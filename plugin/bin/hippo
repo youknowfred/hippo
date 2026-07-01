@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# hippo — convenience launcher for the memory engine's stateless CLI entry points.
+#
+# NOT auto-added to $PATH by the plugin system — invoke via its full plugin-relative
+# path: "${CLAUDE_PLUGIN_ROOT}/bin/hippo" <subcommand> [args...]. Runs the plugin's own
+# venv (${CLAUDE_PLUGIN_DATA}/venv) with PYTHONPATH set to this script's plugin root,
+# falling back to python3 pre-bootstrap (recall/staleness still work BM25-only).
+#
+# Only wraps the genuinely stateless, single-purpose commands (recall, new, build-index,
+# staleness). init/bootstrap/doctor/audit are multi-step orchestrations that belong in
+# their SKILL.md files, not duplicated here — this script redirects to them instead of
+# re-implementing their logic.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"  # plugin root (parent of bin/)
+
+PY="${CLAUDE_PLUGIN_DATA:-}/venv/bin/python"
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -x "$PY" ] || PY="python3"
+export PYTHONPATH="${SCRIPT_DIR}${PYTHONPATH:+:$PYTHONPATH}"
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  recall)
+    exec "$PY" -m memory.recall "$@"
+    ;;
+  new)
+    exec "$PY" -m memory.new_memory "$@"
+    ;;
+  build-index)
+    exec "$PY" -m memory.build_index "$@"
+    ;;
+  staleness)
+    exec "$PY" -m memory.staleness "$@"
+    ;;
+  init|bootstrap|doctor|audit)
+    echo "hippo: '$cmd' is a multi-step skill, not a bare CLI command — use /memory:$cmd instead." >&2
+    exit 1
+    ;;
+  *)
+    echo "usage: hippo <recall|new|build-index|staleness> [args...]" >&2
+    echo "  (init/bootstrap/doctor/audit are skills — use /memory:<name>)" >&2
+    exit 2
+    ;;
+esac
