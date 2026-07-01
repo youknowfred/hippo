@@ -480,15 +480,30 @@ def evaluate(
     sess_cost = session_token_cost(memory_dir, resolved_telemetry_dir, index, hard_set, k=k)
     grad = graduation_rate(resolved_telemetry_dir)
 
+    # A caller with NO hard-set fixture (hard_set_path=None — e.g. a fresh install of the
+    # packaged plugin with no hand-curated calibration data yet, see /memory:audit) is a
+    # deliberately-absent input, not a failure. Those two gates report "skipped" (pass=None,
+    # excluded from `ok`) rather than a false FAIL against an empty set. A caller who DID pass
+    # a hard_set_path that happens to load empty (a malformed/truncated fixture file) keeps the
+    # original strict fail-on-empty behavior — that case is a real problem worth failing loudly.
+    hard_set_provided = bool(hard_set_path)
     gates = {
         "self_recall@10": {"value": round(self_recall, 4), "threshold": GATE_SELF_RECALL, "pass": self_recall >= GATE_SELF_RECALL},
-        "hard_recall@10": {"value": round(hs["recall"], 4), "threshold": GATE_HARD_RECALL, "pass": (hs["n"] > 0 and hs["recall"] >= GATE_HARD_RECALL)},
-        "mrr@10": {"value": round(hs["mrr"], 4), "threshold": GATE_MRR, "pass": (hs["n"] > 0 and hs["mrr"] >= GATE_MRR)},
+        "hard_recall@10": {
+            "value": round(hs["recall"], 4), "threshold": GATE_HARD_RECALL,
+            "pass": (hs["n"] > 0 and hs["recall"] >= GATE_HARD_RECALL) if hard_set_provided else None,
+            **({"skipped": True} if not hard_set_provided else {}),
+        },
+        "mrr@10": {
+            "value": round(hs["mrr"], 4), "threshold": GATE_MRR,
+            "pass": (hs["n"] > 0 and hs["mrr"] >= GATE_MRR) if hard_set_provided else None,
+            **({"skipped": True} if not hard_set_provided else {}),
+        },
         "token_reduction": {"value": tok["net"], "pct": tok["pct"], "threshold": 0, "pass": tok["net"] > 0},
         "recall_p95_ms": {"value": lat["p95"], "threshold": GATE_P95_MS, "pass": lat["p95"] < GATE_P95_MS},
     }
     return {
-        "ok": all(g["pass"] for g in gates.values()),
+        "ok": all(g["pass"] for g in gates.values() if g.get("pass") is not None),
         "dense_ready": index.dense_ready,
         "model": index.model,
         "count": len(index),
