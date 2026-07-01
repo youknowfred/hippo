@@ -8,6 +8,6 @@
   "homepage": "https://github.com/youknowfred/hippo",
   "repository": "https://github.com/youknowfred/hippo",
   "license": "MIT",
-  "keywords": ["memory", "recall", "agent-memory", "knowledge-base"],
-  "hooks": "./hooks/hooks.json"
+  "keywords": ["memory", "recall", "agent-memory", "knowledge-base"]
 }
+
