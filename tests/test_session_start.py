@@ -1,0 +1,137 @@
+"""Tests for memory/session_start.py — the SessionStart dispatcher.
+
+Dispatcher logic (merge / bound / suppress / isolate / JSON) is tested by stubbing the
+producer set, so these tests don't depend on git timing (that's covered in test_staleness).
+"""
+
+from __future__ import annotations
+
+import json
+
+import memory.session_start as S
+
+
+def _producers(monkeypatch, producers):
+    monkeypatch.setattr(S, "PRODUCERS", producers)
+
+
+def test_build_context_merges_producer_blocks(monkeypatch):
+    _producers(
+        monkeypatch,
+        [
+            ("a", lambda md, repo: "ALPHA block"),
+            ("b", lambda md, repo: "BETA block"),
+        ],
+    )
+    ctx = S.build_context("md", "repo")
+    assert "ALPHA block" in ctx and "BETA block" in ctx
+
+
+def test_build_context_empty_when_nothing_to_say(monkeypatch):
+    _producers(monkeypatch, [("a", lambda md, repo: None)])
+    assert S.build_context("md", "repo") == ""
+
+
+def test_producer_exception_is_isolated(monkeypatch):
+    def boom(md, repo):
+        raise RuntimeError("producer failed")
+
+    _producers(monkeypatch, [("boom", boom), ("ok", lambda md, repo: "still here")])
+    ctx = S.build_context("md", "repo")
+    assert ctx == "still here"  # the survivor is kept, the failure swallowed
+
+
+def test_output_is_bounded_under_cap(monkeypatch):
+    _producers(monkeypatch, [("big", lambda md, repo: "x" * 50_000)])
+    ctx = S.build_context("md", "repo", max_chars=500)
+    assert len(ctx) <= 500
+    assert ctx.endswith("(truncated)")
+
+
+def test_staleness_producer_formats_real_output(monkeypatch):
+    monkeypatch.setattr(
+        S, "find_stale", lambda md, repo: [{"name": "m_x", "changed_paths": ["src/a.py", "src/b.py"]}]
+    )
+    out = S.staleness_producer("md", "repo")
+    assert out and "m_x" in out and "src/a.py" in out
+
+
+def test_main_prints_session_start_json_when_stale(monkeypatch, capsys):
+    monkeypatch.setattr(S, "resolve_dirs", lambda: ("md", "repo"))
+    monkeypatch.setattr(
+        S, "find_stale", lambda md, repo: [{"name": "m_x", "changed_paths": ["src/a.py"]}]
+    )
+    rc = S.main()
+    assert rc == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    assert "m_x" in data["hookSpecificOutput"]["additionalContext"]
+
+
+def test_main_is_silent_when_nothing_stale(monkeypatch, capsys):
+    monkeypatch.setattr(S, "resolve_dirs", lambda: ("md", "repo"))
+    monkeypatch.setattr(S, "find_stale", lambda md, repo: [])
+    rc = S.main()
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == ""
+
+
+def test_integrity_producer_formats_real_output(monkeypatch):
+    monkeypatch.setattr(S, "find_unparseable", lambda md: ["m_broken"])
+    out = S.integrity_producer("md", "repo")
+    assert out and "m_broken" in out and "UNPARSEABLE" in out
+
+
+def test_integrity_producer_silent_when_clean(monkeypatch):
+    monkeypatch.setattr(S, "find_unparseable", lambda md: [])
+    assert S.integrity_producer("md", "repo") is None
+
+
+def test_main_refreshes_index_for_a_new_memory(tmp_path, monkeypatch):
+    """The dispatcher brings the recall index up to date so a memory written during the last
+    session is indexed by this one (the SessionStart auto-refresh side effect)."""
+    import os
+
+    from memory import build_index as B
+
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / ".claude" / "memory")
+    os.makedirs(md)
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: a\ndescription: "alpha"\ntype: project\n---\nbody\n')
+    B.build_index(md, B.default_index_dir(md))
+    assert {e["name"] for e in B.load_index(B.default_index_dir(md)).entries} == {"a"}
+
+    # A new memory is written; SessionStart should index it on the next start.
+    with open(os.path.join(md, "b.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: b\ndescription: "beta new"\ntype: project\n---\nbody\n')
+
+    monkeypatch.setattr(S, "resolve_dirs", lambda: (md, str(tmp_path)))
+    monkeypatch.setattr(S, "build_context", lambda *a, **k: "")  # isolate the refresh side effect
+    assert S.main() == 0
+    assert {e["name"] for e in B.load_index(B.default_index_dir(md)).entries} == {"a", "b"}
+
+
+# --------------------------------------------------------------------------- #
+# reconsolidation producer wiring (Tier 2) — ONE dispatcher, never a parallel hook entry
+# --------------------------------------------------------------------------- #
+def test_reconsolidation_producer_is_registered_exactly_once():
+    from memory.reconsolidate import reconsolidation_producer
+
+    labels = [label for label, _fn in S.PRODUCERS]
+    assert labels.count("reconsolidation") == 1
+    fns = [fn for label, fn in S.PRODUCERS if label == "reconsolidation"]
+    assert fns == [reconsolidation_producer]  # the SAME function, not a re-implementation
+
+
+def test_reconsolidation_producer_registered_after_staleness():
+    labels = [label for label, _fn in S.PRODUCERS]
+    # the recall-filtered subset is grouped right after the full staleness signal
+    assert labels.index("reconsolidation") == labels.index("staleness") + 1
+
+
+def test_reconsolidation_silent_when_stubbed_empty(monkeypatch):
+    from memory.reconsolidate import reconsolidation_producer
+
+    monkeypatch.setattr("memory.reconsolidate.recalled_stale_worklist", lambda *a, **k: [])
+    assert reconsolidation_producer("md", "repo") is None

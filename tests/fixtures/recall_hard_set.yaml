@@ -1,0 +1,76 @@
+# Curated hard-set for the recall merge gate (eval_recall.py gate #2 + #3).
+#
+# Hand-written CROSS-VOCABULARY paraphrase queries -> the memory file stem(s) that should
+# be recalled in the top-10. These deliberately AVOID the vocabulary of each memory's
+# `description:` so they exercise the DENSE half of hybrid recall (BM25 alone catches the
+# lexical overlaps; the dense embeddings catch the paraphrases). Run against the REAL
+# corpus + a warm dense model:
+#
+#   ./.venv/bin/pip install -r memory/requirements-memory.txt
+#   ./.venv/bin/python -m memory.build_index
+#   ./.venv/bin/python -m memory.eval_recall
+#
+# `expected` is a list — any one of the listed stems in the top-10 counts as a hit (some
+# queries legitimately map to a small cluster of related memories). This is the ONLY
+# hand-maintained eval data; keep stems in sync with the corpus (eval_recall warns on a
+# stem that no longer resolves to a file).
+
+- query: "keep the memo generator from timing out when the model is responding slowly"
+  expected: [quality_first_budget_policy, latency_robustness_levers]
+
+- query: "a workbook with a hundred-thousand-plus formula cells is an ordinary deal, not an edge case"
+  expected: [feedback_151_avenue_a_is_standard_size]
+
+- query: "which model do we run first to reorder candidate search results"
+  expected: [reranker_voyage_primary]
+
+- query: "the agent's document search should run the real retrieval engine instead of the old canned keyword lookup"
+  expected: [retrieval_wrapper_path_bypasses_cre_pipeline]
+
+- query: "attribute every commit to the human author only, never add an AI co-author trailer"
+  expected: [oss-attribution-no-claude]
+
+- query: "don't open side branches; commit straight onto the development line"
+  expected: [feedback_no_feature_branches]
+
+- query: "the workbook dependency graph is persisted as parquet column tables and reconstructed in memory"
+  expected: [formula_graph_columnar_duckdb_migration]
+
+- query: "a thread offload that can't be cancelled defeats the timeout wrapper while unzipping the graph"
+  expected: [formula_graph_decompress_hang]
+
+- query: "raise the relevance cutoff when there is a sharp gap in similarity scores before reranking"
+  expected: [density_adaptive_floor]
+
+- query: "exporting a polished document to PDF goes through headless chrome in two rendering passes"
+  expected: [canvas_pdf_export_pipeline]
+
+- query: "login tokens embed a unique id that is checked against a revocation list on each call"
+  expected: [canvas_auth_rbac]
+
+- query: "the analytics warehouse stores its catalog in postgres and the data files in a storage bucket"
+  expected: [observability_ducklake_migration, observability_warehouse_consumers]
+
+- query: "for blame, compare revisions with a diff rather than shelving the changes aside"
+  expected: [feedback_no_git_stash_for_fault_attribution]
+
+- query: "detached async jobs vanish unless you hold a strong reference to them"
+  expected: [feedback_anchor_fire_and_forget_tasks]
+
+- query: "regenerate and commit the compiled editor frontend or the server keeps shipping old code"
+  expected: [canvas_ui_prebuilt_committed_bundle, feedback_canvas_ui_static_rebuild]
+
+- query: "one process-wide cap on simultaneous Anthropic chat requests per event loop"
+  expected: [anthropic_global_concurrency_ceiling]
+
+- query: "search came back with no chunks because the single event loop was starved"
+  expected: [async_retrieval_migration, triage_2026_06_27_web_beeef6bd_cascade]
+
+- query: "a required pipeline step must be dispatched deterministically, not left to the model to decide whether to invoke"
+  expected: [feedback_no_llm_tool_choice_for_mandatory_steps]
+
+- query: "the unattended audit bot runs every night on a schedule"
+  expected: [evergreen_system]
+
+- query: "the lifecycle callback needs an explicit jump target or the memo ends up empty"
+  expected: [langgraph_error_handler_requires_goto]
