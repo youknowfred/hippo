@@ -1,0 +1,21 @@
+# Agent-memory tooling dependencies.
+#
+# This is a standalone plugin venv (built by the /memory:bootstrap skill into
+# ${CLAUDE_PLUGIN_DATA}/venv, NOT the consuming project's own venv) — unlike the
+# ic-memobot monorepo this engine was extracted from, there is no host product
+# requirements.txt to lean on for numpy/PyYAML/rank-bm25, so all four deps this
+# package actually imports are pinned here explicitly.
+#
+# Recall DEGRADES to BM25-only when fastembed's model cache is cold/unavailable —
+# rank-bm25 is NOT optional (staleness/eval_recall/recall.py all depend on it
+# directly), only the dense (fastembed) half of hybrid recall is optional in the
+# sense that its absence degrades gracefully rather than erroring.
+#
+# Install (normally done for you by /memory:bootstrap, not by hand):
+#   uv venv "${CLAUDE_PLUGIN_DATA}/venv" && uv pip install -r requirements.txt --python "${CLAUDE_PLUGIN_DATA}/venv/bin/python"
+#   "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -m memory.build_index   # warms ~130MB bge-small cache OFFLINE-safe on first run
+
+fastembed>=0.4,<0.8
+numpy>=1.26,<2.0
+PyYAML>=6.0,<7.0
+rank-bm25>=0.2.2,<0.3
