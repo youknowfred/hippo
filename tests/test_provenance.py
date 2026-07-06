@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 from memory import provenance as P
-from memory.staleness import read_provenance
+from memory.staleness import read_provenance, read_source_commit_time
 
 from .conftest import git_commit, write_file
 
@@ -172,6 +172,90 @@ def test_backfill_corpus_sets_provenance_preserves_body_and_is_idempotent(repo, 
 
     second = P.backfill_corpus(memory_dir, repo)
     assert all(r["changed"] is False for r in second)  # idempotent
+
+
+# --------------------------------------------------------------------------- #
+# SHP-3 — source_commit_time recorded ALONGSIDE source_commit at backfill/reverify,
+# via ONE extra git-show call (or folded into the existing git_last_commit call).
+# --------------------------------------------------------------------------- #
+def test_git_last_commit_with_time_returns_sha_and_epoch(repo):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    sha, ct = P.git_last_commit_with_time("src/foo.py", repo)
+    assert sha == c1 and ct == 1_700_000_000
+
+
+def test_git_last_commit_with_time_none_on_no_history(repo):
+    git_commit(repo, "init", 1_700_000_000)
+    sha, ct = P.git_last_commit_with_time("src/never-existed.py", repo)
+    assert sha is None and ct is None
+
+
+def test_git_head_with_time_returns_head_and_epoch(repo):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    sha, ct = P.git_head_with_time(repo)
+    assert sha == c1 and ct == 1_700_000_000
+
+
+def test_git_head_with_time_none_when_no_commits(repo):
+    sha, ct = P.git_head_with_time(repo)
+    assert sha is None and ct is None
+
+
+def test_backfill_corpus_writes_source_commit_time_alongside_sha(repo, memory_dir):
+    write_file(repo, "src/utils/foo.py", "x = 1\n")
+    write_file(
+        memory_dir,
+        "m_alpha.md",
+        "---\nname: A\ntype: project\noriginSessionId: s1\n---\nCites src/utils/foo.py:3.\n",
+    )
+    c1 = git_commit(repo, "init", 1_700_000_000)
+
+    results = P.backfill_corpus(memory_dir, repo)
+    r = next(x for x in results if x["path"].endswith("m_alpha.md"))
+    assert r["source_commit"] == c1
+    assert r["source_commit_time"] == 1_700_000_000
+
+    after = open(os.path.join(memory_dir, "m_alpha.md"), encoding="utf-8").read()
+    assert read_source_commit_time(after) == 1_700_000_000
+
+
+def test_refresh_preserves_source_commit_time_alongside_sha(repo, memory_dir):
+    write_file(repo, "src/a/dup.py", "x = 1\n")
+    write_file(repo, "src/b/dup.py", "y = 1\n")  # makes 'dup.py' ambiguous
+    git_commit(repo, "init", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/memory/m.md",
+        '---\nname: M\ncited_paths: ["src/a/dup.py", "src/b/dup.py"]\n'
+        'source_commit: "BASELINE123"\nsource_commit_time: 1650000000\n---\nbody refs dup.py\n',
+    )
+
+    P.backfill_corpus(memory_dir, repo, refresh=True)
+
+    after = open(os.path.join(memory_dir, "m.md"), encoding="utf-8").read()
+    _, sc = read_provenance(after)
+    assert sc == "BASELINE123"  # baseline preserved
+    assert read_source_commit_time(after) == 1650000000  # time preserved alongside it
+
+
+def test_reverify_writes_source_commit_time_at_head(repo, memory_dir):
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep v1", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/memory/m.md",
+        f'---\nname: M\ncited_paths: ["src/dep.py"]\nsource_commit: "{c1}"\n---\nbody src/dep.py\n',
+    )
+    head = git_commit(repo, "memory", 1_700_000_100)
+
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    res = P.reverify_file(os.path.join(memory_dir, "m.md"), repo, repo_files, basename_index)
+    assert res["source_commit"] == head
+    assert res["source_commit_time"] == 1_700_000_100
+    after = open(os.path.join(memory_dir, "m.md"), encoding="utf-8").read()
+    assert read_source_commit_time(after) == 1_700_000_100
 
 
 def test_backfill_corpus_skips_index_files(repo, memory_dir):

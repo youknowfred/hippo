@@ -27,7 +27,7 @@ from .lint_links import lint_links_producer
 from .provenance import resolve_dirs
 from .recall import git_recent_producer
 from .reconsolidate import reconsolidation_producer
-from .staleness import find_stale, find_unparseable
+from .staleness import count_unresolvable_baselines, find_stale, find_unparseable
 
 # Harness caps hook output at 10,000 chars; stay comfortably under it.
 _MAX_CONTEXT_CHARS = 9000
@@ -112,12 +112,30 @@ def staleness_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     return "\n".join(lines)
 
 
+def unresolvable_baseline_producer(memory_dir: str, repo_root: str) -> Optional[str]:
+    """LOUD count for memories whose staleness baseline sha isn't in this repo's history.
+
+    A squash-merge default (or a shallow/partial CI clone) rewrites/truncates history so a
+    branch-authored memory's ``source_commit`` is never reachable from mainline — SHP-3 falls
+    back to the memory's own stored ``source_commit_time`` instead of silently exempting it
+    from drift detection forever, but that fallback IS a degradation and must be legible.
+    """
+    n = count_unresolvable_baselines(memory_dir, repo_root)
+    if not n:
+        return None
+    return (
+        f"⚠ {n} memories have unresolvable staleness baselines (source_commit sha not in "
+        "history — likely squash-merge or a shallow clone); falling back to time-based comparison."
+    )
+
+
 # (label, fn). Each tier appends a producer here — never a parallel hook entry.
 PRODUCERS: List[Tuple[str, Callable[[str, str], Optional[str]]]] = [
     ("stale_venv", stale_venv_producer),  # environment-level — a stale venv taints everything below
     ("integrity", integrity_producer),  # a malformed memory must not hide
     ("staleness", staleness_producer),
     ("reconsolidation", reconsolidation_producer),  # recall-filtered subset of staleness; silent unless a recently-recalled memory is stale
+    ("unresolvable_baseline", unresolvable_baseline_producer),  # legibility for find_stale's sha-fallback path
     ("git_recent", git_recent_producer),
     ("link_health", lint_links_producer),
     ("floor", floor_producer),  # silent unless project/reference links re-bloat the MEMORY.md floor

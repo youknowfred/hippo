@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import os
 
-from memory.staleness import find_stale, find_unparseable, read_provenance, set_invalid_after
+from memory.staleness import (
+    count_unresolvable_baselines,
+    find_stale,
+    find_unparseable,
+    read_provenance,
+    read_source_commit_time,
+    set_invalid_after,
+)
 
 from .conftest import git_commit, write_file
 
@@ -16,6 +23,16 @@ def _memory(cited, source_commit):
     cp = "[" + ", ".join(f'"{c}"' for c in cited) + "]"
     sc = f'"{source_commit}"' if source_commit is not None else "null"
     return f"---\nname: A\ntype: project\ncited_paths: {cp}\nsource_commit: {sc}\n---\nbody\n"
+
+
+def _memory_with_time(cited, source_commit, source_commit_time):
+    cp = "[" + ", ".join(f'"{c}"' for c in cited) + "]"
+    sc = f'"{source_commit}"' if source_commit is not None else "null"
+    sct = str(int(source_commit_time)) if source_commit_time is not None else "null"
+    return (
+        f"---\nname: A\ntype: project\ncited_paths: {cp}\nsource_commit: {sc}\n"
+        f"source_commit_time: {sct}\n---\nbody\n"
+    )
 
 
 def test_read_provenance_top_level_and_metadata_block():
@@ -138,6 +155,100 @@ def test_unknown_baseline_commit_is_skipped_not_raised(repo, memory_dir):
     write_file(memory_dir, "m_c.md", _memory(["src/foo.py"], "0" * 40))  # sha not in history
     stale = find_stale(memory_dir, repo, since=_ALL)
     assert isinstance(stale, list) and all(s["name"] != "m_c" for s in stale)
+
+
+# --------------------------------------------------------------------------- #
+# SHP-3 — squash-merge / shallow-clone resilience: an unresolvable source_commit sha
+# falls back to the memory's OWN stored source_commit_time instead of being silently
+# skipped forever (which is what happened before this fix — see the test just above,
+# preserved because a memory with NO fallback time at all must still be un-judgeable).
+# --------------------------------------------------------------------------- #
+def test_hermetic_squash_merge_drift_still_detected_via_time_fallback(repo, memory_dir):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    git_commit(repo, "c1", 1_700_000_000)
+    fabricated_sha = "a" * 40  # NEVER exists in this repo's history (simulates squash-merge)
+    write_file(
+        memory_dir,
+        "m_squashed.md",
+        _memory_with_time(["src/foo.py"], fabricated_sha, 1_700_000_050),
+    )
+    write_file(repo, "src/foo.py", "x = 2\n")  # cited file drifts AFTER the stored baseline time
+    git_commit(repo, "c2", 1_700_000_100)
+
+    stale = find_stale(memory_dir, repo, since=_ALL)
+    hit = [s for s in stale if s["name"] == "m_squashed"]
+    assert hit and "src/foo.py" in hit[0]["changed_paths"]
+
+
+def test_squash_merge_fallback_not_flagged_when_drift_precedes_stored_time(repo, memory_dir):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    git_commit(repo, "c1", 1_700_000_000)
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)  # drift happens BEFORE the stored baseline time
+    fabricated_sha = "b" * 40
+    write_file(
+        memory_dir,
+        "m_squashed2.md",
+        _memory_with_time(["src/foo.py"], fabricated_sha, 1_700_000_200),
+    )
+
+    stale = find_stale(memory_dir, repo, since=_ALL)
+    assert all(s["name"] != "m_squashed2" for s in stale)
+
+
+def test_resolvable_sha_takes_priority_over_stored_time_fallback(repo, memory_dir):
+    """When the sha DOES resolve, the git cross-check is used — the stored time is never
+    consulted (it's purely a fallback for the unresolvable case)."""
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    # A wildly-wrong stored time that would (wrongly) flag every future commit if it were used.
+    write_file(memory_dir, "m_real.md", _memory_with_time(["src/foo.py"], c1, 0))
+    write_file(repo, "src/other.py", "y = 1\n")  # an UNCITED file changes
+    git_commit(repo, "c2", 1_700_000_100)
+
+    stale = find_stale(memory_dir, repo, since=_ALL)
+    assert all(s["name"] != "m_real" for s in stale)  # resolvable sha correctly NOT flagged
+
+
+def test_read_source_commit_time_top_level_and_metadata_block():
+    top = "---\ncited_paths: []\nsource_commit: \"abc\"\nsource_commit_time: 1700000000\n---\nb\n"
+    nested = (
+        "---\nmetadata:\n  source_commit: \"abc\"\n  source_commit_time: 1700000000\n---\nb\n"
+    )
+    assert read_source_commit_time(top) == 1700000000
+    assert read_source_commit_time(nested) == 1700000000
+
+
+def test_read_source_commit_time_absent_returns_none():
+    assert read_source_commit_time(_memory(["src/a.py"], "abc")) is None
+
+
+# --------------------------------------------------------------------------- #
+# count_unresolvable_baselines — the visible-degradation count (SessionStart + doctor)
+# --------------------------------------------------------------------------- #
+def test_count_unresolvable_baselines_counts_only_unresolvable_shas(repo, memory_dir):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_ok.md", _memory(["src/foo.py"], c1))  # resolvable
+    write_file(
+        memory_dir,
+        "m_squashed.md",
+        _memory_with_time(["src/foo.py"], "c" * 40, 1_700_000_050),
+    )  # unresolvable
+    write_file(memory_dir, "m_no_baseline.md", _memory([], None))  # no source_commit at all
+
+    assert count_unresolvable_baselines(memory_dir, repo) == 1
+
+
+def test_count_unresolvable_baselines_zero_when_all_resolvable(repo, memory_dir):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_ok.md", _memory(["src/foo.py"], c1))
+    assert count_unresolvable_baselines(memory_dir, repo) == 0
+
+
+def test_count_unresolvable_baselines_empty_corpus_is_zero(repo, memory_dir):
+    assert count_unresolvable_baselines(memory_dir, repo) == 0
 
 
 def test_malformed_frontmatter_never_raises(repo, memory_dir):

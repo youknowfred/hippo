@@ -252,6 +252,24 @@ def git_last_commit(rel_path: str, repo_root: str) -> Optional[str]:
     return sha or None
 
 
+def git_last_commit_with_time(rel_path: str, repo_root: str) -> Tuple[Optional[str], Optional[int]]:
+    """``(sha, committer_epoch)`` for the commit that last touched ``rel_path``.
+
+    ONE ``git log`` call carries both ``%H`` and ``%ct`` (SHP-3) — avoids a second git
+    process per file just to fetch the timestamp alongside the sha already fetched by
+    ``git_last_commit``. Returns ``(None, None)`` on no history / any failure.
+    """
+    out = run_git(["log", "-1", "--format=%H %ct", "--", rel_path], repo_root).strip()
+    parts = out.split()
+    if len(parts) != 2:
+        return None, None
+    sha, ct = parts
+    try:
+        return sha, int(ct)
+    except ValueError:
+        return sha, None
+
+
 def git_head(repo_root: str) -> Optional[str]:
     """Current HEAD sha, or None (no commits yet / not a git repo / git failure).
 
@@ -261,6 +279,18 @@ def git_head(repo_root: str) -> Optional[str]:
     """
     sha = run_git(["rev-parse", "--verify", "--quiet", "HEAD"], repo_root).strip()
     return sha if re.fullmatch(r"[0-9a-f]{40}", sha) else None
+
+
+def git_head_with_time(repo_root: str) -> Tuple[Optional[str], Optional[int]]:
+    """``(sha, committer_epoch)`` for HEAD (SHP-3's sibling of ``git_head``)."""
+    head = git_head(repo_root)
+    if not head:
+        return None, None
+    out = run_git(["show", "-s", "--format=%ct", head], repo_root).strip()
+    try:
+        return head, int(out)
+    except ValueError:
+        return head, None
 
 
 # --------------------------------------------------------------------------- #
@@ -274,12 +304,18 @@ def _flow_list(paths: List[str]) -> str:
     return "[" + ", ".join(json.dumps(p) for p in paths) + "]"
 
 
-def backfill_text(text: str, cited_paths: List[str], source_commit: Optional[str]) -> Tuple[str, bool]:
+def backfill_text(
+    text: str,
+    cited_paths: List[str],
+    source_commit: Optional[str],
+    source_commit_time: Optional[int] = None,
+) -> Tuple[str, bool]:
     """Return ``(new_text, changed)``.
 
-    Inserts ``cited_paths`` + ``source_commit`` into the frontmatter ONLY. The body is
-    left byte-identical. No-op (``changed=False``) when there is no frontmatter or the
-    file already carries ``cited_paths``.
+    Inserts ``cited_paths`` + ``source_commit`` (+ ``source_commit_time`` when given,
+    SHP-3) into the frontmatter ONLY. The body is left byte-identical. No-op
+    (``changed=False``) when there is no frontmatter or the file already carries
+    ``cited_paths``.
     """
     if not text.startswith(_FENCE):
         return text, False
@@ -298,6 +334,9 @@ def backfill_text(text: str, cited_paths: List[str], source_commit: Optional[str
 
     cp_line_val = _flow_list(cited_paths)
     sc_val = json.dumps(source_commit if source_commit is not None else "")
+    new_keys = [f"cited_paths: {cp_line_val}", f"source_commit: {sc_val}"]
+    if source_commit_time is not None:
+        new_keys.append(f"source_commit_time: {json.dumps(source_commit_time)}")
 
     # Locate a `metadata:` block; if present, the new keys nest under it.
     meta_idx = next((i for i, ln in enumerate(fm) if re.match(r"^metadata\s*:\s*$", ln)), None)
@@ -314,25 +353,28 @@ def backfill_text(text: str, cited_paths: List[str], source_commit: Optional[str
                 indent = m.group(1)
             last = j
             j += 1
-        new = [f"{indent}cited_paths: {cp_line_val}", f"{indent}source_commit: {sc_val}"]
+        new = [f"{indent}{k}" for k in new_keys]
         fm2 = fm[: last + 1] + new + fm[last + 1:]
     else:
-        new = [f"cited_paths: {cp_line_val}", f"source_commit: {sc_val}"]
-        fm2 = fm + new
+        fm2 = fm + new_keys
 
     new_text = "\n".join([lines[0]] + fm2 + lines[close:])
     return new_text, True
 
 
 def _strip_provenance(text: str) -> str:
-    """Remove any existing cited_paths/source_commit lines from the frontmatter (body verbatim)."""
+    """Remove any existing cited_paths/source_commit/source_commit_time lines (body verbatim)."""
     if not text.startswith(_FENCE):
         return text
     lines = text.split("\n")
     close = next((i for i in range(1, len(lines)) if lines[i].strip() == _FENCE), None)
     if close is None:
         return text
-    fm = [ln for ln in lines[1:close] if not re.match(r"\s*(cited_paths|source_commit)\s*:", ln)]
+    fm = [
+        ln
+        for ln in lines[1:close]
+        if not re.match(r"\s*(cited_paths|source_commit|source_commit_time)\s*:", ln)
+    ]
     return "\n".join([lines[0]] + fm + lines[close:])
 
 
@@ -365,10 +407,22 @@ def backfill_file(
     """Backfill one memory file. Returns a small result dict; never raises.
 
     With ``refresh=True``, an already-backfilled file has its ``cited_paths`` RE-DERIVED
-    (e.g. after a resolver fix) while its existing ``source_commit`` baseline is PRESERVED,
-    so the staleness comparison is unchanged. The body is always left byte-identical.
+    (e.g. after a resolver fix) while its existing ``source_commit``/``source_commit_time``
+    baseline is PRESERVED, so the staleness comparison is unchanged. The body is always
+    left byte-identical.
+
+    ``source_commit_time`` (SHP-3) is the committer epoch of ``source_commit``, recorded
+    alongside it — the fallback baseline ``staleness.find_stale`` uses when the sha itself
+    is unresolvable (squash-merge / shallow clone erases it from history).
     """
-    result = {"path": path, "changed": False, "cited": [], "source_commit": None, "error": None}
+    result = {
+        "path": path,
+        "changed": False,
+        "cited": [],
+        "source_commit": None,
+        "source_commit_time": None,
+        "error": None,
+    }
     try:
         with open(path, "r", encoding="utf-8") as fh:
             text = fh.read()
@@ -386,12 +440,14 @@ def backfill_file(
                 result["error"] = "unparseable frontmatter — refusing to refresh (fix the YAML)"
                 return result
             meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-            sc = (
-                fm.get("source_commit")
-                or meta.get("source_commit")
-                or git_last_commit(rel, repo_root)
-                or git_head(repo_root)
-            )
+            sc = fm.get("source_commit") or meta.get("source_commit")
+            sct = fm.get("source_commit_time")
+            if sct is None:
+                sct = meta.get("source_commit_time")
+            if sc is None:
+                sc, sct = git_last_commit_with_time(rel, repo_root)
+                if sc is None:
+                    sc, sct = git_head_with_time(repo_root)
             text = _strip_provenance(text)  # drop old provenance; body untouched
         else:
             # A file with no commit history yet (just created by write_memory, or
@@ -399,9 +455,11 @@ def backfill_file(
             # "reflects code as of now". An empty baseline would make the memory
             # invisible to staleness/reconsolidation/archive gating until a manual
             # commit + refresh (COR-1: memories must be BORN staleness-tracked).
-            sc = git_last_commit(rel, repo_root) or git_head(repo_root)
-        new_text, changed = backfill_text(text, cited, sc)
-        result.update({"cited": cited, "source_commit": sc, "changed": changed})
+            sc, sct = git_last_commit_with_time(rel, repo_root)
+            if sc is None:
+                sc, sct = git_head_with_time(repo_root)
+        new_text, changed = backfill_text(text, cited, sc, sct)
+        result.update({"cited": cited, "source_commit": sc, "source_commit_time": sct, "changed": changed})
         if changed and not dry_run:
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(new_text)
@@ -512,7 +570,14 @@ def reverify_file(
     re-baselines the staleness window. Mirrors the rest of this function's per-item,
     HEAD-baseline, refuse-unparseable contract; nothing else about that contract changes.
     """
-    result = {"path": path, "changed": False, "cited": [], "source_commit": None, "error": None}
+    result = {
+        "path": path,
+        "changed": False,
+        "cited": [],
+        "source_commit": None,
+        "source_commit_time": None,
+        "error": None,
+    }
     try:
         with open(path, "r", encoding="utf-8") as fh:
             text = fh.read()
@@ -529,11 +594,11 @@ def reverify_file(
             # refresh path; find_unparseable / the integrity producer surface these.
             result["error"] = "unparseable frontmatter — refusing to re-baseline (fix the YAML)"
             return result
-        sc = git_head(repo_root)
+        sc, sct = git_head_with_time(repo_root)
         cited = cited_paths_for_body(body, repo_files, basename_index)
-        new_text, _ = backfill_text(_strip_invalid_after(_strip_provenance(text)), cited, sc)
+        new_text, _ = backfill_text(_strip_invalid_after(_strip_provenance(text)), cited, sc, sct)
         changed = new_text != text  # idempotent: a no-op when provenance already matches
-        result.update({"cited": cited, "source_commit": sc, "changed": changed})
+        result.update({"cited": cited, "source_commit": sc, "source_commit_time": sct, "changed": changed})
         if changed and not dry_run:
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(new_text)

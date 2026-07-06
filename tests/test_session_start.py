@@ -216,3 +216,24 @@ def test_stale_venv_producer_silent_without_plugin_data_env(tmp_path, monkeypatc
 def test_stale_venv_producer_registered_first():
     assert S.PRODUCERS[0][0] == "stale_venv"
     assert S.PRODUCERS[0][1] is S.stale_venv_producer
+
+
+# --------------------------------------------------------------------------- #
+# SHP-3 — unresolvable_baseline_producer (squash-merge / shallow-clone legibility)
+# --------------------------------------------------------------------------- #
+def test_unresolvable_baseline_producer_formats_real_output(monkeypatch):
+    monkeypatch.setattr(S, "count_unresolvable_baselines", lambda md, repo: 3)
+    out = S.unresolvable_baseline_producer("md", "repo")
+    assert out and "3 memories" in out and "squash-merge" in out
+
+
+def test_unresolvable_baseline_producer_silent_when_zero(monkeypatch):
+    monkeypatch.setattr(S, "count_unresolvable_baselines", lambda md, repo: 0)
+    assert S.unresolvable_baseline_producer("md", "repo") is None
+
+
+def test_unresolvable_baseline_producer_is_registered():
+    labels = [label for label, _fn in S.PRODUCERS]
+    assert labels.count("unresolvable_baseline") == 1
+    fns = [fn for label, fn in S.PRODUCERS if label == "unresolvable_baseline"]
+    assert fns == [S.unresolvable_baseline_producer]

@@ -55,6 +55,32 @@ def read_provenance(text: str) -> tuple[List[str], Optional[str]]:
     return cited, sc
 
 
+def read_source_commit_time(text: str) -> Optional[int]:
+    """Return the memory's stored ``source_commit_time`` (committer epoch), if any.
+
+    SHP-3's fallback baseline: recorded alongside ``source_commit`` at backfill/reverify
+    time so a memory can still be judged for drift when its baseline SHA is unresolvable
+    (squash-merge rewrote history; a shallow/partial clone never fetched it).
+    """
+    fm = parse_frontmatter(text)
+    if not fm:
+        return None
+    meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+    sct = fm.get("source_commit_time")
+    if sct is None:
+        sct = meta.get("source_commit_time")
+    if isinstance(sct, bool):
+        return None
+    if isinstance(sct, int):
+        return sct
+    if isinstance(sct, str) and sct.strip():
+        try:
+            return int(sct.strip())
+        except ValueError:
+            return None
+    return None
+
+
 def _path_change_times(repo_root: str, since: str) -> Dict[str, int]:
     """Map repo-relative path -> newest commit unix-time within the window."""
     out: Dict[str, int] = {}
@@ -77,12 +103,18 @@ def _path_change_times(repo_root: str, since: str) -> Dict[str, int]:
 
 
 def _commit_times(shas: List[str], repo_root: str) -> Dict[str, int]:
-    """Map commit sha -> commit unix-time, in one ``git show`` call."""
+    """Map commit sha -> commit unix-time, in one ``git show`` call.
+
+    ``--ignore-missing`` (SHP-3): without it, a SINGLE unresolvable sha in the batch
+    (squash-merge / shallow clone — exactly the mixed batch this signal must survive)
+    makes ``git show`` exit nonzero and print NOTHING, silently poisoning the lookup for
+    every OTHER, perfectly resolvable sha in the same call too.
+    """
     shas = [s for s in dict.fromkeys(shas) if s]
     if not shas:
         return {}
     out: Dict[str, int] = {}
-    res = run_git(["show", "-s", "--format=%H %ct", *shas], repo_root)
+    res = run_git(["show", "-s", "--format=%H %ct", "--ignore-missing", *shas], repo_root)
     for line in res.split("\n"):
         parts = line.split()
         if len(parts) == 2:
@@ -93,8 +125,16 @@ def _commit_times(shas: List[str], repo_root: str) -> Dict[str, int]:
     return out
 
 
-def find_stale(memory_dir: str, repo_root: str, since: str = _DEFAULT_WINDOW) -> List[dict]:
+def find_stale(
+    memory_dir: str, repo_root: str, since: str = _DEFAULT_WINDOW
+) -> List[dict]:
     """Return ``[{"name", "changed_paths"}]`` for memories whose cited code drifted.
+
+    SHP-3: when a memory's ``source_commit`` sha is NOT in this repo's history (squash-merge
+    rewrote it away, or a shallow/partial clone never fetched it), fall back to the memory's
+    OWN stored ``source_commit_time`` as the baseline instead of skipping the memory outright
+    — an unresolvable sha must not make a memory permanently exempt from drift detection.
+    Memories with neither a resolvable sha NOR a stored time are still skipped (unjudgeable).
 
     Never raises; returns ``[]`` on any failure.
     """
@@ -109,7 +149,7 @@ def find_stale(memory_dir: str, repo_root: str, since: str = _DEFAULT_WINDOW) ->
             cited, sc = read_provenance(text)
             if cited and sc:
                 name = os.path.splitext(os.path.basename(path))[0]
-                memories.append((name, cited, sc))
+                memories.append((name, cited, sc, text))
         if not memories:
             return []
 
@@ -117,10 +157,14 @@ def find_stale(memory_dir: str, repo_root: str, since: str = _DEFAULT_WINDOW) ->
         commit_times = _commit_times([m[2] for m in memories], repo_root)
 
         stale: List[dict] = []
-        for name, cited, sc in memories:
+        for name, cited, sc, text in memories:
             base = commit_times.get(sc)
             if base is None:
-                continue  # baseline commit not in history (rebased/squashed) — cannot judge
+                # sha unresolvable — squash-merge/shallow clone. Fall back to the memory's
+                # OWN recorded commit time (SHP-3) rather than silently skipping it forever.
+                base = read_source_commit_time(text)
+                if base is None:
+                    continue  # no fallback baseline available either — cannot judge
             changed = [p for p in cited if path_times.get(p, 0) > base]
             if changed:
                 # recency = newest drift among the cited files; ranks the most-urgently-stale first
@@ -131,6 +175,34 @@ def find_stale(memory_dir: str, repo_root: str, since: str = _DEFAULT_WINDOW) ->
         return stale
     except Exception:
         return []
+
+
+def count_unresolvable_baselines(memory_dir: str, repo_root: str) -> int:
+    """Count memories whose ``source_commit`` sha is NOT in this repo's history.
+
+    These are the squash-merge / shallow-clone casualties (SHP-3): their staleness baseline
+    falls back to their own stored ``source_commit_time`` inside ``find_stale`` rather than
+    being silently skipped, but that fallback is a WEAKER signal (a git-cross-checked sha
+    beats a self-reported timestamp) — worth its own visible count at SessionStart and in
+    doctor so the degradation is never silent. Never raises; ``0`` on any failure.
+    """
+    try:
+        shas: List[str] = []
+        for path in _iter_memory_files(memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+            except Exception:
+                continue
+            _, sc = read_provenance(text)
+            if sc:
+                shas.append(sc)
+        if not shas:
+            return 0
+        commit_times = _commit_times(shas, repo_root)
+        return sum(1 for sc in shas if sc not in commit_times)
+    except Exception:
+        return 0
 
 
 def find_unparseable(memory_dir: str) -> List[str]:

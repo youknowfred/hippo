@@ -83,6 +83,15 @@ downstream errors from a root cause already identified)
     ```
     When it IS a git repo, report `✔ git repo detected — staleness, provenance, and archive's
     git-mv path are all active.` instead; don't print the degraded block on a healthy repo.
+11. **Unresolvable staleness baselines (squash-merge / shallow clone, SHP-3).** Call
+    `memory.staleness.count_unresolvable_baselines(<memory_dir>, <repo_root>)` — memories whose
+    `source_commit` sha is NOT reachable in this repo's history (a squash-merge default rewrites
+    branch commits away; a shallow/partial clone never fetched them). These fall back to each
+    memory's own stored `source_commit_time` for drift detection rather than being silently
+    exempted forever, but the fallback is a weaker signal than a git-cross-checked sha, so report
+    it as a LABELED degradation when nonzero: `⚠ N memories have unresolvable staleness baselines
+    (source_commit sha not in history — likely squash-merge or a shallow clone); falling back to
+    time-based comparison.` Silent (no line) when the count is `0`.
 
 ## Report format
 
