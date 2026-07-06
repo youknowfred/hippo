@@ -653,14 +653,42 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
 # Load (for recall / eval)
 # --------------------------------------------------------------------------- #
 class LoadedIndex:
-    """In-memory view of the persisted index. ``dense`` is None for a BM25-only index."""
+    """In-memory view of the persisted index. ``dense`` is None for a BM25-only index.
+
+    QUA-4: ``manifest.json`` and ``dense.npy`` are read as TWO separate files (see
+    ``load_index``) -- COR-12 made each individual write atomic, but a rebuild racing
+    BETWEEN those two reads can still swap ``dense.npy`` out from under a reader that
+    already has the OLD manifest in hand (e.g. the next build removes it, going
+    BM25-only, or replaces it with a different-shape/different-entry-count matrix).
+    Rather than exposing that torn pair, ``dense_ready`` is verified HERE against the
+    actual loaded matrix's shape and every entry's ``row`` index -- any mismatch
+    degrades to BM25-only for this read, exactly like a fully-failed dense load would.
+    """
 
     def __init__(self, manifest: dict, dense):
         self.manifest = manifest
         self.entries: List[dict] = manifest.get("entries", [])
-        self.dense_ready: bool = bool(manifest.get("dense_ready")) and dense is not None
+        dense_ready = bool(manifest.get("dense_ready")) and dense is not None
+        if dense_ready and not self._dense_matches_entries(dense, self.entries):
+            dense_ready = False
+            dense = None
+        self.dense_ready: bool = dense_ready
         self.dense = dense if self.dense_ready else None
         self.model: Optional[str] = manifest.get("model")
+
+    @staticmethod
+    def _dense_matches_entries(dense, entries: List[dict]) -> bool:
+        try:
+            n_rows = dense.shape[0]
+        except Exception:
+            return False
+        if n_rows != len(entries):
+            return False
+        for e in entries:
+            row = e.get("row")
+            if row is None or not (0 <= row < n_rows):
+                return False
+        return True
 
     def __len__(self) -> int:
         return len(self.entries)
