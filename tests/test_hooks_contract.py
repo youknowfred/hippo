@@ -41,13 +41,19 @@ Deploy zebra via the canary lane first; page the on-call if step two stalls.
 
 
 def _make_project(tmp_path, with_corpus: bool) -> str:
+    """Idempotent — some tests run the hook several times against one project."""
     project = tmp_path / "project"
     memdir = project / ".claude" / "memory"
-    os.makedirs(memdir if with_corpus else project)
+    os.makedirs(memdir if with_corpus else project, exist_ok=True)
     if with_corpus:
         (memdir / "zebra_deploy_runbook.md").write_text(_MEMORY_MD, encoding="utf-8")
         (memdir / "MEMORY.md").write_text("# Memory Index\n\n## User\n", encoding="utf-8")
     return str(project)
+
+
+def _symlink_once(src: str, dst) -> None:
+    if src and not os.path.lexists(dst):
+        os.symlink(src, dst)
 
 
 def _make_path_dir(tmp_path, *, python3: bool, jq: bool) -> str:
@@ -55,16 +61,12 @@ def _make_path_dir(tmp_path, *, python3: bool, jq: bool) -> str:
     bindir = tmp_path / "bin"
     os.makedirs(bindir, exist_ok=True)
     for tool in ("cat", "printf"):
-        real = shutil.which(tool)
-        if real:
-            os.symlink(real, bindir / tool)
+        _symlink_once(shutil.which(tool), bindir / tool)
     if python3:
         # The test venv's interpreter, exposed as `python3` — it has the pinned deps.
-        os.symlink(sys.executable, bindir / "python3")
+        _symlink_once(sys.executable, bindir / "python3")
     if jq:
-        real_jq = shutil.which("jq")
-        if real_jq:
-            os.symlink(real_jq, bindir / "jq")
+        _symlink_once(shutil.which("jq"), bindir / "jq")
     return str(bindir)
 
 
@@ -77,6 +79,7 @@ def _run_hook(
     python3: bool = True,
     jq: bool = False,
     venv_python: bool = False,
+    sentinel: bool = False,
 ) -> tuple[subprocess.CompletedProcess, str, str]:
     """Run one hook script in a controlled env; return (proc, project_dir, data_dir)."""
     project = _make_project(tmp_path, with_corpus)
@@ -85,7 +88,10 @@ def _run_hook(
     if venv_python:
         venv_bin = os.path.join(data_dir, "venv", "bin")
         os.makedirs(venv_bin, exist_ok=True)
-        os.symlink(sys.executable, os.path.join(venv_bin, "python"))
+        _symlink_once(sys.executable, os.path.join(venv_bin, "python"))
+    if sentinel:
+        with open(os.path.join(data_dir, ".bootstrap-sentinel"), "w", encoding="utf-8") as fh:
+            fh.write('{"requirements_hash": "test", "bootstrapped_at": "test"}')
     home = str(tmp_path / "home")
     os.makedirs(home, exist_ok=True)
     env = {
@@ -198,16 +204,22 @@ class TestUserPromptHook:
 # --------------------------------------------------------------------------- #
 class TestSessionStartHook:
     def test_empty_stdin(self, tmp_path):
-        proc, _, _ = _run_hook(_SESSION_START_HOOK, "", tmp_path, venv_python=True)
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, "", tmp_path, venv_python=True, sentinel=True
+        )
         _assert_contract(proc, "SessionStart")
 
     def test_garbage_json(self, tmp_path):
-        proc, _, _ = _run_hook(_SESSION_START_HOOK, "{{{{", tmp_path, venv_python=True)
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, "{{{{", tmp_path, venv_python=True, sentinel=True
+        )
         _assert_contract(proc, "SessionStart")
 
     def test_valid_payload(self, tmp_path):
         stdin = json.dumps({"hook_event_name": "SessionStart", "source": "startup"})
-        proc, _, _ = _run_hook(_SESSION_START_HOOK, stdin, tmp_path, venv_python=True)
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, stdin, tmp_path, venv_python=True, sentinel=True
+        )
         _assert_contract(proc, "SessionStart")
 
     def test_missing_python3(self, tmp_path):
@@ -216,14 +228,74 @@ class TestSessionStartHook:
 
     def test_no_corpus(self, tmp_path):
         proc, _, _ = _run_hook(
-            _SESSION_START_HOOK, "", tmp_path, with_corpus=False, venv_python=True
+            _SESSION_START_HOOK, "", tmp_path, with_corpus=False, venv_python=True,
+            sentinel=True,
         )
         _assert_contract(proc, "SessionStart")
 
     def test_writes_only_derived_dirs(self, tmp_path):
-        proc, project, _ = _run_hook(_SESSION_START_HOOK, "", tmp_path, venv_python=True)
+        proc, project, _ = _run_hook(
+            _SESSION_START_HOOK, "", tmp_path, venv_python=True, sentinel=True
+        )
         _assert_contract(proc, "SessionStart")
         for rel in _tree(project):
             assert rel.startswith(
                 (".claude/memory/", ".claude/.memory-index/", ".claude/.memory-telemetry/")
             ), f"hook wrote outside the expected dirs: {rel}"
+
+
+# --------------------------------------------------------------------------- #
+# ONB-1: SessionStart bootstrap/init nudge (pre-Python branch)
+# --------------------------------------------------------------------------- #
+class TestSessionStartNudge:
+    def _ctx(self, proc) -> str:
+        out = proc.stdout.strip()
+        return json.loads(out)["hookSpecificOutput"]["additionalContext"] if out else ""
+
+    def test_venv_absent_nudges_bootstrap_exactly_one_line(self, tmp_path):
+        proc, _, _ = _run_hook(_SESSION_START_HOOK, "", tmp_path, venv_python=False)
+        _assert_contract(proc, "SessionStart")
+        ctx = self._ctx(proc)
+        assert "/hippo:bootstrap" in ctx and "not bootstrapped" in ctx
+        assert "\n" not in ctx  # exactly one nudge line
+        assert len(proc.stdout.strip().splitlines()) == 1  # exactly one JSON object
+
+    def test_sentinel_absent_nudges_bootstrap_even_with_venv(self, tmp_path):
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, "", tmp_path, venv_python=True, sentinel=False
+        )
+        _assert_contract(proc, "SessionStart")
+        assert "/hippo:bootstrap" in self._ctx(proc)
+
+    def test_corpus_absent_nudges_init(self, tmp_path):
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, "", tmp_path, with_corpus=False, venv_python=True,
+            sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        ctx = self._ctx(proc)
+        assert "/hippo:init" in ctx and "/hippo:bootstrap" not in ctx
+
+    def test_nudge_fires_once_per_n_sessions_not_spam(self, tmp_path):
+        # Session 1 nudges; sessions 2..5 stay silent; session 6 nudges again.
+        emitted = []
+        for _ in range(6):
+            proc, _, _ = _run_hook(_SESSION_START_HOOK, "", tmp_path, venv_python=False)
+            _assert_contract(proc, "SessionStart")
+            emitted.append(bool(proc.stdout.strip()))
+        assert emitted == [True, False, False, False, False, True]
+
+    def test_dismissal_marker_silences_permanently(self, tmp_path):
+        data_dir = tmp_path / "plugin-data"
+        os.makedirs(data_dir, exist_ok=True)
+        (data_dir / ".nudge-dismissed").touch()
+        proc, _, _ = _run_hook(_SESSION_START_HOOK, "", tmp_path, venv_python=False)
+        _assert_contract(proc, "SessionStart")
+        assert proc.stdout.strip() == ""
+
+    def test_fully_provisioned_project_never_nudges(self, tmp_path):
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, "", tmp_path, venv_python=True, sentinel=True
+        )
+        _assert_contract(proc, "SessionStart")
+        assert "/hippo:" not in self._ctx(proc)
