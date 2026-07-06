@@ -24,13 +24,12 @@ BM25-only index without error (``dense_ready=false``); recall still works on BM2
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import os
 import re
-import signal
 import sys
-import threading
 import time
 from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple
@@ -111,30 +110,27 @@ DENSE_EMBED_CHUNK_SIZE = _parse_int_env("MEMOBOT_EMBED_CHUNK_SIZE", 64)
 
 
 def run_bounded(fn, seconds: float):
-    """Run ``fn`` with a SIGALRM wall-clock bound (main-thread/Unix only).
+    """Run ``fn`` with a wall-clock bound that holds regardless of which thread calls this.
 
-    Off the main thread or where SIGALRM is unavailable (Windows), runs ``fn`` directly —
-    hooks always run on the main thread of a fresh Unix process, where the bound holds.
-    The handler is installed BEFORE the timer is armed (so a firing alarm never hits the
-    default SIGALRM action, which terminates the process).
+    OSP-4: SIGALRM only works in the main thread of a Unix process — a future MCP server (or
+    any embedded use) calling recall from a worker thread would silently get NO bound at all.
+    Instead, ``fn`` is submitted to a single-worker ``ThreadPoolExecutor`` and awaited with
+    ``future.result(timeout=seconds)`` — this works identically from any calling thread. The
+    tradeoff (accepted per the roadmap): this can make the CALLER stop waiting, but cannot
+    forcibly kill ``fn`` if it doesn't cooperate — a still-running fastembed/onnx call keeps
+    running in the background thread after ``DenseTimeout`` is raised here. That thread is not
+    joined; it's left to finish (or the executor is garbage-collected once unreferenced).
     """
-    if (
-        seconds <= 0
-        or threading.current_thread() is not threading.main_thread()
-        or not hasattr(signal, "SIGALRM")
-    ):
+    if seconds <= 0:
         return fn()
-
-    def _handler(signum, frame):
-        raise DenseTimeout()
-
-    old = signal.signal(signal.SIGALRM, _handler)
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(fn)
     try:
-        signal.setitimer(signal.ITIMER_REAL, seconds)
-        return fn()
+        return future.result(timeout=seconds)
+    except concurrent.futures.TimeoutError:
+        raise DenseTimeout()
     finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, old)
+        executor.shutdown(wait=False)
 
 
 # --------------------------------------------------------------------------- #
@@ -361,6 +357,59 @@ def ensure_fastembed_cache_path() -> str:
 # --------------------------------------------------------------------------- #
 _MODEL_CACHE: dict = {}
 
+# OSP-4: the fastembed model's HF *cache* repo id -- NOT the fastembed ``model_name``
+# (``BAAI/bge-small-en-v1.5``) passed to ``TextEmbedding``. fastembed maps that name to this
+# ``sources.hf`` id internally (``fastembed/text/onnx_embedding.py``'s SUPPORTED_MODELS) and
+# snapshots it under ``models--{id.replace('/', '--')}``. Grounded against the installed
+# fastembed 0.7.4 in this repo's .venv (see ``ModelSource(hf="qdrant/bge-small-en-v1.5-onnx-q")``)
+# and against this machine's real warmed cache
+# (``~/Library/Caches/hippo-memory/fastembed/models--qdrant--bge-small-en-v1.5-onnx-q``).
+# Hardcoded (not looked up via a fastembed import) because importing even one fastembed
+# submodule pulls in onnxruntime transitively (~500ms+) -- exactly the cost this pre-check
+# exists to avoid paying on a cold cache. If ``MEMOBOT_EMBED_MODEL`` is ever pointed at a
+# different model, the id below won't match -- see ``_expected_model_snapshot_dir``'s fallback.
+_HF_SOURCE_REPO_BY_MODEL = {
+    "BAAI/bge-small-en-v1.5": "qdrant/bge-small-en-v1.5-onnx-q",
+}
+
+
+def _expected_model_snapshot_dir(cache_dir: str) -> Optional[str]:
+    """The on-disk snapshot dir fastembed would use for ``DEFAULT_MODEL``, or ``None``.
+
+    ``None`` when the model isn't in ``_HF_SOURCE_REPO_BY_MODEL`` (an unrecognized
+    ``MEMOBOT_EMBED_MODEL`` override) -- the pre-check can't ground a path for it, so the
+    caller should skip the stat-check and fall through to the existing (bounded) load attempt
+    rather than wrongly declaring "not cached".
+    """
+    hf_source_repo = _HF_SOURCE_REPO_BY_MODEL.get(DEFAULT_MODEL)
+    if not hf_source_repo:
+        return None
+    return os.path.join(cache_dir, f"models--{hf_source_repo.replace('/', '--')}")
+
+
+def _fastembed_model_cached(cache_dir: str) -> bool:
+    """Pure-stat check: is ``DEFAULT_MODEL`` already warmed on disk at ``cache_dir``?
+
+    NO fastembed import, NO network -- just directory/file existence, so this costs
+    microseconds even on a cold-cache machine. Walks the snapshot dir (fastembed materializes
+    the model files there as symlinks into ``blobs/``) looking for at least one ``.onnx``
+    file; an existing-but-empty or partially-downloaded snapshot dir must NOT read as cached
+    (a half-written model would still fail to load, so this would just trade a fast "no" for a
+    slow, confusing failure inside fastembed instead). An unrecognized model (``None`` from
+    ``_expected_model_snapshot_dir``) returns True -- "assume cached, let the real load attempt
+    decide" -- so an unusual ``MEMOBOT_EMBED_MODEL`` override degrades to the old (bounded)
+    behavior rather than being wrongly short-circuited to "unavailable".
+    """
+    snapshot_dir = _expected_model_snapshot_dir(cache_dir)
+    if snapshot_dir is None:
+        return True
+    if not os.path.isdir(snapshot_dir):
+        return False
+    for root, _dirs, files in os.walk(snapshot_dir):
+        if any(f.endswith(".onnx") for f in files):
+            return True
+    return False
+
 
 def _normalize_rows(mat):
     import numpy as np
@@ -377,8 +426,14 @@ def _get_model(allow_download: bool):
     """Return a cached ``fastembed.TextEmbedding`` or raise.
 
     With ``allow_download=False`` (the recall/hook path) HF Hub is forced OFFLINE so a
-    cache miss raises immediately instead of triggering a synchronous ~130 MB download.
-    The build path (``allow_download=True``) is the ONLY place a download may happen.
+    cache miss raises immediately instead of triggering a synchronous ~130 MB download. The
+    build path (``allow_download=True``) is the ONLY place a download may happen.
+
+    OSP-4: for the offline path, a cheap filesystem pre-check
+    (``_fastembed_model_cached``) runs BEFORE the fastembed import -- on a cold/wiped cache
+    (the common case on a fresh machine) this raises immediately without importing fastembed
+    at all, so the caller falls back to BM25 in microseconds instead of needing a wall-clock
+    timeout to bound an import+load that was never going to succeed.
     """
     if dense_disabled():
         raise RuntimeError("dense disabled via MEMOBOT_DISABLE_DENSE")
@@ -393,7 +448,9 @@ def _get_model(allow_download: bool):
     # loads from a path that survives macOS temp purges (closes the silent BM25-degradation
     # bug). Unconditional: the BUILD path (allow_download=True) is where the model is WARMED,
     # so it must warm into the durable dir too — not just the offline read paths.
-    ensure_fastembed_cache_path()
+    cache_dir = ensure_fastembed_cache_path()
+    if not allow_download and not _fastembed_model_cached(cache_dir):
+        raise RuntimeError(f"fastembed model not cached offline at {cache_dir}")
     from fastembed import TextEmbedding  # lazy: never imported at module load
 
     model = TextEmbedding(model_name=DEFAULT_MODEL)

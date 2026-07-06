@@ -8,6 +8,9 @@ fastembed, no network); a single importorskip test covers the real backend when 
 from __future__ import annotations
 
 import os
+import sys
+import threading
+import time
 
 import numpy as np
 import pytest
@@ -74,6 +77,88 @@ def test_degrade_to_bm25_when_model_unavailable(tmp_path, monkeypatch):
 
     manifest = B.build_index(md, idx)  # must NOT raise
     assert manifest["dense_ready"] is False and manifest["count"] == 2
+
+
+# --------------------------------------------------------------------------- #
+# OSP-4: pure-stat cold-cache pre-check (no fastembed import, no SIGALRM needed)
+# --------------------------------------------------------------------------- #
+def test_fastembed_model_cached_false_on_empty_dir(tmp_path):
+    assert B._fastembed_model_cached(str(tmp_path / "empty-cache")) is False
+
+
+def test_fastembed_model_cached_true_when_onnx_present(tmp_path):
+    cache = str(tmp_path / "cache")
+    snapshot = os.path.join(
+        cache, "models--qdrant--bge-small-en-v1.5-onnx-q", "snapshots", "abc123"
+    )
+    os.makedirs(snapshot)
+    open(os.path.join(snapshot, "model_optimized.onnx"), "w").close()
+    assert B._fastembed_model_cached(cache) is True
+
+
+def test_cold_cache_degrades_to_bm25_fast_with_no_fastembed_import(tmp_path, monkeypatch):
+    """OSP-4 acceptance: with NO fastembed model cache present, the dense path bails in
+    well under the hook's timeout budget WITHOUT importing fastembed at all -- a pure stat,
+    not a bounded-but-attempted load. Numpy/yaml/rank_bm25 are pre-warmed (their FIRST-ever
+    import in a process is ~1-2s, unrelated to this item) so the timing isolates the cost of
+    OSP-4's own pre-check rather than incidental interpreter warm-up."""
+    import rank_bm25  # noqa: F401
+    import yaml  # noqa: F401
+
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    empty_cache = str(tmp_path / "empty-fastembed-cache")
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", empty_cache)
+    sys.modules.pop("fastembed", None)
+
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha", "b.md": "beta"})
+    B.build_index(md, idx, allow_download=False)  # warm-up call (imports, filesystem caches)
+
+    t0 = time.monotonic()
+    manifest = B.build_index(md, idx, allow_download=False, force=True)
+    elapsed = time.monotonic() - t0
+
+    assert manifest["dense_ready"] is False
+    assert elapsed < 0.1  # generous CI-safe bound; a real fastembed import alone is ~0.5s+
+    assert "fastembed" not in sys.modules
+
+
+# --------------------------------------------------------------------------- #
+# OSP-4: run_bounded holds off the main thread (SIGALRM never worked there)
+# --------------------------------------------------------------------------- #
+def test_run_bounded_raises_dense_timeout_from_worker_thread():
+    result = {}
+
+    def _target():
+        try:
+            B.run_bounded(lambda: time.sleep(2.0), 0.1)
+            result["outcome"] = "no-timeout"
+        except B.DenseTimeout:
+            result["outcome"] = "timeout"
+        except Exception as exc:  # pragma: no cover - would indicate a real bug
+            result["outcome"] = f"error: {exc!r}"
+
+    t = threading.Thread(target=_target)
+    t.start()
+    t.join(timeout=5.0)
+
+    assert not t.is_alive()
+    assert result.get("outcome") == "timeout"
+
+
+def test_run_bounded_returns_value_from_worker_thread():
+    result = {}
+
+    def _target():
+        result["value"] = B.run_bounded(lambda: 42, 5.0)
+
+    t = threading.Thread(target=_target)
+    t.start()
+    t.join(timeout=5.0)
+
+    assert not t.is_alive()
+    assert result.get("value") == 42
 
 
 # --------------------------------------------------------------------------- #
