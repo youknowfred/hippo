@@ -5,7 +5,7 @@
 # git-recent, reconsolidation worklist, link-health, floor). Self-suppresses when
 # there is nothing to say. ALWAYS exits 0 — never blocks session start.
 #
-# Runs the plugin's OWN self-provisioned venv (built by the /memory:bootstrap skill
+# Runs the plugin's OWN self-provisioned venv (built by the /hippo:bootstrap skill
 # into ${CLAUDE_PLUGIN_DATA}/venv), with PYTHONPATH pointed at ${CLAUDE_PLUGIN_ROOT}
 # so `import memory` resolves to the bundled package — code from PLUGIN_ROOT
 # (read-only, swapped on update), deps from PLUGIN_DATA (persistent across updates).
@@ -22,6 +22,37 @@ cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" 
 PY="${CLAUDE_PLUGIN_DATA:-}/venv/bin/python"
 [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -x "$PY" ] || PY="python3"
 export PYTHONPATH="${CLAUDE_PLUGIN_ROOT:-}${PYTHONPATH:+:$PYTHONPATH}"
+
+# --- First-run nudge (ONB-1) — cheap pre-Python branch, pure stats -----------
+# After install the plugin is otherwise silently inert: hooks fall back to bare
+# python3 and every error is swallowed. Tell the user the ONE next step, at most
+# once per NUDGE_EVERY nudge-eligible sessions, permanently silenceable via a
+# dismissal marker. Emits a single well-formed hookSpecificOutput JSON and exits
+# 0 (the Python dispatcher would be inert in both nudge states anyway).
+NUDGE_EVERY=5
+if [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ ! -f "${CLAUDE_PLUGIN_DATA}/.nudge-dismissed" ]; then
+  NUDGE=""
+  SILENCE="(To silence this nudge permanently: touch '${CLAUDE_PLUGIN_DATA}/.nudge-dismissed')"
+  if [ ! -x "${CLAUDE_PLUGIN_DATA}/venv/bin/python" ] || [ ! -f "${CLAUDE_PLUGIN_DATA}/.bootstrap-sentinel" ]; then
+    NUDGE="hippo memory is installed but not bootstrapped — recall is inert. Run /hippo:bootstrap once per machine, then /hippo:init once per project. ${SILENCE}"
+  elif [ ! -f ".claude/memory/MEMORY.md" ]; then
+    NUDGE="hippo memory is bootstrapped but this project has no memory corpus — run /hippo:init to seed .claude/memory/. ${SILENCE}"
+  fi
+  if [ -n "$NUDGE" ]; then
+    COUNTER_FILE="${CLAUDE_PLUGIN_DATA}/.nudge-counter"
+    COUNT="$(cat "$COUNTER_FILE" 2>/dev/null || printf '0')"
+    case "$COUNT" in '' | *[!0-9]*) COUNT=0 ;; esac
+    printf '%s' "$((COUNT + 1))" > "$COUNTER_FILE" 2>/dev/null || true
+    if [ "$((COUNT % NUDGE_EVERY))" -eq 0 ]; then
+      # JSON-escape (backslash, double quote) with pure bash — the PLUGIN_DATA
+      # path is the only variable content. No jq dependency on this path.
+      ESCAPED="${NUDGE//\\/\\\\}"
+      ESCAPED="${ESCAPED//\"/\\\"}"
+      printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$ESCAPED" 2>/dev/null || true
+    fi
+    exit 0
+  fi
+fi
 
 # Pin fastembed's ONNX model cache to a durable dir. UNSET, fastembed uses
 # $TMPDIR/fastembed_cache (macOS /var/folders, purged on a schedule) — the OFFLINE

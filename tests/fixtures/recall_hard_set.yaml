@@ -3,74 +3,81 @@
 # Hand-written CROSS-VOCABULARY paraphrase queries -> the memory file stem(s) that should
 # be recalled in the top-10. These deliberately AVOID the vocabulary of each memory's
 # `description:` so they exercise the DENSE half of hybrid recall (BM25 alone catches the
-# lexical overlaps; the dense embeddings catch the paraphrases). Run against the REAL
-# corpus + a warm dense model:
+# lexical overlaps; the dense embeddings catch the paraphrases).
 #
-#   ./.venv/bin/pip install -r memory/requirements-memory.txt
-#   ./.venv/bin/python -m memory.build_index
-#   ./.venv/bin/python -m memory.eval_recall
+# The stems target the memories this repo SHIPS (plugin/assets/ starter packs) — CI seeds
+# a corpus from them and runs the bare CLI against it. Run the same thing locally from the
+# repo root:
+#
+#   .venv/bin/pip install -r plugin/requirements.txt
+#   mkdir -p .claude/memory && find plugin/assets -name '*.md' ! -name 'MEMORY.skeleton.md' ! -name 'README.md' -exec cp {} .claude/memory/ \;
+#   cp plugin/assets/MEMORY.skeleton.md .claude/memory/MEMORY.md
+#   PYTHONPATH=plugin .venv/bin/python -m memory.build_index --memory-dir .claude/memory --index-dir .claude/.memory-index
+#   PYTHONPATH=plugin .venv/bin/python -m memory.eval_recall
+#
+# (In a consuming project, the project-local convention .claude/memory/.audit-fixtures/
+# takes precedence over this file — see eval_recall._default_fixture_path.)
 #
 # `expected` is a list — any one of the listed stems in the top-10 counts as a hit (some
 # queries legitimately map to a small cluster of related memories). This is the ONLY
-# hand-maintained eval data; keep stems in sync with the corpus (eval_recall warns on a
-# stem that no longer resolves to a file).
+# hand-maintained eval data; keep stems in sync with the shipped packs.
 
-- query: "keep the memo generator from timing out when the model is responding slowly"
-  expected: [quality_first_budget_policy, latency_robustness_levers]
+- query: "who is responsible for cleaning up outdated memories — do I approve each one?"
+  expected: [claude_is_memory_master]
 
-- query: "a workbook with a hundred-thousand-plus formula cells is an ordinary deal, not an edge case"
-  expected: [feedback_151_avenue_a_is_standard_size]
+- query: "should we vet a consequential architecture with competing candidates and judges before writing code"
+  expected: [adversarial_design_pinning_before_implementation]
 
-- query: "which model do we run first to reorder candidate search results"
-  expected: [reranker_voyage_primary]
+- query: "the operator pointed me at one specific issue mid-task — do the other known fixes still apply?"
+  expected: [feedback_additive_not_restrictive_redirects]
 
-- query: "the agent's document search should run the real retrieval engine instead of the old canned keyword lookup"
-  expected: [retrieval_wrapper_path_bypasses_cre_pipeline]
-
-- query: "attribute every commit to the human author only, never add an AI co-author trailer"
-  expected: [oss-attribution-no-claude]
-
-- query: "don't open side branches; commit straight onto the development line"
-  expected: [feedback_no_feature_branches]
-
-- query: "the workbook dependency graph is persisted as parquet column tables and reconstructed in memory"
-  expected: [formula_graph_columnar_duckdb_migration]
-
-- query: "a thread offload that can't be cancelled defeats the timeout wrapper while unzipping the graph"
-  expected: [formula_graph_decompress_hang]
-
-- query: "raise the relevance cutoff when there is a sharp gap in similarity scores before reranking"
-  expected: [density_adaptive_floor]
-
-- query: "exporting a polished document to PDF goes through headless chrome in two rendering passes"
-  expected: [canvas_pdf_export_pipeline]
-
-- query: "login tokens embed a unique id that is checked against a revocation list on each call"
-  expected: [canvas_auth_rbac]
-
-- query: "the analytics warehouse stores its catalog in postgres and the data files in a storage bucket"
-  expected: [observability_ducklake_migration, observability_warehouse_consumers]
-
-- query: "for blame, compare revisions with a diff rather than shelving the changes aside"
-  expected: [feedback_no_git_stash_for_fault_attribution]
-
-- query: "detached async jobs vanish unless you hold a strong reference to them"
+- query: "my background job vanished before finishing — the garbage collector ate the async task"
   expected: [feedback_anchor_fire_and_forget_tasks]
 
-- query: "regenerate and commit the compiled editor frontend or the server keeps shipping old code"
-  expected: [canvas_ui_prebuilt_committed_bundle, feedback_canvas_ui_static_rebuild]
+- query: "should I run the whole test suite after every single file edit during a big refactor"
+  expected: [feedback_batch_tests_at_end]
 
-- query: "one process-wide cap on simultaneous Anthropic chat requests per event loop"
-  expected: [anthropic_global_concurrency_ceiling]
+- query: "the slowdown is probably just the upstream provider being slow again, right?"
+  expected: [feedback_dont_blame_vendor_latency]
 
-- query: "search came back with no chunks because the single event loop was starved"
-  expected: [async_retrieval_migration, triage_2026_06_27_web_beeef6bd_cascade]
+- query: "the urgent production fix is mergeable now — wait for the remaining checks or land it?"
+  expected: [feedback_dont_poll_ci_on_hotfix_merges]
 
-- query: "a required pipeline step must be dispatched deterministically, not left to the model to decide whether to invoke"
-  expected: [feedback_no_llm_tool_choice_for_mandatory_steps]
+- query: "the primary path errored but the fallback caught it, so nothing needs fixing?"
+  expected: [feedback_fallback_is_still_bug]
 
-- query: "the unattended audit bot runs every night on a schedule"
-  expected: [evergreen_system]
+- query: "these failures predate my change — file them as a follow-up ticket instead?"
+  expected: [feedback_fix_pre_existing_when_encountered]
 
-- query: "the lifecycle callback needs an explicit jump target or the memo ends up empty"
-  expected: [langgraph_error_handler_requires_goto]
+- query: "the user sent fresh error output for something I already patched last week"
+  expected: [feedback_new_logs_mean_recurrence]
+
+- query: "keep the old code path alive so existing callers don't break during the migration?"
+  expected: [feedback_no_backward_compat, feedback_no_legacy_read_fallbacks]
+
+- query: "roll the internal refactor out behind an env flag with a phased canary first?"
+  expected: [feedback_no_feature_flagged_refactor_rollouts]
+
+- query: "stash my in-flight work to check whether the bug exists on a clean tree"
+  expected: [feedback_no_git_stash_for_fault_attribution]
+
+- query: "could we hit plan limits if we enable this — should I warn about upgrading the subscription?"
+  expected: [feedback_no_hedging_on_confirmed_paid_services]
+
+- query: "just wrap it in a try/except and log a warning so it stops crashing"
+  expected: [feedback_root_cause_not_symptom_handling]
+
+- query: "which MCP server should handle remembering things versus navigating code symbols"
+  expected: [feedback_serena_tools_only]
+
+- query: "three related bugs triaged together — open three separate pull requests?"
+  expected: [feedback_single_pr_separate_commits]
+
+- query: "will promoting this branch drop any commits — what diff do I trust to check"
+  expected: [feedback_two_dot_diff_for_lost_work]
+
+- query: "how should commits be attributed — do we include the AI co-author trailer?"
+  expected: [oss-attribution-no-claude]
+
+- query: "tempted to write a plan document and defer the hard half to avoid complexity"
+  expected: [feedback_no_tactical_shortcuts]

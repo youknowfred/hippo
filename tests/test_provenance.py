@@ -441,3 +441,74 @@ def test_refresh_one_never_raises_on_missing_memory(repo, memory_dir, monkeypatc
     rc = P.main(["--refresh-one", "does_not_exist"])
     assert rc == 0
     assert "refused" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# COR-1: memories are BORN staleness-tracked (HEAD fallback + baseline healing)
+# --------------------------------------------------------------------------- #
+def test_backfill_uncommitted_file_falls_back_to_head(repo, memory_dir):
+    """A memory with no commit history of its own (just created, dirty worktree) gets
+    HEAD as its baseline — "reflects code as of now" — never an empty source_commit
+    that leaves it invisible to staleness."""
+    write_file(repo, "src/x.py", "x = 1\n")
+    head = git_commit(repo, "init", 1_700_000_000)
+    path = write_file(
+        repo, ".claude/memory/fresh.md", "---\nname: fresh\n---\nbody cites src/x.py\n"
+    )  # NOT committed
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    r = P.backfill_file(path, repo, repo_files, basename_index)
+    assert r["changed"] is True and r["error"] is None
+    assert r["source_commit"] == head
+    _, sc = read_provenance(open(path, encoding="utf-8").read())
+    assert sc == head
+
+
+def test_backfill_no_commits_at_all_still_writes_empty(repo, memory_dir):
+    """A repo with ZERO commits has no resolvable baseline anywhere — the empty
+    source_commit is honest there; SessionStart heals it once HEAD exists."""
+    path = write_file(repo, ".claude/memory/early.md", "---\nname: early\n---\nbody\n")
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    r = P.backfill_file(path, repo, repo_files, basename_index)
+    assert r["changed"] is True
+    assert r["source_commit"] is None
+
+
+def test_heal_empty_baselines_heals_only_empty(repo, memory_dir):
+    write_file(repo, "src/x.py", "x = 1\n")
+    head = git_commit(repo, "init", 1_700_000_000)
+    empty = write_file(
+        repo,
+        ".claude/memory/m_empty.md",
+        '---\nname: m_empty\nmetadata:\n  type: project\n  cited_paths: ["src/x.py"]\n'
+        '  source_commit: ""\n---\nbody one\n',
+    )
+    real = write_file(
+        repo,
+        ".claude/memory/m_real.md",
+        '---\nname: m_real\ncited_paths: []\nsource_commit: "REALBASELINE"\n---\nbody two\n',
+    )
+    none = write_file(repo, ".claude/memory/m_none.md", "---\nname: m_none\n---\nno provenance\n")
+    broken = write_file(
+        repo, ".claude/memory/m_broken.md", "---\nname: m: broken: yaml\nsource_commit: \n---\nb\n"
+    )
+    healed = P.heal_empty_baselines(memory_dir, repo)
+    assert healed == ["m_empty"]
+    healed_text = open(empty, encoding="utf-8").read()
+    _, sc = read_provenance(healed_text)
+    assert sc == head
+    assert healed_text.endswith("---\nbody one\n")  # body byte-identical
+    assert 'source_commit: "REALBASELINE"' in open(real, encoding="utf-8").read()  # untouched
+    assert "source_commit" not in open(none, encoding="utf-8").read()  # backfill's job, not heal's
+    assert "m_broken" not in healed  # unparseable skipped (integrity producer's territory)
+
+    # Idempotent: a second sweep heals nothing.
+    assert P.heal_empty_baselines(memory_dir, repo) == []
+
+
+def test_heal_empty_baselines_noop_without_head(repo, memory_dir):
+    write_file(
+        repo,
+        ".claude/memory/m.md",
+        '---\nname: m\ncited_paths: []\nsource_commit: ""\n---\nbody\n',
+    )
+    assert P.heal_empty_baselines(memory_dir, repo) == []  # no commits yet -> no HEAD -> no-op

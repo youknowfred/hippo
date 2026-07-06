@@ -447,3 +447,23 @@ def test_session_start_main_no_stray_telemetry_for_missing_memory_dir(tmp_path, 
     monkeypatch.setattr(S, "build_context", lambda *a, **k: "")
     assert S.main() == 0
     assert not os.path.exists(T.default_telemetry_dir(bogus))  # no stray ledger dir
+
+
+# --------------------------------------------------------------------------- #
+# SEC-3: derived dirs are self-ignoring
+# --------------------------------------------------------------------------- #
+def test_telemetry_dir_drops_self_ignoring_gitignore(tmp_path):
+    td = str(tmp_path / ".memory-telemetry")
+    T.mark_session(td)
+    gi = os.path.join(td, ".gitignore")
+    assert os.path.exists(gi)
+    assert open(gi, encoding="utf-8").read() == "*\n"
+
+
+def test_existing_gitignore_never_overwritten(tmp_path):
+    td = str(tmp_path / ".memory-telemetry")
+    os.makedirs(td)
+    with open(os.path.join(td, ".gitignore"), "w", encoding="utf-8") as fh:
+        fh.write("# user-edited\n")
+    T.mark_session(td)
+    assert open(os.path.join(td, ".gitignore"), encoding="utf-8").read() == "# user-edited\n"

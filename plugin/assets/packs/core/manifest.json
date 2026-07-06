@@ -1,0 +1,15 @@
+{
+  "pack": "core",
+  "version": "0.2.0",
+  "title": "Core",
+  "description": "The minimal seed every corpus starts from: the user_role template (who the operator is) and the memory-master policy (the agent owns corpus upkeep). Offered by default at /hippo:init.",
+  "seed_by_default": true,
+  "memories": [
+    {
+      "file": "user_role.md"
+    },
+    {
+      "file": "claude_is_memory_master.md"
+    }
+  ]
+}

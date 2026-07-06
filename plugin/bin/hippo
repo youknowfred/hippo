@@ -35,12 +35,12 @@ case "$cmd" in
     exec "$PY" -m memory.staleness "$@"
     ;;
   init|bootstrap|doctor|audit)
-    echo "hippo: '$cmd' is a multi-step skill, not a bare CLI command — use /memory:$cmd instead." >&2
+    echo "hippo: '$cmd' is a multi-step skill, not a bare CLI command — use /hippo:$cmd instead." >&2
     exit 1
     ;;
   *)
     echo "usage: hippo <recall|new|build-index|staleness> [args...]" >&2
-    echo "  (init/bootstrap/doctor/audit are skills — use /memory:<name>)" >&2
+    echo "  (init/bootstrap/doctor/audit are skills — use /hippo:<name>)" >&2
     exit 2
     ;;
 esac

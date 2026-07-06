@@ -23,10 +23,10 @@ import re
 import subprocess
 from typing import Dict, List, Optional, Tuple
 
-try:  # pragma: no cover - PyYAML is a repo dep; guard anyway so the hook never dies
-    import yaml
-except Exception:  # pragma: no cover
-    yaml = None  # type: ignore
+try:
+    import yaml  # PyYAML — the pinned venv dep (full-fidelity path)
+except Exception:  # pragma: no cover - bare python3 pre-bootstrap (ONB-2)
+    from ._vendor import miniyaml as yaml  # type: ignore  # frontmatter-subset fallback
 
 # Code/config extensions we treat as "cited code" for the staleness signal.
 # .md is intentionally EXCLUDED — memory<->memory references are [[wikilinks]] (Tier 3),
@@ -76,6 +76,25 @@ def resolve_dirs() -> Tuple[str, str]:
     return memory_dir, repo_root
 
 
+def ensure_self_ignoring_dir(path: str) -> None:
+    """mkdir -p a DERIVED dir + drop a ``.gitignore`` containing ``*`` inside it.
+
+    The standard self-ignoring cache pattern (SEC-3): the index and telemetry dirs
+    stay invisible to ``git status`` even in projects that never ran init's
+    .gitignore patch — a habitual ``git add .`` can never commit prompt previews or
+    index blobs. Idempotent (an existing .gitignore, even user-edited, is left
+    alone); never raises.
+    """
+    try:
+        os.makedirs(path, exist_ok=True)
+        gi = os.path.join(path, ".gitignore")
+        if not os.path.exists(gi):
+            with open(gi, "w", encoding="utf-8") as fh:
+                fh.write("*\n")
+    except Exception:
+        pass
+
+
 def split_frontmatter(text: str) -> Tuple[Optional[List[str]], str]:
     """Split a memory file into ``(frontmatter_lines, body_text)``.
 
@@ -96,7 +115,7 @@ def split_frontmatter(text: str) -> Tuple[Optional[List[str]], str]:
 def parse_frontmatter(text: str) -> dict:
     """YAML-parse the frontmatter block into a dict (``{}`` on any problem)."""
     fm_lines, _ = split_frontmatter(text)
-    if fm_lines is None or yaml is None:
+    if fm_lines is None:
         return {}
     try:
         data = yaml.safe_load("\n".join(fm_lines))
@@ -167,6 +186,17 @@ def git_last_commit(rel_path: str, repo_root: str) -> Optional[str]:
     """The commit that last touched ``rel_path`` — the memory's staleness baseline."""
     sha = run_git(["log", "-1", "--format=%H", "--", rel_path], repo_root).strip()
     return sha or None
+
+
+def git_head(repo_root: str) -> Optional[str]:
+    """Current HEAD sha, or None (no commits yet / not a git repo / git failure).
+
+    ``--verify --quiet`` (not bare ``rev-parse HEAD``): on an unborn branch, bare
+    rev-parse echoes the literal string "HEAD" to stdout — which would become a bogus
+    baseline. The full-sha shape check is belt for any other echo-through.
+    """
+    sha = run_git(["rev-parse", "--verify", "--quiet", "HEAD"], repo_root).strip()
+    return sha if re.fullmatch(r"[0-9a-f]{40}", sha) else None
 
 
 # --------------------------------------------------------------------------- #
@@ -292,10 +322,20 @@ def backfill_file(
                 result["error"] = "unparseable frontmatter — refusing to refresh (fix the YAML)"
                 return result
             meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-            sc = fm.get("source_commit") or meta.get("source_commit") or git_last_commit(rel, repo_root)
+            sc = (
+                fm.get("source_commit")
+                or meta.get("source_commit")
+                or git_last_commit(rel, repo_root)
+                or git_head(repo_root)
+            )
             text = _strip_provenance(text)  # drop old provenance; body untouched
         else:
-            sc = git_last_commit(rel, repo_root)
+            # A file with no commit history yet (just created by write_memory, or
+            # hand-authored and not yet committed) still gets a REAL baseline: HEAD —
+            # "reflects code as of now". An empty baseline would make the memory
+            # invisible to staleness/reconsolidation/archive gating until a manual
+            # commit + refresh (COR-1: memories must be BORN staleness-tracked).
+            sc = git_last_commit(rel, repo_root) or git_head(repo_root)
         new_text, changed = backfill_text(text, cited, sc)
         result.update({"cited": cited, "source_commit": sc, "changed": changed})
         if changed and not dry_run:
@@ -313,6 +353,57 @@ def _iter_memory_files(memory_dir: str):
         if name in ("MEMORY.md", "MEMORY.full.md"):
             continue
         yield os.path.join(memory_dir, name)
+
+
+def heal_empty_baselines(memory_dir: str, repo_root: str) -> List[str]:
+    """Set ``source_commit`` to HEAD for memories whose baseline is EMPTY. Returns healed names.
+
+    An empty baseline (written when a memory was backfilled before its repo had any
+    commits, or by a pre-COR-1 plugin in a dirty worktree) makes a memory INVISIBLE to
+    staleness, reconsolidation, and archive gating. Healing it to HEAD turns tracking ON
+    ("reflects code as of now") — it can never SILENCE an existing flag, because an empty
+    baseline never flags anything; this is the opposite of a bulk re-baseline, which the
+    engine deliberately refuses everywhere else. Only the one ``source_commit: ""`` line
+    inside the frontmatter is rewritten; bodies stay byte-identical. Files whose
+    frontmatter does not parse are skipped (the integrity producer surfaces those).
+    Never raises; a no-op when HEAD is unresolvable (repo with no commits yet).
+    """
+    healed: List[str] = []
+    try:
+        head = git_head(repo_root)
+        if not head or not os.path.isdir(memory_dir):
+            return []
+        for path in _iter_memory_files(memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+                fm = parse_frontmatter(text)
+                if not fm:
+                    continue  # no/unparseable frontmatter — not this function's job
+                meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+                has_key = "source_commit" in fm or "source_commit" in (meta or {})
+                current = fm.get("source_commit") or (meta or {}).get("source_commit")
+                if not has_key or current:
+                    continue  # never touch a real baseline (no blind re-baseline)
+                lines = text.split("\n")
+                close = next(
+                    (i for i in range(1, len(lines)) if lines[i].strip() == _FENCE), None
+                )
+                if close is None:
+                    continue
+                for i in range(1, close):
+                    m = re.match(r"^(\s*source_commit\s*:\s*)(\"\"|''|)\s*$", lines[i])
+                    if m:
+                        lines[i] = f'{m.group(1)}"{head}"'
+                        with open(path, "w", encoding="utf-8") as fh:
+                            fh.write("\n".join(lines))
+                        healed.append(os.path.splitext(os.path.basename(path))[0])
+                        break
+            except Exception:
+                continue  # never break the sweep on one file
+    except Exception:
+        return healed
+    return healed
 
 
 def backfill_corpus(
@@ -374,7 +465,7 @@ def reverify_file(
             # refresh path; find_unparseable / the integrity producer surface these.
             result["error"] = "unparseable frontmatter — refusing to re-baseline (fix the YAML)"
             return result
-        sc = run_git(["rev-parse", "HEAD"], repo_root).strip() or None
+        sc = git_head(repo_root)
         cited = cited_paths_for_body(body, repo_files, basename_index)
         new_text, _ = backfill_text(_strip_invalid_after(_strip_provenance(text)), cited, sc)
         changed = new_text != text  # idempotent: a no-op when provenance already matches

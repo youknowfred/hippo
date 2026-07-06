@@ -1,0 +1,28 @@
+{
+  "pack": "git-workflow",
+  "version": "0.2.0",
+  "title": "Git workflow",
+  "description": "Opinionated git habits: safe fault attribution, loss-proof diffs, and one-PR-per-cluster batching. Two policies in this pack are consequential enough to need individual confirmation.",
+  "seed_by_default": false,
+  "memories": [
+    {
+      "file": "feedback_no_git_stash_for_fault_attribution.md"
+    },
+    {
+      "file": "feedback_two_dot_diff_for_lost_work.md"
+    },
+    {
+      "file": "feedback_single_pr_separate_commits.md"
+    },
+    {
+      "file": "oss-attribution-no-claude.md",
+      "confirm": "individual",
+      "reason": "changes commit attribution for the whole repo \u2014 strips AI co-author trailers from every commit the agent makes"
+    },
+    {
+      "file": "feedback_dont_poll_ci_on_hotfix_merges.md",
+      "confirm": "individual",
+      "reason": "a CI-bypass policy: merges hotfixes as soon as mergeable without waiting for checks \u2014 many teams explicitly forbid this"
+    }
+  ]
+}
