@@ -61,6 +61,13 @@ if [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ ! -f "${CLAUDE_PLUGIN_DATA}/.nudge-dism
   fi
 fi
 
+# COR-10: a never-opted-in repo has no .claude/memory at all — bail before the
+# Python dispatcher, which would otherwise mkdir a real .memory-index directory
+# via build_index.refresh_index even though there's no corpus to index. The nudge
+# block above still fires (and exits) in this exact case until dismissed; this
+# guard only matters once it's been silenced.
+[ -d ".claude/memory" ] || exit 0
+
 # Pin fastembed's ONNX model cache to a durable dir. UNSET, fastembed uses
 # $TMPDIR/fastembed_cache (macOS /var/folders, purged on a schedule) — the OFFLINE
 # SessionStart refresh can't re-fetch a wiped model, silently degrading recall to
