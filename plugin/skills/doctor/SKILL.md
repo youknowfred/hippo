@@ -33,8 +33,18 @@ downstream errors from a root cause already identified)
    plugin-data dir precisely because hooks are offline by contract and can never re-warm a
    purged `$TMPDIR` cache; an empty dir here means that pin failed or the warm step never ran.)
 4. **Project corpus.** Does `.claude/memory/MEMORY.md` exist in the current project? If not,
-   suggest `/hippo:init`. If it exists, does the `~/.claude/projects/<encoded>/memory` symlink
-   resolve to it correctly (not broken, not pointing elsewhere)?
+   suggest `/hippo:init`. If it exists, call
+   `memory.provenance.check_project_symlink(repo_root, memory_dir)` (SHP-5) — it verifies from
+   the direction Claude Code actually reads (resolves `~/.claude/projects/<encoded>/memory` and
+   compares its REAL target against this project's `.claude/memory`), never by recomputing and
+   trusting the formula blind. Report:
+   - `ok` — symlink resolves to this project's corpus, nothing to say.
+   - `missing` — no symlink yet; print the returned `repair_command`.
+   - `broken` — symlink exists but points elsewhere; print the returned `repair_command`.
+   - `legacy_wrong_encoding` — a symlink exists under the OLD (pre-SHP-5) buggy encoding for
+     this same repo root (only `/` transliterated) instead of the harness's real one; report it
+     explicitly as a legacy artifact and print the returned `repair_command` (create the
+     correctly-encoded symlink, then remove the stale legacy one).
 5. **Corpus resolution (monorepo subdir launches, SHP-2).** Report WHICH corpus this session's
    `memory.provenance.resolve_dirs()` actually resolved, and why — a session started from a
    package subdirectory (`claude` launched from `packages/web`) walks UP toward the git

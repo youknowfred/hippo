@@ -49,10 +49,17 @@ symlink Claude Code's native memory system reads from.
    editable `<FILL-ME>` template — tell the user to fill it in with their own role/context
    before their first real session (skip this reminder only if they explicitly say they'll
    do it later).
-3. **Create the cross-machine symlink**:
+3. **Create the cross-machine symlink**. The encoding is the harness's actual rule (SHP-5:
+   every non-alphanumeric character becomes a literal `-`, one-for-one, no collapsing, no
+   stripping) — it lives in ONE place, `memory.provenance.encode_project_dir`, never
+   hand-rolled in bash:
    ```bash
    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-   ENCODED="-$(echo "$REPO_ROOT" | tr '/' '-' | sed 's/^-//')"
+   PY="${CLAUDE_PLUGIN_DATA:-}/venv/bin/python"
+   [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -x "$PY" ] || PY="python3"
+   ENCODED="$(PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "$PY" -c \
+     "import sys; from memory.provenance import encode_project_dir; print(encode_project_dir(sys.argv[1]))" \
+     "$REPO_ROOT")"
    SYMLINK_DIR="$HOME/.claude/projects/${ENCODED}"
    mkdir -p "$SYMLINK_DIR"
    [ -L "$SYMLINK_DIR/memory" ] || ln -s "$REPO_ROOT/.claude/memory" "$SYMLINK_DIR/memory"

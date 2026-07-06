@@ -65,6 +65,80 @@ def git_root(start: Optional[str] = None) -> Optional[str]:
     return out or None
 
 
+def encode_project_dir(repo_root: str) -> str:
+    """Encode an absolute repo path the way Claude Code names ``~/.claude/projects/<encoded>``.
+
+    SHP-5: the harness's real rule (verified against this machine's actual
+    ``~/.claude/projects/`` entries, not folklore) is a literal one-for-one transliteration —
+    every character that is NOT ``[A-Za-z0-9]`` becomes a single ``-``. No collapsing runs of
+    hyphens, no stripping the leading hyphen produced by the path's initial ``/``. A prior
+    ``tr '/' '-'`` implementation only touched slashes, so any path containing a ``.`` (or other
+    punctuation) landed under a directory the harness never reads. This is the ONE place that
+    formula lives — init and doctor both call it instead of hand-rolling their own bash regex.
+    """
+    return re.sub(r"[^A-Za-z0-9]", "-", repo_root)
+
+
+def _legacy_encode_project_dir(repo_root: str) -> str:
+    """The PRE-FIX (buggy) encoding — only '/' transliterated, leading '-' stripped+re-added.
+
+    Kept ONLY so ``check_project_symlink`` can recognize a symlink created by the old
+    formula and name it as a legacy artifact needing repair — never used to CREATE a new
+    symlink (that would just reintroduce the bug it exists to detect).
+    """
+    return "-" + repo_root.replace("/", "-").lstrip("-")
+
+
+def check_project_symlink(repo_root: str, memory_dir: str, claude_projects_dir: Optional[str] = None) -> dict:
+    """Verify the ``~/.claude/projects/<encoded>/memory`` symlink the way Claude Code reads it.
+
+    SHP-5: per the roadmap, doctor must verify FROM THE DIRECTION Claude Code reads — resolve
+    the expected symlink's target and compare it against ``memory_dir`` — never by
+    recomputing/re-deriving a formula and trusting it blind (that is exactly how the original
+    bug went undetected: doctor re-derived the same wrong formula the encoder used).
+
+    Returns a dict with:
+      - ``status``: one of ``"ok"``, ``"missing"``, ``"broken"`` (exists, wrong target),
+        ``"legacy_wrong_encoding"`` (a pre-fix-formula symlink exists for this repo instead)
+      - ``expected_path``: the correctly-encoded symlink path
+      - ``legacy_path``: the pre-fix-formula path, when relevant (else None)
+      - ``repair_command``: exact shell command to fix it, when status != "ok"
+
+    Never raises — filesystem races/permission errors degrade to ``status="missing"``.
+    """
+    claude_projects_dir = claude_projects_dir or os.path.join(os.path.expanduser("~"), ".claude", "projects")
+    encoded = encode_project_dir(repo_root)
+    expected_link = os.path.join(claude_projects_dir, encoded, "memory")
+    legacy_encoded = _legacy_encode_project_dir(repo_root)
+    legacy_link = os.path.join(claude_projects_dir, legacy_encoded, "memory")
+
+    result = {
+        "status": "missing",
+        "expected_path": expected_link,
+        "legacy_path": legacy_link if legacy_encoded != encoded else None,
+        "repair_command": None,
+    }
+    try:
+        if os.path.islink(expected_link) or os.path.exists(expected_link):
+            target = os.path.realpath(expected_link)
+            if os.path.isdir(target) and os.path.realpath(memory_dir) == target:
+                result["status"] = "ok"
+            else:
+                result["status"] = "broken"
+                result["repair_command"] = f'rm -f "{expected_link}" && mkdir -p "$(dirname "{expected_link}")" && ln -s "{memory_dir}" "{expected_link}"'
+            return result
+
+        if legacy_encoded != encoded and (os.path.islink(legacy_link) or os.path.exists(legacy_link)):
+            result["status"] = "legacy_wrong_encoding"
+            result["repair_command"] = f'mkdir -p "$(dirname "{expected_link}")" && ln -s "{memory_dir}" "{expected_link}"  # then: rm "{legacy_link}"'
+            return result
+
+        result["repair_command"] = f'mkdir -p "$(dirname "{expected_link}")" && ln -s "{memory_dir}" "{expected_link}"'
+        return result
+    except Exception:
+        return result
+
+
 def _candidate_memory_dir(d: str) -> str:
     return os.path.join(d, ".claude", "memory")
 

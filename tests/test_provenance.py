@@ -708,3 +708,111 @@ def test_walk_up_for_memory_dir_reports_nested_reason():
         memory_dir, reason = P.walk_up_for_memory_dir(d)
         assert memory_dir == nested
         assert reason == "nested"
+
+
+# --------------------------------------------------------------------------- #
+# encode_project_dir (SHP-5 — matches the harness's real one-char-per-'-' rule)
+# --------------------------------------------------------------------------- #
+def test_encode_project_dir_plain_path_only_slashes():
+    assert P.encode_project_dir("/Users/fredbook/GitHub/hippo") == "-Users-fredbook-GitHub-hippo"
+
+
+def test_encode_project_dir_dotted_path_replaces_every_dot():
+    # Confirmed empirically: '/' AND '.' are each replaced 1-for-1, never collapsed.
+    assert P.encode_project_dir("/Users/x/dev/next.js-app") == "-Users-x-dev-next-js-app"
+
+
+def test_encode_project_dir_underscored_path_replaces_underscore():
+    assert P.encode_project_dir("/Users/x/dev/sdk_2.0") == "-Users-x-dev-sdk-2-0"
+
+
+def test_encode_project_dir_consecutive_punctuation_produces_consecutive_hyphens():
+    # "/." (slash then dot) before "claude" -> TWO hyphens, not collapsed to one.
+    path = "/Users/fredbook/Documents/GitHub/ic-memobot/.claude/memory"
+    expected = "-Users-fredbook-Documents-GitHub-ic-memobot--claude-memory"
+    assert P.encode_project_dir(path) == expected
+
+
+def test_encode_project_dir_existing_hyphens_pass_through_unchanged():
+    path = "/Users/fredbook/Documents/GitHub/ic-memobot/canvas-ui/src"
+    expected = "-Users-fredbook-Documents-GitHub-ic-memobot-canvas-ui-src"
+    assert P.encode_project_dir(path) == expected
+
+
+def test_encode_project_dir_keeps_leading_hyphen_no_strip():
+    assert P.encode_project_dir("/a").startswith("-")
+
+
+def test_legacy_encode_project_dir_differs_from_fixed_only_when_punctuation_present():
+    plain = "/Users/fredbook/GitHub/hippo"
+    assert P._legacy_encode_project_dir(plain) == P.encode_project_dir(plain)  # coincidentally same
+
+    dotted = "/Users/x/dev/next.js-app"
+    assert P._legacy_encode_project_dir(dotted) != P.encode_project_dir(dotted)  # bug reproduced
+
+
+# --------------------------------------------------------------------------- #
+# check_project_symlink (SHP-5 — verify from the direction Claude Code reads)
+# --------------------------------------------------------------------------- #
+def test_check_project_symlink_ok_when_correctly_encoded_and_resolves(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "next.js-app")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+    encoded = P.encode_project_dir(repo_root)
+    link_dir = os.path.join(projects_dir, encoded)
+    os.makedirs(link_dir)
+    os.symlink(memory_dir, os.path.join(link_dir, "memory"))
+
+    result = P.check_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert result["status"] == "ok"
+
+
+def test_check_project_symlink_missing_when_no_symlink_at_all(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "next.js-app")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+
+    result = P.check_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert result["status"] == "missing"
+    assert result["repair_command"]
+
+
+def test_check_project_symlink_broken_when_points_elsewhere(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "next.js-app")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    other_dir = str(tmp_path / "somewhere-else")
+    os.makedirs(other_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+    encoded = P.encode_project_dir(repo_root)
+    link_dir = os.path.join(projects_dir, encoded)
+    os.makedirs(link_dir)
+    os.symlink(other_dir, os.path.join(link_dir, "memory"))
+
+    result = P.check_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert result["status"] == "broken"
+    assert result["repair_command"]
+
+
+def test_check_project_symlink_detects_legacy_wrong_encoding(tmp_path):
+    # A dotted repo path: the pre-SHP-5 formula (only '/' transliterated) produces a
+    # DIFFERENT directory name than the fixed one — simulate a symlink created by that
+    # old buggy formula and confirm doctor's check names it as a legacy artifact.
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "next.js-app")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+    legacy_encoded = P._legacy_encode_project_dir(repo_root)
+    assert legacy_encoded != P.encode_project_dir(repo_root)  # sanity: the two differ here
+    legacy_link_dir = os.path.join(projects_dir, legacy_encoded)
+    os.makedirs(legacy_link_dir)
+    os.symlink(memory_dir, os.path.join(legacy_link_dir, "memory"))
+
+    result = P.check_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert result["status"] == "legacy_wrong_encoding"
+    assert result["repair_command"]
+    assert legacy_link_dir in result["repair_command"] or result["legacy_path"] == os.path.join(
+        legacy_link_dir, "memory"
+    )
