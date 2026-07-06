@@ -96,9 +96,17 @@ def integrity_producer(memory_dir: str, repo_root: str) -> Optional[str]:
 
 def staleness_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     # find_stale already orders most-recently-drifted first.
-    stale = find_stale(memory_dir, repo_root)
+    diagnostics: dict = {}
+    stale = find_stale(memory_dir, repo_root, diagnostics=diagnostics)
+    # SHP-6: a scoped git-log scan can still time out on a pathologically large cited-path
+    # set; surface that instead of silently reporting "nothing stale" (legible degradation).
+    timeout_note = (
+        "⚠ staleness scan timed out — signal may be incomplete"
+        if diagnostics.get("timed_out")
+        else None
+    )
     if not stale:
-        return None
+        return timeout_note
     lines = [
         f"⚠ Memory staleness — {len(stale)} memories cite code that changed since they were "
         "written (most-recently-drifted first); verify against current code before relying on them:"
@@ -109,6 +117,8 @@ def staleness_producer(memory_dir: str, repo_root: str) -> Optional[str]:
         lines.append(f"  • {item['name']}: {paths}{more}")
     if len(stale) > _MAX_ITEMS_PER_PRODUCER:
         lines.append(f"  …and {len(stale) - _MAX_ITEMS_PER_PRODUCER} more.")
+    if timeout_note:
+        lines.append(timeout_note)
     return "\n".join(lines)
 
 

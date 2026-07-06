@@ -224,6 +224,102 @@ def test_read_source_commit_time_absent_returns_none():
 
 
 # --------------------------------------------------------------------------- #
+# SHP-6 — the staleness git-log scan is scoped to cited paths (not whole-repo history),
+# and a git-log timeout produces a visible diagnostic instead of a silent empty stale-list.
+# --------------------------------------------------------------------------- #
+def test_path_change_times_scopes_git_log_to_cited_paths(monkeypatch, repo, memory_dir):
+    from memory import staleness as ST
+
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_alpha.md", _memory(["src/foo.py"], c1))
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)
+
+    captured_argvs = []
+    real_run = ST.subprocess.run
+
+    def spy_run(args, **kwargs):
+        captured_argvs.append(args)
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(ST.subprocess, "run", spy_run)
+
+    find_stale(memory_dir, repo, since=_ALL)
+
+    log_calls = [a for a in captured_argvs if "log" in a]
+    assert log_calls, "expected at least one git log invocation"
+    for call in log_calls:
+        assert "--" in call
+        pathspecs = call[call.index("--") + 1:]
+        assert pathspecs, "git log call had no path restriction"
+        assert ":/src/foo.py" in pathspecs  # top-anchored pathspec (SHP-1 convention)
+        assert "--name-only" in call  # sanity: still the same log shape as before
+
+
+def test_chunk_paths_stays_under_byte_bound():
+    from memory.staleness import _chunk_paths
+
+    paths = [f"src/module_{i}.py" for i in range(500)]
+    chunks = _chunk_paths(paths, max_bytes=200)
+    assert len(chunks) > 1
+    for chunk in chunks:
+        total = sum(len(p.encode("utf-8")) + 1 for p in chunk)
+        assert total <= 200 + len(chunk[-1].encode("utf-8")) + 1  # last item may tip it, never more
+    # every path preserved, none dropped or duplicated across chunks
+    flat = [p for chunk in chunks for p in chunk]
+    assert flat == paths
+
+
+def test_git_log_timeout_produces_visible_diagnostic_not_silent_empty(monkeypatch, repo, memory_dir):
+    import subprocess as sp
+
+    from memory import staleness as ST
+
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_alpha.md", _memory(["src/foo.py"], c1))
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)
+
+    def fake_run(args, **kwargs):
+        if "log" in args:
+            raise sp.TimeoutExpired(cmd=args, timeout=20)
+        return sp.run(args, **kwargs)
+
+    monkeypatch.setattr(ST.subprocess, "run", fake_run)
+
+    diagnostics: dict = {}
+    stale = find_stale(memory_dir, repo, since=_ALL, diagnostics=diagnostics)
+
+    assert stale == []  # git log failed -> no drift can be detected
+    assert diagnostics.get("timed_out") is True  # but it must be VISIBLE, not a silent []
+
+
+def test_git_log_timeout_diagnostic_surfaces_in_session_start_producer(monkeypatch):
+    import memory.session_start as S
+
+    def fake_find_stale(md, repo, diagnostics=None, **kwargs):
+        if diagnostics is not None:
+            diagnostics["timed_out"] = True
+        return []
+
+    monkeypatch.setattr(S, "find_stale", fake_find_stale)
+    out = S.staleness_producer("md", "repo")
+    assert out and "timed out" in out.lower()
+
+
+def test_no_timeout_diagnostic_when_scan_succeeds(monkeypatch, repo, memory_dir):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_alpha.md", _memory(["src/foo.py"], c1))
+
+    diagnostics: dict = {}
+    find_stale(memory_dir, repo, since=_ALL, diagnostics=diagnostics)
+    assert diagnostics.get("timed_out") is False
+
+
+# --------------------------------------------------------------------------- #
 # count_unresolvable_baselines — the visible-degradation count (SessionStart + doctor)
 # --------------------------------------------------------------------------- #
 def test_count_unresolvable_baselines_counts_only_unresolvable_shas(repo, memory_dir):

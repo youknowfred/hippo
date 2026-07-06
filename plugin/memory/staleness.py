@@ -5,8 +5,13 @@ a memory is stale when any file it cites (``cited_paths``) changed AFTER the mem
 ``source_commit``. This is correlated with the thing it warns about — code drift —
 unlike calendar age.
 
-Fast path (for the SessionStart hook): TWO git calls total, regardless of corpus size.
-  1. ``git log --since=<window> --name-only`` → newest change time per path.
+Fast path (for the SessionStart hook): a BOUNDED number of git calls, proportional to the
+cited-path set (not repo history):
+  1. ``git log --since=<window> --name-only -- <cited paths, chunked>`` → newest change
+     time per path. SHP-6: scoped to the union of cited_paths across the corpus (chunked
+     to stay well under ARG_MAX) instead of scanning every path in the repo's history —
+     on a large monorepo, an unscoped scan can emit hundreds of MB and blow the subprocess
+     timeout, which used to silently degrade to "no stale memories" with no notice.
   2. ``git show -s`` over the distinct source_commits → their commit times.
 Then it's pure in-memory comparison. Never raises.
 """
@@ -16,8 +21,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .provenance import (
     _iter_memory_files,
@@ -30,6 +36,13 @@ from .provenance import (
 # a memory citing code last changed beyond this window simply won't be flagged.
 _DEFAULT_WINDOW = "2 years ago"
 _CHANGE_MARKER = "__C__"
+
+# SHP-6: chunk the cited-path pathspec so a single git invocation never approaches the
+# OS's real ARG_MAX (~1MB on macOS/Linux). This is a defensive, conservative constant —
+# not tuned to any OS's exact limit — chosen so even a monorepo with thousands of cited
+# paths issues a handful of git calls instead of one call that risks blowing the timeout.
+_MAX_PATHSPEC_BYTES = 8_000
+_GIT_LOG_TIMEOUT = 20
 
 
 def read_provenance(text: str) -> tuple[List[str], Optional[str]]:
@@ -81,25 +94,92 @@ def read_source_commit_time(text: str) -> Optional[int]:
     return None
 
 
-def _path_change_times(repo_root: str, since: str) -> Dict[str, int]:
-    """Map repo-relative path -> newest commit unix-time within the window."""
+def _chunk_paths(paths: List[str], max_bytes: int = _MAX_PATHSPEC_BYTES) -> List[List[str]]:
+    """Split ``paths`` into batches whose total byte length stays under ``max_bytes``.
+
+    Keeps each ``git log -- <paths>`` invocation's argument list well clear of the OS's
+    real ARG_MAX, regardless of how many distinct files the corpus's memories cite.
+    """
+    chunks: List[List[str]] = []
+    cur: List[str] = []
+    cur_bytes = 0
+    for p in paths:
+        p_bytes = len(p.encode("utf-8")) + 1
+        if cur and cur_bytes + p_bytes > max_bytes:
+            chunks.append(cur)
+            cur = []
+            cur_bytes = 0
+        cur.append(p)
+        cur_bytes += p_bytes
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
+def _run_git_log_scoped(repo_root: str, since: str, paths: List[str]) -> Tuple[str, bool]:
+    """Run ONE ``git log --since=<since> --name-only -- <paths>`` call; return ``(stdout, timed_out)``.
+
+    Distinct from ``provenance.run_git`` on purpose (SHP-6): that helper's broad
+    ``except Exception`` swallows ``subprocess.TimeoutExpired`` indistinguishably from any
+    other failure, which is exactly the silent-degradation bug this fix closes. Scoped to
+    this module's own git-log invocation — ``run_git``'s general contract for OTHER callers
+    (archive.py, provenance.py) is untouched.
+
+    ``cited_paths`` are always TOPLEVEL-relative (SHP-1), but a bare pathspec after ``--``
+    is interpreted relative to ``-C repo_root`` — so for a monorepo-subdir-rooted corpus
+    (``repo_root`` below the git toplevel), an unanchored pathspec would silently match
+    nothing. The ``:/`` magic prefix anchors each pathspec to the repo top regardless of
+    ``-C``, matching the toplevel-relative convention every other caller in this module
+    already relies on.
+    """
+    pathspecs = [f":/{p}" for p in paths]
+    try:
+        out = subprocess.run(
+            ["git", "-C", repo_root, "log", f"--since={since}", "--name-only",
+             f"--format={_CHANGE_MARKER}%ct", "--", *pathspecs],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_GIT_LOG_TIMEOUT,
+        )
+        return out.stdout or "", False
+    except subprocess.TimeoutExpired:
+        return "", True
+    except Exception:
+        return "", False
+
+
+def _path_change_times(
+    repo_root: str, since: str, paths: List[str]
+) -> Tuple[Dict[str, int], bool]:
+    """Map repo-relative path -> newest commit unix-time within the window.
+
+    SHP-6: scoped to ``paths`` (the union of cited_paths across the corpus being checked)
+    instead of the whole repo history, and chunked so no single git invocation risks
+    blowing ``_GIT_LOG_TIMEOUT`` on a large monorepo. Returns ``(times, timed_out)`` —
+    ``timed_out`` is True if ANY chunk hit the timeout, so the caller can surface a visible
+    diagnostic instead of silently treating a partial result as "nothing is stale".
+    """
     out: Dict[str, int] = {}
-    log = run_git(
-        ["log", f"--since={since}", "--name-only", f"--format={_CHANGE_MARKER}%ct"],
-        repo_root,
-    )
-    cur: Optional[int] = None
-    for line in log.split("\n"):
-        if line.startswith(_CHANGE_MARKER):
-            try:
-                cur = int(line[len(_CHANGE_MARKER):] or 0)
-            except ValueError:
-                cur = None
-        elif line.strip() and cur is not None:
-            # git log is newest-first, so the first time we see a path is its newest change.
-            if line not in out:
-                out[line] = cur
-    return out
+    if not paths:
+        return out, False
+    timed_out = False
+    for chunk in _chunk_paths(paths):
+        log, chunk_timed_out = _run_git_log_scoped(repo_root, since, chunk)
+        if chunk_timed_out:
+            timed_out = True
+        cur: Optional[int] = None
+        for line in log.split("\n"):
+            if line.startswith(_CHANGE_MARKER):
+                try:
+                    cur = int(line[len(_CHANGE_MARKER):] or 0)
+                except ValueError:
+                    cur = None
+            elif line.strip() and cur is not None:
+                # git log is newest-first, so the first time we see a path is its newest change.
+                if line not in out:
+                    out[line] = cur
+    return out, timed_out
 
 
 def _commit_times(shas: List[str], repo_root: str) -> Dict[str, int]:
@@ -126,7 +206,10 @@ def _commit_times(shas: List[str], repo_root: str) -> Dict[str, int]:
 
 
 def find_stale(
-    memory_dir: str, repo_root: str, since: str = _DEFAULT_WINDOW
+    memory_dir: str,
+    repo_root: str,
+    since: str = _DEFAULT_WINDOW,
+    diagnostics: Optional[dict] = None,
 ) -> List[dict]:
     """Return ``[{"name", "changed_paths"}]`` for memories whose cited code drifted.
 
@@ -135,6 +218,14 @@ def find_stale(
     OWN stored ``source_commit_time`` as the baseline instead of skipping the memory outright
     — an unresolvable sha must not make a memory permanently exempt from drift detection.
     Memories with neither a resolvable sha NOR a stored time are still skipped (unjudgeable).
+
+    SHP-6: the git-log path-change scan is scoped to the union of ``cited_paths`` across
+    every memory being checked (chunked to stay under a conservative pathspec-byte bound),
+    not the whole repo history — bounding scan cost to the cited-path set instead of repo
+    size. If ``diagnostics`` (a caller-owned dict) is passed, this sets
+    ``diagnostics["timed_out"] = True`` when any chunk of that scan hit the git timeout, so
+    a caller (e.g. ``session_start.staleness_producer``) can emit a visible
+    "scan timed out" note instead of treating a partial/empty result as "nothing stale".
 
     Never raises; returns ``[]`` on any failure.
     """
@@ -153,7 +244,10 @@ def find_stale(
         if not memories:
             return []
 
-        path_times = _path_change_times(repo_root, since)
+        cited_union = sorted({p for m in memories for p in m[1]})
+        path_times, timed_out = _path_change_times(repo_root, since, cited_union)
+        if diagnostics is not None:
+            diagnostics["timed_out"] = timed_out
         commit_times = _commit_times([m[2] for m in memories], repo_root)
 
         stale: List[dict] = []
@@ -357,7 +451,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"⚠ {len(broken)} memory file(s) have UNPARSEABLE frontmatter (fix the YAML):")
         for name in broken:
             print(f"  ! {name}")
-    stale = find_stale(memory_dir, repo)
+    diagnostics: dict = {}
+    stale = find_stale(memory_dir, repo, diagnostics=diagnostics)
+    if diagnostics.get("timed_out"):
+        print("⚠ staleness scan timed out — signal may be incomplete")
     if not stale:
         print("No code-stale memories detected.")
         return 0

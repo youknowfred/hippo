@@ -51,7 +51,11 @@ def test_output_is_bounded_under_cap(monkeypatch):
 
 def test_staleness_producer_formats_real_output(monkeypatch):
     monkeypatch.setattr(
-        S, "find_stale", lambda md, repo: [{"name": "m_x", "changed_paths": ["src/a.py", "src/b.py"]}]
+        S,
+        "find_stale",
+        lambda md, repo, diagnostics=None: [
+            {"name": "m_x", "changed_paths": ["src/a.py", "src/b.py"]}
+        ],
     )
     out = S.staleness_producer("md", "repo")
     assert out and "m_x" in out and "src/a.py" in out
@@ -60,7 +64,9 @@ def test_staleness_producer_formats_real_output(monkeypatch):
 def test_main_prints_session_start_json_when_stale(monkeypatch, capsys):
     monkeypatch.setattr(S, "resolve_dirs", lambda: ("md", "repo"))
     monkeypatch.setattr(
-        S, "find_stale", lambda md, repo: [{"name": "m_x", "changed_paths": ["src/a.py"]}]
+        S,
+        "find_stale",
+        lambda md, repo, diagnostics=None: [{"name": "m_x", "changed_paths": ["src/a.py"]}],
     )
     rc = S.main()
     assert rc == 0
@@ -71,7 +77,7 @@ def test_main_prints_session_start_json_when_stale(monkeypatch, capsys):
 
 def test_main_is_silent_when_nothing_stale(monkeypatch, capsys):
     monkeypatch.setattr(S, "resolve_dirs", lambda: ("md", "repo"))
-    monkeypatch.setattr(S, "find_stale", lambda md, repo: [])
+    monkeypatch.setattr(S, "find_stale", lambda md, repo, diagnostics=None: [])
     rc = S.main()
     assert rc == 0
     assert capsys.readouterr().out.strip() == ""
