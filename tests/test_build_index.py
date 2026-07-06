@@ -295,6 +295,9 @@ def test_default_index_dir_is_gitignored_sibling(tmp_path):
 
 
 def test_switching_to_bm25_removes_stale_dense_file(tmp_path, monkeypatch):
+    # Explicit delenv: the CI hermetic lane exports MEMOBOT_DISABLE_DENSE=1 job-wide,
+    # and this test's FIRST build must be a dense one for the scenario to exist.
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"a.md": "alpha", "b.md": "beta"})
