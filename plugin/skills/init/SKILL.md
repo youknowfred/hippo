@@ -20,7 +20,9 @@ symlink Claude Code's native memory system reads from.
   (or this worktree's `~/.claude/projects/<encoded>` entry) has never had its symlink or index
   built. Do **NOT** hard-stop and do **NOT** touch any existing memory file. Instead, **skip
   steps 1-2** (starter-pack selection, `MEMORY.md` skeleton — there is nothing to seed) and run
-  **only the machine-local setup, steps 3-5**: symlink, index build, `.gitignore` check. This
+  **only the machine-local setup, steps 3-5** (including 4b): symlink, index build, trust-mark,
+  `.gitignore` check. Re-running init against an existing corpus is the user explicitly
+  reviewing it, so 4b marks it trusted (SEC-1) even on this path. This
   makes re-running `/hippo:init` on an already-initialized project safe and useful — it is how
   `/hippo:doctor` tells a user to repair a missing/broken symlink, instead of routing them back
   to a hard stop.
@@ -48,7 +50,8 @@ symlink Claude Code's native memory system reads from.
 
 ## What this does, in order
 
-Steps 1-2 are SKIPPED entirely on an existing corpus (see preflight) — jump straight to step 3.
+Steps 1-2 are SKIPPED entirely on an existing corpus (see preflight) — jump straight to step 3;
+steps 3, 4, 4b (trust-mark), and 5 all still run.
 
 1. **Offer the starter packs — default is core only.** The packs live in
    `${CLAUDE_PLUGIN_ROOT}/assets/packs/` (one directory per pack, each with a `manifest.json`;
@@ -97,6 +100,20 @@ Steps 1-2 are SKIPPED entirely on an existing corpus (see preflight) — jump st
    .claude/.memory-index` — reuse the `$PY`/`PYTHONPATH` already resolved by `hippo_resolve_py`
    in step 3 (falls back to bare `python3` if bootstrap hasn't run yet — BM25-only index still
    builds and works).
+4b. **Mark this corpus TRUSTED (SEC-1).** Recall is gated: until this machine's user trusts a
+   corpus, recall injects nothing from it (a cloned repo's memories are otherwise an unreviewed
+   prompt-injection channel). Running `/hippo:init` here IS the user's explicit review — whether
+   they just created the corpus (steps 1-2) or re-ran init against an existing one (ONB-5) —
+   so mark it trusted now. Reuse the `$PY` + `REPO_ROOT` from step 3:
+   ```bash
+   "$PY" -c \
+     "import sys, json; from memory.trust import mark_trusted; \
+      print(json.dumps({'trusted': mark_trusted(sys.argv[1])}))" \
+     "$REPO_ROOT"
+   ```
+   The marker lives in the machine-local `~/.claude/hippo-trust.json` (OUTSIDE the project, so
+   a foreign repo can't commit its own "trust me"). A `false` result means the registry write
+   failed — report it (recall will stay gated until it succeeds), don't pretend it's trusted.
 5. **Patch `.gitignore`** — SKIP entirely when not a git repo (there's nothing for git to
    ignore yet; a future `git init` + this same nudge in step 6, once repeated after init, is
    how it gets patched). In a git repo, append `.claude/.memory-index/` and

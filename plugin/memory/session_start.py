@@ -173,8 +173,87 @@ PRODUCERS: List[Tuple[str, Callable[[str, str], Optional[str]]]] = [
 ]
 
 
+# How often the untrusted-corpus nudge fires among nudge-eligible sessions (mirrors ONB-1's
+# NUDGE_EVERY): loud enough to be seen, quiet enough not to nag every session.
+_TRUST_NUDGE_EVERY = 5
+
+
+def _trust_nudge_should_fire(repo_root: str) -> bool:
+    """Low-frequency gate for the untrusted-corpus nudge (mirrors ONB-1's modulo pattern).
+
+    Fires on the 1st nudge-eligible session and every ``_TRUST_NUDGE_EVERY``-th after, using a
+    per-corpus counter file under ``CLAUDE_PLUGIN_DATA`` so trusting one corpus never silences
+    the nudge for another. When ``CLAUDE_PLUGIN_DATA`` is unset (dev checkout / hermetic test
+    with no plugin-data dir), there is nowhere durable to keep the counter — fail toward
+    LEGIBLE and fire every session rather than swallow the signal. Never raises.
+    """
+    try:
+        import hashlib
+
+        data_dir = os.environ.get("CLAUDE_PLUGIN_DATA") or ""
+        if not data_dir:
+            return True
+        key = hashlib.sha256(os.path.realpath(repo_root).encode("utf-8")).hexdigest()[:16]
+        counter_path = os.path.join(data_dir, f".trust-nudge-{key}")
+        try:
+            with open(counter_path, "r", encoding="utf-8") as fh:
+                raw = fh.read().strip()
+            count = int(raw) if raw.isdigit() else 0
+        except Exception:
+            count = 0
+        try:
+            os.makedirs(data_dir, exist_ok=True)
+            with open(counter_path, "w", encoding="utf-8") as fh:
+                fh.write(str(count + 1))
+        except Exception:
+            pass
+        return count % _TRUST_NUDGE_EVERY == 0
+    except Exception:
+        return True
+
+
+def untrusted_corpus_nudge(memory_dir: str, repo_root: str) -> Optional[str]:
+    """Low-frequency nudge when THIS project's corpus is not yet trusted (SEC-1).
+
+    The one legible signal on the untrusted path: recall injects nothing and every other
+    producer stays silent (see ``build_context``'s short-circuit), so without this the user
+    would see a totally inert corpus with zero explanation. Silent when the corpus is trusted,
+    when the gate is inapplicable (no resolvable git root), or when the low-frequency modulo
+    says skip this session. Names the memory COUNT so the user knows something is being
+    withheld and points at ``/hippo:doctor`` (which shows the sample + takes consent).
+    """
+    from . import trust
+
+    gate_root = trust.gate_repo_root(memory_dir, repo_root)
+    if gate_root is None or trust.is_trusted(gate_root):
+        return None
+    if not _trust_nudge_should_fire(gate_root):
+        return None
+    count = trust.corpus_count(memory_dir)
+    return (
+        f"🔒 This project has an UNTRUSTED memory corpus ({count} memories) — hippo is "
+        "injecting nothing from it until you review and trust it. A cloned repo's memories "
+        "are an unreviewed prompt-injection channel, so recall stays gated by default. Run "
+        "/hippo:doctor to see the memory names and trust this corpus (or set MEMOBOT_TRUST_ALL=1 "
+        "for CI)."
+    )
+
+
 def build_context(memory_dir: str, repo_root: str, max_chars: int = _MAX_CONTEXT_CHARS) -> str:
-    """Run every producer, merge their non-empty blocks, bound the total. Never raises."""
+    """Run every producer, merge their non-empty blocks, bound the total. Never raises.
+
+    SEC-1 short-circuit: when this project's corpus exists but is NOT trusted, EVERY content
+    producer stays silent (an untrusted corpus injects nothing) and the ONLY block emitted is
+    the low-frequency untrusted-corpus nudge — the single legible signal on the gated path.
+    """
+    try:
+        from . import trust
+
+        gate_root = trust.gate_repo_root(memory_dir, repo_root)
+        if gate_root is not None and not trust.is_trusted(gate_root):
+            return untrusted_corpus_nudge(memory_dir, repo_root) or ""
+    except Exception:
+        pass
     blocks: List[str] = []
     for _label, fn in PRODUCERS:
         try:

@@ -36,6 +36,7 @@ from .build_index import (
     run_bounded,
     tokenize,
 )
+from . import trust
 from .lint_floor import floor_memory_names
 from .provenance import _iter_memory_files, resolve_dirs
 from .staleness import _commit_times, read_provenance
@@ -281,10 +282,14 @@ def recall(
     index: Optional[LoadedIndex] = None,
     memory_dir: Optional[str] = None,
     index_dir: Optional[str] = None,
+    repo_root: Optional[str] = None,
 ) -> List[dict]:
     """Top-``k`` memories for ``query`` as ``[{name, file, description, score, backend}]``.
 
-    Never raises; returns [] on any failure or empty query.
+    Never raises; returns [] on any failure or empty query. ``repo_root`` is the SEC-1 trust
+    gate's key — the hook entry (``main``) resolves it ONCE via ``resolve_dirs`` and threads it
+    through so the hot path pays no second ``git rev-parse``; a direct caller that omits it has
+    it derived (once) from ``memory_dir``'s git toplevel.
     """
     try:
         if not query or not query.strip():
@@ -293,10 +298,28 @@ def recall(
             idx = index  # caller supplied the index -> never touch the real memory dir / git
         else:
             if memory_dir is None:
-                memory_dir, _ = resolve_dirs()
+                memory_dir, resolved = resolve_dirs()
+                if repo_root is None:
+                    repo_root = resolved
             idx = _ensure_index(None, memory_dir, index_dir)
         if idx is None or not len(idx):
             return []
+
+        # Trust gate (SEC-1): a foreign corpus (clone any repo carrying .claude/memory)
+        # must inject NOTHING until this machine's user has explicitly trusted it — an
+        # untrusted corpus is an unreviewed prompt-injection channel. The gate LOOKUP is a
+        # stat + small-JSON read (no git/network/LLM), safe on the hot path; the git toplevel
+        # it keys on is resolved by the caller (``main``) ONCE and threaded in via repo_root,
+        # so the hot path pays no extra ``git rev-parse``. When there is NO resolvable git root
+        # (a non-git corpus, or a caller-supplied in-memory `index` with no memory_dir —
+        # eval/self_recall and the hermetic recall tests) the gate is inapplicable and recall
+        # proceeds; only a real git corpus NOT in the trust registry is denied. MEMOBOT_TRUST_ALL
+        # bypasses it for CI. The user-visible signal for the deny path is the SessionStart
+        # untrusted-corpus nudge + /hippo:doctor — never a silent no-op with zero trace.
+        if index is None:
+            gate_root = trust.gate_repo_root(memory_dir, repo_root)
+            if gate_root is not None and not trust.is_trusted(gate_root):
+                return []
 
         entries = idx.entries
 
@@ -436,6 +459,9 @@ def git_recent_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     """SessionStart producer: a one-block digest of recently-captured memories.
 
     Window via ``MEMOBOT_RECENT_DAYS`` (default 14). Self-suppresses when nothing is recent.
+    The untrusted-corpus gate (SEC-1) is enforced once, upstream, by ``session_start``'s
+    ``build_context`` short-circuit — no producer re-checks it (one gate boundary, no extra
+    per-producer git call on the trusted hot path).
     """
     try:
         days = float(os.environ.get("MEMOBOT_RECENT_DAYS", "14") or 14)
@@ -502,7 +528,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         # injects redundant tokens. Over-fetch by the floor size, drop floor members, slice to k.
         floor = floor_memory_names(memory_dir) if memory_dir else set()
         pool_k = args.k + len(floor) if floor else args.k
-        results = recall(query, k=pool_k, memory_dir=memory_dir, index_dir=args.index_dir)
+        results = recall(
+            query, k=pool_k, memory_dir=memory_dir, index_dir=args.index_dir, repo_root=repo_root
+        )
         if floor:
             results = [r for r in results if r["name"] not in floor]
         results = results[: args.k]
