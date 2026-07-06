@@ -30,6 +30,7 @@ import os
 import re
 import signal
 import threading
+import time
 from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -90,6 +91,22 @@ def _parse_timeout_env(name: str, default: float) -> float:
 # query path (per-prompt recall) — short; refresh path (SessionStart embed batch) — longer.
 DENSE_QUERY_TIMEOUT_SECS = _parse_timeout_env("MEMOBOT_DENSE_TIMEOUT", 5.0)
 DENSE_REFRESH_TIMEOUT_SECS = _parse_timeout_env("MEMOBOT_REFRESH_TIMEOUT", 15.0)
+
+
+def _parse_int_env(name: str, default: int) -> int:
+    """Parse an int env var; a malformed value must NEVER crash module import."""
+    try:
+        return int(os.environ.get(name) or str(default))
+    except (TypeError, ValueError):
+        return default
+
+
+# COR-3: the offline batch embed is sliced into bounded-size chunks so a large corpus
+# persists PARTIAL progress within one DENSE_REFRESH_TIMEOUT_SECS budget instead of an
+# all-or-nothing attempt that discards everything on a single slow batch. Each slice's
+# already-embedded hashes are cache-reused on the next call (see build_index's
+# old_row_by_hash), so a 500-doc corpus converges to dense over N sessions.
+DENSE_EMBED_CHUNK_SIZE = _parse_int_env("MEMOBOT_EMBED_CHUNK_SIZE", 64)
 
 
 def run_bounded(fn, seconds: float):
@@ -428,9 +445,24 @@ def build_index(
     False) — the BM25 part is always rebuilt (cheap), so the index is never stale.
 
     ``allow_download=False`` (the offline SessionStart refresh) forbids a model download and
-    bounds the embed so a cold cache can't hang. ``preserve_on_dense_fail=True`` means: if
-    the existing index was dense and this build could NOT produce dense (offline embed failed),
-    leave the existing index untouched rather than DOWNGRADE it to BM25-only — "never worse".
+    bounds the embed so a cold cache can't hang. The batch is embedded in
+    ``DENSE_EMBED_CHUNK_SIZE``-sized slices against the SAME overall
+    ``DENSE_REFRESH_TIMEOUT_SECS`` wall-clock budget: once a slice completes, no NEW slice is
+    started if the budget is already exhausted, but everything embedded so far is still
+    persisted (row=None for anything left un-embedded). This lets a large corpus converge to
+    dense across sessions (each pass reuses the previous pass's rows via ``old_row_by_hash``)
+    instead of an all-or-nothing 15s attempt that discards partial progress.
+
+    ``dense_ready`` is True only when EVERY entry ends up with a row — a partially-embedded
+    corpus stays ``dense_ready=False`` (BM25-only) rather than exposing a half-filled dense
+    matrix to recall, which cosine-scores placeholder rows as if they were real embeddings.
+    The rows themselves (and the manifest's per-entry ``row``) are still saved so the next
+    build's ``old_row_by_hash`` skips re-embedding them — "never worse than BM25" is protected
+    for CURRENT recall while embedding progress is not thrown away.
+
+    ``preserve_on_dense_fail=True`` means: if the existing index was dense and this build
+    could NOT produce (fully) dense (offline embed failed or ran out of budget), leave the
+    existing index untouched rather than DOWNGRADE it to BM25-only — "never worse".
     """
     if memory_dir is None:
         memory_dir, _ = resolve_dirs()
@@ -450,49 +482,68 @@ def build_index(
         try:
             import numpy as np
 
+            # NOTE: gated on the model matching + a dense matrix being present — NOT on
+            # old_manifest["dense_ready"] — so a PARTIALLY-embedded manifest (COR-3 chunked
+            # embed, dense_ready=False but some entries do have a row) still contributes its
+            # already-embedded rows here, letting a large corpus converge across sessions
+            # instead of re-embedding from scratch every time the prior attempt fell short.
             old_row_by_hash: Dict[str, int] = {}
-            if (
-                old_manifest
-                and old_manifest.get("dense_ready")
-                and old_dense is not None
-                and old_manifest.get("model") == DEFAULT_MODEL
-            ):
+            if old_manifest and old_dense is not None and old_manifest.get("model") == DEFAULT_MODEL:
                 for e in old_manifest.get("entries", []):
                     if "row" in e and e["row"] is not None and 0 <= e["row"] < len(old_dense):
                         old_row_by_hash[e["hash"]] = e["row"]
 
             to_embed_idx = [i for i, e in enumerate(entries) if e["hash"] not in old_row_by_hash]
-            new_vecs = None
+            new_vecs_by_idx: Dict[int, "np.ndarray"] = {}
             if to_embed_idx:
-                texts = [entries[i]["doc_text"] for i in to_embed_idx]
                 if allow_download:
-                    new_vecs = embed_documents(texts, allow_download=True)
+                    # Online build (bootstrap/manual): one unbounded batch, as before.
+                    texts = [entries[i]["doc_text"] for i in to_embed_idx]
+                    vecs = embed_documents(texts, allow_download=True)
+                    for pos, i in enumerate(to_embed_idx):
+                        new_vecs_by_idx[i] = vecs[pos]
                 else:
-                    # Offline: bound the embed so a cold/wiped cache aborts instead of hanging.
-                    new_vecs = run_bounded(
-                        lambda: embed_documents(texts, allow_download=False),
-                        DENSE_REFRESH_TIMEOUT_SECS,
-                    )
+                    # Offline: slice into bounded chunks against ONE overall wall-clock budget
+                    # so a large corpus persists whatever it manages instead of all-or-nothing.
+                    deadline = time.monotonic() + DENSE_REFRESH_TIMEOUT_SECS
+                    for start in range(0, len(to_embed_idx), DENSE_EMBED_CHUNK_SIZE):
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            break  # budget exhausted -> stop starting new slices
+                        chunk_idx = to_embed_idx[start : start + DENSE_EMBED_CHUNK_SIZE]
+                        texts = [entries[i]["doc_text"] for i in chunk_idx]
+                        try:
+                            chunk_vecs = run_bounded(
+                                lambda t=texts: embed_documents(t, allow_download=False),
+                                remaining,
+                            )
+                        except DenseTimeout:
+                            break  # this slice didn't finish -> keep what's already persisted
+                        for pos, i in enumerate(chunk_idx):
+                            new_vecs_by_idx[i] = chunk_vecs[pos]
 
             dim = None
-            if new_vecs is not None and len(new_vecs):
-                dim = new_vecs.shape[1]
+            if new_vecs_by_idx:
+                dim = next(iter(new_vecs_by_idx.values())).shape[0]
             elif old_dense is not None and len(old_dense):
                 dim = old_dense.shape[1]
             if dim is None:
                 raise RuntimeError("could not determine embedding dim")
 
             rows = np.zeros((len(entries), dim), dtype="float32")
-            new_ptr = 0
+            all_embedded = True
             for i, e in enumerate(entries):
                 if e["hash"] in old_row_by_hash:
                     rows[i] = old_dense[old_row_by_hash[e["hash"]]]
+                    e["row"] = i
+                elif i in new_vecs_by_idx:
+                    rows[i] = new_vecs_by_idx[i]
+                    e["row"] = i
                 else:
-                    rows[i] = new_vecs[new_ptr]
-                    new_ptr += 1
-                e["row"] = i
+                    e["row"] = None
+                    all_embedded = False
             dense_rows = rows
-            dense_ready = True
+            dense_ready = all_embedded
         except Exception:
             # Any dense failure (no fastembed, no cached model, offline miss, timeout) -> BM25.
             dense_rows = None
@@ -508,15 +559,18 @@ def build_index(
     ):
         return old_manifest
 
-    if not dense_ready:
+    if dense_rows is None:
+        # Total dense failure (no partial progress to keep) -> every entry is row=None.
         for e in entries:
             e["row"] = None
 
     manifest = {
         "schema_version": SCHEMA_VERSION,
-        "model": DEFAULT_MODEL if dense_ready else None,
+        # A partially-embedded (dense_ready=False) manifest still names the model so the
+        # next build's cache-reuse check (old_manifest.get("model") == DEFAULT_MODEL) fires.
+        "model": DEFAULT_MODEL if dense_rows is not None else None,
         "dense_ready": dense_ready,
-        "dim": int(dense_rows.shape[1]) if dense_ready and dense_rows is not None else None,
+        "dim": int(dense_rows.shape[1]) if dense_rows is not None else None,
         "count": len(entries),
         "entries": entries,
     }
@@ -524,7 +578,9 @@ def build_index(
     with open(os.path.join(index_dir, _MANIFEST_NAME), "w", encoding="utf-8") as fh:
         json.dump(manifest, fh)
     dense_path = os.path.join(index_dir, _DENSE_NAME)
-    if dense_ready and dense_rows is not None:
+    if dense_rows is not None:
+        # Persisted even when dense_ready=False (partial progress) so the next build's
+        # old_row_by_hash can resume from here instead of re-embedding from scratch.
         import numpy as np
 
         np.save(dense_path, dense_rows)
@@ -541,9 +597,15 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
     """Incrementally bring the index up to date with the corpus — OFFLINE, never-raises.
 
     For the SessionStart hook: so a memory written during one session is indexed (and thus
-    recallable) by the next. Fast no-op when nothing changed (a hash check, NO model load);
-    otherwise an offline, bounded, never-downgrade incremental build. Returns the manifest
-    (or the unchanged one), or None on any failure.
+    recallable) by the next. Fast no-op when nothing changed AND the index isn't degraded (a
+    hash check, NO model load); otherwise an offline, bounded, never-downgrade incremental
+    build. Returns the manifest (or the unchanged one), or None on any failure.
+
+    COR-3: the short-circuit must NOT fire on an unchanged-but-degraded (``dense_ready``
+    False) index — that would serve BM25-only recall forever, healed only by a corpus write
+    perturbing a hash. Falling through to ``build_index`` retries the offline dense embed
+    (bounded, chunked, never-downgrade), so a warm model cache upgrades the index to dense on
+    this SessionStart instead of waiting on the next write.
     """
     try:
         if memory_dir is None:
@@ -554,8 +616,9 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
         old = _load_manifest(index_dir)
         if old is not None:
             old_hashes = [e.get("hash") for e in old.get("entries", [])]
-            if old_hashes == [e["hash"] for e in entries_now]:
-                return old  # corpus unchanged -> no write, no embedding, no model load
+            corpus_unchanged = old_hashes == [e["hash"] for e in entries_now]
+            if corpus_unchanged and (old.get("dense_ready") or dense_disabled()):
+                return old  # corpus unchanged + already as good as it can be -> no-op
         return build_index(
             memory_dir, index_dir, allow_download=False, preserve_on_dense_fail=True
         )

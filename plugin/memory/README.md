@@ -288,7 +288,10 @@ Decay is DEMOTION, never deletion.
 - `MEMOBOT_EMBED_MODEL` — dense model name (default `BAAI/bge-small-en-v1.5`).
 - `MEMOBOT_DISABLE_DENSE=1` — force BM25-only (hermetic tests, CI).
 - `MEMOBOT_DENSE_TIMEOUT` — seconds before a dense query aborts to BM25 (default 5).
-- `MEMOBOT_REFRESH_TIMEOUT` — seconds before the offline SessionStart embed aborts (default 15).
+- `MEMOBOT_REFRESH_TIMEOUT` — overall wall-clock budget for the offline SessionStart embed;
+  exhausting it stops starting new chunks but keeps whatever already embedded (default 15).
+- `MEMOBOT_EMBED_CHUNK_SIZE` — docs per offline embed slice, so a large corpus persists
+  partial dense progress across sessions instead of an all-or-nothing attempt (default 64).
 - `MEMOBOT_RECENT_DAYS` — window for the git-recent producer (default 14).
 - `MEMOBOT_TELEMETRY_DIR` — override the ledger location (default `.claude/.memory-telemetry/`).
 - `MEMOBOT_TELEMETRY_MAX_BYTES` — ledger byte ceiling before rotation (default 2 MB).
