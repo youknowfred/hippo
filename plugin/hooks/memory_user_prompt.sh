@@ -14,7 +14,9 @@
 #
 # Runs the plugin's OWN self-provisioned venv (${CLAUDE_PLUGIN_DATA}/venv), PYTHONPATH
 # pointed at ${CLAUDE_PLUGIN_ROOT} so `import memory` resolves to the bundled package.
-# Falls back to a bare `python3` if bootstrap hasn't run yet.
+# Falls back to a bare `python3` if bootstrap hasn't run yet. PY resolution itself is
+# the ONE shared hippo_resolve_py() in _resolve_py.sh (OSP-6) — every hook/skill/bin
+# surface sources the same file instead of re-deriving this logic.
 #
 # Wired as a UserPromptSubmit hook via plugin/hooks/hooks.json. The SessionStart dynamic
 # memory context is emitted by the separate memory_session_start.sh dispatcher.
@@ -30,9 +32,9 @@ cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" 
 # UserPromptSubmit delivers the event as JSON on stdin; ".prompt" is the user's text.
 PAYLOAD="$(cat 2>/dev/null || true)"
 
-PY="${CLAUDE_PLUGIN_DATA:-}/venv/bin/python"
-[ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -x "$PY" ] || PY="python3"
-export PYTHONPATH="${CLAUDE_PLUGIN_ROOT:-}${PYTHONPATH:+:$PYTHONPATH}"
+# shellcheck disable=SC1091  # dynamic path via CLAUDE_PLUGIN_ROOT; see hooks/_resolve_py.sh
+. "${CLAUDE_PLUGIN_ROOT:-.}/hooks/_resolve_py.sh"
+hippo_resolve_py
 
 # Force the dense model OFFLINE for the hook path (belt — recall.py also guards this).
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"

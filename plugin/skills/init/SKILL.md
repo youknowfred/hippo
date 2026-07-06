@@ -55,9 +55,9 @@ symlink Claude Code's native memory system reads from.
    hand-rolled in bash:
    ```bash
    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-   PY="${CLAUDE_PLUGIN_DATA:-}/venv/bin/python"
-   [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -x "$PY" ] || PY="python3"
-   ENCODED="$(PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "$PY" -c \
+   . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
+   hippo_resolve_py
+   ENCODED="$("$PY" -c \
      "import sys; from memory.provenance import encode_project_dir; print(encode_project_dir(sys.argv[1]))" \
      "$REPO_ROOT")"
    SYMLINK_DIR="$HOME/.claude/projects/${ENCODED}"
@@ -68,9 +68,10 @@ symlink Claude Code's native memory system reads from.
    toplevel to ask for. If the symlink already exists and points somewhere ELSE, stop and
    report the conflict rather than silently overwriting it — a pre-existing symlink to a
    different target is a sign of a prior manual setup that shouldn't be clobbered.
-4. **Build the index**: `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python"
-   -m memory.build_index --memory-dir .claude/memory --index-dir .claude/.memory-index` (fall back
-   to bare `python3` if bootstrap hasn't run yet — BM25-only index still builds and works).
+4. **Build the index**: `"$PY" -m memory.build_index --memory-dir .claude/memory --index-dir
+   .claude/.memory-index` — reuse the `$PY`/`PYTHONPATH` already resolved by `hippo_resolve_py`
+   in step 3 (falls back to bare `python3` if bootstrap hasn't run yet — BM25-only index still
+   builds and works).
 5. **Patch `.gitignore`** — SKIP entirely when not a git repo (there's nothing for git to
    ignore yet; a future `git init` + this same nudge in step 6, once repeated after init, is
    how it gets patched). In a git repo, append `.claude/.memory-index/` and

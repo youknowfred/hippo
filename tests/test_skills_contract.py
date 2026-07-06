@@ -12,10 +12,10 @@ import glob
 import os
 import re
 
-_SKILLS_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "plugin", "skills")
-)
+_PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "plugin"))
+_SKILLS_DIR = os.path.join(_PLUGIN_DIR, "skills")
 _ALL_SKILLS = sorted(glob.glob(os.path.join(_SKILLS_DIR, "*", "SKILL.md")))
+_RESOLVE_PY_SH = os.path.join(_PLUGIN_DIR, "hooks", "_resolve_py.sh")
 
 # The shared ONB-7 preflight guard: unset/empty CLAUDE_PLUGIN_DATA must stop a skill
 # BEFORE any code block expands it (`uv venv "/venv"` provisions a root-owned path).
@@ -82,3 +82,85 @@ def test_skill_descriptions_carry_their_trigger_phrase():
     for path in _ALL_SKILLS:
         name = os.path.basename(os.path.dirname(path))
         assert f"/hippo:{name}" in _description_of(path), os.path.relpath(path)
+
+
+# --------------------------------------------------------------------------- #
+# OSP-6: one canonical PY-resolution snippet (hooks/_resolve_py.sh), reused
+# everywhere instead of eight hand-rolled copies (two hooks, bin/hippo, five
+# skills). This pins the shape, not just presence, so a future surface can't
+# silently reintroduce its own inline PY="${CLAUDE_PLUGIN_DATA:-}/venv/bin/python"
+# dance.
+# --------------------------------------------------------------------------- #
+_HOOKS_DIR = os.path.join(_PLUGIN_DIR, "hooks")
+_BIN_HIPPO = os.path.join(_PLUGIN_DIR, "bin", "hippo")
+_BOTH_HOOKS = [
+    os.path.join(_HOOKS_DIR, "memory_session_start.sh"),
+    os.path.join(_HOOKS_DIR, "memory_user_prompt.sh"),
+]
+_ALL_PY_RESOLVING_SURFACES = _BOTH_HOOKS + [_BIN_HIPPO] + _ALL_SKILLS
+
+# A hand-rolled duplicate of the resolver's own fallback dance — the exact
+# drift-prone pattern OSP-6 eliminates. Any surface OTHER than _resolve_py.sh
+# itself containing this is a regression back to eight independent copies.
+_INLINE_DUPLICATE_RE = re.compile(
+    r'PY="\$\{CLAUDE_PLUGIN_DATA:-\}/venv/bin/python"'
+)
+# How a surface "routes through" the canonical resolver: sourcing the shared
+# file (a plain `source`/`.` line naming _resolve_py.sh).
+_SOURCE_LINE_RE = re.compile(r'(?:^|\s)\.\s+["\'$][^\n]*_resolve_py\.sh')
+
+
+def test_resolve_py_snippet_exists_and_defines_the_canonical_function():
+    assert os.path.isfile(_RESOLVE_PY_SH), "plugin/hooks/_resolve_py.sh is missing"
+    with open(_RESOLVE_PY_SH, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    assert "hippo_resolve_py()" in text
+    assert 'PY="${CLAUDE_PLUGIN_DATA:-}/venv/bin/python"' in text
+    assert 'PY="python3"' in text
+    assert "export PYTHONPATH=" in text
+
+
+def test_no_surface_hand_rolls_its_own_py_resolution():
+    """No hook/bin/skill outside _resolve_py.sh itself duplicates the fallback dance."""
+    for path in _ALL_PY_RESOLVING_SURFACES:
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        assert not _INLINE_DUPLICATE_RE.search(text), (
+            f"{os.path.relpath(path, _PLUGIN_DIR)} hand-rolls its own PY-resolution "
+            "dance instead of sourcing the canonical hooks/_resolve_py.sh (OSP-6)"
+        )
+
+
+def test_both_hooks_source_the_canonical_resolver():
+    for path in _BOTH_HOOKS:
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        assert _SOURCE_LINE_RE.search(text), (
+            f"{os.path.relpath(path, _PLUGIN_DIR)} does not source _resolve_py.sh"
+        )
+        assert "hippo_resolve_py" in text
+
+
+def test_bin_hippo_sources_the_canonical_resolver():
+    with open(_BIN_HIPPO, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    assert _SOURCE_LINE_RE.search(text), "bin/hippo does not source _resolve_py.sh"
+    assert "hippo_resolve_py" in text
+
+
+def test_every_skill_routes_through_the_canonical_resolver():
+    """Every SKILL.md either sources _resolve_py.sh directly, or (like bootstrap,
+    which builds the venv itself rather than choosing between venv/bare-python3)
+    never performs a PY-selection fallback at all."""
+    for path in _ALL_SKILLS:
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        name = os.path.basename(os.path.dirname(path))
+        if name == "bootstrap":
+            # Bootstrap constructs the venv; it never chooses between venv/bare
+            # python3, so it has nothing to route through the resolver.
+            continue
+        assert _SOURCE_LINE_RE.search(text) or "hippo_resolve_py" in text, (
+            f"{os.path.relpath(path, _PLUGIN_DIR)} does not route PY resolution "
+            "through hooks/_resolve_py.sh (OSP-6)"
+        )

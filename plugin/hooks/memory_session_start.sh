@@ -10,7 +10,9 @@
 # so `import memory` resolves to the bundled package — code from PLUGIN_ROOT
 # (read-only, swapped on update), deps from PLUGIN_DATA (persistent across updates).
 # Falls back to a bare `python3` if bootstrap hasn't run yet (BM25-only / degraded,
-# never a hard failure).
+# never a hard failure). PY resolution itself is the ONE shared hippo_resolve_py()
+# in _resolve_py.sh (OSP-6) — every hook/skill/bin surface sources the same file
+# instead of re-deriving this logic.
 #
 # Wired as a SessionStart hook via plugin/hooks/hooks.json.
 set -uo pipefail
@@ -26,9 +28,9 @@ PAYLOAD="$(cat 2>/dev/null || true)"
 # .claude/memory/ lives in the project, not in the plugin bundle.
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" 2>/dev/null || exit 0
 
-PY="${CLAUDE_PLUGIN_DATA:-}/venv/bin/python"
-[ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -x "$PY" ] || PY="python3"
-export PYTHONPATH="${CLAUDE_PLUGIN_ROOT:-}${PYTHONPATH:+:$PYTHONPATH}"
+# shellcheck disable=SC1091  # dynamic path via CLAUDE_PLUGIN_ROOT; see hooks/_resolve_py.sh
+. "${CLAUDE_PLUGIN_ROOT:-.}/hooks/_resolve_py.sh"
+hippo_resolve_py
 
 # --- First-run nudge (ONB-1) — cheap pre-Python branch, pure stats -----------
 # After install the plugin is otherwise silently inert: hooks fall back to bare

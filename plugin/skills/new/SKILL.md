@@ -19,7 +19,9 @@ only — a floor pointer appended to `MEMORY.md` under the right section.
 ## Usage
 
 ```bash
-PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -m memory.new_memory \
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
+hippo_resolve_py
+"$PY" -m memory.new_memory \
   <name> "<one-line description — this is the recall hook, be specific>" \
   --type {user|feedback|project|reference} \
   --body "<full memory body — the WHY, not just the WHAT>" \
