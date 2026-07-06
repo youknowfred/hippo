@@ -9,7 +9,7 @@ reconsolidation, archive internals).
 
 | Skill | Run when |
 |---|---|
-| `/hippo:bootstrap` | Once per Mac — builds the shared venv + warms the offline model cache |
+| `/hippo:bootstrap` | Once per machine — builds the shared venv + warms the offline model cache |
 | `/hippo:init` | Once per new project — seeds `.claude/memory/` + the cross-machine symlink |
 | `/hippo:new` | Whenever the agent decides to save something to memory |
 | `/hippo:doctor` | Fast health check — is the plugin's own install/environment working |

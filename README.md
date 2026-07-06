@@ -33,6 +33,17 @@ tests/                            # hermetic test suite (14 files, no network/mo
 See `plugin/memory/README.md` for full usage docs (recall, staleness, reconsolidation,
 archive) and the bootstrap/init skills once Tier 2 ships.
 
+## Support matrix
+
+| Platform | Status |
+|---|---|
+| macOS | **Fully supported** — the primary development platform; CI runs the full suite on macOS |
+| Linux | **Fully supported** — CI runs the full suite on Ubuntu. One known wart: without `CLAUDE_PLUGIN_DATA`, the fallback cache dir is `~/Library/Caches` (macOS-shaped); the XDG-aware fix ships in v0.3.0 ([ROADMAP.yaml](ROADMAP.yaml), OSP-2) |
+| Windows | **Out of scope** — a decision, not an omission ([ROADMAP.yaml](ROADMAP.yaml), decision OQ-2 + non_goals): the hooks are bash and the engine is untested there. Revisit only on concrete adoption evidence |
+
+Python 3.10 and 3.12 are exercised in CI. Bootstrap runs once per machine; init runs once
+per project.
+
 ## Bootstrap vs. auto-provision (design decision)
 
 The plugin's Python dependencies (fastembed, numpy, PyYAML, rank-bm25) and the ~130MB
