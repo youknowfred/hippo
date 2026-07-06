@@ -486,3 +486,77 @@ def test_evaluate_graduation_rate_no_telemetry_dir_stays_hermetic(tmp_path, monk
     hs_path = _write_hard_set(tmp_path)
     report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)
     assert report["graduation_rate"] == {"rate": 0.0, "n": 0, "graduate": 0, "fix": 0, "demote": 0}
+
+
+# --------------------------------------------------------------------------- #
+# COR-2: default fixture-path resolution + fresh-corpus gate skip semantics
+# --------------------------------------------------------------------------- #
+def test_default_fixture_path_probes_audit_fixtures_then_tests_fixtures(tmp_path, monkeypatch):
+    repo = str(tmp_path / "proj")
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    monkeypatch.setenv("MEMOBOT_MEMORY_DIR", md)
+
+    # Nothing anywhere -> None, so the CLI inherits evaluate()'s skip semantics
+    # (the old default pointed at tests/unit/memory_tools/ — a path that exists in
+    # NO repo — making gates 2-3 spuriously fail everywhere).
+    assert E._default_hard_set_path() is None
+    assert E._default_relevance_set_path() is None
+
+    # Engine-repo convention: <repo>/tests/fixtures/
+    tf = os.path.join(repo, "tests", "fixtures")
+    os.makedirs(tf)
+    repo_fixture = os.path.join(tf, "recall_hard_set.yaml")
+    with open(repo_fixture, "w", encoding="utf-8") as fh:
+        fh.write("- {query: q, expected: [a]}\n")
+    assert E._default_hard_set_path() == repo_fixture
+
+    # Project-local audit convention WINS over the repo fixtures.
+    af = os.path.join(md, ".audit-fixtures")
+    os.makedirs(af)
+    audit_fixture = os.path.join(af, "recall_hard_set.yaml")
+    with open(audit_fixture, "w", encoding="utf-8") as fh:
+        fh.write("- {query: q, expected: [a]}\n")
+    assert E._default_hard_set_path() == audit_fixture
+
+
+def test_token_reduction_gate_skips_without_pretrim_snapshot(tmp_path, monkeypatch):
+    """A corpus that never had an untrimmed always-load (MEMORY.full.md absent — every
+    fresh install) has nothing to compare against: net == -recall_avg would spuriously
+    fail the gate in EVERY fresh project. It must skip, not fail."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    os.remove(os.path.join(md, "MEMORY.full.md"))
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)
+    g = report["gates"]["token_reduction"]
+    assert g["pass"] is None and g.get("skipped") is True
+    assert report["ok"] is True, report["gates"]  # a skipped gate never fails the run
+    # value still REPORTED (honest), just not gated
+    assert "value" in g and "pct" in g
+
+
+def test_main_bare_cli_is_honest_on_a_fresh_corpus(tmp_path, monkeypatch, capsys):
+    """The documented merge-gate command `python -m memory.eval_recall` (no flags) must
+    pass/skip honestly on a fresh corpus with no fixtures — not report spurious gate
+    failures from a fossil default path."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    repo = str(tmp_path / "proj")
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    for fname, desc in _CORPUS.items():
+        with open(os.path.join(md, fname), "w", encoding="utf-8") as fh:
+            fh.write(_mem(fname[:-3], desc))
+    with open(os.path.join(md, "MEMORY.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Floor\n## User\n")  # fresh-install shape: floor, no MEMORY.full.md
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    monkeypatch.setenv("MEMOBOT_MEMORY_DIR", md)
+
+    rc = E.main(["--memory-dir", md, "--index-dir", str(tmp_path / ".memory-index")])
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "ALL GATES PASS" in out
+    assert "skipped" in out  # the skipped gates say so instead of rendering ❌
+    assert "❌" not in out

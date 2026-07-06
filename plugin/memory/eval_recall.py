@@ -487,6 +487,12 @@ def evaluate(
     # a hard_set_path that happens to load empty (a malformed/truncated fixture file) keeps the
     # original strict fail-on-empty behavior — that case is a real problem worth failing loudly.
     hard_set_provided = bool(hard_set_path)
+    # token_reduction compares the TRIMMED floor + per-query recall against the pre-trim
+    # MEMORY.full.md snapshot. A corpus that never had an untrimmed always-load (every fresh
+    # install — MEMORY.full.md absent) has nothing to compare against: full == floor and the
+    # gate would fail as net == -recall_avg in EVERY fresh project. Same skip semantics as
+    # the absent hard set: deliberately-absent input, not a failure.
+    has_full_snapshot = os.path.exists(os.path.join(memory_dir, "MEMORY.full.md"))
     gates = {
         "self_recall@10": {"value": round(self_recall, 4), "threshold": GATE_SELF_RECALL, "pass": self_recall >= GATE_SELF_RECALL},
         "hard_recall@10": {
@@ -499,7 +505,11 @@ def evaluate(
             "pass": (hs["n"] > 0 and hs["mrr"] >= GATE_MRR) if hard_set_provided else None,
             **({"skipped": True} if not hard_set_provided else {}),
         },
-        "token_reduction": {"value": tok["net"], "pct": tok["pct"], "threshold": 0, "pass": tok["net"] > 0},
+        "token_reduction": {
+            "value": tok["net"], "pct": tok["pct"], "threshold": 0,
+            "pass": (tok["net"] > 0) if has_full_snapshot else None,
+            **({} if has_full_snapshot else {"skipped": True}),
+        },
         "recall_p95_ms": {"value": lat["p95"], "threshold": GATE_P95_MS, "pass": lat["p95"] < GATE_P95_MS},
     }
     return {
@@ -519,14 +529,35 @@ def evaluate(
     }
 
 
-def _default_hard_set_path() -> str:
-    _, repo = resolve_dirs()
-    return os.path.join(repo, "tests", "unit", "memory_tools", "fixtures", "recall_hard_set.yaml")
+def _default_fixture_path(filename: str) -> Optional[str]:
+    """Resolve a default eval fixture, or None when no fixture exists anywhere.
+
+    Probe order:
+      1. ``.claude/memory/.audit-fixtures/<filename>`` — the project-local convention
+         the /hippo:audit skill writes to (any consuming project can carry its own
+         calibration data).
+      2. ``<repo>/tests/fixtures/<filename>`` — the engine repo's own checked-in set.
+
+    ``None`` (nothing found) makes ``main()`` inherit ``evaluate()``'s skip semantics
+    for the hard-set gates rather than failing them against a path that exists
+    nowhere — an absent fixture is a deliberately-absent input, not a failure.
+    """
+    memory_dir, repo = resolve_dirs()
+    for candidate in (
+        os.path.join(memory_dir, ".audit-fixtures", filename),
+        os.path.join(repo, "tests", "fixtures", filename),
+    ):
+        if os.path.exists(candidate):
+            return candidate
+    return None
 
 
-def _default_relevance_set_path() -> str:
-    _, repo = resolve_dirs()
-    return os.path.join(repo, "tests", "unit", "memory_tools", "fixtures", "recall_relevance_set.yaml")
+def _default_hard_set_path() -> Optional[str]:
+    return _default_fixture_path("recall_hard_set.yaml")
+
+
+def _default_relevance_set_path() -> Optional[str]:
+    return _default_fixture_path("recall_relevance_set.yaml")
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -556,9 +587,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     print(f"corpus={report['count']} dense={report['dense_ready']} model={report['model']} hard_set={report['hard_set_n']}")
+    _SKIP_REASONS = {
+        "hard_recall@10": "no hard-set fixture",
+        "mrr@10": "no hard-set fixture",
+        "token_reduction": "no MEMORY.full.md pre-trim snapshot",
+    }
     for name, g in report["gates"].items():
-        mark = "✅" if g["pass"] else "❌"
+        skipped = g.get("pass") is None
+        mark = "➖" if skipped else ("✅" if g["pass"] else "❌")
         extra = f" ({g['pct']*100:.1f}% reduction)" if name == "token_reduction" else ""
+        if skipped:
+            extra += f" — skipped ({_SKIP_REASONS.get(name, 'input absent')}; excluded from RESULT)"
         print(f"  {mark} {name:18s} = {g['value']} (threshold {g['threshold']}){extra}")
     t = report["tokens"]
     print(f"  tokens: full={t['full']} floor={t['floor']} recall_avg={t['recall_avg']} net={t['net']}")
