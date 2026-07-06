@@ -122,6 +122,26 @@ def staleness_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     return "\n".join(lines)
 
 
+def index_integrity_producer(memory_dir: str, repo_root: str) -> Optional[str]:
+    """LOUD diagnosis for on-disk recall-index corruption (QUA-5).
+
+    ``build_index``/``recall`` already degrade gracefully (never raise) on a truncated
+    manifest, a missing dense.npy, or a wrong-shape dense.npy — but until now nothing named
+    WHICH of those states was present, so "memory stopped working" had no diagnosis surface.
+    Silent when the index doesn't exist yet (nothing built) or is healthy.
+    """
+    try:
+        from .build_index import check_index_integrity, default_index_dir
+
+        index_dir = default_index_dir(memory_dir)
+        finding = check_index_integrity(index_dir)
+    except Exception:
+        return None
+    if not finding:
+        return None
+    return f"⚠ Index integrity — {finding}."
+
+
 def unresolvable_baseline_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     """LOUD count for memories whose staleness baseline sha isn't in this repo's history.
 
@@ -145,6 +165,7 @@ PRODUCERS: List[Tuple[str, Callable[[str, str], Optional[str]]]] = [
     ("integrity", integrity_producer),  # a malformed memory must not hide
     ("staleness", staleness_producer),
     ("reconsolidation", reconsolidation_producer),  # recall-filtered subset of staleness; silent unless a recently-recalled memory is stale
+    ("index_integrity", index_integrity_producer),  # names on-disk index corruption (QUA-5) — recall/build_index already degrade silently
     ("unresolvable_baseline", unresolvable_baseline_producer),  # legibility for find_stale's sha-fallback path
     ("git_recent", git_recent_producer),
     ("link_health", lint_links_producer),

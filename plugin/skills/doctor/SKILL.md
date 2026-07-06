@@ -71,14 +71,23 @@ downstream errors from a root cause already identified)
    `memory.build_index --memory-dir .claude/memory --index-dir .claude/.memory-index`
    (SessionStart's own refresh should have caught this already; a persistent mismatch across
    sessions is itself worth flagging as a possible SessionStart hook problem).
-8. **Live recall probe.** Run one real `memory.recall` call with a trivial query and confirm it
+8. **Index corruption (QUA-5).** Call `memory.build_index.check_index_integrity(index_dir)` —
+   it inspects the PERSISTED index for the states that otherwise degrade recall to nothing
+   silently, without needing a full recall: a truncated/garbled `manifest.json` (invalid JSON —
+   self-heals on the next rebuild, since a `None` old-manifest forces a full re-embed), a
+   manifest claiming `dense_ready: true` with `dense.npy` missing, or a `dense.npy` whose shape
+   doesn't match the manifest's entry/dim count. Report its returned string verbatim when
+   non-`None`; silent when `None` (nothing built yet, or healthy). This is also SessionStart's
+   `index_integrity` producer — a persistent finding here across sessions means the next
+   rebuild isn't happening (worth escalating like #9's mismatch).
+9. **Live recall probe.** Run one real `memory.recall` call with a trivial query and confirm it
    returns without raising and within a few seconds. This is the actual end-to-end proof the
    other checks are trying to predict — always run it even if the rest all look healthy.
-9. **Stale plugin name (pre-0.2.0).** If the user's installed-plugin list still shows
-   `memory@hippo`, that install predates the 0.2.0 rename to `hippo` and receives no updates —
-   recommend `/plugin uninstall memory@hippo` followed by `/plugin install hippo@hippo`
-   (a clean break; there is no alias shim).
-10. **Non-git degraded mode (SHP-4).** Run `git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse
+10. **Stale plugin name (pre-0.2.0).** If the user's installed-plugin list still shows
+    `memory@hippo`, that install predates the 0.2.0 rename to `hippo` and receives no updates —
+    recommend `/plugin uninstall memory@hippo` followed by `/plugin install hippo@hippo`
+    (a clean break; there is no alias shim).
+11. **Non-git degraded mode (SHP-4).** Run `git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse
     --show-toplevel` (or reuse `memory.provenance.git_root()`). A non-zero exit / `None` means
     this project has no git repo — report it as a LABELED DEGRADATION, not an error, and name
     exactly which subsystems are inactive and why:
@@ -93,7 +102,7 @@ downstream errors from a root cause already identified)
     ```
     When it IS a git repo, report `✔ git repo detected — staleness, provenance, and archive's
     git-mv path are all active.` instead; don't print the degraded block on a healthy repo.
-11. **Unresolvable staleness baselines (squash-merge / shallow clone, SHP-3).** Call
+12. **Unresolvable staleness baselines (squash-merge / shallow clone, SHP-3).** Call
     `memory.staleness.count_unresolvable_baselines(<memory_dir>, <repo_root>)` — memories whose
     `source_commit` sha is NOT reachable in this repo's history (a squash-merge default rewrites
     branch commits away; a shallow/partial clone never fetched them). These fall back to each

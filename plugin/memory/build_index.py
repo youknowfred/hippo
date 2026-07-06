@@ -703,6 +703,62 @@ def load_index(index_dir: str) -> Optional[LoadedIndex]:
 
 
 # --------------------------------------------------------------------------- #
+# QUA-5: on-disk corruption diagnosis (distinct from LoadedIndex's in-memory,
+# already-degrades-gracefully view — this names WHAT is wrong on disk, for a
+# SessionStart producer / doctor to surface, without needing a full recall).
+# --------------------------------------------------------------------------- #
+def check_index_integrity(index_dir: str) -> Optional[str]:
+    """One-line diagnosis of on-disk index corruption, or ``None`` if nothing's wrong.
+
+    Never raises. Distinguishes the three silent-degradation states this item closes:
+      (a) ``manifest.json`` exists but isn't valid JSON (truncated/garbled) — recall already
+          degrades to an empty/rebuilt index via ``_load_manifest``'s except->None, but
+          nothing said so; the next ``refresh_index``/``build_index`` call rebuilds from
+          scratch (``old_manifest`` is None -> full re-embed) so this self-heals, but the
+          CURRENT session's recall was silently empty/BM25-only until then.
+      (b) manifest claims ``dense_ready: true`` but ``dense.npy`` is missing — the LOADED view
+          (``LoadedIndex``) already degrades this to BM25-only, but the ON-DISK manifest still
+          wrongly claims dense_ready until the next rebuild overwrites it.
+      (c) ``dense.npy`` exists but its shape doesn't match the manifest (row count != entry
+          count, or column count != declared ``dim``) — ``LoadedIndex``/`_dense_rank`` already
+          degrade this to BM25-only without raising, but silently.
+    A missing manifest (no index built yet) is NOT corruption — returns ``None``.
+    """
+    try:
+        manifest_path = os.path.join(index_dir, _MANIFEST_NAME)
+        if not os.path.exists(manifest_path):
+            return None  # nothing built yet -> not a corruption state
+        manifest = _load_manifest(index_dir)
+        if manifest is None:
+            return (
+                "index manifest is corrupt (invalid JSON) — will rebuild on next refresh"
+            )
+        dense_path = os.path.join(index_dir, _DENSE_NAME)
+        if manifest.get("dense_ready"):
+            if not os.path.exists(dense_path):
+                return (
+                    "index manifest claims dense embeddings exist but the data file is "
+                    "missing — recall will degrade to BM25 until the next rebuild"
+                )
+            dense = _load_dense(index_dir)
+            entries = manifest.get("entries", [])
+            dim = manifest.get("dim")
+            shape_ok = dense is not None and getattr(dense, "ndim", 0) == 2
+            if shape_ok and dense.shape[0] != len(entries):
+                shape_ok = False
+            if shape_ok and dim is not None and dense.shape[1] != dim:
+                shape_ok = False
+            if not shape_ok:
+                return (
+                    "index dense.npy shape does not match the manifest (row/column count "
+                    "mismatch) — recall will degrade to BM25 until the next rebuild"
+                )
+        return None
+    except Exception:
+        return None
+
+
+# --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
 def main(argv: Optional[List[str]] = None) -> int:
