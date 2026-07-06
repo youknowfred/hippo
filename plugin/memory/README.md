@@ -1,521 +1,338 @@
-# Agent-Memory Activation Tooling
+# The hippo memory engine
 
-Local, no-server tooling over the markdown memory corpus at `.claude/memory/`. It
-**activates** structure that already lives in the files (citations, provenance,
-`[[wikilinks]]`, `description:` recall hooks) without changing the contract that
-**markdown-in-git is the single source of authority** — everything here is derived,
-rebuildable, and side-effect-light.
+Local, no-server tooling over the markdown memory corpus at `.claude/memory/` in the
+**consuming project**. It **activates** structure that already lives in the files
+(citations, provenance, `[[wikilinks]]`, `description:` recall hooks) without changing the
+contract that **markdown-in-git is the single source of authority** — everything else
+(index, telemetry, graph caches) is derived, rebuildable, and gitignored.
 
-Design + rationale: [`docs/plans/active/agent-memory-activation-layer-2026-06-23.yaml`](../../docs/plans/active/agent-memory-activation-layer-2026-06-23.yaml)
-and the exploration [`docs/plans/active/trustgraph-for-agent-memory-exploration-2026-06-23.md`](../../docs/plans/active/trustgraph-for-agent-memory-exploration-2026-06-23.md).
+This package ships inside the hippo Claude Code plugin (`plugin/memory/`, imported as
+`memory`). The skills (`/hippo:bootstrap|init|new|doctor|audit`) and hooks
+(`plugin/hooks/`) are thin orchestration over the CLI entry points documented here.
 
-The **memory-organism** layer (instrument + immunize — see
-[`docs/plans/active/memory-organism-instrument-immunize-2026-06-30.yaml`](../../docs/plans/active/memory-organism-instrument-immunize-2026-06-30.yaml)
-and the architecture doc [`docs/plans/active/biology-informed-memory-architecture-2026-06-30.md`](../../docs/plans/active/biology-informed-memory-architecture-2026-06-30.md))
-adds three organs on top of everything below, in shipped order:
+## Running the commands in this doc
 
-1. **Measurement** ([Scorecard extensions + episode buffer](#scorecard-extensions--episode-buffer-tier-1-memory-organism-instrument-immunize)) — `eval_recall.py` gains precision@k / staleness-half-life / per-session-cost / graduation-rate (all report-only); `telemetry.py` gains a second ledger (the episode buffer) pinning a HEAD-commit watermark for a *future, not-yet-shipped* capture pass.
-2. **Immune system** ([Reconsolidation worklist + graduation rate](#reconsolidation-worklist--graduation-rate-tier-2-memory-organism-instrument-immunize)) — `reconsolidate.py` re-grounds recently-recalled-and-stale memories against current code; a `demote` verdict can never silently clear the staleness flag.
-3. **Graceful decay** ([Soft-invalidation + archive](#graceful-decay--soft-invalidation--archive-tier-3-memory-organism-instrument-immunize)) — `staleness.py`/`recall.py` add a soft (never-hard) recall penalty; `archive.py` adds a git-reversible, single-item, 4-way-gated `git mv` — never an autonomous sweep, never a delete.
-
-Autonomous CAPTURE (the architecture doc's headline want — an LLM-driven extraction pass)
-is **deliberately deferred** to its own future roadmap, gated on this layer proving green
-across real, temporally-diverse sessions. See the changelog
-[`changelog/2026-06-30-memory-organism-instrument-immunize.md`](../../changelog/2026-06-30-memory-organism-instrument-immunize.md)
-for the measured scorecard snapshot and the exact unblock gate.
-
-## Tier 1 — code-tied staleness + provenance (shipped)
-
-The harness already warns "this memory is N days old" — but that's **calendar age**,
-uncorrelated with whether the cited code actually changed. Tier 1 replaces it with a
-**git-drift** signal.
-
-### `provenance.py` — backfill citation provenance
-
-Extracts `path:line` code citations from each memory **body** and records them as
-**additive** frontmatter (`cited_paths`, `source_commit`). The body is never modified;
-re-running is a no-op (idempotent); both frontmatter schemas in the corpus (a `metadata:`
-block and the flat top-level style) are handled.
+Inside a Claude Code session (skills, agents), the plugin env vars are set. Every code
+block below assumes this one-time shell setup:
 
 ```bash
-# preview (no writes)
-./.venv/bin/python -m memory.provenance --dry-run
-# apply
-./.venv/bin/python -m memory.provenance
+PY="${CLAUDE_PLUGIN_DATA}/venv/bin/python"   # built by /hippo:bootstrap
+export PYTHONPATH="${CLAUDE_PLUGIN_ROOT}"    # so `import memory` resolves to this package
 ```
 
-- `cited_paths` — the repo-relative code files the memory talks about (a bare basename
-  resolves via `git ls-files`; an ambiguous basename keeps all candidates).
-- `source_commit` — the memory file's own last-edit commit; the staleness baseline.
+The four stateless commands also have a launcher — `"${CLAUDE_PLUGIN_ROOT}/bin/hippo"
+<recall|new|build-index|staleness>` — which does the same resolution internally (and falls
+back to bare `python3` pre-bootstrap: BM25-only via the vendored fallbacks in
+[`_vendor/`](_vendor/__init__.py)).
 
-### `staleness.py` — the git-drift signal
+In a **dev checkout of this repo**, use `PY=.venv/bin/python` and `PYTHONPATH=plugin`
+instead.
 
-A memory is **stale** when any of its `cited_paths` changed *after* its `source_commit`.
-Two git calls total regardless of corpus size (path-change times + baseline-commit times),
-then pure comparison. Never raises.
-
-```bash
-./.venv/bin/python -m memory.staleness
-```
-
-### `session_start.py` — the SessionStart hook dispatcher
-
-ONE process, ONE corpus load, ONE merged `additionalContext`. Tier 1 registers the
-staleness producer; later tiers **add a producer function here** (git-recent in Tier 2,
-link-health in Tier 3) rather than registering a parallel hook. Self-suppresses when
-there's nothing to say, bounds output under the harness's 10,000-char cap, and **always
-exits 0**.
-
-Wired via [`.claude/hooks/memory_session_start.sh`](../../.claude/hooks/memory_session_start.sh)
-in `.claude/settings.json` (coexists with `agent_staleness.sh` — the harness concatenates
-multiple SessionStart `additionalContext` values).
-
-## Tier 2 — hybrid on-demand recall (shipped)
-
-Instead of always-loading the whole index, the relevant subset is **recalled on demand**.
-The durable floor (`MEMORY.md`, trimmed to the **User** + **Working-Style** memories + a
-section map) is the only always-load; the project/reference long-tail is pulled per prompt.
+## Hybrid recall
 
 ### `build_index.py` — offline hybrid index builder
 
 Builds a gitignored, rebuildable index at `.claude/.memory-index/` over each memory's
 `name` + `description`:
 - **dense** — `bge-small-en-v1.5` via `fastembed` (ONNX, no torch), and
-- **sparse** — `rank-bm25` (already a repo dep).
+- **sparse** — BM25 (`rank-bm25`, or the vendored scorer pre-bootstrap).
 
-It **warms the ~130 MB model cache OFFLINE** — a hook must never download. Incremental:
-unchanged memories reuse their cached embedding; only edited files re-embed. With
-`fastembed` absent it builds **BM25-only** (no error).
+Incremental: unchanged memories reuse their cached embedding row (keyed by content hash);
+only edited files re-embed. With `fastembed` absent/disabled it builds **BM25-only** (no
+error). The index dir is self-ignoring (it drops a `.gitignore` containing `*` on first
+creation) so it stays invisible to git even in projects that never patched `.gitignore`.
 
 ```bash
-# one-time: enable the dense half (ISOLATED dep — never in the product lock)
-./.venv/bin/pip install -r memory/requirements-memory.txt
-# build + warm the model cache (re-run after writing memories; incremental)
-./.venv/bin/python -m memory.build_index
+"$PY" -m memory.build_index --memory-dir .claude/memory --index-dir .claude/.memory-index
 ```
 
-**Auto-refresh at SessionStart:** you rarely need to run `build_index` by hand. The
-SessionStart dispatcher calls `refresh_index()` on every start — an incremental, **offline**,
-bounded, **never-downgrade** rebuild — so a memory written during one session is indexed
-(and recallable) by the next. It is a fast no-op (~tens of ms, no model load) when nothing
-changed, embeds only new/edited memories from the warm cache otherwise, and if a cold cache
-can't embed offline it leaves the last good index in place rather than degrade it to BM25.
-The initial `pip install` + `build_index` above is still the one-time setup that warms the
-~130 MB model cache (a hook must never download it).
+**Auto-refresh at SessionStart:** you rarely run `build_index` by hand. The SessionStart
+dispatcher calls `refresh_index()` on every start — incremental, **offline**, bounded,
+**never-downgrade** — so a memory written during one session is indexed (recallable) by
+the next. A fast no-op when nothing changed; if a cold cache can't embed offline it leaves
+the last good index in place rather than degrade it to BM25. The model cache itself is
+warmed ONCE, online, by `/hippo:bootstrap` (a hook must never download — see
+[Appendix A](#appendix-a--the-durable-model-cache-gotcha)).
 
 ### `recall.py` — query-time fused recall
 
-`recall(query, k=10)` → top-K via **RRF fusion** of dense + BM25, **degrading to BM25** when
-the dense model/cache is unavailable. Never raises; output bounded < 10K. The dense path is
-**wall-clock bounded** (`MEMOBOT_DENSE_TIMEOUT`, default 5 s) so a cold/wiped cache aborts to
-BM25 instead of blocking the hook.
+`recall(query, k=10)` → top-K via **RRF fusion** of dense + BM25, **degrading to BM25**
+when the dense model/cache is unavailable. Never raises; output bounded < 10K chars. The
+dense path is **wall-clock bounded** (`MEMOBOT_DENSE_TIMEOUT`, default 5 s) so a cold or
+wiped cache aborts to BM25 instead of blocking the hook.
 
 ```bash
-./.venv/bin/python -m memory.recall "how do we keep the memo writer from timing out"
+"$PY" -m memory.recall "how do we keep the memo writer from timing out"
 ```
 
-Wired at **UserPromptSubmit** via [`.claude/hooks/memory_user_prompt.sh`](../../.claude/hooks/memory_user_prompt.sh)
-— injects the top-K as `additionalContext`, **always exits 0** (exit 2 would erase the
-prompt), and forces HF offline so it can't trigger a download.
+Wired at **UserPromptSubmit** via [`../hooks/memory_user_prompt.sh`](../hooks/memory_user_prompt.sh)
+(registered in [`../hooks/hooks.json`](../hooks/hooks.json)) — injects the top-K as
+`additionalContext`, **always exits 0** (exit 2 would erase the user's prompt), and forces
+HF offline so it can never trigger a download.
 
-`recall.py` also hosts the SessionStart **git-recent** producer (recently-captured
-memories), registered into `session_start.py` alongside staleness.
+`recall.main()` (the CLI/hook entry, never `recall()` itself) also applies **query
+hygiene** (`clean_query` strips harness envelopes and skips near-empty/continuation
+prompts before any model load) and **floor-dedup** (memories already always-loaded in the
+`MEMORY.md` floor are dropped from per-prompt results, topping back up to `k`).
 
 ### `eval_recall.py` — the 5 merge gates
 
 ```bash
-./.venv/bin/python -m memory.eval_recall
+"$PY" -m memory.eval_recall
 ```
 
-Gates (all must pass to trust the recall path): synthetic self-recall@10 ≥ 0.90, curated
-hard-set recall@10 ≥ 0.80 ([`fixtures/recall_hard_set.yaml`](../../tests/unit/memory_tools/fixtures/recall_hard_set.yaml)),
-MRR@10 ≥ 0.60, net token reduction > 0, recall p95 < 300 ms (warm).
+Gates: synthetic self-recall@10 ≥ 0.90, curated hard-set recall@10 ≥ 0.80, MRR@10 ≥ 0.60,
+net token reduction > 0, recall p95 < 300 ms (warm). Two kinds of input are **skipped
+honestly** rather than failed (reported as `➖ skipped`, excluded from the RESULT):
 
-## Tier 3 — wikilink traversal + link lint (shipped)
+- **hard-set gates** when no fixture exists — resolution probes the project-local
+  `.claude/memory/.audit-fixtures/` (written by `/hippo:audit`), then the engine repo's
+  [`tests/fixtures/`](../../tests/fixtures/recall_hard_set.yaml), else skips;
+- **token_reduction** when the corpus has no `MEMORY.full.md` pre-trim snapshot (every
+  fresh install) — there is nothing to compare the trimmed floor against.
 
-Makes the `[[wikilinks]]` walkable and catches link rot — READ-ONLY (never edits a memory).
+`cold_latency` is reported alongside (fresh subprocess per sample — the REAL per-prompt
+hook cost, ~10× the warm p95) but never gated. Report-only scorecard extras: precision@k
+(graded, from `recall_relevance_set.yaml`), staleness half-life, per-session token cost,
+and the reconsolidation graduation rate.
 
-### `links.py` — the resolved wikilink graph
+## Staleness + provenance
 
-`build_graph(memory_dir)` parses `[[name]]` markers into adjacency and resolves each target,
-slug-normalizing so `_`/`-` variants and a dropped category prefix resolve
-(`[[151-avenue-a-is-standard-size]]` → `feedback_151_avenue_a_is_standard_size.md`) while
-genuinely-absent targets (`[[ship-roadmap]]`) stay unresolved. `traverse(name, hops)` walks
-N outbound hops.
+### `provenance.py` — citation provenance backfill
+
+Extracts `path:line` code citations from each memory **body** and records them as
+**additive** frontmatter (`cited_paths`, `source_commit`). The body is never modified;
+re-running is a no-op; both frontmatter schemas (a `metadata:` block and flat top-level)
+are handled.
 
 ```bash
-./.venv/bin/python -m memory.links --traverse async-retrieval-migration --hops 2
+"$PY" -m memory.provenance --dry-run    # preview
+"$PY" -m memory.provenance              # apply
 ```
 
-### `lint_links.py` — link-integrity linter (read-only)
+- `cited_paths` — repo-relative code files the memory talks about (a bare basename keeps
+  only an UNambiguous `git ls-files` resolution; ambiguous basenames are dropped).
+- `source_commit` — the file's own last-edit commit, else **HEAD** ("reflects code as of
+  now") when the file has no commit history yet — memories are born staleness-tracked
+  even in a dirty worktree. A residual empty baseline (pre-0.2.0 files, or a corpus
+  seeded before its repo's first commit) is **healed to HEAD at SessionStart** once
+  resolvable; healing can never silence a flag, because an empty baseline never flags.
 
-Flags **dangling** targets, **slug-mismatches** (resolve only via a soft alias), and
-**orphans** (zero outbound links). Idempotent; never edits a file.
+### `staleness.py` — the git-drift signal
+
+A memory is **stale** when any of its `cited_paths` changed *after* its `source_commit` —
+git drift, not calendar age. Two git calls total regardless of corpus size, then pure
+comparison. Never raises.
 
 ```bash
-./.venv/bin/python -m memory.lint_links
+"$PY" -m memory.staleness
 ```
 
-Its one-line health summary is the SessionStart **link-health** producer, merged into the
-single dispatcher `additionalContext` alongside staleness + git-recent.
-
-## Measurement + creation hygiene (the 2026-06-29 layer)
-
-On top of staleness/recall/links, four tools make the system measurable and keep new memories
-from re-bloating the trimmed floor (see
-[`changelog/2026-06-29-recall-telemetry-and-creation-convention.md`](../../changelog/2026-06-29-recall-telemetry-and-creation-convention.md)):
-
-| Tool | What it does |
-|------|--------------|
-| `telemetry.py` | append-only ledger of every hook recall (names, backend, latency, truncated query) |
-| `soak.py` | distinct-session **curation-soak bar** (≥5 = enough sessions to trust the dead-weight signal) + dead-weight curation report (CLI-only) |
-| `lint_floor.py` | guards the `MEMORY.md` floor invariant (memory links only under User + Working-Style) |
-| `new_memory.py` | writes a recall-ready memory; floor pointer **only** for user/feedback |
+### Clearing a flag: `--reverify` / `--refresh-one`
 
 ```bash
-./.venv/bin/python -m memory.soak        # curation-soak status + dead-weight report
-./.venv/bin/python -m memory.lint_floor  # floor-invariant check
+"$PY" -m memory.provenance --reverify <name>      # clear ONE memory after re-verifying it
+"$PY" -m memory.provenance --refresh-one <name>   # re-derive ONE memory's citations only
 ```
 
-## Recall telemetry (instrumentation)
+- `--reverify NAME` — the verification-gated way to CLEAR a staleness flag (which
+  `--refresh` deliberately CANNOT): after the content is re-read and confirmed to match
+  current code, it re-baselines `source_commit` to HEAD and re-opens the
+  soft-invalidation window. Frontmatter-only, body byte-identical, refuses unparseable
+  files, per-memory by design — see
+  [Appendix B](#appendix-b--why-there-is-no-bulk-re-baseline).
+- `--refresh-one NAME` — re-derives `cited_paths` for one memory (e.g. after hand-editing
+  its body), `source_commit` untouched. The corpus-wide `--refresh` does the same for
+  every already-backfilled memory.
 
-The recall path retrieves reliably but was **blind to its own behavior in the wild**.
-`telemetry.py` logs **one JSON line per hook recall** so we can see what it actually does.
+## The SessionStart dispatcher
 
-### `telemetry.py` — the recall-event ledger
+### `session_start.py`
 
-Each hook recall appends an event — `{ts, session_id, names, backend, latency_ms, k,
-query_preview}` — to an append-only JSONL at `.claude/.memory-telemetry/recall_events.jsonl`
-(its **own** gitignored sibling of the index, because it is append-only **history**, not a
-rebuildable cache).
+ONE process, ONE corpus load, ONE merged `additionalContext`. Producers, in order:
+`stale_venv` (deps changed since bootstrap → re-bootstrap nudge), `integrity`
+(unparseable frontmatter — surfaced FIRST among corpus signals so a malformed memory
+can't hide), `staleness`, `reconsolidation` (recall-filtered staleness worklist),
+`git_recent`, `link_health`, `floor`. Self-suppresses when no producer has anything to
+say; bounds output under the harness's 10,000-char cap; **always exits 0**. Side effects
+(not producers): heal empty baselines, `refresh_index()`, `mark_session()`.
 
-Contract (the hook depends on it):
-- **Never raises / never delays** — logging fires *after* recall results are computed and is
-  fully wrapped; an unwritable dir or a race degrades to a silent no-op and recall still
-  returns its results.
-- **No sensitive content** — only the surfaced memory **names**, the serving **backend**
-  (`dense+bm25` / `dense` / `bm25` / `none`), latency, `k`, and a **truncated** query preview
-  (first 80 chars) — never the full prompt.
-- **Size-bounded** — the ledger caps at a byte ceiling (`MEMOBOT_TELEMETRY_MAX_BYTES`,
-  default 2 MB) and **rotates** (keeps the recent tail), so it can never grow unbounded.
+Wired via [`../hooks/memory_session_start.sh`](../hooks/memory_session_start.sh), which
+also owns the **first-run nudge**: venv/sentinel missing → "run /hippo:bootstrap";
+bootstrapped but no corpus → "run /hippo:init" — at most once per 5 sessions, permanently
+dismissable, emitted before Python is even involved.
 
-Wiring (no new hook — the existing entry points do the work):
-- **`recall.main()`** (the `UserPromptSubmit` CLI/hook entry) fires `log_recall_event(...)`
-  after results. Logging lives **only** in `main()` — **not** in `recall()` — so
-  `eval_recall`'s direct `recall()` calls never pollute the ledger.
-- **`session_start.main()`** calls `mark_session()` (a side effect, alongside
-  `refresh_index()`) so each SessionStart opens a new ledger **session** — letting the
-  ledger count distinct sessions (the curation-soak signal the analyzer reads).
+## Wikilink graph
 
-Markdown-in-git stays the single source of authority; the ledger is derived, local, and
-gitignored — deleting it loses only history. `read_events()` is the read surface the
-soak/curation analyzer consumes.
+### `links.py` / `lint_links.py`
 
-### `soak.py` — soak ledger + curation report (read-only)
-
-Reads the ledger into two decisions:
-
-- **`soak_status()`** — distinct-session count and whether the **≥5-real-session** curation-soak
-  bar is met (enough distinct sessions that the dead-weight signal below is minimally trustworthy
-  rather than one-session topic noise — NOT an Option-C unblock gate).
-- **`curation_report()`** — per-memory recall-hit counts, the **never-recalled** set (curation
-  "dead weight" — read with the topic-bias caveat: cold tracks recent session mix, not value),
-  and the **BM25-fallback rate** (dense unavailable on some session).
+`build_graph(memory_dir)` parses `[[name]]` markers into adjacency, slug-normalizing so
+`_`/`-` variants and dropped category prefixes resolve; `traverse(name, hops)` walks N
+outbound hops. `lint_links` flags **dangling** targets, **slug-mismatches**, and
+**orphans** — read-only, never edits a memory; its one-line summary is the `link_health`
+producer.
 
 ```bash
-./.venv/bin/python -m memory.soak
+"$PY" -m memory.links --traverse <name> --hops 2
+"$PY" -m memory.lint_links
 ```
 
-`soak.py` is a CLI / analysis surface — it is **not** a SessionStart producer. The former
-Option-C soak announcer was **removed**: the auto-extraction draft queue it advertised was killed,
-so a met bar must never resurrect-by-accident a dead feature. Read-only over the ledger; never
-raises; empty/missing ledger yields an empty report.
+## Writing memories
 
-## Recall input hygiene + honest latency + staleness re-verify (the 2026-06-29 round 2)
-
-Four small, ledger-justified refinements on top of the above (rationale + measurements in
-[`docs/plans/active/memory-system-enhancement-exploration-2026-06-29.md`](../../docs/plans/active/memory-system-enhancement-exploration-2026-06-29.md)):
-
-- **Query hygiene** (`recall.clean_query`) — `recall.main()` strips harness envelopes
-  (`<task-notification>` tool-use blobs, fenced code, stray tags) and SKIPS recall entirely on
-  near-empty / continuation prompts (`?`, `continue`) *before* embedding. ~a third of real prompts
-  were paying a ~400 ms cold model load to inject pure semantic noise; now they cost nothing.
-- **Floor-dedup** (`lint_floor.floor_memory_names`) — `recall.main()` drops User+Working-Style
-  memories ALREADY always-loaded in the `MEMORY.md` floor from the per-prompt results (they were
-  ~25 % of surfaced slots), topping off to `k` from the fused tail. DISPLAY-layer only — never
-  inside `recall()`, so `eval_recall.self_recall` is byte-identical.
-- **Honest cold latency** (`eval_recall.cold_latency`) — reports the REAL per-process model-load
-  cost (~400 ms; a fresh subprocess per sample) alongside the warm p95 (~30 ms, which understates
-  it ~10×). Report-only, never gated.
-- **`--reverify NAME`** (`provenance.reverify_file`) — the verification-gated way to CLEAR a
-  staleness flag (which `--refresh` deliberately CANNOT). After the memory's content is **re-read
-  and confirmed to still match current code** — by the memory-master agent (see below) or a human —
-  it re-baselines `source_commit` to **HEAD** ("verified current as of now"). Frontmatter-only, body
-  byte-identical, refuses unparseable files, idempotent. Per-memory by design.
-- **`--refresh-one NAME`** (`provenance.backfill_file(..., refresh=True)`) — the scoped sibling of
-  `--refresh`: re-derives `cited_paths` for ONE memory only, `source_commit` untouched. Use this
-  whenever a memory's body is hand-edited after creation (e.g. via `new_memory.py` with a
-  placeholder body, then `Edit`) and its citations need picking up — plain `backfill_file` refuses
-  to re-derive `cited_paths` on a file that already has the key, and corpus-wide `--refresh` was the
-  ONLY way to force it before this flag existed, which meant re-deriving citations for every OTHER
-  already-backfilled memory too (silently dropping references to any file since renamed/deleted,
-  whether that review was wanted or not). `--refresh-one` never touches any file but the one named.
+### `new_memory.py` — recall-ready creation
 
 ```bash
-./.venv/bin/python -m memory.provenance --reverify <name>      # clear ONE memory after re-verifying it
-./.venv/bin/python -m memory.provenance --refresh-one <name>  # re-derive ONE memory's citations only
+"$PY" -m memory.new_memory my_slug "one-line recall hook" --type project --body "the WHY"
 ```
 
-> **There is intentionally NO bulk re-baseline** (no `--reverify-all`). A blind bulk pass would
-> anchor `source_commit` to each file's last *touch* — but ~168/179 memories were last touched by a
-> mechanical, body-identical commit (the provenance backfill / `--refresh` run), so that date is
-> "when we ran the tooling," not when the content was written. Re-baselining to it **silences
-> genuine drift** rather than draining an artifact. The staleness count is mostly a TRUE signal;
-> the only correct way to clear a flag is to actually re-verify the memory's content against current
-> code first, then `--reverify <name>`. Doing that *at scale* is the memory-master agent's job, not a
-> CLI flag — see the staleness-resolution pass.
+Writes the frontmatter the system depends on (`name`, `description` — **the recall
+hook** — and `metadata.type`), backfills provenance (born staleness-tracked), refreshes
+the index (**immediately recallable**), and appends a `MEMORY.md` floor pointer **only
+for `user`/`feedback`** types. Never overwrites an existing file. Prefer the
+`/hippo:new` skill, which wraps this with the what-not-to-save judgment.
 
-## Scorecard extensions + episode buffer (Tier 1, memory-organism-instrument-immunize)
+### `lint_floor.py` — the floor invariant
 
-`eval_recall.py` measured the recall INDEX (5 merge gates); it had no precision/coverage/cost
-metric for the recall PATH itself. This layer adds three REPORT-ONLY scorecard metrics — they
-extend `evaluate()`'s output dict, **never** the `gates` dict, and never change a gate
-threshold — plus an episode buffer that starts soaking now so a future (separately
-roadmapped, NOT yet shipped) autonomous-capture pass has something to replay.
-
-### Scorecard metrics (`eval_recall.py`, report-only)
-
-- **`precision_at_k`** — a GRADED measure: `|top-k ∩ relevant| / k`, averaged over
-  [`fixtures/recall_relevance_set.yaml`](../../tests/unit/memory_tools/fixtures/recall_relevance_set.yaml)
-  (hand-judged `{query, relevant: [name, ...]}` pairs — some list a real multi-memory
-  cluster). Distinct from `hard_set_metrics`' binary recall@k (any ONE expected name in the
-  top-k counts as a full hit) — precision rewards surfacing MORE of a relevant cluster, not
-  just one member of it.
-- **`staleness_half_life`** — the MEDIAN age (days) of the corpus's staleness baselines
-  (`source_commit`) versus now. A half-life proxy: half the corpus's content baselines are
-  younger than this figure, half are older. Memories with no baseline yet are excluded from
-  the sample (not counted as age zero).
-- **`session_token_cost`** — average recall-injection tokens **per session** (vs.
-  `token_reduction`'s existing per-QUERY figure) — average recall events per session, read
-  from the REAL telemetry ledger, times the average per-query token cost.
+The `MEMORY.md` floor is the only always-loaded memory context, so it stays lean: memory
+pointers belong ONLY under `## User` and `## Working Style & Process Feedback`;
+`project`/`reference` memories are recalled on demand. `lint_floor` flags re-bloat and
+floor link rot (read-only); its summary is the `floor` producer.
 
 ```bash
-./.venv/bin/python -m memory.eval_recall   # now also prints the 3 report-only lines
+"$PY" -m memory.lint_floor
 ```
 
-### `telemetry.log_episode()` — the episode buffer
+## Telemetry (three ledgers)
 
-A SECOND, distinct ledger from the recall-event ledger above — `.claude/.memory-telemetry/episode_buffer.jsonl`.
-The recall ledger records memory **names** surfaced per query; the episode buffer additionally
-pins the repo **HEAD commit** at recall time, so a future capture pass has a watermark to diff
-`git log <head_commit>..HEAD` against. It has to start soaking now even though nothing reads it
-yet — there is no way to backfill it retroactively.
+`telemetry.py` writes append-only, size-bounded (rotating), gitignored JSONL ledgers under
+`.claude/.memory-telemetry/` — derived local history, never authority:
 
-Same contract as the recall ledger: never raises, fire-and-forget (fires in `recall.main()`
-right after `log_recall_event`, in the SAME wrapped block — never inside `recall()` itself, so
-`eval_recall`'s direct `recall()` calls never pollute either ledger), size-bounded + rotated
-(shares `_rotate_if_needed`), and no sensitive content — a truncated query preview only, same
-80-char budget as the recall ledger, never the full prompt. `read_episodes()` is the read
-surface a future consumer would use; nothing in this tier consumes it yet.
+| Ledger | Written by | Content |
+|---|---|---|
+| `recall_events.jsonl` | `recall.main()` after results | `{ts, session_id, names, backend, latency_ms, k, query_preview}` |
+| `episode_buffer.jsonl` | `recall.main()`, same block | adds the repo HEAD watermark — soak data for the future capture pass |
+| `reconsolidation_events.jsonl` | `record_reconsolidation_outcome()` | `{ts, name, outcome}` verdicts |
 
-```python
-{"ts": ..., "session_id": ..., "query_preview": "...", "recalled_names": [...], "head_commit": "..."}
-```
+Contract: never raises, never delays a recall (fires after results, fully wrapped), no
+sensitive content (an 80-char query preview, never the full prompt). **Hygiene:** a
+project with no `.claude/memory` corpus gets NO ledgers at all, and the telemetry dir is
+self-ignoring (a `.gitignore` containing `*` inside it) so `git add .` can never commit
+prompt previews.
 
-### `soak.compute_strength_scores()` — topic-bias-resistant strength (report-only)
+### `soak.py` — soak status + curation report (read-only)
 
-`curation_report()`'s `per_memory_hits` is a raw event Counter — a memory hit 5× in one chatty
-session scores the same as one hit once across 5 distinct sessions, which over-weights
-whatever a single session happened to be about. `compute_strength_scores(telemetry_dir)`
-instead returns `{name: distinct_sessions_recalled / total_sessions}` — the numerator counts
-**sessions**, not events, and the denominator is the FULL distinct-session pool (mirrors
-`soak_status()`), not just sessions that recalled *something*. Report-only in the `soak` CLI;
-no write, no ranking change — folding it into `recall()`'s ranking is a separate, explicitly
-DEFERRED roadmap item (K2 in the architecture doc).
-
-## Reconsolidation worklist + graduation rate (Tier 2, memory-organism-instrument-immunize)
-
-The immune keystone — neutralizes two failure modes the architecture doc identified: a
-birth-defect WRONG claim that passes `reverify_file`'s SYNTACTIC gate (it only checks "does
-the cited code still match", never "is the content actually correct"), and a frequently-recalled
-WRONG memory that grows its strength score and is the LAST thing curated (recall frequency
-measures use, not correctness).
-
-### `reconsolidate.py` — recall-filtered staleness, the "labile-on-recall" set
-
-`recalled_stale_worklist(memory_dir, repo_root, telemetry_dir, window_sessions)` intersects
-names **recently recalled** (the Tier-1 recall-event ledger, over the last `window_sessions`
-sessions, default 10) with `staleness.find_stale()`'s stale set — memories ACTIVELY shaping
-recent agent behavior AND whose cited code has drifted. This is the shipped
-`claude_is_memory_master` re-grounding flow (read body + `git diff source_commit..HEAD` →
-reverify / fix body + reverify / archive), just **triggered by recall** instead of only by
-calendar SessionStart.
+Distinct-session count vs the **≥5-session** curation-soak bar, per-memory recall hits,
+the never-recalled set (dead-weight candidates — clone-local, topic-biased; read with
+care), and the BM25-fallback rate. `compute_strength_scores()` returns
+`{name: distinct_sessions_recalled / total_sessions}` — sessions, not events, so one
+chatty session can't inflate a memory's strength.
 
 ```bash
-./.venv/bin/python -m memory.reconsolidate   # the worklist, read-only
+"$PY" -m memory.soak
 ```
 
-`semantic_reverify(name, outcome, memory_dir, repo_root)` is the per-item write primitive —
-`outcome` is one of `graduate` / `fix` / `demote`:
-- **`graduate`** / **`fix`** route through the EXISTING `provenance.reverify_file()` (per-item,
-  body byte-identical, refuses unparseable frontmatter) to clear the staleness flag, **then**
-  log the verdict.
-- **`demote`** does **NOT** call `reverify_file` — the staleness flag stays SET. Clearing it on
-  a confirmed-WRONG memory would hide it from future staleness detection (the exact hole this
-  tier exists to close); demotion is `staleness.set_invalid_after`'s job (Tier 3), not this
-  function's. The verdict is still logged either way.
+## Reconsolidation (the immune system)
 
-There is **no bulk variant** — `semantic_reverify` takes one `name: str`, never a list (mirrors
-`reverify_head_only_no_bulk`: the per-item judgment is the memory-master agent's job, never an
-autonomous sweep).
+### `reconsolidate.py`
 
-`reconsolidation_producer(memory_dir, repo_root)` is registered in `session_start.PRODUCERS`
-(right after `staleness`) — **silent** unless a recently-recalled memory is currently stale,
-otherwise a bounded, most-recently-drifted-first worklist block. The UserPromptSubmit recall
-hot path is untouched: the intersection runs at SessionStart/CLI over the ledger, never
-per-prompt.
-
-### `eval_recall.graduation_rate()` — the accuracy axis (report-only)
-
-`graduate / (graduate + demote)` over the reconsolidation outcome ledger
-(`.claude/.memory-telemetry/reconsolidation_events.jsonl`, a THIRD sibling ledger, written by
-`telemetry.record_reconsolidation_outcome()`). `fix` outcomes are excluded from both the
-numerator and denominator by design — a fix is a distinct outcome (content was wrong, then
-corrected), not a verdict on whether the originally-flagged content was right or wrong, which
-is what this ratio measures. Report-only — never a gate threshold; folded into `evaluate()`'s
-output alongside the Tier-1 scorecard metrics.
-
-## Graceful decay — soft-invalidation + archive (Tier 3, memory-organism-instrument-immunize)
-
-Decay is DEMOTION, never deletion. Soft-invalidation is a recall-time score penalty; archive
-is a `git mv` into a tracked subdir. Neither ever deletes a memory.
-
-### `staleness.set_invalid_after()` / `provenance.reverify_file()` — the tri-state contract
-
-`invalid_after` is an ADDITIVE frontmatter timestamp (mirrors `cited_paths`/`source_commit`'s
-top-level-or-`metadata:`-nested schema awareness; body byte-identical; refuses unparseable
-frontmatter):
-
-- **absent** — valid (the default; nothing changes for the overwhelming majority of the corpus).
-- **set, < 30 days old** — **soft-invalid ("recent")** — still recallable, ranked lower.
-- **set, ≥ 30 days old** — **soft-invalid ("old")** — dropped from recall DISPLAY only, still
-  in the corpus/index.
-- **cleared by `reverify_file`** — back to valid (a genuine re-verification re-opens the
-  window; the mechanical `--refresh` path deliberately does NOT clear it — only an actual
-  content re-check may).
+`recalled_stale_worklist(...)` intersects recently-recalled names (the recall ledger,
+last N sessions) with the stale set — memories actively shaping behavior whose cited code
+drifted. Read-only CLI + the `reconsolidation` producer (silent unless non-empty).
 
 ```bash
-./.venv/bin/python -m memory.staleness --invalidate <name>   # close the validity window
-./.venv/bin/python -m memory.provenance --reverify <name>    # re-open it (existing primitive)
+"$PY" -m memory.reconsolidate
 ```
 
-### `recall.py` — the soft-invalidation penalty (pre-cut, not a post-hoc relabel)
+`semantic_reverify(name, outcome, ...)` is the per-item write primitive — `graduate` /
+`fix` route through `reverify_file` (clears the flag), **`demote` does NOT** (a
+confirmed-wrong memory must stay visible to staleness; demotion is
+`set_invalid_after`'s job). Verdicts land in the reconsolidation ledger;
+`eval_recall.graduation_rate()` reports `graduate / (graduate + demote)` (fixes excluded
+by design). No bulk variant exists.
 
-`_rrf_fuse` returns `[(index, fused_score), ...]` (widened from a bare index ordering) so a
-penalty can be applied **before** the top-k cut — a recently-invalidated memory must be able
-to actually fall out of top-k on its own demerits, not just get a cosmetic post-hoc label.
-`_invalidation_state(entry)` classifies `"recent"` / `"old"` / `None` (absent or unparseable —
-fails OPEN to valid). In `recall()`: `"recent"` halves the fused score *before* the cut and
-re-sort; `"old"` is skipped in the emission loop (a walk-and-break, not a fixed slice-then-
-filter, so old-invalidated entries never cause an under-fill). The corpus/index itself
-(`idx.entries`, `_bm25_rank`, `_dense_rank`) is completely untouched either way — only the
-returned `results` list is affected. `eval_recall`'s 5 gates are unaffected when no memory
-carries `invalid_after` (the universal case today) — verified, not just asserted.
+## Graceful decay — soft-invalidation + archive
 
-### `build_index.py` — `invalid_after` ingestion (metadata refresh decoupled from re-embed)
+Decay is DEMOTION, never deletion.
 
-`compute_corpus()` re-reads every memory file from disk on every call; only the embedding
-**row** is cache-reused (keyed by `hash(doc_text)`, where `doc_text` is name + description
-only — `invalid_after` never enters that hash). So a metadata-only change (a fresh
-`invalid_after`) is reflected on the very next build, including one where every embedding row
-is a 100% cache-hit — no special-case refresh logic needed. Reads top-level or
-`metadata:`-nested (mirrors `extract_description`'s exact fallback — the load-bearing fix: a
-top-level-only read would make the field PERMANENTLY inert the moment a memory uses the
-nested schema) and coerces a YAML-auto-typed `date`/`datetime` (the natural unquoted-date
-authoring form) to its ISO string rather than silently dropping it or crashing `json.dump`.
-
-### `archive.py` — the 4-way gate + git-reversible move
-
-`archive_candidates(memory_dir, repo_root, telemetry_dir)` is a REPORT over the intersection
-of:
-
-- **cold** — never recalled (`soak.curation_report`'s `never_recalled`)
-- **stale** — cites code that drifted (`staleness.find_stale`)
-- **zero-inbound** — no OTHER memory `[[wikilinks]]` to it (a NEW inverted-adjacency
-  computation — distinct from `links.LinkGraph.orphans()`, which is zero-*outbound*)
-- **not-cited-by-CLAUDE.md** — the memory's filename isn't referenced (backtick-quoted, with
-  or without `.md`) anywhere across `CLAUDE.md` + `.claude/rules/*.md` + `.claude/agents/*.md`
-  + `.claude/skills/*.md` + `docs/prompts/*.md` — matched via backtick/code-span-anchored
-  token extraction (never bare substring containment — a real collision risk in this corpus),
-  fresh-read-per-call, failing CLOSED (treated as cited) on any read error
+- `staleness.set_invalid_after(name)` stamps an additive `invalid_after` frontmatter
+  timestamp: **< 30 days old** → still recallable, fused score halved BEFORE the top-k
+  cut (real demotion — it can fall out of top-k); **≥ 30 days** → dropped from recall
+  display only, still in corpus/index; **cleared** by a genuine `--reverify`.
+- `archive.py` — `archive_candidates` reports the intersection of four gates (cold ∧
+  stale ∧ zero-inbound ∧ not-cited-by-instructions, the last failing CLOSED on read
+  errors); `--archive <name>` is a per-item, git-reversible `git mv` into
+  `.claude/memory/archive/` (a tracked subdir the corpus iterator skips). Never fires
+  automatically; no `--all` exists.
 
 ```bash
-./.venv/bin/python -m memory.archive             # the candidate report (read-only)
-./.venv/bin/python -m memory.archive --archive <name>   # per-item git mv, after review
+"$PY" -m memory.staleness --invalidate <name>
+"$PY" -m memory.archive                       # report only
+"$PY" -m memory.archive --archive <name>      # per-item move, after review
 ```
 
-`archive_memory(name)` is single-name-only — no batch/list/`--all` parameter exists anywhere
-in this module (mirrors `reverify_head_only_no_bulk`); a bulk sweep would need a separately-
-approved function, never this one. It `git mv`s into `.claude/memory/archive/` — a TRACKED
-subdir the non-recursive `_iter_memory_files` already skips, so an archived memory instantly
-drops from index/recall/staleness with zero other code change, and the move is fully
-git-reversible (`git mv` it back). **Never fires automatically** — REPORT-then-move, per-item,
-gated by the memory-master agent reviewing the report first. The roadmap's never-recalled
-signal in particular must not be acted on until the ledger spans temporally diverse weeks
-(today's window is a few days) — `archive_candidates` already requires ALL four conditions,
-but the *cold* leg specifically is the least trustworthy signal this early.
+## Degraded modes (all legible, none fatal)
 
-## Writing a new memory (post-trim convention)
-
-After the `MEMORY.md` trim, the floor is the **only always-loaded** memory context, so it
-must stay lean: **memory pointers belong ONLY under `## User` and `## Working Style & Process
-Feedback`.** The project/reference long-tail is **recalled on demand** (the recall hook +
-SessionStart auto-refresh index it) and must **not** be added to the floor.
-
-### `new_memory.py` — recall-ready creation, right-by-construction
-
-```bash
-./.venv/bin/python -m memory.new_memory my_slug "one-line recall hook" --type project
-```
-
-`write_memory(name, description, type, body)`:
-- writes frontmatter the system depends on — `name`, `description` (**the recall hook**),
-  `metadata.type`;
-- backfills Tier-1 provenance (`cited_paths` / `source_commit`) so it's born staleness-tracked;
-- refreshes the recall index so it's **immediately recallable**;
-- appends a `MEMORY.md` floor pointer **ONLY for `user` / `feedback`** — `project` / `reference`
-  are left off the floor (recalled on demand). Never silently overwrites an existing file.
-
-### `lint_floor.py` — the floor-invariant guard (read-only)
-
-Flags any non-allow-listed `](file.md)` link **outside** the two floor sections (re-bloat),
-plus floor link rot (a pointer to a missing file). `MEMORY.full.md` / `MEMORY.md` restore
-pointers are allow-listed. Its one-line summary is the SessionStart **floor** producer
-(silent when the invariant holds). Never edits `MEMORY.md`.
-
-```bash
-./.venv/bin/python -m memory.lint_floor
-```
+| State | Behavior |
+|---|---|
+| No bootstrap (bare `python3`) | BM25-only recall via [`_vendor/`](_vendor/__init__.py) (score-identical scorer + frontmatter-subset parser); SessionStart nudges `/hippo:bootstrap` |
+| Model cache cold/wiped | Dense aborts within the wall-clock bound → BM25; the index never downgrades; `/hippo:doctor` flags the cache |
+| Deps changed after update | The `stale_venv` producer nudges a re-bootstrap once per session |
+| No `.claude/memory` corpus | Hooks stay inert: no index, no ledgers, zero files created; SessionStart nudges `/hippo:init` |
+| Unparseable frontmatter | Skipped by staleness AND refused by refresh/reverify; the `integrity` producer names the file loudly |
 
 ## Environment overrides
 
-- `MEMOBOT_MEMORY_DIR` — point the tooling at a different memory dir (hermetic tests use this).
-- `CLAUDE_PROJECT_DIR` — repo root override (set by the harness); otherwise derived from git.
-- `MEMOBOT_INDEX_DIR` — override the index cache location (default `.claude/.memory-index/`).
+- `MEMOBOT_MEMORY_DIR` — point the tooling at a different memory dir (hermetic tests).
+- `CLAUDE_PROJECT_DIR` — repo root override (set by the harness); else derived from git.
+- `MEMOBOT_INDEX_DIR` — override the index location (default `.claude/.memory-index/`).
 - `MEMOBOT_EMBED_MODEL` — dense model name (default `BAAI/bge-small-en-v1.5`).
-- `MEMOBOT_DISABLE_DENSE=1` — force BM25-only (used by hermetic tests).
-- `MEMOBOT_DENSE_TIMEOUT` — seconds before the dense query aborts to BM25 (default 5).
+- `MEMOBOT_DISABLE_DENSE=1` — force BM25-only (hermetic tests, CI).
+- `MEMOBOT_DENSE_TIMEOUT` — seconds before a dense query aborts to BM25 (default 5).
 - `MEMOBOT_REFRESH_TIMEOUT` — seconds before the offline SessionStart embed aborts (default 15).
-- `MEMOBOT_RECENT_DAYS` — window for the SessionStart git-recent producer (default 14).
-- `MEMOBOT_TELEMETRY_DIR` — override the recall-telemetry ledger location (default
-  `.claude/.memory-telemetry/`; hermetic tests use this).
-- `MEMOBOT_TELEMETRY_MAX_BYTES` — ledger byte ceiling before it rotates (default 2 MB).
+- `MEMOBOT_RECENT_DAYS` — window for the git-recent producer (default 14).
+- `MEMOBOT_TELEMETRY_DIR` — override the ledger location (default `.claude/.memory-telemetry/`).
+- `MEMOBOT_TELEMETRY_MAX_BYTES` — ledger byte ceiling before rotation (default 2 MB).
+- `FASTEMBED_CACHE_PATH` — model cache override (default `${CLAUDE_PLUGIN_DATA}/fastembed`).
 
-## Tests
+## Tests (dev checkout)
 
-Hermetic — each test builds a throwaway git repo + fixture memory files and sets
-`MEMOBOT_MEMORY_DIR`; nothing reads the real `~/.claude` memory dir.
+Hermetic — each test builds a throwaway git repo + fixture memories and points the tooling
+at it; nothing reads a real corpus, and the one network-capable test is deselected by
+default (`-m "not network"`).
 
 ```bash
-./.venv/bin/python -m pytest tests/unit/memory_tools/ -v
+.venv/bin/python -m pytest
 ```
+
+---
+
+## Appendix A — the durable model-cache gotcha
+
+*(An origin-repo lesson, inlined because the wikilink that used to carry it doesn't ship.)*
+
+With `FASTEMBED_CACHE_PATH` unset, fastembed caches the ~130MB ONNX model under
+`$TMPDIR/fastembed_cache` — on macOS that's `/var/folders/...`, which the OS purges on a
+schedule. The hooks are offline by hard contract (a hook must NEVER download), so once the
+tmp cache is wiped, nothing on the hook path can ever re-fetch the model: dense recall
+silently degrades to BM25 forever, with no error anywhere. That failure mode is why:
+
+- `/hippo:bootstrap` pins the cache to `${CLAUDE_PLUGIN_DATA}/fastembed` (survives plugin
+  updates AND reboots) via `ensure_fastembed_cache_path()`;
+- both hook scripts export the same precedence **before** Python starts (bash/python
+  parity is enforced by test);
+- `/hippo:doctor` checks the cache dir explicitly and names this exact failure mode.
+
+## Appendix B — why there is no bulk re-baseline
+
+*(An origin-repo lesson, inlined for the same reason.)*
+
+In the origin corpus, ~168 of 179 memories were last touched by a mechanical,
+body-identical commit — the provenance backfill itself. A "reverify everything" pass that
+re-baselines `source_commit` to each file's last touch would anchor to *"when we ran the
+tooling"*, not *"when the content was verified"* — silencing genuine drift wholesale
+rather than draining an artifact. The staleness count is mostly a TRUE signal; the only
+correct way to clear a flag is to actually re-read the memory against current code, then
+`--reverify <name>` — one memory at a time, judgment applied to each. That is why
+`semantic_reverify` takes one name (never a list), `archive_memory` is single-item, and no
+`--all` flag exists anywhere in this engine: verification cannot be done in bulk, so the
+primitives refuse to pretend it can.

@@ -36,7 +36,7 @@ instruction, the agent should act autonomously on corpus upkeep.
 
 ## Design note: why bootstrap is explicit, not automatic
 
-See the [repo root README](../../README.md#bootstrap-vs-auto-provision-design-decision) for the
+See the [repo root README](../README.md#bootstrap-vs-auto-provision-design-decision) for the
 full reasoning — in short: the one online step in this plugin's whole lifecycle (venv + model
 warm) is deliberately never triggered from a hook, so hooks stay simple, offline, and
 always-exit-0.
