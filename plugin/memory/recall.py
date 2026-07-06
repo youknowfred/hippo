@@ -26,11 +26,13 @@ from typing import List, Optional, Tuple
 from .build_index import (
     DENSE_QUERY_TIMEOUT_SECS,
     LoadedIndex,
+    _hash,
     build_index,
     default_index_dir,
     embed_query,
     entry_description,
     load_index,
+    memory_doc_text,
     run_bounded,
     tokenize,
 )
@@ -48,6 +50,10 @@ DEFAULT_K = 10
 # after the cut (the memory stays fully in the corpus/index, never excluded from ranking).
 _INVALIDATION_PENALTY = 0.5
 _INVALIDATION_RECENT_DAYS = 30.0
+
+# Mid-session drift (COR-4) — a stat+reread per entry is cheap, but bound it so a huge
+# corpus can never turn the hot path into an O(corpus) disk scan of unbounded size.
+_MAX_DRIFT_CHECKS = 200
 
 # --------------------------------------------------------------------------- #
 # Query hygiene
@@ -203,6 +209,38 @@ def _invalidation_state(entry: dict, *, now: Optional[float] = None) -> Optional
     return "recent" if age_days < _INVALIDATION_RECENT_DAYS else "old"
 
 
+def _drift_patch(entry: dict, memory_dir: str) -> dict:
+    """Detect mid-session edits (COR-4) and return a display/BM25-fresh COPY of ``entry``.
+
+    Cheaply re-reads the file and recomputes ``doc_text``/``hash`` exactly as
+    ``build_index.compute_corpus`` would. If the hash still matches the index's stored
+    value, the entry is returned UNCHANGED (no drift) -- this is the common case and stays
+    just a stat + read + hash, no re-tokenizing. If it differs (the description was edited
+    on disk since the index was last built), the returned copy carries fresh ``tokens`` (so
+    THIS query's BM25 re-ranks against the current text) and a fresh ``description`` (so the
+    displayed line matches). The DENSE row is deliberately left untouched -- re-embedding
+    synchronously here would violate the pure-retrieval hot-path invariant; the stale cached
+    embedding keeps being used for this session, and a full re-embed happens at the next
+    SessionStart rebuild. Never raises: any read/parse failure returns ``entry`` as-is
+    (fail open to the last-known-good index state, same as every other degrade path here).
+    """
+    try:
+        path = os.path.join(memory_dir, entry["file"])
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        doc_text = memory_doc_text(entry["name"], text)
+        fresh_hash = _hash(doc_text)
+        if fresh_hash == entry.get("hash"):
+            return entry
+        patched = dict(entry)
+        patched["tokens"] = tokenize(doc_text)
+        patched["description"] = doc_text.split(". ", 1)[1] if ". " in doc_text else doc_text
+        patched["hash"] = fresh_hash
+        return patched
+    except Exception:
+        return entry
+
+
 # --------------------------------------------------------------------------- #
 # Recall
 # --------------------------------------------------------------------------- #
@@ -261,6 +299,19 @@ def recall(
             return []
 
         entries = idx.entries
+
+        # --- Mid-session drift (COR-4) -----------------------------------------------
+        # The persisted index is only as fresh as the last SessionStart rebuild; a memory
+        # edited or deleted DURING the session must not keep serving stale text/paths for
+        # the rest of it. Bounded by _MAX_DRIFT_CHECKS so a huge corpus can't turn this
+        # into an unbounded per-query disk scan -- beyond the bound, entries are passed
+        # through untouched (fail open to "may be stale", never fail closed to "crash").
+        if memory_dir:
+            entries = [
+                _drift_patch(e, memory_dir) if i < _MAX_DRIFT_CHECKS else e
+                for i, e in enumerate(entries)
+            ]
+
         q_tokens = tokenize(query)
         bm25 = _bm25_rank(q_tokens, entries)
         dense = _dense_rank(query, idx)
@@ -300,6 +351,10 @@ def recall(
             if state == "old":
                 continue
             e = entries[i]
+            # Deleted/renamed since the index was built (COR-4): drop it from THIS
+            # session's output immediately rather than keep injecting a dangling path.
+            if memory_dir and not os.path.isfile(os.path.join(memory_dir, e["file"])):
+                continue
             results.append(
                 {
                     "name": e["name"],
