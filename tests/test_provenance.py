@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 from memory import provenance as P
-from memory.staleness import read_provenance
+from memory.staleness import read_provenance, read_source_commit_time
 
 from .conftest import git_commit, write_file
 
@@ -172,6 +172,90 @@ def test_backfill_corpus_sets_provenance_preserves_body_and_is_idempotent(repo, 
 
     second = P.backfill_corpus(memory_dir, repo)
     assert all(r["changed"] is False for r in second)  # idempotent
+
+
+# --------------------------------------------------------------------------- #
+# SHP-3 — source_commit_time recorded ALONGSIDE source_commit at backfill/reverify,
+# via ONE extra git-show call (or folded into the existing git_last_commit call).
+# --------------------------------------------------------------------------- #
+def test_git_last_commit_with_time_returns_sha_and_epoch(repo):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    sha, ct = P.git_last_commit_with_time("src/foo.py", repo)
+    assert sha == c1 and ct == 1_700_000_000
+
+
+def test_git_last_commit_with_time_none_on_no_history(repo):
+    git_commit(repo, "init", 1_700_000_000)
+    sha, ct = P.git_last_commit_with_time("src/never-existed.py", repo)
+    assert sha is None and ct is None
+
+
+def test_git_head_with_time_returns_head_and_epoch(repo):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    sha, ct = P.git_head_with_time(repo)
+    assert sha == c1 and ct == 1_700_000_000
+
+
+def test_git_head_with_time_none_when_no_commits(repo):
+    sha, ct = P.git_head_with_time(repo)
+    assert sha is None and ct is None
+
+
+def test_backfill_corpus_writes_source_commit_time_alongside_sha(repo, memory_dir):
+    write_file(repo, "src/utils/foo.py", "x = 1\n")
+    write_file(
+        memory_dir,
+        "m_alpha.md",
+        "---\nname: A\ntype: project\noriginSessionId: s1\n---\nCites src/utils/foo.py:3.\n",
+    )
+    c1 = git_commit(repo, "init", 1_700_000_000)
+
+    results = P.backfill_corpus(memory_dir, repo)
+    r = next(x for x in results if x["path"].endswith("m_alpha.md"))
+    assert r["source_commit"] == c1
+    assert r["source_commit_time"] == 1_700_000_000
+
+    after = open(os.path.join(memory_dir, "m_alpha.md"), encoding="utf-8").read()
+    assert read_source_commit_time(after) == 1_700_000_000
+
+
+def test_refresh_preserves_source_commit_time_alongside_sha(repo, memory_dir):
+    write_file(repo, "src/a/dup.py", "x = 1\n")
+    write_file(repo, "src/b/dup.py", "y = 1\n")  # makes 'dup.py' ambiguous
+    git_commit(repo, "init", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/memory/m.md",
+        '---\nname: M\ncited_paths: ["src/a/dup.py", "src/b/dup.py"]\n'
+        'source_commit: "BASELINE123"\nsource_commit_time: 1650000000\n---\nbody refs dup.py\n',
+    )
+
+    P.backfill_corpus(memory_dir, repo, refresh=True)
+
+    after = open(os.path.join(memory_dir, "m.md"), encoding="utf-8").read()
+    _, sc = read_provenance(after)
+    assert sc == "BASELINE123"  # baseline preserved
+    assert read_source_commit_time(after) == 1650000000  # time preserved alongside it
+
+
+def test_reverify_writes_source_commit_time_at_head(repo, memory_dir):
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep v1", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/memory/m.md",
+        f'---\nname: M\ncited_paths: ["src/dep.py"]\nsource_commit: "{c1}"\n---\nbody src/dep.py\n',
+    )
+    head = git_commit(repo, "memory", 1_700_000_100)
+
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    res = P.reverify_file(os.path.join(memory_dir, "m.md"), repo, repo_files, basename_index)
+    assert res["source_commit"] == head
+    assert res["source_commit_time"] == 1_700_000_100
+    after = open(os.path.join(memory_dir, "m.md"), encoding="utf-8").read()
+    assert read_source_commit_time(after) == 1_700_000_100
 
 
 def test_backfill_corpus_skips_index_files(repo, memory_dir):
@@ -512,3 +596,441 @@ def test_heal_empty_baselines_noop_without_head(repo, memory_dir):
         '---\nname: m\ncited_paths: []\nsource_commit: ""\n---\nbody\n',
     )
     assert P.heal_empty_baselines(memory_dir, repo) == []  # no commits yet -> no HEAD -> no-op
+
+
+# --------------------------------------------------------------------------- #
+# SHP-2 — resolve_dirs() walks UP for a monorepo-subdir launch (OQ-1: nested wins).
+#
+# ``claude`` started from ``packages/web`` sets CLAUDE_PROJECT_DIR to the subdir. Before
+# this fix, resolve_dirs() looked ONLY there — a subdir with no memory dir of its own
+# silently no-op'd the whole plugin (recall, every producer, new_memory's target, the
+# floor symlink) even though a perfectly good corpus sat at the repo root. These tests
+# pin CLAUDE_PROJECT_DIR to a subdir and assert the walk-up resolves the right corpus.
+# --------------------------------------------------------------------------- #
+def _init_repo(path: str) -> None:
+    import subprocess
+
+    os.makedirs(path, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.email", "tester@example.com"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "tester"], cwd=path, check=True)
+
+
+def test_resolve_dirs_nested_corpus_wins_over_root(tmp_path, monkeypatch):
+    repo = str(tmp_path / "repo")
+    _init_repo(repo)
+    subdir = os.path.join(repo, "packages", "web")
+    os.makedirs(subdir)
+
+    root_md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(root_md)
+    nested_md = os.path.join(subdir, ".claude", "memory")
+    os.makedirs(nested_md)
+
+    monkeypatch.delenv("MEMOBOT_MEMORY_DIR", raising=False)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", subdir)
+
+    memory_dir, repo_root = P.resolve_dirs()
+    assert memory_dir == nested_md  # nested (per-package) corpus wins even though root exists
+    assert os.path.abspath(repo_root) == os.path.abspath(repo)
+
+
+def test_resolve_dirs_falls_through_to_root_when_subdir_has_no_corpus(tmp_path, monkeypatch):
+    repo = str(tmp_path / "repo")
+    _init_repo(repo)
+    subdir = os.path.join(repo, "packages", "web")
+    os.makedirs(subdir)
+
+    root_md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(root_md)
+    # No nested .claude/memory under subdir.
+
+    monkeypatch.delenv("MEMOBOT_MEMORY_DIR", raising=False)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", subdir)
+
+    memory_dir, repo_root = P.resolve_dirs()
+    assert memory_dir == root_md  # falls through to the repo-root corpus
+    assert os.path.abspath(repo_root) == os.path.abspath(repo)
+
+
+def test_resolve_dirs_falls_back_to_project_dir_when_no_corpus_anywhere(tmp_path, monkeypatch):
+    repo = str(tmp_path / "repo")
+    _init_repo(repo)
+    subdir = os.path.join(repo, "packages", "web")
+    os.makedirs(subdir)
+    # Neither the subdir NOR the repo root has a .claude/memory anywhere.
+
+    monkeypatch.delenv("MEMOBOT_MEMORY_DIR", raising=False)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", subdir)
+
+    memory_dir, repo_root = P.resolve_dirs()
+    # Today's behavior preserved: /hippo:init still has somewhere to seed.
+    assert memory_dir == os.path.join(subdir, ".claude", "memory")
+    assert os.path.abspath(repo_root) == os.path.abspath(repo)
+
+
+def test_resolve_dirs_explicit_memobot_memory_dir_bypasses_walk_up(tmp_path, monkeypatch):
+    repo = str(tmp_path / "repo")
+    _init_repo(repo)
+    subdir = os.path.join(repo, "packages", "web")
+    os.makedirs(subdir)
+    root_md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(root_md)
+    explicit_md = str(tmp_path / "somewhere-else")
+    os.makedirs(explicit_md)
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", subdir)
+    monkeypatch.setenv("MEMOBOT_MEMORY_DIR", explicit_md)
+
+    memory_dir, repo_root = P.resolve_dirs()
+    assert memory_dir == explicit_md  # explicit override always wins, no walk-up
+
+
+def test_walk_up_for_memory_dir_never_ascends_past_home(tmp_path, monkeypatch):
+    fake_home = str(tmp_path / "home")
+    os.makedirs(fake_home)
+    deep = os.path.join(fake_home, "a", "b", "c")
+    os.makedirs(deep)
+    # No .claude/memory anywhere from `deep` up through `fake_home`, and no git repo at
+    # all -- the walk must stop AT fake_home, never wandering out to the real filesystem.
+    monkeypatch.setattr(os.path, "expanduser", lambda p: fake_home if p == "~" else p)
+    memory_dir, reason = P.walk_up_for_memory_dir(deep)
+    assert memory_dir == ""
+    assert reason == "none-found"
+
+
+def test_walk_up_for_memory_dir_reports_nested_reason():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        nested = os.path.join(d, ".claude", "memory")
+        os.makedirs(nested)
+        memory_dir, reason = P.walk_up_for_memory_dir(d)
+        assert memory_dir == nested
+        assert reason == "nested"
+
+
+# --------------------------------------------------------------------------- #
+# encode_project_dir (SHP-5 — matches the harness's real one-char-per-'-' rule)
+# --------------------------------------------------------------------------- #
+def test_encode_project_dir_plain_path_only_slashes():
+    assert P.encode_project_dir("/Users/x/GitHub/hippo") == "-Users-x-GitHub-hippo"
+
+
+def test_encode_project_dir_dotted_path_replaces_every_dot():
+    # Confirmed empirically: '/' AND '.' are each replaced 1-for-1, never collapsed.
+    assert P.encode_project_dir("/Users/x/dev/next.js-app") == "-Users-x-dev-next-js-app"
+
+
+def test_encode_project_dir_underscored_path_replaces_underscore():
+    assert P.encode_project_dir("/Users/x/dev/sdk_2.0") == "-Users-x-dev-sdk-2-0"
+
+
+def test_encode_project_dir_consecutive_punctuation_produces_consecutive_hyphens():
+    # "/." (slash then dot) before "claude" -> TWO hyphens, not collapsed to one.
+    path = "/Users/x/dev/proj/.claude/memory"
+    expected = "-Users-x-dev-proj--claude-memory"
+    assert P.encode_project_dir(path) == expected
+
+
+def test_encode_project_dir_existing_hyphens_pass_through_unchanged():
+    path = "/Users/x/dev/proj/ui-lib/src"
+    expected = "-Users-x-dev-proj-ui-lib-src"
+    assert P.encode_project_dir(path) == expected
+
+
+def test_encode_project_dir_keeps_leading_hyphen_no_strip():
+    assert P.encode_project_dir("/a").startswith("-")
+
+
+def test_legacy_encode_project_dir_differs_from_fixed_only_when_punctuation_present():
+    plain = "/Users/x/GitHub/hippo"
+    assert P._legacy_encode_project_dir(plain) == P.encode_project_dir(plain)  # coincidentally same
+
+    dotted = "/Users/x/dev/next.js-app"
+    assert P._legacy_encode_project_dir(dotted) != P.encode_project_dir(dotted)  # bug reproduced
+
+
+# --------------------------------------------------------------------------- #
+# check_project_symlink (SHP-5 — verify from the direction Claude Code reads)
+# --------------------------------------------------------------------------- #
+def test_check_project_symlink_ok_when_correctly_encoded_and_resolves(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "next.js-app")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+    encoded = P.encode_project_dir(repo_root)
+    link_dir = os.path.join(projects_dir, encoded)
+    os.makedirs(link_dir)
+    os.symlink(memory_dir, os.path.join(link_dir, "memory"))
+
+    result = P.check_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert result["status"] == "ok"
+
+
+def test_check_project_symlink_missing_when_no_symlink_at_all(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "next.js-app")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+
+    result = P.check_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert result["status"] == "missing"
+    assert result["repair_command"]
+
+
+def test_check_project_symlink_broken_when_points_elsewhere(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "next.js-app")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    other_dir = str(tmp_path / "somewhere-else")
+    os.makedirs(other_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+    encoded = P.encode_project_dir(repo_root)
+    link_dir = os.path.join(projects_dir, encoded)
+    os.makedirs(link_dir)
+    os.symlink(other_dir, os.path.join(link_dir, "memory"))
+
+    result = P.check_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert result["status"] == "broken"
+    assert result["repair_command"]
+
+
+def test_check_project_symlink_detects_legacy_wrong_encoding(tmp_path):
+    # A dotted repo path: the pre-SHP-5 formula (only '/' transliterated) produces a
+    # DIFFERENT directory name than the fixed one — simulate a symlink created by that
+    # old buggy formula and confirm doctor's check names it as a legacy artifact.
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "next.js-app")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+    legacy_encoded = P._legacy_encode_project_dir(repo_root)
+    assert legacy_encoded != P.encode_project_dir(repo_root)  # sanity: the two differ here
+    legacy_link_dir = os.path.join(projects_dir, legacy_encoded)
+    os.makedirs(legacy_link_dir)
+    os.symlink(memory_dir, os.path.join(legacy_link_dir, "memory"))
+
+    result = P.check_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert result["status"] == "legacy_wrong_encoding"
+    assert result["repair_command"]
+    assert legacy_link_dir in result["repair_command"] or result["legacy_path"] == os.path.join(
+        legacy_link_dir, "memory"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# create_project_symlink (ONB-5 — machine-local setup for an existing corpus:
+# teammate clone, new worktree, second machine)
+# --------------------------------------------------------------------------- #
+def test_create_project_symlink_creates_when_absent(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "myrepo")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+
+    result = P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+
+    assert result["status"] == "created"
+    assert os.path.islink(result["expected_path"])
+    assert os.path.realpath(result["expected_path"]) == os.path.realpath(memory_dir)
+
+
+def test_create_project_symlink_idempotent_noop_when_already_correct(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "myrepo")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    marker = os.path.join(memory_dir, "MEMORY.md")
+    with open(marker, "w", encoding="utf-8") as fh:
+        fh.write("# existing corpus\n")
+    before = open(marker, "rb").read()
+    projects_dir = str(tmp_path / "claude-projects")
+
+    first = P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert first["status"] == "created"
+
+    second = P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert second["status"] == "already_correct"
+    assert second["expected_path"] == first["expected_path"]
+
+    after = open(marker, "rb").read()
+    assert after == before  # MEMORY.md is byte-identical — never touched by symlink setup
+
+
+def test_create_project_symlink_reports_conflict_without_clobbering(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "myrepo")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    other_dir = str(tmp_path / "somewhere-else")
+    os.makedirs(other_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+    encoded = P.encode_project_dir(repo_root)
+    link_dir = os.path.join(projects_dir, encoded)
+    os.makedirs(link_dir)
+    existing_link = os.path.join(link_dir, "memory")
+    os.symlink(other_dir, existing_link)
+
+    result = P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+
+    assert result["status"] == "conflict"
+    assert result["error"]
+    # the pre-existing symlink is left exactly as it was — never overwritten
+    assert os.path.realpath(existing_link) == os.path.realpath(other_dir)
+
+
+def test_create_project_symlink_uses_same_encoding_as_check(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "next.js-app")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+
+    created = P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert created["status"] == "created"
+
+    checked = P.check_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert checked["status"] == "ok"
+
+
+# --------------------------------------------------------------------------- #
+# ONB-5: init's machine-local setup on an existing (cloned) corpus — symlink +
+# index build, memory files never touched.
+# --------------------------------------------------------------------------- #
+def test_existing_corpus_gets_symlink_and_index_without_touching_memory(tmp_path, monkeypatch):
+    from memory import build_index as B
+
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")  # fast, offline, BM25-only build
+
+    repo_root = str(tmp_path / "repo")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    memory_path = write_file(
+        repo_root, ".claude/memory/MEMORY.md", "# Project memory\n\n## User\n- nothing yet\n"
+    )
+    write_file(
+        repo_root,
+        ".claude/memory/user_role.md",
+        "---\ntype: user\n---\nSome existing corpus content already committed by a teammate.\n",
+    )
+    before = open(memory_path, "rb").read()
+    projects_dir = str(tmp_path / "claude-projects")
+    index_dir = str(tmp_path / "repo" / ".claude" / ".memory-index")
+
+    # Simulates a teammate clone / new worktree / second machine: the corpus (MEMORY.md)
+    # is already on disk, but the machine-local symlink and index have never been built.
+    link_result = P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert link_result["status"] == "created"
+    manifest = B.build_index(memory_dir, index_dir)
+
+    assert manifest["count"] == 1
+    assert os.path.exists(os.path.join(index_dir, "manifest.json"))
+    after = open(memory_path, "rb").read()
+    assert after == before  # MEMORY.md is byte-identical — init never re-seeds an existing corpus
+
+    # Re-running (idempotent — same as running /hippo:init again on the same machine)
+    # leaves both the symlink and the corpus exactly as they were.
+    link_again = P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert link_again["status"] == "already_correct"
+    manifest_again = B.build_index(memory_dir, index_dir)
+    assert manifest_again["count"] == 1
+    assert open(memory_path, "rb").read() == before
+
+
+# --------------------------------------------------------------------------- #
+# remove_project_symlink (ONB-6 — /hippo:remove's machine-local teardown: the
+# inverse of create_project_symlink, never touches memory_dir itself)
+# --------------------------------------------------------------------------- #
+def test_remove_project_symlink_removes_when_correct(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "myrepo")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+
+    created = P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert created["status"] == "created"
+    assert os.path.islink(created["expected_path"])
+
+    result = P.remove_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+
+    assert result["status"] == "removed"
+    assert result["expected_path"] == created["expected_path"]
+    assert not os.path.islink(result["expected_path"])
+    assert not os.path.exists(result["expected_path"])
+
+
+def test_remove_project_symlink_absent_is_a_noop(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "never-linked")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    projects_dir = str(tmp_path / "claude-projects")
+
+    result = P.remove_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+
+    assert result["status"] == "absent"
+    assert result["error"] is None
+
+
+def test_remove_project_symlink_reports_conflict_without_deleting(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "myrepo")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    other_dir = str(tmp_path / "somewhere-else")
+    os.makedirs(other_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+    encoded = P.encode_project_dir(repo_root)
+    link_dir = os.path.join(projects_dir, encoded)
+    os.makedirs(link_dir)
+    existing_link = os.path.join(link_dir, "memory")
+    os.symlink(other_dir, existing_link)
+
+    result = P.remove_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+
+    assert result["status"] == "conflict"
+    assert result["error"]
+    # the pre-existing symlink (pointing at a DIFFERENT project's corpus) is left exactly as is
+    assert os.path.islink(existing_link)
+    assert os.path.realpath(existing_link) == os.path.realpath(other_dir)
+
+
+def test_remove_project_symlink_never_touches_memory_dir_contents(tmp_path):
+    repo_root = str(tmp_path / "repo")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    marker = os.path.join(memory_dir, "MEMORY.md")
+    with open(marker, "w", encoding="utf-8") as fh:
+        fh.write("# committed corpus, stays inert after removal\n")
+    before = open(marker, "rb").read()
+    projects_dir = str(tmp_path / "claude-projects")
+
+    P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    result = P.remove_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+
+    assert result["status"] == "removed"
+    assert os.path.isdir(memory_dir)  # the corpus directory itself is untouched
+    after = open(marker, "rb").read()
+    assert after == before  # byte-identical — removal never edits the git-tracked corpus
+
+
+def test_remove_project_symlink_uses_same_encoding_as_create(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "next.js-app")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+
+    created = P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert created["status"] == "created"
+
+    removed = P.remove_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert removed["status"] == "removed"
+    assert removed["expected_path"] == created["expected_path"]
+
+
+def test_remove_project_symlink_idempotent_second_call_is_absent(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "myrepo")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+
+    P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    first = P.remove_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert first["status"] == "removed"
+
+    second = P.remove_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert second["status"] == "absent"

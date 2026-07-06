@@ -10,9 +10,11 @@ with these tests.
 
 Default precedence (below an explicit ``FASTEMBED_CACHE_PATH``, which ``ensure_fastembed_cache_path``
 honors): ``$CLAUDE_PLUGIN_DATA/fastembed`` when ``CLAUDE_PLUGIN_DATA`` is set (the packaged
-plugin's update-surviving data dir) else ``~/Library/Caches/hippo-memory/fastembed``. The two
-memory hooks run BEFORE the Python resolver and their export WINS via setdefault, so they encode
-the SAME order — pinned together by the cross-language guard below.
+plugin's update-surviving data dir) else a PLATFORM-CONVENTIONAL home cache (OSP-2):
+``~/Library/Caches/hippo-memory/fastembed`` on macOS, ``${XDG_CACHE_HOME:-~/.cache}/hippo-memory/
+fastembed`` on Linux. The two memory hooks run BEFORE the Python resolver and their export WINS
+via setdefault, so they encode the SAME order — pinned together by the cross-language guard below,
+parametrized per platform so the suite does not pin the macOS layout as correct everywhere.
 
 Hermetic: env mutation is monkeypatch-scoped and the conftest autouse fixture additionally
 snapshots/restores ``FASTEMBED_CACHE_PATH``. The real-``fastembed`` cases use a fake embedder or
@@ -32,37 +34,54 @@ from memory import build_index as B
 
 # Repo root from this test file (tests/ -> repo root is parents[1]).
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-# The home-cache literal both hooks must contain (the bash fallback default). The plugin-data
-# branch is verified by actually expanding the hook in a subshell (test_hook_exports_match_*).
-_HOOK_HOME_LITERAL = "$HOME/Library/Caches/hippo-memory/fastembed"
 _HOOK_PATHS = (
     _REPO_ROOT / "plugin" / "hooks" / "memory_user_prompt.sh",
     _REPO_ROOT / "plugin" / "hooks" / "memory_session_start.sh",
 )
-_HOME_REL = ("Library", "Caches", "hippo-memory", "fastembed")
 
 
-def _expand_hook_export(hook_path: Path, *, home: str, plugin_data) -> str:
+def _expected_home_cache(*, uname: str, home: str, xdg_cache_home) -> str:
+    """The per-platform expected home-cache fallback (mirrors platform_cache_dir())."""
+    if uname == "Darwin":
+        return os.path.join(home, "Library", "Caches", "hippo-memory", "fastembed")
+    base = xdg_cache_home if xdg_cache_home else os.path.join(home, ".cache")
+    return os.path.join(base, "hippo-memory", "fastembed")
+
+
+def _expand_hook_export(hook_path: Path, *, home: str, plugin_data, uname: str, xdg_cache_home=None) -> str:
     """Source the hook's REAL ``export FASTEMBED_CACHE_PATH=`` lines in a clean ``set -u`` bash
     subshell under a controlled env and return the resulting value.
 
     Exercises the committed hook lines (not a copy), so a divergence in the hook file — or a
     ``set -u`` unbound-variable break — is caught. ``env`` is replaced wholesale (clean room),
-    so ``FASTEMBED_CACHE_PATH`` / ``CLAUDE_PLUGIN_DATA`` are absent unless injected here.
+    so ``FASTEMBED_CACHE_PATH`` / ``CLAUDE_PLUGIN_DATA`` / ``XDG_CACHE_HOME`` are absent unless
+    injected here. ``uname`` fakes ``$(uname)`` via a shim ``uname`` shadowing PATH so the SAME
+    Darwin/Linux branch in the hook is exercised regardless of the host running the test.
     """
-    lines = [
-        ln
-        for ln in hook_path.read_text(encoding="utf-8").splitlines()
-        if ln.strip().startswith("export FASTEMBED_CACHE_PATH=")
-    ]
-    assert lines, f"{hook_path.name} has no FASTEMBED_CACHE_PATH export line"
+    all_lines = hook_path.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, ln in enumerate(all_lines) if ln.strip().startswith("export FASTEMBED_CACHE_PATH="))
+    end = next(i for i, ln in enumerate(all_lines) if i > start and ln.strip() == "fi")
+    lines = all_lines[start : end + 1]
+    assert any("FASTEMBED_CACHE_PATH" in ln for ln in lines), (
+        f"{hook_path.name} has no FASTEMBED_CACHE_PATH export line"
+    )
+    fake_uname_dir = Path(tempfile.mkdtemp(prefix="fake-uname-"))
+    fake_uname = fake_uname_dir / "uname"
+    fake_uname.write_text(f'#!/bin/sh\nprintf %s "{uname}"\n', encoding="utf-8")
+    fake_uname.chmod(0o755)
     script = "set -u\n" + "\n".join(lines) + '\nprintf %s "$FASTEMBED_CACHE_PATH"'
-    env = {"HOME": home, "PATH": os.environ.get("PATH", "")}
+    env = {"HOME": home, "PATH": f"{fake_uname_dir}:{os.environ.get('PATH', '')}"}
     if plugin_data is not None:
         env["CLAUDE_PLUGIN_DATA"] = plugin_data
-    proc = subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, env=env, check=True
-    )
+    if xdg_cache_home is not None:
+        env["XDG_CACHE_HOME"] = xdg_cache_home
+    try:
+        proc = subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True, env=env, check=True
+        )
+    finally:
+        fake_uname.unlink(missing_ok=True)
+        fake_uname_dir.rmdir()
     return proc.stdout
 
 
@@ -85,7 +104,7 @@ def test_durable_cache_dir_is_absolute_expanded_home_path(monkeypatch):
     durable = B.durable_fastembed_cache_dir()
     assert os.path.isabs(durable)
     assert "~" not in durable  # expanduser actually ran
-    assert durable == os.path.join(os.path.expanduser("~"), *_HOME_REL)
+    assert durable == os.path.join(B.platform_cache_dir(), "fastembed")
 
 
 def test_durable_cache_dir_stable_across_tmpdir_churn(tmp_path, monkeypatch):
@@ -123,13 +142,76 @@ def test_durable_prefers_plugin_data_when_set(monkeypatch):
     assert durable == os.path.join(plugin_data, "fastembed")
     assert tempfile.gettempdir() not in durable  # still durable, not an ephemeral temp dir
     # It must NOT fall through to the home cache when plugin data is available.
-    assert durable != os.path.join(os.path.expanduser("~"), *_HOME_REL)
+    assert durable != os.path.join(B.platform_cache_dir(), "fastembed")
 
 
 def test_durable_ignores_empty_plugin_data(monkeypatch):
     """An empty CLAUDE_PLUGIN_DATA is treated as unset (matches bash ``${VAR:+...}``)."""
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", "")
-    assert B.durable_fastembed_cache_dir() == os.path.join(os.path.expanduser("~"), *_HOME_REL)
+    assert B.durable_fastembed_cache_dir() == os.path.join(B.platform_cache_dir(), "fastembed")
+
+
+# --------------------------------------------------------------------------- #
+# platform_cache_dir() — per-platform branch (OSP-2): darwin vs XDG/Linux default
+# --------------------------------------------------------------------------- #
+def test_platform_cache_dir_darwin(monkeypatch):
+    monkeypatch.setattr(B.sys, "platform", "darwin")
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    fake_home = "/Users/somebody"
+    monkeypatch.setenv("HOME", fake_home)
+    assert B.platform_cache_dir() == os.path.join(fake_home, "Library", "Caches", "hippo-memory")
+
+
+def test_platform_cache_dir_linux_uses_xdg_cache_home(monkeypatch):
+    monkeypatch.setattr(B.sys, "platform", "linux")
+    monkeypatch.setenv("XDG_CACHE_HOME", "/home/somebody/.cache-custom")
+    assert B.platform_cache_dir() == "/home/somebody/.cache-custom/hippo-memory"
+
+
+def test_platform_cache_dir_linux_defaults_to_dot_cache_when_xdg_unset(monkeypatch):
+    monkeypatch.setattr(B.sys, "platform", "linux")
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    fake_home = "/home/somebody"
+    monkeypatch.setenv("HOME", fake_home)
+    assert B.platform_cache_dir() == os.path.join(fake_home, ".cache", "hippo-memory")
+
+
+def test_platform_cache_dir_linux_ignores_empty_xdg_cache_home(monkeypatch):
+    """An empty XDG_CACHE_HOME is treated as unset (matches bash ``${VAR:-...}``)."""
+    monkeypatch.setattr(B.sys, "platform", "linux")
+    monkeypatch.setenv("XDG_CACHE_HOME", "")
+    fake_home = "/home/somebody"
+    monkeypatch.setenv("HOME", fake_home)
+    assert B.platform_cache_dir() == os.path.join(fake_home, ".cache", "hippo-memory")
+
+
+def test_platform_cache_dir_unrecognized_platform_falls_back_to_xdg_convention(monkeypatch):
+    """An unrecognized (non-darwin) platform string does not hard-fail — Windows is out of
+    scope per OQ-2, so any non-darwin platform is treated as the XDG/Linux convention."""
+    monkeypatch.setattr(B.sys, "platform", "freebsd13")
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    fake_home = "/home/somebody"
+    monkeypatch.setenv("HOME", fake_home)
+    assert B.platform_cache_dir() == os.path.join(fake_home, ".cache", "hippo-memory")
+
+
+@pytest.mark.parametrize(
+    "sys_platform, xdg_cache_home",
+    [("darwin", None), ("linux", None), ("linux", "/home/somebody/.cache-custom")],
+)
+def test_durable_fastembed_cache_dir_per_platform(monkeypatch, sys_platform, xdg_cache_home):
+    """``durable_fastembed_cache_dir`` follows ``platform_cache_dir`` under EVERY platform branch —
+    not just the host's real platform (the regression this item fixes: the fallback used to be
+    pinned to the macOS literal regardless of ``sys.platform``)."""
+    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
+    monkeypatch.setattr(B.sys, "platform", sys_platform)
+    fake_home = "/Users/somebody" if sys_platform == "darwin" else "/home/somebody"
+    monkeypatch.setenv("HOME", fake_home)
+    if xdg_cache_home is None:
+        monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    else:
+        monkeypatch.setenv("XDG_CACHE_HOME", xdg_cache_home)
+    assert B.durable_fastembed_cache_dir() == os.path.join(B.platform_cache_dir(), "fastembed")
 
 
 # --------------------------------------------------------------------------- #
@@ -184,6 +266,11 @@ def test_get_model_pins_cache_before_fastembed_import(monkeypatch, allow_downloa
             captured["cache_path"] = os.environ.get("FASTEMBED_CACHE_PATH")
 
     monkeypatch.setattr(fastembed, "TextEmbedding", _RecordingEmbedding)
+    # OSP-4 added an offline-path pre-check (``_fastembed_model_cached``) that raises BEFORE
+    # constructing the embedder on a cold cache — orthogonal to what THIS test verifies (the
+    # cache-pin fires before the embedder is built). Neutralize it so both parametrizations
+    # reach the construction; the cold-cache bail has its own coverage in test_build_index.py.
+    monkeypatch.setattr(B, "_fastembed_model_cached", lambda cache_dir: True)
 
     model = B._get_model(allow_download=allow_download)
     assert isinstance(model, _RecordingEmbedding)
@@ -211,41 +298,60 @@ def test_fastembed_resolver_honors_pinned_env(monkeypatch, tmp_path):
 # Cross-language guard: the hooks' export resolves to the SAME dir as the Python pin
 # --------------------------------------------------------------------------- #
 def test_hooks_reference_plugin_data_and_home_cache():
-    """Each hook must encode BOTH precedence levels (a fast, bash-free structural check)."""
+    """Each hook must encode BOTH precedence levels AND branch on platform (a fast, bash-free
+    structural check) — not just contain the macOS literal unconditionally."""
     for hook in _HOOK_PATHS:
         text = hook.read_text(encoding="utf-8")
         assert "FASTEMBED_CACHE_PATH" in text, f"{hook.name} does not pin FASTEMBED_CACHE_PATH"
         assert "CLAUDE_PLUGIN_DATA" in text, f"{hook.name} missing the plugin-data precedence"
-        assert _HOOK_HOME_LITERAL in text, f"{hook.name} missing the home-cache fallback literal"
+        assert "Darwin" in text, f"{hook.name} missing the darwin/linux platform branch"
+        assert "Library/Caches/hippo-memory/fastembed" in text, f"{hook.name} missing the macOS home-cache fallback"
+        assert "XDG_CACHE_HOME" in text, f"{hook.name} missing the Linux/XDG home-cache fallback"
 
 
+@pytest.mark.parametrize(
+    "uname, xdg_cache_home",
+    [("Darwin", None), ("Linux", None), ("Linux", "/home/somebody/.cache-custom")],
+)
 @pytest.mark.parametrize("plugin_data", [None, "/opt/claude/plugin-data"])
-def test_hook_exports_match_python_resolver(monkeypatch, plugin_data):
-    """Both hooks' REAL export lines must resolve to the SAME dir as ``durable_fastembed_cache_dir``.
+def test_hook_exports_match_python_resolver(monkeypatch, plugin_data, uname, xdg_cache_home):
+    """Both hooks' REAL export lines must resolve to the SAME dir as ``durable_fastembed_cache_dir``
+    under the SAME simulated platform (OSP-2: this must hold for both Darwin and Linux, not just
+    the host's real platform).
 
     Divergence here is the one way this fix silently breaks: the hook export runs first and WINS
     over Python's setdefault, so if the hook picked a different dir than a manual ``build_index``
     warms, recall would read a cold cache. Verified by expanding the committed hook lines in a
-    subshell — under BOTH precedence branches (CLAUDE_PLUGIN_DATA unset vs set).
+    subshell — under BOTH precedence branches (CLAUDE_PLUGIN_DATA unset vs set) and BOTH platform
+    branches (Darwin vs Linux, with/without XDG_CACHE_HOME).
     """
-    fake_home = "/Users/somebody"
+    fake_home = "/Users/somebody" if uname == "Darwin" else "/home/somebody"
     monkeypatch.setenv("HOME", fake_home)
     monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
+    monkeypatch.setattr(B.sys, "platform", "darwin" if uname == "Darwin" else "linux")
     if plugin_data is None:
         monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
     else:
         monkeypatch.setenv("CLAUDE_PLUGIN_DATA", plugin_data)
+    if xdg_cache_home is None:
+        monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    else:
+        monkeypatch.setenv("XDG_CACHE_HOME", xdg_cache_home)
 
     expected = B.durable_fastembed_cache_dir()  # Python resolver under this exact env
-    # Sanity: the Python value reflects the intended precedence branch.
+    # Sanity: the Python value reflects the intended precedence + platform branch.
     if plugin_data is None:
-        assert expected == os.path.join(fake_home, *_HOME_REL)
+        assert expected == os.path.join(
+            _expected_home_cache(uname=uname, home=fake_home, xdg_cache_home=xdg_cache_home)
+        )
     else:
         assert expected == os.path.join(plugin_data, "fastembed")
 
     for hook in _HOOK_PATHS:
-        got = _expand_hook_export(hook, home=fake_home, plugin_data=plugin_data)
+        got = _expand_hook_export(
+            hook, home=fake_home, plugin_data=plugin_data, uname=uname, xdg_cache_home=xdg_cache_home
+        )
         assert os.path.normpath(got) == os.path.normpath(expected), (
-            f"{hook.name} diverged from the Python resolver (CLAUDE_PLUGIN_DATA={plugin_data!r}): "
-            f"hook={got!r} python={expected!r}"
+            f"{hook.name} diverged from the Python resolver (CLAUDE_PLUGIN_DATA={plugin_data!r}, "
+            f"uname={uname!r}, XDG_CACHE_HOME={xdg_cache_home!r}): hook={got!r} python={expected!r}"
         )

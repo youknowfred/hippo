@@ -4,7 +4,10 @@
 # NOT auto-added to $PATH by the plugin system — invoke via its full plugin-relative
 # path: "${CLAUDE_PLUGIN_ROOT}/bin/hippo" <subcommand> [args...]. Runs the plugin's own
 # venv (${CLAUDE_PLUGIN_DATA}/venv) with PYTHONPATH set to this script's plugin root,
-# falling back to python3 pre-bootstrap (recall/staleness still work BM25-only).
+# falling back to python3 pre-bootstrap (recall/staleness still work BM25-only). PY
+# resolution is the ONE shared hippo_resolve_py() in hooks/_resolve_py.sh (OSP-6),
+# sourced relative to this script's own known location — CLAUDE_PLUGIN_ROOT is pinned
+# to SCRIPT_DIR here so PYTHONPATH matches this exact plugin copy even when unset.
 #
 # Only wraps the genuinely stateless, single-purpose commands (recall, new, build-index,
 # staleness). init/bootstrap/doctor/audit are multi-step orchestrations that belong in
@@ -14,9 +17,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"  # plugin root (parent of bin/)
 
-PY="${CLAUDE_PLUGIN_DATA:-}/venv/bin/python"
-[ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -x "$PY" ] || PY="python3"
-export PYTHONPATH="${SCRIPT_DIR}${PYTHONPATH:+:$PYTHONPATH}"
+# shellcheck disable=SC1091  # dynamic path via SCRIPT_DIR; see hooks/_resolve_py.sh
+. "${SCRIPT_DIR}/hooks/_resolve_py.sh"
+CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$SCRIPT_DIR}" hippo_resolve_py
 
 cmd="${1:-}"
 shift || true

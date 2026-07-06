@@ -10,18 +10,27 @@
 # so `import memory` resolves to the bundled package — code from PLUGIN_ROOT
 # (read-only, swapped on update), deps from PLUGIN_DATA (persistent across updates).
 # Falls back to a bare `python3` if bootstrap hasn't run yet (BM25-only / degraded,
-# never a hard failure).
+# never a hard failure). PY resolution itself is the ONE shared hippo_resolve_py()
+# in _resolve_py.sh (OSP-6) — every hook/skill/bin surface sources the same file
+# instead of re-deriving this logic.
 #
 # Wired as a SessionStart hook via plugin/hooks/hooks.json.
 set -uo pipefail
+
+# SessionStart delivers the event as JSON on stdin — ``source`` (startup/resume/clear/compact)
+# and ``session_id`` (COR-6: read by memory.session_start so resume/compact don't rotate the
+# telemetry session, and so concurrent sessions key telemetry by the harness's own id instead
+# of a shared mutable file). Captured here (before the nudge branch's own reads) and piped to
+# the python dispatcher below; parsing happens in Python, mirroring memory_user_prompt.sh.
+PAYLOAD="$(cat 2>/dev/null || true)"
 
 # Operate against the CONSUMING project's root, not the plugin's own directory —
 # .claude/memory/ lives in the project, not in the plugin bundle.
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" 2>/dev/null || exit 0
 
-PY="${CLAUDE_PLUGIN_DATA:-}/venv/bin/python"
-[ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -x "$PY" ] || PY="python3"
-export PYTHONPATH="${CLAUDE_PLUGIN_ROOT:-}${PYTHONPATH:+:$PYTHONPATH}"
+# shellcheck disable=SC1091  # dynamic path via CLAUDE_PLUGIN_ROOT; see hooks/_resolve_py.sh
+. "${CLAUDE_PLUGIN_ROOT:-.}/hooks/_resolve_py.sh"
+hippo_resolve_py
 
 # --- First-run nudge (ONB-1) — cheap pre-Python branch, pure stats -----------
 # After install the plugin is otherwise silently inert: hooks fall back to bare
@@ -54,14 +63,26 @@ if [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ ! -f "${CLAUDE_PLUGIN_DATA}/.nudge-dism
   fi
 fi
 
+# COR-10: a never-opted-in repo has no .claude/memory at all — bail before the
+# Python dispatcher, which would otherwise mkdir a real .memory-index directory
+# via build_index.refresh_index even though there's no corpus to index. The nudge
+# block above still fires (and exits) in this exact case until dismissed; this
+# guard only matters once it's been silenced.
+[ -d ".claude/memory" ] || exit 0
+
 # Pin fastembed's ONNX model cache to a durable dir. UNSET, fastembed uses
 # $TMPDIR/fastembed_cache (macOS /var/folders, purged on a schedule) — the OFFLINE
 # SessionStart refresh can't re-fetch a wiped model, silently degrading recall to
 # BM25. Precedence (must match memory/build_index.py::durable_fastembed_cache_dir):
 # explicit env wins; else ${CLAUDE_PLUGIN_DATA}/fastembed (the update-surviving data
-# dir every installed plugin gets); else a home cache dir for non-plugin/dev runs.
+# dir every installed plugin gets); else a platform-conventional home cache dir for
+# non-plugin/dev runs (OSP-2: macOS Library/Caches vs Linux XDG-or-~/.cache).
 export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-${CLAUDE_PLUGIN_DATA:+$CLAUDE_PLUGIN_DATA/fastembed}}"
-export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-$HOME/Library/Caches/hippo-memory/fastembed}"
+if [ "$(uname)" = "Darwin" ]; then
+  export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-$HOME/Library/Caches/hippo-memory/fastembed}"
+else
+  export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-${XDG_CACHE_HOME:-$HOME/.cache}/hippo-memory/fastembed}"
+fi
 
-"$PY" -m memory.session_start 2>/dev/null || true
+printf '%s' "$PAYLOAD" | "$PY" -m memory.session_start 2>/dev/null || true
 exit 0

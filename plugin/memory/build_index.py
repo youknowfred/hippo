@@ -24,12 +24,13 @@ BM25-only index without error (``dense_ready=false``); recall still works on BM2
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import os
 import re
-import signal
-import threading
+import sys
+import time
 from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -92,31 +93,44 @@ DENSE_QUERY_TIMEOUT_SECS = _parse_timeout_env("MEMOBOT_DENSE_TIMEOUT", 5.0)
 DENSE_REFRESH_TIMEOUT_SECS = _parse_timeout_env("MEMOBOT_REFRESH_TIMEOUT", 15.0)
 
 
-def run_bounded(fn, seconds: float):
-    """Run ``fn`` with a SIGALRM wall-clock bound (main-thread/Unix only).
-
-    Off the main thread or where SIGALRM is unavailable (Windows), runs ``fn`` directly —
-    hooks always run on the main thread of a fresh Unix process, where the bound holds.
-    The handler is installed BEFORE the timer is armed (so a firing alarm never hits the
-    default SIGALRM action, which terminates the process).
-    """
-    if (
-        seconds <= 0
-        or threading.current_thread() is not threading.main_thread()
-        or not hasattr(signal, "SIGALRM")
-    ):
-        return fn()
-
-    def _handler(signum, frame):
-        raise DenseTimeout()
-
-    old = signal.signal(signal.SIGALRM, _handler)
+def _parse_int_env(name: str, default: int) -> int:
+    """Parse an int env var; a malformed value must NEVER crash module import."""
     try:
-        signal.setitimer(signal.ITIMER_REAL, seconds)
+        return int(os.environ.get(name) or str(default))
+    except (TypeError, ValueError):
+        return default
+
+
+# COR-3: the offline batch embed is sliced into bounded-size chunks so a large corpus
+# persists PARTIAL progress within one DENSE_REFRESH_TIMEOUT_SECS budget instead of an
+# all-or-nothing attempt that discards everything on a single slow batch. Each slice's
+# already-embedded hashes are cache-reused on the next call (see build_index's
+# old_row_by_hash), so a 500-doc corpus converges to dense over N sessions.
+DENSE_EMBED_CHUNK_SIZE = _parse_int_env("MEMOBOT_EMBED_CHUNK_SIZE", 64)
+
+
+def run_bounded(fn, seconds: float):
+    """Run ``fn`` with a wall-clock bound that holds regardless of which thread calls this.
+
+    OSP-4: SIGALRM only works in the main thread of a Unix process — a future MCP server (or
+    any embedded use) calling recall from a worker thread would silently get NO bound at all.
+    Instead, ``fn`` is submitted to a single-worker ``ThreadPoolExecutor`` and awaited with
+    ``future.result(timeout=seconds)`` — this works identically from any calling thread. The
+    tradeoff (accepted per the roadmap): this can make the CALLER stop waiting, but cannot
+    forcibly kill ``fn`` if it doesn't cooperate — a still-running fastembed/onnx call keeps
+    running in the background thread after ``DenseTimeout`` is raised here. That thread is not
+    joined; it's left to finish (or the executor is garbage-collected once unreferenced).
+    """
+    if seconds <= 0:
         return fn()
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(fn)
+    try:
+        return future.result(timeout=seconds)
+    except concurrent.futures.TimeoutError:
+        raise DenseTimeout()
     finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, old)
+        executor.shutdown(wait=False)
 
 
 # --------------------------------------------------------------------------- #
@@ -290,25 +304,40 @@ def compute_corpus(memory_dir: str) -> List[dict]:
 #
 # Default precedence (below an explicit FASTEMBED_CACHE_PATH, which ``ensure_fastembed_cache_path``
 # honors): ``$CLAUDE_PLUGIN_DATA/fastembed`` when CLAUDE_PLUGIN_DATA is set — the packaged
-# plugin's UPDATE-surviving data dir — else the standalone-repo home cache. The hooks run
-# BEFORE this resolver and their export WINS via setdefault, so they implement the SAME order
+# plugin's UPDATE-surviving data dir — else a platform-conventional home cache (OSP-2). The hooks
+# run BEFORE this resolver and their export WINS via setdefault, so they implement the SAME order
 # (see the cross-language guard in tests/test_fastembed_cache_path.py).
-_HOME_CACHE_SUBPATH = ("Library", "Caches", "hippo-memory", "fastembed")
+def platform_cache_dir(*, subpath: str = "hippo-memory") -> str:
+    """The OS-conventional user cache dir, joined with ``subpath`` — macOS vs Linux/XDG (OSP-2).
+
+    darwin -> ``~/Library/Caches/<subpath>``; anything else (Linux, and any unrecognized
+    ``sys.platform`` — Windows is out of scope per OQ-2, so no hard-fail on an odd platform
+    string) -> ``$XDG_CACHE_HOME/<subpath>`` or ``~/.cache/<subpath>`` when XDG_CACHE_HOME is
+    unset/empty. Absolute and ``~``-expanded. Must stay equivalent to the bash branch the memory
+    hooks mirror (same ``uname``-based split; see tests/test_fastembed_cache_path.py).
+    """
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~"), "Library", "Caches", subpath)
+    xdg_cache_home = os.environ.get("XDG_CACHE_HOME", "")
+    if xdg_cache_home:
+        return os.path.join(xdg_cache_home, subpath)
+    return os.path.join(os.path.expanduser("~"), ".cache", subpath)
 
 
 def durable_fastembed_cache_dir() -> str:
     """A durable, machine-shared cache dir for the fastembed model — NEVER under ``$TMPDIR``.
 
     Prefers ``$CLAUDE_PLUGIN_DATA/fastembed`` when CLAUDE_PLUGIN_DATA is set+non-empty (the
-    packaged plugin's update-surviving data dir), else ``~/Library/Caches/hippo-memory/
-    fastembed``. Absolute and ``~``-expanded; stable across reboots and macOS temp purges. Must
-    stay equivalent to the ``FASTEMBED_CACHE_PATH`` default the memory hooks export (same
-    precedence in bash; ``set -u``-safe ``:+`` / ``:-`` expansions).
+    packaged plugin's update-surviving data dir), else ``platform_cache_dir()/fastembed`` (macOS:
+    ``~/Library/Caches/hippo-memory/fastembed``; Linux: XDG-or-``~/.cache/hippo-memory/fastembed``).
+    Absolute and ``~``-expanded; stable across reboots and macOS temp purges. Must stay equivalent
+    to the ``FASTEMBED_CACHE_PATH`` default the memory hooks export (same precedence in bash;
+    ``set -u``-safe ``:+`` / ``:-`` expansions).
     """
     plugin_data = os.environ.get("CLAUDE_PLUGIN_DATA", "")
     if plugin_data:  # non-empty (matches bash ${CLAUDE_PLUGIN_DATA:+...}); harness sets a clean abs path
         return os.path.join(plugin_data, "fastembed")
-    return os.path.join(os.path.expanduser("~"), *_HOME_CACHE_SUBPATH)
+    return os.path.join(platform_cache_dir(), "fastembed")
 
 
 def ensure_fastembed_cache_path() -> str:
@@ -328,6 +357,59 @@ def ensure_fastembed_cache_path() -> str:
 # --------------------------------------------------------------------------- #
 _MODEL_CACHE: dict = {}
 
+# OSP-4: the fastembed model's HF *cache* repo id -- NOT the fastembed ``model_name``
+# (``BAAI/bge-small-en-v1.5``) passed to ``TextEmbedding``. fastembed maps that name to this
+# ``sources.hf`` id internally (``fastembed/text/onnx_embedding.py``'s SUPPORTED_MODELS) and
+# snapshots it under ``models--{id.replace('/', '--')}``. Grounded against the installed
+# fastembed 0.7.4 in this repo's .venv (see ``ModelSource(hf="qdrant/bge-small-en-v1.5-onnx-q")``)
+# and against this machine's real warmed cache
+# (``~/Library/Caches/hippo-memory/fastembed/models--qdrant--bge-small-en-v1.5-onnx-q``).
+# Hardcoded (not looked up via a fastembed import) because importing even one fastembed
+# submodule pulls in onnxruntime transitively (~500ms+) -- exactly the cost this pre-check
+# exists to avoid paying on a cold cache. If ``MEMOBOT_EMBED_MODEL`` is ever pointed at a
+# different model, the id below won't match -- see ``_expected_model_snapshot_dir``'s fallback.
+_HF_SOURCE_REPO_BY_MODEL = {
+    "BAAI/bge-small-en-v1.5": "qdrant/bge-small-en-v1.5-onnx-q",
+}
+
+
+def _expected_model_snapshot_dir(cache_dir: str) -> Optional[str]:
+    """The on-disk snapshot dir fastembed would use for ``DEFAULT_MODEL``, or ``None``.
+
+    ``None`` when the model isn't in ``_HF_SOURCE_REPO_BY_MODEL`` (an unrecognized
+    ``MEMOBOT_EMBED_MODEL`` override) -- the pre-check can't ground a path for it, so the
+    caller should skip the stat-check and fall through to the existing (bounded) load attempt
+    rather than wrongly declaring "not cached".
+    """
+    hf_source_repo = _HF_SOURCE_REPO_BY_MODEL.get(DEFAULT_MODEL)
+    if not hf_source_repo:
+        return None
+    return os.path.join(cache_dir, f"models--{hf_source_repo.replace('/', '--')}")
+
+
+def _fastembed_model_cached(cache_dir: str) -> bool:
+    """Pure-stat check: is ``DEFAULT_MODEL`` already warmed on disk at ``cache_dir``?
+
+    NO fastembed import, NO network -- just directory/file existence, so this costs
+    microseconds even on a cold-cache machine. Walks the snapshot dir (fastembed materializes
+    the model files there as symlinks into ``blobs/``) looking for at least one ``.onnx``
+    file; an existing-but-empty or partially-downloaded snapshot dir must NOT read as cached
+    (a half-written model would still fail to load, so this would just trade a fast "no" for a
+    slow, confusing failure inside fastembed instead). An unrecognized model (``None`` from
+    ``_expected_model_snapshot_dir``) returns True -- "assume cached, let the real load attempt
+    decide" -- so an unusual ``MEMOBOT_EMBED_MODEL`` override degrades to the old (bounded)
+    behavior rather than being wrongly short-circuited to "unavailable".
+    """
+    snapshot_dir = _expected_model_snapshot_dir(cache_dir)
+    if snapshot_dir is None:
+        return True
+    if not os.path.isdir(snapshot_dir):
+        return False
+    for root, _dirs, files in os.walk(snapshot_dir):
+        if any(f.endswith(".onnx") for f in files):
+            return True
+    return False
+
 
 def _normalize_rows(mat):
     import numpy as np
@@ -344,8 +426,14 @@ def _get_model(allow_download: bool):
     """Return a cached ``fastembed.TextEmbedding`` or raise.
 
     With ``allow_download=False`` (the recall/hook path) HF Hub is forced OFFLINE so a
-    cache miss raises immediately instead of triggering a synchronous ~130 MB download.
-    The build path (``allow_download=True``) is the ONLY place a download may happen.
+    cache miss raises immediately instead of triggering a synchronous ~130 MB download. The
+    build path (``allow_download=True``) is the ONLY place a download may happen.
+
+    OSP-4: for the offline path, a cheap filesystem pre-check
+    (``_fastembed_model_cached``) runs BEFORE the fastembed import -- on a cold/wiped cache
+    (the common case on a fresh machine) this raises immediately without importing fastembed
+    at all, so the caller falls back to BM25 in microseconds instead of needing a wall-clock
+    timeout to bound an import+load that was never going to succeed.
     """
     if dense_disabled():
         raise RuntimeError("dense disabled via MEMOBOT_DISABLE_DENSE")
@@ -360,7 +448,9 @@ def _get_model(allow_download: bool):
     # loads from a path that survives macOS temp purges (closes the silent BM25-degradation
     # bug). Unconditional: the BUILD path (allow_download=True) is where the model is WARMED,
     # so it must warm into the durable dir too — not just the offline read paths.
-    ensure_fastembed_cache_path()
+    cache_dir = ensure_fastembed_cache_path()
+    if not allow_download and not _fastembed_model_cached(cache_dir):
+        raise RuntimeError(f"fastembed model not cached offline at {cache_dir}")
     from fastembed import TextEmbedding  # lazy: never imported at module load
 
     model = TextEmbedding(model_name=DEFAULT_MODEL)
@@ -428,9 +518,24 @@ def build_index(
     False) — the BM25 part is always rebuilt (cheap), so the index is never stale.
 
     ``allow_download=False`` (the offline SessionStart refresh) forbids a model download and
-    bounds the embed so a cold cache can't hang. ``preserve_on_dense_fail=True`` means: if
-    the existing index was dense and this build could NOT produce dense (offline embed failed),
-    leave the existing index untouched rather than DOWNGRADE it to BM25-only — "never worse".
+    bounds the embed so a cold cache can't hang. The batch is embedded in
+    ``DENSE_EMBED_CHUNK_SIZE``-sized slices against the SAME overall
+    ``DENSE_REFRESH_TIMEOUT_SECS`` wall-clock budget: once a slice completes, no NEW slice is
+    started if the budget is already exhausted, but everything embedded so far is still
+    persisted (row=None for anything left un-embedded). This lets a large corpus converge to
+    dense across sessions (each pass reuses the previous pass's rows via ``old_row_by_hash``)
+    instead of an all-or-nothing 15s attempt that discards partial progress.
+
+    ``dense_ready`` is True only when EVERY entry ends up with a row — a partially-embedded
+    corpus stays ``dense_ready=False`` (BM25-only) rather than exposing a half-filled dense
+    matrix to recall, which cosine-scores placeholder rows as if they were real embeddings.
+    The rows themselves (and the manifest's per-entry ``row``) are still saved so the next
+    build's ``old_row_by_hash`` skips re-embedding them — "never worse than BM25" is protected
+    for CURRENT recall while embedding progress is not thrown away.
+
+    ``preserve_on_dense_fail=True`` means: if the existing index was dense and this build
+    could NOT produce (fully) dense (offline embed failed or ran out of budget), leave the
+    existing index untouched rather than DOWNGRADE it to BM25-only — "never worse".
     """
     if memory_dir is None:
         memory_dir, _ = resolve_dirs()
@@ -450,49 +555,68 @@ def build_index(
         try:
             import numpy as np
 
+            # NOTE: gated on the model matching + a dense matrix being present — NOT on
+            # old_manifest["dense_ready"] — so a PARTIALLY-embedded manifest (COR-3 chunked
+            # embed, dense_ready=False but some entries do have a row) still contributes its
+            # already-embedded rows here, letting a large corpus converge across sessions
+            # instead of re-embedding from scratch every time the prior attempt fell short.
             old_row_by_hash: Dict[str, int] = {}
-            if (
-                old_manifest
-                and old_manifest.get("dense_ready")
-                and old_dense is not None
-                and old_manifest.get("model") == DEFAULT_MODEL
-            ):
+            if old_manifest and old_dense is not None and old_manifest.get("model") == DEFAULT_MODEL:
                 for e in old_manifest.get("entries", []):
                     if "row" in e and e["row"] is not None and 0 <= e["row"] < len(old_dense):
                         old_row_by_hash[e["hash"]] = e["row"]
 
             to_embed_idx = [i for i, e in enumerate(entries) if e["hash"] not in old_row_by_hash]
-            new_vecs = None
+            new_vecs_by_idx: Dict[int, "np.ndarray"] = {}
             if to_embed_idx:
-                texts = [entries[i]["doc_text"] for i in to_embed_idx]
                 if allow_download:
-                    new_vecs = embed_documents(texts, allow_download=True)
+                    # Online build (bootstrap/manual): one unbounded batch, as before.
+                    texts = [entries[i]["doc_text"] for i in to_embed_idx]
+                    vecs = embed_documents(texts, allow_download=True)
+                    for pos, i in enumerate(to_embed_idx):
+                        new_vecs_by_idx[i] = vecs[pos]
                 else:
-                    # Offline: bound the embed so a cold/wiped cache aborts instead of hanging.
-                    new_vecs = run_bounded(
-                        lambda: embed_documents(texts, allow_download=False),
-                        DENSE_REFRESH_TIMEOUT_SECS,
-                    )
+                    # Offline: slice into bounded chunks against ONE overall wall-clock budget
+                    # so a large corpus persists whatever it manages instead of all-or-nothing.
+                    deadline = time.monotonic() + DENSE_REFRESH_TIMEOUT_SECS
+                    for start in range(0, len(to_embed_idx), DENSE_EMBED_CHUNK_SIZE):
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            break  # budget exhausted -> stop starting new slices
+                        chunk_idx = to_embed_idx[start : start + DENSE_EMBED_CHUNK_SIZE]
+                        texts = [entries[i]["doc_text"] for i in chunk_idx]
+                        try:
+                            chunk_vecs = run_bounded(
+                                lambda t=texts: embed_documents(t, allow_download=False),
+                                remaining,
+                            )
+                        except DenseTimeout:
+                            break  # this slice didn't finish -> keep what's already persisted
+                        for pos, i in enumerate(chunk_idx):
+                            new_vecs_by_idx[i] = chunk_vecs[pos]
 
             dim = None
-            if new_vecs is not None and len(new_vecs):
-                dim = new_vecs.shape[1]
+            if new_vecs_by_idx:
+                dim = next(iter(new_vecs_by_idx.values())).shape[0]
             elif old_dense is not None and len(old_dense):
                 dim = old_dense.shape[1]
             if dim is None:
                 raise RuntimeError("could not determine embedding dim")
 
             rows = np.zeros((len(entries), dim), dtype="float32")
-            new_ptr = 0
+            all_embedded = True
             for i, e in enumerate(entries):
                 if e["hash"] in old_row_by_hash:
                     rows[i] = old_dense[old_row_by_hash[e["hash"]]]
+                    e["row"] = i
+                elif i in new_vecs_by_idx:
+                    rows[i] = new_vecs_by_idx[i]
+                    e["row"] = i
                 else:
-                    rows[i] = new_vecs[new_ptr]
-                    new_ptr += 1
-                e["row"] = i
+                    e["row"] = None
+                    all_embedded = False
             dense_rows = rows
-            dense_ready = True
+            dense_ready = all_embedded
         except Exception:
             # Any dense failure (no fastembed, no cached model, offline miss, timeout) -> BM25.
             dense_rows = None
@@ -508,32 +632,60 @@ def build_index(
     ):
         return old_manifest
 
-    if not dense_ready:
+    if dense_rows is None:
+        # Total dense failure (no partial progress to keep) -> every entry is row=None.
         for e in entries:
             e["row"] = None
 
     manifest = {
         "schema_version": SCHEMA_VERSION,
-        "model": DEFAULT_MODEL if dense_ready else None,
+        # A partially-embedded (dense_ready=False) manifest still names the model so the
+        # next build's cache-reuse check (old_manifest.get("model") == DEFAULT_MODEL) fires.
+        "model": DEFAULT_MODEL if dense_rows is not None else None,
         "dense_ready": dense_ready,
-        "dim": int(dense_rows.shape[1]) if dense_ready and dense_rows is not None else None,
+        "dim": int(dense_rows.shape[1]) if dense_rows is not None else None,
         "count": len(entries),
         "entries": entries,
     }
 
-    with open(os.path.join(index_dir, _MANIFEST_NAME), "w", encoding="utf-8") as fh:
-        json.dump(manifest, fh)
+    # COR-12: dense.npy (or its removal) is durably in place BEFORE the manifest that
+    # references it is made visible — a recall racing this rebuild must never observe a
+    # manifest ahead of its data (e.g. dense_ready=true with a stale/missing dense.npy).
     dense_path = os.path.join(index_dir, _DENSE_NAME)
-    if dense_ready and dense_rows is not None:
+    if dense_rows is not None:
+        # Persisted even when dense_ready=False (partial progress) so the next build's
+        # old_row_by_hash can resume from here instead of re-embedding from scratch.
         import numpy as np
 
-        np.save(dense_path, dense_rows)
+        tmp_dense_path = dense_path + ".tmp.npy"
+        try:
+            np.save(tmp_dense_path, dense_rows)
+            os.replace(tmp_dense_path, dense_path)
+        finally:
+            if os.path.exists(tmp_dense_path):
+                try:
+                    os.remove(tmp_dense_path)
+                except Exception:
+                    pass
     elif os.path.exists(dense_path):
         # Stale dense file from a prior dense build — remove so recall doesn't misread it.
         try:
             os.remove(dense_path)
         except Exception:
             pass
+
+    manifest_path = os.path.join(index_dir, _MANIFEST_NAME)
+    tmp_manifest_path = manifest_path + ".tmp"
+    try:
+        with open(tmp_manifest_path, "w", encoding="utf-8") as fh:
+            json.dump(manifest, fh)
+        os.replace(tmp_manifest_path, manifest_path)
+    finally:
+        if os.path.exists(tmp_manifest_path):
+            try:
+                os.remove(tmp_manifest_path)
+            except Exception:
+                pass
     return manifest
 
 
@@ -541,9 +693,15 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
     """Incrementally bring the index up to date with the corpus — OFFLINE, never-raises.
 
     For the SessionStart hook: so a memory written during one session is indexed (and thus
-    recallable) by the next. Fast no-op when nothing changed (a hash check, NO model load);
-    otherwise an offline, bounded, never-downgrade incremental build. Returns the manifest
-    (or the unchanged one), or None on any failure.
+    recallable) by the next. Fast no-op when nothing changed AND the index isn't degraded (a
+    hash check, NO model load); otherwise an offline, bounded, never-downgrade incremental
+    build. Returns the manifest (or the unchanged one), or None on any failure.
+
+    COR-3: the short-circuit must NOT fire on an unchanged-but-degraded (``dense_ready``
+    False) index — that would serve BM25-only recall forever, healed only by a corpus write
+    perturbing a hash. Falling through to ``build_index`` retries the offline dense embed
+    (bounded, chunked, never-downgrade), so a warm model cache upgrades the index to dense on
+    this SessionStart instead of waiting on the next write.
     """
     try:
         if memory_dir is None:
@@ -554,8 +712,9 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
         old = _load_manifest(index_dir)
         if old is not None:
             old_hashes = [e.get("hash") for e in old.get("entries", [])]
-            if old_hashes == [e["hash"] for e in entries_now]:
-                return old  # corpus unchanged -> no write, no embedding, no model load
+            corpus_unchanged = old_hashes == [e["hash"] for e in entries_now]
+            if corpus_unchanged and (old.get("dense_ready") or dense_disabled()):
+                return old  # corpus unchanged + already as good as it can be -> no-op
         return build_index(
             memory_dir, index_dir, allow_download=False, preserve_on_dense_fail=True
         )
@@ -567,14 +726,42 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
 # Load (for recall / eval)
 # --------------------------------------------------------------------------- #
 class LoadedIndex:
-    """In-memory view of the persisted index. ``dense`` is None for a BM25-only index."""
+    """In-memory view of the persisted index. ``dense`` is None for a BM25-only index.
+
+    QUA-4: ``manifest.json`` and ``dense.npy`` are read as TWO separate files (see
+    ``load_index``) -- COR-12 made each individual write atomic, but a rebuild racing
+    BETWEEN those two reads can still swap ``dense.npy`` out from under a reader that
+    already has the OLD manifest in hand (e.g. the next build removes it, going
+    BM25-only, or replaces it with a different-shape/different-entry-count matrix).
+    Rather than exposing that torn pair, ``dense_ready`` is verified HERE against the
+    actual loaded matrix's shape and every entry's ``row`` index -- any mismatch
+    degrades to BM25-only for this read, exactly like a fully-failed dense load would.
+    """
 
     def __init__(self, manifest: dict, dense):
         self.manifest = manifest
         self.entries: List[dict] = manifest.get("entries", [])
-        self.dense_ready: bool = bool(manifest.get("dense_ready")) and dense is not None
+        dense_ready = bool(manifest.get("dense_ready")) and dense is not None
+        if dense_ready and not self._dense_matches_entries(dense, self.entries):
+            dense_ready = False
+            dense = None
+        self.dense_ready: bool = dense_ready
         self.dense = dense if self.dense_ready else None
         self.model: Optional[str] = manifest.get("model")
+
+    @staticmethod
+    def _dense_matches_entries(dense, entries: List[dict]) -> bool:
+        try:
+            n_rows = dense.shape[0]
+        except Exception:
+            return False
+        if n_rows != len(entries):
+            return False
+        for e in entries:
+            row = e.get("row")
+            if row is None or not (0 <= row < n_rows):
+                return False
+        return True
 
     def __len__(self) -> int:
         return len(self.entries)
@@ -586,6 +773,62 @@ def load_index(index_dir: str) -> Optional[LoadedIndex]:
         return None
     dense = _load_dense(index_dir) if manifest.get("dense_ready") else None
     return LoadedIndex(manifest, dense)
+
+
+# --------------------------------------------------------------------------- #
+# QUA-5: on-disk corruption diagnosis (distinct from LoadedIndex's in-memory,
+# already-degrades-gracefully view — this names WHAT is wrong on disk, for a
+# SessionStart producer / doctor to surface, without needing a full recall).
+# --------------------------------------------------------------------------- #
+def check_index_integrity(index_dir: str) -> Optional[str]:
+    """One-line diagnosis of on-disk index corruption, or ``None`` if nothing's wrong.
+
+    Never raises. Distinguishes the three silent-degradation states this item closes:
+      (a) ``manifest.json`` exists but isn't valid JSON (truncated/garbled) — recall already
+          degrades to an empty/rebuilt index via ``_load_manifest``'s except->None, but
+          nothing said so; the next ``refresh_index``/``build_index`` call rebuilds from
+          scratch (``old_manifest`` is None -> full re-embed) so this self-heals, but the
+          CURRENT session's recall was silently empty/BM25-only until then.
+      (b) manifest claims ``dense_ready: true`` but ``dense.npy`` is missing — the LOADED view
+          (``LoadedIndex``) already degrades this to BM25-only, but the ON-DISK manifest still
+          wrongly claims dense_ready until the next rebuild overwrites it.
+      (c) ``dense.npy`` exists but its shape doesn't match the manifest (row count != entry
+          count, or column count != declared ``dim``) — ``LoadedIndex``/`_dense_rank`` already
+          degrade this to BM25-only without raising, but silently.
+    A missing manifest (no index built yet) is NOT corruption — returns ``None``.
+    """
+    try:
+        manifest_path = os.path.join(index_dir, _MANIFEST_NAME)
+        if not os.path.exists(manifest_path):
+            return None  # nothing built yet -> not a corruption state
+        manifest = _load_manifest(index_dir)
+        if manifest is None:
+            return (
+                "index manifest is corrupt (invalid JSON) — will rebuild on next refresh"
+            )
+        dense_path = os.path.join(index_dir, _DENSE_NAME)
+        if manifest.get("dense_ready"):
+            if not os.path.exists(dense_path):
+                return (
+                    "index manifest claims dense embeddings exist but the data file is "
+                    "missing — recall will degrade to BM25 until the next rebuild"
+                )
+            dense = _load_dense(index_dir)
+            entries = manifest.get("entries", [])
+            dim = manifest.get("dim")
+            shape_ok = dense is not None and getattr(dense, "ndim", 0) == 2
+            if shape_ok and dense.shape[0] != len(entries):
+                shape_ok = False
+            if shape_ok and dim is not None and dense.shape[1] != dim:
+                shape_ok = False
+            if not shape_ok:
+                return (
+                    "index dense.npy shape does not match the manifest (row/column count "
+                    "mismatch) — recall will degrade to BM25 until the next rebuild"
+                )
+        return None
+    except Exception:
+        return None
 
 
 # --------------------------------------------------------------------------- #

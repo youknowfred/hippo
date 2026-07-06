@@ -1,0 +1,228 @@
+"""Tests for memory/trust.py — the SEC-1 foreign-corpus trust gate.
+
+Hermetic: the trust registry is pointed at a tmp file via MEMOBOT_TRUST_FILE so the real
+~/.claude/hippo-trust.json is NEVER touched. Corpora that must be gated live inside a real
+git repo (the conftest `repo`/`memory_dir` fixtures) so `git_root` resolves a repo_root for
+the gate to key on; a non-git tmp corpus is deliberately used to prove the gate is a no-op
+where it doesn't apply.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+
+from memory import build_index as B
+from memory import recall as R
+from memory import session_start as S
+from memory import trust as T
+
+
+def _mem(name: str, description: str, body: str = "body") -> str:
+    return f'---\nname: {name}\ndescription: "{description}"\ntype: project\n---\n{body}\n'
+
+
+_CORPUS = {
+    "reranker_voyage.md": "voyage rerank cross encoder is the primary reranker bm25 hybrid fallback",
+    "budget_envelope.md": "phase envelope budget authority guards the synthesis tail reservation",
+    "excel_header.md": "excel parser llm header rescue for non canonical column layouts",
+}
+
+
+def _write_corpus(memory_dir: str, items: dict = _CORPUS) -> None:
+    os.makedirs(memory_dir, exist_ok=True)
+    for fname, desc in items.items():
+        with open(os.path.join(memory_dir, fname), "w", encoding="utf-8") as fh:
+            fh.write(_mem(fname[:-3], desc))
+
+
+def _point_registry(monkeypatch, tmp_path):
+    reg = str(tmp_path / "hippo-trust.json")
+    monkeypatch.setenv("MEMOBOT_TRUST_FILE", reg)
+    monkeypatch.delenv("MEMOBOT_TRUST_ALL", raising=False)
+    return reg
+
+
+# --------------------------------------------------------------------------- #
+# Acceptance criterion 1: freshly-cloned foreign corpus injects nothing until trusted
+# --------------------------------------------------------------------------- #
+def test_untrusted_git_corpus_recall_returns_empty(repo, memory_dir, tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    _point_registry(monkeypatch, tmp_path)
+    idx = str(tmp_path / "idx")
+    _write_corpus(memory_dir)
+    B.build_index(memory_dir, idx)
+
+    # The index has real matching content, but the corpus's repo_root is NOT in the registry.
+    assert R.recall("which reranker do we use", k=5, memory_dir=memory_dir, index_dir=idx) == []
+
+
+# --------------------------------------------------------------------------- #
+# Acceptance criterion 2: after trusting the repo_root, the SAME corpus recalls for real
+# --------------------------------------------------------------------------- #
+def test_trusted_git_corpus_recall_returns_results(repo, memory_dir, tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    _point_registry(monkeypatch, tmp_path)
+    idx = str(tmp_path / "idx")
+    _write_corpus(memory_dir)
+    B.build_index(memory_dir, idx)
+
+    assert T.mark_trusted(repo) is True
+    res = R.recall("which reranker do we use", k=5, memory_dir=memory_dir, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert "reranker_voyage" in names
+
+
+# --------------------------------------------------------------------------- #
+# Acceptance criterion 3: MEMOBOT_TRUST_ALL bypasses the gate regardless of registry state
+# --------------------------------------------------------------------------- #
+def test_trust_all_env_bypasses_gate(repo, memory_dir, tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    _point_registry(monkeypatch, tmp_path)  # registry empty -> would deny
+    monkeypatch.setenv("MEMOBOT_TRUST_ALL", "1")
+    idx = str(tmp_path / "idx")
+    _write_corpus(memory_dir)
+    B.build_index(memory_dir, idx)
+
+    res = R.recall("which reranker do we use", k=5, memory_dir=memory_dir, index_dir=idx)
+    assert any(r["name"] == "reranker_voyage" for r in res)
+
+
+# --------------------------------------------------------------------------- #
+# Acceptance criterion 4: init's corpus-creation path (mark_trusted) writes the marker
+# --------------------------------------------------------------------------- #
+def test_mark_trusted_writes_registry_marker(repo, tmp_path, monkeypatch):
+    reg = _point_registry(monkeypatch, tmp_path)
+    assert T.is_trusted(repo) is False
+    assert T.mark_trusted(repo) is True
+    assert T.is_trusted(repo) is True
+
+    with open(reg, "r", encoding="utf-8") as fh:
+        doc = json.load(fh)
+    assert os.path.realpath(repo) in doc["trusted"]
+    assert "trusted_at" in doc["trusted"][os.path.realpath(repo)]
+
+
+def test_mark_trusted_is_idempotent_and_preserves_siblings(repo, tmp_path, monkeypatch):
+    reg = _point_registry(monkeypatch, tmp_path)
+    other = str(tmp_path / "other-repo")
+    assert T.mark_trusted(other) is True
+    assert T.mark_trusted(repo) is True
+    assert T.mark_trusted(repo) is True  # idempotent second write
+
+    with open(reg, "r", encoding="utf-8") as fh:
+        doc = json.load(fh)
+    # The first (sibling) key survived the later writes.
+    assert os.path.realpath(other) in doc["trusted"]
+    assert os.path.realpath(repo) in doc["trusted"]
+
+
+# --------------------------------------------------------------------------- #
+# gate_repo_root: inapplicable (fail-open) for a non-git corpus and for index-only calls
+# --------------------------------------------------------------------------- #
+def test_gate_inapplicable_for_non_git_corpus(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    _point_registry(monkeypatch, tmp_path)
+    md = str(tmp_path / "memory")  # a bare tmp dir — NOT inside any git repo
+    idx = str(tmp_path / "idx")
+    _write_corpus(md)
+    B.build_index(md, idx)
+
+    # No resolvable git root -> gate inapplicable -> recall proceeds even without a marker.
+    assert T.gate_repo_root(md) is None
+    res = R.recall("which reranker do we use", k=5, memory_dir=md, index_dir=idx)
+    assert any(r["name"] == "reranker_voyage" for r in res)
+
+
+def test_gate_resolves_git_toplevel_not_passed_path_blind(repo, memory_dir, monkeypatch, tmp_path):
+    from memory.provenance import git_root
+
+    _point_registry(monkeypatch, tmp_path)
+    top = git_root(repo)
+    # Always resolved through git_root — never the passed path taken blind.
+    assert T.gate_repo_root(memory_dir, None) == top
+    assert T.gate_repo_root(memory_dir, repo) == top
+    assert T.gate_repo_root(None, repo) == top
+    # A non-git fallback path (what resolve_dirs hands back for a non-git project) -> None.
+    non_git = str(tmp_path / "not-a-git-repo")
+    os.makedirs(non_git)
+    assert T.gate_repo_root(non_git, non_git) is None
+
+
+# --------------------------------------------------------------------------- #
+# is_trusted fail-closed posture
+# --------------------------------------------------------------------------- #
+def test_is_trusted_fails_closed_on_missing_registry(repo, tmp_path, monkeypatch):
+    _point_registry(monkeypatch, tmp_path)  # file does not exist yet
+    assert T.is_trusted(repo) is False
+
+
+def test_is_trusted_fails_closed_on_corrupt_registry(repo, tmp_path, monkeypatch):
+    reg = _point_registry(monkeypatch, tmp_path)
+    with open(reg, "w", encoding="utf-8") as fh:
+        fh.write("{ this is not valid json ]")
+    assert T.is_trusted(repo) is False
+
+
+def test_is_trusted_falsy_repo_root_is_untrusted(tmp_path, monkeypatch):
+    _point_registry(monkeypatch, tmp_path)
+    assert T.is_trusted(None) is False
+    assert T.is_trusted("") is False
+
+
+# --------------------------------------------------------------------------- #
+# corpus_count / corpus_sample: what the consent prompt shows (names, not bodies)
+# --------------------------------------------------------------------------- #
+def test_corpus_count_and_sample(memory_dir):
+    _write_corpus(memory_dir)
+    assert T.corpus_count(memory_dir) == len(_CORPUS)
+    sample = T.corpus_sample(memory_dir, limit=2)
+    assert len(sample) == 2
+    assert all(name in {fname[:-3] for fname in _CORPUS} for name in sample)
+    # MEMORY.md floor is excluded from both.
+    with open(os.path.join(memory_dir, "MEMORY.md"), "w", encoding="utf-8") as fh:
+        fh.write("# floor\n")
+    assert T.corpus_count(memory_dir) == len(_CORPUS)
+    assert "MEMORY" not in T.corpus_sample(memory_dir, limit=99)
+
+
+# --------------------------------------------------------------------------- #
+# SessionStart: untrusted corpus -> only the nudge; producers suppressed. Trusted -> normal.
+# --------------------------------------------------------------------------- #
+def test_build_context_untrusted_emits_only_nudge(repo, memory_dir, tmp_path, monkeypatch):
+    _point_registry(monkeypatch, tmp_path)
+    _write_corpus(memory_dir)
+    ctx = S.build_context(memory_dir, repo)
+    assert "UNTRUSTED" in ctx
+    assert "/hippo:doctor" in ctx
+    assert str(len(_CORPUS)) in ctx  # the memory count is shown
+
+
+def test_build_context_trusted_runs_producers_normally(repo, memory_dir, tmp_path, monkeypatch):
+    _point_registry(monkeypatch, tmp_path)
+    _write_corpus(memory_dir)
+    T.mark_trusted(repo)
+    ctx = S.build_context(memory_dir, repo)
+    # Trusted -> the nudge is gone; normal producers run (may be empty, but never the nudge).
+    assert "UNTRUSTED" not in ctx
+
+
+def test_untrusted_nudge_is_low_frequency(repo, memory_dir, tmp_path, monkeypatch):
+    _point_registry(monkeypatch, tmp_path)
+    data_dir = str(tmp_path / "plugin-data")
+    os.makedirs(data_dir)
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", data_dir)
+    _write_corpus(memory_dir)
+
+    # First eligible session fires; the next few are suppressed by the modulo (NUDGE_EVERY=5).
+    fired = [bool(S.untrusted_corpus_nudge(memory_dir, repo)) for _ in range(6)]
+    assert fired[0] is True
+    assert fired[1:5] == [False, False, False, False]
+    assert fired[5] is True
+
+
+def test_untrusted_nudge_silent_when_trusted(repo, memory_dir, tmp_path, monkeypatch):
+    _point_registry(monkeypatch, tmp_path)
+    _write_corpus(memory_dir)
+    T.mark_trusted(repo)
+    assert S.untrusted_corpus_nudge(memory_dir, repo) is None

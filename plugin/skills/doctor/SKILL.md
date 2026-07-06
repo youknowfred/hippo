@@ -4,62 +4,76 @@ description: Fast health check for the memory plugin's own install/environment �
 
 # /hippo:doctor — fast environment sanity check
 
-A few-second diagnostic over the PLUGIN'S OWN install health — venv, model cache, symlink,
-index freshness. This is deliberately NOT `/hippo:audit`: doctor answers "is the plumbing
-working," audit answers "is the corpus content still trustworthy" (a much heavier, judgment-based
-pass). Don't reach for audit when doctor's quick checks are what's actually being asked.
+A few-second diagnostic over the PLUGIN'S OWN install health — venv, bootstrap, symlink,
+corpus resolution, trust, index freshness/corruption. This is deliberately NOT `/hippo:audit`:
+doctor answers "is the plumbing working," audit answers "is the corpus content still
+trustworthy" (a much heavier, judgment-based pass). Don't reach for audit when doctor's quick
+checks are what's actually being asked.
+
+Doctor's checks are a DETERMINISTIC engine (`memory.doctor`, DOC-4): identical state produces
+identical output across models and sessions. This SKILL is a thin wrapper — it runs that engine
+and presents its output verbatim, then handles the one step a non-interactive module cannot: the
+untrusted-corpus consent prompt.
 
 ## Preflight (shared across all hippo skills)
 
 ```bash
 [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty — this Claude Code version is too old for hippo's self-provisioning. Update Claude Code, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
+hippo_resolve_py
 ```
 
-## Checks, in order (stop at the first hard failure and report it — don't cascade confusing
-downstream errors from a root cause already identified)
+## Run the engine
 
-1. **Bootstrap state.** Does `${CLAUDE_PLUGIN_DATA}/.bootstrap-sentinel` exist and does its
-   `requirements_hash` match the current `${CLAUDE_PLUGIN_ROOT}/requirements.txt`? Report
-   "not bootstrapped — run /hippo:bootstrap" or "bootstrapped `<date>`, deps current" or
-   "bootstrapped but STALE — deps changed since, run /hippo:bootstrap again."
-2. **Venv health.** If bootstrapped, do all 4 deps actually import cleanly in
-   `${CLAUDE_PLUGIN_DATA}/venv`? (`fastembed`, `numpy`, `yaml`, `rank_bm25`.) A missing import
-   here despite a sentinel claiming success means a corrupted/partial venv — recommend deleting
-   `${CLAUDE_PLUGIN_DATA}/venv` + `.bootstrap-sentinel` and re-running bootstrap, don't try to
-   patch it in place.
-3. **Model cache.** Does `${CLAUDE_PLUGIN_DATA}/fastembed` contain the warmed
-   `bge-small-en-v1.5` model files? If bootstrapped but this is empty/missing, dense recall is
-   silently degrading to BM25 — flag it explicitly. (The cache is pinned to the durable
-   plugin-data dir precisely because hooks are offline by contract and can never re-warm a
-   purged `$TMPDIR` cache; an empty dir here means that pin failed or the warm step never ran.)
-4. **Project corpus.** Does `.claude/memory/MEMORY.md` exist in the current project? If not,
-   suggest `/hippo:init`. If it exists, does the `~/.claude/projects/<encoded>/memory` symlink
-   resolve to it correctly (not broken, not pointing elsewhere)?
-5. **Unfilled templates.** Run `grep -rln '<FILL-ME' .claude/memory/` — any hit means a
-   template memory (usually `user_role.md`) was never filled in: its placeholder text is
-   being embedded into the recall index and (for `user` types) floor-loaded every session.
-   Report each file BY NAME with "edit this file, then the next SessionStart re-indexes it
-   automatically"; don't edit it yourself — its content is facts about the user only they
-   can supply.
-6. **Index freshness.** Does `.claude/.memory-index/manifest.json` exist, and does its recorded
-   memory count match the actual `.claude/memory/*.md` file count? A mismatch means the index is
-   stale (a memory was added/removed since the last build) — recommend
-   `memory.build_index --memory-dir .claude/memory --index-dir .claude/.memory-index`
-   (SessionStart's own refresh should have caught this already; a persistent mismatch across
-   sessions is itself worth flagging as a possible SessionStart hook problem).
-7. **Live recall probe.** Run one real `memory.recall` call with a trivial query and confirm it
-   returns without raising and within a few seconds. This is the actual end-to-end proof the
-   other 6 checks are trying to predict — always run it even if 1-6 all look healthy.
-8. **Stale plugin name (pre-0.2.0).** If the user's installed-plugin list still shows
-   `memory@hippo`, that install predates the 0.2.0 rename to `hippo` and receives no updates —
-   recommend `/plugin uninstall memory@hippo` followed by `/plugin install hippo@hippo`
-   (a clean break; there is no alias shim).
+```bash
+"$PY" -m memory.doctor
+```
 
-## Report format
+Print its output VERBATIM — every `✔`/`✘`/`⚠` line, in order. Do not re-word, re-order, drop,
+or re-run individual checks by hand: the whole point of the engine is that the diagnostic is
+reproducible, and paraphrasing reintroduces the run-to-run variance DOC-4 removed. The engine
+resolves the corpus/repo the same way recall does (`resolve_dirs`) and runs, in a FIXED order:
+bootstrap state, venv imports, corpus existence, project symlink (SHP-5/ONB-5), corpus
+resolution (SHP-2 nested-vs-root walk-up), git degraded-mode (SHP-4), corpus trust (SEC-1),
+frontmatter integrity, index corruption (QUA-5), index count vs corpus, index format version,
+pack drift, `<FILL-ME` templates, and the corpus-wide secret scan (SEC-2). Each line already
+names the specific finding and the exact command to fix it.
 
-One line per check: `✔`/`✘`/`⚠` + the specific finding, not a generic pass/fail. End with ONE
-concrete next action if anything failed (the single most useful thing to run next), not a list
-of every possible remediation.
+## The one interactive step doctor still owns — untrusted-corpus consent (SEC-1)
+
+The engine REPORTS trust state but never trusts a corpus: consent is a security boundary that
+must be an explicit human yes, which a non-interactive module cannot take. When the trust line
+reads `⚠ corpus UNTRUSTED (N memories) — recall injects nothing from it`, recall is gated and
+this is the consent moment:
+
+1. **Show what would be injected BEFORE asking** — the memory COUNT and a SAMPLE of memory
+   NAMES (names only; never dump bodies — the whole point of the gate is that an untrusted
+   corpus's content never reaches context unreviewed):
+   ```bash
+   "$PY" -c \
+     "import json; from memory import trust; from memory.provenance import resolve_dirs; \
+      md, rr = resolve_dirs(); root = trust.gate_repo_root(md, rr); \
+      print(json.dumps({'count': trust.corpus_count(md), 'sample': trust.corpus_sample(md)}))"
+   ```
+2. **ASK** (AskUserQuestion where available, else a plain yes/no) whether they trust this corpus.
+3. **On an explicit YES**, mark it and confirm:
+   ```bash
+   "$PY" -c \
+     "import sys, json; from memory.trust import mark_trusted; \
+      print(json.dumps({'trusted': mark_trusted(sys.argv[1])}))" \
+     "<repo_root from the check above>"
+   ```
+   Report `✔ corpus now trusted — recall active from next prompt` on success (or that the marker
+   write failed — say so; recall stays gated). On NO / no answer, leave it gated and report that
+   re-running `/hippo:doctor` will offer to trust it again later. NEVER auto-trust without the
+   explicit yes — the review IS the security boundary.
+
+## End with ONE next action
+
+After presenting the engine's lines (and handling consent if it applied), end with the single
+most useful thing to run next if anything failed (e.g. `/hippo:bootstrap`, `/hippo:init`, or the
+rebuild command a line named) — not a list of every possible remediation. If every line is a
+`✔`, say so plainly.
 
 ## When NOT to use
 

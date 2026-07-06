@@ -100,6 +100,14 @@ def _session_path(telemetry_dir: str) -> str:
 
 # --------------------------------------------------------------------------- #
 # Session token (persisted: SessionStart and UserPromptSubmit are separate processes)
+#
+# COR-6: when the harness hands us a concrete session_id (from the SessionStart /
+# UserPromptSubmit hook payload), that id is used DIRECTLY as the telemetry key instead of
+# the file-based uuid token below. The file (``<telemetry_dir>/session``) is a SHARED,
+# mutable fallback — fine for a single interactive session with no harness id (tests, bare
+# CLI invocations), but two concurrent harness sessions on the same project both writing to
+# it would clobber each other's id. Passing an explicit ``session_id`` bypasses the file
+# entirely: nothing is read or written to it, so concurrent sessions never collide.
 # --------------------------------------------------------------------------- #
 def mark_session(telemetry_dir: Optional[str] = None) -> Optional[str]:
     """Stamp a FRESH session id (rotates the token). Called once per SessionStart.
@@ -117,13 +125,19 @@ def mark_session(telemetry_dir: Optional[str] = None) -> Optional[str]:
         return None
 
 
-def current_session_id(telemetry_dir: Optional[str] = None) -> Optional[str]:
+def current_session_id(
+    telemetry_dir: Optional[str] = None, *, session_id: Optional[str] = None
+) -> Optional[str]:
     """Read the current session id, minting + persisting one if none exists.
 
     So recall events are grouped per Claude-Code session even if a recall fires before the
     SessionStart mark (the first read establishes the id; the next SessionStart rotates it).
+    When ``session_id`` is given (a harness-provided id), it is returned DIRECTLY — the
+    file-based token is neither read nor written, so concurrent sessions never share it.
     Never raises.
     """
+    if session_id:
+        return session_id
     try:
         td = _resolve_dir(telemetry_dir)
         sp = _session_path(td)
@@ -180,12 +194,15 @@ def log_recall_event(
     k: int,
     latency_ms: float,
     telemetry_dir: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> bool:
     """Append ONE recall event to the ledger. Fire-and-forget: NEVER raises.
 
     Records the surfaced memory names, the serving backend, latency, ``k``, and a TRUNCATED
-    query preview (never the full prompt). Returns True on a successful append, else False
-    (a write failure degrades silently — the caller's recall is unaffected).
+    query preview (never the full prompt). ``session_id``, when given (the harness-provided
+    id), keys the event directly instead of the file-based token — see ``current_session_id``.
+    Returns True on a successful append, else False (a write failure degrades silently — the
+    caller's recall is unaffected).
     """
     try:
         td = _resolve_dir(telemetry_dir)
@@ -193,7 +210,7 @@ def log_recall_event(
         backend = (results[0].get("backend") if results else None) or "none"
         event = {
             "ts": round(time.time(), 3),
-            "session_id": current_session_id(td),
+            "session_id": current_session_id(td, session_id=session_id),
             "names": [r.get("name") for r in results if r.get("name")],
             "backend": backend,
             "latency_ms": round(float(latency_ms), 2),
@@ -252,14 +269,17 @@ def log_episode(
     query: str,
     repo_root: Optional[str] = None,
     telemetry_dir: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> bool:
     """Append ONE episode to the gitignored ``episode_buffer.jsonl``. Fire-and-forget.
 
     Records the recalled memory NAMES (not content — the buffer has nothing else to
     "replay"), a TRUNCATED query preview, the current session id, and the repo's HEAD
     commit at logging time (``None`` when it cannot be determined — e.g. not a git repo —
-    never raises on that failure). Returns True on a successful append, else False (a
-    write failure degrades silently, mirroring ``log_recall_event``).
+    never raises on that failure). ``session_id``, when given (the harness-provided id),
+    keys the event directly instead of the file-based token — see ``current_session_id``.
+    Returns True on a successful append, else False (a write failure degrades silently,
+    mirroring ``log_recall_event``).
     """
     try:
         td = _resolve_dir(telemetry_dir)
@@ -274,7 +294,7 @@ def log_episode(
                 head_commit = None
         event = {
             "ts": round(time.time(), 3),
-            "session_id": current_session_id(td),
+            "session_id": current_session_id(td, session_id=session_id),
             "query_preview": (query or "")[:_QUERY_PREVIEW_CHARS],
             "recalled_names": [n for n in (recalled_names or []) if n],
             "head_commit": head_commit,

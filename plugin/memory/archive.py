@@ -101,7 +101,9 @@ def _scan_files(repo_root: str) -> List[str]:
     return out
 
 
-def _cited_by_claude_md_names(repo_root: str, corpus_names: Set[str]) -> Set[str]:
+def _cited_by_claude_md_names(
+    repo_root: str, corpus_names: Set[str], *, unreadable: Optional[List[str]] = None
+) -> Set[str]:
     """Corpus memory names cited (backtick-quoted, with/without ``.md``) anywhere across the
     project's instruction surface.
 
@@ -111,7 +113,10 @@ def _cited_by_claude_md_names(repo_root: str, corpus_names: Set[str]) -> Set[str
     collision exists in this corpus today (``"MEMORY"`` is a substring of ``"MEMORY.full"``).
     Never raises; on a total scan failure returns the FULL ``corpus_names`` (fail CLOSED to
     "cited" — the safe direction: an unreadable scan target must never let the gate
-    conclude "not cited" for everything).
+    conclude "not cited" for everything). A PER-FILE read failure fails closed the same
+    way — an unreadable instruction-surface file could have cited anything, so it must never
+    silently cause its would-be citations to read as "not cited"; ``unreadable`` (if passed)
+    collects the paths that failed so callers can surface the degradation.
     """
     try:
         cited: Set[str] = set()
@@ -120,7 +125,9 @@ def _cited_by_claude_md_names(repo_root: str, corpus_names: Set[str]) -> Set[str
                 with open(path, "r", encoding="utf-8") as fh:
                     text = fh.read()
             except Exception:
-                continue
+                if unreadable is not None:
+                    unreadable.append(path)
+                return set(corpus_names)
             for tok in _BACKTICK_TOKEN_RE.findall(text):
                 stem = tok[:-3] if tok.endswith(".md") else tok
                 if stem in corpus_names:
@@ -140,9 +147,14 @@ def archive_candidates(
     """REPORT (never autonomous) — the 4-way intersection: cold ∧ stale ∧ zero-inbound ∧
     not-cited-by-CLAUDE.md.
 
-    Returns ``[{"name", "changed_paths"}]`` (every candidate is necessarily stale, so the
-    stale-set shape is reused), most-recently-drifted first. ``since`` passes through to
-    ``find_stale`` (its own default when omitted) — exposed so hermetic tests can widen the
+    Returns ``[{"name", "changed_paths", "citation_scan_unreadable"}]`` (every candidate is
+    necessarily stale, so the stale-set shape is reused), most-recently-drifted first.
+    ``citation_scan_unreadable`` is the list of instruction-surface paths (if any) that
+    could not be read during the citation scan — attached to EVERY item regardless of
+    whether that item itself survived the citation gate, so a fail-closed degradation is
+    never silent even though it can only ever shrink (never inflate) the candidate set
+    (guiding invariant: legible degradation). ``since`` passes through to ``find_stale``
+    (its own default when omitted) — exposed so hermetic tests can widen the
     wall-clock-relative window (mirrors ``reconsolidate.recalled_stale_worklist``'s same
     passthrough for pinned-epoch fixtures). Read-only; never raises; ``[]`` when nothing
     satisfies all four conditions (the common, expected case — and ALWAYS the case on the
@@ -157,7 +169,8 @@ def archive_candidates(
         cold = set(report.get("never_recalled") or [])
         stale = find_stale(memory_dir, repo_root, **({"since": since} if since else {}))
         zero_inbound = _zero_inbound_names(memory_dir)
-        cited = _cited_by_claude_md_names(repo_root, corpus_names)
+        unreadable: List[str] = []
+        cited = _cited_by_claude_md_names(repo_root, corpus_names, unreadable=unreadable)
 
         out = [
             item
@@ -165,19 +178,61 @@ def archive_candidates(
             if item["name"] in cold and item["name"] in zero_inbound and item["name"] not in cited
         ]
         out.sort(key=lambda d: (-d["recency"], d["name"]))
+        for item in out:
+            item["citation_scan_unreadable"] = list(unreadable)
         return out
     except Exception:
         return []
 
 
+_JOURNAL_NAME = ".archive_journal.jsonl"
+
+
+def _journal_untracked_move(memory_dir: str, fname: str, src: str, dest: str) -> None:
+    """Append a one-line record of an os.rename fallback move, for reversibility.
+
+    Untracked files have no git history to fall back on, so this sidecar is the only trace
+    of the pre-archive path. Best-effort only — a journal write failure must never abort an
+    already-successful move.
+    """
+    import json
+    import time
+
+    journal = os.path.join(memory_dir, _ARCHIVE_SUBDIR, _JOURNAL_NAME)
+    try:
+        with open(journal, "a", encoding="utf-8") as fh:
+            fh.write(
+                json.dumps(
+                    {
+                        "name": fname,
+                        "from": src,
+                        "to": dest,
+                        "method": "os.rename",
+                        "ts": time.time(),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+
+
 def archive_memory(name: str, memory_dir: str, repo_root: str, *, dry_run: bool = False) -> dict:
     """``git mv`` ONE memory into ``.claude/memory/archive/`` — per-item, report-then-move.
 
-    NEVER deletes; the move is fully git-reversible. The non-recursive ``_iter_memory_files``
-    already skips the ``archive/`` subdir, so an archived memory instantly drops from
-    index/recall/staleness with NO code change elsewhere. Deliberately NO batch/list
-    parameter — a bulk sweep would require a separately-approved function, never this one.
-    Never raises.
+    NEVER deletes; the move is fully git-reversible (or, for an untracked file, at least
+    fully recoverable — see the ``os.rename`` fallback below). The non-recursive
+    ``_iter_memory_files`` already skips the ``archive/`` subdir, so an archived memory
+    instantly drops from index/recall/staleness with NO code change elsewhere. Deliberately
+    NO batch/list parameter — a bulk sweep would require a separately-approved function,
+    never this one. Never raises.
+
+    A memory that ``write_memory`` just created and that was never ``git add``-ed is
+    UNTRACKED, and ``git mv`` refuses to move an untracked path. Falling back to a plain
+    ``os.rename`` (journaled to a small sidecar log for reversibility, since git itself has
+    no history of an untracked file anyway) is the only way archiving such a memory can
+    ever succeed — without it, every just-written memory would be unarchivable until some
+    unrelated later commit happened to stage it.
     """
     result = {"name": name, "moved": False, "error": None}
     try:
@@ -199,9 +254,21 @@ def archive_memory(name: str, memory_dir: str, repo_root: str, *, dry_run: bool 
             timeout=20,
         )
         if proc.returncode != 0:
-            result["error"] = (proc.stderr or proc.stdout or "git mv failed").strip()
-            return result
+            # git mv refuses untracked/ignored paths -- fall back to a plain rename so a
+            # just-written (not yet git-add-ed) memory can still be archived.
+            try:
+                os.rename(src, dest)
+            except OSError:
+                result["error"] = (proc.stderr or proc.stdout or "git mv failed").strip()
+                return result
+            _journal_untracked_move(memory_dir, fname, src, dest)
         result["moved"] = True
+        try:
+            from . import build_index
+
+            build_index.refresh_index(memory_dir)
+        except Exception:
+            pass
     except Exception as exc:
         result["error"] = str(exc)
     return result
@@ -243,6 +310,13 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     td = args.telemetry_dir or default_telemetry_dir(memory_dir)
     candidates = archive_candidates(memory_dir, repo_root, telemetry_dir=td)
+    unreadable: List[str] = []
+    _cited_by_claude_md_names(repo_root, _corpus_names(memory_dir), unreadable=unreadable)
+    if unreadable:
+        print(
+            f"warning: {len(unreadable)} instruction-surface file(s) unreadable during "
+            f"citation scan (treated as cited, fail-closed): {', '.join(unreadable)}"
+        )
     if not candidates:
         print("No archive candidates (4-way: cold ∧ stale ∧ zero-inbound ∧ not-CLAUDE.md-cited).")
         return 0

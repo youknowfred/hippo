@@ -24,8 +24,32 @@ would provision into a root-owned path. Run this guard FIRST and stop if it fail
    If it exists AND its `requirements_hash` matches the CURRENT `${CLAUDE_PLUGIN_ROOT}/requirements.txt`
    hash, report "already bootstrapped, nothing to do" and STOP. A stale hash (plugin updated,
    deps changed) means re-provision, not skip.
-2. **Build the venv.** `uv venv "${CLAUDE_PLUGIN_DATA}/venv"` if `uv` is on PATH, else
-   `python3 -m venv "${CLAUDE_PLUGIN_DATA}/venv"` as a fallback. Then install:
+2. **Build the venv.** First check whether the system `python3` is inside the supported
+   window — **3.9 through 3.13** — this plugin's pinned deps (`numpy>=1.26,<3`, matched to
+   `fastembed`'s numpy-2 support) target:
+   ```bash
+   PYVER="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo "")"
+   PYOK=1
+   case "$PYVER" in
+     3.9|3.10|3.11|3.12|3.13) PYOK=1 ;;
+     "") PYOK=0 ;;
+     *) PYOK=0 ;;
+   esac
+   ```
+   - If `PYOK=1` (or version detection failed but `python3` exists — best effort, don't block
+     on a detection quirk): `uv venv "${CLAUDE_PLUGIN_DATA}/venv"` if `uv` is on PATH, else
+     `python3 -m venv "${CLAUDE_PLUGIN_DATA}/venv"` as a fallback.
+   - If `PYOK=0` (system `python3` is outside 3.9–3.13, e.g. a brand-new 3.14+ default on a
+     fresh machine) **and `uv` is on PATH**: prefer a pinned interpreter instead of the
+     unsupported system one — `uv venv --python 3.12 "${CLAUDE_PLUGIN_DATA}/venv"` (uv fetches
+     3.12 itself if it isn't already installed).
+   - If `PYOK=0` **and `uv` is NOT on PATH**: don't attempt `python3 -m venv` — it would fail
+     deep inside a numpy source build with an opaque traceback. Fail loudly and actionably
+     instead: `echo "✘ system python3 is $PYVER, outside hippo's supported window (3.9–3.13),
+     and uv is not on PATH to fetch a supported interpreter. Install uv
+     (https://docs.astral.sh/uv/) and re-run bootstrap, or install a 3.9–3.13 python3 and
+     re-run."; exit 1`
+   Then install:
    ```bash
    uv pip install -r "${CLAUDE_PLUGIN_ROOT}/requirements.txt" --python "${CLAUDE_PLUGIN_DATA}/venv/bin/python"
    # fallback if uv is absent:
@@ -47,6 +71,8 @@ would provision into a root-owned path. Run this guard FIRST and stop if it fail
    without it, every session would re-attempt a multi-second venv build.
 5. **Report** what happened: fresh bootstrap vs. re-provision (dep change detected) vs. already
    current. If `uv` was unavailable and the `venv` fallback was used, say so (slower but works).
+   If the system `python3` was outside the supported window and `uv --python 3.12` was used
+   instead, say that too — the venv's interpreter deliberately differs from `python3` on PATH.
 
 ## Hard rules (do not violate)
 
@@ -61,6 +87,9 @@ would provision into a root-owned path. Run this guard FIRST and stop if it fail
   install and gets no retry.
 - If `uv` and `python3` are BOTH unavailable, fail loudly with a clear message — don't silently
   produce a broken venv path that later hooks will treat as "bootstrapped."
+- If system `python3` is outside the supported window (3.9–3.13) and `uv` is ALSO unavailable,
+  fail loudly with an actionable message (install `uv`, or install a supported `python3`) —
+  don't let `python3 -m venv` limp forward into an opaque numpy source-build traceback.
 
 ## After bootstrap
 

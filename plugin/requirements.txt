@@ -17,6 +17,6 @@
 #   "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -m memory.build_index   # warms ~130MB bge-small cache OFFLINE-safe on first run
 
 fastembed>=0.4,<0.8
-numpy>=1.26,<2.0
+numpy>=1.26,<3
 PyYAML>=6.0,<7.0
 rank-bm25>=0.2.2,<0.3

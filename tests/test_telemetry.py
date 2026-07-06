@@ -155,6 +155,64 @@ def test_current_session_id_mints_when_absent(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# COR-6: harness-keyed telemetry sessions (bypass the shared file-based token)
+# --------------------------------------------------------------------------- #
+def test_current_session_id_override_bypasses_file_token(tmp_path):
+    td = str(tmp_path / "tele")
+    assert T.current_session_id(td, session_id="harness-abc") == "harness-abc"
+    assert not os.path.exists(T._session_path(td))  # never read or written
+
+
+def test_current_session_id_override_wins_over_existing_file_token(tmp_path):
+    td = str(tmp_path / "tele")
+    file_sid = T.mark_session(td)
+    assert T.current_session_id(td, session_id="harness-xyz") == "harness-xyz"
+    assert file_sid != "harness-xyz"
+
+
+def test_log_recall_event_uses_harness_session_id(tmp_path):
+    td = str(tmp_path / "tele")
+    T.log_recall_event(
+        [{"name": "a", "backend": "bm25"}],
+        query="q",
+        k=1,
+        latency_ms=1.0,
+        telemetry_dir=td,
+        session_id="harness-sid-1",
+    )
+    assert _events(td)[0]["session_id"] == "harness-sid-1"
+    assert not os.path.exists(T._session_path(td))  # file token never touched
+
+
+def test_log_episode_uses_harness_session_id(tmp_path):
+    td = str(tmp_path / "tele")
+    T.log_episode(["a"], query="q", telemetry_dir=td, session_id="harness-sid-2")
+    assert _episodes(td)[0]["session_id"] == "harness-sid-2"
+
+
+def test_two_concurrent_harness_session_ids_stay_distinct_and_stable(tmp_path):
+    """Two concurrent sessions on the SAME telemetry_dir, each with its own harness
+    session_id, must log under distinct stable ids — neither clobbers the other's,
+    unlike the shared mutable session-token file."""
+    td = str(tmp_path / "tele")
+    T.log_recall_event(
+        [{"name": "a", "backend": "bm25"}],
+        query="one", k=1, latency_ms=1.0, telemetry_dir=td, session_id="session-A",
+    )
+    T.log_recall_event(
+        [{"name": "b", "backend": "bm25"}],
+        query="two", k=1, latency_ms=1.0, telemetry_dir=td, session_id="session-B",
+    )
+    T.log_recall_event(
+        [{"name": "c", "backend": "bm25"}],
+        query="three", k=1, latency_ms=1.0, telemetry_dir=td, session_id="session-A",
+    )
+    evs = _events(td)
+    assert [e["session_id"] for e in evs] == ["session-A", "session-B", "session-A"]
+    assert not os.path.exists(T._session_path(td))
+
+
+# --------------------------------------------------------------------------- #
 # read_events robustness
 # --------------------------------------------------------------------------- #
 def test_read_events_skips_corrupt_lines(tmp_path):
@@ -414,6 +472,32 @@ def test_recall_main_empty_query_logs_nothing(tmp_path, monkeypatch):
     assert R.main([]) == 0  # no query
     assert _events(td) == []
     assert _episodes(td) == []
+
+
+def test_recall_main_session_id_flag_keys_telemetry(tmp_path, monkeypatch):
+    """COR-6: --session-id (as memory_user_prompt.sh threads the harness's session_id)
+    keys both ledgers directly, bypassing the shared file-based token."""
+    from memory import build_index as B
+    from memory import recall as R
+
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    td = str(tmp_path / "tele")
+    monkeypatch.setenv("MEMOBOT_TELEMETRY_DIR", td)
+
+    md = str(tmp_path / ".claude" / "memory")
+    os.makedirs(md)
+    with open(os.path.join(md, "alpha_note.md"), "w", encoding="utf-8") as fh:
+        fh.write(
+            '---\nname: alpha_note\ndescription: "alpha beta gamma timeout budget"\n'
+            "type: project\n---\nbody\n"
+        )
+    B.build_index(md, B.default_index_dir(md))
+
+    rc = R.main(["alpha", "beta", "--memory-dir", md, "--session-id", "harness-session-42"])
+    assert rc == 0
+    assert _events(td)[0]["session_id"] == "harness-session-42"
+    assert _episodes(td)[0]["session_id"] == "harness-session-42"
+    assert not os.path.exists(T._session_path(td))
 
 
 # --------------------------------------------------------------------------- #

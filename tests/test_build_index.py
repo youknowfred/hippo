@@ -8,6 +8,9 @@ fastembed, no network); a single importorskip test covers the real backend when 
 from __future__ import annotations
 
 import os
+import sys
+import threading
+import time
 
 import numpy as np
 import pytest
@@ -77,6 +80,88 @@ def test_degrade_to_bm25_when_model_unavailable(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# OSP-4: pure-stat cold-cache pre-check (no fastembed import, no SIGALRM needed)
+# --------------------------------------------------------------------------- #
+def test_fastembed_model_cached_false_on_empty_dir(tmp_path):
+    assert B._fastembed_model_cached(str(tmp_path / "empty-cache")) is False
+
+
+def test_fastembed_model_cached_true_when_onnx_present(tmp_path):
+    cache = str(tmp_path / "cache")
+    snapshot = os.path.join(
+        cache, "models--qdrant--bge-small-en-v1.5-onnx-q", "snapshots", "abc123"
+    )
+    os.makedirs(snapshot)
+    open(os.path.join(snapshot, "model_optimized.onnx"), "w").close()
+    assert B._fastembed_model_cached(cache) is True
+
+
+def test_cold_cache_degrades_to_bm25_fast_with_no_fastembed_import(tmp_path, monkeypatch):
+    """OSP-4 acceptance: with NO fastembed model cache present, the dense path bails in
+    well under the hook's timeout budget WITHOUT importing fastembed at all -- a pure stat,
+    not a bounded-but-attempted load. Numpy/yaml/rank_bm25 are pre-warmed (their FIRST-ever
+    import in a process is ~1-2s, unrelated to this item) so the timing isolates the cost of
+    OSP-4's own pre-check rather than incidental interpreter warm-up."""
+    import rank_bm25  # noqa: F401
+    import yaml  # noqa: F401
+
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    empty_cache = str(tmp_path / "empty-fastembed-cache")
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", empty_cache)
+    sys.modules.pop("fastembed", None)
+
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha", "b.md": "beta"})
+    B.build_index(md, idx, allow_download=False)  # warm-up call (imports, filesystem caches)
+
+    t0 = time.monotonic()
+    manifest = B.build_index(md, idx, allow_download=False, force=True)
+    elapsed = time.monotonic() - t0
+
+    assert manifest["dense_ready"] is False
+    assert elapsed < 0.1  # generous CI-safe bound; a real fastembed import alone is ~0.5s+
+    assert "fastembed" not in sys.modules
+
+
+# --------------------------------------------------------------------------- #
+# OSP-4: run_bounded holds off the main thread (SIGALRM never worked there)
+# --------------------------------------------------------------------------- #
+def test_run_bounded_raises_dense_timeout_from_worker_thread():
+    result = {}
+
+    def _target():
+        try:
+            B.run_bounded(lambda: time.sleep(2.0), 0.1)
+            result["outcome"] = "no-timeout"
+        except B.DenseTimeout:
+            result["outcome"] = "timeout"
+        except Exception as exc:  # pragma: no cover - would indicate a real bug
+            result["outcome"] = f"error: {exc!r}"
+
+    t = threading.Thread(target=_target)
+    t.start()
+    t.join(timeout=5.0)
+
+    assert not t.is_alive()
+    assert result.get("outcome") == "timeout"
+
+
+def test_run_bounded_returns_value_from_worker_thread():
+    result = {}
+
+    def _target():
+        result["value"] = B.run_bounded(lambda: 42, 5.0)
+
+    t = threading.Thread(target=_target)
+    t.start()
+    t.join(timeout=5.0)
+
+    assert not t.is_alive()
+    assert result.get("value") == 42
+
+
+# --------------------------------------------------------------------------- #
 # Dense build with a fake embedder (deterministic, offline)
 # --------------------------------------------------------------------------- #
 def test_dense_build_writes_matrix_and_rows(tmp_path, monkeypatch):
@@ -95,6 +180,68 @@ def test_dense_build_writes_matrix_and_rows(tmp_path, monkeypatch):
     norms = np.linalg.norm(dense, axis=1)
     assert np.allclose(norms, 1.0, atol=1e-5)
     assert [e["row"] for e in manifest["entries"]] == [0, 1, 2]
+
+
+# --------------------------------------------------------------------------- #
+# COR-12: atomic manifest/dense writes (no torn reads, no tmp litter)
+# --------------------------------------------------------------------------- #
+def test_no_stray_tmp_files_after_build(tmp_path, monkeypatch):
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha one", "b.md": "beta two"})
+
+    B.build_index(md, idx)
+    leftovers = [f for f in os.listdir(idx) if f.endswith(".tmp") or f.endswith(".tmp.npy")]
+    assert leftovers == []
+
+    # Also true for a BM25-only (no-dense) build and a switch-back-to-dense rebuild.
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    B.build_index(md, idx)
+    leftovers = [f for f in os.listdir(idx) if f.endswith(".tmp") or f.endswith(".tmp.npy")]
+    assert leftovers == []
+
+
+def test_dense_replace_happens_before_manifest_replace(tmp_path, monkeypatch):
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha one", "b.md": "beta two"})
+
+    replaced = []
+    real_replace = os.replace
+
+    def spy_replace(src, dst):
+        replaced.append(dst)
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(B.os, "replace", spy_replace)
+    B.build_index(md, idx)
+
+    dense_path = os.path.join(idx, "dense.npy")
+    manifest_path = os.path.join(idx, "manifest.json")
+    assert dense_path in replaced and manifest_path in replaced
+    assert replaced.index(dense_path) < replaced.index(manifest_path)
+
+
+def test_manifest_never_visible_with_missing_or_stale_dense(tmp_path, monkeypatch):
+    # A reader that observes the manifest mid-build (simulated by inspecting os.replace call
+    # order + on-disk state right after build_index returns) must never see dense_ready=true
+    # with dense.npy absent or shaped differently than what the manifest expects.
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha one", "b.md": "beta two", "c.md": "gamma three"})
+
+    manifest = B.build_index(md, idx)
+    assert manifest["dense_ready"] is True
+    dense_path = os.path.join(idx, "dense.npy")
+    assert os.path.exists(dense_path)
+    dense = np.load(dense_path)
+    assert dense.shape == (manifest["count"], manifest["dim"])
 
 
 def test_incremental_rebuild_only_embeds_changed(tmp_path, monkeypatch):
@@ -397,6 +544,146 @@ def test_refresh_preserves_dense_when_offline_embed_fails(tmp_path, monkeypatch)
 
 def test_refresh_index_missing_dir_is_none(tmp_path):
     assert B.refresh_index(str(tmp_path / "nope"), str(tmp_path / "idx")) is None
+
+
+# --------------------------------------------------------------------------- #
+# COR-3: a degraded (BM25-only) index must upgrade to dense on the next refresh_index
+# call once the corpus is unchanged but the model cache is warm again — the hash
+# short-circuit must NOT ignore dense_ready.
+# --------------------------------------------------------------------------- #
+def test_refresh_index_upgrades_degraded_index_when_corpus_unchanged(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha one", "b.md": "beta two"})
+    m1 = B.build_index(md, idx)
+    assert m1["dense_ready"] is False  # persisted degraded (dense disabled at build time)
+
+    # The corpus is UNCHANGED across "sessions", but dense is now available (mocked/fast
+    # embed path) -- the next refresh_index must upgrade the index in place.
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
+    m2 = B.refresh_index(md, idx)
+
+    assert m2["dense_ready"] is True
+    assert m2["count"] == 2
+    loaded = B.load_index(idx)
+    assert loaded.dense_ready is True and len(loaded) == 2
+
+
+def test_refresh_index_still_noops_when_already_dense_and_unchanged(tmp_path, monkeypatch):
+    # The short-circuit must still fire (no embedding call) when the index is ALREADY dense
+    # and the corpus hasn't changed -- COR-3 must not regress the fast no-op path.
+    embedded = []
+
+    def counting(texts, allow_download=True):
+        embedded.append(list(texts))
+        return _fake_embedder(16)(texts)
+
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", counting)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha", "b.md": "beta"})
+    B.build_index(md, idx)
+    embedded.clear()
+
+    m = B.refresh_index(md, idx)
+    assert embedded == []  # no embedding -- true no-op
+    assert m["dense_ready"] is True
+
+
+# --------------------------------------------------------------------------- #
+# COR-3: chunked offline batch embed persists partial progress instead of
+# all-or-nothing, so a large corpus converges to dense across sessions.
+# --------------------------------------------------------------------------- #
+def test_large_corpus_offline_embed_persists_partial_progress_across_sessions(tmp_path, monkeypatch):
+    """Simulate a bounded budget that only allows a couple of chunks per session: assert
+    partial rows persist after session 1, and session 2 continues from where it left off
+    (already-embedded hashes are never re-submitted to embed_documents)."""
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "DENSE_EMBED_CHUNK_SIZE", 10)
+
+    submitted_texts = []
+    base = _fake_embedder(16)
+
+    def counting_embed(texts, allow_download=False):
+        submitted_texts.append(list(texts))
+        return base(texts)
+
+    monkeypatch.setattr(B, "embed_documents", counting_embed)
+
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    items = {f"m{i:03d}.md": f"memory number {i} unique token m{i:03d}" for i in range(50)}
+    _write_corpus(md, items)
+
+    # Session 1: budget only covers ~2 chunks (20 of 50 docs) before time.monotonic()
+    # reports the deadline has passed. Fake a clock that advances a lot per call so the
+    # loop in build_index's offline branch stops early but has already embedded 2 chunks.
+    real_monotonic = B.time.monotonic
+    call_count = {"n": 0}
+
+    def fake_monotonic():
+        call_count["n"] += 1
+        # First call establishes the deadline (t=0); subsequent calls (the per-slice
+        # `remaining` checks) advance quickly so only 2 chunks fit before time is up.
+        return real_monotonic() + call_count["n"] * 6.0
+
+    monkeypatch.setattr(B.time, "monotonic", fake_monotonic)
+    m1 = B.build_index(md, idx, allow_download=False, preserve_on_dense_fail=True)
+
+    assert m1["dense_ready"] is False  # not everything embedded yet
+    embedded_so_far = sum(1 for e in m1["entries"] if e["row"] is not None)
+    assert 0 < embedded_so_far < 50  # partial progress, not all-or-nothing
+    assert os.path.exists(os.path.join(idx, "dense.npy"))  # partial rows persisted to disk
+    first_pass_submitted = sum(len(batch) for batch in submitted_texts)
+    assert first_pass_submitted == embedded_so_far
+
+    # Session 2: restore the real clock (full budget) -- the remaining docs finish, and the
+    # already-embedded hashes from session 1 must NOT be resubmitted.
+    monkeypatch.setattr(B.time, "monotonic", real_monotonic)
+    submitted_texts.clear()
+    m2 = B.build_index(md, idx, allow_download=False, preserve_on_dense_fail=True)
+
+    assert m2["dense_ready"] is True
+    assert all(e["row"] is not None for e in m2["entries"])
+    resubmitted = sum(len(batch) for batch in submitted_texts)
+    assert resubmitted == 50 - embedded_so_far  # only the remaining docs were embedded
+
+    loaded = B.load_index(idx)
+    assert loaded.dense_ready is True and len(loaded) == 50
+
+
+def test_offline_embed_chunk_timeout_keeps_partial_progress(tmp_path, monkeypatch):
+    """A slice that itself blows the (per-slice) wall-clock bound raises DenseTimeout inside
+    run_bounded -- build_index must catch it, stop starting new slices, and still persist
+    whatever prior slices completed rather than losing all progress."""
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "DENSE_EMBED_CHUNK_SIZE", 5)
+    monkeypatch.setattr(B, "DENSE_REFRESH_TIMEOUT_SECS", 15.0)
+
+    base = _fake_embedder(16)
+    calls = {"n": 0}
+
+    def flaky_embed(texts, allow_download=False):
+        calls["n"] += 1
+        if calls["n"] == 2:  # second slice "hangs" past its bound
+            raise B.DenseTimeout()
+        return base(texts)
+
+    monkeypatch.setattr(B, "embed_documents", flaky_embed)
+
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    items = {f"m{i:02d}.md": f"memory number {i}" for i in range(15)}
+    _write_corpus(md, items)
+
+    m = B.build_index(md, idx, allow_download=False, preserve_on_dense_fail=True)
+    assert m["dense_ready"] is False
+    embedded_rows = [e for e in m["entries"] if e["row"] is not None]
+    assert len(embedded_rows) == 5  # only the first slice (5 docs) landed
+    assert os.path.exists(os.path.join(idx, "dense.npy"))
 
 
 def test_load_index_roundtrip(tmp_path, monkeypatch):
