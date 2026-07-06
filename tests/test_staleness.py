@@ -39,6 +39,77 @@ def test_flags_memory_when_cited_code_changed_after_baseline(repo, memory_dir):
     assert hit and "src/foo.py" in hit[0]["changed_paths"]
 
 
+# --------------------------------------------------------------------------- #
+# SHP-1 — staleness must fire identically for a monorepo-subdir-rooted corpus.
+#
+# ``git log --name-only`` always emits toplevel-relative paths, -C notwithstanding. Before
+# the fix, ``build_repo_file_index`` called ``git ls-files`` (no ``--full-name``), which is
+# CWD-relative to repo_root — so when repo_root is a subdir (the CLAUDE_PROJECT_DIR shape
+# for a package inside a monorepo), cited_paths ended up subdir-relative while
+# ``_path_change_times`` keys stayed toplevel-relative: find_stale's ``path_times.get(p)``
+# could never match. These two tests run the SAME drift scenario once rooted at the repo
+# toplevel and once rooted at a subdirectory, and assert both flag identically.
+# --------------------------------------------------------------------------- #
+def test_flags_drift_identically_toplevel_vs_subdir_rooted_corpus(repo):
+    from memory import provenance as P
+
+    # --- control: corpus rooted at the toplevel ---------------------------------
+    write_file(repo, "packages/web/src/foo.py", "x = 1\n")
+    top_memory_dir = os.path.join(repo, ".claude", "memory")
+    os.makedirs(top_memory_dir, exist_ok=True)
+    write_file(
+        top_memory_dir,
+        "m_top.md",
+        "---\nname: top\ntype: project\noriginSessionId: s1\n---\n"
+        "Cites packages/web/src/foo.py:1.\n",
+    )
+    git_commit(repo, "init", 1_700_000_000)
+    P.backfill_corpus(top_memory_dir, repo)
+
+    write_file(repo, "packages/web/src/foo.py", "x = 2\n")  # cited file drifts
+    git_commit(repo, "drift", 1_700_000_100)
+
+    top_stale = find_stale(top_memory_dir, repo, since=_ALL)
+    top_hit = [s for s in top_stale if s["name"] == "m_top"]
+    assert top_hit and "packages/web/src/foo.py" in top_hit[0]["changed_paths"]
+
+    # --- key case: corpus rooted at a monorepo SUBDIR (CLAUDE_PROJECT_DIR=subdir) -----
+    subdir_root = os.path.join(repo, "packages", "web")
+    sub_memory_dir = os.path.join(subdir_root, ".claude", "memory")
+    os.makedirs(sub_memory_dir, exist_ok=True)
+    write_file(
+        sub_memory_dir,
+        "m_sub.md",
+        "---\nname: sub\ntype: project\noriginSessionId: s1\n---\n"
+        "Cites src/foo.py:1.\n",
+    )
+    git_commit(repo, "add sub memory", 1_700_000_200)
+    # backfill + find_stale invoked with repo_root = the SUBDIR, reproducing the exact
+    # monorepo CLAUDE_PROJECT_DIR=subdir scenario.
+    P.backfill_corpus(sub_memory_dir, subdir_root)
+
+    write_file(repo, "packages/web/src/foo.py", "x = 3\n")  # cited file drifts again
+    git_commit(repo, "drift again", 1_700_000_300)
+
+    sub_stale = find_stale(sub_memory_dir, subdir_root, since=_ALL)
+    sub_hit = [s for s in sub_stale if s["name"] == "m_sub"]
+    assert sub_hit and "packages/web/src/foo.py" in sub_hit[0]["changed_paths"]
+
+
+def test_build_repo_file_index_is_toplevel_relative_from_a_subdir(repo):
+    from memory import provenance as P
+
+    write_file(repo, "packages/web/src/foo.py", "x = 1\n")
+    git_commit(repo, "init", 1_700_000_000)
+
+    subdir_root = os.path.join(repo, "packages", "web")
+    repo_files, basename_index = P.build_repo_file_index(subdir_root)
+
+    assert "packages/web/src/foo.py" in repo_files
+    assert "src/foo.py" not in repo_files
+    assert basename_index.get("foo.py") == ["packages/web/src/foo.py"]
+
+
 def test_does_not_flag_when_cited_code_unchanged(repo, memory_dir):
     write_file(repo, "src/foo.py", "x = 1\n")
     c1 = git_commit(repo, "c1", 1_700_000_000)

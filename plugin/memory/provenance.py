@@ -141,8 +141,18 @@ def extract_citations(body: str) -> List[str]:
 
 
 def build_repo_file_index(repo_root: str) -> Tuple[set, Dict[str, List[str]]]:
-    """Return ``(repo_files, basename_index)`` from ``git ls-files``."""
-    files = [f for f in run_git(["ls-files"], repo_root).split("\n") if f]
+    """Return ``(repo_files, basename_index)`` from ``git ls-files``.
+
+    ``--full-name`` (SHP-1): without it, ``ls-files`` emits paths CWD-relative to
+    ``repo_root`` — so when ``repo_root`` is a monorepo subdir (``CLAUDE_PROJECT_DIR``
+    pointing below the git toplevel), this index would be subdir-relative while
+    ``staleness._path_change_times`` (``git log --name-only``, always toplevel-relative,
+    unaffected by ``-C``) is not. That mismatch means ``find_stale``'s
+    ``path_times.get(p, 0) > base`` NEVER matches for a subdir-rooted corpus — a silent,
+    permanent false-negative for the flagship staleness signal. ``--full-name`` makes this
+    index toplevel-relative too, matching git log's convention everywhere in this module.
+    """
+    files = [f for f in run_git(["ls-files", "--full-name"], repo_root).split("\n") if f]
     repo_files = set(files)
     basename_index: Dict[str, List[str]] = {}
     for f in files:
