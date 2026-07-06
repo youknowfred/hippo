@@ -266,6 +266,11 @@ def test_get_model_pins_cache_before_fastembed_import(monkeypatch, allow_downloa
             captured["cache_path"] = os.environ.get("FASTEMBED_CACHE_PATH")
 
     monkeypatch.setattr(fastembed, "TextEmbedding", _RecordingEmbedding)
+    # OSP-4 added an offline-path pre-check (``_fastembed_model_cached``) that raises BEFORE
+    # constructing the embedder on a cold cache — orthogonal to what THIS test verifies (the
+    # cache-pin fires before the embedder is built). Neutralize it so both parametrizations
+    # reach the construction; the cold-cache bail has its own coverage in test_build_index.py.
+    monkeypatch.setattr(B, "_fastembed_model_cached", lambda cache_dir: True)
 
     model = B._get_model(allow_download=allow_download)
     assert isinstance(model, _RecordingEmbedding)
