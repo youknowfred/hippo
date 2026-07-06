@@ -64,10 +64,12 @@ not a multi-PR roadmap.
   ```
 - Confirm every tool imports cleanly:
   ```bash
-  PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -c \
+  . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
+  hippo_resolve_py
+  "$PY" -c \
     "from memory import eval_recall, soak, staleness, reconsolidate, archive, links, lint_links, lint_floor, telemetry, provenance"
   ```
-  (fall back to bare `python3` pre-bootstrap; BM25-only tools still import fine, only
+  (`$PY` falls back to bare `python3` pre-bootstrap; BM25-only tools still import fine, only
   `eval_recall`'s dense-model-dependent paths need the venv.) Halt if this fails — a broken tool
   means every downstream signal in this audit is suspect, not just cosmetic.
 - Discover corpus scale fresh, never hardcode it: `ls .claude/memory/*.md | wc -l` and
@@ -98,9 +100,9 @@ value is cheap **in-process set/dict arithmetic across all of them at once**; a 
 would force that state through serialization for zero parallelism win. Revisit this only if a
 corpus grows 5-10x past what's realistic today (see Hard Rules).
 
-Run this as one script (adjust flags per the invocation; `PY` is
-`${CLAUDE_PLUGIN_DATA}/venv/bin/python` with `PYTHONPATH=${CLAUDE_PLUGIN_ROOT}` set, or bare
-`python3` pre-bootstrap):
+Run this as one script (adjust flags per the invocation; `PY` is resolved by
+`hippo_resolve_py` in Phase 0 — `${CLAUDE_PLUGIN_DATA}/venv/bin/python` with
+`PYTHONPATH=${CLAUDE_PLUGIN_ROOT}` set, or bare `python3` pre-bootstrap):
 
 ```bash
 "$PY" - <<'PYEOF'

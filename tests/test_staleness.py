@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import os
 
-from memory.staleness import find_stale, find_unparseable, read_provenance, set_invalid_after
+from memory.staleness import (
+    count_unresolvable_baselines,
+    find_stale,
+    find_unparseable,
+    read_provenance,
+    read_source_commit_time,
+    set_invalid_after,
+)
 
 from .conftest import git_commit, write_file
 
@@ -16,6 +23,16 @@ def _memory(cited, source_commit):
     cp = "[" + ", ".join(f'"{c}"' for c in cited) + "]"
     sc = f'"{source_commit}"' if source_commit is not None else "null"
     return f"---\nname: A\ntype: project\ncited_paths: {cp}\nsource_commit: {sc}\n---\nbody\n"
+
+
+def _memory_with_time(cited, source_commit, source_commit_time):
+    cp = "[" + ", ".join(f'"{c}"' for c in cited) + "]"
+    sc = f'"{source_commit}"' if source_commit is not None else "null"
+    sct = str(int(source_commit_time)) if source_commit_time is not None else "null"
+    return (
+        f"---\nname: A\ntype: project\ncited_paths: {cp}\nsource_commit: {sc}\n"
+        f"source_commit_time: {sct}\n---\nbody\n"
+    )
 
 
 def test_read_provenance_top_level_and_metadata_block():
@@ -37,6 +54,77 @@ def test_flags_memory_when_cited_code_changed_after_baseline(repo, memory_dir):
     stale = find_stale(memory_dir, repo, since=_ALL)
     hit = [s for s in stale if s["name"] == "m_alpha"]
     assert hit and "src/foo.py" in hit[0]["changed_paths"]
+
+
+# --------------------------------------------------------------------------- #
+# SHP-1 — staleness must fire identically for a monorepo-subdir-rooted corpus.
+#
+# ``git log --name-only`` always emits toplevel-relative paths, -C notwithstanding. Before
+# the fix, ``build_repo_file_index`` called ``git ls-files`` (no ``--full-name``), which is
+# CWD-relative to repo_root — so when repo_root is a subdir (the CLAUDE_PROJECT_DIR shape
+# for a package inside a monorepo), cited_paths ended up subdir-relative while
+# ``_path_change_times`` keys stayed toplevel-relative: find_stale's ``path_times.get(p)``
+# could never match. These two tests run the SAME drift scenario once rooted at the repo
+# toplevel and once rooted at a subdirectory, and assert both flag identically.
+# --------------------------------------------------------------------------- #
+def test_flags_drift_identically_toplevel_vs_subdir_rooted_corpus(repo):
+    from memory import provenance as P
+
+    # --- control: corpus rooted at the toplevel ---------------------------------
+    write_file(repo, "packages/web/src/foo.py", "x = 1\n")
+    top_memory_dir = os.path.join(repo, ".claude", "memory")
+    os.makedirs(top_memory_dir, exist_ok=True)
+    write_file(
+        top_memory_dir,
+        "m_top.md",
+        "---\nname: top\ntype: project\noriginSessionId: s1\n---\n"
+        "Cites packages/web/src/foo.py:1.\n",
+    )
+    git_commit(repo, "init", 1_700_000_000)
+    P.backfill_corpus(top_memory_dir, repo)
+
+    write_file(repo, "packages/web/src/foo.py", "x = 2\n")  # cited file drifts
+    git_commit(repo, "drift", 1_700_000_100)
+
+    top_stale = find_stale(top_memory_dir, repo, since=_ALL)
+    top_hit = [s for s in top_stale if s["name"] == "m_top"]
+    assert top_hit and "packages/web/src/foo.py" in top_hit[0]["changed_paths"]
+
+    # --- key case: corpus rooted at a monorepo SUBDIR (CLAUDE_PROJECT_DIR=subdir) -----
+    subdir_root = os.path.join(repo, "packages", "web")
+    sub_memory_dir = os.path.join(subdir_root, ".claude", "memory")
+    os.makedirs(sub_memory_dir, exist_ok=True)
+    write_file(
+        sub_memory_dir,
+        "m_sub.md",
+        "---\nname: sub\ntype: project\noriginSessionId: s1\n---\n"
+        "Cites src/foo.py:1.\n",
+    )
+    git_commit(repo, "add sub memory", 1_700_000_200)
+    # backfill + find_stale invoked with repo_root = the SUBDIR, reproducing the exact
+    # monorepo CLAUDE_PROJECT_DIR=subdir scenario.
+    P.backfill_corpus(sub_memory_dir, subdir_root)
+
+    write_file(repo, "packages/web/src/foo.py", "x = 3\n")  # cited file drifts again
+    git_commit(repo, "drift again", 1_700_000_300)
+
+    sub_stale = find_stale(sub_memory_dir, subdir_root, since=_ALL)
+    sub_hit = [s for s in sub_stale if s["name"] == "m_sub"]
+    assert sub_hit and "packages/web/src/foo.py" in sub_hit[0]["changed_paths"]
+
+
+def test_build_repo_file_index_is_toplevel_relative_from_a_subdir(repo):
+    from memory import provenance as P
+
+    write_file(repo, "packages/web/src/foo.py", "x = 1\n")
+    git_commit(repo, "init", 1_700_000_000)
+
+    subdir_root = os.path.join(repo, "packages", "web")
+    repo_files, basename_index = P.build_repo_file_index(subdir_root)
+
+    assert "packages/web/src/foo.py" in repo_files
+    assert "src/foo.py" not in repo_files
+    assert basename_index.get("foo.py") == ["packages/web/src/foo.py"]
 
 
 def test_does_not_flag_when_cited_code_unchanged(repo, memory_dir):
@@ -67,6 +155,196 @@ def test_unknown_baseline_commit_is_skipped_not_raised(repo, memory_dir):
     write_file(memory_dir, "m_c.md", _memory(["src/foo.py"], "0" * 40))  # sha not in history
     stale = find_stale(memory_dir, repo, since=_ALL)
     assert isinstance(stale, list) and all(s["name"] != "m_c" for s in stale)
+
+
+# --------------------------------------------------------------------------- #
+# SHP-3 — squash-merge / shallow-clone resilience: an unresolvable source_commit sha
+# falls back to the memory's OWN stored source_commit_time instead of being silently
+# skipped forever (which is what happened before this fix — see the test just above,
+# preserved because a memory with NO fallback time at all must still be un-judgeable).
+# --------------------------------------------------------------------------- #
+def test_hermetic_squash_merge_drift_still_detected_via_time_fallback(repo, memory_dir):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    git_commit(repo, "c1", 1_700_000_000)
+    fabricated_sha = "a" * 40  # NEVER exists in this repo's history (simulates squash-merge)
+    write_file(
+        memory_dir,
+        "m_squashed.md",
+        _memory_with_time(["src/foo.py"], fabricated_sha, 1_700_000_050),
+    )
+    write_file(repo, "src/foo.py", "x = 2\n")  # cited file drifts AFTER the stored baseline time
+    git_commit(repo, "c2", 1_700_000_100)
+
+    stale = find_stale(memory_dir, repo, since=_ALL)
+    hit = [s for s in stale if s["name"] == "m_squashed"]
+    assert hit and "src/foo.py" in hit[0]["changed_paths"]
+
+
+def test_squash_merge_fallback_not_flagged_when_drift_precedes_stored_time(repo, memory_dir):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    git_commit(repo, "c1", 1_700_000_000)
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)  # drift happens BEFORE the stored baseline time
+    fabricated_sha = "b" * 40
+    write_file(
+        memory_dir,
+        "m_squashed2.md",
+        _memory_with_time(["src/foo.py"], fabricated_sha, 1_700_000_200),
+    )
+
+    stale = find_stale(memory_dir, repo, since=_ALL)
+    assert all(s["name"] != "m_squashed2" for s in stale)
+
+
+def test_resolvable_sha_takes_priority_over_stored_time_fallback(repo, memory_dir):
+    """When the sha DOES resolve, the git cross-check is used — the stored time is never
+    consulted (it's purely a fallback for the unresolvable case)."""
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    # A wildly-wrong stored time that would (wrongly) flag every future commit if it were used.
+    write_file(memory_dir, "m_real.md", _memory_with_time(["src/foo.py"], c1, 0))
+    write_file(repo, "src/other.py", "y = 1\n")  # an UNCITED file changes
+    git_commit(repo, "c2", 1_700_000_100)
+
+    stale = find_stale(memory_dir, repo, since=_ALL)
+    assert all(s["name"] != "m_real" for s in stale)  # resolvable sha correctly NOT flagged
+
+
+def test_read_source_commit_time_top_level_and_metadata_block():
+    top = "---\ncited_paths: []\nsource_commit: \"abc\"\nsource_commit_time: 1700000000\n---\nb\n"
+    nested = (
+        "---\nmetadata:\n  source_commit: \"abc\"\n  source_commit_time: 1700000000\n---\nb\n"
+    )
+    assert read_source_commit_time(top) == 1700000000
+    assert read_source_commit_time(nested) == 1700000000
+
+
+def test_read_source_commit_time_absent_returns_none():
+    assert read_source_commit_time(_memory(["src/a.py"], "abc")) is None
+
+
+# --------------------------------------------------------------------------- #
+# SHP-6 — the staleness git-log scan is scoped to cited paths (not whole-repo history),
+# and a git-log timeout produces a visible diagnostic instead of a silent empty stale-list.
+# --------------------------------------------------------------------------- #
+def test_path_change_times_scopes_git_log_to_cited_paths(monkeypatch, repo, memory_dir):
+    from memory import staleness as ST
+
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_alpha.md", _memory(["src/foo.py"], c1))
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)
+
+    captured_argvs = []
+    real_run = ST.subprocess.run
+
+    def spy_run(args, **kwargs):
+        captured_argvs.append(args)
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(ST.subprocess, "run", spy_run)
+
+    find_stale(memory_dir, repo, since=_ALL)
+
+    log_calls = [a for a in captured_argvs if "log" in a]
+    assert log_calls, "expected at least one git log invocation"
+    for call in log_calls:
+        assert "--" in call
+        pathspecs = call[call.index("--") + 1:]
+        assert pathspecs, "git log call had no path restriction"
+        assert ":/src/foo.py" in pathspecs  # top-anchored pathspec (SHP-1 convention)
+        assert "--name-only" in call  # sanity: still the same log shape as before
+
+
+def test_chunk_paths_stays_under_byte_bound():
+    from memory.staleness import _chunk_paths
+
+    paths = [f"src/module_{i}.py" for i in range(500)]
+    chunks = _chunk_paths(paths, max_bytes=200)
+    assert len(chunks) > 1
+    for chunk in chunks:
+        total = sum(len(p.encode("utf-8")) + 1 for p in chunk)
+        assert total <= 200 + len(chunk[-1].encode("utf-8")) + 1  # last item may tip it, never more
+    # every path preserved, none dropped or duplicated across chunks
+    flat = [p for chunk in chunks for p in chunk]
+    assert flat == paths
+
+
+def test_git_log_timeout_produces_visible_diagnostic_not_silent_empty(monkeypatch, repo, memory_dir):
+    import subprocess as sp
+
+    from memory import staleness as ST
+
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_alpha.md", _memory(["src/foo.py"], c1))
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)
+
+    def fake_run(args, **kwargs):
+        if "log" in args:
+            raise sp.TimeoutExpired(cmd=args, timeout=20)
+        return sp.run(args, **kwargs)
+
+    monkeypatch.setattr(ST.subprocess, "run", fake_run)
+
+    diagnostics: dict = {}
+    stale = find_stale(memory_dir, repo, since=_ALL, diagnostics=diagnostics)
+
+    assert stale == []  # git log failed -> no drift can be detected
+    assert diagnostics.get("timed_out") is True  # but it must be VISIBLE, not a silent []
+
+
+def test_git_log_timeout_diagnostic_surfaces_in_session_start_producer(monkeypatch):
+    import memory.session_start as S
+
+    def fake_find_stale(md, repo, diagnostics=None, **kwargs):
+        if diagnostics is not None:
+            diagnostics["timed_out"] = True
+        return []
+
+    monkeypatch.setattr(S, "find_stale", fake_find_stale)
+    out = S.staleness_producer("md", "repo")
+    assert out and "timed out" in out.lower()
+
+
+def test_no_timeout_diagnostic_when_scan_succeeds(monkeypatch, repo, memory_dir):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_alpha.md", _memory(["src/foo.py"], c1))
+
+    diagnostics: dict = {}
+    find_stale(memory_dir, repo, since=_ALL, diagnostics=diagnostics)
+    assert diagnostics.get("timed_out") is False
+
+
+# --------------------------------------------------------------------------- #
+# count_unresolvable_baselines — the visible-degradation count (SessionStart + doctor)
+# --------------------------------------------------------------------------- #
+def test_count_unresolvable_baselines_counts_only_unresolvable_shas(repo, memory_dir):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_ok.md", _memory(["src/foo.py"], c1))  # resolvable
+    write_file(
+        memory_dir,
+        "m_squashed.md",
+        _memory_with_time(["src/foo.py"], "c" * 40, 1_700_000_050),
+    )  # unresolvable
+    write_file(memory_dir, "m_no_baseline.md", _memory([], None))  # no source_commit at all
+
+    assert count_unresolvable_baselines(memory_dir, repo) == 1
+
+
+def test_count_unresolvable_baselines_zero_when_all_resolvable(repo, memory_dir):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_ok.md", _memory(["src/foo.py"], c1))
+    assert count_unresolvable_baselines(memory_dir, repo) == 0
+
+
+def test_count_unresolvable_baselines_empty_corpus_is_zero(repo, memory_dir):
+    assert count_unresolvable_baselines(memory_dir, repo) == 0
 
 
 def test_malformed_frontmatter_never_raises(repo, memory_dir):

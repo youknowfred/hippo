@@ -26,14 +26,17 @@ from typing import List, Optional, Tuple
 from .build_index import (
     DENSE_QUERY_TIMEOUT_SECS,
     LoadedIndex,
+    _hash,
     build_index,
     default_index_dir,
     embed_query,
     entry_description,
     load_index,
+    memory_doc_text,
     run_bounded,
     tokenize,
 )
+from . import trust
 from .lint_floor import floor_memory_names
 from .provenance import _iter_memory_files, resolve_dirs
 from .staleness import _commit_times, read_provenance
@@ -48,6 +51,10 @@ DEFAULT_K = 10
 # after the cut (the memory stays fully in the corpus/index, never excluded from ranking).
 _INVALIDATION_PENALTY = 0.5
 _INVALIDATION_RECENT_DAYS = 30.0
+
+# Mid-session drift (COR-4) — a stat+reread per entry is cheap, but bound it so a huge
+# corpus can never turn the hot path into an O(corpus) disk scan of unbounded size.
+_MAX_DRIFT_CHECKS = 200
 
 # --------------------------------------------------------------------------- #
 # Query hygiene
@@ -203,6 +210,38 @@ def _invalidation_state(entry: dict, *, now: Optional[float] = None) -> Optional
     return "recent" if age_days < _INVALIDATION_RECENT_DAYS else "old"
 
 
+def _drift_patch(entry: dict, memory_dir: str) -> dict:
+    """Detect mid-session edits (COR-4) and return a display/BM25-fresh COPY of ``entry``.
+
+    Cheaply re-reads the file and recomputes ``doc_text``/``hash`` exactly as
+    ``build_index.compute_corpus`` would. If the hash still matches the index's stored
+    value, the entry is returned UNCHANGED (no drift) -- this is the common case and stays
+    just a stat + read + hash, no re-tokenizing. If it differs (the description was edited
+    on disk since the index was last built), the returned copy carries fresh ``tokens`` (so
+    THIS query's BM25 re-ranks against the current text) and a fresh ``description`` (so the
+    displayed line matches). The DENSE row is deliberately left untouched -- re-embedding
+    synchronously here would violate the pure-retrieval hot-path invariant; the stale cached
+    embedding keeps being used for this session, and a full re-embed happens at the next
+    SessionStart rebuild. Never raises: any read/parse failure returns ``entry`` as-is
+    (fail open to the last-known-good index state, same as every other degrade path here).
+    """
+    try:
+        path = os.path.join(memory_dir, entry["file"])
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        doc_text = memory_doc_text(entry["name"], text)
+        fresh_hash = _hash(doc_text)
+        if fresh_hash == entry.get("hash"):
+            return entry
+        patched = dict(entry)
+        patched["tokens"] = tokenize(doc_text)
+        patched["description"] = doc_text.split(". ", 1)[1] if ". " in doc_text else doc_text
+        patched["hash"] = fresh_hash
+        return patched
+    except Exception:
+        return entry
+
+
 # --------------------------------------------------------------------------- #
 # Recall
 # --------------------------------------------------------------------------- #
@@ -243,10 +282,14 @@ def recall(
     index: Optional[LoadedIndex] = None,
     memory_dir: Optional[str] = None,
     index_dir: Optional[str] = None,
+    repo_root: Optional[str] = None,
 ) -> List[dict]:
     """Top-``k`` memories for ``query`` as ``[{name, file, description, score, backend}]``.
 
-    Never raises; returns [] on any failure or empty query.
+    Never raises; returns [] on any failure or empty query. ``repo_root`` is the SEC-1 trust
+    gate's key — the hook entry (``main``) resolves it ONCE via ``resolve_dirs`` and threads it
+    through so the hot path pays no second ``git rev-parse``; a direct caller that omits it has
+    it derived (once) from ``memory_dir``'s git toplevel.
     """
     try:
         if not query or not query.strip():
@@ -255,12 +298,43 @@ def recall(
             idx = index  # caller supplied the index -> never touch the real memory dir / git
         else:
             if memory_dir is None:
-                memory_dir, _ = resolve_dirs()
+                memory_dir, resolved = resolve_dirs()
+                if repo_root is None:
+                    repo_root = resolved
             idx = _ensure_index(None, memory_dir, index_dir)
         if idx is None or not len(idx):
             return []
 
+        # Trust gate (SEC-1): a foreign corpus (clone any repo carrying .claude/memory)
+        # must inject NOTHING until this machine's user has explicitly trusted it — an
+        # untrusted corpus is an unreviewed prompt-injection channel. The gate LOOKUP is a
+        # stat + small-JSON read (no git/network/LLM), safe on the hot path; the git toplevel
+        # it keys on is resolved by the caller (``main``) ONCE and threaded in via repo_root,
+        # so the hot path pays no extra ``git rev-parse``. When there is NO resolvable git root
+        # (a non-git corpus, or a caller-supplied in-memory `index` with no memory_dir —
+        # eval/self_recall and the hermetic recall tests) the gate is inapplicable and recall
+        # proceeds; only a real git corpus NOT in the trust registry is denied. MEMOBOT_TRUST_ALL
+        # bypasses it for CI. The user-visible signal for the deny path is the SessionStart
+        # untrusted-corpus nudge + /hippo:doctor — never a silent no-op with zero trace.
+        if index is None:
+            gate_root = trust.gate_repo_root(memory_dir, repo_root)
+            if gate_root is not None and not trust.is_trusted(gate_root):
+                return []
+
         entries = idx.entries
+
+        # --- Mid-session drift (COR-4) -----------------------------------------------
+        # The persisted index is only as fresh as the last SessionStart rebuild; a memory
+        # edited or deleted DURING the session must not keep serving stale text/paths for
+        # the rest of it. Bounded by _MAX_DRIFT_CHECKS so a huge corpus can't turn this
+        # into an unbounded per-query disk scan -- beyond the bound, entries are passed
+        # through untouched (fail open to "may be stale", never fail closed to "crash").
+        if memory_dir:
+            entries = [
+                _drift_patch(e, memory_dir) if i < _MAX_DRIFT_CHECKS else e
+                for i, e in enumerate(entries)
+            ]
+
         q_tokens = tokenize(query)
         bm25 = _bm25_rank(q_tokens, entries)
         dense = _dense_rank(query, idx)
@@ -300,6 +374,10 @@ def recall(
             if state == "old":
                 continue
             e = entries[i]
+            # Deleted/renamed since the index was built (COR-4): drop it from THIS
+            # session's output immediately rather than keep injecting a dangling path.
+            if memory_dir and not os.path.isfile(os.path.join(memory_dir, e["file"])):
+                continue
             results.append(
                 {
                     "name": e["name"],
@@ -381,6 +459,9 @@ def git_recent_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     """SessionStart producer: a one-block digest of recently-captured memories.
 
     Window via ``MEMOBOT_RECENT_DAYS`` (default 14). Self-suppresses when nothing is recent.
+    The untrusted-corpus gate (SEC-1) is enforced once, upstream, by ``session_start``'s
+    ``build_context`` short-circuit — no producer re-checks it (one gate boundary, no extra
+    per-producer git call on the trusted hot path).
     """
     try:
         days = float(os.environ.get("MEMOBOT_RECENT_DAYS", "14") or 14)
@@ -407,6 +488,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--index-dir", default=None)
     parser.add_argument("--repo-root", default=None)
+    parser.add_argument(
+        "--session-id",
+        default=None,
+        help="harness-provided session id (COR-6) — keys telemetry directly instead of the "
+        "shared file-based token, fixing concurrent-session attribution.",
+    )
     args = parser.parse_args(argv)
 
     raw_query = " ".join(args.query).strip()
@@ -441,7 +528,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         # injects redundant tokens. Over-fetch by the floor size, drop floor members, slice to k.
         floor = floor_memory_names(memory_dir) if memory_dir else set()
         pool_k = args.k + len(floor) if floor else args.k
-        results = recall(query, k=pool_k, memory_dir=memory_dir, index_dir=args.index_dir)
+        results = recall(
+            query, k=pool_k, memory_dir=memory_dir, index_dir=args.index_dir, repo_root=repo_root
+        )
         if floor:
             results = [r for r in results if r["name"] not in floor]
         results = results[: args.k]
@@ -467,12 +556,20 @@ def main(argv: Optional[List[str]] = None) -> int:
             from .telemetry import default_telemetry_dir, log_episode, log_recall_event
 
             td = default_telemetry_dir(memory_dir)
-            log_recall_event(results, query=raw_query, k=args.k, latency_ms=latency_ms, telemetry_dir=td)
+            log_recall_event(
+                results,
+                query=raw_query,
+                k=args.k,
+                latency_ms=latency_ms,
+                telemetry_dir=td,
+                session_id=args.session_id or None,
+            )
             log_episode(
                 [r.get("name") for r in results if r.get("name")],
                 query=raw_query,
                 repo_root=repo_root,
                 telemetry_dir=td,
+                session_id=args.session_id or None,
             )
         except Exception:
             pass

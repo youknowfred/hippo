@@ -462,3 +462,69 @@ def test_main_skips_recall_entirely_on_envelope_query(tmp_path, monkeypatch, cap
     )
     assert rc == 0
     assert capsys.readouterr().out.strip() == ""  # hygiene skipped recall — nothing injected
+
+
+# --------------------------------------------------------------------------- #
+# Mid-session corpus drift (COR-4) — edits/deletes invisible until next SessionStart
+# --------------------------------------------------------------------------- #
+def test_recall_drops_deleted_memory_same_session(tmp_path, monkeypatch):
+    """A memory deleted from disk AFTER the index was built must never surface again,
+    even though the persisted index still has a row for it."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx)
+
+    query = "which reranker do we use for search results"
+    before = [r["name"] for r in R.recall(query, k=5, memory_dir=md, index_dir=idx)]
+    assert "reranker_voyage" in before
+
+    os.remove(os.path.join(md, "reranker_voyage.md"))  # delete WITHOUT rebuilding the index
+
+    after = [r["name"] for r in R.recall(query, k=5, memory_dir=md, index_dir=idx)]
+    assert "reranker_voyage" not in after
+
+
+def test_recall_patches_bm25_on_edited_description(tmp_path, monkeypatch):
+    """A description edited on disk (index NOT rebuilt) must surface via BM25 for a query
+    that only matches the NEW text — proving the live token patch, not just stale reuse."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"canvas_pdf.md": _CORPUS["canvas_pdf.md"]})
+    B.build_index(md, idx)
+
+    query = "kubernetes helm chart deployment rollout"
+    assert R.recall(query, k=5, memory_dir=md, index_dir=idx) == []  # doesn't match yet
+
+    with open(os.path.join(md, "canvas_pdf.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem("canvas_pdf", "kubernetes helm chart deployment rollout strategy"))
+
+    res = R.recall(query, k=5, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert "canvas_pdf" in names
+    hit = next(r for r in res if r["name"] == "canvas_pdf")
+    assert "kubernetes" in hit["description"]  # displayed text is the FRESH description too
+
+
+def test_recall_drift_check_stays_fast_on_larger_corpus(tmp_path, monkeypatch):
+    """Timing guard: the per-query stat+reread drift check must not blow up the hot path."""
+    import time
+
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    corpus = {
+        f"synthetic_{i:03d}.md": f"synthetic memory number {i} about topic area {i % 7} testing"
+        for i in range(60)
+    }
+    _write_corpus(md, corpus)
+    B.build_index(md, idx)
+
+    start = time.monotonic()
+    res = R.recall("synthetic memory topic area testing", k=10, memory_dir=md, index_dir=idx)
+    elapsed = time.monotonic() - start
+
+    assert res
+    assert elapsed < 2.0  # generous bound; drift check is a handful of stats+reads, not ML

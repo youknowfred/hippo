@@ -357,3 +357,208 @@ class TestCorpusLessHygiene:
         )
         _assert_contract(proc, "SessionStart")
         assert _tree(project) == set()
+
+
+# --------------------------------------------------------------------------- #
+# COR-10: bash-level bail on a missing .claude/memory — proves Python is never
+# even SPAWNED (not just that it returns nothing), by making every interpreter
+# reachable on PATH / in the venv a canary that records its own invocation.
+# --------------------------------------------------------------------------- #
+class TestBashLevelCorpusGuard:
+    def _canary_env(self, tmp_path, *, with_corpus: bool, nudge_dismissed: bool):
+        project = _make_project(tmp_path, with_corpus)
+        data_dir = tmp_path / "plugin-data"
+        os.makedirs(data_dir, exist_ok=True)
+        if nudge_dismissed:
+            (data_dir / ".nudge-dismissed").touch()
+
+        canary = tmp_path / "python-spawned.marker"
+        bindir = tmp_path / "bin"
+        os.makedirs(bindir, exist_ok=True)
+        for tool in ("cat", "printf"):
+            _symlink_once(shutil.which(tool), bindir / tool)
+        canary_script = f"#!/bin/sh\ntouch '{canary}'\nexit 0\n"
+        # Any python this hook could possibly resolve to (bare python3 on PATH,
+        # or the plugin-data venv) is this same canary — if the bash guard
+        # doesn't fire before the FIRST python invocation, the marker appears.
+        (bindir / "python3").write_text(canary_script, encoding="utf-8")
+        os.chmod(bindir / "python3", 0o755)
+        venv_bin = data_dir / "venv" / "bin"
+        os.makedirs(venv_bin, exist_ok=True)
+        (venv_bin / "python").write_text(canary_script, encoding="utf-8")
+        os.chmod(venv_bin / "python", 0o755)
+        (data_dir / ".bootstrap-sentinel").write_text(
+            json.dumps({"requirements_hash": "irrelevant", "bootstrapped_at": "test"}),
+            encoding="utf-8",
+        )
+
+        home = tmp_path / "home"
+        os.makedirs(home, exist_ok=True)
+        env = {
+            "PATH": str(bindir),
+            "HOME": str(home),
+            "CLAUDE_PROJECT_DIR": project,
+            "CLAUDE_PLUGIN_ROOT": _PLUGIN_ROOT,
+            "CLAUDE_PLUGIN_DATA": str(data_dir),
+            "MEMOBOT_DISABLE_DENSE": "1",
+        }
+        return project, str(data_dir), canary, env
+
+    def test_user_prompt_hook_spawns_zero_python_in_corpusless_repo(self, tmp_path):
+        project, _data_dir, canary, env = self._canary_env(
+            tmp_path, with_corpus=False, nudge_dismissed=True
+        )
+        stdin = json.dumps({"prompt": "a perfectly normal prompt about deploying things"})
+        proc = subprocess.run(
+            ["/bin/bash", _USER_PROMPT_HOOK],
+            input=stdin, capture_output=True, text=True, timeout=60, env=env,
+        )
+        _assert_contract(proc, "UserPromptSubmit")
+        assert proc.stdout.strip() == ""
+        assert not canary.exists(), "the hook spawned python despite no .claude/memory"
+        assert _tree(project) == set()
+        assert not os.path.isdir(os.path.join(project, ".claude"))
+
+    def test_session_start_hook_spawns_zero_python_in_corpusless_repo(self, tmp_path):
+        # Dismiss the ONB-1 nudge so we're proving the POST-nudge guard, not just
+        # that the nudge branch itself short-circuits before Python.
+        project, _data_dir, canary, env = self._canary_env(
+            tmp_path, with_corpus=False, nudge_dismissed=True
+        )
+        proc = subprocess.run(
+            ["/bin/bash", _SESSION_START_HOOK],
+            input="", capture_output=True, text=True, timeout=60, env=env,
+        )
+        _assert_contract(proc, "SessionStart")
+        assert proc.stdout.strip() == ""
+        assert not canary.exists(), "the hook spawned python despite no .claude/memory"
+        assert _tree(project) == set()
+        assert not os.path.isdir(os.path.join(project, ".claude"))
+        assert not os.path.isdir(os.path.join(project, ".claude", ".memory-index"))
+        assert not os.path.isdir(os.path.join(project, ".claude", ".memory-telemetry"))
+
+    def test_session_start_nudge_still_fires_before_guard_when_not_dismissed(self, tmp_path):
+        # The bash guard must NOT silence the ONB-1 nudge — it sits AFTER it.
+        project, _data_dir, canary, env = self._canary_env(
+            tmp_path, with_corpus=False, nudge_dismissed=False
+        )
+        proc = subprocess.run(
+            ["/bin/bash", _SESSION_START_HOOK],
+            input="", capture_output=True, text=True, timeout=60, env=env,
+        )
+        _assert_contract(proc, "SessionStart")
+        assert "/hippo:init" in proc.stdout
+        assert not canary.exists()
+        assert _tree(project) == set()
+
+
+# --------------------------------------------------------------------------- #
+# COR-6: SessionStart source-awareness + harness-keyed telemetry sessions, exercised
+# through the REAL bash hook script (not just memory.session_start directly).
+# --------------------------------------------------------------------------- #
+def _session_token(project: str) -> str:
+    path = os.path.join(project, ".claude", ".memory-telemetry", "session")
+    with open(path, "r", encoding="utf-8") as fh:
+        return fh.read().strip()
+
+
+class TestSessionStartSourceAwareness:
+    def test_compaction_mid_session_does_not_rotate_token(self, tmp_path):
+        stdin_startup = json.dumps({"hook_event_name": "SessionStart", "source": "startup"})
+        proc, project, _ = _run_hook(
+            _SESSION_START_HOOK, stdin_startup, tmp_path, venv_python=True, sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        before = _session_token(project)
+
+        stdin_compact = json.dumps({"hook_event_name": "SessionStart", "source": "compact"})
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, stdin_compact, tmp_path, venv_python=True, sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        after = _session_token(project)
+        assert after == before, "compaction mid-session must not increment distinct-session count"
+
+    def test_resume_does_not_rotate_token(self, tmp_path):
+        stdin_startup = json.dumps({"hook_event_name": "SessionStart", "source": "startup"})
+        proc, project, _ = _run_hook(
+            _SESSION_START_HOOK, stdin_startup, tmp_path, venv_python=True, sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        before = _session_token(project)
+
+        stdin_resume = json.dumps({"hook_event_name": "SessionStart", "source": "resume"})
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, stdin_resume, tmp_path, venv_python=True, sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        assert _session_token(project) == before
+
+    def test_clear_rotates_token(self, tmp_path):
+        stdin_startup = json.dumps({"hook_event_name": "SessionStart", "source": "startup"})
+        proc, project, _ = _run_hook(
+            _SESSION_START_HOOK, stdin_startup, tmp_path, venv_python=True, sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        before = _session_token(project)
+
+        stdin_clear = json.dumps({"hook_event_name": "SessionStart", "source": "clear"})
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, stdin_clear, tmp_path, venv_python=True, sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        assert _session_token(project) != before
+
+    def test_harness_session_id_never_touches_file_token(self, tmp_path):
+        stdin = json.dumps(
+            {"hook_event_name": "SessionStart", "source": "startup", "session_id": "harness-1"}
+        )
+        proc, project, _ = _run_hook(
+            _SESSION_START_HOOK, stdin, tmp_path, venv_python=True, sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        assert not os.path.exists(
+            os.path.join(project, ".claude", ".memory-telemetry", "session")
+        )
+
+
+class TestConcurrentSessionAttribution:
+    def test_two_concurrent_harness_sessions_log_distinct_stable_ids(self, tmp_path):
+        stdin = json.dumps(
+            {"prompt": "how is the zebra service deployed with canary rollout",
+             "session_id": "session-A"}
+        )
+        proc, project, _ = _run_hook(_USER_PROMPT_HOOK, stdin, tmp_path, venv_python=True)
+        _assert_contract(proc, "UserPromptSubmit")
+
+        stdin_b = json.dumps(
+            {"prompt": "how is the zebra service deployed with canary rollout",
+             "session_id": "session-B"}
+        )
+        env_data_dir = os.path.join(str(tmp_path), "plugin-data")
+        proc_b = subprocess.run(
+            ["/bin/bash", _USER_PROMPT_HOOK],
+            input=stdin_b,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env={
+                "PATH": _make_path_dir(tmp_path, python3=True, jq=False),
+                "HOME": str(tmp_path / "home"),
+                "CLAUDE_PROJECT_DIR": project,
+                "CLAUDE_PLUGIN_ROOT": _PLUGIN_ROOT,
+                "CLAUDE_PLUGIN_DATA": env_data_dir,
+                "MEMOBOT_DISABLE_DENSE": "1",
+            },
+        )
+        _assert_contract(proc_b, "UserPromptSubmit")
+
+        ledger = os.path.join(project, ".claude", ".memory-telemetry", "recall_events.jsonl")
+        with open(ledger, "r", encoding="utf-8") as fh:
+            events = [json.loads(line) for line in fh if line.strip()]
+        session_ids = [e.get("session_id") for e in events]
+        assert "session-A" in session_ids
+        assert "session-B" in session_ids
+        assert not os.path.exists(
+            os.path.join(project, ".claude", ".memory-telemetry", "session")
+        )

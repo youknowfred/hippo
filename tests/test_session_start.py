@@ -51,7 +51,11 @@ def test_output_is_bounded_under_cap(monkeypatch):
 
 def test_staleness_producer_formats_real_output(monkeypatch):
     monkeypatch.setattr(
-        S, "find_stale", lambda md, repo: [{"name": "m_x", "changed_paths": ["src/a.py", "src/b.py"]}]
+        S,
+        "find_stale",
+        lambda md, repo, diagnostics=None: [
+            {"name": "m_x", "changed_paths": ["src/a.py", "src/b.py"]}
+        ],
     )
     out = S.staleness_producer("md", "repo")
     assert out and "m_x" in out and "src/a.py" in out
@@ -60,7 +64,9 @@ def test_staleness_producer_formats_real_output(monkeypatch):
 def test_main_prints_session_start_json_when_stale(monkeypatch, capsys):
     monkeypatch.setattr(S, "resolve_dirs", lambda: ("md", "repo"))
     monkeypatch.setattr(
-        S, "find_stale", lambda md, repo: [{"name": "m_x", "changed_paths": ["src/a.py"]}]
+        S,
+        "find_stale",
+        lambda md, repo, diagnostics=None: [{"name": "m_x", "changed_paths": ["src/a.py"]}],
     )
     rc = S.main()
     assert rc == 0
@@ -71,7 +77,7 @@ def test_main_prints_session_start_json_when_stale(monkeypatch, capsys):
 
 def test_main_is_silent_when_nothing_stale(monkeypatch, capsys):
     monkeypatch.setattr(S, "resolve_dirs", lambda: ("md", "repo"))
-    monkeypatch.setattr(S, "find_stale", lambda md, repo: [])
+    monkeypatch.setattr(S, "find_stale", lambda md, repo, diagnostics=None: [])
     rc = S.main()
     assert rc == 0
     assert capsys.readouterr().out.strip() == ""
@@ -216,3 +222,138 @@ def test_stale_venv_producer_silent_without_plugin_data_env(tmp_path, monkeypatc
 def test_stale_venv_producer_registered_first():
     assert S.PRODUCERS[0][0] == "stale_venv"
     assert S.PRODUCERS[0][1] is S.stale_venv_producer
+
+
+# --------------------------------------------------------------------------- #
+# SHP-3 — unresolvable_baseline_producer (squash-merge / shallow-clone legibility)
+# --------------------------------------------------------------------------- #
+def test_unresolvable_baseline_producer_formats_real_output(monkeypatch):
+    monkeypatch.setattr(S, "count_unresolvable_baselines", lambda md, repo: 3)
+    out = S.unresolvable_baseline_producer("md", "repo")
+    assert out and "3 memories" in out and "squash-merge" in out
+
+
+def test_unresolvable_baseline_producer_silent_when_zero(monkeypatch):
+    monkeypatch.setattr(S, "count_unresolvable_baselines", lambda md, repo: 0)
+    assert S.unresolvable_baseline_producer("md", "repo") is None
+
+
+def test_unresolvable_baseline_producer_is_registered():
+    labels = [label for label, _fn in S.PRODUCERS]
+    assert labels.count("unresolvable_baseline") == 1
+    fns = [fn for label, fn in S.PRODUCERS if label == "unresolvable_baseline"]
+    assert fns == [S.unresolvable_baseline_producer]
+
+
+# --------------------------------------------------------------------------- #
+# COR-6: source-gated session rotation + harness-keyed telemetry sessions
+# --------------------------------------------------------------------------- #
+def _session_start_env(tmp_path, monkeypatch):
+    import memory.telemetry as T
+
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / ".claude" / "memory")
+    os.makedirs(md)
+    td = str(tmp_path / ".claude" / ".memory-telemetry")
+    monkeypatch.delenv("MEMOBOT_TELEMETRY_DIR", raising=False)
+    monkeypatch.setattr(S, "resolve_dirs", lambda: (md, str(tmp_path)))
+    monkeypatch.setattr(S, "build_context", lambda *a, **k: "")
+    return md, td, T
+
+
+def test_resume_source_does_not_rotate_session_token(tmp_path, monkeypatch):
+    md, td, T = _session_start_env(tmp_path, monkeypatch)
+    assert S.main(source="startup") == 0
+    before = T.current_session_id(td)
+    assert S.main(source="resume") == 0
+    after = T.current_session_id(td)
+    assert after == before
+
+
+def test_compact_source_does_not_rotate_session_token(tmp_path, monkeypatch):
+    md, td, T = _session_start_env(tmp_path, monkeypatch)
+    assert S.main(source="startup") == 0
+    before = T.current_session_id(td)
+    assert S.main(source="compact") == 0
+    assert T.current_session_id(td) == before
+
+
+def test_startup_source_rotates_session_token(tmp_path, monkeypatch):
+    md, td, T = _session_start_env(tmp_path, monkeypatch)
+    assert S.main(source="startup") == 0
+    before = T.current_session_id(td)
+    assert S.main(source="startup") == 0
+    after = T.current_session_id(td)
+    assert after != before
+
+
+def test_clear_source_rotates_session_token(tmp_path, monkeypatch):
+    md, td, T = _session_start_env(tmp_path, monkeypatch)
+    assert S.main(source="startup") == 0
+    before = T.current_session_id(td)
+    assert S.main(source="clear") == 0
+    after = T.current_session_id(td)
+    assert after != before
+
+
+def test_missing_source_does_not_rotate_session_token(tmp_path, monkeypatch):
+    """No hook payload at all (source=None) must not rotate — mirrors resume/compact."""
+    md, td, T = _session_start_env(tmp_path, monkeypatch)
+    assert S.main(source="startup") == 0
+    before = T.current_session_id(td)
+    assert S.main() == 0
+    assert T.current_session_id(td) == before
+
+
+def test_harness_session_id_bypasses_file_token_entirely(tmp_path, monkeypatch):
+    """When the harness hands us a session_id, the file-based token is never touched."""
+    md, td, T = _session_start_env(tmp_path, monkeypatch)
+    assert S.main(source="startup", session_id="harness-sid-1") == 0
+    assert not os.path.exists(T._session_path(td))
+
+
+def test_explicit_source_wins_over_stdin_payload(tmp_path, monkeypatch):
+    """Explicit kwargs override whatever _read_hook_payload would have parsed from stdin."""
+    monkeypatch.setattr(S, "_read_hook_payload", lambda: ("resume", None))
+    md, td, T = _session_start_env(tmp_path, monkeypatch)
+    assert S.main(source="startup") == 0
+    before = T.current_session_id(td)
+    # stdin says "resume" (would NOT rotate) but the explicit source="startup" wins,
+    # so a second explicit-startup call still rotates.
+    assert S.main(source="startup") == 0
+    assert T.current_session_id(td) != before
+
+
+def test_read_hook_payload_parses_source_and_session_id(monkeypatch):
+    import io
+
+    monkeypatch.setattr(
+        S.sys, "stdin", io.StringIO('{"source": "resume", "session_id": "abc123"}')
+    )
+    assert S._read_hook_payload() == ("resume", "abc123")
+
+
+def test_read_hook_payload_empty_stdin_yields_none_none(monkeypatch):
+    import io
+
+    monkeypatch.setattr(S.sys, "stdin", io.StringIO(""))
+    assert S._read_hook_payload() == (None, None)
+
+
+def test_read_hook_payload_garbage_json_yields_none_none(monkeypatch):
+    import io
+
+    monkeypatch.setattr(S.sys, "stdin", io.StringIO("{not json"))
+    assert S._read_hook_payload() == (None, None)
+
+
+def test_read_hook_payload_tty_stdin_is_not_read(monkeypatch):
+    class FakeTty:
+        def isatty(self):
+            return True
+
+        def read(self):
+            raise AssertionError("must not read from a tty stdin")
+
+    monkeypatch.setattr(S.sys, "stdin", FakeTty())
+    assert S._read_hook_payload() == (None, None)
