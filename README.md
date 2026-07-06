@@ -57,3 +57,10 @@ an implicit SessionStart auto-provision. Reasoning:
 Until `/hippo:bootstrap` has run, recall works immediately in BM25-only mode (rank-bm25
 is a normal pinned dependency, not gated on bootstrap) — dense recall degrades
 gracefully rather than blocking or erroring.
+
+## License
+
+MIT — see [LICENSE](LICENSE). A copy ships inside the plugin bundle
+([plugin/LICENSE](plugin/LICENSE)) so installs carry the license text too. The engine code
+extracted from the ic-memobot/Memosa agent-memory tooling was written by this repo's author
+and is relicensed here under the same MIT terms; no third-party code was ported with it.
