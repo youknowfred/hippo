@@ -512,3 +512,115 @@ def test_heal_empty_baselines_noop_without_head(repo, memory_dir):
         '---\nname: m\ncited_paths: []\nsource_commit: ""\n---\nbody\n',
     )
     assert P.heal_empty_baselines(memory_dir, repo) == []  # no commits yet -> no HEAD -> no-op
+
+
+# --------------------------------------------------------------------------- #
+# SHP-2 — resolve_dirs() walks UP for a monorepo-subdir launch (OQ-1: nested wins).
+#
+# ``claude`` started from ``packages/web`` sets CLAUDE_PROJECT_DIR to the subdir. Before
+# this fix, resolve_dirs() looked ONLY there — a subdir with no memory dir of its own
+# silently no-op'd the whole plugin (recall, every producer, new_memory's target, the
+# floor symlink) even though a perfectly good corpus sat at the repo root. These tests
+# pin CLAUDE_PROJECT_DIR to a subdir and assert the walk-up resolves the right corpus.
+# --------------------------------------------------------------------------- #
+def _init_repo(path: str) -> None:
+    import subprocess
+
+    os.makedirs(path, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.email", "tester@example.com"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "tester"], cwd=path, check=True)
+
+
+def test_resolve_dirs_nested_corpus_wins_over_root(tmp_path, monkeypatch):
+    repo = str(tmp_path / "repo")
+    _init_repo(repo)
+    subdir = os.path.join(repo, "packages", "web")
+    os.makedirs(subdir)
+
+    root_md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(root_md)
+    nested_md = os.path.join(subdir, ".claude", "memory")
+    os.makedirs(nested_md)
+
+    monkeypatch.delenv("MEMOBOT_MEMORY_DIR", raising=False)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", subdir)
+
+    memory_dir, repo_root = P.resolve_dirs()
+    assert memory_dir == nested_md  # nested (per-package) corpus wins even though root exists
+    assert os.path.abspath(repo_root) == os.path.abspath(repo)
+
+
+def test_resolve_dirs_falls_through_to_root_when_subdir_has_no_corpus(tmp_path, monkeypatch):
+    repo = str(tmp_path / "repo")
+    _init_repo(repo)
+    subdir = os.path.join(repo, "packages", "web")
+    os.makedirs(subdir)
+
+    root_md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(root_md)
+    # No nested .claude/memory under subdir.
+
+    monkeypatch.delenv("MEMOBOT_MEMORY_DIR", raising=False)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", subdir)
+
+    memory_dir, repo_root = P.resolve_dirs()
+    assert memory_dir == root_md  # falls through to the repo-root corpus
+    assert os.path.abspath(repo_root) == os.path.abspath(repo)
+
+
+def test_resolve_dirs_falls_back_to_project_dir_when_no_corpus_anywhere(tmp_path, monkeypatch):
+    repo = str(tmp_path / "repo")
+    _init_repo(repo)
+    subdir = os.path.join(repo, "packages", "web")
+    os.makedirs(subdir)
+    # Neither the subdir NOR the repo root has a .claude/memory anywhere.
+
+    monkeypatch.delenv("MEMOBOT_MEMORY_DIR", raising=False)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", subdir)
+
+    memory_dir, repo_root = P.resolve_dirs()
+    # Today's behavior preserved: /hippo:init still has somewhere to seed.
+    assert memory_dir == os.path.join(subdir, ".claude", "memory")
+    assert os.path.abspath(repo_root) == os.path.abspath(repo)
+
+
+def test_resolve_dirs_explicit_memobot_memory_dir_bypasses_walk_up(tmp_path, monkeypatch):
+    repo = str(tmp_path / "repo")
+    _init_repo(repo)
+    subdir = os.path.join(repo, "packages", "web")
+    os.makedirs(subdir)
+    root_md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(root_md)
+    explicit_md = str(tmp_path / "somewhere-else")
+    os.makedirs(explicit_md)
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", subdir)
+    monkeypatch.setenv("MEMOBOT_MEMORY_DIR", explicit_md)
+
+    memory_dir, repo_root = P.resolve_dirs()
+    assert memory_dir == explicit_md  # explicit override always wins, no walk-up
+
+
+def test_walk_up_for_memory_dir_never_ascends_past_home(tmp_path, monkeypatch):
+    fake_home = str(tmp_path / "home")
+    os.makedirs(fake_home)
+    deep = os.path.join(fake_home, "a", "b", "c")
+    os.makedirs(deep)
+    # No .claude/memory anywhere from `deep` up through `fake_home`, and no git repo at
+    # all -- the walk must stop AT fake_home, never wandering out to the real filesystem.
+    monkeypatch.setattr(os.path, "expanduser", lambda p: fake_home if p == "~" else p)
+    memory_dir, reason = P.walk_up_for_memory_dir(deep)
+    assert memory_dir == ""
+    assert reason == "none-found"
+
+
+def test_walk_up_for_memory_dir_reports_nested_reason():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        nested = os.path.join(d, ".claude", "memory")
+        os.makedirs(nested)
+        memory_dir, reason = P.walk_up_for_memory_dir(d)
+        assert memory_dir == nested
+        assert reason == "nested"

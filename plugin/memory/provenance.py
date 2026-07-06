@@ -65,14 +65,68 @@ def git_root(start: Optional[str] = None) -> Optional[str]:
     return out or None
 
 
+def _candidate_memory_dir(d: str) -> str:
+    return os.path.join(d, ".claude", "memory")
+
+
+def walk_up_for_memory_dir(start: str) -> Tuple[str, str]:
+    """Find the nearest existing ``.claude/memory`` at or above ``start``.
+
+    Returns ``(memory_dir, reason)``. ``reason`` is one of ``"nested"`` (found at
+    ``start`` itself — the per-package corpus that wins per OQ-1), ``"root-fallthrough"``
+    (found by ascending past ``start``), or ``"none-found"`` (no existing corpus anywhere
+    in the walk; caller falls back to today's behavior). The walk stops (inclusive) at
+    the git toplevel when resolvable, and NEVER ascends past ``$HOME`` — an outer safety
+    bound so a repo with an unusual structure, or no git repo at all, can't walk
+    arbitrarily far up the filesystem.
+    """
+    start = os.path.abspath(start)
+    nested = _candidate_memory_dir(start)
+    if os.path.isdir(nested):
+        return nested, "nested"
+
+    toplevel = git_root(start)
+    home = os.path.expanduser("~")
+    cur = start
+    while True:
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break  # filesystem root
+        cur = parent
+        cand = _candidate_memory_dir(cur)
+        if os.path.isdir(cand):
+            return cand, "root-fallthrough"
+        if toplevel and os.path.abspath(cur) == os.path.abspath(toplevel):
+            break  # stop AT (inclusive) the git toplevel
+        if os.path.abspath(cur) == os.path.abspath(home):
+            break  # never ascend past $HOME
+    return "", "none-found"
+
+
 def resolve_dirs() -> Tuple[str, str]:
     """Return ``(memory_dir, repo_root)``.
 
-    Honors ``MEMOBOT_MEMORY_DIR`` (used by hermetic tests) and ``CLAUDE_PROJECT_DIR``;
-    otherwise derives the repo root from git and points at ``<root>/.claude/memory``.
+    Honors ``MEMOBOT_MEMORY_DIR`` (used by hermetic tests) explicitly — that path is
+    used as-is, no walk-up. Otherwise (OQ-1, SHP-2): a per-package corpus at
+    ``<CLAUDE_PROJECT_DIR-or-cwd>/.claude/memory`` wins when present (nested wins);
+    else ascend toward the git toplevel looking for a corpus (root-fallthrough) — a
+    subdirectory launch (``claude`` started from ``packages/web`` in a monorepo) must
+    still recall the repo-root corpus instead of silently no-op'ing. If no corpus
+    exists anywhere in the walk, fall back to today's behavior (the raw
+    ``CLAUDE_PROJECT_DIR``-derived path) so ``/hippo:init`` still has somewhere to seed.
+    ``repo_root`` reuses ``git_root()`` (the actual toplevel) when resolvable — more
+    correct for git-command purposes than a subdir ``CLAUDE_PROJECT_DIR``.
     """
-    repo_root = os.environ.get("CLAUDE_PROJECT_DIR") or git_root() or os.getcwd()
-    memory_dir = os.environ.get("MEMOBOT_MEMORY_DIR") or os.path.join(repo_root, ".claude", "memory")
+    start = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    repo_root = git_root(start) or start
+
+    explicit = os.environ.get("MEMOBOT_MEMORY_DIR")
+    if explicit:
+        return explicit, repo_root
+
+    memory_dir, _reason = walk_up_for_memory_dir(start)
+    if not memory_dir:
+        memory_dir = _candidate_memory_dir(start)
     return memory_dir, repo_root
 
 
