@@ -116,12 +116,15 @@ def write_memory(
     - Refuses to overwrite an existing ``<name>.md`` (``created=False``, ``error`` set).
     - Backfills provenance + refreshes the recall index (best-effort; never fatal).
     - Adds a MEMORY.md floor pointer ONLY for ``user`` / ``feedback``.
+    - Scans the rendered text for secret-looking patterns (SEC-2) and, on a match, populates
+      ``warnings`` — WARN-not-block: the write still happens; the agent decides what to do.
     """
     result = {
         "created": False,
         "path": None,
         "floor_pointer_added": False,
         "indexed": False,
+        "warnings": [],
         "error": None,
     }
     if type not in VALID_TYPES:
@@ -140,11 +143,12 @@ def write_memory(
     repo_root = repo_root or repo
 
     path = os.path.join(memory_dir, f"{name}.md")
+    rendered = _render_frontmatter(name, description, type, body)
     try:
         os.makedirs(memory_dir, exist_ok=True)
         # "x" = exclusive create: atomic no-overwrite (no TOCTOU window between check + write).
         with open(path, "x", encoding="utf-8") as fh:
-            fh.write(_render_frontmatter(name, description, type, body))
+            fh.write(rendered)
         result["created"] = True
         result["path"] = path
     except FileExistsError:
@@ -153,6 +157,17 @@ def write_memory(
     except Exception as exc:
         result["error"] = f"write failed: {exc}"
         return result
+
+    # Secret-pattern lint (SEC-2): scan the RENDERED text (frontmatter + body) for
+    # secret-looking content. This WARNS, it does NOT block — the write already happened and
+    # is kept; the warnings ride out on the result dict so the agent decides what to do next
+    # (report-then-act, agent-gated). Never fatal — a scan failure just yields no warnings.
+    try:
+        from .secrets import scan_with_remediation
+
+        result["warnings"] = scan_with_remediation(rendered)
+    except Exception:
+        pass
 
     # 1. Provenance backfill (best-effort — a new file with no code citations is fine).
     try:
@@ -209,6 +224,8 @@ def main(argv=None) -> int:
     print(f"created : {res['path']}")
     print(f"indexed : {res['indexed']}")
     print(f"floor pointer added : {res['floor_pointer_added']} (only user/feedback get one)")
+    for warning in res["warnings"]:
+        print(f"warning : {warning}")
     if args.type in ("project", "reference"):
         print("note    : project/reference memories are recalled on demand — NOT added to the floor.")
     return 0

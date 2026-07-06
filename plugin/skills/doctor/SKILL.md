@@ -112,6 +112,22 @@ downstream errors from a root cause already identified)
    Report each file BY NAME with "edit this file, then the next SessionStart re-indexes it
    automatically"; don't edit it yourself — its content is facts about the user only they
    can supply.
+6b. **Secret-pattern scan (SEC-2).** Memories are committed and recalled forever — a credential
+   pasted into a body lives in shared git history and re-injects on every recall. Sweep every
+   memory file for secret-looking content using the SAME detector `new_memory` warns with at
+   write time (one pattern set, no duplicate regexes):
+   ```bash
+   "$PY" -c \
+     "import json; from memory.secrets import scan_corpus; \
+      print(json.dumps(scan_corpus('.claude/memory')))"
+   ```
+   Each returned entry is `{"file", "warnings"}` (the KIND of match only — the scan NEVER
+   echoes the matched secret text). An empty list means the corpus is clean — say so with a
+   `✔`. For a non-empty result, report each flagged file BY NAME with its warning kind(s), then
+   print the remediation ONCE for the whole run: `if any of these is a real secret, remove it,
+   rotate the credential, and scrub it from git history before committing`. This is agent-gated,
+   not a fix — doctor names the files; a human reviews and triggers any purge (no bulk sweep).
+
 7. **Index freshness.** Does `.claude/.memory-index/manifest.json` exist, and does its recorded
    memory count match the actual `.claude/memory/*.md` file count? A mismatch means the index is
    stale (a memory was added/removed since the last build) — recommend
