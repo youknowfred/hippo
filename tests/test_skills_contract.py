@@ -51,3 +51,34 @@ def test_guard_appears_before_any_plugin_data_expansion():
                 f"offset {m.start()} before the ONB-7 guard at {guard_pos}"
             )
             break  # only the first expansion matters
+
+
+# --------------------------------------------------------------------------- #
+# DOC-3: frontmatter description budget + shape
+# --------------------------------------------------------------------------- #
+_DESCRIPTION_BUDGET = 500  # chars — well under the 1024 truncation/validation limit
+
+
+def _description_of(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    m = re.search(r"^description: (.*)$", text, re.M)
+    assert m, f"{os.path.relpath(path)}: no frontmatter description"
+    return m.group(1)
+
+
+def test_skill_descriptions_fit_the_budget():
+    for path in _ALL_SKILLS:
+        desc = _description_of(path)
+        assert len(desc) <= _DESCRIPTION_BUDGET, (
+            f"{os.path.relpath(path)}: description is {len(desc)} chars "
+            f"(budget {_DESCRIPTION_BUDGET}) — trigger phrases get buried past the "
+            "truncation point; move flags/caveats to the body"
+        )
+
+
+def test_skill_descriptions_carry_their_trigger_phrase():
+    """Consistency: every description names its own /hippo:<name> invocation."""
+    for path in _ALL_SKILLS:
+        name = os.path.basename(os.path.dirname(path))
+        assert f"/hippo:{name}" in _description_of(path), os.path.relpath(path)
