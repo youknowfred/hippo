@@ -170,8 +170,49 @@ def build_context(memory_dir: str, repo_root: str, max_chars: int = _MAX_CONTEXT
     return ctx
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def _read_hook_payload() -> Tuple[Optional[str], Optional[str]]:
+    """Best-effort ``(source, session_id)`` from the SessionStart hook's stdin JSON.
+
+    ``source`` is one of ``startup``/``resume``/``clear``/``compact`` (COR-6); ``session_id``
+    is the harness's own id for THIS session. Never raises: any failure (no stdin, a tty,
+    unparseable JSON, a non-dict payload) yields ``(None, None)`` — the caller then falls back
+    to today's "always mint/reuse a file-based token" behavior.
+    """
     try:
+        if sys.stdin is None or sys.stdin.isatty():
+            return None, None
+        raw = sys.stdin.read()
+        if not raw or not raw.strip():
+            return None, None
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            return None, None
+        source = payload.get("source") or None
+        session_id = payload.get("session_id") or None
+        return source, session_id
+    except Exception:
+        return None, None
+
+
+def main(
+    argv: Optional[List[str]] = None,
+    *,
+    source: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> int:
+    """SessionStart entry point.
+
+    ``source``/``session_id`` are normally sourced from the hook's stdin JSON payload (see
+    ``_read_hook_payload``) — the explicit keyword args exist so tests (and any future
+    non-hook caller) can drive the source/session-id-dependent behavior directly without
+    piping JSON through stdin. When given explicitly they WIN over whatever stdin carries.
+    """
+    try:
+        stdin_source, stdin_session_id = _read_hook_payload()
+        if source is None:
+            source = stdin_source
+        if session_id is None:
+            session_id = stdin_session_id
         memory_dir, repo_root = resolve_dirs()
         # Heal residual EMPTY staleness baselines (source_commit: "") to HEAD once
         # resolvable — an empty baseline leaves a memory invisible to staleness forever
@@ -193,14 +234,26 @@ def main(argv: Optional[List[str]] = None) -> int:
         except Exception:
             pass
         # Open a NEW telemetry session so the recall ledger can count distinct sessions
-        # (the curation-soak signal). Side effect, not a producer; never raises. Guarded on a
-        # real corpus dir so a bogus/nonexistent memory_dir never creates a stray ledger dir
-        # (mirrors refresh_index, which no-ops on a missing corpus).
+        # (the curation-soak signal) — but ONLY on a genuinely new conversation (source
+        # "startup"/"clear"). "resume"/"compact" (or an unknown/missing source, e.g. no
+        # hook payload at all) re-enter or continue an EXISTING conversation and must not
+        # inflate the distinct-session count (COR-6) — ensure some id exists instead of
+        # rotating. When the harness hands us a concrete session_id, telemetry keys on THAT
+        # id directly (see telemetry.current_session_id) — the file-based token below is a
+        # fallback for callers without one, so it's skipped entirely in that case (nothing to
+        # mint/rotate/reuse; a shared mutable file is exactly what a harness id replaces).
+        # Side effect, not a producer; never raises. Guarded on a real corpus dir so a
+        # bogus/nonexistent memory_dir never creates a stray ledger dir (mirrors
+        # refresh_index, which no-ops on a missing corpus).
         try:
-            from .telemetry import default_telemetry_dir, mark_session
+            from .telemetry import current_session_id, default_telemetry_dir, mark_session
 
-            if os.path.isdir(memory_dir):
-                mark_session(default_telemetry_dir(memory_dir))
+            if os.path.isdir(memory_dir) and not session_id:
+                td = default_telemetry_dir(memory_dir)
+                if source in ("startup", "clear"):
+                    mark_session(td)
+                else:
+                    current_session_id(td)
         except Exception:
             pass
         ctx = build_context(memory_dir, repo_root)

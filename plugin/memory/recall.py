@@ -462,6 +462,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--index-dir", default=None)
     parser.add_argument("--repo-root", default=None)
+    parser.add_argument(
+        "--session-id",
+        default=None,
+        help="harness-provided session id (COR-6) — keys telemetry directly instead of the "
+        "shared file-based token, fixing concurrent-session attribution.",
+    )
     args = parser.parse_args(argv)
 
     raw_query = " ".join(args.query).strip()
@@ -522,12 +528,20 @@ def main(argv: Optional[List[str]] = None) -> int:
             from .telemetry import default_telemetry_dir, log_episode, log_recall_event
 
             td = default_telemetry_dir(memory_dir)
-            log_recall_event(results, query=raw_query, k=args.k, latency_ms=latency_ms, telemetry_dir=td)
+            log_recall_event(
+                results,
+                query=raw_query,
+                k=args.k,
+                latency_ms=latency_ms,
+                telemetry_dir=td,
+                session_id=args.session_id or None,
+            )
             log_episode(
                 [r.get("name") for r in results if r.get("name")],
                 query=raw_query,
                 repo_root=repo_root,
                 telemetry_dir=td,
+                session_id=args.session_id or None,
             )
         except Exception:
             pass

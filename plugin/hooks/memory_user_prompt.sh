@@ -48,7 +48,15 @@ except Exception:
 # Empty / unparseable prompt → nothing to recall; say nothing, exit clean.
 [ -z "${QUERY//[[:space:]]/}" ] && exit 0
 
-CTX="$("$PY" -m memory.recall "$QUERY" 2>/dev/null || true)"
+# COR-6: the harness's own session_id keys telemetry directly (see memory.telemetry) instead
+# of the shared, mutable session-token file — fixes concurrent-session misattribution.
+SESSION_ID="$(printf '%s' "$PAYLOAD" | "$PY" -c 'import sys,json
+try:
+    print((json.load(sys.stdin) or {}).get("session_id","") or "")
+except Exception:
+    pass' 2>/dev/null || true)"
+
+CTX="$("$PY" -m memory.recall "$QUERY" --session-id "$SESSION_ID" 2>/dev/null || true)"
 [ -z "$CTX" ] && exit 0
 
 if command -v jq >/dev/null 2>&1; then

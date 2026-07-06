@@ -15,6 +15,13 @@
 # Wired as a SessionStart hook via plugin/hooks/hooks.json.
 set -uo pipefail
 
+# SessionStart delivers the event as JSON on stdin — ``source`` (startup/resume/clear/compact)
+# and ``session_id`` (COR-6: read by memory.session_start so resume/compact don't rotate the
+# telemetry session, and so concurrent sessions key telemetry by the harness's own id instead
+# of a shared mutable file). Captured here (before the nudge branch's own reads) and piped to
+# the python dispatcher below; parsing happens in Python, mirroring memory_user_prompt.sh.
+PAYLOAD="$(cat 2>/dev/null || true)"
+
 # Operate against the CONSUMING project's root, not the plugin's own directory —
 # .claude/memory/ lives in the project, not in the plugin bundle.
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" 2>/dev/null || exit 0
@@ -63,5 +70,5 @@ fi
 export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-${CLAUDE_PLUGIN_DATA:+$CLAUDE_PLUGIN_DATA/fastembed}}"
 export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-$HOME/Library/Caches/hippo-memory/fastembed}"
 
-"$PY" -m memory.session_start 2>/dev/null || true
+printf '%s' "$PAYLOAD" | "$PY" -m memory.session_start 2>/dev/null || true
 exit 0

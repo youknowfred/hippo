@@ -243,3 +243,117 @@ def test_unresolvable_baseline_producer_is_registered():
     assert labels.count("unresolvable_baseline") == 1
     fns = [fn for label, fn in S.PRODUCERS if label == "unresolvable_baseline"]
     assert fns == [S.unresolvable_baseline_producer]
+
+
+# --------------------------------------------------------------------------- #
+# COR-6: source-gated session rotation + harness-keyed telemetry sessions
+# --------------------------------------------------------------------------- #
+def _session_start_env(tmp_path, monkeypatch):
+    import memory.telemetry as T
+
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / ".claude" / "memory")
+    os.makedirs(md)
+    td = str(tmp_path / ".claude" / ".memory-telemetry")
+    monkeypatch.delenv("MEMOBOT_TELEMETRY_DIR", raising=False)
+    monkeypatch.setattr(S, "resolve_dirs", lambda: (md, str(tmp_path)))
+    monkeypatch.setattr(S, "build_context", lambda *a, **k: "")
+    return md, td, T
+
+
+def test_resume_source_does_not_rotate_session_token(tmp_path, monkeypatch):
+    md, td, T = _session_start_env(tmp_path, monkeypatch)
+    assert S.main(source="startup") == 0
+    before = T.current_session_id(td)
+    assert S.main(source="resume") == 0
+    after = T.current_session_id(td)
+    assert after == before
+
+
+def test_compact_source_does_not_rotate_session_token(tmp_path, monkeypatch):
+    md, td, T = _session_start_env(tmp_path, monkeypatch)
+    assert S.main(source="startup") == 0
+    before = T.current_session_id(td)
+    assert S.main(source="compact") == 0
+    assert T.current_session_id(td) == before
+
+
+def test_startup_source_rotates_session_token(tmp_path, monkeypatch):
+    md, td, T = _session_start_env(tmp_path, monkeypatch)
+    assert S.main(source="startup") == 0
+    before = T.current_session_id(td)
+    assert S.main(source="startup") == 0
+    after = T.current_session_id(td)
+    assert after != before
+
+
+def test_clear_source_rotates_session_token(tmp_path, monkeypatch):
+    md, td, T = _session_start_env(tmp_path, monkeypatch)
+    assert S.main(source="startup") == 0
+    before = T.current_session_id(td)
+    assert S.main(source="clear") == 0
+    after = T.current_session_id(td)
+    assert after != before
+
+
+def test_missing_source_does_not_rotate_session_token(tmp_path, monkeypatch):
+    """No hook payload at all (source=None) must not rotate — mirrors resume/compact."""
+    md, td, T = _session_start_env(tmp_path, monkeypatch)
+    assert S.main(source="startup") == 0
+    before = T.current_session_id(td)
+    assert S.main() == 0
+    assert T.current_session_id(td) == before
+
+
+def test_harness_session_id_bypasses_file_token_entirely(tmp_path, monkeypatch):
+    """When the harness hands us a session_id, the file-based token is never touched."""
+    md, td, T = _session_start_env(tmp_path, monkeypatch)
+    assert S.main(source="startup", session_id="harness-sid-1") == 0
+    assert not os.path.exists(T._session_path(td))
+
+
+def test_explicit_source_wins_over_stdin_payload(tmp_path, monkeypatch):
+    """Explicit kwargs override whatever _read_hook_payload would have parsed from stdin."""
+    monkeypatch.setattr(S, "_read_hook_payload", lambda: ("resume", None))
+    md, td, T = _session_start_env(tmp_path, monkeypatch)
+    assert S.main(source="startup") == 0
+    before = T.current_session_id(td)
+    # stdin says "resume" (would NOT rotate) but the explicit source="startup" wins,
+    # so a second explicit-startup call still rotates.
+    assert S.main(source="startup") == 0
+    assert T.current_session_id(td) != before
+
+
+def test_read_hook_payload_parses_source_and_session_id(monkeypatch):
+    import io
+
+    monkeypatch.setattr(
+        S.sys, "stdin", io.StringIO('{"source": "resume", "session_id": "abc123"}')
+    )
+    assert S._read_hook_payload() == ("resume", "abc123")
+
+
+def test_read_hook_payload_empty_stdin_yields_none_none(monkeypatch):
+    import io
+
+    monkeypatch.setattr(S.sys, "stdin", io.StringIO(""))
+    assert S._read_hook_payload() == (None, None)
+
+
+def test_read_hook_payload_garbage_json_yields_none_none(monkeypatch):
+    import io
+
+    monkeypatch.setattr(S.sys, "stdin", io.StringIO("{not json"))
+    assert S._read_hook_payload() == (None, None)
+
+
+def test_read_hook_payload_tty_stdin_is_not_read(monkeypatch):
+    class FakeTty:
+        def isatty(self):
+            return True
+
+        def read(self):
+            raise AssertionError("must not read from a tty stdin")
+
+    monkeypatch.setattr(S.sys, "stdin", FakeTty())
+    assert S._read_hook_payload() == (None, None)

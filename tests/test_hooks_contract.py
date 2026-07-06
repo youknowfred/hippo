@@ -357,3 +357,115 @@ class TestCorpusLessHygiene:
         )
         _assert_contract(proc, "SessionStart")
         assert _tree(project) == set()
+
+
+# --------------------------------------------------------------------------- #
+# COR-6: SessionStart source-awareness + harness-keyed telemetry sessions, exercised
+# through the REAL bash hook script (not just memory.session_start directly).
+# --------------------------------------------------------------------------- #
+def _session_token(project: str) -> str:
+    path = os.path.join(project, ".claude", ".memory-telemetry", "session")
+    with open(path, "r", encoding="utf-8") as fh:
+        return fh.read().strip()
+
+
+class TestSessionStartSourceAwareness:
+    def test_compaction_mid_session_does_not_rotate_token(self, tmp_path):
+        stdin_startup = json.dumps({"hook_event_name": "SessionStart", "source": "startup"})
+        proc, project, _ = _run_hook(
+            _SESSION_START_HOOK, stdin_startup, tmp_path, venv_python=True, sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        before = _session_token(project)
+
+        stdin_compact = json.dumps({"hook_event_name": "SessionStart", "source": "compact"})
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, stdin_compact, tmp_path, venv_python=True, sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        after = _session_token(project)
+        assert after == before, "compaction mid-session must not increment distinct-session count"
+
+    def test_resume_does_not_rotate_token(self, tmp_path):
+        stdin_startup = json.dumps({"hook_event_name": "SessionStart", "source": "startup"})
+        proc, project, _ = _run_hook(
+            _SESSION_START_HOOK, stdin_startup, tmp_path, venv_python=True, sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        before = _session_token(project)
+
+        stdin_resume = json.dumps({"hook_event_name": "SessionStart", "source": "resume"})
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, stdin_resume, tmp_path, venv_python=True, sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        assert _session_token(project) == before
+
+    def test_clear_rotates_token(self, tmp_path):
+        stdin_startup = json.dumps({"hook_event_name": "SessionStart", "source": "startup"})
+        proc, project, _ = _run_hook(
+            _SESSION_START_HOOK, stdin_startup, tmp_path, venv_python=True, sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        before = _session_token(project)
+
+        stdin_clear = json.dumps({"hook_event_name": "SessionStart", "source": "clear"})
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, stdin_clear, tmp_path, venv_python=True, sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        assert _session_token(project) != before
+
+    def test_harness_session_id_never_touches_file_token(self, tmp_path):
+        stdin = json.dumps(
+            {"hook_event_name": "SessionStart", "source": "startup", "session_id": "harness-1"}
+        )
+        proc, project, _ = _run_hook(
+            _SESSION_START_HOOK, stdin, tmp_path, venv_python=True, sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        assert not os.path.exists(
+            os.path.join(project, ".claude", ".memory-telemetry", "session")
+        )
+
+
+class TestConcurrentSessionAttribution:
+    def test_two_concurrent_harness_sessions_log_distinct_stable_ids(self, tmp_path):
+        stdin = json.dumps(
+            {"prompt": "how is the zebra service deployed with canary rollout",
+             "session_id": "session-A"}
+        )
+        proc, project, _ = _run_hook(_USER_PROMPT_HOOK, stdin, tmp_path, venv_python=True)
+        _assert_contract(proc, "UserPromptSubmit")
+
+        stdin_b = json.dumps(
+            {"prompt": "how is the zebra service deployed with canary rollout",
+             "session_id": "session-B"}
+        )
+        env_data_dir = os.path.join(str(tmp_path), "plugin-data")
+        proc_b = subprocess.run(
+            ["/bin/bash", _USER_PROMPT_HOOK],
+            input=stdin_b,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env={
+                "PATH": _make_path_dir(tmp_path, python3=True, jq=False),
+                "HOME": str(tmp_path / "home"),
+                "CLAUDE_PROJECT_DIR": project,
+                "CLAUDE_PLUGIN_ROOT": _PLUGIN_ROOT,
+                "CLAUDE_PLUGIN_DATA": env_data_dir,
+                "MEMOBOT_DISABLE_DENSE": "1",
+            },
+        )
+        _assert_contract(proc_b, "UserPromptSubmit")
+
+        ledger = os.path.join(project, ".claude", ".memory-telemetry", "recall_events.jsonl")
+        with open(ledger, "r", encoding="utf-8") as fh:
+            events = [json.loads(line) for line in fh if line.strip()]
+        session_ids = [e.get("session_id") for e in events]
+        assert "session-A" in session_ids
+        assert "session-B" in session_ids
+        assert not os.path.exists(
+            os.path.join(project, ".claude", ".memory-telemetry", "session")
+        )
