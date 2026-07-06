@@ -16,9 +16,13 @@ symlink Claude Code's native memory system reads from.
   ```
 - If `.claude/memory/MEMORY.md` already exists, **STOP** and report it — do not touch an
   existing corpus. Suggest `/hippo:doctor` instead if the user wants a health check.
-- Confirm `${CLAUDE_PROJECT_DIR}` (or `git rev-parse --show-toplevel`) resolves to a real git
-  repo. `/hippo:init` outside a git repo has nowhere durable to seed — halt with a clear
-  message rather than writing into an ungit'd directory that a future `git init` won't pick up.
+- Check `${CLAUDE_PROJECT_DIR}` (or `git rev-parse --show-toplevel`) resolves to a real git
+  repo (`git rev-parse --show-toplevel` exits non-zero when it isn't). Do **NOT** halt when it
+  isn't one — seed the corpus anyway (everything in steps 1-4 below works without git: the
+  skeleton MEMORY.md, starter packs, index build, and cross-machine symlink). Skip step 5
+  (the `.gitignore` patch — there's no git to ignore anything from) and replace step 6's
+  commit nudge with the degradation notice (SHP-4): git init later still finds these files on
+  disk and `git add`s them fine, so there was never a real reason to refuse.
 
 ## What this does, in order
 
@@ -47,28 +51,36 @@ symlink Claude Code's native memory system reads from.
    do it later).
 3. **Create the cross-machine symlink**:
    ```bash
-   REPO_ROOT="$(git rev-parse --show-toplevel)"
+   REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
    ENCODED="-$(echo "$REPO_ROOT" | tr '/' '-' | sed 's/^-//')"
    SYMLINK_DIR="$HOME/.claude/projects/${ENCODED}"
    mkdir -p "$SYMLINK_DIR"
    [ -L "$SYMLINK_DIR/memory" ] || ln -s "$REPO_ROOT/.claude/memory" "$SYMLINK_DIR/memory"
    ```
-   If the symlink already exists and points somewhere ELSE, stop and report the conflict rather
-   than silently overwriting it — a pre-existing symlink to a different target is a sign of a
-   prior manual setup that shouldn't be clobbered.
+   Non-git dir: `REPO_ROOT` falls back to the current directory (`pwd`) — there is no git
+   toplevel to ask for. If the symlink already exists and points somewhere ELSE, stop and
+   report the conflict rather than silently overwriting it — a pre-existing symlink to a
+   different target is a sign of a prior manual setup that shouldn't be clobbered.
 4. **Build the index**: `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python"
    -m memory.build_index --memory-dir .claude/memory --index-dir .claude/.memory-index` (fall back
    to bare `python3` if bootstrap hasn't run yet — BM25-only index still builds and works).
-5. **Patch `.gitignore`**: append `.claude/.memory-index/` and `.claude/.memory-telemetry/` if not
-   already present (derived, rebuildable — never commit them). Do NOT create `.gitignore` from
-   scratch if the project doesn't have one without asking first — a repo with zero `.gitignore`
-   may be intentional (e.g. a throwaway test repo).
-6. **Nudge, don't commit.** Print the exact `git add .claude/memory .gitignore && git commit -m
-   "seed agent memory"` command and STOP there. Never auto-commit the user's repo — memory
-   corpus content is exactly the kind of thing a user should look at before it enters their
-   history. If `user_role.md` still contains `<FILL-ME` at this point, END the report with an
-   explicit warning: "⚠ user_role.md is still the unfilled template — recall will index its
-   placeholder text until you edit it (/hippo:doctor flags this too)."
+5. **Patch `.gitignore`** — SKIP entirely when not a git repo (there's nothing for git to
+   ignore yet; a future `git init` + this same nudge in step 6, once repeated after init, is
+   how it gets patched). In a git repo, append `.claude/.memory-index/` and
+   `.claude/.memory-telemetry/` if not already present (derived, rebuildable — never commit
+   them). Do NOT create `.gitignore` from scratch if the project doesn't have one without
+   asking first — a repo with zero `.gitignore` may be intentional (e.g. a throwaway test repo).
+6. **Nudge, don't commit — or, in a non-git dir, name the degradation.** In a git repo: print
+   the exact `git add .claude/memory .gitignore && git commit -m "seed agent memory"` command
+   and STOP there. Never auto-commit the user's repo — memory corpus content is exactly the
+   kind of thing a user should look at before it enters their history. In a NON-git dir
+   (SHP-4), skip that nudge (there's no git to commit to) and print this notice instead: "Not
+   a git repository — hippo is running in DEGRADED mode: staleness tracking, provenance
+   backfill, and archive's git-mv path are all INACTIVE until you `git init` and commit.
+   Recall, indexing, links, and floor loading all work normally." If `user_role.md` still
+   contains `<FILL-ME` at this point (either path), END the report with an explicit warning:
+   "⚠ user_role.md is still the unfilled template — recall will index its placeholder text
+   until you edit it (/hippo:doctor flags this too)."
 
 ## Hard rules
 

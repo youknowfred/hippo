@@ -68,6 +68,21 @@ downstream errors from a root cause already identified)
    `memory@hippo`, that install predates the 0.2.0 rename to `hippo` and receives no updates —
    recommend `/plugin uninstall memory@hippo` followed by `/plugin install hippo@hippo`
    (a clean break; there is no alias shim).
+10. **Non-git degraded mode (SHP-4).** Run `git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse
+    --show-toplevel` (or reuse `memory.provenance.git_root()`). A non-zero exit / `None` means
+    this project has no git repo — report it as a LABELED DEGRADATION, not an error, and name
+    exactly which subsystems are inactive and why:
+    ```
+    ⚠ not a git repository — running in DEGRADED mode:
+      - staleness tracking: INACTIVE (no commit history to diff cited files against)
+      - provenance/backfill: INACTIVE (no commits, so source_commit has no baseline to record)
+      - archive: DEGRADED, not inactive — falls back to os.rename instead of git mv (COR-5),
+        so archived memories are still recoverable, just not via git history
+      recall, indexing, links, and floor loading are all unaffected — run `git init` and
+      commit to restore the rest.
+    ```
+    When it IS a git repo, report `✔ git repo detected — staleness, provenance, and archive's
+    git-mv path are all active.` instead; don't print the degraded block on a healthy repo.
 
 ## Report format
 
