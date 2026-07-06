@@ -34,42 +34,70 @@ _MAX_CONTEXT_CHARS = 9000
 _MAX_ITEMS_PER_PRODUCER = 20
 
 
+def bootstrap_state(
+    plugin_data: Optional[str] = None, plugin_root: Optional[str] = None
+) -> str:
+    """Canonical sentinel-vs-requirements.txt state (COR-11's sha256 compare, ONE definition).
+
+    Returns one of:
+      - ``"no_data_dir"`` — ``CLAUDE_PLUGIN_DATA`` unset (can't locate the sentinel/venv).
+      - ``"not_bootstrapped"`` — no ``.bootstrap-sentinel`` (bootstrap never ran).
+      - ``"no_requirements"`` — sentinel present but ``requirements.txt`` unreadable.
+      - ``"stale"`` — sentinel's recorded ``requirements_hash`` != current requirements.txt
+        (a plugin update bumped deps; the venv still runs the OLD set, new imports degrade
+        silently).
+      - ``"current"`` — bootstrapped and deps match, OR the sentinel recorded no hash to compare.
+
+    Both the SessionStart re-bootstrap nudge (``stale_venv_producer``) and ``doctor.check_bootstrap``
+    read THIS one function rather than re-deriving the hash compare — DOC-4's one-implementation
+    rule. Never raises: any unexpected error degrades to ``"current"`` (fail toward not-nagging;
+    the actual venv-import check catches a truly broken venv). ``plugin_data``/``plugin_root``
+    override the env for hermetic tests.
+    """
+    try:
+        import hashlib
+
+        data_dir = plugin_data if plugin_data is not None else (os.environ.get("CLAUDE_PLUGIN_DATA") or "")
+        root = plugin_root if plugin_root is not None else (
+            os.environ.get("CLAUDE_PLUGIN_ROOT")
+            or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        )
+        if not data_dir:
+            return "no_data_dir"
+        sentinel_path = os.path.join(data_dir, ".bootstrap-sentinel")
+        if not os.path.isfile(sentinel_path):
+            return "not_bootstrapped"
+        req_path = os.path.join(root, "requirements.txt")
+        if not os.path.isfile(req_path):
+            return "no_requirements"
+        with open(sentinel_path, "r", encoding="utf-8") as fh:
+            recorded = (json.load(fh) or {}).get("requirements_hash") or ""
+        with open(req_path, "rb") as fh:
+            current = hashlib.sha256(fh.read()).hexdigest()
+        if recorded and recorded != current:
+            return "stale"
+        return "current"
+    except Exception:
+        return "current"
+
+
 def stale_venv_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     """One-line re-bootstrap nudge when plugin deps changed after the last bootstrap.
 
     The venv-in-PLUGIN_DATA model is update-safe for CODE but not DEPS: a plugin update
     that bumps requirements.txt leaves hooks running the old venv indefinitely, with new
-    imports failing into silent excepts (COR-11). Compare sha256 of the CURRENT
-    requirements.txt against the hash the bootstrap sentinel recorded; nudge on mismatch.
-    Runs once per session by construction (SessionStart). Silent when not bootstrapped
-    (ONB-1's pre-Python nudge owns that state) or when anything is unreadable.
+    imports failing into silent excepts (COR-11). Delegates the sha256 compare to the
+    canonical ``bootstrap_state`` (shared with doctor); nudges ONLY on ``"stale"``. Silent
+    when not bootstrapped (ONB-1's pre-Python nudge owns that state) or when anything is
+    unreadable. Runs once per session by construction (SessionStart).
     """
-    try:
-        import hashlib
-
-        data_dir = os.environ.get("CLAUDE_PLUGIN_DATA") or ""
-        plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT") or os.path.dirname(
-            os.path.dirname(os.path.abspath(__file__))
-        )
-        if not data_dir:
-            return None
-        sentinel_path = os.path.join(data_dir, ".bootstrap-sentinel")
-        req_path = os.path.join(plugin_root, "requirements.txt")
-        if not os.path.isfile(sentinel_path) or not os.path.isfile(req_path):
-            return None
-        with open(sentinel_path, "r", encoding="utf-8") as fh:
-            recorded = (json.load(fh) or {}).get("requirements_hash") or ""
-        with open(req_path, "rb") as fh:
-            current = hashlib.sha256(fh.read()).hexdigest()
-        if not recorded or recorded == current:
-            return None
-        return (
-            "⚠ hippo deps changed with the last plugin update — the venv still runs the "
-            "old dependency set (new imports degrade silently). Run /hippo:bootstrap to "
-            "re-provision."
-        )
-    except Exception:
+    if bootstrap_state() != "stale":
         return None
+    return (
+        "⚠ hippo deps changed with the last plugin update — the venv still runs the "
+        "old dependency set (new imports degrade silently). Run /hippo:bootstrap to "
+        "re-provision."
+    )
 
 
 def integrity_producer(memory_dir: str, repo_root: str) -> Optional[str]:
