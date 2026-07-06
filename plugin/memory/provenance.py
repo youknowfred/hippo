@@ -76,6 +76,25 @@ def resolve_dirs() -> Tuple[str, str]:
     return memory_dir, repo_root
 
 
+def ensure_self_ignoring_dir(path: str) -> None:
+    """mkdir -p a DERIVED dir + drop a ``.gitignore`` containing ``*`` inside it.
+
+    The standard self-ignoring cache pattern (SEC-3): the index and telemetry dirs
+    stay invisible to ``git status`` even in projects that never ran init's
+    .gitignore patch — a habitual ``git add .`` can never commit prompt previews or
+    index blobs. Idempotent (an existing .gitignore, even user-edited, is left
+    alone); never raises.
+    """
+    try:
+        os.makedirs(path, exist_ok=True)
+        gi = os.path.join(path, ".gitignore")
+        if not os.path.exists(gi):
+            with open(gi, "w", encoding="utf-8") as fh:
+                fh.write("*\n")
+    except Exception:
+        pass
+
+
 def split_frontmatter(text: str) -> Tuple[Optional[List[str]], str]:
     """Split a memory file into ``(frontmatter_lines, body_text)``.
 

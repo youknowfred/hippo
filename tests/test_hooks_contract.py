@@ -328,3 +328,32 @@ class TestStaleVenvNudge:
         )
         _assert_contract(proc, "SessionStart")
         assert "deps changed" not in proc.stdout
+
+
+# --------------------------------------------------------------------------- #
+# SEC-3: never-opted-in projects gain ZERO hippo files
+# --------------------------------------------------------------------------- #
+class TestCorpusLessHygiene:
+    def test_prompt_in_corpusless_repo_creates_no_files(self, tmp_path):
+        stdin = json.dumps({"prompt": "a perfectly normal prompt about deploying things"})
+        proc, project, _ = _run_hook(
+            _USER_PROMPT_HOOK, stdin, tmp_path, with_corpus=False, venv_python=True,
+            sentinel=True,
+        )
+        _assert_contract(proc, "UserPromptSubmit")
+        assert _tree(project) == set(), (
+            "a repo that never ran /hippo:init must gain zero hippo files "
+            f"(got {_tree(project)})"
+        )
+
+    def test_session_start_in_corpusless_repo_creates_no_files(self, tmp_path):
+        # Dismiss the ONB-1 nudge so the full Python dispatcher actually runs.
+        data_dir = tmp_path / "plugin-data"
+        os.makedirs(data_dir, exist_ok=True)
+        (data_dir / ".nudge-dismissed").touch()
+        proc, project, _ = _run_hook(
+            _SESSION_START_HOOK, "", tmp_path, with_corpus=False, venv_python=True,
+            sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        assert _tree(project) == set()

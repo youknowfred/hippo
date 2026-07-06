@@ -33,7 +33,13 @@ import threading
 from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple
 
-from .provenance import _iter_memory_files, parse_frontmatter, resolve_dirs, split_frontmatter
+from .provenance import (
+    _iter_memory_files,
+    ensure_self_ignoring_dir,
+    parse_frontmatter,
+    resolve_dirs,
+    split_frontmatter,
+)
 
 # --------------------------------------------------------------------------- #
 # Config (all overridable via env so the hook/tests never hard-depend on one model)
@@ -430,7 +436,7 @@ def build_index(
         memory_dir, _ = resolve_dirs()
     if index_dir is None:
         index_dir = default_index_dir(memory_dir)
-    os.makedirs(index_dir, exist_ok=True)
+    ensure_self_ignoring_dir(index_dir)  # derived dir: mkdir + self-ignoring .gitignore (SEC-3)
 
     entries = compute_corpus(memory_dir)
 
