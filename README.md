@@ -54,9 +54,11 @@ an implicit SessionStart auto-provision. Reasoning:
 - It keeps the hard hook contract (`exit 0`, never downloads, never blocks) simple and
   auditable: hooks only ever *read* an already-warmed cache; they never *provision* one.
 
-Until `/hippo:bootstrap` has run, recall works immediately in BM25-only mode (rank-bm25
-is a normal pinned dependency, not gated on bootstrap) — dense recall degrades
-gracefully rather than blocking or erroring.
+Until `/hippo:bootstrap` has run, recall works immediately in BM25-only mode: the plugin
+vendors a dependency-free BM25 scorer and a frontmatter parser
+(`plugin/memory/_vendor/`) precisely for that pre-bootstrap window, so a bare `python3`
+with none of the pinned deps still serves real lexical recall. Bootstrap unlocks the
+dense half — dense recall degrades gracefully rather than blocking or erroring.
 
 ## License
 
@@ -64,3 +66,5 @@ MIT — see [LICENSE](LICENSE). A copy ships inside the plugin bundle
 ([plugin/LICENSE](plugin/LICENSE)) so installs carry the license text too. The engine code
 extracted from the ic-memobot/Memosa agent-memory tooling was written by this repo's author
 and is relicensed here under the same MIT terms; no third-party code was ported with it.
+The pre-bootstrap fallbacks in `plugin/memory/_vendor/` (a BM25 scorer and a frontmatter
+parser) are likewise original implementations, MIT like the rest — not copied vendor code.

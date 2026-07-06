@@ -23,10 +23,10 @@ import re
 import subprocess
 from typing import Dict, List, Optional, Tuple
 
-try:  # pragma: no cover - PyYAML is a repo dep; guard anyway so the hook never dies
-    import yaml
-except Exception:  # pragma: no cover
-    yaml = None  # type: ignore
+try:
+    import yaml  # PyYAML — the pinned venv dep (full-fidelity path)
+except Exception:  # pragma: no cover - bare python3 pre-bootstrap (ONB-2)
+    from ._vendor import miniyaml as yaml  # type: ignore  # frontmatter-subset fallback
 
 # Code/config extensions we treat as "cited code" for the staleness signal.
 # .md is intentionally EXCLUDED — memory<->memory references are [[wikilinks]] (Tier 3),
@@ -96,7 +96,7 @@ def split_frontmatter(text: str) -> Tuple[Optional[List[str]], str]:
 def parse_frontmatter(text: str) -> dict:
     """YAML-parse the frontmatter block into a dict (``{}`` on any problem)."""
     fm_lines, _ = split_frontmatter(text)
-    if fm_lines is None or yaml is None:
+    if fm_lines is None:
         return {}
     try:
         data = yaml.safe_load("\n".join(fm_lines))

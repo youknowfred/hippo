@@ -119,7 +119,10 @@ def _bm25_rank(query_tokens: List[str], entries: List[dict]) -> List[int]:
     if not query_tokens or not entries:
         return []
     try:
-        from rank_bm25 import BM25Okapi
+        try:
+            from rank_bm25 import BM25Okapi  # the pinned venv dep (full-fidelity path)
+        except ImportError:  # bare python3 pre-bootstrap (ONB-2): score-identical fallback
+            from ._vendor.bm25 import BM25Okapi
 
         corpus = [e.get("tokens") or [] for e in entries]
         bm25 = BM25Okapi(corpus)

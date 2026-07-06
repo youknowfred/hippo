@@ -54,5 +54,6 @@ exists precisely so those hooks never have to be.
 ## After bootstrap
 
 Recall works in full hybrid (dense+BM25) mode from the next session onward. Before bootstrap,
-recall already works in BM25-only mode (`rank-bm25` is a normal pinned dependency, not gated
-on this skill) — bootstrap only unlocks the dense half.
+recall already works in BM25-only mode — the plugin vendors a dependency-free BM25 scorer and
+frontmatter parser (`memory/_vendor/`) so a bare `python3` with none of the pinned deps still
+serves real lexical recall. Bootstrap unlocks the dense half (and the full pinned deps).
