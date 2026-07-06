@@ -48,7 +48,9 @@ symlink Claude Code's native memory system reads from.
 6. **Nudge, don't commit.** Print the exact `git add .claude/memory .gitignore && git commit -m
    "seed agent memory"` command and STOP there. Never auto-commit the user's repo — memory
    corpus content is exactly the kind of thing a user should look at before it enters their
-   history.
+   history. If `user_role.md` still contains `<FILL-ME` at this point, END the report with an
+   explicit warning: "⚠ user_role.md is still the unfilled template — recall will index its
+   placeholder text until you edit it (/hippo:doctor flags this too)."
 
 ## Hard rules
 

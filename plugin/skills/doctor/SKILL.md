@@ -28,16 +28,22 @@ downstream errors from a root cause already identified)
 4. **Project corpus.** Does `.claude/memory/MEMORY.md` exist in the current project? If not,
    suggest `/hippo:init`. If it exists, does the `~/.claude/projects/<encoded>/memory` symlink
    resolve to it correctly (not broken, not pointing elsewhere)?
-5. **Index freshness.** Does `.claude/.memory-index/manifest.json` exist, and does its recorded
+5. **Unfilled templates.** Run `grep -rln '<FILL-ME' .claude/memory/` — any hit means a
+   template memory (usually `user_role.md`) was never filled in: its placeholder text is
+   being embedded into the recall index and (for `user` types) floor-loaded every session.
+   Report each file BY NAME with "edit this file, then the next SessionStart re-indexes it
+   automatically"; don't edit it yourself — its content is facts about the user only they
+   can supply.
+6. **Index freshness.** Does `.claude/.memory-index/manifest.json` exist, and does its recorded
    memory count match the actual `.claude/memory/*.md` file count? A mismatch means the index is
    stale (a memory was added/removed since the last build) — recommend
    `memory.build_index --memory-dir .claude/memory --index-dir .claude/.memory-index`
    (SessionStart's own refresh should have caught this already; a persistent mismatch across
    sessions is itself worth flagging as a possible SessionStart hook problem).
-6. **Live recall probe.** Run one real `memory.recall` call with a trivial query and confirm it
+7. **Live recall probe.** Run one real `memory.recall` call with a trivial query and confirm it
    returns without raising and within a few seconds. This is the actual end-to-end proof the
-   other 5 checks are trying to predict — always run it even if 1-5 all look healthy.
-7. **Stale plugin name (pre-0.2.0).** If the user's installed-plugin list still shows
+   other 6 checks are trying to predict — always run it even if 1-6 all look healthy.
+8. **Stale plugin name (pre-0.2.0).** If the user's installed-plugin list still shows
    `memory@hippo`, that install predates the 0.2.0 rename to `hippo` and receives no updates —
    recommend `/plugin uninstall memory@hippo` followed by `/plugin install hippo@hippo`
    (a clean break; there is no alias shim).
