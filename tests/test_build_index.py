@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 
 import numpy as np
+import pytest
 
 from memory import build_index as B
 
@@ -408,12 +409,20 @@ def test_load_index_roundtrip(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# Real fastembed backend (skipped where the dep isn't installed)
+# Real fastembed backend (network-marked: can download the ~130MB model on a
+# cold cache, so it is deselected by default via addopts `-m "not network"` —
+# the suite's hermeticity claim must stay true offline with an empty home cache)
 # --------------------------------------------------------------------------- #
-def test_real_fastembed_dense_build(tmp_path, monkeypatch):
-    import pytest
-
+@pytest.mark.network
+def test_real_fastembed_dense_build(tmp_path, monkeypatch, tmp_path_factory):
     pytest.importorskip("fastembed")
+    # Pin the model cache: honor a caller-provided FASTEMBED_CACHE_PATH (CI's dense
+    # lane points this at the actions-restored cache) else a session-scoped tmp dir —
+    # NEVER the user's real home cache.
+    cache = os.environ.get("FASTEMBED_CACHE_PATH") or str(
+        tmp_path_factory.getbasetemp() / "fastembed-cache"
+    )
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", cache)
     monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
