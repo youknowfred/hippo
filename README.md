@@ -4,34 +4,45 @@ Local, git-native agent memory for Claude Code — a markdown-in-git corpus with
 dense+BM25 hybrid recall, git-drift staleness/provenance tracking, recall-triggered
 reconsolidation, and a self-audit skill. Distributed as a Claude Code plugin.
 
-Extracted from the [ic-memobot/Memosa](https://github.com) agent-memory tooling
-(`scripts/memory/` + `.claude/hooks/`), where it has run in production since 2026-06
-across a 180+ memory corpus.
+Extracted from the ic-memobot/Memosa agent-memory tooling (a private origin repo), where
+it has run in production since 2026-06 across a 180+ memory corpus.
 
-## Repo layout
+## Quickstart
 
-This repo is both a **plugin marketplace** and the **plugin itself**:
+1. **Install** (inside Claude Code):
 
-```
-.claude-plugin/marketplace.json   # marketplace manifest (lists the `hippo` plugin)
-plugin/
-├── .claude-plugin/plugin.json    # plugin manifest
-├── memory/                       # the engine (Python package, imported as `memory`)
-├── hooks/                        # UserPromptSubmit recall + SessionStart dispatcher
-├── requirements.txt              # fastembed, numpy, PyYAML, rank-bm25
-└── skills/                       # /hippo:bootstrap|init|new|doctor|audit (Tier 2)
-tests/                            # hermetic test suite (14 files, no network/model download)
-```
+   ```
+   /plugin marketplace add youknowfred/hippo
+   /plugin install hippo@hippo
+   ```
 
-## Install
+2. **Bootstrap — once per machine.** Builds the plugin's own venv and downloads the ~130MB
+   embedding model (the ONE online step in the plugin's whole lifecycle):
 
-```
-/plugin marketplace add youknowfred/hippo
-/plugin install hippo@hippo
-```
+   ```
+   /hippo:bootstrap
+   ```
 
-See `plugin/memory/README.md` for full usage docs (recall, staleness, reconsolidation,
-archive) and the bootstrap/init skills once Tier 2 ships.
+3. **Init — once per project.** Seeds `.claude/memory/` from the starter packs (core by
+   default — a `user_role.md` template and the memory-master policy; themed packs are
+   opt-in), builds the recall index, and wires the always-loaded floor. Fill in
+   `user_role.md` when it asks:
+
+   ```
+   /hippo:init
+   ```
+
+4. **Use it.** Say *"remember this: …"* (the `/hippo:new` skill writes a recall-ready
+   memory), then just work — every prompt is matched against the corpus by the
+   UserPromptSubmit hook and the relevant memories are injected automatically. Session
+   starts surface staleness, recent captures, and link health. If anything seems off:
+   `/hippo:doctor`.
+
+Before bootstrap has run, recall works immediately in BM25-only mode: the plugin vendors a
+dependency-free BM25 scorer and frontmatter parser (`plugin/memory/_vendor/`) precisely
+for that pre-bootstrap window, so a bare `python3` with none of the pinned deps still
+serves real lexical recall. Bootstrap unlocks the dense half — dense recall degrades
+gracefully rather than blocking or erroring.
 
 ## Support matrix
 
@@ -44,11 +55,34 @@ archive) and the bootstrap/init skills once Tier 2 ships.
 Python 3.10 and 3.12 are exercised in CI. Bootstrap runs once per machine; init runs once
 per project.
 
+## Repo layout
+
+This repo is both a **plugin marketplace** and the **plugin itself**:
+
+```
+.claude-plugin/marketplace.json   # marketplace manifest (lists the `hippo` plugin)
+plugin/
+├── .claude-plugin/plugin.json    # plugin manifest
+├── memory/                       # the engine (Python package, imported as `memory`)
+│   └── _vendor/                  # pre-bootstrap fallbacks (BM25 + frontmatter parser)
+├── hooks/                        # UserPromptSubmit recall + SessionStart dispatcher
+├── assets/packs/                 # starter packs (core seeded by default; rest opt-in)
+├── bin/hippo                     # CLI launcher for the stateless engine commands
+├── requirements.txt              # fastembed, numpy, PyYAML, rank-bm25 (the venv path)
+└── skills/                       # /hippo:bootstrap|init|new|doctor|audit
+tests/                            # hermetic test suite (no network/model download by default)
+.github/workflows/ci.yml          # hermetic matrix + dense lane + shellcheck
+```
+
+See [`plugin/memory/README.md`](plugin/memory/README.md) for the full engine documentation
+(recall, staleness, reconsolidation, archive internals) and
+[`plugin/README.md`](plugin/README.md) for the skills overview.
+
 ## Bootstrap vs. auto-provision (design decision)
 
 The plugin's Python dependencies (fastembed, numpy, PyYAML, rank-bm25) and the ~130MB
 fastembed model cache are **not** installed automatically on enable. Bootstrapping is
-**explicit** via a `/hippo:bootstrap` skill (Tier 2), run once per machine, rather than
+**explicit** via the `/hippo:bootstrap` skill, run once per machine, rather than
 an implicit SessionStart auto-provision. Reasoning:
 
 - The one-time venv build + model warm is an **online** step (the only one in this
@@ -65,11 +99,8 @@ an implicit SessionStart auto-provision. Reasoning:
 - It keeps the hard hook contract (`exit 0`, never downloads, never blocks) simple and
   auditable: hooks only ever *read* an already-warmed cache; they never *provision* one.
 
-Until `/hippo:bootstrap` has run, recall works immediately in BM25-only mode: the plugin
-vendors a dependency-free BM25 scorer and a frontmatter parser
-(`plugin/memory/_vendor/`) precisely for that pre-bootstrap window, so a bare `python3`
-with none of the pinned deps still serves real lexical recall. Bootstrap unlocks the
-dense half — dense recall degrades gracefully rather than blocking or erroring.
+Until bootstrap runs, the SessionStart hook nudges the next step (once every few
+sessions, permanently dismissable) instead of staying silent.
 
 ## License
 
