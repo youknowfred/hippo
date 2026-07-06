@@ -106,6 +106,16 @@ def build_context(memory_dir: str, repo_root: str, max_chars: int = _MAX_CONTEXT
 def main(argv: Optional[List[str]] = None) -> int:
     try:
         memory_dir, repo_root = resolve_dirs()
+        # Heal residual EMPTY staleness baselines (source_commit: "") to HEAD once
+        # resolvable — an empty baseline leaves a memory invisible to staleness forever
+        # (COR-1). Runs BEFORE the index refresh so the healed frontmatter is what gets
+        # hashed. Frontmatter-only, per-line, never touches a real baseline, never raises.
+        try:
+            from .provenance import heal_empty_baselines
+
+            heal_empty_baselines(memory_dir, repo_root)
+        except Exception:
+            pass
         # Bring the recall index up to date so a memory written during the LAST session is
         # indexed (recallable) this one. Incremental, OFFLINE, bounded, never-downgrade,
         # never-raises — a fast no-op when nothing changed. (Side effect, not a producer.)

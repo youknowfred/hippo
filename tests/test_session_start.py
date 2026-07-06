@@ -7,6 +7,7 @@ producer set, so these tests don't depend on git timing (that's covered in test_
 from __future__ import annotations
 
 import json
+import os
 
 import memory.session_start as S
 
@@ -135,3 +136,34 @@ def test_reconsolidation_silent_when_stubbed_empty(monkeypatch):
 
     monkeypatch.setattr("memory.reconsolidate.recalled_stale_worklist", lambda *a, **k: [])
     assert reconsolidation_producer("md", "repo") is None
+
+
+def test_main_heals_empty_baselines_side_effect(tmp_path, monkeypatch, capsys):
+    """COR-1: SessionStart heals residual source_commit:"" baselines to HEAD (covers
+    hand-authored/pre-COR-1 memories) as a side effect, before the index refresh."""
+    import subprocess
+
+    from memory.staleness import read_provenance
+
+    from .conftest import git_commit, write_file
+
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    repo = str(tmp_path / "repo")
+    os.makedirs(repo)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
+    write_file(repo, "src/x.py", "x = 1\n")
+    head = git_commit(repo, "init", 1_700_000_000)
+    md = os.path.join(repo, ".claude", "memory")
+    path = write_file(
+        repo,
+        ".claude/memory/residual.md",
+        '---\nname: residual\ndescription: "left empty by a pre-COR-1 backfill"\n'
+        'cited_paths: ["src/x.py"]\nsource_commit: ""\n---\nbody\n',
+    )
+    monkeypatch.setattr(S, "resolve_dirs", lambda: (md, repo))
+
+    assert S.main() == 0
+    _, sc = read_provenance(open(path, encoding="utf-8").read())
+    assert sc == head
