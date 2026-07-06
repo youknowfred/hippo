@@ -3,6 +3,8 @@ name: feedback_root_cause_not_symptom_handling
 description: When a bug has a clear root cause, fix THAT — don't layer defense-in-depth exception handlers, log-level demotions, or fallback paths that mask the underlying issue
 metadata:
   type: feedback
+  pack: debugging-discipline
+  pack_version: "0.2.0"
 ---
 
 When diagnosing bugs, attack WHY the failure exists, not just how it's handled. Adding

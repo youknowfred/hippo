@@ -3,6 +3,8 @@ name: feedback_no_feature_flagged_refactor_rollouts
 description: Never propose env-var flags, per-domain allowlists, or phased canary rollouts for internal refactors or prompt/code unifications — one PR, one correct path, delete the old
 metadata:
   type: feedback
+  pack: engineering-process
+  pack_version: "0.2.0"
 ---
 
 For internal refactors and code/prompt unifications, never propose a feature flag, a per-domain

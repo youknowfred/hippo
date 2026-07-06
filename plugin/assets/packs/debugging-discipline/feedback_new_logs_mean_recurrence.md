@@ -3,6 +3,8 @@ name: feedback_new_logs_mean_recurrence
 description: When the operator shares NEW logs for a problem you previously "fixed", assume the prior fix did NOT address it — it's a recurrence, not deploy lag or a backstop working as intended
 metadata:
   type: feedback
+  pack: debugging-discipline
+  pack_version: "0.2.0"
 ---
 
 When the operator shares **new logs** showing a symptom you have a prior fix for, **assume the

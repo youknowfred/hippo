@@ -3,6 +3,8 @@ name: feedback_additive_not_restrictive_redirects
 description: When the operator redirects mid-task to a specific item, treat it as ADDITIVE not RESTRICTIVE — other already-identified items still need fixing in the same session
 metadata:
   type: feedback
+  pack: engineering-process
+  pack_version: "0.2.0"
 ---
 
 When the operator redirects to one item mid-task (e.g. "can we bump this value to X"), treat

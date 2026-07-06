@@ -3,6 +3,8 @@ name: claude_is_memory_master
 description: Claude is the autonomous MEMORY MASTER for this memory corpus — the agent re-verifies and resolves memory staleness/curation itself; the human is NOT the verifier and not in the loop; git is the audit/safety net
 metadata:
   type: feedback
+  pack: core
+  pack_version: "0.2.0"
 ---
 
 By default, the operator delegates memory upkeep to the agent: the agent owns verifying and

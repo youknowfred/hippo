@@ -1,5 +1,5 @@
 ---
-description: Run this once per NEW project to seed .claude/memory/ with the portable operator pack, a skeleton MEMORY.md floor, the cross-machine symlink, and a built recall index. Use when a user says "init memory here", "set up memory for this project", "/hippo:init", or opens a fresh repo with no .claude/memory/ directory yet. Idempotent — never overwrites an existing memory file.
+description: Run this once per NEW project to seed .claude/memory/ from the starter packs (core by default, themed packs opt-in), a skeleton MEMORY.md floor, the cross-machine symlink, and a built recall index. Use when a user says "init memory here", "set up memory for this project", "/hippo:init", or opens a fresh repo with no .claude/memory/ directory yet. Idempotent — never overwrites an existing memory file.
 ---
 
 # /hippo:init — seed a project's memory corpus
@@ -22,15 +22,29 @@ symlink Claude Code's native memory system reads from.
 
 ## What this does, in order
 
-1. **Create `.claude/memory/`** and copy every file from `${CLAUDE_PLUGIN_ROOT}/assets/operator-pack/`
-   into it verbatim — these are the ~portable user/feedback memories (working-style + identity,
-   never project-coupled — see the pack's own README for the exclusion criteria).
-2. **Seed `MEMORY.md`** from `${CLAUDE_PLUGIN_ROOT}/assets/MEMORY.skeleton.md`, filling in the
-   floor pointers for every operator-pack memory copied in step 1 (mirrors the real floor shape:
-   H1 + preamble + `## User` + `## Working Style & Process Feedback` + `## Recalled on demand`
-   section-map nav). `user_role.md` ships as an editable `<FILL-ME>` template — tell the user to
-   fill it in with their own role/context before their first real session (skip this reminder
-   only if they explicitly say they'll do it later).
+1. **Offer the starter packs — default is core only.** The packs live in
+   `${CLAUDE_PLUGIN_ROOT}/assets/packs/` (one directory per pack, each with a `manifest.json`;
+   see `assets/packs/README.md` for the inclusion criteria). Ask the user which packs to seed
+   (AskUserQuestion where available, otherwise a plain listed question), presenting each
+   optional pack's title + one-line description from its manifest. Rules:
+   - `core` (the `user_role.md` template + `claude_is_memory_master.md`) is offered by
+     default; every OTHER pack defaults to NOT seeded — an unanswered/skipped menu means
+     core only. These files are committed to the repo and steer behavior for every teammate;
+     each extra policy must be an explicit choice.
+   - Manifest entries carrying `"confirm": "individual"` (the attribution and CI-bypass
+     policies) require their OWN yes even when their pack was selected — present the
+     manifest's `reason` and ask separately; a pack-level yes is not consent for these.
+   - Copy only the chosen packs' `*.md` memory files into `.claude/memory/` verbatim
+     (manifests and the pack README stay in the plugin, never copied).
+2. **Seed `MEMORY.md`** from `${CLAUDE_PLUGIN_ROOT}/assets/MEMORY.skeleton.md` — the skeleton
+   ships with floor pointers for the core pack only. For every ADDITIONAL `user`/`feedback`
+   memory actually copied in step 1, append a floor pointer line under the matching section
+   (`## User` for `user` types, `## Working Style & Process Feedback` for `feedback`),
+   `- [Title](file.md) — one-line hook` — mirror the skeleton's existing pointer style.
+   `project`/`reference` memories never get floor pointers. `user_role.md` ships as an
+   editable `<FILL-ME>` template — tell the user to fill it in with their own role/context
+   before their first real session (skip this reminder only if they explicitly say they'll
+   do it later).
 3. **Create the cross-machine symlink**:
    ```bash
    REPO_ROOT="$(git rev-parse --show-toplevel)"

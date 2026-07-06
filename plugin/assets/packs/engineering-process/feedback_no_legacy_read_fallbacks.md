@@ -3,6 +3,8 @@ name: feedback_no_legacy_read_fallbacks
 description: Never preserve legacy cookie/header/state-key names via "read modern, fall back to legacy" patterns during a rename or migration — one canonical name only
 metadata:
   type: feedback
+  pack: engineering-process
+  pack_version: "0.2.0"
 ---
 
 Never preserve a legacy-read fallback during a rename or migration. Pick the new canonical name

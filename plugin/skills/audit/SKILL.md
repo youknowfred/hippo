@@ -470,12 +470,12 @@ never adds a batch wrapper around them:
   stays cheap, but Phase 2's per-memory staleness-age decomposition and Phase 3's by-hand
   deep-dive would need either a higher default N, sub-scoping by `metadata.type`, or eventually
   a subagent-fan-out escalation. Don't solve this preemptively.
-- **A small corpus will legitimately fail `token_reduction` — this is expected, not a bug.**
-  On a fresh install (the ~22-memory operator pack, before the project has grown its own
-  corpus), on-demand recall's fixed overhead can exceed the tiny always-load floor, so the gate
-  reports `pass: false` honestly. Report this as "expected for a corpus this size, should
-  resolve as the corpus grows past roughly 50-100 memories" — do NOT treat it as a real finding
-  requiring a fix, and do NOT recommend the operator "add filler memories" to inflate the count.
+- **A fresh corpus SKIPS `token_reduction` — this is expected, not a bug.** A corpus with no
+  `MEMORY.full.md` pre-trim snapshot (every fresh install — core pack or a few seeded packs,
+  before the project has grown its own corpus) has nothing to compare the trimmed floor
+  against, so the gate reports `skipped`, excluded from the RESULT. Report it as exactly
+  that — do NOT treat the skip as a failure, and do NOT recommend the operator "add filler
+  memories" or fabricate a MEMORY.full.md to force the gate on.
 - **Never conflate "evaluate() returned ok=True" with "the scorecard metrics look healthy."**
   The gates and the report-only scorecard metrics are orthogonal — none of the latter can move
   `ok` or any `gates` entry. And if no hard-set fixture exists for this project, say so plainly

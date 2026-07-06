@@ -3,6 +3,8 @@ name: feedback_no_hedging_on_confirmed_paid_services
 description: Once the operator has confirmed a service is on a paid plan with adequate headroom, never frame "plan limits" or "plan upgrade" as a risk or precondition for a technical decision involving that service
 metadata:
   type: feedback
+  pack: engineering-process
+  pack_version: "0.2.0"
 ---
 
 If the operator has told you a service (a cloud provider, an LLM API, a database, an

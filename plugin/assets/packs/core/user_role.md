@@ -3,6 +3,8 @@ name: user_role
 description: "<FILL-ME: your name> — <FILL-ME: your role, e.g. 'solo founder/engineer' or 'tech lead on a 3-person team'> building <FILL-ME: project/product name>. Claude is <FILL-ME: the engineering bench / a pair-programming partner / one of several tools>."
 metadata:
   type: user
+  pack: core
+  pack_version: "0.2.0"
 ---
 
 The user is **<FILL-ME: your name>** — <FILL-ME: one-line role description, e.g. "a solo

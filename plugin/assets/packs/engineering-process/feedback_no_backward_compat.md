@@ -3,6 +3,8 @@ name: feedback_no_backward_compat
 description: Never use backward compatibility as a reason for architecture decisions — one correct path, no shims
 metadata:
   type: feedback
+  pack: engineering-process
+  pack_version: "0.2.0"
 ---
 
 Do not use "backward compatibility" as a motivating reason for architecture decisions. Design

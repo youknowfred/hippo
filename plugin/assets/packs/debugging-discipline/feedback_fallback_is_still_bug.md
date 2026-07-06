@@ -3,6 +3,8 @@ name: feedback_fallback_is_still_bug
 description: When primary functionality fails and falls back, the primary failure IS a bug — never dismiss it as "working as designed"
 metadata:
   type: feedback
+  pack: debugging-discipline
+  pack_version: "0.2.0"
 ---
 
 When primary functionality fails and the system falls back to a degraded path, the PRIMARY

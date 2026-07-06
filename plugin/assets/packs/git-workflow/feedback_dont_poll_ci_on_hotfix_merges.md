@@ -3,6 +3,8 @@ name: feedback_dont_poll_ci_on_hotfix_merges
 description: For hotfix PRs into the production/default branch, merge immediately once mergeable — don't sit polling CI checks for minutes
 metadata:
   type: feedback
+  pack: git-workflow
+  pack_version: "0.2.0"
 ---
 
 For hotfix PRs fixing a production-impacting issue, merge immediately (with an admin override

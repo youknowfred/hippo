@@ -3,6 +3,8 @@ name: adversarial_design_pinning_before_implementation
 description: Before implementing a risky/consequential design, pin it via a multi-candidate judge panel + adversarial-verify pass BEFORE writing code — this catches real bugs that code review alone tends to miss
 metadata:
   type: feedback
+  pack: engineering-process
+  pack_version: "0.2.0"
 ---
 
 For a risky, consequential design decision (touches a hot path, adds the first write primitive

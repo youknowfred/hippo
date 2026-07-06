@@ -3,6 +3,8 @@ name: oss-attribution-no-claude
 description: Attribute commits solely to the operator (their own git identity) — no Claude Co-Authored-By trailer or "Generated with Claude Code" line, unless they say otherwise.
 metadata:
   type: feedback
+  pack: git-workflow
+  pack_version: "0.2.0"
 ---
 
 On this operator's repos, commits, PR bodies, and any repo content should be attributed SOLELY

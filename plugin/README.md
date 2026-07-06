@@ -29,7 +29,7 @@ deliberate, individually-justified action (see [[reverify_head_only_no_bulk]] in
 corpus this engine was extracted from, and the no-bulk-primitives hard rule that carried forward
 into `/hippo:audit`'s design).
 
-This is a **default assumption seeded by the operator pack** (`assets/operator-pack/claude_is_memory_master.md`),
+This is a **default assumption seeded by the core starter pack** (`assets/packs/core/claude_is_memory_master.md`),
 not a hardcoded behavior — if an operator prefers to review corpus maintenance themselves before
 it happens, they should say so explicitly and delete or edit that memory; absent that
 instruction, the agent should act autonomously on corpus upkeep.

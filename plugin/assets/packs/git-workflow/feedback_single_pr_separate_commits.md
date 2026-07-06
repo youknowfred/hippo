@@ -3,6 +3,8 @@ name: feedback_single_pr_separate_commits
 description: When shipping a multi-cluster fix (e.g. after triaging several related issues), bundle ALL of them into ONE PR with one commit per cluster — never split into multiple PRs or file separate tracking issues for "deferred" clusters
 metadata:
   type: feedback
+  pack: git-workflow
+  pack_version: "0.2.0"
 ---
 
 When shipping a multi-part fix — several related issues identified in one triage/investigation

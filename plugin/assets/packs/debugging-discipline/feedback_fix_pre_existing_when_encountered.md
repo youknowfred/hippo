@@ -3,6 +3,8 @@ name: feedback_fix_pre_existing_when_encountered
 description: When a review pass OR a full test run surfaces pre-existing failures, fix them in the same session — don't skip/ignore them or scope them out as "out of scope"
 metadata:
   type: feedback
+  pack: debugging-discipline
+  pack_version: "0.2.0"
 ---
 
 When you encounter a pre-existing failure during your own work — surfaced by a review/audit

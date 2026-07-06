@@ -3,6 +3,8 @@ name: feedback_two_dot_diff_for_lost_work
 description: "To check whether a merge/promote would DROP work, use a two-dot `git diff A B` (full symmetric diff, or check both directions) — never rely on a single three-dot `A...B`, which hides A's own additions"
 metadata:
   type: feedback
+  pack: git-workflow
+  pack_version: "0.2.0"
 ---
 
 When resolving a merge conflict or a branch promotion, to answer **"would taking one side drop

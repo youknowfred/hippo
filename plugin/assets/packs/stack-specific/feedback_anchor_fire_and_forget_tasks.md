@@ -3,6 +3,9 @@ name: feedback_anchor_fire_and_forget_tasks
 description: "asyncio.create_task() is only weakly referenced by the event loop — an unanchored fire-and-forget task can be garbage-collected mid-execution. Always anchor it on a module-level set with a done_callback that removes it."
 metadata:
   type: feedback
+  pack: stack-specific
+  pack_version: "0.2.0"
+  stack: python-asyncio
 ---
 
 `asyncio.create_task()` returns a Task that the event loop holds with only a **weak reference**

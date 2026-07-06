@@ -3,6 +3,9 @@ name: feedback_serena_tools_only
 description: Serena MCP (or any code-navigation MCP) is for code navigation tools ONLY (LSP, symbol search, rename) — never for memory. All memory management uses this native memory system.
 metadata:
   type: feedback
+  pack: stack-specific
+  pack_version: "0.2.0"
+  stack: serena-mcp
 ---
 
 If a code-navigation MCP server (e.g. Serena) is active in this project, use it only for code

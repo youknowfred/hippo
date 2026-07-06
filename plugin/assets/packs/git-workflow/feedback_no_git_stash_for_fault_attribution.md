@@ -3,6 +3,8 @@ name: feedback_no_git_stash_for_fault_attribution
 description: Never use git stash to determine whether a test failure or bug predates your own changes — it risks losing in-flight work, including popping a stale/pre-existing stash even when your own tree is clean
 metadata:
   type: feedback
+  pack: git-workflow
+  pack_version: "0.2.0"
 ---
 
 Never run `git stash` (in any form — `push`, `pop`, `apply`, `--include-untracked`,

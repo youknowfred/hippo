@@ -3,6 +3,8 @@ name: feedback_dont_blame_vendor_latency
 description: When a system degrades, don't default to "it's just vendor/provider latency" as the diagnosis — especially if a similar diagnosis was already made (and "fixed") before and it recurred
 metadata:
   type: feedback
+  pack: debugging-discipline
+  pack_version: "0.2.0"
 ---
 
 When a system degrades (timeouts, cascading failures, budget exhaustion), do NOT default to

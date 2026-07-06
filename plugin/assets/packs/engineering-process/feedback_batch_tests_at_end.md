@@ -3,6 +3,8 @@ name: feedback_batch_tests_at_end
 description: During multi-commit refactors/upgrades, don't run tests between each file edit and don't stall diagnosing every failure as it surfaces — finish all edits, then run the full suite once as the gate
 metadata:
   type: feedback
+  pack: engineering-process
+  pack_version: "0.2.0"
 ---
 
 During a multi-commit workstream (refactor, dependency upgrade, multi-file fix), don't run the

@@ -3,6 +3,8 @@ name: feedback_no_tactical_shortcuts
 description: When asked for remediation, pick the architecturally sound path — never defer part of the work to a follow-up "to avoid complexity," and never write a stub plan doc in place of actually implementing the fix
 metadata:
   type: feedback
+  pack: engineering-process
+  pack_version: "0.2.0"
 ---
 
 When given a remediation request, default to the architecturally sound fix — not a
