@@ -44,6 +44,25 @@ for that pre-bootstrap window, so a bare `python3` with none of the pinned deps 
 serves real lexical recall. Bootstrap unlocks the dense half — dense recall degrades
 gracefully rather than blocking or erroring.
 
+## Removal / Uninstall
+
+To stop hippo from acting on a project, run inside Claude Code:
+
+```
+/hippo:remove
+```
+
+This removes the cross-machine symlink under `~/.claude/projects/<encoded>/memory` — the one
+thing that actually stops Claude Code's native memory from injecting the floor for this project.
+It then offers (a confirmed step, never automatic) to delete the derived, gitignored
+`.claude/.memory-index/` and `.claude/.memory-telemetry/` dirs, and **reports** — never
+deletes — the shared per-machine venv (`CLAUDE_PLUGIN_DATA/venv`) and fastembed model cache
+paths, since those are shared across every project using the plugin on this machine.
+
+`.claude/memory/` itself — the git-tracked corpus — is always left alone: it stays committed in
+git, inert, until someone runs `/hippo:init` again (in this repo, a fresh clone, or a new
+worktree).
+
 ## Support matrix
 
 | Platform | Status |
@@ -69,7 +88,7 @@ plugin/
 ├── assets/packs/                 # starter packs (core seeded by default; rest opt-in)
 ├── bin/hippo                     # CLI launcher for the stateless engine commands
 ├── requirements.txt              # fastembed, numpy, PyYAML, rank-bm25 (the venv path)
-└── skills/                       # /hippo:bootstrap|init|new|doctor|audit
+└── skills/                       # /hippo:bootstrap|init|new|doctor|audit|remove
 tests/                            # hermetic test suite (no network/model download by default)
 .github/workflows/ci.yml          # hermetic matrix + dense lane + shellcheck
 ```

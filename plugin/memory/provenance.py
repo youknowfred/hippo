@@ -181,6 +181,53 @@ def create_project_symlink(repo_root: str, memory_dir: str, claude_projects_dir:
         return {"status": "conflict", "expected_path": expected_link, "error": str(exc)}
 
 
+def remove_project_symlink(repo_root: str, memory_dir: str, claude_projects_dir: Optional[str] = None) -> dict:
+    """Remove the ``~/.claude/projects/<encoded>/memory`` symlink (ONB-6 — `/hippo:remove`).
+
+    The inverse of ``create_project_symlink`` — same encoding formula (SHP-5), never a second
+    hand-rolled derivation. Only ever removes a symlink that resolves to THIS project's
+    ``memory_dir``; a symlink pointing somewhere else is left untouched and reported as
+    ``"conflict"`` rather than deleted, since that shape means it belongs to a different corpus
+    (or a prior manual setup) this call has no business touching.
+
+    Never deletes ``memory_dir`` itself — the git-tracked corpus is out of scope for this
+    function entirely; it only ever unlinks the machine-local symlink that points AT it.
+
+    Returns a dict with:
+      - ``status``: one of ``"removed"``, ``"absent"`` (nothing to remove — no-op),
+        ``"conflict"`` (exists but points elsewhere)
+      - ``expected_path``: the symlink path this call acted on / would have acted on
+      - ``error``: set only when ``status == "conflict"`` — the existing (wrong) target
+
+    Never raises — filesystem errors degrade to ``status="conflict"`` with the exception text
+    in ``error`` so the caller can surface it rather than silently doing nothing.
+    """
+    claude_projects_dir = claude_projects_dir or os.path.join(os.path.expanduser("~"), ".claude", "projects")
+    encoded = encode_project_dir(repo_root)
+    expected_link = os.path.join(claude_projects_dir, encoded, "memory")
+
+    try:
+        if not (os.path.islink(expected_link) or os.path.exists(expected_link)):
+            return {"status": "absent", "expected_path": expected_link, "error": None}
+        if not os.path.islink(expected_link):
+            return {
+                "status": "conflict",
+                "expected_path": expected_link,
+                "error": f"{expected_link!r} exists but is not a symlink — refusing to remove it",
+            }
+        target = os.path.realpath(expected_link)
+        if os.path.realpath(memory_dir) != target:
+            return {
+                "status": "conflict",
+                "expected_path": expected_link,
+                "error": f"points at {target!r}, not {memory_dir!r} — left untouched",
+            }
+        os.remove(expected_link)
+        return {"status": "removed", "expected_path": expected_link, "error": None}
+    except Exception as exc:
+        return {"status": "conflict", "expected_path": expected_link, "error": str(exc)}
+
+
 def _candidate_memory_dir(d: str) -> str:
     return os.path.join(d, ".claude", "memory")
 

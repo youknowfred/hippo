@@ -14,6 +14,7 @@ reconsolidation, archive internals).
 | `/hippo:new` | Whenever the agent decides to save something to memory |
 | `/hippo:doctor` | Fast health check — is the plugin's own install/environment working |
 | `/hippo:audit` | Deep, judgment-based self-audit of the corpus's content — staleness, drift, archive candidates |
+| `/hippo:remove` | Uninstall/offboard THIS project — removes the symlink, offers to delete index/telemetry, reports (never deletes) shared venv/cache paths |
 
 ## Operating principle: the agent is the memory master
 

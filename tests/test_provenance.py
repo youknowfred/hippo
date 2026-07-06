@@ -932,3 +932,105 @@ def test_existing_corpus_gets_symlink_and_index_without_touching_memory(tmp_path
     manifest_again = B.build_index(memory_dir, index_dir)
     assert manifest_again["count"] == 1
     assert open(memory_path, "rb").read() == before
+
+
+# --------------------------------------------------------------------------- #
+# remove_project_symlink (ONB-6 — /hippo:remove's machine-local teardown: the
+# inverse of create_project_symlink, never touches memory_dir itself)
+# --------------------------------------------------------------------------- #
+def test_remove_project_symlink_removes_when_correct(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "myrepo")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+
+    created = P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert created["status"] == "created"
+    assert os.path.islink(created["expected_path"])
+
+    result = P.remove_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+
+    assert result["status"] == "removed"
+    assert result["expected_path"] == created["expected_path"]
+    assert not os.path.islink(result["expected_path"])
+    assert not os.path.exists(result["expected_path"])
+
+
+def test_remove_project_symlink_absent_is_a_noop(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "never-linked")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    projects_dir = str(tmp_path / "claude-projects")
+
+    result = P.remove_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+
+    assert result["status"] == "absent"
+    assert result["error"] is None
+
+
+def test_remove_project_symlink_reports_conflict_without_deleting(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "myrepo")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    other_dir = str(tmp_path / "somewhere-else")
+    os.makedirs(other_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+    encoded = P.encode_project_dir(repo_root)
+    link_dir = os.path.join(projects_dir, encoded)
+    os.makedirs(link_dir)
+    existing_link = os.path.join(link_dir, "memory")
+    os.symlink(other_dir, existing_link)
+
+    result = P.remove_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+
+    assert result["status"] == "conflict"
+    assert result["error"]
+    # the pre-existing symlink (pointing at a DIFFERENT project's corpus) is left exactly as is
+    assert os.path.islink(existing_link)
+    assert os.path.realpath(existing_link) == os.path.realpath(other_dir)
+
+
+def test_remove_project_symlink_never_touches_memory_dir_contents(tmp_path):
+    repo_root = str(tmp_path / "repo")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    marker = os.path.join(memory_dir, "MEMORY.md")
+    with open(marker, "w", encoding="utf-8") as fh:
+        fh.write("# committed corpus, stays inert after removal\n")
+    before = open(marker, "rb").read()
+    projects_dir = str(tmp_path / "claude-projects")
+
+    P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    result = P.remove_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+
+    assert result["status"] == "removed"
+    assert os.path.isdir(memory_dir)  # the corpus directory itself is untouched
+    after = open(marker, "rb").read()
+    assert after == before  # byte-identical — removal never edits the git-tracked corpus
+
+
+def test_remove_project_symlink_uses_same_encoding_as_create(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "next.js-app")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+
+    created = P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert created["status"] == "created"
+
+    removed = P.remove_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert removed["status"] == "removed"
+    assert removed["expected_path"] == created["expected_path"]
+
+
+def test_remove_project_symlink_idempotent_second_call_is_absent(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "myrepo")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+
+    P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    first = P.remove_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert first["status"] == "removed"
+
+    second = P.remove_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert second["status"] == "absent"
