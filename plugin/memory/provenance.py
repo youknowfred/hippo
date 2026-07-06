@@ -139,6 +139,48 @@ def check_project_symlink(repo_root: str, memory_dir: str, claude_projects_dir: 
         return result
 
 
+def create_project_symlink(repo_root: str, memory_dir: str, claude_projects_dir: Optional[str] = None) -> dict:
+    """Create (or confirm) the ``~/.claude/projects/<encoded>/memory`` symlink.
+
+    ONB-5: the machine-local half of init that a cloned/second-machine corpus still needs —
+    factored out of init's inline bash so it has one real unit-tested implementation instead
+    of only living as a shell snippet in ``SKILL.md``. Uses the SAME ``encode_project_dir``
+    formula (SHP-5) as ``check_project_symlink`` — never a second hand-rolled encoding.
+
+    Idempotent: a symlink already pointing at ``memory_dir`` is a no-op. A symlink pointing
+    somewhere ELSE is left untouched and reported as a conflict rather than clobbered — that
+    shape usually means a prior manual setup.
+
+    Returns a dict with:
+      - ``status``: one of ``"created"``, ``"already_correct"``, ``"conflict"``
+      - ``expected_path``: the symlink path this call created/checked
+      - ``error``: set only when ``status == "conflict"`` — the existing (wrong) target
+
+    Never raises — filesystem errors degrade to ``status="conflict"`` with the exception text
+    in ``error`` so the caller can surface it rather than silently doing nothing.
+    """
+    claude_projects_dir = claude_projects_dir or os.path.join(os.path.expanduser("~"), ".claude", "projects")
+    encoded = encode_project_dir(repo_root)
+    link_dir = os.path.join(claude_projects_dir, encoded)
+    expected_link = os.path.join(link_dir, "memory")
+
+    try:
+        if os.path.islink(expected_link) or os.path.exists(expected_link):
+            target = os.path.realpath(expected_link)
+            if os.path.isdir(target) and os.path.realpath(memory_dir) == target:
+                return {"status": "already_correct", "expected_path": expected_link, "error": None}
+            return {
+                "status": "conflict",
+                "expected_path": expected_link,
+                "error": f"already exists and points at {target!r}, not {memory_dir!r}",
+            }
+        os.makedirs(link_dir, exist_ok=True)
+        os.symlink(memory_dir, expected_link)
+        return {"status": "created", "expected_path": expected_link, "error": None}
+    except Exception as exc:
+        return {"status": "conflict", "expected_path": expected_link, "error": str(exc)}
+
+
 def _candidate_memory_dir(d: str) -> str:
     return os.path.join(d, ".claude", "memory")
 

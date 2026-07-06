@@ -42,14 +42,20 @@ downstream errors from a root cause already identified)
    `memory.provenance.check_project_symlink(repo_root, memory_dir)` (SHP-5) — it verifies from
    the direction Claude Code actually reads (resolves `~/.claude/projects/<encoded>/memory` and
    compares its REAL target against this project's `.claude/memory`), never by recomputing and
-   trusting the formula blind. Report:
+   trusting the formula blind. Report, and for every non-`ok` status name BOTH remediations —
+   the returned `repair_command` (instant, no prompting) AND `/hippo:init` (ONB-5: re-running it
+   on an existing corpus is now safe — it skips seeding and only (re)builds the symlink + index,
+   so it is the sanctioned one-liner a user should reach for first):
    - `ok` — symlink resolves to this project's corpus, nothing to say.
-   - `missing` — no symlink yet; print the returned `repair_command`.
-   - `broken` — symlink exists but points elsewhere; print the returned `repair_command`.
+   - `missing` — no symlink yet; print the returned `repair_command`, or "run `/hippo:init`
+     here to create it (existing corpus is left untouched, ONB-5)".
+   - `broken` — symlink exists but points elsewhere; print the returned `repair_command`, or
+     "run `/hippo:init` here to repair it (existing corpus is left untouched, ONB-5)".
    - `legacy_wrong_encoding` — a symlink exists under the OLD (pre-SHP-5) buggy encoding for
      this same repo root (only `/` transliterated) instead of the harness's real one; report it
      explicitly as a legacy artifact and print the returned `repair_command` (create the
-     correctly-encoded symlink, then remove the stale legacy one).
+     correctly-encoded symlink, then remove the stale legacy one) — `/hippo:init` creates the
+     correctly-encoded symlink too, but does not remove the stale legacy directory itself.
 5. **Corpus resolution (monorepo subdir launches, SHP-2).** Report WHICH corpus this session's
    `memory.provenance.resolve_dirs()` actually resolved, and why — a session started from a
    package subdirectory (`claude` launched from `packages/web`) walks UP toward the git

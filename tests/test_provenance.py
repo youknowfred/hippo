@@ -816,3 +816,119 @@ def test_check_project_symlink_detects_legacy_wrong_encoding(tmp_path):
     assert legacy_link_dir in result["repair_command"] or result["legacy_path"] == os.path.join(
         legacy_link_dir, "memory"
     )
+
+
+# --------------------------------------------------------------------------- #
+# create_project_symlink (ONB-5 — machine-local setup for an existing corpus:
+# teammate clone, new worktree, second machine)
+# --------------------------------------------------------------------------- #
+def test_create_project_symlink_creates_when_absent(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "myrepo")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+
+    result = P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+
+    assert result["status"] == "created"
+    assert os.path.islink(result["expected_path"])
+    assert os.path.realpath(result["expected_path"]) == os.path.realpath(memory_dir)
+
+
+def test_create_project_symlink_idempotent_noop_when_already_correct(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "myrepo")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    marker = os.path.join(memory_dir, "MEMORY.md")
+    with open(marker, "w", encoding="utf-8") as fh:
+        fh.write("# existing corpus\n")
+    before = open(marker, "rb").read()
+    projects_dir = str(tmp_path / "claude-projects")
+
+    first = P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert first["status"] == "created"
+
+    second = P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert second["status"] == "already_correct"
+    assert second["expected_path"] == first["expected_path"]
+
+    after = open(marker, "rb").read()
+    assert after == before  # MEMORY.md is byte-identical — never touched by symlink setup
+
+
+def test_create_project_symlink_reports_conflict_without_clobbering(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "myrepo")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    other_dir = str(tmp_path / "somewhere-else")
+    os.makedirs(other_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+    encoded = P.encode_project_dir(repo_root)
+    link_dir = os.path.join(projects_dir, encoded)
+    os.makedirs(link_dir)
+    existing_link = os.path.join(link_dir, "memory")
+    os.symlink(other_dir, existing_link)
+
+    result = P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+
+    assert result["status"] == "conflict"
+    assert result["error"]
+    # the pre-existing symlink is left exactly as it was — never overwritten
+    assert os.path.realpath(existing_link) == os.path.realpath(other_dir)
+
+
+def test_create_project_symlink_uses_same_encoding_as_check(tmp_path):
+    repo_root = str(tmp_path / "Users" / "x" / "dev" / "next.js-app")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    projects_dir = str(tmp_path / "claude-projects")
+
+    created = P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert created["status"] == "created"
+
+    checked = P.check_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert checked["status"] == "ok"
+
+
+# --------------------------------------------------------------------------- #
+# ONB-5: init's machine-local setup on an existing (cloned) corpus — symlink +
+# index build, memory files never touched.
+# --------------------------------------------------------------------------- #
+def test_existing_corpus_gets_symlink_and_index_without_touching_memory(tmp_path, monkeypatch):
+    from memory import build_index as B
+
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")  # fast, offline, BM25-only build
+
+    repo_root = str(tmp_path / "repo")
+    memory_dir = os.path.join(repo_root, ".claude", "memory")
+    os.makedirs(memory_dir)
+    memory_path = write_file(
+        repo_root, ".claude/memory/MEMORY.md", "# Project memory\n\n## User\n- nothing yet\n"
+    )
+    write_file(
+        repo_root,
+        ".claude/memory/user_role.md",
+        "---\ntype: user\n---\nSome existing corpus content already committed by a teammate.\n",
+    )
+    before = open(memory_path, "rb").read()
+    projects_dir = str(tmp_path / "claude-projects")
+    index_dir = str(tmp_path / "repo" / ".claude" / ".memory-index")
+
+    # Simulates a teammate clone / new worktree / second machine: the corpus (MEMORY.md)
+    # is already on disk, but the machine-local symlink and index have never been built.
+    link_result = P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert link_result["status"] == "created"
+    manifest = B.build_index(memory_dir, index_dir)
+
+    assert manifest["count"] == 1
+    assert os.path.exists(os.path.join(index_dir, "manifest.json"))
+    after = open(memory_path, "rb").read()
+    assert after == before  # MEMORY.md is byte-identical — init never re-seeds an existing corpus
+
+    # Re-running (idempotent — same as running /hippo:init again on the same machine)
+    # leaves both the symlink and the corpus exactly as they were.
+    link_again = P.create_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
+    assert link_again["status"] == "already_correct"
+    manifest_again = B.build_index(memory_dir, index_dir)
+    assert manifest_again["count"] == 1
+    assert open(memory_path, "rb").read() == before
