@@ -49,7 +49,7 @@ gracefully rather than blocking or erroring.
 | Platform | Status |
 |---|---|
 | macOS | **Fully supported** — the primary development platform; CI runs the full suite on macOS |
-| Linux | **Fully supported** — CI runs the full suite on Ubuntu. One known wart: without `CLAUDE_PLUGIN_DATA`, the fallback cache dir is `~/Library/Caches` (macOS-shaped); the XDG-aware fix ships in v0.3.0 ([ROADMAP.yaml](ROADMAP.yaml), OSP-2) |
+| Linux | **Fully supported** — CI runs the full suite on Ubuntu. Without `CLAUDE_PLUGIN_DATA`, the fallback cache dir is XDG-aware: `${XDG_CACHE_HOME:-~/.cache}/hippo-memory` ([ROADMAP.yaml](ROADMAP.yaml), OSP-2) |
 | Windows | **Out of scope** — a decision, not an omission ([ROADMAP.yaml](ROADMAP.yaml), decision OQ-2 + non_goals): the hooks are bash and the engine is untested there. Revisit only on concrete adoption evidence |
 
 Python 3.10 and 3.12 are exercised in CI. Bootstrap runs once per machine; init runs once

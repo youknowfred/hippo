@@ -40,9 +40,14 @@ export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 # Pin fastembed's ONNX model cache to a durable, machine-shared dir (see
 # memory_session_start.sh for the full rationale — precedence must match
 # memory/build_index.py::durable_fastembed_cache_dir). This export runs BEFORE
-# Python and WINS over its setdefault, so it must encode the same order.
+# Python and WINS over its setdefault, so it must encode the same order
+# (OSP-2: macOS Library/Caches vs Linux XDG-or-~/.cache).
 export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-${CLAUDE_PLUGIN_DATA:+$CLAUDE_PLUGIN_DATA/fastembed}}"
-export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-$HOME/Library/Caches/hippo-memory/fastembed}"
+if [ "$(uname)" = "Darwin" ]; then
+  export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-$HOME/Library/Caches/hippo-memory/fastembed}"
+else
+  export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-${XDG_CACHE_HOME:-$HOME/.cache}/hippo-memory/fastembed}"
+fi
 
 QUERY="$(printf '%s' "$PAYLOAD" | "$PY" -c 'import sys,json
 try:

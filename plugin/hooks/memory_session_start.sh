@@ -73,9 +73,14 @@ fi
 # SessionStart refresh can't re-fetch a wiped model, silently degrading recall to
 # BM25. Precedence (must match memory/build_index.py::durable_fastembed_cache_dir):
 # explicit env wins; else ${CLAUDE_PLUGIN_DATA}/fastembed (the update-surviving data
-# dir every installed plugin gets); else a home cache dir for non-plugin/dev runs.
+# dir every installed plugin gets); else a platform-conventional home cache dir for
+# non-plugin/dev runs (OSP-2: macOS Library/Caches vs Linux XDG-or-~/.cache).
 export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-${CLAUDE_PLUGIN_DATA:+$CLAUDE_PLUGIN_DATA/fastembed}}"
-export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-$HOME/Library/Caches/hippo-memory/fastembed}"
+if [ "$(uname)" = "Darwin" ]; then
+  export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-$HOME/Library/Caches/hippo-memory/fastembed}"
+else
+  export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-${XDG_CACHE_HOME:-$HOME/.cache}/hippo-memory/fastembed}"
+fi
 
 printf '%s' "$PAYLOAD" | "$PY" -m memory.session_start 2>/dev/null || true
 exit 0

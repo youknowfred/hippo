@@ -29,6 +29,7 @@ import json
 import os
 import re
 import signal
+import sys
 import threading
 import time
 from datetime import date, datetime
@@ -307,25 +308,40 @@ def compute_corpus(memory_dir: str) -> List[dict]:
 #
 # Default precedence (below an explicit FASTEMBED_CACHE_PATH, which ``ensure_fastembed_cache_path``
 # honors): ``$CLAUDE_PLUGIN_DATA/fastembed`` when CLAUDE_PLUGIN_DATA is set — the packaged
-# plugin's UPDATE-surviving data dir — else the standalone-repo home cache. The hooks run
-# BEFORE this resolver and their export WINS via setdefault, so they implement the SAME order
+# plugin's UPDATE-surviving data dir — else a platform-conventional home cache (OSP-2). The hooks
+# run BEFORE this resolver and their export WINS via setdefault, so they implement the SAME order
 # (see the cross-language guard in tests/test_fastembed_cache_path.py).
-_HOME_CACHE_SUBPATH = ("Library", "Caches", "hippo-memory", "fastembed")
+def platform_cache_dir(*, subpath: str = "hippo-memory") -> str:
+    """The OS-conventional user cache dir, joined with ``subpath`` — macOS vs Linux/XDG (OSP-2).
+
+    darwin -> ``~/Library/Caches/<subpath>``; anything else (Linux, and any unrecognized
+    ``sys.platform`` — Windows is out of scope per OQ-2, so no hard-fail on an odd platform
+    string) -> ``$XDG_CACHE_HOME/<subpath>`` or ``~/.cache/<subpath>`` when XDG_CACHE_HOME is
+    unset/empty. Absolute and ``~``-expanded. Must stay equivalent to the bash branch the memory
+    hooks mirror (same ``uname``-based split; see tests/test_fastembed_cache_path.py).
+    """
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~"), "Library", "Caches", subpath)
+    xdg_cache_home = os.environ.get("XDG_CACHE_HOME", "")
+    if xdg_cache_home:
+        return os.path.join(xdg_cache_home, subpath)
+    return os.path.join(os.path.expanduser("~"), ".cache", subpath)
 
 
 def durable_fastembed_cache_dir() -> str:
     """A durable, machine-shared cache dir for the fastembed model — NEVER under ``$TMPDIR``.
 
     Prefers ``$CLAUDE_PLUGIN_DATA/fastembed`` when CLAUDE_PLUGIN_DATA is set+non-empty (the
-    packaged plugin's update-surviving data dir), else ``~/Library/Caches/hippo-memory/
-    fastembed``. Absolute and ``~``-expanded; stable across reboots and macOS temp purges. Must
-    stay equivalent to the ``FASTEMBED_CACHE_PATH`` default the memory hooks export (same
-    precedence in bash; ``set -u``-safe ``:+`` / ``:-`` expansions).
+    packaged plugin's update-surviving data dir), else ``platform_cache_dir()/fastembed`` (macOS:
+    ``~/Library/Caches/hippo-memory/fastembed``; Linux: XDG-or-``~/.cache/hippo-memory/fastembed``).
+    Absolute and ``~``-expanded; stable across reboots and macOS temp purges. Must stay equivalent
+    to the ``FASTEMBED_CACHE_PATH`` default the memory hooks export (same precedence in bash;
+    ``set -u``-safe ``:+`` / ``:-`` expansions).
     """
     plugin_data = os.environ.get("CLAUDE_PLUGIN_DATA", "")
     if plugin_data:  # non-empty (matches bash ${CLAUDE_PLUGIN_DATA:+...}); harness sets a clean abs path
         return os.path.join(plugin_data, "fastembed")
-    return os.path.join(os.path.expanduser("~"), *_HOME_CACHE_SUBPATH)
+    return os.path.join(platform_cache_dir(), "fastembed")
 
 
 def ensure_fastembed_cache_path() -> str:
