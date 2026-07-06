@@ -29,8 +29,9 @@ downstream errors from a root cause already identified)
    patch it in place.
 3. **Model cache.** Does `${CLAUDE_PLUGIN_DATA}/fastembed` contain the warmed
    `bge-small-en-v1.5` model files? If bootstrapped but this is empty/missing, dense recall is
-   silently degrading to BM25 — flag it explicitly (this is exactly the failure mode
-   [[hippo_plugin_schema_gotchas]]'s sibling durable-cache-pin fix exists to prevent).
+   silently degrading to BM25 — flag it explicitly. (The cache is pinned to the durable
+   plugin-data dir precisely because hooks are offline by contract and can never re-warm a
+   purged `$TMPDIR` cache; an empty dir here means that pin failed or the warm step never ran.)
 4. **Project corpus.** Does `.claude/memory/MEMORY.md` exist in the current project? If not,
    suggest `/hippo:init`. If it exists, does the `~/.claude/projects/<encoded>/memory` symlink
    resolve to it correctly (not broken, not pointing elsewhere)?

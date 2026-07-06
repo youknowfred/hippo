@@ -37,9 +37,11 @@ would provision into a root-owned path. Run this guard FIRST and stop if it fail
    PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -c \
      "from memory.build_index import ensure_fastembed_cache_path; ensure_fastembed_cache_path(); from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
    ```
-   `ensure_fastembed_cache_path()` pins the cache under `${CLAUDE_PLUGIN_DATA}/fastembed` (never
-   `$TMPDIR` — see [[hippo_plugin_schema_gotchas]] sibling lesson: a hook can never re-warm a
-   wiped `/var/folders` cache, so this step MUST land the model somewhere durable).
+   `ensure_fastembed_cache_path()` pins the cache under `${CLAUDE_PLUGIN_DATA}/fastembed` —
+   never `$TMPDIR`. The lesson behind that pin: unset, fastembed caches under
+   `$TMPDIR/fastembed_cache`, which macOS purges on a schedule — and the hooks are offline by
+   hard contract, so they can never re-download a wiped model. Recall would silently degrade
+   to BM25 until someone re-ran bootstrap. This step MUST land the model somewhere durable.
 4. **Write the sentinel** on success: `{"requirements_hash": "<hash>", "bootstrapped_at": "<ISO
    timestamp>"}` to `${CLAUDE_PLUGIN_DATA}/.bootstrap-sentinel`. This is what step 1 checks —
    without it, every session would re-attempt a multi-second venv build.

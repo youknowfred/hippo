@@ -25,9 +25,9 @@ re-verify it; drifted → fix the body, then re-verify; obsolete → archive. Th
 reports; git is the audit/revert path, since the corpus is markdown-in-git. Verification is the
 agent's judgment, never a human pre-approval checkpoint, and there is deliberately no bulk
 "reverify everything at once" primitive anywhere in this engine — every resolution is a single,
-deliberate, individually-justified action (see [[reverify_head_only_no_bulk]] in the shipped
-corpus this engine was extracted from, and the no-bulk-primitives hard rule that carried forward
-into `/hippo:audit`'s design).
+deliberate, individually-justified action (a blind bulk re-baseline would anchor to the
+mechanical backfill touch and silence real drift; that rationale carried forward into
+`/hippo:audit`'s no-bulk hard rule).
 
 This is a **default assumption seeded by the core starter pack** (`assets/packs/core/claude_is_memory_master.md`),
 not a hardcoded behavior — if an operator prefers to review corpus maintenance themselves before
