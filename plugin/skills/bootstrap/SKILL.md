@@ -1,8 +1,8 @@
 ---
-description: Run this once per Mac (per machine, not per project) to build the shared plugin venv and warm the offline embedding model cache. Use when a user says "bootstrap memory", "set up hippo", "/memory:bootstrap", or when memory_doctor reports the venv/model cache is missing. Idempotent — safe to re-run; it no-ops via a sentinel file if already bootstrapped.
+description: Run this once per Mac (per machine, not per project) to build the shared plugin venv and warm the offline embedding model cache. Use when a user says "bootstrap memory", "set up hippo", "/hippo:bootstrap", or when /hippo:doctor reports the venv/model cache is missing. Idempotent — safe to re-run; it no-ops via a sentinel file if already bootstrapped.
 ---
 
-# /memory:bootstrap — one-time-per-Mac venv + model warm
+# /hippo:bootstrap — one-time-per-Mac venv + model warm
 
 This is the **one online step** in this plugin's entire lifecycle. Every other operation
 (recall, staleness, reconsolidation, archive) is offline-only by hard contract. Bootstrap

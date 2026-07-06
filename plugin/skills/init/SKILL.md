@@ -1,8 +1,8 @@
 ---
-description: Run this once per NEW project to seed .claude/memory/ with the portable operator pack, a skeleton MEMORY.md floor, the cross-machine symlink, and a built recall index. Use when a user says "init memory here", "set up memory for this project", "/memory:init", or opens a fresh repo with no .claude/memory/ directory yet. Idempotent — never overwrites an existing memory file.
+description: Run this once per NEW project to seed .claude/memory/ with the portable operator pack, a skeleton MEMORY.md floor, the cross-machine symlink, and a built recall index. Use when a user says "init memory here", "set up memory for this project", "/hippo:init", or opens a fresh repo with no .claude/memory/ directory yet. Idempotent — never overwrites an existing memory file.
 ---
 
-# /memory:init — seed a project's memory corpus
+# /hippo:init — seed a project's memory corpus
 
 Builds the two seams a copy-isolated plugin cannot reach on its own: the consuming project's
 own `.claude/memory/` corpus, and the machine-local `~/.claude/projects/<encoded>/memory`
@@ -11,9 +11,9 @@ symlink Claude Code's native memory system reads from.
 ## Preflight
 
 - If `.claude/memory/MEMORY.md` already exists, **STOP** and report it — do not touch an
-  existing corpus. Suggest `/memory:doctor` instead if the user wants a health check.
+  existing corpus. Suggest `/hippo:doctor` instead if the user wants a health check.
 - Confirm `${CLAUDE_PROJECT_DIR}` (or `git rev-parse --show-toplevel`) resolves to a real git
-  repo. `/memory:init` outside a git repo has nowhere durable to seed — halt with a clear
+  repo. `/hippo:init` outside a git repo has nowhere durable to seed — halt with a clear
   message rather than writing into an ungit'd directory that a future `git init` won't pick up.
 
 ## What this does, in order
@@ -58,5 +58,5 @@ symlink Claude Code's native memory system reads from.
   project, but check), skip that one file and report it rather than silently clobbering.
 - **Never auto-commit.** The nudge in step 6 is the end of this skill's responsibility.
 - Re-running on an already-initialized project is a no-op per the preflight check — this skill
-  does not have an "update" mode; that's `/memory:doctor`'s job to detect drift, not this one's
+  does not have an "update" mode; that's `/hippo:doctor`'s job to detect drift, not this one's
   job to silently patch.

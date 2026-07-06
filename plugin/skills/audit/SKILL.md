@@ -1,8 +1,8 @@
 ---
-description: This skill should be used for a self-audit of the LOCAL agent-memory tooling and corpus itself (the `memory` package + `.claude/memory/`) — the tools' own health, not your product's own code. Triggers include "audit memory", "audit the memory corpus", "memory self-audit", "how healthy is my memory system", "/memory:audit". Cross-references signals no single tool combines (authority-vs-evidence mismatches, cross-run worklist recurrence, cascading blind spots, staleness-outlier decomposition, demote-history-vs-currently-stale), deep-dives a bounded top-N by actually reading bodies + git diffs, and renders graduate/fix/demote verdicts — producing a ranked "3-5 things that matter this week" report, never a stats dump. Mode flags — default is report-only (writes the report, zero corpus writes); `--apply` executes approved verdicts via the tools' own no-bulk primitives; `--deep-dive-n N` (default 8); `--window-sessions N` (default 30); `--skip-eval`. Do NOT use this for auditing your PRODUCT's own code, features, or architecture — this is corpus/tooling self-audit only. Do NOT use for routine memory hygiene already free at every SessionStart (the staleness banner, reconsolidation worklist, recently-captured list) — this skill exists only to add value beyond what the SessionStart hook already surfaces automatically.
+description: This skill should be used for a self-audit of the LOCAL agent-memory tooling and corpus itself (the `memory` package + `.claude/memory/`) — the tools' own health, not your product's own code. Triggers include "audit memory", "audit the memory corpus", "memory self-audit", "how healthy is my memory system", "/hippo:audit". Cross-references signals no single tool combines (authority-vs-evidence mismatches, cross-run worklist recurrence, cascading blind spots, staleness-outlier decomposition, demote-history-vs-currently-stale), deep-dives a bounded top-N by actually reading bodies + git diffs, and renders graduate/fix/demote verdicts — producing a ranked "3-5 things that matter this week" report, never a stats dump. Mode flags — default is report-only (writes the report, zero corpus writes); `--apply` executes approved verdicts via the tools' own no-bulk primitives; `--deep-dive-n N` (default 8); `--window-sessions N` (default 30); `--skip-eval`. Do NOT use this for auditing your PRODUCT's own code, features, or architecture — this is corpus/tooling self-audit only. Do NOT use for routine memory hygiene already free at every SessionStart (the staleness banner, reconsolidation worklist, recently-captured list) — this skill exists only to add value beyond what the SessionStart hook already surfaces automatically.
 ---
 
-# /memory:audit — Self-Audit of the Agent-Memory Tooling & Corpus
+# /hippo:audit — Self-Audit of the Agent-Memory Tooling & Corpus
 
 A genuinely insightful health check of the `memory` package + the `.claude/memory/` corpus —
 the tooling that runs the agent's own memory, not your product's own code. Cross-references
@@ -480,17 +480,17 @@ never adds a batch wrapper around them:
 
 ### (A) Routine health check (default, safe)
 
-> Run `/memory:audit`. Report-only — don't apply anything. I want to see what's actually worth
+> Run `/hippo:audit`. Report-only — don't apply anything. I want to see what's actually worth
 > my attention this week beyond what the SessionStart banner already told me.
 
 ### (B) Fast drift-only pass (no dense model load)
 
-> Run `/memory:audit --skip-eval --deep-dive-n 5`. I just want the curation/staleness/archive
+> Run `/hippo:audit --skip-eval --deep-dive-n 5`. I just want the curation/staleness/archive
 > signals, not the recall-quality gates.
 
 ### (C) Apply mode after reviewing a prior report
 
-> Run `/memory:audit --apply`. I've read the last report — go ahead and execute the
+> Run `/hippo:audit --apply`. I've read the last report — go ahead and execute the
 > graduate/fix/demote verdicts. Leave any archive proposals for a follow-up; don't move files yet.
 
 ### (D) Follow-up archive confirmation

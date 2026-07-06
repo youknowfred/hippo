@@ -481,7 +481,7 @@ def evaluate(
     grad = graduation_rate(resolved_telemetry_dir)
 
     # A caller with NO hard-set fixture (hard_set_path=None — e.g. a fresh install of the
-    # packaged plugin with no hand-curated calibration data yet, see /memory:audit) is a
+    # packaged plugin with no hand-curated calibration data yet, see /hippo:audit) is a
     # deliberately-absent input, not a failure. Those two gates report "skipped" (pass=None,
     # excluded from `ok`) rather than a false FAIL against an empty set. A caller who DID pass
     # a hard_set_path that happens to load empty (a malformed/truncated fixture file) keeps the

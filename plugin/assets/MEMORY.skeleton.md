@@ -33,5 +33,5 @@
 
 ## Recalled on demand
 > Everything below the floor — project facts, external references, and anything not linked
-> above — is surfaced per-prompt by the recall hook, not always-loaded. Use `/memory:new` to add
+> above — is surfaced per-prompt by the recall hook, not always-loaded. Use `/hippo:new` to add
 > to it; it needs no index maintenance here.

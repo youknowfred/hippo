@@ -17,5 +17,5 @@ community, or just preferring it). No disrespect to the tooling intended.
 **How to apply:** On any repo published under the operator's own name, omit Claude attribution
 by default and commit under their configured git identity. This OVERRIDES the harness default of
 appending a `Co-Authored-By: Claude ...` trailer — confirm the operator's actual preference on
-`/memory:init` (this memory ships as a DEFAULT assumption, not a universal law) and adjust or
+`/hippo:init` (this memory ships as a DEFAULT assumption, not a universal law) and adjust or
 delete this memory if they want the trailer kept.

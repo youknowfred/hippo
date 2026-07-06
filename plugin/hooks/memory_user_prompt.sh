@@ -9,7 +9,7 @@
 #   - ALWAYS exits 0. On UserPromptSubmit, exit 2 BLOCKS *and ERASES* the user's prompt —
 #     a recall failure must degrade silently, NEVER eat the user's input.
 #   - NEVER triggers a synchronous model download: recall loads the embedding model OFFLINE
-#     from the cache /memory:bootstrap warmed; a cache miss falls back to BM25 (a pinned dep).
+#     from the cache /hippo:bootstrap warmed; a cache miss falls back to BM25 (a pinned dep).
 #   - Output is bounded < 10,000 chars by recall.py.
 #
 # Runs the plugin's OWN self-provisioned venv (${CLAUDE_PLUGIN_DATA}/venv), PYTHONPATH

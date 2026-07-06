@@ -9,11 +9,11 @@ reconsolidation, archive internals).
 
 | Skill | Run when |
 |---|---|
-| `/memory:bootstrap` | Once per Mac — builds the shared venv + warms the offline model cache |
-| `/memory:init` | Once per new project — seeds `.claude/memory/` + the cross-machine symlink |
-| `/memory:new` | Whenever the agent decides to save something to memory |
-| `/memory:doctor` | Fast health check — is the plugin's own install/environment working |
-| `/memory:audit` | Deep, judgment-based self-audit of the corpus's content — staleness, drift, archive candidates |
+| `/hippo:bootstrap` | Once per Mac — builds the shared venv + warms the offline model cache |
+| `/hippo:init` | Once per new project — seeds `.claude/memory/` + the cross-machine symlink |
+| `/hippo:new` | Whenever the agent decides to save something to memory |
+| `/hippo:doctor` | Fast health check — is the plugin's own install/environment working |
+| `/hippo:audit` | Deep, judgment-based self-audit of the corpus's content — staleness, drift, archive candidates |
 
 ## Operating principle: the agent is the memory master
 
@@ -27,7 +27,7 @@ agent's judgment, never a human pre-approval checkpoint, and there is deliberate
 "reverify everything at once" primitive anywhere in this engine — every resolution is a single,
 deliberate, individually-justified action (see [[reverify_head_only_no_bulk]] in the shipped
 corpus this engine was extracted from, and the no-bulk-primitives hard rule that carried forward
-into `/memory:audit`'s design).
+into `/hippo:audit`'s design).
 
 This is a **default assumption seeded by the operator pack** (`assets/operator-pack/claude_is_memory_master.md`),
 not a hardcoded behavior — if an operator prefers to review corpus maintenance themselves before

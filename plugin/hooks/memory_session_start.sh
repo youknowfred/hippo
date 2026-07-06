@@ -5,7 +5,7 @@
 # git-recent, reconsolidation worklist, link-health, floor). Self-suppresses when
 # there is nothing to say. ALWAYS exits 0 — never blocks session start.
 #
-# Runs the plugin's OWN self-provisioned venv (built by the /memory:bootstrap skill
+# Runs the plugin's OWN self-provisioned venv (built by the /hippo:bootstrap skill
 # into ${CLAUDE_PLUGIN_DATA}/venv), with PYTHONPATH pointed at ${CLAUDE_PLUGIN_ROOT}
 # so `import memory` resolves to the bundled package — code from PLUGIN_ROOT
 # (read-only, swapped on update), deps from PLUGIN_DATA (persistent across updates).

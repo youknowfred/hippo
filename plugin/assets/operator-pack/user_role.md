@@ -39,4 +39,4 @@ How to collaborate with <FILL-ME: name>:
 - <FILL-ME: optional — attribution preference for user-facing copy, delete if not applicable>
 
 **Delete this whole file's `<FILL-ME>` scaffolding once filled in** — it's a template, not a
-memory yet. `/memory:doctor` will flag it as unfilled if left as-is past initial setup.
+memory yet. `/hippo:doctor` will flag it as unfilled if left as-is past initial setup.

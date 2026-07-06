@@ -14,6 +14,6 @@ alongside this native memory system's, doubling context consumption for duplicat
 Additionally, the two memory stores drift out of sync, creating conflicting information over time.
 
 **How to apply:** When you need to persist knowledge across conversations, always use this
-native memory system (`/memory:new`). When you need LSP-powered code intelligence, use the
+native memory system (`/hippo:new`). When you need LSP-powered code intelligence, use the
 code-navigation MCP. The two concerns are cleanly separated: the MCP is for code tools, this
 plugin is for memory.
