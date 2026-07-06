@@ -203,3 +203,42 @@ def test_new_memory_does_not_touch_unrelated_bodies(tmp_path, monkeypatch):
     other_before = open(other, "rb").read()
     NM.write_memory("new_proj_mem", "d desc", "project", memory_dir=md, repo_root=str(tmp_path))
     assert open(other, "rb").read() == other_before  # unrelated memory body unchanged
+
+
+def test_new_memory_born_staleness_tracked_in_dirty_worktree(tmp_path, monkeypatch):
+    """COR-1: a memory created via write_memory in a git repo (dirty worktree — the file
+    itself has no commit history) carries HEAD as source_commit at CREATION, so
+    find_stale/reconsolidation/archive gating see it immediately."""
+    import subprocess
+
+    from memory import new_memory as NM
+    from memory.provenance import parse_frontmatter
+
+    from .conftest import git_commit, write_file
+
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    repo = str(tmp_path / "repo")
+    os.makedirs(repo)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
+    write_file(repo, "src/app.py", "x = 1\n")
+    head = git_commit(repo, "init", 1_700_000_000)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+
+    md = os.path.join(repo, ".claude", "memory")
+    _floor(md, _CLEAN_FLOOR)
+    res = NM.write_memory(
+        "born_tracked",
+        "a fact about src/app.py that must be staleness-tracked from birth",
+        "project",
+        body="src/app.py does x.",
+        memory_dir=md,
+        repo_root=repo,
+    )
+    assert res["created"] is True and res["error"] is None
+
+    fm = parse_frontmatter(open(res["path"], encoding="utf-8").read())
+    meta = fm.get("metadata") or {}
+    sc = fm.get("source_commit") or meta.get("source_commit")
+    assert sc == head, f"expected a HEAD baseline at creation, got {sc!r}"

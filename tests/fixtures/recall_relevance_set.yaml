@@ -1,80 +1,38 @@
-# Hand-judged relevance set for the precision@k scorecard metric (eval_recall.py, Tier 1
-# of the memory-organism-instrument-immunize roadmap — REPORT-ONLY, never a merge gate).
+# Hand-judged relevance set for the precision@k scorecard metric (eval_recall.py —
+# REPORT-ONLY, never a merge gate).
 #
 # Distinct from recall_hard_set.yaml's binary recall@k ("any ONE of `expected` in the top-k
 # counts as a full hit"): precision@k is a GRADED measure — `relevant` lists every memory
 # stem judged relevant to the query, and a query is scored by what FRACTION of the top-k
-# slots are occupied by a relevant memory (|top-k ∩ relevant| / k). A handful of entries
-# below deliberately list MULTIPLE relevant stems (a real cluster of related memories) so
-# the metric actually exercises "found more of the cluster" rather than degenerating into
-# the same binary signal hard_set_metrics already reports.
+# slots are occupied by a relevant memory (|top-k ∩ relevant| / k). Several entries below
+# deliberately list MULTIPLE relevant stems (a real cluster of related memories) so the
+# metric actually exercises "found more of the cluster" rather than degenerating into the
+# same binary signal hard_set_metrics already reports.
 #
-# Like recall_hard_set.yaml, these are hand-written CROSS-VOCABULARY paraphrase queries that
-# deliberately avoid each memory's own `description:` wording, to exercise the DENSE half of
-# hybrid recall. This is the ONLY new hand-maintained eval data this tier adds; keep stems in
-# sync with the corpus (a stem that no longer resolves to a file is silently dropped from the
-# precision computation, mirroring how eval_recall already treats the hard set).
-#
-#   ./.venv/bin/pip install -r memory/requirements-memory.txt
-#   ./.venv/bin/python -m memory.build_index
-#   ./.venv/bin/python -m memory.eval_recall
+# Stems target the memories this repo SHIPS (plugin/assets/ starter packs); keep them in
+# sync with the packs. Run instructions: see recall_hard_set.yaml's header — the same
+# seeded corpus serves both fixtures.
 
-- query: "what's the right way to handle a bug whose cause is already known"
-  relevant: [feedback_root_cause_not_symptom_handling]
+- query: "what's our policy on keeping legacy compatibility paths alive"
+  relevant: [feedback_no_backward_compat, feedback_no_legacy_read_fallbacks, feedback_no_feature_flagged_refactor_rollouts]
 
-- query: "should we keep an old shim around so a refactor doesn't break existing callers"
-  relevant: [feedback_no_backward_compat]
+- query: "how do we handle a failure whose underlying cause is already known"
+  relevant: [feedback_root_cause_not_symptom_handling, feedback_fallback_is_still_bug]
 
-- query: "how does the document editor authenticate users and enforce permissions"
-  relevant: [canvas_auth_rbac]
+- query: "process for landing a batch of related fixes at once"
+  relevant: [feedback_single_pr_separate_commits]
 
-- query: "why did we stop storing the workbook dependency graph as one giant compressed blob"
-  relevant: [formula_graph_columnar_duckdb_migration]
+- query: "who owns memory hygiene and staleness resolution here"
+  relevant: [claude_is_memory_master]
 
-- query: "trimming the tail of a score distribution before the cross-encoder reranker runs"
-  relevant: [density_adaptive_floor, reranker_voyage_primary]
+- query: "git techniques for checking whether work would be lost"
+  relevant: [feedback_two_dot_diff_for_lost_work, feedback_no_git_stash_for_fault_attribution]
 
-- query: "how does the research agent decide which strategies are worth promoting into long-term memory"
-  relevant: [playbook_memory_system, playbook_read_store_wiring]
+- query: "when should tests run during a long multi-file refactor"
+  relevant: [feedback_batch_tests_at_end]
 
-- query: "where does the analytics warehouse actually store its data now"
-  relevant: [observability_ducklake_migration]
+- query: "diagnosing a recurring degradation that keeps getting blamed on third parties"
+  relevant: [feedback_dont_blame_vendor_latency, feedback_new_logs_mean_recurrence]
 
-- query: "which cross-encoder model actually does the heavy lifting for result ordering"
-  relevant: [reranker_voyage_primary]
-
-- query: "what's the cap on how many tool definitions or schema branches a single model call can have"
-  relevant: [anthropic_strict_tool_grammar_ceilings]
-
-- query: "how do we stop one slow phase from starving the ones that run after it"
-  relevant: [budget_downstream_reservations, workflow_timeout_layering, cre_caller_enforced_deadline]
-
-- query: "letting an LLM figure out the column headers when a spreadsheet doesn't match our usual template"
-  relevant: [excel_llm_header_rescue]
-
-- query: "a database connection pool getting confused across different event loops in worker threads"
-  relevant: [postgres_pool_event_loop_invariants]
-
-- query: "a child process socket connection failing with a missing-file error right at startup"
-  relevant: [subprocess_ready_before_bind]
-
-- query: "how do we know if the generated memo actually answered the key investment questions"
-  relevant: [chart_decision_coverage]
-
-- query: "the approved library for turning markdown into HTML in this codebase"
-  relevant: [feedback_use_pymmd_for_markdown]
-
-- query: "protecting the dependency lockfile from a dependency-confusion or typosquat attack"
-  relevant: [supply_chain_hardening]
-
-- query: "exporting a document to a PDF through a two-stage rendering service"
-  relevant: [canvas_pdf_export_pipeline]
-
-- query: "the worker process's retrieval thread going quiet even though it isn't actually using CPU"
-  relevant: [retrieval_loop_gil_convoy_tokenization]
-
-- query: "switching every blocking network call in the retrieval path over to non-blocking calls"
-  relevant: [async_retrieval_migration]
-
-- query: "the order that middleware layers must be wired onto a deep research agent"
-  relevant: [deepagents_sdk_patterns]
+- query: "commit authorship and attribution rules for this repo"
+  relevant: [oss-attribution-no-claude]

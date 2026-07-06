@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 
 import numpy as np
+import pytest
 
 from memory import build_index as B
 
@@ -294,6 +295,9 @@ def test_default_index_dir_is_gitignored_sibling(tmp_path):
 
 
 def test_switching_to_bm25_removes_stale_dense_file(tmp_path, monkeypatch):
+    # Explicit delenv: the CI hermetic lane exports MEMOBOT_DISABLE_DENSE=1 job-wide,
+    # and this test's FIRST build must be a dense one for the scenario to exist.
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"a.md": "alpha", "b.md": "beta"})
@@ -408,12 +412,20 @@ def test_load_index_roundtrip(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# Real fastembed backend (skipped where the dep isn't installed)
+# Real fastembed backend (network-marked: can download the ~130MB model on a
+# cold cache, so it is deselected by default via addopts `-m "not network"` —
+# the suite's hermeticity claim must stay true offline with an empty home cache)
 # --------------------------------------------------------------------------- #
-def test_real_fastembed_dense_build(tmp_path, monkeypatch):
-    import pytest
-
+@pytest.mark.network
+def test_real_fastembed_dense_build(tmp_path, monkeypatch, tmp_path_factory):
     pytest.importorskip("fastembed")
+    # Pin the model cache: honor a caller-provided FASTEMBED_CACHE_PATH (CI's dense
+    # lane points this at the actions-restored cache) else a session-scoped tmp dir —
+    # NEVER the user's real home cache.
+    cache = os.environ.get("FASTEMBED_CACHE_PATH") or str(
+        tmp_path_factory.getbasetemp() / "fastembed-cache"
+    )
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", cache)
     monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -429,3 +441,45 @@ def test_real_fastembed_dense_build(tmp_path, monkeypatch):
     assert manifest["dense_ready"] is True
     assert manifest["dim"] and manifest["dim"] > 0
     assert os.path.exists(os.path.join(idx, "dense.npy"))
+
+
+# --------------------------------------------------------------------------- #
+# SEC-3: the index dir is self-ignoring; derived state invisible to git
+# --------------------------------------------------------------------------- #
+def test_index_dir_drops_self_ignoring_gitignore(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha"})
+    B.build_index(md, idx)
+    gi = os.path.join(idx, ".gitignore")
+    assert os.path.exists(gi) and open(gi, encoding="utf-8").read() == "*\n"
+
+
+def test_derived_dirs_invisible_to_git_without_init(tmp_path, monkeypatch):
+    """Both derived dirs must be invisible to `git status` in a repo whose .gitignore
+    was never patched by init — the self-ignoring pattern removes that dependency."""
+    import subprocess
+
+    from memory import recall as R
+
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    repo = str(tmp_path / "repo")
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    with open(os.path.join(md, "m.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: m\ndescription: "zebra canary deploys"\n---\nbody\n')
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    monkeypatch.setenv("MEMOBOT_MEMORY_DIR", md)
+    monkeypatch.chdir(repo)
+    R.main(["zebra", "canary", "deploys"])  # builds the index + writes telemetry
+
+    assert os.path.isdir(os.path.join(repo, ".claude", ".memory-index"))
+    assert os.path.isdir(os.path.join(repo, ".claude", ".memory-telemetry"))
+    porcelain = subprocess.run(
+        ["git", "status", "--porcelain", "-uall"], cwd=repo, capture_output=True, text=True
+    ).stdout
+    assert ".memory-index" not in porcelain and ".memory-telemetry" not in porcelain
+    assert ".claude/memory/m.md" in porcelain  # the CORPUS stays visible/committable

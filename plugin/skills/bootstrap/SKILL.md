@@ -1,12 +1,21 @@
 ---
-description: Run this once per Mac (per machine, not per project) to build the shared plugin venv and warm the offline embedding model cache. Use when a user says "bootstrap memory", "set up hippo", "/memory:bootstrap", or when memory_doctor reports the venv/model cache is missing. Idempotent — safe to re-run; it no-ops via a sentinel file if already bootstrapped.
+description: Run this once per machine (not per project) to build the shared plugin venv and warm the offline embedding model cache. Use when a user says "bootstrap memory", "set up hippo", "/hippo:bootstrap", or when /hippo:doctor reports the venv/model cache is missing. Idempotent — safe to re-run; it no-ops via a sentinel file if already bootstrapped.
 ---
 
-# /memory:bootstrap — one-time-per-Mac venv + model warm
+# /hippo:bootstrap — one-time-per-machine venv + model warm
 
 This is the **one online step** in this plugin's entire lifecycle. Every other operation
 (recall, staleness, reconsolidation, archive) is offline-only by hard contract. Bootstrap
 exists precisely so those hooks never have to be.
+
+## Preflight (shared across all hippo skills)
+
+Every code block below expands the plugin data dir variable — unset, `uv venv "/venv"`
+would provision into a root-owned path. Run this guard FIRST and stop if it fails:
+
+```bash
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty — this Claude Code version is too old for hippo's self-provisioning. Update Claude Code, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+```
 
 ## What this does
 
@@ -28,9 +37,11 @@ exists precisely so those hooks never have to be.
    PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -c \
      "from memory.build_index import ensure_fastembed_cache_path; ensure_fastembed_cache_path(); from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
    ```
-   `ensure_fastembed_cache_path()` pins the cache under `${CLAUDE_PLUGIN_DATA}/fastembed` (never
-   `$TMPDIR` — see [[hippo_plugin_schema_gotchas]] sibling lesson: a hook can never re-warm a
-   wiped `/var/folders` cache, so this step MUST land the model somewhere durable).
+   `ensure_fastembed_cache_path()` pins the cache under `${CLAUDE_PLUGIN_DATA}/fastembed` —
+   never `$TMPDIR`. The lesson behind that pin: unset, fastembed caches under
+   `$TMPDIR/fastembed_cache`, which macOS purges on a schedule — and the hooks are offline by
+   hard contract, so they can never re-download a wiped model. Recall would silently degrade
+   to BM25 until someone re-ran bootstrap. This step MUST land the model somewhere durable.
 4. **Write the sentinel** on success: `{"requirements_hash": "<hash>", "bootstrapped_at": "<ISO
    timestamp>"}` to `${CLAUDE_PLUGIN_DATA}/.bootstrap-sentinel`. This is what step 1 checks —
    without it, every session would re-attempt a multi-second venv build.
@@ -54,5 +65,6 @@ exists precisely so those hooks never have to be.
 ## After bootstrap
 
 Recall works in full hybrid (dense+BM25) mode from the next session onward. Before bootstrap,
-recall already works in BM25-only mode (`rank-bm25` is a normal pinned dependency, not gated
-on this skill) — bootstrap only unlocks the dense half.
+recall already works in BM25-only mode — the plugin vendors a dependency-free BM25 scorer and
+frontmatter parser (`memory/_vendor/`) so a bare `python3` with none of the pinned deps still
+serves real lexical recall. Bootstrap unlocks the dense half (and the full pinned deps).

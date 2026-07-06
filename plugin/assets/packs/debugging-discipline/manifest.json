@@ -1,0 +1,24 @@
+{
+  "pack": "debugging-discipline",
+  "version": "0.2.0",
+  "title": "Debugging discipline",
+  "description": "How failures get diagnosed: root causes over symptom handlers, fallbacks are still bugs, recurrences are not deploy lag, vendors are innocent until the code-side mechanism is ruled out.",
+  "seed_by_default": false,
+  "memories": [
+    {
+      "file": "feedback_root_cause_not_symptom_handling.md"
+    },
+    {
+      "file": "feedback_fallback_is_still_bug.md"
+    },
+    {
+      "file": "feedback_new_logs_mean_recurrence.md"
+    },
+    {
+      "file": "feedback_dont_blame_vendor_latency.md"
+    },
+    {
+      "file": "feedback_fix_pre_existing_when_encountered.md"
+    }
+  ]
+}

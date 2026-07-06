@@ -1,0 +1,17 @@
+{
+  "pack": "stack-specific",
+  "version": "0.2.0",
+  "title": "Stack-specific gotchas",
+  "description": "Memories that only make sense on a particular stack or toolchain \u2014 each is tagged metadata.stack so audit can flag them for pruning on projects that never recall them.",
+  "seed_by_default": false,
+  "memories": [
+    {
+      "file": "feedback_anchor_fire_and_forget_tasks.md",
+      "stack": "python-asyncio"
+    },
+    {
+      "file": "feedback_serena_tools_only.md",
+      "stack": "serena-mcp"
+    }
+  ]
+}

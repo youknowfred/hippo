@@ -7,6 +7,7 @@ producer set, so these tests don't depend on git timing (that's covered in test_
 from __future__ import annotations
 
 import json
+import os
 
 import memory.session_start as S
 
@@ -135,3 +136,83 @@ def test_reconsolidation_silent_when_stubbed_empty(monkeypatch):
 
     monkeypatch.setattr("memory.reconsolidate.recalled_stale_worklist", lambda *a, **k: [])
     assert reconsolidation_producer("md", "repo") is None
+
+
+def test_main_heals_empty_baselines_side_effect(tmp_path, monkeypatch, capsys):
+    """COR-1: SessionStart heals residual source_commit:"" baselines to HEAD (covers
+    hand-authored/pre-COR-1 memories) as a side effect, before the index refresh."""
+    import subprocess
+
+    from memory.staleness import read_provenance
+
+    from .conftest import git_commit, write_file
+
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    repo = str(tmp_path / "repo")
+    os.makedirs(repo)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
+    write_file(repo, "src/x.py", "x = 1\n")
+    head = git_commit(repo, "init", 1_700_000_000)
+    md = os.path.join(repo, ".claude", "memory")
+    path = write_file(
+        repo,
+        ".claude/memory/residual.md",
+        '---\nname: residual\ndescription: "left empty by a pre-COR-1 backfill"\n'
+        'cited_paths: ["src/x.py"]\nsource_commit: ""\n---\nbody\n',
+    )
+    monkeypatch.setattr(S, "resolve_dirs", lambda: (md, repo))
+
+    assert S.main() == 0
+    _, sc = read_provenance(open(path, encoding="utf-8").read())
+    assert sc == head
+
+
+# --------------------------------------------------------------------------- #
+# COR-11: stale-venv detection (requirements hash vs bootstrap sentinel)
+# --------------------------------------------------------------------------- #
+def _plugin_env(tmp_path, monkeypatch, *, req_text: str, sentinel_hash):
+    import hashlib
+    import json as _json
+
+    data_dir = tmp_path / "plugin-data"
+    plugin_root = tmp_path / "plugin-root"
+    os.makedirs(data_dir, exist_ok=True)
+    os.makedirs(plugin_root, exist_ok=True)
+    (plugin_root / "requirements.txt").write_text(req_text, encoding="utf-8")
+    if sentinel_hash == "current":
+        sentinel_hash = hashlib.sha256(req_text.encode()).hexdigest()
+    if sentinel_hash is not None:
+        (data_dir / ".bootstrap-sentinel").write_text(
+            _json.dumps({"requirements_hash": sentinel_hash}), encoding="utf-8"
+        )
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(data_dir))
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
+
+
+def test_stale_venv_producer_nudges_on_dep_bump(tmp_path, monkeypatch):
+    _plugin_env(tmp_path, monkeypatch, req_text="numpy>=2\n", sentinel_hash="0" * 64)
+    out = S.stale_venv_producer("md", "repo")
+    assert out and "/hippo:bootstrap" in out
+
+
+def test_stale_venv_producer_silent_when_hash_current(tmp_path, monkeypatch):
+    _plugin_env(tmp_path, monkeypatch, req_text="numpy>=2\n", sentinel_hash="current")
+    assert S.stale_venv_producer("md", "repo") is None
+
+
+def test_stale_venv_producer_silent_when_not_bootstrapped(tmp_path, monkeypatch):
+    # No sentinel — ONB-1's pre-Python nudge owns that state; this producer stays out.
+    _plugin_env(tmp_path, monkeypatch, req_text="numpy>=2\n", sentinel_hash=None)
+    assert S.stale_venv_producer("md", "repo") is None
+
+
+def test_stale_venv_producer_silent_without_plugin_data_env(tmp_path, monkeypatch):
+    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
+    assert S.stale_venv_producer("md", "repo") is None
+
+
+def test_stale_venv_producer_registered_first():
+    assert S.PRODUCERS[0][0] == "stale_venv"
+    assert S.PRODUCERS[0][1] is S.stale_venv_producer

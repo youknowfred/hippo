@@ -1,14 +1,20 @@
 ---
-description: Create a new, recall-ready memory file the right way (correct frontmatter, backfilled citation provenance, refreshed index, and a floor pointer if applicable). Use whenever the agent decides to save something to memory — a user preference, a corrected mistake, a project fact, or an external reference — instead of hand-writing a markdown file. Triggers include "remember this", "save this to memory", "/memory:new".
+description: Create a new, recall-ready memory file the right way (correct frontmatter, backfilled citation provenance, refreshed index, and a floor pointer if applicable). Use whenever the agent decides to save something to memory — a user preference, a corrected mistake, a project fact, or an external reference — instead of hand-writing a markdown file. Triggers include "remember this", "save this to memory", "/hippo:new".
 ---
 
-# /memory:new — create a memory right-by-construction
+# /hippo:new — create a memory right-by-construction
 
 Never hand-write a memory file directly — `memory.new_memory` does five things atomically that
 are easy to get wrong by hand: correct frontmatter schema, citation-provenance backfill
 (`cited_paths` / `source_commit`, so staleness detection works from day one), an index refresh
 (so it's recallable in THIS session, not just the next one), and — for `user`/`feedback` types
 only — a floor pointer appended to `MEMORY.md` under the right section.
+
+## Preflight (shared across all hippo skills)
+
+```bash
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty — this Claude Code version is too old for hippo's self-provisioning. Update Claude Code, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+```
 
 ## Usage
 
@@ -41,7 +47,7 @@ PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -m me
 - Anything directly re-derivable from reading the current code or `git log`/`git blame`.
 - Transient state relevant only to the current session.
 - Anything already covered by this project's own docs/README.
-- A duplicate of an existing memory — search/recall first (`/memory:doctor` or a direct
+- A duplicate of an existing memory — search/recall first (`/hippo:doctor` or a direct
   `memory.recall` call) before creating a new one on the same topic; update the existing file
   instead if it's just stale, not wrong.
 
@@ -49,4 +55,4 @@ PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -m me
 
 The tool refreshes the index automatically — the new memory is recallable in the SAME session,
 not just future ones. It does NOT commit anything; that's the user's call, same as
-`/memory:init`'s nudge-not-commit policy.
+`/hippo:init`'s nudge-not-commit policy.

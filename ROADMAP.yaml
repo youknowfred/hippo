@@ -1,0 +1,2229 @@
+# ============================================================================
+# hippo — Cross-Project Uniform-Utility Roadmap
+# ============================================================================
+# The roadmap the engine's own comments point at (recall.py:1 "Tier 2 of the
+# activation roadmap", build_index.py:9 "deferred (see the roadmap)") now ships
+# in-repo. It is organized as 14 workstreams of individually-shippable items,
+# sequenced into a release train (v0.2.0 → v0.7.0) that front-loads truthfulness
+# (what ships must work as documented, and say so when it can't) before breadth
+# (any repo shape), before depth (retrieval/graph/lifecycle), before autonomy
+# (capture), before fleet scale (teams, cross-project tiers).
+
+meta:
+  title: hippo uniform-utility roadmap
+  repo: youknowfred/hippo
+  authored: 2026-07-05
+  baseline_version: 0.1.0
+  baseline_state: >-
+    Tier 1 (engine extraction) and Tier 2 (bootstrap/init/new/doctor/audit
+    skills, operator pack, audit port) merged; 283 tests passing, 1 skip;
+    no CI, no LICENSE, no tagged release.
+  method: >-
+    Produced from a 40-agent evaluation: seven dimension evaluators
+    (recall-engine, lifecycle, graph, integration, skills-dx, portability,
+    tests-quality) reading the full source, adversarial verification of every
+    critical/high finding (verdicts recorded per item under `provenance`),
+    a 2025-2026 agent-memory landscape scan (Letta, Mem0, Zep/Graphiti,
+    LangMem, HippoRAG, A-MEM, LongMemEval), and a completeness critique.
+  scoring:
+    priority:
+      P0: broken promise, correctness, or legal/distribution blocker — ship next
+      P1: core to the uniform-utility north star — near-term
+      P2: quality and leverage — mid-term
+      P3: exploratory or deliberately deferred — needs a proving gate
+    effort:
+      S: under a day, single PR
+      M: one to three days, one or two PRs
+      L: multi-day, multi-PR workstream
+
+north_star: >-
+  hippo delivers UNIFORM utility and efficacy across DIFFERENT projects — any
+  language, any repo shape (monorepo, non-git dir, worktree, squash-merge team),
+  any OS, solo or team, fresh install or 500-memory corpus — as a maximally
+  snap-in Claude Code plugin: zero-friction install, self-managing lifecycle,
+  graph-backed markdown memory with hybrid dense+BM25 recall.
+
+# Invariants every roadmap item must preserve. These are the codebase's own
+# hard-won contracts; an item that violates one is wrong, not bold.
+guiding_invariants:
+  - markdown-in-git is the single source of authority; index, telemetry, and
+    graph caches are derived, rebuildable, and gitignored
+  - hooks always exit 0, never download, never block; recall failures degrade
+    silently at the hook boundary but must become LOUD at doctor/SessionStart
+  - degradation must be legible — every silent-fallback path gains a
+    user-visible signal somewhere (nudge, doctor line, producer)
+  - destructive/corrective writes are per-item and agent-gated; no bulk
+    autonomous sweeps (no --all, no auto-archive, no blind re-baseline)
+  - one canonical name/path per concept; renames are clean breaks with a
+    version bump, not compat shims
+  - the UserPromptSubmit hot path stays pure retrieval — no LLM calls, no
+    network, no consolidation work per-prompt
+
+current_strengths:  # verified — build on these, do not regress them
+  - never-raise degradation ladder (dense → BM25 → empty) honored end-to-end
+  - RRF hybrid fusion with pre-cut soft-invalidation penalties (demotion is
+    real, not cosmetic) and bounded output under the harness 10k-char cap
+  - incremental hash-keyed embedding reuse; never-downgrade index refresh
+  - git-drift staleness (two git calls regardless of corpus size) instead of
+    calendar age; additive, idempotent, body-preserving provenance writes
+  - durable fastembed cache pinning with bash/python parity enforced by test
+  - three-ledger telemetry (recall/episode/reconsolidation) with rotation,
+    no-sensitive-content discipline, and honest cold-vs-warm latency reporting
+  - per-module hermetic test coverage with negative-capability pins (tests
+    that assert bulk primitives do NOT exist)
+  - crisp skill boundaries (doctor=plumbing vs audit=content) and
+    nudge-don't-commit policy throughout
+
+workstreams:
+
+  # ==========================================================================
+  # ONB — Onboarding & First-Run Experience
+  # The snap-in promise currently fails at the first hurdle: install is
+  # totally silent and the docs overstate what works pre-bootstrap.
+  # ==========================================================================
+  - id: ONB
+    name: Onboarding & first-run experience
+    goal: >-
+      From /plugin install to first successful recall in under five minutes,
+      with the plugin itself narrating every remaining step and every
+      degraded state.
+    items:
+
+      - id: ONB-1
+        title: SessionStart bootstrap/init nudge producer
+        priority: P0
+        effort: S
+        provenance: {dimension: integration+skills-dx, severity: high, verdict: confirmed}
+        problem: >-
+          After install, both hooks fall back to bare python3 (no deps), every
+          error is 2>/dev/null'd, and nothing anywhere tells the user the next
+          step — the plugin is silently inert (memory_session_start.sh:22-35,
+          session_start.py PRODUCERS has no not-bootstrapped producer).
+        proposal: >-
+          Cheap pre-Python branch in memory_session_start.sh: if the venv
+          interpreter or bootstrap sentinel is missing, emit a one-line
+          additionalContext ("hippo installed but not bootstrapped — run
+          /memory:bootstrap, then /memory:init per project"); if bootstrapped
+          but .claude/memory/MEMORY.md is absent, nudge /memory:init instead.
+          Gate with a dismissal marker in CLAUDE_PLUGIN_DATA so it fires at
+          most once per N sessions and can be permanently silenced.
+        acceptance_criteria:
+          - fresh install with no action emits exactly one nudge line, not zero, not spam
+          - nudge suppressed after dismissal marker; never breaks the exit-0 contract
+          - hook subprocess test covers venv-absent and corpus-absent branches
+
+      - id: ONB-2
+        title: Make the pre-bootstrap BM25-only claim true (vendor the pure-python deps)
+        priority: P0
+        effort: S
+        provenance: {dimension: portability, severity: high, verdict: confirmed}
+        problem: >-
+          README and bootstrap skill promise "recall works immediately in
+          BM25-only mode" pre-bootstrap, but the bare python3 fallback has
+          none of the pinned deps (rank-bm25, PyYAML), so recall is silently
+          dead in exactly the fresh-install window the claim covers.
+        proposal: >-
+          Vendor rank-bm25 and a minimal YAML front-matter parser (both tiny,
+          pure-python) inside the plugin package so the python3 fallback
+          genuinely serves BM25 recall; keep the venv as the full-fidelity
+          path. Correct the README/skill claims to match whichever ships.
+        acceptance_criteria:
+          - hook subprocess test with NO venv and stock python3 returns real BM25 results
+          - no import of numpy/fastembed on the vendored path
+        dependencies: [ONB-1]
+
+      - id: ONB-3
+        title: Root README quickstart rewrite
+        priority: P1
+        effort: S
+        provenance: {dimension: skills-dx, severity: low, verdict: unverified}
+        problem: >-
+          The marketplace landing page still says bootstrap/init arrive "once
+          Tier 2 ships" (they shipped), cites the origin repo with a
+          placeholder github.com link, and never shows the four-step path.
+        proposal: >-
+          Numbered quickstart (install → /memory:bootstrap → /memory:init →
+          "remember this"), a support-matrix line, an honest pre-bootstrap
+          behavior note, and a fixed-or-dropped Memosa attribution link.
+        acceptance_criteria:
+          - a new user can reach first recall from README alone
+          - no stale tier language anywhere in shipped markdown
+
+      - id: ONB-4
+        title: FILL-ME template detection in doctor
+        priority: P1
+        effort: S
+        provenance: {dimension: skills-dx, severity: medium, verdict: unverified}
+        problem: >-
+          user_role.md ships promising "/memory:doctor will flag it as
+          unfilled" but doctor has no such check; the unfilled <FILL-ME>
+          description is embedded into the recall index and floor-loaded
+          every session.
+        proposal: >-
+          Add a doctor check that greps the corpus for '<FILL-ME' and reports
+          the exact file to edit; have init end its report with an explicit
+          "user_role left as template" warning when applicable.
+        acceptance_criteria:
+          - doctor reports unfilled templates by filename
+          - the promise in user_role.md matches shipped behavior
+
+      - id: ONB-5
+        title: Per-machine init idempotency (teammate clone / worktree / second machine)
+        priority: P1
+        effort: M
+        provenance: {dimension: skills-dx, severity: high, verdict: confirmed}
+        problem: >-
+          The flagship cross-machine scenario is unreachable: init hard-stops
+          when MEMORY.md exists (teammate clone, new worktree, second machine)
+          and doctor routes back to init — circular remediation; the symlink
+          and index never get built on machine two.
+        proposal: >-
+          Split init's preflight: existing corpus skips seeding (steps 1-2)
+          but still performs machine-local setup (symlink, index build,
+          gitignore check). Name "teammate clones the repo" and "new worktree"
+          as scenarios in the SKILL; give doctor a repair action for its
+          symlink check.
+        acceptance_criteria:
+          - init on a cloned corpus builds symlink+index without touching memory files
+          - doctor's symlink failure names the exact command that repairs it
+
+      - id: ONB-6
+        title: /memory:remove — uninstall and offboarding path
+        priority: P2
+        effort: M
+        provenance: {dimension: critic, severity: medium}
+        problem: >-
+          No teardown exists: removing the plugin leaves a live symlink that
+          keeps injecting the floor via native memory, plus orphaned venv,
+          model cache, index, and telemetry state.
+        proposal: >-
+          Ship a removal skill that deletes the symlink, offers to delete
+          index/telemetry dirs, reports venv/cache paths for reclamation, and
+          explains that the committed corpus stays in git, inert. Document
+          next to Install.
+        acceptance_criteria:
+          - after removal, no hook output and no native-memory floor injection
+          - README documents removal alongside install
+
+      - id: ONB-7
+        title: Guard skills against unset CLAUDE_PLUGIN_DATA
+        priority: P2
+        effort: S
+        provenance: {dimension: integration, severity: low, verdict: unverified}
+        problem: >-
+          Skill code blocks expand ${CLAUDE_PLUGIN_DATA} unguarded — unset,
+          bootstrap becomes `uv venv /venv` (root-owned path, confusing
+          failure or worse).
+        proposal: >-
+          Shared preflight line in every SKILL.md: if CLAUDE_PLUGIN_DATA is
+          unset/empty, stop with "Claude Code version too old for
+          self-provisioning" guidance (or export a documented fallback under
+          ~/.claude).
+        acceptance_criteria:
+          - all five skills carry the guard; skills-contract test asserts it
+
+  # ==========================================================================
+  # COR — Engine Correctness
+  # Verified defects where shipped behavior contradicts documented claims.
+  # ==========================================================================
+  - id: COR
+    name: Engine correctness
+    goal: Every documented claim about engine behavior is true as shipped.
+    items:
+
+      - id: COR-1
+        title: New memories are born with an empty staleness baseline
+        priority: P0
+        effort: S
+        provenance: {dimension: lifecycle, severity: high, verdict: confirmed}
+        problem: >-
+          write_memory backfills source_commit from the file's own (nonexistent)
+          commit history, so every plugin-created memory carries
+          source_commit:"" and is invisible to find_stale, reconsolidation, and
+          archive gating until a manual commit plus corpus refresh — the
+          "born staleness-tracked" claim is false.
+        proposal: >-
+          Fall back to `git rev-parse HEAD` when the file has no commit
+          history ("reflects code as of now"), and add a SessionStart side
+          effect that heals any residual empty baselines once resolvable
+          (covers hand-authored memories too).
+        acceptance_criteria:
+          - memory created via new_memory in a dirty worktree is immediately staleness-tracked
+          - hermetic test asserts non-empty source_commit at creation
+
+      - id: COR-2
+        title: eval_recall default fixture paths are a Memosa fossil
+        priority: P0
+        effort: S
+        provenance: {dimension: recall-engine+portability+tests-quality, severity: high, verdict: confirmed-with-corrections}
+        problem: >-
+          _default_hard_set_path points at tests/unit/memory_tools/fixtures/
+          (nonexistent everywhere), and main() passes it unconditionally so
+          hard_set_provided is always True — the documented merge-gate command
+          `python -m memory.eval_recall` reports gates 2-3 as FAILED in every
+          repo, including hippo itself; the c98189a skip semantics are
+          unreachable from the CLI.
+        proposal: >-
+          Default path probes the project-local convention
+          (.claude/memory/.audit-fixtures/recall_hard_set.yaml per the audit
+          skill), then the engine repo's tests/fixtures/, else resolves to
+          None so CLI inherits evaluate()'s skip semantics. Fix the fixture
+          headers' run instructions. Add a CI invocation of the bare CLI so
+          path fossils fail loudly.
+        acceptance_criteria:
+          - bare eval_recall run in hippo passes/skips honestly (no spurious gate failures)
+          - CI runs the CLI defaults on every push
+
+      - id: COR-3
+        title: Degraded BM25-only index is not dense-upgraded until the next corpus write
+        priority: P1
+        effort: S
+        provenance: {dimension: recall-engine, severity: medium, verdict: adjusted}
+        problem: >-
+          refresh_index's hash short-circuit returns the old manifest without
+          checking dense_ready, so an index persisted degraded (hook raced
+          bootstrap, or offline embed timed out) serves lexical-only recall
+          across sessions until a memory write perturbs a hash. Self-healing
+          on normal usage, silent for read-mostly users.
+        proposal: >-
+          Short-circuit only when hashes match AND (dense_ready OR dense
+          disabled); otherwise fall through to attempt the dense upgrade.
+          Chunk the offline batch embed (persist partial rows per bounded
+          slice) so large corpora converge to dense across sessions instead
+          of failing the 15s budget all-or-nothing.
+        acceptance_criteria:
+          - warm cache + degraded index + unchanged corpus upgrades to dense on next SessionStart
+          - 500-doc corpus converges to dense within N sessions under the 15s budget
+
+      - id: COR-4
+        title: Mid-session corpus drift — edits/deletes invisible until next SessionStart
+        priority: P1
+        effort: S
+        provenance: {dimension: recall-engine, severity: medium, verdict: unverified}
+        problem: >-
+          Index staleness is session-granular: an edited description keeps
+          serving old text and a deleted/renamed memory keeps being injected
+          with a dangling file path for the rest of the session.
+        proposal: >-
+          Emission loop drops entries whose file no longer exists (cheap
+          stat); run the hash-compare drift check on the hot path (~ms) and
+          patch BM25 rows inline on drift, deferring dense rows to the next
+          SessionStart (incremental build already supports mixed reuse).
+        acceptance_criteria:
+          - deleted memory never surfaces in the same session post-delete
+          - hot-path latency budget unchanged (measured in telemetry)
+
+      - id: COR-5
+        title: Archive-move correctness (untracked files, index refresh, fail-closed scan)
+        priority: P1
+        effort: S
+        provenance: {dimension: lifecycle+graph, severity: medium, verdict: unverified}
+        problem: >-
+          archive_memory's git mv refuses untracked files (including
+          everything write_memory just created); the archived memory keeps
+          leaking into recall until the next index refresh (the "instantly
+          drops" claim is false within-session); and the not-cited-by-
+          instructions gate fails OPEN on per-file read errors despite its
+          documented fail-closed contract.
+        proposal: >-
+          Fall back to plain os.rename for untracked/ignored files (journal
+          the move for reversibility); call refresh_index best-effort after a
+          successful non-dry-run move; track per-file scan read failures and
+          fail closed (treat as cited) with the failure surfaced in the
+          report.
+        acceptance_criteria:
+          - just-created memory archives successfully; archived memory absent from same-session recall
+          - unreadable CLAUDE.md marks all its citations as cited (test with chmod 000)
+
+      - id: COR-6
+        title: SessionStart source-awareness and harness-keyed telemetry sessions
+        priority: P1
+        effort: S
+        provenance: {dimension: integration, severity: medium, verdict: unverified}
+        problem: >-
+          The dispatcher ignores the event payload, so resume/clear/compact
+          all rotate the telemetry session id (inflating the ≥5-session soak
+          bar) and re-run the full producer pipeline; concurrent sessions on
+          one project misattribute each other's recalls via the shared
+          mutable token file.
+        proposal: >-
+          Read the hook JSON payload; rotate the session token only on
+          source in {startup, clear}; key telemetry by the harness-provided
+          session_id (removes the shared file and fixes both resume rotation
+          and concurrent-session attribution). Consider a compact-specific
+          re-grounding block as a follow-up.
+        acceptance_criteria:
+          - compaction mid-session does not increment distinct-session counts
+          - two concurrent sessions log under distinct, stable ids
+
+      - id: COR-7
+        title: Enforce index schema versioning; add a corpus format version
+        priority: P2
+        effort: S
+        provenance: {dimension: integration, severity: medium, verdict: unverified}
+        problem: >-
+          SCHEMA_VERSION is a dead marker — load_index accepts any manifest
+          and the hash fast-path returns old manifests verbatim, so a plugin
+          update that adds a load-bearing entry field silently serves stale
+          shapes; memory frontmatter has two unversioned schemas and no
+          migration story.
+        proposal: >-
+          Force a rebuild on manifest schema_version mismatch (index is
+          derived — one line); stamp a corpus_format marker (in MEMORY.md or
+          .claude/memory/.format), flag mismatches via the integrity
+          producer, and document the doctor-driven migration path before the
+          first breaking corpus change ships.
+        acceptance_criteria:
+          - bumping SCHEMA_VERSION triggers exactly one full rebuild
+          - doctor reports corpus format vs plugin expectation
+
+      - id: COR-8
+        title: Emit true fused scores; cross-check index vs query embedding model
+        priority: P2
+        effort: S
+        provenance: {dimension: recall-engine, severity: low, verdict: unverified}
+        problem: >-
+          Emitted 'score' is fabricated 1/rank noise — telemetry, threshold
+          calibration, and any future feedback loop inherit it; _dense_rank
+          never verifies index.model matches the query-time model.
+        proposal: >-
+          Emit the real fused/penalized score plus rank in results and
+          telemetry; bail to BM25 when the manifest's model differs from the
+          configured one.
+        acceptance_criteria:
+          - telemetry scores are monotone in fused score, not rank-derived
+          - model mismatch test degrades to BM25 with a doctor-visible reason
+
+      - id: COR-9
+        title: Order-dependent soft-alias resolution silently picks the alphabetically-first claimant
+        priority: P2
+        effort: S
+        provenance: {dimension: graph, severity: medium, verdict: unverified}
+        problem: >-
+          feedback_api_keys.md and project_api_keys.md both prefix-strip to
+          "api-keys"; sorted iteration lets the first file claim the alias and
+          the collision is never marked ambiguous — [[api-keys]] resolves to
+          the wrong memory with no lint signal.
+        proposal: >-
+          Register soft aliases unconditionally so same-tier collisions land
+          in _ambiguous (full-stem claims still beat soft claims); add the
+          two-files-share-a-stripped-alias case to tests.
+        acceptance_criteria:
+          - colliding soft aliases resolve to neither and lint as ambiguous
+
+      - id: COR-10
+        title: Stop creating .claude/.memory-index in never-opted-in projects
+        priority: P2
+        effort: S
+        provenance: {dimension: recall-engine, severity: medium, verdict: unverified}
+        problem: >-
+          Hooks fire in every repo the user opens; _ensure_index mkdir-p's
+          .claude/.memory-index (creating .claude/ itself) in projects with
+          no memory corpus, littering unrelated repos and paying per-prompt
+          interpreter cost for nothing.
+        proposal: >-
+          Bash-level bail when .claude/memory is absent (a stat is ~free and
+          skips the Python spawn entirely); Python-level early-return None
+          from _ensure_index when the memory dir is missing/empty as belt.
+        acceptance_criteria:
+          - prompt in a corpus-less repo creates zero files and spawns zero Python
+        dependencies: [SEC-3]
+
+      - id: COR-11
+        title: Stale-venv detection after plugin updates change requirements
+        priority: P2
+        effort: S
+        provenance: {dimension: integration, severity: medium, verdict: unverified}
+        problem: >-
+          The venv-in-PLUGIN_DATA model is update-safe for code but not deps:
+          after an update bumps requirements.txt, hooks run the old venv
+          indefinitely with no signal (new imports fail into silent excepts).
+        proposal: >-
+          Once per session, compare sha256(requirements.txt) against the
+          bootstrap sentinel hash; on mismatch prepend a one-line nudge:
+          "hippo deps changed with the last update — run /memory:bootstrap".
+        acceptance_criteria:
+          - simulated dep bump yields the nudge exactly once per session
+        dependencies: [ONB-1]
+
+      - id: COR-12
+        title: Atomic index manifest writes
+        priority: P1
+        effort: S
+        provenance: {dimension: tests-quality, severity: medium, verdict: adjusted}
+        problem: >-
+          build_index writes manifest.json in place (open-w + json.dump, with
+          dense.npy saved separately), so a recall racing a SessionStart
+          rebuild can read a torn manifest or mismatched manifest/dense pair.
+        proposal: >-
+          tmp-file + os.replace for the manifest (matching telemetry.py's
+          existing pattern); write dense.npy before the manifest that
+          references it so readers never see a manifest ahead of its data.
+        acceptance_criteria:
+          - concurrency test (QUA-4) passes: no torn reads across 1000 interleaved cycles
+
+  # ==========================================================================
+  # SHP — Repo-Shape & Git-Workflow Robustness
+  # The north star names monorepos, non-git dirs, worktrees, and team git
+  # workflows explicitly; today each one silently disables a subsystem.
+  # ==========================================================================
+  - id: SHP
+    name: Repo-shape & git-workflow robustness
+    goal: >-
+      Identical observable behavior (or a loudly-labeled degraded mode) on
+      monorepo subdirs, non-git dirs, worktrees, shallow clones, and
+      squash-merge teams.
+    items:
+
+      - id: SHP-1
+        title: Staleness never fires when .claude/ is below the git toplevel
+        priority: P0
+        effort: S
+        provenance: {dimension: portability, severity: high, verdict: confirmed}
+        problem: >-
+          In a project rooted in a subdirectory of a larger repo (the standard
+          monorepo shape), provenance appears to work but find_stale can never
+          flag anything: cited_paths are subdir-relative while
+          `git log --name-only` emits toplevel-relative paths — a silent,
+          permanent false-negative for the flagship signal.
+        proposal: >-
+          Normalize to one convention: `git ls-files --full-name` at backfill
+          (or prefix with `git rev-parse --show-prefix`), and strip/filter the
+          prefix in _path_change_times. Add a hermetic test that roots the
+          memory dir in a subdirectory and asserts drift is flagged.
+        acceptance_criteria:
+          - subdir-rooted corpus flags drift identically to a toplevel corpus
+
+      - id: SHP-2
+        title: resolve_dirs walks upward — subdirectory launches currently disable everything
+        priority: P0
+        effort: M
+        provenance: {dimension: skills-dx, severity: high, verdict: confirmed}
+        problem: >-
+          Running claude from packages/web in a monorepo sets
+          CLAUDE_PROJECT_DIR to the subdir; resolve_dirs looks only there, so
+          recall, every producer, new_memory's target, and the floor symlink
+          all miss the corpus at the repo root — the whole plugin silently
+          no-ops on a normal working habit.
+        decision: OQ-1 resolved — nested wins, walk up
+        proposal: >-
+          Prefer <CLAUDE_PROJECT_DIR>/.claude/memory when present, else ascend
+          toward git toplevel (stop at $HOME) — the decided monorepo story:
+          per-package corpus wins, repo-root corpus is the fallthrough.
+          Doctor names which corpus a session resolved and why, and flags
+          subdir sessions that fell through to root.
+        acceptance_criteria:
+          - session from any subdir recalls the root corpus
+          - nested corpus (per-package) wins over root when both exist, documented
+
+      - id: SHP-3
+        title: Squash-merge and shallow-clone resilience for staleness baselines
+        priority: P1
+        effort: M
+        provenance: {dimension: portability+lifecycle, severity: high, verdict: confirmed}
+        problem: >-
+          Under squash-merge (a default on a large share of GitHub teams)
+          every memory authored on a branch carries a source_commit absent
+          from mainline history; those memories become permanently exempt
+          from drift detection and nothing ever says so. Same for shallow/
+          partial clones (CI, big monorepos).
+        proposal: >-
+          Record source_commit_time (committer epoch) alongside the sha at
+          backfill/reverify; fall back to time-based comparison when the sha
+          is unresolvable; surface an integrity-producer line ("N memories
+          have unresolvable staleness baselines — likely squash-merge").
+        acceptance_criteria:
+          - hermetic squash-merge test: drift still detected via time fallback
+          - unresolvable-baseline count visible at SessionStart and in doctor
+
+      - id: SHP-4
+        title: Non-git degraded mode — supported, labeled, documented
+        priority: P1
+        effort: M
+        provenance: {dimension: lifecycle+skills-dx+integration, severity: medium, verdict: adjusted}
+        problem: >-
+          init hard-refuses non-git dirs (on a wrong rationale — a later
+          `git init` picks up existing files fine), while the engine mostly
+          works without git: recall/index/links/floor/new_memory function,
+          but staleness/provenance/archive silently no-op with no notice.
+        proposal: >-
+          init proceeds in non-git dirs with an explicit "degraded: no
+          staleness/provenance/archive tracking until git init + commit"
+          notice (skip gitignore patch and commit nudge); doctor reports
+          git-less mode as a labeled degradation, not an error; archive falls
+          back to os.rename (COR-5). Optional follow-up: mtime-based
+          staleness fallback.
+        acceptance_criteria:
+          - init on a plain dir seeds corpus+index and prints the degradation notice
+          - doctor names exactly which subsystems are inactive and why
+        dependencies: [COR-5]
+
+      - id: SHP-5
+        title: Fix the cross-machine symlink encoding to match the harness
+        priority: P1
+        effort: S
+        provenance: {dimension: skills-dx+integration, severity: high, verdict: confirmed}
+        problem: >-
+          init re-implements Claude Code's project-dir encoding handling only
+          '/' — any repo path containing a dot (~/dev/next.js-app, sdk-2.0)
+          gets the symlink created under a directory the harness never reads,
+          and doctor re-derives the same wrong formula so it validates the
+          broken result.
+        proposal: >-
+          Encode with the harness's actual rule (replace every
+          non-alphanumeric with '-'; verify against harness behavior rather
+          than folklore), and better: derive the encoded name by matching the
+          current session's real project dir against ~/.claude/projects/
+          entries. Doctor verifies from the direction Claude Code reads
+          (resolve the link target), never by recomputing. Hermetic test with
+          a dotted repo path.
+        acceptance_criteria:
+          - dotted/underscored repo paths produce a symlink the harness actually reads
+          - doctor detects a wrong-encoding legacy symlink and offers the fix
+
+      - id: SHP-6
+        title: Bound the staleness git-log scan for large monorepos
+        priority: P2
+        effort: M
+        provenance: {dimension: lifecycle, severity: medium, verdict: unverified}
+        problem: >-
+          `git log --since='2 years ago' --name-only` over a whole monorepo
+          can emit hundreds of MB and blow the 20s timeout — which silently
+          returns [] and disables the signal on every SessionStart, again
+          with no notice.
+        proposal: >-
+          Scope the log to the union of cited paths (chunked under ARG_MAX)
+          or diff from the oldest baseline; emit a one-line "staleness scan
+          timed out" diagnostic instead of silently returning empty.
+        acceptance_criteria:
+          - scan cost proportional to cited-path set, not repo history
+          - timeout produces a visible diagnostic, never a silent []
+
+  # ==========================================================================
+  # OSP — OS & Environment Portability
+  # ==========================================================================
+  - id: OSP
+    name: OS & environment portability
+    goal: >-
+      Declared support matrix; macOS and Linux behave identically; Windows
+      has an explicit, tested story (or an explicit, documented exclusion).
+    items:
+
+      - id: OSP-1
+        title: Declare the support matrix; de-Mac the language
+        priority: P0
+        effort: S
+        provenance: {dimension: portability+skills-dx, severity: medium, verdict: unverified}
+        decision: OQ-2 resolved — macOS + Linux full support; Windows out of scope (see non_goals)
+        problem: >-
+          Bootstrap says "once per Mac"; docs and paths assume darwin. Nothing
+          states what is actually supported, so every non-Mac user discovers
+          the gaps empirically.
+        proposal: >-
+          README support-matrix section: macOS full; Linux full after
+          OSP-2/3/4; Windows explicitly unsupported (a decision, not an
+          omission — link the non_goals entry). Reword "per Mac" →
+          "per machine" everywhere.
+        acceptance_criteria:
+          - every shipped doc consistent with the declared matrix
+
+      - id: OSP-2
+        title: Platform-aware cache directory (XDG / LOCALAPPDATA / Library)
+        priority: P1
+        effort: S
+        provenance: {dimension: portability+tests-quality, severity: medium, verdict: confirmed-evidence}
+        problem: >-
+          The no-PLUGIN_DATA fallback hardcodes ~/Library/Caches in both hook
+          scripts and build_index (_HOME_CACHE_SUBPATH), creating a literal
+          Library dir in Linux homes; the tests then PIN the macOS layout as
+          correct on every platform, so any fix fights the suite.
+        proposal: >-
+          platform_cache_dir() helper: darwin → ~/Library/Caches/hippo-memory,
+          Linux → ${XDG_CACHE_HOME:-~/.cache}/hippo-memory; mirror in bash via
+          the existing cross-language parity test, parametrized by platform.
+        acceptance_criteria:
+          - parity test asserts per-platform expectations, not the mac literal
+
+      - id: OSP-3
+        title: Widen the numpy pin; interpreter-version preflight in bootstrap
+        priority: P1
+        effort: S
+        provenance: {dimension: portability, severity: medium, verdict: unverified}
+        problem: >-
+          numpy>=1.26,<2.0 fails to resolve (or source-builds doomed) on
+          python 3.13+ — the default interpreter on new machines by mid-2026 —
+          so bootstrap fails on exactly the fresh-machine path it exists for.
+        proposal: >-
+          Widen to numpy>=1.26,<3 (fastembed 0.4-0.7 supports numpy 2); have
+          bootstrap check the interpreter version and prefer
+          `uv venv --python <supported>` resolution when system python is
+          outside the window; add an install-matrix CI lane (3.9-3.14) that
+          just resolves requirements.txt.
+        acceptance_criteria:
+          - bootstrap succeeds on python 3.13 with uv present and absent
+
+      - id: OSP-4
+        title: Portable time-bounds — retire SIGALRM
+        priority: P1
+        effort: M
+        provenance: {dimension: recall-engine+portability, severity: medium, verdict: unverified}
+        problem: >-
+          The dense timeout is SIGALRM-based, which only works in the main
+          thread of a Unix process — INT-2's MCP server (which calls recall
+          from worker threads) and any embedded use will silently lose the
+          bound. The common cold-cache case doesn't even need a timeout —
+          the model files' existence is statable.
+        proposal: >-
+          Pre-check model files on disk before attempting the offline load
+          (pure stat, removes the timeout need in the cold case); replace
+          SIGALRM with a thread/subprocess bound for the residual cases so
+          the guarantee holds off the main thread.
+        acceptance_criteria:
+          - cold-cache recall degrades to BM25 in <50ms with no signal machinery
+          - bound holds when recall runs in a non-main thread (tested)
+
+      # OSP-5 (Windows enablement) removed per OQ-2: Windows is out of scope,
+      # recorded in decisions + non_goals. The confirmed-critical finding
+      # ("non-functional on native Windows") stands as documented fact; the
+      # support matrix now says so instead of the user discovering it.
+
+      - id: OSP-6
+        title: Single venv-python resolution helper reused everywhere
+        priority: P2
+        effort: S
+        provenance: {dimension: skills-dx, severity: medium, verdict: unverified}
+        problem: >-
+          The PY-resolution dance (PLUGIN_DATA venv, executable check, bare
+          python3 fallback, PYTHONPATH export) is copy-pasted across two
+          hooks, bin/hippo, and five skills — eight drift-prone copies.
+        proposal: >-
+          One canonical snippet (bash function or `python -m memory.which_py`)
+          consumed by all surfaces; skills reference it instead of inlining.
+        acceptance_criteria:
+          - skills-contract test asserts all surfaces use the canonical resolver
+
+  # ==========================================================================
+  # RET — Retrieval Quality & Ranking
+  # Recall is the headline feature; today it is English-only, body-blind,
+  # floor-less (injects k results for ANY prompt), and signal-poor.
+  # ==========================================================================
+  - id: RET
+    name: Retrieval quality & ranking
+    goal: >-
+      Recall injects the right memories, only when warranted, in any language,
+      matching against everything a memory contains — with per-project
+      evidence that it works.
+    items:
+
+      - id: RET-1
+        title: Relevance floor + knee cutoff — earn every injected token
+        priority: P0
+        effort: M
+        provenance: {dimension: recall-engine, severity: high, verdict: confirmed}
+        problem: >-
+          The dense ranker admits the entire corpus for any query, so every
+          substantive prompt injects k=10 pointers (~600 tokens) regardless of
+          relevance — an off-topic prompt on a 500-memory corpus still gets 10.
+          Abstention (injecting nothing) is the correct output for many
+          prompts and is currently impossible.
+        proposal: >-
+          (1) minimum cosine floor for dense candidates (per-model calibrated,
+          env-overridable); (2) score-gap/knee cutoff on the fused list so k
+          becomes "up to k"; (3) hard skip when neither backend clears its
+          floor. Gate the change on precision@k promoted from report-only to
+          a tracked eval number, plus abstention cases in the eval set (RET-8).
+        acceptance_criteria:
+          - off-topic prompt injects zero pointers; on-topic unchanged recall@10
+          - precision@k tracked before/after in eval output
+
+      - id: RET-2
+        title: Body-aware indexing — stop capping recall at description-writing discipline
+        priority: P1
+        effort: L
+        provenance: {dimension: recall-engine, severity: medium, verdict: adjusted, note: deliberate-deferral-now-promoted}
+        problem: >-
+          Only name+description are indexed; a memory whose body holds the
+          crucial fact (error signature, config value, rationale) behind a
+          generic description is invisible to both backends. This was an
+          explicit deferral in the origin repo — this roadmap is where it
+          lands.
+        proposal: >-
+          Embed a bounded body representation (first ~1-2k chars or
+          heading-guided chunks, 2-4 rows per memory mapped back to one name);
+          description rows stay primary, body rows enter fusion at a small RRF
+          weight as a backstop. Extend self-recall with body-derived probe
+          queries to prove the gain and catch dilution.
+        acceptance_criteria:
+          - body-only fact retrievable via probe queries; description-based gates unregressed
+          - index size and refresh latency within stated budgets at 500 memories
+
+      - id: RET-3
+        title: Unicode and multilingual retrieval
+        priority: P1
+        effort: M
+        provenance: {dimension: recall-engine+portability, severity: high, verdict: confirmed}
+        problem: >-
+          _TOKEN_RE is ASCII-lowercase-only, stopwords/continuation phrases
+          are English, and the default model is bge-small-EN — a non-English
+          prompt tokenizes to zero tokens, trips the min-content skip, and
+          recall silently never runs. Accented Latin degrades too
+          ('café'→'caf'). Violates "any language" outright.
+        decision: OQ-4 resolved — English default, opt-in --multilingual bootstrap preset
+        proposal: >-
+          Unicode-aware tokenization (\w-based with existing length/stopword
+          filters; CJK bigram fallback where whitespace segmentation is
+          absent); grapheme-based (not ASCII-token) skip gates; documented
+          --multilingual bootstrap preset (multilingual-e5-small in fastembed
+          ONNX) — the manifest's model field already forces the full re-embed
+          on switch. Doctor flags a visibly non-English corpus served by the
+          English model.
+        acceptance_criteria:
+          - Japanese/Russian corpus+query returns relevant BM25 and dense hits
+          - substantive non-English prompt never trips the continuation skip
+
+      - id: RET-4
+        title: Code-aware query hygiene — mine fences and tracebacks instead of deleting them
+        priority: P1
+        effort: M
+        provenance: {dimension: recall-engine, severity: medium, verdict: unverified}
+        problem: >-
+          clean_query strips fenced blocks and all angle-bracketed spans —
+          discarding the error classes, symbol names, and file paths that are
+          the strongest lexical signal in exactly the debugging prompts where
+          recall matters most.
+        proposal: >-
+          Extract identifier-like tokens from fence contents (top-N rare
+          tokens appended to the query) rather than deleting; restrict tag
+          stripping to known harness tag names; add code-heavy cases to the
+          hard set to pin the behavior.
+        acceptance_criteria:
+          - traceback-bearing prompt recalls the memory citing the same symbol/file
+
+      - id: RET-5
+        title: Salience fusion — recency, usage, and staleness as ranking signals
+        priority: P2
+        effort: M
+        provenance: {dimension: recall-engine+integration, severity: medium, verdict: unverified, landscape: [generative-agents-salience, memorybank-decay]}
+        problem: >-
+          For equal text similarity, a two-year-old memory and yesterday's
+          rank identically; a memory recalled in 40 sessions gets no prior
+          over one never used; a drifted memory ranks as if current. The
+          ledgers and strength scores (soak.compute_strength_scores) already
+          exist — write-only.
+        proposal: >-
+          Blend three bounded signals into fusion: recency prior from
+          source_commit age (already computed for staleness), usage prior from
+          per-session strength scores (capped so relevance dominates), and the
+          staleness penalty folded into rank (not just metadata). Volatile
+          stats stay in the gitignored index/ledger — never in committed
+          frontmatter. Evaluate against precision@k; ship behind an env flag
+          first.
+        acceptance_criteria:
+          - eval shows no recall@10 regression; precision@k improves on the golden corpus
+          - all signals inspectable via emitted true scores (COR-8)
+        dependencies: [COR-8, LIF-4]
+
+      - id: RET-6
+        title: Verify-at-use banners on drifted injections; last-verified reinforcement
+        priority: P2
+        effort: M
+        provenance: {dimension: landscape, landscape: [temporal-validity-2026, copilot-memory]}
+        problem: >-
+          Stale memory rarely fails to retrieve — it retrieves confidently
+          and misleads. hippo tracks drift but injects drifted memories
+          unlabeled.
+        proposal: >-
+          When an injected memory is currently stale, wrap it with a one-line
+          banner ("anchored to <short-sha>; N cited files changed since —
+          verify before relying"); let a session that confirms a memory touch
+          last_verified via the existing reverify primitive (reinforcement).
+        acceptance_criteria:
+          - stale injections carry the banner; fresh ones don't; output stays under budget
+
+      - id: RET-7
+        title: Per-project eval-set generation — make recall quality measurable everywhere
+        priority: P2
+        effort: M
+        provenance: {dimension: recall-engine+tests-quality, severity: medium, verdict: unverified}
+        problem: >-
+          The only calibrated evidence that hybrid recall works belongs to
+          the Memosa corpus and can't even run here (COR-2); every other
+          install has no way to measure recall quality on its own corpus, so
+          "uniform efficacy" is unfalsifiable per-project.
+        proposal: >-
+          /memory:audit gains an eval-set generation phase: synthesize N
+          cross-vocabulary paraphrase queries from sampled descriptions+bodies
+          into .claude/memory/.audit-fixtures/ (human-skimmed), then run the
+          gates against them. Record the serving backend per-run with separate
+          thresholds so a BM25-only pass can't masquerade as hybrid health.
+        acceptance_criteria:
+          - audit on any project emits recall@10/MRR against its own corpus
+          - backend recorded in gate output; mismatched-backend pass impossible
+
+      - id: RET-8
+        title: Category-tagged eval suite (multi-hop, temporal, update, abstention)
+        priority: P3
+        effort: M
+        provenance: {dimension: landscape, landscape: [longmemeval, locomo]}
+        problem: >-
+          The current gates measure single-hop lookup only; the question
+          classes that separate memory systems from demos — multi-hop via
+          links, temporal/superseded facts, knowledge updates, abstention —
+          are unmeasured.
+        proposal: >-
+          Extend the eval fixture schema with category tags: multi-hop cases
+          requiring wikilink traversal (validates GRA-1/GRA-7), temporal cases
+          against superseded facts (validates GRA-4), post-reconsolidation
+          update cases, and abstention cases where correct output is nothing
+          (validates RET-1).
+        acceptance_criteria:
+          - per-category scores in eval output; regressions attributable to a category
+        dependencies: [RET-1, GRA-1, GRA-4]
+
+  # ==========================================================================
+  # GRA — Graph Activation
+  # "Graph-backed" today means links exist and are linted. Nothing consults
+  # the graph at recall time, nothing creates links, edges are untyped, and
+  # a fresh install starts (and stays) at zero edges.
+  # ==========================================================================
+  - id: GRA
+    name: Graph activation
+    goal: >-
+      The wikilink graph earns its keep: it shapes recall ranking, carries
+      typed consolidation semantics, grows automatically at write time, and
+      is inspectable as a graph.
+    items:
+
+      - id: GRA-1
+        title: 1-hop neighbor expansion in recall — the first load-bearing graph read
+        priority: P1
+        effort: M
+        provenance: {dimension: graph, severity: high, verdict: confirmed}
+        problem: >-
+          The hybrid recall path never consults the graph: no neighbor
+          expansion, no link-degree prior, no related-memories tail —
+          "graph-backed recall" is unimplemented. The single highest-leverage
+          step from "links are linted" to "the graph matters".
+        proposal: >-
+          After fusion and invalidation penalties, take the top-N seeds (N≈3),
+          pull 1-hop outbound+inbound neighbors from the persisted edge list
+          (GRA-6), inject them at a discounted score (~0.5× seed), and let
+          them compete for top-k. Gate on the existing five gates plus a new
+          query→linked-neighbor fixture set so expansion provably helps
+          rather than dilutes.
+        acceptance_criteria:
+          - neighbor fixture set shows recall of linked-but-lexically-distant memories
+          - zero regression on the five existing gates; hot-path latency budget held
+        dependencies: [GRA-2, GRA-6]
+
+      - id: GRA-2
+        title: Backlink/inbound primitives with stem-normalized identity
+        priority: P1
+        effort: S
+        provenance: {dimension: graph, severity: medium, verdict: unverified}
+        problem: >-
+          "What refers to this memory?" has no API — archive.py and the audit
+          skill each reinvent adjacency inversion and fight a basename-vs-stem
+          identity mismatch when joining graph output against
+          staleness/soak/telemetry sets.
+        proposal: >-
+          Build reverse adjacency in _build(); expose inbound(name) and
+          isolates() (zero-in AND zero-out); normalize node identity to stems
+          throughout LinkGraph; refactor archive._zero_inbound_names and the
+          audit skill onto it.
+        acceptance_criteria:
+          - one adjacency inversion in the codebase; graph output joins cleanly by stem
+
+      - id: GRA-3
+        title: Link creation at write time — bootstrap the graph on every project
+        priority: P1
+        effort: M
+        provenance: {dimension: graph, severity: medium, verdict: adjusted}
+        problem: >-
+          The graph machinery was extracted from a corpus where links were
+          hand-authored over months; a snap-in install starts at zero edges
+          and no code path ever creates one — the graph's value is maximally
+          non-uniform across projects.
+        proposal: >-
+          (1) new_memory runs recall(description, k=3) against the existing
+          index and appends a "Related: [[a]], [[b]]" line (or --links the
+          skill fills in); (2) audit gains an agent-gated link-densification
+          pass suggesting edges for high-similarity pairs; (3) init/doctor
+          surface a one-time "memories can reference each other with
+          [[name]]" hint instead of per-session orphan lint.
+        acceptance_criteria:
+          - fresh project reaches nonzero edge density within its first five memories
+          - suggestions are agent-gated; no autonomous body edits
+
+      - id: GRA-4
+        title: Typed edges — supersedes / contradicts / refines
+        priority: P2
+        effort: L
+        provenance: {dimension: graph, severity: medium, verdict: adjusted, landscape: [zep-graphiti-bitemporal]}
+        problem: >-
+          Every edge means undifferentiated "mentions"; the relations a memory
+          system actually needs — X supersedes Y (demote Y), X contradicts Y
+          (flag the conflict), X refines Y — are unexpressible, so
+          consolidation semantics live nowhere.
+        proposal: >-
+          Additive frontmatter relations mirroring the cited_paths pattern:
+          supersedes:[name], contradicts:[name]; [[wikilinks]] stay the
+          untyped edge. Consume in three places: recall demotes/annotates
+          superseded memories (bi-temporal validity for free — git supplies
+          ingestion time, invalid_after supplies the validity axis);
+          reconsolidation's fix/demote outcomes optionally write the edge;
+          lint_links validates typed targets. Requires corpus format
+          versioning (COR-7).
+        acceptance_criteria:
+          - superseded memory ranks below its successor and carries an annotation
+          - temporal eval cases (RET-8) pass; lint catches dangling typed targets
+        dependencies: [COR-7, GRA-2]
+
+      - id: GRA-5
+        title: Archive refuses (without --force) when inbound links exist
+        priority: P2
+        effort: S
+        provenance: {dimension: graph, severity: medium, verdict: unverified}
+        problem: >-
+          Archiving a referenced memory instantly converts every inbound
+          [[link]] into dangling rot; the write primitive has no guardrail
+          and no redirect story.
+        proposal: >-
+          archive_memory computes inbound(name) and refuses with the referrer
+          list unless zero-inbound or --force; on move, print referrers so the
+          agent rewrites them in the same commit. Pair with supersedes edges
+          (GRA-4) so an archive can leave a machine-readable forwarding
+          pointer.
+        acceptance_criteria:
+          - referenced-memory archive without --force fails with the referrer list
+        dependencies: [GRA-2]
+
+      - id: GRA-6
+        title: Persist the resolved edge list in the index
+        priority: P2
+        effort: M
+        provenance: {dimension: graph, severity: low, verdict: unverified}
+        problem: >-
+          Every consumer rebuilds the graph from full corpus re-reads —
+          repeated O(N) file I/O per SessionStart (violating the dispatcher's
+          own "ONE corpus load" promise) and no O(1)-load edge source exists
+          for recall-time expansion.
+        proposal: >-
+          Persist edges (stems + alias table) into the index dir during
+          refresh_index, keyed by the same per-file hashes; build_graph loads
+          it when fresh, falls back to the full re-read otherwise.
+        acceptance_criteria:
+          - SessionStart performs one corpus read; recall expansion loads edges in O(1)
+
+      - id: GRA-7
+        title: Personalized-PageRank ranking stage (exploratory)
+        priority: P3
+        effort: M
+        provenance: {dimension: landscape, landscape: [hipporag-2]}
+        problem: >-
+          1-hop expansion (GRA-1) is a special case; HippoRAG shows PPR seeded
+          from query-matched nodes substantially beats flat RAG on multi-hop
+          and associative retrieval at very low online cost (sparse matrix
+          iteration, no LLM).
+        proposal: >-
+          Build the note-level adjacency matrix at index time, run 10-20 PPR
+          iterations at query time seeded by the hybrid top-k, blend the PPR
+          score into fusion. Pure local numpy; fully offline; well inside the
+          hook budget at thousands of notes. Gate on the multi-hop eval
+          category (RET-8); ship only if it beats 1-hop on the fixtures.
+        acceptance_criteria:
+          - multi-hop eval category improves over GRA-1 baseline or the item is dropped
+        dependencies: [GRA-1, GRA-6, RET-8]
+
+      - id: GRA-8
+        title: Graph observability — components, degree, export
+        priority: P3
+        effort: S
+        provenance: {dimension: graph, severity: low, verdict: unverified}
+        proposal: >-
+          links.py CLI additions: --components (union-find; count+sizes),
+          --degree (hubs, isolates), --export dot|mermaid|json. Read-only,
+          ~100 lines, no deps; component/isolate counts feed the audit
+          scorecard.
+        acceptance_criteria:
+          - corpus shape inspectable in one command; audit reports component count
+
+      - id: GRA-9
+        title: Consolidation propagates along edges (review-adjacent worklist)
+        priority: P2
+        effort: M
+        provenance: {dimension: graph, severity: medium, verdict: unverified}
+        problem: >-
+          When a memory is demoted or drifts, its linked neighbors are
+          statistically the next most likely to be wrong — the graph encodes
+          exactly that neighborhood and consolidation ignores it.
+        proposal: >-
+          recalled_stale_worklist gains an optional graph column: each stale
+          item lists 1-hop neighbors as review-adjacent entries (report-only);
+          the SessionStart block renders "X (+2 linked: Y, Z)".
+        acceptance_criteria:
+          - worklist shows neighborhoods; no autonomous writes introduced
+        dependencies: [GRA-2]
+
+  # ==========================================================================
+  # LIF — Lifecycle Closure & Self-Management
+  # "Self-managing" is currently a read-side story: signals fire but no loop
+  # closes, and creation-side hygiene (dedup, conflicts) doesn't exist.
+  # ==========================================================================
+  - id: LIF
+    name: Lifecycle closure & self-management
+    goal: >-
+      Every lifecycle signal either closes its own loop (within the per-item,
+      agent-gated invariant) or visibly hands off to the agent — nothing
+      nags forever, dead-ends, or silently under-counts.
+    items:
+
+      - id: LIF-1
+        title: Close the reconsolidation loop — demote gets a terminal state
+        priority: P1
+        effort: M
+        provenance: {dimension: lifecycle, severity: high, verdict: confirmed}
+        problem: >-
+          The trigger is a text nudge competing inside a 9000-char budget; if
+          ignored, the same worklist re-nags every session forever; a
+          'demote' verdict deliberately leaves the staleness flag set but
+          nothing chains to soft-invalidation — a confirmed-wrong memory
+          keeps being recalled at full rank until someone runs a second
+          manual command.
+        proposal: >-
+          Chain demote → set_invalid_after inside semantic_reverify (per-item
+          and verdict-gated — consistent with the no-bulk invariant); make
+          the staleness producer suppress or annotate entries already
+          carrying invalid_after; add an ack/snooze record in the
+          reconsolidation ledger so explicitly-deferred items stop re-nagging;
+          suggest archive once an invalid_after entry ages past the old
+          horizon.
+        acceptance_criteria:
+          - demote immediately halves recall rank (existing penalty) with no second command
+          - snoozed items absent from the next N worklists; no double-reporting
+
+      - id: LIF-2
+        title: Duplicate and conflict detection at write time
+        priority: P1
+        effort: M
+        provenance: {dimension: lifecycle, severity: medium, verdict: unverified, landscape: [mem0-add-update-delete-noop]}
+        problem: >-
+          Creation refuses only exact filename collisions while an embedding
+          index sits right there; months-old corpora accumulate near-dupes
+          (splitting recall hits) and contradictions (old memory asserting X,
+          new asserting not-X) with no detection anywhere.
+        proposal: >-
+          write_memory embeds the new doc_text and returns top-N cosine
+          neighbors above threshold in its result (warn-only, agent-gated);
+          /memory:new instructs the agent to decide add / update-existing /
+          supersede (writing the GRA-4 edge, which auto-invalidates the
+          loser) / skip — Mem0's ADD/UPDATE/DELETE/NOOP pattern with every
+          decision an auditable git diff.
+        acceptance_criteria:
+          - near-duplicate creation surfaces the neighbor and the skill routes to update/supersede
+          - no autonomous rejection — agent decides, tool reports
+        dependencies: [GRA-4]
+
+      - id: LIF-3
+        title: Surface citation rot instead of silently dropping it
+        priority: P2
+        effort: S
+        provenance: {dimension: lifecycle, severity: low, verdict: unverified}
+        problem: >-
+          A renamed/deleted cited file silently vanishes from cited_paths on
+          refresh — possibly to [], after which the memory is permanently
+          exempt from staleness with no record anything was lost.
+        proposal: >-
+          refresh/reverify results include dropped_citations; a producer/CLI
+          line reports memories whose citation count dropped (especially to
+          zero) — a citation-rot sibling of find_unparseable.
+        acceptance_criteria:
+          - rename of a cited file yields a visible rot report, not a silent shrink
+
+      - id: LIF-4
+        title: Rotation-surviving usage aggregates; archive enforces its own soak gate
+        priority: P2
+        effort: S
+        provenance: {dimension: lifecycle, severity: medium, verdict: unverified}
+        problem: >-
+          The cold/never-recalled signal derives from a rotating 2MB buffer
+          (long-lived corpora lose oldest evidence first, so genuinely-used
+          memories drift toward "cold"), and archive_candidates never checks
+          the ≥5-session soak bar its own docs call the trust threshold —
+          fresh installs get maximally-permissive candidate lists.
+        proposal: >-
+          Tiny per-memory aggregate file beside the ledger (first/last
+          recalled ts, distinct session count) updated on append, surviving
+          rotation; archive_candidates returns [] with a stated reason when
+          the gate is unmet and excludes memories younger than the soak
+          window.
+        acceptance_criteria:
+          - rotation does not change per-memory recall history
+          - pre-soak archive report explains itself instead of listing the whole corpus
+
+      - id: LIF-5
+        title: Floor-pointer robustness when MEMORY.md diverges from the skeleton
+        priority: P2
+        effort: S
+        provenance: {dimension: lifecycle, severity: low, verdict: unverified}
+        problem: >-
+          The floor append silently no-ops when MEMORY.md is missing or a
+          section header was renamed — user/feedback memories lose their
+          always-load pointer with no signal.
+        proposal: >-
+          Create the missing section (MEMORY.md is the one file this module
+          may edit) or return a distinct machine-readable reason
+          ('MEMORY.md missing' / 'section not found: ## User') the calling
+          skill must surface.
+        acceptance_criteria:
+          - renamed-section corpus still gets pointers or a loud reason — never silence
+
+      - id: LIF-6
+        title: De-duplicate SessionStart staleness vs reconsolidation reporting
+        priority: P2
+        effort: S
+        provenance: {dimension: lifecycle, severity: low, verdict: unverified}
+        problem: >-
+          The worklist is by construction a subset of the stale list; both
+          producers print into the same 9000-char budget, wasting it and
+          diluting the priority signal.
+        proposal: >-
+          Compute find_stale once in the dispatcher, pass to both producers;
+          staleness producer excludes (or asterisks) names already in the
+          worklist — each memory appears exactly once, worklist first.
+        acceptance_criteria:
+          - no memory name appears twice in one SessionStart context
+
+      - id: LIF-7
+        title: Typed memory taxonomy with per-type lifecycle policies (exploratory)
+        priority: P3
+        effort: L
+        provenance: {dimension: landscape, landscape: [langmem-taxonomy]}
+        problem: >-
+          user/feedback/project/reference is a floor-routing taxonomy, not a
+          lifecycle one; semantic facts, episodic session records, and
+          procedural rules each want different consolidation and decay, and
+          hippo treats them identically.
+        proposal: >-
+          Map the existing types onto lifecycle policies (episodic records
+          feed reflection then archive; semantic facts merge/supersede;
+          procedural rules compile — reconsolidation promotes repeatedly-
+          reinforced rules into a suggested CLAUDE.md diff, PR-able). Requires
+          COR-7 corpus versioning; prove on the capture pipeline (CAP) before
+          schema changes ship.
+        dependencies: [COR-7, CAP-2]
+
+      - id: LIF-8
+        title: Verbatim-evidence convention — compress claims, preserve quotes
+        priority: P3
+        effort: S
+        provenance: {dimension: landscape, landscape: [cogcanvas-verbatim-ablation]}
+        problem: >-
+          Extraction is lossy distillation; verbatim chunks beat extracted
+          artifacts by double digits on LongMemEval-class benchmarks. Nothing
+          in hippo's conventions protects exact error messages, command
+          output, or quoted decisions from being summarized away at
+          reconsolidation.
+        proposal: >-
+          Document an evidence-block convention (fenced block + source
+          annotation under the distilled claim); reconsolidation guidance
+          forbids deleting evidence blocks when rewriting prose; body-aware
+          indexing (RET-2) makes the evidence retrievable.
+        dependencies: [RET-2, DOC-6]
+
+  # ==========================================================================
+  # CAP — Automatic Capture & Write Path
+  # The read path is fully automated; the write path is 100% manual. This is
+  # the single biggest asymmetry against the self-managing bar, and the
+  # origin repo's own architecture doc gates it on the instrumentation that
+  # is now shipped and soaking.
+  # ==========================================================================
+  - id: CAP
+    name: Automatic capture & write path
+    goal: >-
+      Durable facts stop dying with the session — capture is automated up to
+      the agent-approval gate, never past it.
+    items:
+
+      - id: CAP-1
+        title: PreCompact capture nudge
+        priority: P1
+        effort: S
+        provenance: {dimension: integration, severity: high, verdict: confirmed}
+        problem: >-
+          Compaction is where session knowledge dies; nothing prompts
+          persistence before it happens.
+        proposal: >-
+          PreCompact hook emitting additionalContext instructing the model to
+          persist durable facts via /memory:new before compaction proceeds —
+          zero-risk, prompt-level, no new write machinery.
+        acceptance_criteria:
+          - compaction is preceded by a capture opportunity; hook honors exit-0/offline contracts
+
+      - id: CAP-2
+        title: Stop/SessionEnd draft-capture pass over the episode buffer
+        priority: P1
+        effort: L
+        provenance: {dimension: integration+lifecycle, severity: high, verdict: confirmed, origin_gate: memory-organism episode buffer soaking since 2026-06-30}
+        problem: >-
+          The episode buffer (query previews + recalled names + HEAD
+          watermark) has been soaking specifically so a capture pass has
+          something to replay — and nothing consumes it; memory creation
+          still depends on someone remembering /memory:new.
+        proposal: >-
+          A Stop/SessionEnd-triggered pass (skill-first, hook-assisted) that
+          reads the episode buffer + `git diff <head_commit>..HEAD` and
+          drafts candidate memories into a pending queue
+          (.claude/.memory-pending/, gitignored) for explicit agent/human
+          approval next session — never direct-to-corpus. Sleep-time-compute
+          principle: all LLM work happens off the hot path.
+        acceptance_criteria:
+          - candidates appear in the queue with provenance (session, commits, queries)
+          - nothing enters .claude/memory/ without an explicit approval action
+        dependencies: [CAP-1, COR-6]
+
+      - id: CAP-3
+        title: Write-time decisioning for captured candidates (add/update/supersede/skip)
+        priority: P2
+        effort: M
+        provenance: {dimension: landscape, landscape: [mem0-add-update-delete-noop]}
+        proposal: >-
+          Each drained candidate runs through hybrid recall against the
+          existing corpus; the approving agent chooses add / merge-into /
+          supersede / skip with the target named explicitly — reusing LIF-2's
+          neighbor machinery so capture cannot re-bloat the corpus with
+          near-dupes.
+        acceptance_criteria:
+          - approving a duplicate candidate routes to update/supersede, not a new file
+        dependencies: [CAP-2, LIF-2]
+
+      - id: CAP-4
+        title: /memory:consolidate — sleep-time consolidation skill
+        priority: P2
+        effort: M
+        provenance: {dimension: landscape, landscape: [letta-sleep-time-compute, a-mem-evolution]}
+        proposal: >-
+          An explicit skill (also suggested by the nudge when the pending
+          queue or worklist is deep) that drains the capture queue, runs the
+          reconsolidation worklist, densifies links (GRA-3's audit pass), and
+          refreshes the MOC (CAP-5) — one deliberate turn where latency
+          doesn't matter, keeping the hook path pure retrieval forever.
+        acceptance_criteria:
+          - one command leaves queue drained, worklist addressed, and graph/MOC current
+        dependencies: [CAP-2, GRA-3, LIF-1]
+
+      - id: CAP-5
+        title: Auto-maintained MOC index note and rolling session-summary note
+        priority: P3
+        effort: M
+        provenance: {dimension: landscape, landscape: [chatgpt-memory-humility, human-legible-memory]}
+        proposal: >-
+          Consolidation maintains a human-browsable map-of-content note (top
+          entities, recent decisions, links into the corpus) that doubles as
+          a high-centrality hub for graph expansion/PPR, plus a rolling
+          recent-sessions summary note mirroring ChatGPT's conversation-
+          summary layer. Human edits are first-class (git-native anyway).
+        dependencies: [CAP-4, GRA-1]
+
+  # ==========================================================================
+  # INT — Integration Surfaces & Agent Access
+  # ==========================================================================
+  - id: INT
+    name: Integration surfaces & agent access
+    goal: >-
+      Memory is reachable wherever the agent works — mid-turn, in subagents,
+      across harness versions — with a defined relationship to Claude Code's
+      native memory.
+    items:
+
+      - id: INT-1
+        title: /memory:recall — the missing read-side verb
+        priority: P1
+        effort: M
+        provenance: {dimension: skills-dx, severity: medium, verdict: unverified}
+        problem: >-
+          Between /memory:new (write) and /memory:audit (maintenance) there is
+          no deliberate read entry point: "what do you remember about X",
+          "list what you know here", and "why was that injected" have no
+          answer; the hook is invisible by design.
+        proposal: >-
+          A skill wrapping memory.recall + links.traverse with a
+          human-readable listing (name, type, description, staleness flag,
+          inbound/outbound links), plus --list-by-type; documents itself as
+          the mid-turn retrieval path for agents too (interim until INT-2).
+        acceptance_criteria:
+          - '"what do you remember about deploys" triggers the skill and answers from the corpus'
+
+      - id: INT-2
+        title: Minimal stdio MCP server — mid-turn and subagent memory access
+        priority: P1
+        effort: L
+        provenance: {dimension: integration+critic, severity: medium}
+        problem: >-
+          Recall fires exactly once per user prompt, keyed on the raw prompt
+          text — mid-turn, after the agent discovers what it's actually
+          working on, there is no retrieval path; subagent (Task) turns get
+          zero memory (no UserPromptSubmit fires for them), while the shipped
+          corpus explicitly prescribes subagent workflows.
+        proposal: >-
+          A stdio MCP server in the plugin venv (plugin.json mcpServers →
+          PLUGIN_DATA venv python) exposing recall(query,k), new_memory(...),
+          and traverse(name,hops) as tools. Offline, corpus-local, honoring
+          every existing contract. Subagents inherit MCP tools — closing
+          their memory blindness without new hooks.
+        acceptance_criteria:
+          - mid-turn recall works without a user prompt; subagent can query the corpus
+          - hook path unchanged and still functional with the server absent
+        dependencies: [INT-1]
+
+      - id: INT-3
+        title: Interim subagent guidance; SubagentStop capture once CAP lands
+        priority: P2
+        effort: S
+        provenance: {dimension: critic, severity: medium}
+        proposal: >-
+          Document bin/hippo recall as the Task-prompt injection pattern for
+          policy-critical delegations (skills reference it); once CAP-2
+          exists, add a SubagentStop path so subagent discoveries become
+          capture candidates rather than vanishing.
+        dependencies: [CAP-2]
+
+      - id: INT-4
+        title: Native-memory coexistence contract
+        priority: P2
+        effort: M
+        provenance: {dimension: critic, severity: high}
+        problem: >-
+          The floor-loading mechanism piggybacks on an undocumented Claude
+          Code internal (the projects-dir memory symlink) with no
+          compatibility contract, no drift detection, and no README answer to
+          "why this over built-in memory" — while the plugin's /memory
+          namespace invites collision with the native surface.
+        proposal: >-
+          (a) a compatibility doc naming every native behavior hippo relies
+          on, with a doctor check that detects native-layout changes or
+          unexpected native writes through the symlink; (b) a README
+          positioning section (what native memory does, what hippo adds,
+          how they compose). The namespace question is already decided and
+          executed separately (OQ-3 → INT-7).
+        acceptance_criteria:
+          - doctor detects symlink-target drift and native-layout change
+          - positioning section answers the overlap question explicitly
+
+      - id: INT-5
+        title: One Python launch per prompt; measured hook wall-time
+        priority: P2
+        effort: S
+        provenance: {dimension: integration, severity: medium, verdict: unverified}
+        problem: >-
+          Every prompt pays two interpreter launches (JSON parse + recall);
+          latency_ms exists in telemetry but nothing watches it.
+        proposal: >-
+          memory.recall accepts the hook JSON on stdin (kills the first
+          launch); doctor gains a p95-latency check over the ledger.
+        acceptance_criteria:
+          - single Python spawn per prompt; doctor reports hot-path p95
+
+      - id: INT-7
+        title: Rename the plugin namespace — /memory:* becomes /hippo:*
+        priority: P0
+        effort: S
+        provenance: {decision: OQ-3, dimension: critic, severity: high}
+        problem: >-
+          The "memory" plugin name collides with Claude Code's native memory
+          surface and every other memory plugin, and gets harder to change
+          with every adopter. Decided 2026-07-05: rename now, while the user
+          base is ~zero.
+        proposal: >-
+          One clean break in one release (no alias shims, per the
+          one-canonical-name invariant): plugin name "memory" → "hippo" in
+          plugin.json and marketplace.json, every skill invocation and doc
+          reference becomes /hippo:*, install line becomes
+          `/plugin install hippo@hippo`. Loud CHANGELOG entry; doctor flags a
+          stale "memory@hippo" install.
+        acceptance_criteria:
+          - no shipped file references /memory:* after the release
+          - fresh install exposes /hippo:bootstrap|init|new|doctor|audit
+
+      - id: INT-6
+        title: Warm recall daemon (exploratory)
+        priority: P3
+        effort: L
+        provenance: {dimension: recall-engine+integration, severity: medium, verdict: unverified}
+        problem: >-
+          The per-process floor (interpreter + numpy/onnx import + model
+          load) is structural — ~0.4-3s per prompt depending on machine; the
+          only way to make dense recall genuinely cheap per-prompt is to stop
+          paying it per-prompt.
+        proposal: >-
+          A tiny long-lived daemon (unix socket under CLAUDE_PLUGIN_DATA,
+          started by SessionStart, idle-timeout suicide, model kept warm)
+          with the current per-process path as permanent fallback. Gate on
+          measured latency wins (INT-5's p95) and prove the fallback path
+          stays exercised in CI.
+        dependencies: [INT-5, PRF-2]
+
+  # ==========================================================================
+  # TEA — Team, Multi-User & Cross-Project Memory
+  # ==========================================================================
+  - id: TEA
+    name: Team, multi-user & cross-project memory
+    goal: >-
+      Memory semantics that survive more than one human and more than one
+      repo: personal learnings propagate across projects, team corpora don't
+      encode one person's policies, and usage signals aren't clone-local lies.
+    items:
+
+      - id: TEA-1
+        title: Two-tier corpus — user-level memories alongside project memories
+        priority: P1
+        effort: L
+        provenance: {dimension: critic, severity: high}
+        problem: >-
+          The architecture has no user-level corpus: user/feedback memories —
+          explicitly person-scoped, portable learnings — are copy-forked
+          per-project at init and can never propagate or converge; a lesson
+          learned in project A is unknown in project B forever.
+        decision: OQ-5 resolved — machine-local only; cross-machine sync is the user's own concern
+        proposal: >-
+          A user-level memory dir (e.g. ~/.claude/hippo-memory) holding
+          user/feedback types, indexed and recalled alongside the project
+          corpus (two-corpus fusion), floor drawn from both; project memories
+          stay git-native in-repo. Machine-local by decision — no remote/sync
+          machinery; the location is a plain directory so a dotfiles symlink
+          Just Works for users who sync themselves. Interim cheaper step:
+          stamp pack files with a pack version and teach doctor to report
+          per-project pack drift with a guided merge.
+        acceptance_criteria:
+          - feedback memory saved in project A is recallable in project B with provenance
+          - project corpus remains fully self-contained for teammates (no user-tier leakage into git)
+        dependencies: [COR-7, TEA-2]
+
+      - id: TEA-2
+        title: Operator pack → opt-in starter packs
+        priority: P0
+        effort: M
+        provenance: {dimension: skills-dx+portability, severity: high, verdict: confirmed}
+        problem: >-
+          /memory:init copies one person's 21 personal, stack-specific,
+          behavior-altering policies verbatim into every adopter's committed,
+          floor-pinned corpus — including CI-bypass merge policy, Claude-
+          attribution stripping, an asyncio gotcha, and a Serena-only tools
+          mandate. Wrong defaults for every user who isn't the author, and
+          committed on behalf of whole teams.
+        proposal: >-
+          Restructure assets into packs with manifests: core (user_role
+          template + claude_is_memory_master) always offered; themed opt-in
+          packs (git-workflow, debugging-discipline, language-specific,
+          solo-operator) behind an init-time menu defaulting to core-only;
+          attribution and CI-bypass policies each require explicit individual
+          confirmation. Tag pack memories (metadata.pack, metadata.stack) so
+          audit can flag never-recalled pack members for pruning. Write the
+          pack README (inclusion criteria) that init already cites but
+          doesn't ship.
+        acceptance_criteria:
+          - default init seeds core only; every additional policy is an explicit choice
+          - each pack memory carries pack/version metadata
+
+      - id: TEA-3
+        title: Private memory tier (.claude/memory.local/)
+        priority: P2
+        effort: M
+        provenance: {dimension: portability, severity: medium, verdict: unverified}
+        problem: >-
+          Everything in .claude/memory/ is committed — user-type memories
+          (role, working preferences) are forced into the shared repo, and
+          there is no home for memories a user wants recall over but not
+          published to teammates.
+        proposal: >-
+          A gitignored sibling dir merged into the same index and recall
+          (provenance labeled), created by init with a one-line explanation;
+          floor pointers into it resolve locally and degrade gracefully for
+          teammates who lack the file.
+        acceptance_criteria:
+          - private memory recallable locally, invisible in git status after init's gitignore patch
+
+      - id: TEA-4
+        title: Kill floor merge conflicts — generate MEMORY.md or sort insertions
+        priority: P2
+        effort: M
+        provenance: {dimension: portability, severity: medium, verdict: unverified}
+        problem: >-
+          Concurrent floor appends from teammates collide at the file tail —
+          the highest-churn shared line in the corpus is also the
+          always-loaded one.
+        proposal: >-
+          Either sorted insertion (order-insensitive, conflict-minimal) or
+          the cleaner break: floor membership moves to per-memory frontmatter
+          (floor: true) and MEMORY.md's floor sections become generated
+          content (lint_floor already knows the invariant). Decide with
+          COR-7's corpus versioning in hand.
+        dependencies: [COR-7]
+
+      - id: TEA-5
+        title: Label clone-local usage signals; optional shared usage summaries
+        priority: P2
+        effort: M
+        provenance: {dimension: portability, severity: medium, verdict: unverified}
+        problem: >-
+          "Never recalled" means "never in THIS clone" — a memory teammate B
+          hits daily is archive-cold in teammate A's report, silently biasing
+          curation and archive candidacy on teams.
+        proposal: >-
+          Reports label the signal's clone-local scope explicitly (cheap,
+          immediate); optionally, a committed append-only per-user usage
+          summary (.claude/memory/.usage/<user>.json, tiny, merge-friendly)
+          that curation unions before judging coldness.
+        dependencies: [LIF-4]
+
+  # ==========================================================================
+  # SEC — Security, Privacy & Trust
+  # A committed memory corpus is an unreviewed prompt-injection channel and
+  # a potential secret sink; telemetry writes into repos that never opted in.
+  # ==========================================================================
+  - id: SEC
+    name: Security, privacy & trust
+    goal: >-
+      Cloning a repo with a hippo corpus is safe by default; nothing secret
+      enters the corpus or ledgers silently; removal is total.
+    items:
+
+      - id: SEC-1
+        title: Trust gate for foreign corpora
+        priority: P1
+        effort: M
+        provenance: {dimension: critic, severity: high}
+        problem: >-
+          The recall hook auto-executes in whatever project it lands in: clone
+          any repo containing .claude/memory/ and its memories inject into
+          your context on every prompt — an unreviewed prompt-injection
+          channel requiring zero user action.
+        decision: OQ-6 resolved — hard-block + one-time consent, env override for CI
+        proposal: >-
+          Recall injects only from corpora the current user has marked
+          trusted (init sets the marker for corpora you created; doctor/a
+          first-session prompt offers one-time trust for cloned corpora,
+          showing memory count and sample names before consent). Env override
+          for CI. Mirrors the harness's own folder-trust pattern.
+        acceptance_criteria:
+          - freshly-cloned foreign corpus injects nothing until explicitly trusted
+          - trust prompt shows what would be injected before consent
+
+      - id: SEC-2
+        title: Secret-pattern lint at write time and in doctor
+        priority: P1
+        effort: S
+        provenance: {dimension: critic, severity: high}
+        problem: >-
+          Memories are committed and recalled forever; nothing scans for
+          high-entropy strings or known token prefixes at creation, and no
+          corpus-wide check exists.
+        proposal: >-
+          new_memory warns (agent-gated, never blocks silently) on
+          secret-looking content; doctor gains a corpus scan check; document
+          the purge procedure (SEC-4) in the warning.
+        acceptance_criteria:
+          - AWS-style key in a body triggers the warning path in tests
+
+      - id: SEC-3
+        title: Telemetry hygiene — no ledgers in non-opted-in repos; self-ignoring dirs
+        priority: P0
+        effort: S
+        provenance: {dimension: portability, severity: medium, verdict: unverified}
+        problem: >-
+          Every prompt in every repo appends an 80-char prompt preview to
+          .claude/.memory-telemetry/ — including projects that never ran
+          init, where nothing gitignores it; a habitual `git add .` commits
+          prompt fragments to shared history.
+        proposal: >-
+          Skip telemetry when the project has no corpus (pairs with COR-10's
+          hook bail); both derived dirs drop a `.gitignore` containing `*`
+          inside themselves on first creation (the standard self-ignoring
+          cache pattern), removing the dependency on init's gitignore patch
+          entirely.
+        acceptance_criteria:
+          - corpus-less repo gains zero hippo files; derived dirs invisible to git even without init
+
+      - id: SEC-4
+        title: Documented purge procedure
+        priority: P2
+        effort: S
+        provenance: {dimension: critic, severity: high}
+        proposal: >-
+          A doctor-referenced doc covering: removing a memory file, scrubbing
+          it from git history (filter-repo recipe), clearing ledgers and
+          index rows, and verifying via recall that it no longer surfaces.
+        acceptance_criteria:
+          - following the doc leaves no trace in corpus, index, ledgers, or recall output
+
+  # ==========================================================================
+  # PRF — Performance & Scale
+  # ==========================================================================
+  - id: PRF
+    name: Performance & scale
+    goal: >-
+      Stated, gated latency budgets that hold at the north star's 500-memory
+      corpus on the hot path users actually experience (cold process), not
+      the warm path that flatters benchmarks.
+    items:
+
+      - id: PRF-1
+        title: Persist BM25 statistics — stop rebuilding the scorer per query
+        priority: P1
+        effort: S
+        provenance: {dimension: recall-engine, severity: medium, verdict: unverified}
+        problem: >-
+          Every query reconstructs BM25Okapi over the whole corpus — O(N)
+          IDF recomputation per prompt, growing linearly with corpus size on
+          the hot path.
+        proposal: >-
+          Precompute doc frequencies, lengths, and IDF into the manifest at
+          build time; query-time scoring reads them directly.
+        acceptance_criteria:
+          - per-query BM25 cost independent of corpus size; identical rankings (golden test)
+
+      - id: PRF-2
+        title: Gate the cold path — promote cold_latency from report-only
+        priority: P1
+        effort: S
+        provenance: {dimension: recall-engine, severity: medium, verdict: unverified}
+        problem: >-
+          The only enforced latency number is warm p95 (<300ms), which the
+          code itself documents as ~10x under the real per-prompt cost; the
+          production experience is ungated.
+        proposal: >-
+          Gate cold p50 (fresh subprocess per sample, the honest number
+          eval_recall already measures) at a stated budget (e.g. <1500ms);
+          doctor surfaces the ledger's real p95 (INT-5).
+        acceptance_criteria:
+          - cold budget enforced in the CI dense lane; regressions fail the gate
+
+      - id: PRF-3
+        title: 500-memory scale lane
+        priority: P2
+        effort: M
+        provenance: {dimension: tests-quality, severity: medium, verdict: unverified}
+        problem: >-
+          The largest test corpus is 8 memories against a north star of 500;
+          recall latency, truncation behavior with 40+ real-size matches,
+          incremental build time, and graph traversal density are all
+          unmeasured at scale.
+        proposal: >-
+          Generated ~500-memory corpus (realistic description/body lengths;
+          BM25-only for speed) asserting recall latency, bounded output, and
+          build/refresh time; marked slow, run nightly in CI.
+        acceptance_criteria:
+          - nightly lane pins the scale envelope; failures name the regressing budget
+        dependencies: [QUA-1]
+
+  # ==========================================================================
+  # QUA — Quality Gates, CI & Eval Infrastructure
+  # 283 green tests that nothing runs automatically, guarding contracts the
+  # most safety-critical code (the hooks) isn't covered by.
+  # ==========================================================================
+  - id: QUA
+    name: Quality gates, CI & eval infrastructure
+    goal: >-
+      Every contract the docs assert is enforced by a gate that runs on every
+      push, across the OS/interpreter matrix the support matrix declares.
+    items:
+
+      - id: QUA-1
+        title: CI pipeline — the suite finally gates something
+        priority: P0
+        effort: M
+        provenance: {dimension: tests-quality, severity: high, verdict: adjusted}
+        problem: >-
+          No CI config exists anywhere; the five "merge gates" gate nothing,
+          pytest runs only when someone remembers, and the 3-OS north star
+          has never been executed once.
+        proposal: >-
+          GitHub Actions: (1) hermetic lane — pytest with
+          MEMOBOT_DISABLE_DENSE=1 on {ubuntu, macos} × {3.10, 3.12}, matching
+          the declared support matrix; (2) dense lane — fastembed model restored from
+          actions/cache, dense tests + eval_recall CLI gates; (3) shellcheck
+          over hooks and bin/hippo; (4) requirements resolution matrix
+          (OSP-3). Required on PRs to main.
+        acceptance_criteria:
+          - red suite blocks merge; eval CLI runs green with default paths (COR-2)
+
+      - id: QUA-2
+        title: Hook end-to-end tests — enforce the exit-0 / never-eat-the-prompt contract
+        priority: P0
+        effort: S
+        provenance: {dimension: tests-quality, severity: high, verdict: confirmed}
+        problem: >-
+          The plugin's most safety-critical path (exit 2 on UserPromptSubmit
+          BLOCKS AND ERASES the user's prompt) has zero test coverage; a
+          future set -u edit could silently destroy prompts in every
+          consuming project.
+        proposal: >-
+          Subprocess tests invoking each hook under controlled env (tmp repo,
+          plugin root, no venv): assert exit 0 under empty stdin, garbage
+          JSON, valid prompt, missing python3, missing jq; stdout is empty or
+          valid hookSpecificOutput JSON; nothing written outside expected
+          dirs.
+        acceptance_criteria:
+          - contract matrix green; a deliberate exit-2 mutation fails the suite
+
+      - id: QUA-3
+        title: True hermeticity — quarantine the network test
+        priority: P1
+        effort: S
+        provenance: {dimension: tests-quality, severity: medium, verdict: adjusted}
+        problem: >-
+          test_real_fastembed_dense_build can download 130MB into the user's
+          real home cache — the suite's own hermeticity claim is false, and
+          offline runs fail spuriously.
+        proposal: >-
+          Register a `network` marker, pin FASTEMBED_CACHE_PATH to a
+          session-scoped dir in that test, default-deselect via addopts
+          (-m "not network"); CI's dense lane runs the marked set against
+          the actions cache.
+        acceptance_criteria:
+          - default suite passes airplane-mode with an empty home cache
+
+      - id: QUA-4
+        title: Concurrency race tests over ledger and index
+        priority: P1
+        effort: S
+        provenance: {dimension: tests-quality, severity: medium, verdict: adjusted}
+        proposal: >-
+          With COR-12's atomic manifest in place: multiprocess appenders
+          against one ledger asserting no lost/torn lines across rotation;
+          reader loop against a rebuilding index asserting recall never sees
+          mismatched manifest/dense pairs.
+        dependencies: [COR-12]
+
+      - id: QUA-5
+        title: Index-corruption recovery matrix
+        priority: P1
+        effort: S
+        provenance: {dimension: tests-quality, severity: medium, verdict: unverified}
+        problem: >-
+          Truncated manifests, wrong-shape dense.npy, and dense_ready-without-
+          data all degrade recall to nothing silently — "memory stopped
+          working" with no diagnosis surface.
+        proposal: >-
+          Corruption-matrix tests asserting never-raise AND that doctor or
+          the integrity producer names the corruption; consider a manifest
+          checksum.
+        acceptance_criteria:
+          - every corruption state yields a visible diagnosis, not just empty results
+
+      - id: QUA-6
+        title: Gate-constant pins and a golden-corpus dense benchmark
+        priority: P2
+        effort: S
+        provenance: {dimension: tests-quality, severity: medium, verdict: unverified}
+        problem: >-
+          Gates are tested on corpora engineered to score ~1.0, so threshold
+          edits and dense-ranking regressions (model bump, fusion change)
+          pass silently.
+        proposal: >-
+          Exact-value pins on the five GATE_* constants (changes become
+          deliberate); a checked-in ~50-memory hippo-native golden corpus
+          with expected recall/MRR bands, run in the dense CI lane.
+        dependencies: [QUA-1]
+
+      - id: QUA-7
+        title: bin/hippo launcher tests
+        priority: P2
+        effort: S
+        provenance: {dimension: tests-quality, severity: medium, verdict: unverified}
+        proposal: >-
+          Subprocess tests: no PLUGIN_DATA → python3 fallback works BM25-only;
+          bogus subcommand → exit 2 + usage; skill-redirect commands → exit 1
+          + message.
+
+      - id: QUA-8
+        title: Skills-contract tests
+        priority: P2
+        effort: M
+        provenance: {dimension: tests-quality, severity: medium, verdict: unverified}
+        problem: >-
+          The skills ARE the lifecycle, and their embedded code blocks call
+          engine symbols by name — an engine rename breaks four skills with
+          zero test signal; frontmatter description limits (DOC-3) are also
+          unchecked.
+        proposal: >-
+          Extract fenced blocks from each SKILL.md: python blocks
+          compile/import-check and every memory.X symbol referenced must
+          exist with a compatible signature; referenced paths must ship in
+          plugin/ or be documented project-local; description lengths
+          enforced.
+        acceptance_criteria:
+          - renaming evaluate() fails the suite before it ships
+
+      - id: QUA-9
+        title: Property-based fuzzing over parsing surfaces
+        priority: P2
+        effort: M
+        provenance: {dimension: tests-quality, severity: low, verdict: unverified}
+        proposal: >-
+          Hypothesis round-trips: split_frontmatter recomposition lossless;
+          backfill/set_invalid_after never touch the body for arbitrary
+          frontmatter; clean_query total and output ⊆ input; tokenize/
+          normalize_slug total over unicode (locks RET-3). Seed with the
+          known YAML-colon corpus.
+        dependencies: [RET-3]
+
+      - id: QUA-10
+        title: pytest.ini hardening; repoint the dead real-corpus test
+        priority: P2
+        effort: S
+        provenance: {dimension: tests-quality, severity: low, verdict: unverified}
+        proposal: >-
+          Register network/slow markers, filterwarnings=error with targeted
+          ignores, pytest-timeout default; move the strict 300ms wall-clock
+          assertion to the eval lane; repoint
+          test_real_corpus_frontmatter_all_parses (a permanent skip here) at
+          the shipped operator-pack assets so it becomes a packaging gate.
+
+  # ==========================================================================
+  # DOC — Docs, Distribution & Release Engineering
+  # ==========================================================================
+  - id: DOC
+    name: Docs, distribution & release engineering
+    goal: >-
+      Shipped docs describe THIS plugin (not its origin repo), distribution
+      is legally and mechanically sound, and every release is versioned,
+      changelogged, and migration-annotated.
+    items:
+
+      - id: DOC-1
+        title: Ship the LICENSE file
+        priority: P0
+        effort: S
+        provenance: {dimension: critic, severity: high}
+        problem: >-
+          plugin.json declares MIT but no LICENSE text exists anywhere —
+          the code defaults to all-rights-reserved and marketplace
+          distribution is legally unresolved.
+        proposal: >-
+          MIT text at repo root (confirm the packager bundles it); a README
+          note on the licensing status of the Memosa-extracted code.
+
+      - id: DOC-2
+        title: Consumer-facing rewrite of the engine README
+        priority: P0
+        effort: M
+        provenance: {dimension: skills-dx+portability, severity: medium, verdict: unverified}
+        problem: >-
+          plugin/memory/README.md — designated "the full engine docs" by both
+          other READMEs — still describes the origin monorepo: ./.venv
+          commands that fail, hook wiring that doesn't exist here,
+          tests/unit/memory_tools paths, and links that 404 in this repo.
+        proposal: >-
+          Rewrite against the plugin layout (PLUGIN_DATA venv + PYTHONPATH
+          pattern or bin/hippo everywhere, hooks.json wiring, tests/ paths);
+          inline the two origin lessons that are cited as dangling wikilinks
+          (durable-cache gotcha, no-bulk-reverify rationale) as short
+          appendix sections; add a link-check test over plugin/**/*.md so
+          ported docs can't regress silently.
+        acceptance_criteria:
+          - every command in the doc runs verbatim on a fresh install
+          - link-check green in CI
+
+      - id: DOC-3
+        title: Skill description budget pass
+        priority: P1
+        effort: S
+        provenance: {dimension: skills-dx, severity: medium, verdict: unverified}
+        problem: >-
+          audit's frontmatter description is ~1353 chars against a 1024-char
+          limit — truncation or validation failure territory, with trigger
+          phrases buried behind flag documentation.
+        proposal: >-
+          Cut to <500 chars (what it is, trigger phrases, doctor-vs-audit
+          disambiguator, one not-for clause); move flags/caveats to the body;
+          consistency pass over all five; QUA-8 enforces the budget.
+        dependencies: [QUA-8]
+
+      - id: DOC-4
+        title: Deterministic doctor — a memory.doctor engine module
+        priority: P1
+        effort: S
+        provenance: {dimension: skills-dx, severity: low, verdict: unverified}
+        problem: >-
+          Two of doctor's six checks require the agent to invent verification
+          procedures (sentinel-hash compare, manifest count), producing
+          run-to-run variance in the skill users reach for when frustrated.
+        proposal: >-
+          `python -m memory.doctor` runs all checks and prints the ✔/✘/⚠
+          lines; the SKILL becomes a thin wrapper. New checks from this
+          roadmap (FILL-ME, latency p95, trust state, pack drift, format
+          version) land in the module, not prose.
+        acceptance_criteria:
+          - doctor output identical across models/sessions for identical state
+
+      - id: DOC-5
+        title: Fix phantom references shipped into adopter corpora
+        priority: P1
+        effort: S
+        provenance: {dimension: skills-dx, severity: medium, verdict: unverified}
+        problem: >-
+          Skills cite a pack README that doesn't exist and a
+          [[hippo_plugin_schema_gotchas]] memory that never ships (agents
+          waste turns failing to Read it); the skeleton bakes a
+          plugin-repo-relative path into every seeded MEMORY.md.
+        proposal: >-
+          Ship the pack README (TEA-2); inline the schema-gotcha lesson into
+          bootstrap/doctor prose and drop the wikilink; point the skeleton at
+          a stable URL or inline the one-sentence floor rule.
+        dependencies: [TEA-2]
+
+      - id: DOC-6
+        title: CONVENTIONS.md seeded into every corpus
+        priority: P2
+        effort: S
+        provenance: {dimension: skills-dx, severity: medium, verdict: unverified}
+        proposal: >-
+          One page — frontmatter schema, type taxonomy with per-project-kind
+          examples, floor rule, evidence-block convention (LIF-8), link
+          conventions — copied into .claude/memory/ by init so the rules
+          live where memories get written, not only in the plugin bundle.
+        dependencies: [DOC-2]
+
+      - id: DOC-7
+        title: Release engineering — tags, CHANGELOG, version sync, re-bootstrap flags
+        priority: P2
+        effort: S
+        provenance: {dimension: critic, severity: low}
+        problem: >-
+          Version lives unsynced in plugin.json and marketplace.json; no
+          tags, no CHANGELOG, no channel to tell users a release requires
+          re-bootstrap.
+        proposal: >-
+          Tagged releases with CHANGELOG.md; CI check that both version
+          fields match the tag; each release notes "re-bootstrap: yes/no";
+          doctor surfaces installed-vs-bootstrapped version delta (with
+          COR-11).
+        dependencies: [QUA-1, COR-11]
+
+      - id: DOC-8
+        title: Rename MEMOBOT_* env vars to HIPPO_*
+        priority: P2
+        effort: S
+        provenance: {dimension: portability, severity: low, verdict: unverified}
+        problem: >-
+          Every env override still carries the origin project's MEMOBOT_
+          prefix — branding drift that confuses docs and search.
+        proposal: >-
+          Single clean rename (no alias shims, per the one-canonical-name
+          invariant), shipped in one release with a loud CHANGELOG entry and
+          a doctor check that flags stale MEMOBOT_ vars in the environment.
+        dependencies: [DOC-7]
+
+# ============================================================================
+# Release train — sequencing the workstreams
+# Each release has a theme, a gate ("done means"), and pulls items whose
+# dependencies are satisfied. Windows (OSP-5) and exploratory items ride
+# whichever release their gates unlock.
+# ============================================================================
+release_train:
+
+  - version: 0.2.0
+    theme: "Truthful snap-in — what ships works as documented, and says so when it can't"
+    done_means: >-
+      A stranger installs from the marketplace, is nudged through
+      bootstrap/init, gets working (genuinely, measurably) recall, under CI,
+      under a real license, with no personal-policy payload.
+    items: [ONB-1, ONB-2, ONB-3, ONB-4, ONB-7, COR-1, COR-2, COR-11, TEA-2,
+            SEC-3, OSP-1, INT-7, QUA-1, QUA-2, QUA-3, DOC-1, DOC-2, DOC-3, DOC-5]
+
+  - version: 0.3.0
+    theme: "Any repo, any machine — uniformity across shapes and platforms"
+    done_means: >-
+      Monorepo subdir, non-git dir, squash-merge team, teammate clone, second
+      machine, and Linux/XDG all behave identically or degrade loudly with a
+      named reason and a repair command.
+    items: [SHP-1, SHP-2, SHP-3, SHP-4, SHP-5, SHP-6, OSP-2, OSP-3, OSP-4,
+            OSP-6, ONB-5, ONB-6, COR-3, COR-4, COR-5, COR-6, COR-10, COR-12,
+            SEC-1, SEC-2, QUA-4, QUA-5, DOC-4]
+
+  - version: 0.4.0
+    theme: "Recall precision — earn every injected token, in every language"
+    done_means: >-
+      Off-topic prompts inject nothing; bodies are retrievable; non-English
+      corpora work; the graph contributes its first ranking signal; every
+      project can measure its own recall quality.
+    items: [RET-1, RET-2, RET-3, RET-4, RET-7, GRA-1, GRA-2, GRA-3, GRA-6,
+            PRF-1, PRF-2, COR-8, COR-9, QUA-6, QUA-7, DOC-8]
+
+  - version: 0.5.0
+    theme: "The graph earns its keep — typed relations and closed lifecycle loops"
+    done_means: >-
+      supersedes/contradicts are live in recall and consolidation; demote has
+      a terminal state; duplicates are caught at write time; archives can't
+      strand inbound links; nothing double-nags.
+    items: [GRA-4, GRA-5, GRA-9, LIF-1, LIF-2, LIF-3, LIF-4, LIF-5, LIF-6,
+            RET-5, RET-6, COR-7, TEA-4, QUA-8, QUA-10, DOC-6]
+
+  - version: 0.6.0
+    theme: "The write path — capture up to the approval gate; memory reaches every agent"
+    done_means: >-
+      Sessions stop losing durable facts to compaction; the episode buffer
+      finally has a consumer; mid-turn and subagent retrieval exist; the
+      native-memory relationship is contracted.
+    items: [CAP-1, CAP-2, CAP-3, CAP-4, INT-1, INT-2, INT-3, INT-4, INT-5,
+            QUA-9, DOC-7]
+
+  - version: 0.7.0
+    theme: "Team & fleet — memory that survives more than one human and one repo"
+    done_means: >-
+      Personal learnings propagate across projects; team corpora carry no
+      one's personal policies; usage signals are honest about their scope;
+      offboarding is total.
+    items: [TEA-1, TEA-3, TEA-5, SEC-4, PRF-3]
+
+  - version: exploratory
+    theme: "Proving-gate items — ship only when their gates clear"
+    items:
+      - {id: GRA-7,  gate: "beats GRA-1 on the RET-8 multi-hop category"}
+      - {id: GRA-8,  gate: "none — schedule opportunistically"}
+      - {id: RET-8,  gate: "RET-1 + GRA-1 landed"}
+      - {id: LIF-7,  gate: "CAP-2 capture pipeline proven across temporally-diverse sessions"}
+      - {id: LIF-8,  gate: "RET-2 body indexing landed"}
+      - {id: CAP-5,  gate: "CAP-4 consolidation skill proven"}
+      - {id: INT-6,  gate: "INT-5 p95 evidence shows the daemon is worth its complexity"}
+
+# ============================================================================
+# Measurement — "uniform utility" gets a yardstick
+# Emitted uniformly by eval/doctor/audit so utility is comparable ACROSS
+# projects — the only way to know the north star is being met.
+# ============================================================================
+kpis:
+  - id: KPI-1
+    name: time_to_first_recall
+    definition: minutes from /plugin install to first successful non-empty recall
+    target: "< 5 minutes, zero doc-reading required (ONB-1..3)"
+  - id: KPI-2
+    name: injection_precision_proxy
+    definition: >-
+      fraction of injected memories subsequently opened/used in the session
+      (requires the PostToolUse read-signal from the telemetry loop) — the
+      true numerator over RET-1's abstention denominator
+    target: "trend up release-over-release on the golden corpus and ≥2 real corpora"
+  - id: KPI-3
+    name: hot_path_latency_cold_p95
+    definition: per-prompt hook wall-time, cold process, 500-memory corpus (PRF-2, INT-5)
+    target: "< 1500ms gated; < 300ms with INT-6 daemon if pursued"
+  - id: KPI-4
+    name: recall_quality_per_project
+    definition: recall@10 / MRR@10 / precision@k on the project's own generated eval set (RET-7)
+    target: "measurable on ANY project, backend-labeled; hard-set ≥0.80 where dense is live"
+  - id: KPI-5
+    name: degradation_legibility
+    definition: >-
+      count of silent-fallback paths without a user-visible signal
+      (nudge/doctor/producer) — the anti-silent-degradation audit
+    target: "zero by 0.3.0; enforced by the QUA-2/QUA-5 matrices"
+  - id: KPI-6
+    name: staleness_loop_closure
+    definition: median sessions from staleness flag to resolution (reverify/fix/demote/archive)
+    target: "finite and falling once LIF-1 lands (today: unbounded — loops never close)"
+  - id: KPI-7
+    name: graph_liveness
+    definition: edge density + fraction of recalls where graph expansion contributed a top-k result
+    target: "nonzero on fresh projects within 5 memories (GRA-3); contribution measurable post GRA-1"
+  - id: KPI-8
+    name: onboarding_funnel_completion
+    definition: install → bootstrap → init → first memory → first recall, per fresh install
+    target: "every step either completes or emits the exact next command"
+
+# ============================================================================
+# Decisions — the load-bearing questions, answered by the owner 2026-07-05
+# ============================================================================
+decisions:
+  - id: OQ-1
+    question: Monorepo topology once SHP-2 makes resolve_dirs walk upward?
+    decision: nested-wins-with-fallthrough
+    decided: 2026-07-05
+    consequence: >-
+      A per-package .claude/memory wins when present; otherwise ascend to the
+      repo-root corpus (stop at $HOME). SHP-2 documents this as THE monorepo
+      story; doctor names which corpus a session resolved and why.
+  - id: OQ-2
+    question: Windows in the support matrix?
+    decision: out of scope — macOS/Linux only
+    decided: 2026-07-05
+    consequence: >-
+      OSP-1's matrix declares macOS + Linux full support, Windows explicitly
+      unsupported (documented, so its absence reads as a decision — see
+      non_goals). The former OSP-5 enablement item is removed rather than
+      shelved; revisit only on concrete adoption evidence. OSP-4's portable
+      time-bounds survive on their own merits (SIGALRM breaks in non-main
+      threads, which INT-2's MCP server will hit).
+  - id: OQ-3
+    question: Keep /memory:* or rename to /hippo:*?
+    decision: rename to /hippo:*
+    decided: 2026-07-05
+    consequence: >-
+      Clean break while the user base is ~zero, per the one-canonical-name
+      invariant: plugin name "memory" → "hippo" in both manifests, all skill
+      invocations become /hippo:*, all shipped docs updated in the same
+      release. Lands as INT-7 in v0.2.0 — before any adopter builds muscle
+      memory. INT-4's coexistence work loses its namespace-evaluation leg.
+  - id: OQ-4
+    question: Default dense model — English or multilingual?
+    decision: English default (bge-small-en-v1.5) + documented --multilingual bootstrap preset
+    decided: 2026-07-05
+    consequence: >-
+      RET-3 still fixes Unicode tokenization unconditionally; bootstrap gains
+      the opt-in preset (multilingual-e5-small, fastembed ONNX), and doctor
+      flags a visibly non-English corpus served by the English model.
+  - id: OQ-5
+    question: Does the TEA-1 user tier sync across machines?
+    decision: machine-local only
+    decided: 2026-07-05
+    consequence: >-
+      The user tier propagates across projects on one machine; cross-machine
+      sync is explicitly the user's own concern (dotfiles manager, etc.).
+      TEA-1 sheds remote-repo setup from its scope; the tier's on-disk
+      location is chosen so a dotfiles symlink Just Works for users who want
+      sync anyway.
+  - id: OQ-6
+    question: Trust-gate default posture for corpora the user didn't init?
+    decision: hard-block + one-time consent prompt (env override for CI)
+    decided: 2026-07-05
+    consequence: >-
+      SEC-1 ships as specified: foreign corpora inject nothing until a
+      one-time trust prompt showing memory count and sample names; init marks
+      self-created corpora trusted; CI opts in via env var.
+
+# ============================================================================
+# Non-goals — explicitly out, so their absence reads as a decision
+# ============================================================================
+non_goals:
+  - native Windows support (decided 2026-07-05, OQ-2) — the support matrix
+    is macOS + Linux; the confirmed broken-on-Windows finding is documented
+    rather than fixed; revisit only on concrete adoption evidence
+  - cloud/server-backed storage or retrieval of any kind — local, offline,
+    git-native is the identity, not a constraint to outgrow
+  - autonomous bulk writes (auto-archive sweeps, bulk re-baseline, unattended
+    corpus edits) — the per-item agent gate is permanent
+  - LLM calls on the UserPromptSubmit hot path — consolidation intelligence
+    lives at Stop/skill time (CAP), never per-prompt
+  - replacing Claude Code's native memory — hippo composes with it (INT-4),
+    it does not fork it
+  - a query DSL or structured-search language — the query is the user's
+    prompt; sophistication belongs in ranking, not in syntax the user
+    must learn
+
+# ============================================================================
+# Landscape references that shaped this roadmap (see meta.method)
+# ============================================================================
+references:
+  - {theme: sleep-time compute,            source: "Letta (2025)",                 applied_in: [CAP-2, CAP-4]}
+  - {theme: memory blocks / tiered core,   source: "MemGPT/Letta, ChatGPT memory", applied_in: [CAP-5, TEA-1]}
+  - {theme: ADD/UPDATE/DELETE/NOOP writes, source: "Mem0",                         applied_in: [LIF-2, CAP-3]}
+  - {theme: bi-temporal invalidation,      source: "Zep/Graphiti",                 applied_in: [GRA-4]}
+  - {theme: personalized PageRank recall,  source: "HippoRAG / HippoRAG 2",        applied_in: [GRA-1, GRA-7]}
+  - {theme: write-time link generation,    source: "A-MEM (NeurIPS'25)",           applied_in: [GRA-3]}
+  - {theme: verbatim beats extraction,     source: "CogCanvas ablation",           applied_in: [LIF-8, RET-2]}
+  - {theme: staleness as ranking signal,   source: "temporal-validity lit. 2026",  applied_in: [RET-5, RET-6]}
+  - {theme: semantic/episodic/procedural,  source: "LangMem",                      applied_in: [LIF-7]}
+  - {theme: salience = rel+rec+importance, source: "Generative Agents, MemoryBank", applied_in: [RET-5]}
+  - {theme: human-legible memory wins,     source: "ChatGPT memory, Claude Code",  applied_in: [CAP-5, DOC-6]}
+  - {theme: eval categories + abstention,  source: "LongMemEval, LoCoMo",          applied_in: [RET-8, RET-1]}

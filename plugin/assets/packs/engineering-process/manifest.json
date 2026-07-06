@@ -1,0 +1,33 @@
+{
+  "pack": "engineering-process",
+  "version": "0.2.0",
+  "title": "Engineering process",
+  "description": "One-correct-path engineering: no compat shims, no legacy read fallbacks, no feature-flagged refactor rollouts, no tactical shortcuts; batch tests at the end; redirects are additive; pin risky designs adversarially first.",
+  "seed_by_default": false,
+  "memories": [
+    {
+      "file": "feedback_no_backward_compat.md"
+    },
+    {
+      "file": "feedback_no_legacy_read_fallbacks.md"
+    },
+    {
+      "file": "feedback_no_feature_flagged_refactor_rollouts.md"
+    },
+    {
+      "file": "feedback_no_tactical_shortcuts.md"
+    },
+    {
+      "file": "feedback_additive_not_restrictive_redirects.md"
+    },
+    {
+      "file": "feedback_batch_tests_at_end.md"
+    },
+    {
+      "file": "feedback_no_hedging_on_confirmed_paid_services.md"
+    },
+    {
+      "file": "adversarial_design_pinning_before_implementation.md"
+    }
+  ]
+}

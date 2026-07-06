@@ -119,7 +119,10 @@ def _bm25_rank(query_tokens: List[str], entries: List[dict]) -> List[int]:
     if not query_tokens or not entries:
         return []
     try:
-        from rank_bm25 import BM25Okapi
+        try:
+            from rank_bm25 import BM25Okapi  # the pinned venv dep (full-fidelity path)
+        except ImportError:  # bare python3 pre-bootstrap (ONB-2): score-identical fallback
+            from ._vendor.bm25 import BM25Okapi
 
         corpus = [e.get("tokens") or [] for e in entries]
         bm25 = BM25Okapi(corpus)
@@ -208,6 +211,11 @@ def _ensure_index(
 ) -> Optional[LoadedIndex]:
     if index is not None:
         return index
+    # Never-opted-in guard (SEC-3): a project with no .claude/memory corpus must gain
+    # ZERO derived files — without this, the implicit build below mkdir-p's the index
+    # dir (creating .claude/ itself) in every repo the user merely opens.
+    if not memory_dir or not os.path.isdir(memory_dir):
+        return None
     index_dir = index_dir or default_index_dir(memory_dir)
     loaded = load_index(index_dir)
     if loaded is not None:
@@ -451,11 +459,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     # raise into / delay the hook. The episode buffer (the future capture pass's replay log)
     # is logged in the SAME block, right after the recall ledger, on the SAME raw_query gate —
     # it must start soaking now even though nothing reads it yet.
-    if raw_query:
+    if raw_query and memory_dir and os.path.isdir(memory_dir):
+        # The corpus-existence gate (SEC-3): a project that never opted in (no
+        # .claude/memory) must never gain a telemetry ledger with prompt previews —
+        # a habitual `git add .` would commit prompt fragments to shared history.
         try:
             from .telemetry import default_telemetry_dir, log_episode, log_recall_event
 
-            td = default_telemetry_dir(args.memory_dir) if args.memory_dir else None
+            td = default_telemetry_dir(memory_dir)
             log_recall_event(results, query=raw_query, k=args.k, latency_ms=latency_ms, telemetry_dir=td)
             log_episode(
                 [r.get("name") for r in results if r.get("name")],

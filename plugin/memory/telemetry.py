@@ -29,6 +29,8 @@ import time
 import uuid
 from typing import Iterator, List, Optional
 
+from .provenance import ensure_self_ignoring_dir
+
 _TELEMETRY_DIRNAME = ".memory-telemetry"
 _LEDGER_NAME = "recall_events.jsonl"
 _EPISODE_LEDGER_NAME = "episode_buffer.jsonl"
@@ -106,7 +108,7 @@ def mark_session(telemetry_dir: Optional[str] = None) -> Optional[str]:
     """
     try:
         td = _resolve_dir(telemetry_dir)
-        os.makedirs(td, exist_ok=True)
+        ensure_self_ignoring_dir(td)  # derived dir: mkdir + self-ignoring .gitignore (SEC-3)
         sid = uuid.uuid4().hex
         with open(_session_path(td), "w", encoding="utf-8") as fh:
             fh.write(sid)
@@ -187,7 +189,7 @@ def log_recall_event(
     """
     try:
         td = _resolve_dir(telemetry_dir)
-        os.makedirs(td, exist_ok=True)
+        ensure_self_ignoring_dir(td)  # derived dir: mkdir + self-ignoring .gitignore (SEC-3)
         backend = (results[0].get("backend") if results else None) or "none"
         event = {
             "ts": round(time.time(), 3),
@@ -261,7 +263,7 @@ def log_episode(
     """
     try:
         td = _resolve_dir(telemetry_dir)
-        os.makedirs(td, exist_ok=True)
+        ensure_self_ignoring_dir(td)  # derived dir: mkdir + self-ignoring .gitignore (SEC-3)
         head_commit = None
         if repo_root:
             try:
@@ -332,7 +334,7 @@ def record_reconsolidation_outcome(
         return False
     try:
         td = _resolve_dir(telemetry_dir)
-        os.makedirs(td, exist_ok=True)
+        ensure_self_ignoring_dir(td)  # derived dir: mkdir + self-ignoring .gitignore (SEC-3)
         event = {"ts": round(time.time(), 3), "name": name, "outcome": outcome}
         path = _reconsolidation_ledger_path(td)
         with open(path, "a", encoding="utf-8") as fh:
