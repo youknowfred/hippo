@@ -167,3 +167,52 @@ def test_main_heals_empty_baselines_side_effect(tmp_path, monkeypatch, capsys):
     assert S.main() == 0
     _, sc = read_provenance(open(path, encoding="utf-8").read())
     assert sc == head
+
+
+# --------------------------------------------------------------------------- #
+# COR-11: stale-venv detection (requirements hash vs bootstrap sentinel)
+# --------------------------------------------------------------------------- #
+def _plugin_env(tmp_path, monkeypatch, *, req_text: str, sentinel_hash):
+    import hashlib
+    import json as _json
+
+    data_dir = tmp_path / "plugin-data"
+    plugin_root = tmp_path / "plugin-root"
+    os.makedirs(data_dir, exist_ok=True)
+    os.makedirs(plugin_root, exist_ok=True)
+    (plugin_root / "requirements.txt").write_text(req_text, encoding="utf-8")
+    if sentinel_hash == "current":
+        sentinel_hash = hashlib.sha256(req_text.encode()).hexdigest()
+    if sentinel_hash is not None:
+        (data_dir / ".bootstrap-sentinel").write_text(
+            _json.dumps({"requirements_hash": sentinel_hash}), encoding="utf-8"
+        )
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(data_dir))
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
+
+
+def test_stale_venv_producer_nudges_on_dep_bump(tmp_path, monkeypatch):
+    _plugin_env(tmp_path, monkeypatch, req_text="numpy>=2\n", sentinel_hash="0" * 64)
+    out = S.stale_venv_producer("md", "repo")
+    assert out and "/hippo:bootstrap" in out
+
+
+def test_stale_venv_producer_silent_when_hash_current(tmp_path, monkeypatch):
+    _plugin_env(tmp_path, monkeypatch, req_text="numpy>=2\n", sentinel_hash="current")
+    assert S.stale_venv_producer("md", "repo") is None
+
+
+def test_stale_venv_producer_silent_when_not_bootstrapped(tmp_path, monkeypatch):
+    # No sentinel — ONB-1's pre-Python nudge owns that state; this producer stays out.
+    _plugin_env(tmp_path, monkeypatch, req_text="numpy>=2\n", sentinel_hash=None)
+    assert S.stale_venv_producer("md", "repo") is None
+
+
+def test_stale_venv_producer_silent_without_plugin_data_env(tmp_path, monkeypatch):
+    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
+    assert S.stale_venv_producer("md", "repo") is None
+
+
+def test_stale_venv_producer_registered_first():
+    assert S.PRODUCERS[0][0] == "stale_venv"
+    assert S.PRODUCERS[0][1] is S.stale_venv_producer

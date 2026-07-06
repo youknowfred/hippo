@@ -34,6 +34,44 @@ _MAX_CONTEXT_CHARS = 9000
 _MAX_ITEMS_PER_PRODUCER = 20
 
 
+def stale_venv_producer(memory_dir: str, repo_root: str) -> Optional[str]:
+    """One-line re-bootstrap nudge when plugin deps changed after the last bootstrap.
+
+    The venv-in-PLUGIN_DATA model is update-safe for CODE but not DEPS: a plugin update
+    that bumps requirements.txt leaves hooks running the old venv indefinitely, with new
+    imports failing into silent excepts (COR-11). Compare sha256 of the CURRENT
+    requirements.txt against the hash the bootstrap sentinel recorded; nudge on mismatch.
+    Runs once per session by construction (SessionStart). Silent when not bootstrapped
+    (ONB-1's pre-Python nudge owns that state) or when anything is unreadable.
+    """
+    try:
+        import hashlib
+
+        data_dir = os.environ.get("CLAUDE_PLUGIN_DATA") or ""
+        plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT") or os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))
+        )
+        if not data_dir:
+            return None
+        sentinel_path = os.path.join(data_dir, ".bootstrap-sentinel")
+        req_path = os.path.join(plugin_root, "requirements.txt")
+        if not os.path.isfile(sentinel_path) or not os.path.isfile(req_path):
+            return None
+        with open(sentinel_path, "r", encoding="utf-8") as fh:
+            recorded = (json.load(fh) or {}).get("requirements_hash") or ""
+        with open(req_path, "rb") as fh:
+            current = hashlib.sha256(fh.read()).hexdigest()
+        if not recorded or recorded == current:
+            return None
+        return (
+            "⚠ hippo deps changed with the last plugin update — the venv still runs the "
+            "old dependency set (new imports degrade silently). Run /hippo:bootstrap to "
+            "re-provision."
+        )
+    except Exception:
+        return None
+
+
 def integrity_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     """LOUD warning for memory files whose frontmatter does not parse.
 
@@ -76,7 +114,8 @@ def staleness_producer(memory_dir: str, repo_root: str) -> Optional[str]:
 
 # (label, fn). Each tier appends a producer here — never a parallel hook entry.
 PRODUCERS: List[Tuple[str, Callable[[str, str], Optional[str]]]] = [
-    ("integrity", integrity_producer),  # FIRST — a malformed memory must not hide
+    ("stale_venv", stale_venv_producer),  # environment-level — a stale venv taints everything below
+    ("integrity", integrity_producer),  # a malformed memory must not hide
     ("staleness", staleness_producer),
     ("reconsolidation", reconsolidation_producer),  # recall-filtered subset of staleness; silent unless a recently-recalled memory is stale
     ("git_recent", git_recent_producer),

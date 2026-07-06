@@ -80,6 +80,7 @@ def _run_hook(
     jq: bool = False,
     venv_python: bool = False,
     sentinel: bool = False,
+    sentinel_hash: str = "",
 ) -> tuple[subprocess.CompletedProcess, str, str]:
     """Run one hook script in a controlled env; return (proc, project_dir, data_dir)."""
     project = _make_project(tmp_path, with_corpus)
@@ -90,8 +91,14 @@ def _run_hook(
         os.makedirs(venv_bin, exist_ok=True)
         _symlink_once(sys.executable, os.path.join(venv_bin, "python"))
     if sentinel:
+        # Record the REAL current requirements hash (a healthy bootstrap) unless a test
+        # overrides it to simulate a post-update dep bump (COR-11).
+        import hashlib
+
+        with open(os.path.join(_PLUGIN_ROOT, "requirements.txt"), "rb") as fh:
+            current = hashlib.sha256(fh.read()).hexdigest()
         with open(os.path.join(data_dir, ".bootstrap-sentinel"), "w", encoding="utf-8") as fh:
-            fh.write('{"requirements_hash": "test", "bootstrapped_at": "test"}')
+            json.dump({"requirements_hash": sentinel_hash or current, "bootstrapped_at": "test"}, fh)
     home = str(tmp_path / "home")
     os.makedirs(home, exist_ok=True)
     env = {
@@ -299,3 +306,25 @@ class TestSessionStartNudge:
         )
         _assert_contract(proc, "SessionStart")
         assert "/hippo:" not in self._ctx(proc)
+
+
+# --------------------------------------------------------------------------- #
+# COR-11: a simulated dep bump yields the re-bootstrap nudge (once per session —
+# the producer lives in the once-per-session SessionStart dispatcher)
+# --------------------------------------------------------------------------- #
+class TestStaleVenvNudge:
+    def test_dep_bump_yields_rebootstrap_nudge(self, tmp_path):
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, "", tmp_path, venv_python=True, sentinel=True,
+            sentinel_hash="0" * 64,  # pre-bump hash — requirements.txt no longer matches
+        )
+        _assert_contract(proc, "SessionStart")
+        ctx = json.loads(proc.stdout.strip())["hookSpecificOutput"]["additionalContext"]
+        assert "deps changed" in ctx and "/hippo:bootstrap" in ctx
+
+    def test_current_hash_stays_silent(self, tmp_path):
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, "", tmp_path, venv_python=True, sentinel=True
+        )
+        _assert_contract(proc, "SessionStart")
+        assert "deps changed" not in proc.stdout
