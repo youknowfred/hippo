@@ -1,0 +1,53 @@
+"""Contract tests over the shipped SKILL.md files.
+
+The skills ARE the lifecycle — their embedded code blocks run verbatim in consumers'
+shells. This file pins the cross-skill contracts that prose reviews miss (the full
+skills-contract suite is a later roadmap item, QUA-8; this seeds it with the shipped
+guarantees).
+"""
+
+from __future__ import annotations
+
+import glob
+import os
+import re
+
+_SKILLS_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "plugin", "skills")
+)
+_ALL_SKILLS = sorted(glob.glob(os.path.join(_SKILLS_DIR, "*", "SKILL.md")))
+
+# The shared ONB-7 preflight guard: unset/empty CLAUDE_PLUGIN_DATA must stop a skill
+# BEFORE any code block expands it (`uv venv "/venv"` provisions a root-owned path).
+_GUARD = '[ -n "${CLAUDE_PLUGIN_DATA:-}" ] ||'
+
+
+def test_five_skills_ship():
+    names = sorted(os.path.basename(os.path.dirname(p)) for p in _ALL_SKILLS)
+    assert names == ["audit", "bootstrap", "doctor", "init", "new"]
+
+
+def test_every_skill_carries_the_plugin_data_guard():
+    for path in _ALL_SKILLS:
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        assert _GUARD in text, (
+            f"{os.path.relpath(path)} lacks the shared CLAUDE_PLUGIN_DATA preflight "
+            "guard (ONB-7) — an unset var makes its code blocks expand to root paths"
+        )
+
+
+def test_guard_appears_before_any_plugin_data_expansion():
+    """The guard must come BEFORE the first code line that expands the variable."""
+    for path in _ALL_SKILLS:
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        guard_pos = text.find(_GUARD)
+        # First expansion that is NOT the guard itself / prose backticks: look for the
+        # brace-expansion form used in runnable blocks.
+        for m in re.finditer(r"\$\{CLAUDE_PLUGIN_DATA\}", text):
+            assert guard_pos != -1 and guard_pos < m.start(), (
+                f"{os.path.relpath(path)}: ${{CLAUDE_PLUGIN_DATA}} expanded at "
+                f"offset {m.start()} before the ONB-7 guard at {guard_pos}"
+            )
+            break  # only the first expansion matters

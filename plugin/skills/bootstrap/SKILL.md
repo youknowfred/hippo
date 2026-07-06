@@ -8,6 +8,15 @@ This is the **one online step** in this plugin's entire lifecycle. Every other o
 (recall, staleness, reconsolidation, archive) is offline-only by hard contract. Bootstrap
 exists precisely so those hooks never have to be.
 
+## Preflight (shared across all hippo skills)
+
+Every code block below expands the plugin data dir variable — unset, `uv venv "/venv"`
+would provision into a root-owned path. Run this guard FIRST and stop if it fails:
+
+```bash
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty — this Claude Code version is too old for hippo's self-provisioning. Update Claude Code, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+```
+
 ## What this does
 
 1. **Idempotency check first.** Read `${CLAUDE_PLUGIN_DATA}/.bootstrap-sentinel` (a small

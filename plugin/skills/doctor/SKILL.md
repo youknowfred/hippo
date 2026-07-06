@@ -9,6 +9,12 @@ index freshness. This is deliberately NOT `/hippo:audit`: doctor answers "is the
 working," audit answers "is the corpus content still trustworthy" (a much heavier, judgment-based
 pass). Don't reach for audit when doctor's quick checks are what's actually being asked.
 
+## Preflight (shared across all hippo skills)
+
+```bash
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty — this Claude Code version is too old for hippo's self-provisioning. Update Claude Code, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+```
+
 ## Checks, in order (stop at the first hard failure and report it — don't cascade confusing
 downstream errors from a root cause already identified)
 

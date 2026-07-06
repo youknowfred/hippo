@@ -10,6 +10,10 @@ symlink Claude Code's native memory system reads from.
 
 ## Preflight
 
+- **Guard `CLAUDE_PLUGIN_DATA` first** (shared across all hippo skills — step 4 expands it):
+  ```bash
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty — this Claude Code version is too old for hippo's self-provisioning. Update Claude Code, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+  ```
 - If `.claude/memory/MEMORY.md` already exists, **STOP** and report it — do not touch an
   existing corpus. Suggest `/hippo:doctor` instead if the user wants a health check.
 - Confirm `${CLAUDE_PROJECT_DIR}` (or `git rev-parse --show-toplevel`) resolves to a real git

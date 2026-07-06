@@ -10,6 +10,12 @@ are easy to get wrong by hand: correct frontmatter schema, citation-provenance b
 (so it's recallable in THIS session, not just the next one), and — for `user`/`feedback` types
 only — a floor pointer appended to `MEMORY.md` under the right section.
 
+## Preflight (shared across all hippo skills)
+
+```bash
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty — this Claude Code version is too old for hippo's self-provisioning. Update Claude Code, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+```
+
 ## Usage
 
 ```bash

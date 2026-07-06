@@ -57,6 +57,11 @@ not a multi-PR roadmap.
 
 ## Phase 0 — Preflight
 
+- **Guard `CLAUDE_PLUGIN_DATA` first** (shared across all hippo skills — the venv paths
+  below expand it):
+  ```bash
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty — this Claude Code version is too old for hippo's self-provisioning. Update Claude Code, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+  ```
 - Confirm every tool imports cleanly:
   ```bash
   PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -c \
