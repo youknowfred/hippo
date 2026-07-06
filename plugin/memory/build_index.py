@@ -575,21 +575,44 @@ def build_index(
         "entries": entries,
     }
 
-    with open(os.path.join(index_dir, _MANIFEST_NAME), "w", encoding="utf-8") as fh:
-        json.dump(manifest, fh)
+    # COR-12: dense.npy (or its removal) is durably in place BEFORE the manifest that
+    # references it is made visible — a recall racing this rebuild must never observe a
+    # manifest ahead of its data (e.g. dense_ready=true with a stale/missing dense.npy).
     dense_path = os.path.join(index_dir, _DENSE_NAME)
     if dense_rows is not None:
         # Persisted even when dense_ready=False (partial progress) so the next build's
         # old_row_by_hash can resume from here instead of re-embedding from scratch.
         import numpy as np
 
-        np.save(dense_path, dense_rows)
+        tmp_dense_path = dense_path + ".tmp.npy"
+        try:
+            np.save(tmp_dense_path, dense_rows)
+            os.replace(tmp_dense_path, dense_path)
+        finally:
+            if os.path.exists(tmp_dense_path):
+                try:
+                    os.remove(tmp_dense_path)
+                except Exception:
+                    pass
     elif os.path.exists(dense_path):
         # Stale dense file from a prior dense build — remove so recall doesn't misread it.
         try:
             os.remove(dense_path)
         except Exception:
             pass
+
+    manifest_path = os.path.join(index_dir, _MANIFEST_NAME)
+    tmp_manifest_path = manifest_path + ".tmp"
+    try:
+        with open(tmp_manifest_path, "w", encoding="utf-8") as fh:
+            json.dump(manifest, fh)
+        os.replace(tmp_manifest_path, manifest_path)
+    finally:
+        if os.path.exists(tmp_manifest_path):
+            try:
+                os.remove(tmp_manifest_path)
+            except Exception:
+                pass
     return manifest
 
 

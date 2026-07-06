@@ -97,6 +97,68 @@ def test_dense_build_writes_matrix_and_rows(tmp_path, monkeypatch):
     assert [e["row"] for e in manifest["entries"]] == [0, 1, 2]
 
 
+# --------------------------------------------------------------------------- #
+# COR-12: atomic manifest/dense writes (no torn reads, no tmp litter)
+# --------------------------------------------------------------------------- #
+def test_no_stray_tmp_files_after_build(tmp_path, monkeypatch):
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha one", "b.md": "beta two"})
+
+    B.build_index(md, idx)
+    leftovers = [f for f in os.listdir(idx) if f.endswith(".tmp") or f.endswith(".tmp.npy")]
+    assert leftovers == []
+
+    # Also true for a BM25-only (no-dense) build and a switch-back-to-dense rebuild.
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    B.build_index(md, idx)
+    leftovers = [f for f in os.listdir(idx) if f.endswith(".tmp") or f.endswith(".tmp.npy")]
+    assert leftovers == []
+
+
+def test_dense_replace_happens_before_manifest_replace(tmp_path, monkeypatch):
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha one", "b.md": "beta two"})
+
+    replaced = []
+    real_replace = os.replace
+
+    def spy_replace(src, dst):
+        replaced.append(dst)
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(B.os, "replace", spy_replace)
+    B.build_index(md, idx)
+
+    dense_path = os.path.join(idx, "dense.npy")
+    manifest_path = os.path.join(idx, "manifest.json")
+    assert dense_path in replaced and manifest_path in replaced
+    assert replaced.index(dense_path) < replaced.index(manifest_path)
+
+
+def test_manifest_never_visible_with_missing_or_stale_dense(tmp_path, monkeypatch):
+    # A reader that observes the manifest mid-build (simulated by inspecting os.replace call
+    # order + on-disk state right after build_index returns) must never see dense_ready=true
+    # with dense.npy absent or shaped differently than what the manifest expects.
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha one", "b.md": "beta two", "c.md": "gamma three"})
+
+    manifest = B.build_index(md, idx)
+    assert manifest["dense_ready"] is True
+    dense_path = os.path.join(idx, "dense.npy")
+    assert os.path.exists(dense_path)
+    dense = np.load(dense_path)
+    assert dense.shape == (manifest["count"], manifest["dim"])
+
+
 def test_incremental_rebuild_only_embeds_changed(tmp_path, monkeypatch):
     embedded_batches = []
 
