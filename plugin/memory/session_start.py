@@ -31,6 +31,7 @@ from .recall import _INVALIDATION_RECENT_DAYS, _invalidation_state, git_recent_p
 from .reconsolidate import reconsolidation_producer
 from .staleness import (
     count_unresolvable_baselines,
+    find_citation_rot,
     find_stale,
     find_unparseable,
     invalid_after_map,
@@ -154,6 +155,39 @@ def integrity_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     return "\n".join(lines)
 
 
+def citation_rot_producer(memory_dir: str, repo_root: str) -> Optional[str]:
+    """Count-first warning for memories citing paths that no longer exist in the repo (LIF-3).
+
+    The current-state citation-rot report — catches a rename/delete of cited code even when
+    no refresh has run yet (nothing has dropped, but staleness can't watch a vanished path,
+    and the next re-derivation would silently shrink cited_paths — possibly to zero, which
+    permanently exempts the memory). This producer is the ONE canonical SessionStart surface;
+    the CLI sibling lives in ``memory.staleness``'s default report, next to the unparseable
+    block. TOTAL rot (every citation gone) is called out distinctly on its line.
+    """
+    rot = find_citation_rot(memory_dir, repo_root)
+    if not rot:
+        return None
+    lines = [
+        f"⚠ Citation rot — {len(rot)} memories cite paths that no longer exist in the repo "
+        "(renamed or deleted since capture; staleness can't watch a vanished path). Re-point "
+        "the citation in the body then `provenance --refresh-one <name>`, or re-verify the "
+        "memory against current code:"
+    ]
+    for item in rot[:_MAX_ITEMS_PER_PRODUCER]:
+        paths = ", ".join(item["missing_paths"][:4])
+        more = "" if len(item["missing_paths"]) <= 4 else f" (+{len(item['missing_paths']) - 4} more)"
+        total = (
+            " — ALL its citations (a refresh would EMPTY cited_paths → staleness-EXEMPT)"
+            if len(item["missing_paths"]) == item["cited_count"]
+            else ""
+        )
+        lines.append(f"  • {item['name']}: {paths}{more}{total}")
+    if len(rot) > _MAX_ITEMS_PER_PRODUCER:
+        lines.append(f"  …and {len(rot) - _MAX_ITEMS_PER_PRODUCER} more.")
+    return "\n".join(lines)
+
+
 def staleness_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     # find_stale already orders most-recently-drifted first.
     diagnostics: dict = {}
@@ -256,6 +290,7 @@ PRODUCERS: List[Tuple[str, Callable[[str, str], Optional[str]]]] = [
     ("stale_venv", stale_venv_producer),  # environment-level — a stale venv taints everything below
     ("corpus_format", corpus_format_producer),  # a corpus NEWER than the plugin taints every reader below (COR-7)
     ("integrity", integrity_producer),  # a malformed memory must not hide
+    ("citation_rot", citation_rot_producer),  # cited paths gone from the repo (LIF-3) — find_unparseable's rot sibling
     ("staleness", staleness_producer),
     ("reconsolidation", reconsolidation_producer),  # recall-filtered subset of staleness; silent unless a recently-recalled memory is stale
     ("index_integrity", index_integrity_producer),  # names on-disk index corruption (QUA-5) — recall/build_index already degrade silently

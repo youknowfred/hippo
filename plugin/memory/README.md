@@ -132,6 +132,25 @@ comparison. Never raises.
 "$PY" -m memory.staleness
 ```
 
+### Citation rot (LIF-3) — a vanished cited path is loud, never a silent shrink
+
+A renamed/deleted cited file used to vanish from `cited_paths` on the next re-derivation
+— possibly to `[]`, after which the memory is permanently exempt from staleness with no
+record anything was lost. Two surfaces close that hole:
+
+- **The drop itself**: `backfill_file(refresh=True)` / `reverify_file` results carry
+  `dropped_citations` (paths in the frontmatter BEFORE the re-derivation, absent AFTER).
+  The provenance CLI (`--refresh` / `--refresh-one` / `--reverify`) and
+  `reconsolidate --reverify` print one shared per-file rot line
+  (`provenance.citation_rot_lines`) whenever it is non-empty; a drop to **zero** is
+  called out distinctly — the memory becomes staleness-EXEMPT.
+- **Current state, before any drop**: `staleness.find_citation_rot(memory_dir, repo_root)`
+  lists memories whose frontmatter cites paths no longer in the repo file index
+  (`find_unparseable`'s rot sibling; `[]` when the index is unavailable — under-flag
+  beats cry-wolf in a non-git dir). Surfaced count-first by the SessionStart
+  `citation_rot` producer and in `python -m memory.staleness`'s default report, next to
+  the unparseable block; TOTAL rot (every citation gone) is marked on its line.
+
 ### Clearing a flag: `--reverify` / `--refresh-one`
 
 ```bash
@@ -156,7 +175,8 @@ comparison. Never raises.
 ONE process, ONE corpus load, ONE merged `additionalContext`. Producers, in order:
 `stale_venv` (deps changed since bootstrap → re-bootstrap nudge), `integrity`
 (unparseable frontmatter — surfaced FIRST among corpus signals so a malformed memory
-can't hide), `staleness`, `reconsolidation` (recall-filtered staleness worklist),
+can't hide), `citation_rot` (cited paths gone from the repo, LIF-3), `staleness`,
+`reconsolidation` (recall-filtered staleness worklist),
 `git_recent`, `link_health`, `floor`. Self-suppresses when no producer has anything to
 say; bounds output under the harness's 10,000-char cap; **always exits 0**. Side effects
 (not producers): heal empty baselines, `refresh_index()`, `mark_session()`.

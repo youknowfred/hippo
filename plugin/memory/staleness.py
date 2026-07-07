@@ -27,6 +27,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .provenance import (
     _iter_memory_files,
+    build_repo_file_index,
     parse_frontmatter,
     run_git,
     split_frontmatter,
@@ -329,6 +330,48 @@ def find_unparseable(memory_dir: str) -> List[str]:
     return sorted(out)
 
 
+def find_citation_rot(memory_dir: str, repo_root: str) -> List[dict]:
+    """Memories whose frontmatter cites paths that no longer exist in the repo file index.
+
+    ``find_unparseable``'s citation-rot sibling (LIF-3), judging CURRENT state: a cited
+    file that was renamed/deleted leaves a dangling ``cited_paths`` entry that the next
+    re-derivation (``provenance --refresh`` / ``--reverify``) would silently drop —
+    possibly emptying the list, after which the memory is permanently exempt from the
+    staleness signal. This catches the rot WITHOUT needing to have observed that drop
+    (the drop itself is reported by ``dropped_citations`` on the write path).
+
+    Returns ``[{"name", "missing_paths", "cited_count"}]`` sorted by name; an entry with
+    ``len(missing_paths) == cited_count`` is TOTAL rot (a refresh would zero its
+    citations). Returns ``[]`` when the repo file index is unavailable (non-git dir /
+    git failure) — with no index, EVERY citation would look missing; under-flag beats
+    cry-wolf, same direction as ``resolve_citations``. Never raises.
+    """
+    out: List[dict] = []
+    try:
+        repo_files, _ = build_repo_file_index(repo_root)
+        if not repo_files:
+            return []
+        for path in _iter_memory_files(memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+            except Exception:
+                continue
+            cited, _sc = read_provenance(text)
+            missing = [p for p in cited if p not in repo_files]
+            if missing:
+                out.append(
+                    {
+                        "name": os.path.splitext(os.path.basename(path))[0],
+                        "missing_paths": missing,
+                        "cited_count": len(cited),
+                    }
+                )
+    except Exception:
+        return []
+    return sorted(out, key=lambda d: d["name"])
+
+
 # --------------------------------------------------------------------------- #
 # Soft-invalidation primitive (graceful decay — demotion, never deletion)
 # --------------------------------------------------------------------------- #
@@ -476,10 +519,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         "there is no bulk invalidate. NAME is the slug, with or without .md",
     )
     parser.add_argument("--memory-dir", default=None)
+    parser.add_argument("--repo-root", default=None)
     args = parser.parse_args(argv)
 
     md, repo = resolve_dirs()
     memory_dir = args.memory_dir or md
+    repo_root = args.repo_root or repo
 
     if args.invalidate:
         name = args.invalidate if args.invalidate.endswith(".md") else f"{args.invalidate}.md"
@@ -499,8 +544,23 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"⚠ {len(broken)} memory file(s) have UNPARSEABLE frontmatter (fix the YAML):")
         for name in broken:
             print(f"  ! {name}")
+    # LIF-3: find_unparseable's citation-rot sibling — count-first, then per-memory with the
+    # vanished path(s) named; TOTAL rot (every citation gone) is called out distinctly because
+    # a refresh over it would zero cited_paths and make the memory staleness-exempt.
+    rot = find_citation_rot(memory_dir, repo_root)
+    if rot:
+        print(f"⚠ {len(rot)} memory file(s) cite paths that no longer exist in the repo (citation rot):")
+        for item in rot:
+            missing = ", ".join(item["missing_paths"][:6])
+            more = f" (+{len(item['missing_paths']) - 6} more)" if len(item["missing_paths"]) > 6 else ""
+            total = (
+                " — ALL its citations (a refresh would EMPTY cited_paths → staleness-EXEMPT)"
+                if len(item["missing_paths"]) == item["cited_count"]
+                else ""
+            )
+            print(f"  ! {item['name']}: {missing}{more}{total}")
     diagnostics: dict = {}
-    stale = find_stale(memory_dir, repo, diagnostics=diagnostics)
+    stale = find_stale(memory_dir, repo_root, diagnostics=diagnostics)
     if diagnostics.get("timed_out"):
         print("⚠ staleness scan timed out — signal may be incomplete")
     if not stale:

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import os
+import subprocess
 
 from memory.staleness import (
     count_unresolvable_baselines,
+    find_citation_rot,
     find_stale,
     find_unparseable,
     invalid_after_map,
@@ -407,6 +409,95 @@ def test_find_unparseable_quoting_the_value_fixes_it(memory_dir):
 
 def test_find_unparseable_empty_on_missing_dir():
     assert find_unparseable("/no/such/memory/dir") == []
+
+
+# --------------------------------------------------------------------------- #
+# find_citation_rot — find_unparseable's citation-rot sibling (LIF-3): memories
+# whose frontmatter cites paths no longer in the repo file index, caught from
+# CURRENT state (no refresh needs to have dropped anything yet)
+# --------------------------------------------------------------------------- #
+def test_find_citation_rot_names_memory_and_vanished_path_after_rename(repo, memory_dir):
+    """AC (LIF-3): rename a cited file (git mv + commit) → the rot report names the
+    memory AND the vanished path — a visible report, not a silent shrink-in-waiting."""
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep", 1_700_000_000)
+    write_file(memory_dir, "m_rot.md", _memory(["src/dep.py"], c1))
+    subprocess.run(
+        ["git", "mv", "src/dep.py", "src/dep_moved2.py"], cwd=repo, check=True, capture_output=True
+    )
+    git_commit(repo, "rename dep", 1_700_000_100)
+
+    rot = find_citation_rot(memory_dir, repo)
+    assert rot == [{"name": "m_rot", "missing_paths": ["src/dep.py"], "cited_count": 1}]
+
+
+def test_find_citation_rot_silent_when_all_cited_paths_exist(repo, memory_dir):
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep", 1_700_000_000)
+    write_file(memory_dir, "m_ok.md", _memory(["src/dep.py"], c1))
+    git_commit(repo, "memory", 1_700_000_001)
+    assert find_citation_rot(memory_dir, repo) == []
+
+
+def test_find_citation_rot_distinguishes_partial_from_total(repo, memory_dir):
+    """cited_count rides along so callers can mark TOTAL rot (every citation gone — a
+    refresh would zero cited_paths and staleness-exempt the memory) distinctly."""
+    write_file(repo, "src/keep.py", "k = 1\n")
+    write_file(repo, "src/gone_a.py", "a = 1\n")
+    write_file(repo, "src/gone_b.py", "b = 1\n")
+    c1 = git_commit(repo, "init", 1_700_000_000)
+    write_file(memory_dir, "m_partial.md", _memory(["src/keep.py", "src/gone_a.py"], c1))
+    write_file(memory_dir, "m_total.md", _memory(["src/gone_b.py"], c1))
+    subprocess.run(
+        ["git", "rm", "-q", "src/gone_a.py", "src/gone_b.py"],
+        cwd=repo, check=True, capture_output=True,
+    )
+    git_commit(repo, "delete cited files", 1_700_000_100)
+
+    rot = {r["name"]: r for r in find_citation_rot(memory_dir, repo)}
+    assert set(rot) == {"m_partial", "m_total"}
+    assert rot["m_partial"]["missing_paths"] == ["src/gone_a.py"]
+    assert rot["m_partial"]["cited_count"] == 2  # partial — a citation survives
+    assert rot["m_total"]["missing_paths"] == ["src/gone_b.py"]
+    assert rot["m_total"]["cited_count"] == 1  # TOTAL rot
+
+
+def test_find_citation_rot_never_raises_on_missing_dir(repo):
+    assert find_citation_rot("/no/such/memory/dir", repo) == []
+
+
+def test_main_reports_citation_rot_count_first(repo, memory_dir, capsys):
+    """The CLI sibling of the SessionStart producer: count-first header, then per-memory
+    lines naming the vanished path(s); total rot marked with the staleness-exempt warning."""
+    import memory.staleness as S
+
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep", 1_700_000_000)
+    write_file(memory_dir, "m_rot.md", _memory(["src/dep.py"], c1))
+    subprocess.run(
+        ["git", "mv", "src/dep.py", "src/dep_moved2.py"], cwd=repo, check=True, capture_output=True
+    )
+    git_commit(repo, "rename dep", 1_700_000_100)
+
+    rc = S.main(["--memory-dir", memory_dir, "--repo-root", repo])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "1 memory file(s) cite paths that no longer exist in the repo" in out  # count-first
+    assert "m_rot" in out and "src/dep.py" in out  # names the memory and the vanished path
+    assert "staleness-EXEMPT" in out  # its ONLY citation is gone — total rot, said distinctly
+
+
+def test_main_citation_rot_silent_on_healthy_corpus(repo, memory_dir, capsys):
+    import memory.staleness as S
+
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep", 1_700_000_000)
+    write_file(memory_dir, "m_ok.md", _memory(["src/dep.py"], c1))
+    git_commit(repo, "memory", 1_700_000_001)
+
+    rc = S.main(["--memory-dir", memory_dir, "--repo-root", repo])
+    assert rc == 0
+    assert "citation rot" not in capsys.readouterr().out
 
 
 # --------------------------------------------------------------------------- #

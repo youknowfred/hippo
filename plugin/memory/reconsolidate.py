@@ -295,11 +295,20 @@ def semantic_reverify(
     (``staleness.set_invalid_after``) — no new bulk path can exist. Always logs the
     outcome via ``telemetry.record_reconsolidation_outcome`` (even on ``"demote"``, even
     when ``reverify_file`` is never called) UNLESS a write was refused. Never raises.
+
+    ``cited``/``dropped_citations`` (LIF-3) are passed straight through from
+    ``reverify_file``'s result on the graduate/fix outcomes: a re-derivation that DROPPED
+    citations (a cited file was renamed/deleted) must ride out to the caller — this is
+    the one write path where a memory can silently shrink to zero citations (becoming
+    staleness-exempt) with nobody watching. Both stay ``[]`` on demote (nothing is
+    re-derived) and on any refusal.
     """
     result = {
         "name": name,
         "outcome": outcome,
         "cleared": False,
+        "cited": [],
+        "dropped_citations": [],
         "invalidated": False,
         "edge_written": False,
         "logged": False,
@@ -336,6 +345,8 @@ def semantic_reverify(
                 result["error"] = rv["error"]
                 return result
             result["cleared"] = rv["changed"]
+            result["cited"] = rv["cited"]
+            result["dropped_citations"] = rv["dropped_citations"]
         if outcome == "demote":
             # LIF-1: the demote verdict OWNS its terminal state — close the validity
             # window on the memory itself so recall's pre-cut penalty (the EXISTING
@@ -574,6 +585,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
         bits.append("logged" if r["logged"] else "not logged")
         print(f"reverify {base}: " + "; ".join(bits))
+        # LIF-3: the ONE shared rot rendering (provenance.citation_rot_lines) — a graduate/fix
+        # re-derivation that dropped citations must be as loud here as on the provenance CLI.
+        from .provenance import citation_rot_lines
+
+        for ln in citation_rot_lines(base, r["cited"], r["dropped_citations"], dry_run=args.dry_run):
+            print(ln)
         return 0
 
     worklist = recalled_stale_worklist(

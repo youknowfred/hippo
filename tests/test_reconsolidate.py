@@ -302,6 +302,10 @@ def test_semantic_reverify_graduate_clears_flag_and_logs_outcome(repo, memory_di
         "name": "m_a",
         "outcome": "graduate",
         "cleared": True,
+        # LIF-3 pass-through from reverify_file: _mem's body cites NOTHING, so the
+        # re-derivation drops the frontmatter's src/foo.py — reported, never silent.
+        "cited": [],
+        "dropped_citations": ["src/foo.py"],
         "invalidated": False,  # LIF-1's chain is demote-only — graduate never touches it
         "edge_written": False,
         "logged": True,
@@ -334,6 +338,61 @@ def test_semantic_reverify_fix_also_clears_flag(repo, memory_dir):
     result = R.semantic_reverify("m_a", "fix", memory_dir, repo, telemetry_dir=td)
     assert result["cleared"] is True
     assert result["logged"] is True
+
+
+def test_semantic_reverify_reports_dropped_citations_after_rename(repo, memory_dir):
+    """LIF-3 pass-through: a graduate/fix re-derivation over a renamed cited file must
+    surface the drop on the result (this is the one write path where a memory can
+    otherwise shrink to zero citations — staleness-exempt — with nobody watching)."""
+    import subprocess
+
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(
+        memory_dir,
+        "m_a.md",
+        f'---\nname: m_a\ndescription: "d"\ncited_paths: ["src/foo.py"]\nsource_commit: "{c1}"\n'
+        "---\nbody cites src/foo.py\n",
+    )
+    subprocess.run(
+        ["git", "mv", "src/foo.py", "src/foo_moved2.py"], cwd=repo, check=True, capture_output=True
+    )
+    git_commit(repo, "rename foo", 1_700_000_100)
+
+    td = os.path.join(repo, "tele")
+    result = R.semantic_reverify("m_a", "graduate", memory_dir, repo, telemetry_dir=td)
+    assert result["error"] is None
+    assert result["dropped_citations"] == ["src/foo.py"]
+    assert result["cited"] == []  # dropped to ZERO — the caller can name the exemption
+
+
+def test_reconsolidate_cli_reverify_prints_citation_rot_line(repo, memory_dir, capsys):
+    """The CLI renders the drop via the ONE shared provenance.citation_rot_lines — same
+    loud line as the provenance CLI, zero case called out distinctly."""
+    import subprocess
+
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(
+        memory_dir,
+        "m_a.md",
+        f'---\nname: m_a\ndescription: "d"\ncited_paths: ["src/foo.py"]\nsource_commit: "{c1}"\n'
+        "---\nbody cites src/foo.py\n",
+    )
+    subprocess.run(
+        ["git", "mv", "src/foo.py", "src/foo_moved2.py"], cwd=repo, check=True, capture_output=True
+    )
+    git_commit(repo, "rename foo", 1_700_000_100)
+
+    td = os.path.join(repo, "tele")
+    rc = R.main(
+        ["--reverify", "m_a", "--outcome", "graduate",
+         "--memory-dir", memory_dir, "--repo-root", repo, "--telemetry-dir", td]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "citation rot" in out and "src/foo.py" in out
+    assert "EXEMPT" in out  # drop to zero — distinct, names the staleness exemption
 
 
 def test_semantic_reverify_demote_never_clears_flag(repo, memory_dir, monkeypatch):

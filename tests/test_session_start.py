@@ -332,6 +332,95 @@ def test_unresolvable_baseline_producer_is_registered():
 
 
 # --------------------------------------------------------------------------- #
+# LIF-3: citation_rot_producer — cited paths gone from the repo, count-first,
+# ONE canonical SessionStart surface (find_unparseable's rot sibling)
+# --------------------------------------------------------------------------- #
+def test_citation_rot_producer_formats_real_output_count_first(monkeypatch):
+    monkeypatch.setattr(
+        S,
+        "find_citation_rot",
+        lambda md, repo: [{"name": "m_rot", "missing_paths": ["src/gone.py"], "cited_count": 2}],
+    )
+    out = S.citation_rot_producer("md", "repo")
+    assert out and "m_rot" in out and "src/gone.py" in out
+    # count-first: the COUNT leads the block, per-item lines follow inside the budget
+    assert "1 memories cite paths that no longer exist" in out.splitlines()[0]
+
+
+def test_citation_rot_producer_total_rot_called_out_distinctly(monkeypatch):
+    """Every citation gone → a refresh would EMPTY cited_paths and the memory becomes
+    staleness-exempt; the producer says so on that line, distinctly."""
+    monkeypatch.setattr(
+        S,
+        "find_citation_rot",
+        lambda md, repo: [{"name": "m_total", "missing_paths": ["src/gone.py"], "cited_count": 1}],
+    )
+    out = S.citation_rot_producer("md", "repo")
+    assert "staleness-EXEMPT" in out
+
+
+def test_citation_rot_producer_partial_rot_not_marked_exempt(monkeypatch):
+    monkeypatch.setattr(
+        S,
+        "find_citation_rot",
+        lambda md, repo: [{"name": "m_partial", "missing_paths": ["src/gone.py"], "cited_count": 3}],
+    )
+    out = S.citation_rot_producer("md", "repo")
+    assert out and "EXEMPT" not in out  # only the drop-to-zero case earns the loud marker
+
+
+def test_citation_rot_producer_silent_when_clean(monkeypatch):
+    monkeypatch.setattr(S, "find_citation_rot", lambda md, repo: [])
+    assert S.citation_rot_producer("md", "repo") is None
+
+
+def test_citation_rot_producer_bounds_item_count(monkeypatch):
+    monkeypatch.setattr(
+        S,
+        "find_citation_rot",
+        lambda md, repo: [
+            {"name": f"m_{i:03d}", "missing_paths": ["src/gone.py"], "cited_count": 2}
+            for i in range(30)
+        ],
+    )
+    out = S.citation_rot_producer("md", "repo")
+    assert "30 memories" in out  # the count stays honest…
+    assert "…and 10 more." in out  # …while the per-item lines respect the budget
+
+
+def test_citation_rot_producer_registered_once_after_integrity():
+    labels = [label for label, _fn in S.PRODUCERS]
+    assert labels.count("citation_rot") == 1
+    # grouped right after its unparseable sibling — both are corpus-record-vs-reality holes
+    assert labels.index("citation_rot") == labels.index("integrity") + 1
+    fns = [fn for label, fn in S.PRODUCERS if label == "citation_rot"]
+    assert fns == [S.citation_rot_producer]
+
+
+def test_citation_rot_producer_end_to_end_after_git_mv(repo, memory_dir):
+    """AC (LIF-3): rename a cited file (git mv + commit) → the SessionStart rot surface
+    names the memory and the vanished path, before any refresh has dropped anything."""
+    import subprocess
+
+    from .conftest import git_commit
+
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep", 1_700_000_000)
+    write_file(
+        memory_dir,
+        "m_rot.md",
+        f'---\nname: m_rot\ncited_paths: ["src/dep.py"]\nsource_commit: "{c1}"\n---\nbody\n',
+    )
+    subprocess.run(
+        ["git", "mv", "src/dep.py", "src/dep_moved2.py"], cwd=repo, check=True, capture_output=True
+    )
+    git_commit(repo, "rename dep", 1_700_000_100)
+
+    out = S.citation_rot_producer(memory_dir, repo)
+    assert out and "m_rot" in out and "src/dep.py" in out
+
+
+# --------------------------------------------------------------------------- #
 # COR-6: source-gated session rotation + harness-keyed telemetry sessions
 # --------------------------------------------------------------------------- #
 def _session_start_env(tmp_path, monkeypatch):

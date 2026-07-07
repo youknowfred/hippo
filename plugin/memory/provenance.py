@@ -484,6 +484,24 @@ def cited_paths_for_body(body: str, repo_files: set, basename_index: Dict[str, L
     return resolve_citations(extract_citations(body), repo_files, basename_index)
 
 
+def _frontmatter_cited_paths(fm: dict) -> List[str]:
+    """The ``cited_paths`` a PARSED frontmatter dict already carries (both schemas).
+
+    The "before" side of ``dropped_citations`` (LIF-3). Dict-level on purpose: the two
+    result-producing callers (``backfill_file``'s refresh branch, ``reverify_file``) have
+    already parsed the frontmatter, and ``staleness.read_provenance`` — the text-level
+    reader with the same both-schema lookup — lives in a module that imports THIS one,
+    so it cannot be reused here without a cycle.
+    """
+    meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+    cited = fm.get("cited_paths")
+    if cited is None:
+        cited = (meta or {}).get("cited_paths")
+    if not isinstance(cited, list):
+        return []
+    return [c for c in cited if isinstance(c, str)]
+
+
 def git_last_commit(rel_path: str, repo_root: str) -> Optional[str]:
     """The commit that last touched ``rel_path`` — the memory's staleness baseline."""
     sha = run_git(["log", "-1", "--format=%H", "--", rel_path], repo_root).strip()
@@ -652,11 +670,19 @@ def backfill_file(
     ``source_commit_time`` (SHP-3) is the committer epoch of ``source_commit``, recorded
     alongside it — the fallback baseline ``staleness.find_stale`` uses when the sha itself
     is unresolvable (squash-merge / shallow clone erases it from history).
+
+    ``dropped_citations`` (LIF-3): the cited paths present in the frontmatter BEFORE a
+    refresh re-derivation and absent AFTER — the rename/delete case, where a citation
+    silently vanishes (possibly emptying ``cited_paths``, which permanently exempts the
+    memory from staleness). Always ``[]`` on the initial-backfill path (nothing recorded
+    yet, so nothing can be lost) and on a refusal (nothing was re-derived); callers must
+    surface a non-empty list, never swallow it.
     """
     result = {
         "path": path,
         "changed": False,
         "cited": [],
+        "dropped_citations": [],
         "source_commit": None,
         "source_commit_time": None,
         "error": None,
@@ -667,6 +693,7 @@ def backfill_file(
         _, body = split_frontmatter(text)
         cited = cited_paths_for_body(body, repo_files, basename_index)
         rel = os.path.relpath(path, repo_root)
+        dropped: List[str] = []
         if refresh and _has_cited_paths(split_frontmatter(text)[0] or []):
             fm = parse_frontmatter(text)
             if not fm:
@@ -686,6 +713,7 @@ def backfill_file(
                 sc, sct = git_last_commit_with_time(rel, repo_root)
                 if sc is None:
                     sc, sct = git_head_with_time(repo_root)
+            dropped = [p for p in _frontmatter_cited_paths(fm) if p not in cited]
             text = _strip_provenance(text)  # drop old provenance; body untouched
         else:
             # A file with no commit history yet (just created by write_memory, or
@@ -697,7 +725,15 @@ def backfill_file(
             if sc is None:
                 sc, sct = git_head_with_time(repo_root)
         new_text, changed = backfill_text(text, cited, sc, sct)
-        result.update({"cited": cited, "source_commit": sc, "source_commit_time": sct, "changed": changed})
+        result.update(
+            {
+                "cited": cited,
+                "dropped_citations": dropped,
+                "source_commit": sc,
+                "source_commit_time": sct,
+                "changed": changed,
+            }
+        )
         if changed and not dry_run:
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(new_text)
@@ -811,11 +847,17 @@ def reverify_file(
     re-verification re-opens the soft-invalidation validity window, exactly like it
     re-baselines the staleness window. Mirrors the rest of this function's per-item,
     HEAD-baseline, refuse-unparseable contract; nothing else about that contract changes.
+
+    ``dropped_citations`` (LIF-3): cited paths in the frontmatter BEFORE this re-derivation
+    that are absent AFTER — same contract as ``backfill_file``'s; a drop (especially to
+    zero, which makes the memory staleness-exempt) must be surfaced by the caller, never
+    a silent shrink.
     """
     result = {
         "path": path,
         "changed": False,
         "cited": [],
+        "dropped_citations": [],
         "source_commit": None,
         "source_commit_time": None,
         "error": None,
@@ -830,7 +872,8 @@ def reverify_file(
         if not _has_cited_paths(fm_lines):
             result["error"] = "no provenance yet — run backfill first"
             return result
-        if not parse_frontmatter(text):
+        fm = parse_frontmatter(text)
+        if not fm:
             # Unparseable frontmatter: re-baselining would rewrite an already-broken file AND
             # silently move the baseline. Refuse loudly (fix the YAML first) — same guard as the
             # refresh path; find_unparseable / the integrity producer surface these.
@@ -838,15 +881,54 @@ def reverify_file(
             return result
         sc, sct = git_head_with_time(repo_root)
         cited = cited_paths_for_body(body, repo_files, basename_index)
+        dropped = [p for p in _frontmatter_cited_paths(fm) if p not in cited]
         new_text, _ = backfill_text(_strip_invalid_after(_strip_provenance(text)), cited, sc, sct)
         changed = new_text != text  # idempotent: a no-op when provenance already matches
-        result.update({"cited": cited, "source_commit": sc, "source_commit_time": sct, "changed": changed})
+        result.update(
+            {
+                "cited": cited,
+                "dropped_citations": dropped,
+                "source_commit": sc,
+                "source_commit_time": sct,
+                "changed": changed,
+            }
+        )
         if changed and not dry_run:
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(new_text)
     except Exception as exc:
         result["error"] = str(exc)
     return result
+
+
+def citation_rot_lines(
+    name: str, cited_after: List[str], dropped: List[str], *, dry_run: bool = False
+) -> List[str]:
+    """The ONE rendering of a per-file citation-drop event (LIF-3).
+
+    Shared by this module's CLI (``--refresh`` / ``--refresh-one`` / ``--reverify``) and
+    ``reconsolidate``'s ``--reverify`` so the loud line cannot drift between surfaces.
+    ``dropped`` is a result's ``dropped_citations``; ``cited_after`` its re-derived
+    ``cited``. A drop to ZERO is called out distinctly: with no cited_paths left,
+    ``find_stale`` has nothing to watch — the memory becomes staleness-EXEMPT, the worst
+    rot state, not a cosmetic shrink. Returns ``[]`` when nothing was dropped.
+    """
+    if not dropped:
+        return []
+    verb = "would drop" if dry_run else "dropped"
+    shown = ", ".join(dropped[:6])
+    more = f" (+{len(dropped) - 6} more)" if len(dropped) > 6 else ""
+    if not cited_after:
+        state = "would be" if dry_run else "is now"
+        return [
+            f"⚠ citation rot — {name}: {verb} ALL {len(dropped)} cited path(s), no longer in "
+            f"the repo ({shown}{more}) — cited_paths {state} EMPTY, so this memory is EXEMPT "
+            "from staleness tracking until its body cites current code again"
+        ]
+    return [
+        f"⚠ citation rot — {name}: {verb} {len(dropped)} cited path(s) no longer in the repo "
+        f"({shown}{more}); {len(cited_after)} citation(s) remain"
+    ]
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -901,6 +983,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"reverify {base}: {verb} source_commit -> HEAD ({(r['source_commit'] or '')[:9]})")
         else:
             print(f"reverify {base}: already current (no change)")
+        for ln in citation_rot_lines(base, r["cited"], r["dropped_citations"], dry_run=args.dry_run):
+            print(ln)
         return 0
 
     if args.refresh_one:
@@ -916,6 +1000,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"refresh-one {base}: {verb} cited_paths ({len(r['cited'])} citation(s)); source_commit unchanged")
         else:
             print(f"refresh-one {base}: already current (no change)")
+        for ln in citation_rot_lines(base, r["cited"], r["dropped_citations"], dry_run=args.dry_run):
+            print(ln)
         return 0
 
     results = backfill_corpus(memory_dir, repo_root, dry_run=args.dry_run, refresh=args.refresh)
@@ -929,6 +1015,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"errors               : {len(errored)}")
         for r in errored[:10]:
             print(f"  ! {os.path.basename(r['path'])}: {r['error']}")
+    # LIF-3: a re-derivation that DROPPED citations is a rot event, not a cosmetic shrink —
+    # every drop is named per-file (drop-to-zero loudest), never buried in the counts above.
+    rotted = [r for r in results if r["dropped_citations"]]
+    if rotted:
+        print(f"citation rot         : {len(rotted)} file(s) {'would drop' if args.dry_run else 'dropped'} cited path(s)")
+        for r in rotted:
+            for ln in citation_rot_lines(
+                os.path.basename(r["path"]), r["cited"], r["dropped_citations"], dry_run=args.dry_run
+            ):
+                print(f"  {ln}")
     return 0
 
 
