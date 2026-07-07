@@ -275,12 +275,18 @@ def test_index_corruption_surfaces_truncated_manifest(repo, memory_dir, tmp_path
 
 
 def test_format_version_ok_when_current(repo, memory_dir, tmp_path, monkeypatch):
+    from memory.provenance import write_corpus_format
+
     idx = str(tmp_path / ".memory-index")
     monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     _seed(memory_dir)
     write_file(memory_dir, "a.md", _mem("a", "alpha"))
     B.build_index(memory_dir, idx)
+    # "Current" means the corpus DECLARES the current format: since GRA-4 bumped
+    # CORPUS_FORMAT_VERSION past the v1 baseline, an unstamped corpus correctly warns
+    # (it lags the plugin — the doctor-driven migration surface), so stamp it here.
+    assert write_corpus_format(memory_dir) is True
     r = D.check_format_version(_ctx(memory_dir, repo))
     assert r["status"] == "ok" and f"v{B.SCHEMA_VERSION}" in r["message"]
 

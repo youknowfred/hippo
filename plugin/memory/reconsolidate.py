@@ -20,8 +20,10 @@ The per-item JUDGMENT stays the memory-master AGENT's job — this module ships 
 MECHANISM (the worklist + the write primitive + the outcome log), never a judgment loop in
 a hook. ``semantic_reverify()`` is a thin wrapper around the EXISTING
 ``provenance.reverify_file()`` (per-item, verification-gated, body byte-identical, refuses
-unparseable frontmatter) — there is NO new write primitive and therefore no new bulk
-re-baseline path (mirrors ``reverify_head_only_no_bulk``).
+unparseable frontmatter) — there is NO new re-baseline primitive and therefore no new bulk
+re-baseline path (mirrors ``reverify_head_only_no_bulk``). GRA-4's opt-in ``superseded_by``
+routes through ``links.add_typed_relation`` (the one typed-edge write primitive), equally
+per-item and agent-gated.
 
 Read-mostly; never raises.
 """
@@ -43,6 +45,10 @@ _VALID_OUTCOMES = frozenset({"graduate", "fix", "demote"})
 # exactly the FM2 hole this tier exists to close). Tier 3's invalid_after is the actual
 # demotion primitive, not this module.
 _OUTCOMES_THAT_CLEAR_STALENESS = frozenset({"graduate", "fix"})
+# Outcomes that may OPTIONALLY record a supersedes edge (GRA-4's superseded_by opt-in):
+# the memory was confirmed wrong/replaced and a SUCCESSOR carries the current claim.
+# "graduate" is excluded — confirmed-correct and superseded are contradictory verdicts.
+_EDGE_WRITING_OUTCOMES = frozenset({"fix", "demote"})
 
 
 # --------------------------------------------------------------------------- #
@@ -114,6 +120,7 @@ def semantic_reverify(
     *,
     telemetry_dir: Optional[str] = None,
     dry_run: bool = False,
+    superseded_by: Optional[str] = None,
 ) -> dict:
     """Re-ground ONE memory after the memory-master agent has re-verified it, and LOG the verdict.
 
@@ -131,25 +138,71 @@ def semantic_reverify(
         caller is responsible for any further action (e.g. Tier 3's ``invalid_after``, or
         archiving) — this function only logs the verdict.
 
-    The frontmatter write (when one happens) routes ENTIRELY through the existing
-    ``provenance.reverify_file()`` — no new write primitive, so no new bulk path can exist.
-    Always logs the outcome via ``telemetry.record_reconsolidation_outcome`` (even on
-    ``"demote"``, even when ``reverify_file`` is never called). Never raises.
+    ``superseded_by`` (GRA-4, opt-in, ``demote``/``fix`` outcomes only): the name of the
+    SUCCESSOR memory that replaces this one's claim. When given, the ``supersedes``
+    relation is appended to the SUCCESSOR's frontmatter (``links.add_typed_relation`` —
+    additive, body-preserving, idempotent), so recall demotes+annotates the loser from the
+    next index refresh on. Explicitly per-item and agent-gated: the agent names ONE
+    successor for ONE re-verified memory; there is no batch form and nothing here ever
+    fires autonomously. Refused (no writes at all) for ``graduate`` — a memory just
+    confirmed CORRECT cannot simultaneously be superseded — and when either endpoint's
+    file is missing (a dangling edge must not be born from the engine's own write path).
+
+    The staleness-flag write (when one happens) routes ENTIRELY through the existing
+    ``provenance.reverify_file()``, and the edge write through the ONE typed-edge
+    primitive — no new bulk path can exist. Always logs the outcome via
+    ``telemetry.record_reconsolidation_outcome`` (even on ``"demote"``, even when
+    ``reverify_file`` is never called) UNLESS a write was refused. Never raises.
     """
-    result = {"name": name, "outcome": outcome, "cleared": False, "logged": False, "error": None}
+    result = {
+        "name": name,
+        "outcome": outcome,
+        "cleared": False,
+        "edge_written": False,
+        "logged": False,
+        "error": None,
+    }
     try:
         if outcome not in _VALID_OUTCOMES:
             result["error"] = f"invalid outcome: {outcome!r}"
             return result
+        fname = name if name.endswith(".md") else f"{name}.md"
+        successor_path = None
+        if superseded_by is not None:
+            # Validate BEFORE any write so a refused edge never leaves a half-applied
+            # verdict (reverify done, edge missing) behind.
+            if outcome not in _EDGE_WRITING_OUTCOMES:
+                result["error"] = (
+                    f"superseded_by is only valid with outcomes "
+                    f"{sorted(_EDGE_WRITING_OUTCOMES)}, not {outcome!r}"
+                )
+                return result
+            sfname = superseded_by if superseded_by.endswith(".md") else f"{superseded_by}.md"
+            successor_path = os.path.join(memory_dir, sfname)
+            if not os.path.isfile(successor_path):
+                result["error"] = f"successor memory not found: {sfname}"
+                return result
+            if not os.path.isfile(os.path.join(memory_dir, fname)):
+                result["error"] = f"memory not found: {fname}"
+                return result
         if outcome in _OUTCOMES_THAT_CLEAR_STALENESS:
             repo_files, basename_index = build_repo_file_index(repo_root)
-            fname = name if name.endswith(".md") else f"{name}.md"
             path = os.path.join(memory_dir, fname)
             rv = reverify_file(path, repo_root, repo_files, basename_index, dry_run=dry_run)
             if rv["error"]:
                 result["error"] = rv["error"]
                 return result
             result["cleared"] = rv["changed"]
+        if successor_path is not None:
+            from .links import add_typed_relation
+
+            edge = add_typed_relation(
+                successor_path, "supersedes", os.path.splitext(fname)[0], dry_run=dry_run
+            )
+            if edge["error"]:
+                result["error"] = edge["error"]
+                return result
+            result["edge_written"] = edge["changed"]
         result["logged"] = record_reconsolidation_outcome(name, outcome, telemetry_dir=telemetry_dir)
     except Exception as exc:
         result["error"] = str(exc)
@@ -195,11 +248,65 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--repo-root", default=None)
     parser.add_argument("--telemetry-dir", default=None)
     parser.add_argument("--window-sessions", type=int, default=_DEFAULT_WINDOW_SESSIONS)
+    parser.add_argument(
+        "--reverify",
+        metavar="NAME",
+        default=None,
+        help="apply ONE semantic_reverify verdict (requires --outcome). Per-memory and "
+        "verification-gated by design — the agent re-reads the memory first; there is no "
+        "bulk form. NAME is the slug, with or without .md",
+    )
+    parser.add_argument(
+        "--outcome",
+        choices=sorted(_VALID_OUTCOMES),
+        default=None,
+        help="the re-verification verdict for --reverify (graduate/fix clear the staleness "
+        "flag; demote never does)",
+    )
+    parser.add_argument(
+        "--superseded-by",
+        metavar="SUCCESSOR",
+        default=None,
+        help="GRA-4 opt-in (demote/fix only): name the SUCCESSOR memory that replaces this "
+        "one's claim — appends `supersedes: [NAME]` to the successor's frontmatter so "
+        "recall demotes+annotates the loser. One successor, one memory, never autonomous.",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="report only; do not write")
     args = parser.parse_args(argv)
 
     memory_dir, repo_root = resolve_dirs()
     memory_dir = args.memory_dir or memory_dir
     repo_root = args.repo_root or repo_root
+
+    if args.reverify:
+        if not args.outcome:
+            print("reverify: --outcome is required (graduate|fix|demote)")
+            return 1
+        r = semantic_reverify(
+            args.reverify,
+            args.outcome,
+            memory_dir,
+            repo_root,
+            telemetry_dir=args.telemetry_dir,
+            dry_run=args.dry_run,
+            superseded_by=args.superseded_by,
+        )
+        base = args.reverify if args.reverify.endswith(".md") else f"{args.reverify}.md"
+        if r["error"]:
+            print(f"reverify {base}: refused — {r['error']}")
+            return 1
+        verb = "would be " if args.dry_run else ""
+        bits = [f"outcome={r['outcome']}"]
+        bits.append(f"staleness flag {verb}cleared" if r["cleared"] else "staleness flag unchanged")
+        if args.superseded_by:
+            bits.append(
+                f"supersedes edge {verb}written to {args.superseded_by}"
+                if r["edge_written"]
+                else "supersedes edge already present"
+            )
+        bits.append("logged" if r["logged"] else "not logged")
+        print(f"reverify {base}: " + "; ".join(bits))
+        return 0
 
     worklist = recalled_stale_worklist(
         memory_dir, repo_root, telemetry_dir=args.telemetry_dir, window_sessions=args.window_sessions

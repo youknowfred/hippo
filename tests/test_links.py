@@ -352,3 +352,203 @@ def test_health_line_reports_dangling(tmp_path):
 
 def test_build_graph_missing_dir_is_none():
     assert build_graph("/no/such/memory/dir/xyz") is None
+
+
+# --------------------------------------------------------------------------- #
+# GRA-4: typed edges — supersedes / contradicts / refines
+# --------------------------------------------------------------------------- #
+def _typed_mem(name: str, fm_extra: str, body: str = "body") -> str:
+    return f'---\nname: {name}\ndescription: "d for {name}"\ntype: project\n{fm_extra}---\n{body}\n'
+
+
+def _typed_corpus(md: str) -> None:
+    """new_way supersedes old_way + refines base; rival contradicts base (nested under
+    metadata:); dangler carries an unresolvable supersedes target."""
+    _write(md, "old_way.md", _mem("old_way", "body"))
+    _write(md, "base.md", _mem("base", "body"))
+    _write(md, "new_way.md", _typed_mem("new_way", "supersedes: [old_way]\nrefines: [base]\n"))
+    _write(md, "rival.md", _typed_mem("rival", "metadata:\n  contradicts: [base]\n"))
+    _write(md, "dangler.md", _typed_mem("dangler", 'supersedes: ["no-such-memory"]\n'))
+
+
+def test_parse_typed_relations_top_level_and_metadata_and_scalar():
+    from memory.links import parse_typed_relations
+
+    # top-level list, metadata-nested list, and the natural scalar single-target form
+    assert parse_typed_relations({"supersedes": ["a", "b", "a"]}) == {"supersedes": ["a", "b"]}
+    assert parse_typed_relations({"metadata": {"contradicts": ["x"]}}) == {"contradicts": ["x"]}
+    assert parse_typed_relations({"refines": "base"}) == {"refines": ["base"]}
+    # top-level wins over metadata (the cited_paths read convention); junk shapes drop
+    assert parse_typed_relations({"supersedes": ["t"], "metadata": {"supersedes": ["m"]}}) == {
+        "supersedes": ["t"]
+    }
+    assert parse_typed_relations({"supersedes": [1, None, ""], "contradicts": 7}) == {}
+    assert parse_typed_relations({}) == {}
+    assert parse_typed_relations(None) == {}  # never raises
+
+
+def test_typed_edges_resolve_through_the_same_alias_path(tmp_path):
+    """A typed target enjoys the SAME soft-alias resolution and ambiguity refusal a
+    [[wikilink]] does — one resolution path (the GRA-4 spec's own requirement)."""
+    md = str(tmp_path / "memory")
+    _write(md, "feedback_gamma_thing.md", _mem("Gamma Thing", "body"))
+    # soft (prefix-stripped) alias target resolves...
+    _write(md, "n1.md", _typed_mem("n1", "supersedes: [gamma-thing]\n"))
+    # ...an ambiguous soft alias is refused (COR-9), landing in typed_unresolved
+    _write(md, "feedback_api_keys.md", _mem("feedback api keys", "body"))
+    _write(md, "project_api_keys.md", _mem("project api keys", "body"))
+    _write(md, "n2.md", _typed_mem("n2", "supersedes: [api-keys]\n"))
+    g = LinkGraph(md)
+    assert g.typed["n1"]["supersedes"] == {"feedback_gamma_thing"}
+    assert "n2" not in g.typed
+    assert g.typed_unresolved["n2"] == {"supersedes": ["api-keys"]}
+
+
+def test_typed_accessors_both_directions_and_self_target_dropped(tmp_path):
+    md = str(tmp_path / "memory")
+    _typed_corpus(md)
+    # a self-referential typed edge must be dropped like a self wikilink
+    _write(md, "selfy.md", _typed_mem("selfy", "supersedes: [selfy]\n"))
+    g = LinkGraph(md)
+    assert g.typed_outbound("new_way", "supersedes") == {"old_way"}
+    assert g.typed_inbound("old_way", "supersedes") == {"new_way"}  # recall's direction
+    assert g.typed_inbound("base", "contradicts") == {"rival"}
+    assert g.typed_inbound("base", "refines") == {"new_way"}
+    assert g.typed_outbound("old_way", "supersedes") == set()
+    assert g.typed_inbound("unknown-name", "supersedes") == set()
+    assert "selfy" not in g.typed
+    # typed edges NEVER leak into the untyped adjacency (wikilinks stay the untyped edge)
+    assert g.adjacency["new_way"] == set()
+    assert g.inbound("old_way") == set()
+
+
+def test_lint_flags_dangling_typed_targets(tmp_path):
+    md = str(tmp_path / "memory")
+    _typed_corpus(md)
+    report = L.lint(md)
+    assert report["typed_dangling"] == [
+        {"file": "dangler", "relation": "supersedes", "target": "no-such-memory", "claimants": []}
+    ]
+    assert report["typed_edges"] == 3  # supersedes + refines + contradicts, all resolved
+    line = L.health_line(report)
+    assert line and "dangling typed relation" in line and "no-such-memory" in line
+
+
+def test_lint_typed_ambiguous_target_names_claimants(tmp_path):
+    md = str(tmp_path / "memory")
+    _write(md, "feedback_api_keys.md", _mem("feedback api keys", "body"))
+    _write(md, "project_api_keys.md", _mem("project api keys", "body"))
+    _write(md, "n.md", _typed_mem("n", "contradicts: [api-keys]\n"))
+    report = L.lint(md)
+    assert report["typed_dangling"] == [
+        {
+            "file": "n",
+            "relation": "contradicts",
+            "target": "api-keys",
+            "claimants": ["feedback_api_keys", "project_api_keys"],
+        }
+    ]
+
+
+def test_lint_health_line_silent_when_typed_edges_are_clean(tmp_path):
+    md = str(tmp_path / "memory")
+    _write(md, "old_way.md", _mem("old_way", "body"))
+    _write(md, "new_way.md", _typed_mem("new_way", "supersedes: [old_way]\n"))
+    report = L.lint(md)
+    assert report["typed_dangling"] == []
+    assert L.health_line(report) is None  # resolved typed edges are healthy, not rot
+
+
+# --------------------------------------------------------------------------- #
+# GRA-4: add_typed_relation — the ONE typed-edge write primitive
+# --------------------------------------------------------------------------- #
+def test_add_typed_relation_appends_top_level_body_verbatim(tmp_path):
+    from memory.links import add_typed_relation
+
+    md = str(tmp_path / "memory")
+    _write(md, "succ.md", _mem("succ", "the body\nstays byte-identical\n"))
+    p = os.path.join(md, "succ.md")
+    before_body = open(p, encoding="utf-8").read().split("---\n", 2)[-1]
+
+    r = add_typed_relation(p, "supersedes", "old_way")
+    assert r == {"path": p, "relation": "supersedes", "target": "old_way", "changed": True, "error": None}
+    text = open(p, encoding="utf-8").read()
+    assert 'supersedes: ["old_way"]' in text
+    assert text.split("---\n", 2)[-1] == before_body  # body untouched
+
+    # idempotent — a slug-equivalent target (underscore/hyphen variant) is the SAME edge
+    assert add_typed_relation(p, "supersedes", "old-way")["changed"] is False
+    # a second, different target APPENDS to the existing flow list
+    assert add_typed_relation(p, "supersedes", "older_way")["changed"] is True
+    assert 'supersedes: ["old_way", "older_way"]' in open(p, encoding="utf-8").read()
+
+
+def test_add_typed_relation_nests_under_metadata_block(tmp_path):
+    """Mirrors backfill_text/set_invalid_after's metadata:-nesting discipline so
+    parse_typed_relations finds the key regardless of frontmatter schema."""
+    from memory.links import add_typed_relation, parse_typed_relations
+    from memory.provenance import parse_frontmatter
+
+    md = str(tmp_path / "memory")
+    _write(
+        md,
+        "nested.md",
+        "---\nname: nested\ndescription: \"d\"\nmetadata:\n  originSessionId: abc\n---\nbody\n",
+    )
+    p = os.path.join(md, "nested.md")
+    assert add_typed_relation(p, "contradicts", "rival")["changed"] is True
+    text = open(p, encoding="utf-8").read()
+    assert '  contradicts: ["rival"]' in text  # nested at the metadata block's indent
+    assert parse_typed_relations(parse_frontmatter(text)) == {"contradicts": ["rival"]}
+
+
+def test_add_typed_relation_merges_existing_block_style_list(tmp_path):
+    from memory.links import add_typed_relation
+
+    md = str(tmp_path / "memory")
+    _write(
+        md,
+        "block.md",
+        '---\nname: block\ndescription: "d"\nsupersedes:\n  - alpha\n  - beta\n---\nbody\n',
+    )
+    p = os.path.join(md, "block.md")
+    assert add_typed_relation(p, "supersedes", "gamma")["changed"] is True
+    text = open(p, encoding="utf-8").read()
+    assert 'supersedes: ["alpha", "beta", "gamma"]' in text  # old values preserved, one canonical line
+    assert "- alpha" not in text  # the block continuation lines were folded in, not duplicated
+
+
+def test_add_typed_relation_refusals_and_dry_run(tmp_path):
+    from memory.links import add_typed_relation
+
+    md = str(tmp_path / "memory")
+    _write(md, "ok.md", _mem("ok", "body"))
+    _write(md, "nofm.md", "no frontmatter at all\n")
+    _write(
+        md,
+        "bad.md",
+        "---\nname: bad\ndescription: contains an unquoted colon: like this\n---\nbody\n",
+    )
+    assert add_typed_relation(os.path.join(md, "ok.md"), "bogus-rel", "x")["error"] is not None
+    assert add_typed_relation(os.path.join(md, "ok.md"), "supersedes", "  ")["error"] is not None
+    assert add_typed_relation(os.path.join(md, "nofm.md"), "supersedes", "x")["error"] is not None
+    assert add_typed_relation(os.path.join(md, "bad.md"), "supersedes", "x")["error"] is not None
+    missing = add_typed_relation(os.path.join(md, "gone.md"), "supersedes", "x")
+    assert missing["error"] is not None and missing["changed"] is False  # never raises
+
+    before = open(os.path.join(md, "ok.md"), encoding="utf-8").read()
+    r = add_typed_relation(os.path.join(md, "ok.md"), "supersedes", "x", dry_run=True)
+    assert r["changed"] is True and r["error"] is None
+    assert open(os.path.join(md, "ok.md"), encoding="utf-8").read() == before  # nothing written
+
+
+def test_add_typed_relation_is_single_item_only_no_bulk_path():
+    """The no-bulk pin (mirrors test_semantic_reverify_is_single_item_only): one path, one
+    relation, one target — a bulk supersede sweep must not be expressible."""
+    import inspect
+
+    from memory.links import add_typed_relation
+
+    params = list(inspect.signature(add_typed_relation).parameters)
+    assert params[:3] == ["path", "relation", "target"]
+    assert "targets" not in params and "names" not in params and "bulk" not in params

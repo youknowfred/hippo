@@ -612,6 +612,234 @@ def test_graph_expansion_skipped_for_in_memory_index_without_dirs(tmp_path, monk
 
 
 # --------------------------------------------------------------------------- #
+# Typed edges (GRA-4) — supersedes demotes+annotates, contradicts annotates only,
+# refines is navigational. Served from links.json; degrades to no-annotation.
+# --------------------------------------------------------------------------- #
+# old_way matches the query STRICTLY better than new_way (one extra query token), so
+# WITHOUT the edge it organically outranks its successor — the flip below is therefore
+# real pre-cut demotion, not a cosmetic relabel. Fillers keep BM25 IDF sane.
+_TYPED_QUERY = "oauth token refresh flow policy gateway"
+
+
+def _typed_fm_corpus(memory_dir: str, *, edge: bool = True) -> None:
+    os.makedirs(memory_dir, exist_ok=True)
+    sup = "supersedes: [old_way]\n" if edge else ""
+    files = {
+        "old_way.md": _mem("old_way", "oauth token refresh flow policy for the gateway"),
+        "new_way.md": (
+            f'---\nname: new_way\ndescription: "oauth token refresh flow policy rotating tokens"\n'
+            f"type: project\n{sup}---\nbody\n"
+        ),
+        "excel_header.md": _mem("excel_header", _CORPUS["excel_header.md"]),
+        "canvas_pdf.md": _mem("canvas_pdf", _CORPUS["canvas_pdf.md"]),
+        "formula_graph.md": _mem("formula_graph", _CORPUS["formula_graph.md"]),
+    }
+    for fname, content in files.items():
+        with open(os.path.join(memory_dir, fname), "w", encoding="utf-8") as fh:
+            fh.write(content)
+
+
+def test_recall_superseded_ranks_below_successor_with_annotation_bm25(tmp_path, monkeypatch):
+    """The GRA-4 acceptance case (BM25 path): X supersedes Y, a query hitting both ->
+    Y ranks strictly below X (a real pre-cut flip — Y organically outranks X without the
+    edge) and Y's pointer carries the successor-naming annotation."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+
+    # Baseline (no edge): the loser organically outranks its successor.
+    md0, idx0 = str(tmp_path / "m0"), str(tmp_path / "i0")
+    _typed_fm_corpus(md0, edge=False)
+    B.build_index(md0, idx0)
+    baseline = [r["name"] for r in R.recall(_TYPED_QUERY, k=5, memory_dir=md0, index_dir=idx0)]
+    assert baseline.index("old_way") < baseline.index("new_way")
+
+    # With the edge: strict flip + annotation.
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    _typed_fm_corpus(md, edge=True)
+    B.build_index(md, idx)
+    res = R.recall(_TYPED_QUERY, k=5, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert names.index("new_way") < names.index("old_way")  # strictly below its successor
+    by_name = {r["name"]: r for r in res}
+    assert by_name["old_way"]["note"] == "superseded by new_way"
+    assert by_name["new_way"]["note"] == ""
+
+    # Demotion is REAL (pre-cut): at k=1 only the successor survives the cut...
+    assert [r["name"] for r in R.recall(_TYPED_QUERY, k=1, memory_dir=md, index_dir=idx)] == ["new_way"]
+    # ...but soft: a wide k still surfaces the superseded memory (never a hard exclude).
+    assert "old_way" in names
+
+    # The annotation reaches the rendered pointer line, inside the char budget.
+    out = R.format_results(res)
+    assert len(out) <= 9000
+    line = next(ln for ln in out.splitlines() if "old_way" in ln)
+    assert line.endswith("[superseded by new_way]")
+    assert "superseded" not in next(ln for ln in out.splitlines() if "new_way" in ln)
+
+
+def test_recall_superseded_ranks_below_successor_dense_path(tmp_path, monkeypatch):
+    """The same acceptance case through the DENSE path (fake embedder, house pattern):
+    the flip and annotation must not depend on the BM25-only lane."""
+    emb_docs, emb_query = _fake_embedder(16)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", emb_docs)
+    monkeypatch.setattr(R, "embed_query", emb_query)
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    _typed_fm_corpus(md, edge=True)
+    B.build_index(md, idx)
+
+    res = R.recall(_TYPED_QUERY, k=5, memory_dir=md, index_dir=idx)
+    assert res and res[0]["backend"] == "dense+bm25"  # both rankers genuinely contributed
+    names = [r["name"] for r in res]
+    assert names.index("new_way") < names.index("old_way")
+    assert {r["name"]: r for r in res}["old_way"]["note"] == "superseded by new_way"
+
+
+def test_recall_contradicts_annotates_without_demotion(tmp_path, monkeypatch):
+    """A contradicts TARGET is flagged ("verify"), never demoted — scores and order are
+    byte-identical to the same corpus without the edge; only the annotation differs."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+
+    def _corpus_at(md: str, *, edge: bool) -> None:
+        os.makedirs(md, exist_ok=True)
+        con = "contradicts: [canary_deploy]\n" if edge else ""
+        items = {
+            "canary_deploy.md": _mem("canary_deploy", "deploy rollout uses canary traffic shifting"),
+            "bluegreen_deploy.md": (
+                f'---\nname: bluegreen_deploy\ndescription: "deploy rollout uses blue green swap"\n'
+                f"type: project\n{con}---\nbody\n"
+            ),
+            "excel_header.md": _mem("excel_header", _CORPUS["excel_header.md"]),
+            "formula_graph.md": _mem("formula_graph", _CORPUS["formula_graph.md"]),
+        }
+        for fname, content in items.items():
+            with open(os.path.join(md, fname), "w", encoding="utf-8") as fh:
+                fh.write(content)
+
+    query = "deploy rollout canary traffic"
+    md0, idx0 = str(tmp_path / "m0"), str(tmp_path / "i0")
+    _corpus_at(md0, edge=False)
+    B.build_index(md0, idx0)
+    plain = R.recall(query, k=5, memory_dir=md0, index_dir=idx0)
+
+    md1, idx1 = str(tmp_path / "m1"), str(tmp_path / "i1")
+    _corpus_at(md1, edge=True)
+    B.build_index(md1, idx1)
+    flagged = R.recall(query, k=5, memory_dir=md1, index_dir=idx1)
+
+    assert [(r["name"], r["score"]) for r in flagged] == [(r["name"], r["score"]) for r in plain]
+    by_name = {r["name"]: r for r in flagged}
+    assert by_name["canary_deploy"]["note"] == "contradicts bluegreen_deploy — verify"
+    assert by_name["bluegreen_deploy"]["note"] == ""  # the DECLARING side is not annotated
+    line = next(ln for ln in R.format_results(flagged).splitlines() if "canary_deploy" in ln)
+    assert line.endswith("[contradicts bluegreen_deploy — verify]")
+
+
+def test_recall_refines_is_navigational_only(tmp_path, monkeypatch):
+    """refines carries NO ranking effect and NO annotation — parse/persist/lint only."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    os.makedirs(md)
+    items = {
+        "base_note.md": _mem("base_note", "oauth token refresh flow policy for the gateway"),
+        "detail_note.md": (
+            '---\nname: detail_note\ndescription: "oauth token refresh flow policy rotating tokens"\n'
+            "type: project\nrefines: [base_note]\n---\nbody\n"
+        ),
+        "excel_header.md": _mem("excel_header", _CORPUS["excel_header.md"]),
+    }
+    for fname, content in items.items():
+        with open(os.path.join(md, fname), "w", encoding="utf-8") as fh:
+            fh.write(content)
+    B.build_index(md, idx)
+
+    res = R.recall(_TYPED_QUERY, k=5, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert names.index("base_note") < names.index("detail_note")  # organic order, no demotion
+    assert all(r["note"] == "" for r in res)
+    assert "[" not in R.format_results(res).split("📎", 1)[1].replace("(linked)", "")
+
+
+def test_recall_typed_edges_degrade_without_links_cache(tmp_path, monkeypatch):
+    """Cache absent -> no demotion, no annotation (the hot path must NEVER re-read the
+    corpus for typed edges): deleting links.json restores the organic order silently."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    _typed_fm_corpus(md, edge=True)
+    B.build_index(md, idx)
+    os.remove(os.path.join(idx, "links.json"))
+
+    res = R.recall(_TYPED_QUERY, k=5, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert names.index("old_way") < names.index("new_way")  # organic order — no cache, no demotion
+    assert all(r["note"] == "" for r in res)
+
+    # Same degradation for a caller-supplied in-memory index with no dirs (eval probes).
+    index = B.load_index(idx)
+    res2 = R.recall(_TYPED_QUERY, k=5, index=index)
+    assert res2 and all(r["note"] == "" for r in res2)
+
+
+def test_recall_typed_edge_to_deleted_successor_is_not_live(tmp_path, monkeypatch):
+    """A slightly-stale cache naming a successor the index no longer carries is not a
+    LIVE edge: fail open to no-demotion/no-annotation rather than annotating with a
+    ghost (the same stale-tolerance posture load_edges documents)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    _typed_fm_corpus(md, edge=True)
+    B.build_index(md, idx)
+    with open(os.path.join(idx, "links.json"), encoding="utf-8") as fh:
+        stale_cache = fh.read()  # still names new_way -> old_way
+
+    os.remove(os.path.join(md, "new_way.md"))  # the successor is deleted...
+    B.build_index(md, idx)  # ...and the index rebuilt without it
+    with open(os.path.join(idx, "links.json"), "w", encoding="utf-8") as fh:
+        fh.write(stale_cache)  # but the edge cache lags a beat behind
+
+    res = R.recall(_TYPED_QUERY, k=5, memory_dir=md, index_dir=idx)
+    by_name = {r["name"]: r for r in res}
+    assert "old_way" in by_name
+    assert by_name["old_way"]["note"] == ""  # dead edge -> no ghost annotation
+
+
+def test_graph_expansion_applies_superseded_penalty_to_injected_neighbor(tmp_path, monkeypatch):
+    """The untyped graph must not become a side door around supersession: a superseded
+    memory injected via 1-hop expansion enters at the SAME halved discount and still
+    carries its annotation."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    _write_linked_corpus(
+        md,
+        {
+            # the seed: matches the query, wikilinks to the lexically-distant loser
+            "auth_flow.md": (
+                "oauth token refresh flow for the api gateway",
+                "details\n\nRelated: [[old_runbook]]\n",
+            ),
+            "old_runbook.md": ("kubernetes helm chart rollout steps", "body"),
+            "excel_header.md": (_CORPUS["excel_header.md"], "body"),
+            "canvas_pdf.md": (_CORPUS["canvas_pdf.md"], "body"),
+        },
+    )
+    # new_runbook supersedes old_runbook (frontmatter edge, no wikilinks)
+    with open(os.path.join(md, "new_runbook.md"), "w", encoding="utf-8") as fh:
+        fh.write(
+            '---\nname: new_runbook\ndescription: "argo rollout steps replace helm"\n'
+            "type: project\nsupersedes: [old_runbook]\n---\nbody\n"
+        )
+    B.build_index(md, idx)
+
+    res = R.recall(_OAUTH_QUERY, k=5, memory_dir=md, index_dir=idx)
+    by_name = {r["name"]: r for r in res}
+    assert by_name["old_runbook"]["via"] == "graph"  # only the edge got it here
+    assert by_name["old_runbook"]["note"] == "superseded by new_runbook"
+    # injected at seed * _NEIGHBOR_DISCOUNT * _SUPERSEDED_PENALTY — the penalty is real
+    # (abs_tol covers the 6-decimal rounding recall applies to emitted scores)
+    seed_score = by_name["auth_flow"]["score"]
+    expected = seed_score * R._NEIGHBOR_DISCOUNT * R._SUPERSEDED_PENALTY
+    assert math.isclose(by_name["old_runbook"]["score"], expected, abs_tol=1e-6)
+
+
+# --------------------------------------------------------------------------- #
 # Fused dense+BM25 recall with a fake embedder
 # --------------------------------------------------------------------------- #
 def test_recall_fused_dense_and_bm25(tmp_path, monkeypatch):

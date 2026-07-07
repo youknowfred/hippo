@@ -180,8 +180,22 @@ zero-OUTBOUND (may still be well-cited), `isolates()` is zero-in AND zero-out (g
 disconnected). Soft aliases (prefix-strip / `name:` slug) claimed by two or more files
 are **ambiguous** — `resolve()` refuses them rather than guess (a full-stem claim still
 beats any soft claim). `lint_links` flags **dangling** targets, **ambiguous** targets
-(naming every claimant), **slug-mismatches**, and **orphans** — read-only, never edits a
-memory; its one-line summary is the `link_health` producer.
+(naming every claimant), **slug-mismatches**, **dangling typed relation targets**, and
+**orphans** — read-only, never edits a memory; its one-line summary is the `link_health`
+producer.
+
+**Typed edges (GRA-4, corpus format 2).** Frontmatter may declare
+`supersedes: [name]`, `contradicts: [name]`, `refines: [name]` (each a list of memory
+names/stems, top-level or under `metadata:` — the `cited_paths` read convention);
+`[[wikilinks]]` remain the untyped edge. Targets resolve through the SAME alias tiers as
+wikilinks. Consequences at recall time (served from the persisted `links.json`, zero
+corpus re-reads; cache absent → no effect): the TARGET of a live `supersedes` edge has
+its fused score halved BEFORE the top-k cut (its successor outranks it; wide-k still
+surfaces it) and its pointer carries `[superseded by <name>]`; a `contradicts` target is
+NOT demoted — it carries `[contradicts <name> — verify]` only; `refines` is navigational
+(no ranking effect, no annotation). The one write primitive is
+`links.add_typed_relation(path, relation, target)` — additive, body-preserving,
+idempotent, per-item; reconsolidation's `superseded_by` opt-in routes through it.
 
 ```bash
 "$PY" -m memory.links --traverse <name> --hops 2
@@ -269,6 +283,14 @@ confirmed-wrong memory must stay visible to staleness; demotion is
 `eval_recall.graduation_rate()` reports `graduate / (graduate + demote)` (fixes excluded
 by design). No bulk variant exists.
 
+`superseded_by=<successor>` (GRA-4, `demote`/`fix` only, opt-in): when the agent knows
+WHICH memory replaces the demoted one's claim, this appends `supersedes: [name]` to the
+**successor's** frontmatter (via `links.add_typed_relation` — additive, body-preserving),
+so recall demotes the loser below its successor and annotates it. Per-item and
+agent-gated like everything else here; refused for `graduate` and when either memory is
+missing. CLI: `"$PY" -m memory.reconsolidate --reverify <name> --outcome demote
+--superseded-by <successor>`.
+
 ## Graceful decay — soft-invalidation + archive
 
 Decay is DEMOTION, never deletion.
@@ -314,11 +336,20 @@ Two version numbers, two very different contracts (COR-7):
   shape) is **self-healing and needs zero operator action**: every load path treats a
   mismatched manifest as absent, and the next SessionStart refresh performs one full
   rebuild stamped with the current version.
-- **Corpus** — `.claude/memory/.format` declares `{"corpus_format": 1}`
-  (`provenance.CORPUS_FORMAT_VERSION`). It is committed **with** the corpus (it describes
-  the corpus; it is not a rebuildable cache); `/hippo:init` stamps it when seeding a fresh
-  corpus, and **a corpus with no marker reads as format 1** — every pre-marker corpus is
-  already on the baseline, nothing to backfill.
+- **Corpus** — `.claude/memory/.format` declares `{"corpus_format": N}`
+  (`provenance.CORPUS_FORMAT_VERSION`, currently **2**). It is committed **with** the
+  corpus (it describes the corpus; it is not a rebuildable cache); `/hippo:init` stamps it
+  when seeding a fresh corpus, and **a corpus with no marker reads as format 1** — every
+  pre-marker corpus is already on the baseline, nothing to backfill.
+
+  Format history: **v1** = the pre-versioning baseline. **v2** (GRA-4) = frontmatter may
+  carry typed relations (`supersedes:`/`contradicts:`/`refines:` lists). v2 is purely
+  ADDITIVE, so the v1→v2 migration is the trivial case of the flow below: no per-memory
+  edits are required — review that no existing frontmatter uses those three keys for
+  something else, then stamp the marker (`write_corpus_format`). Until stamped, a v1
+  corpus is read identically; typed edges any teammate authors still work (formats are
+  additive where possible) — the marker just records which conventions the corpus has
+  adopted.
 
 **How a corpus format bump is detected, and what the operator does.** The corpus is the
 git-tracked source of authority, so hippo **never migrates it autonomously** — detection

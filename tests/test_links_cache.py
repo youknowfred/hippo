@@ -8,6 +8,7 @@ load-bearing claims pinned here:
     picked up via the per-file stat signature;
   - corrupt/missing/wrong-schema caches fall back to the full re-read, never raise;
   - ``load_edges`` returns both directions from links.json only, and None on absence;
+  - typed edges (GRA-4) round-trip: resolved/raw/unresolved maps + typed_out/typed_in;
   - ``refresh_index``'s no-op short-circuit backfills/refreshes the cache so a quiet
     corpus (or a pre-GRA-6 index) cannot starve it forever.
 """
@@ -36,13 +37,20 @@ def _write(md: str, fname: str, content: str) -> None:
 
 def _corpus(md: str) -> None:
     """Same shape as test_links's census corpus: full-stem + soft-alias + dangling +
-    an ambiguous soft collision, so every persisted field is non-trivially exercised."""
+    an ambiguous soft collision, so every persisted field is non-trivially exercised.
+    GRA-4: beta also carries typed relations (a resolved supersedes + a dangling one)
+    so the typed round-trip is exercised by every cold-vs-cached comparison below."""
     _write(
         md,
         "alpha.md",
         _mem("alpha", "see [[beta]] and [[gamma-thing]] and [[ship-roadmap]] and [[api-keys]]"),
     )
-    _write(md, "beta.md", _mem("beta", "back to [[alpha]]"))
+    _write(
+        md,
+        "beta.md",
+        '---\nname: beta\ndescription: "d for beta"\ntype: project\n'
+        "supersedes: [delta, vanished-memory]\n---\nback to [[alpha]]\n",
+    )
     _write(md, "feedback_gamma_thing.md", _mem("Gamma Thing", "onward to [[delta]]"))
     _write(md, "delta.md", _mem("delta", "no outbound links here"))
     # COR-9 ambiguity: both strip to the soft alias "api-keys" -> resolve() refuses.
@@ -67,6 +75,11 @@ def _graph_state(g: LinkGraph) -> tuple:
         {s: list(t) for s, t in g.unresolved.items()},
         g.orphans(),
         g.isolates(),
+        # GRA-4: typed facets round-trip too (resolved, raw, unresolved, transpose)
+        {s: {r: set(v) for r, v in m.items()} for s, m in g.typed.items()},
+        {s: {r: list(v) for r, v in m.items()} for s, m in g.typed_raw.items()},
+        {s: {r: list(v) for r, v in m.items()} for s, m in g.typed_unresolved.items()},
+        {s: {r: set(v) for r, v in m.items()} for s, m in g._typed_inbound.items()},
     )
 
 
@@ -104,6 +117,11 @@ def test_build_index_persists_links_cache(tmp_path, monkeypatch):
     assert payload["files"]["alpha"]["outbound"] == ["beta", "feedback_gamma_thing"]
     # the COR-9 ambiguity survives the round trip with BOTH claimants
     assert payload["ambiguous"]["api-keys"] == ["feedback_api_keys", "project_api_keys"]
+    # GRA-4: typed edges persist — resolved per-file, raw + unresolved top-level
+    assert payload["files"]["beta"]["typed"] == {"supersedes": ["delta"]}
+    assert payload["files"]["alpha"]["typed"] == {}
+    assert payload["typed_raw"]["beta"] == {"supersedes": ["delta", "vanished-memory"]}
+    assert payload["typed_unresolved"]["beta"] == {"supersedes": ["vanished-memory"]}
 
 
 def test_cache_hit_reproduces_identical_graph(tmp_path, monkeypatch):
@@ -121,6 +139,9 @@ def test_cache_hit_reproduces_identical_graph(tmp_path, monkeypatch):
     assert cached.resolve("api-keys") is None
     assert cached.ambiguous_claimants("api-keys") == ["feedback_api_keys", "project_api_keys"]
     assert cached.traverse("alpha", hops=2) == cold.traverse("alpha", hops=2)
+    # GRA-4: typed accessors serve identically from the cache (both directions)
+    assert cached.typed_outbound("beta", "supersedes") == {"delta"}
+    assert cached.typed_inbound("delta", "supersedes") == {"beta"}
 
 
 def test_cached_path_performs_zero_memory_file_reads(tmp_path, monkeypatch):
@@ -287,10 +308,22 @@ def test_load_edges_returns_both_directions(tmp_path, monkeypatch):
     assert edges is not None
     assert edges["alpha"]["out"] == {"beta", "feedback_gamma_thing"}
     assert edges["alpha"]["in"] == {"beta"}
-    assert edges["beta"] == {"out": {"alpha"}, "in": {"alpha"}}
-    assert edges["delta"] == {"out": set(), "in": {"feedback_gamma_thing"}}
+    # GRA-4: typed_out/typed_in ALWAYS present ({} when none) — typed_in is recall's
+    # consuming direction ("who supersedes delta?" -> beta).
+    assert edges["beta"] == {
+        "out": {"alpha"},
+        "in": {"alpha"},
+        "typed_out": {"supersedes": {"delta"}},
+        "typed_in": {},
+    }
+    assert edges["delta"] == {
+        "out": set(),
+        "in": {"feedback_gamma_thing"},
+        "typed_out": {},
+        "typed_in": {"supersedes": {"beta"}},
+    }
     # every corpus stem is present, even the fully unlinked ones
-    assert edges["project_api_keys"] == {"out": set(), "in": set()}
+    assert edges["project_api_keys"] == {"out": set(), "in": set(), "typed_out": {}, "typed_in": {}}
 
 
 def test_load_edges_reads_links_json_only(tmp_path, monkeypatch):

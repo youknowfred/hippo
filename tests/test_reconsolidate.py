@@ -140,7 +140,14 @@ def test_semantic_reverify_graduate_clears_flag_and_logs_outcome(repo, memory_di
 
     td = os.path.join(repo, "tele")
     result = R.semantic_reverify("m_a", "graduate", memory_dir, repo, telemetry_dir=td)
-    assert result == {"name": "m_a", "outcome": "graduate", "cleared": True, "logged": True, "error": None}
+    assert result == {
+        "name": "m_a",
+        "outcome": "graduate",
+        "cleared": True,
+        "edge_written": False,
+        "logged": True,
+        "error": None,
+    }
 
     # the flag is genuinely cleared -- m_a no longer shows up as stale
     from memory.staleness import find_stale
@@ -231,6 +238,124 @@ def test_semantic_reverify_is_single_item_only_no_bulk_path():
     params = list(sig.parameters)
     assert params[0] == "name"
     assert "names" not in params and "bulk" not in params and "all" not in params
+
+
+# --------------------------------------------------------------------------- #
+# GRA-4: superseded_by — demote/fix optionally record the supersedes edge
+# --------------------------------------------------------------------------- #
+def _seed_pair(repo, memory_dir):
+    """Two memories citing the same drifted file: m_old (the wrong one) + m_new (its
+    successor). Returns m_new's original text for body-preservation asserts."""
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_old.md", _mem("m_old", ["src/foo.py"], c1))
+    new_text = _mem("m_new", ["src/foo.py"], c1)
+    write_file(memory_dir, "m_new.md", new_text)
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)
+    return new_text
+
+
+def test_semantic_reverify_demote_with_superseded_by_writes_edge_to_successor(repo, memory_dir):
+    new_text = _seed_pair(repo, memory_dir)
+    td = os.path.join(repo, "tele")
+
+    result = R.semantic_reverify(
+        "m_old", "demote", memory_dir, repo, telemetry_dir=td, superseded_by="m_new"
+    )
+    assert result["error"] is None
+    assert result["edge_written"] is True
+    assert result["cleared"] is False  # demote NEVER clears the staleness flag (unchanged)
+    assert result["logged"] is True
+
+    # the edge lands on the SUCCESSOR's frontmatter, additively; its body is byte-identical
+    text = open(os.path.join(memory_dir, "m_new.md"), encoding="utf-8").read()
+    assert 'supersedes: ["m_old"]' in text
+    assert text.split("---\n", 2)[-1] == new_text.split("---\n", 2)[-1]
+    # the DEMOTED memory's file is untouched (the edge lives on the successor)
+    assert "supersedes" not in open(os.path.join(memory_dir, "m_old.md"), encoding="utf-8").read()
+
+    # idempotent: re-running the same verdict re-logs but does not duplicate the edge
+    again = R.semantic_reverify(
+        "m_old", "demote", memory_dir, repo, telemetry_dir=td, superseded_by="m_new"
+    )
+    assert again["error"] is None and again["edge_written"] is False
+    assert open(os.path.join(memory_dir, "m_new.md"), encoding="utf-8").read() == text
+
+
+def test_semantic_reverify_fix_with_superseded_by_also_clears_flag(repo, memory_dir):
+    _seed_pair(repo, memory_dir)
+    td = os.path.join(repo, "tele")
+    result = R.semantic_reverify(
+        "m_old", "fix", memory_dir, repo, telemetry_dir=td, superseded_by="m_new"
+    )
+    assert result["error"] is None
+    assert result["cleared"] is True  # fix still routes through reverify_file
+    assert result["edge_written"] is True
+
+
+def test_semantic_reverify_graduate_refuses_superseded_by(repo, memory_dir):
+    """A memory just confirmed CORRECT cannot simultaneously be superseded — refused
+    BEFORE any write, and the refusal is not logged (mirrors the unparseable guard)."""
+    _seed_pair(repo, memory_dir)
+    td = os.path.join(repo, "tele")
+    before = open(os.path.join(memory_dir, "m_new.md"), encoding="utf-8").read()
+    result = R.semantic_reverify(
+        "m_old", "graduate", memory_dir, repo, telemetry_dir=td, superseded_by="m_new"
+    )
+    assert result["error"] is not None and "superseded_by" in result["error"]
+    assert result["cleared"] is False and result["edge_written"] is False
+    assert result["logged"] is False
+    assert list(read_reconsolidation_events(td)) == []
+    assert open(os.path.join(memory_dir, "m_new.md"), encoding="utf-8").read() == before
+
+
+def test_semantic_reverify_superseded_by_missing_successor_refuses(repo, memory_dir):
+    _seed_pair(repo, memory_dir)
+    td = os.path.join(repo, "tele")
+    result = R.semantic_reverify(
+        "m_old", "demote", memory_dir, repo, telemetry_dir=td, superseded_by="m_ghost"
+    )
+    assert result["error"] is not None and "m_ghost" in result["error"]
+    assert result["edge_written"] is False and result["logged"] is False
+
+
+def test_reconsolidate_cli_reverify_with_superseded_by(repo, memory_dir, capsys):
+    """The CLI wiring: --reverify NAME --outcome demote --superseded-by SUCCESSOR applies
+    the same per-item primitive (and --outcome is required)."""
+    _seed_pair(repo, memory_dir)
+    td = os.path.join(repo, "tele")
+
+    rc = R.main(["--reverify", "m_old", "--memory-dir", memory_dir, "--repo-root", repo])
+    assert rc == 1
+    assert "--outcome is required" in capsys.readouterr().out
+
+    rc = R.main(
+        [
+            "--reverify", "m_old", "--outcome", "demote", "--superseded-by", "m_new",
+            "--memory-dir", memory_dir, "--repo-root", repo, "--telemetry-dir", td,
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "outcome=demote" in out and "supersedes edge written to m_new" in out
+    assert 'supersedes: ["m_old"]' in open(os.path.join(memory_dir, "m_new.md"), encoding="utf-8").read()
+
+
+def test_reconsolidate_cli_reverify_dry_run_writes_nothing(repo, memory_dir, capsys):
+    _seed_pair(repo, memory_dir)
+    td = os.path.join(repo, "tele")
+    before = open(os.path.join(memory_dir, "m_new.md"), encoding="utf-8").read()
+    rc = R.main(
+        [
+            "--reverify", "m_old", "--outcome", "demote", "--superseded-by", "m_new",
+            "--memory-dir", memory_dir, "--repo-root", repo, "--telemetry-dir", td,
+            "--dry-run",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0 and "would be written" in out
+    assert open(os.path.join(memory_dir, "m_new.md"), encoding="utf-8").read() == before
 
 
 # --------------------------------------------------------------------------- #

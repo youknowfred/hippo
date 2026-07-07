@@ -1100,3 +1100,10 @@ def test_format_marker_is_invisible_to_the_corpus_iterator(tmp_path):
     with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
         fh.write("---\nname: a\n---\nbody\n")
     assert [os.path.basename(p) for p in P._iter_memory_files(md)] == ["a.md"]
+
+
+def test_corpus_format_version_is_2_for_typed_edges():
+    """GRA-4 is the corpus's first real format change: typed frontmatter relations
+    (supersedes/contradicts/refines) are a v2 convention. Pinned so a future bump is a
+    deliberate act with release-notes migration steps, never an accident."""
+    assert P.CORPUS_FORMAT_VERSION == 2

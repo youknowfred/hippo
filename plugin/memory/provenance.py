@@ -322,12 +322,21 @@ def ensure_self_ignoring_dir(path: str) -> None:
 # format change there is a MIGRATION of user data, per-item and agent-gated, never
 # automatic (see plugin/memory/README.md, "Corpus format versioning"). Declared by a
 # ``.claude/memory/.format`` marker committed WITH the corpus (it describes the corpus; it
-# is NOT a rebuildable cache), JSON ``{"corpus_format": 1}``. A corpus with NO marker reads
+# is NOT a rebuildable cache), JSON ``{"corpus_format": N}``. A corpus with NO marker reads
 # as format 1 — every pre-v0.5.0 corpus predates the marker, so absence must mean the
-# baseline, never an error. A future breaking corpus change (e.g. GRA-4's typed edges)
-# bumps this ONE constant; init's seeding snippet and doctor's check follow it (a parity
-# test pins the init skill's literal to this constant so the two can't drift).
-CORPUS_FORMAT_VERSION = 1
+# baseline, never an error. A breaking corpus change bumps this ONE constant; init's
+# seeding snippet and doctor's check follow it (a parity test pins the init skill's
+# literal to this constant so the two can't drift).
+#
+# Format history:
+#   1 — the pre-versioning baseline (frontmatter with cited_paths/source_commit/
+#       invalid_after, [[wikilink]] bodies, MEMORY.md floor).
+#   2 — GRA-4 typed edges: frontmatter may carry `supersedes:`/`contradicts:`/`refines:`
+#       lists (top-level or under `metadata:`). Purely ADDITIVE — a v1 corpus with no
+#       typed relations is read identically by a v2 plugin, so the migration is just
+#       reviewing that no frontmatter key collides and stamping the marker
+#       (`write_corpus_format`); see plugin/memory/README.md "Corpus format versioning".
+CORPUS_FORMAT_VERSION = 2
 _FORMAT_MARKER_NAME = ".format"
 
 

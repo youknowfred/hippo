@@ -74,6 +74,18 @@ def _body_rrf_weight() -> float:
 _INVALIDATION_PENALTY = 0.5
 _INVALIDATION_RECENT_DAYS = 30.0
 
+# Typed-edge demotion (GRA-4) — a memory that is the TARGET of a live supersedes edge
+# (some OTHER memory in the index declares `supersedes: [it]`) has its fused score halved
+# BEFORE the top-k cut, exactly the invalidation penalty's bounded-multiplier style: real
+# demotion (it can fall out of top-k, and its successor outranks it), never a hard exclude
+# (a wide-k query still surfaces it, annotated). `contradicts` targets are deliberately
+# NOT demoted — a contradiction means "one of these is wrong, VERIFY", not "this one lost"
+# — they carry a conflict annotation only. `refines` is navigational: no ranking effect,
+# no annotation. Typed edges reach this hot path via GRA-6's persisted links.json ONLY
+# (one small-JSON read, shared with 1-hop expansion) — cache absent degrades to
+# no-demotion/no-annotation, never a corpus read per prompt.
+_SUPERSEDED_PENALTY = 0.5
+
 # Mid-session drift (COR-4) — a stat+reread per entry is cheap, but bound it so a huge
 # corpus can never turn the hot path into an O(corpus) disk scan of unbounded size.
 _MAX_DRIFT_CHECKS = 200
@@ -702,17 +714,91 @@ def _graph_seed_count() -> int:
         return _GRAPH_SEEDS
 
 
+def _load_hot_edges(index_dir: Optional[str]) -> Optional[dict]:
+    """The hot path's ONE links.json read (GRA-6's ``load_edges``), or None.
+
+    Loaded exactly once per ``recall()`` call and shared by BOTH graph consumers — the
+    typed-edge maps (GRA-4) and 1-hop expansion (GRA-1) — so adding typed edges cost the
+    hot path zero additional I/O. Never raises; None (no ``index_dir`` resolvable, cache
+    absent/corrupt) simply disables both consumers, the same degrade-to-organic-ranking
+    posture ``_expand_neighbors`` always had.
+    """
+    try:
+        if not index_dir:
+            return None
+        from .links import load_edges
+
+        return load_edges(index_dir)
+    except Exception:
+        return None
+
+
+def _typed_relation_maps(
+    entries: List[dict], edges: Optional[dict]
+) -> Tuple[Dict[int, List[str]], Dict[int, List[str]]]:
+    """``(superseded_by, contradicted_by)`` — entry index -> sorted LIVE source names.
+
+    GRA-4: built from the persisted edge list's ``typed_in`` direction (who declares the
+    relation TOWARD this entry), filtered to LIVE sources — a source stem must itself be
+    present in the loaded index, so a slightly-stale cache naming a deleted successor
+    degrades to "no edge" (fail open, no demotion) rather than annotating with a ghost.
+    Entry ``name`` == file stem == the edge list's node identity, same join
+    ``_expand_neighbors`` relies on. Never raises; ``({}, {})`` when the cache is absent.
+    """
+    superseded: Dict[int, List[str]] = {}
+    contradicted: Dict[int, List[str]] = {}
+    try:
+        if not edges:
+            return superseded, contradicted
+        live = {e.get("name") for e in entries}
+        for i, e in enumerate(entries):
+            rec = edges.get(e.get("name"))
+            if not rec:
+                continue
+            typed_in = rec.get("typed_in") or {}
+            sup = sorted(s for s in typed_in.get("supersedes", ()) if s in live)
+            if sup:
+                superseded[i] = sup
+            con = sorted(s for s in typed_in.get("contradicts", ()) if s in live)
+            if con:
+                contradicted[i] = con
+        return superseded, contradicted
+    except Exception:
+        return {}, {}
+
+
+def _typed_note(i: int, superseded: Dict[int, List[str]], contradicted: Dict[int, List[str]]) -> str:
+    """One bounded annotation string for entry ``i`` ("" when it carries no typed edge).
+
+    Names at most two sources per relation (+N more) so a heavily-superseded memory can
+    never balloon its pointer line past the display budget.
+    """
+
+    def _names(names: List[str]) -> str:
+        head = ", ".join(names[:2])
+        return head if len(names) <= 2 else f"{head} (+{len(names) - 2} more)"
+
+    bits: List[str] = []
+    if i in superseded:
+        bits.append(f"superseded by {_names(superseded[i])}")
+    if i in contradicted:
+        bits.append(f"contradicts {_names(contradicted[i])} — verify")
+    return "; ".join(bits)
+
+
 def _expand_neighbors(
     penalized: List[Tuple[int, float, Optional[str]]],
     entries: List[dict],
-    index_dir: Optional[str],
+    edges: Optional[dict],
+    superseded: Optional[Dict[int, List[str]]] = None,
 ) -> Tuple[List[Tuple[int, float, Optional[str]]], set]:
     """1-hop neighbor expansion (GRA-1): inject linked memories at a discounted score.
 
     Takes the ALREADY-penalized candidate list (post-fusion, post-invalidation re-sort),
     seeds on its top-N entries, and unions their outbound+inbound 1-hop neighbor stems from
-    GRA-6's persisted edge list (``load_edges`` — links.json only, the hot path's single
-    extra small-JSON read). Injection rules, in order:
+    GRA-6's persisted edge list (``edges`` — the ``_load_hot_edges`` result ``recall()``
+    loaded once, links.json only, the hot path's single extra small-JSON read). Injection
+    rules, in order:
 
       - stems absent from the index are dropped (a link can outlive its target);
       - the seeds themselves are dropped (a seed is already ranked as well as it can be);
@@ -721,26 +807,25 @@ def _expand_neighbors(
       - invalidation applies IDENTICALLY to organic candidates: "recent" halves the
         injected score, "old" rides through as state so the display filter downstream
         drops it — expansion must never resurrect an invalidated memory;
+      - the superseded penalty (GRA-4, ``superseded`` — the entry-index map ``recall()``
+        already built) applies identically too: a superseded neighbor enters at the SAME
+        halved score it would rank at organically — the untyped graph must not become a
+        side door around supersession;
       - a neighbor already in the penalized list at an equal-or-higher score keeps its
         ORGANIC tuple (and organic provenance); only a strictly-better injected score
         replaces it, and only then does the result carry the "graph" marker.
 
     Returns ``(re-sorted list, {entry indices injected via graph})`` so the emission loop
-    can stamp provenance ("via"). Never raises; ANY failure — no index_dir resolvable
+    can stamp provenance ("via"). Never raises; ANY failure — no edges loaded
     (caller-supplied in-memory index with no dirs: eval self_recall probes, hermetic
-    LoadedIndex tests), absent/corrupt links.json, junk env — returns the input untouched,
+    LoadedIndex tests; absent/corrupt links.json), junk env — returns the input untouched,
     so expansion can only ever be additive, never a new degradation mode.
     """
     try:
-        if not index_dir or not penalized:
+        if not edges or not penalized:
             return penalized, set()
         seeds_n = _graph_seed_count()
         if seeds_n <= 0:
-            return penalized, set()
-        from .links import load_edges
-
-        edges = load_edges(index_dir)
-        if not edges:
             return penalized, set()
         seeds = penalized[:seeds_n]
         seed_idxs = {i for i, _score, _state in seeds}
@@ -766,6 +851,8 @@ def _expand_neighbors(
         for j, cand in injected.items():
             state = _invalidation_state(entries[j])
             adj = cand * _INVALIDATION_PENALTY if state == "recent" else cand
+            if superseded and j in superseded:
+                adj *= _SUPERSEDED_PENALTY
             if j in organic_score and organic_score[j] >= adj:
                 continue  # organic rank is already at least as good — keep it (and its label)
             replace[j] = (adj, state)
@@ -957,29 +1044,38 @@ def recall(
             {i: score for i, score in _rrf_fuse(primary_rankings)} if primary_rankings else {}
         )
 
-        # --- Soft-invalidation: applied to the SCORE, BEFORE the top-k cut. ---
-        # This is the exact point of the x0.5 multiply -- "recent" halves the fused score so
-        # a borderline-ranked recently-invalidated memory can legitimately fall out of the
-        # top-k (real demotion, not a cosmetic post-hoc label). "old" does NOT change the
-        # score here -- it is filtered from DISPLAY only, in the emission loop below, so it
-        # keeps its true rank for internal bookkeeping but never reaches `results`.
-        penalized: List[Tuple[int, float, Optional[str]]] = []
-        for i, score in fused:
-            state = _invalidation_state(entries[i])
-            adj_score = score * _INVALIDATION_PENALTY if state == "recent" else score
-            penalized.append((i, adj_score, state))
-        penalized.sort(key=lambda triple: triple[1], reverse=True)
-
-        # --- 1-hop graph expansion (GRA-1): AFTER fusion + invalidation re-sort. ---
+        # --- Graph edges: ONE links.json read for both typed edges and expansion. ---
         # Resolvable index_dir only: an explicit index_dir wins, else it derives from
         # memory_dir exactly as _ensure_index does (same default_index_dir, same
         # HIPPO_INDEX_DIR override). A caller-supplied in-memory index with NO dirs
         # (eval self_recall probes, hermetic LoadedIndex tests) resolves to None ->
-        # _expand_neighbors is a no-op, zero behavior change there.
+        # no typed maps, no expansion — zero behavior change there.
         graph_index_dir = index_dir
         if graph_index_dir is None and memory_dir:
             graph_index_dir = default_index_dir(memory_dir)
-        penalized, graph_injected = _expand_neighbors(penalized, entries, graph_index_dir)
+        edges = _load_hot_edges(graph_index_dir)
+        superseded_by, contradicted_by = _typed_relation_maps(entries, edges)
+
+        # --- Soft-invalidation + supersession: applied to the SCORE, BEFORE the top-k cut. ---
+        # This is the exact point of the x0.5 multiplies -- "recent" invalidation halves the
+        # fused score so a borderline-ranked recently-invalidated memory can legitimately
+        # fall out of the top-k (real demotion, not a cosmetic post-hoc label), and a LIVE
+        # supersedes target (GRA-4) is halved the same bounded way so its successor outranks
+        # it in the SAME top-k. "old" does NOT change the score here -- it is filtered from
+        # DISPLAY only, in the emission loop below, so it keeps its true rank for internal
+        # bookkeeping but never reaches `results`. Contradicted entries deliberately get NO
+        # penalty (annotation-only — see _SUPERSEDED_PENALTY's comment block).
+        penalized: List[Tuple[int, float, Optional[str]]] = []
+        for i, score in fused:
+            state = _invalidation_state(entries[i])
+            adj_score = score * _INVALIDATION_PENALTY if state == "recent" else score
+            if i in superseded_by:
+                adj_score *= _SUPERSEDED_PENALTY
+            penalized.append((i, adj_score, state))
+        penalized.sort(key=lambda triple: triple[1], reverse=True)
+
+        # --- 1-hop graph expansion (GRA-1): AFTER fusion + invalidation/supersession re-sort. ---
+        penalized, graph_injected = _expand_neighbors(penalized, entries, edges, superseded_by)
 
         # Walk the re-sorted list and emit up to k DISPLAY-eligible results, skipping "old"
         # entries as we go. This is NOT `penalized[:k]` followed by a filter -- a fixed-size
@@ -1059,6 +1155,12 @@ def recall(
                     # "rank" = organic fusion. format_results renders "graph" as " (linked)"
                     # so a user reading the injected block can see WHY a line is there.
                     "via": "graph" if i in graph_injected else "rank",
+                    # Typed-edge annotation (GRA-4) — ALWAYS present ("" when none), same
+                    # no-key-branching convention as "via": "superseded by <successor>"
+                    # names why the line ranks below its successor; "contradicts <name> —
+                    # verify" flags a live conflict without demoting either side. Absent
+                    # links cache -> _typed_relation_maps returned empty maps -> "".
+                    "note": _typed_note(i, superseded_by, contradicted_by),
                 }
             )
         return results
@@ -1083,7 +1185,11 @@ def format_results(results: List[dict], max_chars: int = _MAX_RECALL_CHARS) -> s
         # inspectable — a "(linked)" entry is here because a top-seed memory links to it,
         # not because it matched the query lexically/semantically on its own.
         marker = " (linked)" if r.get("via") == "graph" else ""
-        lines.append(f"  • {r['name']} ({r['file']}) — {desc}{marker}")
+        # Typed-edge annotation (GRA-4): the one-line supersession/conflict note rides on
+        # the same pointer line — bounded upstream (_typed_note caps names) and by the
+        # overall max_chars truncation below, so it can never blow the injection budget.
+        note = f" [{r['note']}]" if r.get("note") else ""
+        lines.append(f"  • {r['name']} ({r['file']}) — {desc}{marker}{note}")
     out = "\n".join(lines)
     if len(out) > max_chars:
         out = out[: max_chars - 16].rstrip() + "\n…(truncated)"
