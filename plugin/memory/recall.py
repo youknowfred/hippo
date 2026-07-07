@@ -56,6 +56,15 @@ _INVALIDATION_RECENT_DAYS = 30.0
 # corpus can never turn the hot path into an O(corpus) disk scan of unbounded size.
 _MAX_DRIFT_CHECKS = 200
 
+# 1-hop graph expansion (GRA-1) — the first load-bearing graph READ. After fusion +
+# invalidation penalties, the top-_GRAPH_SEEDS entries seed a 1-hop neighbor pull from the
+# persisted edge list (GRA-6's links.json, one small-JSON read, no corpus scan). Neighbors
+# are injected at _NEIGHBOR_DISCOUNT x their best seed's penalized score and COMPETE for
+# top-k — no reserved slots, so expansion can only surface a linked memory when its
+# discounted score actually beats an organic candidate, never by displacing one for free.
+_GRAPH_SEEDS = 3  # override: MEMOBOT_GRAPH_SEEDS (0 disables expansion entirely)
+_NEIGHBOR_DISCOUNT = 0.5
+
 # --------------------------------------------------------------------------- #
 # Query hygiene
 # --------------------------------------------------------------------------- #
@@ -242,6 +251,94 @@ def _drift_patch(entry: dict, memory_dir: str) -> dict:
         return entry
 
 
+def _graph_seed_count() -> int:
+    """Seed count for 1-hop expansion; MEMOBOT_GRAPH_SEEDS overrides, junk -> default."""
+    raw = os.environ.get("MEMOBOT_GRAPH_SEEDS")
+    if raw is None or not raw.strip():
+        return _GRAPH_SEEDS
+    try:
+        return int(raw)
+    except ValueError:
+        return _GRAPH_SEEDS
+
+
+def _expand_neighbors(
+    penalized: List[Tuple[int, float, Optional[str]]],
+    entries: List[dict],
+    index_dir: Optional[str],
+) -> Tuple[List[Tuple[int, float, Optional[str]]], set]:
+    """1-hop neighbor expansion (GRA-1): inject linked memories at a discounted score.
+
+    Takes the ALREADY-penalized candidate list (post-fusion, post-invalidation re-sort),
+    seeds on its top-N entries, and unions their outbound+inbound 1-hop neighbor stems from
+    GRA-6's persisted edge list (``load_edges`` — links.json only, the hot path's single
+    extra small-JSON read). Injection rules, in order:
+
+      - stems absent from the index are dropped (a link can outlive its target);
+      - the seeds themselves are dropped (a seed is already ranked as well as it can be);
+      - a neighbor's injected score is ``_NEIGHBOR_DISCOUNT x its BEST seed's penalized
+        score`` (touching several seeds does not stack — the graph is a hint, not a vote);
+      - invalidation applies IDENTICALLY to organic candidates: "recent" halves the
+        injected score, "old" rides through as state so the display filter downstream
+        drops it — expansion must never resurrect an invalidated memory;
+      - a neighbor already in the penalized list at an equal-or-higher score keeps its
+        ORGANIC tuple (and organic provenance); only a strictly-better injected score
+        replaces it, and only then does the result carry the "graph" marker.
+
+    Returns ``(re-sorted list, {entry indices injected via graph})`` so the emission loop
+    can stamp provenance ("via"). Never raises; ANY failure — no index_dir resolvable
+    (caller-supplied in-memory index with no dirs: eval self_recall probes, hermetic
+    LoadedIndex tests), absent/corrupt links.json, junk env — returns the input untouched,
+    so expansion can only ever be additive, never a new degradation mode.
+    """
+    try:
+        if not index_dir or not penalized:
+            return penalized, set()
+        seeds_n = _graph_seed_count()
+        if seeds_n <= 0:
+            return penalized, set()
+        from .links import load_edges
+
+        edges = load_edges(index_dir)
+        if not edges:
+            return penalized, set()
+        seeds = penalized[:seeds_n]
+        seed_idxs = {i for i, _score, _state in seeds}
+        # Entry "name" == file stem == the edge list's node identity (both come from the
+        # same os.path.splitext(basename) in compute_corpus / LinkGraph).
+        name_to_idx = {e.get("name"): j for j, e in enumerate(entries)}
+        organic_score = {i: score for i, score, _state in penalized}
+        injected: dict = {}  # entry idx -> best discounted seed score
+        for si, sscore, _sstate in seeds:
+            rec = edges.get(entries[si].get("name"))
+            if not rec:
+                continue
+            for stem in rec.get("out", set()) | rec.get("in", set()):
+                j = name_to_idx.get(stem)
+                if j is None or j in seed_idxs:
+                    continue
+                cand = sscore * _NEIGHBOR_DISCOUNT
+                if cand > injected.get(j, float("-inf")):
+                    injected[j] = cand
+        if not injected:
+            return penalized, set()
+        replace: dict = {}  # entry idx -> (adj_score, state)
+        for j, cand in injected.items():
+            state = _invalidation_state(entries[j])
+            adj = cand * _INVALIDATION_PENALTY if state == "recent" else cand
+            if j in organic_score and organic_score[j] >= adj:
+                continue  # organic rank is already at least as good — keep it (and its label)
+            replace[j] = (adj, state)
+        if not replace:
+            return penalized, set()
+        expanded = [t for t in penalized if t[0] not in replace]
+        expanded.extend((j, adj, state) for j, (adj, state) in replace.items())
+        expanded.sort(key=lambda triple: triple[1], reverse=True)
+        return expanded, set(replace)
+    except Exception:
+        return penalized, set()
+
+
 # --------------------------------------------------------------------------- #
 # Recall
 # --------------------------------------------------------------------------- #
@@ -284,7 +381,7 @@ def recall(
     index_dir: Optional[str] = None,
     repo_root: Optional[str] = None,
 ) -> List[dict]:
-    """Top-``k`` memories for ``query`` as ``[{name, file, description, score, backend}]``.
+    """Top-``k`` memories for ``query`` as ``[{name, file, description, score, backend, via}]``.
 
     Never raises; returns [] on any failure or empty query. ``repo_root`` is the SEC-1 trust
     gate's key — the hook entry (``main``) resolves it ONCE via ``resolve_dirs`` and threads it
@@ -358,6 +455,17 @@ def recall(
             penalized.append((i, adj_score, state))
         penalized.sort(key=lambda triple: triple[1], reverse=True)
 
+        # --- 1-hop graph expansion (GRA-1): AFTER fusion + invalidation re-sort. ---
+        # Resolvable index_dir only: an explicit index_dir wins, else it derives from
+        # memory_dir exactly as _ensure_index does (same default_index_dir, same
+        # MEMOBOT_INDEX_DIR override). A caller-supplied in-memory index with NO dirs
+        # (eval self_recall probes, hermetic LoadedIndex tests) resolves to None ->
+        # _expand_neighbors is a no-op, zero behavior change there.
+        graph_index_dir = index_dir
+        if graph_index_dir is None and memory_dir:
+            graph_index_dir = default_index_dir(memory_dir)
+        penalized, graph_injected = _expand_neighbors(penalized, entries, graph_index_dir)
+
         # Walk the re-sorted list and emit up to k DISPLAY-eligible results, skipping "old"
         # entries as we go. This is NOT `penalized[:k]` followed by a filter -- a fixed-size
         # slice-then-filter could yield fewer than k results when an "old" entry occupies a
@@ -385,6 +493,11 @@ def recall(
                     "description": entry_description(e).strip(),
                     "score": round(1.0 / (len(results) + 1), 4),
                     "backend": backend,
+                    # Injection provenance (GRA-1) — ALWAYS present so downstream code never
+                    # branches on key existence: "graph" = surfaced by 1-hop expansion,
+                    # "rank" = organic fusion. format_results renders "graph" as " (linked)"
+                    # so a user reading the injected block can see WHY a line is there.
+                    "via": "graph" if i in graph_injected else "rank",
                 }
             )
         return results
@@ -405,7 +518,11 @@ def format_results(results: List[dict], max_chars: int = _MAX_RECALL_CHARS) -> s
         desc = r["description"].replace("\n", " ").strip()
         if len(desc) > 220:
             desc = desc[:217].rstrip() + "…"
-        lines.append(f"  • {r['name']} ({r['file']}) — {desc}")
+        # Graph-injected lines (GRA-1) carry a legible provenance marker so injection is
+        # inspectable — a "(linked)" entry is here because a top-seed memory links to it,
+        # not because it matched the query lexically/semantically on its own.
+        marker = " (linked)" if r.get("via") == "graph" else ""
+        lines.append(f"  • {r['name']} ({r['file']}) — {desc}{marker}")
     out = "\n".join(lines)
     if len(out) > max_chars:
         out = out[: max_chars - 16].rstrip() + "\n…(truncated)"

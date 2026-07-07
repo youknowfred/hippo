@@ -252,6 +252,193 @@ def test_recall_no_invalid_after_is_unaffected(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# 1-hop graph expansion (GRA-1) — BM25-only, links.json persisted by build_index
+# --------------------------------------------------------------------------- #
+def _write_linked_corpus(memory_dir: str, items: dict) -> None:
+    """items: fname -> (description, body). Bodies may carry [[wikilinks]]."""
+    os.makedirs(memory_dir, exist_ok=True)
+    for fname, (desc, body) in items.items():
+        with open(os.path.join(memory_dir, fname), "w", encoding="utf-8") as fh:
+            fh.write(_mem(fname[:-3], desc, body))
+
+
+# auth_flow links [[deploy_runbook]]; deploy_runbook shares ZERO tokens with the oauth
+# query — only the graph edge can surface it. Fillers keep BM25 IDF sane on a tiny corpus.
+_LINKED_CORPUS = {
+    "auth_flow.md": (
+        "oauth token refresh flow for the api gateway",
+        "details\n\nRelated: [[deploy_runbook]]\n",
+    ),
+    "deploy_runbook.md": ("kubernetes helm chart rollout steps", "body"),
+    "excel_header.md": (_CORPUS["excel_header.md"], "body"),
+    "canvas_pdf.md": (_CORPUS["canvas_pdf.md"], "body"),
+    "formula_graph.md": (_CORPUS["formula_graph.md"], "body"),
+}
+_OAUTH_QUERY = "how does the oauth token refresh flow work"
+
+
+def test_graph_expansion_surfaces_lexically_distant_neighbor(tmp_path, monkeypatch):
+    """The acceptance case: A links [[B]], B shares no tokens with a query hitting A ->
+    B still lands in top-k, marked via=graph, and format_results renders ' (linked)'."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_linked_corpus(md, _LINKED_CORPUS)
+    B.build_index(md, idx)
+
+    res = R.recall(_OAUTH_QUERY, k=5, memory_dir=md, index_dir=idx)
+    by_name = {r["name"]: r for r in res}
+    assert "auth_flow" in by_name and by_name["auth_flow"]["via"] == "rank"
+    assert "deploy_runbook" in by_name  # lexically distant — only the edge got it here
+    assert by_name["deploy_runbook"]["via"] == "graph"
+    # the seed outranks its 0.5x-discounted neighbor
+    names = [r["name"] for r in res]
+    assert names.index("auth_flow") < names.index("deploy_runbook")
+
+    out = R.format_results(res)
+    for line in out.splitlines():
+        if "deploy_runbook" in line:
+            assert line.endswith(" (linked)")
+        elif "auth_flow" in line:
+            assert "(linked)" not in line
+
+
+def test_graph_expansion_pulls_inbound_neighbors_too(tmp_path, monkeypatch):
+    """Expansion unions BOTH directions: a query hitting deploy_runbook (the link TARGET)
+    surfaces auth_flow through its inbound edge."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_linked_corpus(md, _LINKED_CORPUS)
+    B.build_index(md, idx)
+
+    res = R.recall("kubernetes helm chart rollout steps", k=5, memory_dir=md, index_dir=idx)
+    by_name = {r["name"]: r for r in res}
+    assert "deploy_runbook" in by_name and by_name["deploy_runbook"]["via"] == "rank"
+    assert "auth_flow" in by_name and by_name["auth_flow"]["via"] == "graph"
+
+
+def test_graph_expansion_noop_when_no_edges(tmp_path, monkeypatch):
+    """A corpus with zero wikilinks must rank byte-identically with expansion enabled vs
+    force-disabled (MEMOBOT_GRAPH_SEEDS=0) — the expansion path may only ever ADD."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)  # bodies are plain "body" — no [[links]], so links.json is edge-free
+    B.build_index(md, idx)
+
+    query = "which reranker do we use for search results"
+    monkeypatch.setenv("MEMOBOT_GRAPH_SEEDS", "0")
+    disabled = R.recall(query, k=5, memory_dir=md, index_dir=idx)
+    monkeypatch.delenv("MEMOBOT_GRAPH_SEEDS")
+    enabled = R.recall(query, k=5, memory_dir=md, index_dir=idx)
+    assert enabled == disabled  # full dict equality: names, order, scores, via labels
+    assert enabled and all(r["via"] == "rank" for r in enabled)
+    assert "(linked)" not in R.format_results(enabled)
+
+
+def test_graph_expansion_never_resurrects_old_invalidated(tmp_path, monkeypatch):
+    """'old'-invalidated neighbors stay display-filtered — the graph must not become a
+    side door around soft-invalidation."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    items = dict(_LINKED_CORPUS)
+    _write_linked_corpus(md, items)
+    # Stamp deploy_runbook (the neighbor) old-invalidated via top-level frontmatter, the
+    # same field build_index extracts for organic candidates.
+    runbook = os.path.join(md, "deploy_runbook.md")
+    with open(runbook, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    text = text.replace("type: project\n", f"type: project\ninvalid_after: {_iso_days_ago(400)}\n")
+    with open(runbook, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    B.build_index(md, idx)
+
+    res = R.recall(_OAUTH_QUERY, k=5, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert "auth_flow" in names
+    assert "deploy_runbook" not in names  # injected, then display-filtered like any organic "old"
+
+
+def test_graph_expansion_keeps_higher_organic_score(tmp_path, monkeypatch):
+    """A neighbor that ALREADY ranks organically above the discounted injection keeps its
+    organic tuple — same position, via=rank, no downgrade to a graph label."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    # Both docs match the query hard -> the neighbor's organic RRF score (rank 1 or 2,
+    # >= 1/62) strictly beats the 0.5x-discounted injection (<= 1/122).
+    _write_linked_corpus(
+        md,
+        {
+            "auth_flow.md": (
+                "oauth token refresh flow for the api gateway",
+                "details\n\nRelated: [[token_rotation]]\n",
+            ),
+            "token_rotation.md": ("oauth token refresh rotation policy", "body"),
+            "excel_header.md": (_CORPUS["excel_header.md"], "body"),
+            "canvas_pdf.md": (_CORPUS["canvas_pdf.md"], "body"),
+        },
+    )
+    B.build_index(md, idx)
+
+    res = R.recall(_OAUTH_QUERY, k=4, memory_dir=md, index_dir=idx)
+    by_name = {r["name"]: r for r in res}
+    assert "token_rotation" in by_name
+    assert by_name["token_rotation"]["via"] == "rank"  # organic win — no graph relabel
+    # organic top-2, ahead of everything the graph could have injected it at
+    assert [r["name"] for r in res].index("token_rotation") < 2
+
+
+def test_graph_expansion_seed_count_env_override(tmp_path, monkeypatch):
+    """MEMOBOT_GRAPH_SEEDS changes how deep the seed window reaches: a neighbor linked only
+    from the #3-ranked hit appears at the default (3) but not at 1."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    # Strictly nested token overlap -> deterministic BM25 order x > y > z for the query;
+    # only z (rank 3) links to the lexically-distant neighbor.
+    _write_linked_corpus(
+        md,
+        {
+            "x.md": ("alpha beta gamma delta topic", "body"),
+            "y.md": ("alpha beta gamma other topic", "body"),
+            "z.md": ("alpha beta unrelated topic", "Related: [[hidden_gem]]\n"),
+            "hidden_gem.md": ("kubernetes helm chart rollout steps", "body"),
+            "filler.md": (_CORPUS["canvas_pdf.md"], "body"),
+        },
+    )
+    B.build_index(md, idx)
+
+    query = "alpha beta gamma delta"
+    monkeypatch.setenv("MEMOBOT_GRAPH_SEEDS", "1")
+    narrow = [r["name"] for r in R.recall(query, k=5, memory_dir=md, index_dir=idx)]
+    assert "hidden_gem" not in narrow  # z is outside the 1-seed window
+
+    monkeypatch.delenv("MEMOBOT_GRAPH_SEEDS")  # default 3 seeds reaches z
+    wide = [r["name"] for r in R.recall(query, k=5, memory_dir=md, index_dir=idx)]
+    assert "hidden_gem" in wide
+
+
+def test_graph_expansion_skipped_for_in_memory_index_without_dirs(tmp_path, monkeypatch):
+    """A caller-supplied LoadedIndex with no dirs (eval self_recall probes, hermetic tests)
+    gets NO expansion — no index_dir is resolvable, so the edge cache is never consulted."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_linked_corpus(md, _LINKED_CORPUS)
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+
+    res = R.recall(_OAUTH_QUERY, k=5, index=index)
+    names = [r["name"] for r in res]
+    assert "auth_flow" in names
+    assert "deploy_runbook" not in names  # edge exists on disk, but no dirs -> no expansion
+    assert all(r["via"] == "rank" for r in res)
+
+
+# --------------------------------------------------------------------------- #
 # Fused dense+BM25 recall with a fake embedder
 # --------------------------------------------------------------------------- #
 def test_recall_fused_dense_and_bm25(tmp_path, monkeypatch):
