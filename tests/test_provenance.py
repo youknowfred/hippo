@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 from memory import provenance as P
@@ -1034,3 +1035,68 @@ def test_remove_project_symlink_idempotent_second_call_is_absent(tmp_path):
 
     second = P.remove_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
     assert second["status"] == "absent"
+
+
+# --------------------------------------------------------------------------- #
+# COR-7: corpus format marker (.claude/memory/.format) — read/write helpers
+# --------------------------------------------------------------------------- #
+def test_read_corpus_format_is_1_when_undeclared(tmp_path):
+    """A corpus with NO marker reads as format 1 — every pre-marker corpus is already on
+    the baseline, so absence must mean the baseline, never an error."""
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    assert P.read_corpus_format(md) == 1
+    assert P.read_corpus_format(str(tmp_path / "does-not-exist")) == 1
+
+
+def test_write_then_read_corpus_format_round_trips(tmp_path):
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    assert P.write_corpus_format(md) is True
+    assert P.read_corpus_format(md) == P.CORPUS_FORMAT_VERSION
+    # An explicit version (the final step of a doctor-driven migration) round-trips too.
+    assert P.write_corpus_format(md, version=7) is True
+    assert P.read_corpus_format(md) == 7
+
+
+def test_corpus_format_marker_is_json_at_the_canonical_path(tmp_path):
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    assert P.write_corpus_format(md) is True
+    marker = P.format_marker_path(md)
+    assert marker == os.path.join(md, ".format")
+    with open(marker, "r", encoding="utf-8") as fh:
+        assert json.load(fh) == {"corpus_format": P.CORPUS_FORMAT_VERSION}
+
+
+def test_read_corpus_format_degrades_to_1_on_garbage(tmp_path):
+    """An unreadable/corrupt/wrong-shape marker degrades to the baseline (never raises) —
+    doctor reports against whatever this returns, so garbage at worst reads as format 1
+    rather than blocking recall."""
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    for garbage in (
+        "{not json",
+        '["corpus_format", 2]',  # non-dict payload
+        '{"corpus_format": "two"}',  # non-int value
+        '{"corpus_format": true}',  # bool is an int subclass — must NOT read as 1==True
+        '{"something_else": 2}',  # missing key
+    ):
+        with open(P.format_marker_path(md), "w", encoding="utf-8") as fh:
+            fh.write(garbage)
+        assert P.read_corpus_format(md) == 1, garbage
+
+
+def test_write_corpus_format_returns_false_on_missing_dir(tmp_path):
+    assert P.write_corpus_format(str(tmp_path / "does-not-exist")) is False
+
+
+def test_format_marker_is_invisible_to_the_corpus_iterator(tmp_path):
+    """.format is a marker, not a memory — _iter_memory_files (THE corpus-membership
+    filter) must never yield it, so it can never be indexed/floor-scanned/backfilled."""
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    assert P.write_corpus_format(md) is True
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: a\n---\nbody\n")
+    assert [os.path.basename(p) for p in P._iter_memory_files(md)] == ["a.md"]

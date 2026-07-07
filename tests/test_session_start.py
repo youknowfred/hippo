@@ -357,3 +357,53 @@ def test_read_hook_payload_tty_stdin_is_not_read(monkeypatch):
 
     monkeypatch.setattr(S.sys, "stdin", FakeTty())
     assert S._read_hook_payload() == (None, None)
+
+
+# --------------------------------------------------------------------------- #
+# COR-7: corpus_format producer — a corpus NEWER than the plugin must be loud;
+# an OLDER one is doctor's migration path, never a per-session nag
+# --------------------------------------------------------------------------- #
+def test_corpus_format_producer_warns_when_corpus_is_newer(tmp_path):
+    from memory.provenance import write_corpus_format
+
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    newer = S.CORPUS_FORMAT_VERSION + 1
+    assert write_corpus_format(md, version=newer) is True
+    out = S.corpus_format_producer(md, "repo")
+    assert out is not None
+    assert f"v{newer}" in out and f"v{S.CORPUS_FORMAT_VERSION}" in out  # names BOTH versions
+    assert "update the hippo plugin" in out.lower()  # the one-directional remediation
+
+
+def test_corpus_format_producer_silent_when_current_or_undeclared(tmp_path):
+    from memory.provenance import write_corpus_format
+
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    assert S.corpus_format_producer(md, "repo") is None  # no marker == format 1 == silent
+    assert write_corpus_format(md) is True  # explicit current version
+    assert S.corpus_format_producer(md, "repo") is None
+
+
+def test_corpus_format_producer_silent_when_corpus_is_older(tmp_path, monkeypatch):
+    """Corpus older than the plugin == a migration is pending — that path is doctor-driven
+    (check_format_version names it once, on demand), not a per-session alarm."""
+    from memory.provenance import write_corpus_format
+
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    assert write_corpus_format(md, version=1) is True
+    monkeypatch.setattr(S, "CORPUS_FORMAT_VERSION", 2)  # simulate a post-bump plugin
+    assert S.corpus_format_producer(md, "repo") is None
+
+
+def test_corpus_format_producer_silent_on_missing_corpus(tmp_path):
+    assert S.corpus_format_producer(str(tmp_path / "does-not-exist"), "repo") is None
+
+
+def test_corpus_format_producer_is_registered_exactly_once():
+    labels = [label for label, _fn in S.PRODUCERS]
+    assert labels.count("corpus_format") == 1
+    fns = [fn for label, fn in S.PRODUCERS if label == "corpus_format"]
+    assert fns == [S.corpus_format_producer]

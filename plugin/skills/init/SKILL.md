@@ -19,7 +19,9 @@ symlink Claude Code's native memory system reads from.
   `git worktree` of a repo already using hippo: the corpus is already in git, but THIS machine
   (or this worktree's `~/.claude/projects/<encoded>` entry) has never had its symlink or index
   built. Do **NOT** hard-stop and do **NOT** touch any existing memory file. Instead, **skip
-  steps 1-2** (starter-pack selection, `MEMORY.md` skeleton — there is nothing to seed) and run
+  steps 1-2b** (starter-pack selection, `MEMORY.md` skeleton, format marker — there is
+  nothing to seed, and stamping a format marker onto an unmigrated corpus is doctor's call,
+  not init's) and run
   **only the machine-local setup, steps 3-5** (including 4b): symlink, index build, trust-mark,
   `.gitignore` check. Re-running init against an existing corpus is the user explicitly
   reviewing it, so 4b marks it trusted (SEC-1) even on this path. This
@@ -50,8 +52,8 @@ symlink Claude Code's native memory system reads from.
 
 ## What this does, in order
 
-Steps 1-2 are SKIPPED entirely on an existing corpus (see preflight) — jump straight to step 3;
-steps 3, 4, 4b (trust-mark), and 5 all still run.
+Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump straight to step
+3; steps 3, 4, 4b (trust-mark), and 5 all still run.
 
 1. **Offer the starter packs — default is core only.** The packs live in
    `${CLAUDE_PLUGIN_ROOT}/assets/packs/` (one directory per pack, each with a `manifest.json`;
@@ -76,6 +78,17 @@ steps 3, 4, 4b (trust-mark), and 5 all still run.
    editable `<FILL-ME>` template — tell the user to fill it in with their own role/context
    before their first real session (skip this reminder only if they explicitly say they'll
    do it later).
+2b. **Stamp the corpus format marker** — `.claude/memory/.format`, committed WITH the corpus
+   (it describes the corpus's on-disk conventions; it is NOT a derived cache, so it is never
+   gitignored):
+   ```bash
+   printf '{"corpus_format": 1}\n' > .claude/memory/.format
+   ```
+   The number is `memory.provenance.CORPUS_FORMAT_VERSION` (a parity test pins this snippet
+   to that constant so the two can't drift). Fresh-corpus path ONLY, like the rest of steps
+   1-2: a corpus with NO marker already reads as format 1 (every pre-marker corpus), and an
+   EXISTING corpus must never be stamped with a newer format it hasn't been migrated to —
+   `/hippo:doctor`'s format check owns that comparison (COR-7).
 3. **Create the cross-machine symlink**. The encoding is the harness's actual rule (SHP-5:
    every non-alphanumeric character becomes a literal `-`, one-for-one, no collapsing, no
    stripping), and the create-or-confirm logic itself is ONE tested Python helper

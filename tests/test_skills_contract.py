@@ -164,3 +164,31 @@ def test_every_skill_routes_through_the_canonical_resolver():
             f"{os.path.relpath(path, _PLUGIN_DIR)} does not route PY resolution "
             "through hooks/_resolve_py.sh (OSP-6)"
         )
+
+
+# --------------------------------------------------------------------------- #
+# COR-7: init's corpus-format seeding snippet stays in lockstep with the constant.
+# Steps 1-2 of init run BEFORE $PY is resolved, so the SKILL.md snippet writes a
+# LITERAL number instead of calling memory.provenance.write_corpus_format — this
+# parity pin (the same cross-language pattern as test_fastembed_cache_path.py)
+# is what makes a CORPUS_FORMAT_VERSION bump a one-constant change: bump the
+# constant and this test names the exact init surface that must follow.
+# --------------------------------------------------------------------------- #
+_INIT_SKILL = os.path.join(_SKILLS_DIR, "init", "SKILL.md")
+
+
+def test_init_skill_seeds_the_canonical_corpus_format():
+    from memory.provenance import CORPUS_FORMAT_VERSION
+
+    with open(_INIT_SKILL, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    assert ".claude/memory/.format" in text, (
+        "init SKILL.md no longer seeds the corpus format marker (COR-7 step 2b)"
+    )
+    literals = re.findall(r'\{"corpus_format":\s*(\d+)\}', text)
+    assert literals, "init SKILL.md carries no {\"corpus_format\": N} literal to pin"
+    assert all(int(v) == CORPUS_FORMAT_VERSION for v in literals), (
+        f"init SKILL.md seeds corpus_format {sorted(set(literals))}, but "
+        f"memory.provenance.CORPUS_FORMAT_VERSION is {CORPUS_FORMAT_VERSION} — "
+        "update the SKILL.md snippet in the same change that bumps the constant"
+    )

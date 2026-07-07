@@ -1770,3 +1770,26 @@ def test_on_topic_prompt_still_finds_hit_with_dense_floor_active(tmp_path, monke
         index_dir=idx,
     )
     assert any(r["name"] == "oauth_refresh" for r in res)
+
+
+# --------------------------------------------------------------------------- #
+# COR-7: the hook path never serves a schema-stale index — load_index treats it
+# as absent and the implicit BM25-only build replaces it in place.
+# --------------------------------------------------------------------------- #
+def test_recall_rebuilds_and_serves_results_on_schema_stale_index(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"reranker.md": "voyage reranker cross encoder ordering"})
+    B.build_index(md, idx)
+
+    monkeypatch.setattr(B, "SCHEMA_VERSION", B.SCHEMA_VERSION + 1)
+    res = R.recall("voyage reranker cross encoder", memory_dir=md, index_dir=idx)
+    assert any(r["name"] == "reranker" for r in res)  # rebuilt, not silently empty
+    # The stale manifest was REPLACED at the current (bumped) version by _ensure_index's
+    # implicit build — the next load serves it without another rebuild.
+    import json as _json
+
+    with open(os.path.join(idx, "manifest.json"), "r", encoding="utf-8") as fh:
+        assert _json.load(fh)["schema_version"] == B.SCHEMA_VERSION
+    assert B.load_index(idx) is not None

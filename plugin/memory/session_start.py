@@ -24,7 +24,7 @@ from typing import Callable, List, Optional, Tuple
 
 from .lint_floor import floor_producer
 from .lint_links import lint_links_producer
-from .provenance import resolve_dirs
+from .provenance import CORPUS_FORMAT_VERSION, read_corpus_format, resolve_dirs
 from .recall import git_recent_producer
 from .reconsolidate import reconsolidation_producer
 from .staleness import count_unresolvable_baselines, find_stale, find_unparseable
@@ -97,6 +97,31 @@ def stale_venv_producer(memory_dir: str, repo_root: str) -> Optional[str]:
         "⚠ hippo deps changed with the last plugin update — the venv still runs the "
         "old dependency set (new imports degrade silently). Run /hippo:bootstrap to "
         "re-provision."
+    )
+
+
+def corpus_format_producer(memory_dir: str, repo_root: str) -> Optional[str]:
+    """LOUD warning when the corpus declares a format NEWER than this plugin understands.
+
+    COR-7: the ``.claude/memory/.format`` marker travels with the corpus through git, so a
+    teammate on a newer hippo can bump the corpus format under a machine still running an
+    older plugin — which would otherwise keep reading conventions it predates with NO
+    signal anywhere. The fix is one-directional and user-side (update the plugin), hence a
+    per-session producer. The OTHER direction (corpus OLDER than the plugin expects) is
+    deliberately NOT nagged here: migrating user data is a doctor-driven, agent-gated path
+    (see ``doctor.check_format_version`` + the README), not a per-session alarm. Silent on
+    an undeclared corpus (no marker == format 1) and on any read problem.
+    """
+    try:
+        declared = read_corpus_format(memory_dir)
+    except Exception:
+        return None
+    if declared <= CORPUS_FORMAT_VERSION:
+        return None
+    return (
+        f"⚠ Corpus format — this corpus declares format v{declared} but this hippo plugin "
+        f"only understands v{CORPUS_FORMAT_VERSION}. Update the hippo plugin: a newer-format "
+        "corpus can carry conventions this version misreads or silently ignores."
     )
 
 
@@ -190,6 +215,7 @@ def unresolvable_baseline_producer(memory_dir: str, repo_root: str) -> Optional[
 # (label, fn). Each tier appends a producer here — never a parallel hook entry.
 PRODUCERS: List[Tuple[str, Callable[[str, str], Optional[str]]]] = [
     ("stale_venv", stale_venv_producer),  # environment-level — a stale venv taints everything below
+    ("corpus_format", corpus_format_producer),  # a corpus NEWER than the plugin taints every reader below (COR-7)
     ("integrity", integrity_producer),  # a malformed memory must not hide
     ("staleness", staleness_producer),
     ("reconsolidation", reconsolidation_producer),  # recall-filtered subset of staleness; silent unless a recently-recalled memory is stale

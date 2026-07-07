@@ -49,10 +49,16 @@ from .provenance import (
 # Config (all overridable via env so the hook/tests never hard-depend on one model)
 # --------------------------------------------------------------------------- #
 _INDEX_DIRNAME = ".memory-index"
-# v2 (Tier 3, memory-organism-instrument-immunize): entries gained "invalid_after". Nothing
-# currently reads/gates on this field (no version-mismatch check exists anywhere), so the
-# bump is a marker only — an older v1 index loads fine; entry.get("invalid_after") is None
-# for every pre-existing entry until the next rebuild repopulates it.
+# v2 (Tier 3, memory-organism-instrument-immunize): entries gained "invalid_after".
+# COR-7 made this constant LOAD-BEARING: ``_load_manifest`` (the one gate every manifest
+# consumer goes through — build_index's incremental reuse, refresh_index's hash fast-path,
+# load_index and therefore recall) treats a manifest whose ``schema_version`` differs from
+# this value as ABSENT, so bumping it forces exactly ONE full rebuild at the next
+# build/refresh (the index is derived — a rebuild loses nothing) instead of silently
+# serving a stale shape to code expecting the new one. The CORPUS format is versioned
+# separately (``provenance.CORPUS_FORMAT_VERSION`` + the ``.claude/memory/.format``
+# marker) — the corpus is authoritative and is never auto-migrated; see doctor's
+# ``check_format_version`` and plugin/memory/README.md.
 SCHEMA_VERSION = 2
 # Public (not underscore-prefixed): doctor's non-English-corpus check (RET-3) compares a
 # manifest's recorded model against this constant to decide whether the CURRENTLY configured
@@ -834,15 +840,41 @@ def embed_query(text: str, allow_download: bool = False):
 # --------------------------------------------------------------------------- #
 # Manifest / dense matrix IO
 # --------------------------------------------------------------------------- #
-def _load_manifest(index_dir: str) -> Optional[dict]:
+def _read_manifest_json(index_dir: str) -> Optional[dict]:
+    """Raw manifest read — NO schema gate. Only for surfaces that must SEE an old-version
+    manifest in order to name it (``check_index_integrity``, doctor's format check); every
+    load-bearing consumer goes through ``_load_manifest`` below, which enforces
+    ``SCHEMA_VERSION``. ``None`` on a missing file, unparseable JSON, or a non-dict payload."""
     p = os.path.join(index_dir, _MANIFEST_NAME)
     if not os.path.exists(p):
         return None
     try:
         with open(p, "r", encoding="utf-8") as fh:
-            return json.load(fh)
+            data = json.load(fh)
+        return data if isinstance(data, dict) else None
     except Exception:
         return None
+
+
+def _load_manifest(index_dir: str) -> Optional[dict]:
+    """The versioned manifest load (COR-7) — the ONE gate every consumer passes through.
+
+    A manifest whose ``schema_version`` != the running module's ``SCHEMA_VERSION`` is
+    treated as ABSENT (returns ``None``), exactly like a missing/corrupt file: the index is
+    derived, so the only correct response to a shape this code no longer (or does not yet)
+    writes is one full rebuild, never serving the stale shape verbatim. Consequences per
+    caller, all automatic: ``build_index`` sees no old manifest -> no hash-keyed row reuse
+    -> full re-embed; ``refresh_index``'s corpus-unchanged fast-path sees no old manifest ->
+    falls through to that one full rebuild (which stamps the CURRENT version, so the next
+    refresh no-ops again); ``load_index``/recall see no index -> the hook's implicit
+    BM25-only build replaces it. This state is user-visible at doctor
+    (``check_format_version``) — it is a routine plugin-update artifact, not corruption."""
+    manifest = _read_manifest_json(index_dir)
+    if manifest is None:
+        return None
+    if manifest.get("schema_version") != SCHEMA_VERSION:
+        return None
+    return manifest
 
 
 def _load_dense(index_dir: str):
@@ -1283,17 +1315,28 @@ def check_index_integrity(index_dir: str) -> Optional[str]:
           update bumped the default, since this index was last built) — ``recall._dense_rank``
           already refuses to cosine-score across two different embedding spaces and degrades
           to BM25, but silently; this names BOTH models and the remediation.
-    A missing manifest (no index built yet) is NOT corruption — returns ``None``.
+    A missing manifest (no index built yet) is NOT corruption — returns ``None``. Neither
+    is a schema-version mismatch (COR-7): that manifest is already treated as absent by
+    every load path and rebuilt on the next refresh; ``doctor.check_format_version`` owns
+    naming it, so this detector returns ``None`` rather than calling an update "damage".
     """
     try:
         manifest_path = os.path.join(index_dir, _MANIFEST_NAME)
         if not os.path.exists(manifest_path):
             return None  # nothing built yet -> not a corruption state
-        manifest = _load_manifest(index_dir)
+        # RAW read (not _load_manifest): a schema-version mismatch must NOT be mislabeled
+        # as corrupt JSON here — it is a routine plugin-update state, not damage.
+        manifest = _read_manifest_json(index_dir)
         if manifest is None:
             return (
                 "index manifest is corrupt (invalid JSON) — will rebuild on next refresh"
             )
+        if manifest.get("schema_version") != SCHEMA_VERSION:
+            # Not corruption (COR-7): every load path already treats this manifest as
+            # absent and the next build/refresh performs one full rebuild. doctor's
+            # check_format_version owns reporting it; diagnosing the dense/model state of
+            # a manifest no reader will ever serve would only mislead.
+            return None
         dense_path = os.path.join(index_dir, _DENSE_NAME)
         if manifest.get("dense_ready"):
             if not os.path.exists(dense_path):

@@ -292,6 +292,36 @@ Decay is DEMOTION, never deletion.
 | Untrusted corpus (SEC-1) | A cloned/foreign git corpus injects NOTHING until trusted: recall returns `[]`, producers stay silent; a low-frequency SessionStart nudge points at `/hippo:doctor` (count + sample names → one-time consent). `/hippo:init` trusts corpora you create; `HIPPO_TRUST_ALL=1` bypasses for CI |
 | Unparseable frontmatter | Skipped by staleness AND refused by refresh/reverify; the `integrity` producer names the file loudly |
 
+## Corpus format versioning (the doctor-driven migration path)
+
+Two version numbers, two very different contracts (COR-7):
+
+- **Index** — `manifest.json` carries `schema_version` (`build_index.SCHEMA_VERSION`).
+  The index is a derived cache, so a mismatch (any plugin update that changes the manifest
+  shape) is **self-healing and needs zero operator action**: every load path treats a
+  mismatched manifest as absent, and the next SessionStart refresh performs one full
+  rebuild stamped with the current version.
+- **Corpus** — `.claude/memory/.format` declares `{"corpus_format": 1}`
+  (`provenance.CORPUS_FORMAT_VERSION`). It is committed **with** the corpus (it describes
+  the corpus; it is not a rebuildable cache); `/hippo:init` stamps it when seeding a fresh
+  corpus, and **a corpus with no marker reads as format 1** — every pre-marker corpus is
+  already on the baseline, nothing to backfill.
+
+**How a corpus format bump is detected, and what the operator does.** The corpus is the
+git-tracked source of authority, so hippo **never migrates it autonomously** — detection
+is loud, the fix is operator-driven:
+
+1. *Corpus newer than the plugin* (a teammate on newer hippo bumped the format): the
+   `corpus_format` SessionStart producer warns every session, and `/hippo:doctor`'s
+   format check names both versions → **update the hippo plugin**. Nothing else to do.
+2. *Corpus older than the plugin* (a plugin update shipped a format bump): `/hippo:doctor`
+   names both versions and points here. The release notes of the version that bumped
+   `CORPUS_FORMAT_VERSION` carry the migration steps; the operator runs them from doctor —
+   per-item, agent-gated frontmatter/body edits (the audit pattern: review each change,
+   no bulk sweep) — then stamps the marker as the final, explicit step
+   (`memory.provenance.write_corpus_format`). Until migrated, the plugin keeps reading
+   the old format (formats are additive where possible); newer-format features stay off.
+
 ## Environment overrides
 
 - `HIPPO_MEMORY_DIR` — point the tooling at a different memory dir (hermetic tests).

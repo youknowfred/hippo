@@ -312,6 +312,72 @@ def ensure_self_ignoring_dir(path: str) -> None:
         pass
 
 
+# --------------------------------------------------------------------------- #
+# COR-7: corpus format versioning
+# --------------------------------------------------------------------------- #
+# The version of the CORPUS's own on-disk conventions (frontmatter schemas, marker files,
+# floor layout) that this plugin reads and writes. Distinct from the INDEX's
+# ``build_index.SCHEMA_VERSION``: the index is a derived cache (a mismatch is healed by one
+# silent rebuild), while the corpus is the git-tracked single source of authority — a
+# format change there is a MIGRATION of user data, per-item and agent-gated, never
+# automatic (see plugin/memory/README.md, "Corpus format versioning"). Declared by a
+# ``.claude/memory/.format`` marker committed WITH the corpus (it describes the corpus; it
+# is NOT a rebuildable cache), JSON ``{"corpus_format": 1}``. A corpus with NO marker reads
+# as format 1 — every pre-v0.5.0 corpus predates the marker, so absence must mean the
+# baseline, never an error. A future breaking corpus change (e.g. GRA-4's typed edges)
+# bumps this ONE constant; init's seeding snippet and doctor's check follow it (a parity
+# test pins the init skill's literal to this constant so the two can't drift).
+CORPUS_FORMAT_VERSION = 1
+_FORMAT_MARKER_NAME = ".format"
+
+
+def format_marker_path(memory_dir: str) -> str:
+    """``<memory_dir>/.format`` — the corpus format marker's one canonical location."""
+    return os.path.join(memory_dir, _FORMAT_MARKER_NAME)
+
+
+def read_corpus_format(memory_dir: str) -> int:
+    """The corpus's declared format version; ``1`` when undeclared. Never raises.
+
+    A missing marker IS format 1 (the pre-versioning baseline every existing corpus is
+    on), so no corpus ever needs backfilling to be readable. An unreadable/corrupt/
+    wrong-shape marker also degrades to 1 — the never-raise direction; doctor's format
+    check reports against whatever this returns, so a garbled marker at worst reads as
+    the baseline rather than blocking recall.
+    """
+    try:
+        p = format_marker_path(memory_dir)
+        if not os.path.isfile(p):
+            return 1
+        with open(p, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if isinstance(data, dict):
+            v = data.get("corpus_format")
+            if isinstance(v, int) and not isinstance(v, bool):
+                return v
+        return 1
+    except Exception:
+        return 1
+
+
+def write_corpus_format(memory_dir: str, version: Optional[int] = None) -> bool:
+    """Stamp the corpus format marker (default: this plugin's ``CORPUS_FORMAT_VERSION``).
+
+    Returns True on success, False on any failure (missing dir, permissions) — callers
+    surface the failure rather than pretending the corpus is stamped. Deliberately has NO
+    bulk-migration counterpart: stamping a NEWER version onto an old corpus is the final,
+    explicit step of a doctor-driven migration, never something a hook or sweep does.
+    """
+    try:
+        marker = format_marker_path(memory_dir)
+        with open(marker, "w", encoding="utf-8") as fh:
+            json.dump({"corpus_format": int(version if version is not None else CORPUS_FORMAT_VERSION)}, fh)
+            fh.write("\n")
+        return True
+    except Exception:
+        return False
+
+
 def split_frontmatter(text: str) -> Tuple[Optional[List[str]], str]:
     """Split a memory file into ``(frontmatter_lines, body_text)``.
 
