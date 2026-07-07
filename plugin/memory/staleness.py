@@ -312,8 +312,8 @@ _SHORT_SHA_LEN = 7
 
 
 def stale_cache_path(index_dir: str) -> str:
-    """``<index_dir>/stale.json`` — the one path the writer (below) and RET-5/RET-6's
-    future reader must agree on."""
+    """``<index_dir>/stale.json`` — the one path the writer and ``read_stale_cache`` below
+    (RET-5's ranking penalty; RET-6's future drift banner) must agree on."""
     return os.path.join(index_dir, _STALE_CACHE_NAME)
 
 
@@ -332,10 +332,11 @@ def write_stale_cache(index_dir: str, stale: List[dict]) -> bool:
     Written on EVERY call, including an empty ``stale`` list — an honest
     ``{"stale": {}}`` means "checked this session, found nothing", never a skipped write,
     so a reader can trust the file's mere presence rather than guess whether staleness
-    ever ran. Nothing in this module reads it back: recall (RET-5/RET-6) owns that half,
-    and treats an absent/corrupt file as advisory — a no-op, never a hard error. Never
-    raises; returns True on a successful write, False on any failure (a bad ``index_dir``,
-    a permissions error) — callers must not let a cache-write failure cost them the
+    ever ran. ``read_stale_cache`` (below) is the reader half — recall.py's RET-5 salience
+    blend is its first consumer, treating an absent/corrupt file as advisory — a no-op,
+    never a hard error. RET-6's drift banner is a future second consumer. Never raises;
+    returns True on a successful write, False on any failure (a bad ``index_dir``, a
+    permissions error) — callers must not let a cache-write failure cost them the
     SessionStart run itself.
     """
     try:
@@ -366,6 +367,32 @@ def write_stale_cache(index_dir: str, stale: List[dict]) -> bool:
         return True
     except Exception:
         return False
+
+
+def read_stale_cache(index_dir: str) -> Optional[Dict[str, dict]]:
+    """The RET-5 reader half of ``write_stale_cache`` — ``{"<name>": {"changed", "sha"}}``,
+    or ``None`` when the cache is absent, corrupt, or schema-mismatched.
+
+    Advisory, same posture as ``links.load_edges``: this is a single small-JSON read of a
+    file SessionStart already refreshed once per run (never a git call — the staleness scan
+    that produced it already paid that cost, and belongs to ``_build_run_context``, not the
+    hot path). A missing file (index never built, or predates LIF-6) or a schema mismatch
+    both degrade to ``None`` -- recall.py's salience blend (RET-5) treats that identically to
+    "nothing stale", never a hard error. Never raises.
+    """
+    try:
+        with open(stale_cache_path(index_dir), "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("schema_version") != STALE_CACHE_SCHEMA_VERSION:
+            return None
+        stale = payload.get("stale")
+        if not isinstance(stale, dict):
+            return None
+        return {name: rec for name, rec in stale.items() if isinstance(name, str) and isinstance(rec, dict)}
+    except Exception:
+        return None
 
 
 def count_unresolvable_baselines(memory_dir: str, repo_root: str) -> int:

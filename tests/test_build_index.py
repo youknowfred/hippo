@@ -578,6 +578,75 @@ def test_refresh_index_picks_up_metadata_only_invalid_after_change(tmp_path, mon
 
 
 # --------------------------------------------------------------------------- #
+# RET-5: source_commit_time ingestion — the manifest-level half of the recency prior.
+# Mirrors the invalid_after tests above exactly: same top-level/nested-under-metadata
+# read contract (staleness.read_source_commit_time), same "metadata never perturbs
+# doc_text hash" starvation-proofing in refresh_index.
+# --------------------------------------------------------------------------- #
+def test_compute_corpus_source_commit_time_absent_by_default(tmp_path):
+    md = str(tmp_path / "memory")
+    _write_corpus(md, {"a.md": "alpha"})
+    entries = B.compute_corpus(md)
+    assert entries[0]["source_commit_time"] is None
+
+
+def test_compute_corpus_reads_source_commit_time_top_level(tmp_path):
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: a\ndescription: "alpha"\nsource_commit_time: 1750000000\n---\nbody\n')
+    entries = B.compute_corpus(md)
+    assert entries[0]["source_commit_time"] == 1750000000
+
+
+def test_compute_corpus_reads_source_commit_time_nested_under_metadata(tmp_path):
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write(
+            '---\nname: a\ndescription: "alpha"\nmetadata:\n'
+            "  source_commit_time: 1750000000\n---\nbody\n"
+        )
+    entries = B.compute_corpus(md)
+    assert entries[0]["source_commit_time"] == 1750000000
+
+
+def test_build_index_manifest_carries_source_commit_time(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    os.makedirs(md, exist_ok=True)
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: a\ndescription: "alpha"\nsource_commit_time: 1750000000\n---\nbody\n')
+    manifest = B.build_index(md, idx)
+    assert manifest["entries"][0]["source_commit_time"] == 1750000000
+    assert B.load_index(idx).entries[0]["source_commit_time"] == 1750000000
+
+
+def test_refresh_index_picks_up_metadata_only_source_commit_time_change(tmp_path, monkeypatch):
+    """RET-5: source_commit_time never perturbs doc_text (name+description only), so the
+    unchanged-corpus short-circuit must compare it explicitly — otherwise a reverify/
+    backfill that only bumps this field would be starved out of the index forever on an
+    otherwise-quiet corpus, and recall's optional recency prior would keep reading a stale
+    baseline (or none at all)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha", "b.md": "beta"})
+    B.build_index(md, idx)
+    assert all(e.get("source_commit_time") is None for e in B.load_index(idx).entries)
+
+    text = open(os.path.join(md, "a.md"), encoding="utf-8").read()
+    text = text.replace("---\n", "---\nsource_commit_time: 1750000000\n", 1)
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write(text)
+    B.refresh_index(md, idx)
+    by_name = {e["name"]: e.get("source_commit_time") for e in B.load_index(idx).entries}
+    assert by_name["a"] == 1750000000  # set -> propagated despite doc_text being unchanged
+    assert by_name["b"] is None
+
+
+# --------------------------------------------------------------------------- #
 # COR-3: a degraded (BM25-only) index must upgrade to dense on the next refresh_index
 # call once the corpus is unchanged but the model cache is warm again — the hash
 # short-circuit must NOT ignore dense_ready.
@@ -1147,9 +1216,11 @@ def test_build_index_manifest_carries_body_chunks_block(tmp_path, monkeypatch):
         on_disk = json.load(fh)
     assert on_disk["body_chunks"] == chunks
 
-    # The entries list itself is EXACTLY the pre-RET-2 shape (no new keys leaked onto it).
+    # The entries list itself is EXACTLY the pre-RET-2 shape plus RET-5's
+    # source_commit_time (no OTHER new keys leaked onto it).
     assert set(manifest["entries"][0].keys()) == {
-        "name", "file", "doc_text", "description", "hash", "tokens", "invalid_after", "row",
+        "name", "file", "doc_text", "description", "hash", "tokens", "invalid_after",
+        "source_commit_time", "row",
     }
 
 

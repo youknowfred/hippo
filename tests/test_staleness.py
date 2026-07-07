@@ -16,6 +16,7 @@ from memory.staleness import (
     read_invalid_after,
     read_provenance,
     read_source_commit_time,
+    read_stale_cache,
     set_invalid_after,
     stale_cache_path,
     write_stale_cache,
@@ -677,8 +678,9 @@ def test_main_invalidate_flag_accepts_name_without_md_suffix(memory_dir, capsys)
 
 
 # --------------------------------------------------------------------------- #
-# LIF-6: find_stale carries source_commit; write_stale_cache persists stale.json
-# (RET-5/RET-6 setup — a future bounded ranking penalty and drift banner).
+# LIF-6: find_stale carries source_commit; write_stale_cache persists stale.json,
+# consumed by RET-5's recall-time salience penalty (read_stale_cache below) and RET-6's
+# future drift banner.
 # --------------------------------------------------------------------------- #
 def test_find_stale_result_carries_source_commit(repo, memory_dir):
     """Additive: existing consumers only read name/changed_paths, so this is a new key,
@@ -744,3 +746,48 @@ def test_write_stale_cache_never_raises_on_a_bogus_index_dir():
     with tempfile.NamedTemporaryFile() as f:
         # f.name is a FILE; os.makedirs(f.name, exist_ok=True) must fail cleanly.
         assert write_stale_cache(f.name, []) is False
+
+
+# --------------------------------------------------------------------------- #
+# RET-5: read_stale_cache — the reader half of write_stale_cache, first consumed by
+# recall.py's salience blend.
+# --------------------------------------------------------------------------- #
+def test_read_stale_cache_round_trips_write(tmp_path):
+    idx = str(tmp_path / "idx")
+    stale = [
+        {"name": "m_alpha", "changed_paths": ["src/a.py", "src/b.py"], "source_commit": "abcdef1234567890"},
+    ]
+    write_stale_cache(idx, stale)
+    assert read_stale_cache(idx) == {"m_alpha": {"changed": 2, "sha": "abcdef1"}}
+
+
+def test_read_stale_cache_absent_file_is_none(tmp_path):
+    assert read_stale_cache(str(tmp_path / "never-built")) is None
+
+
+def test_read_stale_cache_empty_stale_is_an_honest_empty_dict(tmp_path):
+    """write_stale_cache([]) is a real "checked, found nothing" write — the reader must
+    distinguish it from "never ran" (None) by returning {}, not None."""
+    idx = str(tmp_path / "idx")
+    write_stale_cache(idx, [])
+    assert read_stale_cache(idx) == {}
+
+
+def test_read_stale_cache_corrupt_json_is_none(tmp_path):
+    idx = str(tmp_path / "idx")
+    os.makedirs(idx, exist_ok=True)
+    with open(stale_cache_path(idx), "w", encoding="utf-8") as fh:
+        fh.write("{not valid json")
+    assert read_stale_cache(idx) is None
+
+
+def test_read_stale_cache_wrong_schema_version_is_none(tmp_path):
+    idx = str(tmp_path / "idx")
+    os.makedirs(idx, exist_ok=True)
+    with open(stale_cache_path(idx), "w", encoding="utf-8") as fh:
+        json.dump({"schema_version": STALE_CACHE_SCHEMA_VERSION + 1, "stale": {"m_a": {}}}, fh)
+    assert read_stale_cache(idx) is None
+
+
+def test_read_stale_cache_never_raises_on_a_bogus_index_dir():
+    assert read_stale_cache("/nonexistent/path/does/not/exist") is None

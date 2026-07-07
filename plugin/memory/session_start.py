@@ -20,8 +20,9 @@ worklist derived from it) exactly ONCE per run — a ``staleness.RunContext`` �
 POSITIONALLY through every producer below (see ``PRODUCERS``): one uniform call shape, not a
 special case for the two staleness-derived producers. Producers that don't care about
 staleness just declare the trailing ``ctx`` parameter and never read it. The same computed
-staleness set is also persisted to the gitignored index dir as ``stale.json`` (RET-5/RET-6
-setup — a future bounded ranking penalty and drift banner; nothing here reads it back).
+staleness set is also persisted to the gitignored index dir as ``stale.json`` (consumed by
+RET-5's recall-time salience penalty and RET-6's future drift banner; nothing HERE reads it
+back — this module only writes it, via ``staleness.write_stale_cache``).
 
 Contract (mirrors ``.claude/hooks/agent_staleness.sh``):
   - Self-suppresses (prints nothing) when no producer has anything to say.

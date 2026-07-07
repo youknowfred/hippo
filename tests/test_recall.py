@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 import zlib
 
 import numpy as np
@@ -15,6 +16,8 @@ import pytest
 
 from memory import build_index as B
 from memory import recall as R
+from memory import staleness as S
+from memory import telemetry as T
 
 from .conftest import git_commit, write_file
 
@@ -2021,3 +2024,246 @@ def test_recall_rebuilds_and_serves_results_on_schema_stale_index(tmp_path, monk
     with open(os.path.join(idx, "manifest.json"), "r", encoding="utf-8") as fh:
         assert _json.load(fh)["schema_version"] == B.SCHEMA_VERSION
     assert B.load_index(idx) is not None
+
+
+# --------------------------------------------------------------------------- #
+# RET-5: salience fusion — recency / usage / staleness as bounded ranking priors.
+# DEFAULT OFF (HIPPO_SALIENCE=1 opts in). Hermetic throughout (HIPPO_DISABLE_DENSE=1,
+# same as every other test in this module) — no dense signal is needed to exercise any
+# of the three priors, all bm25-only.
+# --------------------------------------------------------------------------- #
+def test_salience_enabled_default_off_and_env_parsing(monkeypatch):
+    monkeypatch.delenv("HIPPO_SALIENCE", raising=False)
+    assert R._salience_enabled() is False
+    for truthy in ("1", "true", "yes", "on"):
+        monkeypatch.setenv("HIPPO_SALIENCE", truthy)
+        assert R._salience_enabled() is True
+    for falsy in ("0", "false", "False", ""):
+        monkeypatch.setenv("HIPPO_SALIENCE", falsy)
+        assert R._salience_enabled() is False
+
+
+def test_recency_boost_decays_linearly_and_caps():
+    now = 1_800_000_000.0
+    # same-day commit -> the full cap
+    assert R._recency_boost({"source_commit_time": now}, now=now) == R._SALIENCE_RECENCY_CAP
+    # half the window old -> half the cap
+    half_window_secs = R._SALIENCE_RECENCY_WINDOW_DAYS * 86400.0 / 2
+    boost = R._recency_boost({"source_commit_time": now - half_window_secs}, now=now)
+    assert boost == pytest.approx(R._SALIENCE_RECENCY_CAP / 2, abs=1e-9)
+    # beyond the window -> zero, never negative
+    too_old = now - (R._SALIENCE_RECENCY_WINDOW_DAYS + 1) * 86400.0
+    assert R._recency_boost({"source_commit_time": too_old}, now=now) == 0.0
+    # future/clock-skew timestamp -> treated as "as fresh as it gets", never raises
+    assert R._recency_boost({"source_commit_time": now + 1000}, now=now) == R._SALIENCE_RECENCY_CAP
+
+
+def test_recency_boost_absent_or_malformed_is_zero_never_a_penalty():
+    now = 1_800_000_000.0
+    assert R._recency_boost({}, now=now) == 0.0
+    assert R._recency_boost({"source_commit_time": None}, now=now) == 0.0
+    assert R._recency_boost({"source_commit_time": "not-a-number"}, now=now) == 0.0
+    assert R._recency_boost({"source_commit_time": True}, now=now) == 0.0  # bool excluded
+
+
+def test_usage_boost_map_empty_without_memory_dir_or_history(tmp_path):
+    assert R._usage_boost_map(None) == {}
+    assert R._usage_boost_map(str(tmp_path / "memory")) == {}  # no telemetry ever logged
+
+
+def test_usage_boost_map_capped_hard_even_at_full_session_coverage(tmp_path, monkeypatch):
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    td = T.default_telemetry_dir(md)
+    # "m" recalled in every one of 3 distinct sessions -> usage_score == 1.0
+    for i in range(3):
+        T.log_recall_event(
+            [{"name": "m", "backend": "bm25"}], query="q", k=1, latency_ms=1.0,
+            telemetry_dir=td, session_id=f"s{i}",
+        )
+    boosts = R._usage_boost_map(md)
+    assert boosts["m"] == R._SALIENCE_USAGE_CAP  # capped hard, not scaled past the cap
+    assert "never_recalled" not in boosts
+
+
+def test_staleness_penalty_map_empty_without_index_dir_or_cache(tmp_path):
+    assert R._staleness_penalty_map(None) == {}
+    assert R._staleness_penalty_map(str(tmp_path / "idx")) == {}  # stale.json never written
+
+
+def test_staleness_penalty_map_graduated_and_saturates(tmp_path):
+    idx = str(tmp_path / ".memory-index")
+    S.write_stale_cache(
+        idx,
+        [
+            {"name": "one_changed", "changed_paths": ["a.py"], "source_commit": "abc"},
+            {
+                "name": "way_over_saturation",
+                "changed_paths": [f"f{i}.py" for i in range(50)],
+                "source_commit": "def",
+            },
+        ],
+    )
+    penalties = R._staleness_penalty_map(idx)
+    expected_one = R._SALIENCE_STALENESS_CAP * (1 / R._SALIENCE_STALENESS_SATURATION)
+    assert penalties["one_changed"] == pytest.approx(expected_one)
+    assert penalties["way_over_saturation"] == R._SALIENCE_STALENESS_CAP  # saturates, never exceeds
+
+
+def test_apply_salience_demotes_stale_never_used_below_equally_relevant_fresh_used(tmp_path):
+    """THE acceptance case, as a direct unit test of `_apply_salience` (no BM25/RRF
+    rank-fusion tie-breaking noise involved — see the end-to-end recall() test below for
+    that): two entries tied EXACTLY at score 1.0 pre-salience (equally relevant, by
+    construction) — one fresh + recently used, the other stale + never used. Flag-on must
+    reorder them so the fresh/used one ranks first."""
+    now = time.time()
+    entries = [
+        {"name": "fresh_used", "source_commit_time": now},
+        {"name": "stale_never_used", "source_commit_time": now - 400 * 86400},  # beyond the window
+    ]
+    penalized = [(0, 1.0, None), (1, 1.0, None)]  # exact tie
+
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    td = T.default_telemetry_dir(md)
+    T.log_recall_event(
+        [{"name": "fresh_used", "backend": "bm25"}], query="q", k=1, latency_ms=1.0,
+        telemetry_dir=td, session_id="s1",
+    )
+    idx_dir = str(tmp_path / ".memory-index")
+    S.write_stale_cache(
+        idx_dir,
+        [{"name": "stale_never_used", "changed_paths": ["a.py", "b.py", "c.py"], "source_commit": "deadbeef"}],
+    )
+
+    adjusted, components = R._apply_salience(penalized, entries, memory_dir=md, index_dir=idx_dir)
+    order = [entries[i]["name"] for i, _score, _state in adjusted]
+    assert order == ["fresh_used", "stale_never_used"]  # demoted below
+
+    fresh_c = components[0]
+    stale_c = components[1]
+    assert fresh_c["recency"] == R._SALIENCE_RECENCY_CAP
+    assert fresh_c["usage"] == R._SALIENCE_USAGE_CAP
+    assert fresh_c["staleness"] == 0.0
+    assert stale_c["recency"] == 0.0
+    assert stale_c["usage"] == 0.0
+    assert stale_c["staleness"] > 0.0
+
+
+def test_apply_salience_disabled_path_never_called_is_a_noop():
+    """Sanity pin for the byte-identical flag-off contract at the call site level: an
+    UNTOUCHED `penalized` + empty component map is exactly what a flag-off `recall()` uses
+    in place of calling `_apply_salience` at all (see recall()'s `if _salience_enabled():`
+    guard) — this is what "never even a no-op float multiply" means in practice."""
+    penalized = [(0, 0.5, None), (1, 0.25, "recent")]
+    assert penalized == list(penalized)  # unchanged reference semantics, nothing to adjust
+
+
+# --------------------------------------------------------------------------- #
+# RET-5 end-to-end: recall() threading, the env flag, and the emitted "salience" field.
+# --------------------------------------------------------------------------- #
+def _write_salience_fixture(md: str, idx: str, *, fresh_source_commit_time: int) -> None:
+    """Two entries, BM25-score-TIED by construction (identical token shapes, symmetric
+    query overlap — see the RET-5 commit body for the verification) — `entry_a` organically
+    outranks `entry_b` by nothing but RRF's stable rank tie-break (both raw BM25 scores are
+    IDENTICAL: 1/61 vs 1/62), i.e. they are "equally relevant" in every real sense. `entry_a`
+    is cast as the stale/never-used memory (gets a stale.json entry); `entry_b` is cast as
+    the fresh/used one (gets `source_commit_time` + a prior recall event) — the OPPOSITE of
+    which one organically leads, so a flag-on reorder is attributable ONLY to salience.
+    """
+    os.makedirs(md, exist_ok=True)
+    with open(os.path.join(md, "entry_a.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem("entry_a", "gizmo widget calibration alpha"))
+    with open(os.path.join(md, "entry_b.md"), "w", encoding="utf-8") as fh:
+        fh.write(
+            "---\nname: entry_b\ndescription: \"gizmo widget calibration beta\"\n"
+            f"type: project\nsource_commit_time: {fresh_source_commit_time}\n---\nbody\n"
+        )
+    B.build_index(md, idx)
+    td = T.default_telemetry_dir(md)
+    T.log_recall_event(
+        [{"name": "entry_b", "backend": "bm25"}], query="prior session", k=1, latency_ms=1.0,
+        telemetry_dir=td, session_id="s1",
+    )
+    S.write_stale_cache(
+        idx, [{"name": "entry_a", "changed_paths": ["a.py", "b.py", "c.py"], "source_commit": "deadbeef"}]
+    )
+
+
+_SALIENCE_QUERY = "gizmo widget calibration"
+
+
+def test_recall_salience_flag_off_ranking_byte_identical(tmp_path, monkeypatch):
+    """AC: flag-off ranking is byte-identical whether HIPPO_SALIENCE is unset (the true
+    default) or explicitly forced "0" — even though this fixture carries REAL
+    recency/usage/staleness signal on disk, proving flag-off never reads any of it (a bug
+    that read it unconditionally would show up here as a score/order diff)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_salience_fixture(md, idx, fresh_source_commit_time=int(time.time()))
+
+    monkeypatch.delenv("HIPPO_SALIENCE", raising=False)
+    default_off = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    monkeypatch.setenv("HIPPO_SALIENCE", "0")
+    explicit_off = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    assert default_off == explicit_off  # full dict equality: names, order, scores, salience
+    assert [r["name"] for r in default_off] == ["entry_a", "entry_b"]  # untouched organic order
+    assert all(r["salience"] is None for r in default_off)  # ALWAYS present, None when off
+
+    # ...and identical to a twin corpus carrying NO salience signal on disk at all — proves
+    # flag-off literally never reads source_commit_time/usage_aggregates.json/stale.json.
+    md2 = str(tmp_path / "memory_nosignal")
+    idx2 = str(tmp_path / ".memory-index_nosignal")
+    _write_corpus(md2, {"entry_a.md": "gizmo widget calibration alpha", "entry_b.md": "gizmo widget calibration beta"})
+    B.build_index(md2, idx2)
+    nosignal = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md2, index_dir=idx2)
+    assert [(r["name"], r["score"]) for r in default_off] == [(r["name"], r["score"]) for r in nosignal]
+
+
+def test_recall_salience_flag_on_demotes_stale_never_used_below_fresh_used(tmp_path, monkeypatch):
+    """THE acceptance case end-to-end through recall(): entry_a organically leads (a tied
+    BM25/RRF rank artifact — see `_write_salience_fixture`'s docstring) but is cast as
+    stale+never-used; entry_b trails organically but is cast as fresh+used. HIPPO_SALIENCE=1
+    must flip the order, and every emitted result must carry its salience breakdown."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_salience_fixture(md, idx, fresh_source_commit_time=int(time.time()))
+
+    monkeypatch.delenv("HIPPO_SALIENCE", raising=False)
+    before = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    assert [r["name"] for r in before] == ["entry_a", "entry_b"]  # organic order, pre-salience
+
+    monkeypatch.setenv("HIPPO_SALIENCE", "1")
+    after = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    names_after = [r["name"] for r in after]
+    assert names_after == ["entry_b", "entry_a"]  # fresh+used overtakes stale+never-used
+
+    by_name = {r["name"]: r for r in after}
+    assert by_name["entry_b"]["salience"]["recency"] > 0
+    assert by_name["entry_b"]["salience"]["usage"] > 0
+    assert by_name["entry_b"]["salience"]["staleness"] == 0.0
+    assert by_name["entry_a"]["salience"]["staleness"] > 0
+    assert by_name["entry_a"]["salience"]["recency"] == 0.0
+    assert by_name["entry_a"]["salience"]["usage"] == 0.0
+    # the emitted "score" is the REAL post-salience value the ranking sorted on (COR-8) —
+    # not a fabricated number, and the winner's score really is higher than the loser's.
+    assert by_name["entry_b"]["score"] > by_name["entry_a"]["score"]
+
+
+def test_recall_salience_never_raises_when_telemetry_and_stale_cache_absent(tmp_path, monkeypatch):
+    """Advisory posture: with the flag on but NEITHER usage_aggregates.json NOR stale.json
+    ever written (a fresh corpus with no session history), recall() must degrade to
+    "no usage/staleness signal" rather than raise — only the recency prior (pure
+    manifest arithmetic) can contribute anything on a corpus this quiet."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_SALIENCE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"entry_a.md": "gizmo widget calibration alpha", "entry_b.md": "gizmo widget calibration beta"})
+    B.build_index(md, idx)
+    res = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    assert len(res) == 2
+    for r in res:
+        assert r["salience"] == {"recency": 0.0, "usage": 0.0, "staleness": 0.0}

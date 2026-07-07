@@ -44,12 +44,17 @@ from .provenance import (
     resolve_dirs,
     split_frontmatter,
 )
+from .staleness import read_source_commit_time
 
 # --------------------------------------------------------------------------- #
 # Config (all overridable via env so the hook/tests never hard-depend on one model)
 # --------------------------------------------------------------------------- #
 _INDEX_DIRNAME = ".memory-index"
 # v2 (Tier 3, memory-organism-instrument-immunize): entries gained "invalid_after".
+# v3 (RET-5, salience fusion): entries gained "source_commit_time" (the frontmatter-persisted
+# committer epoch — see ``staleness.read_source_commit_time`` — copied into the manifest at
+# build time) so recall's optional recency prior is pure arithmetic on already-loaded index
+# state, never a git call on the hot path.
 # COR-7 made this constant LOAD-BEARING: ``_load_manifest`` (the one gate every manifest
 # consumer goes through — build_index's incremental reuse, refresh_index's hash fast-path,
 # load_index and therefore recall) treats a manifest whose ``schema_version`` differs from
@@ -59,7 +64,7 @@ _INDEX_DIRNAME = ".memory-index"
 # separately (``provenance.CORPUS_FORMAT_VERSION`` + the ``.claude/memory/.format``
 # marker) — the corpus is authoritative and is never auto-migrated; see doctor's
 # ``check_format_version`` and plugin/memory/README.md.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 # Public (not underscore-prefixed): doctor's non-English-corpus check (RET-3) compares a
 # manifest's recorded model against this constant to decide whether the CURRENTLY configured
 # model is the English default vs. an already-switched multilingual/other model.
@@ -503,14 +508,23 @@ def compute_corpus(
     sigs_out: Optional[Dict[str, List[int]]] = None,
     body_chunks_out: Optional[Dict[int, List[dict]]] = None,
 ) -> List[dict]:
-    """Scan the corpus -> ordered entries ``{name, file, doc_text, hash, tokens, invalid_after}``.
+    """Scan the corpus -> ordered entries
+    ``{name, file, doc_text, hash, tokens, invalid_after, source_commit_time}``.
 
     Order is deterministic (sorted filenames, from ``_iter_memory_files``). Re-scanned FRESH
     on every call (every file re-read from disk) — only the dense embedding ROW is
     cache-reused, keyed by ``hash`` (= sha1 of ``doc_text``, which is name + description
-    ONLY). Adding ``invalid_after`` therefore can never disturb embedding-cache reuse, and a
-    metadata-only change (e.g. a fresh ``invalid_after``) is reflected on every rebuild —
-    including a rebuild whose embedding rows are entirely cache-hit.
+    ONLY). Adding ``invalid_after``/``source_commit_time`` therefore can never disturb
+    embedding-cache reuse, and a metadata-only change (e.g. a fresh ``invalid_after``, or a
+    reverify that bumps ``source_commit_time``) is reflected on every rebuild — including a
+    rebuild whose embedding rows are entirely cache-hit.
+
+    RET-5: ``source_commit_time`` (the frontmatter-persisted committer epoch —
+    ``staleness.read_source_commit_time``, already computed for the staleness baseline, SHP-3)
+    is copied verbatim into the entry here so recall's optional recency prior can read it off
+    the already-loaded manifest — pure arithmetic, no git call on the hot path. ``None`` when
+    the memory has no baseline yet (a hand-authored file that predates provenance backfill) —
+    the recency prior treats that as "no signal", never a penalty.
 
     GRA-6: ``texts_out``/``sigs_out`` (caller-supplied dicts, mutated in place) capture the
     FULL text and stat signature ``[st_mtime_ns, st_size]`` per stem as a side product of
@@ -553,6 +567,7 @@ def compute_corpus(
                 "hash": _hash(doc_text),
                 "tokens": tokenize(doc_text),
                 "invalid_after": _extract_invalid_after(fm),
+                "source_commit_time": read_source_commit_time(text),
             }
         )
     return entries
@@ -1208,10 +1223,18 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
             # the same starvation-proofing GRA-6 gave the body-link edge cache below.
             old_invalid = [e.get("invalid_after") for e in old.get("entries", [])]
             now_invalid = [e.get("invalid_after") for e in entries_now]
+            # RET-5: source_commit_time is the SAME kind of metadata-not-in-doc_text field
+            # invalid_after already needed starvation-proofing for — a provenance
+            # --reverify (or a fresh backfill) bumps it without touching name/description,
+            # so a hash-only compare would leave recall's optional recency prior reading a
+            # stale baseline forever on an otherwise-quiet corpus.
+            old_sct = [e.get("source_commit_time") for e in old.get("entries", [])]
+            now_sct = [e.get("source_commit_time") for e in entries_now]
             corpus_unchanged = (
                 old_hashes == now_hashes
                 and old_chunk_hashes == now_chunk_hashes
                 and old_invalid == now_invalid
+                and old_sct == now_sct
             )
             if corpus_unchanged and (old.get("dense_ready") or dense_disabled()):
                 # GRA-6: "corpus unchanged" above compares doc_text hashes, which BODY
