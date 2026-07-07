@@ -256,7 +256,7 @@ def test_get_model_pins_cache_before_fastembed_import(monkeypatch, allow_downloa
     fastembed = pytest.importorskip("fastembed")
     monkeypatch.delenv("FASTEMBED_CACHE_PATH", raising=False)
     monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)  # deterministic home-cache target
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
 
     captured = {}
 

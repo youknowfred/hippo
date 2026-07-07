@@ -49,7 +49,7 @@ def _fake_embedder(dim: int = 16):
 
 
 def _build_dense_index(tmp_path, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")

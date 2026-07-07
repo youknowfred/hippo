@@ -53,14 +53,14 @@ DEFAULT_K = 10
 # author chose those words to BE the recall surface). Weighting body rankings down (rather than
 # giving them full RRF weight) keeps description rows primary and prevents a corpus of long,
 # keyword-dense bodies from systematically outranking well-written descriptions purely on body
-# volume. Env-overridable (not a hook env var in the MEMOBOT_ prefix sense of "per-invocation
+# volume. Env-overridable (not a hook env var in the HIPPO_ prefix sense of "per-invocation
 # tuning" -- this is a corpus-wide ranking knob an operator might calibrate via /hippo:audit).
 _BODY_RRF_WEIGHT = 0.5
 
 
 def _body_rrf_weight() -> float:
-    """``MEMOBOT_BODY_RRF_WEIGHT`` override; malformed/absent -> the module default. Never raises."""
-    raw = os.environ.get("MEMOBOT_BODY_RRF_WEIGHT")
+    """``HIPPO_BODY_RRF_WEIGHT`` override; malformed/absent -> the module default. Never raises."""
+    raw = os.environ.get("HIPPO_BODY_RRF_WEIGHT")
     if raw is None or not raw.strip():
         return _BODY_RRF_WEIGHT
     try:
@@ -84,7 +84,7 @@ _MAX_DRIFT_CHECKS = 200
 # are injected at _NEIGHBOR_DISCOUNT x their best seed's penalized score and COMPETE for
 # top-k — no reserved slots, so expansion can only surface a linked memory when its
 # discounted score actually beats an organic candidate, never by displacing one for free.
-_GRAPH_SEEDS = 3  # override: MEMOBOT_GRAPH_SEEDS (0 disables expansion entirely)
+_GRAPH_SEEDS = 3  # override: HIPPO_GRAPH_SEEDS (0 disables expansion entirely)
 _NEIGHBOR_DISCOUNT = 0.5
 
 # --------------------------------------------------------------------------- #
@@ -114,7 +114,7 @@ _DENSE_FLOOR_BY_MODEL = {
     "BAAI/bge-small-en-v1.5": 0.60,
     "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": 0.30,
 }
-# Fallback for any OTHER model id (a future default bump, a user-supplied MEMOBOT_EMBED_MODEL
+# Fallback for any OTHER model id (a future default bump, a user-supplied HIPPO_EMBED_MODEL
 # not in the table above) -- conservative (low) rather than guessing a tight number for an
 # uncalibrated embedding space; admits more than it should rather than risk false abstention.
 _DENSE_FLOOR_DEFAULT = 0.50
@@ -143,18 +143,18 @@ _DENSE_FLOOR_DEFAULT = 0.50
 # off-topic-rejection work) -- confirming 0.5 is conservative-enough to "admit when in
 # doubt" without giving up the cutoff's ability to stop injecting once genuinely irrelevant
 # tail candidates show up.
-_KNEE_RATIO = 0.5  # override: MEMOBOT_KNEE_RATIO
+_KNEE_RATIO = 0.5  # override: HIPPO_KNEE_RATIO
 
 
 def _dense_floor(model: Optional[str]) -> float:
-    """Calibrated cosine floor for ``model`` — ``MEMOBOT_DENSE_FLOOR`` overrides everything.
+    """Calibrated cosine floor for ``model`` — ``HIPPO_DENSE_FLOOR`` overrides everything.
 
     Lookup order: env override (any float, including 0 to disable the floor entirely) ->
     per-model table -> module-level default. Malformed env value degrades to "no override"
     (falls through to the table/default) rather than raising -- recall() must never break
     over a typo'd env var.
     """
-    raw = os.environ.get("MEMOBOT_DENSE_FLOOR")
+    raw = os.environ.get("HIPPO_DENSE_FLOOR")
     if raw is not None and raw.strip():
         try:
             return float(raw)
@@ -164,13 +164,13 @@ def _dense_floor(model: Optional[str]) -> float:
 
 
 def _knee_ratio() -> float:
-    """``MEMOBOT_KNEE_RATIO`` override; malformed/absent -> the module default. Never raises.
+    """``HIPPO_KNEE_RATIO`` override; malformed/absent -> the module default. Never raises.
 
     0 (or any non-positive value) disables the knee cutoff outright -- see its use in
     ``recall()``'s emission loop, which skips the check entirely rather than comparing
     against a degenerate ratio.
     """
-    raw = os.environ.get("MEMOBOT_KNEE_RATIO")
+    raw = os.environ.get("HIPPO_KNEE_RATIO")
     if raw is None or not raw.strip():
         return _KNEE_RATIO
     try:
@@ -506,7 +506,7 @@ def _dense_rank_rows(query: str, index: LoadedIndex) -> List[int]:
     query embedded under model Y (the CURRENTLY configured ``build_index.DEFAULT_MODEL``),
     is comparing vectors from two different embedding spaces -- the resulting "similarity"
     is not meaningful, just noise that happens to look like a score. This can happen after
-    ``MEMOBOT_EMBED_MODEL`` changes (or a stale index survives a plugin update that bumps the
+    ``HIPPO_EMBED_MODEL`` changes (or a stale index survives a plugin update that bumps the
     default) without a full rebuild. ``index.model`` is ``None`` for a BM25-only manifest
     (never built dense, or dense_ready False) -- that is NOT a mismatch, just "no dense model
     recorded yet", so only an EXPLICIT, DIFFERENT model name skips dense. The mismatch is
@@ -692,8 +692,8 @@ def _drift_patch(entry: dict, memory_dir: str) -> dict:
 
 
 def _graph_seed_count() -> int:
-    """Seed count for 1-hop expansion; MEMOBOT_GRAPH_SEEDS overrides, junk -> default."""
-    raw = os.environ.get("MEMOBOT_GRAPH_SEEDS")
+    """Seed count for 1-hop expansion; HIPPO_GRAPH_SEEDS overrides, junk -> default."""
+    raw = os.environ.get("HIPPO_GRAPH_SEEDS")
     if raw is None or not raw.strip():
         return _GRAPH_SEEDS
     try:
@@ -798,8 +798,8 @@ def _ensure_index(
         return loaded
     # No persisted index yet: build an in-memory BM25 view WITHOUT touching the dense model
     # (a hook must never block on indexing). Disable dense for this implicit build.
-    prev = os.environ.get("MEMOBOT_DISABLE_DENSE")
-    os.environ["MEMOBOT_DISABLE_DENSE"] = "1"
+    prev = os.environ.get("HIPPO_DISABLE_DENSE")
+    os.environ["HIPPO_DISABLE_DENSE"] = "1"
     try:
         build_index(memory_dir, index_dir)
         return load_index(index_dir)
@@ -807,9 +807,9 @@ def _ensure_index(
         return None
     finally:
         if prev is None:
-            os.environ.pop("MEMOBOT_DISABLE_DENSE", None)
+            os.environ.pop("HIPPO_DISABLE_DENSE", None)
         else:
-            os.environ["MEMOBOT_DISABLE_DENSE"] = prev
+            os.environ["HIPPO_DISABLE_DENSE"] = prev
 
 
 def recall(
@@ -850,7 +850,7 @@ def recall(
         # so the hot path pays no extra ``git rev-parse``. When there is NO resolvable git root
         # (a non-git corpus, or a caller-supplied in-memory `index` with no memory_dir —
         # eval/self_recall and the hermetic recall tests) the gate is inapplicable and recall
-        # proceeds; only a real git corpus NOT in the trust registry is denied. MEMOBOT_TRUST_ALL
+        # proceeds; only a real git corpus NOT in the trust registry is denied. HIPPO_TRUST_ALL
         # bypasses it for CI. The user-visible signal for the deny path is the SessionStart
         # untrusted-corpus nudge + /hippo:doctor — never a silent no-op with zero trace.
         if index is None:
@@ -973,7 +973,7 @@ def recall(
         # --- 1-hop graph expansion (GRA-1): AFTER fusion + invalidation re-sort. ---
         # Resolvable index_dir only: an explicit index_dir wins, else it derives from
         # memory_dir exactly as _ensure_index does (same default_index_dir, same
-        # MEMOBOT_INDEX_DIR override). A caller-supplied in-memory index with NO dirs
+        # HIPPO_INDEX_DIR override). A caller-supplied in-memory index with NO dirs
         # (eval self_recall probes, hermetic LoadedIndex tests) resolves to None ->
         # _expand_neighbors is a no-op, zero behavior change there.
         graph_index_dir = index_dir
@@ -1136,13 +1136,13 @@ def recent_memories(
 def git_recent_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     """SessionStart producer: a one-block digest of recently-captured memories.
 
-    Window via ``MEMOBOT_RECENT_DAYS`` (default 14). Self-suppresses when nothing is recent.
+    Window via ``HIPPO_RECENT_DAYS`` (default 14). Self-suppresses when nothing is recent.
     The untrusted-corpus gate (SEC-1) is enforced once, upstream, by ``session_start``'s
     ``build_context`` short-circuit — no producer re-checks it (one gate boundary, no extra
     per-producer git call on the trusted hot path).
     """
     try:
-        days = float(os.environ.get("MEMOBOT_RECENT_DAYS", "14") or 14)
+        days = float(os.environ.get("HIPPO_RECENT_DAYS", "14") or 14)
     except ValueError:
         days = 14.0
     recent = recent_memories(memory_dir, repo_root, window_days=days)

@@ -101,7 +101,7 @@ def test_main_refreshes_index_for_a_new_memory(tmp_path, monkeypatch):
 
     from memory import build_index as B
 
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / ".claude" / "memory")
     os.makedirs(md)
     with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
@@ -153,7 +153,7 @@ def test_main_heals_empty_baselines_side_effect(tmp_path, monkeypatch, capsys):
 
     from .conftest import git_commit, write_file
 
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     repo = str(tmp_path / "repo")
     os.makedirs(repo)
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
@@ -251,11 +251,11 @@ def test_unresolvable_baseline_producer_is_registered():
 def _session_start_env(tmp_path, monkeypatch):
     import memory.telemetry as T
 
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / ".claude" / "memory")
     os.makedirs(md)
     td = str(tmp_path / ".claude" / ".memory-telemetry")
-    monkeypatch.delenv("MEMOBOT_TELEMETRY_DIR", raising=False)
+    monkeypatch.delenv("HIPPO_TELEMETRY_DIR", raising=False)
     monkeypatch.setattr(S, "resolve_dirs", lambda: (md, str(tmp_path)))
     monkeypatch.setattr(S, "build_context", lambda *a, **k: "")
     return md, td, T

@@ -58,7 +58,7 @@ warmed ONCE, online, by `/hippo:bootstrap` (a hook must never download — see
 
 `recall(query, k=10)` → top-K via **RRF fusion** of dense + BM25, **degrading to BM25**
 when the dense model/cache is unavailable. Never raises; output bounded < 10K chars. The
-dense path is **wall-clock bounded** (`MEMOBOT_DENSE_TIMEOUT`, default 5 s) so a cold or
+dense path is **wall-clock bounded** (`HIPPO_DENSE_TIMEOUT`, default 5 s) so a cold or
 wiped cache aborts to BM25 instead of blocking the hook.
 
 ```bash
@@ -289,27 +289,27 @@ Decay is DEMOTION, never deletion.
 | Model cache cold/wiped | Dense aborts within the wall-clock bound → BM25; the index never downgrades; `/hippo:doctor` flags the cache |
 | Deps changed after update | The `stale_venv` producer nudges a re-bootstrap once per session |
 | No `.claude/memory` corpus | Hooks stay inert: no index, no ledgers, zero files created; SessionStart nudges `/hippo:init` |
-| Untrusted corpus (SEC-1) | A cloned/foreign git corpus injects NOTHING until trusted: recall returns `[]`, producers stay silent; a low-frequency SessionStart nudge points at `/hippo:doctor` (count + sample names → one-time consent). `/hippo:init` trusts corpora you create; `MEMOBOT_TRUST_ALL=1` bypasses for CI |
+| Untrusted corpus (SEC-1) | A cloned/foreign git corpus injects NOTHING until trusted: recall returns `[]`, producers stay silent; a low-frequency SessionStart nudge points at `/hippo:doctor` (count + sample names → one-time consent). `/hippo:init` trusts corpora you create; `HIPPO_TRUST_ALL=1` bypasses for CI |
 | Unparseable frontmatter | Skipped by staleness AND refused by refresh/reverify; the `integrity` producer names the file loudly |
 
 ## Environment overrides
 
-- `MEMOBOT_MEMORY_DIR` — point the tooling at a different memory dir (hermetic tests).
+- `HIPPO_MEMORY_DIR` — point the tooling at a different memory dir (hermetic tests).
 - `CLAUDE_PROJECT_DIR` — repo root override (set by the harness); else derived from git.
-- `MEMOBOT_INDEX_DIR` — override the index location (default `.claude/.memory-index/`).
-- `MEMOBOT_EMBED_MODEL` — dense model name (default `BAAI/bge-small-en-v1.5`).
-- `MEMOBOT_DISABLE_DENSE=1` — force BM25-only (hermetic tests, CI).
-- `MEMOBOT_DENSE_TIMEOUT` — seconds before a dense query aborts to BM25 (default 5).
-- `MEMOBOT_REFRESH_TIMEOUT` — overall wall-clock budget for the offline SessionStart embed;
+- `HIPPO_INDEX_DIR` — override the index location (default `.claude/.memory-index/`).
+- `HIPPO_EMBED_MODEL` — dense model name (default `BAAI/bge-small-en-v1.5`).
+- `HIPPO_DISABLE_DENSE=1` — force BM25-only (hermetic tests, CI).
+- `HIPPO_DENSE_TIMEOUT` — seconds before a dense query aborts to BM25 (default 5).
+- `HIPPO_REFRESH_TIMEOUT` — overall wall-clock budget for the offline SessionStart embed;
   exhausting it stops starting new chunks but keeps whatever already embedded (default 15).
-- `MEMOBOT_EMBED_CHUNK_SIZE` — docs per offline embed slice, so a large corpus persists
+- `HIPPO_EMBED_CHUNK_SIZE` — docs per offline embed slice, so a large corpus persists
   partial dense progress across sessions instead of an all-or-nothing attempt (default 64).
-- `MEMOBOT_RECENT_DAYS` — window for the git-recent producer (default 14).
-- `MEMOBOT_TELEMETRY_DIR` — override the ledger location (default `.claude/.memory-telemetry/`).
-- `MEMOBOT_TELEMETRY_MAX_BYTES` — ledger byte ceiling before rotation (default 2 MB).
-- `MEMOBOT_TRUST_ALL=1` — bypass the SEC-1 foreign-corpus trust gate entirely (CI/automation);
+- `HIPPO_RECENT_DAYS` — window for the git-recent producer (default 14).
+- `HIPPO_TELEMETRY_DIR` — override the ledger location (default `.claude/.memory-telemetry/`).
+- `HIPPO_TELEMETRY_MAX_BYTES` — ledger byte ceiling before rotation (default 2 MB).
+- `HIPPO_TRUST_ALL=1` — bypass the SEC-1 foreign-corpus trust gate entirely (CI/automation);
   recall injects from any corpus without requiring a trust marker.
-- `MEMOBOT_TRUST_FILE` — relocate the machine-local trust registry (default
+- `HIPPO_TRUST_FILE` — relocate the machine-local trust registry (default
   `~/.claude/hippo-trust.json`); hermetic tests point it at a tmp path.
 - `FASTEMBED_CACHE_PATH` — model cache override (default `${CLAUDE_PLUGIN_DATA}/fastembed`).
 

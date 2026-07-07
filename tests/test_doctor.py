@@ -5,7 +5,7 @@ fixtures + write_file/git_commit helpers), asserting stable status/message for a
 state. The engine's contract is DETERMINISM: the same context maps to byte-identical output, so
 several tests assert ``render()`` twice against identical state and compare the two runs.
 
-Trust checks delete the autouse ``MEMOBOT_TRUST_ALL`` (set open by conftest) to drive the real
+Trust checks delete the autouse ``HIPPO_TRUST_ALL`` (set open by conftest) to drive the real
 deny/allow gate, mirroring tests/test_trust.py.
 """
 
@@ -78,9 +78,9 @@ def test_run_checks_order_is_fixed(repo, memory_dir):
     labels = [label for label, _ in D.run_checks(ctx)]
     assert labels == [label for label, _ in D.CHECKS]
     # Sanity: the order is a real ordered list, not derived from a set/dict view.
-    # RET-3 appended "non_english_corpus" as the new last check (a corpus-content heuristic,
-    # fittingly last alongside the other corpus-content checks it follows).
-    assert labels[0] == "bootstrap" and labels[-1] == "non_english_corpus"
+    # DOC-8 appended "stale_memobot_env" as the new last check (an environment-hygiene check,
+    # deliberately last so it never shifts the corpus-content checks' relative order).
+    assert labels[0] == "bootstrap" and labels[-1] == "stale_memobot_env"
 
 
 def test_every_line_has_a_status_glyph(repo, memory_dir):
@@ -227,7 +227,7 @@ def test_unresolvable_baselines_warns_on_missing_sha(repo, memory_dir):
 # Index corruption / count / format version (QUA-5 + DOC-4 count check)
 # --------------------------------------------------------------------------- #
 def test_index_count_ok_when_no_index(repo, memory_dir, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_INDEX_DIR", str(os.path.join(repo, ".memory-index")))
+    monkeypatch.setenv("HIPPO_INDEX_DIR", str(os.path.join(repo, ".memory-index")))
     _seed(memory_dir)
     write_file(memory_dir, "a.md", _mem("a", "alpha"))
     r = D.check_index_count(_ctx(memory_dir, repo))
@@ -236,8 +236,8 @@ def test_index_count_ok_when_no_index(repo, memory_dir, monkeypatch):
 
 def test_index_count_matches_after_build(repo, memory_dir, tmp_path, monkeypatch):
     idx = str(tmp_path / ".memory-index")
-    monkeypatch.setenv("MEMOBOT_INDEX_DIR", idx)
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     _seed(memory_dir)
     write_file(memory_dir, "a.md", _mem("a", "alpha"))
     write_file(memory_dir, "b.md", _mem("b", "beta"))
@@ -248,8 +248,8 @@ def test_index_count_matches_after_build(repo, memory_dir, tmp_path, monkeypatch
 
 def test_index_count_warns_on_drift(repo, memory_dir, tmp_path, monkeypatch):
     idx = str(tmp_path / ".memory-index")
-    monkeypatch.setenv("MEMOBOT_INDEX_DIR", idx)
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     _seed(memory_dir)
     write_file(memory_dir, "a.md", _mem("a", "alpha"))
     B.build_index(memory_dir, idx)
@@ -261,9 +261,9 @@ def test_index_count_warns_on_drift(repo, memory_dir, tmp_path, monkeypatch):
 
 def test_index_corruption_surfaces_truncated_manifest(repo, memory_dir, tmp_path, monkeypatch):
     idx = str(tmp_path / ".memory-index")
-    monkeypatch.setenv("MEMOBOT_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     _seed(memory_dir)
     write_file(memory_dir, "a.md", _mem("a", "alpha"))
     B.build_index(memory_dir, idx)
@@ -275,8 +275,8 @@ def test_index_corruption_surfaces_truncated_manifest(repo, memory_dir, tmp_path
 
 def test_format_version_ok_when_current(repo, memory_dir, tmp_path, monkeypatch):
     idx = str(tmp_path / ".memory-index")
-    monkeypatch.setenv("MEMOBOT_INDEX_DIR", idx)
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     _seed(memory_dir)
     write_file(memory_dir, "a.md", _mem("a", "alpha"))
     B.build_index(memory_dir, idx)
@@ -286,8 +286,8 @@ def test_format_version_ok_when_current(repo, memory_dir, tmp_path, monkeypatch)
 
 def test_format_version_warns_on_old_schema(repo, memory_dir, tmp_path, monkeypatch):
     idx = str(tmp_path / ".memory-index")
-    monkeypatch.setenv("MEMOBOT_INDEX_DIR", idx)
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     _seed(memory_dir)
     write_file(memory_dir, "a.md", _mem("a", "alpha"))
     B.build_index(memory_dir, idx)
@@ -332,7 +332,7 @@ def test_fill_me_scans_the_floor_too(repo, memory_dir):
 # Trust state (SEC-1) — drive the REAL gate (delete the conftest bypass)
 # --------------------------------------------------------------------------- #
 def test_trust_check_warns_on_untrusted_corpus(repo, memory_dir, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_TRUST_ALL", raising=False)
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     _seed(memory_dir)
     write_file(memory_dir, "a.md", _mem("a", "alpha"))
     write_file(memory_dir, "b.md", _mem("b", "beta"))
@@ -345,7 +345,7 @@ def test_trust_check_warns_on_untrusted_corpus(repo, memory_dir, monkeypatch):
 
 
 def test_trust_check_ok_when_trusted(repo, memory_dir, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_TRUST_ALL", raising=False)
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     _seed(memory_dir)
     git_commit(repo, "seed", 1_700_000_000)
     from memory.trust import mark_trusted
@@ -356,15 +356,15 @@ def test_trust_check_ok_when_trusted(repo, memory_dir, monkeypatch):
 
 
 def test_trust_check_bypassed_with_trust_all(repo, memory_dir):
-    # conftest sets MEMOBOT_TRUST_ALL=1 by default.
+    # conftest sets HIPPO_TRUST_ALL=1 by default.
     _seed(memory_dir)
     git_commit(repo, "seed", 1_700_000_000)
     r = D.check_trust(_ctx(memory_dir, repo))
-    assert r["status"] == "ok" and "MEMOBOT_TRUST_ALL" in r["message"]
+    assert r["status"] == "ok" and "HIPPO_TRUST_ALL" in r["message"]
 
 
 def test_trust_check_na_outside_git(tmp_path, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_TRUST_ALL", raising=False)
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     plain = str(tmp_path / "plain")
     md = os.path.join(plain, ".claude", "memory")
     os.makedirs(md)
@@ -437,8 +437,8 @@ def test_non_english_corpus_na_with_no_index(repo, memory_dir):
 
 def test_non_english_corpus_na_below_sample_floor(repo, memory_dir, tmp_path, monkeypatch):
     idx = str(tmp_path / ".memory-index")
-    monkeypatch.setenv("MEMOBOT_INDEX_DIR", idx)
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     _seed(memory_dir)
     write_file(memory_dir, "a.md", _mem("a", "東京"))  # tiny sample, well below the floor
     B.build_index(memory_dir, idx)
@@ -448,8 +448,8 @@ def test_non_english_corpus_na_below_sample_floor(repo, memory_dir, tmp_path, mo
 
 def test_non_english_corpus_ok_when_english(repo, memory_dir, tmp_path, monkeypatch):
     idx = str(tmp_path / ".memory-index")
-    monkeypatch.setenv("MEMOBOT_INDEX_DIR", idx)
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     _seed(memory_dir)
     write_file(
         memory_dir,
@@ -465,8 +465,8 @@ def test_non_english_corpus_warns_when_visibly_non_latin_and_english_model(
     repo, memory_dir, tmp_path, monkeypatch
 ):
     idx = str(tmp_path / ".memory-index")
-    monkeypatch.setenv("MEMOBOT_INDEX_DIR", idx)
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     _seed(memory_dir)
     for i in range(3):
         write_file(memory_dir, f"m{i}.md", _mem(f"m{i}", _JP_DESC))
@@ -484,10 +484,10 @@ def test_non_english_corpus_ok_when_already_multilingual_model(
     """Once the manifest records a DIFFERENT (already-switched) model, the hint has nothing
     left to suggest -- silent even though the corpus is still visibly non-Latin."""
     idx = str(tmp_path / ".memory-index")
-    monkeypatch.setenv("MEMOBOT_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     monkeypatch.setattr(B, "DEFAULT_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     _seed(memory_dir)
     for i in range(3):
         write_file(memory_dir, f"m{i}.md", _mem(f"m{i}", _JP_DESC))
@@ -498,8 +498,8 @@ def test_non_english_corpus_ok_when_already_multilingual_model(
 
 def test_non_english_corpus_never_raises_on_unreadable_file(repo, memory_dir, tmp_path, monkeypatch):
     idx = str(tmp_path / ".memory-index")
-    monkeypatch.setenv("MEMOBOT_INDEX_DIR", idx)
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     _seed(memory_dir)
     write_file(memory_dir, "a.md", _mem("a", _JP_DESC))
     B.build_index(memory_dir, idx)
@@ -507,6 +507,35 @@ def test_non_english_corpus_never_raises_on_unreadable_file(repo, memory_dir, tm
     os.remove(os.path.join(memory_dir, "a.md"))
     r = D.check_non_english_corpus(_ctx(memory_dir, repo))
     assert r["status"] in ("ok", "warn")  # degrades gracefully -- never raises
+
+
+# --------------------------------------------------------------------------- #
+# Stale MEMOBOT_* env (DOC-8) — the pre-v0.4.0 prefix is now silently inert; this check is the
+# one legible signal. Fully controls its own env (never relies on conftest's autouse fixtures,
+# which now only ever set HIPPO_* names) so it can assert on the OLD prefix without interference.
+# --------------------------------------------------------------------------- #
+def test_stale_memobot_env_ok_when_absent(repo, memory_dir, monkeypatch):
+    for key in list(os.environ):
+        if key.startswith("MEMOBOT_"):
+            monkeypatch.delenv(key, raising=False)
+    r = D.check_stale_memobot_env(_ctx(memory_dir, repo))
+    assert r["status"] == "ok"
+    assert "no stale MEMOBOT_" in r["message"]
+
+
+def test_stale_memobot_env_warns_and_names_the_replacement(repo, memory_dir, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_TRUST_ALL", "1")
+    r = D.check_stale_memobot_env(_ctx(memory_dir, repo))
+    assert r["status"] == "warn"
+    assert "MEMOBOT_TRUST_ALL is ignored since v0.4.0 — use HIPPO_TRUST_ALL" in r["message"]
+
+
+def test_stale_memobot_env_never_fails_and_reports_all_stale_vars(repo, memory_dir, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_TRUST_ALL", "1")
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    r = D.check_stale_memobot_env(_ctx(memory_dir, repo))
+    assert r["status"] == "warn"  # warn-only — never fails the doctor run
+    assert "MEMOBOT_DISABLE_DENSE" in r["message"] and "MEMOBOT_TRUST_ALL" in r["message"]
 
 
 # --------------------------------------------------------------------------- #

@@ -90,7 +90,7 @@ will flag this for you if it notices), switch to a multilingual model instead:
       json.dump({'embed_model': 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'}, \
       open(os.path.join(os.environ['CLAUDE_PLUGIN_DATA'], 'model.json'), 'w'))"
    ```
-   `resolve_embed_model()` (in `memory/build_index.py`) reads this file — `MEMOBOT_EMBED_MODEL`
+   `resolve_embed_model()` (in `memory/build_index.py`) reads this file — `HIPPO_EMBED_MODEL`
    still overrides it if set, otherwise every subsequent build/recall picks up the multilingual
    model automatically. This is the SAME preset file `/hippo:doctor`'s non-English-corpus check
    points users at.

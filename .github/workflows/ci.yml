@@ -28,7 +28,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         python: ["3.10", "3.12"]
     env:
-      MEMOBOT_DISABLE_DENSE: "1"
+      HIPPO_DISABLE_DENSE: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

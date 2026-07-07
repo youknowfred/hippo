@@ -37,7 +37,7 @@ def test_git_root_returns_none_outside_any_repo(tmp_path):
 
 def test_resolve_dirs_falls_back_to_start_when_no_git_repo(tmp_path, monkeypatch):
     d = _non_git_dir(tmp_path)
-    monkeypatch.delenv("MEMOBOT_MEMORY_DIR", raising=False)
+    monkeypatch.delenv("HIPPO_MEMORY_DIR", raising=False)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", d)
 
     memory_dir, repo_root = P.resolve_dirs()
@@ -49,7 +49,7 @@ def test_resolve_dirs_falls_back_to_start_when_no_git_repo(tmp_path, monkeypatch
 # init's underlying seeding primitives — corpus + index build without git
 # --------------------------------------------------------------------------- #
 def test_build_index_succeeds_in_non_git_dir(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")  # hermetic — no model download
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")  # hermetic — no model download
     d = _non_git_dir(tmp_path)
     memory_dir = os.path.join(d, ".claude", "memory")
     os.makedirs(memory_dir)

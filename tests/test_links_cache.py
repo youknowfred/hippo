@@ -51,7 +51,7 @@ def _corpus(md: str) -> None:
 
 
 def _build(md: str, idx: str, monkeypatch) -> None:
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     B.build_index(md, idx)
 
 
@@ -323,9 +323,9 @@ def test_sessionstart_lint_producer_reads_no_memory_files_after_refresh(tmp_path
     opens of memory files — and still report the same rot as a cold lint."""
     md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
     _corpus(md)
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     # the producer derives the index dir itself (default_index_dir honors this override)
-    monkeypatch.setenv("MEMOBOT_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
     assert B.refresh_index(md, idx) is not None
 
     cold_line = L.health_line(L.lint(md))  # corpus has dangling links -> non-None

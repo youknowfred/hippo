@@ -51,7 +51,7 @@ _DEFAULT_MAX_BYTES = 2_000_000
 def _max_bytes() -> int:
     """Byte ceiling before the ledger rotates. Env-overridable (tests use a tiny cap)."""
     try:
-        return max(256, int(os.environ.get("MEMOBOT_TELEMETRY_MAX_BYTES") or _DEFAULT_MAX_BYTES))
+        return max(256, int(os.environ.get("HIPPO_TELEMETRY_MAX_BYTES") or _DEFAULT_MAX_BYTES))
     except (TypeError, ValueError):
         return _DEFAULT_MAX_BYTES
 
@@ -64,9 +64,9 @@ def default_telemetry_dir(memory_dir: str) -> str:
 
     Mirrors ``build_index.default_index_dir`` so the ledger lands beside the index. It is a
     SEPARATE dir from the index because it is append-only history, not a rebuildable cache.
-    ``MEMOBOT_TELEMETRY_DIR`` overrides (hermetic tests use this).
+    ``HIPPO_TELEMETRY_DIR`` overrides (hermetic tests use this).
     """
-    override = os.environ.get("MEMOBOT_TELEMETRY_DIR")
+    override = os.environ.get("HIPPO_TELEMETRY_DIR")
     if override:
         return override
     return os.path.join(os.path.dirname(os.path.abspath(memory_dir)), _TELEMETRY_DIRNAME)

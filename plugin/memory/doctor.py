@@ -516,7 +516,7 @@ def check_trust(ctx: DoctorContext) -> Dict[str, str]:
         if trust.trust_all():
             return {
                 "status": "ok",
-                "message": "corpus trust bypassed (MEMOBOT_TRUST_ALL) — recall ungated.",
+                "message": "corpus trust bypassed (HIPPO_TRUST_ALL) — recall ungated.",
             }
         gate_root = trust.gate_repo_root(ctx.memory_dir, ctx.repo_root)
         if gate_root is None:
@@ -533,7 +533,7 @@ def check_trust(ctx: DoctorContext) -> Dict[str, str]:
             "message": f"corpus UNTRUSTED ({count} memories) — recall injects nothing from it. "
             "Review the memory names, then trust it: "
             f"python -c \"from memory.trust import mark_trusted; mark_trusted('{gate_root}')\" "
-            "(or set MEMOBOT_TRUST_ALL=1 for CI).",
+            "(or set HIPPO_TRUST_ALL=1 for CI).",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"trust check failed: {exc}."}
@@ -713,6 +713,31 @@ def check_non_english_corpus(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"non-English corpus check failed: {exc}."}
 
 
+def check_stale_memobot_env(ctx: DoctorContext) -> Dict[str, str]:
+    """DOC-8: flag any lingering ``MEMOBOT_*`` env var — the pre-v0.4.0 name, now ignored.
+
+    The rename to ``HIPPO_*`` was a clean break (one-canonical-name invariant — no alias shims,
+    no fallback reads of the old prefix), which means a developer's stale shell profile or CI
+    secret still exporting e.g. ``MEMOBOT_TRUST_ALL`` is now SILENTLY inert: every module only
+    ever reads ``HIPPO_*``, so the old var has no effect and nothing else would ever say so. That
+    silent-fallback path needs a legible signal somewhere — this is it. Scans the live environment
+    (not the corpus) for any key starting with ``MEMOBOT_`` and warns, by name, that it is ignored
+    and what to rename it to. Sorted so multiple stale vars report in a stable order. Warn-only —
+    a leftover env var is a footgun, not a broken install, so this never fails the run.
+    """
+    try:
+        stale = sorted(k for k in os.environ if k.startswith("MEMOBOT_"))
+        if not stale:
+            return {"status": "ok", "message": "no stale MEMOBOT_* env vars in the environment."}
+        parts = []
+        for key in stale:
+            suffix = key[len("MEMOBOT_") :]
+            parts.append(f"{key} is ignored since v0.4.0 — use HIPPO_{suffix}")
+        return {"status": "warn", "message": "; ".join(parts) + "."}
+    except Exception as exc:
+        return {"status": "warn", "message": f"stale-env check failed: {exc}."}
+
+
 # (label, check_fn) in a FIXED order — the source of the deterministic output. New checks append
 # here; the order is never sorted-by-name or set-derived, so the printed sequence is stable.
 CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
@@ -732,6 +757,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("secrets", check_secrets),
     ("link_density", check_link_density),
     ("non_english_corpus", check_non_english_corpus),
+    ("stale_memobot_env", check_stale_memobot_env),
 ]
 
 

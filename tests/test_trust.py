@@ -1,6 +1,6 @@
 """Tests for memory/trust.py — the SEC-1 foreign-corpus trust gate.
 
-Hermetic: the trust registry is pointed at a tmp file via MEMOBOT_TRUST_FILE so the real
+Hermetic: the trust registry is pointed at a tmp file via HIPPO_TRUST_FILE so the real
 ~/.claude/hippo-trust.json is NEVER touched. Corpora that must be gated live inside a real
 git repo (the conftest `repo`/`memory_dir` fixtures) so `git_root` resolves a repo_root for
 the gate to key on; a non-git tmp corpus is deliberately used to prove the gate is a no-op
@@ -38,8 +38,8 @@ def _write_corpus(memory_dir: str, items: dict = _CORPUS) -> None:
 
 def _point_registry(monkeypatch, tmp_path):
     reg = str(tmp_path / "hippo-trust.json")
-    monkeypatch.setenv("MEMOBOT_TRUST_FILE", reg)
-    monkeypatch.delenv("MEMOBOT_TRUST_ALL", raising=False)
+    monkeypatch.setenv("HIPPO_TRUST_FILE", reg)
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     return reg
 
 
@@ -47,7 +47,7 @@ def _point_registry(monkeypatch, tmp_path):
 # Acceptance criterion 1: freshly-cloned foreign corpus injects nothing until trusted
 # --------------------------------------------------------------------------- #
 def test_untrusted_git_corpus_recall_returns_empty(repo, memory_dir, tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     _point_registry(monkeypatch, tmp_path)
     idx = str(tmp_path / "idx")
     _write_corpus(memory_dir)
@@ -66,11 +66,11 @@ def test_untrusted_git_corpus_recall_returns_empty(repo, memory_dir, tmp_path, m
 # already-resolved repo_root -- no extra git call).
 # --------------------------------------------------------------------------- #
 def test_untrusted_git_corpus_recall_main_writes_no_telemetry(repo, memory_dir, tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     _point_registry(monkeypatch, tmp_path)
     idx = str(tmp_path / "idx")
     td = str(tmp_path / "tele")
-    monkeypatch.setenv("MEMOBOT_TELEMETRY_DIR", td)
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
     _write_corpus(memory_dir)
     B.build_index(memory_dir, idx)
 
@@ -88,7 +88,7 @@ def test_untrusted_git_corpus_recall_main_writes_no_telemetry(repo, memory_dir, 
 # Acceptance criterion 2: after trusting the repo_root, the SAME corpus recalls for real
 # --------------------------------------------------------------------------- #
 def test_trusted_git_corpus_recall_returns_results(repo, memory_dir, tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     _point_registry(monkeypatch, tmp_path)
     idx = str(tmp_path / "idx")
     _write_corpus(memory_dir)
@@ -101,12 +101,12 @@ def test_trusted_git_corpus_recall_returns_results(repo, memory_dir, tmp_path, m
 
 
 # --------------------------------------------------------------------------- #
-# Acceptance criterion 3: MEMOBOT_TRUST_ALL bypasses the gate regardless of registry state
+# Acceptance criterion 3: HIPPO_TRUST_ALL bypasses the gate regardless of registry state
 # --------------------------------------------------------------------------- #
 def test_trust_all_env_bypasses_gate(repo, memory_dir, tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     _point_registry(monkeypatch, tmp_path)  # registry empty -> would deny
-    monkeypatch.setenv("MEMOBOT_TRUST_ALL", "1")
+    monkeypatch.setenv("HIPPO_TRUST_ALL", "1")
     idx = str(tmp_path / "idx")
     _write_corpus(memory_dir)
     B.build_index(memory_dir, idx)
@@ -148,7 +148,7 @@ def test_mark_trusted_is_idempotent_and_preserves_siblings(repo, tmp_path, monke
 # gate_repo_root: inapplicable (fail-open) for a non-git corpus and for index-only calls
 # --------------------------------------------------------------------------- #
 def test_gate_inapplicable_for_non_git_corpus(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     _point_registry(monkeypatch, tmp_path)
     md = str(tmp_path / "memory")  # a bare tmp dir — NOT inside any git repo
     idx = str(tmp_path / "idx")

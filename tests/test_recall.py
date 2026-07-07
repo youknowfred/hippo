@@ -75,7 +75,7 @@ _CORPUS = {
 # BM25-only recall (no dense) — runs everywhere
 # --------------------------------------------------------------------------- #
 def test_recall_bm25_returns_expected_topk(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _CORPUS)
@@ -88,7 +88,7 @@ def test_recall_bm25_returns_expected_topk(tmp_path, monkeypatch):
 
 
 def test_recall_empty_query_returns_empty(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _CORPUS)
@@ -106,7 +106,7 @@ def test_recall_never_raises_on_missing_index(tmp_path):
 
 def test_recall_returns_empty_when_no_ranker_matches(tmp_path, monkeypatch):
     # query whose tokens appear in NO memory -> BM25 empty + dense disabled -> [] (not a crash)
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _CORPUS)
@@ -116,7 +116,7 @@ def test_recall_returns_empty_when_no_ranker_matches(tmp_path, monkeypatch):
 
 def test_recall_uses_stored_description_not_doc_text_split(tmp_path, monkeypatch):
     # The recalled description comes from the stored field, robust to any '. ' in the name.
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"excel_header.md": _CORPUS["excel_header.md"]})
@@ -127,7 +127,7 @@ def test_recall_uses_stored_description_not_doc_text_split(tmp_path, monkeypatch
 
 def test_recall_builds_index_on_demand_bm25(tmp_path, monkeypatch):
     # Index not pre-built; recall should build a BM25 view implicitly (no dense download).
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _CORPUS)
@@ -166,7 +166,7 @@ def test_invalidation_state_classifies_recent_old_absent_unparseable():
 def test_recall_recently_invalidated_demotes_and_can_drop_out_of_topk(tmp_path, monkeypatch):
     """The exact contract the roadmap's open question asked for: a recent invalidation must
     be able to move the top-k CUT, not just relabel a result after the cut already happened."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx_dir = str(tmp_path / ".memory-index")
     # 5 entries, strictly nested token overlap with the query -> a clean, discoverable ranking.
@@ -200,7 +200,7 @@ def test_recall_recently_invalidated_demotes_and_can_drop_out_of_topk(tmp_path, 
 
 
 def test_recall_old_invalidated_dropped_from_display_not_corpus(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx_dir = str(tmp_path / ".memory-index")
     _write_corpus(md, {"e1.md": "alpha one", "e2.md": "alpha two", "e3.md": "alpha three"})
@@ -232,7 +232,7 @@ def test_recall_walk_and_break_avoids_underfill(tmp_path, monkeypatch):
     """If old-invalidated entries occupy slots that would otherwise land in the naive top-k,
     the walk-and-break loop must still fill k results from the eligible tail -- a fixed
     `[:k]` slice-then-filter would silently under-fill."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx_dir = str(tmp_path / ".memory-index")
     _write_corpus(md, {f"e{i}.md": "alpha" for i in range(6)})  # 6 equally-matching entries
@@ -258,7 +258,7 @@ def test_recall_walk_and_break_avoids_underfill(tmp_path, monkeypatch):
 def test_recall_no_invalid_after_is_unaffected(tmp_path, monkeypatch):
     """Sanity: with no entry carrying invalid_after, behavior is exactly what it was before
     this tier (same names, same order) -- the no-op path."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx_dir = str(tmp_path / ".memory-index")
     _write_corpus(md, _CORPUS)
@@ -275,7 +275,7 @@ def test_recall_no_invalid_after_is_unaffected(tmp_path, monkeypatch):
 def test_recall_emits_monotone_scores_and_sequential_ranks(tmp_path, monkeypatch):
     """Baseline sanity (no invalidation): emitted scores are monotone non-increasing in
     emission order, and `rank` is exactly the 1-based emission position."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx_dir = str(tmp_path / ".memory-index")
     _write_corpus(md, _CORPUS)
@@ -293,7 +293,7 @@ def test_recall_emitted_score_equals_true_penalized_fused_score(tmp_path, monkey
     """The exact acceptance case: construct a corpus where the invalidation penalty REORDERS
     results (rank-derived 1/rank and fused-derived scores visibly diverge), then assert the
     emitted `score` is the REAL internal penalized/fused score, not 1/(emission_rank+1)."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx_dir = str(tmp_path / ".memory-index")
     words = ["alpha", "beta", "gamma", "delta", "epsilon"]
@@ -354,7 +354,7 @@ def test_dense_rank_skips_when_manifest_model_mismatches_configured_model(tmp_pa
     CURRENTLY configured model Y, is comparing two different embedding spaces -- garbage
     similarity. _dense_rank must refuse and degrade to [] (BM25 carries recall)."""
     emb_docs, emb_query = _fake_embedder(16)
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
     monkeypatch.setattr(R, "embed_query", emb_query)
     md = str(tmp_path / "memory")
@@ -378,7 +378,7 @@ def test_recall_degrades_to_bm25_with_doctor_visible_reason_on_model_mismatch(
     `model` to a different string, and assert BOTH recall()'s backend degrades to bm25
     AND check_index_integrity names the mismatch (doctor-visible, both models + remediation)."""
     emb_docs, emb_query = _fake_embedder(16)
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
     monkeypatch.setattr(R, "embed_query", emb_query)
     md = str(tmp_path / "memory")
@@ -453,7 +453,7 @@ _OAUTH_QUERY = "how does the oauth token refresh flow work"
 def test_graph_expansion_surfaces_lexically_distant_neighbor(tmp_path, monkeypatch):
     """The acceptance case: A links [[B]], B shares no tokens with a query hitting A ->
     B still lands in top-k, marked via=graph, and format_results renders ' (linked)'."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_linked_corpus(md, _LINKED_CORPUS)
@@ -479,7 +479,7 @@ def test_graph_expansion_surfaces_lexically_distant_neighbor(tmp_path, monkeypat
 def test_graph_expansion_pulls_inbound_neighbors_too(tmp_path, monkeypatch):
     """Expansion unions BOTH directions: a query hitting deploy_runbook (the link TARGET)
     surfaces auth_flow through its inbound edge."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_linked_corpus(md, _LINKED_CORPUS)
@@ -493,17 +493,17 @@ def test_graph_expansion_pulls_inbound_neighbors_too(tmp_path, monkeypatch):
 
 def test_graph_expansion_noop_when_no_edges(tmp_path, monkeypatch):
     """A corpus with zero wikilinks must rank byte-identically with expansion enabled vs
-    force-disabled (MEMOBOT_GRAPH_SEEDS=0) — the expansion path may only ever ADD."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    force-disabled (HIPPO_GRAPH_SEEDS=0) — the expansion path may only ever ADD."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _CORPUS)  # bodies are plain "body" — no [[links]], so links.json is edge-free
     B.build_index(md, idx)
 
     query = "which reranker do we use for search results"
-    monkeypatch.setenv("MEMOBOT_GRAPH_SEEDS", "0")
+    monkeypatch.setenv("HIPPO_GRAPH_SEEDS", "0")
     disabled = R.recall(query, k=5, memory_dir=md, index_dir=idx)
-    monkeypatch.delenv("MEMOBOT_GRAPH_SEEDS")
+    monkeypatch.delenv("HIPPO_GRAPH_SEEDS")
     enabled = R.recall(query, k=5, memory_dir=md, index_dir=idx)
     assert enabled == disabled  # full dict equality: names, order, scores, via labels
     assert enabled and all(r["via"] == "rank" for r in enabled)
@@ -513,7 +513,7 @@ def test_graph_expansion_noop_when_no_edges(tmp_path, monkeypatch):
 def test_graph_expansion_never_resurrects_old_invalidated(tmp_path, monkeypatch):
     """'old'-invalidated neighbors stay display-filtered — the graph must not become a
     side door around soft-invalidation."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     items = dict(_LINKED_CORPUS)
@@ -537,7 +537,7 @@ def test_graph_expansion_never_resurrects_old_invalidated(tmp_path, monkeypatch)
 def test_graph_expansion_keeps_higher_organic_score(tmp_path, monkeypatch):
     """A neighbor that ALREADY ranks organically above the discounted injection keeps its
     organic tuple — same position, via=rank, no downgrade to a graph label."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     # Both docs match the query hard -> the neighbor's organic RRF score (rank 1 or 2,
@@ -565,9 +565,9 @@ def test_graph_expansion_keeps_higher_organic_score(tmp_path, monkeypatch):
 
 
 def test_graph_expansion_seed_count_env_override(tmp_path, monkeypatch):
-    """MEMOBOT_GRAPH_SEEDS changes how deep the seed window reaches: a neighbor linked only
+    """HIPPO_GRAPH_SEEDS changes how deep the seed window reaches: a neighbor linked only
     from the #3-ranked hit appears at the default (3) but not at 1."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     # Strictly nested token overlap -> deterministic BM25 order x > y > z for the query;
@@ -585,11 +585,11 @@ def test_graph_expansion_seed_count_env_override(tmp_path, monkeypatch):
     B.build_index(md, idx)
 
     query = "alpha beta gamma delta"
-    monkeypatch.setenv("MEMOBOT_GRAPH_SEEDS", "1")
+    monkeypatch.setenv("HIPPO_GRAPH_SEEDS", "1")
     narrow = [r["name"] for r in R.recall(query, k=5, memory_dir=md, index_dir=idx)]
     assert "hidden_gem" not in narrow  # z is outside the 1-seed window
 
-    monkeypatch.delenv("MEMOBOT_GRAPH_SEEDS")  # default 3 seeds reaches z
+    monkeypatch.delenv("HIPPO_GRAPH_SEEDS")  # default 3 seeds reaches z
     wide = [r["name"] for r in R.recall(query, k=5, memory_dir=md, index_dir=idx)]
     assert "hidden_gem" in wide
 
@@ -597,7 +597,7 @@ def test_graph_expansion_seed_count_env_override(tmp_path, monkeypatch):
 def test_graph_expansion_skipped_for_in_memory_index_without_dirs(tmp_path, monkeypatch):
     """A caller-supplied LoadedIndex with no dirs (eval self_recall probes, hermetic tests)
     gets NO expansion — no index_dir is resolvable, so the edge cache is never consulted."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_linked_corpus(md, _LINKED_CORPUS)
@@ -616,7 +616,7 @@ def test_graph_expansion_skipped_for_in_memory_index_without_dirs(tmp_path, monk
 # --------------------------------------------------------------------------- #
 def test_recall_fused_dense_and_bm25(tmp_path, monkeypatch):
     emb_docs, emb_query = _fake_embedder(16)
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
     monkeypatch.setattr(R, "embed_query", emb_query)
     md = str(tmp_path / "memory")
@@ -632,7 +632,7 @@ def test_recall_fused_dense_and_bm25(tmp_path, monkeypatch):
 
 def test_recall_falls_back_to_bm25_when_dense_query_fails(tmp_path, monkeypatch):
     emb_docs, _ = _fake_embedder(16)
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -665,7 +665,7 @@ def test_format_results_empty_is_empty():
 
 
 def test_recall_output_bounded_under_cap(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _CORPUS)
@@ -682,7 +682,7 @@ def test_bm25_fallback_path_with_fastembed_installed(tmp_path, monkeypatch):
 
     pytest.importorskip("fastembed")
     # Even with fastembed installed, forcing dense off must yield a working BM25 recall.
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _CORPUS)
@@ -723,7 +723,7 @@ def test_recent_memories_window(repo, memory_dir):
 
 def test_git_recent_producer_self_suppresses(repo, memory_dir, monkeypatch):
     # No memories with a resolvable recent source_commit -> producer returns None.
-    monkeypatch.setenv("MEMOBOT_RECENT_DAYS", "14")
+    monkeypatch.setenv("HIPPO_RECENT_DAYS", "14")
     git_commit(repo, "c1", 1_700_000_000)
     assert R.git_recent_producer(memory_dir, repo) is None
 
@@ -856,7 +856,7 @@ def test_recall_acceptance_traceback_prompt_recalls_memory_citing_same_symbol(
     # Acceptance criterion (RET-4): a traceback-bearing prompt recalls the memory citing the
     # same symbol/file. Hermetic corpus test THROUGH recall() (clean_query -> recall), not
     # just a clean_query unit test -- exercises the full hot-path contract end to end.
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     corpus = {
@@ -909,7 +909,7 @@ def test_floor_memory_names_parses_floor_pointers(tmp_path):
 
 
 def test_main_floor_dedup_drops_always_loaded_members_and_tops_off(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(
@@ -930,7 +930,7 @@ def test_main_floor_dedup_drops_always_loaded_members_and_tops_off(tmp_path, mon
 
 
 def test_main_skips_recall_entirely_on_envelope_query(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _CORPUS)
@@ -954,7 +954,7 @@ def test_main_skips_recall_entirely_on_envelope_query(tmp_path, monkeypatch, cap
 def test_recall_drops_deleted_memory_same_session(tmp_path, monkeypatch):
     """A memory deleted from disk AFTER the index was built must never surface again,
     even though the persisted index still has a row for it."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _CORPUS)
@@ -973,7 +973,7 @@ def test_recall_drops_deleted_memory_same_session(tmp_path, monkeypatch):
 def test_recall_patches_bm25_on_edited_description(tmp_path, monkeypatch):
     """A description edited on disk (index NOT rebuilt) must surface via BM25 for a query
     that only matches the NEW text — proving the live token patch, not just stale reuse."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"canvas_pdf.md": _CORPUS["canvas_pdf.md"]})
@@ -996,7 +996,7 @@ def test_recall_drift_check_stays_fast_on_larger_corpus(tmp_path, monkeypatch):
     """Timing guard: the per-query stat+reread drift check must not blow up the hot path."""
     import time
 
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     corpus = {
@@ -1034,7 +1034,7 @@ def test_recall_bm25_japanese_corpus_returns_relevant_hit(tmp_path, monkeypatch)
     """Acceptance: a Japanese corpus + same-language query must return the RELEVANT memory via
     BM25 -- pre-RET-3, the ASCII-only tokenizer produced zero tokens for this text entirely,
     so BM25 could never match anything (0 shared tokens with an empty corpus vocabulary)."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _JAPANESE_CORPUS)
@@ -1048,7 +1048,7 @@ def test_recall_bm25_japanese_corpus_returns_relevant_hit(tmp_path, monkeypatch)
 
 def test_recall_bm25_russian_corpus_returns_relevant_hit(tmp_path, monkeypatch):
     """Acceptance: same as the Japanese case, for Cyrillic (word-token, not bigram, path)."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _RUSSIAN_CORPUS)
@@ -1066,7 +1066,7 @@ def test_recall_dense_japanese_corpus_with_fake_embedder(tmp_path, monkeypatch):
     per the roadmap's scoping: a real multilingual dense download is explicitly NOT added to
     CI). Confirms the dense path doesn't choke/degrade on non-Latin text end to end."""
     emb_docs, emb_query = _fake_embedder(16)
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
     monkeypatch.setattr(R, "embed_query", emb_query)
     md = str(tmp_path / "memory")
@@ -1227,7 +1227,7 @@ def test_bm25_rank_without_stats_falls_back_and_matches_golden():
 def test_bm25_stats_survive_manifest_round_trip(tmp_path, monkeypatch):
     """Build persists the "bm25" block; loading it back gives byte-for-byte-equivalent stats
     (JSON round-trip: int/float/list/dict only, no drift)."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _CORPUS)
@@ -1248,7 +1248,7 @@ def test_bm25_stats_survive_manifest_round_trip(tmp_path, monkeypatch):
 def test_recall_rankings_identical_with_and_without_persisted_stats(tmp_path, monkeypatch):
     """Same corpus/query: recall() with the persisted-stats fast path vs the manifest's "bm25"
     block stripped out (forcing the fallback) must produce IDENTICAL rankings and scores."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _CORPUS)
@@ -1271,7 +1271,7 @@ def test_bm25_rank_falls_back_when_drift_patched_entry_matches(tmp_path, monkeyp
     """A drift-patched entry (COR-4: fresh tokens the persisted postings don't know about)
     must force the FULL fallback construction for this query, not the stale fast path —
     this is exactly what makes `test_recall_patches_bm25_on_edited_description` keep passing."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"canvas_pdf.md": _CORPUS["canvas_pdf.md"]})
@@ -1357,7 +1357,7 @@ def test_recall_acceptance_body_only_fact_retrievable_via_bm25(tmp_path, monkeyp
     """The headline RET-2 acceptance test: a GENERIC description gives BM25 nothing to match,
     but a query on a DISTINCTIVE body token (present ONLY in the body, absent from the
     description) must still surface the memory via the bm25_body backstop ranking."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_body_corpus(
@@ -1384,7 +1384,7 @@ def test_recall_body_backstop_never_beats_description_hit_at_equal_relevance(tmp
     """_BODY_RRF_WEIGHT keeps body rankings a BACKSTOP: a query matching one memory's
     DESCRIPTION must still outrank a same-query body-only match on another memory, all else
     equal -- proving description rows stay primary, per the roadmap's design."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_body_corpus(
@@ -1409,7 +1409,7 @@ def test_recall_body_backstop_never_beats_description_hit_at_equal_relevance(tmp
 def test_recall_body_hit_carries_primary_backend_label(tmp_path, monkeypatch):
     """A body-only hit still reports the description-only backend label ('bm25', not a third
     backend) -- body rankings are a backstop at the display layer too, per the design."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_body_corpus(md, {"incident.md": ("a generic description", _DISTINCTIVE_BODY)})
@@ -1421,7 +1421,7 @@ def test_recall_body_hit_carries_primary_backend_label(tmp_path, monkeypatch):
 def test_bm25_rank_body_maps_chunks_back_to_parent_and_dedupes(tmp_path, monkeypatch):
     """Direct unit check: a memory with MULTIPLE matching body chunks contributes exactly
     ONE entry to the ranking (its best-ranked chunk), never one entry per matching chunk."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     two_chunk_body = (
@@ -1441,7 +1441,7 @@ def test_bm25_rank_body_maps_chunks_back_to_parent_and_dedupes(tmp_path, monkeyp
 def test_dense_rank_body_maps_chunks_back_and_dedupes(tmp_path, monkeypatch):
     """Direct unit check on the dense half of the backstop: fake-embedder dense rank over the
     widened matrix, mapped back to parent entries, deduped to best rank."""
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16)[0])
     monkeypatch.setattr(B, "embed_query", _fake_embedder(16)[1])
     md = str(tmp_path / "memory")
@@ -1481,11 +1481,11 @@ def test_rrf_fuse_body_weight_discounts_but_does_not_zero():
 
 
 def test_body_rrf_weight_env_override(monkeypatch):
-    monkeypatch.setenv("MEMOBOT_BODY_RRF_WEIGHT", "0.25")
+    monkeypatch.setenv("HIPPO_BODY_RRF_WEIGHT", "0.25")
     assert R._body_rrf_weight() == pytest.approx(0.25)
-    monkeypatch.setenv("MEMOBOT_BODY_RRF_WEIGHT", "not-a-number")
+    monkeypatch.setenv("HIPPO_BODY_RRF_WEIGHT", "not-a-number")
     assert R._body_rrf_weight() == R._BODY_RRF_WEIGHT  # malformed -> module default
-    monkeypatch.delenv("MEMOBOT_BODY_RRF_WEIGHT", raising=False)
+    monkeypatch.delenv("HIPPO_BODY_RRF_WEIGHT", raising=False)
     assert R._body_rrf_weight() == R._BODY_RRF_WEIGHT
 
 
@@ -1493,7 +1493,7 @@ def test_graph_expansion_still_operates_on_parent_entries_with_body_chunks_prese
     """GRA-1 interplay (explicitly called out in the roadmap): 1-hop expansion must keep
     operating purely on parent ENTRY indices even when the corpus has body chunks -- the
     graph never needs to know body chunks exist at all."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_body_corpus(
@@ -1542,7 +1542,7 @@ def test_recall_acceptance_body_only_fact_retrievable_via_dense(tmp_path, monkey
             "other.md": ("an unrelated memory", "completely different unrelated topic content here today"),
         },
     )
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     B.build_index(md, idx)
     res = R.recall(
         "why did the database connections run out during retries", k=5, memory_dir=md, index_dir=idx
@@ -1570,35 +1570,35 @@ _OFF_TOPIC_PROMPTS = [
 
 
 def test_dense_floor_env_override_accepted_and_malformed_falls_back(monkeypatch):
-    """``MEMOBOT_DENSE_FLOOR`` overrides the calibrated table for ANY model; a malformed
+    """``HIPPO_DENSE_FLOOR`` overrides the calibrated table for ANY model; a malformed
     value degrades to the table/default rather than raising (recall() must never break over
     a typo'd env var)."""
-    monkeypatch.setenv("MEMOBOT_DENSE_FLOOR", "0.42")
+    monkeypatch.setenv("HIPPO_DENSE_FLOOR", "0.42")
     assert R._dense_floor("BAAI/bge-small-en-v1.5") == 0.42
     assert R._dense_floor("some/other-model") == 0.42  # override wins over EVERY model
     assert R._dense_floor(None) == 0.42
 
-    monkeypatch.setenv("MEMOBOT_DENSE_FLOOR", "not-a-float")
+    monkeypatch.setenv("HIPPO_DENSE_FLOOR", "not-a-float")
     assert R._dense_floor("BAAI/bge-small-en-v1.5") == R._DENSE_FLOOR_BY_MODEL["BAAI/bge-small-en-v1.5"]
 
-    monkeypatch.delenv("MEMOBOT_DENSE_FLOOR", raising=False)
+    monkeypatch.delenv("HIPPO_DENSE_FLOOR", raising=False)
     assert R._dense_floor("BAAI/bge-small-en-v1.5") == R._DENSE_FLOOR_BY_MODEL["BAAI/bge-small-en-v1.5"]
     assert R._dense_floor("an/unknown-model-id") == R._DENSE_FLOOR_DEFAULT  # uncalibrated -> conservative default
 
 
 def test_dense_floor_zero_override_disables_floor_entirely(monkeypatch):
-    """``MEMOBOT_DENSE_FLOOR=0`` admits every candidate regardless of similarity — the pre-
+    """``HIPPO_DENSE_FLOOR=0`` admits every candidate regardless of similarity — the pre-
     RET-1 behavior, available as an explicit opt-out."""
-    monkeypatch.setenv("MEMOBOT_DENSE_FLOOR", "0")
+    monkeypatch.setenv("HIPPO_DENSE_FLOOR", "0")
     assert R._dense_floor("BAAI/bge-small-en-v1.5") == 0.0
 
 
 def test_knee_ratio_env_override_accepted_and_malformed_falls_back(monkeypatch):
-    monkeypatch.setenv("MEMOBOT_KNEE_RATIO", "0.75")
+    monkeypatch.setenv("HIPPO_KNEE_RATIO", "0.75")
     assert R._knee_ratio() == 0.75
-    monkeypatch.setenv("MEMOBOT_KNEE_RATIO", "garbage")
+    monkeypatch.setenv("HIPPO_KNEE_RATIO", "garbage")
     assert R._knee_ratio() == R._KNEE_RATIO
-    monkeypatch.delenv("MEMOBOT_KNEE_RATIO", raising=False)
+    monkeypatch.delenv("HIPPO_KNEE_RATIO", raising=False)
     assert R._knee_ratio() == R._KNEE_RATIO
 
 
@@ -1606,7 +1606,7 @@ def test_dense_rank_rows_drops_candidates_below_floor(tmp_path, monkeypatch):
     """Unit check on leg 1: ``_dense_rank_rows`` must never return a row whose cosine
     similarity to the query sits below the calibrated floor for the index's model."""
     emb_docs, emb_query = _fake_embedder(16)
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
     monkeypatch.setattr(R, "embed_query", emb_query)
     md = str(tmp_path / "memory")
@@ -1617,12 +1617,12 @@ def test_dense_rank_rows_drops_candidates_below_floor(tmp_path, monkeypatch):
 
     # A floor of 1.01 is unreachable for any unit-normalized cosine similarity (max is 1.0)
     # -> every candidate must be dropped, proving the floor is actually applied per-row.
-    monkeypatch.setenv("MEMOBOT_DENSE_FLOOR", "1.01")
+    monkeypatch.setenv("HIPPO_DENSE_FLOOR", "1.01")
     assert R._dense_rank_rows("oauth token refresh", index) == []
 
     # A floor of -1.0 is below every possible cosine similarity -> nothing is ever dropped;
     # the raw row count must equal the corpus size (a real ordering, not an empty one).
-    monkeypatch.setenv("MEMOBOT_DENSE_FLOOR", "-1.0")
+    monkeypatch.setenv("HIPPO_DENSE_FLOOR", "-1.0")
     rows = R._dense_rank_rows("oauth token refresh", index)
     assert len(rows) == len(index.entries)
 
@@ -1630,7 +1630,7 @@ def test_dense_rank_rows_drops_candidates_below_floor(tmp_path, monkeypatch):
 def test_off_topic_prompt_injects_zero_pointers_bm25_only(tmp_path, monkeypatch):
     """ACCEPTANCE (hermetic): a query sharing NO token with any memory in the corpus, with
     dense disabled, must abstain completely — recall() returns [], not a wasted top-k."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _RET1_CORPUS)
@@ -1646,10 +1646,10 @@ def test_hard_skip_when_dense_below_floor_and_bm25_empty(tmp_path, monkeypatch):
     query with zero BM25 token overlap either -> recall() must return [], not fall through to
     some partial/garbage result."""
     emb_docs, emb_query = _fake_embedder(16)
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
     monkeypatch.setattr(R, "embed_query", emb_query)
-    monkeypatch.setenv("MEMOBOT_DENSE_FLOOR", "1.01")  # unreachable -> dense always empty
+    monkeypatch.setenv("HIPPO_DENSE_FLOOR", "1.01")  # unreachable -> dense always empty
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _RET1_CORPUS)
@@ -1663,7 +1663,7 @@ def test_knee_cutoff_stops_early_leaving_up_to_k(tmp_path, monkeypatch):
     """Leg 2 acceptance: a corpus with one strong hit and several much-weaker BM25-only
     matches must emit FEWER than k results once the score ratio falls below the knee -- "up
     to k", not always exactly k."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     # "alpha" alone overlaps every doc (weak, shared token); "beta gamma delta epsilon
@@ -1687,10 +1687,10 @@ def test_knee_cutoff_stops_early_leaving_up_to_k(tmp_path, monkeypatch):
 
 
 def test_knee_ratio_zero_disables_cutoff(tmp_path, monkeypatch):
-    """``MEMOBOT_KNEE_RATIO=0`` must restore the pre-RET-1 "always fill to k" behavior on
+    """``HIPPO_KNEE_RATIO=0`` must restore the pre-RET-1 "always fill to k" behavior on
     the SAME corpus the knee test above proves stops early with the default ratio."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
-    monkeypatch.setenv("MEMOBOT_KNEE_RATIO", "0")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_KNEE_RATIO", "0")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(
@@ -1714,7 +1714,7 @@ def test_knee_cutoff_exempts_invalidation_demoted_entry_still_recallable(tmp_pat
     demotion), but must remain reachable at a larger k rather than being knee-cut on the
     artificial score gap the x0.5 penalty alone manufactures (see recall()'s
     `primary_relevance` construction)."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx_dir = str(tmp_path / ".memory-index")
     words = ["alpha", "beta", "gamma", "delta", "epsilon"]
@@ -1738,7 +1738,7 @@ def test_off_topic_prompt_injects_zero_pointers_dense(tmp_path, monkeypatch):
     pytest.importorskip("fastembed")
     cache = os.environ.get("FASTEMBED_CACHE_PATH") or B.durable_fastembed_cache_dir()
     monkeypatch.setenv("FASTEMBED_CACHE_PATH", cache)
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _RET1_CORPUS)
@@ -1757,7 +1757,7 @@ def test_on_topic_prompt_still_finds_hit_with_dense_floor_active(tmp_path, monke
     pytest.importorskip("fastembed")
     cache = os.environ.get("FASTEMBED_CACHE_PATH") or B.durable_fastembed_cache_dir()
     monkeypatch.setenv("FASTEMBED_CACHE_PATH", cache)
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _RET1_CORPUS)

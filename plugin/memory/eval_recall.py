@@ -672,7 +672,7 @@ def evaluate(
     backend = "dense+bm25" if index.dense_ready else "bm25-only"
     # Fixture provenance mismatch: the hard-set fixture SAYS it was generated against a
     # dense+bm25 run (see _load_fixture_docs' metadata header), but THIS run is serving
-    # bm25-only -- e.g. a cold model cache, MEMOBOT_DISABLE_DENSE, or fastembed missing.
+    # bm25-only -- e.g. a cold model cache, HIPPO_DISABLE_DENSE, or fastembed missing.
     # A bm25-only pass against dense-calibrated paraphrase queries is systematically WEAKER
     # than what the fixture was tuned for (BM25 alone can't catch the cross-vocabulary
     # paraphrases dense embeddings were curated to test) -- silently reporting "PASS" here
@@ -883,7 +883,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             "  ⚠️  BACKEND MISMATCH: hard-set fixture was generated_with_backend=dense+bm25, "
             "but this run served bm25-only — a PASS here does NOT prove hybrid recall works, "
             "only that BM25 alone can pass a dense-calibrated fixture (or that dense degraded "
-            "silently -- check the fastembed model cache / MEMOBOT_DISABLE_DENSE)."
+            "silently -- check the fastembed model cache / HIPPO_DISABLE_DENSE)."
         )
     _SKIP_REASONS = {
         "hard_recall@10": "no hard-set fixture",

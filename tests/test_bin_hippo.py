@@ -15,7 +15,7 @@ artifact the invocation could touch.
 
 Subprocess tests do NOT inherit conftest.py's autouse fixtures (they set up THIS
 process's os.environ, not a child's) -- each test here builds its own env dict and
-must set MEMOBOT_TRUST_FILE / MEMOBOT_TRUST_ALL / MEMOBOT_DISABLE_DENSE explicitly,
+must set HIPPO_TRUST_FILE / HIPPO_TRUST_ALL / HIPPO_DISABLE_DENSE explicitly,
 mirroring what conftest does for in-process tests.
 
 Note on the fallback interpreter: on the CI hermetic lane, the `python3` bin/hippo
@@ -92,10 +92,10 @@ def _base_env(tmp_path, *, cwd) -> dict:
         # the in-process autouse fixture, so the hermetic trust env must be set here
         # explicitly or the corpus (a real git-less dir) could be denied/allowed by
         # whatever the runner's real ~/.claude/hippo-trust.json happens to contain.
-        "MEMOBOT_TRUST_FILE": str(tmp_path / "hippo-trust.json"),
-        "MEMOBOT_TRUST_ALL": "1",
+        "HIPPO_TRUST_FILE": str(tmp_path / "hippo-trust.json"),
+        "HIPPO_TRUST_ALL": "1",
         # Mirrors the item spec: BM25-only, no dense model load / download attempt.
-        "MEMOBOT_DISABLE_DENSE": "1",
+        "HIPPO_DISABLE_DENSE": "1",
     }
 
 

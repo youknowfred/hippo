@@ -627,7 +627,7 @@ def test_resolve_dirs_nested_corpus_wins_over_root(tmp_path, monkeypatch):
     nested_md = os.path.join(subdir, ".claude", "memory")
     os.makedirs(nested_md)
 
-    monkeypatch.delenv("MEMOBOT_MEMORY_DIR", raising=False)
+    monkeypatch.delenv("HIPPO_MEMORY_DIR", raising=False)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", subdir)
 
     memory_dir, repo_root = P.resolve_dirs()
@@ -645,7 +645,7 @@ def test_resolve_dirs_falls_through_to_root_when_subdir_has_no_corpus(tmp_path, 
     os.makedirs(root_md)
     # No nested .claude/memory under subdir.
 
-    monkeypatch.delenv("MEMOBOT_MEMORY_DIR", raising=False)
+    monkeypatch.delenv("HIPPO_MEMORY_DIR", raising=False)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", subdir)
 
     memory_dir, repo_root = P.resolve_dirs()
@@ -660,7 +660,7 @@ def test_resolve_dirs_falls_back_to_project_dir_when_no_corpus_anywhere(tmp_path
     os.makedirs(subdir)
     # Neither the subdir NOR the repo root has a .claude/memory anywhere.
 
-    monkeypatch.delenv("MEMOBOT_MEMORY_DIR", raising=False)
+    monkeypatch.delenv("HIPPO_MEMORY_DIR", raising=False)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", subdir)
 
     memory_dir, repo_root = P.resolve_dirs()
@@ -680,7 +680,7 @@ def test_resolve_dirs_explicit_memobot_memory_dir_bypasses_walk_up(tmp_path, mon
     os.makedirs(explicit_md)
 
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", subdir)
-    monkeypatch.setenv("MEMOBOT_MEMORY_DIR", explicit_md)
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", explicit_md)
 
     memory_dir, repo_root = P.resolve_dirs()
     assert memory_dir == explicit_md  # explicit override always wins, no walk-up
@@ -897,7 +897,7 @@ def test_create_project_symlink_uses_same_encoding_as_check(tmp_path):
 def test_existing_corpus_gets_symlink_and_index_without_touching_memory(tmp_path, monkeypatch):
     from memory import build_index as B
 
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")  # fast, offline, BM25-only build
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")  # fast, offline, BM25-only build
 
     repo_root = str(tmp_path / "repo")
     memory_dir = os.path.join(repo_root, ".claude", "memory")

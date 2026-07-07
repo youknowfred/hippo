@@ -49,7 +49,7 @@ def _fake_embedder(dim: int = 16):
 # BM25-only build (no dense)
 # --------------------------------------------------------------------------- #
 def test_build_bm25_only_when_dense_disabled(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"a.md": "voyage reranker cross encoder", "b.md": "budget timeout phase envelope"})
@@ -69,7 +69,7 @@ def test_degrade_to_bm25_when_model_unavailable(tmp_path, monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("no cached model")
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", boom)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -105,7 +105,7 @@ def test_cold_cache_degrades_to_bm25_fast_with_no_fastembed_import(tmp_path, mon
     import rank_bm25  # noqa: F401
     import yaml  # noqa: F401
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     empty_cache = str(tmp_path / "empty-fastembed-cache")
     monkeypatch.setenv("FASTEMBED_CACHE_PATH", empty_cache)
     sys.modules.pop("fastembed", None)
@@ -165,7 +165,7 @@ def test_run_bounded_returns_value_from_worker_thread():
 # Dense build with a fake embedder (deterministic, offline)
 # --------------------------------------------------------------------------- #
 def test_dense_build_writes_matrix_and_rows(tmp_path, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -186,7 +186,7 @@ def test_dense_build_writes_matrix_and_rows(tmp_path, monkeypatch):
 # COR-12: atomic manifest/dense writes (no torn reads, no tmp litter)
 # --------------------------------------------------------------------------- #
 def test_no_stray_tmp_files_after_build(tmp_path, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -197,14 +197,14 @@ def test_no_stray_tmp_files_after_build(tmp_path, monkeypatch):
     assert leftovers == []
 
     # Also true for a BM25-only (no-dense) build and a switch-back-to-dense rebuild.
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     B.build_index(md, idx)
     leftovers = [f for f in os.listdir(idx) if f.endswith(".tmp") or f.endswith(".tmp.npy")]
     assert leftovers == []
 
 
 def test_dense_replace_happens_before_manifest_replace(tmp_path, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -230,7 +230,7 @@ def test_manifest_never_visible_with_missing_or_stale_dense(tmp_path, monkeypatc
     # A reader that observes the manifest mid-build (simulated by inspecting os.replace call
     # order + on-disk state right after build_index returns) must never see dense_ready=true
     # with dense.npy absent or shaped differently than what the manifest expects.
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -253,7 +253,7 @@ def test_incremental_rebuild_only_embeds_changed(tmp_path, monkeypatch):
         embedded_batches.append(list(texts))
         return base(texts)
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", counting_embed)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -281,7 +281,7 @@ def test_rebuild_with_no_changes_reembeds_nothing(tmp_path, monkeypatch):
         embedded_batches.append(list(texts))
         return base(texts)
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", counting_embed)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -342,7 +342,7 @@ def test_compute_corpus_coerces_unquoted_yaml_date(tmp_path):
 def test_build_index_does_not_crash_on_unquoted_yaml_date(tmp_path, monkeypatch):
     """End-to-end: the exact crash scenario the coercion fix prevents -- json.dump(manifest)
     on a raw datetime.date would raise TypeError without it."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     os.makedirs(md, exist_ok=True)
@@ -367,7 +367,7 @@ def test_invalid_after_refreshed_on_embedding_cache_hit(tmp_path, monkeypatch):
         embedded_batches.append(list(texts))
         return base(texts)
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", counting_embed)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -421,7 +421,7 @@ def test_force_reembeds_everything(tmp_path, monkeypatch):
         embedded_batches.append(list(texts))
         return base(texts)
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", counting_embed)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -442,9 +442,9 @@ def test_default_index_dir_is_gitignored_sibling(tmp_path):
 
 
 def test_switching_to_bm25_removes_stale_dense_file(tmp_path, monkeypatch):
-    # Explicit delenv: the CI hermetic lane exports MEMOBOT_DISABLE_DENSE=1 job-wide,
+    # Explicit delenv: the CI hermetic lane exports HIPPO_DISABLE_DENSE=1 job-wide,
     # and this test's FIRST build must be a dense one for the scenario to exist.
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"a.md": "alpha", "b.md": "beta"})
@@ -452,7 +452,7 @@ def test_switching_to_bm25_removes_stale_dense_file(tmp_path, monkeypatch):
     B.build_index(md, idx)
     assert os.path.exists(os.path.join(idx, "dense.npy"))
     # Rebuild with dense disabled -> the stale dense.npy must be removed.
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     m2 = B.build_index(md, idx)
     assert m2["dense_ready"] is False
     assert not os.path.exists(os.path.join(idx, "dense.npy"))
@@ -465,7 +465,7 @@ def test_allow_download_false_threads_to_embedder(tmp_path, monkeypatch):
         seen["allow_download"] = allow_download
         return _fake_embedder(16)(texts)
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", recording_embed)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -478,7 +478,7 @@ def test_allow_download_false_threads_to_embedder(tmp_path, monkeypatch):
 # refresh_index — the SessionStart incremental, offline, never-downgrade rebuild
 # --------------------------------------------------------------------------- #
 def test_refresh_index_picks_up_new_memory(tmp_path, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -502,7 +502,7 @@ def test_refresh_index_noop_when_unchanged(tmp_path, monkeypatch):
         embedded.append(list(texts))
         return _fake_embedder(16)(texts)
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", counting)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -519,7 +519,7 @@ def test_refresh_index_noop_when_unchanged(tmp_path, monkeypatch):
 def test_refresh_preserves_dense_when_offline_embed_fails(tmp_path, monkeypatch):
     # Build a complete dense index, then add a memory but make the offline embed FAIL
     # (simulates a cold/wiped cache). The refresh must NOT downgrade the index to BM25-only.
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -552,7 +552,7 @@ def test_refresh_index_missing_dir_is_none(tmp_path):
 # short-circuit must NOT ignore dense_ready.
 # --------------------------------------------------------------------------- #
 def test_refresh_index_upgrades_degraded_index_when_corpus_unchanged(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"a.md": "alpha one", "b.md": "beta two"})
@@ -561,7 +561,7 @@ def test_refresh_index_upgrades_degraded_index_when_corpus_unchanged(tmp_path, m
 
     # The corpus is UNCHANGED across "sessions", but dense is now available (mocked/fast
     # embed path) -- the next refresh_index must upgrade the index in place.
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     m2 = B.refresh_index(md, idx)
 
@@ -580,7 +580,7 @@ def test_refresh_index_still_noops_when_already_dense_and_unchanged(tmp_path, mo
         embedded.append(list(texts))
         return _fake_embedder(16)(texts)
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", counting)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -601,7 +601,7 @@ def test_large_corpus_offline_embed_persists_partial_progress_across_sessions(tm
     """Simulate a bounded budget that only allows a couple of chunks per session: assert
     partial rows persist after session 1, and session 2 continues from where it left off
     (already-embedded hashes are never re-submitted to embed_documents)."""
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "DENSE_EMBED_CHUNK_SIZE", 10)
 
     submitted_texts = []
@@ -659,7 +659,7 @@ def test_offline_embed_chunk_timeout_keeps_partial_progress(tmp_path, monkeypatc
     """A slice that itself blows the (per-slice) wall-clock bound raises DenseTimeout inside
     run_bounded -- build_index must catch it, stop starting new slices, and still persist
     whatever prior slices completed rather than losing all progress."""
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "DENSE_EMBED_CHUNK_SIZE", 5)
     monkeypatch.setattr(B, "DENSE_REFRESH_TIMEOUT_SECS", 15.0)
 
@@ -687,7 +687,7 @@ def test_offline_embed_chunk_timeout_keeps_partial_progress(tmp_path, monkeypatc
 
 
 def test_load_index_roundtrip(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"a.md": "voyage reranker", "b.md": "budget envelope"})
@@ -744,7 +744,7 @@ def test_compute_bm25_stats_empty_corpus():
 def test_build_index_manifest_carries_bm25_block(tmp_path, monkeypatch):
     """build_index() must persist the "bm25" stats block, and it must survive the JSON
     manifest round-trip byte-for-byte (all keys JSON-safe: no sets/tuples/non-str keys)."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"a.md": "voyage reranker fallback", "b.md": "budget envelope authority"})
@@ -780,7 +780,7 @@ def test_real_fastembed_dense_build(tmp_path, monkeypatch, tmp_path_factory):
         tmp_path_factory.getbasetemp() / "fastembed-cache"
     )
     monkeypatch.setenv("FASTEMBED_CACHE_PATH", cache)
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(
@@ -801,7 +801,7 @@ def test_real_fastembed_dense_build(tmp_path, monkeypatch, tmp_path_factory):
 # SEC-3: the index dir is self-ignoring; derived state invisible to git
 # --------------------------------------------------------------------------- #
 def test_index_dir_drops_self_ignoring_gitignore(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"a.md": "alpha"})
@@ -817,7 +817,7 @@ def test_derived_dirs_invisible_to_git_without_init(tmp_path, monkeypatch):
 
     from memory import recall as R
 
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     repo = str(tmp_path / "repo")
     md = os.path.join(repo, ".claude", "memory")
     os.makedirs(md)
@@ -826,7 +826,7 @@ def test_derived_dirs_invisible_to_git_without_init(tmp_path, monkeypatch):
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
 
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
-    monkeypatch.setenv("MEMOBOT_MEMORY_DIR", md)
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", md)
     monkeypatch.chdir(repo)
     R.main(["zebra", "canary", "deploys"])  # builds the index + writes telemetry
 
@@ -905,13 +905,13 @@ def test_tokenize_empty_and_whitespace():
 # RET-3: resolve_embed_model() precedence — env > model.json preset > English default
 # --------------------------------------------------------------------------- #
 def test_resolve_embed_model_defaults_to_english(tmp_path, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_EMBED_MODEL", raising=False)
+    monkeypatch.delenv("HIPPO_EMBED_MODEL", raising=False)
     monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
     assert B.resolve_embed_model() == B.ENGLISH_DEFAULT_MODEL
 
 
 def test_resolve_embed_model_reads_persisted_preset(tmp_path, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_EMBED_MODEL", raising=False)
+    monkeypatch.delenv("HIPPO_EMBED_MODEL", raising=False)
     plugin_data = str(tmp_path / "plugin-data")
     os.makedirs(plugin_data)
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", plugin_data)
@@ -921,19 +921,19 @@ def test_resolve_embed_model_reads_persisted_preset(tmp_path, monkeypatch):
 
 
 def test_resolve_embed_model_env_override_wins_over_preset(tmp_path, monkeypatch):
-    """MEMOBOT_EMBED_MODEL must win even when a model.json preset is ALSO present -- the env
+    """HIPPO_EMBED_MODEL must win even when a model.json preset is ALSO present -- the env
     override is the top precedence level, unconditionally (existing tests/hooks rely on this)."""
     plugin_data = str(tmp_path / "plugin-data")
     os.makedirs(plugin_data)
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", plugin_data)
     with open(os.path.join(plugin_data, "model.json"), "w", encoding="utf-8") as fh:
         fh.write('{"embed_model": "some/preset-model"}')
-    monkeypatch.setenv("MEMOBOT_EMBED_MODEL", "some/env-model")
+    monkeypatch.setenv("HIPPO_EMBED_MODEL", "some/env-model")
     assert B.resolve_embed_model() == "some/env-model"
 
 
 def test_resolve_embed_model_missing_preset_file_falls_through(tmp_path, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_EMBED_MODEL", raising=False)
+    monkeypatch.delenv("HIPPO_EMBED_MODEL", raising=False)
     plugin_data = str(tmp_path / "plugin-data")
     os.makedirs(plugin_data)  # dir exists, but no model.json inside it
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", plugin_data)
@@ -943,7 +943,7 @@ def test_resolve_embed_model_missing_preset_file_falls_through(tmp_path, monkeyp
 def test_resolve_embed_model_corrupt_preset_never_raises(tmp_path, monkeypatch):
     """A corrupt/unreadable model.json must degrade to the default, never raise or crash --
     resolve_embed_model runs at MODULE IMPORT time, so a raise here would break every hook."""
-    monkeypatch.delenv("MEMOBOT_EMBED_MODEL", raising=False)
+    monkeypatch.delenv("HIPPO_EMBED_MODEL", raising=False)
     plugin_data = str(tmp_path / "plugin-data")
     os.makedirs(plugin_data)
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", plugin_data)
@@ -953,7 +953,7 @@ def test_resolve_embed_model_corrupt_preset_never_raises(tmp_path, monkeypatch):
 
 
 def test_resolve_embed_model_non_dict_json_falls_through(tmp_path, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_EMBED_MODEL", raising=False)
+    monkeypatch.delenv("HIPPO_EMBED_MODEL", raising=False)
     plugin_data = str(tmp_path / "plugin-data")
     os.makedirs(plugin_data)
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", plugin_data)
@@ -967,15 +967,15 @@ def test_resolve_embed_model_non_dict_json_falls_through(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 def test_model_switch_forces_full_reembed(tmp_path, monkeypatch):
     """build_index's cache-reuse check gates on `old_manifest["model"] == DEFAULT_MODEL` --
-    switching MEMOBOT_EMBED_MODEL (what bootstrap's model.json preset ultimately becomes, via
+    switching HIPPO_EMBED_MODEL (what bootstrap's model.json preset ultimately becomes, via
     resolve_embed_model, at the next process start) must make EVERY existing row a cache miss,
     not just the changed ones -- the whole point being two different models' vectors are NOT
     comparable, so no row can be silently carried over."""
-    # The CI hermetic lane exports MEMOBOT_DISABLE_DENSE=1 job-wide (see the sibling tests in
+    # The CI hermetic lane exports HIPPO_DISABLE_DENSE=1 job-wide (see the sibling tests in
     # this file) -- without clearing it here, dense_disabled() short-circuits want_dense before
     # the monkeypatched embedder ever runs, so dense_ready is force-False regardless of this
     # test's own logic. Every other dense-path test in this file already delenv's this.
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"a.md": "alpha content", "b.md": "beta content"})
@@ -1099,7 +1099,7 @@ _DISTINCTIVE_BODY = (
 
 
 def test_build_index_manifest_carries_body_chunks_block(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_body_corpus(md, {"a.md": ("a generic description", _DISTINCTIVE_BODY)})
@@ -1123,7 +1123,7 @@ def test_build_index_manifest_carries_body_chunks_block(tmp_path, monkeypatch):
 
 
 def test_build_index_dense_matrix_widened_with_body_chunk_rows(tmp_path, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -1159,7 +1159,7 @@ def test_incremental_rebuild_reuses_unchanged_body_chunk_rows(tmp_path, monkeypa
         embedded_batches.append(list(texts))
         return base(texts)
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", counting_embed)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -1190,7 +1190,7 @@ def test_incremental_rebuild_reuses_unchanged_body_chunk_rows(tmp_path, monkeypa
 
 
 def test_loaded_index_exposes_body_chunks(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_body_corpus(md, {"a.md": ("a generic description", _DISTINCTIVE_BODY)})
@@ -1202,7 +1202,7 @@ def test_loaded_index_exposes_body_chunks(tmp_path, monkeypatch):
 def test_loaded_index_degrades_dense_when_widened_matrix_mismatches_body_chunks(tmp_path, monkeypatch):
     """A torn/corrupt dense.npy whose row count matches entries+OLD chunk count but not the
     manifest's CURRENT body_chunks count must degrade the WHOLE dense view (not just chunks)."""
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -1252,7 +1252,7 @@ def test_refresh_index_heals_body_only_edit(tmp_path, monkeypatch):
     """A body edit that leaves the description BYTE-IDENTICAL changes no entry hash at all --
     refresh_index's corpus-unchanged short-circuit must still notice via body-chunk hashes
     and re-run the build so the NEW body content becomes indexed/retrievable."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_body_corpus(md, {"a.md": ("a generic description", "## Old\n" + "original body content here today " * 4)})

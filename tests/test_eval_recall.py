@@ -88,7 +88,7 @@ def _write_relevance_set(tmp_path):
 
 
 def test_self_recall_gate_passes(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     B.build_index(md, idx)
@@ -98,7 +98,7 @@ def test_self_recall_gate_passes(tmp_path, monkeypatch):
 
 
 def test_hard_set_recall_and_mrr_gates(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     B.build_index(md, idx)
@@ -109,7 +109,7 @@ def test_hard_set_recall_and_mrr_gates(tmp_path, monkeypatch):
 
 
 def test_token_reduction_gate(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     B.build_index(md, idx)
@@ -120,7 +120,7 @@ def test_token_reduction_gate(tmp_path, monkeypatch):
 
 
 def test_latency_is_recorded(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     B.build_index(md, idx)
@@ -136,7 +136,7 @@ def test_cold_latency_is_reported_not_gated(tmp_path, monkeypatch):
     # per-process import + model-load cost is measured (the warm gate hides it). On BM25-only it
     # is cheaper (no model) but must still record samples and never gate. Subprocess inherits the
     # parent cwd (repo root) so `memory.recall` imports.
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     B.build_index(md, idx)
@@ -146,7 +146,7 @@ def test_cold_latency_is_reported_not_gated(tmp_path, monkeypatch):
 
 
 def test_evaluate_all_gates_pass_on_tmp_corpus(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -178,7 +178,7 @@ def test_evaluate_all_gates_pass_on_tmp_corpus(tmp_path, monkeypatch):
 # lives in test_cold_latency_is_reported_not_gated above + the manual dense-lane check).
 # --------------------------------------------------------------------------- #
 def test_cold_p50_gate_skipped_when_not_requested(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -193,7 +193,7 @@ def test_cold_p50_gate_skipped_when_not_requested(tmp_path, monkeypatch):
 
 
 def test_cold_p50_gate_requested_and_dense_ready_passes_under_budget(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -212,7 +212,7 @@ def test_cold_p50_gate_requested_and_dense_ready_passes_under_budget(tmp_path, m
 
 
 def test_cold_p50_gate_requested_and_dense_ready_fails_over_budget(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -231,7 +231,7 @@ def test_cold_p50_gate_requested_and_dense_ready_fails_over_budget(tmp_path, mon
 def test_cold_p50_gate_requested_but_no_samples_fails_not_skips(tmp_path, monkeypatch):
     """n == 0 (every subprocess sample failed/timed out) must FAIL the gate when requested,
     not silently pass -- a gate you can't measure is not a gate you can trust."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -251,7 +251,7 @@ def test_cold_p50_gate_requested_but_bm25_only_is_skipped_not_failed(tmp_path, m
     """Requested (--gate-cold) but the run only served bm25-only (no dense model, e.g. a
     hermetic/cache-less machine) -- must SKIP (not fail), because cold ~= warm without a
     per-process model load to amortize; gating here would redden hermetic CI for nothing."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -269,7 +269,7 @@ def test_cold_p50_gate_requested_but_bm25_only_is_skipped_not_failed(tmp_path, m
 def test_gate_cold_cli_flag_defaults_false_and_plumbs_through(tmp_path, monkeypatch, capsys):
     """CLI flag plumbing: --gate-cold absent -> gate_cold=False reaches evaluate(); the
     skip reason printed names the flag so a reader knows how to opt in."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -291,7 +291,7 @@ def test_gate_cold_cli_flag_defaults_false_and_plumbs_through(tmp_path, monkeypa
 
 
 def test_gate_cold_cli_flag_true_plumbs_through(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -316,7 +316,7 @@ def test_main_cli_exits_nonzero_on_cold_failure_only_when_requested(tmp_path, mo
     """RESULT honors a cold failure ONLY when --gate-cold was passed -- the same forged
     over-budget cold sample must be invisible to `ok`/exit-code without the flag, and must
     fail the build with it (dense_ready forced True so the gate actually evaluates)."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -371,7 +371,7 @@ def test_precision_at_k_empty_set_is_zero():
 
 
 def test_precision_at_k_rewards_finding_more_of_a_cluster(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     B.build_index(md, idx)
@@ -402,7 +402,7 @@ def test_precision_at_k_rewards_finding_more_of_a_cluster(tmp_path, monkeypatch)
 def test_precision_at_k_is_distinct_from_hard_set_binary_recall(tmp_path, monkeypatch):
     """A query matching only 1 of 2 relevant items scores 0.5/k under precision, but would
     score a full binary HIT under hard_set_metrics' recall@k -- proving the metrics differ."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     B.build_index(md, idx)
@@ -459,7 +459,7 @@ def test_abstention_rate_measures_fraction_returning_zero_results(tmp_path, monk
     """The headline RET-1 eval acceptance: over a set of queries that share NO token with
     the corpus (hermetic — dense disabled), recall() must abstain on every one, so
     abstention_rate == 1.0."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     B.build_index(md, idx)
@@ -473,7 +473,7 @@ def test_abstention_rate_is_report_only_never_gates(tmp_path, monkeypatch):
     """A LOW abstention rate (queries that happen to share tokens with the corpus, so
     recall() correctly does NOT abstain) must still produce ok=True -- this metric never
     feeds a gate threshold, per the roadmap item."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -497,7 +497,7 @@ def test_default_abstention_set_path_probes_audit_fixtures_then_tests_fixtures(t
     md = os.path.join(repo, ".claude", "memory")
     os.makedirs(md)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
-    monkeypatch.setenv("MEMOBOT_MEMORY_DIR", md)
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", md)
 
     assert E._default_abstention_set_path() is None  # nothing anywhere yet
 
@@ -517,7 +517,7 @@ def test_default_abstention_set_path_probes_audit_fixtures_then_tests_fixtures(t
 
 
 def test_main_cli_prints_abstention_rate_line_when_present(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -589,7 +589,7 @@ def _seed_recall_events(td, session_event_counts):
 
 
 def test_session_token_cost_combines_ledger_and_token_reduction(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     B.build_index(md, idx)
@@ -606,7 +606,7 @@ def test_session_token_cost_combines_ledger_and_token_reduction(tmp_path, monkey
 
 
 def test_session_token_cost_no_sessions_returns_zeros_never_raises(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     B.build_index(md, idx)
@@ -619,7 +619,7 @@ def test_session_token_cost_no_sessions_returns_zeros_never_raises(tmp_path, mon
 # evaluate() — report-only additions never touch the 5 gates
 # --------------------------------------------------------------------------- #
 def test_evaluate_gates_byte_unchanged_with_or_without_new_report_params(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -650,7 +650,7 @@ def test_evaluate_gates_byte_unchanged_with_or_without_new_report_params(tmp_pat
 
 
 def test_evaluate_report_fields_present_and_zeroed_when_omitted(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -664,7 +664,7 @@ def test_evaluate_report_fields_present_and_zeroed_when_omitted(tmp_path, monkey
 def test_evaluate_explicit_memory_dir_stays_hermetic_no_repo_root_leak(tmp_path, monkeypatch):
     """Passing memory_dir explicitly (without repo_root) must NOT trigger an extra
     resolve_dirs() git call that resolves repo_root against the real working tree."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -680,7 +680,7 @@ def test_evaluate_explicit_memory_dir_stays_hermetic_no_repo_root_leak(tmp_path,
 def test_gates_unaffected_when_invalidation_marks_an_irrelevant_entry(tmp_path, monkeypatch):
     """invalid_after set on a memory NOT involved in the hard-set/self-recall queries must
     not move any of the 5 gates -- the penalty only touches the marked entry's own ranking."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -763,7 +763,7 @@ def test_graduation_rate_all_demote_is_zero():
 
 
 def test_evaluate_includes_graduation_rate_report_only(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -784,7 +784,7 @@ def test_evaluate_graduation_rate_no_telemetry_dir_stays_hermetic(tmp_path, monk
     """Passing memory_dir explicitly without telemetry_dir must derive the SIBLING
     telemetry dir (which won't exist under a fresh tmp corpus), not leak onto the real
     repo's reconsolidation ledger."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -800,7 +800,7 @@ def test_default_fixture_path_probes_audit_fixtures_then_tests_fixtures(tmp_path
     md = os.path.join(repo, ".claude", "memory")
     os.makedirs(md)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
-    monkeypatch.setenv("MEMOBOT_MEMORY_DIR", md)
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", md)
 
     # Nothing anywhere -> None, so the CLI inherits evaluate()'s skip semantics
     # (the old default pointed at tests/unit/memory_tools/ — a path that exists in
@@ -829,7 +829,7 @@ def test_token_reduction_gate_skips_without_pretrim_snapshot(tmp_path, monkeypat
     """A corpus that never had an untrimmed always-load (MEMORY.full.md absent — every
     fresh install) has nothing to compare against: net == -recall_avg would spuriously
     fail the gate in EVERY fresh project. It must skip, not fail."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     os.remove(os.path.join(md, "MEMORY.full.md"))
     idx = str(tmp_path / ".memory-index")
@@ -846,7 +846,7 @@ def test_main_bare_cli_is_honest_on_a_fresh_corpus(tmp_path, monkeypatch, capsys
     """The documented merge-gate command `python -m memory.eval_recall` (no flags) must
     pass/skip honestly on a fresh corpus with no fixtures — not report spurious gate
     failures from a fossil default path."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     repo = str(tmp_path / "proj")
     md = os.path.join(repo, ".claude", "memory")
     os.makedirs(md)
@@ -856,7 +856,7 @@ def test_main_bare_cli_is_honest_on_a_fresh_corpus(tmp_path, monkeypatch, capsys
     with open(os.path.join(md, "MEMORY.md"), "w", encoding="utf-8") as fh:
         fh.write("# Floor\n## User\n")  # fresh-install shape: floor, no MEMORY.full.md
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
-    monkeypatch.setenv("MEMOBOT_MEMORY_DIR", md)
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", md)
 
     rc = E.main(["--memory-dir", md, "--index-dir", str(tmp_path / ".memory-index")])
     out = capsys.readouterr().out
@@ -884,7 +884,7 @@ def _mem_with_body(name: str, description: str, body: str) -> str:
 
 
 def test_derive_body_probe_query_excludes_description_tokens(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     os.makedirs(md, exist_ok=True)
     with open(os.path.join(md, "incident.md"), "w", encoding="utf-8") as fh:
@@ -904,7 +904,7 @@ def test_derive_body_probe_query_excludes_description_tokens(tmp_path, monkeypat
 def test_derive_body_probe_query_empty_when_no_body_chunks(tmp_path, monkeypatch):
     """A memory with no qualifying body chunks (trivial/short body) yields "" -- excluded
     from body_probe_recall_at_k's denominator, never a spurious miss."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     os.makedirs(md, exist_ok=True)
     with open(os.path.join(md, "trivial.md"), "w", encoding="utf-8") as fh:
@@ -916,7 +916,7 @@ def test_derive_body_probe_query_empty_when_no_body_chunks(tmp_path, monkeypatch
 
 
 def test_body_probe_recall_at_k_measures_parent_recall(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     os.makedirs(md, exist_ok=True)
     with open(os.path.join(md, "incident.md"), "w", encoding="utf-8") as fh:
@@ -935,7 +935,7 @@ def test_body_probe_recall_at_k_measures_parent_recall(tmp_path, monkeypatch):
 def test_body_probe_recall_zero_n_when_no_body_chunks_anywhere(tmp_path, monkeypatch):
     """A corpus with NO qualifying body chunks (e.g. every body is trivial, or a pre-RET-2
     manifest with no body_chunks key at all) reports n=0, recall=0.0 -- never raises."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)  # this fixture's bodies are all "body for {name}" -- trivial
     idx = str(tmp_path / ".memory-index")
     B.build_index(md, idx)
@@ -946,7 +946,7 @@ def test_body_probe_recall_zero_n_when_no_body_chunks_anywhere(tmp_path, monkeyp
 
 def test_evaluate_includes_body_probe_report_only(tmp_path, monkeypatch):
     """body_probe is threaded through evaluate()'s report but NEVER feeds `ok` / a gate."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     os.makedirs(md, exist_ok=True)
     with open(os.path.join(md, "incident.md"), "w", encoding="utf-8") as fh:
@@ -961,18 +961,18 @@ def test_evaluate_includes_body_probe_report_only(tmp_path, monkeypatch):
 def test_main_cli_prints_body_probe_line_when_present(tmp_path, monkeypatch, capsys):
     """Mirrors test_main_bare_cli_is_honest_on_a_fresh_corpus's env setup — the DEFAULT
     (no --hard-set/--relevance-set flags) CLI path calls _default_hard_set_path(), which
-    resolves via the ambient resolve_dirs(); pointing CLAUDE_PROJECT_DIR/MEMOBOT_MEMORY_DIR
+    resolves via the ambient resolve_dirs(); pointing CLAUDE_PROJECT_DIR/HIPPO_MEMORY_DIR
     at this tmp project (with no .audit-fixtures dir) makes that resolve to "no fixture
     found" -- fresh-install shape -- rather than accidentally discovering THIS repo's own
     tests/fixtures/recall_hard_set.yaml."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     repo = str(tmp_path / "proj")
     md = os.path.join(repo, ".claude", "memory")
     os.makedirs(md)
     with open(os.path.join(md, "incident.md"), "w", encoding="utf-8") as fh:
         fh.write(_mem_with_body("incident", "a generic description", _DISTINCTIVE_BODY))
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
-    monkeypatch.setenv("MEMOBOT_MEMORY_DIR", md)
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", md)
 
     rc = E.main(["--memory-dir", md, "--index-dir", str(tmp_path / ".memory-index")])
     out = capsys.readouterr().out
@@ -987,13 +987,13 @@ def test_main_cli_prints_body_probe_line_when_present(tmp_path, monkeypatch, cap
 # The point of this cluster: a BM25-only pass must never be mistakable for verified hybrid
 # (dense+bm25) recall health -- both in the report dict (``report["backend"]``) and in the
 # two printed lines a human/CI log actually skims (the gate-header line and the RESULT
-# line). Every test below runs BM25-only (MEMOBOT_DISABLE_DENSE=1, per this suite's
+# line). Every test below runs BM25-only (HIPPO_DISABLE_DENSE=1, per this suite's
 # hermeticity requirement -- no fastembed model on disk in CI's hermetic lane) EXCEPT the
 # ones that specifically assert the mismatch does NOT fire on an honest bm25-only fixture
 # or one with no header at all, which is exactly the case this whole suite already runs in.
 # --------------------------------------------------------------------------- #
 def test_evaluate_reports_bm25_only_backend_when_dense_disabled(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -1008,7 +1008,7 @@ def test_backend_field_tracks_dense_ready_directly(tmp_path, monkeypatch):
     signal build_index already exposes, COR-3) rather than re-derived independently --
     forcing dense_ready True on a hermetic (no real model) index proves the field really
     reads the index's own flag rather than e.g. always defaulting to bm25-only."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     B.build_index(md, idx)
@@ -1032,7 +1032,7 @@ def _with_dense_ready(index, value):
 
 
 def test_main_cli_result_line_labels_bm25_only_backend(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -1048,7 +1048,7 @@ def test_main_cli_result_line_labels_dense_bm25_backend(tmp_path, monkeypatch, c
     """Same CLI path, but with a FORGED dense_ready index (no real fastembed model needed)
     -- proves the "dense+bm25" branch of the RESULT-line label renders correctly too, not
     just the bm25-only branch every other test in this file exercises."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
@@ -1127,7 +1127,7 @@ def _write_hard_set_with_header(tmp_path, backend_claim):
 
 
 def test_backend_mismatch_fires_when_dense_generated_fixture_served_bm25_only(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set_with_header(tmp_path, "dense+bm25")
@@ -1137,7 +1137,7 @@ def test_backend_mismatch_fires_when_dense_generated_fixture_served_bm25_only(tm
 
 
 def test_backend_mismatch_does_not_fire_when_fixture_claims_bm25_only(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set_with_header(tmp_path, "bm25-only")
@@ -1146,7 +1146,7 @@ def test_backend_mismatch_does_not_fire_when_fixture_claims_bm25_only(tmp_path, 
 
 
 def test_backend_mismatch_does_not_fire_when_fixture_has_no_header(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)  # bare-list, no header at all
@@ -1159,7 +1159,7 @@ def test_backend_mismatch_does_not_fire_when_dense_claimed_and_actually_served(t
     healthy case this whole mechanism exists to distinguish from the mismatch above --
     must never false-positive here. Forges dense_ready on the loaded index (no real
     fastembed model needed) so this stays hermetic."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set_with_header(tmp_path, "dense+bm25")
@@ -1172,7 +1172,7 @@ def test_backend_mismatch_does_not_fire_when_dense_claimed_and_actually_served(t
 
 
 def test_main_cli_prints_loud_warning_on_backend_mismatch(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set_with_header(tmp_path, "dense+bm25")
@@ -1184,7 +1184,7 @@ def test_main_cli_prints_loud_warning_on_backend_mismatch(tmp_path, monkeypatch,
 
 
 def test_main_cli_no_mismatch_warning_when_backends_agree(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)  # no header -> no claim -> no mismatch possible
@@ -1205,7 +1205,7 @@ def test_default_fixture_path_probe_order_unaffected_by_ret7(tmp_path, monkeypat
     md = os.path.join(repo, ".claude", "memory")
     os.makedirs(md)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
-    monkeypatch.setenv("MEMOBOT_MEMORY_DIR", md)
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", md)
 
     assert E._default_hard_set_path() is None
 
@@ -1253,7 +1253,7 @@ def test_token_reduction_gate_is_net_greater_than_zero(tmp_path, monkeypatch):
     covers the latter. A future rewrite of ``token_reduction`` that silently changes what
     "pass" means (e.g. net >= 0, or a nonzero pct instead of net) should fail this pin even if
     every engineered-to-pass corpus in the suite still scores comfortably positive."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     B.build_index(md, idx)
@@ -1282,7 +1282,7 @@ def test_token_reduction_gate_is_net_greater_than_zero(tmp_path, monkeypatch):
 # Actuals measured on 2026-07-06 against this exact corpus + hard-set (recorded here AND in
 # the commit body per the roadmap item's instructions):
 #   dense (fastembed model warm)  : recall@10 = 1.0000, mrr@10 = 0.9352, self_recall@10 = 1.0000
-#   bm25-only (MEMOBOT_DISABLE_DENSE=1): recall@10 = 1.0000, mrr@10 = 0.9120, self_recall@10 = 1.0000
+#   bm25-only (HIPPO_DISABLE_DENSE=1): recall@10 = 1.0000, mrr@10 = 0.9120, self_recall@10 = 1.0000
 #
 # Band floors are set a small margin (0.05) below each measured actual -- tight enough to
 # catch a real regression (a model bump, a fusion-weight change, a soft-invalidation
@@ -1331,7 +1331,7 @@ def test_golden_corpus_bm25_only_recall_and_mrr_within_band(tmp_path, monkeypatc
     """HERMETIC companion (no fastembed, no network): gives the hermetic CI lanes real golden
     signal instead of only the network-marked dense test below. Its floors are its OWN
     measured band (not the dense test's floors relaxed) -- see the module docstring."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     idx = str(tmp_path / ".memory-index")
     manifest = B.build_index(_GOLDEN_MEMORY_DIR, idx)
     assert manifest["dense_ready"] is False  # confirms this run is genuinely BM25-only
@@ -1369,7 +1369,7 @@ def test_golden_corpus_dense_recall_and_mrr_within_band(tmp_path, monkeypatch, t
         tmp_path_factory.getbasetemp() / "fastembed-cache"
     )
     monkeypatch.setenv("FASTEMBED_CACHE_PATH", cache)
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
 
     idx = str(tmp_path / ".memory-index")
     manifest = B.build_index(_GOLDEN_MEMORY_DIR, idx)
@@ -1411,7 +1411,7 @@ def test_golden_corpus_dense_abstention_rate_high(tmp_path, monkeypatch, tmp_pat
         tmp_path_factory.getbasetemp() / "fastembed-cache"
     )
     monkeypatch.setenv("FASTEMBED_CACHE_PATH", cache)
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
 
     idx = str(tmp_path / ".memory-index")
     manifest = B.build_index(_GOLDEN_MEMORY_DIR, idx)

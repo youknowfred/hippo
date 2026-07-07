@@ -100,7 +100,7 @@ def test_floor_producer_registered_in_dispatcher():
 # new_memory — recall-ready creation; floor pointer only for user/feedback
 # --------------------------------------------------------------------------- #
 def _nm_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))  # hermetic resolve_dirs
     md = str(tmp_path / ".claude" / "memory")
     _floor(md, _CLEAN_FLOOR)
@@ -216,7 +216,7 @@ def test_new_memory_born_staleness_tracked_in_dirty_worktree(tmp_path, monkeypat
 
     from .conftest import git_commit, write_file
 
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     repo = str(tmp_path / "repo")
     os.makedirs(repo)
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
@@ -370,7 +370,7 @@ def test_new_memory_empty_corpus_no_related_line_no_error(tmp_path, monkeypatch)
     """Empty corpus (the very first memory ever created) -> no Related line, no error."""
     from memory import new_memory as NM
 
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     md = str(tmp_path / ".claude" / "memory")  # deliberately NOT pre-seeded — truly empty/absent
     res = NM.write_memory(
@@ -393,7 +393,7 @@ def test_related_line_lands_before_provenance_backfill_ordering(tmp_path, monkey
 
     from .conftest import git_commit, write_file
 
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     repo = str(tmp_path / "repo")
     os.makedirs(repo)
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)

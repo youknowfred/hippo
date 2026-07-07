@@ -20,7 +20,7 @@ deleting it loses nothing (``build_index`` regenerates it). The build is INCREME
 unchanged memories (same content hash) reuse their cached embedding row, so only
 new/edited files are re-embedded.
 
-Degrades cleanly: with ``fastembed`` absent (or ``MEMOBOT_DISABLE_DENSE=1``) it builds a
+Degrades cleanly: with ``fastembed`` absent (or ``HIPPO_DISABLE_DENSE=1``) it builds a
 BM25-only index without error (``dense_ready=false``); recall still works on BM25 alone.
 """
 
@@ -68,7 +68,7 @@ def resolve_embed_model() -> str:
     model-warm step and the doctor English-corpus check both need a known constant to compare
     against) while offering ``--multilingual`` as an OPT-IN, PERSISTED switch — not a second
     env var users have to remember to set every session. Precedence:
-      1. ``MEMOBOT_EMBED_MODEL`` env override — wins unconditionally (existing behavior/tests
+      1. ``HIPPO_EMBED_MODEL`` env override — wins unconditionally (existing behavior/tests
          that set this env var to point at a fake/alternate model must keep working verbatim).
       2. ``${CLAUDE_PLUGIN_DATA}/model.json`` — a small persisted preset file
          (``{"embed_model": "<id>"}``) that bootstrap's ``--multilingual`` flag writes. This is
@@ -84,7 +84,7 @@ def resolve_embed_model() -> str:
     bootstrap-then-recall in one run) re-resolves explicitly rather than relying on the module
     being re-imported.
     """
-    env_override = os.environ.get("MEMOBOT_EMBED_MODEL")
+    env_override = os.environ.get("HIPPO_EMBED_MODEL")
     if env_override:
         return env_override
     plugin_data = os.environ.get("CLAUDE_PLUGIN_DATA", "")
@@ -110,7 +110,7 @@ _DENSE_NAME = "dense.npy"
 
 def default_index_dir(memory_dir: str) -> str:
     """``.claude/.memory-index`` — a sibling of ``.claude/memory`` (the gitignored cache)."""
-    override = os.environ.get("MEMOBOT_INDEX_DIR")
+    override = os.environ.get("HIPPO_INDEX_DIR")
     if override:
         return override
     return os.path.join(os.path.dirname(os.path.abspath(memory_dir)), _INDEX_DIRNAME)
@@ -118,7 +118,7 @@ def default_index_dir(memory_dir: str) -> str:
 
 def dense_disabled() -> bool:
     """True when the dense path is explicitly suppressed (tests / forced BM25-only)."""
-    return os.environ.get("MEMOBOT_DISABLE_DENSE", "").strip() not in ("", "0", "false", "False")
+    return os.environ.get("HIPPO_DISABLE_DENSE", "").strip() not in ("", "0", "false", "False")
 
 
 # --------------------------------------------------------------------------- #
@@ -141,8 +141,8 @@ def _parse_timeout_env(name: str, default: float) -> float:
 
 
 # query path (per-prompt recall) — short; refresh path (SessionStart embed batch) — longer.
-DENSE_QUERY_TIMEOUT_SECS = _parse_timeout_env("MEMOBOT_DENSE_TIMEOUT", 5.0)
-DENSE_REFRESH_TIMEOUT_SECS = _parse_timeout_env("MEMOBOT_REFRESH_TIMEOUT", 15.0)
+DENSE_QUERY_TIMEOUT_SECS = _parse_timeout_env("HIPPO_DENSE_TIMEOUT", 5.0)
+DENSE_REFRESH_TIMEOUT_SECS = _parse_timeout_env("HIPPO_REFRESH_TIMEOUT", 15.0)
 
 
 def _parse_int_env(name: str, default: int) -> int:
@@ -158,7 +158,7 @@ def _parse_int_env(name: str, default: int) -> int:
 # all-or-nothing attempt that discards everything on a single slow batch. Each slice's
 # already-embedded hashes are cache-reused on the next call (see build_index's
 # old_row_by_hash), so a 500-doc corpus converges to dense over N sessions.
-DENSE_EMBED_CHUNK_SIZE = _parse_int_env("MEMOBOT_EMBED_CHUNK_SIZE", 64)
+DENSE_EMBED_CHUNK_SIZE = _parse_int_env("HIPPO_EMBED_CHUNK_SIZE", 64)
 
 
 def run_bounded(fn, seconds: float):
@@ -705,7 +705,7 @@ _MODEL_CACHE: dict = {}
 # (``~/Library/Caches/hippo-memory/fastembed/models--qdrant--bge-small-en-v1.5-onnx-q``).
 # Hardcoded (not looked up via a fastembed import) because importing even one fastembed
 # submodule pulls in onnxruntime transitively (~500ms+) -- exactly the cost this pre-check
-# exists to avoid paying on a cold cache. If ``MEMOBOT_EMBED_MODEL`` is ever pointed at a
+# exists to avoid paying on a cold cache. If ``HIPPO_EMBED_MODEL`` is ever pointed at a
 # different model, the id below won't match -- see ``_expected_model_snapshot_dir``'s fallback.
 #
 # RET-3: ``sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`` is the
@@ -735,7 +735,7 @@ def _expected_model_snapshot_dir(cache_dir: str) -> Optional[str]:
     """The on-disk snapshot dir fastembed would use for ``DEFAULT_MODEL``, or ``None``.
 
     ``None`` when the model isn't in ``_HF_SOURCE_REPO_BY_MODEL`` (an unrecognized
-    ``MEMOBOT_EMBED_MODEL`` override) -- the pre-check can't ground a path for it, so the
+    ``HIPPO_EMBED_MODEL`` override) -- the pre-check can't ground a path for it, so the
     caller should skip the stat-check and fall through to the existing (bounded) load attempt
     rather than wrongly declaring "not cached".
     """
@@ -755,7 +755,7 @@ def _fastembed_model_cached(cache_dir: str) -> bool:
     (a half-written model would still fail to load, so this would just trade a fast "no" for a
     slow, confusing failure inside fastembed instead). An unrecognized model (``None`` from
     ``_expected_model_snapshot_dir``) returns True -- "assume cached, let the real load attempt
-    decide" -- so an unusual ``MEMOBOT_EMBED_MODEL`` override degrades to the old (bounded)
+    decide" -- so an unusual ``HIPPO_EMBED_MODEL`` override degrades to the old (bounded)
     behavior rather than being wrongly short-circuited to "unavailable".
     """
     snapshot_dir = _expected_model_snapshot_dir(cache_dir)
@@ -794,7 +794,7 @@ def _get_model(allow_download: bool):
     timeout to bound an import+load that was never going to succeed.
     """
     if dense_disabled():
-        raise RuntimeError("dense disabled via MEMOBOT_DISABLE_DENSE")
+        raise RuntimeError("dense disabled via HIPPO_DISABLE_DENSE")
     key = (DEFAULT_MODEL, bool(allow_download))
     if key in _MODEL_CACHE:
         return _MODEL_CACHE[key]
@@ -1279,7 +1279,7 @@ def check_index_integrity(index_dir: str) -> Optional[str]:
           count, or column count != declared ``dim``) — ``LoadedIndex``/`_dense_rank`` already
           degrade this to BM25-only without raising, but silently.
       (d) COR-8: the manifest's recorded ``model`` is set but differs from the CURRENTLY
-          configured ``DEFAULT_MODEL`` (e.g. ``MEMOBOT_EMBED_MODEL`` changed, or a plugin
+          configured ``DEFAULT_MODEL`` (e.g. ``HIPPO_EMBED_MODEL`` changed, or a plugin
           update bumped the default, since this index was last built) — ``recall._dense_rank``
           already refuses to cosine-score across two different embedding spaces and degrades
           to BM25, but silently; this names BOTH models and the remediation.
