@@ -4,11 +4,13 @@ description: Create a new, recall-ready memory file the right way (correct front
 
 # /hippo:new — create a memory right-by-construction
 
-Never hand-write a memory file directly — `memory.new_memory` does five things atomically that
-are easy to get wrong by hand: correct frontmatter schema, citation-provenance backfill
-(`cited_paths` / `source_commit`, so staleness detection works from day one), an index refresh
-(so it's recallable in THIS session, not just the next one), and — for `user`/`feedback` types
-only — a floor pointer appended to `MEMORY.md` under the right section.
+Never hand-write a memory file directly — `memory.new_memory` does six things atomically that
+are easy to get wrong by hand: correct frontmatter schema, a near-duplicate/conflict check
+against the existing corpus (warn-only — see the decision flow below), citation-provenance
+backfill (`cited_paths` / `source_commit`, so staleness detection works from day one), an
+index refresh (so it's recallable in THIS session, not just the next one), and — for
+`user`/`feedback` types only — a floor pointer appended to `MEMORY.md` under the right
+section.
 
 ## Preflight (shared across all hippo skills)
 
@@ -78,14 +80,62 @@ Only `user`/`feedback`/`project`/`reference` memories written via THIS tool ever
 Related line — it is never retrofitted onto an existing memory by any automated process (see
 `/hippo:audit`'s link-densification pass for the agent-gated equivalent on the existing corpus).
 
+## Near-duplicate / conflict check (LIF-2) — the tool reports, YOU decide
+
+At creation the tool scores the new memory's name+description against the **existing** index
+(dense cosine when the dense index is warm, normalized BM25 otherwise; each threshold is
+calibrated separately, `HIPPO_DUP_THRESHOLD` overrides). Existing memories above the
+threshold print as a warning block and ride out on the result's `neighbors` list:
+
+```
+warning : 1 existing memory looks near-duplicate/conflicting:
+  • old-memory-name (similarity 0.91) — its one-line description
+  decide  : add (keep both) / update-existing / supersede / skip — see /hippo:new
+```
+
+**Creation is never blocked** — the file is already written when the warning prints. The
+warning routes a decision to YOU (Mem0's ADD/UPDATE/DELETE/NOOP pattern; every outcome is a
+reviewable, per-item git diff — never a bulk sweep). **Read the flagged neighbor(s) first**
+— similarity is vocabulary overlap, not judgment — then pick exactly one:
+
+- **add** — the two are genuinely distinct (similar vocabulary, different fact). Keep both
+  as-is; optionally add a `[[wikilink]]` between them if they are meaningfully related.
+- **update-existing** — same fact, and the EXISTING memory is the right home (it's just
+  stale or incomplete). Fold the new content into the existing memory's body/description,
+  then delete the just-created file (it is uncommitted — plus the floor pointer line the
+  tool added to `MEMORY.md`, if the type was `user`/`feedback`; `git diff` shows it) and
+  re-run `"$PY" -m memory.build_index` so the index drops the deleted entry.
+- **supersede** — the new memory REPLACES the flagged one's claim (old asserts X, reality
+  is now not-X). Keep the new file and record the typed edge + demotion verdict in one
+  per-item step:
+
+  ```bash
+  "$PY" -m memory.reconsolidate --reverify <old-name> --outcome demote --superseded-by <new-name>
+  "$PY" -m memory.build_index   # refresh links.json so the demotion is live THIS session
+  ```
+
+  This appends `supersedes: ["<old-name>"]` to the NEW memory's frontmatter (the GRA-4
+  edge) and logs the verdict; recall then demotes the loser automatically (halved rank,
+  `[superseded by <new-name>]` annotation) — the old file stays in the corpus as history
+  and can be archived later via `/hippo:audit` once it ages out.
+- **skip** — the flagged memory already covers it and needs no update (the new file should
+  not exist). Delete the just-created file (+ its floor pointer, as in update-existing)
+  and re-run `"$PY" -m memory.build_index`.
+
+When the check could not run at all, the result carries a machine-readable
+`note` (e.g. `duplicate check skipped: no index` — a first-ever memory, or a never-indexed
+corpus with `--links`/`--no-links`). No warning ≠ no duplicates in that case — apply the
+search-first judgment below yourself.
+
 ## What NOT to save (skip even if it seems tempting)
 
 - Anything directly re-derivable from reading the current code or `git log`/`git blame`.
 - Transient state relevant only to the current session.
 - Anything already covered by this project's own docs/README.
-- A duplicate of an existing memory — search/recall first (`/hippo:doctor` or a direct
-  `memory.recall` call) before creating a new one on the same topic; update the existing file
-  instead if it's just stale, not wrong.
+- A duplicate of an existing memory — the write-time check above catches near-dupes when an
+  index exists, but it is a similarity heuristic, not judgment: still search/recall first
+  (`/hippo:doctor` or a direct `memory.recall` call) when you suspect the topic is covered;
+  update the existing file instead if it's just stale, not wrong.
 
 ## After creating
 

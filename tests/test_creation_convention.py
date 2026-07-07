@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 import memory.lint_floor as floor
 
 # A real-shaped trimmed floor: memory pointers ONLY under User + Working-Style; the
@@ -381,6 +383,228 @@ def test_new_memory_empty_corpus_no_related_line_no_error(tmp_path, monkeypatch)
     assert res["related"] == []
     text = open(res["path"], encoding="utf-8").read()
     assert "Related:" not in text
+
+
+# --------------------------------------------------------------------------- #
+# LIF-2 — duplicate/conflict detection at write time (warn-only, agent-gated)
+# --------------------------------------------------------------------------- #
+# Three seed memories (not fewer): a 1-2 doc corpus's BM25 idf mass is degenerate
+# (df==N terms floor to zero/negative idf), which the detector honestly refuses to
+# score — three distinct-vocabulary docs give every term a positive idf.
+_DUP_SEED = [
+    ("railway_deploy_pipeline", "how the railway deploy pipeline builds and ships the app"),
+    ("billing_plan_tiers", "billing plan tiers offered after onboarding completes"),
+    ("signup_form_validation", "signup form validation rules for the onboarding flow"),
+]
+
+
+def _seed_dup_corpus(NM, md, tmp_path):
+    for name, desc in _DUP_SEED:
+        res = NM.write_memory(
+            name, desc, "project", body=f"notes about {name}.", memory_dir=md, repo_root=str(tmp_path)
+        )
+        assert res["created"] is True and res["error"] is None
+
+
+def test_new_memory_near_duplicate_surfaces_neighbor_and_never_rejects(tmp_path, monkeypatch):
+    """AC (hermetic BM25 path): a near-duplicate description surfaces the existing twin in
+    result["neighbors"] ({name, score, description}) — and creation still proceeds (the
+    no-autonomous-rejection bar: agent decides, tool reports)."""
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    _seed_dup_corpus(NM, md, tmp_path)
+
+    res = NM.write_memory(
+        "deploy_pipeline_rebuild_notes",
+        "how the railway deploy pipeline builds and ships the app again",
+        "project",
+        body="re-captured months later in nearly the same words.",
+        memory_dir=md,
+        repo_root=str(tmp_path),
+    )
+    # NEVER auto-rejects: the file exists despite the near-dupe.
+    assert res["created"] is True and res["error"] is None
+    assert os.path.exists(res["path"])
+    # The twin surfaces, best-first, in the documented shape; the check RAN (no note).
+    assert res["note"] is None
+    assert res["neighbors"], "expected the near-duplicate twin to surface"
+    top = res["neighbors"][0]
+    assert top["name"] == "railway_deploy_pipeline"
+    assert top["score"] >= NM._DUP_BM25_THRESHOLD
+    assert top["description"] == "how the railway deploy pipeline builds and ships the app"
+
+
+def test_new_memory_distinct_creation_yields_no_neighbors(tmp_path, monkeypatch):
+    """The calibrated BM25 threshold must NOT flag distinct memories (the existing
+    fixture-style corpus cross-scores at ~0.0 — see the LIF-2 calibration)."""
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    _seed_dup_corpus(NM, md, tmp_path)
+
+    res = NM.write_memory(
+        "gardening_watering_schedule",
+        "watering schedule for indoor houseplants during winter months",
+        "project",
+        memory_dir=md,
+        repo_root=str(tmp_path),
+    )
+    assert res["created"] is True and res["neighbors"] == [] and res["note"] is None
+
+
+def test_new_memory_index_absent_stays_warning_free_and_note_carrying(tmp_path, monkeypatch):
+    """AC: index-absent creation yields NO neighbor warning but a machine-readable note —
+    degradation must be legible, never silent (and never an implicit build or download)."""
+    from memory import new_memory as NM
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+
+    # Case 1: the very first memory ever (no corpus dir, no index).
+    md = str(tmp_path / ".claude" / "memory")
+    res = NM.write_memory(
+        "first_ever_memory", "the very first memory in this corpus", "project",
+        memory_dir=md, repo_root=str(tmp_path),
+    )
+    assert res["created"] is True and res["error"] is None
+    assert res["neighbors"] == []
+    assert res["note"] == "duplicate check skipped: no index"
+
+    # Case 2: a corpus with files but no index yet, and --no-links suppressing the GRA-3
+    # recall() (whose implicit build would otherwise have created one) — same legible note.
+    md2 = str(tmp_path / "elsewhere" / ".claude" / "memory")
+    os.makedirs(md2)
+    _touch_memory(md2, "pre_existing")
+    res2 = NM.write_memory(
+        "second_memory", "another memory description", "project",
+        memory_dir=md2, repo_root=str(tmp_path / "elsewhere"), no_links=True,
+    )
+    assert res2["created"] is True
+    assert res2["neighbors"] == []
+    assert res2["note"] == "duplicate check skipped: no index"
+
+
+def test_new_memory_dense_path_scores_cosine_with_fake_embeddings(tmp_path, monkeypatch):
+    """Dense path (hermetic fake embedder, house pattern): with a dense-ready index the
+    detector scores COSINE via embed_query against the persisted rows — pinned by matching
+    the fake embedder's own dot product exactly, with the BM25 scorer boobytrapped to prove
+    the fallback is never consulted."""
+    import zlib
+
+    import numpy as np
+
+    from memory import build_index as B
+    from memory import new_memory as NM
+    from memory import recall as R
+
+    def _vec(text: str):
+        v = np.zeros(16, dtype="float32")
+        for tok in B.tokenize(text):
+            v[zlib.crc32(tok.encode("utf-8")) % 16] += 1.0
+        n = np.linalg.norm(v)
+        return v / n if n else v
+
+    def emb_docs(texts, allow_download=True):
+        return np.vstack([_vec(t) for t in texts]).astype("float32")
+
+    def emb_query(text, allow_download=False):
+        return _vec(text)
+
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", emb_docs)
+    monkeypatch.setattr(B, "embed_query", emb_query)
+    monkeypatch.setattr(R, "embed_query", emb_query)  # GRA-3's recall() shares the index
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    md = str(tmp_path / ".claude" / "memory")
+    _floor(md, _CLEAN_FLOOR)
+
+    _seed_dup_corpus(NM, md, tmp_path)
+    assert B.load_index(B.default_index_dir(md)).dense_ready is True
+
+    def boom(*a, **k):
+        raise AssertionError("BM25 fallback must not be consulted on the dense path")
+
+    monkeypatch.setattr(R, "_bm25_score_via_postings", boom)
+
+    res = NM.write_memory(
+        "deploy_pipeline_rebuild_notes",
+        "how the railway deploy pipeline builds and ships the app again",
+        "project",
+        body="re-captured months later in nearly the same words.",
+        memory_dir=md,
+        repo_root=str(tmp_path),
+        no_links=True,  # recall()'s BM25 half would trip the boom above; dense check is the probe
+    )
+    assert res["created"] is True and res["error"] is None
+    assert res["note"] is None
+    assert res["neighbors"] and res["neighbors"][0]["name"] == "railway_deploy_pipeline"
+
+    # The reported score IS the fake embedder's cosine (query doc_text vs twin doc_text) —
+    # proving the dense path scored, not the normalized-BM25 fallback.
+    twin_text = open(os.path.join(md, "railway_deploy_pipeline.md"), encoding="utf-8").read()
+    new_text = open(res["path"], encoding="utf-8").read()
+    expected = float(
+        np.dot(
+            _vec(B.memory_doc_text("deploy_pipeline_rebuild_notes", new_text)),
+            _vec(B.memory_doc_text("railway_deploy_pipeline", twin_text)),
+        )
+    )
+    assert res["neighbors"][0]["score"] == pytest.approx(expected, abs=1e-3)
+    assert res["neighbors"][0]["score"] >= NM._DUP_COSINE_THRESHOLD
+
+
+def test_new_memory_dup_threshold_env_override(tmp_path, monkeypatch):
+    """HIPPO_DUP_THRESHOLD overrides the calibrated default — raising it above the twin's
+    score suppresses the warning (created either way; warn-only)."""
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    _seed_dup_corpus(NM, md, tmp_path)
+    monkeypatch.setenv("HIPPO_DUP_THRESHOLD", "0.999")
+
+    res = NM.write_memory(
+        "deploy_pipeline_rebuild_notes",
+        "how the railway deploy pipeline builds and ships the app again",
+        "project",
+        memory_dir=md,
+        repo_root=str(tmp_path),
+    )
+    assert res["created"] is True
+    assert res["neighbors"] == []
+
+
+def test_new_memory_cli_prints_neighbor_block_and_note(tmp_path, monkeypatch, capsys):
+    """main() renders the neighbor warning legibly (twin + similarity + the four-way
+    decision routed to /hippo:new) and, when the check can't run, the machine-readable note."""
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    _seed_dup_corpus(NM, md, tmp_path)
+    capsys.readouterr()  # drop seed noise
+
+    rc = NM.main(
+        [
+            "deploy_pipeline_rebuild_notes",
+            "how the railway deploy pipeline builds and ships the app again",
+            "--type", "project",
+            "--memory-dir", md,
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "near-duplicate" in out
+    assert "railway_deploy_pipeline" in out
+    assert "add (keep both) / update-existing / supersede / skip" in out
+    assert "/hippo:new" in out
+
+    # Index-absent invocation prints the note line instead of a warning.
+    md2 = str(tmp_path / "fresh" / ".claude" / "memory")
+    rc2 = NM.main(["lone_memory", "a lone description", "--type", "project", "--memory-dir", md2, "--no-links"])
+    out2 = capsys.readouterr().out
+    assert rc2 == 0
+    assert "near-duplicate" not in out2
+    assert "duplicate check skipped: no index" in out2
 
 
 def test_related_line_lands_before_provenance_backfill_ordering(tmp_path, monkeypatch):

@@ -192,3 +192,25 @@ def test_init_skill_seeds_the_canonical_corpus_format():
         f"memory.provenance.CORPUS_FORMAT_VERSION is {CORPUS_FORMAT_VERSION} — "
         "update the SKILL.md snippet in the same change that bumps the constant"
     )
+
+
+# --------------------------------------------------------------------------- #
+# LIF-2: the new skill must ROUTE the write-time duplicate decision to the agent —
+# all four Mem0-style branches named, supersede wired to the shipped per-item
+# primitive (reconsolidate's --superseded-by, which writes the GRA-4 edge).
+# --------------------------------------------------------------------------- #
+_NEW_SKILL = os.path.join(_SKILLS_DIR, "new", "SKILL.md")
+
+
+def test_new_skill_routes_the_duplicate_decision():
+    with open(_NEW_SKILL, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    for branch in ("**add**", "**update-existing**", "**supersede**", "**skip**"):
+        assert branch in text, f"new SKILL.md lost the {branch} branch of the LIF-2 decision flow"
+    assert "--superseded-by" in text, (
+        "new SKILL.md's supersede branch must route through the per-item "
+        "reconsolidate --superseded-by primitive (GRA-4 edge on the successor)"
+    )
+    assert "never blocked" in text.lower(), (
+        "new SKILL.md must state creation is never blocked (warn-only, agent-gated)"
+    )

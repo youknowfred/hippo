@@ -7,10 +7,15 @@ and ``metadata.type`` — then:
   1. discovers related EXISTING memories via ``recall()`` and appends a "Related: [[a]], [[b]]"
      line to the body (GRA-3 — see ``_discover_links``), BEFORE rendering/writing, so the link
      line lands in the file at birth; then
-  2. backfills Tier-1 citation provenance (``cited_paths`` / ``source_commit``) so the new
+  2. scores the new memory's ``doc_text`` against the persisted index for near-duplicate /
+     conflicting EXISTING memories (LIF-2 — see ``_duplicate_neighbors``); anything above the
+     similarity threshold rides out on ``result["neighbors"]`` — WARN-ONLY, the write always
+     proceeds and the AGENT decides add / update-existing / supersede / skip (``/hippo:new``
+     documents the decision flow); then
+  3. backfills Tier-1 citation provenance (``cited_paths`` / ``source_commit``) so the new
      memory is born staleness-tracked, and
-  3. refreshes the recall index so it is immediately recallable, and
-  4. appends a ``MEMORY.md`` floor pointer ONLY when ``type`` is ``user`` or ``feedback``.
+  4. refreshes the recall index so it is immediately recallable, and
+  5. appends a ``MEMORY.md`` floor pointer ONLY when ``type`` is ``user`` or ``feedback``.
 
 ``project`` / ``reference`` memories are deliberately NOT added to the floor — they are
 recalled on demand (the UserPromptSubmit recall hook + the SessionStart auto-refresh index
@@ -32,6 +37,33 @@ VALID_TYPES = ("user", "feedback", "project", "reference")
 
 # GRA-3: how many related memories new_memory suggests via recall() at write time.
 _LINK_DISCOVERY_K = 3
+
+# --------------------------------------------------------------------------- #
+# LIF-2: duplicate/conflict detection at write time — thresholds + result cap.
+# --------------------------------------------------------------------------- #
+# How many above-threshold neighbors ride out on result["neighbors"] (best first). A near-dupe
+# has ONE twin in practice; 3 leaves room for the multi-way-drift case without ever flooding
+# the CLI warning block.
+_DUP_NEIGHBORS_K = 3
+# DENSE path: cosine similarity of the new memory's doc_text (embedded via embed_query,
+# exactly the vector recall would score this memory's own recall queries with) against the
+# persisted description rows. Calibrated on tests/golden_corpus with the real warm
+# bge-small-en-v1.5 (full numbers in the LIF-2 commit body): 10 near-duplicate probes
+# (lightly-reworded descriptions under new slugs) scored [0.9050, 0.9640] against their
+# twins while the corpus's 50 deliberately-DISTINCT memories cross-scored at most 0.7554
+# leave-one-out against each other (p95 0.7431) — 0.80 sits inside that gap, biased low
+# (warn-only means a borderline false neighbor costs one line of agent judgment; a missed
+# real dupe costs a permanently split recall signal).
+_DUP_COSINE_THRESHOLD = 0.80
+# BM25 fallback: the raw Okapi score is corpus- and length-scaled (no fixed unit), so it is
+# NORMALIZED to [~0, ~1] by the query's own self-score (the score a hypothetical doc
+# containing exactly the query's tokens would get — see _bm25_dup_scores) before
+# thresholding. Calibrated the same way (same commit body): the golden-corpus near-duplicate
+# probes normalized to [0.6014, 1.2360] vs a distinct-pair ceiling of 0.3494 (the two
+# hermetic fixture corpora's cross-pair ceilings are 0.0 — zero shared content tokens) —
+# 0.45 splits the measured gap, again biased below the midpoint for the same
+# warn-only asymmetry as the cosine threshold.
+_DUP_BM25_THRESHOLD = 0.45
 
 # Which floor section a pointer goes under, by type. project/reference => no floor pointer.
 _FLOOR_SECTION_BY_TYPE = {
@@ -87,6 +119,164 @@ def _append_related_line(body: str, related: List[str]) -> str:
     line = "Related: " + ", ".join(f"[[{r}]]" for r in related)
     body = (body or "").rstrip("\n")
     return f"{body}\n\n{line}\n" if body else f"{line}\n"
+
+
+def _dup_threshold(default: float) -> float:
+    """``HIPPO_DUP_THRESHOLD`` override; malformed/absent -> ``default``. Never raises.
+
+    One env var for BOTH backends (recall's ``_knee_ratio``-style parse): the dense cosine
+    and the normalized BM25 ratio are each ~[0, 1] similarity scales, so a single override
+    tunes whichever path actually scored this write — no second env var to remember.
+    """
+    raw = os.environ.get("HIPPO_DUP_THRESHOLD")
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _dense_dup_scores(index, doc_text: str):
+    """``[(entry_index, cosine)]`` over DESCRIPTION rows, or ``None`` when dense can't run.
+
+    LIF-2's dense path is deliberately the same machinery recall's ``_dense_rank_rows``
+    uses — ``embed_query`` under ``run_bounded`` (offline, never a download; a cold/wiped
+    model cache aborts within ``DENSE_QUERY_TIMEOUT_SECS`` instead of blocking the write)
+    against the ALREADY-persisted ``dense.npy`` — but with the raw SCORES kept (dup
+    detection thresholds on similarity itself, not rank) and no relevance floor (0.80-dupe
+    territory is far above RET-1's 0.60 floor anyway). Same preconditions as recall: dense
+    disabled/not-ready -> ``None``; a manifest embedded under a DIFFERENT model than the
+    currently configured one -> ``None`` (COR-8 — cosine across two embedding spaces is
+    noise, not similarity). Description rows only — a body chunk can legitimately overlap a
+    neighbor's body without the memories being duplicates of each other.
+    """
+    from .build_index import DEFAULT_MODEL, DENSE_QUERY_TIMEOUT_SECS, dense_disabled, embed_query, run_bounded
+
+    if dense_disabled() or not index.dense_ready or index.dense is None:
+        return None
+    if index.model and index.model != DEFAULT_MODEL:
+        return None
+    try:
+        qvec = run_bounded(lambda: embed_query(doc_text, allow_download=False), DENSE_QUERY_TIMEOUT_SECS)
+        sims = index.dense @ qvec  # rows are L2-normalized -> dot == cosine
+        return [(i, float(sims[e["row"]])) for i, e in enumerate(index.entries)]
+    except Exception:  # incl. DenseTimeout -> BM25 fallback, never block/crash the write
+        return None
+
+
+def _bm25_dup_scores(index, doc_text: str):
+    """``[(entry_index, normalized bm25)]`` from the manifest's PRF-1 stats, or ``None``.
+
+    The fallback when dense is unavailable/disabled. Reuses recall's postings-walk scorer
+    (``_bm25_score_via_postings`` — the exact per-term Okapi formula query time uses)
+    against the manifest's precomputed stats; entry doc indices are 0..N-1 in the unified
+    PRF-1 doc space, so no ``doc_offset`` translation is needed. Raw BM25 has no fixed
+    unit (it grows with query length, corpus size, and idf mass), so each entry's score is
+    divided by the query's SELF-SCORE — what a document containing exactly the query's own
+    tokens would score, term formula identical, with tokens the corpus has never seen
+    assigned the df=0 Okapi idf (``ln((N+0.5)/0.5)``, the same formula
+    ``compute_bm25_stats`` applies at df>0). Counting unseen tokens at full idf weight is
+    load-bearing: without it, a memory sharing only its few corpus-known tokens with some
+    entry would normalize to ~1.0 (false dupe) because its genuinely-novel vocabulary
+    contributed nothing to the denominator. ``None`` when the stats are absent (a manifest
+    predating PRF-1 can't reach here — the schema gate rebuilds it — so this is pure
+    defense) or degenerate (a 1-2 doc corpus's idf mass can be all-zero/negative — no
+    honest ratio exists, and saying so beats fabricating one); ``[]`` when the doc_text
+    tokenizes to nothing (the check RAN, nothing can match).
+    """
+    import math
+
+    from .build_index import tokenize
+    from .recall import _bm25_score_via_postings
+
+    stats = index.manifest.get("bm25")
+    if not isinstance(stats, dict):
+        return None
+    try:
+        k1, b, avgdl, idf = stats["k1"], stats["b"], stats["avgdl"], stats["idf"]
+        if not avgdl:
+            return None
+        q_tokens = tokenize(doc_text)
+        if not q_tokens:
+            return []
+        freqs = {}
+        for tok in q_tokens:
+            freqs[tok] = freqs.get(tok, 0) + 1
+        novel_idf = math.log(len(stats["doc_len"]) + 0.5) - math.log(0.5)
+        denom_norm = k1 * (1 - b + b * len(q_tokens) / avgdl)
+        self_score = sum(
+            idf.get(tok, novel_idf) * (tf * (k1 + 1)) / (tf + denom_norm)
+            for tok, tf in freqs.items()
+        )
+        if self_score <= 0:
+            return None
+        qset = set(q_tokens)
+        matched = [i for i, e in enumerate(index.entries) if qset.intersection(e.get("tokens") or [])]
+        scores = _bm25_score_via_postings(q_tokens, stats, matched)
+        return [(i, scores[i] / self_score) for i in matched]
+    except Exception:
+        return None
+
+
+def _duplicate_neighbors(name: str, rendered: str, memory_dir: str):
+    """Top-``_DUP_NEIGHBORS_K`` above-threshold EXISTING neighbors -> ``(neighbors, note)``.
+
+    LIF-2: creation used to refuse only exact filename collisions while an embedding index
+    sat right there — months-old corpora accumulate near-dupes (splitting recall hits) and
+    contradictions with no detection anywhere. This scores the new memory's ``doc_text``
+    (via ``memory_doc_text`` on the SAME rendered text that lands on disk — byte-identical
+    to what the next index build would derive) against the PERSISTED index: dense cosine
+    when available, normalized BM25 otherwise (each with its own calibrated threshold —
+    see the module constants). Neighbors are ``{name, score, description}``, best first.
+
+    WARN-ONLY by contract: the caller writes the file regardless — the roadmap's
+    no-autonomous-rejection acceptance bar — and the AGENT routes the decision
+    (add / update-existing / supersede / skip, per ``/hippo:new``).
+
+    Degradation is legible, never fatal: no index / empty index / unscorable stats each
+    yield ``([], "duplicate check skipped: <reason>")`` — a machine-readable note the
+    result dict carries so a silent no-warning write is distinguishable from a genuinely
+    clean one (the every-silent-fallback-gains-a-signal invariant). Never raises, never
+    downloads, never builds an index of its own (the GRA-3 discovery pass usually just
+    built the BM25 one in-process; when it didn't — ``--links``/``--no-links``, or a
+    first-ever memory — the note says so instead).
+    """
+    try:
+        from .build_index import default_index_dir, entry_description, load_index, memory_doc_text
+
+        index = load_index(default_index_dir(memory_dir))
+        if index is None:
+            return [], "duplicate check skipped: no index"
+        if not index.entries:
+            return [], "duplicate check skipped: empty index"
+        doc_text = memory_doc_text(name, rendered)
+        scored = _dense_dup_scores(index, doc_text)
+        default_threshold = _DUP_COSINE_THRESHOLD
+        if scored is None:
+            scored = _bm25_dup_scores(index, doc_text)
+            default_threshold = _DUP_BM25_THRESHOLD
+        if scored is None:
+            return [], "duplicate check skipped: unscorable index"
+        threshold = _dup_threshold(default_threshold)
+        # Own-name exclusion mirrors _discover_links: a pre-write index cannot contain the
+        # new memory, but a stale index carrying a same-named stub must never self-match.
+        hits = sorted(
+            ((i, s) for i, s in scored if s >= threshold and index.entries[i].get("name") != name),
+            key=lambda pair: pair[1],
+            reverse=True,
+        )
+        neighbors = [
+            {
+                "name": index.entries[i]["name"],
+                "score": round(float(s), 4),
+                "description": entry_description(index.entries[i]).strip(),
+            }
+            for i, s in hits[:_DUP_NEIGHBORS_K]
+        ]
+        return neighbors, None
+    except Exception:
+        return [], "duplicate check skipped: error"
 
 
 def _render_frontmatter(name: str, description: str, mtype: str, body: str) -> str:
@@ -174,6 +364,12 @@ def write_memory(
       ``no_links=True`` suppresses it entirely (neither discovery nor an explicit ``links``
       list is applied). ``result["related"]`` reports whatever list was actually used (``[]``
       when suppressed/empty-corpus/no hits).
+    - Detects near-duplicate/conflicting EXISTING memories (LIF-2): ``result["neighbors"]``
+      carries ``[{name, score, description}]`` above the calibrated threshold (dense cosine
+      when the persisted index is dense, normalized BM25 otherwise; ``HIPPO_DUP_THRESHOLD``
+      overrides). WARN-ONLY — creation NEVER auto-rejects on a neighbor; the agent decides
+      add / update-existing / supersede / skip (see ``/hippo:new``). When the check cannot
+      run at all (no index yet), ``result["note"]`` names why — no silent no-warning path.
     - Backfills provenance + refreshes the recall index (best-effort; never fatal).
     - Adds a MEMORY.md floor pointer ONLY for ``user`` / ``feedback``.
     - Scans the rendered text for secret-looking patterns (SEC-2) and, on a match, populates
@@ -185,6 +381,8 @@ def write_memory(
         "floor_pointer_added": False,
         "indexed": False,
         "related": [],
+        "neighbors": [],
+        "note": None,
         "warnings": [],
         "error": None,
     }
@@ -222,6 +420,15 @@ def write_memory(
 
     path = os.path.join(memory_dir, f"{name}.md")
     rendered = _render_frontmatter(name, description, type, body)
+
+    # --- LIF-2: duplicate/conflict detection, BEFORE the write + index refresh. ---
+    # Ordering is load-bearing twice over: (a) it must score against the PRE-refresh
+    # persisted index — after refresh_index below, the new memory would be IN the index and
+    # match itself at ~1.0; (b) it runs on the exact ``rendered`` text (via memory_doc_text)
+    # so the doc_text scored here is byte-identical to what the next build indexes. Warn-only:
+    # whatever comes back, the exclusive-create below proceeds unconditionally.
+    result["neighbors"], result["note"] = _duplicate_neighbors(name, rendered, memory_dir)
+
     try:
         os.makedirs(memory_dir, exist_ok=True)
         # "x" = exclusive create: atomic no-overwrite (no TOCTOU window between check + write).
@@ -320,6 +527,21 @@ def main(argv=None) -> int:
     print(f"floor pointer added : {res['floor_pointer_added']} (only user/feedback get one)")
     if res["related"]:
         print(f"related : {', '.join(res['related'])} (curate this — keep/trim/replace, see /hippo:new)")
+    # LIF-2: the neighbor warning block. Bounded (<= _DUP_NEIGHBORS_K lines, descriptions
+    # truncated at format_results' 220-char display convention) and decision-routing — the
+    # tool reports, the agent decides; nothing here rejects or edits anything.
+    if res["neighbors"]:
+        n_hits = len(res["neighbors"])
+        noun = "memory looks" if n_hits == 1 else "memories look"
+        print(f"warning : {n_hits} existing {noun} near-duplicate/conflicting:")
+        for n in res["neighbors"]:
+            desc = n["description"].replace("\n", " ").strip()
+            if len(desc) > 220:
+                desc = desc[:217].rstrip() + "…"
+            print(f"  • {n['name']} (similarity {n['score']:.2f}) — {desc}")
+        print("  decide  : add (keep both) / update-existing / supersede / skip — see /hippo:new")
+    if res["note"]:
+        print(f"note    : {res['note']}")
     for warning in res["warnings"]:
         print(f"warning : {warning}")
     if args.type in ("project", "reference"):
