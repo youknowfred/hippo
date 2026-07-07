@@ -58,6 +58,33 @@ def test_untrusted_git_corpus_recall_returns_empty(repo, memory_dir, tmp_path, m
 
 
 # --------------------------------------------------------------------------- #
+# SEC-1 (opportunistic, COR-8 release): main() must leave ZERO telemetry trace for an
+# untrusted corpus. The trust gate INSIDE recall() already returns [] for it; before this
+# fix, main() still appended a backend="none" ledger line on top of the empty result --
+# even a "found nothing" line is itself a trace that a foreign, unreviewed corpus was
+# queried. Gate main()'s telemetry/episode block on the same trust condition (reusing the
+# already-resolved repo_root -- no extra git call).
+# --------------------------------------------------------------------------- #
+def test_untrusted_git_corpus_recall_main_writes_no_telemetry(repo, memory_dir, tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    _point_registry(monkeypatch, tmp_path)
+    idx = str(tmp_path / "idx")
+    td = str(tmp_path / "tele")
+    monkeypatch.setenv("MEMOBOT_TELEMETRY_DIR", td)
+    _write_corpus(memory_dir)
+    B.build_index(memory_dir, idx)
+
+    # repo_root is NOT in the registry -> untrusted; recall.main() is the hook/CLI entry.
+    rc = R.main(["which", "reranker", "do", "we", "use", "--memory-dir", memory_dir,
+                 "--index-dir", idx, "--repo-root", repo])
+    assert rc == 0
+    import memory.telemetry as telemetry
+
+    assert not os.path.exists(telemetry._ledger_path(td))  # zero recall-ledger trace
+    assert not os.path.exists(telemetry._episode_ledger_path(td))  # zero episode-buffer trace
+
+
+# --------------------------------------------------------------------------- #
 # Acceptance criterion 2: after trusting the repo_root, the SAME corpus recalls for real
 # --------------------------------------------------------------------------- #
 def test_trusted_git_corpus_recall_returns_results(repo, memory_dir, tmp_path, monkeypatch):

@@ -690,7 +690,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     # raise into / delay the hook. The episode buffer (the future capture pass's replay log)
     # is logged in the SAME block, right after the recall ledger, on the SAME raw_query gate —
     # it must start soaking now even though nothing reads it yet.
-    if raw_query and memory_dir and os.path.isdir(memory_dir):
+    #
+    # SEC-1 gate: an UNTRUSTED corpus already makes recall() return [] (the trust gate inside
+    # recall() denies it), but before this fix main() still appended a backend="none"
+    # telemetry line for it -- a ledger entry (even an empty one) is itself a trace that a
+    # foreign, unreviewed corpus was queried. Reuse the ALREADY-resolved repo_root here (no
+    # extra git call on top of what recall() itself just paid) so an untrusted corpus leaves
+    # ZERO ledger trace, matching recall()'s own zero-injection posture. A non-git corpus, or
+    # one with no resolvable repo_root, has an inapplicable gate (gate_root is None) and is
+    # untouched by this check -- same fail-open posture as recall()'s own gate.
+    trusted_or_gate_inapplicable = True
+    if memory_dir:
+        gate_root = trust.gate_repo_root(memory_dir, repo_root)
+        if gate_root is not None and not trust.is_trusted(gate_root):
+            trusted_or_gate_inapplicable = False
+    if raw_query and memory_dir and os.path.isdir(memory_dir) and trusted_or_gate_inapplicable:
         # The corpus-existence gate (SEC-3): a project that never opted in (no
         # .claude/memory) must never gain a telemetry ledger with prompt previews —
         # a habitual `git add .` would commit prompt fragments to shared history.
