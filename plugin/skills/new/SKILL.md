@@ -9,9 +9,11 @@ are easy to get wrong by hand: correct frontmatter schema, a near-duplicate/conf
 against the existing corpus (warn-only — see the decision flow below), citation-provenance
 backfill (`cited_paths` / `source_commit`, so staleness detection works from day one), an
 index refresh (so it's recallable in THIS session, not just the next one), and — for
-`user`/`feedback` types only — a floor pointer appended to `MEMORY.md` under the right
-section, with the outcome reported explicitly (never a silent no-op — see the floor-outcome
-section below).
+`user`/`feedback` types only — a floor pointer inserted into `MEMORY.md` at its sorted
+position within the right section (lexicographic by memory name, not always the section
+tail — this is what keeps two teammates' concurrent floor writes from merge-conflicting on
+the same line), with the outcome reported explicitly (never a silent no-op — see the
+floor-outcome section below).
 
 ## Preflight (shared across all hippo skills)
 
@@ -142,8 +144,9 @@ its floor presence. Now the outcome is an explicit result field
 (`floor: {status, reason}`) and a `floor   :` CLI line. **Never absorb a non-`appended`
 outcome silently — report it to the user and act on it:**
 
-- `appended` — the normal case: the pointer landed at the end of the type's canonical
-  section. Nothing to surface.
+- `appended` — the normal case: the pointer landed at its deterministic sorted position
+  (lexicographic by memory name) within the type's canonical section — not necessarily the
+  end (TEA-4). Nothing to surface.
 - `created-section — section not found: ## <Header> …` — `MEMORY.md` exists but the
   canonical section header was renamed or deleted (the floor drifted from
   `assets/MEMORY.skeleton.md`). Rather than dropping the pointer, the tool re-created the

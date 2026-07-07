@@ -254,9 +254,13 @@ idempotent, per-item; reconsolidation's `superseded_by` opt-in routes through it
 
 Writes the frontmatter the system depends on (`name`, `description` — **the recall
 hook** — and `metadata.type`), backfills provenance (born staleness-tracked), refreshes
-the index (**immediately recallable**), and appends a `MEMORY.md` floor pointer **only
-for `user`/`feedback`** types. Never overwrites an existing file. Prefer the
-`/hippo:new` skill, which wraps this with the what-not-to-save judgment.
+the index (**immediately recallable**), and inserts a `MEMORY.md` floor pointer **only
+for `user`/`feedback`** types — at its deterministic **sorted** position within the
+section (lexicographic by memory name) rather than always at the section tail, so two
+teammates adding different pointers to the same section land on different lines and
+merge cleanly instead of colliding on the shared tail line (TEA-4). Never overwrites an
+existing file. Prefer the `/hippo:new` skill, which wraps this with the
+what-not-to-save judgment.
 
 ### `lint_floor.py` — the floor invariant
 

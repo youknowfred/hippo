@@ -661,18 +661,21 @@ def test_related_line_lands_before_provenance_backfill_ordering(tmp_path, monkey
 #  outcome is now explicit: appended / created-section / skipped-with-reason)
 # --------------------------------------------------------------------------- #
 def test_floor_happy_path_append_is_byte_stable(tmp_path, monkeypatch):
-    """AC (LIF-5): the existing happy path is pinned byte-for-byte — same insertion point
-    (end of the section's block), same pointer format, no incidental reflow anywhere else."""
+    """AC (LIF-5, updated for TEA-4 sorted insertion): the happy path is pinned byte-for-byte.
+    ``zz_byte_stable`` sorts lexicographically AFTER the section's only existing pointer
+    (``feedback_x``), so its deterministic sorted position IS the block tail — this pins the
+    "no existing pointer sorts greater" fallback, same pointer format, no incidental reflow
+    anywhere else. Mid-section sorted insertion is covered separately (TEA-4 tests below)."""
     from memory import new_memory as NM
 
     md = _nm_env(tmp_path, monkeypatch)
     res = NM.write_memory(
-        "fb_byte_stable",
+        "zz_byte_stable",
         "the hook text",
         "feedback",
         memory_dir=md,
         repo_root=str(tmp_path),
-        title="Fb Byte Stable",
+        title="Zz Byte Stable",
         hook="the hook text",
         no_links=True,
     )
@@ -681,7 +684,7 @@ def test_floor_happy_path_append_is_byte_stable(tmp_path, monkeypatch):
     expected = _CLEAN_FLOOR.replace(
         "- [Some Feedback](feedback_x.md) — a process hook.\n",
         "- [Some Feedback](feedback_x.md) — a process hook.\n"
-        "- [Fb Byte Stable](fb_byte_stable.md) — the hook text\n",
+        "- [Zz Byte Stable](zz_byte_stable.md) — the hook text\n",
     )
     assert open(os.path.join(md, "MEMORY.md"), encoding="utf-8").read() == expected
 
@@ -840,3 +843,195 @@ def test_canonical_floor_sections_match_skeleton_and_lint():
     for header in NM._FLOOR_SECTION_BY_TYPE.values():
         assert header in skeleton_lines
     assert {h[3:] for h in NM._FLOOR_SECTION_BY_TYPE.values()} == set(floor._FLOOR_SECTIONS)
+
+
+# --------------------------------------------------------------------------- #
+# TEA-4 — sorted floor-pointer insertion (kills tail-collision merge conflicts)
+#
+# DECISION (see the commit body for full rationale): sorted insertion, not generated
+# floor sections. New pointers land at their deterministic lexicographic position among
+# the section's EXISTING pointer lines instead of always appending at the section tail —
+# the single highest-churn shared line every concurrent user/feedback write used to touch.
+# --------------------------------------------------------------------------- #
+def test_sorted_insertion_lands_before_first_greater_pointer(tmp_path):
+    """AC #1 (deterministic insertion position): inserting into an ALREADY-sorted section
+    lands the new pointer immediately before the first existing pointer whose name sorts
+    greater — a mid-section insert, not a tail append — and the result is byte-pinned."""
+    from memory import new_memory as NM
+
+    md = str(tmp_path / "memory")
+    _floor(
+        md,
+        "# Proj — Agent Memory Index (durable floor)\n"
+        "## User\n"
+        "- [Alpha](alpha_note.md) — a.\n"
+        "- [Mango](mango_note.md) — m.\n"
+        "- [Zulu](zulu_note.md) — z.\n"
+        "## Working Style & Process Feedback\n"
+        "## Recalled on demand\n",
+    )
+    res = NM._append_floor_pointer(md, "## User", "charlie_note", "Charlie", "c.")
+    assert res == {"status": "appended", "reason": None}
+    mem = open(os.path.join(md, "MEMORY.md"), encoding="utf-8").read()
+    expected = (
+        "# Proj — Agent Memory Index (durable floor)\n"
+        "## User\n"
+        "- [Alpha](alpha_note.md) — a.\n"
+        "- [Charlie](charlie_note.md) — c.\n"
+        "- [Mango](mango_note.md) — m.\n"
+        "- [Zulu](zulu_note.md) — z.\n"
+        "## Working Style & Process Feedback\n"
+        "## Recalled on demand\n"
+    )
+    assert mem == expected
+
+    # A name sorting BEFORE every existing pointer lands right after the header (first slot).
+    res2 = NM._append_floor_pointer(md, "## User", "aardvark_note", "Aardvark", "aa.")
+    assert res2 == {"status": "appended", "reason": None}
+    mem2 = open(os.path.join(md, "MEMORY.md"), encoding="utf-8").read()
+    assert mem2.index("(aardvark_note.md)") < mem2.index("(alpha_note.md)")
+    assert mem2.split("## User\n", 1)[1].split("\n")[0] == "- [Aardvark](aardvark_note.md) — aa."
+
+
+def test_sorted_insertion_on_unsorted_legacy_section_places_locally_no_bulk_resort(tmp_path):
+    """AC #1 (legacy-section behavior, spec'd explicitly): an UNSORTED legacy section gets
+    the new entry placed at its locally-correct spot — before the first pointer it scans
+    past whose name sorts greater — WITHOUT reordering any pre-existing line (no bulk
+    re-sort, per the no-bulk-autonomous-sweeps invariant)."""
+    from memory import new_memory as NM
+
+    md = str(tmp_path / "memory")
+    # Deliberately NOT alphabetical: zulu, alpha, mango (hand-authored corpora drift like this).
+    _floor(
+        md,
+        "# Proj — Agent Memory Index (durable floor)\n"
+        "## User\n"
+        "- [Zulu](zulu_note.md) — z.\n"
+        "- [Alpha](alpha_note.md) — a.\n"
+        "- [Mango](mango_note.md) — m.\n"
+        "## Working Style & Process Feedback\n",
+    )
+    res = NM._append_floor_pointer(md, "## User", "bravo_note", "Bravo", "b.")
+    assert res == {"status": "appended", "reason": None}
+    mem = open(os.path.join(md, "MEMORY.md"), encoding="utf-8").read()
+    # "bravo" sorts greater than nothing it hasn't already passed except "zulu" (the FIRST
+    # pointer scanned that sorts greater than "bravo") -> lands before zulu, i.e. first slot.
+    # alpha/mango — untouched, unmoved, in their original (still-unsorted) relative order.
+    expected = (
+        "# Proj — Agent Memory Index (durable floor)\n"
+        "## User\n"
+        "- [Bravo](bravo_note.md) — b.\n"
+        "- [Zulu](zulu_note.md) — z.\n"
+        "- [Alpha](alpha_note.md) — a.\n"
+        "- [Mango](mango_note.md) — m.\n"
+        "## Working Style & Process Feedback\n"
+    )
+    assert mem == expected
+
+
+def test_sorted_section_stays_sorted_across_n_inserts(tmp_path):
+    """AC #3: seeding an empty section and inserting N names in SHUFFLED (non-sorted) order,
+    one write at a time (the real corpus-growth pattern), leaves the section fully sorted."""
+    from memory import new_memory as NM
+
+    md = str(tmp_path / "memory")
+    _floor(
+        md,
+        "# Proj — Agent Memory Index (durable floor)\n"
+        "## User\n"
+        "## Working Style & Process Feedback\n"
+        "## Recalled on demand\n",
+    )
+    names = [
+        "mango_note", "aardvark_note", "zulu_note", "charlie_note", "bravo_note",
+        "delta_note", "yankee_note", "echo_note", "quebec_note", "foxtrot_note",
+    ]
+    for n in names:
+        res = NM._append_floor_pointer(md, "## User", n, NM._title_from_slug(n), "hook")
+        assert res == {"status": "appended", "reason": None}
+
+    mem = open(os.path.join(md, "MEMORY.md"), encoding="utf-8").read()
+    section = mem.split("## User\n", 1)[1].split("## Working Style", 1)[0]
+    lines = [ln for ln in section.split("\n") if ln.strip()]
+    got_names = [NM._pointer_name(ln) for ln in lines]
+    assert got_names == sorted(names)  # fully sorted, no gaps, nothing dropped/duplicated
+
+
+def test_sorted_insertion_merges_cleanly_across_two_clones(tmp_path):
+    """AC #2 — the item's whole point, proven with a REAL git merge: two independent clones
+    of a fixture repo each add a DIFFERENT memory pointer to the SAME floor section (via the
+    exact function ``write_memory`` calls in production), commit, and merge. Because sorted
+    insertion places the two new lines at DIFFERENT positions (one before, one after the
+    shared pre-existing pointer) rather than both appending to the section's tail line, git's
+    three-way merge resolves with NO conflict and BOTH pointers survive."""
+    import subprocess
+
+    from memory import new_memory as NM
+    from .conftest import git_commit
+
+    def _run(args, cwd, check=True):
+        return subprocess.run(args, cwd=cwd, capture_output=True, text=True, check=check)
+
+    def _init_repo(path):
+        os.makedirs(path, exist_ok=True)
+        _run(["git", "init", "-q", "-b", "main", path], cwd=str(tmp_path))
+        _run(["git", "config", "user.email", "tester@example.com"], cwd=path)
+        _run(["git", "config", "user.name", "tester"], cwd=path)
+
+    # Seed an origin repo with a real-shaped floor: ONE existing Working-Style pointer.
+    origin_bare = str(tmp_path / "origin.git")
+    _run(["git", "init", "-q", "--bare", "-b", "main", origin_bare], cwd=str(tmp_path))
+
+    seed = str(tmp_path / "seed")
+    _init_repo(seed)
+    seed_md = os.path.join(seed, ".claude", "memory")
+    _floor(seed_md, _CLEAN_FLOOR)
+    git_commit(seed, "seed floor", 1_700_000_000)
+    _run(["git", "remote", "add", "origin", origin_bare], cwd=seed)
+    _run(["git", "push", "-q", "origin", "HEAD:main"], cwd=seed)
+
+    # Two independent clones — teammate A and teammate B.
+    clone_a = str(tmp_path / "clone_a")
+    clone_b = str(tmp_path / "clone_b")
+    _run(["git", "clone", "-q", origin_bare, clone_a], cwd=str(tmp_path))
+    _run(["git", "clone", "-q", origin_bare, clone_b], cwd=str(tmp_path))
+    for c in (clone_a, clone_b):
+        _run(["git", "config", "user.email", "tester@example.com"], cwd=c)
+        _run(["git", "config", "user.name", "tester"], cwd=c)
+
+    # A adds "alpha_note" (sorts BEFORE the existing feedback_x) — B adds "zulu_note" (sorts
+    # AFTER it) — different names, different sections positions, same section+file.
+    md_a = os.path.join(clone_a, ".claude", "memory")
+    res_a = NM._append_floor_pointer(
+        md_a, "## Working Style & Process Feedback", "alpha_note", "Alpha Note", "hook a"
+    )
+    assert res_a == {"status": "appended", "reason": None}
+    git_commit(clone_a, "add alpha_note floor pointer", 1_700_000_100)
+
+    md_b = os.path.join(clone_b, ".claude", "memory")
+    res_b = NM._append_floor_pointer(
+        md_b, "## Working Style & Process Feedback", "zulu_note", "Zulu Note", "hook b"
+    )
+    assert res_b == {"status": "appended", "reason": None}
+    git_commit(clone_b, "add zulu_note floor pointer", 1_700_000_200)
+
+    # A pushes first; B fetches + merges (a real 3-way git merge, not a rebase).
+    _run(["git", "push", "-q", "origin", "HEAD:main"], cwd=clone_a)
+    _run(["git", "fetch", "-q", "origin"], cwd=clone_b)
+    merge = _run(["git", "merge", "--no-edit", "origin/main"], cwd=clone_b, check=False)
+    assert merge.returncode == 0, (
+        f"expected a clean automatic merge, got a conflict:\nstdout={merge.stdout}\n"
+        f"stderr={merge.stderr}"
+    )
+    assert "CONFLICT" not in merge.stdout
+    assert not _run(["git", "diff", "--name-only", "--diff-filter=U"], cwd=clone_b).stdout.strip()
+
+    merged = open(os.path.join(md_b, "MEMORY.md"), encoding="utf-8").read()
+    assert "<<<<<<<" not in merged and "=======" not in merged and ">>>>>>>" not in merged
+    assert "(alpha_note.md)" in merged
+    assert "(zulu_note.md)" in merged
+    assert "(feedback_x.md)" in merged  # the pre-existing pointer survives untouched
+
+    section = merged.split("## Working Style & Process Feedback\n", 1)[1].split("## ", 1)[0]
+    lines = [ln for ln in section.split("\n") if ln.strip()]
+    assert [NM._pointer_name(ln) for ln in lines] == ["alpha_note", "feedback_x", "zulu_note"]

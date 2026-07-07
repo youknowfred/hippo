@@ -15,8 +15,10 @@ and ``metadata.type`` — then:
   3. backfills Tier-1 citation provenance (``cited_paths`` / ``source_commit``) so the new
      memory is born staleness-tracked, and
   4. refreshes the recall index so it is immediately recallable, and
-  5. appends a ``MEMORY.md`` floor pointer ONLY when ``type`` is ``user`` or ``feedback``,
-     and reports the floor OUTCOME explicitly (LIF-5 — see ``_append_floor_pointer``): a
+  5. inserts a ``MEMORY.md`` floor pointer ONLY when ``type`` is ``user`` or ``feedback``, at
+     its deterministic SORTED position within the section rather than the tail (TEA-4 — kills
+     concurrent-append merge conflicts on the section's highest-churn line; see
+     ``_append_floor_pointer``), and reports the floor OUTCOME explicitly (LIF-5): a
      renamed/deleted canonical section is re-created rather than silently no-oped; a missing
      MEMORY.md is a loud machine-readable skip (floor creation is init's job, never faked here).
 
@@ -78,6 +80,25 @@ _FLOOR_SECTION_BY_TYPE = {
 
 def _title_from_slug(name: str) -> str:
     return name.replace("_", " ").replace("-", " ").strip().title()
+
+
+def _pointer_name(line: str) -> Optional[str]:
+    """The memory name a floor-section ``line`` points at, or ``None`` if it isn't a pointer.
+
+    TEA-4: reuses lint_floor's own link regex + restore-pointer allow-list so "what counts as
+    a pointer to sort by" is the exact same notion the lint guard already parses — a hand-
+    authored ``[MEMORY.full.md](MEMORY.full.md)`` restore link inside a floor section (rare,
+    but the allow-list tolerates it) is never treated as a memory entry to sort against.
+    """
+    from .lint_floor import _ALLOWLIST, _MD_LINK_RE
+
+    m = _MD_LINK_RE.search(line)
+    if not m:
+        return None
+    base = m.group(1).rsplit("/", 1)[-1]
+    if base in _ALLOWLIST:
+        return None
+    return base[:-3] if base.endswith(".md") else base
 
 
 def _discover_links(
@@ -305,15 +326,16 @@ def _render_frontmatter(name: str, description: str, mtype: str, body: str) -> s
 def _append_floor_pointer(
     memory_dir: str, section_header: str, name: str, title: str, hook: str
 ) -> dict:
-    """Insert ``- [title](name.md) — hook`` at the END of ``section_header`` in MEMORY.md.
+    """Insert ``- [title](name.md) — hook`` at its SORTED position within ``section_header``.
 
     Returns the ``result["floor"]`` outcome dict — ``{"status", "reason"}`` (LIF-5). This used
     to return a bare bool that silently no-oped on a missing file OR a renamed header, so a
     user/feedback memory could lose its always-load pointer with no signal anywhere. Now every
     outcome is explicit; never raises; MEMORY.md stays the ONLY file this module edits:
 
-    - ``appended`` (reason None) — the section exists; the pointer went in at the end of its
-      block, byte-identical to the pre-LIF-5 insertion (idempotent happy path unchanged).
+    - ``appended`` (reason None) — the section exists; the pointer is inserted at its
+      deterministic lexicographic position among the section's EXISTING pointer lines (TEA-4 —
+      see the insertion-point comment below), never necessarily the block tail anymore.
     - ``created-section`` — MEMORY.md exists but ``section_header`` does not (renamed or
       deleted by hand — the floor drifted from ``assets/MEMORY.skeleton.md``). The canonical
       section is re-created at the END of MEMORY.md in the skeleton's own format (one blank
@@ -369,11 +391,33 @@ def _append_floor_pointer(
         if lines[j].strip().startswith("## "):
             end = j
             break
-    # Insertion point = after the last non-blank line within the block.
-    insert = start + 1
+
+    # TEA-4: sorted insertion — the new pointer goes BEFORE the first existing pointer line in
+    # the block whose memory name sorts lexicographically greater than this one. This is what
+    # kills tail-collision merge conflicts: two clones adding DIFFERENT names to the same
+    # section each touch a diff hunk at THEIR OWN name's position, not both appending to the
+    # single highest-churn shared line (the section tail) — git merges the two non-overlapping
+    # insertions cleanly. A fully-sorted section stays sorted (every insert lands at its exact
+    # slot). An unsorted legacy section gets each new entry placed at its locally-correct spot
+    # relative to whatever order already exists, WITHOUT touching or reordering any other
+    # line — no bulk re-sort, per the no-bulk-autonomous-sweeps invariant. Non-pointer lines
+    # (blank lines, hand-written prose) are skipped when searching but never moved.
+    insert = None
     for j in range(start + 1, end):
-        if lines[j].strip():
-            insert = j + 1
+        other = _pointer_name(lines[j])
+        if other is not None and other > name:
+            insert = j
+            break
+    if insert is None:
+        # No existing pointer sorts greater than this name (a brand-new section, an
+        # append-only section, or this name is the section's new last entry) — falls through
+        # to the same "end of block" position the pre-TEA-4 append always used, so a freshly
+        # created section's first pointer (LIF-5) and an alphabetically-last name both land
+        # exactly where they always did.
+        insert = start + 1
+        for j in range(start + 1, end):
+            if lines[j].strip():
+                insert = j + 1
 
     lines.insert(insert, pointer)
     try:
