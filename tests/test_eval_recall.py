@@ -152,12 +152,189 @@ def test_evaluate_all_gates_pass_on_tmp_corpus(tmp_path, monkeypatch):
     hs_path = _write_hard_set(tmp_path)
     report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)
     assert report["ok"] is True, report["gates"]
-    # every individual gate flag is true
-    assert all(g["pass"] for g in report["gates"].values()), report["gates"]
+    # every NON-SKIPPED gate flag is true (PRF-2: cold_p50_ms is now a real gates-dict entry,
+    # but defaults to skipped/pass=None -- gate_cold=False was not requested here -- so it
+    # is correctly excluded rather than asserted True like the 5 always-on gates above).
+    assert all(
+        g["pass"] for g in report["gates"].values() if g.get("pass") is not None
+    ), report["gates"]
     assert report["gates"]["recall_p95_ms"]["value"] < E.GATE_P95_MS
-    # cold latency is reported alongside but is NOT a gate (report-only honesty signal)
+    # cold_latency itself (the report block) stays report-only regardless of gate_cold --
+    # only the derived cold_p50_ms GATE is opt-in (PRF-2).
     assert "cold_latency" in report and report["cold_latency"]["n"] >= 1
-    assert not any("cold" in name for name in report["gates"])
+    assert report["gates"]["cold_p50_ms"]["pass"] is None  # not requested -> skipped
+    assert report["gates"]["cold_p50_ms"]["skipped"] is True
+
+
+# --------------------------------------------------------------------------- #
+# PRF-2 — cold_p50_ms: gate the cold path (opt-in via evaluate(gate_cold=True) /
+# main's --gate-cold), report-only by default. Three states to cover:
+#   1. not requested                -> skipped, reason "not requested (--gate-cold)"
+#   2. requested + dense_ready      -> a REAL gate (pass = n>0 and p50 < GATE_COLD_P50_MS)
+#   3. requested + bm25-only        -> skipped (cold ~= warm without dense; a hermetic
+#                                      machine must never redden on this)
+# cold_latency is monkeypatched throughout so these are hermetic unit tests of the GATES
+# DICT SHAPE, not integration tests that spawn real subprocesses in a loop (that coverage
+# lives in test_cold_latency_is_reported_not_gated above + the manual dense-lane check).
+# --------------------------------------------------------------------------- #
+def test_cold_p50_gate_skipped_when_not_requested(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)
+    # Even a comfortably-under-budget cold sample must NOT turn into a gate unless asked.
+    monkeypatch.setattr(E, "cold_latency", lambda *a, **k: {"p50": 5.0, "max": 6.0, "n": 3})
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)
+    g = report["gates"]["cold_p50_ms"]
+    assert g["pass"] is None
+    assert g["skipped"] is True
+    assert g["threshold"] == E.GATE_COLD_P50_MS
+    assert report["ok"] is True  # a skipped gate never drags `ok` down
+
+
+def test_cold_p50_gate_requested_and_dense_ready_passes_under_budget(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)
+    B.build_index(md, idx)
+    real_index = B.load_index(idx)
+    monkeypatch.setattr(E, "load_index", lambda _idx_dir: _with_dense_ready(real_index, True))
+    monkeypatch.setattr(E, "cold_latency", lambda *a, **k: {"p50": 5.0, "max": 6.0, "n": 3})
+
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10, gate_cold=True)
+    g = report["gates"]["cold_p50_ms"]
+    assert "skipped" not in g
+    assert g["pass"] is True
+    assert g["value"] == 5.0
+    assert g["threshold"] == E.GATE_COLD_P50_MS
+    assert report["ok"] is True
+
+
+def test_cold_p50_gate_requested_and_dense_ready_fails_over_budget(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)
+    B.build_index(md, idx)
+    real_index = B.load_index(idx)
+    monkeypatch.setattr(E, "load_index", lambda _idx_dir: _with_dense_ready(real_index, True))
+    # A p50 comfortably OVER the 1500ms budget -- must fail the gate and drag `ok` down.
+    monkeypatch.setattr(E, "cold_latency", lambda *a, **k: {"p50": 4000.0, "max": 4200.0, "n": 3})
+
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10, gate_cold=True)
+    g = report["gates"]["cold_p50_ms"]
+    assert g["pass"] is False
+    assert report["ok"] is False
+
+
+def test_cold_p50_gate_requested_but_no_samples_fails_not_skips(tmp_path, monkeypatch):
+    """n == 0 (every subprocess sample failed/timed out) must FAIL the gate when requested,
+    not silently pass -- a gate you can't measure is not a gate you can trust."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)
+    B.build_index(md, idx)
+    real_index = B.load_index(idx)
+    monkeypatch.setattr(E, "load_index", lambda _idx_dir: _with_dense_ready(real_index, True))
+    monkeypatch.setattr(E, "cold_latency", lambda *a, **k: {"p50": 0.0, "max": 0.0, "n": 0})
+
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10, gate_cold=True)
+    g = report["gates"]["cold_p50_ms"]
+    assert "skipped" not in g
+    assert g["pass"] is False
+    assert report["ok"] is False
+
+
+def test_cold_p50_gate_requested_but_bm25_only_is_skipped_not_failed(tmp_path, monkeypatch):
+    """Requested (--gate-cold) but the run only served bm25-only (no dense model, e.g. a
+    hermetic/cache-less machine) -- must SKIP (not fail), because cold ~= warm without a
+    per-process model load to amortize; gating here would redden hermetic CI for nothing."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)
+    # Even a wildly-over-budget "cold" sample must not fail when bm25-only -- proves the
+    # skip is unconditional on backend, not just a lucky under-budget number.
+    monkeypatch.setattr(E, "cold_latency", lambda *a, **k: {"p50": 9999.0, "max": 9999.0, "n": 1})
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10, gate_cold=True)
+    assert report["dense_ready"] is False
+    g = report["gates"]["cold_p50_ms"]
+    assert g["pass"] is None
+    assert g["skipped"] is True
+    assert report["ok"] is True
+
+
+def test_gate_cold_cli_flag_defaults_false_and_plumbs_through(tmp_path, monkeypatch, capsys):
+    """CLI flag plumbing: --gate-cold absent -> gate_cold=False reaches evaluate(); the
+    skip reason printed names the flag so a reader knows how to opt in."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)
+
+    captured = {}
+    real_evaluate = E.evaluate
+
+    def _spy(*args, **kwargs):
+        captured["gate_cold"] = kwargs.get("gate_cold")
+        return real_evaluate(*args, **kwargs)
+
+    monkeypatch.setattr(E, "evaluate", _spy)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path])
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert captured["gate_cold"] is False
+    assert "cold_p50_ms" in out
+    assert "not requested (--gate-cold)" in out
+
+
+def test_gate_cold_cli_flag_true_plumbs_through(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)
+
+    captured = {}
+    real_evaluate = E.evaluate
+
+    def _spy(*args, **kwargs):
+        captured["gate_cold"] = kwargs.get("gate_cold")
+        return real_evaluate(*args, **kwargs)
+
+    monkeypatch.setattr(E, "evaluate", _spy)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path, "--gate-cold"])
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert captured["gate_cold"] is True
+    # requested but bm25-only (hermetic build above) -> skipped with the OTHER reason
+    assert "bm25-only" in out and "cold ~= warm" in out
+
+
+def test_main_cli_exits_nonzero_on_cold_failure_only_when_requested(tmp_path, monkeypatch, capsys):
+    """RESULT honors a cold failure ONLY when --gate-cold was passed -- the same forged
+    over-budget cold sample must be invisible to `ok`/exit-code without the flag, and must
+    fail the build with it (dense_ready forced True so the gate actually evaluates)."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)
+    B.build_index(md, idx)
+    real_index = B.load_index(idx)
+    monkeypatch.setattr(E, "load_index", lambda _idx_dir: _with_dense_ready(real_index, True))
+    monkeypatch.setattr(E, "cold_latency", lambda *a, **k: {"p50": 5000.0, "max": 5200.0, "n": 3})
+
+    rc_without = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path])
+    out_without = capsys.readouterr().out
+    assert rc_without == 0, out_without
+    assert "RESULT: ALL GATES PASS" in out_without
+
+    rc_with = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path, "--gate-cold"])
+    out_with = capsys.readouterr().out
+    assert rc_with == 1, out_with
+    assert "RESULT: GATE FAILURE" in out_with
+    assert "cold_p50_ms" in out_with
 
 
 def test_load_hard_set_missing_file_is_empty():
@@ -1065,6 +1242,9 @@ def test_gate_constants_are_pinned_exact_values():
     assert E.GATE_HARD_RECALL == 0.80
     assert E.GATE_MRR == 0.60
     assert E.GATE_P95_MS == 300.0
+    # PRF-2: cold_p50_ms's budget -- see GATE_COLD_P50_MS's docstring for why 1500ms (the
+    # honest fresh-subprocess-per-sample number the warm p95 gate above understates ~10x).
+    assert E.GATE_COLD_P50_MS == 1500.0
 
 
 def test_token_reduction_gate_is_net_greater_than_zero(tmp_path, monkeypatch):

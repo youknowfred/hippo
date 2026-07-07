@@ -70,6 +70,14 @@ GATE_SELF_RECALL = 0.90
 GATE_HARD_RECALL = 0.80
 GATE_MRR = 0.60
 GATE_P95_MS = 300.0
+# PRF-2: the honest per-prompt budget for cold_latency's p50 (fresh-subprocess-per-sample,
+# see cold_latency()'s docstring). Gate 5 above is measured WARM and documents itself as
+# ~10x under the real per-prompt cost -- this is the number that actually reflects what a
+# freshly-spawned hook pays. Report-only by default (opt in via --gate-cold / evaluate()'s
+# gate_cold=True) so a cold OS cache on an ungated hermetic run never reddens CI; the dense
+# CI lane (which restores a warm fastembed model cache) passes --gate-cold so a REAL cold-path
+# regression (e.g. a heavier model, a new per-import cost) fails the build.
+GATE_COLD_P50_MS = 1500.0
 
 _SELF_QUERY_TOKENS = 12
 # RET-2: body_probe queries keep the first N tokens that are BOTH in a memory's body chunks
@@ -618,6 +626,7 @@ def evaluate(
     repo_root: Optional[str] = None,
     telemetry_dir: Optional[str] = None,
     abstention_set_path: Optional[str] = None,
+    gate_cold: bool = False,
 ) -> dict:
     """Run all 5 gates; return a report dict with per-gate values + pass flags.
 
@@ -625,6 +634,13 @@ def evaluate(
     REPORT-ONLY scorecard additions (precision@k, staleness half-life, per-session token
     cost, RET-1's abstention_rate) — none of the 5 gates above are affected by any of them;
     omitting all of them reproduces the exact prior report shape plus zeroed report blocks.
+
+    ``gate_cold`` (PRF-2) opts INTO gating ``cold_latency``'s p50 against
+    ``GATE_COLD_P50_MS`` -- default False so cold_latency stays the report-only honesty
+    signal it always was on every hermetic/ungated caller. Even when requested, the gate is
+    skipped (not failed) on a BM25-only run: without dense, cold ~= warm (no per-process
+    model load to amortize), so a hermetic machine gating this would be gating nothing
+    real and could redden CI on a cache-less runner that never claimed to serve dense.
     """
     if memory_dir is None:
         # Only resolve_dirs() when memory_dir actually needs it -- mirrors recall.main()'s
@@ -726,6 +742,29 @@ def evaluate(
         },
         "recall_p95_ms": {"value": lat["p95"], "threshold": GATE_P95_MS, "pass": lat["p95"] < GATE_P95_MS},
     }
+    # PRF-2: cold_p50_ms follows the SAME skip-vs-gate shape as the hard-set/token-reduction
+    # gates above (pass=None + skipped=True + a reason string, excluded from `ok`) rather than
+    # a bespoke boolean -- one pattern for "this gate wasn't asked to run" across the module.
+    # Two independent reasons a caller ends up skipped here:
+    #   1. not requested at all (gate_cold=False, the default) -- every existing caller
+    #      (hermetic suite, bare `eval_recall` invocations, doctor/audit) keeps reporting
+    #      cold_latency exactly as before with zero behavior change.
+    #   2. requested but serving bm25-only -- cold_latency's own docstring says cold ~= warm
+    #      with dense unavailable (no per-process model load to amortize), so gating it on a
+    #      hermetic/cache-less machine would be enforcing a budget against a cost that isn't
+    #      actually being paid -- exactly the kind of false-negative-prone gate the hard-set
+    #      skip semantics above already exist to avoid.
+    if gate_cold and index.dense_ready:
+        gates["cold_p50_ms"] = {
+            "value": cold["p50"], "threshold": GATE_COLD_P50_MS,
+            "pass": cold["n"] > 0 and cold["p50"] < GATE_COLD_P50_MS,
+        }
+    else:
+        gates["cold_p50_ms"] = {
+            "value": cold["p50"], "threshold": GATE_COLD_P50_MS,
+            "pass": None,
+            "skipped": True,
+        }
     return {
         "ok": all(g["pass"] for g in gates.values() if g.get("pass") is not None),
         "dense_ready": index.dense_ready,
@@ -800,6 +839,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument("--repo-root", default=None)
     parser.add_argument("--telemetry-dir", default=None)
+    parser.add_argument(
+        "--gate-cold",
+        action="store_true",
+        help="PRF-2: gate cold_latency's p50 (fresh-subprocess-per-sample, the honest "
+        "per-prompt cost) against GATE_COLD_P50_MS. Off by default so cold_latency stays a "
+        "report-only signal everywhere except CI's dense lane, which restores a warm model "
+        "cache and passes this flag so a real cold-path regression fails the build. Skipped "
+        "(not failed) on a bm25-only run -- without dense, cold ~= warm.",
+    )
     parser.add_argument("-k", type=int, default=10)
     args = parser.parse_args(argv)
 
@@ -812,6 +860,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         repo_root=args.repo_root,
         telemetry_dir=args.telemetry_dir,
         abstention_set_path=args.abstention_set or _default_abstention_set_path(),
+        gate_cold=args.gate_cold,
     )
     if not report.get("ok") and "error" in report:
         print(f"eval error: {report['error']}")
@@ -840,6 +889,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         "hard_recall@10": "no hard-set fixture",
         "mrr@10": "no hard-set fixture",
         "token_reduction": "no MEMORY.full.md pre-trim snapshot",
+        "cold_p50_ms": (
+            "not requested (--gate-cold)"
+            if not args.gate_cold
+            else "bm25-only — cold ~= warm without dense; hermetic machines must not redden"
+        ),
     }
     for name, g in report["gates"].items():
         skipped = g.get("pass") is None

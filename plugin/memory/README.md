@@ -91,10 +91,14 @@ honestly** rather than failed (reported as `➖ skipped`, excluded from the RESU
 - **token_reduction** when the corpus has no `MEMORY.full.md` pre-trim snapshot (every
   fresh install) — there is nothing to compare the trimmed floor against.
 
-`cold_latency` is reported alongside (fresh subprocess per sample — the REAL per-prompt
-hook cost, ~10× the warm p95) but never gated. Report-only scorecard extras: precision@k
-(graded, from `recall_relevance_set.yaml`), staleness half-life, per-session token cost,
-and the reconsolidation graduation rate.
+`cold_latency` (fresh subprocess per sample — the REAL per-prompt hook cost, ~10× the warm
+p95) is always reported. Its gate, `cold_p50_ms` (PRF-2), is **opt-in** via `--gate-cold`
+(threshold `GATE_COLD_P50_MS` = 1500 ms) — off by default so an ungated hermetic run never
+reddens on a cold OS cache; CI's dense lane passes `--gate-cold` so a real cold-path
+regression fails the build. Requested but serving BM25-only is also **skipped honestly**
+(cold ≈ warm without a per-process model load to amortize). Report-only scorecard extras:
+precision@k (graded, from `recall_relevance_set.yaml`), staleness half-life, per-session
+token cost, and the reconsolidation graduation rate.
 
 ## Staleness + provenance
 
