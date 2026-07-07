@@ -21,6 +21,7 @@ import json
 import os
 import re
 import subprocess
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 try:
@@ -816,6 +817,56 @@ def backfill_corpus(
     ]
 
 
+_LAST_VERIFIED_RE = re.compile(r"\s*last_verified\s*:")
+
+
+def _has_last_verified(fm_lines: List[str]) -> bool:
+    return any(_LAST_VERIFIED_RE.match(ln) for ln in fm_lines)
+
+
+def _stamp_last_verified(text: str, ts: str) -> str:
+    """Insert an ADDITIVE ``last_verified: "<ts>"`` frontmatter key — RET-6's reinforcement
+    stamp. WRITE-ONCE: callers only reach this after confirming the key is absent (this
+    internal ``_has_last_verified`` check is a defensive second guard, same belt-and-suspenders
+    style ``backfill_text``'s own ``_has_cited_paths`` check already has) — a file that
+    already carries the key is returned byte-identical, never re-timestamped. Records WHEN a
+    human first confirmed this memory (graduate/fix), distinct from ``source_commit_time``
+    (WHICH commit the CITED CODE was at) — the banner-clearing signal itself is
+    ``source_commit``, re-baselined on every reverify regardless of this stamp. Nests under an
+    existing ``metadata:`` block, mirroring ``backfill_text``'s own new-key insertion, so a
+    reader finds it wherever the file's other provenance keys already live. The body is never
+    touched. No-op on unfenced frontmatter (the same guard every writer here uses).
+    """
+    if not text.startswith(_FENCE):
+        return text
+    lines = text.split("\n")
+    close = next((i for i in range(1, len(lines)) if lines[i].strip() == _FENCE), None)
+    if close is None:
+        return text
+    fm = lines[1:close]
+    if _has_last_verified(fm):
+        return text
+    new_key = f"last_verified: {json.dumps(ts)}"
+    meta_idx = next((i for i, ln in enumerate(fm) if re.match(r"^metadata\s*:\s*$", ln)), None)
+    if meta_idx is not None:
+        indent = "  "
+        last = meta_idx
+        j = meta_idx + 1
+        while j < len(fm):
+            ln = fm[j]
+            if ln.strip() == "" or not ln.startswith((" ", "\t")):
+                break
+            m = re.match(r"^(\s+)\S", ln)
+            if m:
+                indent = m.group(1)
+            last = j
+            j += 1
+        fm2 = fm[: last + 1] + [f"{indent}{new_key}"] + fm[last + 1:]
+    else:
+        fm2 = fm + [new_key]
+    return "\n".join([lines[0]] + fm2 + lines[close:])
+
+
 # --------------------------------------------------------------------------- #
 # Re-verify (human-confirmed staleness re-baseline to HEAD — distinct from --refresh)
 # --------------------------------------------------------------------------- #
@@ -852,6 +903,14 @@ def reverify_file(
     that are absent AFTER — same contract as ``backfill_file``'s; a drop (especially to
     zero, which makes the memory staleness-exempt) must be surfaced by the caller, never
     a silent shrink.
+
+    RET-6 reinforcement: also stamps ``last_verified`` — but only the FIRST time this
+    memory is ever re-verified (write-once via ``_stamp_last_verified``; a memory reverified
+    a second time keeps its original stamp, never a running log of every re-check). This is
+    supplementary provenance — the signal that actually clears RET-6's drift banner is
+    ``source_commit`` itself, re-baselined to HEAD on EVERY call above, which is why a
+    reinforced memory drops out of the next SessionStart's ``find_stale`` scan (and thus
+    ``stale.json``) regardless of whether ``last_verified`` was already set.
     """
     result = {
         "path": path,
@@ -860,6 +919,7 @@ def reverify_file(
         "dropped_citations": [],
         "source_commit": None,
         "source_commit_time": None,
+        "last_verified": None,
         "error": None,
     }
     try:
@@ -882,7 +942,25 @@ def reverify_file(
         sc, sct = git_head_with_time(repo_root)
         cited = cited_paths_for_body(body, repo_files, basename_index)
         dropped = [p for p in _frontmatter_cited_paths(fm) if p not in cited]
-        new_text, _ = backfill_text(_strip_invalid_after(_strip_provenance(text)), cited, sc, sct)
+        stripped = _strip_invalid_after(_strip_provenance(text))
+        # RET-6: last_verified is write-once — a memory that already carries one keeps its
+        # FIRST confirmation timestamp; only an as-yet-never-verified memory gets stamped.
+        # Stamped BEFORE backfill_text re-inserts cited_paths/source_commit/source_commit_time
+        # (not after) so the key lands in the SAME relative position every call — `_strip_provenance`
+        # never removes it, so an append-after-backfill_text ordering would flip on the very next
+        # call (the triplet always re-lands at fm's tail while last_verified sat still), breaking
+        # this function's idempotence contract on the SECOND reverify, not the first.
+        meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+        existing_lv = fm.get("last_verified")
+        if existing_lv is None:
+            existing_lv = meta.get("last_verified")
+        if isinstance(existing_lv, str) and existing_lv.strip():
+            lv = existing_lv
+            pre_stamp = stripped  # already present -- untouched by the strip above
+        else:
+            lv = datetime.now(timezone.utc).isoformat()
+            pre_stamp = _stamp_last_verified(stripped, lv)
+        new_text, _ = backfill_text(pre_stamp, cited, sc, sct)
         changed = new_text != text  # idempotent: a no-op when provenance already matches
         result.update(
             {
@@ -890,6 +968,7 @@ def reverify_file(
                 "dropped_citations": dropped,
                 "source_commit": sc,
                 "source_commit_time": sct,
+                "last_verified": lv,
                 "changed": changed,
             }
         )

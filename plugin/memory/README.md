@@ -168,6 +168,22 @@ record anything was lost. Two surfaces close that hole:
   its body), `source_commit` untouched. The corpus-wide `--refresh` does the same for
   every already-backfilled memory.
 
+### Verify-at-use banner + reinforcement (RET-6)
+
+A currently-stale memory's injected pointer line (`recall.format_results`) carries a
+one-line banner — `anchored to <sha>; N cited files changed since — verify before
+relying` — sourced entirely from `stale.json` (LIF-6's `SessionStart`-derived cache; an
+absent/corrupt cache degrades to **no banners**, never a hard error, and never a git call
+on the recall hot path). A fresh memory carries none. **Reinforcement needs no separate
+step**: `--reverify` (or `reconsolidate.semantic_reverify`'s `graduate`/`fix` outcome)
+already re-baselines `source_commit` to HEAD, so a reinforced memory simply drops out of
+the *next* `SessionStart`'s `find_stale` scan — and thus `stale.json` — and the banner is
+gone. The first time a memory is EVER reverified, `--reverify` also additively stamps a
+write-once `last_verified` timestamp (never overwritten by a later reverify) —
+supplementary audit provenance (`staleness.read_last_verified`), distinct from
+`source_commit`/`source_commit_time`, which remains the signal that actually clears the
+banner.
+
 ## The SessionStart dispatcher
 
 ### `session_start.py`

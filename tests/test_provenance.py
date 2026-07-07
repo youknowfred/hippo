@@ -6,7 +6,7 @@ import json
 import os
 
 from memory import provenance as P
-from memory.staleness import read_provenance, read_source_commit_time
+from memory.staleness import read_last_verified, read_provenance, read_source_commit_time
 
 from .conftest import git_commit, write_file
 
@@ -328,6 +328,70 @@ def test_reverify_is_idempotent(repo, memory_dir):
     git_commit(repo, "memory", 1_700_000_100)
     assert _reverify_one(memory_dir, repo, "m")["changed"] is True   # OLD -> HEAD
     assert _reverify_one(memory_dir, repo, "m")["changed"] is False  # already HEAD -> no-op
+
+
+# --------------------------------------------------------------------------- #
+# RET-6 reinforcement: reverify_file also stamps last_verified, WRITE-ONCE, the first
+# time a memory is ever re-verified — the drift-banner-clearing signal itself stays
+# source_commit (re-baselined above on EVERY call, changed or not); last_verified is
+# supplementary audit provenance layered on top, per the roadmap's "touch last_verified
+# via the existing reverify primitive."
+# --------------------------------------------------------------------------- #
+def test_reverify_stamps_last_verified_on_first_confirmation(repo, memory_dir):
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep v1", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/memory/m.md",
+        f'---\nname: M\ncited_paths: ["src/dep.py"]\nsource_commit: "{c1}"\n---\nbody src/dep.py\n',
+    )
+    git_commit(repo, "memory", 1_700_000_001)
+
+    res = _reverify_one(memory_dir, repo, "m")
+    assert res["changed"] is True and res["error"] is None
+    assert res["last_verified"]  # a real, non-empty ISO-8601 stamp
+
+    after = open(os.path.join(memory_dir, "m.md"), encoding="utf-8").read()
+    assert read_last_verified(after) == res["last_verified"]
+
+
+def test_reverify_never_overwrites_an_existing_last_verified_stamp(repo, memory_dir):
+    """A memory reverified a SECOND time (real code drift in between) keeps its ORIGINAL
+    last_verified — write-once, never a running log of every re-check — while
+    source_commit still re-baselines to the new HEAD both times (the actual
+    banner-clearing signal is unaffected by this)."""
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep v1", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/memory/m.md",
+        f'---\nname: M\ncited_paths: ["src/dep.py"]\nsource_commit: "{c1}"\n---\nbody src/dep.py\n',
+    )
+    git_commit(repo, "memory", 1_700_000_001)
+
+    first = _reverify_one(memory_dir, repo, "m")
+    assert first["changed"] is True
+    first_stamp = first["last_verified"]
+    head1 = P.run_git(["rev-parse", "HEAD"], repo).strip()
+    assert first["source_commit"] == head1
+
+    # Idempotent re-run right away: last_verified is preserved, changed is False.
+    again = _reverify_one(memory_dir, repo, "m")
+    assert again["changed"] is False
+    assert again["last_verified"] == first_stamp
+
+    # Real drift + a SECOND genuine re-verification: source_commit moves to the new HEAD,
+    # but last_verified stays pinned to the FIRST confirmation.
+    write_file(repo, "src/dep.py", "v = 2\n")
+    git_commit(repo, "dep v2", 1_700_000_500)
+    second = _reverify_one(memory_dir, repo, "m")
+    assert second["changed"] is True
+    head2 = P.run_git(["rev-parse", "HEAD"], repo).strip()
+    assert second["source_commit"] == head2 and head2 != head1
+    assert second["last_verified"] == first_stamp  # unchanged — write-once
+
+    after = open(os.path.join(memory_dir, "m.md"), encoding="utf-8").read()
+    assert read_last_verified(after) == first_stamp
 
 
 def test_reverify_refuses_unparseable_frontmatter(repo, memory_dir):

@@ -126,6 +126,21 @@ _SALIENCE_STALENESS_CAP = 0.15
 _SALIENCE_STALENESS_SATURATION = 5
 
 # --------------------------------------------------------------------------- #
+# RET-6: verify-at-use banner — a currently-stale injected memory carries a one-line
+# "anchored to <sha>; N cited files changed since — verify before relying" banner on its
+# rendered pointer, sourced from LIF-6's persisted stale.json (advisory, SessionStart-derived
+# -- NEVER a git call on this hot path; absent/corrupt cache -> no banners for anyone).
+# UNLIKE RET-5's salience fusion, this is NOT gated behind a flag and does NOT touch ranking
+# or score at all -- staleness here is a correctness signal a user reading the injected
+# pointer should always see, not a ranking nudge someone might opt out of. Reinforcement
+# (clearing the banner) needs no NEW machinery: `reconsolidate.semantic_reverify`'s
+# graduate/fix outcomes already re-baseline `source_commit` to HEAD via
+# `provenance.reverify_file` -- so a reinforced memory simply drops out of the NEXT
+# SessionStart's `find_stale` scan (and thus `stale.json`), and is rendered bannerless from
+# then on, exactly like a memory that was never stale. See `_stale_banner_map` below.
+# --------------------------------------------------------------------------- #
+
+# --------------------------------------------------------------------------- #
 # RET-1: relevance floor + knee cutoff — "earn every injected token"
 # --------------------------------------------------------------------------- #
 # The dense ranker (a nearest-neighbor search over cosine similarity) ALWAYS returns an
@@ -985,6 +1000,45 @@ def _staleness_penalty_map(index_dir: Optional[str]) -> Dict[str, float]:
         return {}
 
 
+def _stale_banner_map(index_dir: Optional[str]) -> Dict[str, str]:
+    """Name -> RET-6's one-line verify-at-use banner text, from LIF-6's persisted
+    ``stale.json`` (``staleness.read_stale_cache``) — advisory, SessionStart-derived: an
+    absent/corrupt cache degrades to ``{}`` (no banners for anyone), NEVER a git call on this
+    hot path (mirrors ``_staleness_penalty_map``'s read, but UNCONDITIONAL — this runs
+    regardless of ``_salience_enabled()``, since a correctness banner is not a ranking knob).
+    A memory is banner-eligible purely by PRESENCE in the cache; the exact wording is the
+    roadmap's own: ``"anchored to <sha>; N cited files changed since — verify before
+    relying"``, pulling both ``<sha>`` and ``N`` straight from the cache's ``sha``/``changed``
+    fields (LIF-6 already wrote both — no writer/schema change needed here). A record with no
+    usable ``sha`` is skipped (a blank anchor is worse than no banner). Never raises; ``{}``
+    when ``index_dir`` is falsy or the cache is missing/empty/corrupt.
+    """
+    if not index_dir:
+        return {}
+    try:
+        from .staleness import read_stale_cache
+
+        stale = read_stale_cache(index_dir)
+        if not stale:
+            return {}
+        out: Dict[str, str] = {}
+        for name, rec in stale.items():
+            if not isinstance(rec, dict):
+                continue
+            sha = rec.get("sha")
+            if not isinstance(sha, str) or not sha:
+                continue  # no anchor to name -- degrade to no banner rather than a blank one
+            changed = rec.get("changed")
+            if not isinstance(changed, int) or isinstance(changed, bool) or changed <= 0:
+                changed = 1  # present in stale.json at all -> at least one, same floor as the salience penalty
+            out[name] = (
+                f"anchored to {sha}; {changed} cited files changed since — verify before relying"
+            )
+        return out
+    except Exception:
+        return {}
+
+
 def _apply_salience(
     penalized: List[Tuple[int, float, Optional[str]]],
     entries: List[dict],
@@ -1253,6 +1307,12 @@ def recall(
         # --- 1-hop graph expansion (GRA-1): AFTER fusion + invalidation/supersession re-sort. ---
         penalized, graph_injected = _expand_neighbors(penalized, entries, edges, superseded_by)
 
+        # --- RET-6: verify-at-use banner map — display-only, UNGATED (see the constants
+        # block above), computed once here from the SAME graph_index_dir the salience/graph
+        # reads already resolved. Never touches score/order; the emission loop below just
+        # looks a name up in it.
+        stale_banner_map = _stale_banner_map(graph_index_dir)
+
         # Walk the re-sorted list and emit up to k DISPLAY-eligible results, skipping "old"
         # entries as we go. This is NOT `penalized[:k]` followed by a filter -- a fixed-size
         # slice-then-filter could yield fewer than k results when an "old" entry occupies a
@@ -1337,6 +1397,13 @@ def recall(
                     # verify" flags a live conflict without demoting either side. Absent
                     # links cache -> _typed_relation_maps returned empty maps -> "".
                     "note": _typed_note(i, superseded_by, contradicted_by),
+                    # RET-6: the verify-at-use banner — ALWAYS present ("" when the memory is
+                    # not in LIF-6's stale.json, same no-key-branching convention as "note").
+                    # format_results renders it appended to the pointer line; a memory that
+                    # was reinforced (semantic_reverify graduate/fix, see the constants block
+                    # above) simply has no entry in `stale_banner_map` from the next
+                    # SessionStart on, so this reads "" with no separate clear step.
+                    "stale_banner": stale_banner_map.get(e["name"], ""),
                     # RET-5: the salience breakdown behind THIS result's score — ALWAYS
                     # present (None when the flag is off, or for an entry `_apply_salience`
                     # never scored, e.g. a pure graph injection) so a consumer can inspect
@@ -1371,7 +1438,11 @@ def format_results(results: List[dict], max_chars: int = _MAX_RECALL_CHARS) -> s
         # the same pointer line — bounded upstream (_typed_note caps names) and by the
         # overall max_chars truncation below, so it can never blow the injection budget.
         note = f" [{r['note']}]" if r.get("note") else ""
-        lines.append(f"  • {r['name']} ({r['file']}) — {desc}{marker}{note}")
+        # RET-6: the verify-at-use banner — a currently-stale memory (per LIF-6's stale.json)
+        # carries it, a fresh one doesn't ("" -> no clause at all). Same bracket convention as
+        # `note`, same overall max_chars truncation below — a banner can never blow the budget.
+        banner = f" [{r['stale_banner']}]" if r.get("stale_banner") else ""
+        lines.append(f"  • {r['name']} ({r['file']}) — {desc}{marker}{note}{banner}")
     out = "\n".join(lines)
     if len(out) > max_chars:
         out = out[: max_chars - 16].rstrip() + "\n…(truncated)"

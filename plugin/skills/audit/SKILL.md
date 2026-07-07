@@ -556,7 +556,16 @@ Every write goes through the tools' **existing single-item, no-bulk primitives**
 never adds a batch wrapper around them:
 
 - **graduate / fix (body already hand-edited)** → `reconsolidate.semantic_reverify(name,
-  outcome, memory_dir, repo_root)`. Executes **same-turn** under `--apply`.
+  outcome, memory_dir, repo_root)`. Executes **same-turn** under `--apply`. **RET-6
+  reinforcement (automatic, no extra step):** this call routes through
+  `provenance.reverify_file`, which re-baselines `source_commit` to HEAD and — the FIRST
+  time this memory is ever reverified — additively stamps a write-once `last_verified`
+  timestamp. If this memory was carrying a `SessionStart`/recall verify-at-use banner
+  ("anchored to `<sha>`; N cited files changed since — verify before relying"), it clears
+  itself on the **next** `SessionStart` staleness scan (`find_stale`/`stale.json`) with no
+  separate command — the banner's presence is derived purely from `stale.json`, and a
+  reinforced memory simply stops appearing in it. Do not chase the banner with any other
+  primitive; graduate/fix already IS the clear.
 - **demote** → same call with `outcome="demote"` — staleness flag stays set by design; still
   logged. The call chains `invalid_after` onto the memory itself (LIF-1, recorded in the
   ledger event as `invalidated`), so the recall demotion is immediate — do **not** follow up

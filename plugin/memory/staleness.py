@@ -96,6 +96,29 @@ def read_source_commit_time(text: str) -> Optional[int]:
     return None
 
 
+def read_last_verified(text: str) -> Optional[str]:
+    """Return the memory's stored ``last_verified`` (top-level or under ``metadata:``), if any.
+
+    RET-6's reinforcement stamp — ``provenance.reverify_file`` writes this ISO-8601 timestamp
+    ONCE, the FIRST time a memory is ever re-verified (a ``graduate``/``fix`` verdict via
+    ``reconsolidate.semantic_reverify``). Distinct from ``source_commit_time`` (WHICH commit
+    the CITED CODE was at): this is WHEN a human confirmed the memory, an audit fact, not the
+    signal that clears the drift banner (that's ``source_commit`` itself, re-baselined on
+    every reverify regardless of this stamp). Never raises; ``None`` when absent/malformed or
+    the memory has never been reverified.
+    """
+    fm = parse_frontmatter(text)
+    if not fm:
+        return None
+    meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+    lv = fm.get("last_verified")
+    if lv is None:
+        lv = meta.get("last_verified")
+    if isinstance(lv, str) and lv.strip():
+        return lv
+    return None
+
+
 def _chunk_paths(paths: List[str], max_bytes: int = _MAX_PATHSPEC_BYTES) -> List[List[str]]:
     """Split ``paths`` into batches whose total byte length stays under ``max_bytes``.
 

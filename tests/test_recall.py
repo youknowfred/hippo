@@ -2267,3 +2267,198 @@ def test_recall_salience_never_raises_when_telemetry_and_stale_cache_absent(tmp_
     assert len(res) == 2
     for r in res:
         assert r["salience"] == {"recency": 0.0, "usage": 0.0, "staleness": 0.0}
+
+
+# --------------------------------------------------------------------------- #
+# RET-6: verify-at-use banner — a currently-stale injected memory (per LIF-6's stale.json)
+# carries a one-line "anchored to <sha>; N cited files changed since — verify before
+# relying" banner on its rendered pointer; a fresh one carries none. UNGATED (no
+# HIPPO_SALIENCE dependency — a correctness signal, not a ranking knob). Hermetic
+# throughout (HIPPO_DISABLE_DENSE=1), mirroring the RET-5 section's fixture conventions.
+# --------------------------------------------------------------------------- #
+def test_stale_banner_map_empty_without_index_dir_or_cache(tmp_path):
+    assert R._stale_banner_map(None) == {}
+    assert R._stale_banner_map(str(tmp_path / "idx")) == {}  # stale.json never written
+
+
+def test_stale_banner_map_builds_banner_text_from_cache(tmp_path):
+    idx = str(tmp_path / ".memory-index")
+    S.write_stale_cache(
+        idx,
+        [{"name": "m_a", "changed_paths": ["src/a.py", "src/b.py"], "source_commit": "abcdef1234567890"}],
+    )
+    assert R._stale_banner_map(idx) == {
+        "m_a": "anchored to abcdef1; 2 cited files changed since — verify before relying"
+    }
+
+
+def test_stale_banner_map_skips_records_with_no_usable_sha(tmp_path):
+    """A blank/missing anchor is worse than no banner — degrade to skipping the record."""
+    import json
+
+    idx = str(tmp_path / ".memory-index")
+    os.makedirs(idx, exist_ok=True)
+    with open(S.stale_cache_path(idx), "w", encoding="utf-8") as fh:
+        json.dump(
+            {"schema_version": S.STALE_CACHE_SCHEMA_VERSION, "stale": {"m_bad": {"changed": 1, "sha": ""}}},
+            fh,
+        )
+    assert R._stale_banner_map(idx) == {}
+
+
+def test_recall_stale_injection_carries_banner_fresh_does_not(tmp_path, monkeypatch):
+    """AC: stale injections carry the banner; fresh ones don't — same bracket convention as
+    GRA-4's typed-edge note, on the same pointer line."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx)
+    S.write_stale_cache(
+        idx,
+        [{"name": "reranker_voyage", "changed_paths": ["a.py", "b.py", "c.py"], "source_commit": "abcdef1234567"}],
+    )
+
+    res = R.recall("reranker budget excel canvas formula", k=10, memory_dir=md, index_dir=idx)
+    by_name = {r["name"]: r for r in res}
+    assert by_name["reranker_voyage"]["stale_banner"] == (
+        "anchored to abcdef1; 3 cited files changed since — verify before relying"
+    )
+    fresh_names = [n for n in by_name if n != "reranker_voyage"]
+    assert fresh_names  # sanity: other memories were also recalled
+    assert all(by_name[n]["stale_banner"] == "" for n in fresh_names)
+
+    out = R.format_results(res)
+    stale_line = next(ln for ln in out.splitlines() if "reranker_voyage" in ln)
+    assert stale_line.endswith("[anchored to abcdef1; 3 cited files changed since — verify before relying]")
+    for n in fresh_names:
+        fresh_line = next(ln for ln in out.splitlines() if n in ln)
+        assert "anchored to" not in fresh_line
+
+
+def test_recall_no_banner_when_stale_cache_absent(tmp_path, monkeypatch):
+    """AC: the banner path is inert when stale.json is absent (index built, LIF-6's
+    SessionStart staleness pass never ran)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx)  # no write_stale_cache call at all -- stale.json never written
+
+    res = R.recall("which reranker do we use for search results", k=5, memory_dir=md, index_dir=idx)
+    assert res and all(r["stale_banner"] == "" for r in res)
+    assert "anchored to" not in R.format_results(res)
+
+
+def test_recall_no_banner_when_stale_cache_is_corrupt(tmp_path, monkeypatch):
+    """AC: absent/corrupt stale.json both degrade to no banners — never a hard error."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx)
+    os.makedirs(idx, exist_ok=True)
+    with open(S.stale_cache_path(idx), "w", encoding="utf-8") as fh:
+        fh.write("{not valid json")
+
+    res = R.recall("which reranker do we use for search results", k=5, memory_dir=md, index_dir=idx)
+    assert res and all(r["stale_banner"] == "" for r in res)
+
+
+def test_format_results_stale_banner_counts_toward_budget_and_truncates():
+    """AC: banner chars count against the existing output budget — bounded output stays
+    bounded even when every emitted result carries one (mirrors
+    test_format_results_is_bounded above, plus a banner on every line)."""
+    big = [
+        {
+            "name": f"m_{i}",
+            "file": f"m_{i}.md",
+            "description": "x" * 200,
+            "score": 0.1,
+            "backend": "bm25",
+            "stale_banner": "anchored to abcdef1; 5 cited files changed since — verify before relying",
+        }
+        for i in range(60)
+    ]
+    out = R.format_results(big, max_chars=9000)
+    assert len(out) <= 9000
+    assert out.endswith("(truncated)")
+
+
+def test_recall_output_bounded_under_cap_with_every_result_stale(tmp_path, monkeypatch):
+    """A realistic full-corpus bound check: every emitted memory is marked stale (worst
+    case for banner overhead) and the block still fits under the harness cap."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx)
+    S.write_stale_cache(
+        idx,
+        [
+            {"name": fname[:-3], "changed_paths": ["a.py", "b.py"], "source_commit": "deadbeefcafe"}
+            for fname in _CORPUS
+        ],
+    )
+    res = R.recall("reranker budget excel canvas formula", k=10, memory_dir=md, index_dir=idx)
+    assert res and all(r["stale_banner"] for r in res)  # every emitted result IS stale here
+    assert len(R.format_results(res)) <= R._MAX_RECALL_CHARS
+
+
+# --------------------------------------------------------------------------- #
+# RET-6 reinforcement, end-to-end: a graduate/fix verdict (reconsolidate.semantic_reverify,
+# wrapping the EXISTING provenance.reverify_file primitive) re-baselines source_commit to
+# HEAD; the NEXT SessionStart's staleness pass (LIF-6's find_stale + write_stale_cache,
+# via session_start._build_run_context) then simply omits the memory from stale.json, and
+# the banner clears on the next recall() with no separate "clear" step anywhere.
+# --------------------------------------------------------------------------- #
+def _mem_with_provenance(name: str, description: str, cited: list, source_commit: str) -> str:
+    cp = "[" + ", ".join(f'"{c}"' for c in cited) + "]"
+    return (
+        f'---\nname: {name}\ndescription: "{description}"\ntype: project\n'
+        f'cited_paths: {cp}\nsource_commit: "{source_commit}"\n---\nbody references {cited[0]}\n'
+    )
+
+
+def test_reinforcement_clears_banner_end_to_end(repo, memory_dir, monkeypatch):
+    """The full loop, hermetic in a fixture repo. Commits are pinned NEAR-NOW (find_stale's
+    default window is wall-clock-relative — mirrors test_session_start.py's
+    ``_lif6_seed_two_stale_one_recalled`` pattern, needed here because the real
+    ``_build_run_context`` path has no ``since`` override to widen it)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    from memory import reconsolidate as RC
+    from memory import session_start as SS
+
+    now = int(time.time())
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep v1", now - 300)
+    write_file(
+        memory_dir,
+        "m_alpha.md",
+        _mem_with_provenance("m_alpha", "gizmo widget calibration alpha", ["src/dep.py"], c1),
+    )
+    git_commit(repo, "memory", now - 200)
+    write_file(repo, "src/dep.py", "v = 2\n")  # cited code drifts -> genuinely stale
+    git_commit(repo, "dep v2", now - 100)
+
+    idx = B.default_index_dir(memory_dir)
+    B.build_index(memory_dir, idx)
+    SS._build_run_context(memory_dir, repo)  # simulates SessionStart's staleness pass
+    assert S.read_stale_cache(idx).get("m_alpha") is not None  # pre: really persisted stale
+
+    res = R.recall("gizmo widget calibration", k=5, memory_dir=memory_dir, index_dir=idx)
+    by_name = {r["name"]: r for r in res}
+    assert by_name["m_alpha"]["stale_banner"]  # non-empty banner text present pre-reinforcement
+
+    # Reinforcement: a session CONFIRMS the memory via the EXISTING reverify primitive.
+    result = RC.semantic_reverify("m_alpha", "graduate", memory_dir, repo)
+    assert result["error"] is None and result["cleared"] is True
+
+    # Next SessionStart's staleness pass — no manual stale.json edit, just a fresh scan.
+    SS._build_run_context(memory_dir, repo)
+    assert S.read_stale_cache(idx).get("m_alpha") is None  # the DATA is gone
+
+    res2 = R.recall("gizmo widget calibration", k=5, memory_dir=memory_dir, index_dir=idx)
+    by_name2 = {r["name"]: r for r in res2}
+    assert by_name2["m_alpha"]["stale_banner"] == ""  # the banner cleared
+    assert "anchored to" not in R.format_results(res2)

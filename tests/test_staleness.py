@@ -14,6 +14,7 @@ from memory.staleness import (
     find_unparseable,
     invalid_after_map,
     read_invalid_after,
+    read_last_verified,
     read_provenance,
     read_source_commit_time,
     read_stale_cache,
@@ -230,6 +231,23 @@ def test_read_source_commit_time_top_level_and_metadata_block():
 
 def test_read_source_commit_time_absent_returns_none():
     assert read_source_commit_time(_memory(["src/a.py"], "abc")) is None
+
+
+# --------------------------------------------------------------------------- #
+# read_last_verified — RET-6's reinforcement stamp read half
+# (provenance.reverify_file writes it; this is the ONE reader).
+# --------------------------------------------------------------------------- #
+def test_read_last_verified_top_level_and_metadata_block():
+    top = '---\nname: A\nlast_verified: "2026-07-01T00:00:00+00:00"\n---\nb\n'
+    nested = '---\nname: A\nmetadata:\n  last_verified: "2026-07-01T00:00:00+00:00"\n---\nb\n'
+    assert read_last_verified(top) == "2026-07-01T00:00:00+00:00"
+    assert read_last_verified(nested) == "2026-07-01T00:00:00+00:00"
+
+
+def test_read_last_verified_absent_or_unparseable_is_none():
+    assert read_last_verified(_memory(["src/a.py"], "abc")) is None
+    assert read_last_verified("no frontmatter at all\n") is None
+    assert read_last_verified("---\ndescription: unquoted colon: boom\n---\nb\n") is None
 
 
 # --------------------------------------------------------------------------- #
