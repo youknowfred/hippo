@@ -615,6 +615,104 @@ def check_link_density(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"link-density check failed: {exc}."}
 
 
+# --------------------------------------------------------------------------- #
+# RET-3: non-English corpus served by the English default model
+# --------------------------------------------------------------------------- #
+# Codepoint ranges for "Latin script" alphabetic characters — Basic Latin + Latin-1 Supplement
+# + Latin Extended-A/B, which together cover English plus the accented Latin of French,
+# German, Spanish, Portuguese, Vietnamese (base letters), etc. Anything alphabetic OUTSIDE
+# these ranges (Cyrillic, CJK, Greek, Arabic, Devanagari, ...) counts as "non-Latin" for this
+# heuristic. Deliberately coarse (not a full script-detection library) — this is a doctor
+# HINT, not a certified language classifier; it only needs to catch the obvious case (a corpus
+# that reads as visibly non-English) without false-positiving on a mostly-English corpus that
+# happens to contain a few French loanwords or names.
+_LATIN_ALPHA_RANGES = (
+    (0x0041, 0x005A),  # A-Z
+    (0x0061, 0x007A),  # a-z
+    (0x00C0, 0x00FF),  # Latin-1 Supplement letters (À-ÿ, excl. ×/÷ which aren't alphabetic anyway)
+    (0x0100, 0x024F),  # Latin Extended-A/B (accented forms used by many European languages)
+)
+# Below this many sampled alphabetic chars, the sample is too small to call a verdict either
+# way (a corpus of one or two short-description memories) — stay silent rather than guess.
+_NON_ENGLISH_MIN_ALPHA_SAMPLE = 40
+# ">30%" per the roadmap's acceptance criterion — a visible fraction, not a strict majority (a
+# corpus that's mostly English with scattered non-Latin proper nouns should NOT fire this).
+_NON_ENGLISH_ALPHA_FRACTION = 0.30
+
+
+def _is_latin_alpha(ch: str) -> bool:
+    return any(lo <= ord(ch) <= hi for lo, hi in _LATIN_ALPHA_RANGES)
+
+
+def check_non_english_corpus(ctx: DoctorContext) -> Dict[str, str]:
+    """Warn when the corpus reads as visibly non-English but the model is the English default.
+
+    RET-3 / OQ-4: the release keeps ``bge-small-en-v1.5`` as the hardcoded default (an explicit
+    opt-in — ``--multilingual`` — switches it), so a corpus written mostly in, say, Japanese or
+    Russian would otherwise get dense embeddings from a model never trained on that language,
+    with NO signal anywhere that a better-fitting preset exists. This samples every memory's
+    ``description:`` (the same text the index embeds — reusing ``extract_description`` so this
+    check can never disagree with what actually gets indexed) and counts alphabetic characters
+    that fall OUTSIDE the Latin-script ranges. If more than
+    ``_NON_ENGLISH_ALPHA_FRACTION`` of a large-enough alphabetic sample is non-Latin AND the
+    manifest's recorded model is still ``ENGLISH_DEFAULT_MODEL``, this warns and names the
+    `--multilingual` bootstrap preset. Silent (``ok``) on an empty/tiny corpus (nothing to
+    sample, or the sample is below ``_NON_ENGLISH_MIN_ALPHA_SAMPLE``), when the model has
+    already been switched away from the English default (nothing to suggest), or on any
+    unexpected error. Heuristic and best-effort by design — never raises, never blocks.
+    """
+    try:
+        from .build_index import ENGLISH_DEFAULT_MODEL, _load_manifest, default_index_dir, extract_description
+
+        manifest = _load_manifest(default_index_dir(ctx.memory_dir))
+        # No index yet, or already using a non-English model -> nothing to suggest here.
+        if manifest is None:
+            return {"status": "ok", "message": "non-English corpus check: N/A (no index built yet)."}
+        manifest_model = manifest.get("model")
+        if manifest_model and manifest_model != ENGLISH_DEFAULT_MODEL:
+            return {
+                "status": "ok",
+                "message": f"non-English corpus check: N/A (model is already '{manifest_model}', not the English default).",
+            }
+
+        total_alpha = 0
+        non_latin_alpha = 0
+        for path in _iter_memory_files_safe(ctx.memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    desc = extract_description(fh.read())
+            except Exception:
+                continue
+            for ch in desc:
+                if not ch.isalpha():
+                    continue
+                total_alpha += 1
+                if not _is_latin_alpha(ch):
+                    non_latin_alpha += 1
+
+        if total_alpha < _NON_ENGLISH_MIN_ALPHA_SAMPLE:
+            return {
+                "status": "ok",
+                "message": f"non-English corpus check: N/A (only {total_alpha} alphabetic chars sampled, "
+                f"below the {_NON_ENGLISH_MIN_ALPHA_SAMPLE}-char floor for this heuristic).",
+            }
+
+        fraction = non_latin_alpha / total_alpha
+        if fraction <= _NON_ENGLISH_ALPHA_FRACTION:
+            return {
+                "status": "ok",
+                "message": f"corpus reads as Latin-script/English ({fraction:.0%} non-Latin alphabetic chars).",
+            }
+        return {
+            "status": "warn",
+            "message": f"corpus is {fraction:.0%} non-Latin-alphabetic but is served by the English "
+            "default embedding model — consider `/hippo:bootstrap --multilingual` (switches to "
+            "a multilingual model; forces a one-time full re-embed of the corpus).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"non-English corpus check failed: {exc}."}
+
+
 # (label, check_fn) in a FIXED order — the source of the deterministic output. New checks append
 # here; the order is never sorted-by-name or set-derived, so the printed sequence is stable.
 CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
@@ -633,6 +731,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("fill_me", check_fill_me),
     ("secrets", check_secrets),
     ("link_density", check_link_density),
+    ("non_english_corpus", check_non_english_corpus),
 ]
 
 

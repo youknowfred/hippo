@@ -183,6 +183,17 @@ def clean_query(raw: str) -> str:
     carries no retrieval intent (a terse continuation like "?"/"continue", or fewer than
     ``_MIN_CONTENT_TOKENS`` content tokens). Pure; never raises — any failure degrades to the
     raw prompt (recall on the un-cleaned text rather than skip).
+
+    RET-3: the min-content gate below calls the SAME ``tokenize()`` used for BM25/dense, which
+    is now Unicode-aware (word tokens for Latin/Cyrillic/etc., character bigrams for CJK runs
+    lacking whitespace segmentation — see ``build_index.tokenize``). That makes this gate
+    effectively grapheme-aware for free: a substantive Japanese/Russian prompt tokenizes to
+    >=2 real content tokens (never "0 tokens" the way the old ASCII-only tokenizer produced for
+    non-Latin text) and clears the gate exactly like an equivalent English prompt would. The
+    one deliberately-unchanged edge case: a 1-2 character CJK prompt yields only 0-1 bigram
+    tokens and DOES trip the skip — the same treatment a single English word gets today (not a
+    regression, just applying the existing "too terse to carry retrieval intent" rule uniformly
+    across scripts; a 3+ character CJK prompt already yields >=2 bigrams and passes).
     """
     try:
         if not raw or not raw.strip():

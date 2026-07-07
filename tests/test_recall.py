@@ -994,3 +994,106 @@ def test_recall_drift_check_stays_fast_on_larger_corpus(tmp_path, monkeypatch):
 
     assert res
     assert elapsed < 2.0  # generous bound; drift check is a handful of stats+reads, not ML
+
+
+# --------------------------------------------------------------------------- #
+# RET-3: Unicode/multilingual retrieval — BM25 acceptance + clean_query skip-gate
+# --------------------------------------------------------------------------- #
+_JAPANESE_CORPUS = {
+    "tokyo_weather.md": "東京の天気予報は明日晴れです 週末も晴天が続く見込み",  # Tokyo weather forecast
+    "osaka_food.md": "大阪のたこ焼きは観光客に人気の食べ物です 道頓堀で食べられる",  # Osaka takoyaki
+    "kyoto_temple.md": "京都の清水寺は紅葉の名所として有名です 秋の観光シーズン",  # Kyoto temple
+}
+
+_RUSSIAN_CORPUS = {
+    "quarterly_report.md": "квартальный отчёт по продажам показывает рост выручки в этом году",
+    "server_migration.md": "миграция сервера на новую инфраструктуру завершена успешно вчера",
+    "team_meeting.md": "еженедельная встреча команды назначена на вторник утром в офисе",
+}
+
+
+def test_recall_bm25_japanese_corpus_returns_relevant_hit(tmp_path, monkeypatch):
+    """Acceptance: a Japanese corpus + same-language query must return the RELEVANT memory via
+    BM25 -- pre-RET-3, the ASCII-only tokenizer produced zero tokens for this text entirely,
+    so BM25 could never match anything (0 shared tokens with an empty corpus vocabulary)."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _JAPANESE_CORPUS)
+    B.build_index(md, idx)
+
+    res = R.recall("東京の天気はどうですか", k=5, memory_dir=md, index_dir=idx)  # "how's Tokyo weather"
+    names = [r["name"] for r in res]
+    assert "tokyo_weather" in names
+    assert all(r["backend"] == "bm25" for r in res)
+
+
+def test_recall_bm25_russian_corpus_returns_relevant_hit(tmp_path, monkeypatch):
+    """Acceptance: same as the Japanese case, for Cyrillic (word-token, not bigram, path)."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _RUSSIAN_CORPUS)
+    B.build_index(md, idx)
+
+    res = R.recall("квартальный отчёт по продажам за год", k=5, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert "quarterly_report" in names
+    assert all(r["backend"] == "bm25" for r in res)
+
+
+def test_recall_dense_japanese_corpus_with_fake_embedder(tmp_path, monkeypatch):
+    """Dense-path MECHANICS for non-English text, hermetically (fake embedder, not the real
+    English-only model -- covers the switch/plumbing, not real multilingual embedding quality,
+    per the roadmap's scoping: a real multilingual dense download is explicitly NOT added to
+    CI). Confirms the dense path doesn't choke/degrade on non-Latin text end to end."""
+    emb_docs, emb_query = _fake_embedder(16)
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", emb_docs)
+    monkeypatch.setattr(R, "embed_query", emb_query)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _JAPANESE_CORPUS)
+    B.build_index(md, idx)
+
+    res = R.recall("東京の天気はどうですか", k=5, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert "tokyo_weather" in names
+    assert any(r["backend"] in ("dense", "dense+bm25") for r in res)
+
+
+def test_clean_query_never_skips_substantive_japanese_prompt():
+    """Acceptance: a substantive non-English prompt must NEVER trip the continuation/min-content
+    skip -- pre-RET-3 this ALWAYS returned "" for any Japanese/Russian text (zero ASCII tokens),
+    silently disabling recall for an entire language regardless of prompt substance."""
+    raw = "東京の天気はどうですか、明日は晴れますか"  # "how's Tokyo weather, will it be sunny tomorrow"
+    out = R.clean_query(raw)
+    assert out != ""
+    assert out == raw  # nothing to strip/mine here -- passes through verbatim like English does
+
+
+def test_clean_query_never_skips_substantive_russian_prompt():
+    raw = "почему сервер падает при высокой нагрузке в пиковые часы"  # "why does the server crash under high load at peak hours"
+    out = R.clean_query(raw)
+    assert out != ""
+    assert out == raw
+
+
+def test_clean_query_cjk_three_char_prompt_passes_via_bigrams():
+    """Edge case named explicitly in the roadmap: a 3-char CJK prompt must pass the min-content
+    gate via bigrams (2 bigrams over 3 chars == 2 tokens == _MIN_CONTENT_TOKENS)."""
+    assert R.clean_query("東京都") != ""  # "Tokyo" (3 chars) -> ["東京","京都"] -> 2 tokens -> passes
+
+
+def test_clean_query_cjk_two_char_prompt_treated_like_a_single_english_word():
+    """A 2-char CJK prompt yields only ONE bigram -- the same "too terse" treatment a single
+    English word gets today (not a regression; applying the existing rule uniformly)."""
+    assert R.clean_query("継続") == ""  # "continue" (2 chars) -> 1 bigram -> below the floor
+    assert R.clean_query("continue") == ""  # the existing English precedent, for comparison
+
+
+def test_clean_query_accented_latin_cafe_round_trip():
+    """'café' must survive clean_query's min-content gate whole (not truncated to 'caf' by an
+    ASCII-only tokenizer internally used for the gate check)."""
+    raw = "where is the café located in the office building"
+    assert R.clean_query(raw) == raw

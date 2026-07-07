@@ -770,3 +770,163 @@ def test_derived_dirs_invisible_to_git_without_init(tmp_path, monkeypatch):
     ).stdout
     assert ".memory-index" not in porcelain and ".memory-telemetry" not in porcelain
     assert ".claude/memory/m.md" in porcelain  # the CORPUS stays visible/committable
+
+
+# --------------------------------------------------------------------------- #
+# RET-3: Unicode-aware tokenize() — word tokens for Latin/Cyrillic, CJK bigrams
+# --------------------------------------------------------------------------- #
+def test_tokenize_accented_latin_survives_whole():
+    """'café' must tokenize whole ('café'), never truncate to 'caf' (the old ASCII-only
+    regex's failure mode — accents aren't in [a-z0-9] so the match stopped mid-word)."""
+    assert B.tokenize("café") == ["café"]
+    assert B.tokenize("Café RÉSUMÉ naïve") == ["café", "résumé", "naïve"]
+
+
+def test_tokenize_cyrillic_is_not_empty():
+    """The old ASCII-only tokenizer produced ZERO tokens for any non-Latin text -- a Russian
+    memory/query would trip the min-content skip and silently never recall. Must not regress."""
+    toks = B.tokenize("Привет как дела сегодня")
+    assert toks, "Cyrillic text must tokenize to a non-empty token list"
+    assert "привет" in toks  # case-folded (Python str.lower() is Unicode-aware)
+
+
+def test_tokenize_japanese_is_not_empty():
+    toks = B.tokenize("東京の天気はどうですか")
+    assert toks, "Japanese text must tokenize to a non-empty token list"
+
+
+def test_tokenize_cjk_bigrams_basic():
+    """CJK runs (no whitespace segmentation) split into overlapping character bigrams."""
+    assert B.tokenize("東京都") == ["東京", "京都"]
+
+
+def test_tokenize_cjk_single_char_run_yields_the_char_itself():
+    """A length-1 CJK run can't form a bigram -- falls back to the single char, per spec."""
+    assert B.tokenize("東") == ["東"]
+
+
+def test_tokenize_cjk_bigram_overlap_enables_bm25_match():
+    """The whole point of bigramming: a query sharing a 2-char SUBSTRING with an indexed
+    memory must overlap on a token -- this is what makes BM25 retrieval work for CJK at all."""
+    doc_tokens = set(B.tokenize("東京都渋谷区のカフェ"))  # "Shibuya-ku, Tokyo... cafe"
+    query_tokens = set(B.tokenize("渋谷区のイベント"))  # "Shibuya-ku ... event"
+    assert doc_tokens & query_tokens, "shared substring '渋谷区' must produce overlapping bigrams"
+
+
+def test_tokenize_mixed_cjk_and_latin_run():
+    """A token gluing CJK and ASCII digits/letters with no separator splits correctly: CJK
+    part bigrammed, non-CJK part word-tokenized (each independently, not as one blob)."""
+    toks = B.tokenize("東京2024test")
+    assert "東京" in toks
+    assert "2024test" in toks
+
+
+def test_tokenize_english_stopwords_and_length_floor_unchanged():
+    """RET-3 must not regress the existing English behavior: stopwords still dropped, 1-char
+    tokens still dropped, multi-char content words still kept."""
+    toks = B.tokenize("the quick fox is a test of tokenization")
+    assert "the" not in toks and "is" not in toks and "a" not in toks and "of" not in toks
+    assert "quick" in toks and "fox" in toks and "test" in toks and "tokenization" in toks
+
+
+def test_tokenize_empty_and_whitespace():
+    assert B.tokenize("") == []
+    assert B.tokenize("   ") == []
+
+
+# --------------------------------------------------------------------------- #
+# RET-3: resolve_embed_model() precedence — env > model.json preset > English default
+# --------------------------------------------------------------------------- #
+def test_resolve_embed_model_defaults_to_english(tmp_path, monkeypatch):
+    monkeypatch.delenv("MEMOBOT_EMBED_MODEL", raising=False)
+    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
+    assert B.resolve_embed_model() == B.ENGLISH_DEFAULT_MODEL
+
+
+def test_resolve_embed_model_reads_persisted_preset(tmp_path, monkeypatch):
+    monkeypatch.delenv("MEMOBOT_EMBED_MODEL", raising=False)
+    plugin_data = str(tmp_path / "plugin-data")
+    os.makedirs(plugin_data)
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", plugin_data)
+    with open(os.path.join(plugin_data, "model.json"), "w", encoding="utf-8") as fh:
+        fh.write('{"embed_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"}')
+    assert B.resolve_embed_model() == "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+
+def test_resolve_embed_model_env_override_wins_over_preset(tmp_path, monkeypatch):
+    """MEMOBOT_EMBED_MODEL must win even when a model.json preset is ALSO present -- the env
+    override is the top precedence level, unconditionally (existing tests/hooks rely on this)."""
+    plugin_data = str(tmp_path / "plugin-data")
+    os.makedirs(plugin_data)
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", plugin_data)
+    with open(os.path.join(plugin_data, "model.json"), "w", encoding="utf-8") as fh:
+        fh.write('{"embed_model": "some/preset-model"}')
+    monkeypatch.setenv("MEMOBOT_EMBED_MODEL", "some/env-model")
+    assert B.resolve_embed_model() == "some/env-model"
+
+
+def test_resolve_embed_model_missing_preset_file_falls_through(tmp_path, monkeypatch):
+    monkeypatch.delenv("MEMOBOT_EMBED_MODEL", raising=False)
+    plugin_data = str(tmp_path / "plugin-data")
+    os.makedirs(plugin_data)  # dir exists, but no model.json inside it
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", plugin_data)
+    assert B.resolve_embed_model() == B.ENGLISH_DEFAULT_MODEL
+
+
+def test_resolve_embed_model_corrupt_preset_never_raises(tmp_path, monkeypatch):
+    """A corrupt/unreadable model.json must degrade to the default, never raise or crash --
+    resolve_embed_model runs at MODULE IMPORT time, so a raise here would break every hook."""
+    monkeypatch.delenv("MEMOBOT_EMBED_MODEL", raising=False)
+    plugin_data = str(tmp_path / "plugin-data")
+    os.makedirs(plugin_data)
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", plugin_data)
+    with open(os.path.join(plugin_data, "model.json"), "w", encoding="utf-8") as fh:
+        fh.write("{not valid json")
+    assert B.resolve_embed_model() == B.ENGLISH_DEFAULT_MODEL
+
+
+def test_resolve_embed_model_non_dict_json_falls_through(tmp_path, monkeypatch):
+    monkeypatch.delenv("MEMOBOT_EMBED_MODEL", raising=False)
+    plugin_data = str(tmp_path / "plugin-data")
+    os.makedirs(plugin_data)
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", plugin_data)
+    with open(os.path.join(plugin_data, "model.json"), "w", encoding="utf-8") as fh:
+        fh.write("[1, 2, 3]")
+    assert B.resolve_embed_model() == B.ENGLISH_DEFAULT_MODEL
+
+
+# --------------------------------------------------------------------------- #
+# RET-3: switching the embed model forces a full re-embed (never silently reuses stale rows)
+# --------------------------------------------------------------------------- #
+def test_model_switch_forces_full_reembed(tmp_path, monkeypatch):
+    """build_index's cache-reuse check gates on `old_manifest["model"] == DEFAULT_MODEL` --
+    switching MEMOBOT_EMBED_MODEL (what bootstrap's model.json preset ultimately becomes, via
+    resolve_embed_model, at the next process start) must make EVERY existing row a cache miss,
+    not just the changed ones -- the whole point being two different models' vectors are NOT
+    comparable, so no row can be silently carried over."""
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha content", "b.md": "beta content"})
+
+    monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
+    monkeypatch.setattr(B, "DEFAULT_MODEL", "model-a")
+    manifest_a = B.build_index(md, idx)
+    assert manifest_a["dense_ready"] is True
+    assert manifest_a["model"] == "model-a"
+    rows_a = [e["row"] for e in manifest_a["entries"]]
+    assert all(r is not None for r in rows_a)  # every entry embedded fresh under model-a
+
+    embed_calls = {"count": 0}
+    base_embedder = _fake_embedder(16)
+
+    def _counting_embedder(texts, allow_download=True):
+        embed_calls["count"] += len(texts)
+        return base_embedder(texts, allow_download=allow_download)
+
+    monkeypatch.setattr(B, "embed_documents", _counting_embedder)
+    monkeypatch.setattr(B, "DEFAULT_MODEL", "model-b")  # simulate a switched model
+    manifest_b = B.build_index(md, idx)  # no corpus change at all -- only the model changed
+    assert manifest_b["model"] == "model-b"
+    assert manifest_b["dense_ready"] is True
+    # Nothing was cache-reused from model-a's rows: BOTH entries were re-embedded under model-b.
+    assert embed_calls["count"] == 2

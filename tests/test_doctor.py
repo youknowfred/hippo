@@ -78,9 +78,9 @@ def test_run_checks_order_is_fixed(repo, memory_dir):
     labels = [label for label, _ in D.run_checks(ctx)]
     assert labels == [label for label, _ in D.CHECKS]
     # Sanity: the order is a real ordered list, not derived from a set/dict view.
-    # GRA-3 appended "link_density" as the new last check (a one-time hint check, fittingly
-    # last in the fixed order alongside the other corpus-content checks).
-    assert labels[0] == "bootstrap" and labels[-1] == "link_density"
+    # RET-3 appended "non_english_corpus" as the new last check (a corpus-content heuristic,
+    # fittingly last alongside the other corpus-content checks it follows).
+    assert labels[0] == "bootstrap" and labels[-1] == "non_english_corpus"
 
 
 def test_every_line_has_a_status_glyph(repo, memory_dir):
@@ -420,6 +420,93 @@ def test_link_density_ok_once_an_edge_exists(repo, memory_dir):
     write_file(memory_dir, "m4.md", _mem("m4", "note 4", body="see [[m0]]"))
     r = D.check_link_density(_ctx(memory_dir, repo))
     assert r["status"] == "ok" and "1 wikilink edge" in r["message"]
+
+
+# --------------------------------------------------------------------------- #
+# RET-3: non-English corpus served by the English default model
+# --------------------------------------------------------------------------- #
+_JP_DESC = "東京都渋谷区の天気予報と観光案内について詳しく説明しています今日と明日の予定"
+
+
+def test_non_english_corpus_na_with_no_index(repo, memory_dir):
+    _seed(memory_dir)
+    write_file(memory_dir, "a.md", _mem("a", _JP_DESC))
+    r = D.check_non_english_corpus(_ctx(memory_dir, repo))
+    assert r["status"] == "ok" and "N/A" in r["message"]
+
+
+def test_non_english_corpus_na_below_sample_floor(repo, memory_dir, tmp_path, monkeypatch):
+    idx = str(tmp_path / ".memory-index")
+    monkeypatch.setenv("MEMOBOT_INDEX_DIR", idx)
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    _seed(memory_dir)
+    write_file(memory_dir, "a.md", _mem("a", "東京"))  # tiny sample, well below the floor
+    B.build_index(memory_dir, idx)
+    r = D.check_non_english_corpus(_ctx(memory_dir, repo))
+    assert r["status"] == "ok" and "N/A" in r["message"] and "below the" in r["message"]
+
+
+def test_non_english_corpus_ok_when_english(repo, memory_dir, tmp_path, monkeypatch):
+    idx = str(tmp_path / ".memory-index")
+    monkeypatch.setenv("MEMOBOT_INDEX_DIR", idx)
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    _seed(memory_dir)
+    write_file(
+        memory_dir,
+        "a.md",
+        _mem("a", "this is a perfectly ordinary english language memory description about deploys and testing procedures"),
+    )
+    B.build_index(memory_dir, idx)
+    r = D.check_non_english_corpus(_ctx(memory_dir, repo))
+    assert r["status"] == "ok" and "Latin-script" in r["message"]
+
+
+def test_non_english_corpus_warns_when_visibly_non_latin_and_english_model(
+    repo, memory_dir, tmp_path, monkeypatch
+):
+    idx = str(tmp_path / ".memory-index")
+    monkeypatch.setenv("MEMOBOT_INDEX_DIR", idx)
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    _seed(memory_dir)
+    for i in range(3):
+        write_file(memory_dir, f"m{i}.md", _mem(f"m{i}", _JP_DESC))
+    B.build_index(memory_dir, idx)
+    # BM25-only build -> manifest["model"] is None, which is NOT "already switched away from
+    # English" (None just means "no dense recorded yet") -- the check must still fire.
+    r = D.check_non_english_corpus(_ctx(memory_dir, repo))
+    assert r["status"] == "warn"
+    assert "--multilingual" in r["message"]
+
+
+def test_non_english_corpus_ok_when_already_multilingual_model(
+    repo, memory_dir, tmp_path, monkeypatch
+):
+    """Once the manifest records a DIFFERENT (already-switched) model, the hint has nothing
+    left to suggest -- silent even though the corpus is still visibly non-Latin."""
+    idx = str(tmp_path / ".memory-index")
+    monkeypatch.setenv("MEMOBOT_INDEX_DIR", idx)
+    monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
+    monkeypatch.setattr(B, "DEFAULT_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    _seed(memory_dir)
+    for i in range(3):
+        write_file(memory_dir, f"m{i}.md", _mem(f"m{i}", _JP_DESC))
+    B.build_index(memory_dir, idx)
+    r = D.check_non_english_corpus(_ctx(memory_dir, repo))
+    assert r["status"] == "ok" and "already" in r["message"]
+
+
+def test_non_english_corpus_never_raises_on_unreadable_file(repo, memory_dir, tmp_path, monkeypatch):
+    idx = str(tmp_path / ".memory-index")
+    monkeypatch.setenv("MEMOBOT_INDEX_DIR", idx)
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    _seed(memory_dir)
+    write_file(memory_dir, "a.md", _mem("a", _JP_DESC))
+    B.build_index(memory_dir, idx)
+    # Corrupt the file after the build so the check's own read hits a real filesystem error path.
+    os.remove(os.path.join(memory_dir, "a.md"))
+    r = D.check_non_english_corpus(_ctx(memory_dir, repo))
+    assert r["status"] in ("ok", "warn")  # degrades gracefully -- never raises
 
 
 # --------------------------------------------------------------------------- #

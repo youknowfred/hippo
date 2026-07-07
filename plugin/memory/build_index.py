@@ -51,7 +51,56 @@ _INDEX_DIRNAME = ".memory-index"
 # bump is a marker only — an older v1 index loads fine; entry.get("invalid_after") is None
 # for every pre-existing entry until the next rebuild repopulates it.
 SCHEMA_VERSION = 2
-DEFAULT_MODEL = os.environ.get("MEMOBOT_EMBED_MODEL", "BAAI/bge-small-en-v1.5")
+# Public (not underscore-prefixed): doctor's non-English-corpus check (RET-3) compares a
+# manifest's recorded model against this constant to decide whether the CURRENTLY configured
+# model is the English default vs. an already-switched multilingual/other model.
+ENGLISH_DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
+_MODEL_PRESET_FILENAME = "model.json"
+
+
+def resolve_embed_model() -> str:
+    """The embedding model id to use, in precedence order: env > persisted preset > default.
+
+    RET-3 / OQ-4: the release keeps an ENGLISH model as the hardcoded default (bootstrap's
+    model-warm step and the doctor English-corpus check both need a known constant to compare
+    against) while offering ``--multilingual`` as an OPT-IN, PERSISTED switch — not a second
+    env var users have to remember to set every session. Precedence:
+      1. ``MEMOBOT_EMBED_MODEL`` env override — wins unconditionally (existing behavior/tests
+         that set this env var to point at a fake/alternate model must keep working verbatim).
+      2. ``${CLAUDE_PLUGIN_DATA}/model.json`` — a small persisted preset file
+         (``{"embed_model": "<id>"}``) that bootstrap's ``--multilingual`` flag writes. This is
+         what makes the choice STICK across sessions without re-exporting an env var each time.
+      3. ``ENGLISH_DEFAULT_MODEL`` (``bge-small-en-v1.5``) — the release's chosen default.
+    Cheap (one ``os.stat`` + a small JSON read, no fastembed import) and NEVER raises — any
+    read/parse problem (missing file, missing ``CLAUDE_PLUGIN_DATA``, corrupt JSON, non-dict
+    JSON, non-string field) silently falls through to the next precedence level rather than
+    blocking module import or a recall call. Module-level ``DEFAULT_MODEL`` calls this ONCE at
+    import time (unchanged usage everywhere else in the module — ``_get_model``/``_MODEL_CACHE``/
+    ``_HF_SOURCE_REPO_BY_MODEL`` keep reading the same module-level constant as before); a
+    process that needs to pick up a preset written by another process (e.g. a test simulating
+    bootstrap-then-recall in one run) re-resolves explicitly rather than relying on the module
+    being re-imported.
+    """
+    env_override = os.environ.get("MEMOBOT_EMBED_MODEL")
+    if env_override:
+        return env_override
+    plugin_data = os.environ.get("CLAUDE_PLUGIN_DATA", "")
+    if plugin_data:
+        preset_path = os.path.join(plugin_data, _MODEL_PRESET_FILENAME)
+        try:
+            if os.path.isfile(preset_path):
+                with open(preset_path, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+                if isinstance(data, dict):
+                    model = data.get("embed_model")
+                    if isinstance(model, str) and model.strip():
+                        return model.strip()
+        except Exception:
+            pass  # corrupt/unreadable preset -> fall through to the default, never raise
+    return ENGLISH_DEFAULT_MODEL
+
+
+DEFAULT_MODEL = resolve_embed_model()
 _MANIFEST_NAME = "manifest.json"
 _DENSE_NAME = "dense.npy"
 
@@ -149,16 +198,111 @@ _STOPWORDS = frozenset(
     """.split()
 )
 
-_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_]*")
+# RET-3: the old ``_TOKEN_RE`` (``[a-z0-9][a-z0-9_]*``) only matched ASCII — every non-English
+# prompt/memory tokenized to EMPTY (Japanese/Russian text has no ASCII word chars at all), and
+# accented Latin lost its accents before matching so degraded mid-word ("café" -> the regex
+# only sees "caf", the trailing "é" isn't in the class at all and is silently dropped). That
+# silently broke BOTH bm25 ranking for non-English memories AND the min-content skip gate in
+# recall.clean_query (a substantive non-English prompt looked "empty" and recall never ran).
+#
+# The fix is UNCONDITIONAL (OQ-4: tokenization correctness isn't gated behind an opt-in) and
+# stdlib-only (no `regex` third-party module):
+#   - Latin/Cyrillic/etc. (anything with whitespace-separated "words"): ``\w`` under
+#     ``re.UNICODE`` (the default for a ``str`` pattern in Python 3) already matches any
+#     Unicode letter/digit/underscore -- ``str.lower()`` case-folds Cyrillic and accented Latin
+#     correctly (Python's lower() is Unicode-aware), so "café".lower() -> "café" and the \w+
+#     match captures the WHOLE word (accents are \w, not stripped) instead of truncating it.
+#   - CJK (Han/Hiragana/Katakana/Hangul): these scripts don't segment words with whitespace, so
+#     a plain \w+ run would swallow an entire CJK sentence as ONE giant "token" -- useless for
+#     BM25 overlap matching. Instead, each maximal run of CJK codepoints is split into
+#     overlapping character BIGRAMS (a length-1 run emits the single char, since a real bigram
+#     needs 2 chars) -- a cheap, standard, dependency-free proxy for CJK "word" boundaries that
+#     lets BM25 token-overlap actually fire on shared substrings between a query and a memory.
+# Codepoint ranges (explicit, not a `regex` \p{Script} property -- stdlib `re` doesn't expose
+# those): CJK Unified Ideographs (Han, incl. common Ext-A) 0x4E00-0x9FFF, Hiragana
+# 0x3040-0x309F, Katakana 0x30A0-0x30FF, Hangul Syllables 0xAC00-0xD7A3. This is a pragmatic
+# subset (not exhaustive of every CJK extension plane) but covers the overwhelming majority of
+# real-world Japanese/Chinese/Korean text.
+_CJK_RANGES = (
+    (0x4E00, 0x9FFF),  # CJK Unified Ideographs (Han)
+    (0x3040, 0x309F),  # Hiragana
+    (0x30A0, 0x30FF),  # Katakana
+    (0xAC00, 0xD7A3),  # Hangul Syllables
+)
+
+
+def _is_cjk_char(ch: str) -> bool:
+    cp = ord(ch)
+    return any(lo <= cp <= hi for lo, hi in _CJK_RANGES)
+
+
+# Unicode-aware word tokens: \w matches any Unicode letter/digit/underscore (Python 3 `str`
+# patterns default to UNICODE matching), so this covers Latin/Cyrillic/Greek/etc. uniformly.
+# CJK codepoints are individually \w too, but are handled separately by the bigram pass below
+# (a run of CJK chars would otherwise match here as one unsegmented blob).
+_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
+
+
+def _cjk_bigrams(run: str) -> List[str]:
+    """Character bigrams over one maximal run of CJK chars; a length-1 run yields the char itself."""
+    if len(run) < 2:
+        return [run]
+    return [run[i : i + 2] for i in range(len(run) - 1)]
+
+
+def _split_cjk_and_word_runs(tok: str) -> List[str]:
+    """Split one \\w+ match into alternating CJK-bigram and plain-word sub-tokens.
+
+    A \\w+ match almost never actually mixes scripts in practice, but this stays correct (and
+    still cheap) if it ever does — e.g. a token like "东京2024" (CJK + digits glued with no
+    separator) yields CJK bigrams for the Han run and a plain word token for the digit run,
+    rather than either silently dropping one script or bigramming digits. Each non-CJK
+    sub-run gets the SAME length/stopword filter as a normal word token (a lone leftover char
+    is dropped by the ``len(sub) < 2`` check at the call site, same as today).
+    """
+    out: List[str] = []
+    cjk_run: List[str] = []
+    word_run: List[str] = []
+
+    def _flush_cjk() -> None:
+        if cjk_run:
+            out.extend(_cjk_bigrams("".join(cjk_run)))
+            cjk_run.clear()
+
+    def _flush_word() -> None:
+        if word_run:
+            sub = "".join(word_run)
+            if len(sub) >= 2 and sub not in _STOPWORDS:
+                out.append(sub)
+            word_run.clear()
+
+    for ch in tok:
+        if _is_cjk_char(ch):
+            _flush_word()
+            cjk_run.append(ch)
+        else:
+            _flush_cjk()
+            word_run.append(ch)
+    _flush_cjk()
+    _flush_word()
+    return out
 
 
 def tokenize(text: str) -> List[str]:
-    """Lowercase word tokens (alnum + underscore), stopwords + 1-char tokens dropped."""
+    """Unicode-aware tokens: \\w-based words (case-folded) for Latin/Cyrillic/etc., character
+    bigrams for whitespace-less CJK runs. Stopwords + <2-length tokens dropped (the stopword
+    set is English-only by design — non-English tokens are simply never stopped; the CJK
+    bigram path skips the length/stopword filter entirely since 1-2 char CJK tokens ARE the
+    unit of signal there, not noise to be filtered like a stray ASCII letter)."""
     if not text:
         return []
     out: List[str] = []
-    for m in _TOKEN_RE.finditer(text.lower()):
+    lowered = text.lower()
+    for m in _TOKEN_RE.finditer(lowered):
         tok = m.group(0)
+        if any(_is_cjk_char(ch) for ch in tok):
+            out.extend(_split_cjk_and_word_runs(tok))
+            continue
         if len(tok) < 2 or tok in _STOPWORDS:
             continue
         out.append(tok)
@@ -385,9 +529,28 @@ _MODEL_CACHE: dict = {}
 # submodule pulls in onnxruntime transitively (~500ms+) -- exactly the cost this pre-check
 # exists to avoid paying on a cold cache. If ``MEMOBOT_EMBED_MODEL`` is ever pointed at a
 # different model, the id below won't match -- see ``_expected_model_snapshot_dir``'s fallback.
+#
+# RET-3: ``sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`` is the
+# ``--multilingual`` bootstrap preset's model (see ``resolve_embed_model``). Grounded the SAME
+# way as the English entry above -- against this repo's installed fastembed 0.7.4:
+# ``TextEmbedding.list_supported_models()`` returns ``ModelSource(hf="qdrant/paraphrase-
+# multilingual-MiniLM-L12-v2-onnx-Q")`` for this model name. ``intfloat/multilingual-e5-small``
+# (the roadmap's first-preference id) is NOT in this fastembed version's supported-model list
+# (only ``intfloat/multilingual-e5-large`` is, at 2.24 GB) -- confirmed by running
+# ``TextEmbedding.list_supported_models()`` against the installed .venv, per the roadmap's
+# instruction to ground the choice rather than guess. Of the listed multilingual options this
+# is the SMALLEST (0.22 GB, same 384-dim as bge-small-en-v1.5, ~50 languages, no query/passage
+# prefix required) -- closest in spirit to the "small" default this plugin ships.
 _HF_SOURCE_REPO_BY_MODEL = {
     "BAAI/bge-small-en-v1.5": "qdrant/bge-small-en-v1.5-onnx-q",
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": "qdrant/paraphrase-multilingual-MiniLM-L12-v2-onnx-Q",
 }
+
+# The multilingual bootstrap preset's model id -- named separately from
+# ``_HF_SOURCE_REPO_BY_MODEL`` (which is keyed by whatever ``DEFAULT_MODEL`` resolves to) so
+# bootstrap/doctor can reference "the multilingual model" without depending on module import
+# order or re-deriving the id from the dict.
+MULTILINGUAL_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 
 def _expected_model_snapshot_dir(cache_dir: str) -> Optional[str]:
