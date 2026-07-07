@@ -308,12 +308,19 @@ Decay is DEMOTION, never deletion.
   first-seen, not yet exposed to 5 distinct sessions) are excluded and named in the
   report; `--archive <name>` is a per-item, git-reversible `git mv` into
   `.claude/memory/archive/` (a tracked subdir the corpus iterator skips). Never fires
-  automatically; no `--all` exists.
+  automatically; no `--all` exists. GRA-5: the move REFUSES — machine-readable
+  `refused: True` + the `referrers` list in the result, zero filesystem change — while
+  OTHER memories still reference the target (untyped `[[wikilinks]]` unioned with GRA-4
+  typed inbound edges, via the one canonical `LinkGraph.inbound()`/`typed_inbound()`
+  API), unless `--force`; every successful move also reports the referrers so the caller
+  rewrites those links in the same commit (a `supersedes:` edge on the successor memory
+  is the machine-readable forwarding pointer).
 
 ```bash
 "$PY" -m memory.staleness --invalidate <name>
-"$PY" -m memory.archive                       # report only
-"$PY" -m memory.archive --archive <name>      # per-item move, after review
+"$PY" -m memory.archive                             # report only
+"$PY" -m memory.archive --archive <name>            # per-item move; refuses while inbound links exist
+"$PY" -m memory.archive --archive <name> --force    # move anyway; referrers printed for same-commit rewrite
 ```
 
 ## Degraded modes (all legible, none fatal)

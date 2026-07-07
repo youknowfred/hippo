@@ -21,10 +21,15 @@ recalled):
 ``archive_memory(name)`` is the per-item write primitive: a single ``git mv`` into
 ``.claude/memory/archive/`` (a tracked, non-recursive subdir ``_iter_memory_files`` already
 skips — the memory instantly drops from index/recall/staleness with no code change
-elsewhere, and the move is fully git-reversible: ``git mv`` it back). There is deliberately
-NO batch/list parameter on either function — an autonomous bulk sweep is exactly the failure
-mode this primitive must never enable (mirrors ``reverify_head_only_no_bulk``). REPORT-then-
-move, per-item, gated by the memory-master agent. Never deletes. Never raises.
+elsewhere, and the move is fully git-reversible: ``git mv`` it back). GRA-5: the primitive
+carries its own inbound guard — while any OTHER memory still references the target (untyped
+``[[wikilinks]]`` UNIONED with GRA-4 typed inbound edges, via the one canonical
+``LinkGraph.inbound()``/``typed_inbound()`` API), the move REFUSES with the referrer list
+unless ``force=True``, because archiving a referenced memory instantly converts every
+inbound link into dangling rot. There is deliberately NO batch/list parameter on either
+function — an autonomous bulk sweep is exactly the failure mode this primitive must never
+enable (mirrors ``reverify_head_only_no_bulk``). REPORT-then-move, per-item, gated by the
+memory-master agent. Never deletes. Never raises.
 """
 
 from __future__ import annotations
@@ -34,7 +39,7 @@ import re
 import subprocess
 from typing import Dict, List, Optional, Set, Tuple
 
-from .links import build_graph
+from .links import TYPED_RELATIONS, build_graph
 from .provenance import _iter_memory_files, run_git
 from .soak import SOAK_GATE_SESSIONS, curation_report, soak_status
 from .staleness import find_stale
@@ -84,6 +89,29 @@ def _zero_inbound_names(memory_dir: str) -> Set[str]:
         return {stem for stem in g.files if not g.inbound(stem)}
     except Exception:
         return set()
+
+
+def _inbound_referrers(stem: str, memory_dir: str) -> Optional[List[str]]:
+    """Sorted stems that still reference ``stem`` — untyped ``[[wikilinks]]`` UNIONED with
+    GRA-4 typed inbound edges (a memory named by ``supersedes``/``contradicts``/``refines``
+    is just as referenced as a wikilinked one; archiving it dangles those edges identically).
+
+    The ONE canonical graph API (``links.build_graph`` → ``LinkGraph.inbound()`` /
+    ``typed_inbound()``, GRA-2) — never a local adjacency inversion. Returns ``None`` —
+    distinct from ``[]`` — when the graph cannot be built at all, so the caller can fail
+    CLOSED (refuse absent ``force``): the same "fails toward has-inbound" direction
+    ``_zero_inbound_names`` documents. Never raises.
+    """
+    try:
+        g = build_graph(memory_dir)
+        if g is None:
+            return None
+        refs: Set[str] = set(g.inbound(stem))
+        for rel in TYPED_RELATIONS:
+            refs |= g.typed_inbound(stem, rel)
+        return sorted(refs)
+    except Exception:
+        return None
 
 
 def _scan_files(repo_root: str) -> List[str]:
@@ -358,7 +386,9 @@ def _journal_untracked_move(memory_dir: str, fname: str, src: str, dest: str) ->
         pass
 
 
-def archive_memory(name: str, memory_dir: str, repo_root: str, *, dry_run: bool = False) -> dict:
+def archive_memory(
+    name: str, memory_dir: str, repo_root: str, *, dry_run: bool = False, force: bool = False
+) -> dict:
     """``git mv`` ONE memory into ``.claude/memory/archive/`` — per-item, report-then-move.
 
     NEVER deletes; the move is fully git-reversible (or, for an untracked file, at least
@@ -368,6 +398,17 @@ def archive_memory(name: str, memory_dir: str, repo_root: str, *, dry_run: bool 
     NO batch/list parameter — a bulk sweep would require a separately-approved function,
     never this one. Never raises.
 
+    GRA-5 inbound guard: unless ``force=True``, a memory that OTHER memories still
+    reference (``_inbound_referrers``: untyped wikilinks ∪ typed edges) REFUSES to move —
+    machine-readable ``refused: True`` + the ``referrers`` list in the result, ZERO
+    filesystem change — because the move would instantly dangle every one of those links.
+    The guard runs BEFORE the ``dry_run`` preview (a dry run of a referenced memory reports
+    the refusal it would really hit, never a false would-move), and an unbuildable graph
+    fails CLOSED (inbound unverifiable → refuse, absent force). Every SUCCESSFUL move
+    (forced or zero-inbound) also carries ``referrers`` so the calling agent can rewrite
+    those links in the same commit; a ``supersedes:`` edge on the successor memory (GRA-4)
+    is the machine-readable forwarding-pointer pattern for exactly that rewrite.
+
     A memory that ``write_memory`` just created and that was never ``git add``-ed is
     UNTRACKED, and ``git mv`` refuses to move an untracked path. Falling back to a plain
     ``os.rename`` (journaled to a small sidecar log for reversibility, since git itself has
@@ -375,12 +416,35 @@ def archive_memory(name: str, memory_dir: str, repo_root: str, *, dry_run: bool 
     ever succeed — without it, every just-written memory would be unarchivable until some
     unrelated later commit happened to stage it.
     """
-    result = {"name": name, "moved": False, "error": None}
+    result = {"name": name, "moved": False, "refused": False, "referrers": [], "error": None}
     try:
         fname = name if name.endswith(".md") else f"{name}.md"
         src = os.path.join(memory_dir, fname)
         if not os.path.isfile(src):
             result["error"] = f"not found: {fname}"
+            return result
+        referrers = _inbound_referrers(fname[:-3], memory_dir)
+        if referrers is None:
+            # Graph unbuildable -> inbound UNVERIFIABLE. Fail closed (refuse — the
+            # has-inbound direction _zero_inbound_names documents) unless forced.
+            if not force:
+                result["refused"] = True
+                result["error"] = (
+                    "could not build the link graph, so inbound referrers are unverifiable "
+                    "— refusing (fail closed); re-run with --force (force=True) to archive "
+                    "anyway"
+                )
+                return result
+            referrers = []  # forced past an unverifiable graph: referrers unknown
+        result["referrers"] = referrers
+        if referrers and not force:
+            result["refused"] = True
+            result["error"] = (
+                f"{len(referrers)} inbound referrer(s) still link here: "
+                f"{', '.join(referrers)}. Rewrite those references first — a `supersedes:` "
+                "edge on the successor memory (GRA-4) is the machine-readable forwarding "
+                "pointer — or re-run with --force (force=True) to move it anyway"
+            )
             return result
         if dry_run:
             result["moved"] = True  # would-move (report-only preview); no filesystem change
@@ -433,7 +497,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=None,
         help="git-mv ONE memory into .claude/memory/archive/ after confirming it's a "
         "genuine candidate (per-item, gated by the memory-master agent reviewing the "
-        "report first). NAME is the slug, with or without .md",
+        "report first). NAME is the slug, with or without .md. Refuses while other "
+        "memories still link to NAME (GRA-5) unless --force",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="bypass the GRA-5 inbound-referrer guard: archive NAME even while other "
+        "memories still reference it (the referrer list is printed so those links can be "
+        "rewritten in the same commit)",
     )
     args = parser.parse_args(argv)
 
@@ -442,11 +514,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     repo_root = args.repo_root or repo
 
     if args.archive:
-        r = archive_memory(args.archive, memory_dir, repo_root)
+        r = archive_memory(args.archive, memory_dir, repo_root, force=args.force)
         if r["error"]:
             print(f"archive {args.archive}: refused — {r['error']}")
         else:
             print(f"archive {args.archive}: moved into .claude/memory/archive/ (git mv)")
+            if r["referrers"]:
+                print(
+                    f"warning: {len(r['referrers'])} inbound referrer(s) now point at the "
+                    f"archived memory — rewrite them in this same commit: "
+                    f"{', '.join(r['referrers'])}"
+                )
+                print(
+                    "  (a `supersedes:` edge on the successor memory — GRA-4 — is the "
+                    "machine-readable forwarding pointer)"
+                )
         return 0
 
     td = args.telemetry_dir or default_telemetry_dir(memory_dir)

@@ -557,7 +557,16 @@ never adds a batch wrapper around them:
   graph-isolated watch-list or any other heuristic this skill invents. Archive gets a **two-turn
   confirmation gate**: the first `--apply` invocation proposes archive candidates in the report
   and takes no `git mv` action; only a follow-up invocation that **explicitly names the specific
-  memories to archive** executes the move.
+  memories to archive** executes the move. The primitive carries its own inbound guard (GRA-5):
+  it refuses — `refused: True` plus the `referrers` list in the result, no `git mv` — while any
+  other memory still references the target via a `[[wikilink]]` or a typed
+  `supersedes`/`contradicts`/`refines` edge. Candidates are zero-untyped-inbound by
+  construction, so a refusal here means the graph changed since Phase 1 or a typed edge points
+  at the target — rewrite the referring memories (or record a `supersedes:` edge on the
+  successor, the machine-readable forwarding pointer) rather than reaching for `force=True`;
+  when the operator explicitly chooses to force (keeping the typed forwarding pointer in
+  place), the result still lists the referrers — rewrite any plain wikilinks among them in the
+  same commit.
 - **link-densification (GRA-3)** → same **two-turn confirmation gate** as archive: the first
   `--apply` invocation only PRODUCES the suggestions table above and applies NOTHING (there is
   no bulk primitive for this — appending a wikilink is a body edit, and body edits are exactly

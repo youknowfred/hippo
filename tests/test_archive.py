@@ -405,7 +405,7 @@ def test_archive_memory_git_mvs_into_archive_subdir(repo, memory_dir):
     git_commit(repo, "add memory", 1_700_000_000)
 
     result = A.archive_memory("m_a", memory_dir, repo)
-    assert result == {"name": "m_a", "moved": True, "error": None}
+    assert result == {"name": "m_a", "moved": True, "refused": False, "referrers": [], "error": None}
 
     archived_path = os.path.join(memory_dir, "archive", "m_a.md")
     assert os.path.exists(archived_path)
@@ -495,7 +495,7 @@ def test_archive_memory_falls_back_to_rename_for_untracked_file(repo, memory_dir
     write_file(memory_dir, "m_a.md", _mem("m_a", [], None))
 
     result = A.archive_memory("m_a", memory_dir, repo)
-    assert result == {"name": "m_a", "moved": True, "error": None}
+    assert result == {"name": "m_a", "moved": True, "refused": False, "referrers": [], "error": None}
 
     archived_path = os.path.join(memory_dir, "archive", "m_a.md")
     assert os.path.exists(archived_path)
@@ -559,6 +559,125 @@ def test_no_bulk_archive_symbol_exists():
 
 
 # --------------------------------------------------------------------------- #
+# GRA-5: archive refuses (without force) while inbound links exist
+# --------------------------------------------------------------------------- #
+def _typed_mem(name, fm_extra, body="body"):
+    """Memory with extra frontmatter lines (GRA-4 typed relations) — mirrors test_links.py."""
+    return f'---\nname: {name}\ndescription: "{name} description"\n{fm_extra}---\n{body}\n'
+
+
+def _linked_pair(repo, memory_dir):
+    """m_source carries a [[m_target]] wikilink — the minimal referenced-memory corpus."""
+    write_file(memory_dir, "m_target.md", _mem("m_target", [], None))
+    write_file(memory_dir, "m_source.md", _mem("m_source", [], None, body="see [[m_target]]"))
+    git_commit(repo, "add memories", 1_700_000_000)
+
+
+def test_archive_memory_refuses_with_referrer_list_when_inbound_links_exist(repo, memory_dir):
+    """AC (GRA-5): referenced-memory archive without force fails with the referrer list
+    and leaves the corpus byte-for-byte untouched (no move, no archive/ dir created)."""
+    _linked_pair(repo, memory_dir)
+
+    result = A.archive_memory("m_target", memory_dir, repo)
+    assert result["moved"] is False
+    assert result["refused"] is True
+    assert result["referrers"] == ["m_source"]  # machine-readable, not just prose
+    assert "m_source" in result["error"]
+    assert "supersedes" in result["error"]  # the GRA-4 forwarding-pointer pattern is named
+    assert os.path.exists(os.path.join(memory_dir, "m_target.md"))  # untouched
+    assert not os.path.isdir(os.path.join(memory_dir, "archive"))  # nothing created either
+
+
+def test_archive_memory_force_moves_and_reports_referrers(repo, memory_dir):
+    """AC (GRA-5): with force=True the move happens and the referrer list rides along in
+    the result so the calling agent can rewrite those links in the same commit."""
+    _linked_pair(repo, memory_dir)
+
+    result = A.archive_memory("m_target", memory_dir, repo, force=True)
+    assert result["moved"] is True
+    assert result["refused"] is False
+    assert result["referrers"] == ["m_source"]
+    assert result["error"] is None
+    assert os.path.exists(os.path.join(memory_dir, "archive", "m_target.md"))
+    assert not os.path.exists(os.path.join(memory_dir, "m_target.md"))
+
+
+def test_archive_memory_zero_inbound_moves_without_force_even_with_outbound_links(repo, memory_dir):
+    """AC (GRA-5): zero-INBOUND archive behavior is unchanged — inbound degree gates,
+    outbound never does (m_source links out to m_target but nothing links to m_source)."""
+    _linked_pair(repo, memory_dir)
+
+    result = A.archive_memory("m_source", memory_dir, repo)
+    assert result == {
+        "name": "m_source", "moved": True, "refused": False, "referrers": [], "error": None,
+    }
+    assert os.path.exists(os.path.join(memory_dir, "archive", "m_source.md"))
+
+
+def test_archive_memory_counts_typed_inbound_edges_as_referrers(repo, memory_dir):
+    """A memory referenced by a GRA-4 typed relation is just as referenced as a wikilinked
+    one — a `supersedes:` edge on a successor must gate the archive of its target too."""
+    write_file(memory_dir, "m_old.md", _mem("m_old", [], None))
+    write_file(memory_dir, "m_new.md", _typed_mem("m_new", "supersedes: [m_old]\n"))
+    git_commit(repo, "add memories", 1_700_000_000)
+
+    result = A.archive_memory("m_old", memory_dir, repo)
+    assert result["moved"] is False and result["refused"] is True
+    assert result["referrers"] == ["m_new"]
+    assert os.path.exists(os.path.join(memory_dir, "m_old.md"))
+
+
+def test_archive_memory_referrers_union_wikilinks_and_typed_edges(repo, memory_dir):
+    """The referrer set is the UNION of untyped wikilinks and typed inbound edges (here a
+    metadata:-nested contradicts, the GRA-4 read convention) — sorted, each source once."""
+    write_file(memory_dir, "m_old.md", _mem("m_old", [], None))
+    write_file(memory_dir, "m_linker.md", _mem("m_linker", [], None, body="see [[m_old]]"))
+    write_file(memory_dir, "m_rival.md", _typed_mem("m_rival", "metadata:\n  contradicts: [m_old]\n"))
+    git_commit(repo, "add memories", 1_700_000_000)
+
+    result = A.archive_memory("m_old", memory_dir, repo)
+    assert result["refused"] is True
+    assert result["referrers"] == ["m_linker", "m_rival"]
+
+
+def test_archive_memory_dry_run_reports_refusal_without_touching_anything(repo, memory_dir):
+    """The guard runs BEFORE the dry-run preview: a dry run of a referenced memory reports
+    the refusal it would really hit — never a false would-move."""
+    _linked_pair(repo, memory_dir)
+
+    result = A.archive_memory("m_target", memory_dir, repo, dry_run=True)
+    assert result["moved"] is False and result["refused"] is True
+    assert result["referrers"] == ["m_source"]
+    assert os.path.exists(os.path.join(memory_dir, "m_target.md"))
+
+
+def test_archive_memory_dry_run_with_force_previews_move_without_moving(repo, memory_dir):
+    _linked_pair(repo, memory_dir)
+
+    result = A.archive_memory("m_target", memory_dir, repo, dry_run=True, force=True)
+    assert result["moved"] is True and result["refused"] is False
+    assert result["referrers"] == ["m_source"]  # reported even in preview
+    assert os.path.exists(os.path.join(memory_dir, "m_target.md"))  # preview only
+    assert not os.path.isdir(os.path.join(memory_dir, "archive"))
+
+
+def test_archive_memory_fails_closed_when_graph_unbuildable(repo, memory_dir, monkeypatch):
+    """An unverifiable inbound set must refuse (fail toward has-inbound, the same direction
+    _zero_inbound_names documents), never silently archive; force stays the escape hatch."""
+    write_file(memory_dir, "m_a.md", _mem("m_a", [], None))
+    git_commit(repo, "add memory", 1_700_000_000)
+    monkeypatch.setattr(A, "build_graph", lambda md: None)
+
+    refused = A.archive_memory("m_a", memory_dir, repo)
+    assert refused["refused"] is True and refused["moved"] is False
+    assert os.path.exists(os.path.join(memory_dir, "m_a.md"))
+
+    forced = A.archive_memory("m_a", memory_dir, repo, force=True)
+    assert forced["moved"] is True
+    assert forced["referrers"] == []  # unknown — the graph never built
+
+
+# --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
 def test_main_report_mode_prints_no_candidates(memory_dir, repo, capsys):
@@ -574,3 +693,35 @@ def test_main_archive_flag_moves_and_reports(repo, memory_dir, capsys):
     assert rc == 0
     assert "moved into .claude/memory/archive/" in capsys.readouterr().out
     assert os.path.exists(os.path.join(memory_dir, "archive", "m_a.md"))
+
+
+def test_main_archive_without_force_refuses_and_prints_referrers(repo, memory_dir, capsys):
+    """AC (GRA-5), CLI leg: no --force -> refusal names every referrer and the supersedes
+    forwarding-pointer pattern; the file stays put; exit code stays 0 (report, not crash)."""
+    _linked_pair(repo, memory_dir)
+
+    rc = A.main(["--archive", "m_target", "--memory-dir", memory_dir, "--repo-root", repo])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "refused" in out
+    assert "m_source" in out
+    assert "supersedes" in out
+    assert os.path.exists(os.path.join(memory_dir, "m_target.md"))
+    assert not os.path.exists(os.path.join(memory_dir, "archive", "m_target.md"))
+
+
+def test_main_archive_force_flag_moves_and_prints_referrers(repo, memory_dir, capsys):
+    """AC (GRA-5), CLI leg: --force moves AND still reports the referrers so the agent can
+    rewrite those links in the same commit."""
+    _linked_pair(repo, memory_dir)
+
+    rc = A.main(
+        ["--archive", "m_target", "--force", "--memory-dir", memory_dir, "--repo-root", repo]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "moved into .claude/memory/archive/" in out
+    assert "m_source" in out
+    assert "same commit" in out
+    assert "supersedes" in out
+    assert os.path.exists(os.path.join(memory_dir, "archive", "m_target.md"))
