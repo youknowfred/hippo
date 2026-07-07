@@ -25,6 +25,7 @@ import os
 from typing import Dict, List, Optional
 
 from .links import LinkGraph, build_graph
+from .staleness import RunContext
 
 
 def lint(memory_dir: str, index_dir: Optional[str] = None) -> dict:
@@ -136,14 +137,18 @@ def health_line(report: dict) -> Optional[str]:
     return "🔗 Memory link health — " + "; ".join(bits) + tail + " (run `memory.lint_links`)."
 
 
-def lint_links_producer(memory_dir: str, repo_root: str) -> Optional[str]:
+def lint_links_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
     """SessionStart producer (signature matches the dispatcher). Self-suppresses when clean.
 
     GRA-6: routes through the persisted edge cache so SessionStart performs ONE corpus
     read total — the dispatcher's ``refresh_index`` side effect reads the corpus and
     (re)persists ``links.json`` before producers run, so this lint reconstructs the graph
     from the cache with zero file reads. A missing/stale cache silently falls back to the
-    full re-read inside ``build_graph`` (correctness never depends on the cache).
+    full re-read inside ``build_graph`` (correctness never depends on the cache). ``ctx``
+    (LIF-6's shared per-run ``RunContext``) is unused here — declared only so every
+    producer in ``PRODUCERS`` shares ONE call shape.
     """
     try:
         from .build_index import default_index_dir

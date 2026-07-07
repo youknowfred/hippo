@@ -5,11 +5,23 @@ context. Producers (each ADDED here, never as a parallel hook entry — so there
 SessionStart producer for the memory concerns):
   - staleness   (Tier 1) — memories whose cited code drifted since they were written
                            (LIF-1: entries already soft-invalidated are counted, not
-                           re-listed — demote's terminal state must not re-nag).
+                           re-listed — demote's terminal state must not re-nag. LIF-6:
+                           entries already on the reconsolidation worklist are counted,
+                           not re-listed either — see below).
+  - reconsolidation      — the recall-filtered subset of staleness (Tier 2).
   - git-recent  (Tier 2) — memories captured within the recent window (newest first).
   - link-health (Tier 3) — dangling/orphan wikilink count across the corpus.
   - floor                — SILENT unless project/reference links re-bloat the MEMORY.md floor
                            (memory pointers belong only under User + Working-Style).
+
+LIF-6: the reconsolidation worklist is BY CONSTRUCTION a subset of the staleness set (both
+derive from ``staleness.find_stale``), so ``build_context`` computes ``find_stale`` (and the
+worklist derived from it) exactly ONCE per run — a ``staleness.RunContext`` — and threads it
+POSITIONALLY through every producer below (see ``PRODUCERS``): one uniform call shape, not a
+special case for the two staleness-derived producers. Producers that don't care about
+staleness just declare the trailing ``ctx`` parameter and never read it. The same computed
+staleness set is also persisted to the gitignored index dir as ``stale.json`` (RET-5/RET-6
+setup — a future bounded ranking penalty and drift banner; nothing here reads it back).
 
 Contract (mirrors ``.claude/hooks/agent_staleness.sh``):
   - Self-suppresses (prints nothing) when no producer has anything to say.
@@ -28,13 +40,15 @@ from .lint_floor import floor_producer
 from .lint_links import lint_links_producer
 from .provenance import CORPUS_FORMAT_VERSION, read_corpus_format, resolve_dirs
 from .recall import _INVALIDATION_RECENT_DAYS, _invalidation_state, git_recent_producer
-from .reconsolidate import reconsolidation_producer
+from .reconsolidate import recalled_stale_worklist, reconsolidation_producer
 from .staleness import (
+    RunContext,
     count_unresolvable_baselines,
     find_citation_rot,
     find_stale,
     find_unparseable,
     invalid_after_map,
+    write_stale_cache,
 )
 
 # Harness caps hook output at 10,000 chars; stay comfortably under it.
@@ -89,7 +103,9 @@ def bootstrap_state(
         return "current"
 
 
-def stale_venv_producer(memory_dir: str, repo_root: str) -> Optional[str]:
+def stale_venv_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
     """One-line re-bootstrap nudge when plugin deps changed after the last bootstrap.
 
     The venv-in-PLUGIN_DATA model is update-safe for CODE but not DEPS: a plugin update
@@ -98,6 +114,9 @@ def stale_venv_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     canonical ``bootstrap_state`` (shared with doctor); nudges ONLY on ``"stale"``. Silent
     when not bootstrapped (ONB-1's pre-Python nudge owns that state) or when anything is
     unreadable. Runs once per session by construction (SessionStart).
+
+    ``ctx`` (LIF-6's shared per-run ``RunContext``) is unused here — declared only so
+    every producer in ``PRODUCERS`` shares ONE call shape (see the module docstring).
     """
     if bootstrap_state() != "stale":
         return None
@@ -108,7 +127,9 @@ def stale_venv_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     )
 
 
-def corpus_format_producer(memory_dir: str, repo_root: str) -> Optional[str]:
+def corpus_format_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
     """LOUD warning when the corpus declares a format NEWER than this plugin understands.
 
     COR-7: the ``.claude/memory/.format`` marker travels with the corpus through git, so a
@@ -118,7 +139,8 @@ def corpus_format_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     per-session producer. The OTHER direction (corpus OLDER than the plugin expects) is
     deliberately NOT nagged here: migrating user data is a doctor-driven, agent-gated path
     (see ``doctor.check_format_version`` + the README), not a per-session alarm. Silent on
-    an undeclared corpus (no marker == format 1) and on any read problem.
+    an undeclared corpus (no marker == format 1) and on any read problem. ``ctx`` (LIF-6)
+    is unused — see ``stale_venv_producer`` for why it's declared anyway.
     """
     try:
         declared = read_corpus_format(memory_dir)
@@ -133,11 +155,14 @@ def corpus_format_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     )
 
 
-def integrity_producer(memory_dir: str, repo_root: str) -> Optional[str]:
+def integrity_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
     """LOUD warning for memory files whose frontmatter does not parse.
 
     These are otherwise a silent hole — skipped by the staleness signal AND re-baselined
-    by ``provenance --refresh``. Surfaced FIRST so a malformed memory can't hide.
+    by ``provenance --refresh``. Surfaced FIRST so a malformed memory can't hide. ``ctx``
+    (LIF-6) is unused — see ``stale_venv_producer`` for why it's declared anyway.
     """
     broken = find_unparseable(memory_dir)
     if not broken:
@@ -155,7 +180,9 @@ def integrity_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     return "\n".join(lines)
 
 
-def citation_rot_producer(memory_dir: str, repo_root: str) -> Optional[str]:
+def citation_rot_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
     """Count-first warning for memories citing paths that no longer exist in the repo (LIF-3).
 
     The current-state citation-rot report — catches a rename/delete of cited code even when
@@ -163,7 +190,8 @@ def citation_rot_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     and the next re-derivation would silently shrink cited_paths — possibly to zero, which
     permanently exempts the memory). This producer is the ONE canonical SessionStart surface;
     the CLI sibling lives in ``memory.staleness``'s default report, next to the unparseable
-    block. TOTAL rot (every citation gone) is called out distinctly on its line.
+    block. TOTAL rot (every citation gone) is called out distinctly on its line. ``ctx``
+    (LIF-6) is unused — see ``stale_venv_producer`` for why it's declared anyway.
     """
     rot = find_citation_rot(memory_dir, repo_root)
     if not rot:
@@ -188,10 +216,25 @@ def citation_rot_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     return "\n".join(lines)
 
 
-def staleness_producer(memory_dir: str, repo_root: str) -> Optional[str]:
-    # find_stale already orders most-recently-drifted first.
-    diagnostics: dict = {}
-    stale = find_stale(memory_dir, repo_root, diagnostics=diagnostics)
+def staleness_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """LIF-6: ``ctx`` (the dispatcher's shared ``RunContext``) already carries a single
+    ``find_stale`` call's result plus the reconsolidation worklist derived from it — this
+    producer reads both instead of re-deriving them. When ``ctx`` is ``None`` (a standalone
+    call, e.g. a test that stubs only ``find_stale``), it derives its own staleness view
+    exactly as before LIF-6, with no worklist to exclude (there's nothing to de-duplicate
+    against outside the dispatcher).
+    """
+    if ctx is not None:
+        stale = ctx.stale
+        diagnostics = ctx.stale_diagnostics
+        worklist_names = {item["name"] for item in ctx.worklist}
+    else:
+        # find_stale already orders most-recently-drifted first.
+        diagnostics = {}
+        stale = find_stale(memory_dir, repo_root, diagnostics=diagnostics)
+        worklist_names = set()
     # SHP-6: a scoped git-log scan can still time out on a pathologically large cited-path
     # set; surface that instead of silently reporting "nothing stale" (legible degradation).
     timeout_note = (
@@ -209,7 +252,15 @@ def staleness_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     # disappear), and — once an invalidation ages past recall's old horizon — point at the
     # audit skill's archive flow (report-only; the flow applies its own 4-way gate).
     invalidated = invalid_after_map([item["name"] for item in stale], memory_dir)
-    active = [item for item in stale if item["name"] not in invalidated]
+    # LIF-6: a name already on the reconsolidation worklist gets its per-item line THERE
+    # (worklist first) — re-listing it here would be the exact double-nag this item closes,
+    # wasting the shared 9000-char budget on the same drifted memory twice. Suppress the
+    # LINE but keep it in the honest tail count below (mirrors LIF-1's invalidated tail —
+    # nothing silently disappears; invalidated/worklist are disjoint by construction, since
+    # recalled_stale_worklist already drops invalidated names itself).
+    active = [
+        item for item in stale if item["name"] not in invalidated and item["name"] not in worklist_names
+    ]
     if active:
         lines = [
             f"⚠ Memory staleness — {len(active)} memories cite code that changed since they were "
@@ -221,11 +272,27 @@ def staleness_producer(memory_dir: str, repo_root: str) -> Optional[str]:
             lines.append(f"  • {item['name']}: {paths}{more}")
         if len(active) > _MAX_ITEMS_PER_PRODUCER:
             lines.append(f"  …and {len(active) - _MAX_ITEMS_PER_PRODUCER} more.")
+        if worklist_names:
+            lines.append(
+                f"  (+{len(worklist_names)} already on the reconsolidation worklist below — "
+                "no separate re-verify needed here)"
+            )
         if invalidated:
             lines.append(
                 f"  (+{len(invalidated)} already demoted — invalid_after set; recall already "
                 "ranks them down, no re-verify needed)"
             )
+    elif worklist_names and not invalidated:
+        lines = [
+            f"⚠ Memory staleness — all {len(stale)} stale memories are already on the "
+            "reconsolidation worklist below; nothing new to verify here."
+        ]
+    elif worklist_names:
+        lines = [
+            f"⚠ Memory staleness — all {len(stale)} stale memories are already accounted for "
+            f"({len(invalidated)} demoted, {len(worklist_names)} on the reconsolidation worklist "
+            "below); nothing new to verify here."
+        ]
     else:
         lines = [
             f"⚠ Memory staleness — all {len(stale)} stale memories are already demoted "
@@ -248,13 +315,16 @@ def staleness_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     return "\n".join(lines)
 
 
-def index_integrity_producer(memory_dir: str, repo_root: str) -> Optional[str]:
+def index_integrity_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
     """LOUD diagnosis for on-disk recall-index corruption (QUA-5).
 
     ``build_index``/``recall`` already degrade gracefully (never raise) on a truncated
     manifest, a missing dense.npy, or a wrong-shape dense.npy — but until now nothing named
     WHICH of those states was present, so "memory stopped working" had no diagnosis surface.
-    Silent when the index doesn't exist yet (nothing built) or is healthy.
+    Silent when the index doesn't exist yet (nothing built) or is healthy. ``ctx`` (LIF-6)
+    is unused — see ``stale_venv_producer`` for why it's declared anyway.
     """
     try:
         from .build_index import check_index_integrity, default_index_dir
@@ -268,13 +338,16 @@ def index_integrity_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     return f"⚠ Index integrity — {finding}."
 
 
-def unresolvable_baseline_producer(memory_dir: str, repo_root: str) -> Optional[str]:
+def unresolvable_baseline_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
     """LOUD count for memories whose staleness baseline sha isn't in this repo's history.
 
     A squash-merge default (or a shallow/partial CI clone) rewrites/truncates history so a
     branch-authored memory's ``source_commit`` is never reachable from mainline — SHP-3 falls
     back to the memory's own stored ``source_commit_time`` instead of silently exempting it
     from drift detection forever, but that fallback IS a degradation and must be legible.
+    ``ctx`` (LIF-6) is unused — see ``stale_venv_producer`` for why it's declared anyway.
     """
     n = count_unresolvable_baselines(memory_dir, repo_root)
     if not n:
@@ -285,8 +358,10 @@ def unresolvable_baseline_producer(memory_dir: str, repo_root: str) -> Optional[
     )
 
 
-# (label, fn). Each tier appends a producer here — never a parallel hook entry.
-PRODUCERS: List[Tuple[str, Callable[[str, str], Optional[str]]]] = [
+# (label, fn). Each tier appends a producer here — never a parallel hook entry. Every fn
+# shares ONE call shape — ``(memory_dir, repo_root, ctx)`` — LIF-6's ``RunContext``, even
+# when a given producer ignores it (see the module docstring).
+PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[str]]]] = [
     ("stale_venv", stale_venv_producer),  # environment-level — a stale venv taints everything below
     ("corpus_format", corpus_format_producer),  # a corpus NEWER than the plugin taints every reader below (COR-7)
     ("integrity", integrity_producer),  # a malformed memory must not hide
@@ -367,6 +442,41 @@ def untrusted_corpus_nudge(memory_dir: str, repo_root: str) -> Optional[str]:
     )
 
 
+def _build_run_context(memory_dir: str, repo_root: str) -> RunContext:
+    """LIF-6: compute ``find_stale`` (and the reconsolidation worklist derived from it)
+    EXACTLY ONCE per SessionStart run, instead of ``staleness_producer`` and
+    ``reconsolidation_producer`` each independently re-scanning the same corpus into the
+    same git-log window. Also best-effort persists the staleness half to
+    ``<index_dir>/stale.json`` (RET-5/RET-6 setup — see ``staleness.write_stale_cache``).
+
+    The write is guarded on ``memory_dir`` actually existing on disk: a bogus/nonexistent
+    dir (a hermetic test's placeholder string, an untrusted-gate short-circuit that never
+    reaches here) must never mint a stray index dir next to wherever the process happens
+    to be running — mirrors ``main``'s own guard around the telemetry session write.
+    Never raises; degrades to an EMPTY ``RunContext`` (the same shape a clean corpus
+    produces, so every producer's ctx-aware branch already tolerates it).
+    """
+    diagnostics: dict = {}
+    stale: List[dict] = []
+    worklist: List[dict] = []
+    try:
+        stale = find_stale(memory_dir, repo_root, diagnostics=diagnostics)
+    except Exception:
+        stale = []
+    try:
+        worklist = recalled_stale_worklist(memory_dir, repo_root, stale=stale)
+    except Exception:
+        worklist = []
+    try:
+        if os.path.isdir(memory_dir):
+            from .build_index import default_index_dir
+
+            write_stale_cache(default_index_dir(memory_dir), stale)
+    except Exception:
+        pass
+    return RunContext(stale=stale, stale_diagnostics=diagnostics, worklist=worklist)
+
+
 def build_context(memory_dir: str, repo_root: str, max_chars: int = _MAX_CONTEXT_CHARS) -> str:
     """Run every producer, merge their non-empty blocks, bound the total. Never raises.
 
@@ -382,10 +492,11 @@ def build_context(memory_dir: str, repo_root: str, max_chars: int = _MAX_CONTEXT
             return untrusted_corpus_nudge(memory_dir, repo_root) or ""
     except Exception:
         pass
+    run_ctx = _build_run_context(memory_dir, repo_root)
     blocks: List[str] = []
     for _label, fn in PRODUCERS:
         try:
-            out = fn(memory_dir, repo_root)
+            out = fn(memory_dir, repo_root, run_ctx)
         except Exception:
             out = None
         if out:

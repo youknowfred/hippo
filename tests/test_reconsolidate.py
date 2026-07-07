@@ -82,6 +82,64 @@ def test_worklist_excludes_stale_but_never_recalled(repo, memory_dir):
     assert worklist == []
 
 
+# --------------------------------------------------------------------------- #
+# LIF-6: recalled_stale_worklist accepts a PRECOMPUTED stale list (the SessionStart
+# dispatcher's single find_stale call, shared with the staleness producer) instead of
+# always re-deriving it.
+# --------------------------------------------------------------------------- #
+def test_worklist_accepts_a_precomputed_stale_list_and_skips_find_stale(repo, memory_dir, monkeypatch):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_alpha.md", _mem("m_alpha", ["src/foo.py"], c1))
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)
+
+    td = os.path.join(repo, "tele")
+    _seed_events(td, [("s1", ["m_alpha"])])
+
+    calls = []
+    monkeypatch.setattr(R, "find_stale", lambda *a, **k: calls.append(1) or [])
+
+    precomputed = [{"name": "m_alpha", "changed_paths": ["src/foo.py"], "recency": 1}]
+    worklist = R.recalled_stale_worklist(memory_dir, repo, telemetry_dir=td, stale=precomputed)
+    assert [w["name"] for w in worklist] == ["m_alpha"]
+    assert calls == []  # find_stale was never called -- the precomputed list was trusted
+
+
+def test_worklist_falls_back_to_find_stale_when_no_stale_given(repo, memory_dir):
+    """Default behavior (the reconsolidate CLI, any standalone caller) is unchanged."""
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_alpha.md", _mem("m_alpha", ["src/foo.py"], c1))
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)
+
+    td = os.path.join(repo, "tele")
+    _seed_events(td, [("s1", ["m_alpha"])])
+
+    worklist = R.recalled_stale_worklist(memory_dir, repo, telemetry_dir=td, since=_ALL)
+    assert [w["name"] for w in worklist] == ["m_alpha"]
+
+
+def test_worklist_never_mutates_a_precomputed_stale_lists_items(repo, memory_dir):
+    """LIF-6: `stale` may be CALLER-OWNED (session_start.RunContext.stale, shared with the
+    staleness producer) — GRA-9's linked-neighbor attachment must land on the worklist's
+    OWN copies, never leak an added "linked" key back into the caller's list."""
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_alpha.md", _mem("m_alpha", ["src/foo.py"], c1))
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)
+
+    td = os.path.join(repo, "tele")
+    _seed_events(td, [("s1", ["m_alpha"])])
+
+    precomputed = [{"name": "m_alpha", "changed_paths": ["src/foo.py"], "recency": 1}]
+    worklist = R.recalled_stale_worklist(memory_dir, repo, telemetry_dir=td, stale=precomputed)
+    assert worklist and worklist[0] is not precomputed[0]  # a distinct dict, not aliased
+    assert "linked" not in precomputed[0]  # the caller's own item is untouched
+
+
 def test_worklist_most_recently_drifted_first(repo, memory_dir):
     write_file(repo, "src/old.py", "x = 1\n")
     write_file(repo, "src/new.py", "y = 1\n")
@@ -863,10 +921,38 @@ def test_reconsolidate_cli_worklist_renders_linked(repo, memory_dir, capsys):
     assert "• m_a (+2 linked: m_in, m_out): src/foo.py" in out
 
 
+# --------------------------------------------------------------------------- #
+# LIF-6: reconsolidation_producer reads a precomputed worklist off ctx instead of
+# re-deriving it, when the dispatcher supplies one.
+# --------------------------------------------------------------------------- #
+def test_producer_renders_ctx_worklist_without_recomputing():
+    from memory.staleness import RunContext
+
+    ctx = RunContext(worklist=[{"name": "m_a", "changed_paths": ["src/foo.py"]}])
+    out = R.reconsolidation_producer("md", "repo", ctx)
+    assert out is not None and "m_a" in out
+
+
+def test_producer_with_ctx_never_calls_recalled_stale_worklist(monkeypatch):
+    from memory.staleness import RunContext
+
+    def boom(*a, **k):
+        raise AssertionError("must not recompute the worklist when ctx already has one")
+
+    monkeypatch.setattr(R, "recalled_stale_worklist", boom)
+    ctx = RunContext(worklist=[{"name": "m_a", "changed_paths": ["src/foo.py"]}])
+    out = R.reconsolidation_producer("md", "repo", ctx)
+    assert out is not None and "m_a" in out
+
+
 def test_producer_never_raises_on_bogus_dirs():
     assert R.reconsolidation_producer("/no/such/memory", "/no/such/repo") is None
 
 
 def test_producer_signature_matches_dispatcher_contract():
+    """LIF-6: the dispatcher now threads a shared ``RunContext`` positionally through
+    EVERY producer (not just this one) -- ``ctx`` is optional (defaults to None) so the
+    producer stays independently callable with the old 2-arg shape too."""
     sig = inspect.signature(R.reconsolidation_producer)
-    assert list(sig.parameters) == ["memory_dir", "repo_root"]
+    assert list(sig.parameters) == ["memory_dir", "repo_root", "ctx"]
+    assert sig.parameters["ctx"].default is None

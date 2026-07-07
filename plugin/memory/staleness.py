@@ -22,6 +22,7 @@ import json
 import os
 import re
 import subprocess
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
@@ -264,12 +265,107 @@ def find_stale(
             if changed:
                 # recency = newest drift among the cited files; ranks the most-urgently-stale first
                 recency = max(path_times.get(p, 0) for p in changed)
-                stale.append({"name": name, "changed_paths": changed, "recency": recency})
+                # LIF-6: carry the resolved baseline sha along -- write_stale_cache's "sha"
+                # field (a short-form anchor for RET-6's future banner) reads this rather
+                # than re-deriving it; every existing consumer only reads "name"/
+                # "changed_paths" so this extra key is purely additive.
+                stale.append(
+                    {"name": name, "changed_paths": changed, "recency": recency, "source_commit": sc}
+                )
         # Most-recently-drifted first (then name) so the SessionStart note surfaces what matters.
         stale.sort(key=lambda d: (-d["recency"], d["name"]))
         return stale
     except Exception:
         return []
+
+
+# --------------------------------------------------------------------------- #
+# LIF-6: ONE per-run staleness context, computed once by the SessionStart dispatcher and
+# threaded through every producer — see session_start.py's PRODUCERS loop.
+# --------------------------------------------------------------------------- #
+@dataclass
+class RunContext:
+    """Per-SessionStart-run state, computed ONCE by ``session_start.build_context`` and
+    passed POSITIONALLY to every registered producer — not just the two that read it, so
+    the PRODUCERS loop keeps ONE uniform call shape instead of special-casing which
+    producer gets which arity. ``stale`` mirrors ``find_stale``'s own return contract;
+    ``worklist`` mirrors ``reconsolidate.recalled_stale_worklist``'s. A producer that has
+    nothing to do with staleness (most of them) just declares the trailing parameter and
+    never reads it.
+
+    The all-defaults constructor (``RunContext()``) reproduces the exact EMPTY state a
+    clean corpus produces, so ``staleness_producer``/``reconsolidation_producer`` stay
+    independently callable with no ``ctx`` at all (tests, the ``reconsolidate`` CLI) —
+    they fall back to deriving their own single-producer view instead of needing one
+    fabricated for them.
+    """
+
+    stale: List[dict] = field(default_factory=list)
+    stale_diagnostics: dict = field(default_factory=dict)
+    worklist: List[dict] = field(default_factory=list)
+
+
+STALE_CACHE_SCHEMA_VERSION = 1
+_STALE_CACHE_NAME = "stale.json"
+# "short" sha length, matching git's own default `--short` width.
+_SHORT_SHA_LEN = 7
+
+
+def stale_cache_path(index_dir: str) -> str:
+    """``<index_dir>/stale.json`` — the one path the writer (below) and RET-5/RET-6's
+    future reader must agree on."""
+    return os.path.join(index_dir, _STALE_CACHE_NAME)
+
+
+def write_stale_cache(index_dir: str, stale: List[dict]) -> bool:
+    """Persist ``find_stale``'s result to ``<index_dir>/stale.json`` (RET-5/RET-6 setup).
+
+    Derived, rebuildable, gitignored — same standing as ``links.json``/``manifest.json``,
+    and written the same way (tmp + ``os.replace``, ``links.write_links_cache``'s pattern)
+    so a reader never sees a torn file. The shape is the MINIMUM a later bounded ranking
+    penalty and a one-line "anchored to <sha>; verify before relying" banner both need,
+    per stale name::
+
+        {"schema_version": 1, "generated_at": "<iso8601>",
+         "stale": {"<name>": {"changed": <len(changed_paths)>, "sha": "<short source_commit>"}}}
+
+    Written on EVERY call, including an empty ``stale`` list — an honest
+    ``{"stale": {}}`` means "checked this session, found nothing", never a skipped write,
+    so a reader can trust the file's mere presence rather than guess whether staleness
+    ever ran. Nothing in this module reads it back: recall (RET-5/RET-6) owns that half,
+    and treats an absent/corrupt file as advisory — a no-op, never a hard error. Never
+    raises; returns True on a successful write, False on any failure (a bad ``index_dir``,
+    a permissions error) — callers must not let a cache-write failure cost them the
+    SessionStart run itself.
+    """
+    try:
+        os.makedirs(index_dir, exist_ok=True)
+        payload = {
+            "schema_version": STALE_CACHE_SCHEMA_VERSION,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "stale": {
+                item["name"]: {
+                    "changed": len(item.get("changed_paths") or []),
+                    "sha": str(item.get("source_commit") or "")[:_SHORT_SHA_LEN],
+                }
+                for item in stale
+            },
+        }
+        path = stale_cache_path(index_dir)
+        tmp = path + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+            os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except Exception:
+                    pass
+        return True
+    except Exception:
+        return False
 
 
 def count_unresolvable_baselines(memory_dir: str, repo_root: str) -> int:

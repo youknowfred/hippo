@@ -26,7 +26,9 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
+
+from .staleness import RunContext
 
 # Sections under which memory pointers ARE allowed (the always-loaded floor).
 _FLOOR_SECTIONS = ("User", "Working Style & Process Feedback")
@@ -120,11 +122,14 @@ def floor_memory_names(memory_dir: str) -> set:
     return names
 
 
-def floor_producer(memory_dir: str, repo_root: str) -> "str | None":
+def floor_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> "str | None":
     """SessionStart producer: SILENT when the floor invariant holds; one bounded block when not.
 
     Lists project/reference links that re-bloat the floor (and any floor link rot). READ-ONLY;
-    never raises.
+    never raises. ``ctx`` (LIF-6's shared per-run ``RunContext``) is unused here — declared
+    only so every producer in ``PRODUCERS`` shares ONE call shape.
     """
     try:
         v = floor_violations(memory_dir)

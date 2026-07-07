@@ -43,6 +43,14 @@ staleness producer still COUNTS them, so nothing silently disappears), and ``--s
 records an explicit per-item ack that silences an item for the next
 ``_SNOOZE_WINDOW_SESSIONS`` new sessions (a deferral, not a verdict — it expires).
 
+LIF-6 (de-duplicate SessionStart staleness vs reconsolidation reporting): the worklist is
+BY CONSTRUCTION a subset of ``staleness.find_stale()``'s full stale set, so the two
+SessionStart producers used to each independently re-derive it into the same 9000-char
+budget. ``recalled_stale_worklist`` now accepts a precomputed ``stale`` list (the
+dispatcher's single ``find_stale`` call, via ``staleness.RunContext``), and
+``session_start.staleness_producer`` excludes any name already on this worklist from its
+own per-item lines (worklist first) — each memory appears exactly once per SessionStart.
+
 Read-mostly; never raises.
 """
 
@@ -52,7 +60,7 @@ import os
 from typing import Dict, List, Optional, Set
 
 from .provenance import build_repo_file_index, reverify_file
-from .staleness import find_stale, invalid_after_map, set_invalid_after
+from .staleness import RunContext, find_stale, invalid_after_map, set_invalid_after
 from .telemetry import (
     read_events,
     read_reconsolidation_events,
@@ -204,6 +212,7 @@ def recalled_stale_worklist(
     window_sessions: int = _DEFAULT_WINDOW_SESSIONS,
     *,
     since: Optional[str] = None,
+    stale: Optional[List[dict]] = None,
 ) -> List[dict]:
     """``[{"name", "changed_paths"[, "linked"]}]`` — recently-recalled names ∩ ``find_stale()``'s stale set.
 
@@ -220,13 +229,28 @@ def recalled_stale_worklist(
     ``--snooze`` ack (``_snoozed_names`` — expires after ``_SNOOZE_WINDOW_SESSIONS`` new
     sessions). Read-only; never raises; ``[]`` when the ledger is empty or nothing
     intersects.
+
+    LIF-6: ``stale`` accepts a PRECOMPUTED ``find_stale()`` result — the SessionStart
+    dispatcher computes it once and hands it to both the staleness and reconsolidation
+    producers, instead of each independently re-scanning the same corpus into the same
+    git-log window. When omitted (the default — the ``reconsolidate`` CLI and any
+    standalone caller), ``find_stale`` is still called here exactly as before. When given,
+    it is trusted as-is and ``find_stale`` is never called — ``since`` is then ignored
+    (the caller who computed ``stale`` already chose its window).
     """
     try:
         recent = _recently_recalled_names(telemetry_dir, window_sessions)
         if not recent:
             return []
-        stale = find_stale(memory_dir, repo_root, **({"since": since} if since else {}))
-        worklist = [item for item in stale if item["name"] in recent]
+        if stale is None:
+            stale = find_stale(memory_dir, repo_root, **({"since": since} if since else {}))
+        # LIF-6: shallow-copy each item -- `stale` may now be a CALLER-OWNED list shared
+        # with something else (session_start.RunContext.stale), not always a freshly-
+        # derived one this function alone holds. `_attach_linked_neighbors` below mutates
+        # worklist items in place (adds "linked"); without the copy that mutation would
+        # leak back into the caller's `stale` list for any item that's on both, corrupting
+        # a shape callers were promised mirrors find_stale's own contract exactly.
+        worklist = [dict(item) for item in stale if item["name"] in recent]
         if worklist:
             # LIF-1: drop terminal (invalid_after set — demote's chain, or a manual
             # --invalidate) and explicitly-snoozed items BEFORE the linked-column pass,
@@ -448,14 +472,23 @@ def _linked_note(item: dict) -> str:
     return f" (+{len(linked)} linked: {', '.join(linked)})"
 
 
-def reconsolidation_producer(memory_dir: str, repo_root: str) -> Optional[str]:
+def reconsolidation_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
     """SILENT (``None``) unless a recently-recalled memory is currently stale.
 
     Surfaces a bounded, prioritized worklist otherwise — most-recently-drifted first,
     capped at ``_MAX_WORKLIST_ITEMS``. Never raises.
+
+    LIF-6: ``ctx`` (the dispatcher's shared ``RunContext`` — every registered producer's
+    signature carries this same trailing parameter, whether or not it reads it) already
+    carries the worklist computed ONCE by ``session_start.build_context`` from a single
+    ``find_stale`` call; this producer just renders it. When ``ctx`` is ``None`` (any
+    standalone call — tests, or this module invoked outside the dispatcher), it falls
+    back to deriving the worklist itself exactly as before.
     """
     try:
-        worklist = recalled_stale_worklist(memory_dir, repo_root)
+        worklist = ctx.worklist if ctx is not None else recalled_stale_worklist(memory_dir, repo_root)
     except Exception:
         worklist = []
     if not worklist:

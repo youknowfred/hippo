@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 
 from memory.staleness import (
+    STALE_CACHE_SCHEMA_VERSION,
     count_unresolvable_baselines,
     find_citation_rot,
     find_stale,
@@ -15,6 +17,8 @@ from memory.staleness import (
     read_provenance,
     read_source_commit_time,
     set_invalid_after,
+    stale_cache_path,
+    write_stale_cache,
 )
 
 from .conftest import git_commit, write_file
@@ -670,3 +674,73 @@ def test_main_invalidate_flag_accepts_name_without_md_suffix(memory_dir, capsys)
     rc = S.main(["--invalidate", "m_b.md", "--memory-dir", memory_dir])
     assert rc == 0
     assert "validity window closed" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# LIF-6: find_stale carries source_commit; write_stale_cache persists stale.json
+# (RET-5/RET-6 setup — a future bounded ranking penalty and drift banner).
+# --------------------------------------------------------------------------- #
+def test_find_stale_result_carries_source_commit(repo, memory_dir):
+    """Additive: existing consumers only read name/changed_paths, so this is a new key,
+    not a shape change — write_stale_cache's "sha" field reads it."""
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_alpha.md", _memory(["src/foo.py"], c1))
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)
+
+    stale = find_stale(memory_dir, repo, since=_ALL)
+    hit = [s for s in stale if s["name"] == "m_alpha"][0]
+    assert hit["source_commit"] == c1
+
+
+def test_write_stale_cache_shape(tmp_path):
+    idx = str(tmp_path / "idx")
+    stale = [
+        {"name": "m_alpha", "changed_paths": ["src/a.py", "src/b.py"], "source_commit": "abcdef1234567890"},
+        {"name": "m_beta", "changed_paths": ["src/c.py"], "source_commit": "0011223344"},
+    ]
+    assert write_stale_cache(idx, stale) is True
+
+    with open(stale_cache_path(idx), encoding="utf-8") as fh:
+        payload = json.load(fh)
+    assert payload["schema_version"] == STALE_CACHE_SCHEMA_VERSION
+    assert "generated_at" in payload
+    assert payload["stale"] == {
+        "m_alpha": {"changed": 2, "sha": "abcdef1"},
+        "m_beta": {"changed": 1, "sha": "0011223"},
+    }
+
+
+def test_write_stale_cache_empty_list_is_honest_not_skipped(tmp_path):
+    """An empty stale list is still WRITTEN (schema + empty map), never silently skipped —
+    a reader must be able to trust the file's mere presence."""
+    idx = str(tmp_path / "idx")
+    assert write_stale_cache(idx, []) is True
+    with open(stale_cache_path(idx), encoding="utf-8") as fh:
+        payload = json.load(fh)
+    assert payload["stale"] == {}
+
+
+def test_write_stale_cache_is_atomic_no_tmp_file_left_behind(tmp_path):
+    idx = str(tmp_path / "idx")
+    assert write_stale_cache(idx, [{"name": "m_a", "changed_paths": ["a.py"], "source_commit": "abc"}]) is True
+    assert os.path.isfile(stale_cache_path(idx))
+    assert not os.path.exists(stale_cache_path(idx) + ".tmp")
+
+
+def test_write_stale_cache_creates_the_index_dir_if_missing(tmp_path):
+    idx = str(tmp_path / "brand-new" / "idx")
+    assert not os.path.isdir(idx)
+    assert write_stale_cache(idx, []) is True
+    assert os.path.isfile(stale_cache_path(idx))
+
+
+def test_write_stale_cache_never_raises_on_a_bogus_index_dir():
+    """A path that can't be a directory (a file in the way) must degrade to False, never
+    raise — mirrors links.write_links_cache's never-raise contract."""
+    import tempfile
+
+    with tempfile.NamedTemporaryFile() as f:
+        # f.name is a FILE; os.makedirs(f.name, exist_ok=True) must fail cleanly.
+        assert write_stale_cache(f.name, []) is False

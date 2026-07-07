@@ -26,8 +26,8 @@ def test_build_context_merges_producer_blocks(monkeypatch):
     _producers(
         monkeypatch,
         [
-            ("a", lambda md, repo: "ALPHA block"),
-            ("b", lambda md, repo: "BETA block"),
+            ("a", lambda md, repo, ctx=None: "ALPHA block"),
+            ("b", lambda md, repo, ctx=None: "BETA block"),
         ],
     )
     ctx = S.build_context("md", "repo")
@@ -35,24 +35,41 @@ def test_build_context_merges_producer_blocks(monkeypatch):
 
 
 def test_build_context_empty_when_nothing_to_say(monkeypatch):
-    _producers(monkeypatch, [("a", lambda md, repo: None)])
+    _producers(monkeypatch, [("a", lambda md, repo, ctx=None: None)])
     assert S.build_context("md", "repo") == ""
 
 
 def test_producer_exception_is_isolated(monkeypatch):
-    def boom(md, repo):
+    def boom(md, repo, ctx=None):
         raise RuntimeError("producer failed")
 
-    _producers(monkeypatch, [("boom", boom), ("ok", lambda md, repo: "still here")])
+    _producers(monkeypatch, [("boom", boom), ("ok", lambda md, repo, ctx=None: "still here")])
     ctx = S.build_context("md", "repo")
     assert ctx == "still here"  # the survivor is kept, the failure swallowed
 
 
 def test_output_is_bounded_under_cap(monkeypatch):
-    _producers(monkeypatch, [("big", lambda md, repo: "x" * 50_000)])
+    _producers(monkeypatch, [("big", lambda md, repo, ctx=None: "x" * 50_000)])
     ctx = S.build_context("md", "repo", max_chars=500)
     assert len(ctx) <= 500
     assert ctx.endswith("(truncated)")
+
+
+def test_dispatcher_calls_every_producer_with_the_shared_run_context(monkeypatch):
+    """LIF-6: the PRODUCERS loop shares ONE call shape — every registered fn is called
+    ``(memory_dir, repo_root, run_ctx)``, the same ``RunContext`` instance, not a
+    special-cased arity for a subset of producers."""
+    seen = []
+
+    def spy(md, repo, ctx=None):
+        seen.append(ctx)
+        return None
+
+    _producers(monkeypatch, [("a", spy), ("b", spy)])
+    S.build_context("md", "repo")
+    assert len(seen) == 2
+    assert seen[0] is seen[1]  # the SAME RunContext instance, computed once
+    assert isinstance(seen[0], S.RunContext)
 
 
 def test_staleness_producer_formats_real_output(monkeypatch):
@@ -228,6 +245,192 @@ def test_reconsolidation_silent_when_stubbed_empty(monkeypatch):
 
     monkeypatch.setattr("memory.reconsolidate.recalled_stale_worklist", lambda *a, **k: [])
     assert reconsolidation_producer("md", "repo") is None
+
+
+# --------------------------------------------------------------------------- #
+# LIF-6 — de-duplicate SessionStart staleness vs reconsolidation reporting: find_stale is
+# computed ONCE by the dispatcher and shared via RunContext; the staleness producer
+# excludes names already claimed by the reconsolidation worklist. Unlike most of this
+# file, these tests DO use real git timing (mirrors
+# test_citation_rot_producer_end_to_end_after_git_mv) — the de-dup is only observable
+# across two producers wired through the real find_stale/recalled_stale_worklist path.
+# --------------------------------------------------------------------------- #
+def _lif6_mem(name, cited, source_commit):
+    cp = "[" + ", ".join(f'"{c}"' for c in cited) + "]"
+    return (
+        f'---\nname: {name}\ndescription: "{name} description"\n'
+        f'cited_paths: {cp}\nsource_commit: "{source_commit}"\n---\nbody for {name}\n'
+    )
+
+
+def _lif6_seed_two_stale_one_recalled(repo, memory_dir, monkeypatch):
+    """m_a and m_b both cite src/foo.py and both go stale after the same drift commit;
+    only m_a is recently recalled, so the worklist (``{m_a}``) is a STRICT subset of the
+    stale set (``{m_a, m_b}``) — exactly the AC's corpus shape. Commits are pinned
+    NEAR-NOW: find_stale's default window is wall-clock-relative, not relative to any
+    fixed epoch (mirrors test_reconsolidate.py's ``_seed_stale_recalled`` pattern, needed
+    here because the real dispatcher path has no ``since`` override to widen it)."""
+    import time
+
+    from .conftest import git_commit
+
+    now = int(time.time())
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", now - 200)
+    write_file(memory_dir, "m_a.md", _lif6_mem("m_a", ["src/foo.py"], c1))
+    write_file(memory_dir, "m_b.md", _lif6_mem("m_b", ["src/foo.py"], c1))
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", now - 100)
+
+    td = os.path.join(repo, "tele")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    os.makedirs(td, exist_ok=True)
+    with open(os.path.join(td, "recall_events.jsonl"), "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"session_id": "s1", "names": ["m_a"]}) + "\n")
+    return td
+
+
+def test_find_stale_called_exactly_once_per_dispatcher_run(repo, memory_dir, monkeypatch):
+    """LIF-6's core claim: staleness_producer + reconsolidation_producer used to each
+    independently call find_stale (twice per SessionStart, same corpus, same git-log
+    window); the dispatcher now computes it exactly once via ``_build_run_context`` and
+    both producers read the shared RunContext instead."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _lif6_seed_two_stale_one_recalled(repo, memory_dir, monkeypatch)
+
+    calls = []
+    real_find_stale = S.find_stale
+
+    def counting_find_stale(*a, **k):
+        calls.append(1)
+        return real_find_stale(*a, **k)
+
+    monkeypatch.setattr(S, "find_stale", counting_find_stale)
+    S.build_context(memory_dir, repo)
+    assert calls == [1]
+
+
+def test_no_memory_name_appears_twice_when_worklist_is_subset_of_stale(repo, memory_dir, monkeypatch):
+    """The AC, end to end: m_a sits on BOTH the full stale set and the (strict-subset)
+    reconsolidation worklist — its per-item bullet must appear in the staleness block's
+    OWN per-item lines exactly ZERO times (claimed by the reconsolidation block instead),
+    while m_b (stale but never recalled) still gets its own staleness line. Blocks are
+    split on "\\n\\n" (build_context's own join separator) rather than a raw substring
+    count, because an UNRELATED producer (git-recent) legitimately mentions "m_a" too —
+    it was captured recently, which has nothing to do with this de-dup."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _lif6_seed_two_stale_one_recalled(repo, memory_dir, monkeypatch)
+
+    ctx = S.build_context(memory_dir, repo)
+    blocks = ctx.split("\n\n")
+    staleness_block = next(b for b in blocks if b.startswith("⚠ Memory staleness"))
+    recon_block = next(b for b in blocks if b.startswith("🧠 Reconsolidation worklist"))
+    assert "  • m_a:" not in staleness_block  # claimed by the worklist, not re-listed here
+    assert "  • m_b:" in staleness_block  # the non-recalled stale memory still gets its line
+    assert "  • m_a:" in recon_block
+    assert "already on the reconsolidation worklist" in staleness_block  # LIF-1-style tail
+
+
+def test_staleness_producer_excludes_worklist_names_via_ctx(memory_dir):
+    """Unit-level: given a RunContext whose worklist already claims a name, the staleness
+    producer drops its per-item line and counts it in a tail (LIF-1's suppression-tail
+    style, applied to the new exclusion reason)."""
+    write_file(memory_dir, "m_a.md", _lif6_mem("m_a", ["src/foo.py"], "abc123"))
+    write_file(memory_dir, "m_b.md", _lif6_mem("m_b", ["src/foo.py"], "abc123"))
+    ctx = S.RunContext(
+        stale=[
+            {"name": "m_a", "changed_paths": ["src/foo.py"]},
+            {"name": "m_b", "changed_paths": ["src/foo.py"]},
+        ],
+        worklist=[{"name": "m_a", "changed_paths": ["src/foo.py"]}],
+    )
+    out = S.staleness_producer(memory_dir, "repo", ctx)
+    lines = out.splitlines()
+    assert not any(line.strip().startswith("• m_a") for line in lines)
+    assert any(line.strip().startswith("• m_b") for line in lines)
+    assert "(+1 already on the reconsolidation worklist" in out
+
+
+def test_staleness_producer_all_worklisted_collapses_to_one_honest_line(memory_dir):
+    write_file(memory_dir, "m_a.md", _lif6_mem("m_a", ["src/foo.py"], "abc123"))
+    ctx = S.RunContext(
+        stale=[{"name": "m_a", "changed_paths": ["src/foo.py"]}],
+        worklist=[{"name": "m_a", "changed_paths": ["src/foo.py"]}],
+    )
+    out = S.staleness_producer(memory_dir, "repo", ctx)
+    assert out is not None
+    assert "all 1 stale memories are already on the reconsolidation worklist" in out
+    assert "• m_a" not in out
+
+
+def test_staleness_producer_mixed_demoted_and_worklisted_collapse(memory_dir):
+    gone = write_file(memory_dir, "m_gone.md", _lif6_mem("m_gone", ["src/foo.py"], "abc123"))
+    set_invalid_after(gone, _iso_days_ago(5))
+    write_file(memory_dir, "m_a.md", _lif6_mem("m_a", ["src/foo.py"], "abc123"))
+    ctx = S.RunContext(
+        stale=[
+            {"name": "m_gone", "changed_paths": ["src/foo.py"]},
+            {"name": "m_a", "changed_paths": ["src/foo.py"]},
+        ],
+        worklist=[{"name": "m_a", "changed_paths": ["src/foo.py"]}],
+    )
+    out = S.staleness_producer(memory_dir, "repo", ctx)
+    assert "already accounted for" in out
+    assert "1 demoted" in out and "1 on the reconsolidation worklist" in out
+
+
+def test_producers_degrade_unchanged_when_find_stale_is_empty(tmp_path):
+    """A RunContext built from an empty stale set produces the SAME silence as the
+    pre-LIF-6 empty case for both staleness-derived producers."""
+    md = str(tmp_path / ".claude" / "memory")
+    os.makedirs(md)
+    empty_ctx = S.RunContext()
+    assert S.staleness_producer(md, "repo", empty_ctx) is None
+    from memory.reconsolidate import reconsolidation_producer
+
+    assert reconsolidation_producer(md, "repo", empty_ctx) is None
+
+
+def test_stale_cache_written_with_documented_shape(repo, memory_dir, monkeypatch):
+    """RET-5/RET-6 setup: stale.json lands in the gitignored index dir with the minimal
+    ``{changed, sha}`` shape a bounded penalty / drift banner will need."""
+    from memory.build_index import default_index_dir
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _lif6_seed_two_stale_one_recalled(repo, memory_dir, monkeypatch)
+
+    S.build_context(memory_dir, repo)
+
+    idx = default_index_dir(memory_dir)
+    with open(os.path.join(idx, "stale.json"), encoding="utf-8") as fh:
+        payload = json.load(fh)
+    assert payload["schema_version"] == 1
+    assert "generated_at" in payload
+    assert set(payload["stale"]) == {"m_a", "m_b"}
+    for entry in payload["stale"].values():
+        assert entry["changed"] == 1  # one drifted cited path each
+        assert entry["sha"] and len(entry["sha"]) <= 7
+
+
+def test_stale_cache_written_honestly_empty_when_nothing_stale(repo, memory_dir, monkeypatch):
+    """No memories at all -> find_stale returns [] honestly, and stale.json says so too
+    (a checked-and-clean run, not a skipped write)."""
+    from memory.build_index import default_index_dir
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    S.build_context(memory_dir, repo)
+
+    idx = default_index_dir(memory_dir)
+    with open(os.path.join(idx, "stale.json"), encoding="utf-8") as fh:
+        payload = json.load(fh)
+    assert payload["stale"] == {}
+
+
+def test_stale_cache_not_written_for_a_nonexistent_memory_dir():
+    """A bogus/nonexistent memory_dir (a hermetic test's placeholder string, or an
+    untrusted-gate short-circuit) must never mint a stray index dir."""
+    S.build_context("does/not/exist", "repo")
+    assert not os.path.isdir("does")
 
 
 def test_main_heals_empty_baselines_side_effect(tmp_path, monkeypatch, capsys):

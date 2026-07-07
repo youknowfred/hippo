@@ -40,7 +40,7 @@ from .build_index import (
 from . import trust
 from .lint_floor import floor_memory_names
 from .provenance import _iter_memory_files, resolve_dirs
-from .staleness import _commit_times, read_provenance
+from .staleness import RunContext, _commit_times, read_provenance
 
 # Harness caps hook output at 10,000 chars; stay well under it.
 _MAX_RECALL_CHARS = 9000
@@ -1239,13 +1239,17 @@ def recent_memories(
         return []
 
 
-def git_recent_producer(memory_dir: str, repo_root: str) -> Optional[str]:
+def git_recent_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
     """SessionStart producer: a one-block digest of recently-captured memories.
 
     Window via ``HIPPO_RECENT_DAYS`` (default 14). Self-suppresses when nothing is recent.
     The untrusted-corpus gate (SEC-1) is enforced once, upstream, by ``session_start``'s
     ``build_context`` short-circuit — no producer re-checks it (one gate boundary, no extra
-    per-producer git call on the trusted hot path).
+    per-producer git call on the trusted hot path). ``ctx`` (LIF-6's shared per-run
+    ``RunContext``) is unused here — declared only so every producer in ``PRODUCERS``
+    shares ONE call shape.
     """
     try:
         days = float(os.environ.get("HIPPO_RECENT_DAYS", "14") or 14)
