@@ -1,15 +1,20 @@
 """Wikilink integrity linter for agent-memory files (Tier 3 of the activation roadmap).
 
-Reports four classes of link rot the corpus census found, READ-ONLY and idempotent —
+Reports five classes of link rot the corpus census found, READ-ONLY and idempotent —
 it NEVER edits a memory file:
-  - dangling     : a ``[[target]]`` that resolves to NO file (after slug normalization).
-  - ambiguous    : a ``[[target]]`` whose soft alias is claimed by TWO OR MORE files
-                   (COR-9) — resolve() refuses it rather than guess, and the lint line
-                   names every claimant so the fix (link the full stem) is obvious.
-  - slug-mismatch: a ``[[target]]`` that DOES resolve, but only via a soft alias
-                   (prefix-strip / ``name:`` slug) rather than the canonical filename stem —
-                   i.e. it works today but is written in a non-canonical form.
-  - orphan       : a memory with zero OUTBOUND wikilinks (nothing points out of it).
+  - dangling      : a ``[[target]]`` that resolves to NO file (after slug normalization).
+  - ambiguous     : a ``[[target]]`` whose soft alias is claimed by TWO OR MORE files
+                    (COR-9) — resolve() refuses it rather than guess, and the lint line
+                    names every claimant so the fix (link the full stem) is obvious.
+  - slug-mismatch : a ``[[target]]`` that DOES resolve, but only via a soft alias
+                    (prefix-strip / ``name:`` slug) rather than the canonical filename stem —
+                    i.e. it works today but is written in a non-canonical form.
+  - typed-dangling: a typed relation target (GRA-4 — ``supersedes``/``contradicts``/
+                    ``refines`` frontmatter) that resolves to NO memory. Worse than a
+                    dangling wikilink: a dangling ``supersedes`` silently disables the
+                    demotion/annotation it was written to cause. Ambiguous typed targets
+                    land here too, with the claimants named (same COR-9 refusal).
+  - orphan        : a memory with zero OUTBOUND wikilinks (nothing points out of it).
 
 Surfaces a one-line health note for the SessionStart dispatcher (``session_start.py``).
 """
@@ -20,6 +25,7 @@ import os
 from typing import Dict, List, Optional
 
 from .links import LinkGraph, build_graph
+from .staleness import RunContext
 
 
 def lint(memory_dir: str, index_dir: Optional[str] = None) -> dict:
@@ -37,6 +43,7 @@ def lint(memory_dir: str, index_dir: Optional[str] = None) -> dict:
             "dangling": [],
             "ambiguous": [],
             "slug_mismatch": [],
+            "typed_dangling": [],
             "orphans": [],
             "files": 0,
         }
@@ -64,13 +71,32 @@ def lint(memory_dir: str, index_dir: Optional[str] = None) -> dict:
                     {"file": fname, "target": t, "resolves_to": resolved}
                 )
 
+    # Typed relations (GRA-4) whose target resolves to no memory. `claimants` is non-empty
+    # when the target is an AMBIGUOUS alias (two files claim it — the fix is disambiguating,
+    # not creating) and empty when it is genuinely dangling — one finding class, but the
+    # line still tells the user which repair applies.
+    typed_dangling: List[dict] = []
+    for fname, rels in sorted(g.typed_unresolved.items()):
+        for rel, targets in sorted(rels.items()):
+            for t in targets:
+                typed_dangling.append(
+                    {
+                        "file": fname,
+                        "relation": rel,
+                        "target": t,
+                        "claimants": g.ambiguous_claimants(t),
+                    }
+                )
+
     return {
         "ok": True,
         "files": len(g.files),
         "edges": sum(len(v) for v in g.adjacency.values()),
+        "typed_edges": sum(len(t) for m in g.typed.values() for t in m.values()),
         "dangling": dangling,
         "ambiguous": ambiguous,
         "slug_mismatch": slug_mismatch,
+        "typed_dangling": typed_dangling,
         "orphans": g.orphans(),
     }
 
@@ -82,8 +108,9 @@ def health_line(report: dict) -> Optional[str]:
     n_dangling = len(report.get("dangling", []))
     n_ambiguous = len(report.get("ambiguous", []))
     n_mismatch = len(report.get("slug_mismatch", []))
+    n_typed = len(report.get("typed_dangling", []))
     n_orphans = len(report.get("orphans", []))
-    if n_dangling == 0 and n_ambiguous == 0 and n_mismatch == 0:
+    if n_dangling == 0 and n_ambiguous == 0 and n_mismatch == 0 and n_typed == 0:
         return None  # orphans alone are informational, not rot — don't nag every session
     bits = []
     if n_dangling:
@@ -99,18 +126,29 @@ def health_line(report: dict) -> Optional[str]:
         bits.append(f"{n_ambiguous} ambiguous [[wikilink]] target(s): {examples}{more}")
     if n_mismatch:
         bits.append(f"{n_mismatch} non-canonical (slug-mismatch) link(s)")
+    if n_typed:
+        # A dangling typed relation is REAL rot with TEETH — a supersedes edge that
+        # resolves to nothing silently disables the demotion it exists to cause (GRA-4),
+        # so it is loud at SessionStart like dangling/ambiguous wikilinks.
+        examples = ", ".join(f"{d['relation']}: {d['target']}" for d in report["typed_dangling"][:3])
+        more = "" if n_typed <= 3 else f" (+{n_typed - 3} more)"
+        bits.append(f"{n_typed} dangling typed relation target(s): {examples}{more}")
     tail = f"; {n_orphans} orphan memo(s)" if n_orphans else ""
     return "🔗 Memory link health — " + "; ".join(bits) + tail + " (run `memory.lint_links`)."
 
 
-def lint_links_producer(memory_dir: str, repo_root: str) -> Optional[str]:
+def lint_links_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
     """SessionStart producer (signature matches the dispatcher). Self-suppresses when clean.
 
     GRA-6: routes through the persisted edge cache so SessionStart performs ONE corpus
     read total — the dispatcher's ``refresh_index`` side effect reads the corpus and
     (re)persists ``links.json`` before producers run, so this lint reconstructs the graph
     from the cache with zero file reads. A missing/stale cache silently falls back to the
-    full re-read inside ``build_graph`` (correctness never depends on the cache).
+    full re-read inside ``build_graph`` (correctness never depends on the cache). ``ctx``
+    (LIF-6's shared per-run ``RunContext``) is unused here — declared only so every
+    producer in ``PRODUCERS`` shares ONE call shape.
     """
     try:
         from .build_index import default_index_dir
@@ -138,7 +176,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("could not build link graph")
         return 1
 
-    print(f"files={report['files']} edges={report['edges']}")
+    print(f"files={report['files']} edges={report['edges']} typed={report.get('typed_edges', 0)}")
     print(f"dangling targets : {len(report['dangling'])}")
     for d in report["dangling"]:
         print(f"  ✗ {d['file']} -> [[{d['target']}]]")
@@ -149,6 +187,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"slug mismatches  : {len(report['slug_mismatch'])}")
     for d in report["slug_mismatch"][:50]:
         print(f"  ~ {d['file']} -> [[{d['target']}]] (resolves to {d['resolves_to']})")
+    print(f"typed dangling   : {len(report.get('typed_dangling', []))}")
+    for d in report.get("typed_dangling", []):
+        # Ambiguous typed targets carry claimants (disambiguate); genuinely-dangling don't.
+        who = f" (claimed by {', '.join(d['claimants'])})" if d.get("claimants") else ""
+        print(f"  ✗ {d['file']} -> {d['relation']}: {d['target']}{who}")
     print(f"orphans (no outbound links): {len(report['orphans'])}")
     if args.show_orphans:
         for o in report["orphans"]:

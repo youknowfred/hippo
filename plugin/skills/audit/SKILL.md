@@ -457,15 +457,22 @@ For each selected item, concretely:
    - **fix** — the claim is now wrong in a way you can correct inline; edit the memory body
      yourself in this session, then recommend `semantic_reverify(name, "fix", ...)`.
    - **demote** — the claim is wrong or no longer worth tracking. Recommend
-     `semantic_reverify(name, "demote", ...)` — the staleness flag stays **set** by design; if
-     this is also an authority-evidence-gap hit, say so explicitly (demoting the memory doesn't
-     fix the governance doc that still cites it — that needs its own follow-up edit).
+     `semantic_reverify(name, "demote", ...)` — the staleness flag stays **set** by design, and
+     the call itself chains `invalid_after` onto the memory (LIF-1), so recall's pre-cut penalty
+     demotes it immediately — no separate `staleness --invalidate` step. If this is also an
+     authority-evidence-gap hit, say so explicitly (demoting the memory doesn't fix the
+     governance doc that still cites it — that needs its own follow-up edit).
    - **escalate** (local addition — use only when a real verdict genuinely requires domain
      knowledge this skill can't independently verify, e.g. a production-tuned constant) — no
      autonomous verdict, flag the specific open question for the operator.
    - **unverifiable** (local addition) — the cited path was deleted or `source_commit` no longer
      resolves (a rebase/squash) — route to a human-decision appendix, never force-fit into
      demote.
+
+   When the **operator** explicitly defers an item instead of rendering a verdict, ack it with
+   `"$PY" -m memory.reconsolidate --snooze <name>` (LIF-1) — the worklist stops re-nagging it
+   for the next 5 sessions and the ack is logged in the reconsolidation ledger. A snooze is a
+   deferral, not a verdict: never record it as one of the outcomes above.
 5. Every verdict needs a 2-4 sentence justification **citing the specific diff hunk, commit, or
    Grep result you actually read**. A verdict with no cited evidence is a re-labeled
    `staleness.find_stale()` row, not a judgment.
@@ -549,15 +556,35 @@ Every write goes through the tools' **existing single-item, no-bulk primitives**
 never adds a batch wrapper around them:
 
 - **graduate / fix (body already hand-edited)** → `reconsolidate.semantic_reverify(name,
-  outcome, memory_dir, repo_root)`. Executes **same-turn** under `--apply`.
+  outcome, memory_dir, repo_root)`. Executes **same-turn** under `--apply`. **RET-6
+  reinforcement (automatic, no extra step):** this call routes through
+  `provenance.reverify_file`, which re-baselines `source_commit` to HEAD and — the FIRST
+  time this memory is ever reverified — additively stamps a write-once `last_verified`
+  timestamp. If this memory was carrying a `SessionStart`/recall verify-at-use banner
+  ("anchored to `<sha>`; N cited files changed since — verify before relying"), it clears
+  itself on the **next** `SessionStart` staleness scan (`find_stale`/`stale.json`) with no
+  separate command — the banner's presence is derived purely from `stale.json`, and a
+  reinforced memory simply stops appearing in it. Do not chase the banner with any other
+  primitive; graduate/fix already IS the clear.
 - **demote** → same call with `outcome="demote"` — staleness flag stays set by design; still
-  logged.
+  logged. The call chains `invalid_after` onto the memory itself (LIF-1, recorded in the
+  ledger event as `invalidated`), so the recall demotion is immediate — do **not** follow up
+  with a separate `staleness.set_invalid_after` for the same memory.
 - **archive** → `archive.archive_memory(name, memory_dir, repo_root)`, but **only** for names
   `archive.archive_candidates()` itself independently returned in Phase 1 — never from the
   graph-isolated watch-list or any other heuristic this skill invents. Archive gets a **two-turn
   confirmation gate**: the first `--apply` invocation proposes archive candidates in the report
   and takes no `git mv` action; only a follow-up invocation that **explicitly names the specific
-  memories to archive** executes the move.
+  memories to archive** executes the move. The primitive carries its own inbound guard (GRA-5):
+  it refuses — `refused: True` plus the `referrers` list in the result, no `git mv` — while any
+  other memory still references the target via a `[[wikilink]]` or a typed
+  `supersedes`/`contradicts`/`refines` edge. Candidates are zero-untyped-inbound by
+  construction, so a refusal here means the graph changed since Phase 1 or a typed edge points
+  at the target — rewrite the referring memories (or record a `supersedes:` edge on the
+  successor, the machine-readable forwarding pointer) rather than reaching for `force=True`;
+  when the operator explicitly chooses to force (keeping the typed forwarding pointer in
+  place), the result still lists the referrers — rewrite any plain wikilinks among them in the
+  same commit.
 - **link-densification (GRA-3)** → same **two-turn confirmation gate** as archive: the first
   `--apply` invocation only PRODUCES the suggestions table above and applies NOTHING (there is
   no bulk primitive for this — appending a wikilink is a body edit, and body edits are exactly

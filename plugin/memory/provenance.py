@@ -21,6 +21,7 @@ import json
 import os
 import re
 import subprocess
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 try:
@@ -312,6 +313,81 @@ def ensure_self_ignoring_dir(path: str) -> None:
         pass
 
 
+# --------------------------------------------------------------------------- #
+# COR-7: corpus format versioning
+# --------------------------------------------------------------------------- #
+# The version of the CORPUS's own on-disk conventions (frontmatter schemas, marker files,
+# floor layout) that this plugin reads and writes. Distinct from the INDEX's
+# ``build_index.SCHEMA_VERSION``: the index is a derived cache (a mismatch is healed by one
+# silent rebuild), while the corpus is the git-tracked single source of authority — a
+# format change there is a MIGRATION of user data, per-item and agent-gated, never
+# automatic (see plugin/memory/README.md, "Corpus format versioning"). Declared by a
+# ``.claude/memory/.format`` marker committed WITH the corpus (it describes the corpus; it
+# is NOT a rebuildable cache), JSON ``{"corpus_format": N}``. A corpus with NO marker reads
+# as format 1 — every pre-v0.5.0 corpus predates the marker, so absence must mean the
+# baseline, never an error. A breaking corpus change bumps this ONE constant; init's
+# seeding snippet and doctor's check follow it (a parity test pins the init skill's
+# literal to this constant so the two can't drift).
+#
+# Format history:
+#   1 — the pre-versioning baseline (frontmatter with cited_paths/source_commit/
+#       invalid_after, [[wikilink]] bodies, MEMORY.md floor).
+#   2 — GRA-4 typed edges: frontmatter may carry `supersedes:`/`contradicts:`/`refines:`
+#       lists (top-level or under `metadata:`). Purely ADDITIVE — a v1 corpus with no
+#       typed relations is read identically by a v2 plugin, so the migration is just
+#       reviewing that no frontmatter key collides and stamping the marker
+#       (`write_corpus_format`); see plugin/memory/README.md "Corpus format versioning".
+CORPUS_FORMAT_VERSION = 2
+_FORMAT_MARKER_NAME = ".format"
+
+
+def format_marker_path(memory_dir: str) -> str:
+    """``<memory_dir>/.format`` — the corpus format marker's one canonical location."""
+    return os.path.join(memory_dir, _FORMAT_MARKER_NAME)
+
+
+def read_corpus_format(memory_dir: str) -> int:
+    """The corpus's declared format version; ``1`` when undeclared. Never raises.
+
+    A missing marker IS format 1 (the pre-versioning baseline every existing corpus is
+    on), so no corpus ever needs backfilling to be readable. An unreadable/corrupt/
+    wrong-shape marker also degrades to 1 — the never-raise direction; doctor's format
+    check reports against whatever this returns, so a garbled marker at worst reads as
+    the baseline rather than blocking recall.
+    """
+    try:
+        p = format_marker_path(memory_dir)
+        if not os.path.isfile(p):
+            return 1
+        with open(p, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if isinstance(data, dict):
+            v = data.get("corpus_format")
+            if isinstance(v, int) and not isinstance(v, bool):
+                return v
+        return 1
+    except Exception:
+        return 1
+
+
+def write_corpus_format(memory_dir: str, version: Optional[int] = None) -> bool:
+    """Stamp the corpus format marker (default: this plugin's ``CORPUS_FORMAT_VERSION``).
+
+    Returns True on success, False on any failure (missing dir, permissions) — callers
+    surface the failure rather than pretending the corpus is stamped. Deliberately has NO
+    bulk-migration counterpart: stamping a NEWER version onto an old corpus is the final,
+    explicit step of a doctor-driven migration, never something a hook or sweep does.
+    """
+    try:
+        marker = format_marker_path(memory_dir)
+        with open(marker, "w", encoding="utf-8") as fh:
+            json.dump({"corpus_format": int(version if version is not None else CORPUS_FORMAT_VERSION)}, fh)
+            fh.write("\n")
+        return True
+    except Exception:
+        return False
+
+
 def split_frontmatter(text: str) -> Tuple[Optional[List[str]], str]:
     """Split a memory file into ``(frontmatter_lines, body_text)``.
 
@@ -407,6 +483,24 @@ def resolve_citations(
 
 def cited_paths_for_body(body: str, repo_files: set, basename_index: Dict[str, List[str]]) -> List[str]:
     return resolve_citations(extract_citations(body), repo_files, basename_index)
+
+
+def _frontmatter_cited_paths(fm: dict) -> List[str]:
+    """The ``cited_paths`` a PARSED frontmatter dict already carries (both schemas).
+
+    The "before" side of ``dropped_citations`` (LIF-3). Dict-level on purpose: the two
+    result-producing callers (``backfill_file``'s refresh branch, ``reverify_file``) have
+    already parsed the frontmatter, and ``staleness.read_provenance`` — the text-level
+    reader with the same both-schema lookup — lives in a module that imports THIS one,
+    so it cannot be reused here without a cycle.
+    """
+    meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+    cited = fm.get("cited_paths")
+    if cited is None:
+        cited = (meta or {}).get("cited_paths")
+    if not isinstance(cited, list):
+        return []
+    return [c for c in cited if isinstance(c, str)]
 
 
 def git_last_commit(rel_path: str, repo_root: str) -> Optional[str]:
@@ -577,11 +671,19 @@ def backfill_file(
     ``source_commit_time`` (SHP-3) is the committer epoch of ``source_commit``, recorded
     alongside it — the fallback baseline ``staleness.find_stale`` uses when the sha itself
     is unresolvable (squash-merge / shallow clone erases it from history).
+
+    ``dropped_citations`` (LIF-3): the cited paths present in the frontmatter BEFORE a
+    refresh re-derivation and absent AFTER — the rename/delete case, where a citation
+    silently vanishes (possibly emptying ``cited_paths``, which permanently exempts the
+    memory from staleness). Always ``[]`` on the initial-backfill path (nothing recorded
+    yet, so nothing can be lost) and on a refusal (nothing was re-derived); callers must
+    surface a non-empty list, never swallow it.
     """
     result = {
         "path": path,
         "changed": False,
         "cited": [],
+        "dropped_citations": [],
         "source_commit": None,
         "source_commit_time": None,
         "error": None,
@@ -592,6 +694,7 @@ def backfill_file(
         _, body = split_frontmatter(text)
         cited = cited_paths_for_body(body, repo_files, basename_index)
         rel = os.path.relpath(path, repo_root)
+        dropped: List[str] = []
         if refresh and _has_cited_paths(split_frontmatter(text)[0] or []):
             fm = parse_frontmatter(text)
             if not fm:
@@ -611,6 +714,7 @@ def backfill_file(
                 sc, sct = git_last_commit_with_time(rel, repo_root)
                 if sc is None:
                     sc, sct = git_head_with_time(repo_root)
+            dropped = [p for p in _frontmatter_cited_paths(fm) if p not in cited]
             text = _strip_provenance(text)  # drop old provenance; body untouched
         else:
             # A file with no commit history yet (just created by write_memory, or
@@ -622,7 +726,15 @@ def backfill_file(
             if sc is None:
                 sc, sct = git_head_with_time(repo_root)
         new_text, changed = backfill_text(text, cited, sc, sct)
-        result.update({"cited": cited, "source_commit": sc, "source_commit_time": sct, "changed": changed})
+        result.update(
+            {
+                "cited": cited,
+                "dropped_citations": dropped,
+                "source_commit": sc,
+                "source_commit_time": sct,
+                "changed": changed,
+            }
+        )
         if changed and not dry_run:
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(new_text)
@@ -634,8 +746,13 @@ def backfill_file(
 def _is_memory_filename(name: str) -> bool:
     """THE corpus-membership filter — one definition, shared with the edge cache's
     scandir stat sweep (GRA-6), which must see exactly the files ``_iter_memory_files``
-    yields or the cache-freshness check would silently drift from the graph builder."""
-    return name.endswith(".md") and name not in ("MEMORY.md", "MEMORY.full.md")
+    yields or the cache-freshness check would silently drift from the graph builder.
+
+    ``CONVENTIONS.md`` (DOC-6) is excluded the same canonical way as ``MEMORY.md`` /
+    ``MEMORY.full.md`` — it is a reference doc seeded into the corpus by ``/hippo:init``, not
+    a memory, and must never be indexed, recalled, floor-scanned, or counted in corpus stats.
+    """
+    return name.endswith(".md") and name not in ("MEMORY.md", "MEMORY.full.md", "CONVENTIONS.md")
 
 
 def _iter_memory_files(memory_dir: str):
@@ -705,6 +822,56 @@ def backfill_corpus(
     ]
 
 
+_LAST_VERIFIED_RE = re.compile(r"\s*last_verified\s*:")
+
+
+def _has_last_verified(fm_lines: List[str]) -> bool:
+    return any(_LAST_VERIFIED_RE.match(ln) for ln in fm_lines)
+
+
+def _stamp_last_verified(text: str, ts: str) -> str:
+    """Insert an ADDITIVE ``last_verified: "<ts>"`` frontmatter key — RET-6's reinforcement
+    stamp. WRITE-ONCE: callers only reach this after confirming the key is absent (this
+    internal ``_has_last_verified`` check is a defensive second guard, same belt-and-suspenders
+    style ``backfill_text``'s own ``_has_cited_paths`` check already has) — a file that
+    already carries the key is returned byte-identical, never re-timestamped. Records WHEN a
+    human first confirmed this memory (graduate/fix), distinct from ``source_commit_time``
+    (WHICH commit the CITED CODE was at) — the banner-clearing signal itself is
+    ``source_commit``, re-baselined on every reverify regardless of this stamp. Nests under an
+    existing ``metadata:`` block, mirroring ``backfill_text``'s own new-key insertion, so a
+    reader finds it wherever the file's other provenance keys already live. The body is never
+    touched. No-op on unfenced frontmatter (the same guard every writer here uses).
+    """
+    if not text.startswith(_FENCE):
+        return text
+    lines = text.split("\n")
+    close = next((i for i in range(1, len(lines)) if lines[i].strip() == _FENCE), None)
+    if close is None:
+        return text
+    fm = lines[1:close]
+    if _has_last_verified(fm):
+        return text
+    new_key = f"last_verified: {json.dumps(ts)}"
+    meta_idx = next((i for i, ln in enumerate(fm) if re.match(r"^metadata\s*:\s*$", ln)), None)
+    if meta_idx is not None:
+        indent = "  "
+        last = meta_idx
+        j = meta_idx + 1
+        while j < len(fm):
+            ln = fm[j]
+            if ln.strip() == "" or not ln.startswith((" ", "\t")):
+                break
+            m = re.match(r"^(\s+)\S", ln)
+            if m:
+                indent = m.group(1)
+            last = j
+            j += 1
+        fm2 = fm[: last + 1] + [f"{indent}{new_key}"] + fm[last + 1:]
+    else:
+        fm2 = fm + [new_key]
+    return "\n".join([lines[0]] + fm2 + lines[close:])
+
+
 # --------------------------------------------------------------------------- #
 # Re-verify (human-confirmed staleness re-baseline to HEAD — distinct from --refresh)
 # --------------------------------------------------------------------------- #
@@ -736,13 +903,28 @@ def reverify_file(
     re-verification re-opens the soft-invalidation validity window, exactly like it
     re-baselines the staleness window. Mirrors the rest of this function's per-item,
     HEAD-baseline, refuse-unparseable contract; nothing else about that contract changes.
+
+    ``dropped_citations`` (LIF-3): cited paths in the frontmatter BEFORE this re-derivation
+    that are absent AFTER — same contract as ``backfill_file``'s; a drop (especially to
+    zero, which makes the memory staleness-exempt) must be surfaced by the caller, never
+    a silent shrink.
+
+    RET-6 reinforcement: also stamps ``last_verified`` — but only the FIRST time this
+    memory is ever re-verified (write-once via ``_stamp_last_verified``; a memory reverified
+    a second time keeps its original stamp, never a running log of every re-check). This is
+    supplementary provenance — the signal that actually clears RET-6's drift banner is
+    ``source_commit`` itself, re-baselined to HEAD on EVERY call above, which is why a
+    reinforced memory drops out of the next SessionStart's ``find_stale`` scan (and thus
+    ``stale.json``) regardless of whether ``last_verified`` was already set.
     """
     result = {
         "path": path,
         "changed": False,
         "cited": [],
+        "dropped_citations": [],
         "source_commit": None,
         "source_commit_time": None,
+        "last_verified": None,
         "error": None,
     }
     try:
@@ -755,7 +937,8 @@ def reverify_file(
         if not _has_cited_paths(fm_lines):
             result["error"] = "no provenance yet — run backfill first"
             return result
-        if not parse_frontmatter(text):
+        fm = parse_frontmatter(text)
+        if not fm:
             # Unparseable frontmatter: re-baselining would rewrite an already-broken file AND
             # silently move the baseline. Refuse loudly (fix the YAML first) — same guard as the
             # refresh path; find_unparseable / the integrity producer surface these.
@@ -763,15 +946,73 @@ def reverify_file(
             return result
         sc, sct = git_head_with_time(repo_root)
         cited = cited_paths_for_body(body, repo_files, basename_index)
-        new_text, _ = backfill_text(_strip_invalid_after(_strip_provenance(text)), cited, sc, sct)
+        dropped = [p for p in _frontmatter_cited_paths(fm) if p not in cited]
+        stripped = _strip_invalid_after(_strip_provenance(text))
+        # RET-6: last_verified is write-once — a memory that already carries one keeps its
+        # FIRST confirmation timestamp; only an as-yet-never-verified memory gets stamped.
+        # Stamped BEFORE backfill_text re-inserts cited_paths/source_commit/source_commit_time
+        # (not after) so the key lands in the SAME relative position every call — `_strip_provenance`
+        # never removes it, so an append-after-backfill_text ordering would flip on the very next
+        # call (the triplet always re-lands at fm's tail while last_verified sat still), breaking
+        # this function's idempotence contract on the SECOND reverify, not the first.
+        meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+        existing_lv = fm.get("last_verified")
+        if existing_lv is None:
+            existing_lv = meta.get("last_verified")
+        if isinstance(existing_lv, str) and existing_lv.strip():
+            lv = existing_lv
+            pre_stamp = stripped  # already present -- untouched by the strip above
+        else:
+            lv = datetime.now(timezone.utc).isoformat()
+            pre_stamp = _stamp_last_verified(stripped, lv)
+        new_text, _ = backfill_text(pre_stamp, cited, sc, sct)
         changed = new_text != text  # idempotent: a no-op when provenance already matches
-        result.update({"cited": cited, "source_commit": sc, "source_commit_time": sct, "changed": changed})
+        result.update(
+            {
+                "cited": cited,
+                "dropped_citations": dropped,
+                "source_commit": sc,
+                "source_commit_time": sct,
+                "last_verified": lv,
+                "changed": changed,
+            }
+        )
         if changed and not dry_run:
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(new_text)
     except Exception as exc:
         result["error"] = str(exc)
     return result
+
+
+def citation_rot_lines(
+    name: str, cited_after: List[str], dropped: List[str], *, dry_run: bool = False
+) -> List[str]:
+    """The ONE rendering of a per-file citation-drop event (LIF-3).
+
+    Shared by this module's CLI (``--refresh`` / ``--refresh-one`` / ``--reverify``) and
+    ``reconsolidate``'s ``--reverify`` so the loud line cannot drift between surfaces.
+    ``dropped`` is a result's ``dropped_citations``; ``cited_after`` its re-derived
+    ``cited``. A drop to ZERO is called out distinctly: with no cited_paths left,
+    ``find_stale`` has nothing to watch — the memory becomes staleness-EXEMPT, the worst
+    rot state, not a cosmetic shrink. Returns ``[]`` when nothing was dropped.
+    """
+    if not dropped:
+        return []
+    verb = "would drop" if dry_run else "dropped"
+    shown = ", ".join(dropped[:6])
+    more = f" (+{len(dropped) - 6} more)" if len(dropped) > 6 else ""
+    if not cited_after:
+        state = "would be" if dry_run else "is now"
+        return [
+            f"⚠ citation rot — {name}: {verb} ALL {len(dropped)} cited path(s), no longer in "
+            f"the repo ({shown}{more}) — cited_paths {state} EMPTY, so this memory is EXEMPT "
+            "from staleness tracking until its body cites current code again"
+        ]
+    return [
+        f"⚠ citation rot — {name}: {verb} {len(dropped)} cited path(s) no longer in the repo "
+        f"({shown}{more}); {len(cited_after)} citation(s) remain"
+    ]
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -826,6 +1067,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"reverify {base}: {verb} source_commit -> HEAD ({(r['source_commit'] or '')[:9]})")
         else:
             print(f"reverify {base}: already current (no change)")
+        for ln in citation_rot_lines(base, r["cited"], r["dropped_citations"], dry_run=args.dry_run):
+            print(ln)
         return 0
 
     if args.refresh_one:
@@ -841,6 +1084,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"refresh-one {base}: {verb} cited_paths ({len(r['cited'])} citation(s)); source_commit unchanged")
         else:
             print(f"refresh-one {base}: already current (no change)")
+        for ln in citation_rot_lines(base, r["cited"], r["dropped_citations"], dry_run=args.dry_run):
+            print(ln)
         return 0
 
     results = backfill_corpus(memory_dir, repo_root, dry_run=args.dry_run, refresh=args.refresh)
@@ -854,6 +1099,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"errors               : {len(errored)}")
         for r in errored[:10]:
             print(f"  ! {os.path.basename(r['path'])}: {r['error']}")
+    # LIF-3: a re-derivation that DROPPED citations is a rot event, not a cosmetic shrink —
+    # every drop is named per-file (drop-to-zero loudest), never buried in the counts above.
+    rotted = [r for r in results if r["dropped_citations"]]
+    if rotted:
+        print(f"citation rot         : {len(rotted)} file(s) {'would drop' if args.dry_run else 'dropped'} cited path(s)")
+        for r in rotted:
+            for ln in citation_rot_lines(
+                os.path.basename(r["path"]), r["cited"], r["dropped_citations"], dry_run=args.dry_run
+            ):
+                print(f"  {ln}")
     return 0
 
 

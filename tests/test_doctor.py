@@ -18,6 +18,7 @@ import numpy as np
 
 from memory import build_index as B
 from memory import doctor as D
+from memory import provenance as P
 
 from .conftest import git_commit, write_file
 
@@ -274,12 +275,18 @@ def test_index_corruption_surfaces_truncated_manifest(repo, memory_dir, tmp_path
 
 
 def test_format_version_ok_when_current(repo, memory_dir, tmp_path, monkeypatch):
+    from memory.provenance import write_corpus_format
+
     idx = str(tmp_path / ".memory-index")
     monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     _seed(memory_dir)
     write_file(memory_dir, "a.md", _mem("a", "alpha"))
     B.build_index(memory_dir, idx)
+    # "Current" means the corpus DECLARES the current format: since GRA-4 bumped
+    # CORPUS_FORMAT_VERSION past the v1 baseline, an unstamped corpus correctly warns
+    # (it lags the plugin — the doctor-driven migration surface), so stamp it here.
+    assert write_corpus_format(memory_dir) is True
     r = D.check_format_version(_ctx(memory_dir, repo))
     assert r["status"] == "ok" and f"v{B.SCHEMA_VERSION}" in r["message"]
 
@@ -299,6 +306,53 @@ def test_format_version_warns_on_old_schema(repo, memory_dir, tmp_path, monkeypa
         json.dump(man, fh)
     r = D.check_format_version(_ctx(memory_dir, repo))
     assert r["status"] == "warn" and "format version" in r["message"]
+    # COR-7: the mismatch is now ENFORCED (the manifest reads as absent) — the message must
+    # say the stale index is ignored and rebuilt, and the check must still SEE the old
+    # version (it reads the raw manifest; the gated loader would hide exactly this state).
+    assert f"v{B.SCHEMA_VERSION - 1}" in r["message"]
+    assert "rebuild" in r["message"].lower()
+
+
+# --------------------------------------------------------------------------- #
+# COR-7: corpus format vs plugin expectation — BOTH directions (the roadmap AC)
+# --------------------------------------------------------------------------- #
+def test_format_version_reports_corpus_format_alongside_index(repo, memory_dir, tmp_path, monkeypatch):
+    idx = str(tmp_path / ".memory-index")
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _seed(memory_dir)
+    write_file(memory_dir, "a.md", _mem("a", "alpha"))
+    B.build_index(memory_dir, idx)
+    assert P.write_corpus_format(memory_dir) is True
+    r = D.check_format_version(_ctx(memory_dir, repo))
+    assert r["status"] == "ok"
+    assert f"corpus format current (v{P.CORPUS_FORMAT_VERSION})" in r["message"]
+
+
+def test_format_version_warns_when_corpus_newer_than_plugin(repo, memory_dir, monkeypatch):
+    """Corpus NEWER than the plugin -> update the plugin. Reported even with NO index built
+    (a fresh clone on a stale plugin is exactly this shape)."""
+    monkeypatch.setenv("HIPPO_INDEX_DIR", str(os.path.join(repo, ".memory-index")))
+    _seed(memory_dir)
+    assert P.write_corpus_format(memory_dir, version=P.CORPUS_FORMAT_VERSION + 1) is True
+    r = D.check_format_version(_ctx(memory_dir, repo))
+    assert r["status"] == "warn"
+    assert "update the hippo plugin" in r["message"]
+    assert f"v{P.CORPUS_FORMAT_VERSION + 1}" in r["message"]
+
+
+def test_format_version_warns_when_corpus_older_than_plugin(repo, memory_dir, monkeypatch):
+    """Corpus OLDER than the plugin -> the doctor-driven migration path (never automatic).
+    An UNDECLARED corpus (no marker == format 1) under a post-bump plugin is the flagship
+    case, so no marker is written here."""
+    monkeypatch.setenv("HIPPO_INDEX_DIR", str(os.path.join(repo, ".memory-index")))
+    _seed(memory_dir)
+    monkeypatch.setattr(P, "CORPUS_FORMAT_VERSION", P.CORPUS_FORMAT_VERSION + 1)
+    r = D.check_format_version(_ctx(memory_dir, repo))
+    assert r["status"] == "warn"
+    assert "MIGRATION" in r["message"]
+    assert "README" in r["message"]  # points at the documented doctor-driven path
+    assert "never migrates automatically" in r["message"]
 
 
 # --------------------------------------------------------------------------- #

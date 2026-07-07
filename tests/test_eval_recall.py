@@ -120,6 +120,13 @@ def test_token_reduction_gate(tmp_path, monkeypatch):
 
 
 def test_latency_is_recorded(tmp_path, monkeypatch):
+    """Hermetic shape check ONLY: latency() returns a well-formed report. QUA-10: the
+    STRICT `p95 < GATE_P95_MS` wall-clock assertion moved to
+    test_latency_p95_is_under_gate (@pytest.mark.slow, below) — a real wall-clock
+    measurement is environment/timing-sensitive (noisy shared CI runner, thermal
+    throttling, etc.) and must never be able to flake a hermetic lane red. The eval
+    CLI's OWN gate (`eval_recall --gate-cold`, dense CI lane) enforces GATE_P95_MS for
+    real against the shipped corpus regardless of this test's marker."""
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
@@ -128,6 +135,22 @@ def test_latency_is_recorded(tmp_path, monkeypatch):
     lat = E.latency(index, [h["query"] for h in _HARD_SET], k=10)
     assert lat["n"] == len(_HARD_SET)
     assert lat["p95"] >= 0.0
+
+
+@pytest.mark.slow
+def test_latency_p95_is_under_gate(tmp_path, monkeypatch):
+    """QUA-10: the strict wall-clock half of test_latency_is_recorded, split out and
+    marked slow so it's deselected from the default hermetic lane (pytest.ini addopts
+    `-m "not network and not slow"`) and instead runs alongside the dense CI lane's
+    network-marked tests (`-m "network or slow"`) — a machine already reserved and
+    less noisy, where a real timing assertion is meaningful. See
+    test_latency_is_recorded's docstring for the full rationale."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    lat = E.latency(index, [h["query"] for h in _HARD_SET], k=10)
     assert lat["p95"] < E.GATE_P95_MS  # warm recall is well under the latency gate
 
 
@@ -146,24 +169,48 @@ def test_cold_latency_is_reported_not_gated(tmp_path, monkeypatch):
 
 
 def test_evaluate_all_gates_pass_on_tmp_corpus(tmp_path, monkeypatch):
+    """QUA-10: ``report["ok"]`` and ``recall_p95_ms``'s own ``pass`` flag are real wall-clock
+    assertions (evaluate() computes both from a live ``latency()`` measurement) — split into
+    test_evaluate_recall_p95_gate_passes_for_real (@pytest.mark.slow, below) so a noisy
+    hermetic runner can't flake THIS test red. Everything else here (the 4 deterministic
+    gates, cold_p50_ms's skip semantics, recall_p95_ms's structural shape) has no timing
+    dependency and stays hermetic."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)
+    # The 4 deterministic gates (no timing jitter) are asserted True directly.
+    for name in ("self_recall@10", "hard_recall@10", "mrr@10", "token_reduction"):
+        assert report["gates"][name]["pass"] is True, report["gates"][name]
+    # recall_p95_ms's SHAPE is checked hermetically (present, non-negative, right threshold)
+    # without asserting the strictly-timed `pass` flag itself.
+    p95_gate = report["gates"]["recall_p95_ms"]
+    assert p95_gate["value"] >= 0.0
+    assert p95_gate["threshold"] == E.GATE_P95_MS
+    # cold_latency itself (the report block) stays report-only regardless of gate_cold --
+    # only the derived cold_p50_ms GATE is opt-in (PRF-2).
+    assert "cold_latency" in report and report["cold_latency"]["n"] >= 1
+    assert report["gates"]["cold_p50_ms"]["pass"] is None  # not requested -> skipped
+    assert report["gates"]["cold_p50_ms"]["skipped"] is True
+
+
+@pytest.mark.slow
+def test_evaluate_recall_p95_gate_passes_for_real(tmp_path, monkeypatch):
+    """QUA-10: the strict wall-clock half of test_evaluate_all_gates_pass_on_tmp_corpus,
+    split out and marked slow (see that test's docstring) — ``report["ok"]`` and
+    ``recall_p95_ms["pass"]`` are real timing assertions and must not be able to flake the
+    default hermetic lane red. Runs alongside the dense CI lane's network-marked tests
+    (``-m "network or slow"``); the eval CLI's own ``--gate-cold`` run is the real merge
+    gate regardless of this test's outcome."""
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     hs_path = _write_hard_set(tmp_path)
     report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)
     assert report["ok"] is True, report["gates"]
-    # every NON-SKIPPED gate flag is true (PRF-2: cold_p50_ms is now a real gates-dict entry,
-    # but defaults to skipped/pass=None -- gate_cold=False was not requested here -- so it
-    # is correctly excluded rather than asserted True like the 5 always-on gates above).
-    assert all(
-        g["pass"] for g in report["gates"].values() if g.get("pass") is not None
-    ), report["gates"]
+    assert report["gates"]["recall_p95_ms"]["pass"] is True
     assert report["gates"]["recall_p95_ms"]["value"] < E.GATE_P95_MS
-    # cold_latency itself (the report block) stays report-only regardless of gate_cold --
-    # only the derived cold_p50_ms GATE is opt-in (PRF-2).
-    assert "cold_latency" in report and report["cold_latency"]["n"] >= 1
-    assert report["gates"]["cold_p50_ms"]["pass"] is None  # not requested -> skipped
-    assert report["gates"]["cold_p50_ms"]["skipped"] is True
 
 
 # --------------------------------------------------------------------------- #

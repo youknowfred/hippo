@@ -37,7 +37,20 @@ stat sweep (zero file reads); any mismatch/corruption falls back to the full re-
 ``load_edges`` is the O(1) recall-time loader (GRA-1): links.json only, no corpus scan —
 recall tolerates a slightly-stale edge list the same way it tolerates a stale index.
 
-Pure / read-only; never raises into a caller.
+Typed edges (GRA-4, corpus format 2): additive frontmatter relations —
+``supersedes: [name]``, ``contradicts: [name]``, ``refines: [name]`` — each a list of
+memory names/stems, read top-level OR under ``metadata:`` (the ``cited_paths`` read
+convention). ``[[wikilinks]]`` remain the untyped edge; typed relations live in their OWN
+structures (``typed``/``typed_inbound``), never in ``adjacency``, so GRA-1's untyped 1-hop
+expansion is untouched by them. Targets resolve through the SAME alias tiers as wikilinks
+(one resolution path — ``resolve()``); unresolved typed targets land in
+``typed_unresolved`` for the linter. Typed edges round-trip through links.json so recall
+reads them O(1) with zero corpus re-reads.
+
+Read-only, with ONE exception: ``add_typed_relation`` — the per-item, agent-gated write
+primitive reconsolidation's supersede outcome routes through (additive, body-preserving,
+mirrors ``staleness.set_invalid_after``'s frontmatter-write discipline). Never raises into
+a caller.
 """
 
 from __future__ import annotations
@@ -53,8 +66,14 @@ _WIKILINK_RE = re.compile(r"\[\[([^\]\[]+?)\]\]")
 
 # links.json schema — independent of the manifest's SCHEMA_VERSION (the two files evolve
 # separately; a manifest bump must not silently invalidate a perfectly good edge cache).
-LINKS_SCHEMA_VERSION = 1
+# v2 (GRA-4): per-file "typed" resolved-relation maps + top-level "typed_raw"/
+# "typed_unresolved" — a v1 cache reads as a miss and heals with one rebuild.
+LINKS_SCHEMA_VERSION = 2
 _LINKS_CACHE_NAME = "links.json"
+
+# GRA-4: the closed set of typed frontmatter relations. Order is the render order every
+# consumer (lint report, recall annotations) uses, so output stays deterministic.
+TYPED_RELATIONS = ("supersedes", "contradicts", "refines")
 
 
 def normalize_slug(s: str) -> str:
@@ -87,6 +106,44 @@ def parse_wikilinks(text: str) -> List[str]:
     return out
 
 
+def parse_typed_relations(fm: dict) -> Dict[str, List[str]]:
+    """``{relation: [raw targets]}`` from parsed frontmatter — only non-empty relations.
+
+    GRA-4: each relation key is read top-level FIRST, then under ``metadata:`` — the exact
+    ``cited_paths``/``source_commit`` convention ``staleness.read_provenance`` establishes
+    (the corpus uses both frontmatter schemas, and a top-level-only read would make typed
+    edges silently inert for the nested one). Values are lists of memory names/stems; a
+    bare string is tolerated as a one-element list (``supersedes: old-memory`` is the
+    natural single-target hand-authored form, mirroring ``_extract_invalid_after``'s
+    scalar tolerance). Non-string items are dropped; order is preserved, de-duped. Pure;
+    never raises.
+    """
+    out: Dict[str, List[str]] = {}
+    if not isinstance(fm, dict):
+        return out
+    meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+    for rel in TYPED_RELATIONS:
+        val = fm.get(rel)
+        if val is None:
+            val = (meta or {}).get(rel)
+        if isinstance(val, str):
+            val = [val]
+        if not isinstance(val, list):
+            continue
+        seen: Set[str] = set()
+        targets: List[str] = []
+        for t in val:
+            if not isinstance(t, str) or not t.strip():
+                continue
+            t = t.strip()
+            if t not in seen:
+                seen.add(t)
+                targets.append(t)
+        if targets:
+            out[rel] = targets
+    return out
+
+
 class LinkGraph:
     """Resolved wikilink adjacency over the memory corpus. All nodes are STEMS."""
 
@@ -113,6 +170,14 @@ class LinkGraph:
         # the codebase that inverts the graph (GRA-2 acceptance criterion). archive.py and
         # the audit skill consume it via inbound()/isolates() instead of re-inverting.
         self._inbound: Dict[str, Set[str]] = {}  # stem -> stems that link TO it
+        # Typed edges (GRA-4) — SPARSE (a stem appears only when it carries the relation),
+        # deliberately separate from ``adjacency`` so typed relations never leak into the
+        # untyped 1-hop expansion. ``_typed_inbound`` is the transpose, built in the same
+        # pass as ``_inbound`` (one inversion per direction, ever).
+        self.typed_raw: Dict[str, Dict[str, List[str]]] = {}  # stem -> {rel: raw targets}
+        self.typed: Dict[str, Dict[str, Set[str]]] = {}  # stem -> {rel: resolved stems}
+        self.typed_unresolved: Dict[str, Dict[str, List[str]]] = {}  # stem -> {rel: misses}
+        self._typed_inbound: Dict[str, Dict[str, Set[str]]] = {}  # stem -> {rel: sources}
         self._build()
 
     # -- construction ----------------------------------------------------- #
@@ -181,12 +246,15 @@ class LinkGraph:
 
         # Pass 2: prefix-stripped + name-slug aliases — soft tier, registered
         # UNCONDITIONALLY (COR-9) so same-tier collisions become ambiguous instead of
-        # silently resolving to whichever file sorts first.
+        # silently resolving to whichever file sorts first. The parsed frontmatter is kept
+        # for the typed-relation pass below — one parse per file, not two.
+        fms: Dict[str, dict] = {}
         for stem in self.files:
             stripped = _strip_first_segment(stem)
             if stripped:
                 self._register_soft_alias(stripped, stem)
             fm = parse_frontmatter(texts.get(stem, ""))
+            fms[stem] = fm
             name = fm.get("name") if isinstance(fm, dict) else None
             if isinstance(name, str):
                 self._register_soft_alias(normalize_slug(name), stem)
@@ -213,6 +281,22 @@ class LinkGraph:
             self.adjacency[stem] = resolved
             if missed:
                 self.unresolved[stem] = missed
+
+            # Typed edges (GRA-4): SAME resolve() path as wikilinks — one resolution path,
+            # so a typed target enjoys/suffers exactly the alias tiers and ambiguity
+            # refusals a [[wikilink]] does. Self-targets are dropped (a memory cannot
+            # supersede/contradict/refine itself), unresolved targets recorded for lint.
+            raw_rels = parse_typed_relations(fms.get(stem, {}))
+            if raw_rels:
+                self.typed_raw[stem] = raw_rels
+            for rel, raws in raw_rels.items():
+                for t in raws:
+                    s = self.resolve(t)
+                    if s and s != stem:
+                        self.typed.setdefault(stem, {}).setdefault(rel, set()).add(s)
+                        self._typed_inbound.setdefault(s, {}).setdefault(rel, set()).add(stem)
+                    elif s is None:
+                        self.typed_unresolved.setdefault(stem, {}).setdefault(rel, []).append(t)
 
     # -- queries ---------------------------------------------------------- #
     def resolve(self, target: str) -> Optional[str]:
@@ -255,6 +339,26 @@ class LinkGraph:
         """
         s = self._node(name)
         return set(self._inbound.get(s, set())) if s else set()
+
+    def typed_outbound(self, name: str, relation: str) -> Set[str]:
+        """Stems ``name`` declares ``relation`` toward (e.g. the memories it supersedes).
+
+        GRA-4. Accepts any resolvable alias, like ``outbound()``; ``set()`` for an unknown
+        name or a relation ``name`` does not carry.
+        """
+        s = self._node(name)
+        return set(self.typed.get(s, {}).get(relation, set())) if s else set()
+
+    def typed_inbound(self, name: str, relation: str) -> Set[str]:
+        """Stems that declare ``relation`` TOWARD ``name`` — the consumer-shaped direction.
+
+        GRA-4: ``typed_inbound(y, "supersedes")`` answers recall's exact question ("who
+        supersedes y?" — those sources are y's successors); ``typed_inbound(y,
+        "contradicts")`` names y's conflict annotations. Backed by the transpose built
+        once in ``_build()`` — callers must never re-invert ``typed`` themselves.
+        """
+        s = self._node(name)
+        return set(self._typed_inbound.get(s, {}).get(relation, set())) if s else set()
 
     def traverse(self, name: str, hops: int = 1) -> Set[str]:
         """Stems reachable from ``name`` within ``hops`` outbound edges (excludes ``name``)."""
@@ -299,6 +403,102 @@ class LinkGraph:
 
 
 # --------------------------------------------------------------------------- #
+# GRA-4: the ONE typed-edge write primitive (per-item, agent-gated)
+# --------------------------------------------------------------------------- #
+_FENCE = "---"
+
+
+def add_typed_relation(path: str, relation: str, target: str, *, dry_run: bool = False) -> dict:
+    """Append ``target`` to ONE memory's ``relation:`` frontmatter list (additive, body verbatim).
+
+    The write primitive behind reconsolidation's ``superseded_by`` outcome (and any future
+    agent-gated typed-edge write). Mirrors ``staleness.set_invalid_after``'s frontmatter-write
+    discipline exactly: same ``metadata:``-nesting awareness as ``cited_paths`` (so
+    ``parse_typed_relations`` finds the key regardless of which schema the file uses), body
+    left byte-identical, refuses (no write) on missing/unparseable frontmatter. Idempotent:
+    a target already in the list (compared slug-normalized, the same equivalence
+    ``resolve()`` applies) is a no-op. An EXISTING ``relation:`` key is merged — its current
+    targets (flow or block style, read via the YAML parse) are preserved, the key rewritten
+    as one canonical flow list. Deliberately per-item with no batch parameter — a bulk
+    supersede sweep must not be expressible. Never raises.
+    """
+    result = {"path": path, "relation": relation, "target": target, "changed": False, "error": None}
+    try:
+        if relation not in TYPED_RELATIONS:
+            result["error"] = f"unknown relation: {relation!r} (must be one of {', '.join(TYPED_RELATIONS)})"
+            return result
+        if not isinstance(target, str) or not target.strip():
+            result["error"] = "empty target"
+            return result
+        target = target.strip()
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        fm = parse_frontmatter(text)
+        if not text.startswith(_FENCE):
+            result["error"] = "no frontmatter -- cannot write a typed relation"
+            return result
+        if not fm:
+            result["error"] = "unparseable frontmatter -- refusing to write (fix the YAML)"
+            return result
+
+        existing = parse_typed_relations(fm).get(relation, [])
+        if normalize_slug(target) in {normalize_slug(t) for t in existing}:
+            return result  # idempotent: the edge is already declared
+        merged = existing + [target]
+
+        lines = text.split("\n")
+        close = next((i for i in range(1, len(lines)) if lines[i].strip() == _FENCE), None)
+        if close is None:
+            result["error"] = "no frontmatter -- cannot write a typed relation"
+            return result
+        fm_lines = lines[1:close]
+        value = "[" + ", ".join(json.dumps(t) for t in merged) + "]"
+
+        key_re = re.compile(rf"^(\s*){relation}\s*:")
+        key_idx = next((i for i, ln in enumerate(fm_lines) if key_re.match(ln)), None)
+        if key_idx is not None:
+            # Rewrite the existing key in place (merged flow list), dropping any block-style
+            # `- item` continuation lines that belonged to it — their values are already in
+            # ``merged`` via the YAML parse above, so nothing is lost.
+            indent = key_re.match(fm_lines[key_idx]).group(1)
+            end = key_idx + 1
+            while end < len(fm_lines) and re.match(r"^\s+-\s", fm_lines[end]):
+                end += 1
+            fm2 = fm_lines[:key_idx] + [f"{indent}{relation}: {value}"] + fm_lines[end:]
+        else:
+            # Fresh key: nest under an existing `metadata:` block when present, else append
+            # top-level — the exact insertion walk backfill_text/set_invalid_after use.
+            meta_idx = next(
+                (i for i, ln in enumerate(fm_lines) if re.match(r"^metadata\s*:\s*$", ln)), None
+            )
+            if meta_idx is not None:
+                indent = "  "
+                last = meta_idx
+                j = meta_idx + 1
+                while j < len(fm_lines):
+                    ln = fm_lines[j]
+                    if ln.strip() == "" or not ln.startswith((" ", "\t")):
+                        break
+                    m = re.match(r"^(\s+)\S", ln)
+                    if m:
+                        indent = m.group(1)
+                    last = j
+                    j += 1
+                fm2 = fm_lines[: last + 1] + [f"{indent}{relation}: {value}"] + fm_lines[last + 1:]
+            else:
+                fm2 = fm_lines + [f"{relation}: {value}"]
+
+        new_text = "\n".join([lines[0]] + fm2 + lines[close:])
+        result["changed"] = new_text != text
+        if result["changed"] and not dry_run:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(new_text)
+    except Exception as exc:
+        result["error"] = str(exc)
+    return result
+
+
+# --------------------------------------------------------------------------- #
 # GRA-6: persisted edge cache (links.json in the index dir)
 # --------------------------------------------------------------------------- #
 def write_links_cache(index_dir: str, graph: LinkGraph, sigs: Dict[str, List[int]]) -> None:
@@ -321,6 +521,12 @@ def write_links_cache(index_dir: str, graph: LinkGraph, sigs: Dict[str, List[int
                 stem: {
                     "sig": list(sigs.get(stem) or (0, 0)),
                     "outbound": sorted(graph.adjacency.get(stem, ())),
+                    # GRA-4: resolved typed relations, sparse ({} when the stem declares
+                    # none) — recall's O(1) loader reads these, never the corpus.
+                    "typed": {
+                        rel: sorted(targets)
+                        for rel, targets in graph.typed.get(stem, {}).items()
+                    },
                 }
                 for stem in graph.files
             },
@@ -328,6 +534,12 @@ def write_links_cache(index_dir: str, graph: LinkGraph, sigs: Dict[str, List[int
             "ambiguous": {a: sorted(c) for a, c in graph._ambiguous.items()},
             "unresolved": {s: list(t) for s, t in graph.unresolved.items()},
             "raw_targets": {s: list(t) for s, t in graph.raw_targets.items()},
+            # GRA-4: raw + unresolved typed targets round-trip too (lint's dangling-typed
+            # check reads them, and neither is derivable from the resolved map alone).
+            "typed_raw": {s: {r: list(t) for r, t in m.items()} for s, m in graph.typed_raw.items()},
+            "typed_unresolved": {
+                s: {r: list(t) for r, t in m.items()} for s, m in graph.typed_unresolved.items()
+            },
         }
         path = os.path.join(index_dir, _LINKS_CACHE_NAME)
         tmp = path + ".tmp"
@@ -356,7 +568,15 @@ def _load_links_payload(index_dir: str) -> Optional[dict]:
             return None
         if not all(
             isinstance(payload.get(k), dict)
-            for k in ("files", "alias_to_file", "ambiguous", "unresolved", "raw_targets")
+            for k in (
+                "files",
+                "alias_to_file",
+                "ambiguous",
+                "unresolved",
+                "raw_targets",
+                "typed_raw",
+                "typed_unresolved",
+            )
         ):
             return None
         return payload
@@ -403,6 +623,15 @@ def links_cache_fresh(index_dir: str, sigs: Dict[str, List[int]]) -> bool:
         return False
 
 
+def _require_dict(value) -> dict:
+    """``value`` if it is a dict, else raise — the typed-map twin of the ``outbound``
+    list check in ``_graph_from_payload`` (wrong-shape corruption must read as a cache
+    miss, never iterate into garbage)."""
+    if not isinstance(value, dict):
+        raise ValueError("typed relation map must be a dict")
+    return value
+
+
 def _graph_from_payload(memory_dir: str, payload: dict) -> LinkGraph:
     """Reconstruct a full ``LinkGraph`` view from a validated cache payload (no I/O).
 
@@ -423,8 +652,18 @@ def _graph_from_payload(memory_dir: str, payload: dict) -> LinkGraph:
     g._stem_tier = {normalize_slug(s) for s in g.files}
     g.raw_targets = {str(s): list(t) for s, t in payload["raw_targets"].items()}
     g.unresolved = {str(s): list(t) for s, t in payload["unresolved"].items()}
+    g.typed_raw = {
+        str(s): {str(r): list(t) for r, t in _require_dict(m).items()}
+        for s, m in payload["typed_raw"].items()
+    }
+    g.typed_unresolved = {
+        str(s): {str(r): list(t) for r, t in _require_dict(m).items()}
+        for s, m in payload["typed_unresolved"].items()
+    }
     g.adjacency = {}
     g._inbound = {stem: set() for stem in g.files}
+    g.typed = {}
+    g._typed_inbound = {}
     for stem, rec in files_map.items():
         outbound = rec["outbound"]
         if not isinstance(outbound, list):
@@ -436,6 +675,17 @@ def _graph_from_payload(memory_dir: str, payload: dict) -> LinkGraph:
         g.adjacency[stem] = out
         for tgt in out:
             g._inbound.setdefault(tgt, set()).add(stem)
+        # GRA-4: typed edges + their transpose, re-derived exactly like _inbound above
+        # (same rationale: persisting both directions invites disagreement). Wrong-shape
+        # corruption raises for the same cache-miss treatment as ``outbound``.
+        for rel, targets in _require_dict(rec.get("typed", {})).items():
+            if not isinstance(targets, list):
+                raise ValueError("typed targets must be a list")
+            if not targets:
+                continue
+            g.typed.setdefault(stem, {})[str(rel)] = set(targets)
+            for tgt in targets:
+                g._typed_inbound.setdefault(tgt, {}).setdefault(str(rel), set()).add(stem)
     return g
 
 
@@ -467,22 +717,30 @@ def build_graph(memory_dir: str, index_dir: Optional[str] = None) -> Optional[Li
         return None
 
 
-def load_edges(index_dir: str) -> Optional[Dict[str, Dict[str, Set[str]]]]:
-    """O(1)-load edge list for recall-time expansion (GRA-1): ``{stem: {"out", "in"}}``.
+def load_edges(index_dir: str) -> Optional[Dict[str, Dict[str, object]]]:
+    """O(1)-load edge list for recall (GRA-1 + GRA-4):
+    ``{stem: {"out", "in", "typed_out", "typed_in"}}``.
 
     Reads ``links.json`` ONLY — no corpus scan, no stat sweep. Recall-time expansion
     tolerates a slightly-stale edge list the same way it tolerates a stale index (the
     SessionStart refresh re-syncs both), and the hot path must not pay an O(N) stat sweep
     per prompt for freshness it does not need. Returns None (never raises) when the cache
     is absent/corrupt — the caller simply skips expansion.
+
+    GRA-4: ``typed_out``/``typed_in`` are ``{relation: set(stems)}`` (both always present,
+    ``{}`` when the stem carries none) — ``typed_in`` is the direction recall consumes
+    ("who supersedes/contradicts THIS stem?"). Same corpus-stem filter as ``out``/``in``:
+    an edge whose endpoint left the cache's stem set is dropped, so a consumer never sees
+    a typed edge pointing outside the corpus snapshot the cache describes.
     """
     try:
         payload = _load_links_payload(index_dir)
         if payload is None:
             return None
         files_map = payload["files"]
-        edges: Dict[str, Dict[str, Set[str]]] = {
-            str(stem): {"out": set(), "in": set()} for stem in files_map
+        edges: Dict[str, Dict[str, object]] = {
+            str(stem): {"out": set(), "in": set(), "typed_out": {}, "typed_in": {}}
+            for stem in files_map
         }
         for stem, rec in files_map.items():
             outbound = rec.get("outbound")
@@ -492,6 +750,16 @@ def load_edges(index_dir: str) -> Optional[Dict[str, Dict[str, Set[str]]]]:
                 if tgt in edges:  # a resolved edge always targets a corpus stem
                     edges[stem]["out"].add(tgt)
                     edges[tgt]["in"].add(stem)
+            typed = rec.get("typed", {})
+            if not isinstance(typed, dict):
+                return None
+            for rel, targets in typed.items():
+                if not isinstance(targets, list):
+                    return None
+                for tgt in targets:
+                    if tgt in edges:
+                        edges[stem]["typed_out"].setdefault(rel, set()).add(tgt)
+                        edges[tgt]["typed_in"].setdefault(rel, set()).add(stem)
         return edges
     except Exception:
         return None
@@ -515,8 +783,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("could not build link graph")
         return 1
     total_edges = sum(len(v) for v in g.adjacency.values())
+    typed_edges = sum(len(t) for m in g.typed.values() for t in m.values())
     print(
-        f"files={len(g.files)} edges={total_edges} "
+        f"files={len(g.files)} edges={total_edges} typed={typed_edges} "
         f"orphans={len(g.orphans())} isolates={len(g.isolates())}"
     )
     if args.traverse:
