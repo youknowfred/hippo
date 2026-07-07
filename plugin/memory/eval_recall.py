@@ -17,6 +17,12 @@ reports the REAL per-process model-load cost every freshly-spawned hook pays —
 alongside the warm p95 but NOT gated (a cold OS cache must not redden a healthy run; with
 dense unavailable, cold ≈ warm).
 
+RET-2: ``body_probe`` is a REPORT-ONLY (never-gated) addition proving body-chunk indexing
+actually helps — probe queries are derived from body tokens ABSENT from a memory's own
+description, so passing this metric proves something self_recall (description-derived
+queries) cannot: that content living ONLY in the body is retrievable. The 5 gates above are
+unchanged in number/semantics.
+
 Pure / dependency-light: dense is used when the index has it, otherwise the gates are
 computed on BM25 alone (so they run in CI without fastembed). ``main`` exits non-zero if
 any gate fails (use it as a pre-merge check).
@@ -46,6 +52,11 @@ GATE_MRR = 0.60
 GATE_P95_MS = 300.0
 
 _SELF_QUERY_TOKENS = 12
+# RET-2: body_probe queries keep the first N tokens that are BOTH in a memory's body chunks
+# AND absent from its description -- the same "derived, zero-maintenance" spirit as
+# derive_self_query, but proving the NEW thing this item adds (body content is retrievable)
+# rather than the thing self_recall already proves (description content is retrievable).
+_BODY_PROBE_TOKENS = 12
 
 
 # --------------------------------------------------------------------------- #
@@ -88,6 +99,68 @@ def self_recall_at_k(index: LoadedIndex, k: int = 10) -> float:
         if e["name"] in names:
             hits += 1
     return hits / considered if considered else 0.0
+
+
+# --------------------------------------------------------------------------- #
+# RET-2: body_probe — REPORT-ONLY metric proving body chunks are retrievable at all (not
+# just "the index still finds descriptions", which self_recall already covers). A probe
+# query is derived per-memory from BODY tokens ABSENT from the description -- if the query
+# only used tokens the description ALSO carries, a description-only (pre-RET-2) index would
+# already pass, so the probe wouldn't be testing anything new. This is a NEW gate-adjacent
+# metric, but never a merge gate itself (per the roadmap: "the 5 gate semantics unchanged").
+# --------------------------------------------------------------------------- #
+def derive_body_probe_query(index: LoadedIndex, entry_idx: int) -> str:
+    """A query from body tokens NOT in the entry's description, or "" when none qualify.
+
+    Walks ``index.body_chunks`` (RET-2's persisted ``{entry, hash, tokens, row}`` list) for
+    every chunk belonging to ``entry_idx``, collects tokens in body-chunk order (first chunk
+    first, tokens in their original order) that are ABSENT from the description's own token
+    set, dedupes while preserving that order, and keeps the first ``_BODY_PROBE_TOKENS``
+    (~12). An entry with no qualifying body chunks (no chunks at all, or every body token
+    already appears in the description) yields "" -- the caller excludes it from the
+    denominator, exactly like ``self_recall_at_k`` excludes an empty ``derive_self_query``.
+    """
+    entries = index.entries
+    if entry_idx < 0 or entry_idx >= len(entries):
+        return ""
+    desc_tokens = set(tokenize(_description_of(entries[entry_idx])))
+    seen: set = set()
+    out: List[str] = []
+    for chunk in index.body_chunks:
+        if chunk.get("entry") != entry_idx:
+            continue
+        for tok in chunk.get("tokens") or []:
+            if tok in desc_tokens or tok in seen:
+                continue
+            seen.add(tok)
+            out.append(tok)
+            if len(out) >= _BODY_PROBE_TOKENS:
+                break
+        if len(out) >= _BODY_PROBE_TOKENS:
+            break
+    return " ".join(out)
+
+
+def body_probe_recall_at_k(index: LoadedIndex, k: int = 10) -> Dict[str, float]:
+    """recall@k of the PARENT entry for a body-derived probe query, over every entry that
+    has a qualifying probe (see ``derive_body_probe_query``). REPORT-ONLY -- never a merge
+    gate; ``n=0`` (and ``recall=0.0``) when no entry in the corpus has a body chunk carrying a
+    token absent from its own description (e.g. a BM25-only index built before this item ever
+    ran, or a corpus whose bodies are pure restatements of their descriptions)."""
+    entries = index.entries
+    if not entries:
+        return {"recall": 0.0, "n": 0}
+    hits = 0
+    considered = 0
+    for i, e in enumerate(entries):
+        q = derive_body_probe_query(index, i)
+        if not q:
+            continue
+        considered += 1
+        names = {r["name"] for r in recall(q, k=k, index=index)}
+        if e["name"] in names:
+            hits += 1
+    return {"recall": round(hits / considered, 4) if considered else 0.0, "n": considered}
 
 
 def load_relevance_set(path: str) -> List[dict]:
@@ -479,6 +552,7 @@ def evaluate(
     half_life = staleness_half_life(memory_dir, repo_root) if repo_root else {"median_days": 0.0, "n": 0}
     sess_cost = session_token_cost(memory_dir, resolved_telemetry_dir, index, hard_set, k=k)
     grad = graduation_rate(resolved_telemetry_dir)
+    body_probe = body_probe_recall_at_k(index, k=k)
 
     # A caller with NO hard-set fixture (hard_set_path=None — e.g. a fresh install of the
     # packaged plugin with no hand-curated calibration data yet, see /hippo:audit) is a
@@ -526,6 +600,7 @@ def evaluate(
         "staleness_half_life": half_life,
         "session_token_cost": sess_cost,
         "graduation_rate": grad,
+        "body_probe": body_probe,
     }
 
 
@@ -628,6 +703,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(
             f"  graduation rate: {gr['rate']} ({gr['graduate']} graduate / {gr['demote']} demote, "
             f"{gr['fix']} fix excluded from ratio, report-only)"
+        )
+    bp = report.get("body_probe") or {}
+    if bp.get("n"):
+        print(
+            f"  body_probe@{args.k} (RET-2, n={bp['n']}): {bp['recall']} — parent recall for "
+            "queries derived from body-only tokens (report-only)"
         )
 
     print("RESULT:", "ALL GATES PASS ✅" if report["ok"] else "GATE FAILURE ❌")

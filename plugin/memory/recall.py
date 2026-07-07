@@ -47,6 +47,27 @@ _MAX_RECALL_CHARS = 9000
 _RRF_K = 60
 DEFAULT_K = 10
 
+# RET-2: body-chunk rankings (bm25_body / dense_body) enter fusion as a BACKSTOP, not a peer
+# of the description rankings -- a memory whose crucial fact lives only in its body should be
+# findABLE, but a description-vocabulary hit is still the stronger, more deliberate signal (the
+# author chose those words to BE the recall surface). Weighting body rankings down (rather than
+# giving them full RRF weight) keeps description rows primary and prevents a corpus of long,
+# keyword-dense bodies from systematically outranking well-written descriptions purely on body
+# volume. Env-overridable (not a hook env var in the MEMOBOT_ prefix sense of "per-invocation
+# tuning" -- this is a corpus-wide ranking knob an operator might calibrate via /hippo:audit).
+_BODY_RRF_WEIGHT = 0.5
+
+
+def _body_rrf_weight() -> float:
+    """``MEMOBOT_BODY_RRF_WEIGHT`` override; malformed/absent -> the module default. Never raises."""
+    raw = os.environ.get("MEMOBOT_BODY_RRF_WEIGHT")
+    if raw is None or not raw.strip():
+        return _BODY_RRF_WEIGHT
+    try:
+        return float(raw)
+    except ValueError:
+        return _BODY_RRF_WEIGHT
+
 # Soft-invalidation (Tier 3, graceful decay) — "recent" halves the fused score BEFORE the
 # top-k cut (real demotion, can fall out of top-k); "old" is filtered from DISPLAY only,
 # after the cut (the memory stays fully in the corpus/index, never excluded from ranking).
@@ -268,6 +289,7 @@ def _bm25_rank(
     *,
     stats: Optional[dict] = None,
     patched_indices: Optional[set] = None,
+    doc_offset: int = 0,
 ) -> List[int]:
     """Indices of docs that SHARE >=1 query token, ordered by descending BM25 score.
 
@@ -289,6 +311,16 @@ def _bm25_rank(
     query's fresh tokens, so only a full rebuild over the CURRENT ``entries`` tokens is
     correct). Both paths produce IDENTICAL rankings — same match-set filter, same score
     formula, same stable descending sort — a golden test pins this equivalence.
+
+    RET-2: ``doc_offset`` lets this same function rank the BODY-CHUNK doc list too. The
+    manifest's persisted ``stats`` (``build_index.compute_bm25_stats``) is built over a
+    UNIFIED doc space — description docs at indices ``0..N-1``, body-chunk docs APPENDED at
+    ``N..`` — so when ``entries`` here is actually the flat ``body_chunks`` list (local
+    indices ``0..len(body_chunks)-1``), ``doc_offset=N`` translates each local index to its
+    real position in ``stats["postings"]``/``stats["doc_len"]`` before scoring, and translates
+    the winning indices back to LOCAL ones before returning — callers of this function never
+    need to know the offset trick happened. ``doc_offset=0`` (the default) is a no-op,
+    preserving every existing call site's behavior byte-for-byte.
     """
     if not query_tokens or not entries:
         return []
@@ -301,9 +333,10 @@ def _bm25_rank(
     fast_path_ok = stats is not None and not (patched_indices and patched_indices & set(matched))
     if fast_path_ok:
         try:
-            scores = _bm25_score_via_postings(query_tokens, stats, matched)
-            matched.sort(key=lambda i: scores[i], reverse=True)
-            return matched
+            global_matched = [i + doc_offset for i in matched] if doc_offset else matched
+            scores = _bm25_score_via_postings(query_tokens, stats, global_matched)
+            order = sorted(range(len(matched)), key=lambda pos: scores[global_matched[pos]], reverse=True)
+            return [matched[pos] for pos in order]
         except Exception:
             pass  # any stats-shape surprise -> fall through to the full-construction path
 
@@ -321,8 +354,50 @@ def _bm25_rank(
     return matched
 
 
-def _dense_rank(query: str, index: LoadedIndex) -> List[int]:
-    """Indices ordered by descending cosine similarity, or [] if dense is unavailable.
+def _bm25_rank_body(
+    query_tokens: List[str], index: LoadedIndex, *, patched_indices: Optional[set] = None
+) -> List[int]:
+    """BM25 ranking over BODY CHUNKS, mapped back to parent entry indices, deduped to each
+    parent's best (lowest-rank) chunk hit -- the lexical half of the body backstop.
+
+    RET-2: reuses ``_bm25_rank`` unmodified via ``doc_offset=len(index.entries)`` -- the
+    manifest's persisted ``stats`` block is a UNIFIED doc space (descriptions at 0..N-1, body
+    chunks appended at N..), so scoring the chunks needs the SAME offset translation the fast
+    path already supports. ``patched_indices`` is passed straight through: COR-4 drift-patching
+    is description-scoped (see ``_drift_patch``'s docstring) and never touches body-chunk
+    entries here, but the parameter is threaded for signature symmetry with ``_bm25_rank`` and
+    so a future body-drift patch (documented as healing at the next SessionStart rebuild, not
+    mid-session) would have somewhere to plug in without another signature change.
+    """
+    body_chunks = index.body_chunks
+    if not body_chunks or not query_tokens:
+        return []
+    n_entries = len(index.entries)
+    local = _bm25_rank(
+        query_tokens,
+        body_chunks,
+        stats=index.manifest.get("bm25"),
+        patched_indices=patched_indices,
+        doc_offset=n_entries,
+    )
+    seen: set = set()
+    out: List[int] = []
+    for j in local:
+        parent = body_chunks[j].get("entry")
+        if parent is None or parent in seen:
+            continue
+        seen.add(parent)
+        out.append(parent)
+    return out
+
+
+def _dense_rank_rows(query: str, index: LoadedIndex) -> List[int]:
+    """RAW dense-matrix row indices ordered by descending cosine similarity, or [].
+
+    RET-2: the matrix is WIDENED (description rows ``0..N-1`` then body-chunk rows ``N..``),
+    so this returns ROW indices over that whole matrix — callers split the result into a
+    description ranking and a body-chunk ranking (see ``_dense_rank``/``_dense_rank_body``)
+    rather than this function knowing anything about the entries/chunks split itself.
 
     Loads the embedding model OFFLINE (no download); any failure -> [] (BM25 carries it).
 
@@ -357,7 +432,66 @@ def _dense_rank(query: str, index: LoadedIndex) -> List[int]:
         return []
 
 
-def _rrf_fuse(rankings: List[List[int]], k: int = _RRF_K) -> List[Tuple[int, float]]:
+def _dense_rank(query: str, index: LoadedIndex, *, raw_rows: Optional[List[int]] = None) -> List[int]:
+    """Entry indices (description rows only) ordered by descending cosine similarity.
+
+    RET-2: the raw dense matrix now also carries body-chunk rows at ``n_entries..`` (see
+    ``_dense_rank_rows``); this filters the raw row order down to just the description rows
+    (``row < n_entries``) so every EXISTING caller of ``_dense_rank`` (golden tests, the
+    description-ranking half of fusion) keeps seeing entry-index-only results, unchanged.
+
+    ``raw_rows``: an ALREADY-computed ``_dense_rank_rows(query, index)`` result, so a caller
+    that also needs ``_dense_rank_body`` (i.e. ``recall()``) embeds the query and does the
+    ``dense @ qvec`` matmul exactly ONCE per call, not once per ranking -- with the widened
+    matrix this halves the dense query cost every recall() call. ``None`` (every direct/test
+    caller of ``_dense_rank`` before this item) computes it fresh, unchanged behavior.
+    """
+    n_entries = len(index.entries)
+    rows = raw_rows if raw_rows is not None else _dense_rank_rows(query, index)
+    return [row for row in rows if row < n_entries]
+
+
+def _dense_rank_body(
+    query: str, index: LoadedIndex, *, raw_rows: Optional[List[int]] = None
+) -> List[int]:
+    """Body-CHUNK ranking, MAPPED BACK to parent entry indices, deduped to each parent's
+    BEST (lowest-rank) chunk hit — a backstop ranking, never a second vote per memory.
+
+    RET-2: filters the raw dense row order (see ``_dense_rank_rows``) to rows ``>= n_entries``
+    (body-chunk rows), maps each surviving row back to its ``body_chunks[j]["entry"]`` parent,
+    and keeps only the FIRST (best-ranked) occurrence of each parent entry index — a memory
+    with 3 chunks that all rank well must not get 3 votes in the fusion below; it gets exactly
+    one, at its best chunk's rank. Returns entry indices, in the same shape ``_dense_rank``
+    does, so ``recall()`` can pass it straight into ``_rrf_fuse`` alongside the other rankings.
+
+    ``raw_rows``: see ``_dense_rank``'s docstring -- shares the SAME single embed+matmul
+    ``recall()`` already paid for the description ranking, instead of re-embedding the query
+    a second time for the body ranking.
+    """
+    n_entries = len(index.entries)
+    body_chunks = index.body_chunks
+    if not body_chunks:
+        return []
+    raw = raw_rows if raw_rows is not None else _dense_rank_rows(query, index)
+    seen: set = set()
+    out: List[int] = []
+    for row in raw:
+        if row < n_entries:
+            continue
+        j = row - n_entries
+        if j < 0 or j >= len(body_chunks):
+            continue
+        parent = body_chunks[j].get("entry")
+        if parent is None or parent in seen:
+            continue
+        seen.add(parent)
+        out.append(parent)
+    return out
+
+
+def _rrf_fuse(
+    rankings: List[List[int]], k: int = _RRF_K, *, weights: Optional[List[float]] = None
+) -> List[Tuple[int, float]]:
     """Reciprocal Rank Fusion of several rank lists -> ``[(index, fused_score), ...]``, best first.
 
     Returns the SCORE alongside the index (not just an ordering) so a caller can apply a
@@ -368,11 +502,20 @@ def _rrf_fuse(rankings: List[List[int]], k: int = _RRF_K) -> List[Tuple[int, flo
     (``(-score, index)``) found it silently flips top-k SET MEMBERSHIP on real corpus ties,
     independent of any invalidation penalty — an unrelated behavior change this widening must
     not smuggle in. This function has exactly one caller (``recall()``).
+
+    RET-2: ``weights`` (one float per ranking in ``rankings``, same order/length; ``None`` ->
+    every ranking weighted 1.0, IDENTICAL to the pre-RET-2 formula) lets description rankings
+    stay at full RRF weight (1.0) while body-derived rankings (bm25_body/dense_body) enter at
+    ``_BODY_RRF_WEIGHT`` -- the per-term formula becomes ``score += w / (k + rank + 1)`` instead
+    of the unweighted ``1 / (k + rank + 1)``. A caller passing no ``weights`` (every existing
+    call site prior to this item) gets byte-identical scores to before.
     """
+    if weights is None:
+        weights = [1.0] * len(rankings)
     scores: dict = {}
-    for ranking in rankings:
+    for ranking, w in zip(rankings, weights):
         for rank, idx in enumerate(ranking):
-            scores[idx] = scores.get(idx, 0.0) + 1.0 / (k + rank + 1)
+            scores[idx] = scores.get(idx, 0.0) + w / (k + rank + 1)
     return sorted(scores.items(), key=lambda pair: pair[1], reverse=True)
 
 
@@ -417,6 +560,17 @@ def _drift_patch(entry: dict, memory_dir: str) -> dict:
     embedding keeps being used for this session, and a full re-embed happens at the next
     SessionStart rebuild. Never raises: any read/parse failure returns ``entry`` as-is
     (fail open to the last-known-good index state, same as every other degrade path here).
+
+    RET-2: this stays DESCRIPTION-scoped only -- a memory's BODY (and hence its persisted
+    ``body_chunks``) is deliberately NOT drift-patched here, on the exact same rationale as
+    the dense row above: patching body chunks live would mean re-tokenizing (cheap) but also
+    re-deriving which chunks even qualify (heading/paragraph re-split, bounds re-applied) on
+    every query touching a possibly-large corpus, which is a heavier per-query cost than the
+    single-entry hash+reread this function already does, and it still couldn't fix the STALE
+    dense chunk row either. Body drift instead heals the same way the stale dense row does:
+    at the next SessionStart ``refresh_index`` rebuild (which now also compares body-chunk
+    hashes, not just entry hashes, to notice a body-only edit -- see ``refresh_index``'s
+    docstring). Mid-session, a query for a just-edited body fact may miss until then.
     """
     try:
         path = os.path.join(memory_dir, entry["file"])
@@ -635,12 +789,42 @@ def recall(
         bm25 = _bm25_rank(
             q_tokens, entries, stats=idx.manifest.get("bm25"), patched_indices=patched_indices
         )
-        dense = _dense_rank(query, idx)
+        # RET-2: the dense matrix is WIDENED (description rows + body-chunk rows); embed the
+        # query and score the WHOLE matrix exactly ONCE here (_dense_rank_rows), then split the
+        # single raw order into a description ranking and a body ranking below -- doing this
+        # twice (once per ranking) would double the per-query embed+matmul cost for no benefit,
+        # which is exactly what an earlier draft of this item did and blew the p95 gate.
+        raw_dense_rows = _dense_rank_rows(query, idx)
+        dense = _dense_rank(query, idx, raw_rows=raw_dense_rows)
 
-        rankings = [r for r in (dense, bm25) if r]
+        # RET-2: FOUR rank lists total. bm25_desc/dense_desc (above) are the primary,
+        # description-vocabulary signal -- unchanged from before this item. bm25_body/
+        # dense_body are the BACKSTOP: body chunks ranked and mapped back to their parent
+        # entry (deduped to each parent's best chunk -- see _bm25_rank_body/_dense_rank_body),
+        # so a memory whose crucial fact lives only in its body (behind a generic description)
+        # still surfaces, just at a discounted RRF weight (_BODY_RRF_WEIGHT) so a
+        # keyword-dense body can never systematically outrank a well-written description.
+        # COR-4: body drift is NOT patched here (only description entries are, above) --
+        # see _drift_patch's docstring; a body edited mid-session keeps serving its
+        # last-indexed chunk text until the next SessionStart rebuild, same rationale as the
+        # stale dense row already accepted for entries pre-RET-2.
+        bm25_body = _bm25_rank_body(q_tokens, idx, patched_indices=patched_indices)
+        dense_body = _dense_rank_body(query, idx, raw_rows=raw_dense_rows)
+
+        rankings = [r for r in (dense, bm25, dense_body, bm25_body) if r]
+        weights = [
+            w
+            for r, w in zip(
+                (dense, bm25, dense_body, bm25_body),
+                (1.0, 1.0, _body_rrf_weight(), _body_rrf_weight()),
+            )
+            if r
+        ]
         if not rankings:
             return []
-        fused = _rrf_fuse(rankings)  # [(idx, score), ...] desc by fused score
+        fused = _rrf_fuse(rankings, weights=weights)  # [(idx, score), ...] desc by fused score
+        # backend label reflects the PRIMARY (description) signals only -- body rankings are
+        # a backstop, not a third backend a user needs to reason about at the display layer.
         backend = "dense+bm25" if (dense and bm25) else ("dense" if dense else "bm25")
 
         # --- Soft-invalidation: applied to the SCORE, BEFORE the top-k cut. ---

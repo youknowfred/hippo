@@ -560,3 +560,118 @@ def test_main_bare_cli_is_honest_on_a_fresh_corpus(tmp_path, monkeypatch, capsys
     assert "ALL GATES PASS" in out
     assert "skipped" in out  # the skipped gates say so instead of rendering ❌
     assert "❌" not in out
+
+
+# --------------------------------------------------------------------------- #
+# RET-2: body_probe — report-only metric, never a merge gate
+# --------------------------------------------------------------------------- #
+_DISTINCTIVE_BODY = (
+    "## Error signature\n"
+    "The exact failure is a zqxwyvutplaceholder timeout raised from the network layer "
+    "when the retry budget is exhausted before the handshake completes successfully.\n\n"
+    "## Root cause\n"
+    "A misconfigured connection pool size caused exhaustion under load during peak traffic "
+    "hours across every affected region consistently.\n"
+)
+
+
+def _mem_with_body(name: str, description: str, body: str) -> str:
+    return f'---\nname: {name}\ndescription: "{description}"\ntype: project\n---\n{body}\n'
+
+
+def test_derive_body_probe_query_excludes_description_tokens(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    with open(os.path.join(md, "incident.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem_with_body("incident", "a generic description here", _DISTINCTIVE_BODY))
+    idx = str(tmp_path / ".memory-index")
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+
+    q = E.derive_body_probe_query(index, 0)
+    assert q  # a qualifying probe was derived
+    desc_tokens = set(B.tokenize("a generic description here"))
+    probe_tokens = set(q.split())
+    assert not (probe_tokens & desc_tokens)  # every probe token is body-only
+    assert "zqxwyvutplaceholder" in probe_tokens
+
+
+def test_derive_body_probe_query_empty_when_no_body_chunks(tmp_path, monkeypatch):
+    """A memory with no qualifying body chunks (trivial/short body) yields "" -- excluded
+    from body_probe_recall_at_k's denominator, never a spurious miss."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    with open(os.path.join(md, "trivial.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem_with_body("trivial", "a generic description", "tiny"))
+    idx = str(tmp_path / ".memory-index")
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    assert E.derive_body_probe_query(index, 0) == ""
+
+
+def test_body_probe_recall_at_k_measures_parent_recall(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    with open(os.path.join(md, "incident.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem_with_body("incident", "a generic description", _DISTINCTIVE_BODY))
+    with open(os.path.join(md, "other.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem_with_body("other", "an unrelated description", "unrelated filler body content here today"))
+    idx = str(tmp_path / ".memory-index")
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+
+    result = E.body_probe_recall_at_k(index, k=10)
+    assert result["n"] >= 1
+    assert result["recall"] == 1.0  # the one qualifying probe finds its own parent
+
+
+def test_body_probe_recall_zero_n_when_no_body_chunks_anywhere(tmp_path, monkeypatch):
+    """A corpus with NO qualifying body chunks (e.g. every body is trivial, or a pre-RET-2
+    manifest with no body_chunks key at all) reports n=0, recall=0.0 -- never raises."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)  # this fixture's bodies are all "body for {name}" -- trivial
+    idx = str(tmp_path / ".memory-index")
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    result = E.body_probe_recall_at_k(index, k=10)
+    assert result == {"recall": 0.0, "n": 0}
+
+
+def test_evaluate_includes_body_probe_report_only(tmp_path, monkeypatch):
+    """body_probe is threaded through evaluate()'s report but NEVER feeds `ok` / a gate."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    with open(os.path.join(md, "incident.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem_with_body("incident", "a generic description", _DISTINCTIVE_BODY))
+    idx = str(tmp_path / ".memory-index")
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=None, k=10)
+    assert "body_probe" in report
+    assert set(report["body_probe"].keys()) == {"recall", "n"}
+    assert "body_probe" not in report["gates"]  # never a 6th gate
+
+
+def test_main_cli_prints_body_probe_line_when_present(tmp_path, monkeypatch, capsys):
+    """Mirrors test_main_bare_cli_is_honest_on_a_fresh_corpus's env setup — the DEFAULT
+    (no --hard-set/--relevance-set flags) CLI path calls _default_hard_set_path(), which
+    resolves via the ambient resolve_dirs(); pointing CLAUDE_PROJECT_DIR/MEMOBOT_MEMORY_DIR
+    at this tmp project (with no .audit-fixtures dir) makes that resolve to "no fixture
+    found" -- fresh-install shape -- rather than accidentally discovering THIS repo's own
+    tests/fixtures/recall_hard_set.yaml."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    repo = str(tmp_path / "proj")
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    with open(os.path.join(md, "incident.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem_with_body("incident", "a generic description", _DISTINCTIVE_BODY))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    monkeypatch.setenv("MEMOBOT_MEMORY_DIR", md)
+
+    rc = E.main(["--memory-dir", md, "--index-dir", str(tmp_path / ".memory-index")])
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "body_probe" in out
+    assert "report-only" in out

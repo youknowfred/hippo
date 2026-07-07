@@ -1310,3 +1310,226 @@ def test_bm25_rank_patched_indices_param_gates_fast_path():
     # score (TF=6, and a different avgdl/doc_len too) -- proving the gate is load-bearing.
     assert stale_scores[0] != pytest.approx(fresh_oracle_score, abs=1e-9)
     assert correct_scores[0] == pytest.approx(fresh_oracle_score, abs=1e-9)
+
+
+# --------------------------------------------------------------------------- #
+# RET-2: body-aware indexing — the body backstop actually surfaces body-only facts
+# --------------------------------------------------------------------------- #
+def _mem_with_body(name: str, description: str, body: str) -> str:
+    return f'---\nname: {name}\ndescription: "{description}"\ntype: project\n---\n{body}\n'
+
+
+def _write_body_corpus(memory_dir: str, items: dict) -> None:
+    """``items``: fname -> (description, body)."""
+    os.makedirs(memory_dir, exist_ok=True)
+    for fname, (desc, body) in items.items():
+        with open(os.path.join(memory_dir, fname), "w", encoding="utf-8") as fh:
+            fh.write(_mem_with_body(fname[:-3], desc, body))
+
+
+_DISTINCTIVE_BODY = (
+    "## Error signature\n"
+    "The exact failure is a zqxwyvutplaceholder timeout raised from the network layer "
+    "when the retry budget is exhausted before the handshake completes successfully.\n\n"
+    "## Root cause\n"
+    "A misconfigured connection pool size caused exhaustion under load during peak traffic "
+    "hours across every affected region consistently.\n"
+)
+
+
+def test_recall_acceptance_body_only_fact_retrievable_via_bm25(tmp_path, monkeypatch):
+    """The headline RET-2 acceptance test: a GENERIC description gives BM25 nothing to match,
+    but a query on a DISTINCTIVE body token (present ONLY in the body, absent from the
+    description) must still surface the memory via the bm25_body backstop ranking."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(
+        md,
+        {
+            "incident.md": ("a note about a past incident", _DISTINCTIVE_BODY),
+            "other.md": ("an unrelated memory about something else", "unrelated body content here entirely today"),
+        },
+    )
+    B.build_index(md, idx)
+
+    # Sanity: the description alone truly does NOT carry this token (would trivially pass
+    # via the description ranking otherwise, proving nothing about the body backstop).
+    assert "zqxwyvutplaceholder" not in B.extract_description(
+        open(os.path.join(md, "incident.md"), encoding="utf-8").read()
+    )
+
+    res = R.recall("zqxwyvutplaceholder timeout", k=5, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert "incident" in names
+
+
+def test_recall_body_backstop_never_beats_description_hit_at_equal_relevance(tmp_path, monkeypatch):
+    """_BODY_RRF_WEIGHT keeps body rankings a BACKSTOP: a query matching one memory's
+    DESCRIPTION must still outrank a same-query body-only match on another memory, all else
+    equal -- proving description rows stay primary, per the roadmap's design."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(
+        md,
+        {
+            "desc_hit.md": (
+                "kubernetes helm chart deployment rollout strategy guidance",
+                "unrelated filler content that has nothing to do with the query at all today",
+            ),
+            "body_hit.md": (
+                "a totally unrelated generic memory description here",
+                "## Details\nkubernetes helm chart deployment rollout strategy guidance lives here in the body only",
+            ),
+        },
+    )
+    B.build_index(md, idx)
+    res = R.recall("kubernetes helm chart deployment rollout strategy", k=5, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert names.index("desc_hit") < names.index("body_hit")
+
+
+def test_recall_body_hit_carries_primary_backend_label(tmp_path, monkeypatch):
+    """A body-only hit still reports the description-only backend label ('bm25', not a third
+    backend) -- body rankings are a backstop at the display layer too, per the design."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(md, {"incident.md": ("a generic description", _DISTINCTIVE_BODY)})
+    B.build_index(md, idx)
+    res = R.recall("zqxwyvutplaceholder", k=5, memory_dir=md, index_dir=idx)
+    assert res and res[0]["backend"] == "bm25"
+
+
+def test_bm25_rank_body_maps_chunks_back_to_parent_and_dedupes(tmp_path, monkeypatch):
+    """Direct unit check: a memory with MULTIPLE matching body chunks contributes exactly
+    ONE entry to the ranking (its best-ranked chunk), never one entry per matching chunk."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    two_chunk_body = (
+        "## First\n" + ("shared unique keyword appears here in the first section today " * 3)
+        + "\n\n## Second\n" + ("shared unique keyword appears again in the second section too " * 3)
+    )
+    _write_body_corpus(md, {"a.md": ("generic description", two_chunk_body)})
+    B.build_index(md, idx)
+    loaded = B.load_index(idx)
+    assert len(loaded.body_chunks) == 2  # both sections cleared the min-chars floor
+
+    q_tokens = B.tokenize("shared unique keyword")
+    result = R._bm25_rank_body(q_tokens, loaded)
+    assert result.count(0) == 1  # entry 0 contributes exactly once, not twice
+
+
+def test_dense_rank_body_maps_chunks_back_and_dedupes(tmp_path, monkeypatch):
+    """Direct unit check on the dense half of the backstop: fake-embedder dense rank over the
+    widened matrix, mapped back to parent entries, deduped to best rank."""
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", _fake_embedder(16)[0])
+    monkeypatch.setattr(B, "embed_query", _fake_embedder(16)[1])
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(
+        md,
+        {
+            "a.md": ("generic description", _DISTINCTIVE_BODY),
+            "b.md": ("another generic description", "short unrelated body content here at all today"),
+        },
+    )
+    B.build_index(md, idx)
+    loaded = B.load_index(idx)
+    assert loaded.dense_ready is True
+
+    result = R._dense_rank_body("zqxwyvutplaceholder timeout network handshake", loaded)
+    # No entry index appears more than once even though "a" may have 2 qualifying chunks.
+    assert len(result) == len(set(result))
+
+
+def test_rrf_fuse_weights_none_is_byte_identical_to_unweighted(tmp_path):
+    """weights=None (every existing call site before this item) must reproduce the EXACT
+    pre-RET-2 unweighted formula -- a golden byte-for-byte equivalence pin."""
+    rankings = [[2, 0, 1], [1, 2, 0]]
+    unweighted = R._rrf_fuse(rankings)
+    explicit_ones = R._rrf_fuse(rankings, weights=[1.0, 1.0])
+    assert unweighted == explicit_ones
+
+
+def test_rrf_fuse_body_weight_discounts_but_does_not_zero():
+    """A body-only ranking must still be ABLE to contribute (nonzero weight), just less than
+    a full-weight description ranking for the same rank position."""
+    desc_only = R._rrf_fuse([[0]], weights=[1.0])
+    body_only = R._rrf_fuse([[0]], weights=[0.5])
+    assert body_only[0][1] == pytest.approx(desc_only[0][1] * 0.5)
+    assert 0.0 < body_only[0][1] < desc_only[0][1]
+
+
+def test_body_rrf_weight_env_override(monkeypatch):
+    monkeypatch.setenv("MEMOBOT_BODY_RRF_WEIGHT", "0.25")
+    assert R._body_rrf_weight() == pytest.approx(0.25)
+    monkeypatch.setenv("MEMOBOT_BODY_RRF_WEIGHT", "not-a-number")
+    assert R._body_rrf_weight() == R._BODY_RRF_WEIGHT  # malformed -> module default
+    monkeypatch.delenv("MEMOBOT_BODY_RRF_WEIGHT", raising=False)
+    assert R._body_rrf_weight() == R._BODY_RRF_WEIGHT
+
+
+def test_graph_expansion_still_operates_on_parent_entries_with_body_chunks_present(tmp_path, monkeypatch):
+    """GRA-1 interplay (explicitly called out in the roadmap): 1-hop expansion must keep
+    operating purely on parent ENTRY indices even when the corpus has body chunks -- the
+    graph never needs to know body chunks exist at all."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(
+        md,
+        {
+            "seed.md": ("seed memory about zzqqcanary widgets", "## Notes\n" + "extra body detail about the seed topic here today " * 3),
+            "linked.md": ("a completely unrelated description", "## Notes\n" + "extra body detail about something else entirely today " * 3),
+        },
+    )
+    # Wire an explicit link seed -> linked so expansion has something to pull.
+    with open(os.path.join(md, "seed.md"), "a", encoding="utf-8") as fh:
+        fh.write("\nSee also [[linked]].\n")
+    B.build_index(md, idx)
+
+    res = R.recall("zzqqcanary widgets", k=5, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert "seed" in names
+    assert "linked" in names  # pulled in via 1-hop expansion despite unrelated body/description
+    linked_hit = next(r for r in res if r["name"] == "linked")
+    assert linked_hit["via"] == "graph"
+
+
+@pytest.mark.network
+def test_recall_acceptance_body_only_fact_retrievable_via_dense(tmp_path, monkeypatch):
+    """Network-marked dense equivalent of the BM25 body-backstop acceptance test: with the
+    REAL fastembed model, a query semantically close to body-only content (paraphrased, not
+    a literal token match) still surfaces the memory via the dense_body ranking."""
+    pytest.importorskip("fastembed")
+    # Honor a caller-provided FASTEMBED_CACHE_PATH (CI's dense lane points this at the
+    # actions-restored cache) else this machine's own durable warm cache (mirrors
+    # test_real_fastembed_dense_build's precedence, but falls back to the REAL durable dir
+    # instead of an empty tmp one — this test needs an ALREADY-warm model, not a fresh
+    # download, to stay fast and offline-safe in the dense CI lane and on a warm dev machine).
+    cache = os.environ.get("FASTEMBED_CACHE_PATH") or B.durable_fastembed_cache_dir()
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", cache)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(
+        md,
+        {
+            "incident.md": (
+                "a short note",
+                "## Details\nthe production database connection pool was exhausted because "
+                "retries never backed off, causing a cascading outage across every service.",
+            ),
+            "other.md": ("an unrelated memory", "completely different unrelated topic content here today"),
+        },
+    )
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    B.build_index(md, idx)
+    res = R.recall(
+        "why did the database connections run out during retries", k=5, memory_dir=md, index_dir=idx
+    )
+    names = [r["name"] for r in res]
+    assert "incident" in names

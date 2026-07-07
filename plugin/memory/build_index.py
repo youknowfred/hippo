@@ -370,6 +370,97 @@ def _hash(doc_text: str) -> str:
     return hashlib.sha1(doc_text.encode("utf-8")).hexdigest()
 
 
+# --------------------------------------------------------------------------- #
+# RET-2: body chunks — a memory's crucial fact (error signature, config value,
+# rationale) often lives in the BODY, behind a generic description. Description-only
+# indexing makes that fact invisible to both backends no matter how good the query is.
+# These chunks are a BACKSTOP, not a replacement: description rows stay primary (see
+# recall._BODY_RRF_WEIGHT), and the bounds below are deliberately tight so a large corpus'
+# index doesn't balloon just because bodies are verbose.
+# --------------------------------------------------------------------------- #
+_BODY_CHUNK_CHAR_BUDGET = 1500  # only the first ~1500 chars of body are ever considered
+_BODY_CHUNK_MAX = 3  # hard cap: at most 3 body chunks per memory
+_BODY_CHUNK_MIN_CHARS = 80  # a chunk shorter than this is trivia (a lone heading, a stray
+# line) -- skip it rather than index noise that would never usefully rank above a real hit.
+_HEADING_RE = re.compile(r"^#{2,6}\s+\S", re.MULTILINE)  # "## " / "### " etc, not the H1 title
+
+
+def _split_heading_guided(body: str) -> List[str]:
+    """Split ``body`` on ``##``+ headings, each section = heading line + its following text.
+
+    The heading line itself is KEPT in the chunk (it is often the most information-dense line
+    -- "Why:"/"How to apply:"-style headers, or a descriptive section title -- dropping it
+    would throw away a cheap, strong signal). Returns [] when there is no ``##``+ heading
+    anywhere in ``body`` (the caller falls back to paragraph-guided splitting in that case).
+    """
+    matches = list(_HEADING_RE.finditer(body))
+    if not matches:
+        return []
+    sections = []
+    for i, m in enumerate(matches):
+        start = m.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
+        sections.append(body[start:end].strip())
+    return [s for s in sections if s]
+
+
+def _split_paragraph_guided(body: str) -> List[str]:
+    """Split ``body`` on blank-line-separated paragraphs (the fallback when no heading
+    structure exists -- most of this corpus's memories are a few bolded-label paragraphs,
+    per ``feedback_root_cause_not_symptom_handling.md``'s shape: no ``##`` headings at all,
+    just ``**Why:**``/``**How to apply:**`` paragraphs and bullet lists)."""
+    paras = re.split(r"\n\s*\n", body)
+    return [p.strip() for p in paras if p.strip()]
+
+
+def compute_body_chunks(name: str, text: str) -> List[dict]:
+    """Bounded body chunks for one memory -> ``[{text, tokens, hash}, ...]`` (<=3, each
+    >=~80 chars). ``text`` is the FULL raw file (frontmatter + body), matching every other
+    reader in this module (``extract_description``, ``compute_corpus``).
+
+    Bounds (deliberately tight -- a backstop, not a second index):
+      - only the first ``_BODY_CHUNK_CHAR_BUDGET`` (~1500) chars of the body are considered
+        at all -- a memory's most important body content is overwhelmingly near the top
+        (the lede), and this caps embedding/BM25 cost from growing with body length;
+      - heading-guided (``## ...`` sections) when the body has any ``##``+ heading, else
+        paragraph-guided (blank-line-separated paragraphs) -- see the two helpers above;
+      - at most ``_BODY_CHUNK_MAX`` (3) chunks survive -- the first 3 (in body order, which
+        is authoring order -- the memory's own structure already puts the load-bearing
+        content first for a human reader, and this indexer trusts that same ordering);
+      - a chunk shorter than ``_BODY_CHUNK_MIN_CHARS`` (~80) is skipped as trivia (a bare
+        heading with nothing under it, a one-line stub) rather than indexed as noise.
+
+    ``hash`` is per-CHUNK (sha1 of the chunk's own text, not the whole doc) so build_index's
+    incremental reuse is keyed exactly like entry rows: a chunk whose text is byte-identical
+    to a prior build's reuses that prior build's embedding row; only genuinely NEW/changed
+    chunk text gets re-embedded. Never raises -- any parse hiccup degrades to [] (a memory
+    with unparseable body content simply gets no body chunks, never a crash).
+    """
+    try:
+        _, body = split_frontmatter(text)
+        body = (body or "").strip()
+        if not body:
+            return []
+        budget = body[:_BODY_CHUNK_CHAR_BUDGET]
+        sections = _split_heading_guided(budget) or _split_paragraph_guided(budget)
+        chunks: List[dict] = []
+        for section in sections:
+            if len(chunks) >= _BODY_CHUNK_MAX:
+                break
+            if len(section) < _BODY_CHUNK_MIN_CHARS:
+                continue
+            chunks.append(
+                {
+                    "text": section,
+                    "tokens": tokenize(section),
+                    "hash": _hash(section),
+                }
+            )
+        return chunks
+    except Exception:
+        return []
+
+
 def _extract_invalid_after(fm: dict) -> Optional[str]:
     """The memory's ``invalid_after`` (top-level or under ``metadata:``), or ``None``.
 
@@ -404,6 +495,7 @@ def compute_corpus(
     *,
     texts_out: Optional[Dict[str, str]] = None,
     sigs_out: Optional[Dict[str, List[int]]] = None,
+    body_chunks_out: Optional[Dict[int, List[dict]]] = None,
 ) -> List[dict]:
     """Scan the corpus -> ordered entries ``{name, file, doc_text, hash, tokens, invalid_after}``.
 
@@ -420,6 +512,13 @@ def compute_corpus(
     graph with ZERO extra file reads. The stat runs BEFORE the read: a write racing between
     the two makes the recorded sig look STALE on the next freshness check (a wasted rebuild,
     the safe direction), never fresh-but-wrong.
+
+    RET-2: ``body_chunks_out`` (caller-supplied dict, mutated in place, keyed by the ENTRY
+    INDEX in the returned list) is the same "side product of a read this function already
+    performs" pattern as ``texts_out``/``sigs_out`` — the entries list itself stays EXACTLY
+    the shape it was before this item (every existing consumer of ``compute_corpus`` /
+    ``entries`` is untouched), and body chunks are threaded to the caller (``build_index``)
+    out-of-band instead of growing the entry dict.
     """
     entries: List[dict] = []
     for path in _iter_memory_files(memory_dir):
@@ -437,6 +536,8 @@ def compute_corpus(
         desc = extract_description(text)
         doc_text = f"{_name_words(name)}. {desc}".strip()
         fm = parse_frontmatter(text)
+        if body_chunks_out is not None:
+            body_chunks_out[len(entries)] = compute_body_chunks(name, text)
         entries.append(
             {
                 "name": name,
@@ -783,16 +884,27 @@ def build_index(
     dense across sessions (each pass reuses the previous pass's rows via ``old_row_by_hash``)
     instead of an all-or-nothing 15s attempt that discards partial progress.
 
-    ``dense_ready`` is True only when EVERY entry ends up with a row — a partially-embedded
-    corpus stays ``dense_ready=False`` (BM25-only) rather than exposing a half-filled dense
-    matrix to recall, which cosine-scores placeholder rows as if they were real embeddings.
-    The rows themselves (and the manifest's per-entry ``row``) are still saved so the next
-    build's ``old_row_by_hash`` skips re-embedding them — "never worse than BM25" is protected
-    for CURRENT recall while embedding progress is not thrown away.
+    ``dense_ready`` is True only when EVERY entry AND every body chunk (RET-2) ends up with a
+    row — a partially-embedded corpus stays ``dense_ready=False`` (BM25-only) rather than
+    exposing a half-filled dense matrix to recall, which cosine-scores placeholder rows as if
+    they were real embeddings. The rows themselves (and the manifest's per-entry/per-chunk
+    ``row``) are still saved so the next build's ``old_row_by_hash`` skips re-embedding them —
+    "never worse than BM25" is protected for CURRENT recall while embedding progress is not
+    thrown away.
 
     ``preserve_on_dense_fail=True`` means: if the existing index was dense and this build
     could NOT produce (fully) dense (offline embed failed or ran out of budget), leave the
     existing index untouched rather than DOWNGRADE it to BM25-only — "never worse".
+
+    RET-2: body chunks are a BACKSTOP over the SAME ``dense.npy``/BM25-postings machinery as
+    description rows, not a second index. Rows 0..N-1 (N = entry count) are description rows,
+    exactly as before this item; rows N.. are body-chunk rows, in ``(entry_index, chunk_index)``
+    order. Chunk rows reuse the identical hash-keyed incremental-embed logic as entry rows (see
+    ``old_row_by_hash`` below, now populated from BOTH populations) so an unchanged body chunk
+    is never re-embedded. BM25 gets the same treatment: ``compute_bm25_stats`` runs over the
+    UNIFIED doc list (entries first, chunks appended) so entry doc indices 0..N-1 are BYTE
+    IDENTICAL to the pre-RET-2 stats (the golden-equivalence tests pin this), and chunk docs
+    just extend the same postings table at indices N...
     """
     if memory_dir is None:
         memory_dir, _ = resolve_dirs()
@@ -802,7 +914,10 @@ def build_index(
 
     texts: Dict[str, str] = {}
     sigs: Dict[str, List[int]] = {}
-    entries = compute_corpus(memory_dir, texts_out=texts, sigs_out=sigs)
+    body_chunks_by_entry: Dict[int, List[dict]] = {}
+    entries = compute_corpus(
+        memory_dir, texts_out=texts, sigs_out=sigs, body_chunks_out=body_chunks_by_entry
+    )
 
     # GRA-6: persist the resolved wikilink graph (links.json) from the texts this build
     # already read — zero extra file reads. Done BEFORE the dense work (and before the
@@ -820,6 +935,14 @@ def build_index(
     old_manifest = None if force else _load_manifest(index_dir)
     old_dense = None if force else _load_dense(index_dir)
 
+    # RET-2: flatten body_chunks_by_entry into one deterministic list, in (entry_index,
+    # chunk_index) order — this is also the manifest's persisted "body_chunks" ORDER, and
+    # (once description rows occupy 0..N-1) the dense-row order for chunk rows N...
+    body_chunks: List[dict] = []
+    for entry_idx in range(len(entries)):
+        for chunk in body_chunks_by_entry.get(entry_idx, []):
+            body_chunks.append({"entry": entry_idx, "hash": chunk["hash"], "tokens": chunk["tokens"], "text": chunk["text"]})
+
     want_dense = not dense_disabled()
     dense_rows = None
     dense_ready = False
@@ -827,24 +950,39 @@ def build_index(
         try:
             import numpy as np
 
+            n_entries = len(entries)
+            n_chunks = len(body_chunks)
+            n_total = n_entries + n_chunks
+
             # NOTE: gated on the model matching + a dense matrix being present — NOT on
             # old_manifest["dense_ready"] — so a PARTIALLY-embedded manifest (COR-3 chunked
             # embed, dense_ready=False but some entries do have a row) still contributes its
             # already-embedded rows here, letting a large corpus converge across sessions
             # instead of re-embedding from scratch every time the prior attempt fell short.
+            # RET-2: this hash->row map is now populated from BOTH the old entries AND the
+            # old body_chunks blocks -- a chunk hash-hit is exactly as cache-reusable as an
+            # entry hash-hit (same incremental-embed contract, same manifest, same dense.npy).
             old_row_by_hash: Dict[str, int] = {}
             if old_manifest and old_dense is not None and old_manifest.get("model") == DEFAULT_MODEL:
                 for e in old_manifest.get("entries", []):
                     if "row" in e and e["row"] is not None and 0 <= e["row"] < len(old_dense):
                         old_row_by_hash[e["hash"]] = e["row"]
+                for c in old_manifest.get("body_chunks", []) or []:
+                    if c.get("row") is not None and 0 <= c["row"] < len(old_dense):
+                        old_row_by_hash[c["hash"]] = c["row"]
 
-            to_embed_idx = [i for i, e in enumerate(entries) if e["hash"] not in old_row_by_hash]
+            # Unified (doc_text, hash) work list: entries first (rows 0..N-1), chunks appended
+            # (rows N..) -- this is the row order dense_rows is assembled in below.
+            all_hashes = [e["hash"] for e in entries] + [c["hash"] for c in body_chunks]
+            all_texts = [e["doc_text"] for e in entries] + [c["text"] for c in body_chunks]
+
+            to_embed_idx = [i for i in range(n_total) if all_hashes[i] not in old_row_by_hash]
             new_vecs_by_idx: Dict[int, "np.ndarray"] = {}
             if to_embed_idx:
                 if allow_download:
                     # Online build (bootstrap/manual): one unbounded batch, as before.
-                    texts = [entries[i]["doc_text"] for i in to_embed_idx]
-                    vecs = embed_documents(texts, allow_download=True)
+                    batch_texts = [all_texts[i] for i in to_embed_idx]
+                    vecs = embed_documents(batch_texts, allow_download=True)
                     for pos, i in enumerate(to_embed_idx):
                         new_vecs_by_idx[i] = vecs[pos]
                 else:
@@ -856,10 +994,10 @@ def build_index(
                         if remaining <= 0:
                             break  # budget exhausted -> stop starting new slices
                         chunk_idx = to_embed_idx[start : start + DENSE_EMBED_CHUNK_SIZE]
-                        texts = [entries[i]["doc_text"] for i in chunk_idx]
+                        batch_texts = [all_texts[i] for i in chunk_idx]
                         try:
                             chunk_vecs = run_bounded(
-                                lambda t=texts: embed_documents(t, allow_download=False),
+                                lambda t=batch_texts: embed_documents(t, allow_download=False),
                                 remaining,
                             )
                         except DenseTimeout:
@@ -875,18 +1013,24 @@ def build_index(
             if dim is None:
                 raise RuntimeError("could not determine embedding dim")
 
-            rows = np.zeros((len(entries), dim), dtype="float32")
+            rows = np.zeros((n_total, dim), dtype="float32")
             all_embedded = True
-            for i, e in enumerate(entries):
-                if e["hash"] in old_row_by_hash:
-                    rows[i] = old_dense[old_row_by_hash[e["hash"]]]
-                    e["row"] = i
+            row_of: List[Optional[int]] = [None] * n_total
+            for i in range(n_total):
+                h = all_hashes[i]
+                if h in old_row_by_hash:
+                    rows[i] = old_dense[old_row_by_hash[h]]
+                    row_of[i] = i
                 elif i in new_vecs_by_idx:
                     rows[i] = new_vecs_by_idx[i]
-                    e["row"] = i
+                    row_of[i] = i
                 else:
-                    e["row"] = None
+                    row_of[i] = None
                     all_embedded = False
+            for i, e in enumerate(entries):
+                e["row"] = row_of[i]
+            for j, c in enumerate(body_chunks):
+                c["row"] = row_of[n_entries + j]
             dense_rows = rows
             dense_ready = all_embedded
         except Exception:
@@ -905,15 +1049,28 @@ def build_index(
         return old_manifest
 
     if dense_rows is None:
-        # Total dense failure (no partial progress to keep) -> every entry is row=None.
+        # Total dense failure (no partial progress to keep) -> every entry/chunk is row=None.
         for e in entries:
             e["row"] = None
+        for c in body_chunks:
+            c["row"] = None
 
-    # PRF-1: precompute BM25 postings/doc_len/avgdl/idf ONCE at build time (cheap, pure
-    # python — no numpy/fastembed needed) so query time never reconstructs BM25Okapi over
-    # the whole corpus. Token order is entries' order, matching what recall._bm25_rank's
-    # fast path indexes into.
-    bm25_stats = compute_bm25_stats([e.get("tokens") or [] for e in entries])
+    # PRF-1 (+ RET-2): precompute BM25 postings/doc_len/avgdl/idf ONCE at build time (cheap,
+    # pure python — no numpy/fastembed needed) so query time never reconstructs BM25Okapi over
+    # the whole corpus. UNIFIED doc space: entries first (doc indices 0..N-1, byte-identical to
+    # the pre-RET-2 stats — the golden-equivalence tests pin this), body chunks appended (doc
+    # indices N..). recall._bm25_rank's fast path indexes into this SAME order for both.
+    bm25_stats = compute_bm25_stats(
+        [e.get("tokens") or [] for e in entries] + [c.get("tokens") or [] for c in body_chunks]
+    )
+
+    # RET-2: manifest's persisted body_chunks block -- entry/hash/tokens/row ONLY (no raw
+    # chunk text — the text is reconstructible from the source file via compute_body_chunks,
+    # exactly like description rows never persist doc_text's raw description twice either).
+    body_chunks_manifest = [
+        {"entry": c["entry"], "hash": c["hash"], "tokens": c["tokens"], "row": c["row"]}
+        for c in body_chunks
+    ]
 
     manifest = {
         "schema_version": SCHEMA_VERSION,
@@ -924,6 +1081,7 @@ def build_index(
         "dim": int(dense_rows.shape[1]) if dense_rows is not None else None,
         "count": len(entries),
         "entries": entries,
+        "body_chunks": body_chunks_manifest,
         "bm25": bm25_stats,
     }
 
@@ -981,6 +1139,14 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
     perturbing a hash. Falling through to ``build_index`` retries the offline dense embed
     (bounded, chunked, never-downgrade), so a warm model cache upgrades the index to dense on
     this SessionStart instead of waiting on the next write.
+
+    RET-2: "corpus unchanged" now ALSO compares body-chunk hashes (not just entry/description
+    hashes) — a body edit that leaves the description untouched changes NO entry hash at all,
+    so without this the no-op short-circuit would never notice a body-only edit and body
+    drift would never heal, even across restarts. This is exactly the SessionStart rebuild
+    ``_drift_patch``'s docstring (recall.py) defers body drift to — mid-session, a body edit
+    is NOT patched live (that would mean re-embedding on the hot path); it heals HERE, at the
+    next SessionStart refresh, the same as a stale dense row already does.
     """
     try:
         if memory_dir is None:
@@ -989,11 +1155,21 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
             index_dir = default_index_dir(memory_dir)
         texts: Dict[str, str] = {}
         sigs: Dict[str, List[int]] = {}
-        entries_now = compute_corpus(memory_dir, texts_out=texts, sigs_out=sigs)
+        body_chunks_now: Dict[int, List[dict]] = {}
+        entries_now = compute_corpus(
+            memory_dir, texts_out=texts, sigs_out=sigs, body_chunks_out=body_chunks_now
+        )
         old = _load_manifest(index_dir)
         if old is not None:
             old_hashes = [e.get("hash") for e in old.get("entries", [])]
-            corpus_unchanged = old_hashes == [e["hash"] for e in entries_now]
+            now_hashes = [e["hash"] for e in entries_now]
+            old_chunk_hashes = [c.get("hash") for c in old.get("body_chunks", []) or []]
+            now_chunk_hashes = [
+                chunk["hash"]
+                for entry_idx in range(len(entries_now))
+                for chunk in body_chunks_now.get(entry_idx, [])
+            ]
+            corpus_unchanged = old_hashes == now_hashes and old_chunk_hashes == now_chunk_hashes
             if corpus_unchanged and (old.get("dense_ready") or dense_disabled()):
                 # GRA-6: "corpus unchanged" above compares doc_text hashes, which BODY
                 # edits do not perturb — but wikilinks live in bodies. Before skipping
@@ -1031,13 +1207,20 @@ class LoadedIndex:
     Rather than exposing that torn pair, ``dense_ready`` is verified HERE against the
     actual loaded matrix's shape and every entry's ``row`` index -- any mismatch
     degrades to BM25-only for this read, exactly like a fully-failed dense load would.
+
+    RET-2: ``body_chunks`` (a flat list of ``{entry, hash, tokens, row}``, may be empty for
+    an older pre-RET-2 manifest or a corpus with no qualifying body chunks) is validated
+    against the SAME widened dense matrix -- a torn read must degrade the WHOLE dense view
+    (entries AND chunks) to BM25-only together, never a half-valid matrix where entry rows
+    are trusted but chunk rows are garbage (or vice versa).
     """
 
     def __init__(self, manifest: dict, dense):
         self.manifest = manifest
         self.entries: List[dict] = manifest.get("entries", [])
+        self.body_chunks: List[dict] = manifest.get("body_chunks", []) or []
         dense_ready = bool(manifest.get("dense_ready")) and dense is not None
-        if dense_ready and not self._dense_matches_entries(dense, self.entries):
+        if dense_ready and not self._dense_matches_entries(dense, self.entries, self.body_chunks):
             dense_ready = False
             dense = None
         self.dense_ready: bool = dense_ready
@@ -1045,15 +1228,19 @@ class LoadedIndex:
         self.model: Optional[str] = manifest.get("model")
 
     @staticmethod
-    def _dense_matches_entries(dense, entries: List[dict]) -> bool:
+    def _dense_matches_entries(dense, entries: List[dict], body_chunks: Optional[List[dict]] = None) -> bool:
         try:
             n_rows = dense.shape[0]
         except Exception:
             return False
-        if n_rows != len(entries):
+        if n_rows != len(entries) + len(body_chunks or []):
             return False
         for e in entries:
             row = e.get("row")
+            if row is None or not (0 <= row < n_rows):
+                return False
+        for c in body_chunks or []:
+            row = c.get("row")
             if row is None or not (0 <= row < n_rows):
                 return False
         return True
@@ -1116,9 +1303,12 @@ def check_index_integrity(index_dir: str) -> Optional[str]:
                 )
             dense = _load_dense(index_dir)
             entries = manifest.get("entries", [])
+            body_chunks = manifest.get("body_chunks", []) or []
             dim = manifest.get("dim")
             shape_ok = dense is not None and getattr(dense, "ndim", 0) == 2
-            if shape_ok and dense.shape[0] != len(entries):
+            # RET-2: the matrix is WIDENED (description rows + body-chunk rows) — its row
+            # count must match entries+chunks together, not entries alone.
+            if shape_ok and dense.shape[0] != len(entries) + len(body_chunks):
                 shape_ok = False
             if shape_ok and dim is not None and dense.shape[1] != dim:
                 shape_ok = False

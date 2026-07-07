@@ -997,3 +997,269 @@ def test_model_switch_forces_full_reembed(tmp_path, monkeypatch):
     assert manifest_b["dense_ready"] is True
     # Nothing was cache-reused from model-a's rows: BOTH entries were re-embedded under model-b.
     assert embed_calls["count"] == 2
+
+
+# --------------------------------------------------------------------------- #
+# RET-2: body-aware indexing — compute_body_chunks bounds + build_index wiring
+# --------------------------------------------------------------------------- #
+def _mem_with_body(name: str, description: str, body: str) -> str:
+    return f'---\nname: {name}\ndescription: "{description}"\ntype: project\n---\n{body}\n'
+
+
+def _write_body_corpus(memory_dir: str, items: dict) -> None:
+    """``items``: fname -> (description, body)."""
+    os.makedirs(memory_dir, exist_ok=True)
+    for fname, (desc, body) in items.items():
+        with open(os.path.join(memory_dir, fname), "w", encoding="utf-8") as fh:
+            fh.write(_mem_with_body(fname[:-3], desc, body))
+
+
+def test_compute_body_chunks_heading_guided_split():
+    """A body with >=1 '##'+ heading splits ONE chunk per section, heading line kept in it."""
+    text = (
+        "---\nname: a\ndescription: \"generic\"\n---\n"
+        "## First Section\n"
+        + ("alpha " * 20)
+        + "\n\n## Second Section\n"
+        + ("beta " * 20)
+    )
+    chunks = B.compute_body_chunks("a", text)
+    assert len(chunks) == 2
+    assert chunks[0]["text"].startswith("## First Section")
+    assert chunks[1]["text"].startswith("## Second Section")
+
+
+def test_compute_body_chunks_paragraph_guided_fallback():
+    """No '##'+ heading anywhere -> falls back to blank-line-separated paragraphs (the shape
+    most of this corpus's real memories take -- bolded labels, no markdown headings)."""
+    text = (
+        "---\nname: a\ndescription: \"generic\"\n---\n"
+        + ("**Why:** " + "root cause discipline matters a lot here today. " * 4)
+        + "\n\n"
+        + ("**How to apply:** " + "always fix the actual bug not a symptom of it now. " * 4)
+    )
+    chunks = B.compute_body_chunks("a", text)
+    assert len(chunks) == 2
+    assert chunks[0]["text"].startswith("**Why:**")
+    assert chunks[1]["text"].startswith("**How to apply:**")
+
+
+def test_compute_body_chunks_caps_at_three():
+    """MAX 3 chunks per memory even when the body has many qualifying paragraphs."""
+    paras = "\n\n".join(f"paragraph number {i} has plenty of unique content words here today" * 2 for i in range(6))
+    text = f'---\nname: a\ndescription: "generic"\n---\n{paras}\n'
+    chunks = B.compute_body_chunks("a", text)
+    assert len(chunks) <= B._BODY_CHUNK_MAX
+    assert len(chunks) == 3
+
+
+def test_compute_body_chunks_skips_trivia_below_min_chars():
+    """A paragraph shorter than ~80 chars is trivia -- skipped, not indexed as noise."""
+    text = '---\nname: a\ndescription: "generic"\n---\ntoo short\n\n' + ("substantial content " * 10)
+    chunks = B.compute_body_chunks("a", text)
+    assert all(len(c["text"]) >= B._BODY_CHUNK_MIN_CHARS for c in chunks)
+    assert not any(c["text"] == "too short" for c in chunks)
+
+
+def test_compute_body_chunks_only_considers_first_char_budget():
+    """Content beyond ~1500 chars of body is never chunked at all."""
+    filler = "z" * 2000  # one huge unbroken paragraph, well past the budget
+    text = f'---\nname: a\ndescription: "generic"\n---\n{filler}\n'
+    chunks = B.compute_body_chunks("a", text)
+    for c in chunks:
+        assert len(c["text"]) <= B._BODY_CHUNK_CHAR_BUDGET
+
+
+def test_compute_body_chunks_empty_body_yields_no_chunks():
+    text = '---\nname: a\ndescription: "generic"\n---\n\n'
+    assert B.compute_body_chunks("a", text) == []
+
+
+def test_compute_body_chunks_never_raises_on_no_frontmatter():
+    assert B.compute_body_chunks("a", "just plain text, no frontmatter fence at all") != [] or True
+    # (never raises is the actual contract; the exact split doesn't matter here)
+
+
+# --------------------------------------------------------------------------- #
+# RET-2: manifest wiring — body_chunks block, widened dense matrix, incremental reuse
+# --------------------------------------------------------------------------- #
+_DISTINCTIVE_BODY = (
+    "## Error signature\n"
+    "The exact failure is a zqxwyvutplaceholder timeout raised from the network layer "
+    "when the retry budget is exhausted before the handshake completes successfully.\n\n"
+    "## Root cause\n"
+    "A misconfigured connection pool size caused exhaustion under load during peak traffic "
+    "hours across every affected region consistently.\n"
+)
+
+
+def test_build_index_manifest_carries_body_chunks_block(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(md, {"a.md": ("a generic description", _DISTINCTIVE_BODY)})
+    manifest = B.build_index(md, idx)
+    assert "body_chunks" in manifest
+    chunks = manifest["body_chunks"]
+    assert chunks and all(c["entry"] == 0 for c in chunks)
+    assert all(set(c.keys()) == {"entry", "hash", "tokens", "row"} for c in chunks)
+
+    # Round-trips through the actual manifest.json file on disk.
+    import json
+
+    with open(os.path.join(idx, "manifest.json"), "r", encoding="utf-8") as fh:
+        on_disk = json.load(fh)
+    assert on_disk["body_chunks"] == chunks
+
+    # The entries list itself is EXACTLY the pre-RET-2 shape (no new keys leaked onto it).
+    assert set(manifest["entries"][0].keys()) == {
+        "name", "file", "doc_text", "description", "hash", "tokens", "invalid_after", "row",
+    }
+
+
+def test_build_index_dense_matrix_widened_with_body_chunk_rows(tmp_path, monkeypatch):
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(
+        md,
+        {
+            "a.md": ("a generic description", _DISTINCTIVE_BODY),
+            "b.md": ("another generic description", "short body, no heading here at all"),
+        },
+    )
+    manifest = B.build_index(md, idx)
+    assert manifest["dense_ready"] is True
+    n_entries = len(manifest["entries"])
+    n_chunks = len(manifest["body_chunks"])
+    assert n_chunks >= 2  # a.md's two headed sections both clear the min-chars floor
+
+    dense = np.load(os.path.join(idx, "dense.npy"))
+    assert dense.shape[0] == n_entries + n_chunks  # widened: descriptions THEN chunks
+    # Every entry row is in 0..n_entries-1, every chunk row is in n_entries..n_total-1.
+    for e in manifest["entries"]:
+        assert 0 <= e["row"] < n_entries
+    for c in manifest["body_chunks"]:
+        assert n_entries <= c["row"] < n_entries + n_chunks
+
+
+def test_incremental_rebuild_reuses_unchanged_body_chunk_rows(tmp_path, monkeypatch):
+    """Hash-keyed reuse for chunk rows, exactly like entry rows: editing ONE memory's body
+    must not force a re-embed of an UNCHANGED memory's body chunks."""
+    embedded_batches = []
+    base = _fake_embedder(16)
+
+    def counting_embed(texts, allow_download=True):
+        embedded_batches.append(list(texts))
+        return base(texts)
+
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", counting_embed)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(
+        md,
+        {
+            "a.md": ("a generic description", _DISTINCTIVE_BODY),
+            "b.md": ("another generic description", "short body, no heading here at all " * 3),
+        },
+    )
+    m1 = B.build_index(md, idx)
+    assert m1["dense_ready"] is True
+    first_total_embedded = sum(len(b) for b in embedded_batches)
+    assert first_total_embedded == len(m1["entries"]) + len(m1["body_chunks"])
+
+    # Edit ONLY b.md's body -- a's description+body chunks must all be cache-hit.
+    embedded_batches.clear()
+    with open(os.path.join(md, "b.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem_with_body("b", "another generic description", "## Changed\n" + "totally new body content here for b " * 4))
+    m2 = B.build_index(md, idx)
+    assert m2["dense_ready"] is True
+
+    reembedded_texts = [t for batch in embedded_batches for t in batch]
+    # None of a's original body-chunk text (from _DISTINCTIVE_BODY) was resubmitted.
+    assert not any("zqxwyvutplaceholder" in t for t in reembedded_texts)
+    # b's NEW body chunk text WAS resubmitted (its hash changed).
+    assert any("changed" in t.lower() for t in reembedded_texts)
+
+
+def test_loaded_index_exposes_body_chunks(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(md, {"a.md": ("a generic description", _DISTINCTIVE_BODY)})
+    B.build_index(md, idx)
+    loaded = B.load_index(idx)
+    assert loaded.body_chunks  # non-empty, surfaced on the LoadedIndex view
+
+
+def test_loaded_index_degrades_dense_when_widened_matrix_mismatches_body_chunks(tmp_path, monkeypatch):
+    """A torn/corrupt dense.npy whose row count matches entries+OLD chunk count but not the
+    manifest's CURRENT body_chunks count must degrade the WHOLE dense view (not just chunks)."""
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(md, {"a.md": ("a generic description", _DISTINCTIVE_BODY)})
+    B.build_index(md, idx)
+
+    manifest = B._load_manifest(idx)
+    # Corrupt the manifest in-memory: claim one MORE body chunk than the dense matrix has rows for.
+    manifest["body_chunks"] = manifest["body_chunks"] + [
+        {"entry": 0, "hash": "deadbeef", "tokens": ["x"], "row": 9999}
+    ]
+    dense = B._load_dense(idx)
+    loaded = B.LoadedIndex(manifest, dense)
+    assert loaded.dense_ready is False
+    assert loaded.dense is None
+
+
+def test_body_chunks_absent_key_degrades_cleanly_on_old_manifest(tmp_path):
+    """A pre-RET-2 manifest (no 'body_chunks' key at all) must load fine -- body_chunks
+    degrades to [] via .get(), no KeyError, and dense-matches-entries validation is
+    unaffected (0 chunks -> same row-count check as before this item)."""
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    os.makedirs(idx, exist_ok=True)
+    import json as _json
+
+    old_manifest = {
+        "schema_version": 2,
+        "model": None,
+        "dense_ready": False,
+        "dim": None,
+        "count": 1,
+        "entries": [{"name": "a", "file": "a.md", "doc_text": "a. alpha", "description": "alpha", "hash": "x", "tokens": ["a"], "row": None}],
+        "bm25": {"postings": {}, "doc_len": [0], "avgdl": 0.0, "idf": {}, "k1": 1.5, "b": 0.75},
+    }
+    with open(os.path.join(idx, "manifest.json"), "w", encoding="utf-8") as fh:
+        _json.dump(old_manifest, fh)
+    loaded = B.load_index(idx)
+    assert loaded is not None
+    assert loaded.body_chunks == []
+
+
+# --------------------------------------------------------------------------- #
+# RET-2: refresh_index heals body-only drift (description hash unchanged, body changed)
+# --------------------------------------------------------------------------- #
+def test_refresh_index_heals_body_only_edit(tmp_path, monkeypatch):
+    """A body edit that leaves the description BYTE-IDENTICAL changes no entry hash at all --
+    refresh_index's corpus-unchanged short-circuit must still notice via body-chunk hashes
+    and re-run the build so the NEW body content becomes indexed/retrievable."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(md, {"a.md": ("a generic description", "## Old\n" + "original body content here today " * 4)})
+    m1 = B.build_index(md, idx)
+    old_chunk_hashes = {c["hash"] for c in m1["body_chunks"]}
+
+    # Edit ONLY the body (description string is byte-identical) -- entry hash is unchanged.
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem_with_body("a", "a generic description", "## New\n" + "brand new distinctive body content today " * 4))
+
+    m2 = B.refresh_index(md, idx)
+    assert m2 is not None
+    new_chunk_hashes = {c["hash"] for c in m2["body_chunks"]}
+    assert new_chunk_hashes != old_chunk_hashes  # the no-op short-circuit did NOT fire
+    assert any("distinctive" in " ".join(c["tokens"]) for c in m2["body_chunks"])
