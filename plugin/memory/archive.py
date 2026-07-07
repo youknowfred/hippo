@@ -2,8 +2,12 @@
 instrument-immunize roadmap).
 
 Decay is DEMOTION, never deletion. ``archive_candidates()`` is a REPORT over the 4-WAY
-INTERSECTION:
-  - **cold**          — never recalled in the telemetry ledger (``soak.curation_report``'s
+INTERSECTION — withheld entirely until the ``>=5``-distinct-session curation-soak bar is
+met, and excluding memories younger than that soak window (LIF-4: the cold signal below is
+untrustworthy pre-soak and vacuous for a memory that hasn't been around long enough to be
+recalled):
+  - **cold**          — never recalled in the telemetry ledger UNIONED with the
+                        rotation-surviving usage aggregates (``soak.curation_report``'s
                         ``never_recalled`` set)
   - **stale**          — cites code that has drifted (``staleness.find_stale``)
   - **zero-inbound**   — no OTHER memory ``[[wikilinks]]`` to it (via
@@ -28,12 +32,13 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from typing import List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 from .links import build_graph
-from .provenance import _iter_memory_files
-from .soak import curation_report
+from .provenance import _iter_memory_files, run_git
+from .soak import SOAK_GATE_SESSIONS, curation_report, soak_status
 from .staleness import find_stale
+from .telemetry import read_events, read_usage_aggregates
 
 _ARCHIVE_SUBDIR = "archive"
 
@@ -134,15 +139,118 @@ def _cited_by_claude_md_names(
         return set(corpus_names)
 
 
+# Marks each commit's timestamp line in the first-seen git-log scan (mirrors
+# staleness._CHANGE_MARKER's parsing pattern; a distinct token to avoid any collision).
+_FIRST_SEEN_MARKER = "__A__"
+
+
+def _first_seen_times(memory_dir: str, repo_root: str) -> Dict[str, int]:
+    """Memory stem -> unix time of the commit that FIRST ADDED ``<stem>.md``.
+
+    "First seen" is derived from GIT — markdown-in-git is the single source of authority,
+    and the add-commit is the authoritative creation record — NOT from the
+    aggregates/ledger: those only know when a memory was first RECALLED, which is exactly
+    the evidence a cold memory doesn't have. One bounded, timeout-guarded git call for the
+    whole corpus (``git log --diff-filter=A --name-only`` scoped to the memory dir; the
+    ``:/`` magic prefix anchors the pathspec to the git toplevel so a monorepo-subdir
+    ``repo_root`` still matches, mirroring ``staleness._run_git_log_scoped``). The log is
+    newest-first, so the LAST occurrence of a path wins — the oldest add for a
+    deleted-then-re-added file. Only ``.md`` files DIRECTLY in the memory dir are mapped
+    (never ``archive/`` entries, whose stems could shadow a live memory). A name absent
+    from the result (untracked file, rename that reset add-history, non-git dir, git
+    failure) reads as "first seen unknown" and the caller must fail toward NOT-a-candidate.
+    Never raises; ``{}`` on any failure.
+    """
+    try:
+        toplevel = run_git(["rev-parse", "--show-toplevel"], repo_root).strip()
+        if not toplevel:
+            return {}
+        rel = os.path.relpath(os.path.realpath(memory_dir), os.path.realpath(toplevel))
+        if rel.startswith(".."):
+            return {}
+        rel_posix = rel.replace(os.sep, "/")
+        prefix = "" if rel_posix == "." else rel_posix + "/"
+        pathspec = ":/" if rel_posix == "." else f":/{rel_posix}"
+        log = run_git(
+            ["log", "--diff-filter=A", f"--format={_FIRST_SEEN_MARKER}%ct", "--name-only",
+             "--", pathspec],
+            repo_root,
+        )
+        out: Dict[str, int] = {}
+        cur: Optional[int] = None
+        for line in log.split("\n"):
+            if line.startswith(_FIRST_SEEN_MARKER):
+                try:
+                    cur = int(line[len(_FIRST_SEEN_MARKER):] or 0)
+                except ValueError:
+                    cur = None
+            elif line.strip() and cur is not None:
+                stem_part = line[len(prefix):]
+                if line.startswith(prefix) and stem_part.endswith(".md") and "/" not in stem_part:
+                    out[stem_part[:-3]] = cur  # overwrite: newest-first log -> oldest add wins
+        return out
+    except Exception:
+        return {}
+
+
+def _young_names(
+    names: Set[str], memory_dir: str, repo_root: str, telemetry_dir: Optional[str]
+) -> Set[str]:
+    """Subset of ``names`` YOUNGER THAN THE SOAK WINDOW — not yet exposed to
+    ``soak.SOAK_GATE_SESSIONS`` distinct recall-logging sessions since the memory first
+    existed, so its never-recalled coldness is indistinguishable from youth.
+
+    Exposure = distinct ledger sessions whose events are timestamped at/after the memory's
+    git first-seen time (``_first_seen_times``), plus — only for a memory that predates the
+    aggregates' ENTIRE observation span (``sessions.first_ts``) — the sessions the ledger
+    already rotated away (aggregate count minus retained ledger count). A memory created
+    mid-history can't prove exposure to rotated-away sessions, so it gets no credit for
+    them: under-crediting fails toward exclusion, the safe direction for an archive gate.
+    Unknown first-seen also counts as young for the same reason. Never raises; on total
+    failure EVERY name is young (candidates shrink, never inflate).
+    """
+    try:
+        first_seen = _first_seen_times(memory_dir, repo_root)
+        events: List[Tuple[float, str]] = []
+        for e in read_events(telemetry_dir):
+            ts = e.get("ts")
+            sid = e.get("session_id")
+            if (
+                isinstance(ts, (int, float))
+                and not isinstance(ts, bool)
+                and isinstance(sid, str)
+                and sid
+            ):
+                events.append((float(ts), sid))
+        agg_sessions = read_usage_aggregates(telemetry_dir)["sessions"]
+        agg_first_ts = agg_sessions["first_ts"]
+        rotated_away = max(0, agg_sessions["count"] - len({sid for _ts, sid in events}))
+        young: Set[str] = set()
+        for name in names:
+            born = first_seen.get(name)
+            if born is None:
+                young.add(name)
+                continue
+            exposed = len({sid for ts, sid in events if ts >= born})
+            if rotated_away and agg_first_ts is not None and born <= agg_first_ts:
+                exposed += rotated_away
+            if exposed < SOAK_GATE_SESSIONS:
+                young.add(name)
+        return young
+    except Exception:
+        return set(names)
+
+
 def archive_candidates(
     memory_dir: str,
     repo_root: str,
     telemetry_dir: Optional[str] = None,
     *,
     since: Optional[str] = None,
+    diagnostics: Optional[dict] = None,
 ) -> List[dict]:
     """REPORT (never autonomous) — the 4-way intersection: cold ∧ stale ∧ zero-inbound ∧
-    not-cited-by-CLAUDE.md.
+    not-cited-by-CLAUDE.md, gated by the curation-soak bar (LIF-4).
 
     Returns ``[{"name", "changed_paths", "citation_scan_unreadable"}]`` (every candidate is
     necessarily stale, so the stale-set shape is reused), most-recently-drifted first.
@@ -153,15 +261,41 @@ def archive_candidates(
     (guiding invariant: legible degradation). ``since`` passes through to ``find_stale``
     (its own default when omitted) — exposed so hermetic tests can widen the
     wall-clock-relative window (mirrors ``reconsolidate.recalled_stale_worklist``'s same
-    passthrough for pinned-epoch fixtures). Read-only; never raises; ``[]`` when nothing
-    satisfies all four conditions (the common, expected case — and ALWAYS the case on the
-    current corpus, since the recall ledger's temporal window is still far too young to
-    trust the cold signal; see the roadmap's never-act-on-young-window gate).
+    passthrough for pinned-epoch fixtures).
+
+    LIF-4 soak gating (report-only, no new write path):
+      - Until ``soak.soak_status`` meets the ``>=5``-distinct-session bar (its own docs'
+        trust threshold for the cold signal), the report is WITHHELD: ``[]`` with the
+        machine-readable reason ``diagnostics["reason"] = "soak_gate_unmet"`` — a fresh
+        install must never get a maximally-permissive candidate list.
+      - Would-be candidates younger than the soak window (``_young_names`` — not yet
+        exposed to the bar's worth of distinct sessions since their git first-seen) are
+        excluded and listed under ``diagnostics["excluded_young"]``.
+    ``diagnostics`` (a caller-owned dict, mirroring ``find_stale``'s same pattern) also
+    always gains ``diagnostics["soak_gate"] = {"gate_met", "distinct_sessions",
+    "gate_threshold"}`` once evaluation reaches the gate, so the one production caller
+    (``main``) can explain a withheld/thinned report instead of printing a silent ``[]``.
+
+    Read-only; never raises; ``[]`` when the gate is unmet or nothing satisfies all four
+    conditions (the common, expected case).
     """
     try:
         corpus_names = _corpus_names(memory_dir)
         if not corpus_names:
             return []
+
+        status = soak_status(telemetry_dir)
+        if diagnostics is not None:
+            diagnostics["soak_gate"] = {
+                "gate_met": bool(status.get("gate_met")),
+                "distinct_sessions": int(status.get("distinct_sessions") or 0),
+                "gate_threshold": int(status.get("gate_threshold") or SOAK_GATE_SESSIONS),
+            }
+        if not status.get("gate_met"):
+            if diagnostics is not None:
+                diagnostics["reason"] = "soak_gate_unmet"
+            return []
+
         report = curation_report(memory_dir, telemetry_dir)
         cold = set(report.get("never_recalled") or [])
         stale = find_stale(memory_dir, repo_root, **({"since": since} if since else {}))
@@ -174,6 +308,16 @@ def archive_candidates(
             for item in stale
             if item["name"] in cold and item["name"] in zero_inbound and item["name"] not in cited
         ]
+        if out:
+            # Youth gate last, over would-be candidates only — the git first-seen scan is
+            # spent solely on memories the other four conditions already agree on, and the
+            # excluded_young diagnostic stays meaningful (would-be candidates, not every
+            # recently-created memory in the corpus).
+            young = _young_names({i["name"] for i in out}, memory_dir, repo_root, telemetry_dir)
+            excluded = sorted(i["name"] for i in out if i["name"] in young)
+            if diagnostics is not None and excluded:
+                diagnostics["excluded_young"] = excluded
+            out = [i for i in out if i["name"] not in young]
         out.sort(key=lambda d: (-d["recency"], d["name"]))
         for item in out:
             item["citation_scan_unreadable"] = list(unreadable)
@@ -306,13 +450,34 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     td = args.telemetry_dir or default_telemetry_dir(memory_dir)
-    candidates = archive_candidates(memory_dir, repo_root, telemetry_dir=td)
+    diagnostics: dict = {}
+    candidates = archive_candidates(memory_dir, repo_root, telemetry_dir=td, diagnostics=diagnostics)
     unreadable: List[str] = []
     _cited_by_claude_md_names(repo_root, _corpus_names(memory_dir), unreadable=unreadable)
     if unreadable:
         print(
             f"warning: {len(unreadable)} instruction-surface file(s) unreadable during "
             f"citation scan (treated as cited, fail-closed): {', '.join(unreadable)}"
+        )
+    if diagnostics.get("reason") == "soak_gate_unmet":
+        gate = diagnostics.get("soak_gate") or {}
+        print(
+            f"Archive-candidate report withheld: curation-soak gate unmet "
+            f"({gate.get('distinct_sessions', 0)}/{gate.get('gate_threshold', SOAK_GATE_SESSIONS)} "
+            f"distinct sessions logged)."
+        )
+        print(
+            "The cold/never-recalled signal is not yet trustworthy — nothing is listed by "
+            "design; re-run after more sessions."
+        )
+        return 0
+    excluded_young = diagnostics.get("excluded_young") or []
+    if excluded_young:
+        shown = ", ".join(excluded_young[:8])
+        more = f" …and {len(excluded_young) - 8} more" if len(excluded_young) > 8 else ""
+        print(
+            f"note: {len(excluded_young)} would-be candidate(s) excluded — younger than the "
+            f"soak window (not yet exposed to {SOAK_GATE_SESSIONS} distinct sessions): {shown}{more}"
         )
     if not candidates:
         print("No archive candidates (4-way: cold ∧ stale ∧ zero-inbound ∧ not-CLAUDE.md-cited).")

@@ -230,11 +230,19 @@ project with no `.claude/memory` corpus gets NO ledgers at all, and the telemetr
 self-ignoring (a `.gitignore` containing `*` inside it) so `git add .` can never commit
 prompt previews.
 
+Beside the ledgers sits `usage_aggregates.json` (LIF-4) — a tiny per-memory summary
+(first/last recalled ts, distinct-session count) folded in on every recall append and
+**never rotated**, so the byte-capped ledger can drop its oldest tail without a
+long-lived corpus losing its oldest usage evidence. `read_usage_aggregates()` is the
+read surface; the soak/curation/archive analyzers union it with the ledger.
+
 ### `soak.py` — soak status + curation report (read-only)
 
 Distinct-session count vs the **≥5-session** curation-soak bar, per-memory recall hits,
 the never-recalled set (dead-weight candidates — clone-local, topic-biased; read with
-care), and the BM25-fallback rate. `compute_strength_scores()` returns
+care), and the BM25-fallback rate. Session counts and the never-recalled set union the
+rotation-surviving `usage_aggregates.json` with the retained ledger (LIF-4); raw hit
+counts stay ledger-window-only. `compute_strength_scores()` returns
 `{name: distinct_sessions_recalled / total_sessions}` — sessions, not events, so one
 chatty session can't inflate a memory's strength.
 
@@ -271,7 +279,12 @@ Decay is DEMOTION, never deletion.
   display only, still in corpus/index; **cleared** by a genuine `--reverify`.
 - `archive.py` — `archive_candidates` reports the intersection of four gates (cold ∧
   stale ∧ zero-inbound ∧ not-cited-by-instructions, the last failing CLOSED on read
-  errors); `--archive <name>` is a per-item, git-reversible `git mv` into
+  errors). LIF-4: the report enforces its own trust threshold — until the ≥5-session
+  soak bar is met it returns `[]` with a machine-readable reason
+  (`diagnostics["reason"] = "soak_gate_unmet"`) instead of a maximally-permissive
+  fresh-install list, and would-be candidates younger than the soak window (per git
+  first-seen, not yet exposed to 5 distinct sessions) are excluded and named in the
+  report; `--archive <name>` is a per-item, git-reversible `git mv` into
   `.claude/memory/archive/` (a tracked subdir the corpus iterator skips). Never fires
   automatically; no `--all` exists.
 

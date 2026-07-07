@@ -119,6 +119,126 @@ def test_ledger_rotates_under_byte_cap(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# LIF-4: usage aggregates — rotation-surviving per-memory recall history
+# --------------------------------------------------------------------------- #
+def _log(td, names, sid, query="q"):
+    return T.log_recall_event(
+        [{"name": n, "backend": "bm25"} for n in names],
+        query=query,
+        k=5,
+        latency_ms=1.0,
+        telemetry_dir=td,
+        session_id=sid,
+    )
+
+
+def test_log_recall_event_updates_usage_aggregates_schema(tmp_path):
+    td = str(tmp_path / "tele")
+    _log(td, ["alpha", "beta"], "s1")
+    _log(td, ["alpha"], "s1")  # same session -- distinct count must not advance
+    _log(td, ["alpha"], "s2")
+
+    agg = T.read_usage_aggregates(td)
+    evs = _events(td)
+    alpha = agg["memories"]["alpha"]
+    assert alpha["sessions"] == 2  # s1 + s2, not 3 events
+    assert alpha["first_ts"] == evs[0]["ts"]  # stamped from the FIRST event
+    assert alpha["last_ts"] == evs[-1]["ts"]  # advanced by the latest
+    assert agg["memories"]["beta"]["sessions"] == 1
+    assert agg["sessions"]["count"] == 2  # global distinct sessions
+    assert agg["sessions"]["first_ts"] == evs[0]["ts"]  # observation-span start
+
+
+def test_usage_aggregates_survive_ledger_rotation(tmp_path, monkeypatch):
+    """AC (LIF-4): forced ledger rotation does NOT change per-memory recall history —
+    the oldest evidence survives in the aggregates after the byte-capped tail drops it."""
+    td = str(tmp_path / "tele")
+    monkeypatch.setenv("HIPPO_TELEMETRY_MAX_BYTES", "800")
+    _log(td, ["keystone"], "s0", query="the very first recall")
+    before = T.read_usage_aggregates(td)["memories"]["keystone"]
+
+    for i in range(200):
+        _log(td, [f"m{i}"], f"s{i + 1}", query=f"query number {i}")
+
+    evs = _events(td)
+    assert 0 < len(evs) < 201  # rotation really dropped the oldest events...
+    assert all(e["names"] != ["keystone"] for e in evs)  # ...including keystone's only recall
+
+    agg = T.read_usage_aggregates(td)
+    assert agg["memories"]["keystone"] == before  # history byte-identical across rotation
+    assert agg["sessions"]["count"] == 201  # every distinct session still counted
+    assert len(agg["memories"]) == 201  # no per-memory record was lost
+
+
+def test_usage_aggregates_count_distinct_sessions_not_events(tmp_path):
+    td = str(tmp_path / "tele")
+    for _ in range(3):
+        _log(td, ["a"], "same-session")
+    assert T.read_usage_aggregates(td)["memories"]["a"]["sessions"] == 1
+    assert T.read_usage_aggregates(td)["sessions"]["count"] == 1
+    _log(td, ["a"], "new-session")
+    assert T.read_usage_aggregates(td)["memories"]["a"]["sessions"] == 2
+    assert T.read_usage_aggregates(td)["sessions"]["count"] == 2
+
+
+def test_empty_recall_still_counts_session_in_aggregates(tmp_path):
+    """An empty recall counts as a session for the soak gate (mirrors soak_status), but
+    creates no per-memory record."""
+    td = str(tmp_path / "tele")
+    _log(td, [], "sX")
+    agg = T.read_usage_aggregates(td)
+    assert agg["sessions"]["count"] == 1
+    assert agg["memories"] == {}
+
+
+def test_corrupt_aggregates_start_fresh_never_raise(tmp_path):
+    td = str(tmp_path / "tele")
+    os.makedirs(td)
+    with open(T._usage_aggregates_path(td), "w", encoding="utf-8") as fh:
+        fh.write("{ not json at all")
+    assert _log(td, ["a"], "s1") is True  # never raises on the hot path
+    agg = T.read_usage_aggregates(td)
+    assert agg["sessions"]["count"] == 1  # started fresh, then counted the new event
+    assert agg["memories"]["a"]["sessions"] == 1
+
+
+def test_read_usage_aggregates_missing_file_returns_empty_shape(tmp_path):
+    agg = T.read_usage_aggregates(str(tmp_path / "nope"))
+    assert agg["sessions"] == {"count": 0, "first_ts": None, "last_session_id": None}
+    assert agg["memories"] == {}
+
+
+def test_aggregates_write_failure_never_breaks_ledger_append(tmp_path):
+    """usage_aggregates.json replaced by a DIRECTORY -> os.replace fails -> the aggregate
+    update degrades silently while the ledger append still succeeds (and no stray .tmp
+    file is left behind)."""
+    td = str(tmp_path / "tele")
+    os.makedirs(os.path.join(td, "usage_aggregates.json"))  # a dir where the file goes
+    assert _log(td, ["a"], "s1") is True
+    assert [e["names"] for e in _events(td)] == [["a"]]
+    assert not [f for f in os.listdir(td) if ".tmp." in f]  # tmp cleaned up on failure
+
+
+def test_ledger_rotation_never_touches_aggregates_file(tmp_path, monkeypatch):
+    """_rotate_if_needed operates on the ledger path only — across a rotation-heavy burst
+    that adds no new history (same name, same session), everything HISTORIC in the
+    aggregates is intact (only last_ts legitimately advances: real recalls happened)."""
+    td = str(tmp_path / "tele")
+    _log(td, ["pinned"], "s0")
+    before = T.read_usage_aggregates(td)
+
+    monkeypatch.setenv("HIPPO_TELEMETRY_MAX_BYTES", "600")
+    for i in range(100):
+        _log(td, ["pinned"], "s0", query=f"padding {i}")
+
+    after = T.read_usage_aggregates(td)
+    assert after["memories"]["pinned"]["first_ts"] == before["memories"]["pinned"]["first_ts"]
+    assert after["memories"]["pinned"]["sessions"] == before["memories"]["pinned"]["sessions"]
+    assert after["sessions"] == before["sessions"]
+    assert os.path.getsize(T._ledger_path(td)) <= 600  # rotation really happened
+
+
+# --------------------------------------------------------------------------- #
 # session tagging
 # --------------------------------------------------------------------------- #
 def test_mark_session_rotates_token(tmp_path):

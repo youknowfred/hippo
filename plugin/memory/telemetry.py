@@ -19,6 +19,13 @@ the history, nothing the corpus needs). It lives in its OWN sibling of the index
 (``.claude/.memory-telemetry/``) precisely BECAUSE it is history, not a rebuildable cache.
 
 ``read_events`` is the read surface the Tier-2 soak/curation analyzer consumes.
+
+LIF-4: beside the rotating ledgers sits ``usage_aggregates.json`` — a tiny per-memory
+aggregate (first/last recalled ts, distinct-session count) updated on every
+``log_recall_event`` append and NEVER rotated, so long-lived corpora keep their oldest
+usage evidence after the ledger's byte-capped tail drops it. ``read_usage_aggregates``
+is its read surface (soak/curation union it in; v0.5.0's RET-5 consumes it as a
+ranking prior).
 """
 
 from __future__ import annotations
@@ -35,6 +42,7 @@ _TELEMETRY_DIRNAME = ".memory-telemetry"
 _LEDGER_NAME = "recall_events.jsonl"
 _EPISODE_LEDGER_NAME = "episode_buffer.jsonl"
 _RECONSOLIDATION_LEDGER_NAME = "reconsolidation_events.jsonl"
+_USAGE_AGGREGATES_NAME = "usage_aggregates.json"
 _SESSION_NAME = "session"
 
 # Tier 2: the only valid reconsolidation verdicts -- "fix" is a distinct outcome (content was
@@ -92,6 +100,10 @@ def _episode_ledger_path(telemetry_dir: str) -> str:
 
 def _reconsolidation_ledger_path(telemetry_dir: str) -> str:
     return os.path.join(telemetry_dir, _RECONSOLIDATION_LEDGER_NAME)
+
+
+def _usage_aggregates_path(telemetry_dir: str) -> str:
+    return os.path.join(telemetry_dir, _USAGE_AGGREGATES_NAME)
 
 
 def _session_path(telemetry_dir: str) -> str:
@@ -211,6 +223,8 @@ def log_recall_event(
     ``session_id``, when given (the harness-provided id), keys the event directly instead of
     the file-based token — see ``current_session_id``. Returns True on a successful append,
     else False (a write failure degrades silently — the caller's recall is unaffected).
+    LIF-4: a successful append also folds the event into ``usage_aggregates.json`` (the
+    rotation-surviving per-memory summary — best-effort, never affects the return value).
     """
     try:
         td = _resolve_dir(telemetry_dir)
@@ -232,6 +246,12 @@ def log_recall_event(
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, ensure_ascii=False) + "\n")
         _rotate_if_needed(path)
+        # LIF-4: fold this event into the rotation-surviving usage aggregates. Runs AFTER
+        # the append and is itself never-raising, so an aggregate failure can neither lose
+        # the ledger line nor flip this function's return value.
+        _update_usage_aggregates(
+            td, names=event["names"], session_id=event["session_id"], ts=event["ts"]
+        )
         return True
     except Exception:
         return False
@@ -260,6 +280,153 @@ def read_events(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
                     yield obj
     except Exception:
         return
+
+
+# --------------------------------------------------------------------------- #
+# LIF-4: rotation-surviving usage aggregates — a tiny JSON sidecar of the recall ledger.
+#
+# The ledger is a byte-capped rotating buffer, so a long-lived corpus loses its OLDEST
+# usage evidence first and genuinely-used memories drift toward "never recalled" in the
+# soak/curation/archive analyzers. This file keeps the per-memory summary those analyzers
+# actually need — first-recalled ts, last-recalled ts, distinct-session count — updated on
+# every ``log_recall_event`` append and NEVER rotated (its size is bounded by corpus size,
+# ~100 bytes per ever-recalled memory, not by history length).
+#
+# Distinct-session counting is APPROXIMATE by design: each record keeps only the LAST
+# session id it counted, and increments when a different id shows up. Consecutive events
+# from one session count once; two sessions interleaving their prompts on the same project
+# can each be counted more than once. The full-precision alternative (a session-id set per
+# name) would grow without bound — the opposite of this file's contract.
+#
+# Same robustness contract as the ledgers: NEVER raises (corrupt/missing file -> start
+# fresh), fire-and-forget, no sensitive content (memory names + timestamps + one session
+# id per record). Writes are atomic (tmp + os.replace, pid-suffixed so concurrent writers
+# never share a tmp path) under the same single-writer assumption as ``_rotate_if_needed``
+# — a rare concurrent-writer race loses at most one increment, never the file.
+# --------------------------------------------------------------------------- #
+_AGGREGATES_VERSION = 1
+
+
+def _empty_aggregates() -> dict:
+    return {
+        "version": _AGGREGATES_VERSION,
+        "sessions": {"count": 0, "first_ts": None, "last_session_id": None},
+        "memories": {},
+    }
+
+
+def _num(v) -> Optional[float]:
+    """``v`` as a float when it is a real number (bool excluded), else None."""
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _load_usage_aggregates(telemetry_dir: str) -> dict:
+    """Parse ``usage_aggregates.json`` into the canonical shape. Corrupt/missing -> fresh.
+
+    Field-level tolerant: a wrong-typed ``sessions`` block or non-dict memory record is
+    replaced with a fresh value rather than raising (the never-raise discipline) or
+    poisoning the rest of the file.
+    """
+    fresh = _empty_aggregates()
+    try:
+        with open(_usage_aggregates_path(telemetry_dir), "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception:
+        return fresh
+    if not isinstance(data, dict):
+        return fresh
+    sess = data.get("sessions")
+    if isinstance(sess, dict):
+        count = sess.get("count")
+        if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+            fresh["sessions"]["count"] = count
+        fresh["sessions"]["first_ts"] = _num(sess.get("first_ts"))
+        lsid = sess.get("last_session_id")
+        if isinstance(lsid, str) and lsid:
+            fresh["sessions"]["last_session_id"] = lsid
+    mems = data.get("memories")
+    if isinstance(mems, dict):
+        fresh["memories"] = {
+            name: rec for name, rec in mems.items() if isinstance(name, str) and isinstance(rec, dict)
+        }
+    return fresh
+
+
+def _update_usage_aggregates(
+    telemetry_dir: str, *, names: List[str], session_id: Optional[str], ts: float
+) -> None:
+    """Fold ONE recall event into the aggregates. Fire-and-forget: NEVER raises.
+
+    The GLOBAL ``sessions`` record advances on every event (an empty recall still counts
+    as a session for the soak gate, mirroring ``soak.soak_status``); per-memory records
+    advance only for the recalled ``names``. Events without a session id still stamp
+    first/last timestamps but cannot advance a distinct-session count. A malformed
+    per-name record self-heals to a fresh one. The write is atomic (tmp + os.replace);
+    on any failure the previous file is left intact and the caller is unaffected —
+    ``_rotate_if_needed`` never sees, and can never truncate, this file.
+    """
+    try:
+        agg = _load_usage_aggregates(telemetry_dir)
+        sess = agg["sessions"]
+        if sess["first_ts"] is None:
+            sess["first_ts"] = ts
+        if session_id and session_id != sess["last_session_id"]:
+            sess["count"] += 1
+            sess["last_session_id"] = session_id
+        for name in names or []:
+            if not name or not isinstance(name, str):
+                continue
+            rec = agg["memories"].get(name)
+            if not isinstance(rec, dict):
+                rec = {}
+            first_ts = _num(rec.get("first_ts"))
+            count = rec.get("sessions")
+            if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+                count = 0
+            last_sid = rec.get("last_session_id")
+            if not isinstance(last_sid, str) or not last_sid:
+                last_sid = None
+            if session_id and session_id != last_sid:
+                count += 1
+                last_sid = session_id
+            agg["memories"][name] = {
+                "first_ts": first_ts if first_ts is not None else ts,
+                "last_ts": ts,
+                "sessions": count,
+                "last_session_id": last_sid,
+            }
+        path = _usage_aggregates_path(telemetry_dir)
+        tmp = f"{path}.tmp.{os.getpid()}"
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(agg, ensure_ascii=False, separators=(",", ":")))
+            os.replace(tmp, path)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
+def read_usage_aggregates(telemetry_dir: Optional[str] = None) -> dict:
+    """The cheap read surface over the rotation-surviving usage aggregates.
+
+    Always returns the canonical shape (missing/corrupt file -> the empty shape, never an
+    error): ``{"version", "sessions": {"count", "first_ts", "last_session_id"},
+    "memories": {name: {"first_ts", "last_ts", "sessions", "last_session_id"}}}``.
+    ``sessions.count`` / per-record ``sessions`` are DISTINCT-session counts (approximate —
+    see the section comment above); ``first_ts``/``last_ts`` are recall-event timestamps;
+    ``sessions.first_ts`` is the start of the whole observation span. ``last_session_id``
+    keys are counter bookkeeping, not signal. Consumers: soak/curation/archive union this
+    with the rotating ledger; RET-5 reads it as a ranking prior. Read-only; never raises.
+    """
+    try:
+        td = _resolve_dir(telemetry_dir)
+        return _load_usage_aggregates(td)
+    except Exception:
+        return _empty_aggregates()
 
 
 # --------------------------------------------------------------------------- #

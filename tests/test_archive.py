@@ -18,6 +18,15 @@ from .conftest import git_commit, write_file
 # find_stale()'s default `since` window is wall-clock-relative; widen it for pinned fixtures.
 _ALL = "2000-01-01"
 
+# Event timestamps land AFTER every fixture commit time (1_700_000_0xx) so the LIF-4
+# youth gate sees the committed memories as exposed to every seeded session; a test that
+# wants a memory YOUNGER than the events commits it at an epoch above this base.
+_EVENT_TS_BASE = 1_700_000_200
+
+# LIF-4: enough distinct sessions to satisfy soak.SOAK_GATE_SESSIONS — seeded by tests
+# whose subject is the 4-way intersection itself, not the soak gate.
+_SOAKED = [("s1", []), ("s2", []), ("s3", []), ("s4", []), ("s5", [])]
+
 
 def _mem(name, cited, source_commit, body="body"):
     cp = "[" + ", ".join(f'"{c}"' for c in cited) + "]"
@@ -25,11 +34,30 @@ def _mem(name, cited, source_commit, body="body"):
     return f'---\nname: {name}\ndescription: "{name} description"\ncited_paths: {cp}\nsource_commit: {sc}\n---\n{body}\n'
 
 
-def _seed_events(td, session_names):
+def _seed_events(td, session_names, base_ts=_EVENT_TS_BASE):
     os.makedirs(td, exist_ok=True)
     with open(os.path.join(td, "recall_events.jsonl"), "w", encoding="utf-8") as fh:
-        for sid, names in session_names:
-            fh.write(json.dumps({"session_id": sid, "names": names, "backend": "bm25"}) + "\n")
+        for i, (sid, names) in enumerate(session_names):
+            fh.write(
+                json.dumps(
+                    {"ts": base_ts + i, "session_id": sid, "names": names, "backend": "bm25"}
+                )
+                + "\n"
+            )
+
+
+def _seed_aggregates(td, count, first_ts, memories=None):
+    """Write a usage_aggregates.json as telemetry's writer would (LIF-4 fixtures)."""
+    os.makedirs(td, exist_ok=True)
+    with open(os.path.join(td, "usage_aggregates.json"), "w", encoding="utf-8") as fh:
+        json.dump(
+            {
+                "version": 1,
+                "sessions": {"count": count, "first_ts": first_ts, "last_session_id": None},
+                "memories": memories or {},
+            },
+            fh,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -61,7 +89,8 @@ def test_archive_candidates_is_exactly_the_4way_intersection(repo, memory_dir):
     write_file(repo, "CLAUDE.md", "See `m_cited.md` for details on this subsystem.\n")
 
     td = os.path.join(repo, "tele")
-    _seed_events(td, [("s1", ["m_recalled"])])  # only m_recalled was ever recalled
+    # 5 distinct sessions (soak gate met); only m_recalled was ever recalled
+    _seed_events(td, [("s1", ["m_recalled"]), ("s2", []), ("s3", []), ("s4", []), ("s5", [])])
 
     candidates = A.archive_candidates(memory_dir, repo, telemetry_dir=td, since=_ALL)
     assert [c["name"] for c in candidates] == ["m_archivable"]
@@ -74,6 +103,7 @@ def test_archive_candidates_empty_when_nothing_satisfies_all_four(repo, memory_d
     git_commit(repo, "c2", 1_700_000_050)  # nothing cited drifts -> m_a never goes stale
 
     td = os.path.join(repo, "tele")
+    _seed_events(td, _SOAKED)  # gate met, so the 4-way logic (not the gate) decides
     assert A.archive_candidates(memory_dir, repo, telemetry_dir=td, since=_ALL) == []
 
 
@@ -83,6 +113,148 @@ def test_archive_candidates_never_raises_on_bogus_dirs():
 
 def test_archive_candidates_empty_corpus_returns_empty(repo, memory_dir):
     assert A.archive_candidates(memory_dir, repo) == []
+
+
+# --------------------------------------------------------------------------- #
+# LIF-4: the soak gate — a pre-soak report withholds itself with a stated reason
+# --------------------------------------------------------------------------- #
+def _would_be_candidate_corpus(repo, memory_dir):
+    """One memory satisfying all four intersection conditions (stale ∧ cold ∧
+    zero-inbound ∧ uncited) — a maximally-permissive pre-LIF-4 report would list it.
+    Returns the memory's source_commit (pre-drift, reusable for further stale fixtures)."""
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_archivable.md", _mem("m_archivable", ["src/foo.py"], c1))
+    git_commit(repo, "c2", 1_700_000_010)
+    write_file(repo, "src/foo.py", "x = 2\n")  # drift -> stale
+    git_commit(repo, "c3", 1_700_000_020)
+    return c1
+
+
+def test_archive_candidates_pre_soak_returns_empty_with_stated_reason(repo, memory_dir):
+    _would_be_candidate_corpus(repo, memory_dir)
+    td = os.path.join(repo, "tele")
+    _seed_events(td, [("s1", [])])  # 1 distinct session -- far below the >=5 bar
+
+    diagnostics: dict = {}
+    candidates = A.archive_candidates(
+        memory_dir, repo, telemetry_dir=td, since=_ALL, diagnostics=diagnostics
+    )
+    assert candidates == []
+    assert diagnostics["reason"] == "soak_gate_unmet"  # machine-readable, not a silent []
+    assert diagnostics["soak_gate"] == {
+        "gate_met": False,
+        "distinct_sessions": 1,
+        "gate_threshold": 5,
+    }
+
+
+def test_archive_candidates_gate_met_reports_gate_in_diagnostics_without_reason(repo, memory_dir):
+    _would_be_candidate_corpus(repo, memory_dir)
+    td = os.path.join(repo, "tele")
+    _seed_events(td, _SOAKED)
+
+    diagnostics: dict = {}
+    candidates = A.archive_candidates(
+        memory_dir, repo, telemetry_dir=td, since=_ALL, diagnostics=diagnostics
+    )
+    assert [c["name"] for c in candidates] == ["m_archivable"]
+    assert diagnostics["soak_gate"]["gate_met"] is True
+    assert "reason" not in diagnostics
+
+
+def test_main_pre_soak_report_explains_itself_instead_of_listing_corpus(repo, memory_dir, capsys):
+    """AC (LIF-4): the pre-soak archive report explains itself instead of listing the
+    whole corpus — the would-be candidate's name must NOT appear anywhere in the output."""
+    _would_be_candidate_corpus(repo, memory_dir)
+    td = os.path.join(repo, "tele")
+    _seed_events(td, [("s1", []), ("s2", [])])
+
+    rc = A.main(["--memory-dir", memory_dir, "--repo-root", repo, "--telemetry-dir", td])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "soak gate unmet" in out
+    assert "2/5 distinct sessions" in out
+    assert "m_archivable" not in out  # nothing listed -- the report withheld itself
+
+
+# --------------------------------------------------------------------------- #
+# LIF-4: the youth gate — memories younger than the soak window are not candidates
+# --------------------------------------------------------------------------- #
+def test_archive_candidates_excludes_memory_younger_than_soak_window(repo, memory_dir, capsys):
+    # Now-relative epochs (not the usual 1_700_000_000 pins) so the CLI leg below — which
+    # runs find_stale's DEFAULT wall-clock "2 years ago" window — sees the same drift.
+    import time
+
+    t0 = int(time.time()) - 100_000
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", t0)
+    write_file(memory_dir, "m_old.md", _mem("m_old", ["src/foo.py"], c1))
+    git_commit(repo, "c2", t0 + 10)
+    write_file(repo, "src/foo.py", "x = 2\n")  # drift after c1/c2 -> both memories stale
+    git_commit(repo, "c3", t0 + 20)
+
+    td = os.path.join(repo, "tele")
+    _seed_events(td, _SOAKED, base_ts=t0 + 50)  # 5 sessions, all after m_old's first-seen
+
+    # m_young first ADDED after every seeded session -> exposed to 0 distinct sessions;
+    # its coldness is indistinguishable from youth, so it must not be a candidate.
+    write_file(memory_dir, "m_young.md", _mem("m_young", ["src/foo.py"], c1))
+    git_commit(repo, "c4", t0 + 80_000)
+
+    diagnostics: dict = {}
+    candidates = A.archive_candidates(memory_dir, repo, telemetry_dir=td, diagnostics=diagnostics)
+    assert [c["name"] for c in candidates] == ["m_old"]
+    assert diagnostics["excluded_young"] == ["m_young"]
+
+    # The CLI surfaces the exclusion (legible degradation), still listing m_old.
+    rc = A.main(["--memory-dir", memory_dir, "--repo-root", repo, "--telemetry-dir", td])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "younger than the soak window" in out
+    assert "m_young" in out
+    assert "m_old" in out
+
+
+def test_archive_candidates_untracked_memory_first_seen_unknown_is_young(repo, memory_dir):
+    """A never-committed memory has NO git first-seen -- it must fail toward exclusion
+    (it literally is brand new), never toward candidacy."""
+    c1 = _would_be_candidate_corpus(repo, memory_dir)
+    td = os.path.join(repo, "tele")
+    _seed_events(td, _SOAKED)
+    # Written to disk but never git-add-ed: find_stale still judges it stale via its
+    # frontmatter (source_commit c1 predates the drift), so ONLY the youth gate excludes it.
+    write_file(memory_dir, "m_untracked.md", _mem("m_untracked", ["src/foo.py"], c1))
+
+    diagnostics: dict = {}
+    candidates = A.archive_candidates(
+        memory_dir, repo, telemetry_dir=td, since=_ALL, diagnostics=diagnostics
+    )
+    assert [c["name"] for c in candidates] == ["m_archivable"]
+    assert "m_untracked" in diagnostics.get("excluded_young", [])
+
+
+def test_archive_candidates_survive_full_ledger_rotation_via_aggregates(repo, memory_dir):
+    """LIF-4 end-to-end: with the recall ledger entirely rotated/lost, the aggregates
+    alone meet the soak gate AND credit rotated-away sessions to a memory that predates
+    the whole observation span — the oldest evidence is not lost with the ledger."""
+    _would_be_candidate_corpus(repo, memory_dir)  # committed at 1_700_000_0xx
+    td = os.path.join(repo, "tele")
+    # no recall_events.jsonl at all; 6 distinct sessions survive only in the aggregates,
+    # whose observation began AFTER the memory was first seen
+    _seed_aggregates(td, count=6, first_ts=1_700_000_100)
+
+    diagnostics: dict = {}
+    candidates = A.archive_candidates(
+        memory_dir, repo, telemetry_dir=td, since=_ALL, diagnostics=diagnostics
+    )
+    assert diagnostics["soak_gate"] == {
+        "gate_met": True,
+        "distinct_sessions": 6,
+        "gate_threshold": 5,
+    }
+    assert [c["name"] for c in candidates] == ["m_archivable"]
+    assert "excluded_young" not in diagnostics
 
 
 # --------------------------------------------------------------------------- #
@@ -179,6 +351,7 @@ def test_archive_candidates_excludes_memory_when_claude_md_unreadable(repo, memo
     git_commit(repo, "c2", 1_700_000_050)
 
     td = os.path.join(repo, "tele")
+    _seed_events(td, _SOAKED)  # soak gate met, so the citation gate is what excludes m_a
     try:
         os.chmod(claude_md, 0o000)
         candidates = A.archive_candidates(memory_dir, repo, telemetry_dir=td, since=_ALL)
