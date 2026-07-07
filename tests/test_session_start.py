@@ -2,14 +2,20 @@
 
 Dispatcher logic (merge / bound / suppress / isolate / JSON) is tested by stubbing the
 producer set, so these tests don't depend on git timing (that's covered in test_staleness).
+The LIF-1 staleness-producer tests stub ``find_stale`` the same way but write REAL memory
+files for the ``invalid_after`` read — still no git timing anywhere.
 """
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 
 import memory.session_start as S
+from memory.staleness import set_invalid_after
+
+from .conftest import write_file
 
 
 def _producers(monkeypatch, producers):
@@ -59,6 +65,86 @@ def test_staleness_producer_formats_real_output(monkeypatch):
     )
     out = S.staleness_producer("md", "repo")
     assert out and "m_x" in out and "src/a.py" in out
+
+
+# --------------------------------------------------------------------------- #
+# LIF-1: the staleness producer suppresses already-demoted (invalid_after) entries'
+# per-item lines but keeps them COUNTED — terminal states never re-nag, and nothing
+# silently disappears.
+# --------------------------------------------------------------------------- #
+def _iso_days_ago(days):
+    return (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+    ).isoformat()
+
+
+def _leaf(name):
+    return f'---\nname: {name}\ndescription: "{name} description"\n---\nbody\n'
+
+
+def _stub_stale(monkeypatch, names):
+    monkeypatch.setattr(
+        S,
+        "find_stale",
+        lambda md, repo, diagnostics=None: [
+            {"name": n, "changed_paths": ["src/a.py"]} for n in names
+        ],
+    )
+
+
+def test_staleness_producer_suppresses_demoted_lines_but_keeps_the_count(memory_dir, monkeypatch):
+    write_file(memory_dir, "m_keep.md", _leaf("m_keep"))
+    gone = write_file(memory_dir, "m_gone.md", _leaf("m_gone"))
+    set_invalid_after(gone, _iso_days_ago(5))  # "recent" — demoted, penalty engaged
+    _stub_stale(monkeypatch, ["m_keep", "m_gone"])
+
+    out = S.staleness_producer(memory_dir, "repo")
+    assert "m_keep" in out
+    assert "m_gone" not in out  # per-item line suppressed — no double-nag
+    assert "1 memories cite code" in out  # header counts ACTIVE entries only
+    assert "(+1 already demoted" in out  # …but the demoted one is still accounted for
+
+
+def test_staleness_producer_all_demoted_collapses_to_one_honest_line(memory_dir, monkeypatch):
+    for n in ("m_a", "m_b"):
+        set_invalid_after(write_file(memory_dir, f"{n}.md", _leaf(n)), _iso_days_ago(5))
+    _stub_stale(monkeypatch, ["m_a", "m_b"])
+
+    out = S.staleness_producer(memory_dir, "repo")
+    assert out is not None  # not silent — suppression must never look like "nothing stale"
+    assert "all 2 stale memories are already demoted" in out
+    assert "m_a" not in out and "m_b" not in out  # no per-item re-nag lines
+
+
+def test_staleness_producer_old_invalidation_suggests_the_archive_flow(memory_dir, monkeypatch):
+    """LIF-1 (D): once an invalid_after entry ages past recall's old horizon, the producer
+    points at the audit skill's archive flow — report-only, naming the memory."""
+    old = write_file(memory_dir, "m_old.md", _leaf("m_old"))
+    set_invalid_after(old, _iso_days_ago(400))  # far past _INVALIDATION_RECENT_DAYS
+    _stub_stale(monkeypatch, ["m_old"])
+
+    out = S.staleness_producer(memory_dir, "repo")
+    assert "/hippo:audit" in out and "m_old" in out  # named ONLY in the archive suggestion
+    assert "old-invalidation horizon" in out
+
+
+def test_staleness_producer_recent_invalidation_gets_no_archive_suggestion(memory_dir, monkeypatch):
+    recent = write_file(memory_dir, "m_recent.md", _leaf("m_recent"))
+    set_invalid_after(recent, _iso_days_ago(5))
+    _stub_stale(monkeypatch, ["m_recent"])
+
+    out = S.staleness_producer(memory_dir, "repo")
+    assert "/hippo:audit" not in out  # still inside the penalty window — nothing to archive yet
+
+
+def test_staleness_producer_unchanged_when_nothing_is_invalidated(memory_dir, monkeypatch):
+    """No invalid_after anywhere -> the exact pre-LIF-1 block (no tail, full header count)."""
+    write_file(memory_dir, "m_x.md", _leaf("m_x"))
+    _stub_stale(monkeypatch, ["m_x"])
+
+    out = S.staleness_producer(memory_dir, "repo")
+    assert "1 memories cite code" in out and "m_x" in out
+    assert "demoted" not in out and "/hippo:audit" not in out
 
 
 def test_main_prints_session_start_json_when_stale(monkeypatch, capsys):

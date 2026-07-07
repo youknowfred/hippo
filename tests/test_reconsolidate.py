@@ -302,6 +302,7 @@ def test_semantic_reverify_graduate_clears_flag_and_logs_outcome(repo, memory_di
         "name": "m_a",
         "outcome": "graduate",
         "cleared": True,
+        "invalidated": False,  # LIF-1's chain is demote-only — graduate never touches it
         "edge_written": False,
         "logged": True,
         "error": None,
@@ -335,9 +336,10 @@ def test_semantic_reverify_fix_also_clears_flag(repo, memory_dir):
     assert result["logged"] is True
 
 
-def test_semantic_reverify_demote_never_clears_flag(repo, memory_dir):
+def test_semantic_reverify_demote_never_clears_flag(repo, memory_dir, monkeypatch):
     """The FM2 neutralization: a confirmed-WRONG memory must stay flagged, never silently
     re-baselined just because an outcome was logged."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")  # demote chains a refresh_index (LIF-1)
     write_file(repo, "src/foo.py", "x = 1\n")
     c1 = git_commit(repo, "c1", 1_700_000_000)
     write_file(memory_dir, "m_bad.md", _mem("m_bad", ["src/foo.py"], c1))
@@ -414,7 +416,8 @@ def _seed_pair(repo, memory_dir):
     return new_text
 
 
-def test_semantic_reverify_demote_with_superseded_by_writes_edge_to_successor(repo, memory_dir):
+def test_semantic_reverify_demote_with_superseded_by_writes_edge_to_successor(repo, memory_dir, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")  # demote chains a refresh_index (LIF-1)
     new_text = _seed_pair(repo, memory_dir)
     td = os.path.join(repo, "tele")
 
@@ -478,9 +481,10 @@ def test_semantic_reverify_superseded_by_missing_successor_refuses(repo, memory_
     assert result["edge_written"] is False and result["logged"] is False
 
 
-def test_reconsolidate_cli_reverify_with_superseded_by(repo, memory_dir, capsys):
+def test_reconsolidate_cli_reverify_with_superseded_by(repo, memory_dir, capsys, monkeypatch):
     """The CLI wiring: --reverify NAME --outcome demote --superseded-by SUCCESSOR applies
     the same per-item primitive (and --outcome is required)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")  # demote chains a refresh_index (LIF-1)
     _seed_pair(repo, memory_dir)
     td = os.path.join(repo, "tele")
 
@@ -504,6 +508,7 @@ def test_reconsolidate_cli_reverify_dry_run_writes_nothing(repo, memory_dir, cap
     _seed_pair(repo, memory_dir)
     td = os.path.join(repo, "tele")
     before = open(os.path.join(memory_dir, "m_new.md"), encoding="utf-8").read()
+    before_old = open(os.path.join(memory_dir, "m_old.md"), encoding="utf-8").read()
     rc = R.main(
         [
             "--reverify", "m_old", "--outcome", "demote", "--superseded-by", "m_new",
@@ -513,7 +518,209 @@ def test_reconsolidate_cli_reverify_dry_run_writes_nothing(repo, memory_dir, cap
     )
     out = capsys.readouterr().out
     assert rc == 0 and "would be written" in out
+    assert "invalid_after would be set" in out  # LIF-1's chain previews, byte-exact
     assert open(os.path.join(memory_dir, "m_new.md"), encoding="utf-8").read() == before
+    # the demoted memory is untouched too — the chained set_invalid_after honors dry_run
+    assert open(os.path.join(memory_dir, "m_old.md"), encoding="utf-8").read() == before_old
+
+
+# --------------------------------------------------------------------------- #
+# LIF-1: demote chains soft-invalidation (terminal); snooze acks (expiring); the
+# worklist and the staleness producer stop double-nagging what's already settled
+# --------------------------------------------------------------------------- #
+def _append_session(td, sid, names, ts):
+    """Append ONE session's recall event with an explicit ts (the snooze-expiry anchor)."""
+    os.makedirs(td, exist_ok=True)
+    with open(os.path.join(td, "recall_events.jsonl"), "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"session_id": sid, "names": names, "backend": "bm25", "ts": ts}) + "\n")
+
+
+def _seed_stale_recalled(repo, memory_dir, names, when=1_700_000_000):
+    """N memories citing one drifted file, all recalled in session s1. Returns the tele dir."""
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", when)
+    for n in names:
+        write_file(memory_dir, f"{n}.md", _mem(n, ["src/foo.py"], c1))
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", when + 100)
+    td = os.path.join(repo, "tele")
+    _seed_events(td, [("s1", list(names))])
+    return td
+
+
+def test_semantic_reverify_demote_chains_invalid_after(repo, memory_dir, monkeypatch):
+    """LIF-1 (A): ONE demote verdict closes the validity window on the memory itself —
+    body byte-identical, staleness flag STILL set (the chain never re-baselines), and the
+    chained action lands in the ledger event for audit."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    td = _seed_stale_recalled(repo, memory_dir, ["m_bad"])
+    body = open(os.path.join(memory_dir, "m_bad.md"), encoding="utf-8").read()
+
+    result = R.semantic_reverify("m_bad", "demote", memory_dir, repo, telemetry_dir=td)
+    assert result["error"] is None
+    assert result["invalidated"] is True
+    assert result["cleared"] is False  # the chain must never clear the staleness flag
+
+    text = open(os.path.join(memory_dir, "m_bad.md"), encoding="utf-8").read()
+    assert "invalid_after:" in text
+    assert text.split("---\n", 2)[-1] == body.split("---\n", 2)[-1]  # body byte-identical
+
+    # still visible to staleness — invalid_after is invisible to find_stale by pinned contract
+    from memory.staleness import find_stale
+
+    assert any(s["name"] == "m_bad" for s in find_stale(memory_dir, repo, since=_ALL))
+
+    evs = list(read_reconsolidation_events(td))
+    assert evs[-1]["outcome"] == "demote" and evs[-1]["invalidated"] is True
+
+
+def test_demote_immediately_demotes_recall_rank_with_no_second_command(repo, memory_dir, monkeypatch):
+    """The roadmap AC verbatim: demote immediately halves recall rank via the EXISTING
+    pre-cut penalty, with no second command — no `staleness --invalidate`, no manual
+    rebuild. Mirrors test_recall's boundary-swap pattern (nested token overlap)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    import memory.recall as RC
+    from memory.build_index import build_index, default_index_dir
+
+    words = ["alpha", "beta", "gamma", "delta", "epsilon"]
+    for i in range(1, 6):
+        desc = " ".join(words[:i])
+        write_file(memory_dir, f"e{i}.md", f'---\nname: e{i}\ndescription: "{desc}"\n---\nbody\n')
+    idx = default_index_dir(memory_dir)
+    build_index(memory_dir, idx)
+
+    query = " ".join(words)
+    k = 3
+    full = [r["name"] for r in RC.recall(query, k=10, memory_dir=memory_dir, index_dir=idx)]
+    boundary, successor = full[k - 1], full[k]
+    before = [r["name"] for r in RC.recall(query, k=k, memory_dir=memory_dir, index_dir=idx)]
+    assert boundary in before and successor not in before
+
+    td = os.path.join(repo, "tele")
+    result = R.semantic_reverify(boundary, "demote", memory_dir, repo, telemetry_dir=td)
+    assert result["error"] is None and result["invalidated"] is True
+
+    # ONE command ran. The chained invalid_after + index refresh mean the existing
+    # x0.5 pre-cut penalty engages on the very next recall:
+    after = [r["name"] for r in RC.recall(query, k=k, memory_dir=memory_dir, index_dir=idx)]
+    assert boundary not in after  # demoted out of top-k by the penalty
+    assert successor in after  # its successor takes the slot
+    # soft demotion, never a hard exclude (the penalty's own contract)
+    wide = [r["name"] for r in RC.recall(query, k=10, memory_dir=memory_dir, index_dir=idx)]
+    assert boundary in wide
+
+
+def test_worklist_excludes_items_already_carrying_invalid_after(repo, memory_dir, monkeypatch):
+    """LIF-1 (C): terminal states never re-nag — a demoted (or manually invalidated)
+    memory drops off the worklist while its un-demoted sibling stays."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    td = _seed_stale_recalled(repo, memory_dir, ["m_keep", "m_done"])
+    got = {w["name"] for w in R.recalled_stale_worklist(memory_dir, repo, telemetry_dir=td, since=_ALL)}
+    assert got == {"m_keep", "m_done"}  # both nag before any verdict
+
+    R.semantic_reverify("m_done", "demote", memory_dir, repo, telemetry_dir=td)
+    names = [w["name"] for w in R.recalled_stale_worklist(memory_dir, repo, telemetry_dir=td, since=_ALL)]
+    assert names == ["m_keep"]
+
+    # a manual staleness --invalidate is the SAME terminal state (any invalid_after counts)
+    from memory.staleness import set_invalid_after
+
+    set_invalid_after(os.path.join(memory_dir, "m_keep.md"))
+    assert R.recalled_stale_worklist(memory_dir, repo, telemetry_dir=td, since=_ALL) == []
+
+
+def test_snooze_suppresses_the_next_n_worklists_then_expires(repo, memory_dir):
+    """LIF-1 (C) + the roadmap AC: an acked item is absent from the next
+    _SNOOZE_WINDOW_SESSIONS worklists (each produced at a new session's start, BEFORE that
+    session logs recalls of its own), then re-nags — a snooze expires, only demote is
+    terminal."""
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_a.md", _mem("m_a", ["src/foo.py"], c1))
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)
+    td = os.path.join(repo, "tele")
+    now = time.time()
+    _append_session(td, "s0", ["m_a"], now - 50)
+    assert [w["name"] for w in R.recalled_stale_worklist(memory_dir, repo, telemetry_dir=td, since=_ALL)] == ["m_a"]
+
+    r = R.snooze("m_a", memory_dir, telemetry_dir=td)
+    assert r == {"name": "m_a", "logged": True, "error": None}
+
+    for i in range(1, R._SNOOZE_WINDOW_SESSIONS + 1):
+        # session s<i> starts: its worklist must skip m_a…
+        assert R.recalled_stale_worklist(memory_dir, repo, telemetry_dir=td, since=_ALL) == []
+        # …then s<i> logs its own recall events (post-ack ts -> the snooze ages one session)
+        _append_session(td, f"s{i}", ["m_a"], now + 10 * i)
+
+    # _SNOOZE_WINDOW_SESSIONS new sessions have started since the ack -> re-nag
+    assert [w["name"] for w in R.recalled_stale_worklist(memory_dir, repo, telemetry_dir=td, since=_ALL)] == ["m_a"]
+
+
+def test_reconsolidate_cli_snooze_records_the_ack(repo, memory_dir, capsys):
+    td = _seed_stale_recalled(repo, memory_dir, ["m_a"])
+    rc = R.main(["--snooze", "m_a", "--memory-dir", memory_dir, "--repo-root", repo, "--telemetry-dir", td])
+    out = capsys.readouterr().out
+    assert rc == 0 and "ack logged" in out and str(R._SNOOZE_WINDOW_SESSIONS) in out
+    evs = list(read_reconsolidation_events(td))
+    assert evs[-1]["name"] == "m_a" and evs[-1]["outcome"] == "snooze"
+    # the ack is ledger-only: the memory file itself is untouched (no invalid_after)
+    assert "invalid_after" not in open(os.path.join(memory_dir, "m_a.md"), encoding="utf-8").read()
+
+
+def test_snooze_refuses_missing_memory_and_dry_runs_cleanly(repo, memory_dir):
+    td = os.path.join(repo, "tele")
+    r = R.snooze("m_ghost", memory_dir, telemetry_dir=td)
+    assert r["error"] is not None and r["logged"] is False
+    assert list(read_reconsolidation_events(td)) == []  # a typo must not ack anything
+
+    write_file(memory_dir, "m_real.md", _mem("m_real", ["src/foo.py"], "abc"))
+    dry = R.snooze("m_real", memory_dir, telemetry_dir=td, dry_run=True)
+    assert dry["error"] is None and dry["logged"] is False
+    assert list(read_reconsolidation_events(td)) == []
+
+
+def test_snooze_is_single_item_only_no_bulk_path():
+    """Mirrors semantic_reverify's negative-capability pin: one name, no batch form."""
+    sig = inspect.signature(R.snooze)
+    params = list(sig.parameters)
+    assert params[0] == "name"
+    assert "names" not in params and "bulk" not in params and "all" not in params
+
+
+def test_demoted_memory_reported_in_neither_staleness_lines_nor_worklist(repo, memory_dir, monkeypatch):
+    """The AC's no-double-reporting, on LIF-1's own terms: after a demote, the memory's
+    NAME appears in neither the staleness producer's per-item lines nor the worklist —
+    only the aggregate '(+N already demoted)' tail accounts for it. (Full staleness ∩
+    worklist single-computation is LIF-6's job, not this test's.)"""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    now = int(time.time())
+    td = _seed_stale_recalled(repo, memory_dir, ["m_keep", "m_gone"], when=now - 300)
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+
+    assert R.semantic_reverify("m_gone", "demote", memory_dir, repo, telemetry_dir=td)["invalidated"] is True
+
+    import memory.session_start as S
+
+    stale_out = S.staleness_producer(memory_dir, repo) or ""
+    recon_out = R.reconsolidation_producer(memory_dir, repo) or ""
+    assert "m_gone" not in stale_out and "m_gone" not in recon_out  # suppressed everywhere…
+    assert "(+1 already demoted" in stale_out  # …but never silently: the count remains
+    assert "m_keep" in stale_out and "m_keep" in recon_out  # the active item still nags
+
+
+def test_reconsolidate_cli_demote_reports_the_chained_invalidation(repo, memory_dir, capsys, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _seed_pair(repo, memory_dir)
+    td = os.path.join(repo, "tele")
+    rc = R.main(
+        ["--reverify", "m_old", "--outcome", "demote",
+         "--memory-dir", memory_dir, "--repo-root", repo, "--telemetry-dir", td]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "invalid_after set" in out and "no second command" in out
+    assert "invalid_after:" in open(os.path.join(memory_dir, "m_old.md"), encoding="utf-8").read()
 
 
 # --------------------------------------------------------------------------- #

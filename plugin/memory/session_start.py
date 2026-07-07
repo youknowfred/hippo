@@ -3,7 +3,9 @@
 ONE process, ONE corpus load, ONE merged ``additionalContext`` for all dynamic memory
 context. Producers (each ADDED here, never as a parallel hook entry — so there is a single
 SessionStart producer for the memory concerns):
-  - staleness   (Tier 1) — memories whose cited code drifted since they were written.
+  - staleness   (Tier 1) — memories whose cited code drifted since they were written
+                           (LIF-1: entries already soft-invalidated are counted, not
+                           re-listed — demote's terminal state must not re-nag).
   - git-recent  (Tier 2) — memories captured within the recent window (newest first).
   - link-health (Tier 3) — dangling/orphan wikilink count across the corpus.
   - floor                — SILENT unless project/reference links re-bloat the MEMORY.md floor
@@ -25,9 +27,14 @@ from typing import Callable, List, Optional, Tuple
 from .lint_floor import floor_producer
 from .lint_links import lint_links_producer
 from .provenance import CORPUS_FORMAT_VERSION, read_corpus_format, resolve_dirs
-from .recall import git_recent_producer
+from .recall import _INVALIDATION_RECENT_DAYS, _invalidation_state, git_recent_producer
 from .reconsolidate import reconsolidation_producer
-from .staleness import count_unresolvable_baselines, find_stale, find_unparseable
+from .staleness import (
+    count_unresolvable_baselines,
+    find_stale,
+    find_unparseable,
+    invalid_after_map,
+)
 
 # Harness caps hook output at 10,000 chars; stay comfortably under it.
 _MAX_CONTEXT_CHARS = 9000
@@ -160,16 +167,48 @@ def staleness_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     )
     if not stale:
         return timeout_note
-    lines = [
-        f"⚠ Memory staleness — {len(stale)} memories cite code that changed since they were "
-        "written (most-recently-drifted first); verify against current code before relying on them:"
-    ]
-    for item in stale[:_MAX_ITEMS_PER_PRODUCER]:
-        paths = ", ".join(item["changed_paths"][:4])
-        more = "" if len(item["changed_paths"]) <= 4 else f" (+{len(item['changed_paths']) - 4} more)"
-        lines.append(f"  • {item['name']}: {paths}{more}")
-    if len(stale) > _MAX_ITEMS_PER_PRODUCER:
-        lines.append(f"  …and {len(stale) - _MAX_ITEMS_PER_PRODUCER} more.")
+    # LIF-1: a stale entry ALREADY carrying invalid_after is in demote's terminal state —
+    # the verdict (or a manual --invalidate) closed its validity window and recall's
+    # pre-cut penalty is already ranking it down, so a per-item "verify this" line here is
+    # the staleness/demote double-nag this item closes. Suppress those LINES but keep the
+    # COUNT visible (legible degradation applies to suppression too: nothing may silently
+    # disappear), and — once an invalidation ages past recall's old horizon — point at the
+    # audit skill's archive flow (report-only; the flow applies its own 4-way gate).
+    invalidated = invalid_after_map([item["name"] for item in stale], memory_dir)
+    active = [item for item in stale if item["name"] not in invalidated]
+    if active:
+        lines = [
+            f"⚠ Memory staleness — {len(active)} memories cite code that changed since they were "
+            "written (most-recently-drifted first); verify against current code before relying on them:"
+        ]
+        for item in active[:_MAX_ITEMS_PER_PRODUCER]:
+            paths = ", ".join(item["changed_paths"][:4])
+            more = "" if len(item["changed_paths"]) <= 4 else f" (+{len(item['changed_paths']) - 4} more)"
+            lines.append(f"  • {item['name']}: {paths}{more}")
+        if len(active) > _MAX_ITEMS_PER_PRODUCER:
+            lines.append(f"  …and {len(active) - _MAX_ITEMS_PER_PRODUCER} more.")
+        if invalidated:
+            lines.append(
+                f"  (+{len(invalidated)} already demoted — invalid_after set; recall already "
+                "ranks them down, no re-verify needed)"
+            )
+    else:
+        lines = [
+            f"⚠ Memory staleness — all {len(stale)} stale memories are already demoted "
+            "(invalid_after set); recall already ranks them down, nothing new to verify."
+        ]
+    old = sorted(
+        name
+        for name, ia in invalidated.items()
+        if _invalidation_state({"invalid_after": ia}) == "old"
+    )
+    if old:
+        shown = ", ".join(old[:4])
+        more = f" (+{len(old) - 4} more)" if len(old) > 4 else ""
+        lines.append(
+            f"  ({len(old)} demoted past the {int(_INVALIDATION_RECENT_DAYS)}-day "
+            f"old-invalidation horizon — consider the /hippo:audit archive flow: {shown}{more})"
+        )
     if timeout_note:
         lines.append(timeout_note)
     return "\n".join(lines)

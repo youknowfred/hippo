@@ -161,6 +161,12 @@ can't hide), `staleness`, `reconsolidation` (recall-filtered staleness worklist)
 say; bounds output under the harness's 10,000-char cap; **always exits 0**. Side effects
 (not producers): heal empty baselines, `refresh_index()`, `mark_session()`.
 
+LIF-1: the `staleness` producer suppresses the per-item lines of entries already
+carrying `invalid_after` (demote's terminal state — recall is already ranking them
+down) but keeps them **counted** in a `(+N already demoted)` tail, so suppression is
+never silent disappearance; once an invalidation ages past recall's 30-day old horizon,
+the same block names it and suggests the `/hippo:audit` archive flow (report-only).
+
 Wired via [`../hooks/memory_session_start.sh`](../hooks/memory_session_start.sh), which
 also owns the **first-run nudge**: venv/sentinel missing → "run /hippo:bootstrap";
 bootstrapped but no corpus → "run /hippo:init" — at most once per 5 sessions, permanently
@@ -236,7 +242,7 @@ floor link rot (read-only); its summary is the `floor` producer.
 |---|---|---|
 | `recall_events.jsonl` | `recall.main()` after results | `{ts, session_id, names, backend, latency_ms, k, query_preview}` |
 | `episode_buffer.jsonl` | `recall.main()`, same block | adds the repo HEAD watermark — soak data for the future capture pass |
-| `reconsolidation_events.jsonl` | `record_reconsolidation_outcome()` | `{ts, name, outcome}` verdicts |
+| `reconsolidation_events.jsonl` | `record_reconsolidation_outcome()` | `{ts, name, outcome[, invalidated]}` verdicts + LIF-1 snooze acks |
 
 Contract: never raises, never delays a recall (fires after results, fully wrapped), no
 sensitive content (an 80-char query preview, never the full prompt). **Hygiene:** a
@@ -279,16 +285,25 @@ as `X (+2 linked: Y, Z)`. Review-adjacent and **report-only** (zero write paths)
 memory drifts, its neighbors are the next most likely to be wrong. No graph → no column;
 the worklist is exactly its pre-GRA-9 self.
 
+LIF-1 closes the re-nag loop — the worklist is **actionable-only**: items whose file
+already carries `invalid_after` (demote's terminal state) are excluded (the staleness
+producer still counts them), and `--snooze <name>` records an explicit per-item ack in
+the reconsolidation ledger that silences an item for the next 5 new sessions, then
+expires (a deferral, not a verdict — only demote is terminal).
+
 ```bash
 "$PY" -m memory.reconsolidate
+"$PY" -m memory.reconsolidate --snooze <name>    # ack: skip for 5 sessions, then re-nag
 ```
 
 `semantic_reverify(name, outcome, ...)` is the per-item write primitive — `graduate` /
 `fix` route through `reverify_file` (clears the flag), **`demote` does NOT** (a
-confirmed-wrong memory must stay visible to staleness; demotion is
-`set_invalid_after`'s job). Verdicts land in the reconsolidation ledger;
-`eval_recall.graduation_rate()` reports `graduate / (graduate + demote)` (fixes excluded
-by design). No bulk variant exists.
+confirmed-wrong memory must stay visible to staleness) — instead it **chains
+`set_invalid_after`** onto the memory and refreshes the index (LIF-1), so recall's
+pre-cut penalty demotes it immediately: one command, no separate `--invalidate`.
+Verdicts land in the reconsolidation ledger (demote events carry `invalidated` for
+audit); `eval_recall.graduation_rate()` reports `graduate / (graduate + demote)` (fixes
+and snoozes excluded by design). No bulk variant exists.
 
 `superseded_by=<successor>` (GRA-4, `demote`/`fix` only, opt-in): when the agent knows
 WHICH memory replaces the demoted one's claim, this appends `supersedes: [name]` to the
@@ -305,7 +320,9 @@ Decay is DEMOTION, never deletion.
 - `staleness.set_invalid_after(name)` stamps an additive `invalid_after` frontmatter
   timestamp: **< 30 days old** → still recallable, fused score halved BEFORE the top-k
   cut (real demotion — it can fall out of top-k); **≥ 30 days** → dropped from recall
-  display only, still in corpus/index; **cleared** by a genuine `--reverify`.
+  display only, still in corpus/index; **cleared** by a genuine `--reverify`. A `demote`
+  verdict chains this automatically (LIF-1) — the manual `--invalidate` remains for
+  judging a memory questionable *without* rendering a reconsolidation verdict.
 - `archive.py` — `archive_candidates` reports the intersection of four gates (cold ∧
   stale ∧ zero-inbound ∧ not-cited-by-instructions, the last failing CLOSED on read
   errors). LIF-4: the report enforces its own trust threshold — until the ≥5-session

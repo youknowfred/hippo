@@ -486,6 +486,26 @@ def test_record_reconsolidation_outcome_rejects_invalid_verdict(tmp_path):
     assert _outcomes(td) == []  # no garbage entry written, denominator stays clean
 
 
+def test_record_reconsolidation_outcome_accepts_snooze_ack(tmp_path):
+    """LIF-1: "snooze" (an explicit per-item deferral, not a verdict) is a valid ledger
+    outcome — the worklist reads it back to stop re-nagging for a bounded window."""
+    td = str(tmp_path / "tele")
+    assert T.record_reconsolidation_outcome("m", "snooze", telemetry_dir=td) is True
+    evs = _outcomes(td)
+    assert len(evs) == 1 and evs[0]["outcome"] == "snooze"
+
+
+def test_record_reconsolidation_outcome_invalidated_field_is_optional_and_auditable(tmp_path):
+    """LIF-1: demote's chained soft-invalidation is stamped onto the event (audit trail);
+    events recorded without the kwarg keep their exact pre-LIF-1 shape."""
+    td = str(tmp_path / "tele")
+    assert T.record_reconsolidation_outcome("m1", "demote", telemetry_dir=td, invalidated=True)
+    assert T.record_reconsolidation_outcome("m2", "graduate", telemetry_dir=td)
+    evs = _outcomes(td)
+    assert evs[0]["invalidated"] is True
+    assert "invalidated" not in evs[1]  # absent unless the caller stamped it
+
+
 def test_record_reconsolidation_outcome_never_raises_on_unwritable_dir(tmp_path):
     blocker = tmp_path / "tele"
     blocker.write_text("not a directory")

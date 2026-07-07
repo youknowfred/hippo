@@ -45,10 +45,13 @@ _RECONSOLIDATION_LEDGER_NAME = "reconsolidation_events.jsonl"
 _USAGE_AGGREGATES_NAME = "usage_aggregates.json"
 _SESSION_NAME = "session"
 
-# Tier 2: the only valid reconsolidation verdicts -- "fix" is a distinct outcome (content was
+# Tier 2: the only valid reconsolidation outcomes -- "fix" is a distinct outcome (content was
 # wrong, then corrected) from "graduate"/"demote" (a verdict on the ORIGINALLY flagged
 # content), see eval_recall.graduation_rate()'s docstring for why it's excluded from that ratio.
-_RECONSOLIDATION_OUTCOMES = frozenset({"graduate", "fix", "demote"})
+# LIF-1 adds "snooze": an explicit per-item ACK (defer, no verdict rendered) — recorded here so
+# the worklist can stop re-nagging it for a bounded window; graduation_rate() ignores it (its
+# counts dict only knows the three verdicts), so the accuracy ratio's denominator stays clean.
+_RECONSOLIDATION_OUTCOMES = frozenset({"graduate", "fix", "demote", "snooze"})
 
 # Privacy: store only a short prefix of the query, never the full prompt.
 _QUERY_PREVIEW_CHARS = 80
@@ -511,22 +514,30 @@ def read_episodes(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
 # --------------------------------------------------------------------------- #
 # Reconsolidation outcomes (immunize tier) — a THIRD, distinct ledger. Logs the verdict each
 # time the memory-master agent re-grounds a recall-flagged-stale memory (graduate / fix /
-# demote), feeding eval_recall.graduation_rate() (the accuracy axis of the scorecard). This
-# module only LOGS the outcome; the per-item judgment + the actual reverify/fix/archive
-# action live in reconsolidate.py / the memory-master agent, never here.
+# demote), feeding eval_recall.graduation_rate() (the accuracy axis of the scorecard), plus
+# LIF-1's "snooze" acks (explicit per-item deferrals the worklist reads back to stop
+# re-nagging). This module only LOGS the outcome; the per-item judgment + the actual
+# reverify/fix/invalidate/archive action live in reconsolidate.py / the memory-master
+# agent, never here.
 # --------------------------------------------------------------------------- #
 def record_reconsolidation_outcome(
     name: str,
     outcome: str,
     *,
     telemetry_dir: Optional[str] = None,
+    invalidated: Optional[bool] = None,
 ) -> bool:
-    """Append ONE reconsolidation verdict to the gitignored ``reconsolidation_events.jsonl``.
+    """Append ONE reconsolidation outcome to the gitignored ``reconsolidation_events.jsonl``.
 
-    ``outcome`` must be one of ``{"graduate", "fix", "demote"}`` — an invalid outcome is a
-    silent no-op (returns ``False``) rather than corrupting ``graduation_rate()``'s
-    denominator with garbage. Fire-and-forget; NEVER raises; size-bounded (reuses
-    ``_rotate_if_needed``); no sensitive content (only the memory name + the verdict).
+    ``outcome`` must be one of ``{"graduate", "fix", "demote", "snooze"}`` — an invalid
+    outcome is a silent no-op (returns ``False``) rather than corrupting
+    ``graduation_rate()``'s denominator with garbage (``snooze`` — LIF-1's per-item ack —
+    is valid here but ignored by that ratio: an explicit deferral is not a verdict).
+    ``invalidated``, when not ``None``, is stamped onto the event — LIF-1's demote chain
+    passes it so the ledger is an AUDIT TRAIL of whether the verdict also closed the
+    memory's validity window (``staleness.set_invalid_after``), not just that it was
+    rendered. Fire-and-forget; NEVER raises; size-bounded (reuses ``_rotate_if_needed``);
+    no sensitive content (only the memory name + the outcome).
     """
     if outcome not in _RECONSOLIDATION_OUTCOMES:
         return False
@@ -534,6 +545,8 @@ def record_reconsolidation_outcome(
         td = _resolve_dir(telemetry_dir)
         ensure_self_ignoring_dir(td)  # derived dir: mkdir + self-ignoring .gitignore (SEC-3)
         event = {"ts": round(time.time(), 3), "name": name, "outcome": outcome}
+        if invalidated is not None:
+            event["invalidated"] = bool(invalidated)
         path = _reconsolidation_ledger_path(td)
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, ensure_ascii=False) + "\n")

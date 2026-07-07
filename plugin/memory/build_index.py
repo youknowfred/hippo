@@ -1201,7 +1201,18 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
                 for entry_idx in range(len(entries_now))
                 for chunk in body_chunks_now.get(entry_idx, [])
             ]
-            corpus_unchanged = old_hashes == now_hashes and old_chunk_hashes == now_chunk_hashes
+            # LIF-1: invalid_after is METADATA — it never perturbs a doc_text/body hash, so
+            # a hash-only compare would no-op away every soft-invalidation (set OR cleared:
+            # reverify_file strips the key) forever on an otherwise-quiet corpus, starving
+            # recall's pre-cut penalty of the one field it acts on. Compare it explicitly,
+            # the same starvation-proofing GRA-6 gave the body-link edge cache below.
+            old_invalid = [e.get("invalid_after") for e in old.get("entries", [])]
+            now_invalid = [e.get("invalid_after") for e in entries_now]
+            corpus_unchanged = (
+                old_hashes == now_hashes
+                and old_chunk_hashes == now_chunk_hashes
+                and old_invalid == now_invalid
+            )
             if corpus_unchanged and (old.get("dense_ready") or dense_disabled()):
                 # GRA-6: "corpus unchanged" above compares doc_text hashes, which BODY
                 # edits do not perturb — but wikilinks live in bodies. Before skipping

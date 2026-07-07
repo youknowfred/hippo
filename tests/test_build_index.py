@@ -549,6 +549,34 @@ def test_refresh_index_missing_dir_is_none(tmp_path):
     assert B.refresh_index(str(tmp_path / "nope"), str(tmp_path / "idx")) is None
 
 
+def test_refresh_index_picks_up_metadata_only_invalid_after_change(tmp_path, monkeypatch):
+    """LIF-1: invalid_after never perturbs a doc_text/body hash, so the unchanged-corpus
+    short-circuit must compare it explicitly — otherwise a soft-invalidation (set by
+    demote's chain or --invalidate, or STRIPPED by a genuine reverify) would be starved
+    out of the index forever on an otherwise-quiet corpus, and recall's pre-cut penalty
+    would never see the one field it acts on."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha", "b.md": "beta"})
+    B.build_index(md, idx)
+    assert all(e.get("invalid_after") is None for e in B.load_index(idx).entries)
+
+    from memory.staleness import set_invalid_after
+
+    set_invalid_after(os.path.join(md, "a.md"), "2026-01-01T00:00:00+00:00")
+    B.refresh_index(md, idx)
+    by_name = {e["name"]: e.get("invalid_after") for e in B.load_index(idx).entries}
+    assert by_name["a"] == "2026-01-01T00:00:00+00:00"  # set -> propagated
+
+    # the reverse direction too: clearing the window must not be no-op'd away either
+    text = open(os.path.join(md, "a.md"), encoding="utf-8").read()
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write("\n".join(ln for ln in text.split("\n") if not ln.startswith("invalid_after")))
+    B.refresh_index(md, idx)
+    assert all(e.get("invalid_after") is None for e in B.load_index(idx).entries)
+
+
 # --------------------------------------------------------------------------- #
 # COR-3: a degraded (BM25-only) index must upgrade to dense on the next refresh_index
 # call once the corpus is unchanged but the model cache is warm again — the hash

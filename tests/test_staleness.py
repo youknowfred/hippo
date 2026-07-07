@@ -8,6 +8,8 @@ from memory.staleness import (
     count_unresolvable_baselines,
     find_stale,
     find_unparseable,
+    invalid_after_map,
+    read_invalid_after,
     read_provenance,
     read_source_commit_time,
     set_invalid_after,
@@ -491,6 +493,53 @@ def test_set_invalid_after_never_raises_on_missing_file(memory_dir):
     r = set_invalid_after(os.path.join(memory_dir, "does_not_exist.md"), "2026-01-01T00:00:00+00:00")
     assert r["changed"] is False
     assert r["error"] is not None
+
+
+def test_set_invalid_after_dry_run_reports_without_writing(memory_dir):
+    """LIF-1: semantic_reverify's demote chain needs a byte-exact --dry-run preview —
+    ``changed``/``invalid_after`` are reported exactly as a real run would, zero writes."""
+    content = _memory(["src/a.py"], "abc")
+    path = write_file(memory_dir, "m_a.md", content)
+    r = set_invalid_after(path, "2026-01-01T00:00:00+00:00", dry_run=True)
+    assert r["changed"] is True and r["error"] is None
+    assert r["invalid_after"] == "2026-01-01T00:00:00+00:00"
+    with open(path, encoding="utf-8") as fh:
+        assert fh.read() == content  # untouched
+
+
+# --------------------------------------------------------------------------- #
+# read_invalid_after / invalid_after_map — LIF-1's read half of soft-invalidation
+# --------------------------------------------------------------------------- #
+def test_read_invalid_after_top_level_and_metadata_block():
+    top = '---\nname: A\ninvalid_after: "2026-01-01T00:00:00+00:00"\n---\nb\n'
+    nested = '---\nname: A\nmetadata:\n  invalid_after: "2026-01-01T00:00:00+00:00"\n---\nb\n'
+    assert read_invalid_after(top) == "2026-01-01T00:00:00+00:00"
+    assert read_invalid_after(nested) == "2026-01-01T00:00:00+00:00"
+    # YAML auto-types an unquoted date -> coerced to its ISO string, never discarded
+    # (the same _extract_invalid_after rule the index applies)
+    assert read_invalid_after("---\nname: A\ninvalid_after: 2026-06-01\n---\nb\n") == "2026-06-01"
+
+
+def test_read_invalid_after_absent_or_unparseable_is_none():
+    assert read_invalid_after(_memory(["src/a.py"], "abc")) is None
+    assert read_invalid_after("no frontmatter at all\n") is None
+    assert read_invalid_after("---\ndescription: unquoted colon: boom\n---\nb\n") is None
+
+
+def test_invalid_after_map_is_bounded_to_names_and_fails_open(memory_dir):
+    marked = write_file(memory_dir, "m_marked.md", _memory(["src/a.py"], "abc"))
+    set_invalid_after(marked, "2026-01-01T00:00:00+00:00")
+    write_file(memory_dir, "m_clean.md", _memory(["src/a.py"], "abc"))
+    other = write_file(memory_dir, "m_other_marked.md", _memory(["src/a.py"], "abc"))
+    set_invalid_after(other, "2026-01-01T00:00:00+00:00")
+
+    # bounded: only the asked-for names are read — m_other_marked carries the key but was
+    # not in `names`, so it must not appear (never a corpus scan)
+    got = invalid_after_map(["m_marked", "m_clean", "m_ghost"], memory_dir)
+    assert got == {"m_marked": "2026-01-01T00:00:00+00:00"}
+
+    # fail open (toward re-nagging): bogus dir -> empty map, never a raise
+    assert invalid_after_map(["m_marked"], "/no/such/dir") == {}
 
 
 def test_find_stale_read_logic_unaffected_by_invalid_after(repo, memory_dir):

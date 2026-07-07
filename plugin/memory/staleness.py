@@ -348,7 +348,7 @@ def _strip_invalid_after(text: str) -> str:
     return "\n".join([lines[0]] + fm + lines[close:])
 
 
-def set_invalid_after(path: str, ts: Optional[str] = None) -> dict:
+def set_invalid_after(path: str, ts: Optional[str] = None, *, dry_run: bool = False) -> dict:
     """Set/refresh the ``invalid_after`` ADDITIVE frontmatter key on ONE memory file.
 
     Soft-invalidation: the validity window CLOSES at ``ts`` (an ISO-8601 timestamp; defaults
@@ -362,7 +362,9 @@ def set_invalid_after(path: str, ts: Optional[str] = None) -> dict:
     deliberate per-item re-mark, not a blind bulk pass (there is no batch parameter here, and
     no autonomous caller in this tier — the memory-master agent invokes this one memory at a
     time after judging it). Refuses (no write) on unparseable frontmatter, mirroring
-    ``reverify_file``'s guard. Never raises.
+    ``reverify_file``'s guard. ``dry_run`` reports (``changed``/``invalid_after``) without
+    writing — same preview contract as ``reverify_file``, needed by ``semantic_reverify``'s
+    LIF-1 demote chain so its ``--dry-run`` stays byte-exact. Never raises.
     """
     result = {"path": path, "changed": False, "invalid_after": None, "error": None}
     try:
@@ -405,12 +407,58 @@ def set_invalid_after(path: str, ts: Optional[str] = None) -> dict:
         new_text = "\n".join([lines[0]] + fm2 + lines[close:])
         changed = new_text != text
         result.update({"changed": changed, "invalid_after": ts})
-        if changed:
+        if changed and not dry_run:
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(new_text)
     except Exception as exc:
         result["error"] = str(exc)
     return result
+
+
+def read_invalid_after(text: str) -> Optional[str]:
+    """The memory's ``invalid_after`` (top-level or under ``metadata:``), or ``None``.
+
+    The text-level sibling of ``read_provenance``/``read_source_commit_time``, delegating
+    the frontmatter-dict lookup to ``build_index._extract_invalid_after`` — the ONE
+    extractor for this key (same ``metadata:`` fallback + YAML-date coercion the index
+    itself applies), so what LIF-1's producers see can never drift from what recall's
+    penalty actually acts on. Never raises; ``None`` on any failure (fails OPEN to
+    "not invalidated", the same direction as ``recall._invalidation_state``).
+    """
+    try:
+        from .build_index import _extract_invalid_after
+
+        return _extract_invalid_after(parse_frontmatter(text))
+    except Exception:
+        return None
+
+
+def invalid_after_map(names: List[str], memory_dir: str) -> Dict[str, str]:
+    """``{name: invalid_after}`` for the subset of ``names`` whose file carries the key.
+
+    LIF-1's read half of the soft-invalidation chain: an ``invalid_after``-carrying stale
+    memory is in demote's TERMINAL state (recall's pre-cut penalty is already ranking it
+    down), so the SessionStart staleness producer suppresses its per-item line and the
+    reconsolidation worklist stops re-nagging it. Deliberately bounded to the caller's
+    ``names`` (an already-small stale/worklist set) — never a corpus scan, and NOT folded
+    into ``find_stale`` itself: drift detection stays invalid_after-blind by pinned
+    contract (code-drift and content-validity are separate concerns). Read-only; never
+    raises; a missing/unreadable file is simply absent from the map (fails toward
+    re-nagging — the legible direction).
+    """
+    out: Dict[str, str] = {}
+    try:
+        for name in names:
+            try:
+                with open(os.path.join(memory_dir, f"{name}.md"), "r", encoding="utf-8") as fh:
+                    ia = read_invalid_after(fh.read())
+            except Exception:
+                continue
+            if ia:
+                out[name] = ia
+    except Exception:
+        return out
+    return out
 
 
 def main(argv: Optional[List[str]] = None) -> int:
