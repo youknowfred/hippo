@@ -241,6 +241,130 @@ def test_precision_at_k_is_distinct_from_hard_set_binary_recall(tmp_path, monkey
 
 
 # --------------------------------------------------------------------------- #
+# RET-1: abstention_rate (report-only) — the mirror image of the 5 gates: does recall()
+# correctly find NOTHING for a query with no right answer, rather than "does it find the
+# right memory".
+# --------------------------------------------------------------------------- #
+_OFF_TOPIC_QUERIES = [
+    "what's the ideal hydration ratio for pizza dough and how long should it ferment",
+    "explain quantum entanglement and Bell's inequality in a physics lecture",
+    "which celebrity just announced their engagement this week",
+]
+
+
+def test_load_abstention_set_missing_file_is_empty():
+    assert E.load_abstention_set("/no/such/file.yaml") == []
+
+
+def test_load_abstention_set_parses_bare_query_rows(tmp_path):
+    import yaml
+
+    p = str(tmp_path / "abstain.yaml")
+    with open(p, "w", encoding="utf-8") as fh:
+        yaml.safe_dump([{"query": "pizza dough hydration ratio"}, {"query": "quantum entanglement lecture"}], fh)
+    assert E.load_abstention_set(p) == ["pizza dough hydration ratio", "quantum entanglement lecture"]
+
+
+def test_load_abstention_set_tolerates_bare_string_rows(tmp_path):
+    import yaml
+
+    p = str(tmp_path / "abstain.yaml")
+    with open(p, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(["a bare string query"], fh)
+    assert E.load_abstention_set(p) == ["a bare string query"]
+
+
+def test_abstention_rate_empty_set_is_zero():
+    assert E.abstention_rate(index=None, abstention_set=[], k=10) == {"rate": 0.0, "n": 0}
+
+
+def test_abstention_rate_measures_fraction_returning_zero_results(tmp_path, monkeypatch):
+    """The headline RET-1 eval acceptance: over a set of queries that share NO token with
+    the corpus (hermetic — dense disabled), recall() must abstain on every one, so
+    abstention_rate == 1.0."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+
+    rate = E.abstention_rate(index, _OFF_TOPIC_QUERIES, k=10)
+    assert rate == {"rate": 1.0, "n": 3}
+
+
+def test_abstention_rate_is_report_only_never_gates(tmp_path, monkeypatch):
+    """A LOW abstention rate (queries that happen to share tokens with the corpus, so
+    recall() correctly does NOT abstain) must still produce ok=True -- this metric never
+    feeds a gate threshold, per the roadmap item."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)
+
+    p = str(tmp_path / "abstain.yaml")
+    import yaml
+
+    # Deliberately ON-topic (shares vocabulary with _CORPUS) -- recall() should NOT abstain,
+    # so this fixture's own rate is 0.0, yet the run must still pass every real gate.
+    with open(p, "w", encoding="utf-8") as fh:
+        yaml.safe_dump([{"query": "which reranker model runs first on search candidates"}], fh)
+
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10, abstention_set_path=p)
+    assert report["abstention_rate"]["rate"] == 0.0
+    assert report["abstention_rate"]["n"] == 1
+    assert report["ok"] is True  # report-only -- a 0.0 abstention rate never fails the run
+
+
+def test_default_abstention_set_path_probes_audit_fixtures_then_tests_fixtures(tmp_path, monkeypatch):
+    repo = str(tmp_path / "proj")
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    monkeypatch.setenv("MEMOBOT_MEMORY_DIR", md)
+
+    assert E._default_abstention_set_path() is None  # nothing anywhere yet
+
+    tf = os.path.join(repo, "tests", "fixtures")
+    os.makedirs(tf)
+    repo_fixture = os.path.join(tf, "recall_abstention_set.yaml")
+    with open(repo_fixture, "w", encoding="utf-8") as fh:
+        fh.write("- {query: q}\n")
+    assert E._default_abstention_set_path() == repo_fixture
+
+    af = os.path.join(md, ".audit-fixtures")
+    os.makedirs(af)
+    audit_fixture = os.path.join(af, "recall_abstention_set.yaml")
+    with open(audit_fixture, "w", encoding="utf-8") as fh:
+        fh.write("- {query: q}\n")
+    assert E._default_abstention_set_path() == audit_fixture  # project-local wins
+
+
+def test_main_cli_prints_abstention_rate_line_when_present(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)
+
+    ab_path = str(tmp_path / "abstain.yaml")
+    import yaml
+
+    with open(ab_path, "w", encoding="utf-8") as fh:
+        yaml.safe_dump([{"query": q} for q in _OFF_TOPIC_QUERIES], fh)
+
+    rc = E.main(
+        [
+            "--memory-dir", md,
+            "--index-dir", idx,
+            "--hard-set", hs_path,
+            "--abstention-set", ab_path,
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "abstention_rate (RET-1, n=3): 1.0" in out
+
+
+# --------------------------------------------------------------------------- #
 # staleness_half_life (Tier 1, report-only)
 # --------------------------------------------------------------------------- #
 def _mem_with_source_commit(name, source_commit):
@@ -357,6 +481,7 @@ def test_evaluate_report_fields_present_and_zeroed_when_omitted(tmp_path, monkey
     assert report["precision_at_k"] == {"precision": 0.0, "n": 0}
     assert report["staleness_half_life"] == {"median_days": 0.0, "n": 0}  # no repo_root passed
     assert report["session_token_cost"]["n_sessions"] == 0
+    assert report["abstention_rate"] == {"rate": 0.0, "n": 0}  # no abstention_set_path passed
 
 
 def test_evaluate_explicit_memory_dir_stays_hermetic_no_repo_root_leak(tmp_path, monkeypatch):
@@ -983,6 +1108,13 @@ def test_token_reduction_gate_is_net_greater_than_zero(tmp_path, monkeypatch):
 # catch a real regression (a model bump, a fusion-weight change, a soft-invalidation
 # threshold drift that demotes correct hits), loose enough to absorb ordinary run-to-run
 # jitter (tie-breaking among equal-score candidates, floating-point summation order).
+#
+# RET-1 re-measured (same day, after adding the dense floor/knee cutoff/hard-skip): dense
+# recall@10 = 1.0000, mrr@10 = 0.9306 (a small, expected shift -- the knee cutoff's
+# "primary-relevance" comparison can reorder ties near the tail differently than the
+# pre-RET-1 raw fused score did); bm25-only recall@10 = 1.0000, mrr@10 = 0.9120 (BYTE
+# unchanged -- the floor/knee only touch the DENSE ranking, and this run is dense-disabled).
+# Both stay comfortably inside the bands below -- no floor/threshold edit needed.
 # --------------------------------------------------------------------------- #
 _GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "golden_corpus")
 _GOLDEN_MEMORY_DIR = os.path.join(_GOLDEN_DIR, "memory")
@@ -1072,3 +1204,50 @@ def test_golden_corpus_dense_recall_and_mrr_within_band(tmp_path, monkeypatch, t
 
     sr = E.self_recall_at_k(index, k=10)
     assert sr >= _GOLDEN_DENSE_SELF_RECALL_FLOOR, sr
+
+
+# --------------------------------------------------------------------------- #
+# RET-1: golden-corpus abstention companion (report-only, never a merge gate) — proves the
+# dense floor/knee/hard-skip trio abstains on genuinely off-topic queries against a REALISTIC
+# (not artificially zero-overlap) hippo-native corpus, not just the tiny engineered ones
+# elsewhere in this file.
+# --------------------------------------------------------------------------- #
+_GOLDEN_ABSTENTION_SET_PATH = os.path.join(_GOLDEN_DIR, "abstention_set.yaml")
+
+
+def test_golden_corpus_abstention_set_loads():
+    abstention_set = E.load_abstention_set(_GOLDEN_ABSTENTION_SET_PATH)
+    assert 4 <= len(abstention_set) <= 10  # "~6" per the roadmap item
+
+
+@pytest.mark.network
+def test_golden_corpus_dense_abstention_rate_high(tmp_path, monkeypatch, tmp_path_factory):
+    """With the REAL fastembed model, the calibrated dense floor must abstain on MOST of the
+    golden abstention set's clearly off-topic queries -- report-only (never a merge gate),
+    but this is the metric that PROVES the floor actually does something on a realistic
+    corpus, not just the tiny hand-engineered ones."""
+    pytest.importorskip("fastembed")
+    cache = os.environ.get("FASTEMBED_CACHE_PATH") or str(
+        tmp_path_factory.getbasetemp() / "fastembed-cache"
+    )
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", cache)
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+
+    idx = str(tmp_path / ".memory-index")
+    manifest = B.build_index(_GOLDEN_MEMORY_DIR, idx)
+    assert manifest["dense_ready"] is True
+
+    index = B.load_index(idx)
+    abstention_set = E.load_abstention_set(_GOLDEN_ABSTENTION_SET_PATH)
+    rate = E.abstention_rate(index, abstention_set, k=10)
+    # Measured 2026-07-06: 1/6 (0.1667) -- LOWER than the pack-corpus companion's 2/6,
+    # because this ~50-memory realistic corpus gives common English words in the off-topic
+    # probes (e.g. "week", "history", "just") more chances at a coincidental BM25
+    # token-overlap hit than the smaller shipped-pack corpus does (see the RET-1 commit
+    # body's before/after table for the full breakdown). This is NOT a floor failure -- it
+    # is BM25's match-set filter (deliberately unfloored per the roadmap: "BM25's match-set
+    # filter already IS its floor") admitting a query on a single common-word overlap. The
+    # bound here is a REGRESSION TRIPWIRE (this run must not get WORSE than measured), not a
+    # target -- a future BM25/tokenization change that pushes this to 0.0 (dense's floor
+    # alone can't compensate for BM25 finding SOMETHING) should fail this test.
+    assert rate["rate"] >= 0.15, rate

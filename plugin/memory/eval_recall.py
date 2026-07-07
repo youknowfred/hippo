@@ -23,6 +23,16 @@ description, so passing this metric proves something self_recall (description-de
 queries) cannot: that content living ONLY in the body is retrievable. The 5 gates above are
 unchanged in number/semantics.
 
+RET-1: ``abstention_rate`` is a second REPORT-ONLY addition, the mirror image of the 5
+gates above — where self_recall/hard_recall/mrr all measure "does recall() find the RIGHT
+memory", abstention_rate measures "does recall() correctly find NOTHING for a query with no
+right answer at all". Fed by an optional ``--abstention-set`` fixture of clearly off-topic
+queries (``recall_abstention_set.yaml`` / the golden corpus's ``abstention_set.yaml``);
+``rate`` = fraction of those queries for which recall() returned zero results. Never a merge
+gate (per the roadmap item) — it exists to make the dense-floor/knee-cutoff/hard-skip trio
+(the recall() changes that make abstention possible at all) measurable, not to block a merge
+on a number that depends entirely on which off-topic probes someone happened to write down.
+
 RET-7: every report records the SERVING BACKEND (``report["backend"]`` = ``"dense+bm25"``
 when ``index.dense_ready`` else ``"bm25-only"``), printed on the gate-header line AND the
 RESULT line, so a BM25-only pass can never be mistaken for verified hybrid recall health —
@@ -200,6 +210,46 @@ def load_relevance_set(path: str) -> List[dict]:
         if isinstance(q, str) and isinstance(rel, list) and rel:
             out.append({"query": q, "relevant": [str(x) for x in rel]})
     return out
+
+
+def load_abstention_set(path: str) -> List[str]:
+    """Load a bare list of CLEARLY off-topic query strings from a YAML fixture. [] if missing.
+
+    RET-1: distinct schema from ``load_hard_set``/``load_relevance_set`` -- there is no
+    ``expected``/``relevant`` field, because there is nothing these queries SHOULD retrieve;
+    the fixture is just ``- query: "..."`` rows. Reuses ``_load_fixture_docs`` so an optional
+    provenance header (unused today, but kept available for parity with the other two
+    fixtures) is tolerated rather than mis-parsed as a query row.
+    """
+    _meta, data = _load_fixture_docs(path)
+    out: List[str] = []
+    for item in data if isinstance(data, list) else []:
+        if isinstance(item, dict) and isinstance(item.get("query"), str):
+            out.append(item["query"])
+        elif isinstance(item, str):  # tolerate a bare string row too, not just {query: ...}
+            out.append(item)
+    return out
+
+
+def abstention_rate(index: LoadedIndex, abstention_set: List[str], k: int = 10) -> Dict[str, float]:
+    """Fraction of ``abstention_set`` queries for which recall() returned ZERO results.
+
+    REPORT-ONLY (never a merge gate, per the roadmap item) -- proves the NEW thing RET-1
+    adds (a clearly off-topic prompt can abstain, injecting nothing) the way ``body_probe``
+    proves RET-2's new capability: this is a metric no PRE-RET-1 index could ever score above
+    0 on (there was no floor/knee/hard-skip to abstain with), so a healthy run should show
+    ``rate`` near 1.0 on a fixture of genuinely off-topic queries. ``n=0`` (rate 0.0) when the
+    fixture is empty/missing -- a deliberately-absent input, not a failure (mirrors
+    ``precision_at_k``'s skip semantics).
+    """
+    if not abstention_set:
+        return {"rate": 0.0, "n": 0}
+    zero = 0
+    for q in abstention_set:
+        if not recall(q, k=k, index=index):
+            zero += 1
+    n = len(abstention_set)
+    return {"rate": round(zero / n, 4), "n": n}
 
 
 def precision_at_k(index: LoadedIndex, relevance_set: List[dict], k: int = 10) -> Dict[str, float]:
@@ -567,13 +617,14 @@ def evaluate(
     relevance_set_path: Optional[str] = None,
     repo_root: Optional[str] = None,
     telemetry_dir: Optional[str] = None,
+    abstention_set_path: Optional[str] = None,
 ) -> dict:
     """Run all 5 gates; return a report dict with per-gate values + pass flags.
 
-    ``relevance_set_path``/``repo_root``/``telemetry_dir`` feed three REPORT-ONLY scorecard
-    additions (precision@k, staleness half-life, per-session token cost) — none of the 5
-    gates above are affected by any of them; omitting all three reproduces the exact prior
-    report shape plus three zeroed report blocks.
+    ``relevance_set_path``/``repo_root``/``telemetry_dir``/``abstention_set_path`` feed
+    REPORT-ONLY scorecard additions (precision@k, staleness half-life, per-session token
+    cost, RET-1's abstention_rate) — none of the 5 gates above are affected by any of them;
+    omitting all of them reproduces the exact prior report shape plus zeroed report blocks.
     """
     if memory_dir is None:
         # Only resolve_dirs() when memory_dir actually needs it -- mirrors recall.main()'s
@@ -596,6 +647,7 @@ def evaluate(
 
     hard_set = load_hard_set(hard_set_path) if hard_set_path else []
     relevance_set = load_relevance_set(relevance_set_path) if relevance_set_path else []
+    abstention_set = load_abstention_set(abstention_set_path) if abstention_set_path else []
 
     # RET-7: the SERVING backend for this run, recorded so a BM25-only pass can never
     # masquerade as hybrid (dense+bm25) health -- ``index.dense_ready`` is the same
@@ -640,6 +692,7 @@ def evaluate(
     sess_cost = session_token_cost(memory_dir, resolved_telemetry_dir, index, hard_set, k=k)
     grad = graduation_rate(resolved_telemetry_dir)
     body_probe = body_probe_recall_at_k(index, k=k)
+    abstention = abstention_rate(index, abstention_set, k=k)
 
     # A caller with NO hard-set fixture (hard_set_path=None — e.g. a fresh install of the
     # packaged plugin with no hand-curated calibration data yet, see /hippo:audit) is a
@@ -688,6 +741,7 @@ def evaluate(
         "session_token_cost": sess_cost,
         "graduation_rate": grad,
         "body_probe": body_probe,
+        "abstention_rate": abstention,
         # RET-7: serving backend + fixture-provenance mismatch flag (see comments above) --
         # consumed by /hippo:audit and printed on the RESULT line by main() below.
         "backend": backend,
@@ -726,6 +780,10 @@ def _default_relevance_set_path() -> Optional[str]:
     return _default_fixture_path("recall_relevance_set.yaml")
 
 
+def _default_abstention_set_path() -> Optional[str]:
+    return _default_fixture_path("recall_abstention_set.yaml")
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
@@ -734,6 +792,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--index-dir", default=None)
     parser.add_argument("--hard-set", default=None)
     parser.add_argument("--relevance-set", default=None)
+    parser.add_argument(
+        "--abstention-set",
+        default=None,
+        help="RET-1: report-only fixture of clearly off-topic queries — measures the "
+        "fraction recall() correctly abstains (returns []) on; never gates.",
+    )
     parser.add_argument("--repo-root", default=None)
     parser.add_argument("--telemetry-dir", default=None)
     parser.add_argument("-k", type=int, default=10)
@@ -747,6 +811,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         relevance_set_path=args.relevance_set or _default_relevance_set_path(),
         repo_root=args.repo_root,
         telemetry_dir=args.telemetry_dir,
+        abstention_set_path=args.abstention_set or _default_abstention_set_path(),
     )
     if not report.get("ok") and "error" in report:
         print(f"eval error: {report['error']}")
@@ -818,6 +883,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(
             f"  body_probe@{args.k} (RET-2, n={bp['n']}): {bp['recall']} — parent recall for "
             "queries derived from body-only tokens (report-only)"
+        )
+    ab = report.get("abstention_rate") or {}
+    if ab.get("n"):
+        print(
+            f"  abstention_rate (RET-1, n={ab['n']}): {ab['rate']} — fraction of clearly "
+            "off-topic queries recall() correctly injected NOTHING for (report-only)"
         )
 
     # RET-7: the RESULT line always names the serving backend -- e.g.

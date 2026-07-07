@@ -88,6 +88,97 @@ _GRAPH_SEEDS = 3  # override: MEMOBOT_GRAPH_SEEDS (0 disables expansion entirely
 _NEIGHBOR_DISCOUNT = 0.5
 
 # --------------------------------------------------------------------------- #
+# RET-1: relevance floor + knee cutoff — "earn every injected token"
+# --------------------------------------------------------------------------- #
+# The dense ranker (a nearest-neighbor search over cosine similarity) ALWAYS returns an
+# ordering over the WHOLE corpus -- there is no such thing as "no match" in raw cosine
+# space, only "less similar". Before this item, that ordering was trusted wholesale: an
+# off-topic prompt on a 500-memory corpus still got its full top-k of "least dissimilar"
+# junk. A calibrated FLOOR turns "ranked" into "ranked AND actually relevant" by dropping
+# candidates whose cosine similarity to the query falls below a per-model threshold.
+#
+# Calibration method (recorded in the RET-1 commit body): embed the QUA-6 golden-corpus
+# hard-set queries (on-topic, cross-vocabulary paraphrases) and a handful of CLEARLY
+# off-topic probes (pizza dough hydration, quantum entanglement, celebrity gossip, ...)
+# against the golden corpus with the REAL warm model, and look at where the two
+# similarity distributions separate. For bge-small-en-v1.5: on-topic hits landed in
+# [0.65, 0.85], off-topic probes topped out at 0.59 -- a floor of 0.60 sits just above the
+# off-topic ceiling with margin below every measured on-topic hit (conservative: a false
+# abstention costs a real recall miss, so the floor is set to the LOW side of the gap, not
+# the midpoint). The multilingual preset (RET-3) is only given a "reasonable default" per
+# the roadmap item's scope (not the full calibration sweep) -- mean-pooled MiniLM cosine
+# similarities run on a visibly lower absolute scale (on-topic hits [0.32, 0.70], off-topic
+# probes topping out at 0.28), so its floor is calibrated separately and is NOT the
+# bge-small number.
+_DENSE_FLOOR_BY_MODEL = {
+    "BAAI/bge-small-en-v1.5": 0.60,
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": 0.30,
+}
+# Fallback for any OTHER model id (a future default bump, a user-supplied MEMOBOT_EMBED_MODEL
+# not in the table above) -- conservative (low) rather than guessing a tight number for an
+# uncalibrated embedding space; admits more than it should rather than risk false abstention.
+_DENSE_FLOOR_DEFAULT = 0.50
+
+# Knee/score-gap cutoff (leg 2): applied to the FUSED, penalized list at emission time, not
+# to either backend individually -- it is a property of "how much weaker is the next
+# candidate than the one before it", which only means something once both signals (and the
+# soft-invalidation penalty) have already been combined into one comparable scale. Ratio
+# rather than absolute gap because RRF-fused scores have no fixed unit -- a ratio is scale
+# invariant across corpus size / RRF k / body-weight tuning. 0 disables (every candidate
+# admitted regardless of gap, "up to k" degenerates back to "exactly k" subject only to the
+# floor/skip legs) -- see _knee_ratio()'s docstring for why 0 is exact-equality-safe.
+#
+# Calibrated LOW (0.5, the bottom of the roadmap's suggested 0.5-0.7 band): RRF fusion has a
+# characteristic, EXPECTED cliff at "hit both rankings" vs "hit only one" -- a doc appearing
+# in both the dense and BM25 top ranks scores roughly double a doc appearing in only one
+# (each contributes its own 1/(k+rank+1) term), independent of whether the single-ranking
+# hit is still a genuinely correct answer. Measured on the pack-corpus hard-set (recall_
+# hard_set.yaml): at 0.6 this dual-vs-single-hit cliff alone cost two real hard-set hits
+# (claude_is_memory_master / feedback_new_logs_mean_recurrence, both dense-only top hits
+# behind a cluster of dual-backend matches) -- recall@10 dropped 1.0 -> 0.9091, violating
+# the roadmap's explicit "on-topic recall@10 UNCHANGED" bar even though the tracked GATE
+# (>=0.80) still passed. At 0.5 the same fixture is back to a clean 1.0 (see the RET-1
+# commit body's before/after table) while the golden-corpus dense bands and the abstention
+# fixture are unaffected either way (the floor/hard-skip legs, not the knee, do the real
+# off-topic-rejection work) -- confirming 0.5 is conservative-enough to "admit when in
+# doubt" without giving up the cutoff's ability to stop injecting once genuinely irrelevant
+# tail candidates show up.
+_KNEE_RATIO = 0.5  # override: MEMOBOT_KNEE_RATIO
+
+
+def _dense_floor(model: Optional[str]) -> float:
+    """Calibrated cosine floor for ``model`` — ``MEMOBOT_DENSE_FLOOR`` overrides everything.
+
+    Lookup order: env override (any float, including 0 to disable the floor entirely) ->
+    per-model table -> module-level default. Malformed env value degrades to "no override"
+    (falls through to the table/default) rather than raising -- recall() must never break
+    over a typo'd env var.
+    """
+    raw = os.environ.get("MEMOBOT_DENSE_FLOOR")
+    if raw is not None and raw.strip():
+        try:
+            return float(raw)
+        except ValueError:
+            pass  # malformed -> fall through to the calibrated table/default
+    return _DENSE_FLOOR_BY_MODEL.get(model or "", _DENSE_FLOOR_DEFAULT)
+
+
+def _knee_ratio() -> float:
+    """``MEMOBOT_KNEE_RATIO`` override; malformed/absent -> the module default. Never raises.
+
+    0 (or any non-positive value) disables the knee cutoff outright -- see its use in
+    ``recall()``'s emission loop, which skips the check entirely rather than comparing
+    against a degenerate ratio.
+    """
+    raw = os.environ.get("MEMOBOT_KNEE_RATIO")
+    if raw is None or not raw.strip():
+        return _KNEE_RATIO
+    try:
+        return float(raw)
+    except ValueError:
+        return _KNEE_RATIO
+
+# --------------------------------------------------------------------------- #
 # Query hygiene
 # --------------------------------------------------------------------------- #
 # The UserPromptSubmit hook feeds the prompt VERBATIM. In practice a large fraction of prompts
@@ -392,12 +483,22 @@ def _bm25_rank_body(
 
 
 def _dense_rank_rows(query: str, index: LoadedIndex) -> List[int]:
-    """RAW dense-matrix row indices ordered by descending cosine similarity, or [].
+    """RAW dense-matrix row indices ordered by descending cosine similarity, ABOVE the
+    calibrated floor for ``index.model``, or [].
 
     RET-2: the matrix is WIDENED (description rows ``0..N-1`` then body-chunk rows ``N..``),
     so this returns ROW indices over that whole matrix — callers split the result into a
     description ranking and a body-chunk ranking (see ``_dense_rank``/``_dense_rank_body``)
     rather than this function knowing anything about the entries/chunks split itself.
+
+    RET-1: rows scoring below ``_dense_floor(index.model)`` are dropped HERE, before either
+    caller ever sees them — the dense ranker otherwise always returns a total ordering over
+    the whole corpus (cosine similarity has no notion of "no match", only "less similar"),
+    so an off-topic query used to admit the entire corpus at full k regardless of relevance.
+    Filtering at the ROW level (rather than in each caller) means the floor applies
+    identically to description rows AND body-chunk rows with one calibrated number, and a
+    caller that wants pre-floor scores (none currently do) would need a separate entry
+    point — this function's contract is now "ranked AND relevant", not just "ranked".
 
     Loads the embedding model OFFLINE (no download); any failure -> [] (BM25 carries it).
 
@@ -427,7 +528,8 @@ def _dense_rank_rows(query: str, index: LoadedIndex) -> List[int]:
         )
         sims = index.dense @ qvec  # rows are L2-normalized -> dot == cosine
         order = np.argsort(-sims)
-        return [int(i) for i in order]
+        floor = _dense_floor(index.model or DEFAULT_MODEL)
+        return [int(i) for i in order if float(sims[i]) >= floor]
     except Exception:  # incl. DenseTimeout -> degrade to BM25, never block/crash
         return []
 
@@ -820,12 +922,40 @@ def recall(
             )
             if r
         ]
+        # RET-1 leg 3 — hard skip: ABSTENTION IS THE CORRECT OUTPUT when no signal, of any
+        # kind, actually matched this query. `dense`/`dense_body` are already floor-filtered
+        # (see `_dense_rank_rows`) so an empty `dense` here means "zero above-floor
+        # candidates", not merely "the least-bad candidates happened to rank last". `bm25`/
+        # `bm25_body` are already token-overlap filtered (`_bm25_rank`'s match-set IS its
+        # floor -- BM25 never had the "whole corpus always ranks" problem dense did). So
+        # `not rankings` (all four empty) is EXACTLY "dense cleared no floor, and neither
+        # BM25 ranking shares a single token with the query" -- the roadmap's hard-skip
+        # condition, checked over BOTH the description and body-backstop signals so a memory
+        # whose only match is a distinctive BODY token is never abstained away. GRA-1
+        # interplay: this return happens BEFORE `_expand_neighbors` ever runs, so an empty
+        # organic list yields NO graph seeds and thus no expansion -- abstention is absolute,
+        # never overridden by a linked memory that shares no signal with the query itself.
         if not rankings:
             return []
         fused = _rrf_fuse(rankings, weights=weights)  # [(idx, score), ...] desc by fused score
         # backend label reflects the PRIMARY (description) signals only -- body rankings are
         # a backstop, not a third backend a user needs to reason about at the display layer.
         backend = "dense+bm25" if (dense and bm25) else ("dense" if dense else "bm25")
+
+        # RET-1: a SEPARATE, primary-signal-only fusion (dense_desc + bm25_desc, always
+        # weight 1.0, never body/graph) feeds the knee cutoff below. The full `fused` score
+        # already has _BODY_RRF_WEIGHT baked in for any entry the body backstop ALSO ranked
+        # -- comparing knee ratios against that blended number would conflate "this memory's
+        # topical relevance genuinely dropped" with "this memory only has a deliberately
+        # down-weighted body-backstop signal, by design" (RET-2's whole point). Entries with
+        # NO primary-only ranking (a pure body-only hit, or a not-yet-injected graph
+        # neighbor) are simply absent from this dict -- the emission loop below treats that
+        # as "no organic relevance baseline to judge a cliff against" and exempts them from
+        # the knee check entirely, exactly like the soft-invalidation/graph-discount cases.
+        primary_rankings = [r for r in (dense, bm25) if r]
+        primary_relevance: Dict[int, float] = (
+            {i: score for i, score in _rrf_fuse(primary_rankings)} if primary_rankings else {}
+        )
 
         # --- Soft-invalidation: applied to the SCORE, BEFORE the top-k cut. ---
         # This is the exact point of the x0.5 multiply -- "recent" halves the fused score so
@@ -860,7 +990,21 @@ def recall(
         # itself (`idx.entries`, `idx.dense`, the BM25 corpus) is untouched by this filter --
         # "old" entries still fully participate in `_bm25_rank`/`_dense_rank`/`_rrf_fuse`,
         # they are simply never emitted into `results`.
+        #
+        # RET-1 leg 2 — knee/score-gap cutoff: k becomes "up to k". Compared against the
+        # PREVIOUS EMITTED score (not the previous `penalized` entry) so a skipped "old" or
+        # dangling-file candidate never counts as the reference point -- the gap that matters
+        # is between consecutive results a user would actually SEE, not internal bookkeeping
+        # rows. Only checked from the second result onward (`results` non-empty): the first
+        # result has no predecessor to be a "knee" relative to, and the floor/skip legs above
+        # already gate whether ANYTHING is admitted at all. A non-positive ratio (env
+        # override 0, or negative) disables the check outright -- `ratio <= 0` can never be
+        # satisfied by `score < ratio * prev` for any non-negative score/prev pair anyway,
+        # but the explicit early-out keeps the intent legible and skips a division-adjacent
+        # comparison entirely when the knee is turned off.
+        knee_ratio = _knee_ratio()
         results: List[dict] = []
+        prev_relevance: Optional[float] = None
         for i, _adj_score, state in penalized:
             if len(results) >= k:
                 break
@@ -871,6 +1015,28 @@ def recall(
             # session's output immediately rather than keep injecting a dangling path.
             if memory_dir and not os.path.isfile(os.path.join(memory_dir, e["file"])):
                 continue
+            # RET-1: the knee compares PRIMARY-SIGNAL-ONLY relevance (`primary_relevance`,
+            # see its construction above), never the display/sort score -- an entry with NO
+            # primary ranking of its own (a pure body-backstop hit, or a graph-injected
+            # neighbor that was never organically ranked -- see `_expand_neighbors`) has
+            # nothing in `primary_relevance` at all. Such an entry is EXEMPT from the knee
+            # check both ways: it is never cut for "falling off a cliff" relative to the
+            # previous result (its only relevance signal is a deliberate backstop weight or
+            # graph discount, not a topical-relevance drop), and it never becomes the
+            # reference point for the NEXT comparison either (`prev_relevance` only advances
+            # on an entry that actually HAS a primary score) -- a body/graph hit sitting
+            # between two organic ones must not silently loosen or tighten the knee for
+            # whatever organic candidate comes after it.
+            relevance = primary_relevance.get(i)
+            if (
+                knee_ratio > 0
+                and relevance is not None
+                and prev_relevance is not None
+                and relevance < knee_ratio * prev_relevance
+            ):
+                break  # relevance fell off a cliff relative to the last EMITTED result -- stop
+            if relevance is not None:
+                prev_relevance = relevance
             results.append(
                 {
                     "name": e["name"],

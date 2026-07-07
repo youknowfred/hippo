@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import os
+import zlib
 
 import numpy as np
 import pytest
@@ -30,10 +31,25 @@ def _write_corpus(memory_dir: str, items: dict) -> None:
 
 
 def _fake_embedder(dim: int = 16):
+    """Deterministic bag-of-hashed-tokens fake embedder for hermetic dense-path tests.
+
+    RET-1: uses ``zlib.crc32`` (a fixed, unsalted hash) instead of Python's builtin
+    ``hash()`` for the token->bucket mapping. ``hash(str)`` is SALTED per-process by
+    default (``PYTHONHASHSEED=random``) -- this module's docstring always claimed the fake
+    embedder was "deterministic", but that was only true WITHIN one process/run, not
+    ACROSS runs. Every prior use of this fixture only ever checked "did dense contribute at
+    all" (any nonzero similarity counted), so the run-to-run hash-seed variance was
+    invisible. RET-1's calibrated floor made it visible: whether a given fake-embedder
+    similarity clears the floor now depends on which hash bucket a token happens to land
+    in THIS process, which could flip a test between pass/fail across runs with no code
+    change -- a real flakiness bug this item's floor exposed rather than introduced. crc32
+    is stable across processes/interpreters/platforms, restoring genuine determinism.
+    """
+
     def _vec(text: str):
         v = np.zeros(dim, dtype="float32")
         for tok in B.tokenize(text):
-            v[hash(tok) % dim] += 1.0
+            v[zlib.crc32(tok.encode("utf-8")) % dim] += 1.0
         n = np.linalg.norm(v)
         return v / n if n else v
 
@@ -1533,3 +1549,224 @@ def test_recall_acceptance_body_only_fact_retrievable_via_dense(tmp_path, monkey
     )
     names = [r["name"] for r in res]
     assert "incident" in names
+
+
+# --------------------------------------------------------------------------- #
+# RET-1: relevance floor + knee cutoff — "earn every injected token"
+# --------------------------------------------------------------------------- #
+_RET1_CORPUS = {
+    "oauth_refresh.md": "oauth token refresh flow rotates the access token before it expires using the refresh token grant",
+    "helm_rollout.md": "kubernetes helm chart deployment rollout strategy for canary releases across regions",
+    "bm25_fusion.md": "reciprocal rank fusion combines a lexical bm25 ranking with a dense embedding ranking",
+    "git_bisect.md": "git bisect binary searches commit history to find the exact commit that introduced a regression",
+    "unicode_nfc.md": "unicode normalization form nfc versus nfd affects whether visually identical strings compare equal",
+}
+
+_OFF_TOPIC_PROMPTS = [
+    "what's the ideal hydration ratio for pizza dough and how long should it ferment",
+    "explain quantum entanglement and Bell's inequality in a physics lecture",
+    "which celebrity just announced their engagement this week",
+]
+
+
+def test_dense_floor_env_override_accepted_and_malformed_falls_back(monkeypatch):
+    """``MEMOBOT_DENSE_FLOOR`` overrides the calibrated table for ANY model; a malformed
+    value degrades to the table/default rather than raising (recall() must never break over
+    a typo'd env var)."""
+    monkeypatch.setenv("MEMOBOT_DENSE_FLOOR", "0.42")
+    assert R._dense_floor("BAAI/bge-small-en-v1.5") == 0.42
+    assert R._dense_floor("some/other-model") == 0.42  # override wins over EVERY model
+    assert R._dense_floor(None) == 0.42
+
+    monkeypatch.setenv("MEMOBOT_DENSE_FLOOR", "not-a-float")
+    assert R._dense_floor("BAAI/bge-small-en-v1.5") == R._DENSE_FLOOR_BY_MODEL["BAAI/bge-small-en-v1.5"]
+
+    monkeypatch.delenv("MEMOBOT_DENSE_FLOOR", raising=False)
+    assert R._dense_floor("BAAI/bge-small-en-v1.5") == R._DENSE_FLOOR_BY_MODEL["BAAI/bge-small-en-v1.5"]
+    assert R._dense_floor("an/unknown-model-id") == R._DENSE_FLOOR_DEFAULT  # uncalibrated -> conservative default
+
+
+def test_dense_floor_zero_override_disables_floor_entirely(monkeypatch):
+    """``MEMOBOT_DENSE_FLOOR=0`` admits every candidate regardless of similarity — the pre-
+    RET-1 behavior, available as an explicit opt-out."""
+    monkeypatch.setenv("MEMOBOT_DENSE_FLOOR", "0")
+    assert R._dense_floor("BAAI/bge-small-en-v1.5") == 0.0
+
+
+def test_knee_ratio_env_override_accepted_and_malformed_falls_back(monkeypatch):
+    monkeypatch.setenv("MEMOBOT_KNEE_RATIO", "0.75")
+    assert R._knee_ratio() == 0.75
+    monkeypatch.setenv("MEMOBOT_KNEE_RATIO", "garbage")
+    assert R._knee_ratio() == R._KNEE_RATIO
+    monkeypatch.delenv("MEMOBOT_KNEE_RATIO", raising=False)
+    assert R._knee_ratio() == R._KNEE_RATIO
+
+
+def test_dense_rank_rows_drops_candidates_below_floor(tmp_path, monkeypatch):
+    """Unit check on leg 1: ``_dense_rank_rows`` must never return a row whose cosine
+    similarity to the query sits below the calibrated floor for the index's model."""
+    emb_docs, emb_query = _fake_embedder(16)
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", emb_docs)
+    monkeypatch.setattr(R, "embed_query", emb_query)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _RET1_CORPUS)
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+
+    # A floor of 1.01 is unreachable for any unit-normalized cosine similarity (max is 1.0)
+    # -> every candidate must be dropped, proving the floor is actually applied per-row.
+    monkeypatch.setenv("MEMOBOT_DENSE_FLOOR", "1.01")
+    assert R._dense_rank_rows("oauth token refresh", index) == []
+
+    # A floor of -1.0 is below every possible cosine similarity -> nothing is ever dropped;
+    # the raw row count must equal the corpus size (a real ordering, not an empty one).
+    monkeypatch.setenv("MEMOBOT_DENSE_FLOOR", "-1.0")
+    rows = R._dense_rank_rows("oauth token refresh", index)
+    assert len(rows) == len(index.entries)
+
+
+def test_off_topic_prompt_injects_zero_pointers_bm25_only(tmp_path, monkeypatch):
+    """ACCEPTANCE (hermetic): a query sharing NO token with any memory in the corpus, with
+    dense disabled, must abstain completely — recall() returns [], not a wasted top-k."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _RET1_CORPUS)
+    B.build_index(md, idx)
+
+    for prompt in _OFF_TOPIC_PROMPTS:
+        res = R.recall(prompt, k=10, memory_dir=md, index_dir=idx)
+        assert res == [], f"expected abstention for {prompt!r}, got {[r['name'] for r in res]}"
+
+
+def test_hard_skip_when_dense_below_floor_and_bm25_empty(tmp_path, monkeypatch):
+    """Unit check on leg 3: force a dense hit that clears NOTHING (an unreachable floor) on a
+    query with zero BM25 token overlap either -> recall() must return [], not fall through to
+    some partial/garbage result."""
+    emb_docs, emb_query = _fake_embedder(16)
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", emb_docs)
+    monkeypatch.setattr(R, "embed_query", emb_query)
+    monkeypatch.setenv("MEMOBOT_DENSE_FLOOR", "1.01")  # unreachable -> dense always empty
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _RET1_CORPUS)
+    B.build_index(md, idx)
+
+    res = R.recall("zzqqxx nonexistent placeholder gibberish", k=10, memory_dir=md, index_dir=idx)
+    assert res == []
+
+
+def test_knee_cutoff_stops_early_leaving_up_to_k(tmp_path, monkeypatch):
+    """Leg 2 acceptance: a corpus with one strong hit and several much-weaker BM25-only
+    matches must emit FEWER than k results once the score ratio falls below the knee -- "up
+    to k", not always exactly k."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    # "alpha" alone overlaps every doc (weak, shared token); "beta gamma delta epsilon
+    # zeta" all in doc 1 only -> doc1's BM25 score towers over the rest, which share just
+    # the one common token "alpha" -- a textbook knee.
+    _write_corpus(
+        md,
+        {
+            "strong.md": "alpha beta gamma delta epsilon zeta",
+            "weak1.md": "alpha unrelated topic one here today",
+            "weak2.md": "alpha unrelated topic two here today",
+            "weak3.md": "alpha unrelated topic three here today",
+            "weak4.md": "alpha unrelated topic four here today",
+        },
+    )
+    B.build_index(md, idx)
+    res = R.recall("alpha beta gamma delta epsilon zeta", k=10, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert names[0] == "strong"
+    assert len(res) < 10  # knee stopped emission well short of k -- "up to k"
+
+
+def test_knee_ratio_zero_disables_cutoff(tmp_path, monkeypatch):
+    """``MEMOBOT_KNEE_RATIO=0`` must restore the pre-RET-1 "always fill to k" behavior on
+    the SAME corpus the knee test above proves stops early with the default ratio."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("MEMOBOT_KNEE_RATIO", "0")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(
+        md,
+        {
+            "strong.md": "alpha beta gamma delta epsilon zeta",
+            "weak1.md": "alpha unrelated topic one here today",
+            "weak2.md": "alpha unrelated topic two here today",
+            "weak3.md": "alpha unrelated topic three here today",
+            "weak4.md": "alpha unrelated topic four here today",
+        },
+    )
+    B.build_index(md, idx)
+    res = R.recall("alpha beta gamma delta epsilon zeta", k=10, memory_dir=md, index_dir=idx)
+    assert len(res) == 5  # every match-set doc emitted -- knee disabled, "up to k" -> "= k"
+
+
+def test_knee_cutoff_exempts_invalidation_demoted_entry_still_recallable(tmp_path, monkeypatch):
+    """The knee must judge PRIMARY relevance, not the freshness-demotion multiplier -- a
+    recently-invalidated memory can still legitimately drop out of a SMALL top-k (real
+    demotion), but must remain reachable at a larger k rather than being knee-cut on the
+    artificial score gap the x0.5 penalty alone manufactures (see recall()'s
+    `primary_relevance` construction)."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx_dir = str(tmp_path / ".memory-index")
+    words = ["alpha", "beta", "gamma", "delta", "epsilon"]
+    _write_corpus(md, {f"e{i}.md": " ".join(words[:i]) for i in range(1, 6)})
+    B.build_index(md, idx_dir)
+    index = B.load_index(idx_dir)
+    query = " ".join(words)
+
+    for e in index.entries:
+        if e["name"] == "e3":
+            e["invalid_after"] = _iso_days_ago(5)
+
+    wide = [r["name"] for r in R.recall(query, k=10, index=index)]
+    assert "e3" in wide  # demoted, not knee-cut out of existence
+
+
+@pytest.mark.network
+def test_off_topic_prompt_injects_zero_pointers_dense(tmp_path, monkeypatch):
+    """ACCEPTANCE (network): with the REAL fastembed model, a clearly off-topic prompt must
+    clear NEITHER the dense floor NOR any BM25 token overlap -> recall() abstains."""
+    pytest.importorskip("fastembed")
+    cache = os.environ.get("FASTEMBED_CACHE_PATH") or B.durable_fastembed_cache_dir()
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", cache)
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _RET1_CORPUS)
+    B.build_index(md, idx)
+
+    for prompt in _OFF_TOPIC_PROMPTS:
+        res = R.recall(prompt, k=10, memory_dir=md, index_dir=idx)
+        assert res == [], f"expected abstention for {prompt!r}, got {[r['name'] for r in res]}"
+
+
+@pytest.mark.network
+def test_on_topic_prompt_still_finds_hit_with_dense_floor_active(tmp_path, monkeypatch):
+    """Companion to the off-topic acceptance test: the SAME floor that abstains on nonsense
+    must not swallow a real on-topic paraphrase — the conservative "admit when in doubt"
+    calibration."""
+    pytest.importorskip("fastembed")
+    cache = os.environ.get("FASTEMBED_CACHE_PATH") or B.durable_fastembed_cache_dir()
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", cache)
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _RET1_CORPUS)
+    B.build_index(md, idx)
+
+    res = R.recall(
+        "how does the token get rotated before it expires without logging back in",
+        k=10,
+        memory_dir=md,
+        index_dir=idx,
+    )
+    assert any(r["name"] == "oauth_refresh" for r in res)
