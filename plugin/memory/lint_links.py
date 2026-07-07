@@ -22,9 +22,15 @@ from typing import Dict, List, Optional
 from .links import LinkGraph, build_graph
 
 
-def lint(memory_dir: str) -> dict:
-    """Return a report dict. Pure / never raises / never writes."""
-    g = build_graph(memory_dir)
+def lint(memory_dir: str, index_dir: Optional[str] = None) -> dict:
+    """Return a report dict. Pure / never raises / never writes.
+
+    ``index_dir`` (GRA-6) opts into ``build_graph``'s persisted-cache fast path — the
+    SessionStart producer passes it so the dispatcher's ONE corpus read stays the index
+    refresh's own; a fresh cache makes this a stat sweep with zero file reads. The CLI
+    keeps the full re-read (a diagnostic should read the source of authority directly).
+    """
+    g = build_graph(memory_dir, index_dir=index_dir)
     if g is None:
         return {
             "ok": False,
@@ -98,8 +104,21 @@ def health_line(report: dict) -> Optional[str]:
 
 
 def lint_links_producer(memory_dir: str, repo_root: str) -> Optional[str]:
-    """SessionStart producer (signature matches the dispatcher). Self-suppresses when clean."""
-    return health_line(lint(memory_dir))
+    """SessionStart producer (signature matches the dispatcher). Self-suppresses when clean.
+
+    GRA-6: routes through the persisted edge cache so SessionStart performs ONE corpus
+    read total — the dispatcher's ``refresh_index`` side effect reads the corpus and
+    (re)persists ``links.json`` before producers run, so this lint reconstructs the graph
+    from the cache with zero file reads. A missing/stale cache silently falls back to the
+    full re-read inside ``build_graph`` (correctness never depends on the cache).
+    """
+    try:
+        from .build_index import default_index_dir
+
+        index_dir: Optional[str] = default_index_dir(memory_dir)
+    except Exception:
+        index_dir = None
+    return health_line(lint(memory_dir, index_dir=index_dir))
 
 
 def main(argv: Optional[List[str]] = None) -> int:

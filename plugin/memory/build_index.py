@@ -252,7 +252,12 @@ def _extract_invalid_after(fm: dict) -> Optional[str]:
     return None
 
 
-def compute_corpus(memory_dir: str) -> List[dict]:
+def compute_corpus(
+    memory_dir: str,
+    *,
+    texts_out: Optional[Dict[str, str]] = None,
+    sigs_out: Optional[Dict[str, List[int]]] = None,
+) -> List[dict]:
     """Scan the corpus -> ordered entries ``{name, file, doc_text, hash, tokens, invalid_after}``.
 
     Order is deterministic (sorted filenames, from ``_iter_memory_files``). Re-scanned FRESH
@@ -261,15 +266,27 @@ def compute_corpus(memory_dir: str) -> List[dict]:
     ONLY). Adding ``invalid_after`` therefore can never disturb embedding-cache reuse, and a
     metadata-only change (e.g. a fresh ``invalid_after``) is reflected on every rebuild —
     including a rebuild whose embedding rows are entirely cache-hit.
+
+    GRA-6: ``texts_out``/``sigs_out`` (caller-supplied dicts, mutated in place) capture the
+    FULL text and stat signature ``[st_mtime_ns, st_size]`` per stem as a side product of
+    the read this function already performs — so the caller can build/persist the wikilink
+    graph with ZERO extra file reads. The stat runs BEFORE the read: a write racing between
+    the two makes the recorded sig look STALE on the next freshness check (a wasted rebuild,
+    the safe direction), never fresh-but-wrong.
     """
     entries: List[dict] = []
     for path in _iter_memory_files(memory_dir):
         try:
+            st = os.stat(path) if sigs_out is not None else None
             with open(path, "r", encoding="utf-8") as fh:
                 text = fh.read()
         except Exception:
             continue
         name = os.path.splitext(os.path.basename(path))[0]
+        if texts_out is not None:
+            texts_out[name] = text
+        if st is not None and sigs_out is not None:
+            sigs_out[name] = [st.st_mtime_ns, st.st_size]
         desc = extract_description(text)
         doc_text = f"{_name_words(name)}. {desc}".strip()
         fm = parse_frontmatter(text)
@@ -543,7 +560,22 @@ def build_index(
         index_dir = default_index_dir(memory_dir)
     ensure_self_ignoring_dir(index_dir)  # derived dir: mkdir + self-ignoring .gitignore (SEC-3)
 
-    entries = compute_corpus(memory_dir)
+    texts: Dict[str, str] = {}
+    sigs: Dict[str, List[int]] = {}
+    entries = compute_corpus(memory_dir, texts_out=texts, sigs_out=sigs)
+
+    # GRA-6: persist the resolved wikilink graph (links.json) from the texts this build
+    # already read — zero extra file reads. Done BEFORE the dense work (and before the
+    # never-worse early return below): edge freshness is orthogonal to dense outcome, so a
+    # failed/preserved dense build must still leave a CURRENT edge cache behind. Keyed by
+    # per-file stat sigs, NOT doc_text hashes — wikilinks live in bodies, and body edits
+    # don't change doc_text, so a hash-keyed cache would go silently stale. Never raises.
+    try:
+        from .links import LinkGraph, write_links_cache
+
+        write_links_cache(index_dir, LinkGraph(memory_dir, texts=texts), sigs)
+    except Exception:
+        pass
 
     old_manifest = None if force else _load_manifest(index_dir)
     old_dense = None if force else _load_dense(index_dir)
@@ -708,12 +740,28 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
             memory_dir, _ = resolve_dirs()
         if index_dir is None:
             index_dir = default_index_dir(memory_dir)
-        entries_now = compute_corpus(memory_dir)
+        texts: Dict[str, str] = {}
+        sigs: Dict[str, List[int]] = {}
+        entries_now = compute_corpus(memory_dir, texts_out=texts, sigs_out=sigs)
         old = _load_manifest(index_dir)
         if old is not None:
             old_hashes = [e.get("hash") for e in old.get("entries", [])]
             corpus_unchanged = old_hashes == [e["hash"] for e in entries_now]
             if corpus_unchanged and (old.get("dense_ready") or dense_disabled()):
+                # GRA-6: "corpus unchanged" above compares doc_text hashes, which BODY
+                # edits do not perturb — but wikilinks live in bodies. Before skipping
+                # the rebuild, independently verify the edge cache against the stat sigs
+                # and re-persist it from the texts already in hand when stale/missing
+                # (covers both body-only link edits and a pre-GRA-6 index that has no
+                # links.json yet — otherwise the no-op path would starve the cache
+                # forever on a quiet corpus). Never raises.
+                try:
+                    from .links import LinkGraph, links_cache_fresh, write_links_cache
+
+                    if not links_cache_fresh(index_dir, sigs):
+                        write_links_cache(index_dir, LinkGraph(memory_dir, texts=texts), sigs)
+                except Exception:
+                    pass
                 return old  # corpus unchanged + already as good as it can be -> no-op
         return build_index(
             memory_dir, index_dir, allow_download=False, preserve_on_dense_fail=True

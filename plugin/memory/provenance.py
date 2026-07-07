@@ -631,13 +631,17 @@ def backfill_file(
     return result
 
 
+def _is_memory_filename(name: str) -> bool:
+    """THE corpus-membership filter — one definition, shared with the edge cache's
+    scandir stat sweep (GRA-6), which must see exactly the files ``_iter_memory_files``
+    yields or the cache-freshness check would silently drift from the graph builder."""
+    return name.endswith(".md") and name not in ("MEMORY.md", "MEMORY.full.md")
+
+
 def _iter_memory_files(memory_dir: str):
     for name in sorted(os.listdir(memory_dir)):
-        if not name.endswith(".md"):
-            continue
-        if name in ("MEMORY.md", "MEMORY.full.md"):
-            continue
-        yield os.path.join(memory_dir, name)
+        if _is_memory_filename(name):
+            yield os.path.join(memory_dir, name)
 
 
 def heal_empty_baselines(memory_dir: str, repo_root: str) -> List[str]:

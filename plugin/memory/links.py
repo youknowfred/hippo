@@ -27,18 +27,34 @@ silently won and ``[[target]]`` resolved to the wrong memory with no signal). Th
 file claiming one alias twice (its stripped stem == its ``name:`` slug) is NOT a
 collision. Ambiguous claimants are tracked so the linter can name both files.
 
+Persisted edge cache (GRA-6): ``build_index`` writes the fully-resolved graph to
+``links.json`` inside the index dir, keyed by a per-file STAT signature
+``[st_mtime_ns, st_size]`` — deliberately NOT the manifest's ``doc_text`` hash, because
+wikilinks live in BODIES and a body edit does not change ``doc_text`` (name + description
+only); a hash-keyed cache would go silently stale on exactly the edits that change edges.
+``build_graph(memory_dir, index_dir=...)`` reconstructs the graph from that cache after ONE
+stat sweep (zero file reads); any mismatch/corruption falls back to the full re-read.
+``load_edges`` is the O(1) recall-time loader (GRA-1): links.json only, no corpus scan —
+recall tolerates a slightly-stale edge list the same way it tolerates a stale index.
+
 Pure / read-only; never raises into a caller.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from typing import Dict, List, Optional, Set
 
-from .provenance import _iter_memory_files, parse_frontmatter
+from .provenance import _is_memory_filename, _iter_memory_files, parse_frontmatter
 
 _WIKILINK_RE = re.compile(r"\[\[([^\]\[]+?)\]\]")
+
+# links.json schema — independent of the manifest's SCHEMA_VERSION (the two files evolve
+# separately; a manifest bump must not silently invalidate a perfectly good edge cache).
+LINKS_SCHEMA_VERSION = 1
+_LINKS_CACHE_NAME = "links.json"
 
 
 def normalize_slug(s: str) -> str:
@@ -74,8 +90,13 @@ def parse_wikilinks(text: str) -> List[str]:
 class LinkGraph:
     """Resolved wikilink adjacency over the memory corpus. All nodes are STEMS."""
 
-    def __init__(self, memory_dir: str):
+    def __init__(self, memory_dir: str, texts: Optional[Dict[str, str]] = None):
         self.memory_dir = memory_dir
+        # GRA-6: ``texts`` lets a caller that ALREADY read the corpus (build_index reads
+        # every file's full text anyway) construct the graph with ZERO extra file reads.
+        # Keys are stems or filenames ({filename-or-stem: text}); ``None`` keeps the
+        # original read-from-disk behavior.
+        self._texts_in = texts
         self.files: List[str] = []  # stems (unique — one flat dir, one stem per file)
         self._alias_to_stem: Dict[str, str] = {}
         # alias -> claimant stems, so lint can NAME the colliders (COR-9). Membership
@@ -123,8 +144,9 @@ class LinkGraph:
             return
         self._register_alias(alias, stem, allow_collision=False)
 
-    def _build(self) -> None:
-        texts: Dict[str, str] = {}  # stem -> file text
+    def _read_texts(self) -> Dict[str, str]:
+        """Read every memory file into ``{stem: text}`` (unreadable files skipped)."""
+        texts: Dict[str, str] = {}
         for path in _iter_memory_files(self.memory_dir):
             stem = os.path.splitext(os.path.basename(path))[0]
             try:
@@ -132,7 +154,23 @@ class LinkGraph:
                     texts[stem] = fh.read()
             except Exception:
                 continue
-            self.files.append(stem)
+        return texts
+
+    def _build(self) -> None:
+        # GRA-6: alias/edge construction runs from an in-memory mapping so a caller that
+        # already read the corpus (build_index) pays zero extra file reads. Cold path
+        # (no texts supplied) reads from disk exactly as before.
+        if self._texts_in is not None:
+            # Normalize caller keys to stems ({filename-or-stem: text}); dict iteration
+            # preserves the caller's insertion order, and build_index inserts in
+            # _iter_memory_files order — so cached-vs-cold graphs carry the same node order.
+            texts = {
+                (k[:-3] if k.endswith(".md") else k): (v or "")
+                for k, v in self._texts_in.items()
+            }
+        else:
+            texts = self._read_texts()
+        self.files = list(texts.keys())
 
         # Pass 1: full-stem aliases (unique by construction) — highest-confidence tier.
         # Every alias claimed here is immune to soft-tier interference below.
@@ -260,9 +298,201 @@ class LinkGraph:
         )
 
 
-def build_graph(memory_dir: str) -> Optional[LinkGraph]:
+# --------------------------------------------------------------------------- #
+# GRA-6: persisted edge cache (links.json in the index dir)
+# --------------------------------------------------------------------------- #
+def write_links_cache(index_dir: str, graph: LinkGraph, sigs: Dict[str, List[int]]) -> None:
+    """Persist ``graph`` (+ per-file stat ``sigs``) to ``index_dir/links.json``. Never raises.
+
+    ``sigs`` maps stem -> ``[st_mtime_ns, st_size]`` captured by the caller AT READ TIME
+    (build_index stats each file just before reading it, so a write racing the build makes
+    the sig look STALE on the next check — never fresh-but-wrong). The payload carries
+    everything a ``LinkGraph`` view needs — including ``raw_targets``, which lint's
+    slug-mismatch check reads and which is NOT derivable from the resolved adjacency —
+    so a cache hit reproduces the full graph, not a lossy subset. Written atomically
+    (tmp + ``os.replace``, the manifest's COR-12 pattern) so a reader never sees a torn
+    file. A stem missing from ``sigs`` gets ``[0, 0]``, which can never match a real stat
+    — it degrades to a cache miss, the safe direction.
+    """
+    try:
+        payload = {
+            "schema_version": LINKS_SCHEMA_VERSION,
+            "files": {
+                stem: {
+                    "sig": list(sigs.get(stem) or (0, 0)),
+                    "outbound": sorted(graph.adjacency.get(stem, ())),
+                }
+                for stem in graph.files
+            },
+            "alias_to_file": dict(graph._alias_to_stem),
+            "ambiguous": {a: sorted(c) for a, c in graph._ambiguous.items()},
+            "unresolved": {s: list(t) for s, t in graph.unresolved.items()},
+            "raw_targets": {s: list(t) for s, t in graph.raw_targets.items()},
+        }
+        path = os.path.join(index_dir, _LINKS_CACHE_NAME)
+        tmp = path + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+            os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except Exception:
+                    pass
+    except Exception:
+        pass  # a failed cache write must never break an index build
+
+
+def _load_links_payload(index_dir: str) -> Optional[dict]:
+    """Parse ``links.json`` -> payload dict, or None (missing / corrupt / wrong schema)."""
+    try:
+        with open(os.path.join(index_dir, _LINKS_CACHE_NAME), "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("schema_version") != LINKS_SCHEMA_VERSION:
+            return None
+        if not all(
+            isinstance(payload.get(k), dict)
+            for k in ("files", "alias_to_file", "ambiguous", "unresolved", "raw_targets")
+        ):
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+def _stat_signatures(memory_dir: str) -> Optional[Dict[str, List[int]]]:
+    """One ``os.scandir`` stat sweep -> ``{stem: [st_mtime_ns, st_size]}``; None on failure.
+
+    NO file reads — this is the cached path's entire I/O cost. Deliberately NOT built on
+    ``_iter_memory_files`` (which is the corpus READER's entry point and what the
+    zero-reads test probes); the membership filter itself is still the one canonical
+    ``_is_memory_filename``, so the sweep sees exactly the files the graph builder reads.
+    """
+    try:
+        sigs: Dict[str, List[int]] = {}
+        with os.scandir(memory_dir) as it:
+            for entry in it:
+                if not _is_memory_filename(entry.name):
+                    continue
+                st = entry.stat()
+                sigs[entry.name[:-3]] = [st.st_mtime_ns, st.st_size]
+        return sigs
+    except Exception:
+        return None
+
+
+def links_cache_fresh(index_dir: str, sigs: Dict[str, List[int]]) -> bool:
+    """True when ``links.json`` exists and its per-file sigs exactly match ``sigs``.
+
+    Used by ``refresh_index``'s no-op short-circuit: the corpus-unchanged check compares
+    ``doc_text`` hashes, which body edits do NOT perturb — so the short-circuit must
+    independently verify the edge cache before skipping the rebuild, or a body-only edit
+    (the exact kind that changes wikilinks) would leave a stale links.json in place forever.
+    """
+    payload = _load_links_payload(index_dir)
+    if payload is None:
+        return False
+    try:
+        cached = {s: list(rec.get("sig") or []) for s, rec in payload["files"].items()}
+        return cached == {s: list(v) for s, v in sigs.items()}
+    except Exception:
+        return False
+
+
+def _graph_from_payload(memory_dir: str, payload: dict) -> LinkGraph:
+    """Reconstruct a full ``LinkGraph`` view from a validated cache payload (no I/O).
+
+    Raises on any malformed field — ``build_graph`` treats that as a cache miss and falls
+    back to the full re-read. The reverse adjacency is re-derived here (O(E), in-memory)
+    rather than persisted: it is the exact transpose of ``outbound`` and storing both would
+    just create a second copy that could disagree.
+    """
+    files_map = payload["files"]
+    g = LinkGraph.__new__(LinkGraph)
+    g.memory_dir = memory_dir
+    g._texts_in = None
+    g.files = list(files_map.keys())
+    g._alias_to_stem = {str(a): str(s) for a, s in payload["alias_to_file"].items()}
+    g._ambiguous = {str(a): set(c) for a, c in payload["ambiguous"].items()}
+    # Only consulted during construction's soft-alias tiering, but kept coherent anyway —
+    # it is trivially derivable and a half-initialized object invites subtle breakage.
+    g._stem_tier = {normalize_slug(s) for s in g.files}
+    g.raw_targets = {str(s): list(t) for s, t in payload["raw_targets"].items()}
+    g.unresolved = {str(s): list(t) for s, t in payload["unresolved"].items()}
+    g.adjacency = {}
+    g._inbound = {stem: set() for stem in g.files}
+    for stem, rec in files_map.items():
+        outbound = rec["outbound"]
+        if not isinstance(outbound, list):
+            # Valid-JSON-but-wrong-shape corruption (e.g. a hand-edited string) would
+            # otherwise iterate as CHARACTERS into a garbage adjacency — raise instead,
+            # which build_graph treats as a cache miss.
+            raise ValueError("outbound must be a list")
+        out = set(outbound)
+        g.adjacency[stem] = out
+        for tgt in out:
+            g._inbound.setdefault(tgt, set()).add(stem)
+    return g
+
+
+def build_graph(memory_dir: str, index_dir: Optional[str] = None) -> Optional[LinkGraph]:
+    """Build the corpus link graph; with ``index_dir``, try the persisted cache first.
+
+    Cached fast path (GRA-6): load ``links.json``, do ONE stat pass over the memory dir
+    (zero file reads); if the stem set and every ``[st_mtime_ns, st_size]`` signature match,
+    reconstruct the graph entirely from the cache. ANY discrepancy — missing/corrupt cache,
+    added/removed file, any body edit — falls back to the full corpus re-read, so the cache
+    can be wrong only in the cheap direction (a wasted rebuild), never the silent one
+    (serving stale edges as fresh). Never raises; None only when even the fallback fails
+    (e.g. the memory dir does not exist).
+    """
+    if index_dir:
+        try:
+            payload = _load_links_payload(index_dir)
+            if payload is not None:
+                sigs = _stat_signatures(memory_dir)
+                if sigs is not None and sigs == {
+                    s: list(rec.get("sig") or []) for s, rec in payload["files"].items()
+                }:
+                    return _graph_from_payload(memory_dir, payload)
+        except Exception:
+            pass  # any cache trouble -> full rebuild below
     try:
         return LinkGraph(memory_dir)
+    except Exception:
+        return None
+
+
+def load_edges(index_dir: str) -> Optional[Dict[str, Dict[str, Set[str]]]]:
+    """O(1)-load edge list for recall-time expansion (GRA-1): ``{stem: {"out", "in"}}``.
+
+    Reads ``links.json`` ONLY — no corpus scan, no stat sweep. Recall-time expansion
+    tolerates a slightly-stale edge list the same way it tolerates a stale index (the
+    SessionStart refresh re-syncs both), and the hot path must not pay an O(N) stat sweep
+    per prompt for freshness it does not need. Returns None (never raises) when the cache
+    is absent/corrupt — the caller simply skips expansion.
+    """
+    try:
+        payload = _load_links_payload(index_dir)
+        if payload is None:
+            return None
+        files_map = payload["files"]
+        edges: Dict[str, Dict[str, Set[str]]] = {
+            str(stem): {"out": set(), "in": set()} for stem in files_map
+        }
+        for stem, rec in files_map.items():
+            outbound = rec.get("outbound")
+            if not isinstance(outbound, list):
+                return None  # wrong-shape corruption -> absent, same as any other corruption
+            for tgt in outbound:
+                if tgt in edges:  # a resolved edge always targets a corpus stem
+                    edges[stem]["out"].add(tgt)
+                    edges[tgt]["in"].add(stem)
+        return edges
     except Exception:
         return None
 
