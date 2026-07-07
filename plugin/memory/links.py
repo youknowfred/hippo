@@ -15,9 +15,17 @@ every query method speak stems; nothing in graph output carries a ``.md`` suffix
 
 Resolution aliases per file (all normalized to lower-hyphen):
   1. the full filename stem               (always registered — filenames are unique)
-  2. the stem with its FIRST ``_``/``-`` segment stripped   (registered only if globally
-                                                             unique → no false positives)
-  3. the frontmatter ``name:`` slug        (registered only if globally unique)
+  2. the stem with its FIRST ``_``/``-`` segment stripped
+  3. the frontmatter ``name:`` slug
+
+Tiering (COR-9): a full-stem claim (tier 1) always beats a soft claim (tiers 2–3) — a
+soft alias that collides with an existing full-stem alias is simply not registered and
+never poisons the full-stem claim. WITHIN the soft tier, aliases are registered
+UNCONDITIONALLY so that two DIFFERENT files claiming the same soft alias land in
+``_ambiguous`` and ``resolve()`` refuses both (previously the alphabetically-first file
+silently won and ``[[target]]`` resolved to the wrong memory with no signal). The same
+file claiming one alias twice (its stripped stem == its ``name:`` slug) is NOT a
+collision. Ambiguous claimants are tracked so the linter can name both files.
 
 Pure / read-only; never raises into a caller.
 """
@@ -70,7 +78,13 @@ class LinkGraph:
         self.memory_dir = memory_dir
         self.files: List[str] = []  # stems (unique — one flat dir, one stem per file)
         self._alias_to_stem: Dict[str, str] = {}
-        self._ambiguous: Set[str] = set()
+        # alias -> claimant stems, so lint can NAME the colliders (COR-9). Membership
+        # checks ("alias in self._ambiguous") read identically to the old Set form.
+        self._ambiguous: Dict[str, Set[str]] = {}
+        # Aliases claimed at full-stem tier (pass 1). A soft claim colliding with one of
+        # these is silently dropped — full-stem beats soft, and the losing soft claim
+        # must never mark the winning full-stem alias ambiguous.
+        self._stem_tier: Set[str] = set()
         self.raw_targets: Dict[str, List[str]] = {}  # stem -> raw [[targets]]
         self.adjacency: Dict[str, Set[str]] = {}  # stem -> resolved target stems
         self.unresolved: Dict[str, List[str]] = {}  # stem -> raw targets that didn't resolve
@@ -86,10 +100,28 @@ class LinkGraph:
             return
         if alias in self._alias_to_stem:
             if self._alias_to_stem[alias] != stem and not allow_collision:
-                # Two files claim this alias -> ambiguous; drop it so it can't false-resolve.
-                self._ambiguous.add(alias)
+                # Two DIFFERENT files claim this alias -> ambiguous; record BOTH claimants
+                # (linter names them) and drop the alias post-build so it can't
+                # false-resolve. Same-file re-claims (stripped stem == name slug) fall
+                # through the != check — not a collision.
+                self._ambiguous.setdefault(alias, {self._alias_to_stem[alias]}).add(stem)
             return
         self._alias_to_stem[alias] = stem
+
+    def _register_soft_alias(self, alias: str, stem: str) -> None:
+        """Tier 2/3 registration (COR-9): unconditional WITHIN the soft tier.
+
+        Full-stem beats soft: an alias already claimed at full-stem tier is skipped
+        outright (no registration, no ambiguity — the soft loser must not poison the
+        full-stem claim). Everything else registers unconditionally so same-tier
+        collisions across different files land in ``_ambiguous`` instead of letting
+        the alphabetically-first file silently win (the pre-COR-9 bug: the
+        ``not in _alias_to_stem`` guard skipped registration entirely, so the
+        collision was never even SEEN).
+        """
+        if not alias or alias in self._stem_tier:
+            return
+        self._register_alias(alias, stem, allow_collision=False)
 
     def _build(self) -> None:
         texts: Dict[str, str] = {}  # stem -> file text
@@ -102,21 +134,24 @@ class LinkGraph:
                 continue
             self.files.append(stem)
 
-        # Pass 1: full-stem aliases (unique by construction) — highest-confidence.
+        # Pass 1: full-stem aliases (unique by construction) — highest-confidence tier.
+        # Every alias claimed here is immune to soft-tier interference below.
         for stem in self.files:
-            self._register_alias(normalize_slug(stem), stem, allow_collision=False)
+            slug = normalize_slug(stem)
+            self._register_alias(slug, stem, allow_collision=False)
+            self._stem_tier.add(slug)
 
-        # Pass 2: prefix-stripped + name-slug aliases — register only when globally unique.
+        # Pass 2: prefix-stripped + name-slug aliases — soft tier, registered
+        # UNCONDITIONALLY (COR-9) so same-tier collisions become ambiguous instead of
+        # silently resolving to whichever file sorts first.
         for stem in self.files:
             stripped = _strip_first_segment(stem)
-            if stripped and stripped not in self._alias_to_stem:
-                self._register_alias(stripped, stem, allow_collision=False)
+            if stripped:
+                self._register_soft_alias(stripped, stem)
             fm = parse_frontmatter(texts.get(stem, ""))
             name = fm.get("name") if isinstance(fm, dict) else None
             if isinstance(name, str):
-                slug = normalize_slug(name)
-                if slug and slug not in self._alias_to_stem:
-                    self._register_alias(slug, stem, allow_collision=False)
+                self._register_soft_alias(normalize_slug(name), stem)
 
         for amb in self._ambiguous:
             self._alias_to_stem.pop(amb, None)
@@ -148,6 +183,16 @@ class LinkGraph:
         if slug in self._ambiguous:
             return None
         return self._alias_to_stem.get(slug)
+
+    def ambiguous_claimants(self, target: str) -> List[str]:
+        """Sorted claimant stems when ``target`` is an ambiguous alias; ``[]`` otherwise.
+
+        The linter's window into WHY a target refused to resolve — an ambiguous
+        ``[[target]]`` is a different failure from a dangling one (two files claim it
+        vs. nobody does), and the fix is different (rename/disambiguate vs. create),
+        so lint must be able to name both claimants.
+        """
+        return sorted(self._ambiguous.get(normalize_slug(target), set()))
 
     def resolved_via_stem(self, target: str) -> bool:
         """True when ``target`` matches a file's canonical full stem (not a soft alias)."""

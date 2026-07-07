@@ -82,6 +82,73 @@ def test_resolved_via_stem_distinguishes_canonical_from_alias(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# COR-9: soft-alias collisions are ambiguous, never first-claimant-wins
+# --------------------------------------------------------------------------- #
+def _write(md: str, fname: str, content: str) -> None:
+    os.makedirs(md, exist_ok=True)
+    with open(os.path.join(md, fname), "w", encoding="utf-8") as fh:
+        fh.write(content)
+
+
+def test_two_files_sharing_stripped_alias_resolve_to_neither(tmp_path):
+    """The COR-9 census case: feedback_api_keys + project_api_keys both strip to
+    "api-keys". Pre-fix, sorted iteration let feedback_* silently claim it and
+    [[api-keys]] resolved to the WRONG memory. Now resolve() refuses."""
+    md = str(tmp_path / "memory")
+    _write(md, "feedback_api_keys.md", _mem("feedback api keys", "body"))
+    _write(md, "project_api_keys.md", _mem("project api keys", "body"))
+    g = LinkGraph(md)
+    assert g.resolve("api-keys") is None
+    assert g.ambiguous_claimants("api-keys") == ["feedback_api_keys", "project_api_keys"]
+    # both files stay reachable by their canonical full stems — only the SOFT alias died
+    assert g.resolve("feedback-api-keys") == "feedback_api_keys"
+    assert g.resolve("project-api-keys") == "project_api_keys"
+
+
+def test_nameslug_vs_nameslug_collision_is_ambiguous(tmp_path):
+    md = str(tmp_path / "memory")
+    _write(md, "one.md", _mem("Shared Name", "body"))
+    _write(md, "two.md", _mem("Shared Name", "body"))
+    g = LinkGraph(md)
+    assert g.resolve("shared-name") is None
+    assert g.ambiguous_claimants("shared-name") == ["one", "two"]
+
+
+def test_stripped_vs_nameslug_collision_across_files_is_ambiguous(tmp_path):
+    """Cross-KIND soft collision: file A's stripped stem == file B's name slug.
+    Both are soft tier, different files -> ambiguous."""
+    md = str(tmp_path / "memory")
+    _write(md, "feedback_api_keys.md", _mem("feedback api keys", "body"))
+    _write(md, "vault.md", _mem("api keys", "body"))
+    g = LinkGraph(md)
+    assert g.resolve("api-keys") is None
+    assert g.ambiguous_claimants("api-keys") == ["feedback_api_keys", "vault"]
+
+
+def test_full_stem_still_beats_soft_alias(tmp_path):
+    """Tier rule preserved: a full-stem claim wins outright — the losing soft claim is
+    not registered and must NOT poison the full-stem alias, even with MULTIPLE soft
+    losers that would otherwise collide with each other."""
+    md = str(tmp_path / "memory")
+    _write(md, "api-keys.md", _mem("canonical", "body"))
+    _write(md, "feedback_api_keys.md", _mem("feedback api keys", "body"))
+    _write(md, "project_api_keys.md", _mem("project api keys", "body"))
+    g = LinkGraph(md)
+    assert g.resolve("api-keys") == "api-keys"  # full stem, unpoisoned
+    assert g.ambiguous_claimants("api-keys") == []
+
+
+def test_same_file_claiming_alias_twice_is_not_a_collision(tmp_path):
+    """A file whose stripped stem equals its own name slug re-claims ONE alias from
+    both soft kinds — same file, so no ambiguity, and it still resolves."""
+    md = str(tmp_path / "memory")
+    _write(md, "feedback_gamma_thing.md", _mem("Gamma Thing", "body"))
+    g = LinkGraph(md)
+    assert g.resolve("gamma-thing") == "feedback_gamma_thing"
+    assert g.ambiguous_claimants("gamma-thing") == []
+
+
+# --------------------------------------------------------------------------- #
 # traversal
 # --------------------------------------------------------------------------- #
 def test_traverse_n_hops(tmp_path):
@@ -203,6 +270,28 @@ def test_lint_flags_dangling_targets(tmp_path):
     assert ("alpha", "totally-absent") in dangling
     # the resolvable ones are NOT dangling
     assert not any(t in ("beta", "gamma-thing", "151-avenue-a-is-standard-size") for _, t in dangling)
+
+
+def test_lint_reports_ambiguous_with_both_claimants_not_dangling(tmp_path):
+    """COR-9 acceptance: a [[target]] hitting an ambiguous soft alias lints as
+    AMBIGUOUS — naming the alias and both claimant files — and is NOT mislabeled
+    dangling (the files exist; the user must disambiguate, not create)."""
+    md = str(tmp_path / "memory")
+    _write(md, "feedback_api_keys.md", _mem("feedback api keys", "body"))
+    _write(md, "project_api_keys.md", _mem("project api keys", "body"))
+    _write(md, "linker.md", _mem("linker", "see [[api-keys]]"))
+    report = L.lint(md)
+    assert report["ambiguous"] == [
+        {
+            "file": "linker",
+            "target": "api-keys",
+            "claimants": ["feedback_api_keys", "project_api_keys"],
+        }
+    ]
+    assert not any(d["target"] == "api-keys" for d in report["dangling"])
+    # legible degradation: ambiguity is LOUD at SessionStart, like dangling
+    line = L.health_line(report)
+    assert line and "ambiguous" in line and "api-keys" in line
 
 
 def test_lint_flags_slug_mismatch(tmp_path):

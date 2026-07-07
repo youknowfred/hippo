@@ -173,9 +173,11 @@ joins against their name sets with no conversion. `traverse(name, hops)` walks N
 hops; `inbound(name)` answers "what refers to this memory?" from a reverse adjacency built
 once at construction (the codebase's single adjacency inversion); `orphans()` is
 zero-OUTBOUND (may still be well-cited), `isolates()` is zero-in AND zero-out (genuinely
-disconnected). `lint_links` flags **dangling** targets, **slug-mismatches**, and
-**orphans** — read-only, never edits a memory; its one-line summary is the `link_health`
-producer.
+disconnected). Soft aliases (prefix-strip / `name:` slug) claimed by two or more files
+are **ambiguous** — `resolve()` refuses them rather than guess (a full-stem claim still
+beats any soft claim). `lint_links` flags **dangling** targets, **ambiguous** targets
+(naming every claimant), **slug-mismatches**, and **orphans** — read-only, never edits a
+memory; its one-line summary is the `link_health` producer.
 
 ```bash
 "$PY" -m memory.links --traverse <name> --hops 2
