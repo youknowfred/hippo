@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 import re
 import time
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .build_index import (
     DEFAULT_MODEL,
@@ -227,29 +227,96 @@ def clean_query(raw: str) -> str:
 # --------------------------------------------------------------------------- #
 # Rankers
 # --------------------------------------------------------------------------- #
-def _bm25_rank(query_tokens: List[str], entries: List[dict]) -> List[int]:
+def _bm25_score_via_postings(
+    query_tokens: List[str], stats: dict, matched: List[int]
+) -> Dict[int, float]:
+    """Score exactly ``matched`` doc indices from precomputed postings/idf/doc_len/avgdl.
+
+    Replicates rank_bm25.BM25Okapi.get_scores' per-term formula EXACTLY:
+        score[doc] += idf[tok] * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * doc_len[doc] / avgdl))
+    summed over every query token whose postings list contains ``doc`` — but instead of
+    walking the WHOLE corpus per query token (what BM25Okapi.get_scores does internally),
+    this walks only the (token -> [[doc, tf], ...]) postings for the query's own tokens, and
+    only for the docs already known (by the caller's token-overlap filter) to matter. Cost is
+    proportional to the number of matched postings, independent of total corpus size N.
+    """
+    k1 = stats["k1"]
+    b = stats["b"]
+    avgdl = stats["avgdl"]
+    idf = stats["idf"]
+    postings = stats["postings"]
+    doc_len = stats["doc_len"]
+    matched_set = set(matched)
+    scores: Dict[int, float] = {i: 0.0 for i in matched}
+    if not avgdl:
+        return scores
+    for tok in query_tokens:
+        term_idf = idf.get(tok)
+        if term_idf is None:
+            continue
+        for doc_i, tf in postings.get(tok, ()):
+            if doc_i not in matched_set:
+                continue  # postings can reference docs outside this query's match set
+            denom = tf + k1 * (1 - b + b * doc_len[doc_i] / avgdl)
+            scores[doc_i] += term_idf * (tf * (k1 + 1)) / denom
+    return scores
+
+
+def _bm25_rank(
+    query_tokens: List[str],
+    entries: List[dict],
+    *,
+    stats: Optional[dict] = None,
+    patched_indices: Optional[set] = None,
+) -> List[int]:
     """Indices of docs that SHARE >=1 query token, ordered by descending BM25 score.
 
     The match set (token-overlap) is the right filter — NOT ``score > 0``: BM25 IDF goes
     NEGATIVE for a term that appears in most/all docs (e.g. a tiny corpus, or a common
     token), so a genuinely-matching doc can score below an unrelated doc's 0. Filtering on
     overlap keeps matched docs (even negative-scored) and drops only the truly-unrelated.
+
+    PRF-1: when the caller supplies ``stats`` (the manifest's precomputed postings/doc_len/
+    avgdl/idf — see ``build_index.compute_bm25_stats``) AND no entry in ``patched_indices``
+    (COR-4 mid-session drift — ``recall()`` tracks which indices got fresh tokens this query
+    that the persisted postings do not know about) participates, this scores ONLY the
+    matched docs by walking the query tokens' postings lists directly — cost proportional to
+    matched postings, INDEPENDENT of corpus size, never constructing a BM25Okapi over the
+    whole corpus. Falls back to the full from-scratch construction (today's behavior,
+    unchanged) when ``stats`` is absent (an old manifest predating this item, or a caller —
+    e.g. the two direct-call test sites — that doesn't have a manifest to draw stats from)
+    or when any matched doc was drift-patched (its persisted postings are stale for THIS
+    query's fresh tokens, so only a full rebuild over the CURRENT ``entries`` tokens is
+    correct). Both paths produce IDENTICAL rankings — same match-set filter, same score
+    formula, same stable descending sort — a golden test pins this equivalence.
     """
     if not query_tokens or not entries:
         return []
+    corpus = [e.get("tokens") or [] for e in entries]
+    qset = set(query_tokens)
+    matched = [i for i in range(len(entries)) if qset.intersection(corpus[i])]
+    if not matched:
+        return []
+
+    fast_path_ok = stats is not None and not (patched_indices and patched_indices & set(matched))
+    if fast_path_ok:
+        try:
+            scores = _bm25_score_via_postings(query_tokens, stats, matched)
+            matched.sort(key=lambda i: scores[i], reverse=True)
+            return matched
+        except Exception:
+            pass  # any stats-shape surprise -> fall through to the full-construction path
+
     try:
         try:
             from rank_bm25 import BM25Okapi  # the pinned venv dep (full-fidelity path)
         except ImportError:  # bare python3 pre-bootstrap (ONB-2): score-identical fallback
             from ._vendor.bm25 import BM25Okapi
 
-        corpus = [e.get("tokens") or [] for e in entries]
         bm25 = BM25Okapi(corpus)
         scores = bm25.get_scores(query_tokens)
     except Exception:
         return []
-    qset = set(query_tokens)
-    matched = [i for i in range(len(entries)) if qset.intersection(corpus[i])]
     matched.sort(key=lambda i: scores[i], reverse=True)
     return matched
 
@@ -543,14 +610,31 @@ def recall(
         # the rest of it. Bounded by _MAX_DRIFT_CHECKS so a huge corpus can't turn this
         # into an unbounded per-query disk scan -- beyond the bound, entries are passed
         # through untouched (fail open to "may be stale", never fail closed to "crash").
+        # PRF-1: track WHICH indices actually changed under drift-patching (identity
+        # comparison against the pre-patch entry — `_drift_patch` returns the SAME dict
+        # object, unchanged, when the hash still matches, and only a NEW dict when it
+        # patched fresh tokens in). The persisted BM25 postings (manifest's "bm25" block)
+        # know nothing about a patched entry's fresh tokens, so `_bm25_rank`'s fast path
+        # must be skipped for THIS query whenever any patched index is in play — it falls
+        # back to the full from-scratch construction over the CURRENT `entries`, which is
+        # always correct (just not the O(1)-per-matched-posting fast path).
+        patched_indices: set = set()
         if memory_dir:
-            entries = [
-                _drift_patch(e, memory_dir) if i < _MAX_DRIFT_CHECKS else e
-                for i, e in enumerate(entries)
-            ]
+            patched_entries = []
+            for i, e in enumerate(entries):
+                if i < _MAX_DRIFT_CHECKS:
+                    patched = _drift_patch(e, memory_dir)
+                    if patched is not e:
+                        patched_indices.add(i)
+                    patched_entries.append(patched)
+                else:
+                    patched_entries.append(e)
+            entries = patched_entries
 
         q_tokens = tokenize(query)
-        bm25 = _bm25_rank(q_tokens, entries)
+        bm25 = _bm25_rank(
+            q_tokens, entries, stats=idx.manifest.get("bm25"), patched_indices=patched_indices
+        )
         dense = _dense_rank(query, idx)
 
         rankings = [r for r in (dense, bm25) if r]

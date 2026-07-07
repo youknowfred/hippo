@@ -6,9 +6,11 @@ embedder. The git-recent producer test uses the conftest git repo fixtures.
 
 from __future__ import annotations
 
+import math
 import os
 
 import numpy as np
+import pytest
 
 from memory import build_index as B
 from memory import recall as R
@@ -1097,3 +1099,214 @@ def test_clean_query_accented_latin_cafe_round_trip():
     ASCII-only tokenizer internally used for the gate check)."""
     raw = "where is the café located in the office building"
     assert R.clean_query(raw) == raw
+
+
+# --------------------------------------------------------------------------- #
+# PRF-1: persisted BM25 statistics — fast path (postings) vs from-scratch construction
+# --------------------------------------------------------------------------- #
+# Deliberately includes a NEGATIVE-IDF corner: "deploy" appears in 4 of 5 docs, so its
+# Okapi idf = ln((5-4+0.5)/(4+0.5)) = ln(1.5/4.5) < 0 and must be floored to
+# epsilon * average_idf (rank_bm25's exact behavior) rather than left negative.
+_PRF1_CORPUS_TOKENS = [
+    "zebra deploy canary rollout pager escalation".split(),
+    "postgres catalog bucket warehouse lakehouse files".split(),
+    "excel header rescue inference column layout".split(),
+    "deploy deploy deploy repeated token document".split(),
+    "the common token appears in every document deploy".split(),
+]
+
+
+def _prf1_entries() -> list:
+    return [
+        {"name": f"e{i}", "file": f"e{i}.md", "tokens": toks}
+        for i, toks in enumerate(_PRF1_CORPUS_TOKENS)
+    ]
+
+
+def test_bm25_postings_stats_have_negative_idf_floored():
+    """The corner case named in the roadmap: a token in most docs gets a NEGATIVE Okapi idf,
+    floored to epsilon * average_idf — never left negative in the persisted stats, and
+    matching rank_bm25's own floored value exactly (average_idf is computed from the
+    PRE-floor sum, so it must not be re-derived from the already-floored dict)."""
+    rank_bm25 = pytest.importorskip("rank_bm25")
+    stats = B.compute_bm25_stats(_PRF1_CORPUS_TOKENS)
+    df_deploy = 4  # appears in 4 of the 5 docs
+    unfloored = math.log(len(_PRF1_CORPUS_TOKENS) - df_deploy + 0.5) - math.log(df_deploy + 0.5)
+    assert unfloored < 0  # confirms this token really does hit the negative-idf corner
+    assert stats["idf"]["deploy"] > 0  # floored, never left negative
+
+    oracle = rank_bm25.BM25Okapi(_PRF1_CORPUS_TOKENS)
+    assert stats["idf"]["deploy"] == pytest.approx(oracle.idf["deploy"], abs=1e-9)
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        ["deploy", "canary"],
+        ["postgres", "warehouse"],
+        ["deploy"],  # high-df token — exercises the negative-idf epsilon floor at query time
+        ["nonexistent"],
+        ["excel", "deploy", "catalog"],
+    ],
+)
+def test_bm25_rank_fast_path_matches_full_construction_golden(query):
+    """Golden equivalence: IDENTICAL ordering AND scores from the postings fast path vs a
+    fresh query-time BM25Okapi over the same hermetic corpus (incl. the negative-idf corner)."""
+    rank_bm25 = pytest.importorskip("rank_bm25")
+    entries = _prf1_entries()
+    stats = B.compute_bm25_stats(_PRF1_CORPUS_TOKENS)
+
+    fast = R._bm25_rank(query, entries, stats=stats)
+
+    oracle = rank_bm25.BM25Okapi(_PRF1_CORPUS_TOKENS)
+    oracle_scores = oracle.get_scores(query)
+    qset = set(query)
+    expected = [i for i in range(len(entries)) if qset.intersection(_PRF1_CORPUS_TOKENS[i])]
+    expected.sort(key=lambda i: oracle_scores[i], reverse=True)
+
+    assert fast == expected  # identical ORDERING (incl. tie behavior)
+
+    fast_scores = R._bm25_score_via_postings(query, stats, fast)
+    for i in fast:
+        assert fast_scores[i] == pytest.approx(oracle_scores[i], abs=1e-9)  # identical SCORES
+
+
+def test_bm25_rank_fast_path_never_constructs_bm25okapi(monkeypatch):
+    """Probe: with stats supplied and nothing drift-patched, the fast path must NEVER import/
+    construct BM25Okapi (rank_bm25 or the vendored fallback) — monkeypatch both constructors
+    to raise, and assert recall still ranks correctly via postings alone."""
+    import rank_bm25
+
+    def _boom(*a, **k):
+        raise AssertionError("fast path must not construct BM25Okapi")
+
+    monkeypatch.setattr(rank_bm25, "BM25Okapi", _boom)
+    from memory._vendor import bm25 as vendored_bm25
+
+    monkeypatch.setattr(vendored_bm25, "BM25Okapi", _boom)
+
+    entries = _prf1_entries()
+    stats = B.compute_bm25_stats(_PRF1_CORPUS_TOKENS)
+    result = R._bm25_rank(["deploy", "canary"], entries, stats=stats)
+    assert result  # still ranks, despite both constructors being landmines
+    assert 0 in result  # the zebra_deploy doc matches both query tokens
+
+
+def test_bm25_rank_without_stats_falls_back_and_matches_golden():
+    """The two existing direct-call test sites omit `stats` entirely — confirm that path
+    (unchanged full-construction fallback) still matches the golden oracle."""
+    rank_bm25 = pytest.importorskip("rank_bm25")
+    entries = _prf1_entries()
+    query = ["deploy", "canary"]
+    fast = R._bm25_rank(query, entries)  # no stats kwarg -> fallback path
+
+    oracle = rank_bm25.BM25Okapi(_PRF1_CORPUS_TOKENS)
+    oracle_scores = oracle.get_scores(query)
+    qset = set(query)
+    expected = [i for i in range(len(entries)) if qset.intersection(_PRF1_CORPUS_TOKENS[i])]
+    expected.sort(key=lambda i: oracle_scores[i], reverse=True)
+    assert fast == expected
+
+
+def test_bm25_stats_survive_manifest_round_trip(tmp_path, monkeypatch):
+    """Build persists the "bm25" block; loading it back gives byte-for-byte-equivalent stats
+    (JSON round-trip: int/float/list/dict only, no drift)."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    manifest = B.build_index(md, idx)
+    assert "bm25" in manifest
+    for key in ("postings", "doc_len", "avgdl", "idf", "k1", "b"):
+        assert key in manifest["bm25"]
+
+    loaded = B.load_index(idx)
+    assert loaded.manifest["bm25"] == manifest["bm25"]
+
+    # And recall() actually exercises the fast path end-to-end without error.
+    res = R.recall("which reranker do we use for search results", k=5, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert "reranker_voyage" in names
+
+
+def test_recall_rankings_identical_with_and_without_persisted_stats(tmp_path, monkeypatch):
+    """Same corpus/query: recall() with the persisted-stats fast path vs the manifest's "bm25"
+    block stripped out (forcing the fallback) must produce IDENTICAL rankings and scores."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx)
+    query = "excel header inference for weird canvas pdf formula graph reranker"
+
+    with_stats = B.load_index(idx)
+    fast_results = R.recall(query, k=10, index=with_stats)
+
+    without_stats = B.load_index(idx)
+    without_stats.manifest = dict(without_stats.manifest)
+    without_stats.manifest.pop("bm25", None)
+    fallback_results = R.recall(query, k=10, index=without_stats)
+
+    assert [r["name"] for r in fast_results] == [r["name"] for r in fallback_results]
+    assert [r["score"] for r in fast_results] == [r["score"] for r in fallback_results]
+
+
+def test_bm25_rank_falls_back_when_drift_patched_entry_matches(tmp_path, monkeypatch):
+    """A drift-patched entry (COR-4: fresh tokens the persisted postings don't know about)
+    must force the FULL fallback construction for this query, not the stale fast path —
+    this is exactly what makes `test_recall_patches_bm25_on_edited_description` keep passing."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"canvas_pdf.md": _CORPUS["canvas_pdf.md"]})
+    B.build_index(md, idx)
+
+    query = "kubernetes helm chart deployment rollout"
+    # Before the edit: fresh tokens aren't in the corpus at all -> no match, either path.
+    assert R.recall(query, k=5, memory_dir=md, index_dir=idx) == []
+
+    with open(os.path.join(md, "canvas_pdf.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem("canvas_pdf", "kubernetes helm chart deployment rollout strategy"))
+
+    # The persisted postings still reflect the OLD description -- only the drift-patch path
+    # (which forces the fallback for THIS query) can find the new tokens.
+    res = R.recall(query, k=5, memory_dir=md, index_dir=idx)
+    assert any(r["name"] == "canvas_pdf" for r in res)
+
+
+def test_bm25_rank_patched_indices_param_gates_fast_path():
+    """Direct unit check on `_bm25_rank`'s new kwarg: a `patched_indices` set intersecting the
+    match set must force the fallback path even though `stats` is supplied — proven by a
+    scenario where trusting the STALE postings gives a DIFFERENT score than a fresh rebuild
+    over the current (patched) tokens, for a doc that matches under BOTH old and new text."""
+    entries = _prf1_entries()
+    stats = B.compute_bm25_stats(_PRF1_CORPUS_TOKENS)
+    query = ["canary"]
+
+    # Entry 0's original tokens have exactly one "canary". Simulate a drift-patch that added
+    # several MORE "canary" occurrences (still matches the query under both old and new
+    # text, so the match-set filter can't be what distinguishes the two paths) -- the TF (and
+    # hence the score) genuinely differs between the stale persisted postings and a fresh
+    # rebuild over the patched tokens.
+    patched_entries = list(entries)
+    patched_entries[0] = dict(entries[0])
+    patched_entries[0]["tokens"] = entries[0]["tokens"] + ["canary"] * 5
+
+    # Fast path (no patched_indices) wrongly scores entry 0 from the STALE persisted TF=1
+    # postings, ignoring the patched tokens' TF=6 entirely.
+    stale_fast = R._bm25_rank(query, patched_entries, stats=stats, patched_indices=set())
+    stale_scores = R._bm25_score_via_postings(query, stats, stale_fast)
+    # Correctly gated: a full rebuild over the CURRENT (patched) tokens sees TF=6.
+    correct = R._bm25_rank(query, patched_entries, stats=stats, patched_indices={0})
+
+    assert 0 in stale_fast and 0 in correct  # matches under both -- score is what must differ
+    rank_bm25 = pytest.importorskip("rank_bm25")
+    fresh_corpus = [e["tokens"] for e in patched_entries]
+    fresh_oracle_score = rank_bm25.BM25Okapi(fresh_corpus).get_scores(query)[0]
+    correct_scores = R._bm25_score_via_postings(
+        query, B.compute_bm25_stats(fresh_corpus), correct
+    )
+    # The stale fast path's score (frozen at the old TF=1) must NOT match a fresh rebuild's
+    # score (TF=6, and a different avgdl/doc_len too) -- proving the gate is load-bearing.
+    assert stale_scores[0] != pytest.approx(fresh_oracle_score, abs=1e-9)
+    assert correct_scores[0] == pytest.approx(fresh_oracle_score, abs=1e-9)

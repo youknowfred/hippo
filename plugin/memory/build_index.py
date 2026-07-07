@@ -10,7 +10,9 @@ already carry). Body-summary embedding is deferred (see the roadmap) until the
 description-only index is measured.
 
 Persistence: a gitignored, rebuildable cache at ``.claude/.memory-index/``
-  - ``manifest.json`` — schema version, model, per-entry {name, file, hash, tokens, doc_text}
+  - ``manifest.json`` — schema version, model, per-entry {name, file, hash, tokens, doc_text},
+    and a "bm25" block (PRF-1: precomputed postings/doc_len/avgdl/idf/k1/b — see
+    ``compute_bm25_stats`` — so query time never reconstructs BM25Okapi over the whole corpus)
   - ``dense.npy``    — float32 [N, dim] L2-normalized embeddings (row i ↔ entries[i])
 
 Markdown-in-git stays the single source of authority; this cache is derived and
@@ -27,6 +29,7 @@ from __future__ import annotations
 import concurrent.futures
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -449,6 +452,80 @@ def compute_corpus(
 
 
 # --------------------------------------------------------------------------- #
+# PRF-1: precomputed BM25 statistics (postings/doc_len/avgdl/idf), persisted into the
+# manifest so query time never reconstructs BM25Okapi over the WHOLE corpus per query.
+# --------------------------------------------------------------------------- #
+# This mirrors rank_bm25.BM25Okapi's math EXACTLY (grounded against the installed
+# rank_bm25 source AND the vendored plugin/memory/_vendor/bm25.py, which tests/test_vendor.py
+# pins as score-identical to it): Okapi idf = ln((N - df + 0.5)/(df + 0.5)), with negative
+# idfs floored to epsilon * average_idf (epsilon 0.25, rank_bm25's default). k1=1.5, b=0.75
+# are rank_bm25's defaults too — recall._bm25_rank never overrides them, so hardcoding here
+# (rather than threading them as params) keeps this function's signature simple; a future
+# change to override k1/b would need to thread them through both here and the query-time
+# fast path in lockstep, same as today.
+_BM25_K1 = 1.5
+_BM25_B = 0.75
+_BM25_EPSILON = 0.25
+
+
+def compute_bm25_stats(corpus_tokens: List[List[str]]) -> dict:
+    """Precompute BM25 postings/doc_len/avgdl/idf over ``corpus_tokens`` (one list per entry,
+    in entry-index order). Returned dict is JSON-safe (all keys/values are str/int/float/list)
+    so it can be written straight into the manifest and round-tripped through ``json.dump``.
+
+    ``postings``: token -> [[entry_index, tf], ...] — ONLY docs actually containing the
+    token, each paired with its raw term frequency. This is the structure that lets query
+    time score a candidate in O(matched postings) instead of O(corpus): for each query token,
+    walk its postings list directly rather than scanning every document to check membership.
+
+    The IDF table is precomputed here so query time never re-derives it (that recomputation —
+    one pass over every token's document frequency — was exactly the O(N)-per-query cost this
+    item removes). Doc frequency (len of a token's postings list) and negative-IDF flooring
+    follow rank_bm25.BM25Okapi._calc_idf verbatim (see the vendored fallback's mirrored
+    implementation + tests/test_vendor.py's parity pin).
+    """
+    corpus_size = len(corpus_tokens)
+    doc_len = [len(toks) for toks in corpus_tokens]
+    avgdl = (sum(doc_len) / corpus_size) if corpus_size else 0.0
+
+    # One pass: per-doc term frequency dict, immediately folded into the postings lists.
+    postings: Dict[str, List[List[int]]] = {}
+    for i, toks in enumerate(corpus_tokens):
+        freqs: Dict[str, int] = {}
+        for tok in toks:
+            freqs[tok] = freqs.get(tok, 0) + 1
+        for tok, tf in freqs.items():
+            postings.setdefault(tok, []).append([i, tf])
+
+    # Okapi IDF, negative values floored to epsilon * average_idf — identical to
+    # rank_bm25.BM25Okapi / _vendor/bm25.py (a df of len(postings[tok]) is exactly the doc
+    # frequency rank_bm25 computes, since postings only ever contains docs where tf > 0).
+    idf: Dict[str, float] = {}
+    negative: List[str] = []
+    idf_sum = 0.0
+    for tok, plist in postings.items():
+        df = len(plist)
+        val = math.log(corpus_size - df + 0.5) - math.log(df + 0.5)
+        idf[tok] = val
+        idf_sum += val
+        if val < 0:
+            negative.append(tok)
+    average_idf = idf_sum / len(idf) if idf else 0.0
+    floor = _BM25_EPSILON * average_idf
+    for tok in negative:
+        idf[tok] = floor
+
+    return {
+        "postings": postings,
+        "doc_len": doc_len,
+        "avgdl": avgdl,
+        "idf": idf,
+        "k1": _BM25_K1,
+        "b": _BM25_B,
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Durable fastembed model cache (closes a live silent-degradation bug)
 # --------------------------------------------------------------------------- #
 # fastembed resolves its ONNX model cache from FASTEMBED_CACHE_PATH, DEFAULTING to the
@@ -832,6 +909,12 @@ def build_index(
         for e in entries:
             e["row"] = None
 
+    # PRF-1: precompute BM25 postings/doc_len/avgdl/idf ONCE at build time (cheap, pure
+    # python — no numpy/fastembed needed) so query time never reconstructs BM25Okapi over
+    # the whole corpus. Token order is entries' order, matching what recall._bm25_rank's
+    # fast path indexes into.
+    bm25_stats = compute_bm25_stats([e.get("tokens") or [] for e in entries])
+
     manifest = {
         "schema_version": SCHEMA_VERSION,
         # A partially-embedded (dense_ready=False) manifest still names the model so the
@@ -841,6 +924,7 @@ def build_index(
         "dim": int(dense_rows.shape[1]) if dense_rows is not None else None,
         "count": len(entries),
         "entries": entries,
+        "bm25": bm25_stats,
     }
 
     # COR-12: dense.npy (or its removal) is durably in place BEFORE the manifest that

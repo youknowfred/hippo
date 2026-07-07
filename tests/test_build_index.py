@@ -699,6 +699,73 @@ def test_load_index_roundtrip(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# PRF-1: precomputed BM25 stats (postings/doc_len/avgdl/idf) -- build-time unit tests.
+# recall.py's test suite covers the query-time fast path + golden equivalence + drift
+# interaction; these pin the build-time computation and its manifest wiring in isolation.
+# --------------------------------------------------------------------------- #
+def test_compute_bm25_stats_matches_rank_bm25_fields():
+    """postings/doc_len/avgdl/idf/k1/b computed here must agree with a fresh rank_bm25
+    construction over the SAME corpus (field-by-field, not just downstream scores)."""
+    rank_bm25 = pytest.importorskip("rank_bm25")
+    corpus = [
+        "alpha beta gamma".split(),
+        "alpha alpha delta".split(),
+        "epsilon zeta".split(),
+    ]
+    stats = B.compute_bm25_stats(corpus)
+    oracle = rank_bm25.BM25Okapi(corpus)
+
+    assert stats["doc_len"] == oracle.doc_len
+    assert stats["avgdl"] == pytest.approx(oracle.avgdl)
+    assert stats["k1"] == oracle.k1
+    assert stats["b"] == oracle.b
+    assert set(stats["idf"].keys()) == set(oracle.idf.keys())
+    for tok, val in oracle.idf.items():
+        assert stats["idf"][tok] == pytest.approx(val, abs=1e-9)
+
+    # postings[tok] lists exactly the docs (and their TF) that contain tok -- must reconstruct
+    # the SAME per-doc frequency dict rank_bm25's doc_freqs holds internally.
+    for tok in oracle.idf:
+        expected_tf_by_doc = {
+            i: freqs[tok] for i, freqs in enumerate(oracle.doc_freqs) if tok in freqs
+        }
+        got_tf_by_doc = {doc_i: tf for doc_i, tf in stats["postings"].get(tok, [])}
+        assert got_tf_by_doc == expected_tf_by_doc
+
+
+def test_compute_bm25_stats_empty_corpus():
+    stats = B.compute_bm25_stats([])
+    assert stats["postings"] == {}
+    assert stats["doc_len"] == []
+    assert stats["avgdl"] == 0.0
+    assert stats["idf"] == {}
+
+
+def test_build_index_manifest_carries_bm25_block(tmp_path, monkeypatch):
+    """build_index() must persist the "bm25" stats block, and it must survive the JSON
+    manifest round-trip byte-for-byte (all keys JSON-safe: no sets/tuples/non-str keys)."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "voyage reranker fallback", "b.md": "budget envelope authority"})
+    manifest = B.build_index(md, idx)
+    assert "bm25" in manifest
+    bm25 = manifest["bm25"]
+    assert set(bm25.keys()) == {"postings", "doc_len", "avgdl", "idf", "k1", "b"}
+    assert len(bm25["doc_len"]) == manifest["count"] == 2
+
+    # Round-trip through the actual manifest.json file on disk (not just the in-memory dict).
+    import json
+
+    with open(os.path.join(idx, "manifest.json"), "r", encoding="utf-8") as fh:
+        on_disk = json.load(fh)
+    assert on_disk["bm25"] == bm25
+
+    loaded = B.load_index(idx)
+    assert loaded.manifest["bm25"] == bm25
+
+
+# --------------------------------------------------------------------------- #
 # Real fastembed backend (network-marked: can download the ~130MB model on a
 # cold cache, so it is deselected by default via addopts `-m "not network"` —
 # the suite's hermeticity claim must stay true offline with an empty home cache)
