@@ -675,3 +675,249 @@ def test_main_cli_prints_body_probe_line_when_present(tmp_path, monkeypatch, cap
     assert rc == 0, out
     assert "body_probe" in out
     assert "report-only" in out
+
+
+# --------------------------------------------------------------------------- #
+# RET-7: serving-backend recording + fixture-provenance mismatch detection
+#
+# The point of this cluster: a BM25-only pass must never be mistakable for verified hybrid
+# (dense+bm25) recall health -- both in the report dict (``report["backend"]``) and in the
+# two printed lines a human/CI log actually skims (the gate-header line and the RESULT
+# line). Every test below runs BM25-only (MEMOBOT_DISABLE_DENSE=1, per this suite's
+# hermeticity requirement -- no fastembed model on disk in CI's hermetic lane) EXCEPT the
+# ones that specifically assert the mismatch does NOT fire on an honest bm25-only fixture
+# or one with no header at all, which is exactly the case this whole suite already runs in.
+# --------------------------------------------------------------------------- #
+def test_evaluate_reports_bm25_only_backend_when_dense_disabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)
+    assert report["dense_ready"] is False
+    assert report["backend"] == "bm25-only"
+    assert report["backend_mismatch"] is False  # no header on this fixture -> never fires
+
+
+def test_backend_field_tracks_dense_ready_directly(tmp_path, monkeypatch):
+    """``backend`` must be DERIVED from ``index.dense_ready`` (the same torn-pair-verified
+    signal build_index already exposes, COR-3) rather than re-derived independently --
+    forcing dense_ready True on a hermetic (no real model) index proves the field really
+    reads the index's own flag rather than e.g. always defaulting to bm25-only."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    assert index.dense_ready is False  # sanity: hermetic build is BM25-only
+
+    # Monkeypatch dense_ready True on the loaded index object itself (no real dense.npy
+    # needed) to prove evaluate()'s backend label is READ off index.dense_ready, not
+    # independently re-derived from env/config.
+    monkeypatch.setattr(E, "load_index", lambda _idx_dir: _with_dense_ready(index, True))
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=None, k=10)
+    assert report["backend"] == "dense+bm25"
+
+
+def _with_dense_ready(index, value):
+    import copy
+
+    forged = copy.copy(index)
+    forged.dense_ready = value
+    return forged
+
+
+def test_main_cli_result_line_labels_bm25_only_backend(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path])
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "backend=bm25-only" in out  # gate-header line
+    assert "RESULT: ALL GATES PASS" in out
+    assert "[backend=bm25-only — dense path unverified]" in out  # RESULT line
+
+
+def test_main_cli_result_line_labels_dense_bm25_backend(tmp_path, monkeypatch, capsys):
+    """Same CLI path, but with a FORGED dense_ready index (no real fastembed model needed)
+    -- proves the "dense+bm25" branch of the RESULT-line label renders correctly too, not
+    just the bm25-only branch every other test in this file exercises."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)
+    B.build_index(md, idx)
+    real_index = B.load_index(idx)
+    monkeypatch.setattr(E, "load_index", lambda _idx_dir: _with_dense_ready(real_index, True))
+
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path])
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "backend=dense+bm25" in out
+    assert "RESULT: ALL GATES PASS" in out
+    assert "[backend=dense+bm25]" in out
+    assert "dense path unverified" not in out
+
+
+# --------------------------------------------------------------------------- #
+# RET-7: fixture provenance metadata header — optional, backward-compatible
+# --------------------------------------------------------------------------- #
+def test_load_hard_set_metadata_empty_for_bare_list_fixture(tmp_path):
+    """The pre-existing bare-list schema (no header at all) is a fully valid fixture with
+    NO metadata -- this is the backward-compat guarantee: every fixture written before
+    RET-7 keeps loading exactly as before, just with an empty metadata dict available."""
+    hs_path = _write_hard_set(tmp_path)  # plain yaml.safe_dump of a list -- no header
+    assert E.load_hard_set_metadata(hs_path) == {}
+    assert E.load_hard_set(hs_path) == _HARD_SET  # rows themselves are unaffected
+
+
+def test_load_hard_set_metadata_parses_leading_header_doc(tmp_path):
+    p = str(tmp_path / "hard_set_with_header.yaml")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write(
+            "generated_with_backend: dense+bm25\n"
+            "generated_at: '2026-07-06'\n"
+            "---\n"
+            "- query: q1\n"
+            "  expected: [a]\n"
+        )
+    meta = E.load_hard_set_metadata(p)
+    assert meta["generated_with_backend"] == "dense+bm25"
+    assert meta["generated_at"] == "2026-07-06"
+    # rows still load correctly from the SECOND document
+    rows = E.load_hard_set(p)
+    assert rows == [{"query": "q1", "expected": ["a"]}]
+
+
+def test_load_hard_set_metadata_missing_file_is_empty():
+    assert E.load_hard_set_metadata("/no/such/file.yaml") == {}
+
+
+def test_load_hard_set_metadata_bm25_only_header_is_not_dense_claim(tmp_path):
+    """A fixture honestly generated bm25-only (or with any other backend value) is a
+    perfectly valid input -- the metadata loader is a plain passthrough, not a validator;
+    it's ``evaluate()``'s mismatch check that treats ONLY the literal 'dense+bm25' value
+    as a claim worth cross-checking."""
+    p = str(tmp_path / "hard_set_bm25.yaml")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("generated_with_backend: bm25-only\n---\n- query: q1\n  expected: [a]\n")
+    meta = E.load_hard_set_metadata(p)
+    assert meta["generated_with_backend"] == "bm25-only"
+
+
+# --------------------------------------------------------------------------- #
+# RET-7: backend_mismatch fires ONLY on dense-generated fixture + bm25-served run
+# --------------------------------------------------------------------------- #
+def _write_hard_set_with_header(tmp_path, backend_claim):
+    import yaml
+
+    p = str(tmp_path / "hard_set_hdr.yaml")
+    header = f"generated_with_backend: {backend_claim}\ngenerated_at: '2026-07-06'\n"
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write(header)
+        fh.write("---\n")
+        yaml.safe_dump(_HARD_SET, fh)
+    return p
+
+
+def test_backend_mismatch_fires_when_dense_generated_fixture_served_bm25_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set_with_header(tmp_path, "dense+bm25")
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)
+    assert report["backend"] == "bm25-only"
+    assert report["backend_mismatch"] is True
+
+
+def test_backend_mismatch_does_not_fire_when_fixture_claims_bm25_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set_with_header(tmp_path, "bm25-only")
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)
+    assert report["backend_mismatch"] is False
+
+
+def test_backend_mismatch_does_not_fire_when_fixture_has_no_header(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)  # bare-list, no header at all
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)
+    assert report["backend_mismatch"] is False
+
+
+def test_backend_mismatch_does_not_fire_when_dense_claimed_and_actually_served(tmp_path, monkeypatch):
+    """A dense-generated fixture served by an ACTUALLY-dense-ready run is exactly the
+    healthy case this whole mechanism exists to distinguish from the mismatch above --
+    must never false-positive here. Forges dense_ready on the loaded index (no real
+    fastembed model needed) so this stays hermetic."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set_with_header(tmp_path, "dense+bm25")
+    B.build_index(md, idx)
+    real_index = B.load_index(idx)
+    monkeypatch.setattr(E, "load_index", lambda _idx_dir: _with_dense_ready(real_index, True))
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)
+    assert report["backend"] == "dense+bm25"
+    assert report["backend_mismatch"] is False
+
+
+def test_main_cli_prints_loud_warning_on_backend_mismatch(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set_with_header(tmp_path, "dense+bm25")
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path])
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "BACKEND MISMATCH" in out
+    assert "[FIXTURE/BACKEND MISMATCH]" in out  # appended to the RESULT line too
+
+
+def test_main_cli_no_mismatch_warning_when_backends_agree(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)  # no header -> no claim -> no mismatch possible
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path])
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "BACKEND MISMATCH" not in out
+    assert "FIXTURE/BACKEND MISMATCH" not in out
+
+
+# --------------------------------------------------------------------------- #
+# RET-7: _default_fixture_path probe order is unaffected by the metadata-header change
+# (COR-2's probe order is load-bearing -- re-pin it here since this item touches the same
+# loader functions COR-2's own test already covers, to catch any regression in this item).
+# --------------------------------------------------------------------------- #
+def test_default_fixture_path_probe_order_unaffected_by_ret7(tmp_path, monkeypatch):
+    repo = str(tmp_path / "proj2")
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    monkeypatch.setenv("MEMOBOT_MEMORY_DIR", md)
+
+    assert E._default_hard_set_path() is None
+
+    tf = os.path.join(repo, "tests", "fixtures")
+    os.makedirs(tf)
+    repo_fixture = os.path.join(tf, "recall_hard_set.yaml")
+    with open(repo_fixture, "w", encoding="utf-8") as fh:
+        # this candidate carries a header now -- still discoverable via the same probe order
+        fh.write("generated_with_backend: dense+bm25\n---\n- {query: q, expected: [a]}\n")
+    assert E._default_hard_set_path() == repo_fixture
+    assert E.load_hard_set_metadata(repo_fixture)["generated_with_backend"] == "dense+bm25"
+
+    af = os.path.join(md, ".audit-fixtures")
+    os.makedirs(af)
+    audit_fixture = os.path.join(af, "recall_hard_set.yaml")
+    with open(audit_fixture, "w", encoding="utf-8") as fh:
+        fh.write("- {query: q, expected: [a]}\n")  # no header at all -- still wins by path
+    assert E._default_hard_set_path() == audit_fixture
+    assert E.load_hard_set_metadata(audit_fixture) == {}

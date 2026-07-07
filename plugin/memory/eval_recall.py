@@ -23,6 +23,16 @@ description, so passing this metric proves something self_recall (description-de
 queries) cannot: that content living ONLY in the body is retrievable. The 5 gates above are
 unchanged in number/semantics.
 
+RET-7: every report records the SERVING BACKEND (``report["backend"]`` = ``"dense+bm25"``
+when ``index.dense_ready`` else ``"bm25-only"``), printed on the gate-header line AND the
+RESULT line, so a BM25-only pass can never be mistaken for verified hybrid recall health —
+this matters because gates 2/3 (hard-set recall/MRR) can genuinely PASS on lexical overlap
+alone in a small/favorable corpus even with dense entirely unavailable. A hard-set fixture
+MAY additionally carry a ``generated_with_backend`` provenance header (see
+``_load_fixture_docs``); when the fixture claims ``dense+bm25`` but this run only served
+``bm25-only``, ``report["backend_mismatch"]`` is set and a loud warning prints — the
+`/hippo:audit` skill surfaces this flag rather than reporting a bare pass/fail.
+
 Pure / dependency-light: dense is used when the index has it, otherwise the gates are
 computed on BM25 alone (so they run in CI without fastembed). ``main`` exits non-zero if
 any gate fails (use it as a pre-merge check).
@@ -319,17 +329,65 @@ def graduation_rate(telemetry_dir: Optional[str] = None) -> Dict[str, float]:
     return {"rate": round(counts["graduate"] / denominator, 4), "n": denominator, **counts}
 
 
-def load_hard_set(path: str) -> List[dict]:
-    """Load ``[{query, expected: [name, ...]}]`` from a YAML fixture. [] if missing."""
+# RET-7: fixture provenance header. A hard-set (or relevance-set) fixture MAY carry an
+# OPTIONAL leading YAML document recording how it was generated -- e.g.
+#
+#   generated_with_backend: dense+bm25
+#   generated_at: 2026-07-06
+#   ---
+#   - query: ...
+#     expected: [...]
+#
+# This is the thing that makes "did this fixture actually exercise the dense half of hybrid
+# recall, or only BM25" checkable at eval time (see `evaluate()`'s backend_mismatch below).
+# The bare-list schema (no leading doc at all) keeps loading UNCHANGED -- every fixture
+# written before this item, and every hand-written one that never bothers with the header,
+# is still a valid fixture with metadata == {}.
+def _load_fixture_docs(path: str) -> tuple:
+    """Parse a hard-/relevance-set YAML file into (metadata: dict, rows: list).
+
+    Uses ``yaml.safe_load_all`` so BOTH shapes are read with one code path:
+      - bare list only               -> one document, a list          -> ({}, list)
+      - mapping header + `---` + list -> two documents, mapping + list -> (mapping, list)
+    A single lone mapping document (no second doc) is treated as metadata-only with no
+    rows, rather than mis-parsed as a "list" of one dict -- symmetrical with the two-doc
+    case rather than a special error path.
+    ``([], [])``-shaped failures (missing file, unparseable YAML) return ``({}, [])`` --
+    the caller's existing "arrive at an empty list" degradation, now paired with empty
+    metadata rather than raising.
+    """
     if not path or not os.path.exists(path):
-        return []
+        return {}, []
     try:
         import yaml
 
         with open(path, "r", encoding="utf-8") as fh:
-            data = yaml.safe_load(fh) or []
+            docs = [d for d in yaml.safe_load_all(fh) if d is not None]
     except Exception:
-        return []
+        return {}, []
+    if not docs:
+        return {}, []
+    if len(docs) == 1:
+        doc = docs[0]
+        if isinstance(doc, list):
+            return {}, doc
+        if isinstance(doc, dict):
+            return doc, []
+        return {}, []
+    # Two+ documents: first is the metadata header, second is the row list (anything past
+    # the second is ignored -- the schema only ever defines these two documents).
+    meta = docs[0] if isinstance(docs[0], dict) else {}
+    rows = docs[1] if isinstance(docs[1], list) else []
+    return meta, rows
+
+
+def load_hard_set(path: str) -> List[dict]:
+    """Load ``[{query, expected: [name, ...]}]`` from a YAML fixture. [] if missing.
+
+    Ignores an optional leading metadata document (see ``_load_fixture_docs``) -- callers
+    that need the provenance header use ``load_hard_set_metadata`` instead.
+    """
+    _meta, data = _load_fixture_docs(path)
     out: List[dict] = []
     for item in data if isinstance(data, list) else []:
         if not isinstance(item, dict):
@@ -341,6 +399,14 @@ def load_hard_set(path: str) -> List[dict]:
         if isinstance(q, str) and isinstance(exp, list) and exp:
             out.append({"query": q, "expected": [str(x) for x in exp]})
     return out
+
+
+def load_hard_set_metadata(path: str) -> Dict[str, str]:
+    """The optional provenance header (``generated_with_backend``/``generated_at``) of a
+    hard-set fixture, or ``{}`` when the fixture has none / doesn't exist / fails to parse.
+    """
+    meta, _rows = _load_fixture_docs(path)
+    return meta if isinstance(meta, dict) else {}
 
 
 def hard_set_metrics(index: LoadedIndex, hard_set: List[dict], k: int = 10) -> Dict[str, float]:
@@ -531,6 +597,27 @@ def evaluate(
     hard_set = load_hard_set(hard_set_path) if hard_set_path else []
     relevance_set = load_relevance_set(relevance_set_path) if relevance_set_path else []
 
+    # RET-7: the SERVING backend for this run, recorded so a BM25-only pass can never
+    # masquerade as hybrid (dense+bm25) health -- ``index.dense_ready`` is the same
+    # torn-pair-verified signal build_index.LoadedIndex already exposes (COR-3), not a
+    # re-derivation, so this can never disagree with what recall() itself actually used.
+    backend = "dense+bm25" if index.dense_ready else "bm25-only"
+    # Fixture provenance mismatch: the hard-set fixture SAYS it was generated against a
+    # dense+bm25 run (see _load_fixture_docs' metadata header), but THIS run is serving
+    # bm25-only -- e.g. a cold model cache, MEMOBOT_DISABLE_DENSE, or fastembed missing.
+    # A bm25-only pass against dense-calibrated paraphrase queries is systematically WEAKER
+    # than what the fixture was tuned for (BM25 alone can't catch the cross-vocabulary
+    # paraphrases dense embeddings were curated to test) -- silently reporting "PASS" here
+    # would be exactly the "BM25-only masquerading as hybrid health" this item exists to
+    # prevent. Only fires for a fixture that explicitly claims dense+bm25 provenance; a
+    # fixture with no header (or one generated bm25-only, or one whose header claims
+    # something else) never trips this -- an honest bm25-only fixture is a valid input, not
+    # a mismatch.
+    fixture_meta = load_hard_set_metadata(hard_set_path) if hard_set_path else {}
+    backend_mismatch = (
+        fixture_meta.get("generated_with_backend") == "dense+bm25" and backend != "dense+bm25"
+    )
+
     self_recall = self_recall_at_k(index, k=k)
     hs = hard_set_metrics(index, hard_set, k=k)
     tok = token_reduction(memory_dir, index, hard_set, k=k)
@@ -601,6 +688,10 @@ def evaluate(
         "session_token_cost": sess_cost,
         "graduation_rate": grad,
         "body_probe": body_probe,
+        # RET-7: serving backend + fixture-provenance mismatch flag (see comments above) --
+        # consumed by /hippo:audit and printed on the RESULT line by main() below.
+        "backend": backend,
+        "backend_mismatch": backend_mismatch,
     }
 
 
@@ -661,7 +752,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"eval error: {report['error']}")
         return 1
 
-    print(f"corpus={report['count']} dense={report['dense_ready']} model={report['model']} hard_set={report['hard_set_n']}")
+    # RET-7: `backend` is printed on the gate-header line itself (not just buried in the
+    # dict) -- the whole point is that a BM25-only pass must be visibly labeled every time
+    # someone actually reads the CLI output, not just discoverable by someone who thinks to
+    # inspect the report dict.
+    print(
+        f"corpus={report['count']} dense={report['dense_ready']} model={report['model']} "
+        f"hard_set={report['hard_set_n']} backend={report['backend']}"
+    )
+    if report.get("backend_mismatch"):
+        # LOUD by design (see evaluate()'s comment) -- this fixture was generated_with_backend:
+        # dense+bm25 but this run only served bm25-only, so ANY pass below is calibrated
+        # against a stronger backend than what actually ran. Printed before the gate table so
+        # it can't be missed/scrolled past.
+        print(
+            "  ⚠️  BACKEND MISMATCH: hard-set fixture was generated_with_backend=dense+bm25, "
+            "but this run served bm25-only — a PASS here does NOT prove hybrid recall works, "
+            "only that BM25 alone can pass a dense-calibrated fixture (or that dense degraded "
+            "silently -- check the fastembed model cache / MEMOBOT_DISABLE_DENSE)."
+        )
     _SKIP_REASONS = {
         "hard_recall@10": "no hard-set fixture",
         "mrr@10": "no hard-set fixture",
@@ -711,7 +820,18 @@ def main(argv: Optional[List[str]] = None) -> int:
             "queries derived from body-only tokens (report-only)"
         )
 
-    print("RESULT:", "ALL GATES PASS ✅" if report["ok"] else "GATE FAILURE ❌")
+    # RET-7: the RESULT line always names the serving backend -- e.g.
+    #   RESULT: ALL GATES PASS ✅ [backend=bm25-only — dense path unverified]
+    # so a bm25-only pass can never be skimmed as "hybrid recall verified" from this one
+    # line alone, which is the line most CI logs / terminals actually surface.
+    backend = report.get("backend", "unknown")
+    if backend == "dense+bm25":
+        backend_note = "[backend=dense+bm25]"
+    else:
+        backend_note = f"[backend={backend} — dense path unverified]"
+    if report.get("backend_mismatch"):
+        backend_note += " [FIXTURE/BACKEND MISMATCH]"
+    print("RESULT:", ("ALL GATES PASS ✅" if report["ok"] else "GATE FAILURE ❌"), backend_note)
     return 0 if report["ok"] else 1
 
 

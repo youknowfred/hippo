@@ -51,6 +51,11 @@ literacy; this skill matches that separation rather than blurring it.
 - **`--skip-eval`** — skip the `eval_recall.evaluate()` cluster (useful for a fast
   drift/curation/archive-only pass, or when the dense/fastembed model cache is cold and you
   don't want to pay the load).
+- **`--generate-eval-set [N]`** (N default `12`) — RET-7: (re)generate this project's own
+  `.claude/memory/.audit-fixtures/recall_hard_set.yaml` from a fresh sample of THIS corpus
+  (see Phase 0.5). **Never runs on its own** — regeneration is explicit, one invocation at a
+  time, never autonomous; absent this flag Phase 0.5 is skipped entirely and Phase 1 just
+  discovers whatever fixture (if any) already exists on disk, exactly as before this item.
 
 No `--full` / `--semi-attended` / tier flags. This is a single-pass audit with one apply gate,
 not a multi-PR roadmap.
@@ -82,14 +87,86 @@ not a multi-PR roadmap.
   must never be copied from another project's corpus, since the judgments are meaningless
   against different memory content. If absent, Phase 1 runs `eval_recall.evaluate()` WITHOUT a
   hard-set (self-recall/precision-only gates still run; hard-set/MRR gates report "no fixture —
-  skipped" rather than a false pass or fail). If you want these gates going forward, hand-curate
-  a small hard-set file for your own corpus over time — see the engine repo's own
-  `tests/fixtures/recall_hard_set.yaml` for the expected YAML shape as a reference.
+  skipped" rather than a false pass or fail). If you want these gates going forward, either
+  hand-curate a small hard-set file for your own corpus over time — see the engine repo's own
+  `tests/fixtures/recall_hard_set.yaml` for the expected YAML shape as a reference — or generate
+  a first draft with `--generate-eval-set` (Phase 0.5 below).
 - Load prior run history if present: `.claude/state/memory-audit-history.json` (recommend
   git-tracking this file, same precedent as any other durable project state). If absent, this is
   run #1 — say so explicitly in the report; a fresh corpus with no history is not the same
   finding as "nothing recurs," and conflating the two is exactly the kind of overclaim Phase 4's
   honesty section exists to prevent.
+
+## Phase 0.5 — Eval-set generation (RET-7, only under `--generate-eval-set`, agent-gated)
+
+**Skipped entirely unless `--generate-eval-set` was passed.** This is what makes "uniform
+recall efficacy" checkable on ANY project's own corpus, not just the engine repo's own
+hand-curated `tests/fixtures/` — every install gets a way to measure whether hybrid recall
+actually works against ITS OWN memory content, without depending on someone hand-writing
+paraphrase queries from scratch.
+
+1. **Sample up to N (default `12`) memories across `metadata.type`.** Read every memory's
+   frontmatter (`description`) and, for a diverse sample, a short excerpt of its body (first
+   ~200 chars past the frontmatter is enough — this is sampling for query material, not a
+   Phase 3 deep-dive). Spread the sample across whatever `type` values exist in this corpus
+   (e.g. `user`/`project`/`reference`/`feedback`) rather than letting one dominant type crowd
+   out the rest — a hard-set that only ever tests one type isn't measuring "this corpus's
+   recall quality," just one slice of it.
+
+2. **Synthesize a cross-vocabulary PARAPHRASE query per sampled memory — the agent does this,
+   not a script.** For each sampled memory, write ONE query that:
+   - **Never reuses a verbatim substring of the memory's `description`.** Copying the
+     description's own words (or a near-identical rewording) tests nothing dense embeddings
+     don't already get for free via lexical overlap — this is the exact failure mode
+     `recall_hard_set.yaml`'s own header warns about (BM25 alone would already pass a
+     verbatim-ish query).
+   - **Paraphrases with synonyms and a different register** — e.g. task-phrased as a question
+     ("how do I..."), or restated from the *consumer's* point of view rather than the
+     memory's own descriptive voice. If the memory's description says "reranker cross-encoder
+     fallback circuit breaker," a good paraphrase query is "which model re-scores search
+     results if the primary one errors out" — not "reranker fallback logic."
+   - **Targets exactly one memory as `expected`** (a list, per the schema — usually length 1;
+     only list more than one stem if the query genuinely and legitimately maps to a small
+     cluster, mirroring `tests/fixtures/recall_hard_set.yaml`'s own convention).
+   Skip a sampled memory if you cannot produce a genuine paraphrase for it (e.g. its
+   description is already terse enough that any query restates it near-verbatim) rather than
+   forcing a low-quality row — fewer honest rows beat a padded fixture.
+
+3. **Record the run's own serving backend truthfully in the header** — check
+   `hippo_resolve_py`'s resolved `$PY` actually has a warm/available dense model (the same
+   check Phase 0's import line already exercises) before deciding what to write:
+   `generated_with_backend: dense+bm25` only if dense is genuinely available this run, else
+   `generated_with_backend: bm25-only`. **Never write `dense+bm25` speculatively** — an
+   inflated claim here is exactly what RET-7's `backend_mismatch` flag exists to catch on a
+   LATER run, so getting it right at generation time avoids a false alarm against your own
+   fixture. Add `generated_at: <today's date>`.
+
+4. **Write the draft to `.claude/memory/.audit-fixtures/recall_hard_set.yaml`**, YAML shape:
+   ```yaml
+   generated_with_backend: dense+bm25
+   generated_at: 2026-07-06
+   ---
+   - query: "<paraphrase query>"
+     expected: [<memory_stem>]
+   ```
+   If a fixture already exists at that path, **do not silently overwrite it** — show the human
+   both the existing file and the newly-generated draft, and let them choose to replace,
+   merge, or discard the draft. This is a corrective/generative write, so it follows the same
+   per-item, human-in-the-loop discipline as every other write this skill makes.
+
+5. **Present the full generated file to the human and ask before it is used.** State the
+   sample size, the type spread, and explicitly flag any query you were unsure paraphrased
+   well enough. This is an **agent-gated write** — Phase 1's `eval_recall.evaluate()` call
+   must not consume a freshly-generated fixture the human hasn't at least skimmed once. If the
+   human wants changes, make them and re-present; only proceed to Phase 1 once they confirm.
+
+6. **Regeneration is explicit, never autonomous.** This phase never runs unless
+   `--generate-eval-set` was passed on THIS invocation — a routine `/hippo:audit` run never
+   silently regenerates or touches an existing hard-set fixture.
+
+Once confirmed, Phase 1 picks up the (possibly just-written) fixture via its existing
+discovery logic — no separate wiring needed; `_default_fixture_path` already probes
+`.claude/memory/.audit-fixtures/` first (see Phase 1's `hard_set`/`rel_set` resolution below).
 
 ## Phase 1 — Gather (sequential, in-process — not parallel subagents)
 
@@ -278,6 +355,10 @@ print(json.dumps({
     "run_date": today,
     "corpus_size": len(names),
     "fixtures_present": {"hard_set": hard_set is not None, "relevance_set": rel_set is not None},
+    # RET-7: surfaced at the top level (not just buried in `eval_recall`) so Phase 2/4 can't
+    # accidentally skip past it — `ev` is {} under --skip-eval, hence the guarded .get().
+    "recall_backend": ev.get("backend"),
+    "recall_backend_mismatch": ev.get("backend_mismatch", False),
     "soak_status": soak_status,
     "eval_recall": ev,
     "curation": {"never_recalled_count": len(never_recalled),
@@ -418,6 +499,7 @@ items + up to 2 recurrence-escalated items.
 # Memory Tooling Self-Audit — <date>
 Run mode: <report-only|apply>  |  Deep-dive N: <n>  |  Corpus: <N files, N lines> (discovered fresh)
 Fixtures: hard-set <present|absent>, relevance-set <present|absent>
+Recall backend this run: <dense+bm25|bm25-only> <— dense path unverified this run if bm25-only; ⚠ FIXTURE/BACKEND MISMATCH if eval_recall.evaluate() set backend_mismatch>
 Prior audit runs on record: <count from history file, or "none — first run">
 Soak state: <distinct_sessions>/5 sessions (gate_met=<bool>)
 
@@ -451,6 +533,7 @@ operator approved that specific pair — see Phase 5>
 
 ## Raw scorecard (reference only)
 eval_recall gates: <table, or "SKIPPED — no hard-set fixture for this project yet">
+  backend=<dense+bm25|bm25-only> (from `eval_recall`'s own report — never re-derived here)
 soak: <soak_status + curation_report summary>  |  links/floor: <lint_links + lint_floor summary>
 
 ## Below deep-dive cutoff (name only)
@@ -534,6 +617,20 @@ never adds a batch wrapper around them:
   The gates and the report-only scorecard metrics are orthogonal — none of the latter can move
   `ok` or any `gates` entry. And if no hard-set fixture exists for this project, say so plainly
   rather than letting an absent gate read as a passing one.
+- **(RET-7) A BM25-only pass is never reported as "hybrid recall verified."** Always state
+  `recall_backend` (`dense+bm25` or `bm25-only`) next to the eval_recall summary — a
+  `bm25-only` pass proves BM25 alone clears the bar, not that the dense half of hybrid recall
+  works. If `recall_backend_mismatch` is `True` (this project's hard-set fixture was
+  `generated_with_backend: dense+bm25` but this run only served `bm25-only`), call it out as
+  its own explicitly-flagged line in the report, not folded silently into the scorecard table
+  — this is precisely the "mismatched-backend pass masquerading as hybrid health" this item
+  exists to make impossible to miss.
+- **(RET-7) `--generate-eval-set` never runs implicitly.** A routine `/hippo:audit` invocation
+  (no flag) must never regenerate, overwrite, or even touch an existing
+  `.claude/memory/.audit-fixtures/recall_hard_set.yaml` — Phase 0.5 is entered ONLY when that
+  exact flag is present on THIS invocation. And even when it IS present, the generated draft
+  is presented to the human for review before Phase 1 ever consumes it — never write-then-run
+  in the same breath without that confirmation step.
 
 ## Prompt templates
 
@@ -562,3 +659,11 @@ never adds a batch wrapper around them:
 > The audit report suggested linking `<memory-a>` to `<memory-b>` (and `<memory-c>` to
 > `<memory-d>`). I reviewed both — go ahead and add exactly those two wikilinks, nothing else
 > from the table, and commit.
+
+### (F) Generate this project's own recall eval set (RET-7)
+
+> Run `/hippo:audit --generate-eval-set`. This project has no `recall_hard_set.yaml` yet (or
+> the corpus has grown a lot since the last one) — sample memories across types, write
+> cross-vocabulary paraphrase queries, and show me the draft before you use it. Then run the
+> eval gates against it and tell me the recall@10/MRR and which backend actually served this
+> run.
