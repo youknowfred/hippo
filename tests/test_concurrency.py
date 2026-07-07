@@ -128,6 +128,8 @@ def test_ledger_concurrent_appenders_no_crash_no_torn_lines_across_rotation(tmp_
             "ts",
             "session_id",
             "names",
+            "scores",  # COR-8: true fused score per result, parallel to "names"
+            "ranks",  # COR-8: 1-based emission rank per result, parallel to "names"
             "backend",
             "latency_ms",
             "k",

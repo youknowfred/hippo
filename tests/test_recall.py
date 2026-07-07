@@ -252,6 +252,161 @@ def test_recall_no_invalid_after_is_unaffected(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# COR-8: true fused scores (not fabricated 1/rank) + explicit emission rank
+# --------------------------------------------------------------------------- #
+def test_recall_emits_monotone_scores_and_sequential_ranks(tmp_path, monkeypatch):
+    """Baseline sanity (no invalidation): emitted scores are monotone non-increasing in
+    emission order, and `rank` is exactly the 1-based emission position."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx_dir = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx_dir)
+    index = B.load_index(idx_dir)
+
+    res = R.recall("reranker budget excel canvas formula", k=5, index=index)
+    assert len(res) >= 2
+    scores = [r["score"] for r in res]
+    assert scores == sorted(scores, reverse=True)  # monotone non-increasing
+    assert [r["rank"] for r in res] == list(range(1, len(res) + 1))  # 1-based, no gaps
+
+
+def test_recall_emitted_score_equals_true_penalized_fused_score(tmp_path, monkeypatch):
+    """The exact acceptance case: construct a corpus where the invalidation penalty REORDERS
+    results (rank-derived 1/rank and fused-derived scores visibly diverge), then assert the
+    emitted `score` is the REAL internal penalized/fused score, not 1/(emission_rank+1)."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx_dir = str(tmp_path / ".memory-index")
+    words = ["alpha", "beta", "gamma", "delta", "epsilon"]
+    _write_corpus(md, {f"e{i}.md": " ".join(words[:i]) for i in range(1, 6)})
+    B.build_index(md, idx_dir)
+    index = B.load_index(idx_dir)
+
+    query = " ".join(words)
+    k = 3
+    full_ranking = [r["name"] for r in R.recall(query, k=10, index=index)]
+    boundary_name = full_ranking[k - 1]
+    successor_name = full_ranking[k]
+
+    # Recompute the TRUE internal fused+penalized score for every entry the same way
+    # recall() does, independently of recall()'s own emission -- this is the oracle the
+    # emitted `score` must match exactly (not merely be consistent-with-itself).
+    q_tokens = R.tokenize(query)
+    bm25 = R._bm25_rank(q_tokens, index.entries)
+    fused = dict(R._rrf_fuse([bm25]))
+
+    for e in index.entries:
+        if e["name"] == boundary_name:
+            e["invalid_after"] = _iso_days_ago(5)  # "recent" -> x0.5 penalty, reorders
+
+    name_to_idx = {e["name"]: i for i, e in enumerate(index.entries)}
+    expected_penalized = {}
+    for name, i in name_to_idx.items():
+        state = R._invalidation_state(index.entries[i])
+        raw = fused.get(i, 0.0)
+        expected_penalized[name] = raw * R._INVALIDATION_PENALTY if state == "recent" else raw
+
+    after = R.recall(query, k=k, index=index)
+    after_names = [r["name"] for r in after]
+    # The reorder actually happened -- the exact contract this test must exercise.
+    assert boundary_name not in after_names
+    assert successor_name in after_names
+
+    for r in after:
+        expected = round(expected_penalized[r["name"]], 6)
+        assert r["score"] == expected  # the TRUE fused/penalized score, not 1/rank
+        # And explicitly NOT the fabricated-1/rank value this item removes (except by the
+        # coincidence rank==1, where 1/(1+1)==0.5 could theoretically collide with a real
+        # score -- guard against that false-negative by only asserting the divergence for
+        # entries where the two formulas provably differ).
+        rank_derived = round(1.0 / (r["rank"] + 1), 4)
+        if round(expected, 4) != rank_derived:
+            assert round(r["score"], 4) != rank_derived
+
+    scores = [r["score"] for r in after]
+    assert scores == sorted(scores, reverse=True)  # still monotone in emission order
+
+
+# --------------------------------------------------------------------------- #
+# COR-8: manifest-vs-query embedding model cross-check
+# --------------------------------------------------------------------------- #
+def test_dense_rank_skips_when_manifest_model_mismatches_configured_model(tmp_path, monkeypatch):
+    """A manifest embedded under model X, scored against a query embedded under the
+    CURRENTLY configured model Y, is comparing two different embedding spaces -- garbage
+    similarity. _dense_rank must refuse and degrade to [] (BM25 carries recall)."""
+    emb_docs, emb_query = _fake_embedder(16)
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", emb_docs)
+    monkeypatch.setattr(R, "embed_query", emb_query)
+    md = str(tmp_path / "memory")
+    idx_dir = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx_dir)
+
+    index = B.load_index(idx_dir)
+    assert index.dense_ready is True
+    assert index.model == B.DEFAULT_MODEL
+
+    # Simulate a stale index built under a DIFFERENT model than the one now configured.
+    index.model = "some/other-model-v2"
+    assert R._dense_rank("formula dependency graph columnar storage", index) == []
+
+
+def test_recall_degrades_to_bm25_with_doctor_visible_reason_on_model_mismatch(
+    tmp_path, monkeypatch
+):
+    """Full acceptance case: build a real dense index, rewrite the on-disk manifest's
+    `model` to a different string, and assert BOTH recall()'s backend degrades to bm25
+    AND check_index_integrity names the mismatch (doctor-visible, both models + remediation)."""
+    emb_docs, emb_query = _fake_embedder(16)
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", emb_docs)
+    monkeypatch.setattr(R, "embed_query", emb_query)
+    md = str(tmp_path / "memory")
+    idx_dir = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    manifest = B.build_index(md, idx_dir)
+    assert manifest["dense_ready"] is True
+    real_model = manifest["model"]
+
+    # Sanity: BEFORE the rewrite, dense participates and integrity is clean.
+    assert B.check_index_integrity(idx_dir) is None
+    res_before = R.recall("formula dependency graph columnar storage", k=5, memory_dir=md, index_dir=idx_dir)
+    assert res_before and res_before[0]["backend"] == "dense+bm25"
+
+    # Rewrite the manifest's model in place (simulating a stale index surviving a model
+    # change) -- everything else (entries/dense.npy/dim) stays internally consistent.
+    import json
+
+    manifest_path = os.path.join(idx_dir, "manifest.json")
+    with open(manifest_path, "r", encoding="utf-8") as fh:
+        on_disk = json.load(fh)
+    on_disk["model"] = "some/other-model-v2"
+    with open(manifest_path, "w", encoding="utf-8") as fh:
+        json.dump(on_disk, fh)
+
+    res_after = R.recall("formula dependency graph columnar storage", k=5, memory_dir=md, index_dir=idx_dir)
+    assert res_after  # BM25 still carries it -- degrades, does not go empty
+    assert all(r["backend"] == "bm25" for r in res_after)
+
+    finding = B.check_index_integrity(idx_dir)
+    assert finding is not None
+    assert "some/other-model-v2" in finding  # names the STALE model
+    assert real_model in finding  # names the CONFIGURED model
+    assert "rebuild" in finding.lower()  # remediation
+
+    # Doctor-visible wiring: session_start's index_integrity_producer surfaces the same
+    # finding verbatim (already-wired producer; verify it holds for this NEW case too).
+    from memory import session_start as S
+
+    monkeypatch.setattr(B, "default_index_dir", lambda memory_dir: idx_dir)
+    out = S.index_integrity_producer(md, "repo")
+    assert out is not None
+    assert "some/other-model-v2" in out
+
+
+# --------------------------------------------------------------------------- #
 # 1-hop graph expansion (GRA-1) — BM25-only, links.json persisted by build_index
 # --------------------------------------------------------------------------- #
 def _write_linked_corpus(memory_dir: str, items: dict) -> None:

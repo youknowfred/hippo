@@ -198,20 +198,31 @@ def log_recall_event(
 ) -> bool:
     """Append ONE recall event to the ledger. Fire-and-forget: NEVER raises.
 
-    Records the surfaced memory names, the serving backend, latency, ``k``, and a TRUNCATED
-    query preview (never the full prompt). ``session_id``, when given (the harness-provided
-    id), keys the event directly instead of the file-based token — see ``current_session_id``.
-    Returns True on a successful append, else False (a write failure degrades silently — the
-    caller's recall is unaffected).
+    Records the surfaced memory names, the serving backend, latency, ``k``, a TRUNCATED
+    query preview (never the full prompt), and — COR-8 — each result's TRUE penalized fused
+    score plus its 1-based emission rank (``recall()`` now emits the real ranking signal
+    instead of fabricated 1/rank noise; this ledger just persists it verbatim so threshold
+    calibration and any future feedback loop, e.g. v0.5.0's RET-5 salience fusion, inherit the
+    real number). ``scores``/``ranks`` are parallel arrays aligned to ``names`` — kept
+    separate rather than nesting `{name, score, rank}` objects so the existing `names`-shaped
+    consumers (the soak/curation analyzer) are untouched; a `results` entry missing a `score`
+    (a caller-constructed dict predating this field) contributes ``None`` at that position
+    rather than dropping the row, so the arrays never lose alignment with `names`.
+    ``session_id``, when given (the harness-provided id), keys the event directly instead of
+    the file-based token — see ``current_session_id``. Returns True on a successful append,
+    else False (a write failure degrades silently — the caller's recall is unaffected).
     """
     try:
         td = _resolve_dir(telemetry_dir)
         ensure_self_ignoring_dir(td)  # derived dir: mkdir + self-ignoring .gitignore (SEC-3)
         backend = (results[0].get("backend") if results else None) or "none"
+        named = [r for r in results if r.get("name")]
         event = {
             "ts": round(time.time(), 3),
             "session_id": current_session_id(td, session_id=session_id),
-            "names": [r.get("name") for r in results if r.get("name")],
+            "names": [r.get("name") for r in named],
+            "scores": [r.get("score") for r in named],
+            "ranks": [r.get("rank") for r in named],
             "backend": backend,
             "latency_ms": round(float(latency_ms), 2),
             "k": int(k),

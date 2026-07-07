@@ -831,7 +831,8 @@ def load_index(index_dir: str) -> Optional[LoadedIndex]:
 def check_index_integrity(index_dir: str) -> Optional[str]:
     """One-line diagnosis of on-disk index corruption, or ``None`` if nothing's wrong.
 
-    Never raises. Distinguishes the three silent-degradation states this item closes:
+    Never raises. Distinguishes the FOUR silent-degradation states this item (and COR-8)
+    close:
       (a) ``manifest.json`` exists but isn't valid JSON (truncated/garbled) — recall already
           degrades to an empty/rebuilt index via ``_load_manifest``'s except->None, but
           nothing said so; the next ``refresh_index``/``build_index`` call rebuilds from
@@ -843,6 +844,11 @@ def check_index_integrity(index_dir: str) -> Optional[str]:
       (c) ``dense.npy`` exists but its shape doesn't match the manifest (row count != entry
           count, or column count != declared ``dim``) — ``LoadedIndex``/`_dense_rank`` already
           degrade this to BM25-only without raising, but silently.
+      (d) COR-8: the manifest's recorded ``model`` is set but differs from the CURRENTLY
+          configured ``DEFAULT_MODEL`` (e.g. ``MEMOBOT_EMBED_MODEL`` changed, or a plugin
+          update bumped the default, since this index was last built) — ``recall._dense_rank``
+          already refuses to cosine-score across two different embedding spaces and degrades
+          to BM25, but silently; this names BOTH models and the remediation.
     A missing manifest (no index built yet) is NOT corruption — returns ``None``.
     """
     try:
@@ -874,6 +880,13 @@ def check_index_integrity(index_dir: str) -> Optional[str]:
                     "index dense.npy shape does not match the manifest (row/column count "
                     "mismatch) — recall will degrade to BM25 until the next rebuild"
                 )
+        manifest_model = manifest.get("model")
+        if manifest_model and manifest_model != DEFAULT_MODEL:
+            return (
+                f"index was embedded with model '{manifest_model}' but the configured model "
+                f"is now '{DEFAULT_MODEL}' — recall will degrade to BM25 until the index is "
+                "rebuilt (run `/hippo:doctor` or re-run bootstrap to rebuild the index)"
+            )
         return None
     except Exception:
         return None

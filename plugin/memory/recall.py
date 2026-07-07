@@ -24,6 +24,7 @@ import time
 from typing import List, Optional, Tuple
 
 from .build_index import (
+    DEFAULT_MODEL,
     DENSE_QUERY_TIMEOUT_SECS,
     LoadedIndex,
     _hash,
@@ -155,8 +156,22 @@ def _dense_rank(query: str, index: LoadedIndex) -> List[int]:
     """Indices ordered by descending cosine similarity, or [] if dense is unavailable.
 
     Loads the embedding model OFFLINE (no download); any failure -> [] (BM25 carries it).
+
+    COR-8 model cross-check: a manifest embedded under model X, cosine-scored against a
+    query embedded under model Y (the CURRENTLY configured ``build_index.DEFAULT_MODEL``),
+    is comparing vectors from two different embedding spaces -- the resulting "similarity"
+    is not meaningful, just noise that happens to look like a score. This can happen after
+    ``MEMOBOT_EMBED_MODEL`` changes (or a stale index survives a plugin update that bumps the
+    default) without a full rebuild. ``index.model`` is ``None`` for a BM25-only manifest
+    (never built dense, or dense_ready False) -- that is NOT a mismatch, just "no dense model
+    recorded yet", so only an EXPLICIT, DIFFERENT model name skips dense. The mismatch is
+    made doctor-visible via ``build_index.check_index_integrity`` (a NEW corruption-adjacent
+    case alongside the truncated-manifest / missing-dense / wrong-shape ones it already
+    names) so "recall silently got worse after a model change" has a diagnosis surface.
     """
     if not index.dense_ready or index.dense is None:
+        return []
+    if index.model and index.model != DEFAULT_MODEL:
         return []
     try:
         import numpy as np
@@ -491,7 +506,17 @@ def recall(
                     "name": e["name"],
                     "file": e["file"],
                     "description": entry_description(e).strip(),
-                    "score": round(1.0 / (len(results) + 1), 4),
+                    # COR-8: emit the REAL penalized fused score -- exactly the value
+                    # `penalized` (post-invalidation-penalty, post-graph-discount) sorted
+                    # on -- NOT fabricated 1/rank noise. Telemetry, threshold calibration,
+                    # and RET-5's future salience fusion all inherit this number, so it must
+                    # be the actual ranking signal, not a proxy that just happens to be
+                    # monotone in emission order by construction. `rank` is the separate,
+                    # explicit 1-based EMISSION rank (position in `results`, not `penalized`
+                    # index -- "old"/deleted entries are skipped above and must not leave
+                    # gaps in the emitted rank sequence).
+                    "score": round(float(_adj_score), 6),
+                    "rank": len(results) + 1,
                     "backend": backend,
                     # Injection provenance (GRA-1) — ALWAYS present so downstream code never
                     # branches on key existence: "graph" = surfaced by 1-hop expansion,
