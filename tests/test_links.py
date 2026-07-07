@@ -56,11 +56,12 @@ def test_resolution_full_stem_prefix_strip_and_underscore(tmp_path):
     _corpus(md)
     g = LinkGraph(md)
 
-    assert g.resolve("beta") == "beta.md"  # full stem
-    assert g.resolve("gamma-thing") == "feedback_gamma_thing.md"  # prefix-stripped alias
-    assert g.resolve("gamma_thing") == "feedback_gamma_thing.md"  # underscore variant normalizes
+    # GRA-2: resolve() returns STEMS — no ".md" anywhere in graph output.
+    assert g.resolve("beta") == "beta"  # full stem
+    assert g.resolve("gamma-thing") == "feedback_gamma_thing"  # prefix-stripped alias
+    assert g.resolve("gamma_thing") == "feedback_gamma_thing"  # underscore variant normalizes
     # the exact corpus census slug-mismatch resolves:
-    assert g.resolve("151-avenue-a-is-standard-size") == "feedback_151_avenue_a_is_standard_size.md"
+    assert g.resolve("151-avenue-a-is-standard-size") == "feedback_151_avenue_a_is_standard_size"
 
 
 def test_genuinely_absent_targets_do_not_resolve(tmp_path):
@@ -89,12 +90,12 @@ def test_traverse_n_hops(tmp_path):
     g = LinkGraph(md)
 
     one = g.traverse("alpha", hops=1)
-    assert "beta.md" in one and "feedback_gamma_thing.md" in one
-    assert "delta.md" not in one  # delta is 2 hops away (alpha -> gamma -> delta)
+    assert "beta" in one and "feedback_gamma_thing" in one
+    assert "delta" not in one  # delta is 2 hops away (alpha -> gamma -> delta)
 
     two = g.traverse("alpha", hops=2)
-    assert "delta.md" in two  # reached via feedback_gamma_thing -> delta
-    assert "alpha.md" not in two  # start excluded even though beta links back to it
+    assert "delta" in two  # reached via feedback_gamma_thing -> delta
+    assert "alpha" not in two  # start excluded even though beta links back to it
 
 
 def test_traverse_unknown_or_zero_hops_is_empty(tmp_path):
@@ -106,6 +107,91 @@ def test_traverse_unknown_or_zero_hops_is_empty(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# GRA-2: stem identity + inbound()/isolates() backlink primitives
+# --------------------------------------------------------------------------- #
+def test_graph_output_is_stem_keyed_no_md_anywhere(tmp_path):
+    """The clean break: files / adjacency (keys AND values) / raw_targets / unresolved /
+    orphans / isolates all speak stems — no '.md' suffix survives into graph output."""
+    md = str(tmp_path / "memory")
+    _corpus(md)
+    g = LinkGraph(md)
+
+    every_node = (
+        set(g.files)
+        | set(g.adjacency)
+        | {t for targets in g.adjacency.values() for t in targets}
+        | set(g.raw_targets)
+        | set(g.unresolved)
+        | set(g.orphans())
+        | set(g.isolates())
+    )
+    assert every_node  # sanity: the corpus actually produced nodes
+    assert not any(n.endswith(".md") for n in every_node)
+
+
+def test_stem_adjacency_joins_cleanly_against_plain_name_set(tmp_path):
+    """The whole point of the stem break: graph output intersects a staleness/soak-style
+    stem set directly — no Path(...).stem / '.md'-stripping conversion step."""
+    md = str(tmp_path / "memory")
+    _corpus(md)
+    g = LinkGraph(md)
+
+    # the shape staleness/soak/archive produce: plain stems.
+    name_set = {"alpha", "beta", "delta", "feedback_gamma_thing"}
+    assert set(g.files) & name_set == name_set
+    has_inbound = {n for n in g.files if g.inbound(n)}
+    assert has_inbound & name_set == {"alpha", "beta", "delta", "feedback_gamma_thing"}
+
+
+def test_inbound_correctness_and_alias_resolution(tmp_path):
+    md = str(tmp_path / "memory")
+    _corpus(md)
+    g = LinkGraph(md)
+
+    assert g.inbound("beta") == {"alpha"}
+    assert g.inbound("alpha") == {"beta"}
+    assert g.inbound("delta") == {"feedback_gamma_thing"}
+    # accepts any resolvable alias, like outbound(): prefix-stripped + underscore variants
+    assert g.inbound("gamma-thing") == {"alpha"}
+    assert g.inbound("gamma_thing") == {"alpha"}
+    assert g.inbound("feedback_gamma_thing.md") == {"alpha"}  # filename form still resolves
+    # unknown name -> empty set, never a raise
+    assert g.inbound("no-such-memory") == set()
+
+
+def test_inbound_and_outbound_are_consistent_views_of_one_graph(tmp_path):
+    """Reverse adjacency is built once in _build(); it must be the exact transpose of
+    adjacency — every forward edge appears backward, nothing extra."""
+    md = str(tmp_path / "memory")
+    _corpus(md)
+    g = LinkGraph(md)
+    forward = {(src, dst) for src, targets in g.adjacency.items() for dst in targets}
+    backward = {(src, dst) for dst in g.files for src in g.inbound(dst)}
+    assert forward == backward
+
+
+def test_isolates_vs_orphans_distinction(tmp_path):
+    """orphan = zero OUTBOUND (may still be pointed at); isolate = zero in AND zero out.
+    delta: inbound from gamma, no outbound -> orphan but NOT isolate.
+    the 151 file: zero outbound but alpha links to it -> orphan, NOT isolate.
+    epsilon: no links either direction -> orphan AND isolate."""
+    md = str(tmp_path / "memory")
+    _corpus(md)
+    with open(os.path.join(md, "epsilon.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem("epsilon", "fully disconnected — no links in or out"))
+    g = LinkGraph(md)
+
+    assert "delta" in g.orphans()
+    assert "delta" not in g.isolates()  # inbound from gamma keeps it out of isolates
+    assert "feedback_151_avenue_a_is_standard_size" in g.orphans()
+    assert "feedback_151_avenue_a_is_standard_size" not in g.isolates()  # alpha points at it
+    assert g.isolates() == ["epsilon"]
+    # isolates is strictly a subset of orphans, both sorted
+    assert set(g.isolates()) <= set(g.orphans())
+    assert g.orphans() == sorted(g.orphans()) and g.isolates() == sorted(g.isolates())
+
+
+# --------------------------------------------------------------------------- #
 # lint (dangling / slug-mismatch / orphan) — READ-ONLY
 # --------------------------------------------------------------------------- #
 def test_lint_flags_dangling_targets(tmp_path):
@@ -113,8 +199,8 @@ def test_lint_flags_dangling_targets(tmp_path):
     _corpus(md)
     report = L.lint(md)
     dangling = {(d["file"], d["target"]) for d in report["dangling"]}
-    assert ("alpha.md", "ship-roadmap") in dangling
-    assert ("alpha.md", "totally-absent") in dangling
+    assert ("alpha", "ship-roadmap") in dangling
+    assert ("alpha", "totally-absent") in dangling
     # the resolvable ones are NOT dangling
     assert not any(t in ("beta", "gamma-thing", "151-avenue-a-is-standard-size") for _, t in dangling)
 
@@ -124,10 +210,10 @@ def test_lint_flags_slug_mismatch(tmp_path):
     _corpus(md)
     report = L.lint(md)
     mism = {(d["file"], d["target"]) for d in report["slug_mismatch"]}
-    assert ("alpha.md", "gamma-thing") in mism
-    assert ("alpha.md", "151-avenue-a-is-standard-size") in mism
+    assert ("alpha", "gamma-thing") in mism
+    assert ("alpha", "151-avenue-a-is-standard-size") in mism
     # a canonical-stem link is NOT a mismatch
-    assert ("alpha.md", "beta") not in mism
+    assert ("alpha", "beta") not in mism
 
 
 def test_lint_flags_orphans(tmp_path):
@@ -135,9 +221,9 @@ def test_lint_flags_orphans(tmp_path):
     _corpus(md)
     report = L.lint(md)
     # delta has inbound (from gamma) but ZERO outbound -> orphan; 151 file has no links -> orphan
-    assert "delta.md" in report["orphans"]
-    assert "feedback_151_avenue_a_is_standard_size.md" in report["orphans"]
-    assert "alpha.md" not in report["orphans"]
+    assert "delta" in report["orphans"]
+    assert "feedback_151_avenue_a_is_standard_size" in report["orphans"]
+    assert "alpha" not in report["orphans"]
 
 
 def test_lint_is_read_only(tmp_path):

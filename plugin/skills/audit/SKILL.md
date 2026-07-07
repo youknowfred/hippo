@@ -144,11 +144,11 @@ graph = links.build_graph(memory_dir)
 link_report = lint_links.lint(memory_dir)
 floor = lint_floor.floor_violations(memory_dir)
 
-names = {Path(f).stem for f in graph.files} if graph else set()
+# links.py speaks STEMS ("foo", never "foo.md") since GRA-2 — same identity as
+# staleness/soak/archive, so graph output joins below with no conversion step.
+names = set(graph.files) if graph else set()
 never_recalled = set(curation["never_recalled"])
-# links.py returns BASENAMES ("foo.md"); every other module here (staleness/soak/archive) uses
-# STEMS ("foo") — convert before joining, or every join below silently breaks against orphans.
-orphans = {Path(f).stem for f in graph.orphans()} if graph else set()
+orphans = set(graph.orphans()) if graph else set()
 unparseable_set = set(unparseable)
 
 # --- Join 1: cascading blind spot (invisible to 3 tools at once — auto-included in Phase 3
@@ -179,17 +179,11 @@ join_authority_gap = sorted(
     name for name in cited_by_governance if strength.get(name, 0.0) < 0.15
 )
 
-# --- zero-inbound (adjacency values are also basenames — convert to stems first) ---
-adjacency = graph.adjacency if graph else {}
-has_inbound_basenames = set()
-for targets in adjacency.values():
-    has_inbound_basenames |= targets
-has_inbound = {Path(f).stem for f in has_inbound_basenames}
-zero_inbound = names - has_inbound
-
-# --- Join 5: graph-isolated watch-list. NEVER archive-eligible on its own — strictly weaker
-# than archive.archive_candidates()'s real 4-way gate. ---
-join_graph_isolated_watchlist = sorted(orphans & zero_inbound)
+# --- Join 5: graph-isolated watch-list — LinkGraph.isolates() (zero-inbound AND
+# zero-outbound; the graph inverts adjacency once internally, never re-derive it here).
+# NEVER archive-eligible on its own — strictly weaker than
+# archive.archive_candidates()'s real 4-way gate. ---
+join_graph_isolated_watchlist = graph.isolates() if graph else []
 
 # --- Join 4: per-memory staleness-baseline age (eval_recall's own metric is a corpus-wide
 # median only — this decomposes it so an outlier-driven half-life is distinguishable from
@@ -463,10 +457,11 @@ never adds a batch wrapper around them:
   absence gracefully. If this pattern proves durably valuable, it should graduate into a real
   telemetry ledger with its own tests rather than living as a skill-owned side file forever.
 - **This design depends on zero underscore-prefixed private helpers** from `archive.py`/
-  `reconsolidate.py` — the authority-citation scan and zero-inbound computation are
-  reimplemented locally in Phase 1's script specifically to avoid coupling to internals that
-  could be renamed without a deprecation cycle. If those modules' real predicates ever change,
-  re-sync the local reimplementations.
+  `reconsolidate.py` — the authority-citation scan is reimplemented locally in Phase 1's
+  script specifically to avoid coupling to internals that could be renamed without a
+  deprecation cycle, and graph isolation comes from the PUBLIC `LinkGraph.inbound()`/
+  `isolates()` primitives (GRA-2) rather than a hand-rolled adjacency inversion. If those
+  modules' real predicates ever change, re-sync the local reimplementation.
 - **Corpus-size assumption.** This design (single session, no fan-out, `--deep-dive-n` read by
   hand) is sized for "well under a thousand memories." If a corpus grows 5-10x, revisit: Phase 1
   stays cheap, but Phase 2's per-memory staleness-age decomposition and Phase 3's by-hand

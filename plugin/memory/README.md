@@ -167,8 +167,13 @@ dismissable, emitted before Python is even involved.
 ### `links.py` / `lint_links.py`
 
 `build_graph(memory_dir)` parses `[[name]]` markers into adjacency, slug-normalizing so
-`_`/`-` variants and dropped category prefixes resolve; `traverse(name, hops)` walks N
-outbound hops. `lint_links` flags **dangling** targets, **slug-mismatches**, and
+`_`/`-` variants and dropped category prefixes resolve. Every node is a filename **stem**
+(`foo`, never `foo.md`), the same identity staleness/soak/archive key by — graph output
+joins against their name sets with no conversion. `traverse(name, hops)` walks N outbound
+hops; `inbound(name)` answers "what refers to this memory?" from a reverse adjacency built
+once at construction (the codebase's single adjacency inversion); `orphans()` is
+zero-OUTBOUND (may still be well-cited), `isolates()` is zero-in AND zero-out (genuinely
+disconnected). `lint_links` flags **dangling** targets, **slug-mismatches**, and
 **orphans** — read-only, never edits a memory; its one-line summary is the `link_health`
 producer.
 

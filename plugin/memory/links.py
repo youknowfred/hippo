@@ -3,8 +3,15 @@
 Parses ``[[name]]`` markers across the corpus into an adjacency graph and resolves each
 target to a memory file — slug-normalizing so ``_``/``-`` variants and a dropped category
 prefix resolve (e.g. ``[[151-avenue-a-is-standard-size]]`` →
-``feedback_151_avenue_a_is_standard_size.md``) WITHOUT falsely resolving genuinely-absent
+``feedback_151_avenue_a_is_standard_size``) WITHOUT falsely resolving genuinely-absent
 targets (``[[ship-roadmap]]``, ``[[decision-question-coverage]]``).
+
+Node identity is the filename STEM (``foo``, never ``foo.md``) — a deliberate clean break
+(GRA-2, one-canonical-name invariant): every other module that joins against graph output
+(staleness / soak / archive / telemetry) keys by stem, so basename output forced each
+consumer to strip ``.md`` by hand before every join, and two of them got it subtly
+different. ``files``, ``adjacency`` (keys AND values), ``raw_targets``, ``unresolved`` and
+every query method speak stems; nothing in graph output carries a ``.md`` suffix.
 
 Resolution aliases per file (all normalized to lower-hyphen):
   1. the full filename stem               (always registered — filenames are unique)
@@ -19,7 +26,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set
 
 from .provenance import _iter_memory_files, parse_frontmatter
 
@@ -57,97 +64,118 @@ def parse_wikilinks(text: str) -> List[str]:
 
 
 class LinkGraph:
-    """Resolved wikilink adjacency over the memory corpus."""
+    """Resolved wikilink adjacency over the memory corpus. All nodes are STEMS."""
 
     def __init__(self, memory_dir: str):
         self.memory_dir = memory_dir
-        self.files: List[str] = []  # basenames
-        self._alias_to_file: Dict[str, str] = {}
+        self.files: List[str] = []  # stems (unique — one flat dir, one stem per file)
+        self._alias_to_stem: Dict[str, str] = {}
         self._ambiguous: Set[str] = set()
-        self.raw_targets: Dict[str, List[str]] = {}  # file -> raw [[targets]]
-        self.adjacency: Dict[str, Set[str]] = {}  # file -> resolved target files
-        self.unresolved: Dict[str, List[str]] = {}  # file -> raw targets that didn't resolve
+        self.raw_targets: Dict[str, List[str]] = {}  # stem -> raw [[targets]]
+        self.adjacency: Dict[str, Set[str]] = {}  # stem -> resolved target stems
+        self.unresolved: Dict[str, List[str]] = {}  # stem -> raw targets that didn't resolve
+        # Reverse adjacency, built ONCE alongside the forward pass — the single place in
+        # the codebase that inverts the graph (GRA-2 acceptance criterion). archive.py and
+        # the audit skill consume it via inbound()/isolates() instead of re-inverting.
+        self._inbound: Dict[str, Set[str]] = {}  # stem -> stems that link TO it
         self._build()
 
     # -- construction ----------------------------------------------------- #
-    def _register_alias(self, alias: str, fname: str, *, allow_collision: bool) -> None:
+    def _register_alias(self, alias: str, stem: str, *, allow_collision: bool) -> None:
         if not alias:
             return
-        if alias in self._alias_to_file:
-            if self._alias_to_file[alias] != fname and not allow_collision:
+        if alias in self._alias_to_stem:
+            if self._alias_to_stem[alias] != stem and not allow_collision:
                 # Two files claim this alias -> ambiguous; drop it so it can't false-resolve.
                 self._ambiguous.add(alias)
             return
-        self._alias_to_file[alias] = fname
+        self._alias_to_stem[alias] = stem
 
     def _build(self) -> None:
-        texts: Dict[str, str] = {}
-        stems: Dict[str, str] = {}  # fname -> stem
+        texts: Dict[str, str] = {}  # stem -> file text
         for path in _iter_memory_files(self.memory_dir):
-            fname = os.path.basename(path)
+            stem = os.path.splitext(os.path.basename(path))[0]
             try:
                 with open(path, "r", encoding="utf-8") as fh:
-                    texts[fname] = fh.read()
+                    texts[stem] = fh.read()
             except Exception:
                 continue
-            self.files.append(fname)
-            stems[fname] = os.path.splitext(fname)[0]
+            self.files.append(stem)
 
         # Pass 1: full-stem aliases (unique by construction) — highest-confidence.
-        for fname, stem in stems.items():
-            self._register_alias(normalize_slug(stem), fname, allow_collision=False)
+        for stem in self.files:
+            self._register_alias(normalize_slug(stem), stem, allow_collision=False)
 
         # Pass 2: prefix-stripped + name-slug aliases — register only when globally unique.
-        for fname, stem in stems.items():
+        for stem in self.files:
             stripped = _strip_first_segment(stem)
-            if stripped and stripped not in self._alias_to_file:
-                self._register_alias(stripped, fname, allow_collision=False)
-            fm = parse_frontmatter(texts.get(fname, ""))
+            if stripped and stripped not in self._alias_to_stem:
+                self._register_alias(stripped, stem, allow_collision=False)
+            fm = parse_frontmatter(texts.get(stem, ""))
             name = fm.get("name") if isinstance(fm, dict) else None
             if isinstance(name, str):
                 slug = normalize_slug(name)
-                if slug and slug not in self._alias_to_file:
-                    self._register_alias(slug, fname, allow_collision=False)
+                if slug and slug not in self._alias_to_stem:
+                    self._register_alias(slug, stem, allow_collision=False)
 
         for amb in self._ambiguous:
-            self._alias_to_file.pop(amb, None)
+            self._alias_to_stem.pop(amb, None)
 
-        # Edges
-        for fname in self.files:
-            targets = parse_wikilinks(texts.get(fname, ""))
-            self.raw_targets[fname] = targets
+        # Edges — forward AND reverse in the same pass, so inbound-degree queries never
+        # need a second O(V+E) inversion anywhere else.
+        for stem in self.files:
+            self._inbound.setdefault(stem, set())
+        for stem in self.files:
+            targets = parse_wikilinks(texts.get(stem, ""))
+            self.raw_targets[stem] = targets
             resolved: Set[str] = set()
             missed: List[str] = []
             for t in targets:
-                f = self.resolve(t)
-                if f and f != fname:
-                    resolved.add(f)
-                elif f is None:
+                s = self.resolve(t)
+                if s and s != stem:
+                    resolved.add(s)
+                    self._inbound[s].add(stem)
+                elif s is None:
                     missed.append(t)
-            self.adjacency[fname] = resolved
+            self.adjacency[stem] = resolved
             if missed:
-                self.unresolved[fname] = missed
+                self.unresolved[stem] = missed
 
     # -- queries ---------------------------------------------------------- #
     def resolve(self, target: str) -> Optional[str]:
-        """Resolve a ``[[target]]`` (or filename) to a corpus basename, or None."""
+        """Resolve a ``[[target]]`` (or filename/stem) to a corpus STEM, or None."""
         slug = normalize_slug(target)
         if slug in self._ambiguous:
             return None
-        return self._alias_to_file.get(slug)
+        return self._alias_to_stem.get(slug)
 
     def resolved_via_stem(self, target: str) -> bool:
         """True when ``target`` matches a file's canonical full stem (not a soft alias)."""
-        f = self.resolve(target)
-        return bool(f) and normalize_slug(os.path.splitext(f)[0]) == normalize_slug(target)
+        s = self.resolve(target)
+        return bool(s) and normalize_slug(s) == normalize_slug(target)
+
+    def _node(self, name: str) -> Optional[str]:
+        """Resolve ``name`` (alias, stem, or filename) to a graph node stem, or None."""
+        return self.resolve(name) or (name if name in self.adjacency else None)
 
     def outbound(self, name: str) -> Set[str]:
-        f = self.resolve(name) or (name if name in self.adjacency else None)
-        return set(self.adjacency.get(f, set())) if f else set()
+        """Stems ``name`` links TO. Accepts any resolvable alias; ``set()`` if unknown."""
+        s = self._node(name)
+        return set(self.adjacency.get(s, set())) if s else set()
+
+    def inbound(self, name: str) -> Set[str]:
+        """Stems that link TO ``name`` — "what refers to this memory?".
+
+        Accepts any resolvable alias (like ``outbound()``); ``set()`` for an unknown name.
+        Backed by the reverse adjacency built once in ``_build()`` — callers must never
+        re-invert ``adjacency`` themselves.
+        """
+        s = self._node(name)
+        return set(self._inbound.get(s, set())) if s else set()
 
     def traverse(self, name: str, hops: int = 1) -> Set[str]:
-        """Files reachable from ``name`` within ``hops`` outbound edges (excludes ``name``)."""
-        start = self.resolve(name) or (name if name in self.adjacency else None)
+        """Stems reachable from ``name`` within ``hops`` outbound edges (excludes ``name``)."""
+        start = self._node(name)
         if not start or hops < 1:
             return set()
         seen: Set[str] = {start}
@@ -166,8 +194,25 @@ class LinkGraph:
         return seen
 
     def orphans(self) -> List[str]:
-        """Files with zero OUTBOUND resolved links (newest-name-last; sorted)."""
-        return sorted(f for f in self.files if not self.adjacency.get(f))
+        """Stems with zero OUTBOUND resolved links (sorted).
+
+        Orphans-vs-isolates: an orphan points at nothing but may still be pointed AT
+        (a well-cited leaf note is an orphan, and that's healthy); an isolate has no
+        edges in EITHER direction — genuinely disconnected from the graph. Archive/audit
+        gating cares about inbound degree, never orphan-hood alone.
+        """
+        return sorted(s for s in self.files if not self.adjacency.get(s))
+
+    def isolates(self) -> List[str]:
+        """Stems with zero inbound AND zero outbound edges (sorted) — fully disconnected.
+
+        Strictly a subset of ``orphans()``; see the orphans() docstring for the
+        distinction. This is the "graph-isolated watch-list" primitive the audit skill
+        reports (informational only — never archive-eligible on its own).
+        """
+        return sorted(
+            s for s in self.files if not self.adjacency.get(s) and not self._inbound.get(s)
+        )
 
 
 def build_graph(memory_dir: str) -> Optional[LinkGraph]:
@@ -195,12 +240,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("could not build link graph")
         return 1
     total_edges = sum(len(v) for v in g.adjacency.values())
-    print(f"files={len(g.files)} edges={total_edges} orphans={len(g.orphans())}")
+    print(
+        f"files={len(g.files)} edges={total_edges} "
+        f"orphans={len(g.orphans())} isolates={len(g.isolates())}"
+    )
     if args.traverse:
         reach = g.traverse(args.traverse, hops=args.hops)
         print(f"reachable from {args.traverse} within {args.hops} hops ({len(reach)}):")
-        for f in sorted(reach):
-            print(f"  - {f}")
+        for s in sorted(reach):
+            print(f"  - {s}")
     return 0
 
 
