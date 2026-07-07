@@ -120,6 +120,17 @@ steps 3, 4, 4b (trust-mark), and 5 all still run.
    `.claude/.memory-telemetry/` if not already present (derived, rebuildable — never commit
    them). Do NOT create `.gitignore` from scratch if the project doesn't have one without
    asking first — a repo with zero `.gitignore` may be intentional (e.g. a throwaway test repo).
+## Memories can reference each other
+
+`.claude/memory/` files support `[[wikilinks]]` — an outbound `[[some-other-memory]]` in a
+memory's body is a real edge the recall engine's 1-hop graph expansion uses to surface a
+closely-related memory even when the query itself didn't match it directly. `/hippo:new`
+suggests these automatically at write time (a "Related: [[...]]" line, curated by the agent —
+GRA-3); on a corpus that's grown past a handful of memories with zero links so far,
+`/hippo:doctor` also surfaces a one-time hint. There is nothing to do here at init time — this
+is purely FYI so a new project's memories don't accidentally stay isolated from each other for
+months the way a hand-authored corpus without this feature would.
+
 6. **Nudge, don't commit — or, in a non-git dir, name the degradation. On an existing corpus
    (ONB-5), report machine-local setup instead of a seeding nudge.** On a FRESH project in a
    git repo: print the exact `git add .claude/memory .gitignore && git commit -m "seed agent

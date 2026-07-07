@@ -78,7 +78,9 @@ def test_run_checks_order_is_fixed(repo, memory_dir):
     labels = [label for label, _ in D.run_checks(ctx)]
     assert labels == [label for label, _ in D.CHECKS]
     # Sanity: the order is a real ordered list, not derived from a set/dict view.
-    assert labels[0] == "bootstrap" and labels[-1] == "secrets"
+    # GRA-3 appended "link_density" as the new last check (a one-time hint check, fittingly
+    # last in the fixed order alongside the other corpus-content checks).
+    assert labels[0] == "bootstrap" and labels[-1] == "link_density"
 
 
 def test_every_line_has_a_status_glyph(repo, memory_dir):
@@ -389,6 +391,35 @@ def test_secrets_warns_and_names_the_file(repo, memory_dir):
     assert "leak.md" in r["message"] and "AWS access key" in r["message"]
     # Never echoes the secret itself.
     assert fake_aws not in r["message"]
+
+
+# --------------------------------------------------------------------------- #
+# Link density (GRA-3) — one-time hint when a >=5-memory corpus has zero edges
+# --------------------------------------------------------------------------- #
+def test_link_density_na_below_corpus_floor(repo, memory_dir):
+    _seed(memory_dir)
+    for i in range(3):  # below the 5-file floor
+        write_file(memory_dir, f"m{i}.md", _mem(f"m{i}", f"note {i}"))
+    r = D.check_link_density(_ctx(memory_dir, repo))
+    assert r["status"] == "ok" and "N/A" in r["message"]
+
+
+def test_link_density_warns_when_zero_edges_at_or_above_floor(repo, memory_dir):
+    _seed(memory_dir)
+    for i in range(5):  # at the floor, no [[wikilinks]] anywhere
+        write_file(memory_dir, f"m{i}.md", _mem(f"m{i}", f"note {i}"))
+    r = D.check_link_density(_ctx(memory_dir, repo))
+    assert r["status"] == "warn"
+    assert "[[name]]" in r["message"] and "/hippo:new" in r["message"]
+
+
+def test_link_density_ok_once_an_edge_exists(repo, memory_dir):
+    _seed(memory_dir)
+    for i in range(4):
+        write_file(memory_dir, f"m{i}.md", _mem(f"m{i}", f"note {i}"))
+    write_file(memory_dir, "m4.md", _mem("m4", "note 4", body="see [[m0]]"))
+    r = D.check_link_density(_ctx(memory_dir, repo))
+    assert r["status"] == "ok" and "1 wikilink edge" in r["message"]
 
 
 # --------------------------------------------------------------------------- #

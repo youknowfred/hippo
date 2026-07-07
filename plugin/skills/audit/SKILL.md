@@ -112,9 +112,14 @@ from pathlib import Path
 
 from memory.provenance import resolve_dirs
 from memory import eval_recall, soak, staleness, reconsolidate, archive, links, lint_links, lint_floor, telemetry
+from memory.build_index import memory_doc_text
+from memory.recall import recall
 
 SKIP_EVAL = False          # --skip-eval
 WINDOW_SESSIONS = 30       # --window-sessions
+LINK_SIM_K = 3             # GRA-3 densification: candidates recalled per sampled memory
+LINK_SIM_MAX_SAMPLE = 200  # cap: corpus-size assumption (see Hard Rules) — recall() per file
+                           # is O(1) index lookups, not a re-embed, but stay bounded regardless
 
 memory_dir, repo_root = resolve_dirs()
 repo_root_p = Path(repo_root)
@@ -184,6 +189,31 @@ join_authority_gap = sorted(
 # NEVER archive-eligible on its own — strictly weaker than
 # archive.archive_candidates()'s real 4-way gate. ---
 join_graph_isolated_watchlist = graph.isolates() if graph else []
+
+# --- GRA-3 link-densification pass: SUGGESTIONS only, never an autonomous body edit. ---
+# Reuses recall() over each sampled memory's OWN doc_text (name + description — the exact
+# query new_memory's write-time discovery uses, GRA-3) to find its highest-similarity
+# EXISTING neighbors that are NOT already an outbound edge. This is read-only: it proposes
+# high-similarity pairs for the agent to review in Phase 3/5 and hand-add as [[wikilinks]]
+# ONE memory at a time if approved — it never writes to any memory body itself. Skipped
+# gracefully (empty list) when the corpus has no graph yet or recall degrades to nothing.
+link_density_suggestions = []
+if graph and names:
+    for name in sorted(names)[:LINK_SIM_MAX_SAMPLE]:
+        try:
+            text = (Path(memory_dir) / f"{name}.md").read_text()
+        except OSError:
+            continue
+        query = memory_doc_text(name, text)
+        existing_out = graph.adjacency.get(name, set())
+        hits = recall(query, k=LINK_SIM_K + 1, memory_dir=memory_dir, repo_root=repo_root)
+        candidates = [
+            {"name": h["name"], "score": h["score"]}
+            for h in hits
+            if h["name"] != name and h["name"] not in existing_out
+        ][:LINK_SIM_K]
+        if candidates:
+            link_density_suggestions.append({"memory": name, "candidates": candidates})
 
 # --- Join 4: per-memory staleness-baseline age (eval_recall's own metric is a corpus-wide
 # median only — this decomposes it so an outlier-driven half-life is distinguishable from
@@ -266,6 +296,7 @@ print(json.dumps({
         "staleness_ages": ages,
     },
     "graduation_history_for_stale": history_for_stale,
+    "link_density_suggestions": link_density_suggestions,
 }, indent=2, default=str))
 PYEOF
 ```
@@ -302,6 +333,13 @@ The joins above are already computed as plain data; this phase is about **interp
 6. **Graph-isolated watch-list** — report as a clearly-separate, explicitly-labeled section.
    **Never treat it as archive-eligible.** Only `archive_candidates` output (the real 4-way gate)
    may ever become an archive proposal in Phase 5.
+7. **Link-densification suggestions** (`link_density_suggestions`, GRA-3) — each entry is "this
+   memory's highest-similarity EXISTING neighbors that aren't already an outbound edge", i.e. a
+   *candidate* edge, not a confirmed one. A shared vocabulary is not the same as a meaningful
+   relationship (the same caution `/hippo:new`'s own Related-line curation carries) — judge each
+   pair by whether the BODY content actually relates, not just the description text. Report every
+   entry; don't pre-filter by score alone. **Suggestions only — the agent applies approved ones
+   per-item in Phase 5; there is no bulk/autonomous body edit anywhere in this pass.**
 
 **Signal-maturity tag** — apply to every join above that depends on the recall-telemetry window
 (authority-evidence gap, staleness-half-life shape, graduation history, archive candidacy
@@ -405,6 +443,12 @@ report. Never a vague hedge.>
 - Graduation history ∩ currently-stale: <names + prior verdicts>
 - Graph-isolated watch-list (never archive-eligible on its own): <names>
 
+## Link-densification suggestions (GRA-3 — SUGGESTIONS only, none auto-applied)
+| Memory | Candidate | Score | Judged relevant? | Applied this run? |
+|---|---|---|---|---|
+<one row per candidate reviewed; "Applied this run?" is always "no" unless --apply AND the
+operator approved that specific pair — see Phase 5>
+
 ## Raw scorecard (reference only)
 eval_recall gates: <table, or "SKIPPED — no hard-set fixture for this project yet">
 soak: <soak_status + curation_report summary>  |  links/floor: <lint_links + lint_floor summary>
@@ -431,6 +475,15 @@ never adds a batch wrapper around them:
   confirmation gate**: the first `--apply` invocation proposes archive candidates in the report
   and takes no `git mv` action; only a follow-up invocation that **explicitly names the specific
   memories to archive** executes the move.
+- **link-densification (GRA-3)** → same **two-turn confirmation gate** as archive: the first
+  `--apply` invocation only PRODUCES the suggestions table above and applies NOTHING (there is
+  no bulk primitive for this — appending a wikilink is a body edit, and body edits are exactly
+  the kind of write this project never automates). A follow-up invocation that **explicitly
+  names the specific memory + candidate pair(s)** to link appends a single `[[candidate]]`
+  reference into that ONE memory's body (a plain text append, mirroring how `new_memory`'s own
+  Related line is additive-only) and re-runs `build_index.refresh_index` so the new edge is
+  immediately reflected in `links.json`. Never touch more than the named pairs; never infer
+  additional edges beyond what was explicitly approved.
 - Before committing, run the engine repo's own hermetic test suite if you have it vendored
   locally, or at minimum re-run Phase 0's import check — confirm the corpus is still valid after
   any frontmatter/git-mv changes. If red, do not commit; report and halt for review.
@@ -447,6 +500,10 @@ never adds a batch wrapper around them:
   without the Phase 3 per-item justification attached to each.
 - **The graph-isolated watch-list never feeds an archive action.** Only
   `archive.archive_candidates()`'s real 4-way gate may.
+- **Link-densification never auto-edits a body.** `link_density_suggestions` is read-only
+  output from Phase 1; Phase 5 appends a wikilink ONLY for pairs the operator explicitly named
+  in a follow-up invocation, one memory at a time — never a bulk sweep across every suggestion
+  in the table, no matter how high the score.
 - **Never claim the never-recalled/cold signal is actionable while `soak_status()['gate_met']`
   is False.** State the exact session count and gap instead.
 - **The "This week" section is capped and self-contained** — 5 ranked + up to 2
@@ -499,3 +556,9 @@ never adds a batch wrapper around them:
 
 > The audit report proposed archiving `<name1>` and `<name2>`. Archive exactly those two via
 > `archive.archive_memory` and commit.
+
+### (E) Follow-up link-densification confirmation
+
+> The audit report suggested linking `<memory-a>` to `<memory-b>` (and `<memory-c>` to
+> `<memory-d>`). I reviewed both — go ahead and add exactly those two wikilinks, nothing else
+> from the table, and commit.

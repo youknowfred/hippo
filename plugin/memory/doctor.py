@@ -564,6 +564,57 @@ def check_secrets(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"secret scan failed: {exc}."}
 
 
+# GRA-3: a corpus this small (< 5 memories) genuinely may have nothing worth cross-linking yet
+# — the nudge below is about a corpus that has GROWN without ever discovering [[wikilinks]],
+# not about a brand-new project's first couple of files.
+_LINK_DENSITY_MIN_CORPUS = 5
+
+
+def check_link_density(ctx: DoctorContext) -> Dict[str, str]:
+    """One-time hint when the corpus has grown but never gained a single wikilink edge.
+
+    GRA-3: the graph machinery (links.py / lint_links.py / recall's 1-hop expansion) was
+    extracted from a corpus where links were hand-authored over months — a snap-in install
+    starts at zero edges and, pre-GRA-3, no code path ever created one. ``new_memory`` now
+    seeds a "Related: [[...]]" suggestion at write time, but a corpus that already has
+    ``_LINK_DENSITY_MIN_CORPUS`` or more memories and STILL carries zero edges (memories
+    written before this feature landed, or every suggestion so far was trimmed) never
+    hears about the feature at all — this is the one-time doctor-level hint that closes that
+    gap. Deliberately NOT a per-session SessionStart nag (``lint_links.health_line`` already
+    treats bare orphan-hood as informational, never rot, on purpose — see its docstring); doctor
+    is invoked on demand, so surfacing it here is a single ask-when-asked signal, not a repeated
+    per-session nag. Silent (``ok``) below the corpus-size floor, when the graph fails to build,
+    or once at least one edge exists anywhere in the corpus.
+    """
+    try:
+        from .links import build_graph
+
+        n = len(_iter_memory_files_safe(ctx.memory_dir))
+        if n < _LINK_DENSITY_MIN_CORPUS:
+            return {
+                "status": "ok",
+                "message": f"link density: N/A ({n} memories, below the {_LINK_DENSITY_MIN_CORPUS}-file floor for this hint).",
+            }
+        g = build_graph(ctx.memory_dir)
+        if g is None:
+            return {"status": "ok", "message": "link density: could not build the link graph."}
+        total_edges = sum(len(v) for v in g.adjacency.values())
+        if total_edges > 0:
+            return {
+                "status": "ok",
+                "message": f"link density: {total_edges} wikilink edge(s) across {n} memories.",
+            }
+        return {
+            "status": "warn",
+            "message": f"link density is ZERO across {n} memories — memories can reference each "
+            "other with [[name]] — see /hippo:new (new memories now suggest related links "
+            "automatically; existing ones can be cross-linked by hand or via /hippo:audit's "
+            "link-densification pass).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"link-density check failed: {exc}."}
+
+
 # (label, check_fn) in a FIXED order — the source of the deterministic output. New checks append
 # here; the order is never sorted-by-name or set-derived, so the printed sequence is stable.
 CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
@@ -581,6 +632,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("pack_drift", check_pack_drift),
     ("fill_me", check_fill_me),
     ("secrets", check_secrets),
+    ("link_density", check_link_density),
 ]
 
 

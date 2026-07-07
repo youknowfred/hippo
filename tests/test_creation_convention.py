@@ -242,3 +242,189 @@ def test_new_memory_born_staleness_tracked_in_dirty_worktree(tmp_path, monkeypat
     meta = fm.get("metadata") or {}
     sc = fm.get("source_commit") or meta.get("source_commit")
     assert sc == head, f"expected a HEAD baseline at creation, got {sc!r}"
+
+
+# --------------------------------------------------------------------------- #
+# GRA-3 — link creation at write time (recall-discovered "Related: [[...]]")
+# --------------------------------------------------------------------------- #
+def test_new_memory_discovers_related_links_and_linkgraph_resolves_them(tmp_path, monkeypatch):
+    """write_memory on a corpus with related existing memories appends a Related: [[...]] body
+    line whose targets LinkGraph actually resolves (acceptance criterion #1)."""
+    from memory import new_memory as NM
+    from memory.links import build_graph
+
+    md = _nm_env(tmp_path, monkeypatch)
+    # Seed two existing memories that clearly overlap the new one's topic.
+    NM.write_memory(
+        "railway_deploy_pipeline",
+        "how the railway deploy pipeline builds and ships the app",
+        "project",
+        body="the pipeline runs on every push to main.",
+        memory_dir=md,
+        repo_root=str(tmp_path),
+    )
+    NM.write_memory(
+        "railway_env_vars",
+        "railway deploy pipeline environment variables and secrets",
+        "project",
+        body="secrets live in the railway dashboard.",
+        memory_dir=md,
+        repo_root=str(tmp_path),
+    )
+
+    res = NM.write_memory(
+        "railway_rollback_procedure",
+        "how to roll back the railway deploy pipeline after a bad release",
+        "project",
+        body="run the rollback script and re-deploy the previous build.",
+        memory_dir=md,
+        repo_root=str(tmp_path),
+    )
+    assert res["created"] is True and res["error"] is None
+    assert res["related"], "expected recall to surface at least one related existing memory"
+
+    text = open(res["path"], encoding="utf-8").read()
+    assert "Related: " in text
+    for r in res["related"]:
+        assert f"[[{r}]]" in text
+
+    g = build_graph(md)
+    assert g is not None
+    outbound = g.outbound("railway_rollback_procedure")
+    # every suggested name must be a resolvable, real edge — not just literal text
+    assert set(res["related"]) <= outbound
+
+
+def test_fresh_project_five_writes_yields_nonzero_edge_density(tmp_path, monkeypatch):
+    """Fresh-project simulation (the roadmap's literal acceptance criterion): five write_memory
+    calls with overlapping topics on a corpus that starts EMPTY must yield edge count > 0."""
+    from memory import new_memory as NM
+    from memory.links import build_graph
+
+    md = _nm_env(tmp_path, monkeypatch)
+    topics = [
+        ("onboarding_flow", "the user onboarding flow walks a new signup through setup"),
+        ("onboarding_email_copy", "onboarding email copy sent during the signup flow"),
+        ("signup_form_validation", "signup form validation rules for the onboarding flow"),
+        ("billing_plan_tiers", "billing plan tiers offered after onboarding completes"),
+        ("billing_invoice_format", "billing invoice format used for plan tier billing"),
+    ]
+    for name, desc in topics:
+        res = NM.write_memory(
+            name, desc, "project", body=f"notes about {name}.", memory_dir=md, repo_root=str(tmp_path)
+        )
+        assert res["created"] is True and res["error"] is None
+
+    g = build_graph(md)
+    assert g is not None
+    total_edges = sum(len(v) for v in g.adjacency.values())
+    assert total_edges > 0, "fresh project should reach nonzero edge density within its first five memories"
+
+
+def test_new_memory_no_links_suppresses_discovery(tmp_path, monkeypatch):
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    NM.write_memory(
+        "topic_a", "a memory about the deploy pipeline topic", "project", memory_dir=md, repo_root=str(tmp_path)
+    )
+    res = NM.write_memory(
+        "topic_b",
+        "another memory about the deploy pipeline topic",
+        "project",
+        memory_dir=md,
+        repo_root=str(tmp_path),
+        no_links=True,
+    )
+    assert res["created"] is True
+    assert res["related"] == []
+    text = open(res["path"], encoding="utf-8").read()
+    assert "Related:" not in text
+
+
+def test_new_memory_links_override_discovery(tmp_path, monkeypatch):
+    """--links (explicit) OVERRIDES discovery entirely — no recall() call, the given names win
+    verbatim even if they wouldn't have been the top BM25 hits."""
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    NM.write_memory(
+        "totally_unrelated_topic", "something about gardening and houseplants", "project",
+        memory_dir=md, repo_root=str(tmp_path),
+    )
+    res = NM.write_memory(
+        "topic_c",
+        "a memory about the deploy pipeline",
+        "project",
+        memory_dir=md,
+        repo_root=str(tmp_path),
+        links=["totally_unrelated_topic"],
+    )
+    assert res["created"] is True
+    assert res["related"] == ["totally_unrelated_topic"]
+    text = open(res["path"], encoding="utf-8").read()
+    assert "[[totally_unrelated_topic]]" in text
+
+
+def test_new_memory_empty_corpus_no_related_line_no_error(tmp_path, monkeypatch):
+    """Empty corpus (the very first memory ever created) -> no Related line, no error."""
+    from memory import new_memory as NM
+
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    md = str(tmp_path / ".claude" / "memory")  # deliberately NOT pre-seeded — truly empty/absent
+    res = NM.write_memory(
+        "first_ever_memory", "the very first memory in this corpus", "project",
+        memory_dir=md, repo_root=str(tmp_path),
+    )
+    assert res["created"] is True and res["error"] is None
+    assert res["related"] == []
+    text = open(res["path"], encoding="utf-8").read()
+    assert "Related:" not in text
+
+
+def test_related_line_lands_before_provenance_backfill_ordering(tmp_path, monkeypatch):
+    """The Related: line must land BEFORE provenance backfill runs, so cited_paths/staleness
+    computation sees the SAME rendered text that ends up on disk (no post-hoc drift)."""
+    import subprocess
+
+    from memory import new_memory as NM
+    from memory.provenance import parse_frontmatter
+
+    from .conftest import git_commit, write_file
+
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    repo = str(tmp_path / "repo")
+    os.makedirs(repo)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
+    write_file(repo, "src/app.py", "x = 1\n")
+    head = git_commit(repo, "init", 1_700_000_000)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+
+    md = os.path.join(repo, ".claude", "memory")
+    _floor(md, _CLEAN_FLOOR)
+    NM.write_memory(
+        "existing_topic", "an existing memory about src/app.py behavior", "project",
+        body="src/app.py does x.", memory_dir=md, repo_root=repo,
+    )
+    res = NM.write_memory(
+        "new_topic",
+        "a new memory also about src/app.py behavior",
+        "project",
+        body="src/app.py does x, confirmed again.",
+        memory_dir=md,
+        repo_root=repo,
+    )
+    assert res["created"] is True and res["error"] is None
+
+    text = open(res["path"], encoding="utf-8").read()
+    fm = parse_frontmatter(text)
+    meta = fm.get("metadata") or {}
+    sc = fm.get("source_commit") or meta.get("source_commit")
+    cited = fm.get("cited_paths") or meta.get("cited_paths") or []
+    # Provenance backfill ran against the text that ALREADY includes the Related: line (if any
+    # was discovered) — i.e. the persisted frontmatter is not stale/pre-Related.
+    assert sc == head
+    assert "src/app.py" in cited

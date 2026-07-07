@@ -26,6 +26,7 @@ hippo_resolve_py
   --type {user|feedback|project|reference} \
   --body "<full memory body — the WHY, not just the WHAT>" \
   [--title "<floor link text>"] [--hook "<floor trailing note>"] \
+  [--links name-a,name-b | --no-links] \
   [--memory-dir <path, defaults to resolve_dirs()>]
 ```
 
@@ -43,6 +44,39 @@ hippo_resolve_py
     what it's for.
 - `--title` / `--hook` are floor-pointer cosmetics for `user`/`feedback` only — omit for
   `project`/`reference` (they're recalled on demand, never floor-linked).
+- `--links a,b,c` — explicit related-memory names, comma-separated. OVERRIDES the automatic
+  discovery below entirely (no `recall()` call happens at all — your list wins verbatim).
+- `--no-links` — suppress the Related line entirely (no discovery, no `--links`).
+
+## Related: [[...]] — link creation at write time (GRA-3)
+
+Unless suppressed, `new_memory` runs an in-process `recall()` against the **existing** corpus
+(BM25-only, never blocks, never raises, silently skipped on an empty/unbuilt corpus) using the
+new memory's own name + description as the query, and appends a final body line:
+
+```
+Related: [[some-existing-memory]], [[another-existing-memory]]
+```
+
+**This is a suggestion, not a fact — CURATE it before it lands.** The tool has no judgment
+about whether a BM25-similar memory is actually a meaningful relationship; you do. After the
+file is written:
+
+- **Keep** a suggestion that's genuinely related.
+- **Trim** the list down (or drop the whole line) if a hit is superficially similar but
+  substantively unrelated — a shared word is not a shared concept.
+- **Replace/add** — if you know of a better-related memory that recall missed (different
+  wording, no shared vocabulary), edit the line yourself; `[[wikilink]]` targets resolve by
+  filename stem (see `memory.links`).
+
+Do not blindly accept the suggested line as final. This is the single point where the graph
+gains an edge at all on a fresh project — a snap-in install starts at zero wikilinks, and this
+is what seeds the first ones — so a lazily-accepted, actually-unrelated link is worse than no
+link (it pollutes 1-hop graph expansion at recall time for everyone downstream).
+
+Only `user`/`feedback`/`project`/`reference` memories written via THIS tool ever gain a
+Related line — it is never retrofitted onto an existing memory by any automated process (see
+`/hippo:audit`'s link-densification pass for the agent-gated equivalent on the existing corpus).
 
 ## What NOT to save (skip even if it seems tempting)
 
