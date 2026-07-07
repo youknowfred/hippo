@@ -252,7 +252,7 @@ def test_producer_emits_bounded_block_when_worklist_nonempty(repo, memory_dir, m
     git_commit(repo, "c2", now - 100)
 
     td = os.path.join(repo, "tele")
-    monkeypatch.setenv("MEMOBOT_TELEMETRY_DIR", td)
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
     _seed_events(td, [("s1", ["m_a"])])
 
     out = R.reconsolidation_producer(memory_dir, repo)
@@ -272,7 +272,7 @@ def test_producer_truncates_past_max_items(repo, memory_dir, monkeypatch):
     git_commit(repo, "c2", now - 100)
 
     td = os.path.join(repo, "tele")
-    monkeypatch.setenv("MEMOBOT_TELEMETRY_DIR", td)
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
     _seed_events(td, [("s1", names)])
 
     out = R.reconsolidation_producer(memory_dir, repo)

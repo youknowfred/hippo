@@ -17,6 +17,32 @@ reports the REAL per-process model-load cost every freshly-spawned hook pays —
 alongside the warm p95 but NOT gated (a cold OS cache must not redden a healthy run; with
 dense unavailable, cold ≈ warm).
 
+RET-2: ``body_probe`` is a REPORT-ONLY (never-gated) addition proving body-chunk indexing
+actually helps — probe queries are derived from body tokens ABSENT from a memory's own
+description, so passing this metric proves something self_recall (description-derived
+queries) cannot: that content living ONLY in the body is retrievable. The 5 gates above are
+unchanged in number/semantics.
+
+RET-1: ``abstention_rate`` is a second REPORT-ONLY addition, the mirror image of the 5
+gates above — where self_recall/hard_recall/mrr all measure "does recall() find the RIGHT
+memory", abstention_rate measures "does recall() correctly find NOTHING for a query with no
+right answer at all". Fed by an optional ``--abstention-set`` fixture of clearly off-topic
+queries (``recall_abstention_set.yaml`` / the golden corpus's ``abstention_set.yaml``);
+``rate`` = fraction of those queries for which recall() returned zero results. Never a merge
+gate (per the roadmap item) — it exists to make the dense-floor/knee-cutoff/hard-skip trio
+(the recall() changes that make abstention possible at all) measurable, not to block a merge
+on a number that depends entirely on which off-topic probes someone happened to write down.
+
+RET-7: every report records the SERVING BACKEND (``report["backend"]`` = ``"dense+bm25"``
+when ``index.dense_ready`` else ``"bm25-only"``), printed on the gate-header line AND the
+RESULT line, so a BM25-only pass can never be mistaken for verified hybrid recall health —
+this matters because gates 2/3 (hard-set recall/MRR) can genuinely PASS on lexical overlap
+alone in a small/favorable corpus even with dense entirely unavailable. A hard-set fixture
+MAY additionally carry a ``generated_with_backend`` provenance header (see
+``_load_fixture_docs``); when the fixture claims ``dense+bm25`` but this run only served
+``bm25-only``, ``report["backend_mismatch"]`` is set and a loud warning prints — the
+`/hippo:audit` skill surfaces this flag rather than reporting a bare pass/fail.
+
 Pure / dependency-light: dense is used when the index has it, otherwise the gates are
 computed on BM25 alone (so they run in CI without fastembed). ``main`` exits non-zero if
 any gate fails (use it as a pre-merge check).
@@ -44,8 +70,21 @@ GATE_SELF_RECALL = 0.90
 GATE_HARD_RECALL = 0.80
 GATE_MRR = 0.60
 GATE_P95_MS = 300.0
+# PRF-2: the honest per-prompt budget for cold_latency's p50 (fresh-subprocess-per-sample,
+# see cold_latency()'s docstring). Gate 5 above is measured WARM and documents itself as
+# ~10x under the real per-prompt cost -- this is the number that actually reflects what a
+# freshly-spawned hook pays. Report-only by default (opt in via --gate-cold / evaluate()'s
+# gate_cold=True) so a cold OS cache on an ungated hermetic run never reddens CI; the dense
+# CI lane (which restores a warm fastembed model cache) passes --gate-cold so a REAL cold-path
+# regression (e.g. a heavier model, a new per-import cost) fails the build.
+GATE_COLD_P50_MS = 1500.0
 
 _SELF_QUERY_TOKENS = 12
+# RET-2: body_probe queries keep the first N tokens that are BOTH in a memory's body chunks
+# AND absent from its description -- the same "derived, zero-maintenance" spirit as
+# derive_self_query, but proving the NEW thing this item adds (body content is retrievable)
+# rather than the thing self_recall already proves (description content is retrievable).
+_BODY_PROBE_TOKENS = 12
 
 
 # --------------------------------------------------------------------------- #
@@ -90,6 +129,68 @@ def self_recall_at_k(index: LoadedIndex, k: int = 10) -> float:
     return hits / considered if considered else 0.0
 
 
+# --------------------------------------------------------------------------- #
+# RET-2: body_probe — REPORT-ONLY metric proving body chunks are retrievable at all (not
+# just "the index still finds descriptions", which self_recall already covers). A probe
+# query is derived per-memory from BODY tokens ABSENT from the description -- if the query
+# only used tokens the description ALSO carries, a description-only (pre-RET-2) index would
+# already pass, so the probe wouldn't be testing anything new. This is a NEW gate-adjacent
+# metric, but never a merge gate itself (per the roadmap: "the 5 gate semantics unchanged").
+# --------------------------------------------------------------------------- #
+def derive_body_probe_query(index: LoadedIndex, entry_idx: int) -> str:
+    """A query from body tokens NOT in the entry's description, or "" when none qualify.
+
+    Walks ``index.body_chunks`` (RET-2's persisted ``{entry, hash, tokens, row}`` list) for
+    every chunk belonging to ``entry_idx``, collects tokens in body-chunk order (first chunk
+    first, tokens in their original order) that are ABSENT from the description's own token
+    set, dedupes while preserving that order, and keeps the first ``_BODY_PROBE_TOKENS``
+    (~12). An entry with no qualifying body chunks (no chunks at all, or every body token
+    already appears in the description) yields "" -- the caller excludes it from the
+    denominator, exactly like ``self_recall_at_k`` excludes an empty ``derive_self_query``.
+    """
+    entries = index.entries
+    if entry_idx < 0 or entry_idx >= len(entries):
+        return ""
+    desc_tokens = set(tokenize(_description_of(entries[entry_idx])))
+    seen: set = set()
+    out: List[str] = []
+    for chunk in index.body_chunks:
+        if chunk.get("entry") != entry_idx:
+            continue
+        for tok in chunk.get("tokens") or []:
+            if tok in desc_tokens or tok in seen:
+                continue
+            seen.add(tok)
+            out.append(tok)
+            if len(out) >= _BODY_PROBE_TOKENS:
+                break
+        if len(out) >= _BODY_PROBE_TOKENS:
+            break
+    return " ".join(out)
+
+
+def body_probe_recall_at_k(index: LoadedIndex, k: int = 10) -> Dict[str, float]:
+    """recall@k of the PARENT entry for a body-derived probe query, over every entry that
+    has a qualifying probe (see ``derive_body_probe_query``). REPORT-ONLY -- never a merge
+    gate; ``n=0`` (and ``recall=0.0``) when no entry in the corpus has a body chunk carrying a
+    token absent from its own description (e.g. a BM25-only index built before this item ever
+    ran, or a corpus whose bodies are pure restatements of their descriptions)."""
+    entries = index.entries
+    if not entries:
+        return {"recall": 0.0, "n": 0}
+    hits = 0
+    considered = 0
+    for i, e in enumerate(entries):
+        q = derive_body_probe_query(index, i)
+        if not q:
+            continue
+        considered += 1
+        names = {r["name"] for r in recall(q, k=k, index=index)}
+        if e["name"] in names:
+            hits += 1
+    return {"recall": round(hits / considered, 4) if considered else 0.0, "n": considered}
+
+
 def load_relevance_set(path: str) -> List[dict]:
     """Load ``[{query, relevant: [name, ...]}]`` from a hand-judged YAML fixture. [] if missing.
 
@@ -117,6 +218,46 @@ def load_relevance_set(path: str) -> List[dict]:
         if isinstance(q, str) and isinstance(rel, list) and rel:
             out.append({"query": q, "relevant": [str(x) for x in rel]})
     return out
+
+
+def load_abstention_set(path: str) -> List[str]:
+    """Load a bare list of CLEARLY off-topic query strings from a YAML fixture. [] if missing.
+
+    RET-1: distinct schema from ``load_hard_set``/``load_relevance_set`` -- there is no
+    ``expected``/``relevant`` field, because there is nothing these queries SHOULD retrieve;
+    the fixture is just ``- query: "..."`` rows. Reuses ``_load_fixture_docs`` so an optional
+    provenance header (unused today, but kept available for parity with the other two
+    fixtures) is tolerated rather than mis-parsed as a query row.
+    """
+    _meta, data = _load_fixture_docs(path)
+    out: List[str] = []
+    for item in data if isinstance(data, list) else []:
+        if isinstance(item, dict) and isinstance(item.get("query"), str):
+            out.append(item["query"])
+        elif isinstance(item, str):  # tolerate a bare string row too, not just {query: ...}
+            out.append(item)
+    return out
+
+
+def abstention_rate(index: LoadedIndex, abstention_set: List[str], k: int = 10) -> Dict[str, float]:
+    """Fraction of ``abstention_set`` queries for which recall() returned ZERO results.
+
+    REPORT-ONLY (never a merge gate, per the roadmap item) -- proves the NEW thing RET-1
+    adds (a clearly off-topic prompt can abstain, injecting nothing) the way ``body_probe``
+    proves RET-2's new capability: this is a metric no PRE-RET-1 index could ever score above
+    0 on (there was no floor/knee/hard-skip to abstain with), so a healthy run should show
+    ``rate`` near 1.0 on a fixture of genuinely off-topic queries. ``n=0`` (rate 0.0) when the
+    fixture is empty/missing -- a deliberately-absent input, not a failure (mirrors
+    ``precision_at_k``'s skip semantics).
+    """
+    if not abstention_set:
+        return {"rate": 0.0, "n": 0}
+    zero = 0
+    for q in abstention_set:
+        if not recall(q, k=k, index=index):
+            zero += 1
+    n = len(abstention_set)
+    return {"rate": round(zero / n, 4), "n": n}
 
 
 def precision_at_k(index: LoadedIndex, relevance_set: List[dict], k: int = 10) -> Dict[str, float]:
@@ -246,17 +387,65 @@ def graduation_rate(telemetry_dir: Optional[str] = None) -> Dict[str, float]:
     return {"rate": round(counts["graduate"] / denominator, 4), "n": denominator, **counts}
 
 
-def load_hard_set(path: str) -> List[dict]:
-    """Load ``[{query, expected: [name, ...]}]`` from a YAML fixture. [] if missing."""
+# RET-7: fixture provenance header. A hard-set (or relevance-set) fixture MAY carry an
+# OPTIONAL leading YAML document recording how it was generated -- e.g.
+#
+#   generated_with_backend: dense+bm25
+#   generated_at: 2026-07-06
+#   ---
+#   - query: ...
+#     expected: [...]
+#
+# This is the thing that makes "did this fixture actually exercise the dense half of hybrid
+# recall, or only BM25" checkable at eval time (see `evaluate()`'s backend_mismatch below).
+# The bare-list schema (no leading doc at all) keeps loading UNCHANGED -- every fixture
+# written before this item, and every hand-written one that never bothers with the header,
+# is still a valid fixture with metadata == {}.
+def _load_fixture_docs(path: str) -> tuple:
+    """Parse a hard-/relevance-set YAML file into (metadata: dict, rows: list).
+
+    Uses ``yaml.safe_load_all`` so BOTH shapes are read with one code path:
+      - bare list only               -> one document, a list          -> ({}, list)
+      - mapping header + `---` + list -> two documents, mapping + list -> (mapping, list)
+    A single lone mapping document (no second doc) is treated as metadata-only with no
+    rows, rather than mis-parsed as a "list" of one dict -- symmetrical with the two-doc
+    case rather than a special error path.
+    ``([], [])``-shaped failures (missing file, unparseable YAML) return ``({}, [])`` --
+    the caller's existing "arrive at an empty list" degradation, now paired with empty
+    metadata rather than raising.
+    """
     if not path or not os.path.exists(path):
-        return []
+        return {}, []
     try:
         import yaml
 
         with open(path, "r", encoding="utf-8") as fh:
-            data = yaml.safe_load(fh) or []
+            docs = [d for d in yaml.safe_load_all(fh) if d is not None]
     except Exception:
-        return []
+        return {}, []
+    if not docs:
+        return {}, []
+    if len(docs) == 1:
+        doc = docs[0]
+        if isinstance(doc, list):
+            return {}, doc
+        if isinstance(doc, dict):
+            return doc, []
+        return {}, []
+    # Two+ documents: first is the metadata header, second is the row list (anything past
+    # the second is ignored -- the schema only ever defines these two documents).
+    meta = docs[0] if isinstance(docs[0], dict) else {}
+    rows = docs[1] if isinstance(docs[1], list) else []
+    return meta, rows
+
+
+def load_hard_set(path: str) -> List[dict]:
+    """Load ``[{query, expected: [name, ...]}]`` from a YAML fixture. [] if missing.
+
+    Ignores an optional leading metadata document (see ``_load_fixture_docs``) -- callers
+    that need the provenance header use ``load_hard_set_metadata`` instead.
+    """
+    _meta, data = _load_fixture_docs(path)
     out: List[dict] = []
     for item in data if isinstance(data, list) else []:
         if not isinstance(item, dict):
@@ -268,6 +457,14 @@ def load_hard_set(path: str) -> List[dict]:
         if isinstance(q, str) and isinstance(exp, list) and exp:
             out.append({"query": q, "expected": [str(x) for x in exp]})
     return out
+
+
+def load_hard_set_metadata(path: str) -> Dict[str, str]:
+    """The optional provenance header (``generated_with_backend``/``generated_at``) of a
+    hard-set fixture, or ``{}`` when the fixture has none / doesn't exist / fails to parse.
+    """
+    meta, _rows = _load_fixture_docs(path)
+    return meta if isinstance(meta, dict) else {}
 
 
 def hard_set_metrics(index: LoadedIndex, hard_set: List[dict], k: int = 10) -> Dict[str, float]:
@@ -428,13 +625,22 @@ def evaluate(
     relevance_set_path: Optional[str] = None,
     repo_root: Optional[str] = None,
     telemetry_dir: Optional[str] = None,
+    abstention_set_path: Optional[str] = None,
+    gate_cold: bool = False,
 ) -> dict:
     """Run all 5 gates; return a report dict with per-gate values + pass flags.
 
-    ``relevance_set_path``/``repo_root``/``telemetry_dir`` feed three REPORT-ONLY scorecard
-    additions (precision@k, staleness half-life, per-session token cost) — none of the 5
-    gates above are affected by any of them; omitting all three reproduces the exact prior
-    report shape plus three zeroed report blocks.
+    ``relevance_set_path``/``repo_root``/``telemetry_dir``/``abstention_set_path`` feed
+    REPORT-ONLY scorecard additions (precision@k, staleness half-life, per-session token
+    cost, RET-1's abstention_rate) — none of the 5 gates above are affected by any of them;
+    omitting all of them reproduces the exact prior report shape plus zeroed report blocks.
+
+    ``gate_cold`` (PRF-2) opts INTO gating ``cold_latency``'s p50 against
+    ``GATE_COLD_P50_MS`` -- default False so cold_latency stays the report-only honesty
+    signal it always was on every hermetic/ungated caller. Even when requested, the gate is
+    skipped (not failed) on a BM25-only run: without dense, cold ~= warm (no per-process
+    model load to amortize), so a hermetic machine gating this would be gating nothing
+    real and could redden CI on a cache-less runner that never claimed to serve dense.
     """
     if memory_dir is None:
         # Only resolve_dirs() when memory_dir actually needs it -- mirrors recall.main()'s
@@ -457,6 +663,28 @@ def evaluate(
 
     hard_set = load_hard_set(hard_set_path) if hard_set_path else []
     relevance_set = load_relevance_set(relevance_set_path) if relevance_set_path else []
+    abstention_set = load_abstention_set(abstention_set_path) if abstention_set_path else []
+
+    # RET-7: the SERVING backend for this run, recorded so a BM25-only pass can never
+    # masquerade as hybrid (dense+bm25) health -- ``index.dense_ready`` is the same
+    # torn-pair-verified signal build_index.LoadedIndex already exposes (COR-3), not a
+    # re-derivation, so this can never disagree with what recall() itself actually used.
+    backend = "dense+bm25" if index.dense_ready else "bm25-only"
+    # Fixture provenance mismatch: the hard-set fixture SAYS it was generated against a
+    # dense+bm25 run (see _load_fixture_docs' metadata header), but THIS run is serving
+    # bm25-only -- e.g. a cold model cache, HIPPO_DISABLE_DENSE, or fastembed missing.
+    # A bm25-only pass against dense-calibrated paraphrase queries is systematically WEAKER
+    # than what the fixture was tuned for (BM25 alone can't catch the cross-vocabulary
+    # paraphrases dense embeddings were curated to test) -- silently reporting "PASS" here
+    # would be exactly the "BM25-only masquerading as hybrid health" this item exists to
+    # prevent. Only fires for a fixture that explicitly claims dense+bm25 provenance; a
+    # fixture with no header (or one generated bm25-only, or one whose header claims
+    # something else) never trips this -- an honest bm25-only fixture is a valid input, not
+    # a mismatch.
+    fixture_meta = load_hard_set_metadata(hard_set_path) if hard_set_path else {}
+    backend_mismatch = (
+        fixture_meta.get("generated_with_backend") == "dense+bm25" and backend != "dense+bm25"
+    )
 
     self_recall = self_recall_at_k(index, k=k)
     hs = hard_set_metrics(index, hard_set, k=k)
@@ -479,6 +707,8 @@ def evaluate(
     half_life = staleness_half_life(memory_dir, repo_root) if repo_root else {"median_days": 0.0, "n": 0}
     sess_cost = session_token_cost(memory_dir, resolved_telemetry_dir, index, hard_set, k=k)
     grad = graduation_rate(resolved_telemetry_dir)
+    body_probe = body_probe_recall_at_k(index, k=k)
+    abstention = abstention_rate(index, abstention_set, k=k)
 
     # A caller with NO hard-set fixture (hard_set_path=None — e.g. a fresh install of the
     # packaged plugin with no hand-curated calibration data yet, see /hippo:audit) is a
@@ -512,6 +742,29 @@ def evaluate(
         },
         "recall_p95_ms": {"value": lat["p95"], "threshold": GATE_P95_MS, "pass": lat["p95"] < GATE_P95_MS},
     }
+    # PRF-2: cold_p50_ms follows the SAME skip-vs-gate shape as the hard-set/token-reduction
+    # gates above (pass=None + skipped=True + a reason string, excluded from `ok`) rather than
+    # a bespoke boolean -- one pattern for "this gate wasn't asked to run" across the module.
+    # Two independent reasons a caller ends up skipped here:
+    #   1. not requested at all (gate_cold=False, the default) -- every existing caller
+    #      (hermetic suite, bare `eval_recall` invocations, doctor/audit) keeps reporting
+    #      cold_latency exactly as before with zero behavior change.
+    #   2. requested but serving bm25-only -- cold_latency's own docstring says cold ~= warm
+    #      with dense unavailable (no per-process model load to amortize), so gating it on a
+    #      hermetic/cache-less machine would be enforcing a budget against a cost that isn't
+    #      actually being paid -- exactly the kind of false-negative-prone gate the hard-set
+    #      skip semantics above already exist to avoid.
+    if gate_cold and index.dense_ready:
+        gates["cold_p50_ms"] = {
+            "value": cold["p50"], "threshold": GATE_COLD_P50_MS,
+            "pass": cold["n"] > 0 and cold["p50"] < GATE_COLD_P50_MS,
+        }
+    else:
+        gates["cold_p50_ms"] = {
+            "value": cold["p50"], "threshold": GATE_COLD_P50_MS,
+            "pass": None,
+            "skipped": True,
+        }
     return {
         "ok": all(g["pass"] for g in gates.values() if g.get("pass") is not None),
         "dense_ready": index.dense_ready,
@@ -526,6 +779,12 @@ def evaluate(
         "staleness_half_life": half_life,
         "session_token_cost": sess_cost,
         "graduation_rate": grad,
+        "body_probe": body_probe,
+        "abstention_rate": abstention,
+        # RET-7: serving backend + fixture-provenance mismatch flag (see comments above) --
+        # consumed by /hippo:audit and printed on the RESULT line by main() below.
+        "backend": backend,
+        "backend_mismatch": backend_mismatch,
     }
 
 
@@ -560,6 +819,10 @@ def _default_relevance_set_path() -> Optional[str]:
     return _default_fixture_path("recall_relevance_set.yaml")
 
 
+def _default_abstention_set_path() -> Optional[str]:
+    return _default_fixture_path("recall_abstention_set.yaml")
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
@@ -568,8 +831,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--index-dir", default=None)
     parser.add_argument("--hard-set", default=None)
     parser.add_argument("--relevance-set", default=None)
+    parser.add_argument(
+        "--abstention-set",
+        default=None,
+        help="RET-1: report-only fixture of clearly off-topic queries — measures the "
+        "fraction recall() correctly abstains (returns []) on; never gates.",
+    )
     parser.add_argument("--repo-root", default=None)
     parser.add_argument("--telemetry-dir", default=None)
+    parser.add_argument(
+        "--gate-cold",
+        action="store_true",
+        help="PRF-2: gate cold_latency's p50 (fresh-subprocess-per-sample, the honest "
+        "per-prompt cost) against GATE_COLD_P50_MS. Off by default so cold_latency stays a "
+        "report-only signal everywhere except CI's dense lane, which restores a warm model "
+        "cache and passes this flag so a real cold-path regression fails the build. Skipped "
+        "(not failed) on a bm25-only run -- without dense, cold ~= warm.",
+    )
     parser.add_argument("-k", type=int, default=10)
     args = parser.parse_args(argv)
 
@@ -581,16 +859,41 @@ def main(argv: Optional[List[str]] = None) -> int:
         relevance_set_path=args.relevance_set or _default_relevance_set_path(),
         repo_root=args.repo_root,
         telemetry_dir=args.telemetry_dir,
+        abstention_set_path=args.abstention_set or _default_abstention_set_path(),
+        gate_cold=args.gate_cold,
     )
     if not report.get("ok") and "error" in report:
         print(f"eval error: {report['error']}")
         return 1
 
-    print(f"corpus={report['count']} dense={report['dense_ready']} model={report['model']} hard_set={report['hard_set_n']}")
+    # RET-7: `backend` is printed on the gate-header line itself (not just buried in the
+    # dict) -- the whole point is that a BM25-only pass must be visibly labeled every time
+    # someone actually reads the CLI output, not just discoverable by someone who thinks to
+    # inspect the report dict.
+    print(
+        f"corpus={report['count']} dense={report['dense_ready']} model={report['model']} "
+        f"hard_set={report['hard_set_n']} backend={report['backend']}"
+    )
+    if report.get("backend_mismatch"):
+        # LOUD by design (see evaluate()'s comment) -- this fixture was generated_with_backend:
+        # dense+bm25 but this run only served bm25-only, so ANY pass below is calibrated
+        # against a stronger backend than what actually ran. Printed before the gate table so
+        # it can't be missed/scrolled past.
+        print(
+            "  ⚠️  BACKEND MISMATCH: hard-set fixture was generated_with_backend=dense+bm25, "
+            "but this run served bm25-only — a PASS here does NOT prove hybrid recall works, "
+            "only that BM25 alone can pass a dense-calibrated fixture (or that dense degraded "
+            "silently -- check the fastembed model cache / HIPPO_DISABLE_DENSE)."
+        )
     _SKIP_REASONS = {
         "hard_recall@10": "no hard-set fixture",
         "mrr@10": "no hard-set fixture",
         "token_reduction": "no MEMORY.full.md pre-trim snapshot",
+        "cold_p50_ms": (
+            "not requested (--gate-cold)"
+            if not args.gate_cold
+            else "bm25-only — cold ~= warm without dense; hermetic machines must not redden"
+        ),
     }
     for name, g in report["gates"].items():
         skipped = g.get("pass") is None
@@ -629,8 +932,31 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"  graduation rate: {gr['rate']} ({gr['graduate']} graduate / {gr['demote']} demote, "
             f"{gr['fix']} fix excluded from ratio, report-only)"
         )
+    bp = report.get("body_probe") or {}
+    if bp.get("n"):
+        print(
+            f"  body_probe@{args.k} (RET-2, n={bp['n']}): {bp['recall']} — parent recall for "
+            "queries derived from body-only tokens (report-only)"
+        )
+    ab = report.get("abstention_rate") or {}
+    if ab.get("n"):
+        print(
+            f"  abstention_rate (RET-1, n={ab['n']}): {ab['rate']} — fraction of clearly "
+            "off-topic queries recall() correctly injected NOTHING for (report-only)"
+        )
 
-    print("RESULT:", "ALL GATES PASS ✅" if report["ok"] else "GATE FAILURE ❌")
+    # RET-7: the RESULT line always names the serving backend -- e.g.
+    #   RESULT: ALL GATES PASS ✅ [backend=bm25-only — dense path unverified]
+    # so a bm25-only pass can never be skimmed as "hybrid recall verified" from this one
+    # line alone, which is the line most CI logs / terminals actually surface.
+    backend = report.get("backend", "unknown")
+    if backend == "dense+bm25":
+        backend_note = "[backend=dense+bm25]"
+    else:
+        backend_note = f"[backend={backend} — dense path unverified]"
+    if report.get("backend_mismatch"):
+        backend_note += " [FIXTURE/BACKEND MISMATCH]"
+    print("RESULT:", ("ALL GATES PASS ✅" if report["ok"] else "GATE FAILURE ❌"), backend_note)
     return 0 if report["ok"] else 1
 
 

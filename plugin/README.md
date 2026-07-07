@@ -16,6 +16,19 @@ reconsolidation, archive internals).
 | `/hippo:audit` | Deep, judgment-based self-audit of the corpus's content — staleness, drift, archive candidates |
 | `/hippo:remove` | Uninstall/offboard THIS project — removes the symlink, offers to delete index/telemetry, reports (never deletes) shared venv/cache paths |
 
+### Unicode and multilingual retrieval (RET-3)
+
+BM25 tokenization is Unicode-aware unconditionally — word tokens for Latin/Cyrillic/etc.
+(case-folded, accents preserved: "café" tokenizes whole) and character bigrams for CJK
+(Chinese/Japanese/Korean) runs that lack whitespace segmentation. This works out of the box for
+any corpus language, no configuration needed.
+
+The DENSE embedding model, by contrast, stays **English by default** (`bge-small-en-v1.5`) —
+switching it is an explicit opt-in: `/hippo:bootstrap --multilingual` persists a multilingual
+model choice (`${CLAUDE_PLUGIN_DATA}/model.json`) and warms it. `/hippo:doctor` proactively
+flags a visibly non-English corpus still served by the English model. See the bootstrap skill's
+`--multilingual` section for the full procedure and tradeoffs.
+
 ## Operating principle: the agent is the memory master
 
 By default, this plugin operates on the assumption that **the agent owns memory upkeep

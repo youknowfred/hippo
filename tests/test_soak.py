@@ -215,7 +215,7 @@ def test_soak_not_registered_in_dispatcher():
 # read-only invariant — soak never mutates the ledger
 # --------------------------------------------------------------------------- #
 def test_soak_is_readonly_over_ledger(tmp_path, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_TELEMETRY_DIR", raising=False)
+    monkeypatch.delenv("HIPPO_TELEMETRY_DIR", raising=False)
     md = str(tmp_path / ".claude" / "memory")
     _corpus(md, ["a", "b"])
     td = str(tmp_path / ".claude" / ".memory-telemetry")

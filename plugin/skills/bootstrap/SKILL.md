@@ -1,5 +1,5 @@
 ---
-description: Run this once per machine (not per project) to build the shared plugin venv and warm the offline embedding model cache. Use when a user says "bootstrap memory", "set up hippo", "/hippo:bootstrap", or when /hippo:doctor reports the venv/model cache is missing. Idempotent — safe to re-run; it no-ops via a sentinel file if already bootstrapped.
+description: Run this once per machine (not per project) to build the shared plugin venv and warm the offline embedding model cache. Use when a user says "bootstrap memory", "set up hippo", "/hippo:bootstrap", or when /hippo:doctor reports the venv/model cache is missing. Idempotent — safe to re-run; it no-ops via a sentinel file if already bootstrapped. Pass `--multilingual` to switch to a multilingual embedding model for non-English corpora.
 ---
 
 # /hippo:bootstrap — one-time-per-machine venv + model warm
@@ -73,6 +73,50 @@ would provision into a root-owned path. Run this guard FIRST and stop if it fail
    current. If `uv` was unavailable and the `venv` fallback was used, say so (slower but works).
    If the system `python3` was outside the supported window and `uv --python 3.12` was used
    instead, say that too — the venv's interpreter deliberately differs from `python3` on PATH.
+
+## `--multilingual` — opt-in multilingual embedding preset (RET-3 / OQ-4)
+
+The default dense model (`BAAI/bge-small-en-v1.5`) is English-only — trained and evaluated on
+English text. This plugin's Unicode tokenization (BM25 side) works correctly for ANY language
+unconditionally, but the DENSE half only understands what its model was trained on. If your
+corpus is mostly written in a non-English language (Japanese, Russian, etc. — `/hippo:doctor`
+will flag this for you if it notices), switch to a multilingual model instead:
+
+1. Run the SAME venv-build steps above first (`--multilingual` doesn't skip provisioning), then
+   **write the model preset** so the choice persists across sessions without an env var:
+   ```bash
+   PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -c \
+     "import json, os; os.makedirs(os.environ['CLAUDE_PLUGIN_DATA'], exist_ok=True); \
+      json.dump({'embed_model': 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'}, \
+      open(os.path.join(os.environ['CLAUDE_PLUGIN_DATA'], 'model.json'), 'w'))"
+   ```
+   `resolve_embed_model()` (in `memory/build_index.py`) reads this file — `HIPPO_EMBED_MODEL`
+   still overrides it if set, otherwise every subsequent build/recall picks up the multilingual
+   model automatically. This is the SAME preset file `/hippo:doctor`'s non-English-corpus check
+   points users at.
+2. **Warm THAT model** (mirrors step 3 above, but for the multilingual id — a separate ~220MB
+   ONNX download the first time):
+   ```bash
+   PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -c \
+     "from memory.build_index import ensure_fastembed_cache_path; ensure_fastembed_cache_path(); from fastembed import TextEmbedding; TextEmbedding('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')"
+   ```
+3. **Rebuild the index — this is a FULL re-embed, not incremental.** The index manifest records
+   which model embedded it (`manifest["model"]`); `build_index`'s cache-reuse check only trusts
+   a prior row when `old_manifest["model"] == DEFAULT_MODEL`, so switching models makes EVERY
+   existing row a cache miss — every memory gets re-embedded from scratch, once, under the new
+   model. Expect this to take noticeably longer than an incremental rebuild on a large corpus:
+   ```bash
+   PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -m memory.build_index \
+     --memory-dir <memory_dir> --index-dir <index_dir> --force
+   ```
+
+**When to use this**: your corpus (memory descriptions) is visibly written in a non-English
+language, OR `/hippo:doctor` warns "corpus is N% non-Latin-alphabetic but is served by the
+English default embedding model." **When NOT to**: an English (or mostly-English) corpus —
+the multilingual model trades some English-specific accuracy for broad language coverage, so
+switching without a real multilingual corpus is a pure downgrade. Switching back to English
+later is the same procedure in reverse (rewrite `model.json` to the English id, or delete it
+to fall back to the default, then `--force` rebuild again).
 
 ## Hard rules (do not violate)
 

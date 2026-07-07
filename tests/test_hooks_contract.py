@@ -107,7 +107,7 @@ def _run_hook(
         "CLAUDE_PROJECT_DIR": project,
         "CLAUDE_PLUGIN_ROOT": _PLUGIN_ROOT,
         "CLAUDE_PLUGIN_DATA": data_dir,
-        "MEMOBOT_DISABLE_DENSE": "1",
+        "HIPPO_DISABLE_DENSE": "1",
     }
     proc = subprocess.run(
         ["/bin/bash", hook],
@@ -400,7 +400,7 @@ class TestBashLevelCorpusGuard:
             "CLAUDE_PROJECT_DIR": project,
             "CLAUDE_PLUGIN_ROOT": _PLUGIN_ROOT,
             "CLAUDE_PLUGIN_DATA": str(data_dir),
-            "MEMOBOT_DISABLE_DENSE": "1",
+            "HIPPO_DISABLE_DENSE": "1",
         }
         return project, str(data_dir), canary, env
 
@@ -548,7 +548,7 @@ class TestConcurrentSessionAttribution:
                 "CLAUDE_PROJECT_DIR": project,
                 "CLAUDE_PLUGIN_ROOT": _PLUGIN_ROOT,
                 "CLAUDE_PLUGIN_DATA": env_data_dir,
-                "MEMOBOT_DISABLE_DENSE": "1",
+                "HIPPO_DISABLE_DENSE": "1",
             },
         )
         _assert_contract(proc_b, "UserPromptSubmit")

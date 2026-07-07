@@ -1,0 +1,65 @@
+# QUA-6 golden-corpus hard-set: hand-written CROSS-VOCABULARY paraphrase queries against
+# tests/golden_corpus/memory/*.md -> the memory stem(s) that should be recalled in the
+# top-10. Deliberately avoid each target's own `description:` wording so this exercises the
+# DENSE half of hybrid recall (BM25 alone catches lexical overlap; embeddings catch the
+# paraphrase) -- see tests/test_eval_recall.py's golden-corpus benchmark tests, which build
+# a real index over this corpus and assert measured recall@10 / MRR@10 stay within a band.
+#
+# `expected` is a list -- any one of the listed stems in the top-10 counts as a hit.
+#
+# Committed, deterministic, human-readable -- this file (and the corpus it targets) lives
+# entirely under tests/ so it can never be mistaken for a real project's memory corpus.
+
+- query: "if I promote this branch with three dots will I miss commits already merged to main"
+  expected: [two-dot-diff-before-merge]
+
+- query: "collapsing all my commits into one loses the ability to bisect between the small steps"
+  expected: [squash-merge-loses-intermediate-history]
+
+- query: "swallowing an exception with a bare try/except and a log line isn't really a fix, right"
+  expected: [root-cause-not-symptom-handling]
+
+- query: "should I write a red test that reproduces the crash before I even start patching it"
+  expected: [reproduce-before-you-patch]
+
+- query: "an environment that flips a router between two full stacks for instant rollback"
+  expected: [blue-green-deploy-swaps-traffic-not-hosts]
+
+- query: "ramping a new build to a tiny slice of live users before going to everyone"
+  expected: [canary-release-gradual-traffic-shift]
+
+- query: "required checks are all green on the urgent fix, can I land it without watching the rest"
+  expected: [dont-poll-ci-on-hotfix-merges]
+
+- query: "re-running the entire test suite after every single rename during a mechanical cleanup seems wasteful"
+  expected: [batch-tests-at-end-of-refactor]
+
+- query: "a test suite that never touches real time, sockets, or shared disk state between runs"
+  expected: [hermetic-tests-no-network-no-clock]
+
+- query: "comparing two strings that look identical on screen but one uses a combining accent mark"
+  expected: [unicode-normalization-nfc-vs-nfd]
+
+- query: "some languages need more than just a singular and plural word form depending on count"
+  expected: [pluralization-rules-vary-by-language]
+
+- query: "measure with a flamegraph before guessing which function is actually slow"
+  expected: [profile-before-optimizing]
+
+- query: "looping over rows and firing a separate database call for each one instead of a join"
+  expected: [n-plus-one-query-pattern]
+
+- query: "reusing the checked-in markdown as the only ground truth, everything else can be regenerated"
+  expected: [markdown-in-git-as-source-of-truth]
+
+- query: "no --all flag that silently rewrites every file at once without a human approving each one"
+  expected: [no-bulk-autonomous-sweeps]
+
+- query: "combining a keyword ranking and an embedding ranking without needing their scores on the same scale"
+  expected: [hybrid-search-rrf-fusion]
+
+- query: "keeping both an old name and a new one around forever so nobody's code ever breaks"
+  expected: [one-canonical-name-per-concept]
+
+- query: "code-nav tool for jumping to symbol definitions shouldn't double as a place to store long-term notes"
+  expected: [serena-mcp-for-code-navigation-not-memory]

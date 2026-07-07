@@ -1,7 +1,7 @@
 """Hermetic fixtures for the agent-memory tooling tests.
 
 Each test builds a throwaway git repo with fixture code + memory files and points the
-tooling at it via explicit args / MEMOBOT_MEMORY_DIR. Nothing reads the real ~/.claude
+tooling at it via explicit args / HIPPO_MEMORY_DIR. Nothing reads the real ~/.claude
 memory dir, and commit times are pinned so the git-drift staleness check is deterministic.
 """
 
@@ -70,17 +70,17 @@ def _isolate_trust_registry(tmp_path, monkeypatch):
     """Keep the SEC-1 trust gate hermetic + open by default across the whole suite.
 
     Two independent guards:
-      - ``MEMOBOT_TRUST_FILE`` -> a per-test tmp path, so ``memory.trust`` NEVER reads or
+      - ``HIPPO_TRUST_FILE`` -> a per-test tmp path, so ``memory.trust`` NEVER reads or
         writes the real ``~/.claude/hippo-trust.json`` on the runner's machine (mark_trusted
         creates dirs/files — it must land in tmp, not the developer's home).
-      - ``MEMOBOT_TRUST_ALL=1`` -> the gate is bypassed by default, so the many existing
+      - ``HIPPO_TRUST_ALL=1`` -> the gate is bypassed by default, so the many existing
         recall tests that build a corpus INSIDE a git ``repo`` fixture (which would otherwise
         resolve a real repo_root and be denied by the empty tmp registry) keep passing without
         each having to opt in. The dedicated trust tests (test_trust.py) delete this var to
         exercise the real deny/allow gate.
     """
-    monkeypatch.setenv("MEMOBOT_TRUST_FILE", str(tmp_path / "hippo-trust.json"))
-    monkeypatch.setenv("MEMOBOT_TRUST_ALL", "1")
+    monkeypatch.setenv("HIPPO_TRUST_FILE", str(tmp_path / "hippo-trust.json"))
+    monkeypatch.setenv("HIPPO_TRUST_ALL", "1")
 
 
 @pytest.fixture(autouse=True)

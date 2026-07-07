@@ -1,6 +1,6 @@
 """Tests for memory/telemetry.py — the recall-event ledger.
 
-Hermetic: every test points ``MEMOBOT_TELEMETRY_DIR`` at a tmp dir (nothing touches the real
+Hermetic: every test points ``HIPPO_TELEMETRY_DIR`` at a tmp dir (nothing touches the real
 ``.claude/.memory-telemetry``). The recall-isolation test builds a throwaway BM25-only index.
 """
 
@@ -101,7 +101,7 @@ def test_append_never_raises_on_unwritable_dir(tmp_path):
 # --------------------------------------------------------------------------- #
 def test_ledger_rotates_under_byte_cap(tmp_path, monkeypatch):
     td = str(tmp_path / "tele")
-    monkeypatch.setenv("MEMOBOT_TELEMETRY_MAX_BYTES", "800")
+    monkeypatch.setenv("HIPPO_TELEMETRY_MAX_BYTES", "800")
     for i in range(200):
         T.log_recall_event(
             [{"name": f"m{i}", "backend": "bm25"}],
@@ -295,7 +295,7 @@ def test_log_episode_non_git_repo_root_degrades_to_none_head_commit(tmp_path):
 
 
 def test_log_episode_shares_rotation_with_its_own_ledger(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_TELEMETRY_MAX_BYTES", "400")
+    monkeypatch.setenv("HIPPO_TELEMETRY_MAX_BYTES", "400")
     td = str(tmp_path / "tele")
     for i in range(40):
         T.log_episode([f"m{i}"], query=f"q{i}", telemetry_dir=td)
@@ -373,7 +373,7 @@ def test_record_reconsolidation_outcome_never_raises_on_unwritable_dir(tmp_path)
 
 
 def test_reconsolidation_ledger_shares_rotation(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_TELEMETRY_MAX_BYTES", "400")
+    monkeypatch.setenv("HIPPO_TELEMETRY_MAX_BYTES", "400")
     td = str(tmp_path / "tele")
     for i in range(40):
         T.record_reconsolidation_outcome(f"m{i}", "graduate", telemetry_dir=td)
@@ -413,13 +413,13 @@ def test_three_ledgers_are_distinct_files(tmp_path):
 # default_telemetry_dir derivation
 # --------------------------------------------------------------------------- #
 def test_default_telemetry_dir_is_index_sibling(tmp_path, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_TELEMETRY_DIR", raising=False)
+    monkeypatch.delenv("HIPPO_TELEMETRY_DIR", raising=False)
     md = str(tmp_path / ".claude" / "memory")
     assert T.default_telemetry_dir(md) == str(tmp_path / ".claude" / ".memory-telemetry")
 
 
 def test_default_telemetry_dir_env_override(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_TELEMETRY_DIR", "/custom/tele")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", "/custom/tele")
     assert T.default_telemetry_dir(str(tmp_path / ".claude" / "memory")) == "/custom/tele"
 
 
@@ -430,9 +430,9 @@ def test_recall_main_logs_one_event_recall_direct_logs_nothing(tmp_path, monkeyp
     from memory import build_index as B
     from memory import recall as R
 
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     td = str(tmp_path / "tele")
-    monkeypatch.setenv("MEMOBOT_TELEMETRY_DIR", td)
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
 
     md = str(tmp_path / ".claude" / "memory")
     os.makedirs(md)
@@ -468,7 +468,7 @@ def test_recall_main_empty_query_logs_nothing(tmp_path, monkeypatch):
     from memory import recall as R
 
     td = str(tmp_path / "tele")
-    monkeypatch.setenv("MEMOBOT_TELEMETRY_DIR", td)
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
     assert R.main([]) == 0  # no query
     assert _events(td) == []
     assert _episodes(td) == []
@@ -480,9 +480,9 @@ def test_recall_main_session_id_flag_keys_telemetry(tmp_path, monkeypatch):
     from memory import build_index as B
     from memory import recall as R
 
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     td = str(tmp_path / "tele")
-    monkeypatch.setenv("MEMOBOT_TELEMETRY_DIR", td)
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
 
     md = str(tmp_path / ".claude" / "memory")
     os.makedirs(md)
@@ -506,11 +506,11 @@ def test_recall_main_session_id_flag_keys_telemetry(tmp_path, monkeypatch):
 def test_session_start_main_marks_a_session(tmp_path, monkeypatch):
     import memory.session_start as S
 
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / ".claude" / "memory")
     os.makedirs(md)
     td = str(tmp_path / ".claude" / ".memory-telemetry")
-    monkeypatch.delenv("MEMOBOT_TELEMETRY_DIR", raising=False)
+    monkeypatch.delenv("HIPPO_TELEMETRY_DIR", raising=False)
 
     monkeypatch.setattr(S, "resolve_dirs", lambda: (md, str(tmp_path)))
     monkeypatch.setattr(S, "build_context", lambda *a, **k: "")  # isolate the side effect
@@ -525,7 +525,7 @@ def test_session_start_main_no_stray_telemetry_for_missing_memory_dir(tmp_path, 
     mark_session side effect is guarded on a real corpus dir (mirrors refresh_index)."""
     import memory.session_start as S
 
-    monkeypatch.delenv("MEMOBOT_TELEMETRY_DIR", raising=False)
+    monkeypatch.delenv("HIPPO_TELEMETRY_DIR", raising=False)
     bogus = str(tmp_path / "does_not_exist" / "memory")
     monkeypatch.setattr(S, "resolve_dirs", lambda: (bogus, str(tmp_path)))
     monkeypatch.setattr(S, "build_context", lambda *a, **k: "")

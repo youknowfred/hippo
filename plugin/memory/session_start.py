@@ -262,7 +262,7 @@ def untrusted_corpus_nudge(memory_dir: str, repo_root: str) -> Optional[str]:
         f"🔒 This project has an UNTRUSTED memory corpus ({count} memories) — hippo is "
         "injecting nothing from it until you review and trust it. A cloned repo's memories "
         "are an unreviewed prompt-injection channel, so recall stays gated by default. Run "
-        "/hippo:doctor to see the memory names and trust this corpus (or set MEMOBOT_TRUST_ALL=1 "
+        "/hippo:doctor to see the memory names and trust this corpus (or set HIPPO_TRUST_ALL=1 "
         "for CI)."
     )
 

@@ -81,3 +81,30 @@
 
 - query: "tempted to write a plan document and defer the hard half to avoid complexity"
   expected: [feedback_no_tactical_shortcuts]
+
+# RET-4: code-heavy cases — a fenced traceback/symbol block should still retrieve the memory
+# citing that exact symbol/file, now that clean_query MINES fence contents instead of
+# deleting them wholesale. Written as the RAW prompt a debugging session would actually send
+# (fenced traceback + prose) since eval_recall's hard-set feeds `query` straight into
+# recall() (bypassing the hook's clean_query pass) — the mined tokens matter for the real
+# UserPromptSubmit path (see tests/test_recall.py's clean_query→recall acceptance test),
+# but this fixture pins the corpus-level retrieval outcome either way: the symbol/file
+# tokens themselves (present verbatim in the query below) are the signal being pinned.
+- query: >-
+    our fire-and-forget worker keeps silently dying, trace:
+    ```
+    Traceback (most recent call last):
+      File "worker.py", line 12, in <module>
+        task.add_done_callback(_BG_TASKS.discard)
+    ```
+    what is going on
+  expected: [feedback_anchor_fire_and_forget_tasks]
+
+- query: >-
+    getting this from a code-nav MCP:
+    ```
+    write_memory(key, value)
+    read_memory(key)
+    ```
+    should the LSP server really be persisting knowledge like this
+  expected: [feedback_serena_tools_only]

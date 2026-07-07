@@ -269,7 +269,7 @@ def walk_up_for_memory_dir(start: str) -> Tuple[str, str]:
 def resolve_dirs() -> Tuple[str, str]:
     """Return ``(memory_dir, repo_root)``.
 
-    Honors ``MEMOBOT_MEMORY_DIR`` (used by hermetic tests) explicitly — that path is
+    Honors ``HIPPO_MEMORY_DIR`` (used by hermetic tests) explicitly — that path is
     used as-is, no walk-up. Otherwise (OQ-1, SHP-2): a per-package corpus at
     ``<CLAUDE_PROJECT_DIR-or-cwd>/.claude/memory`` wins when present (nested wins);
     else ascend toward the git toplevel looking for a corpus (root-fallthrough) — a
@@ -283,7 +283,7 @@ def resolve_dirs() -> Tuple[str, str]:
     start = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
     repo_root = git_root(start) or start
 
-    explicit = os.environ.get("MEMOBOT_MEMORY_DIR")
+    explicit = os.environ.get("HIPPO_MEMORY_DIR")
     if explicit:
         return explicit, repo_root
 
@@ -631,13 +631,17 @@ def backfill_file(
     return result
 
 
+def _is_memory_filename(name: str) -> bool:
+    """THE corpus-membership filter — one definition, shared with the edge cache's
+    scandir stat sweep (GRA-6), which must see exactly the files ``_iter_memory_files``
+    yields or the cache-freshness check would silently drift from the graph builder."""
+    return name.endswith(".md") and name not in ("MEMORY.md", "MEMORY.full.md")
+
+
 def _iter_memory_files(memory_dir: str):
     for name in sorted(os.listdir(memory_dir)):
-        if not name.endswith(".md"):
-            continue
-        if name in ("MEMORY.md", "MEMORY.full.md"):
-            continue
-        yield os.path.join(memory_dir, name)
+        if _is_memory_filename(name):
+            yield os.path.join(memory_dir, name)
 
 
 def heal_empty_baselines(memory_dir: str, repo_root: str) -> List[str]:
