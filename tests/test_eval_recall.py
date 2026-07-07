@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import os
 
+import pytest
+
 from memory import build_index as B
 from memory import eval_recall as E
 
@@ -921,3 +923,152 @@ def test_default_fixture_path_probe_order_unaffected_by_ret7(tmp_path, monkeypat
         fh.write("- {query: q, expected: [a]}\n")  # no header at all -- still wins by path
     assert E._default_hard_set_path() == audit_fixture
     assert E.load_hard_set_metadata(audit_fixture) == {}
+
+
+# --------------------------------------------------------------------------- #
+# QUA-6, leg 1 — exact-value gate-constant pins.
+#
+# Every OTHER test in this module (and the tmp corpora above) is deliberately engineered to
+# score ~1.0 on all 5 gates, which means a threshold EDIT (someone loosens GATE_HARD_RECALL
+# from 0.80 to 0.60 "to make CI green again") passes every existing test silently -- nothing
+# here notices the merge bar moved. Pinning the exact literal values makes any such edit a
+# visible, deliberate two-place change: the constant in eval_recall.py AND this pin, both
+# touched in the same diff, both reviewable. A one-sided edit (constant only) is a red build.
+# --------------------------------------------------------------------------- #
+def test_gate_constants_are_pinned_exact_values():
+    assert E.GATE_SELF_RECALL == 0.90
+    assert E.GATE_HARD_RECALL == 0.80
+    assert E.GATE_MRR == 0.60
+    assert E.GATE_P95_MS == 300.0
+
+
+def test_token_reduction_gate_is_net_greater_than_zero(tmp_path, monkeypatch):
+    """Pin the token-reduction gate's THRESHOLD EXPRESSION itself (net > 0), not just that a
+    particular tmp corpus happens to satisfy it -- ``test_token_reduction_gate`` above already
+    covers the latter. A future rewrite of ``token_reduction`` that silently changes what
+    "pass" means (e.g. net >= 0, or a nonzero pct instead of net) should fail this pin even if
+    every engineered-to-pass corpus in the suite still scores comfortably positive."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    tok = E.token_reduction(md, index, _HARD_SET, k=10)
+    # The gate dict's "pass" flag is exactly `net > 0` (see evaluate()'s `gates["token_reduction"]`
+    # construction) -- reproduce that exact boolean expression here so an edit to `>=` (which
+    # would let a net of exactly 0 -- no reduction at all -- pass) fails this pin.
+    assert (tok["net"] > 0) is True
+    hs_path = _write_hard_set(tmp_path)
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)
+    assert report["gates"]["token_reduction"]["pass"] == (tok["net"] > 0)
+
+
+# --------------------------------------------------------------------------- #
+# QUA-6, leg 2 — golden-corpus dense-ranking regression tripwire.
+#
+# tests/golden_corpus/ ships a checked-in, deterministic, human-readable ~50-memory
+# hippo-native corpus (git workflows, debugging, deployments, testing, i18n, perf,
+# architecture decisions, tooling...) plus a ~15-query cross-vocabulary paraphrase hard-set.
+# Unlike every OTHER corpus in this file (engineered with near-zero lexical overlap so BM25
+# alone trivially clears the gates), the golden corpus is realistic -- paraphrases sit close
+# enough in vocabulary that BM25 mostly finds them too, so this is a genuine ranking-QUALITY
+# probe (via MRR) rather than a pure recall/miss probe.
+#
+# Actuals measured on 2026-07-06 against this exact corpus + hard-set (recorded here AND in
+# the commit body per the roadmap item's instructions):
+#   dense (fastembed model warm)  : recall@10 = 1.0000, mrr@10 = 0.9352, self_recall@10 = 1.0000
+#   bm25-only (MEMOBOT_DISABLE_DENSE=1): recall@10 = 1.0000, mrr@10 = 0.9120, self_recall@10 = 1.0000
+#
+# Band floors are set a small margin (0.05) below each measured actual -- tight enough to
+# catch a real regression (a model bump, a fusion-weight change, a soft-invalidation
+# threshold drift that demotes correct hits), loose enough to absorb ordinary run-to-run
+# jitter (tie-breaking among equal-score candidates, floating-point summation order).
+# --------------------------------------------------------------------------- #
+_GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "golden_corpus")
+_GOLDEN_MEMORY_DIR = os.path.join(_GOLDEN_DIR, "memory")
+_GOLDEN_HARD_SET_PATH = os.path.join(_GOLDEN_DIR, "hard_set.yaml")
+
+# Dense floors (measured actual - 0.05; see docstring above for the measured actuals).
+_GOLDEN_DENSE_RECALL_FLOOR = 0.95
+_GOLDEN_DENSE_MRR_FLOOR = 0.8852
+_GOLDEN_DENSE_SELF_RECALL_FLOOR = 0.95
+
+# BM25-only floors -- deliberately LOWER than the dense floors: this is the hermetic
+# companion's own measured band, not a relaxed version of the dense one (see docstring).
+_GOLDEN_BM25_RECALL_FLOOR = 0.95
+_GOLDEN_BM25_MRR_FLOOR = 0.862
+_GOLDEN_BM25_SELF_RECALL_FLOOR = 0.95
+
+
+def test_golden_corpus_hard_set_loads_and_targets_exist():
+    """Hermetic sanity check independent of any index build: the fixture parses, has the
+    documented ~15-ish query count, and every expected stem actually ships in the corpus --
+    catches a typo'd stem silently zeroing out that query's contribution to recall/MRR."""
+    hard_set = E.load_hard_set(_GOLDEN_HARD_SET_PATH)
+    assert 12 <= len(hard_set) <= 20
+    stems = {
+        fn[:-3] for fn in os.listdir(_GOLDEN_MEMORY_DIR) if fn.endswith(".md")
+    }
+    assert 45 <= len(stems) <= 55  # "~50" per the roadmap item
+    for item in hard_set:
+        for expected in item["expected"]:
+            assert expected in stems, f"hard-set expects {expected!r}, not in golden corpus"
+
+
+def test_golden_corpus_bm25_only_recall_and_mrr_within_band(tmp_path, monkeypatch):
+    """HERMETIC companion (no fastembed, no network): gives the hermetic CI lanes real golden
+    signal instead of only the network-marked dense test below. Its floors are its OWN
+    measured band (not the dense test's floors relaxed) -- see the module docstring."""
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    idx = str(tmp_path / ".memory-index")
+    manifest = B.build_index(_GOLDEN_MEMORY_DIR, idx)
+    assert manifest["dense_ready"] is False  # confirms this run is genuinely BM25-only
+
+    index = B.load_index(idx)
+    hard_set = E.load_hard_set(_GOLDEN_HARD_SET_PATH)
+
+    hs = E.hard_set_metrics(index, hard_set, k=10)
+    assert hs["recall"] >= _GOLDEN_BM25_RECALL_FLOOR, hs
+    assert hs["mrr"] >= _GOLDEN_BM25_MRR_FLOOR, hs
+
+    sr = E.self_recall_at_k(index, k=10)
+    assert sr >= _GOLDEN_BM25_SELF_RECALL_FLOOR, sr
+
+
+@pytest.mark.network
+def test_golden_corpus_dense_recall_and_mrr_within_band(tmp_path, monkeypatch, tmp_path_factory):
+    """The dense-ranking regression tripwire: builds a REAL dense index (fastembed model,
+    hybrid RRF fusion) over the golden corpus and asserts hard-set recall@10 / MRR@10 stay
+    within a band a small margin below the measured actuals -- a model bump, a fusion-weight
+    change, or a soft-invalidation threshold drift that quietly demotes correct hits would
+    trip this even though it might not touch recall@10 (which mostly stays 1.0 on a small
+    corpus) -- MRR is the more sensitive of the two signals here (see module docstring).
+
+    Network-marked (deselected by default) per the QUA-3 pattern in test_build_index.py: a
+    cold model cache would download the ~130MB fastembed ONNX model. CI's dense lane restores
+    a cached model via actions/cache and opts in with `-m network`; this machine has a warm
+    cache already.
+    """
+    pytest.importorskip("fastembed")
+    # QUA-3 pattern: honor a caller-provided FASTEMBED_CACHE_PATH (CI's dense lane points this
+    # at the actions-restored cache) else a session-scoped tmp dir -- NEVER the user's real
+    # home cache.
+    cache = os.environ.get("FASTEMBED_CACHE_PATH") or str(
+        tmp_path_factory.getbasetemp() / "fastembed-cache"
+    )
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", cache)
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+
+    idx = str(tmp_path / ".memory-index")
+    manifest = B.build_index(_GOLDEN_MEMORY_DIR, idx)
+    assert manifest["dense_ready"] is True  # confirms this run is genuinely dense+bm25
+
+    index = B.load_index(idx)
+    hard_set = E.load_hard_set(_GOLDEN_HARD_SET_PATH)
+
+    hs = E.hard_set_metrics(index, hard_set, k=10)
+    assert hs["recall"] >= _GOLDEN_DENSE_RECALL_FLOOR, hs
+    assert hs["mrr"] >= _GOLDEN_DENSE_MRR_FLOOR, hs
+
+    sr = E.self_recall_at_k(index, k=10)
+    assert sr >= _GOLDEN_DENSE_SELF_RECALL_FLOOR, sr
