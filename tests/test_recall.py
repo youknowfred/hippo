@@ -746,6 +746,130 @@ def test_clean_query_passes_through_a_real_question():
 
 
 # --------------------------------------------------------------------------- #
+# RET-4: fence mining + traceback mining — MINE identifiers instead of deleting them,
+# and restrict tag stripping to KNOWN harness tag names.
+# --------------------------------------------------------------------------- #
+def test_clean_query_mines_symbol_and_file_tokens_from_a_fenced_traceback():
+    raw = (
+        "why does this keep failing:\n"
+        "```\n"
+        "Traceback (most recent call last):\n"
+        '  File "plugin/memory/recall.py", line 42, in recall\n'
+        "    task.add_done_callback(_BG_TASKS.discard)\n"
+        "ValueError: bad state\n"
+        "```\n"
+        "seems related to asyncio.create_task somehow"
+    )
+    out = R.clean_query(raw)
+    # The fence is no longer deleted wholesale -- its identifier-like tokens (symbol, file
+    # path, error class) are mined out and appended so they still reach BM25/dense.
+    assert "_BG_TASKS" in out or "_bg_tasks" in out.lower()
+    assert "plugin/memory/recall.py" in out
+    assert "ValueError" in out
+    # The prose around the fence survives untouched, same as before this change.
+    assert "asyncio.create_task" in out
+    assert "Traceback (most recent call last)" not in out  # fence body itself still removed
+
+
+def test_clean_query_mines_an_unfenced_traceback_line():
+    # Roadmap: "give un-fenced traceback lines the same treatment if cheap" -- a pasted stack
+    # trace often isn't triple-backtick'd; File "...", line N and a trailing SomeError: still
+    # carry signal and must survive even with no fence present.
+    raw = (
+        'File "plugin/memory/build_index.py", line 88, in embed_query\n'
+        "RuntimeError: model cache miss\n"
+        "why does this happen on a cold machine"
+    )
+    out = R.clean_query(raw)
+    assert "plugin/memory/build_index.py" in out
+    assert "RuntimeError" in out
+    assert "cold machine" in out
+
+
+def test_clean_query_caps_mined_tokens():
+    # _MAX_MINED_TOKENS (module constant) bounds how many mined identifiers get appended --
+    # a huge fence must not blow the query out to an unbounded size.
+    fence_lines = "\n".join(f"module_{i}.attr_name_{i}" for i in range(30))
+    raw = f"why is this broken:\n```\n{fence_lines}\n```\nplease help"
+    out = R.clean_query(raw)
+    mined_count = sum(1 for i in range(30) if f"module_{i}.attr_name_{i}" in out)
+    assert mined_count <= R._MAX_MINED_TOKENS
+
+
+def test_clean_query_known_harness_tags_still_stripped():
+    raw = (
+        "<system-reminder>ignore this</system-reminder>"
+        "<task-notification><tool-use-id>x</tool-use-id></task-notification>"
+        "<local-command-stdout>noise</local-command-stdout>"
+        "<local-command-caveat>careful</local-command-caveat>"
+        "<command-name>foo</command-name><command-message>bar</command-message>"
+        "<command-args/>"
+        " fix the reranker circuit breaker bug"
+    )
+    out = R.clean_query(raw)
+    assert "reranker" in out
+    for marker in (
+        "system-reminder", "task-notification", "local-command-stdout",
+        "local-command-caveat", "command-name", "command-message", "command-args",
+    ):
+        assert marker not in out
+
+
+def test_clean_query_unknown_tags_survive_as_signal():
+    # RET-4: only KNOWN harness tag names get deleted -- <lambda>, Vec<String>, <module> are
+    # real symbol-shaped signal in a debugging prompt and must NOT be silently discarded.
+    raw = "why does <lambda> at Vec<String> break, also <module> level code"
+    out = R.clean_query(raw)
+    assert "<lambda>" in out
+    assert "Vec<String>" in out
+    assert "<module>" in out
+
+
+def test_clean_query_continuation_skip_unchanged_with_mining():
+    # A terse continuation must still skip recall entirely -- fence mining must not
+    # accidentally manufacture enough "content" out of nothing to defeat the gate.
+    for raw in ("?", "continue", "pls continue", "ok", "drop it", "   ", "option 2", "yes"):
+        assert R.clean_query(raw) == "", raw
+
+
+def test_recall_acceptance_traceback_prompt_recalls_memory_citing_same_symbol(
+    tmp_path, monkeypatch
+):
+    # Acceptance criterion (RET-4): a traceback-bearing prompt recalls the memory citing the
+    # same symbol/file. Hermetic corpus test THROUGH recall() (clean_query -> recall), not
+    # just a clean_query unit test -- exercises the full hot-path contract end to end.
+    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    corpus = {
+        "anchor_fire_and_forget_tasks.md": (
+            "asyncio.create_task returns a Task the event loop only weakly references -- "
+            "an unanchored fire and forget task can be garbage collected mid execution "
+            "unless anchored on a module level _BG_TASKS set with a done callback"
+        ),
+        "excel_header.md": "excel parser llm header rescue for non canonical column layouts",
+        "canvas_pdf.md": "canvas pdf export two pass gotenberg pypdf footnote marker",
+    }
+    _write_corpus(md, corpus)
+    B.build_index(md, idx)
+
+    raw = (
+        "our background job keeps silently dying, here's the trace:\n"
+        "```\n"
+        "Traceback (most recent call last):\n"
+        '  File "worker.py", line 12, in <module>\n'
+        "    task.add_done_callback(_BG_TASKS.discard)\n"
+        "```\n"
+        "what's going on"
+    )
+    cleaned = R.clean_query(raw)
+    assert cleaned  # not skipped -- carries real retrieval intent once mined
+    res = R.recall(cleaned, k=5, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert "anchor_fire_and_forget_tasks" in names
+
+
+# --------------------------------------------------------------------------- #
 # Floor-dedup (display layer) — drop always-loaded floor members from recall output
 # --------------------------------------------------------------------------- #
 def _write_floor(memory_dir: str, floor_names) -> None:

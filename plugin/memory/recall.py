@@ -79,7 +79,26 @@ _ENVELOPE_BLOCK_RE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 _FENCE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
-_TAG_RE = re.compile(r"<[^>]+>")
+
+# RET-4: tag stripping is scoped to KNOWN harness tag names only. Previously _TAG_RE matched
+# ANY angle-bracketed span, which silently ate `<lambda>`, `Vec<String>`, `<module>` — exactly
+# the symbol-shaped tokens debugging prompts are made of. Restricting the deletion to the
+# harness's own envelope/wrapper tags means an unknown tag (a Python repr, a generic type, a
+# stray HTML-ish fragment a user pasted) is LEFT IN PLACE; angle brackets tokenize harmlessly
+# (they're not word chars) so the identifier text inside/around them still reaches BM25/dense.
+_KNOWN_HARNESS_TAGS = (
+    "task-notification",
+    "system-reminder",
+    "local-command-stdout",
+    "local-command-caveat",
+    "command-name",
+    "command-message",
+    "command-args",
+)
+_TAG_RE = re.compile(
+    r"</?(?:" + "|".join(_KNOWN_HARNESS_TAGS) + r")\b[^>]*/?>",
+    re.IGNORECASE,
+)
 _MIN_CONTENT_TOKENS = 2
 # Terse continuation/filler prompts that carry no retrieval intent (matched normalized+lowered).
 _CONTINUATION_PHRASES = frozenset(
@@ -91,13 +110,77 @@ _CONTINUATION_PHRASES = frozenset(
     }
 )
 
+# --------------------------------------------------------------------------- #
+# RET-4: fence/traceback mining
+# --------------------------------------------------------------------------- #
+# clean_query used to DELETE fenced code blocks outright (_FENCE_BLOCK_RE.sub(" ", ...)) —
+# throwing away the error class, symbol names, and file paths that are the strongest lexical
+# signal in exactly the debugging prompts where recall matters most ("why does
+# `_BG_TASKS.discard` never fire" is far more retrievable than the sentence around it once the
+# identifier survives). Instead of deleting fence contents, MINE them: pull identifier-like
+# tokens out, rank by a cheap rarity proxy, and APPEND the top few to the cleaned text so they
+# still reach tokenize()/BM25/dense. clean_query has no index access (it must stay pure/total,
+# no I/O), so true corpus-frequency rarity is unavailable — "longer / multi-part (underscored,
+# dotted, camelCase) / UPPER_CASE" is the cheap proxy: those shapes are overwhelmingly
+# project-specific identifiers, while short bare words are usually keywords/builtins that BM25
+# already handles fine from the surrounding prose.
+_IDENTIFIER_RE = re.compile(
+    r"""
+    [A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+   # dotted path: module.attr, a.b.c
+    | [A-Za-z0-9_]+/[A-Za-z0-9_./-]*[A-Za-z0-9_]           # path-like: dir/file.py, a/b/c
+    | [A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+               # snake_case (>=1 underscore)
+    | [a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*                   # camelCase / PascalCase-ish
+    | [A-Z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*                   # ErrorClass-style (CapWords, e.g. IOError)
+    | [A-Z][A-Z0-9_]{2,}                                    # UPPER_CASE constants (>=3 chars)
+    """,
+    re.VERBOSE,
+)
+# Traceback lines carry identifier signal even OUTSIDE a fence (a pasted stack trace often
+# isn't triple-backtick'd). Both are cheap, total (no backtracking blowup — bounded charsets,
+# anchored per-line) regexes: `File "path", line N` and a trailing `SomeError: message`.
+_TRACEBACK_FILE_RE = re.compile(r'File\s+"([^"]+)",\s*line\s+(\d+)')
+_TRACEBACK_ERROR_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*(?:Error|Exception|Warning))\b\s*:")
+_MAX_MINED_TOKENS = 8  # module constant per the roadmap spec — cap on mined tokens appended
+
+
+def _mine_identifiers(text: str) -> List[str]:
+    """Extract+rank identifier-like tokens from ``text`` (fence contents or raw traceback lines).
+
+    Rarity proxy (clean_query is pure — no index/corpus access to compute real IDF): rank by
+    (is multi-part [underscore/dot/slash] first, then length desc) — longer, structured tokens
+    are overwhelmingly project-specific identifiers (error classes, symbol names, file paths),
+    while short undecorated words are usually common tokens BM25 already scores fine from the
+    surrounding prose. Dedupes while preserving first-seen order among equal-ranked tokens
+    (stable sort). Never raises (caller wraps); pure text in, list out.
+    """
+    found = _IDENTIFIER_RE.findall(text)
+    # File "path", line N -> the path is exactly as strong a signal as a fenced identifier.
+    for path, _line in _TRACEBACK_FILE_RE.findall(text):
+        found.append(path)
+    found.extend(_TRACEBACK_ERROR_RE.findall(text))
+
+    seen: dict = {}  # token -> first-seen index (for stable ordering among equal rank)
+    for i, tok in enumerate(found):
+        if tok not in seen:
+            seen[tok] = i
+
+    def _is_multipart(tok: str) -> bool:
+        return ("_" in tok) or ("." in tok) or ("/" in tok)
+
+    ranked = sorted(
+        seen.keys(),
+        key=lambda tok: (not _is_multipart(tok), -len(tok), seen[tok]),
+    )
+    return ranked[:_MAX_MINED_TOKENS]
+
 
 def clean_query(raw: str) -> str:
     """Normalize a raw prompt into a recall query, or "" to SKIP recall (no model load).
 
-    Strips harness envelopes (``<task-notification>`` / ``<system-reminder>`` tool-use blobs,
-    fenced code blocks, stray XML-ish tags) and returns "" when what remains carries no
-    retrieval intent (a terse continuation like "?"/"continue", or fewer than
+    Strips harness envelopes (``<task-notification>`` / ``<system-reminder>`` tool-use blobs)
+    and KNOWN harness wrapper tags, MINES identifier-like tokens out of fenced code blocks and
+    traceback lines (rather than deleting them — RET-4), and returns "" when what remains
+    carries no retrieval intent (a terse continuation like "?"/"continue", or fewer than
     ``_MIN_CONTENT_TOKENS`` content tokens). Pure; never raises — any failure degrades to the
     raw prompt (recall on the un-cleaned text rather than skip).
     """
@@ -105,9 +188,17 @@ def clean_query(raw: str) -> str:
         if not raw or not raw.strip():
             return ""
         text = _ENVELOPE_BLOCK_RE.sub(" ", raw)
+
+        # Mine identifiers from fenced blocks AND raw traceback lines BEFORE the fences are
+        # removed from the running text — mining reads the ORIGINAL raw (fences + surrounding
+        # prose both scanned) so a traceback pasted without a fence is treated identically.
+        mined = _mine_identifiers(raw)
+
         text = _FENCE_BLOCK_RE.sub(" ", text)
         text = _TAG_RE.sub(" ", text)
         text = " ".join(text.split()).strip()
+        if mined:
+            text = (text + " " + " ".join(mined)).strip() if text else " ".join(mined)
         if not text:
             return ""
         if text.lower().strip(" ?!.,") in _CONTINUATION_PHRASES:
