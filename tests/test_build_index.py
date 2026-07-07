@@ -390,16 +390,19 @@ def test_invalid_after_refreshed_on_embedding_cache_hit(tmp_path, monkeypatch):
     assert a_entry["invalid_after"] is None  # untouched entry stays untouched
 
 
-def test_load_index_tolerates_older_index_missing_invalid_after(tmp_path):
-    """An index written before this field existed (no invalid_after key on any entry) must
-    load fine -- entry.get("invalid_after") degrades to None via dict .get(), no KeyError."""
+def test_load_index_tolerates_entries_missing_invalid_after(tmp_path):
+    """A CURRENT-schema manifest whose entries carry no invalid_after key must load fine --
+    entry.get("invalid_after") degrades to None via dict .get(), no KeyError. (Pre-COR-7
+    this test used a schema_version-1 manifest to model "older index"; a genuinely older
+    manifest no longer loads AT ALL -- the schema gate treats it as absent and the next
+    refresh rebuilds -- so the missing-key tolerance is pinned on a current-version shape.)"""
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     os.makedirs(idx, exist_ok=True)
     import json as _json
 
     old_manifest = {
-        "schema_version": 1,  # pre-Tier-3 schema
+        "schema_version": B.SCHEMA_VERSION,
         "model": None,
         "dense_ready": False,
         "dim": None,
@@ -544,6 +547,103 @@ def test_refresh_preserves_dense_when_offline_embed_fails(tmp_path, monkeypatch)
 
 def test_refresh_index_missing_dir_is_none(tmp_path):
     assert B.refresh_index(str(tmp_path / "nope"), str(tmp_path / "idx")) is None
+
+
+def test_refresh_index_picks_up_metadata_only_invalid_after_change(tmp_path, monkeypatch):
+    """LIF-1: invalid_after never perturbs a doc_text/body hash, so the unchanged-corpus
+    short-circuit must compare it explicitly — otherwise a soft-invalidation (set by
+    demote's chain or --invalidate, or STRIPPED by a genuine reverify) would be starved
+    out of the index forever on an otherwise-quiet corpus, and recall's pre-cut penalty
+    would never see the one field it acts on."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha", "b.md": "beta"})
+    B.build_index(md, idx)
+    assert all(e.get("invalid_after") is None for e in B.load_index(idx).entries)
+
+    from memory.staleness import set_invalid_after
+
+    set_invalid_after(os.path.join(md, "a.md"), "2026-01-01T00:00:00+00:00")
+    B.refresh_index(md, idx)
+    by_name = {e["name"]: e.get("invalid_after") for e in B.load_index(idx).entries}
+    assert by_name["a"] == "2026-01-01T00:00:00+00:00"  # set -> propagated
+
+    # the reverse direction too: clearing the window must not be no-op'd away either
+    text = open(os.path.join(md, "a.md"), encoding="utf-8").read()
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write("\n".join(ln for ln in text.split("\n") if not ln.startswith("invalid_after")))
+    B.refresh_index(md, idx)
+    assert all(e.get("invalid_after") is None for e in B.load_index(idx).entries)
+
+
+# --------------------------------------------------------------------------- #
+# RET-5: source_commit_time ingestion — the manifest-level half of the recency prior.
+# Mirrors the invalid_after tests above exactly: same top-level/nested-under-metadata
+# read contract (staleness.read_source_commit_time), same "metadata never perturbs
+# doc_text hash" starvation-proofing in refresh_index.
+# --------------------------------------------------------------------------- #
+def test_compute_corpus_source_commit_time_absent_by_default(tmp_path):
+    md = str(tmp_path / "memory")
+    _write_corpus(md, {"a.md": "alpha"})
+    entries = B.compute_corpus(md)
+    assert entries[0]["source_commit_time"] is None
+
+
+def test_compute_corpus_reads_source_commit_time_top_level(tmp_path):
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: a\ndescription: "alpha"\nsource_commit_time: 1750000000\n---\nbody\n')
+    entries = B.compute_corpus(md)
+    assert entries[0]["source_commit_time"] == 1750000000
+
+
+def test_compute_corpus_reads_source_commit_time_nested_under_metadata(tmp_path):
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write(
+            '---\nname: a\ndescription: "alpha"\nmetadata:\n'
+            "  source_commit_time: 1750000000\n---\nbody\n"
+        )
+    entries = B.compute_corpus(md)
+    assert entries[0]["source_commit_time"] == 1750000000
+
+
+def test_build_index_manifest_carries_source_commit_time(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    os.makedirs(md, exist_ok=True)
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: a\ndescription: "alpha"\nsource_commit_time: 1750000000\n---\nbody\n')
+    manifest = B.build_index(md, idx)
+    assert manifest["entries"][0]["source_commit_time"] == 1750000000
+    assert B.load_index(idx).entries[0]["source_commit_time"] == 1750000000
+
+
+def test_refresh_index_picks_up_metadata_only_source_commit_time_change(tmp_path, monkeypatch):
+    """RET-5: source_commit_time never perturbs doc_text (name+description only), so the
+    unchanged-corpus short-circuit must compare it explicitly — otherwise a reverify/
+    backfill that only bumps this field would be starved out of the index forever on an
+    otherwise-quiet corpus, and recall's optional recency prior would keep reading a stale
+    baseline (or none at all)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha", "b.md": "beta"})
+    B.build_index(md, idx)
+    assert all(e.get("source_commit_time") is None for e in B.load_index(idx).entries)
+
+    text = open(os.path.join(md, "a.md"), encoding="utf-8").read()
+    text = text.replace("---\n", "---\nsource_commit_time: 1750000000\n", 1)
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write(text)
+    B.refresh_index(md, idx)
+    by_name = {e["name"]: e.get("source_commit_time") for e in B.load_index(idx).entries}
+    assert by_name["a"] == 1750000000  # set -> propagated despite doc_text being unchanged
+    assert by_name["b"] is None
 
 
 # --------------------------------------------------------------------------- #
@@ -1116,9 +1216,11 @@ def test_build_index_manifest_carries_body_chunks_block(tmp_path, monkeypatch):
         on_disk = json.load(fh)
     assert on_disk["body_chunks"] == chunks
 
-    # The entries list itself is EXACTLY the pre-RET-2 shape (no new keys leaked onto it).
+    # The entries list itself is EXACTLY the pre-RET-2 shape plus RET-5's
+    # source_commit_time (no OTHER new keys leaked onto it).
     assert set(manifest["entries"][0].keys()) == {
-        "name", "file", "doc_text", "description", "hash", "tokens", "invalid_after", "row",
+        "name", "file", "doc_text", "description", "hash", "tokens", "invalid_after",
+        "source_commit_time", "row",
     }
 
 
@@ -1230,7 +1332,7 @@ def test_body_chunks_absent_key_degrades_cleanly_on_old_manifest(tmp_path):
     import json as _json
 
     old_manifest = {
-        "schema_version": 2,
+        "schema_version": B.SCHEMA_VERSION,  # current — COR-7's gate would hide any other
         "model": None,
         "dense_ready": False,
         "dim": None,
@@ -1268,3 +1370,103 @@ def test_refresh_index_heals_body_only_edit(tmp_path, monkeypatch):
     new_chunk_hashes = {c["hash"] for c in m2["body_chunks"]}
     assert new_chunk_hashes != old_chunk_hashes  # the no-op short-circuit did NOT fire
     assert any("distinctive" in " ".join(c["tokens"]) for c in m2["body_chunks"])
+
+
+# --------------------------------------------------------------------------- #
+# COR-7: schema_version is ENFORCED on every manifest load path — a mismatched
+# manifest reads as absent, so a plugin update that changes the manifest shape
+# costs exactly ONE full rebuild instead of silently serving the stale shape.
+# --------------------------------------------------------------------------- #
+def test_load_index_treats_schema_mismatch_as_absent(tmp_path, monkeypatch):
+    """The load-path half of the AC: the moment SCHEMA_VERSION moves, _load_manifest (and
+    therefore load_index — recall's path) returns None for an index built at the old
+    version, instead of serving it verbatim."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha"})
+    B.build_index(md, idx)
+    assert B.load_index(idx) is not None  # sanity: the current version loads
+
+    monkeypatch.setattr(B, "SCHEMA_VERSION", B.SCHEMA_VERSION + 1)
+    assert B._load_manifest(idx) is None  # the one gate every consumer passes through
+    assert B.load_index(idx) is None
+    # The RAW reader still sees it — that is doctor's format-check path, not a load path.
+    assert B._read_manifest_json(idx) is not None
+
+
+def test_schema_bump_triggers_exactly_one_full_rebuild_then_noop(tmp_path, monkeypatch):
+    """THE acceptance test: monkeypatching SCHEMA_VERSION to a new value makes the next
+    refresh perform exactly ONE full rebuild — every doc re-embedded (zero hash-keyed row
+    reuse from the stale manifest) and the manifest rewritten with the NEW version — and a
+    SECOND refresh with an unchanged corpus is back on the no-op fast path (no embeds, no
+    rewrite)."""
+    embedded = []
+
+    def counting(texts, allow_download=True):
+        embedded.append(list(texts))
+        return _fake_embedder(16)(texts)
+
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", counting)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha", "b.md": "beta"})
+    B.build_index(md, idx)
+    embedded.clear()
+
+    bumped = B.SCHEMA_VERSION + 1
+    monkeypatch.setattr(B, "SCHEMA_VERSION", bumped)
+    refreshed = B.refresh_index(md, idx)
+    assert refreshed is not None and refreshed["dense_ready"] is True
+    # ONE full rebuild: both docs re-embedded (the old manifest contributed no cached rows).
+    assert sum(len(batch) for batch in embedded) == 2
+    import json as _json
+
+    with open(os.path.join(idx, "manifest.json"), "r", encoding="utf-8") as fh:
+        assert _json.load(fh)["schema_version"] == bumped  # rewritten at the NEW version
+
+    embedded.clear()
+    mtime_before = os.path.getmtime(os.path.join(idx, "manifest.json"))
+    again = B.refresh_index(md, idx)  # unchanged corpus at the current version
+    assert again is not None
+    assert embedded == []  # NOT a second rebuild
+    assert os.path.getmtime(os.path.join(idx, "manifest.json")) == mtime_before  # no rewrite
+
+
+def test_build_index_discards_row_reuse_on_schema_mismatch(tmp_path, monkeypatch):
+    """build_index's incremental path is a manifest LOAD path too: a version-mismatched old
+    manifest must contribute ZERO cached embedding rows (its per-entry row indices may not
+    mean what the current code thinks they mean)."""
+    embedded = []
+
+    def counting(texts, allow_download=True):
+        embedded.append(list(texts))
+        return _fake_embedder(16)(texts)
+
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", counting)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha", "b.md": "beta"})
+    B.build_index(md, idx)
+    embedded.clear()
+
+    monkeypatch.setattr(B, "SCHEMA_VERSION", B.SCHEMA_VERSION + 1)
+    B.build_index(md, idx)  # unchanged corpus — but the old manifest is now invisible
+    assert sum(len(batch) for batch in embedded) == 2  # full re-embed, no hash reuse
+
+
+def test_check_index_integrity_distinguishes_schema_mismatch_from_corruption(tmp_path, monkeypatch):
+    """A version-mismatched manifest is a routine plugin-update state, NOT damage: the
+    integrity detector must return None for it (doctor's check_format_version owns naming
+    it) rather than misdiagnose it as corrupt JSON via the gated loader."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha"})
+    B.build_index(md, idx)
+    assert B.check_index_integrity(idx) is None  # healthy at the current version
+
+    monkeypatch.setattr(B, "SCHEMA_VERSION", B.SCHEMA_VERSION + 1)
+    assert B.check_index_integrity(idx) is None  # mismatch != corruption

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 import zlib
 
 import numpy as np
@@ -15,6 +16,8 @@ import pytest
 
 from memory import build_index as B
 from memory import recall as R
+from memory import staleness as S
+from memory import telemetry as T
 
 from .conftest import git_commit, write_file
 
@@ -609,6 +612,234 @@ def test_graph_expansion_skipped_for_in_memory_index_without_dirs(tmp_path, monk
     assert "auth_flow" in names
     assert "deploy_runbook" not in names  # edge exists on disk, but no dirs -> no expansion
     assert all(r["via"] == "rank" for r in res)
+
+
+# --------------------------------------------------------------------------- #
+# Typed edges (GRA-4) — supersedes demotes+annotates, contradicts annotates only,
+# refines is navigational. Served from links.json; degrades to no-annotation.
+# --------------------------------------------------------------------------- #
+# old_way matches the query STRICTLY better than new_way (one extra query token), so
+# WITHOUT the edge it organically outranks its successor — the flip below is therefore
+# real pre-cut demotion, not a cosmetic relabel. Fillers keep BM25 IDF sane.
+_TYPED_QUERY = "oauth token refresh flow policy gateway"
+
+
+def _typed_fm_corpus(memory_dir: str, *, edge: bool = True) -> None:
+    os.makedirs(memory_dir, exist_ok=True)
+    sup = "supersedes: [old_way]\n" if edge else ""
+    files = {
+        "old_way.md": _mem("old_way", "oauth token refresh flow policy for the gateway"),
+        "new_way.md": (
+            f'---\nname: new_way\ndescription: "oauth token refresh flow policy rotating tokens"\n'
+            f"type: project\n{sup}---\nbody\n"
+        ),
+        "excel_header.md": _mem("excel_header", _CORPUS["excel_header.md"]),
+        "canvas_pdf.md": _mem("canvas_pdf", _CORPUS["canvas_pdf.md"]),
+        "formula_graph.md": _mem("formula_graph", _CORPUS["formula_graph.md"]),
+    }
+    for fname, content in files.items():
+        with open(os.path.join(memory_dir, fname), "w", encoding="utf-8") as fh:
+            fh.write(content)
+
+
+def test_recall_superseded_ranks_below_successor_with_annotation_bm25(tmp_path, monkeypatch):
+    """The GRA-4 acceptance case (BM25 path): X supersedes Y, a query hitting both ->
+    Y ranks strictly below X (a real pre-cut flip — Y organically outranks X without the
+    edge) and Y's pointer carries the successor-naming annotation."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+
+    # Baseline (no edge): the loser organically outranks its successor.
+    md0, idx0 = str(tmp_path / "m0"), str(tmp_path / "i0")
+    _typed_fm_corpus(md0, edge=False)
+    B.build_index(md0, idx0)
+    baseline = [r["name"] for r in R.recall(_TYPED_QUERY, k=5, memory_dir=md0, index_dir=idx0)]
+    assert baseline.index("old_way") < baseline.index("new_way")
+
+    # With the edge: strict flip + annotation.
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    _typed_fm_corpus(md, edge=True)
+    B.build_index(md, idx)
+    res = R.recall(_TYPED_QUERY, k=5, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert names.index("new_way") < names.index("old_way")  # strictly below its successor
+    by_name = {r["name"]: r for r in res}
+    assert by_name["old_way"]["note"] == "superseded by new_way"
+    assert by_name["new_way"]["note"] == ""
+
+    # Demotion is REAL (pre-cut): at k=1 only the successor survives the cut...
+    assert [r["name"] for r in R.recall(_TYPED_QUERY, k=1, memory_dir=md, index_dir=idx)] == ["new_way"]
+    # ...but soft: a wide k still surfaces the superseded memory (never a hard exclude).
+    assert "old_way" in names
+
+    # The annotation reaches the rendered pointer line, inside the char budget.
+    out = R.format_results(res)
+    assert len(out) <= 9000
+    line = next(ln for ln in out.splitlines() if "old_way" in ln)
+    assert line.endswith("[superseded by new_way]")
+    assert "superseded" not in next(ln for ln in out.splitlines() if "new_way" in ln)
+
+
+def test_recall_superseded_ranks_below_successor_dense_path(tmp_path, monkeypatch):
+    """The same acceptance case through the DENSE path (fake embedder, house pattern):
+    the flip and annotation must not depend on the BM25-only lane."""
+    emb_docs, emb_query = _fake_embedder(16)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", emb_docs)
+    monkeypatch.setattr(R, "embed_query", emb_query)
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    _typed_fm_corpus(md, edge=True)
+    B.build_index(md, idx)
+
+    res = R.recall(_TYPED_QUERY, k=5, memory_dir=md, index_dir=idx)
+    assert res and res[0]["backend"] == "dense+bm25"  # both rankers genuinely contributed
+    names = [r["name"] for r in res]
+    assert names.index("new_way") < names.index("old_way")
+    assert {r["name"]: r for r in res}["old_way"]["note"] == "superseded by new_way"
+
+
+def test_recall_contradicts_annotates_without_demotion(tmp_path, monkeypatch):
+    """A contradicts TARGET is flagged ("verify"), never demoted — scores and order are
+    byte-identical to the same corpus without the edge; only the annotation differs."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+
+    def _corpus_at(md: str, *, edge: bool) -> None:
+        os.makedirs(md, exist_ok=True)
+        con = "contradicts: [canary_deploy]\n" if edge else ""
+        items = {
+            "canary_deploy.md": _mem("canary_deploy", "deploy rollout uses canary traffic shifting"),
+            "bluegreen_deploy.md": (
+                f'---\nname: bluegreen_deploy\ndescription: "deploy rollout uses blue green swap"\n'
+                f"type: project\n{con}---\nbody\n"
+            ),
+            "excel_header.md": _mem("excel_header", _CORPUS["excel_header.md"]),
+            "formula_graph.md": _mem("formula_graph", _CORPUS["formula_graph.md"]),
+        }
+        for fname, content in items.items():
+            with open(os.path.join(md, fname), "w", encoding="utf-8") as fh:
+                fh.write(content)
+
+    query = "deploy rollout canary traffic"
+    md0, idx0 = str(tmp_path / "m0"), str(tmp_path / "i0")
+    _corpus_at(md0, edge=False)
+    B.build_index(md0, idx0)
+    plain = R.recall(query, k=5, memory_dir=md0, index_dir=idx0)
+
+    md1, idx1 = str(tmp_path / "m1"), str(tmp_path / "i1")
+    _corpus_at(md1, edge=True)
+    B.build_index(md1, idx1)
+    flagged = R.recall(query, k=5, memory_dir=md1, index_dir=idx1)
+
+    assert [(r["name"], r["score"]) for r in flagged] == [(r["name"], r["score"]) for r in plain]
+    by_name = {r["name"]: r for r in flagged}
+    assert by_name["canary_deploy"]["note"] == "contradicts bluegreen_deploy — verify"
+    assert by_name["bluegreen_deploy"]["note"] == ""  # the DECLARING side is not annotated
+    line = next(ln for ln in R.format_results(flagged).splitlines() if "canary_deploy" in ln)
+    assert line.endswith("[contradicts bluegreen_deploy — verify]")
+
+
+def test_recall_refines_is_navigational_only(tmp_path, monkeypatch):
+    """refines carries NO ranking effect and NO annotation — parse/persist/lint only."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    os.makedirs(md)
+    items = {
+        "base_note.md": _mem("base_note", "oauth token refresh flow policy for the gateway"),
+        "detail_note.md": (
+            '---\nname: detail_note\ndescription: "oauth token refresh flow policy rotating tokens"\n'
+            "type: project\nrefines: [base_note]\n---\nbody\n"
+        ),
+        "excel_header.md": _mem("excel_header", _CORPUS["excel_header.md"]),
+    }
+    for fname, content in items.items():
+        with open(os.path.join(md, fname), "w", encoding="utf-8") as fh:
+            fh.write(content)
+    B.build_index(md, idx)
+
+    res = R.recall(_TYPED_QUERY, k=5, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert names.index("base_note") < names.index("detail_note")  # organic order, no demotion
+    assert all(r["note"] == "" for r in res)
+    assert "[" not in R.format_results(res).split("📎", 1)[1].replace("(linked)", "")
+
+
+def test_recall_typed_edges_degrade_without_links_cache(tmp_path, monkeypatch):
+    """Cache absent -> no demotion, no annotation (the hot path must NEVER re-read the
+    corpus for typed edges): deleting links.json restores the organic order silently."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    _typed_fm_corpus(md, edge=True)
+    B.build_index(md, idx)
+    os.remove(os.path.join(idx, "links.json"))
+
+    res = R.recall(_TYPED_QUERY, k=5, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert names.index("old_way") < names.index("new_way")  # organic order — no cache, no demotion
+    assert all(r["note"] == "" for r in res)
+
+    # Same degradation for a caller-supplied in-memory index with no dirs (eval probes).
+    index = B.load_index(idx)
+    res2 = R.recall(_TYPED_QUERY, k=5, index=index)
+    assert res2 and all(r["note"] == "" for r in res2)
+
+
+def test_recall_typed_edge_to_deleted_successor_is_not_live(tmp_path, monkeypatch):
+    """A slightly-stale cache naming a successor the index no longer carries is not a
+    LIVE edge: fail open to no-demotion/no-annotation rather than annotating with a
+    ghost (the same stale-tolerance posture load_edges documents)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    _typed_fm_corpus(md, edge=True)
+    B.build_index(md, idx)
+    with open(os.path.join(idx, "links.json"), encoding="utf-8") as fh:
+        stale_cache = fh.read()  # still names new_way -> old_way
+
+    os.remove(os.path.join(md, "new_way.md"))  # the successor is deleted...
+    B.build_index(md, idx)  # ...and the index rebuilt without it
+    with open(os.path.join(idx, "links.json"), "w", encoding="utf-8") as fh:
+        fh.write(stale_cache)  # but the edge cache lags a beat behind
+
+    res = R.recall(_TYPED_QUERY, k=5, memory_dir=md, index_dir=idx)
+    by_name = {r["name"]: r for r in res}
+    assert "old_way" in by_name
+    assert by_name["old_way"]["note"] == ""  # dead edge -> no ghost annotation
+
+
+def test_graph_expansion_applies_superseded_penalty_to_injected_neighbor(tmp_path, monkeypatch):
+    """The untyped graph must not become a side door around supersession: a superseded
+    memory injected via 1-hop expansion enters at the SAME halved discount and still
+    carries its annotation."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    _write_linked_corpus(
+        md,
+        {
+            # the seed: matches the query, wikilinks to the lexically-distant loser
+            "auth_flow.md": (
+                "oauth token refresh flow for the api gateway",
+                "details\n\nRelated: [[old_runbook]]\n",
+            ),
+            "old_runbook.md": ("kubernetes helm chart rollout steps", "body"),
+            "excel_header.md": (_CORPUS["excel_header.md"], "body"),
+            "canvas_pdf.md": (_CORPUS["canvas_pdf.md"], "body"),
+        },
+    )
+    # new_runbook supersedes old_runbook (frontmatter edge, no wikilinks)
+    with open(os.path.join(md, "new_runbook.md"), "w", encoding="utf-8") as fh:
+        fh.write(
+            '---\nname: new_runbook\ndescription: "argo rollout steps replace helm"\n'
+            "type: project\nsupersedes: [old_runbook]\n---\nbody\n"
+        )
+    B.build_index(md, idx)
+
+    res = R.recall(_OAUTH_QUERY, k=5, memory_dir=md, index_dir=idx)
+    by_name = {r["name"]: r for r in res}
+    assert by_name["old_runbook"]["via"] == "graph"  # only the edge got it here
+    assert by_name["old_runbook"]["note"] == "superseded by new_runbook"
+    # injected at seed * _NEIGHBOR_DISCOUNT * _SUPERSEDED_PENALTY — the penalty is real
+    # (abs_tol covers the 6-decimal rounding recall applies to emitted scores)
+    seed_score = by_name["auth_flow"]["score"]
+    expected = seed_score * R._NEIGHBOR_DISCOUNT * R._SUPERSEDED_PENALTY
+    assert math.isclose(by_name["old_runbook"]["score"], expected, abs_tol=1e-6)
 
 
 # --------------------------------------------------------------------------- #
@@ -1770,3 +2001,464 @@ def test_on_topic_prompt_still_finds_hit_with_dense_floor_active(tmp_path, monke
         index_dir=idx,
     )
     assert any(r["name"] == "oauth_refresh" for r in res)
+
+
+# --------------------------------------------------------------------------- #
+# COR-7: the hook path never serves a schema-stale index — load_index treats it
+# as absent and the implicit BM25-only build replaces it in place.
+# --------------------------------------------------------------------------- #
+def test_recall_rebuilds_and_serves_results_on_schema_stale_index(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"reranker.md": "voyage reranker cross encoder ordering"})
+    B.build_index(md, idx)
+
+    monkeypatch.setattr(B, "SCHEMA_VERSION", B.SCHEMA_VERSION + 1)
+    res = R.recall("voyage reranker cross encoder", memory_dir=md, index_dir=idx)
+    assert any(r["name"] == "reranker" for r in res)  # rebuilt, not silently empty
+    # The stale manifest was REPLACED at the current (bumped) version by _ensure_index's
+    # implicit build — the next load serves it without another rebuild.
+    import json as _json
+
+    with open(os.path.join(idx, "manifest.json"), "r", encoding="utf-8") as fh:
+        assert _json.load(fh)["schema_version"] == B.SCHEMA_VERSION
+    assert B.load_index(idx) is not None
+
+
+# --------------------------------------------------------------------------- #
+# RET-5: salience fusion — recency / usage / staleness as bounded ranking priors.
+# DEFAULT OFF (HIPPO_SALIENCE=1 opts in). Hermetic throughout (HIPPO_DISABLE_DENSE=1,
+# same as every other test in this module) — no dense signal is needed to exercise any
+# of the three priors, all bm25-only.
+# --------------------------------------------------------------------------- #
+def test_salience_enabled_default_off_and_env_parsing(monkeypatch):
+    monkeypatch.delenv("HIPPO_SALIENCE", raising=False)
+    assert R._salience_enabled() is False
+    for truthy in ("1", "true", "yes", "on"):
+        monkeypatch.setenv("HIPPO_SALIENCE", truthy)
+        assert R._salience_enabled() is True
+    for falsy in ("0", "false", "False", ""):
+        monkeypatch.setenv("HIPPO_SALIENCE", falsy)
+        assert R._salience_enabled() is False
+
+
+def test_recency_boost_decays_linearly_and_caps():
+    now = 1_800_000_000.0
+    # same-day commit -> the full cap
+    assert R._recency_boost({"source_commit_time": now}, now=now) == R._SALIENCE_RECENCY_CAP
+    # half the window old -> half the cap
+    half_window_secs = R._SALIENCE_RECENCY_WINDOW_DAYS * 86400.0 / 2
+    boost = R._recency_boost({"source_commit_time": now - half_window_secs}, now=now)
+    assert boost == pytest.approx(R._SALIENCE_RECENCY_CAP / 2, abs=1e-9)
+    # beyond the window -> zero, never negative
+    too_old = now - (R._SALIENCE_RECENCY_WINDOW_DAYS + 1) * 86400.0
+    assert R._recency_boost({"source_commit_time": too_old}, now=now) == 0.0
+    # future/clock-skew timestamp -> treated as "as fresh as it gets", never raises
+    assert R._recency_boost({"source_commit_time": now + 1000}, now=now) == R._SALIENCE_RECENCY_CAP
+
+
+def test_recency_boost_absent_or_malformed_is_zero_never_a_penalty():
+    now = 1_800_000_000.0
+    assert R._recency_boost({}, now=now) == 0.0
+    assert R._recency_boost({"source_commit_time": None}, now=now) == 0.0
+    assert R._recency_boost({"source_commit_time": "not-a-number"}, now=now) == 0.0
+    assert R._recency_boost({"source_commit_time": True}, now=now) == 0.0  # bool excluded
+
+
+def test_usage_boost_map_empty_without_memory_dir_or_history(tmp_path):
+    assert R._usage_boost_map(None) == {}
+    assert R._usage_boost_map(str(tmp_path / "memory")) == {}  # no telemetry ever logged
+
+
+def test_usage_boost_map_capped_hard_even_at_full_session_coverage(tmp_path, monkeypatch):
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    td = T.default_telemetry_dir(md)
+    # "m" recalled in every one of 3 distinct sessions -> usage_score == 1.0
+    for i in range(3):
+        T.log_recall_event(
+            [{"name": "m", "backend": "bm25"}], query="q", k=1, latency_ms=1.0,
+            telemetry_dir=td, session_id=f"s{i}",
+        )
+    boosts = R._usage_boost_map(md)
+    assert boosts["m"] == R._SALIENCE_USAGE_CAP  # capped hard, not scaled past the cap
+    assert "never_recalled" not in boosts
+
+
+def test_staleness_penalty_map_empty_without_index_dir_or_cache(tmp_path):
+    assert R._staleness_penalty_map(None) == {}
+    assert R._staleness_penalty_map(str(tmp_path / "idx")) == {}  # stale.json never written
+
+
+def test_staleness_penalty_map_graduated_and_saturates(tmp_path):
+    idx = str(tmp_path / ".memory-index")
+    S.write_stale_cache(
+        idx,
+        [
+            {"name": "one_changed", "changed_paths": ["a.py"], "source_commit": "abc"},
+            {
+                "name": "way_over_saturation",
+                "changed_paths": [f"f{i}.py" for i in range(50)],
+                "source_commit": "def",
+            },
+        ],
+    )
+    penalties = R._staleness_penalty_map(idx)
+    expected_one = R._SALIENCE_STALENESS_CAP * (1 / R._SALIENCE_STALENESS_SATURATION)
+    assert penalties["one_changed"] == pytest.approx(expected_one)
+    assert penalties["way_over_saturation"] == R._SALIENCE_STALENESS_CAP  # saturates, never exceeds
+
+
+def test_apply_salience_demotes_stale_never_used_below_equally_relevant_fresh_used(tmp_path):
+    """THE acceptance case, as a direct unit test of `_apply_salience` (no BM25/RRF
+    rank-fusion tie-breaking noise involved — see the end-to-end recall() test below for
+    that): two entries tied EXACTLY at score 1.0 pre-salience (equally relevant, by
+    construction) — one fresh + recently used, the other stale + never used. Flag-on must
+    reorder them so the fresh/used one ranks first."""
+    now = time.time()
+    entries = [
+        {"name": "fresh_used", "source_commit_time": now},
+        {"name": "stale_never_used", "source_commit_time": now - 400 * 86400},  # beyond the window
+    ]
+    penalized = [(0, 1.0, None), (1, 1.0, None)]  # exact tie
+
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    td = T.default_telemetry_dir(md)
+    T.log_recall_event(
+        [{"name": "fresh_used", "backend": "bm25"}], query="q", k=1, latency_ms=1.0,
+        telemetry_dir=td, session_id="s1",
+    )
+    idx_dir = str(tmp_path / ".memory-index")
+    S.write_stale_cache(
+        idx_dir,
+        [{"name": "stale_never_used", "changed_paths": ["a.py", "b.py", "c.py"], "source_commit": "deadbeef"}],
+    )
+
+    adjusted, components = R._apply_salience(penalized, entries, memory_dir=md, index_dir=idx_dir)
+    order = [entries[i]["name"] for i, _score, _state in adjusted]
+    assert order == ["fresh_used", "stale_never_used"]  # demoted below
+
+    fresh_c = components[0]
+    stale_c = components[1]
+    assert fresh_c["recency"] == R._SALIENCE_RECENCY_CAP
+    assert fresh_c["usage"] == R._SALIENCE_USAGE_CAP
+    assert fresh_c["staleness"] == 0.0
+    assert stale_c["recency"] == 0.0
+    assert stale_c["usage"] == 0.0
+    assert stale_c["staleness"] > 0.0
+
+
+def test_apply_salience_disabled_path_never_called_is_a_noop():
+    """Sanity pin for the byte-identical flag-off contract at the call site level: an
+    UNTOUCHED `penalized` + empty component map is exactly what a flag-off `recall()` uses
+    in place of calling `_apply_salience` at all (see recall()'s `if _salience_enabled():`
+    guard) — this is what "never even a no-op float multiply" means in practice."""
+    penalized = [(0, 0.5, None), (1, 0.25, "recent")]
+    assert penalized == list(penalized)  # unchanged reference semantics, nothing to adjust
+
+
+# --------------------------------------------------------------------------- #
+# RET-5 end-to-end: recall() threading, the env flag, and the emitted "salience" field.
+# --------------------------------------------------------------------------- #
+def _write_salience_fixture(md: str, idx: str, *, fresh_source_commit_time: int) -> None:
+    """Two entries, BM25-score-TIED by construction (identical token shapes, symmetric
+    query overlap — see the RET-5 commit body for the verification) — `entry_a` organically
+    outranks `entry_b` by nothing but RRF's stable rank tie-break (both raw BM25 scores are
+    IDENTICAL: 1/61 vs 1/62), i.e. they are "equally relevant" in every real sense. `entry_a`
+    is cast as the stale/never-used memory (gets a stale.json entry); `entry_b` is cast as
+    the fresh/used one (gets `source_commit_time` + a prior recall event) — the OPPOSITE of
+    which one organically leads, so a flag-on reorder is attributable ONLY to salience.
+    """
+    os.makedirs(md, exist_ok=True)
+    with open(os.path.join(md, "entry_a.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem("entry_a", "gizmo widget calibration alpha"))
+    with open(os.path.join(md, "entry_b.md"), "w", encoding="utf-8") as fh:
+        fh.write(
+            "---\nname: entry_b\ndescription: \"gizmo widget calibration beta\"\n"
+            f"type: project\nsource_commit_time: {fresh_source_commit_time}\n---\nbody\n"
+        )
+    B.build_index(md, idx)
+    td = T.default_telemetry_dir(md)
+    T.log_recall_event(
+        [{"name": "entry_b", "backend": "bm25"}], query="prior session", k=1, latency_ms=1.0,
+        telemetry_dir=td, session_id="s1",
+    )
+    S.write_stale_cache(
+        idx, [{"name": "entry_a", "changed_paths": ["a.py", "b.py", "c.py"], "source_commit": "deadbeef"}]
+    )
+
+
+_SALIENCE_QUERY = "gizmo widget calibration"
+
+
+def test_recall_salience_flag_off_ranking_byte_identical(tmp_path, monkeypatch):
+    """AC: flag-off ranking is byte-identical whether HIPPO_SALIENCE is unset (the true
+    default) or explicitly forced "0" — even though this fixture carries REAL
+    recency/usage/staleness signal on disk, proving flag-off never reads any of it (a bug
+    that read it unconditionally would show up here as a score/order diff)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_salience_fixture(md, idx, fresh_source_commit_time=int(time.time()))
+
+    monkeypatch.delenv("HIPPO_SALIENCE", raising=False)
+    default_off = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    monkeypatch.setenv("HIPPO_SALIENCE", "0")
+    explicit_off = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    assert default_off == explicit_off  # full dict equality: names, order, scores, salience
+    assert [r["name"] for r in default_off] == ["entry_a", "entry_b"]  # untouched organic order
+    assert all(r["salience"] is None for r in default_off)  # ALWAYS present, None when off
+
+    # ...and identical to a twin corpus carrying NO salience signal on disk at all — proves
+    # flag-off literally never reads source_commit_time/usage_aggregates.json/stale.json.
+    md2 = str(tmp_path / "memory_nosignal")
+    idx2 = str(tmp_path / ".memory-index_nosignal")
+    _write_corpus(md2, {"entry_a.md": "gizmo widget calibration alpha", "entry_b.md": "gizmo widget calibration beta"})
+    B.build_index(md2, idx2)
+    nosignal = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md2, index_dir=idx2)
+    assert [(r["name"], r["score"]) for r in default_off] == [(r["name"], r["score"]) for r in nosignal]
+
+
+def test_recall_salience_flag_on_demotes_stale_never_used_below_fresh_used(tmp_path, monkeypatch):
+    """THE acceptance case end-to-end through recall(): entry_a organically leads (a tied
+    BM25/RRF rank artifact — see `_write_salience_fixture`'s docstring) but is cast as
+    stale+never-used; entry_b trails organically but is cast as fresh+used. HIPPO_SALIENCE=1
+    must flip the order, and every emitted result must carry its salience breakdown."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_salience_fixture(md, idx, fresh_source_commit_time=int(time.time()))
+
+    monkeypatch.delenv("HIPPO_SALIENCE", raising=False)
+    before = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    assert [r["name"] for r in before] == ["entry_a", "entry_b"]  # organic order, pre-salience
+
+    monkeypatch.setenv("HIPPO_SALIENCE", "1")
+    after = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    names_after = [r["name"] for r in after]
+    assert names_after == ["entry_b", "entry_a"]  # fresh+used overtakes stale+never-used
+
+    by_name = {r["name"]: r for r in after}
+    assert by_name["entry_b"]["salience"]["recency"] > 0
+    assert by_name["entry_b"]["salience"]["usage"] > 0
+    assert by_name["entry_b"]["salience"]["staleness"] == 0.0
+    assert by_name["entry_a"]["salience"]["staleness"] > 0
+    assert by_name["entry_a"]["salience"]["recency"] == 0.0
+    assert by_name["entry_a"]["salience"]["usage"] == 0.0
+    # the emitted "score" is the REAL post-salience value the ranking sorted on (COR-8) —
+    # not a fabricated number, and the winner's score really is higher than the loser's.
+    assert by_name["entry_b"]["score"] > by_name["entry_a"]["score"]
+
+
+def test_recall_salience_never_raises_when_telemetry_and_stale_cache_absent(tmp_path, monkeypatch):
+    """Advisory posture: with the flag on but NEITHER usage_aggregates.json NOR stale.json
+    ever written (a fresh corpus with no session history), recall() must degrade to
+    "no usage/staleness signal" rather than raise — only the recency prior (pure
+    manifest arithmetic) can contribute anything on a corpus this quiet."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_SALIENCE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"entry_a.md": "gizmo widget calibration alpha", "entry_b.md": "gizmo widget calibration beta"})
+    B.build_index(md, idx)
+    res = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    assert len(res) == 2
+    for r in res:
+        assert r["salience"] == {"recency": 0.0, "usage": 0.0, "staleness": 0.0}
+
+
+# --------------------------------------------------------------------------- #
+# RET-6: verify-at-use banner — a currently-stale injected memory (per LIF-6's stale.json)
+# carries a one-line "anchored to <sha>; N cited files changed since — verify before
+# relying" banner on its rendered pointer; a fresh one carries none. UNGATED (no
+# HIPPO_SALIENCE dependency — a correctness signal, not a ranking knob). Hermetic
+# throughout (HIPPO_DISABLE_DENSE=1), mirroring the RET-5 section's fixture conventions.
+# --------------------------------------------------------------------------- #
+def test_stale_banner_map_empty_without_index_dir_or_cache(tmp_path):
+    assert R._stale_banner_map(None) == {}
+    assert R._stale_banner_map(str(tmp_path / "idx")) == {}  # stale.json never written
+
+
+def test_stale_banner_map_builds_banner_text_from_cache(tmp_path):
+    idx = str(tmp_path / ".memory-index")
+    S.write_stale_cache(
+        idx,
+        [{"name": "m_a", "changed_paths": ["src/a.py", "src/b.py"], "source_commit": "abcdef1234567890"}],
+    )
+    assert R._stale_banner_map(idx) == {
+        "m_a": "anchored to abcdef1; 2 cited files changed since — verify before relying"
+    }
+
+
+def test_stale_banner_map_skips_records_with_no_usable_sha(tmp_path):
+    """A blank/missing anchor is worse than no banner — degrade to skipping the record."""
+    import json
+
+    idx = str(tmp_path / ".memory-index")
+    os.makedirs(idx, exist_ok=True)
+    with open(S.stale_cache_path(idx), "w", encoding="utf-8") as fh:
+        json.dump(
+            {"schema_version": S.STALE_CACHE_SCHEMA_VERSION, "stale": {"m_bad": {"changed": 1, "sha": ""}}},
+            fh,
+        )
+    assert R._stale_banner_map(idx) == {}
+
+
+def test_recall_stale_injection_carries_banner_fresh_does_not(tmp_path, monkeypatch):
+    """AC: stale injections carry the banner; fresh ones don't — same bracket convention as
+    GRA-4's typed-edge note, on the same pointer line."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx)
+    S.write_stale_cache(
+        idx,
+        [{"name": "reranker_voyage", "changed_paths": ["a.py", "b.py", "c.py"], "source_commit": "abcdef1234567"}],
+    )
+
+    res = R.recall("reranker budget excel canvas formula", k=10, memory_dir=md, index_dir=idx)
+    by_name = {r["name"]: r for r in res}
+    assert by_name["reranker_voyage"]["stale_banner"] == (
+        "anchored to abcdef1; 3 cited files changed since — verify before relying"
+    )
+    fresh_names = [n for n in by_name if n != "reranker_voyage"]
+    assert fresh_names  # sanity: other memories were also recalled
+    assert all(by_name[n]["stale_banner"] == "" for n in fresh_names)
+
+    out = R.format_results(res)
+    stale_line = next(ln for ln in out.splitlines() if "reranker_voyage" in ln)
+    assert stale_line.endswith("[anchored to abcdef1; 3 cited files changed since — verify before relying]")
+    for n in fresh_names:
+        fresh_line = next(ln for ln in out.splitlines() if n in ln)
+        assert "anchored to" not in fresh_line
+
+
+def test_recall_no_banner_when_stale_cache_absent(tmp_path, monkeypatch):
+    """AC: the banner path is inert when stale.json is absent (index built, LIF-6's
+    SessionStart staleness pass never ran)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx)  # no write_stale_cache call at all -- stale.json never written
+
+    res = R.recall("which reranker do we use for search results", k=5, memory_dir=md, index_dir=idx)
+    assert res and all(r["stale_banner"] == "" for r in res)
+    assert "anchored to" not in R.format_results(res)
+
+
+def test_recall_no_banner_when_stale_cache_is_corrupt(tmp_path, monkeypatch):
+    """AC: absent/corrupt stale.json both degrade to no banners — never a hard error."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx)
+    os.makedirs(idx, exist_ok=True)
+    with open(S.stale_cache_path(idx), "w", encoding="utf-8") as fh:
+        fh.write("{not valid json")
+
+    res = R.recall("which reranker do we use for search results", k=5, memory_dir=md, index_dir=idx)
+    assert res and all(r["stale_banner"] == "" for r in res)
+
+
+def test_format_results_stale_banner_counts_toward_budget_and_truncates():
+    """AC: banner chars count against the existing output budget — bounded output stays
+    bounded even when every emitted result carries one (mirrors
+    test_format_results_is_bounded above, plus a banner on every line)."""
+    big = [
+        {
+            "name": f"m_{i}",
+            "file": f"m_{i}.md",
+            "description": "x" * 200,
+            "score": 0.1,
+            "backend": "bm25",
+            "stale_banner": "anchored to abcdef1; 5 cited files changed since — verify before relying",
+        }
+        for i in range(60)
+    ]
+    out = R.format_results(big, max_chars=9000)
+    assert len(out) <= 9000
+    assert out.endswith("(truncated)")
+
+
+def test_recall_output_bounded_under_cap_with_every_result_stale(tmp_path, monkeypatch):
+    """A realistic full-corpus bound check: every emitted memory is marked stale (worst
+    case for banner overhead) and the block still fits under the harness cap."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx)
+    S.write_stale_cache(
+        idx,
+        [
+            {"name": fname[:-3], "changed_paths": ["a.py", "b.py"], "source_commit": "deadbeefcafe"}
+            for fname in _CORPUS
+        ],
+    )
+    res = R.recall("reranker budget excel canvas formula", k=10, memory_dir=md, index_dir=idx)
+    assert res and all(r["stale_banner"] for r in res)  # every emitted result IS stale here
+    assert len(R.format_results(res)) <= R._MAX_RECALL_CHARS
+
+
+# --------------------------------------------------------------------------- #
+# RET-6 reinforcement, end-to-end: a graduate/fix verdict (reconsolidate.semantic_reverify,
+# wrapping the EXISTING provenance.reverify_file primitive) re-baselines source_commit to
+# HEAD; the NEXT SessionStart's staleness pass (LIF-6's find_stale + write_stale_cache,
+# via session_start._build_run_context) then simply omits the memory from stale.json, and
+# the banner clears on the next recall() with no separate "clear" step anywhere.
+# --------------------------------------------------------------------------- #
+def _mem_with_provenance(name: str, description: str, cited: list, source_commit: str) -> str:
+    cp = "[" + ", ".join(f'"{c}"' for c in cited) + "]"
+    return (
+        f'---\nname: {name}\ndescription: "{description}"\ntype: project\n'
+        f'cited_paths: {cp}\nsource_commit: "{source_commit}"\n---\nbody references {cited[0]}\n'
+    )
+
+
+def test_reinforcement_clears_banner_end_to_end(repo, memory_dir, monkeypatch):
+    """The full loop, hermetic in a fixture repo. Commits are pinned NEAR-NOW (find_stale's
+    default window is wall-clock-relative — mirrors test_session_start.py's
+    ``_lif6_seed_two_stale_one_recalled`` pattern, needed here because the real
+    ``_build_run_context`` path has no ``since`` override to widen it)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    from memory import reconsolidate as RC
+    from memory import session_start as SS
+
+    now = int(time.time())
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep v1", now - 300)
+    write_file(
+        memory_dir,
+        "m_alpha.md",
+        _mem_with_provenance("m_alpha", "gizmo widget calibration alpha", ["src/dep.py"], c1),
+    )
+    git_commit(repo, "memory", now - 200)
+    write_file(repo, "src/dep.py", "v = 2\n")  # cited code drifts -> genuinely stale
+    git_commit(repo, "dep v2", now - 100)
+
+    idx = B.default_index_dir(memory_dir)
+    B.build_index(memory_dir, idx)
+    SS._build_run_context(memory_dir, repo)  # simulates SessionStart's staleness pass
+    assert S.read_stale_cache(idx).get("m_alpha") is not None  # pre: really persisted stale
+
+    res = R.recall("gizmo widget calibration", k=5, memory_dir=memory_dir, index_dir=idx)
+    by_name = {r["name"]: r for r in res}
+    assert by_name["m_alpha"]["stale_banner"]  # non-empty banner text present pre-reinforcement
+
+    # Reinforcement: a session CONFIRMS the memory via the EXISTING reverify primitive.
+    result = RC.semantic_reverify("m_alpha", "graduate", memory_dir, repo)
+    assert result["error"] is None and result["cleared"] is True
+
+    # Next SessionStart's staleness pass — no manual stale.json edit, just a fresh scan.
+    SS._build_run_context(memory_dir, repo)
+    assert S.read_stale_cache(idx).get("m_alpha") is None  # the DATA is gone
+
+    res2 = R.recall("gizmo widget calibration", k=5, memory_dir=memory_dir, index_dir=idx)
+    by_name2 = {r["name"]: r for r in res2}
+    assert by_name2["m_alpha"]["stale_banner"] == ""  # the banner cleared
+    assert "anchored to" not in R.format_results(res2)

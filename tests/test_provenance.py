@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 from memory import provenance as P
-from memory.staleness import read_provenance, read_source_commit_time
+from memory.staleness import read_last_verified, read_provenance, read_source_commit_time
 
 from .conftest import git_commit, write_file
 
@@ -327,6 +328,70 @@ def test_reverify_is_idempotent(repo, memory_dir):
     git_commit(repo, "memory", 1_700_000_100)
     assert _reverify_one(memory_dir, repo, "m")["changed"] is True   # OLD -> HEAD
     assert _reverify_one(memory_dir, repo, "m")["changed"] is False  # already HEAD -> no-op
+
+
+# --------------------------------------------------------------------------- #
+# RET-6 reinforcement: reverify_file also stamps last_verified, WRITE-ONCE, the first
+# time a memory is ever re-verified — the drift-banner-clearing signal itself stays
+# source_commit (re-baselined above on EVERY call, changed or not); last_verified is
+# supplementary audit provenance layered on top, per the roadmap's "touch last_verified
+# via the existing reverify primitive."
+# --------------------------------------------------------------------------- #
+def test_reverify_stamps_last_verified_on_first_confirmation(repo, memory_dir):
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep v1", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/memory/m.md",
+        f'---\nname: M\ncited_paths: ["src/dep.py"]\nsource_commit: "{c1}"\n---\nbody src/dep.py\n',
+    )
+    git_commit(repo, "memory", 1_700_000_001)
+
+    res = _reverify_one(memory_dir, repo, "m")
+    assert res["changed"] is True and res["error"] is None
+    assert res["last_verified"]  # a real, non-empty ISO-8601 stamp
+
+    after = open(os.path.join(memory_dir, "m.md"), encoding="utf-8").read()
+    assert read_last_verified(after) == res["last_verified"]
+
+
+def test_reverify_never_overwrites_an_existing_last_verified_stamp(repo, memory_dir):
+    """A memory reverified a SECOND time (real code drift in between) keeps its ORIGINAL
+    last_verified — write-once, never a running log of every re-check — while
+    source_commit still re-baselines to the new HEAD both times (the actual
+    banner-clearing signal is unaffected by this)."""
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep v1", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/memory/m.md",
+        f'---\nname: M\ncited_paths: ["src/dep.py"]\nsource_commit: "{c1}"\n---\nbody src/dep.py\n',
+    )
+    git_commit(repo, "memory", 1_700_000_001)
+
+    first = _reverify_one(memory_dir, repo, "m")
+    assert first["changed"] is True
+    first_stamp = first["last_verified"]
+    head1 = P.run_git(["rev-parse", "HEAD"], repo).strip()
+    assert first["source_commit"] == head1
+
+    # Idempotent re-run right away: last_verified is preserved, changed is False.
+    again = _reverify_one(memory_dir, repo, "m")
+    assert again["changed"] is False
+    assert again["last_verified"] == first_stamp
+
+    # Real drift + a SECOND genuine re-verification: source_commit moves to the new HEAD,
+    # but last_verified stays pinned to the FIRST confirmation.
+    write_file(repo, "src/dep.py", "v = 2\n")
+    git_commit(repo, "dep v2", 1_700_000_500)
+    second = _reverify_one(memory_dir, repo, "m")
+    assert second["changed"] is True
+    head2 = P.run_git(["rev-parse", "HEAD"], repo).strip()
+    assert second["source_commit"] == head2 and head2 != head1
+    assert second["last_verified"] == first_stamp  # unchanged — write-once
+
+    after = open(os.path.join(memory_dir, "m.md"), encoding="utf-8").read()
+    assert read_last_verified(after) == first_stamp
 
 
 def test_reverify_refuses_unparseable_frontmatter(repo, memory_dir):
@@ -1034,3 +1099,285 @@ def test_remove_project_symlink_idempotent_second_call_is_absent(tmp_path):
 
     second = P.remove_project_symlink(repo_root, memory_dir, claude_projects_dir=projects_dir)
     assert second["status"] == "absent"
+
+
+# --------------------------------------------------------------------------- #
+# COR-7: corpus format marker (.claude/memory/.format) — read/write helpers
+# --------------------------------------------------------------------------- #
+def test_read_corpus_format_is_1_when_undeclared(tmp_path):
+    """A corpus with NO marker reads as format 1 — every pre-marker corpus is already on
+    the baseline, so absence must mean the baseline, never an error."""
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    assert P.read_corpus_format(md) == 1
+    assert P.read_corpus_format(str(tmp_path / "does-not-exist")) == 1
+
+
+def test_write_then_read_corpus_format_round_trips(tmp_path):
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    assert P.write_corpus_format(md) is True
+    assert P.read_corpus_format(md) == P.CORPUS_FORMAT_VERSION
+    # An explicit version (the final step of a doctor-driven migration) round-trips too.
+    assert P.write_corpus_format(md, version=7) is True
+    assert P.read_corpus_format(md) == 7
+
+
+def test_corpus_format_marker_is_json_at_the_canonical_path(tmp_path):
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    assert P.write_corpus_format(md) is True
+    marker = P.format_marker_path(md)
+    assert marker == os.path.join(md, ".format")
+    with open(marker, "r", encoding="utf-8") as fh:
+        assert json.load(fh) == {"corpus_format": P.CORPUS_FORMAT_VERSION}
+
+
+def test_read_corpus_format_degrades_to_1_on_garbage(tmp_path):
+    """An unreadable/corrupt/wrong-shape marker degrades to the baseline (never raises) —
+    doctor reports against whatever this returns, so garbage at worst reads as format 1
+    rather than blocking recall."""
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    for garbage in (
+        "{not json",
+        '["corpus_format", 2]',  # non-dict payload
+        '{"corpus_format": "two"}',  # non-int value
+        '{"corpus_format": true}',  # bool is an int subclass — must NOT read as 1==True
+        '{"something_else": 2}',  # missing key
+    ):
+        with open(P.format_marker_path(md), "w", encoding="utf-8") as fh:
+            fh.write(garbage)
+        assert P.read_corpus_format(md) == 1, garbage
+
+
+def test_write_corpus_format_returns_false_on_missing_dir(tmp_path):
+    assert P.write_corpus_format(str(tmp_path / "does-not-exist")) is False
+
+
+def test_format_marker_is_invisible_to_the_corpus_iterator(tmp_path):
+    """.format is a marker, not a memory — _iter_memory_files (THE corpus-membership
+    filter) must never yield it, so it can never be indexed/floor-scanned/backfilled."""
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    assert P.write_corpus_format(md) is True
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: a\n---\nbody\n")
+    assert [os.path.basename(p) for p in P._iter_memory_files(md)] == ["a.md"]
+
+
+def test_conventions_md_is_invisible_to_the_corpus_iterator(tmp_path):
+    """CONVENTIONS.md (DOC-6) is a reference doc seeded by /hippo:init, not a memory —
+    _iter_memory_files (THE corpus-membership filter) must never yield it, the same
+    canonical exclusion MEMORY.md/MEMORY.full.md already get. This is the one guard every
+    downstream consumer (indexing, floor lint, staleness, archive, the GRA-6 edge-cache
+    stat sweep) inherits for free, since all of them read through this one filter."""
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: a\n---\nbody\n")
+    with open(os.path.join(md, "CONVENTIONS.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Memory corpus conventions\n")
+    assert [os.path.basename(p) for p in P._iter_memory_files(md)] == ["a.md"]
+
+
+def test_is_memory_filename_excludes_conventions_md():
+    assert P._is_memory_filename("CONVENTIONS.md") is False
+    assert P._is_memory_filename("MEMORY.md") is False
+    assert P._is_memory_filename("MEMORY.full.md") is False
+    assert P._is_memory_filename("a.md") is True
+
+
+def test_corpus_format_version_is_2_for_typed_edges():
+    """GRA-4 is the corpus's first real format change: typed frontmatter relations
+    (supersedes/contradicts/refines) are a v2 convention. Pinned so a future bump is a
+    deliberate act with release-notes migration steps, never an accident."""
+    assert P.CORPUS_FORMAT_VERSION == 2
+
+
+# --------------------------------------------------------------------------- #
+# LIF-3: dropped_citations — a re-derivation that loses cited paths is REPORTED
+# (rename/delete case), never a silent shrink; a drop to ZERO is called out
+# distinctly because the memory becomes staleness-exempt.
+# --------------------------------------------------------------------------- #
+import subprocess  # noqa: E402
+
+
+def _git_mv(repo, src, dst):
+    subprocess.run(["git", "mv", src, dst], cwd=repo, check=True, capture_output=True)
+
+
+def test_reverify_reports_dropped_citations_after_rename_not_a_silent_shrink(repo, memory_dir):
+    """AC (LIF-3): rename a cited file (git mv + commit) → reverify NAMES the vanished
+    path in dropped_citations instead of silently shrinking cited_paths."""
+    write_file(repo, "src/keep.py", "k = 1\n")
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "deps", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/memory/m.md",
+        f'---\nname: M\ncited_paths: ["src/keep.py", "src/dep.py"]\nsource_commit: "{c1}"\n'
+        "---\nbody cites src/keep.py and src/dep.py\n",
+    )
+    git_commit(repo, "memory", 1_700_000_001)
+    _git_mv(repo, "src/dep.py", "src/dep_elsewhere2.py")  # new basename → no re-resolution
+    git_commit(repo, "rename dep", 1_700_000_100)
+
+    res = _reverify_one(memory_dir, repo, "m")
+    assert res["error"] is None and res["changed"] is True
+    assert res["dropped_citations"] == ["src/dep.py"]  # the vanished path is NAMED
+    assert res["cited"] == ["src/keep.py"]  # the survivor remains — a partial drop, not zero
+
+
+def test_refresh_reports_dropped_citations_on_deleted_file(repo, memory_dir):
+    """The corpus-wide --refresh path reports the same drop, with the baseline still
+    preserved — surfacing the rot must not change refresh's no-re-baseline contract."""
+    write_file(repo, "src/a.py", "x = 1\n")
+    write_file(repo, "src/b.py", "y = 1\n")
+    git_commit(repo, "init", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/memory/m.md",
+        '---\nname: M\ncited_paths: ["src/a.py", "src/b.py"]\nsource_commit: "BASE"\n'
+        "---\nbody cites src/a.py and src/b.py\n",
+    )
+    subprocess.run(["git", "rm", "-q", "src/b.py"], cwd=repo, check=True, capture_output=True)
+    git_commit(repo, "delete b", 1_700_000_100)
+
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    r = P.backfill_file(os.path.join(memory_dir, "m.md"), repo, repo_files, basename_index, refresh=True)
+    assert r["error"] is None
+    assert r["dropped_citations"] == ["src/b.py"]
+    assert r["cited"] == ["src/a.py"]
+    assert r["source_commit"] == "BASE"
+
+
+def test_initial_backfill_never_reports_dropped_citations(repo, memory_dir):
+    """A first backfill has no prior cited_paths — nothing can be lost."""
+    write_file(repo, "src/a.py", "x = 1\n")
+    write_file(memory_dir, "m.md", "---\nname: m\n---\nbody cites src/a.py\n")
+    git_commit(repo, "init", 1_700_000_000)
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    r = P.backfill_file(os.path.join(memory_dir, "m.md"), repo, repo_files, basename_index)
+    assert r["changed"] is True and r["dropped_citations"] == []
+
+
+def test_refresh_reports_no_drop_when_nothing_vanished(repo, memory_dir):
+    write_file(repo, "src/a.py", "x = 1\n")
+    git_commit(repo, "init", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/memory/m.md",
+        '---\nname: M\ncited_paths: ["src/a.py"]\nsource_commit: "BASE"\n---\nbody src/a.py\n',
+    )
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    r = P.backfill_file(os.path.join(memory_dir, "m.md"), repo, repo_files, basename_index, refresh=True)
+    assert r["error"] is None and r["dropped_citations"] == []
+
+
+def test_refresh_refusal_reports_no_drop(repo, memory_dir):
+    """An unparseable-frontmatter refusal re-derives nothing — dropped_citations stays []."""
+    write_file(repo, "src/a.py", "x = 1\n")
+    git_commit(repo, "init", 1_700_000_000)
+    bad = (
+        "---\nname: B\ndescription: oops Also: a colon\n"
+        'cited_paths: ["src/a.py"]\nsource_commit: "BASE_KEEP"\n---\nbody\n'
+    )
+    write_file(repo, ".claude/memory/m.md", bad)
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    r = P.backfill_file(os.path.join(memory_dir, "m.md"), repo, repo_files, basename_index, refresh=True)
+    assert r["error"] and r["dropped_citations"] == []
+
+
+def test_cli_reverify_drop_to_zero_is_called_out_distinctly(repo, memory_dir, monkeypatch, capsys):
+    """AC (LIF-3): a drop to ZERO empties cited_paths — find_stale has nothing left to
+    watch, so the memory is now staleness-EXEMPT and the CLI must SAY so, distinctly."""
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/memory/m.md",
+        f'---\nname: M\ncited_paths: ["src/dep.py"]\nsource_commit: "{c1}"\n---\nbody src/dep.py\n',
+    )
+    git_commit(repo, "memory", 1_700_000_001)
+    _git_mv(repo, "src/dep.py", "src/dep_gone2.py")
+    git_commit(repo, "rename dep away", 1_700_000_100)
+
+    monkeypatch.setattr(P, "resolve_dirs", lambda: (memory_dir, repo))
+    rc = P.main(["--reverify", "m"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "citation rot" in out and "m.md" in out and "src/dep.py" in out
+    assert "ALL 1 cited path(s)" in out and "EXEMPT" in out  # zero is distinct, not a footnote
+    cited, _ = read_provenance(open(os.path.join(memory_dir, "m.md"), encoding="utf-8").read())
+    assert cited == []  # the drop really happened — and it was loud, not silent
+
+
+def test_cli_refresh_prints_per_file_rot_line(repo, memory_dir, monkeypatch, capsys):
+    """Corpus-wide --refresh names every rotted file individually (count line + per-file
+    ⚠ line); healthy files stay out of the rot block."""
+    write_file(repo, "src/keep.py", "k = 1\n")
+    write_file(repo, "src/gone.py", "g = 1\n")
+    git_commit(repo, "init", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/memory/m_rot.md",
+        '---\nname: m_rot\ncited_paths: ["src/keep.py", "src/gone.py"]\nsource_commit: "B1"\n'
+        "---\nbody cites src/keep.py and src/gone.py\n",
+    )
+    write_file(
+        repo,
+        ".claude/memory/m_ok.md",
+        '---\nname: m_ok\ncited_paths: ["src/keep.py"]\nsource_commit: "B2"\n---\nbody src/keep.py\n',
+    )
+    subprocess.run(["git", "rm", "-q", "src/gone.py"], cwd=repo, check=True, capture_output=True)
+    git_commit(repo, "delete gone", 1_700_000_100)
+
+    monkeypatch.setattr(P, "resolve_dirs", lambda: (memory_dir, repo))
+    rc = P.main(["--refresh"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "citation rot" in out
+    assert "1 file(s) dropped cited path(s)" in out
+    assert "m_rot.md" in out and "src/gone.py" in out  # per-file, path named
+    assert "1 citation(s) remain" in out  # partial drop — remaining count shown
+    assert "m_ok.md" not in out  # a healthy file never appears in the rot block
+
+
+def test_cli_refresh_one_prints_rot_line(repo, memory_dir, monkeypatch, capsys):
+    write_file(repo, "src/gone.py", "g = 1\n")
+    git_commit(repo, "init", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/memory/m.md",
+        '---\nname: m\ncited_paths: ["src/gone.py"]\nsource_commit: "B"\n---\nbody src/gone.py\n',
+    )
+    subprocess.run(["git", "rm", "-q", "src/gone.py"], cwd=repo, check=True, capture_output=True)
+    git_commit(repo, "delete gone", 1_700_000_100)
+
+    monkeypatch.setattr(P, "resolve_dirs", lambda: (memory_dir, repo))
+    rc = P.main(["--refresh-one", "m"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "citation rot" in out and "m.md" in out and "src/gone.py" in out
+    assert "EXEMPT" in out  # its only citation vanished → the zero case, said distinctly
+
+
+def test_cli_refresh_dry_run_rot_line_says_would_drop_and_writes_nothing(repo, memory_dir, monkeypatch, capsys):
+    write_file(repo, "src/gone.py", "g = 1\n")
+    git_commit(repo, "init", 1_700_000_000)
+    before = '---\nname: m\ncited_paths: ["src/gone.py"]\nsource_commit: "B"\n---\nbody src/gone.py\n'
+    write_file(repo, ".claude/memory/m.md", before)
+    subprocess.run(["git", "rm", "-q", "src/gone.py"], cwd=repo, check=True, capture_output=True)
+    git_commit(repo, "delete gone", 1_700_000_100)
+
+    monkeypatch.setattr(P, "resolve_dirs", lambda: (memory_dir, repo))
+    rc = P.main(["--refresh", "--dry-run"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "would drop" in out and "src/gone.py" in out  # previewed with dry-run verbs
+    assert open(os.path.join(memory_dir, "m.md"), encoding="utf-8").read() == before  # untouched
+
+
+def test_citation_rot_lines_empty_when_nothing_dropped():
+    assert P.citation_rot_lines("m.md", ["src/a.py"], []) == []

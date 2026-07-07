@@ -113,6 +113,17 @@ def test_find_unparseable_does_not_raise_in_non_git_dir(tmp_path):
     assert S.find_unparseable(memory_dir) == []
 
 
+def test_find_citation_rot_empty_when_no_repo_index_in_non_git_dir(tmp_path):
+    """LIF-3: with no git file index, EVERY citation would look missing — the rot report
+    stays empty (under-flag beats cry-wolf) instead of flagging the whole corpus."""
+    d = _non_git_dir(tmp_path)
+    memory_dir = os.path.join(d, ".claude", "memory")
+    os.makedirs(memory_dir)
+    with open(os.path.join(memory_dir, "m.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: m\ncited_paths: ["src/x.py"]\nsource_commit: "abc"\n---\nbody\n')
+    assert S.find_citation_rot(memory_dir, d) == []
+
+
 # --------------------------------------------------------------------------- #
 # archive — falls back to os.rename (COR-5) when there is no git at all
 # --------------------------------------------------------------------------- #
@@ -124,7 +135,7 @@ def test_archive_memory_falls_back_to_rename_with_no_git_repo_at_all(tmp_path):
         fh.write("---\nname: m\ndescription: \"m\"\n---\nbody\n")
 
     result = A.archive_memory("m", memory_dir, d)
-    assert result == {"name": "m", "moved": True, "error": None}
+    assert result == {"name": "m", "moved": True, "refused": False, "referrers": [], "error": None}
     assert os.path.exists(os.path.join(memory_dir, "archive", "m.md"))
     assert not os.path.exists(os.path.join(memory_dir, "m.md"))
 

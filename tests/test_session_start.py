@@ -2,14 +2,20 @@
 
 Dispatcher logic (merge / bound / suppress / isolate / JSON) is tested by stubbing the
 producer set, so these tests don't depend on git timing (that's covered in test_staleness).
+The LIF-1 staleness-producer tests stub ``find_stale`` the same way but write REAL memory
+files for the ``invalid_after`` read — still no git timing anywhere.
 """
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 
 import memory.session_start as S
+from memory.staleness import set_invalid_after
+
+from .conftest import write_file
 
 
 def _producers(monkeypatch, producers):
@@ -20,8 +26,8 @@ def test_build_context_merges_producer_blocks(monkeypatch):
     _producers(
         monkeypatch,
         [
-            ("a", lambda md, repo: "ALPHA block"),
-            ("b", lambda md, repo: "BETA block"),
+            ("a", lambda md, repo, ctx=None: "ALPHA block"),
+            ("b", lambda md, repo, ctx=None: "BETA block"),
         ],
     )
     ctx = S.build_context("md", "repo")
@@ -29,24 +35,41 @@ def test_build_context_merges_producer_blocks(monkeypatch):
 
 
 def test_build_context_empty_when_nothing_to_say(monkeypatch):
-    _producers(monkeypatch, [("a", lambda md, repo: None)])
+    _producers(monkeypatch, [("a", lambda md, repo, ctx=None: None)])
     assert S.build_context("md", "repo") == ""
 
 
 def test_producer_exception_is_isolated(monkeypatch):
-    def boom(md, repo):
+    def boom(md, repo, ctx=None):
         raise RuntimeError("producer failed")
 
-    _producers(monkeypatch, [("boom", boom), ("ok", lambda md, repo: "still here")])
+    _producers(monkeypatch, [("boom", boom), ("ok", lambda md, repo, ctx=None: "still here")])
     ctx = S.build_context("md", "repo")
     assert ctx == "still here"  # the survivor is kept, the failure swallowed
 
 
 def test_output_is_bounded_under_cap(monkeypatch):
-    _producers(monkeypatch, [("big", lambda md, repo: "x" * 50_000)])
+    _producers(monkeypatch, [("big", lambda md, repo, ctx=None: "x" * 50_000)])
     ctx = S.build_context("md", "repo", max_chars=500)
     assert len(ctx) <= 500
     assert ctx.endswith("(truncated)")
+
+
+def test_dispatcher_calls_every_producer_with_the_shared_run_context(monkeypatch):
+    """LIF-6: the PRODUCERS loop shares ONE call shape — every registered fn is called
+    ``(memory_dir, repo_root, run_ctx)``, the same ``RunContext`` instance, not a
+    special-cased arity for a subset of producers."""
+    seen = []
+
+    def spy(md, repo, ctx=None):
+        seen.append(ctx)
+        return None
+
+    _producers(monkeypatch, [("a", spy), ("b", spy)])
+    S.build_context("md", "repo")
+    assert len(seen) == 2
+    assert seen[0] is seen[1]  # the SAME RunContext instance, computed once
+    assert isinstance(seen[0], S.RunContext)
 
 
 def test_staleness_producer_formats_real_output(monkeypatch):
@@ -59,6 +82,86 @@ def test_staleness_producer_formats_real_output(monkeypatch):
     )
     out = S.staleness_producer("md", "repo")
     assert out and "m_x" in out and "src/a.py" in out
+
+
+# --------------------------------------------------------------------------- #
+# LIF-1: the staleness producer suppresses already-demoted (invalid_after) entries'
+# per-item lines but keeps them COUNTED — terminal states never re-nag, and nothing
+# silently disappears.
+# --------------------------------------------------------------------------- #
+def _iso_days_ago(days):
+    return (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+    ).isoformat()
+
+
+def _leaf(name):
+    return f'---\nname: {name}\ndescription: "{name} description"\n---\nbody\n'
+
+
+def _stub_stale(monkeypatch, names):
+    monkeypatch.setattr(
+        S,
+        "find_stale",
+        lambda md, repo, diagnostics=None: [
+            {"name": n, "changed_paths": ["src/a.py"]} for n in names
+        ],
+    )
+
+
+def test_staleness_producer_suppresses_demoted_lines_but_keeps_the_count(memory_dir, monkeypatch):
+    write_file(memory_dir, "m_keep.md", _leaf("m_keep"))
+    gone = write_file(memory_dir, "m_gone.md", _leaf("m_gone"))
+    set_invalid_after(gone, _iso_days_ago(5))  # "recent" — demoted, penalty engaged
+    _stub_stale(monkeypatch, ["m_keep", "m_gone"])
+
+    out = S.staleness_producer(memory_dir, "repo")
+    assert "m_keep" in out
+    assert "m_gone" not in out  # per-item line suppressed — no double-nag
+    assert "1 memories cite code" in out  # header counts ACTIVE entries only
+    assert "(+1 already demoted" in out  # …but the demoted one is still accounted for
+
+
+def test_staleness_producer_all_demoted_collapses_to_one_honest_line(memory_dir, monkeypatch):
+    for n in ("m_a", "m_b"):
+        set_invalid_after(write_file(memory_dir, f"{n}.md", _leaf(n)), _iso_days_ago(5))
+    _stub_stale(monkeypatch, ["m_a", "m_b"])
+
+    out = S.staleness_producer(memory_dir, "repo")
+    assert out is not None  # not silent — suppression must never look like "nothing stale"
+    assert "all 2 stale memories are already demoted" in out
+    assert "m_a" not in out and "m_b" not in out  # no per-item re-nag lines
+
+
+def test_staleness_producer_old_invalidation_suggests_the_archive_flow(memory_dir, monkeypatch):
+    """LIF-1 (D): once an invalid_after entry ages past recall's old horizon, the producer
+    points at the audit skill's archive flow — report-only, naming the memory."""
+    old = write_file(memory_dir, "m_old.md", _leaf("m_old"))
+    set_invalid_after(old, _iso_days_ago(400))  # far past _INVALIDATION_RECENT_DAYS
+    _stub_stale(monkeypatch, ["m_old"])
+
+    out = S.staleness_producer(memory_dir, "repo")
+    assert "/hippo:audit" in out and "m_old" in out  # named ONLY in the archive suggestion
+    assert "old-invalidation horizon" in out
+
+
+def test_staleness_producer_recent_invalidation_gets_no_archive_suggestion(memory_dir, monkeypatch):
+    recent = write_file(memory_dir, "m_recent.md", _leaf("m_recent"))
+    set_invalid_after(recent, _iso_days_ago(5))
+    _stub_stale(monkeypatch, ["m_recent"])
+
+    out = S.staleness_producer(memory_dir, "repo")
+    assert "/hippo:audit" not in out  # still inside the penalty window — nothing to archive yet
+
+
+def test_staleness_producer_unchanged_when_nothing_is_invalidated(memory_dir, monkeypatch):
+    """No invalid_after anywhere -> the exact pre-LIF-1 block (no tail, full header count)."""
+    write_file(memory_dir, "m_x.md", _leaf("m_x"))
+    _stub_stale(monkeypatch, ["m_x"])
+
+    out = S.staleness_producer(memory_dir, "repo")
+    assert "1 memories cite code" in out and "m_x" in out
+    assert "demoted" not in out and "/hippo:audit" not in out
 
 
 def test_main_prints_session_start_json_when_stale(monkeypatch, capsys):
@@ -142,6 +245,192 @@ def test_reconsolidation_silent_when_stubbed_empty(monkeypatch):
 
     monkeypatch.setattr("memory.reconsolidate.recalled_stale_worklist", lambda *a, **k: [])
     assert reconsolidation_producer("md", "repo") is None
+
+
+# --------------------------------------------------------------------------- #
+# LIF-6 — de-duplicate SessionStart staleness vs reconsolidation reporting: find_stale is
+# computed ONCE by the dispatcher and shared via RunContext; the staleness producer
+# excludes names already claimed by the reconsolidation worklist. Unlike most of this
+# file, these tests DO use real git timing (mirrors
+# test_citation_rot_producer_end_to_end_after_git_mv) — the de-dup is only observable
+# across two producers wired through the real find_stale/recalled_stale_worklist path.
+# --------------------------------------------------------------------------- #
+def _lif6_mem(name, cited, source_commit):
+    cp = "[" + ", ".join(f'"{c}"' for c in cited) + "]"
+    return (
+        f'---\nname: {name}\ndescription: "{name} description"\n'
+        f'cited_paths: {cp}\nsource_commit: "{source_commit}"\n---\nbody for {name}\n'
+    )
+
+
+def _lif6_seed_two_stale_one_recalled(repo, memory_dir, monkeypatch):
+    """m_a and m_b both cite src/foo.py and both go stale after the same drift commit;
+    only m_a is recently recalled, so the worklist (``{m_a}``) is a STRICT subset of the
+    stale set (``{m_a, m_b}``) — exactly the AC's corpus shape. Commits are pinned
+    NEAR-NOW: find_stale's default window is wall-clock-relative, not relative to any
+    fixed epoch (mirrors test_reconsolidate.py's ``_seed_stale_recalled`` pattern, needed
+    here because the real dispatcher path has no ``since`` override to widen it)."""
+    import time
+
+    from .conftest import git_commit
+
+    now = int(time.time())
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", now - 200)
+    write_file(memory_dir, "m_a.md", _lif6_mem("m_a", ["src/foo.py"], c1))
+    write_file(memory_dir, "m_b.md", _lif6_mem("m_b", ["src/foo.py"], c1))
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", now - 100)
+
+    td = os.path.join(repo, "tele")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    os.makedirs(td, exist_ok=True)
+    with open(os.path.join(td, "recall_events.jsonl"), "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"session_id": "s1", "names": ["m_a"]}) + "\n")
+    return td
+
+
+def test_find_stale_called_exactly_once_per_dispatcher_run(repo, memory_dir, monkeypatch):
+    """LIF-6's core claim: staleness_producer + reconsolidation_producer used to each
+    independently call find_stale (twice per SessionStart, same corpus, same git-log
+    window); the dispatcher now computes it exactly once via ``_build_run_context`` and
+    both producers read the shared RunContext instead."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _lif6_seed_two_stale_one_recalled(repo, memory_dir, monkeypatch)
+
+    calls = []
+    real_find_stale = S.find_stale
+
+    def counting_find_stale(*a, **k):
+        calls.append(1)
+        return real_find_stale(*a, **k)
+
+    monkeypatch.setattr(S, "find_stale", counting_find_stale)
+    S.build_context(memory_dir, repo)
+    assert calls == [1]
+
+
+def test_no_memory_name_appears_twice_when_worklist_is_subset_of_stale(repo, memory_dir, monkeypatch):
+    """The AC, end to end: m_a sits on BOTH the full stale set and the (strict-subset)
+    reconsolidation worklist — its per-item bullet must appear in the staleness block's
+    OWN per-item lines exactly ZERO times (claimed by the reconsolidation block instead),
+    while m_b (stale but never recalled) still gets its own staleness line. Blocks are
+    split on "\\n\\n" (build_context's own join separator) rather than a raw substring
+    count, because an UNRELATED producer (git-recent) legitimately mentions "m_a" too —
+    it was captured recently, which has nothing to do with this de-dup."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _lif6_seed_two_stale_one_recalled(repo, memory_dir, monkeypatch)
+
+    ctx = S.build_context(memory_dir, repo)
+    blocks = ctx.split("\n\n")
+    staleness_block = next(b for b in blocks if b.startswith("⚠ Memory staleness"))
+    recon_block = next(b for b in blocks if b.startswith("🧠 Reconsolidation worklist"))
+    assert "  • m_a:" not in staleness_block  # claimed by the worklist, not re-listed here
+    assert "  • m_b:" in staleness_block  # the non-recalled stale memory still gets its line
+    assert "  • m_a:" in recon_block
+    assert "already on the reconsolidation worklist" in staleness_block  # LIF-1-style tail
+
+
+def test_staleness_producer_excludes_worklist_names_via_ctx(memory_dir):
+    """Unit-level: given a RunContext whose worklist already claims a name, the staleness
+    producer drops its per-item line and counts it in a tail (LIF-1's suppression-tail
+    style, applied to the new exclusion reason)."""
+    write_file(memory_dir, "m_a.md", _lif6_mem("m_a", ["src/foo.py"], "abc123"))
+    write_file(memory_dir, "m_b.md", _lif6_mem("m_b", ["src/foo.py"], "abc123"))
+    ctx = S.RunContext(
+        stale=[
+            {"name": "m_a", "changed_paths": ["src/foo.py"]},
+            {"name": "m_b", "changed_paths": ["src/foo.py"]},
+        ],
+        worklist=[{"name": "m_a", "changed_paths": ["src/foo.py"]}],
+    )
+    out = S.staleness_producer(memory_dir, "repo", ctx)
+    lines = out.splitlines()
+    assert not any(line.strip().startswith("• m_a") for line in lines)
+    assert any(line.strip().startswith("• m_b") for line in lines)
+    assert "(+1 already on the reconsolidation worklist" in out
+
+
+def test_staleness_producer_all_worklisted_collapses_to_one_honest_line(memory_dir):
+    write_file(memory_dir, "m_a.md", _lif6_mem("m_a", ["src/foo.py"], "abc123"))
+    ctx = S.RunContext(
+        stale=[{"name": "m_a", "changed_paths": ["src/foo.py"]}],
+        worklist=[{"name": "m_a", "changed_paths": ["src/foo.py"]}],
+    )
+    out = S.staleness_producer(memory_dir, "repo", ctx)
+    assert out is not None
+    assert "all 1 stale memories are already on the reconsolidation worklist" in out
+    assert "• m_a" not in out
+
+
+def test_staleness_producer_mixed_demoted_and_worklisted_collapse(memory_dir):
+    gone = write_file(memory_dir, "m_gone.md", _lif6_mem("m_gone", ["src/foo.py"], "abc123"))
+    set_invalid_after(gone, _iso_days_ago(5))
+    write_file(memory_dir, "m_a.md", _lif6_mem("m_a", ["src/foo.py"], "abc123"))
+    ctx = S.RunContext(
+        stale=[
+            {"name": "m_gone", "changed_paths": ["src/foo.py"]},
+            {"name": "m_a", "changed_paths": ["src/foo.py"]},
+        ],
+        worklist=[{"name": "m_a", "changed_paths": ["src/foo.py"]}],
+    )
+    out = S.staleness_producer(memory_dir, "repo", ctx)
+    assert "already accounted for" in out
+    assert "1 demoted" in out and "1 on the reconsolidation worklist" in out
+
+
+def test_producers_degrade_unchanged_when_find_stale_is_empty(tmp_path):
+    """A RunContext built from an empty stale set produces the SAME silence as the
+    pre-LIF-6 empty case for both staleness-derived producers."""
+    md = str(tmp_path / ".claude" / "memory")
+    os.makedirs(md)
+    empty_ctx = S.RunContext()
+    assert S.staleness_producer(md, "repo", empty_ctx) is None
+    from memory.reconsolidate import reconsolidation_producer
+
+    assert reconsolidation_producer(md, "repo", empty_ctx) is None
+
+
+def test_stale_cache_written_with_documented_shape(repo, memory_dir, monkeypatch):
+    """RET-5/RET-6 setup: stale.json lands in the gitignored index dir with the minimal
+    ``{changed, sha}`` shape a bounded penalty / drift banner will need."""
+    from memory.build_index import default_index_dir
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _lif6_seed_two_stale_one_recalled(repo, memory_dir, monkeypatch)
+
+    S.build_context(memory_dir, repo)
+
+    idx = default_index_dir(memory_dir)
+    with open(os.path.join(idx, "stale.json"), encoding="utf-8") as fh:
+        payload = json.load(fh)
+    assert payload["schema_version"] == 1
+    assert "generated_at" in payload
+    assert set(payload["stale"]) == {"m_a", "m_b"}
+    for entry in payload["stale"].values():
+        assert entry["changed"] == 1  # one drifted cited path each
+        assert entry["sha"] and len(entry["sha"]) <= 7
+
+
+def test_stale_cache_written_honestly_empty_when_nothing_stale(repo, memory_dir, monkeypatch):
+    """No memories at all -> find_stale returns [] honestly, and stale.json says so too
+    (a checked-and-clean run, not a skipped write)."""
+    from memory.build_index import default_index_dir
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    S.build_context(memory_dir, repo)
+
+    idx = default_index_dir(memory_dir)
+    with open(os.path.join(idx, "stale.json"), encoding="utf-8") as fh:
+        payload = json.load(fh)
+    assert payload["stale"] == {}
+
+
+def test_stale_cache_not_written_for_a_nonexistent_memory_dir():
+    """A bogus/nonexistent memory_dir (a hermetic test's placeholder string, or an
+    untrusted-gate short-circuit) must never mint a stray index dir."""
+    S.build_context("does/not/exist", "repo")
+    assert not os.path.isdir("does")
 
 
 def test_main_heals_empty_baselines_side_effect(tmp_path, monkeypatch, capsys):
@@ -243,6 +532,95 @@ def test_unresolvable_baseline_producer_is_registered():
     assert labels.count("unresolvable_baseline") == 1
     fns = [fn for label, fn in S.PRODUCERS if label == "unresolvable_baseline"]
     assert fns == [S.unresolvable_baseline_producer]
+
+
+# --------------------------------------------------------------------------- #
+# LIF-3: citation_rot_producer — cited paths gone from the repo, count-first,
+# ONE canonical SessionStart surface (find_unparseable's rot sibling)
+# --------------------------------------------------------------------------- #
+def test_citation_rot_producer_formats_real_output_count_first(monkeypatch):
+    monkeypatch.setattr(
+        S,
+        "find_citation_rot",
+        lambda md, repo: [{"name": "m_rot", "missing_paths": ["src/gone.py"], "cited_count": 2}],
+    )
+    out = S.citation_rot_producer("md", "repo")
+    assert out and "m_rot" in out and "src/gone.py" in out
+    # count-first: the COUNT leads the block, per-item lines follow inside the budget
+    assert "1 memories cite paths that no longer exist" in out.splitlines()[0]
+
+
+def test_citation_rot_producer_total_rot_called_out_distinctly(monkeypatch):
+    """Every citation gone → a refresh would EMPTY cited_paths and the memory becomes
+    staleness-exempt; the producer says so on that line, distinctly."""
+    monkeypatch.setattr(
+        S,
+        "find_citation_rot",
+        lambda md, repo: [{"name": "m_total", "missing_paths": ["src/gone.py"], "cited_count": 1}],
+    )
+    out = S.citation_rot_producer("md", "repo")
+    assert "staleness-EXEMPT" in out
+
+
+def test_citation_rot_producer_partial_rot_not_marked_exempt(monkeypatch):
+    monkeypatch.setattr(
+        S,
+        "find_citation_rot",
+        lambda md, repo: [{"name": "m_partial", "missing_paths": ["src/gone.py"], "cited_count": 3}],
+    )
+    out = S.citation_rot_producer("md", "repo")
+    assert out and "EXEMPT" not in out  # only the drop-to-zero case earns the loud marker
+
+
+def test_citation_rot_producer_silent_when_clean(monkeypatch):
+    monkeypatch.setattr(S, "find_citation_rot", lambda md, repo: [])
+    assert S.citation_rot_producer("md", "repo") is None
+
+
+def test_citation_rot_producer_bounds_item_count(monkeypatch):
+    monkeypatch.setattr(
+        S,
+        "find_citation_rot",
+        lambda md, repo: [
+            {"name": f"m_{i:03d}", "missing_paths": ["src/gone.py"], "cited_count": 2}
+            for i in range(30)
+        ],
+    )
+    out = S.citation_rot_producer("md", "repo")
+    assert "30 memories" in out  # the count stays honest…
+    assert "…and 10 more." in out  # …while the per-item lines respect the budget
+
+
+def test_citation_rot_producer_registered_once_after_integrity():
+    labels = [label for label, _fn in S.PRODUCERS]
+    assert labels.count("citation_rot") == 1
+    # grouped right after its unparseable sibling — both are corpus-record-vs-reality holes
+    assert labels.index("citation_rot") == labels.index("integrity") + 1
+    fns = [fn for label, fn in S.PRODUCERS if label == "citation_rot"]
+    assert fns == [S.citation_rot_producer]
+
+
+def test_citation_rot_producer_end_to_end_after_git_mv(repo, memory_dir):
+    """AC (LIF-3): rename a cited file (git mv + commit) → the SessionStart rot surface
+    names the memory and the vanished path, before any refresh has dropped anything."""
+    import subprocess
+
+    from .conftest import git_commit
+
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep", 1_700_000_000)
+    write_file(
+        memory_dir,
+        "m_rot.md",
+        f'---\nname: m_rot\ncited_paths: ["src/dep.py"]\nsource_commit: "{c1}"\n---\nbody\n',
+    )
+    subprocess.run(
+        ["git", "mv", "src/dep.py", "src/dep_moved2.py"], cwd=repo, check=True, capture_output=True
+    )
+    git_commit(repo, "rename dep", 1_700_000_100)
+
+    out = S.citation_rot_producer(memory_dir, repo)
+    assert out and "m_rot" in out and "src/dep.py" in out
 
 
 # --------------------------------------------------------------------------- #
@@ -357,3 +735,53 @@ def test_read_hook_payload_tty_stdin_is_not_read(monkeypatch):
 
     monkeypatch.setattr(S.sys, "stdin", FakeTty())
     assert S._read_hook_payload() == (None, None)
+
+
+# --------------------------------------------------------------------------- #
+# COR-7: corpus_format producer — a corpus NEWER than the plugin must be loud;
+# an OLDER one is doctor's migration path, never a per-session nag
+# --------------------------------------------------------------------------- #
+def test_corpus_format_producer_warns_when_corpus_is_newer(tmp_path):
+    from memory.provenance import write_corpus_format
+
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    newer = S.CORPUS_FORMAT_VERSION + 1
+    assert write_corpus_format(md, version=newer) is True
+    out = S.corpus_format_producer(md, "repo")
+    assert out is not None
+    assert f"v{newer}" in out and f"v{S.CORPUS_FORMAT_VERSION}" in out  # names BOTH versions
+    assert "update the hippo plugin" in out.lower()  # the one-directional remediation
+
+
+def test_corpus_format_producer_silent_when_current_or_undeclared(tmp_path):
+    from memory.provenance import write_corpus_format
+
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    assert S.corpus_format_producer(md, "repo") is None  # no marker == format 1 == silent
+    assert write_corpus_format(md) is True  # explicit current version
+    assert S.corpus_format_producer(md, "repo") is None
+
+
+def test_corpus_format_producer_silent_when_corpus_is_older(tmp_path, monkeypatch):
+    """Corpus older than the plugin == a migration is pending — that path is doctor-driven
+    (check_format_version names it once, on demand), not a per-session alarm."""
+    from memory.provenance import write_corpus_format
+
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    assert write_corpus_format(md, version=1) is True
+    monkeypatch.setattr(S, "CORPUS_FORMAT_VERSION", 2)  # simulate a post-bump plugin
+    assert S.corpus_format_producer(md, "repo") is None
+
+
+def test_corpus_format_producer_silent_on_missing_corpus(tmp_path):
+    assert S.corpus_format_producer(str(tmp_path / "does-not-exist"), "repo") is None
+
+
+def test_corpus_format_producer_is_registered_exactly_once():
+    labels = [label for label, _fn in S.PRODUCERS]
+    assert labels.count("corpus_format") == 1
+    fns = [fn for label, fn in S.PRODUCERS if label == "corpus_format"]
+    assert fns == [S.corpus_format_producer]

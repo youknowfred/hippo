@@ -9,9 +9,17 @@ Reads the recall-event ledger (``memory/telemetry.py``) into two decisions:
     "dead weight" — read with the topic-bias caveat: cold tracks recent session mix, not
     value), and the BM25-fallback rate (dense unavailable on some session).
 
-Read-only over the LEDGER and the corpus; never raises; output bounded. This is a CLI/analysis
-surface — it is NOT a SessionStart producer (the former Option-C soak announcer was removed: the
-auto-extraction draft queue it announced was killed, so a met gate must not advertise it).
+LIF-4: the ledger is a byte-capped rotating buffer, so on a long-lived corpus its oldest
+evidence is exactly what rotation drops first — a genuinely-used memory would drift toward
+"never recalled" if the ledger were the only source. Every analyzer here therefore UNIONS
+the rotation-surviving ``usage_aggregates.json`` (``telemetry.read_usage_aggregates``) into
+its session counts and recalled-set; the raw per-EVENT hit counts remain ledger-window-only
+(the aggregates deliberately don't store event counts).
+
+Read-only over the LEDGER + AGGREGATES and the corpus; never raises; output bounded. This is
+a CLI/analysis surface — it is NOT a SessionStart producer (the former Option-C soak announcer
+was removed: the auto-extraction draft queue it announced was killed, so a met gate must not
+advertise it).
 """
 
 from __future__ import annotations
@@ -20,7 +28,7 @@ import os
 from collections import Counter
 from typing import List, Optional
 
-from .telemetry import default_telemetry_dir, read_events
+from .telemetry import default_telemetry_dir, read_events, read_usage_aggregates
 
 # Curation-soak bar: enough distinct sessions that the never-recalled signal isn't one-session
 # topic noise (a floor for trusting the dead-weight report, NOT an Option-C unblock gate).
@@ -36,19 +44,25 @@ _SERVING_BACKENDS = ("dense+bm25", "dense", "bm25")
 def soak_status(telemetry_dir: Optional[str] = None) -> dict:
     """Distinct-session count + whether the ``>=5``-session curation-soak bar is met.
 
-    Read-only over the ledger; never raises.
+    ``distinct_sessions`` is the LARGER of the ledger-window count and the
+    rotation-surviving aggregate count (LIF-4) — the two observe the same session stream,
+    so max() is the honest union: rotation can only shrink the ledger's view, and a
+    deleted/reset aggregate file can only shrink the aggregate's. ``total_events`` stays
+    ledger-window-only (the aggregates don't store event counts). Read-only; never raises.
     """
     sessions: set = set()
     total = 0
+    agg_sessions = 0
     try:
         for e in read_events(telemetry_dir):
             total += 1
             sid = e.get("session_id")
             if sid:
                 sessions.add(sid)
+        agg_sessions = read_usage_aggregates(telemetry_dir)["sessions"]["count"]
     except Exception:
         pass
-    distinct = len(sessions)
+    distinct = max(len(sessions), agg_sessions)
     return {
         "distinct_sessions": distinct,
         "total_events": total,
@@ -73,14 +87,19 @@ def _corpus_names(memory_dir: str) -> List[str]:
 def curation_report(memory_dir: str, telemetry_dir: Optional[str] = None) -> dict:
     """Per-memory hit counts, the never-recalled set, and the BM25-fallback rate.
 
-    ``never_recalled`` = corpus memories that never surfaced in any recall event (curation
-    candidates). ``bm25_fallback_rate`` = fraction of result-serving events that fell back to
-    BM25-only (dense unavailable). Read-only; never raises.
+    ``never_recalled`` = corpus memories that never surfaced in any recall event — in the
+    retained ledger OR in the rotation-surviving aggregates (LIF-4: a memory whose only
+    recalls rotated out of the ledger is NOT dead weight). ``recalled_count`` counts that
+    same union, so it can exceed ``len(per_memory_hits)`` — the raw hit Counter stays
+    ledger-window-only by design (the aggregates don't store event counts).
+    ``bm25_fallback_rate`` = fraction of result-serving events that fell back to BM25-only
+    (dense unavailable). Read-only; never raises.
     """
     hits: Counter = Counter()
     serving = 0
     bm25_only = 0
     total = 0
+    agg_recalled: set = set()
     try:
         for e in read_events(telemetry_dir):
             total += 1
@@ -92,11 +111,12 @@ def curation_report(memory_dir: str, telemetry_dir: Optional[str] = None) -> dic
                 serving += 1
                 if backend == "bm25":
                     bm25_only += 1
+        agg_recalled = set(read_usage_aggregates(telemetry_dir)["memories"])
     except Exception:
         pass
 
     corpus = _corpus_names(memory_dir)
-    recalled = set(hits)
+    recalled = set(hits) | agg_recalled
     never_recalled = sorted(n for n in corpus if n not in recalled)
     bm25_fallback_rate = round(bm25_only / serving, 4) if serving else 0.0
     return {
@@ -126,12 +146,21 @@ def compute_strength_scores(telemetry_dir: Optional[str] = None) -> dict:
     memory surfaced in every session ever logged scores ``1.0``; one never recalled is simply
     absent from the returned dict (read it as ``0.0``).
 
+    LIF-4: both sides of the ratio union the rotation-surviving aggregates with the
+    retained ledger — per-name numerator and total denominator each take the LARGER of the
+    two observations of the same session stream, so a memory whose earliest recalls rotated
+    out of the ledger keeps its staying power (and a score can never exceed ``1.0``: a
+    name's aggregate count can't exceed the aggregate total, nor a ledger name-count the
+    ledger total — a hand-corrupted aggregate file is clamped anyway).
+
     REPORT-ONLY: does not write anything, and is never consulted by ``recall()``'s ranking —
     folding it into ranking is a separate, explicitly DEFERRED roadmap item (K2). Read-only
-    over the ledger; never raises; ``{}`` when no sessions have been logged yet.
+    over the ledger + aggregates; never raises; ``{}`` when no sessions have been logged yet.
     """
     sessions_per_name: dict = {}
     all_sessions: set = set()
+    agg_memories: dict = {}
+    agg_total = 0
     try:
         for e in read_events(telemetry_dir):
             sid = e.get("session_id")
@@ -142,12 +171,23 @@ def compute_strength_scores(telemetry_dir: Optional[str] = None) -> dict:
             for name in e.get("names") or []:
                 if name:
                     sessions_per_name.setdefault(name, set()).add(sid)
+        agg = read_usage_aggregates(telemetry_dir)
+        agg_memories = agg["memories"]
+        agg_total = agg["sessions"]["count"]
     except Exception:
         pass
-    total = len(all_sessions)
+    total = max(len(all_sessions), agg_total)
     if not total:
         return {}
-    return {name: round(len(sids) / total, 4) for name, sids in sessions_per_name.items()}
+    scores: dict = {}
+    for name in set(sessions_per_name) | set(agg_memories):
+        agg_n = (agg_memories.get(name) or {}).get("sessions")
+        if not isinstance(agg_n, int) or isinstance(agg_n, bool) or agg_n < 0:
+            agg_n = 0
+        n = max(len(sessions_per_name.get(name, ())), agg_n)
+        if n:
+            scores[name] = round(min(n / total, 1.0), 4)
+    return scores
 
 
 # --------------------------------------------------------------------------- #

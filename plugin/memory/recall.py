@@ -40,7 +40,7 @@ from .build_index import (
 from . import trust
 from .lint_floor import floor_memory_names
 from .provenance import _iter_memory_files, resolve_dirs
-from .staleness import _commit_times, read_provenance
+from .staleness import RunContext, _commit_times, read_provenance
 
 # Harness caps hook output at 10,000 chars; stay well under it.
 _MAX_RECALL_CHARS = 9000
@@ -74,6 +74,18 @@ def _body_rrf_weight() -> float:
 _INVALIDATION_PENALTY = 0.5
 _INVALIDATION_RECENT_DAYS = 30.0
 
+# Typed-edge demotion (GRA-4) — a memory that is the TARGET of a live supersedes edge
+# (some OTHER memory in the index declares `supersedes: [it]`) has its fused score halved
+# BEFORE the top-k cut, exactly the invalidation penalty's bounded-multiplier style: real
+# demotion (it can fall out of top-k, and its successor outranks it), never a hard exclude
+# (a wide-k query still surfaces it, annotated). `contradicts` targets are deliberately
+# NOT demoted — a contradiction means "one of these is wrong, VERIFY", not "this one lost"
+# — they carry a conflict annotation only. `refines` is navigational: no ranking effect,
+# no annotation. Typed edges reach this hot path via GRA-6's persisted links.json ONLY
+# (one small-JSON read, shared with 1-hop expansion) — cache absent degrades to
+# no-demotion/no-annotation, never a corpus read per prompt.
+_SUPERSEDED_PENALTY = 0.5
+
 # Mid-session drift (COR-4) — a stat+reread per entry is cheap, but bound it so a huge
 # corpus can never turn the hot path into an O(corpus) disk scan of unbounded size.
 _MAX_DRIFT_CHECKS = 200
@@ -86,6 +98,47 @@ _MAX_DRIFT_CHECKS = 200
 # discounted score actually beats an organic candidate, never by displacing one for free.
 _GRAPH_SEEDS = 3  # override: HIPPO_GRAPH_SEEDS (0 disables expansion entirely)
 _NEIGHBOR_DISCOUNT = 0.5
+
+# --------------------------------------------------------------------------- #
+# RET-5: salience fusion — recency / usage / staleness as BOUNDED ranking priors.
+# DEFAULT OFF (``HIPPO_SALIENCE=1`` opts in — the roadmap: "ship behind an env flag
+# first"). Applied to the fused+penalized score, PRE-CUT (same "real demotion, can
+# reorder top-k" posture as the invalidation/supersede penalties above), never post-hoc
+# display-only. Each signal is a MULTIPLICATIVE, individually-capped nudge — relevance (the
+# RRF fusion this runs after) picks the candidate set and dominates ordering; salience only
+# re-orders NEAR-TIES within it:
+#   - recency prior  : up to +10% for a same-day ``source_commit_time``, decaying linearly
+#                       to 0 by _SALIENCE_RECENCY_WINDOW_DAYS; absent/old -> 0 (no penalty
+#                       for an undated memory, only a missed boost).
+#   - usage prior     : up to +10% at usage_score == 1.0 (recalled in EVERY distinct session
+#                       LIF-4's aggregates have observed) — capped HARD so a much-recalled
+#                       memory can NEVER outrank a clearly-more-relevant one on usage alone.
+#   - staleness penalty: up to -15% for a memory LIF-6's stale.json marked drifted, graduated
+#                       by how many cited paths changed (saturating at
+#                       _SALIENCE_STALENESS_SATURATION) — advisory, absent -> no penalty.
+# Combined worst-case swing is (1.10 * 1.10) / 0.85 ≈ 1.42x -- enough to break a tie between
+# two candidates the fusion already ranks close together (see the controlled-fixture test),
+# but far short of the multi-x gaps a genuine relevance difference produces in RRF scores.
+_SALIENCE_RECENCY_CAP = 0.10
+_SALIENCE_RECENCY_WINDOW_DAYS = 180.0
+_SALIENCE_USAGE_CAP = 0.10
+_SALIENCE_STALENESS_CAP = 0.15
+_SALIENCE_STALENESS_SATURATION = 5
+
+# --------------------------------------------------------------------------- #
+# RET-6: verify-at-use banner — a currently-stale injected memory carries a one-line
+# "anchored to <sha>; N cited files changed since — verify before relying" banner on its
+# rendered pointer, sourced from LIF-6's persisted stale.json (advisory, SessionStart-derived
+# -- NEVER a git call on this hot path; absent/corrupt cache -> no banners for anyone).
+# UNLIKE RET-5's salience fusion, this is NOT gated behind a flag and does NOT touch ranking
+# or score at all -- staleness here is a correctness signal a user reading the injected
+# pointer should always see, not a ranking nudge someone might opt out of. Reinforcement
+# (clearing the banner) needs no NEW machinery: `reconsolidate.semantic_reverify`'s
+# graduate/fix outcomes already re-baseline `source_commit` to HEAD via
+# `provenance.reverify_file` -- so a reinforced memory simply drops out of the NEXT
+# SessionStart's `find_stale` scan (and thus `stale.json`), and is rendered bannerless from
+# then on, exactly like a memory that was never stale. See `_stale_banner_map` below.
+# --------------------------------------------------------------------------- #
 
 # --------------------------------------------------------------------------- #
 # RET-1: relevance floor + knee cutoff — "earn every injected token"
@@ -702,17 +755,91 @@ def _graph_seed_count() -> int:
         return _GRAPH_SEEDS
 
 
+def _load_hot_edges(index_dir: Optional[str]) -> Optional[dict]:
+    """The hot path's ONE links.json read (GRA-6's ``load_edges``), or None.
+
+    Loaded exactly once per ``recall()`` call and shared by BOTH graph consumers — the
+    typed-edge maps (GRA-4) and 1-hop expansion (GRA-1) — so adding typed edges cost the
+    hot path zero additional I/O. Never raises; None (no ``index_dir`` resolvable, cache
+    absent/corrupt) simply disables both consumers, the same degrade-to-organic-ranking
+    posture ``_expand_neighbors`` always had.
+    """
+    try:
+        if not index_dir:
+            return None
+        from .links import load_edges
+
+        return load_edges(index_dir)
+    except Exception:
+        return None
+
+
+def _typed_relation_maps(
+    entries: List[dict], edges: Optional[dict]
+) -> Tuple[Dict[int, List[str]], Dict[int, List[str]]]:
+    """``(superseded_by, contradicted_by)`` — entry index -> sorted LIVE source names.
+
+    GRA-4: built from the persisted edge list's ``typed_in`` direction (who declares the
+    relation TOWARD this entry), filtered to LIVE sources — a source stem must itself be
+    present in the loaded index, so a slightly-stale cache naming a deleted successor
+    degrades to "no edge" (fail open, no demotion) rather than annotating with a ghost.
+    Entry ``name`` == file stem == the edge list's node identity, same join
+    ``_expand_neighbors`` relies on. Never raises; ``({}, {})`` when the cache is absent.
+    """
+    superseded: Dict[int, List[str]] = {}
+    contradicted: Dict[int, List[str]] = {}
+    try:
+        if not edges:
+            return superseded, contradicted
+        live = {e.get("name") for e in entries}
+        for i, e in enumerate(entries):
+            rec = edges.get(e.get("name"))
+            if not rec:
+                continue
+            typed_in = rec.get("typed_in") or {}
+            sup = sorted(s for s in typed_in.get("supersedes", ()) if s in live)
+            if sup:
+                superseded[i] = sup
+            con = sorted(s for s in typed_in.get("contradicts", ()) if s in live)
+            if con:
+                contradicted[i] = con
+        return superseded, contradicted
+    except Exception:
+        return {}, {}
+
+
+def _typed_note(i: int, superseded: Dict[int, List[str]], contradicted: Dict[int, List[str]]) -> str:
+    """One bounded annotation string for entry ``i`` ("" when it carries no typed edge).
+
+    Names at most two sources per relation (+N more) so a heavily-superseded memory can
+    never balloon its pointer line past the display budget.
+    """
+
+    def _names(names: List[str]) -> str:
+        head = ", ".join(names[:2])
+        return head if len(names) <= 2 else f"{head} (+{len(names) - 2} more)"
+
+    bits: List[str] = []
+    if i in superseded:
+        bits.append(f"superseded by {_names(superseded[i])}")
+    if i in contradicted:
+        bits.append(f"contradicts {_names(contradicted[i])} — verify")
+    return "; ".join(bits)
+
+
 def _expand_neighbors(
     penalized: List[Tuple[int, float, Optional[str]]],
     entries: List[dict],
-    index_dir: Optional[str],
+    edges: Optional[dict],
+    superseded: Optional[Dict[int, List[str]]] = None,
 ) -> Tuple[List[Tuple[int, float, Optional[str]]], set]:
     """1-hop neighbor expansion (GRA-1): inject linked memories at a discounted score.
 
     Takes the ALREADY-penalized candidate list (post-fusion, post-invalidation re-sort),
     seeds on its top-N entries, and unions their outbound+inbound 1-hop neighbor stems from
-    GRA-6's persisted edge list (``load_edges`` — links.json only, the hot path's single
-    extra small-JSON read). Injection rules, in order:
+    GRA-6's persisted edge list (``edges`` — the ``_load_hot_edges`` result ``recall()``
+    loaded once, links.json only, the hot path's single extra small-JSON read). Injection
+    rules, in order:
 
       - stems absent from the index are dropped (a link can outlive its target);
       - the seeds themselves are dropped (a seed is already ranked as well as it can be);
@@ -721,26 +848,25 @@ def _expand_neighbors(
       - invalidation applies IDENTICALLY to organic candidates: "recent" halves the
         injected score, "old" rides through as state so the display filter downstream
         drops it — expansion must never resurrect an invalidated memory;
+      - the superseded penalty (GRA-4, ``superseded`` — the entry-index map ``recall()``
+        already built) applies identically too: a superseded neighbor enters at the SAME
+        halved score it would rank at organically — the untyped graph must not become a
+        side door around supersession;
       - a neighbor already in the penalized list at an equal-or-higher score keeps its
         ORGANIC tuple (and organic provenance); only a strictly-better injected score
         replaces it, and only then does the result carry the "graph" marker.
 
     Returns ``(re-sorted list, {entry indices injected via graph})`` so the emission loop
-    can stamp provenance ("via"). Never raises; ANY failure — no index_dir resolvable
+    can stamp provenance ("via"). Never raises; ANY failure — no edges loaded
     (caller-supplied in-memory index with no dirs: eval self_recall probes, hermetic
-    LoadedIndex tests), absent/corrupt links.json, junk env — returns the input untouched,
+    LoadedIndex tests; absent/corrupt links.json), junk env — returns the input untouched,
     so expansion can only ever be additive, never a new degradation mode.
     """
     try:
-        if not index_dir or not penalized:
+        if not edges or not penalized:
             return penalized, set()
         seeds_n = _graph_seed_count()
         if seeds_n <= 0:
-            return penalized, set()
-        from .links import load_edges
-
-        edges = load_edges(index_dir)
-        if not edges:
             return penalized, set()
         seeds = penalized[:seeds_n]
         seed_idxs = {i for i, _score, _state in seeds}
@@ -766,6 +892,8 @@ def _expand_neighbors(
         for j, cand in injected.items():
             state = _invalidation_state(entries[j])
             adj = cand * _INVALIDATION_PENALTY if state == "recent" else cand
+            if superseded and j in superseded:
+                adj *= _SUPERSEDED_PENALTY
             if j in organic_score and organic_score[j] >= adj:
                 continue  # organic rank is already at least as good — keep it (and its label)
             replace[j] = (adj, state)
@@ -777,6 +905,183 @@ def _expand_neighbors(
         return expanded, set(replace)
     except Exception:
         return penalized, set()
+
+
+# --------------------------------------------------------------------------- #
+# RET-5: salience fusion — recency / usage / staleness (see the constants block above for
+# the caps and why they're small). DEFAULT OFF; every reader here degrades to "no signal"
+# (never a hard error) on any missing/corrupt input, matching the graph readers' posture.
+# --------------------------------------------------------------------------- #
+def _salience_enabled() -> bool:
+    """True only when ``HIPPO_SALIENCE`` is explicitly truthy — DEFAULT OFF (the roadmap:
+    "ship behind an env flag first"). Mirrors ``build_index.dense_disabled()``'s falsy set
+    so ``HIPPO_SALIENCE=0``/``false`` reads as an explicit opt-out, not a truthy string.
+    """
+    raw = os.environ.get("HIPPO_SALIENCE", "").strip()
+    return raw not in ("", "0", "false", "False")
+
+
+def _recency_boost(entry: dict, *, now: float) -> float:
+    """Bounded ``[0, _SALIENCE_RECENCY_CAP]`` recency prior from the entry's persisted
+    ``source_commit_time`` (copied into the manifest at build time by
+    ``build_index.compute_corpus`` — see its docstring; NOT re-derived here, so this is
+    pure arithmetic, no git call on the hot path). Linear decay from the full cap at age 0
+    to 0 at ``_SALIENCE_RECENCY_WINDOW_DAYS``; missing/malformed/future/older -> 0 (no
+    boost, but never a PENALTY — an undated memory is judged on relevance alone). Never
+    raises.
+    """
+    sct = entry.get("source_commit_time")
+    if not isinstance(sct, (int, float)) or isinstance(sct, bool):
+        return 0.0
+    age_days = (now - sct) / 86400.0
+    if age_days <= 0.0:
+        return _SALIENCE_RECENCY_CAP  # future/clock-skew timestamp -> treat as "as fresh as it gets"
+    if age_days >= _SALIENCE_RECENCY_WINDOW_DAYS:
+        return 0.0
+    return _SALIENCE_RECENCY_CAP * (1.0 - age_days / _SALIENCE_RECENCY_WINDOW_DAYS)
+
+
+def _usage_boost_map(memory_dir: Optional[str]) -> Dict[str, float]:
+    """Name -> bounded ``[0, _SALIENCE_USAGE_CAP]`` usage prior from LIF-4's
+    rotation-surviving ``usage_aggregates.json`` (distinct-session count recalling this
+    memory / total distinct sessions observed) — ONE small JSON read
+    (``telemetry.read_usage_aggregates``), the same cost class as the graph's ``links.json``
+    read already on this hot path. Capped HARD: even a memory recalled in EVERY session ever
+    logged only earns ``_SALIENCE_USAGE_CAP`` — a much-recalled memory can never outrank a
+    clearly-more-relevant one on usage alone (the roadmap's explicit AC). Never raises; ``{}``
+    when ``memory_dir`` is falsy or no sessions have been logged yet.
+    """
+    if not memory_dir:
+        return {}
+    try:
+        from .telemetry import default_telemetry_dir, read_usage_aggregates
+
+        agg = read_usage_aggregates(default_telemetry_dir(memory_dir))
+        total = agg.get("sessions", {}).get("count") or 0
+        if not total:
+            return {}
+        out: Dict[str, float] = {}
+        for name, rec in (agg.get("memories") or {}).items():
+            n = rec.get("sessions") if isinstance(rec, dict) else None
+            if not isinstance(n, int) or isinstance(n, bool) or n <= 0:
+                continue
+            out[name] = _SALIENCE_USAGE_CAP * min(1.0, n / total)
+        return out
+    except Exception:
+        return {}
+
+
+def _staleness_penalty_map(index_dir: Optional[str]) -> Dict[str, float]:
+    """Name -> bounded ``[0, _SALIENCE_STALENESS_CAP]`` penalty from LIF-6's persisted
+    ``stale.json`` (``staleness.read_stale_cache``) — advisory: absent/corrupt cache -> ``{}``
+    (no penalty for anyone), NEVER a git call on this hot path (the cache was computed once,
+    upstream, by SessionStart's staleness scan; recall only reads the small JSON it left
+    behind). Graduated by how much cited code drifted (``changed``, saturating at
+    ``_SALIENCE_STALENESS_SATURATION`` paths) rather than a flat penalty, so a memory citing
+    one long-ago-touched path is nudged less than one whose entire cited surface moved. Never
+    raises; ``{}`` when ``index_dir`` is falsy or the cache is missing/empty/corrupt.
+    """
+    if not index_dir:
+        return {}
+    try:
+        from .staleness import read_stale_cache
+
+        stale = read_stale_cache(index_dir)
+        if not stale:
+            return {}
+        out: Dict[str, float] = {}
+        for name, rec in stale.items():
+            changed = rec.get("changed") if isinstance(rec, dict) else None
+            if not isinstance(changed, int) or isinstance(changed, bool) or changed <= 0:
+                changed = 1  # present in stale.json at all -> at least a floor penalty
+            out[name] = _SALIENCE_STALENESS_CAP * min(1.0, changed / _SALIENCE_STALENESS_SATURATION)
+        return out
+    except Exception:
+        return {}
+
+
+def _stale_banner_map(index_dir: Optional[str]) -> Dict[str, str]:
+    """Name -> RET-6's one-line verify-at-use banner text, from LIF-6's persisted
+    ``stale.json`` (``staleness.read_stale_cache``) — advisory, SessionStart-derived: an
+    absent/corrupt cache degrades to ``{}`` (no banners for anyone), NEVER a git call on this
+    hot path (mirrors ``_staleness_penalty_map``'s read, but UNCONDITIONAL — this runs
+    regardless of ``_salience_enabled()``, since a correctness banner is not a ranking knob).
+    A memory is banner-eligible purely by PRESENCE in the cache; the exact wording is the
+    roadmap's own: ``"anchored to <sha>; N cited files changed since — verify before
+    relying"``, pulling both ``<sha>`` and ``N`` straight from the cache's ``sha``/``changed``
+    fields (LIF-6 already wrote both — no writer/schema change needed here). A record with no
+    usable ``sha`` is skipped (a blank anchor is worse than no banner). Never raises; ``{}``
+    when ``index_dir`` is falsy or the cache is missing/empty/corrupt.
+    """
+    if not index_dir:
+        return {}
+    try:
+        from .staleness import read_stale_cache
+
+        stale = read_stale_cache(index_dir)
+        if not stale:
+            return {}
+        out: Dict[str, str] = {}
+        for name, rec in stale.items():
+            if not isinstance(rec, dict):
+                continue
+            sha = rec.get("sha")
+            if not isinstance(sha, str) or not sha:
+                continue  # no anchor to name -- degrade to no banner rather than a blank one
+            changed = rec.get("changed")
+            if not isinstance(changed, int) or isinstance(changed, bool) or changed <= 0:
+                changed = 1  # present in stale.json at all -> at least one, same floor as the salience penalty
+            out[name] = (
+                f"anchored to {sha}; {changed} cited files changed since — verify before relying"
+            )
+        return out
+    except Exception:
+        return {}
+
+
+def _apply_salience(
+    penalized: List[Tuple[int, float, Optional[str]]],
+    entries: List[dict],
+    *,
+    memory_dir: Optional[str],
+    index_dir: Optional[str],
+) -> Tuple[List[Tuple[int, float, Optional[str]]], Dict[int, dict]]:
+    """Fold the three bounded salience priors into ``penalized``'s score, BEFORE the top-k
+    cut / graph expansion — same "real demotion, can reorder top-k" posture the
+    invalidation/supersede penalties above already have, not a cosmetic display-only
+    adjustment. Multiplicative and bounded (see the ``_SALIENCE_*`` caps at the top of this
+    module): relevance (the RRF fusion this runs after) sets the candidate set and dominates
+    ordering; salience only nudges WITHIN it.
+
+    Returns ``(re-sorted list, {entry index: {"recency", "usage", "staleness"}})`` so the
+    emission loop can both re-cut on the adjusted order and surface the breakdown (COR-8
+    true-score discipline) on every emitted result. Only called when ``_salience_enabled()``
+    — callers must not pay this cost, or change scores by even a float no-op multiply, when
+    the flag is off. Never raises: any failure degrades to the UNTOUCHED input list and an
+    empty component map, the same fail-open posture ``_expand_neighbors`` already has.
+    """
+    try:
+        now = time.time()
+        usage_map = _usage_boost_map(memory_dir)
+        stale_map = _staleness_penalty_map(index_dir)
+        components: Dict[int, dict] = {}
+        adjusted: List[Tuple[int, float, Optional[str]]] = []
+        for i, score, state in penalized:
+            e = entries[i]
+            rec_b = _recency_boost(e, now=now)
+            use_b = usage_map.get(e.get("name"), 0.0)
+            stale_p = stale_map.get(e.get("name"), 0.0)
+            multiplier = (1.0 + rec_b) * (1.0 + use_b) * (1.0 - stale_p)
+            adjusted.append((i, score * multiplier, state))
+            components[i] = {
+                "recency": round(rec_b, 4),
+                "usage": round(use_b, 4),
+                "staleness": round(stale_p, 4),
+            }
+        adjusted.sort(key=lambda triple: triple[1], reverse=True)
+        return adjusted, components
+    except Exception:
+        return penalized, {}
 
 
 # --------------------------------------------------------------------------- #
@@ -957,29 +1262,56 @@ def recall(
             {i: score for i, score in _rrf_fuse(primary_rankings)} if primary_rankings else {}
         )
 
-        # --- Soft-invalidation: applied to the SCORE, BEFORE the top-k cut. ---
-        # This is the exact point of the x0.5 multiply -- "recent" halves the fused score so
-        # a borderline-ranked recently-invalidated memory can legitimately fall out of the
-        # top-k (real demotion, not a cosmetic post-hoc label). "old" does NOT change the
-        # score here -- it is filtered from DISPLAY only, in the emission loop below, so it
-        # keeps its true rank for internal bookkeeping but never reaches `results`.
-        penalized: List[Tuple[int, float, Optional[str]]] = []
-        for i, score in fused:
-            state = _invalidation_state(entries[i])
-            adj_score = score * _INVALIDATION_PENALTY if state == "recent" else score
-            penalized.append((i, adj_score, state))
-        penalized.sort(key=lambda triple: triple[1], reverse=True)
-
-        # --- 1-hop graph expansion (GRA-1): AFTER fusion + invalidation re-sort. ---
+        # --- Graph edges: ONE links.json read for both typed edges and expansion. ---
         # Resolvable index_dir only: an explicit index_dir wins, else it derives from
         # memory_dir exactly as _ensure_index does (same default_index_dir, same
         # HIPPO_INDEX_DIR override). A caller-supplied in-memory index with NO dirs
         # (eval self_recall probes, hermetic LoadedIndex tests) resolves to None ->
-        # _expand_neighbors is a no-op, zero behavior change there.
+        # no typed maps, no expansion — zero behavior change there.
         graph_index_dir = index_dir
         if graph_index_dir is None and memory_dir:
             graph_index_dir = default_index_dir(memory_dir)
-        penalized, graph_injected = _expand_neighbors(penalized, entries, graph_index_dir)
+        edges = _load_hot_edges(graph_index_dir)
+        superseded_by, contradicted_by = _typed_relation_maps(entries, edges)
+
+        # --- Soft-invalidation + supersession: applied to the SCORE, BEFORE the top-k cut. ---
+        # This is the exact point of the x0.5 multiplies -- "recent" invalidation halves the
+        # fused score so a borderline-ranked recently-invalidated memory can legitimately
+        # fall out of the top-k (real demotion, not a cosmetic post-hoc label), and a LIVE
+        # supersedes target (GRA-4) is halved the same bounded way so its successor outranks
+        # it in the SAME top-k. "old" does NOT change the score here -- it is filtered from
+        # DISPLAY only, in the emission loop below, so it keeps its true rank for internal
+        # bookkeeping but never reaches `results`. Contradicted entries deliberately get NO
+        # penalty (annotation-only — see _SUPERSEDED_PENALTY's comment block).
+        penalized: List[Tuple[int, float, Optional[str]]] = []
+        for i, score in fused:
+            state = _invalidation_state(entries[i])
+            adj_score = score * _INVALIDATION_PENALTY if state == "recent" else score
+            if i in superseded_by:
+                adj_score *= _SUPERSEDED_PENALTY
+            penalized.append((i, adj_score, state))
+        penalized.sort(key=lambda triple: triple[1], reverse=True)
+
+        # --- RET-5: salience fusion (recency/usage/staleness) — DEFAULT OFF. ---------------
+        # Gated entirely behind HIPPO_SALIENCE so a flag-off run pays zero extra I/O and
+        # produces a BYTE-IDENTICAL `penalized` (no no-op float multiply even) to before this
+        # item. When enabled, runs BEFORE graph expansion — same "pre-cut" posture as the
+        # invalidation/supersede penalties above, so a salience-boosted memory can compete
+        # for graph-expansion seed slots exactly like an organically-boosted one would.
+        salience_components: Dict[int, dict] = {}
+        if _salience_enabled():
+            penalized, salience_components = _apply_salience(
+                penalized, entries, memory_dir=memory_dir, index_dir=graph_index_dir
+            )
+
+        # --- 1-hop graph expansion (GRA-1): AFTER fusion + invalidation/supersession re-sort. ---
+        penalized, graph_injected = _expand_neighbors(penalized, entries, edges, superseded_by)
+
+        # --- RET-6: verify-at-use banner map — display-only, UNGATED (see the constants
+        # block above), computed once here from the SAME graph_index_dir the salience/graph
+        # reads already resolved. Never touches score/order; the emission loop below just
+        # looks a name up in it.
+        stale_banner_map = _stale_banner_map(graph_index_dir)
 
         # Walk the re-sorted list and emit up to k DISPLAY-eligible results, skipping "old"
         # entries as we go. This is NOT `penalized[:k]` followed by a filter -- a fixed-size
@@ -1043,14 +1375,14 @@ def recall(
                     "file": e["file"],
                     "description": entry_description(e).strip(),
                     # COR-8: emit the REAL penalized fused score -- exactly the value
-                    # `penalized` (post-invalidation-penalty, post-graph-discount) sorted
-                    # on -- NOT fabricated 1/rank noise. Telemetry, threshold calibration,
-                    # and RET-5's future salience fusion all inherit this number, so it must
-                    # be the actual ranking signal, not a proxy that just happens to be
-                    # monotone in emission order by construction. `rank` is the separate,
-                    # explicit 1-based EMISSION rank (position in `results`, not `penalized`
-                    # index -- "old"/deleted entries are skipped above and must not leave
-                    # gaps in the emitted rank sequence).
+                    # `penalized` (post-invalidation-penalty, post-graph-discount,
+                    # post-salience when RET-5's flag is on) sorted on -- NOT fabricated
+                    # 1/rank noise. Telemetry and threshold calibration inherit this number
+                    # verbatim, so it must be the actual ranking signal, not a proxy that
+                    # just happens to be monotone in emission order by construction. `rank`
+                    # is the separate, explicit 1-based EMISSION rank (position in `results`,
+                    # not `penalized` index -- "old"/deleted entries are skipped above and
+                    # must not leave gaps in the emitted rank sequence).
                     "score": round(float(_adj_score), 6),
                     "rank": len(results) + 1,
                     "backend": backend,
@@ -1059,6 +1391,25 @@ def recall(
                     # "rank" = organic fusion. format_results renders "graph" as " (linked)"
                     # so a user reading the injected block can see WHY a line is there.
                     "via": "graph" if i in graph_injected else "rank",
+                    # Typed-edge annotation (GRA-4) — ALWAYS present ("" when none), same
+                    # no-key-branching convention as "via": "superseded by <successor>"
+                    # names why the line ranks below its successor; "contradicts <name> —
+                    # verify" flags a live conflict without demoting either side. Absent
+                    # links cache -> _typed_relation_maps returned empty maps -> "".
+                    "note": _typed_note(i, superseded_by, contradicted_by),
+                    # RET-6: the verify-at-use banner — ALWAYS present ("" when the memory is
+                    # not in LIF-6's stale.json, same no-key-branching convention as "note").
+                    # format_results renders it appended to the pointer line; a memory that
+                    # was reinforced (semantic_reverify graduate/fix, see the constants block
+                    # above) simply has no entry in `stale_banner_map` from the next
+                    # SessionStart on, so this reads "" with no separate clear step.
+                    "stale_banner": stale_banner_map.get(e["name"], ""),
+                    # RET-5: the salience breakdown behind THIS result's score — ALWAYS
+                    # present (None when the flag is off, or for an entry `_apply_salience`
+                    # never scored, e.g. a pure graph injection) so a consumer can inspect
+                    # the components without branching on the flag itself (COR-8 true-score
+                    # discipline: no fabricated numbers, an honest None beats a fake 0).
+                    "salience": salience_components.get(i),
                 }
             )
         return results
@@ -1083,7 +1434,15 @@ def format_results(results: List[dict], max_chars: int = _MAX_RECALL_CHARS) -> s
         # inspectable — a "(linked)" entry is here because a top-seed memory links to it,
         # not because it matched the query lexically/semantically on its own.
         marker = " (linked)" if r.get("via") == "graph" else ""
-        lines.append(f"  • {r['name']} ({r['file']}) — {desc}{marker}")
+        # Typed-edge annotation (GRA-4): the one-line supersession/conflict note rides on
+        # the same pointer line — bounded upstream (_typed_note caps names) and by the
+        # overall max_chars truncation below, so it can never blow the injection budget.
+        note = f" [{r['note']}]" if r.get("note") else ""
+        # RET-6: the verify-at-use banner — a currently-stale memory (per LIF-6's stale.json)
+        # carries it, a fresh one doesn't ("" -> no clause at all). Same bracket convention as
+        # `note`, same overall max_chars truncation below — a banner can never blow the budget.
+        banner = f" [{r['stale_banner']}]" if r.get("stale_banner") else ""
+        lines.append(f"  • {r['name']} ({r['file']}) — {desc}{marker}{note}{banner}")
     out = "\n".join(lines)
     if len(out) > max_chars:
         out = out[: max_chars - 16].rstrip() + "\n…(truncated)"
@@ -1133,13 +1492,17 @@ def recent_memories(
         return []
 
 
-def git_recent_producer(memory_dir: str, repo_root: str) -> Optional[str]:
+def git_recent_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
     """SessionStart producer: a one-block digest of recently-captured memories.
 
     Window via ``HIPPO_RECENT_DAYS`` (default 14). Self-suppresses when nothing is recent.
     The untrusted-corpus gate (SEC-1) is enforced once, upstream, by ``session_start``'s
     ``build_context`` short-circuit — no producer re-checks it (one gate boundary, no extra
-    per-producer git call on the trusted hot path).
+    per-producer git call on the trusted hot path). ``ctx`` (LIF-6's shared per-run
+    ``RunContext``) is unused here — declared only so every producer in ``PRODUCERS``
+    shares ONE call shape.
     """
     try:
         days = float(os.environ.get("HIPPO_RECENT_DAYS", "14") or 14)

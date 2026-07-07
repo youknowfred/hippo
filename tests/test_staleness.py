@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+import json
 import os
+import subprocess
 
 from memory.staleness import (
+    STALE_CACHE_SCHEMA_VERSION,
     count_unresolvable_baselines,
+    find_citation_rot,
     find_stale,
     find_unparseable,
+    invalid_after_map,
+    read_invalid_after,
+    read_last_verified,
     read_provenance,
     read_source_commit_time,
+    read_stale_cache,
     set_invalid_after,
+    stale_cache_path,
+    write_stale_cache,
 )
 
 from .conftest import git_commit, write_file
@@ -224,6 +234,23 @@ def test_read_source_commit_time_absent_returns_none():
 
 
 # --------------------------------------------------------------------------- #
+# read_last_verified — RET-6's reinforcement stamp read half
+# (provenance.reverify_file writes it; this is the ONE reader).
+# --------------------------------------------------------------------------- #
+def test_read_last_verified_top_level_and_metadata_block():
+    top = '---\nname: A\nlast_verified: "2026-07-01T00:00:00+00:00"\n---\nb\n'
+    nested = '---\nname: A\nmetadata:\n  last_verified: "2026-07-01T00:00:00+00:00"\n---\nb\n'
+    assert read_last_verified(top) == "2026-07-01T00:00:00+00:00"
+    assert read_last_verified(nested) == "2026-07-01T00:00:00+00:00"
+
+
+def test_read_last_verified_absent_or_unparseable_is_none():
+    assert read_last_verified(_memory(["src/a.py"], "abc")) is None
+    assert read_last_verified("no frontmatter at all\n") is None
+    assert read_last_verified("---\ndescription: unquoted colon: boom\n---\nb\n") is None
+
+
+# --------------------------------------------------------------------------- #
 # SHP-6 — the staleness git-log scan is scoped to cited paths (not whole-repo history),
 # and a git-log timeout produces a visible diagnostic instead of a silent empty stale-list.
 # --------------------------------------------------------------------------- #
@@ -408,6 +435,95 @@ def test_find_unparseable_empty_on_missing_dir():
 
 
 # --------------------------------------------------------------------------- #
+# find_citation_rot — find_unparseable's citation-rot sibling (LIF-3): memories
+# whose frontmatter cites paths no longer in the repo file index, caught from
+# CURRENT state (no refresh needs to have dropped anything yet)
+# --------------------------------------------------------------------------- #
+def test_find_citation_rot_names_memory_and_vanished_path_after_rename(repo, memory_dir):
+    """AC (LIF-3): rename a cited file (git mv + commit) → the rot report names the
+    memory AND the vanished path — a visible report, not a silent shrink-in-waiting."""
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep", 1_700_000_000)
+    write_file(memory_dir, "m_rot.md", _memory(["src/dep.py"], c1))
+    subprocess.run(
+        ["git", "mv", "src/dep.py", "src/dep_moved2.py"], cwd=repo, check=True, capture_output=True
+    )
+    git_commit(repo, "rename dep", 1_700_000_100)
+
+    rot = find_citation_rot(memory_dir, repo)
+    assert rot == [{"name": "m_rot", "missing_paths": ["src/dep.py"], "cited_count": 1}]
+
+
+def test_find_citation_rot_silent_when_all_cited_paths_exist(repo, memory_dir):
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep", 1_700_000_000)
+    write_file(memory_dir, "m_ok.md", _memory(["src/dep.py"], c1))
+    git_commit(repo, "memory", 1_700_000_001)
+    assert find_citation_rot(memory_dir, repo) == []
+
+
+def test_find_citation_rot_distinguishes_partial_from_total(repo, memory_dir):
+    """cited_count rides along so callers can mark TOTAL rot (every citation gone — a
+    refresh would zero cited_paths and staleness-exempt the memory) distinctly."""
+    write_file(repo, "src/keep.py", "k = 1\n")
+    write_file(repo, "src/gone_a.py", "a = 1\n")
+    write_file(repo, "src/gone_b.py", "b = 1\n")
+    c1 = git_commit(repo, "init", 1_700_000_000)
+    write_file(memory_dir, "m_partial.md", _memory(["src/keep.py", "src/gone_a.py"], c1))
+    write_file(memory_dir, "m_total.md", _memory(["src/gone_b.py"], c1))
+    subprocess.run(
+        ["git", "rm", "-q", "src/gone_a.py", "src/gone_b.py"],
+        cwd=repo, check=True, capture_output=True,
+    )
+    git_commit(repo, "delete cited files", 1_700_000_100)
+
+    rot = {r["name"]: r for r in find_citation_rot(memory_dir, repo)}
+    assert set(rot) == {"m_partial", "m_total"}
+    assert rot["m_partial"]["missing_paths"] == ["src/gone_a.py"]
+    assert rot["m_partial"]["cited_count"] == 2  # partial — a citation survives
+    assert rot["m_total"]["missing_paths"] == ["src/gone_b.py"]
+    assert rot["m_total"]["cited_count"] == 1  # TOTAL rot
+
+
+def test_find_citation_rot_never_raises_on_missing_dir(repo):
+    assert find_citation_rot("/no/such/memory/dir", repo) == []
+
+
+def test_main_reports_citation_rot_count_first(repo, memory_dir, capsys):
+    """The CLI sibling of the SessionStart producer: count-first header, then per-memory
+    lines naming the vanished path(s); total rot marked with the staleness-exempt warning."""
+    import memory.staleness as S
+
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep", 1_700_000_000)
+    write_file(memory_dir, "m_rot.md", _memory(["src/dep.py"], c1))
+    subprocess.run(
+        ["git", "mv", "src/dep.py", "src/dep_moved2.py"], cwd=repo, check=True, capture_output=True
+    )
+    git_commit(repo, "rename dep", 1_700_000_100)
+
+    rc = S.main(["--memory-dir", memory_dir, "--repo-root", repo])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "1 memory file(s) cite paths that no longer exist in the repo" in out  # count-first
+    assert "m_rot" in out and "src/dep.py" in out  # names the memory and the vanished path
+    assert "staleness-EXEMPT" in out  # its ONLY citation is gone — total rot, said distinctly
+
+
+def test_main_citation_rot_silent_on_healthy_corpus(repo, memory_dir, capsys):
+    import memory.staleness as S
+
+    write_file(repo, "src/dep.py", "v = 1\n")
+    c1 = git_commit(repo, "dep", 1_700_000_000)
+    write_file(memory_dir, "m_ok.md", _memory(["src/dep.py"], c1))
+    git_commit(repo, "memory", 1_700_000_001)
+
+    rc = S.main(["--memory-dir", memory_dir, "--repo-root", repo])
+    assert rc == 0
+    assert "citation rot" not in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
 # set_invalid_after — soft-invalidation primitive (additive, idempotent, never deletes)
 # --------------------------------------------------------------------------- #
 def test_set_invalid_after_is_additive_and_body_byte_identical(memory_dir):
@@ -493,6 +609,53 @@ def test_set_invalid_after_never_raises_on_missing_file(memory_dir):
     assert r["error"] is not None
 
 
+def test_set_invalid_after_dry_run_reports_without_writing(memory_dir):
+    """LIF-1: semantic_reverify's demote chain needs a byte-exact --dry-run preview —
+    ``changed``/``invalid_after`` are reported exactly as a real run would, zero writes."""
+    content = _memory(["src/a.py"], "abc")
+    path = write_file(memory_dir, "m_a.md", content)
+    r = set_invalid_after(path, "2026-01-01T00:00:00+00:00", dry_run=True)
+    assert r["changed"] is True and r["error"] is None
+    assert r["invalid_after"] == "2026-01-01T00:00:00+00:00"
+    with open(path, encoding="utf-8") as fh:
+        assert fh.read() == content  # untouched
+
+
+# --------------------------------------------------------------------------- #
+# read_invalid_after / invalid_after_map — LIF-1's read half of soft-invalidation
+# --------------------------------------------------------------------------- #
+def test_read_invalid_after_top_level_and_metadata_block():
+    top = '---\nname: A\ninvalid_after: "2026-01-01T00:00:00+00:00"\n---\nb\n'
+    nested = '---\nname: A\nmetadata:\n  invalid_after: "2026-01-01T00:00:00+00:00"\n---\nb\n'
+    assert read_invalid_after(top) == "2026-01-01T00:00:00+00:00"
+    assert read_invalid_after(nested) == "2026-01-01T00:00:00+00:00"
+    # YAML auto-types an unquoted date -> coerced to its ISO string, never discarded
+    # (the same _extract_invalid_after rule the index applies)
+    assert read_invalid_after("---\nname: A\ninvalid_after: 2026-06-01\n---\nb\n") == "2026-06-01"
+
+
+def test_read_invalid_after_absent_or_unparseable_is_none():
+    assert read_invalid_after(_memory(["src/a.py"], "abc")) is None
+    assert read_invalid_after("no frontmatter at all\n") is None
+    assert read_invalid_after("---\ndescription: unquoted colon: boom\n---\nb\n") is None
+
+
+def test_invalid_after_map_is_bounded_to_names_and_fails_open(memory_dir):
+    marked = write_file(memory_dir, "m_marked.md", _memory(["src/a.py"], "abc"))
+    set_invalid_after(marked, "2026-01-01T00:00:00+00:00")
+    write_file(memory_dir, "m_clean.md", _memory(["src/a.py"], "abc"))
+    other = write_file(memory_dir, "m_other_marked.md", _memory(["src/a.py"], "abc"))
+    set_invalid_after(other, "2026-01-01T00:00:00+00:00")
+
+    # bounded: only the asked-for names are read — m_other_marked carries the key but was
+    # not in `names`, so it must not appear (never a corpus scan)
+    got = invalid_after_map(["m_marked", "m_clean", "m_ghost"], memory_dir)
+    assert got == {"m_marked": "2026-01-01T00:00:00+00:00"}
+
+    # fail open (toward re-nagging): bogus dir -> empty map, never a raise
+    assert invalid_after_map(["m_marked"], "/no/such/dir") == {}
+
+
 def test_find_stale_read_logic_unaffected_by_invalid_after(repo, memory_dir):
     """NO change to find_stale's read logic -- invalid_after is invisible to staleness
     detection (a separate concern: code-drift vs content-validity)."""
@@ -530,3 +693,119 @@ def test_main_invalidate_flag_accepts_name_without_md_suffix(memory_dir, capsys)
     rc = S.main(["--invalidate", "m_b.md", "--memory-dir", memory_dir])
     assert rc == 0
     assert "validity window closed" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# LIF-6: find_stale carries source_commit; write_stale_cache persists stale.json,
+# consumed by RET-5's recall-time salience penalty (read_stale_cache below) and RET-6's
+# future drift banner.
+# --------------------------------------------------------------------------- #
+def test_find_stale_result_carries_source_commit(repo, memory_dir):
+    """Additive: existing consumers only read name/changed_paths, so this is a new key,
+    not a shape change — write_stale_cache's "sha" field reads it."""
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_alpha.md", _memory(["src/foo.py"], c1))
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)
+
+    stale = find_stale(memory_dir, repo, since=_ALL)
+    hit = [s for s in stale if s["name"] == "m_alpha"][0]
+    assert hit["source_commit"] == c1
+
+
+def test_write_stale_cache_shape(tmp_path):
+    idx = str(tmp_path / "idx")
+    stale = [
+        {"name": "m_alpha", "changed_paths": ["src/a.py", "src/b.py"], "source_commit": "abcdef1234567890"},
+        {"name": "m_beta", "changed_paths": ["src/c.py"], "source_commit": "0011223344"},
+    ]
+    assert write_stale_cache(idx, stale) is True
+
+    with open(stale_cache_path(idx), encoding="utf-8") as fh:
+        payload = json.load(fh)
+    assert payload["schema_version"] == STALE_CACHE_SCHEMA_VERSION
+    assert "generated_at" in payload
+    assert payload["stale"] == {
+        "m_alpha": {"changed": 2, "sha": "abcdef1"},
+        "m_beta": {"changed": 1, "sha": "0011223"},
+    }
+
+
+def test_write_stale_cache_empty_list_is_honest_not_skipped(tmp_path):
+    """An empty stale list is still WRITTEN (schema + empty map), never silently skipped —
+    a reader must be able to trust the file's mere presence."""
+    idx = str(tmp_path / "idx")
+    assert write_stale_cache(idx, []) is True
+    with open(stale_cache_path(idx), encoding="utf-8") as fh:
+        payload = json.load(fh)
+    assert payload["stale"] == {}
+
+
+def test_write_stale_cache_is_atomic_no_tmp_file_left_behind(tmp_path):
+    idx = str(tmp_path / "idx")
+    assert write_stale_cache(idx, [{"name": "m_a", "changed_paths": ["a.py"], "source_commit": "abc"}]) is True
+    assert os.path.isfile(stale_cache_path(idx))
+    assert not os.path.exists(stale_cache_path(idx) + ".tmp")
+
+
+def test_write_stale_cache_creates_the_index_dir_if_missing(tmp_path):
+    idx = str(tmp_path / "brand-new" / "idx")
+    assert not os.path.isdir(idx)
+    assert write_stale_cache(idx, []) is True
+    assert os.path.isfile(stale_cache_path(idx))
+
+
+def test_write_stale_cache_never_raises_on_a_bogus_index_dir():
+    """A path that can't be a directory (a file in the way) must degrade to False, never
+    raise — mirrors links.write_links_cache's never-raise contract."""
+    import tempfile
+
+    with tempfile.NamedTemporaryFile() as f:
+        # f.name is a FILE; os.makedirs(f.name, exist_ok=True) must fail cleanly.
+        assert write_stale_cache(f.name, []) is False
+
+
+# --------------------------------------------------------------------------- #
+# RET-5: read_stale_cache — the reader half of write_stale_cache, first consumed by
+# recall.py's salience blend.
+# --------------------------------------------------------------------------- #
+def test_read_stale_cache_round_trips_write(tmp_path):
+    idx = str(tmp_path / "idx")
+    stale = [
+        {"name": "m_alpha", "changed_paths": ["src/a.py", "src/b.py"], "source_commit": "abcdef1234567890"},
+    ]
+    write_stale_cache(idx, stale)
+    assert read_stale_cache(idx) == {"m_alpha": {"changed": 2, "sha": "abcdef1"}}
+
+
+def test_read_stale_cache_absent_file_is_none(tmp_path):
+    assert read_stale_cache(str(tmp_path / "never-built")) is None
+
+
+def test_read_stale_cache_empty_stale_is_an_honest_empty_dict(tmp_path):
+    """write_stale_cache([]) is a real "checked, found nothing" write — the reader must
+    distinguish it from "never ran" (None) by returning {}, not None."""
+    idx = str(tmp_path / "idx")
+    write_stale_cache(idx, [])
+    assert read_stale_cache(idx) == {}
+
+
+def test_read_stale_cache_corrupt_json_is_none(tmp_path):
+    idx = str(tmp_path / "idx")
+    os.makedirs(idx, exist_ok=True)
+    with open(stale_cache_path(idx), "w", encoding="utf-8") as fh:
+        fh.write("{not valid json")
+    assert read_stale_cache(idx) is None
+
+
+def test_read_stale_cache_wrong_schema_version_is_none(tmp_path):
+    idx = str(tmp_path / "idx")
+    os.makedirs(idx, exist_ok=True)
+    with open(stale_cache_path(idx), "w", encoding="utf-8") as fh:
+        json.dump({"schema_version": STALE_CACHE_SCHEMA_VERSION + 1, "stale": {"m_a": {}}}, fh)
+    assert read_stale_cache(idx) is None
+
+
+def test_read_stale_cache_never_raises_on_a_bogus_index_dir():
+    assert read_stale_cache("/nonexistent/path/does/not/exist") is None

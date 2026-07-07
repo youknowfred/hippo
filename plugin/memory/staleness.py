@@ -22,11 +22,13 @@ import json
 import os
 import re
 import subprocess
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from .provenance import (
     _iter_memory_files,
+    build_repo_file_index,
     parse_frontmatter,
     run_git,
     split_frontmatter,
@@ -91,6 +93,29 @@ def read_source_commit_time(text: str) -> Optional[int]:
             return int(sct.strip())
         except ValueError:
             return None
+    return None
+
+
+def read_last_verified(text: str) -> Optional[str]:
+    """Return the memory's stored ``last_verified`` (top-level or under ``metadata:``), if any.
+
+    RET-6's reinforcement stamp — ``provenance.reverify_file`` writes this ISO-8601 timestamp
+    ONCE, the FIRST time a memory is ever re-verified (a ``graduate``/``fix`` verdict via
+    ``reconsolidate.semantic_reverify``). Distinct from ``source_commit_time`` (WHICH commit
+    the CITED CODE was at): this is WHEN a human confirmed the memory, an audit fact, not the
+    signal that clears the drift banner (that's ``source_commit`` itself, re-baselined on
+    every reverify regardless of this stamp). Never raises; ``None`` when absent/malformed or
+    the memory has never been reverified.
+    """
+    fm = parse_frontmatter(text)
+    if not fm:
+        return None
+    meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+    lv = fm.get("last_verified")
+    if lv is None:
+        lv = meta.get("last_verified")
+    if isinstance(lv, str) and lv.strip():
+        return lv
     return None
 
 
@@ -263,12 +288,134 @@ def find_stale(
             if changed:
                 # recency = newest drift among the cited files; ranks the most-urgently-stale first
                 recency = max(path_times.get(p, 0) for p in changed)
-                stale.append({"name": name, "changed_paths": changed, "recency": recency})
+                # LIF-6: carry the resolved baseline sha along -- write_stale_cache's "sha"
+                # field (a short-form anchor for RET-6's future banner) reads this rather
+                # than re-deriving it; every existing consumer only reads "name"/
+                # "changed_paths" so this extra key is purely additive.
+                stale.append(
+                    {"name": name, "changed_paths": changed, "recency": recency, "source_commit": sc}
+                )
         # Most-recently-drifted first (then name) so the SessionStart note surfaces what matters.
         stale.sort(key=lambda d: (-d["recency"], d["name"]))
         return stale
     except Exception:
         return []
+
+
+# --------------------------------------------------------------------------- #
+# LIF-6: ONE per-run staleness context, computed once by the SessionStart dispatcher and
+# threaded through every producer — see session_start.py's PRODUCERS loop.
+# --------------------------------------------------------------------------- #
+@dataclass
+class RunContext:
+    """Per-SessionStart-run state, computed ONCE by ``session_start.build_context`` and
+    passed POSITIONALLY to every registered producer — not just the two that read it, so
+    the PRODUCERS loop keeps ONE uniform call shape instead of special-casing which
+    producer gets which arity. ``stale`` mirrors ``find_stale``'s own return contract;
+    ``worklist`` mirrors ``reconsolidate.recalled_stale_worklist``'s. A producer that has
+    nothing to do with staleness (most of them) just declares the trailing parameter and
+    never reads it.
+
+    The all-defaults constructor (``RunContext()``) reproduces the exact EMPTY state a
+    clean corpus produces, so ``staleness_producer``/``reconsolidation_producer`` stay
+    independently callable with no ``ctx`` at all (tests, the ``reconsolidate`` CLI) —
+    they fall back to deriving their own single-producer view instead of needing one
+    fabricated for them.
+    """
+
+    stale: List[dict] = field(default_factory=list)
+    stale_diagnostics: dict = field(default_factory=dict)
+    worklist: List[dict] = field(default_factory=list)
+
+
+STALE_CACHE_SCHEMA_VERSION = 1
+_STALE_CACHE_NAME = "stale.json"
+# "short" sha length, matching git's own default `--short` width.
+_SHORT_SHA_LEN = 7
+
+
+def stale_cache_path(index_dir: str) -> str:
+    """``<index_dir>/stale.json`` — the one path the writer and ``read_stale_cache`` below
+    (RET-5's ranking penalty; RET-6's future drift banner) must agree on."""
+    return os.path.join(index_dir, _STALE_CACHE_NAME)
+
+
+def write_stale_cache(index_dir: str, stale: List[dict]) -> bool:
+    """Persist ``find_stale``'s result to ``<index_dir>/stale.json`` (RET-5/RET-6 setup).
+
+    Derived, rebuildable, gitignored — same standing as ``links.json``/``manifest.json``,
+    and written the same way (tmp + ``os.replace``, ``links.write_links_cache``'s pattern)
+    so a reader never sees a torn file. The shape is the MINIMUM a later bounded ranking
+    penalty and a one-line "anchored to <sha>; verify before relying" banner both need,
+    per stale name::
+
+        {"schema_version": 1, "generated_at": "<iso8601>",
+         "stale": {"<name>": {"changed": <len(changed_paths)>, "sha": "<short source_commit>"}}}
+
+    Written on EVERY call, including an empty ``stale`` list — an honest
+    ``{"stale": {}}`` means "checked this session, found nothing", never a skipped write,
+    so a reader can trust the file's mere presence rather than guess whether staleness
+    ever ran. ``read_stale_cache`` (below) is the reader half — recall.py's RET-5 salience
+    blend is its first consumer, treating an absent/corrupt file as advisory — a no-op,
+    never a hard error. RET-6's drift banner is a future second consumer. Never raises;
+    returns True on a successful write, False on any failure (a bad ``index_dir``, a
+    permissions error) — callers must not let a cache-write failure cost them the
+    SessionStart run itself.
+    """
+    try:
+        os.makedirs(index_dir, exist_ok=True)
+        payload = {
+            "schema_version": STALE_CACHE_SCHEMA_VERSION,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "stale": {
+                item["name"]: {
+                    "changed": len(item.get("changed_paths") or []),
+                    "sha": str(item.get("source_commit") or "")[:_SHORT_SHA_LEN],
+                }
+                for item in stale
+            },
+        }
+        path = stale_cache_path(index_dir)
+        tmp = path + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+            os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except Exception:
+                    pass
+        return True
+    except Exception:
+        return False
+
+
+def read_stale_cache(index_dir: str) -> Optional[Dict[str, dict]]:
+    """The RET-5 reader half of ``write_stale_cache`` — ``{"<name>": {"changed", "sha"}}``,
+    or ``None`` when the cache is absent, corrupt, or schema-mismatched.
+
+    Advisory, same posture as ``links.load_edges``: this is a single small-JSON read of a
+    file SessionStart already refreshed once per run (never a git call — the staleness scan
+    that produced it already paid that cost, and belongs to ``_build_run_context``, not the
+    hot path). A missing file (index never built, or predates LIF-6) or a schema mismatch
+    both degrade to ``None`` -- recall.py's salience blend (RET-5) treats that identically to
+    "nothing stale", never a hard error. Never raises.
+    """
+    try:
+        with open(stale_cache_path(index_dir), "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("schema_version") != STALE_CACHE_SCHEMA_VERSION:
+            return None
+        stale = payload.get("stale")
+        if not isinstance(stale, dict):
+            return None
+        return {name: rec for name, rec in stale.items() if isinstance(name, str) and isinstance(rec, dict)}
+    except Exception:
+        return None
 
 
 def count_unresolvable_baselines(memory_dir: str, repo_root: str) -> int:
@@ -329,6 +476,48 @@ def find_unparseable(memory_dir: str) -> List[str]:
     return sorted(out)
 
 
+def find_citation_rot(memory_dir: str, repo_root: str) -> List[dict]:
+    """Memories whose frontmatter cites paths that no longer exist in the repo file index.
+
+    ``find_unparseable``'s citation-rot sibling (LIF-3), judging CURRENT state: a cited
+    file that was renamed/deleted leaves a dangling ``cited_paths`` entry that the next
+    re-derivation (``provenance --refresh`` / ``--reverify``) would silently drop —
+    possibly emptying the list, after which the memory is permanently exempt from the
+    staleness signal. This catches the rot WITHOUT needing to have observed that drop
+    (the drop itself is reported by ``dropped_citations`` on the write path).
+
+    Returns ``[{"name", "missing_paths", "cited_count"}]`` sorted by name; an entry with
+    ``len(missing_paths) == cited_count`` is TOTAL rot (a refresh would zero its
+    citations). Returns ``[]`` when the repo file index is unavailable (non-git dir /
+    git failure) — with no index, EVERY citation would look missing; under-flag beats
+    cry-wolf, same direction as ``resolve_citations``. Never raises.
+    """
+    out: List[dict] = []
+    try:
+        repo_files, _ = build_repo_file_index(repo_root)
+        if not repo_files:
+            return []
+        for path in _iter_memory_files(memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+            except Exception:
+                continue
+            cited, _sc = read_provenance(text)
+            missing = [p for p in cited if p not in repo_files]
+            if missing:
+                out.append(
+                    {
+                        "name": os.path.splitext(os.path.basename(path))[0],
+                        "missing_paths": missing,
+                        "cited_count": len(cited),
+                    }
+                )
+    except Exception:
+        return []
+    return sorted(out, key=lambda d: d["name"])
+
+
 # --------------------------------------------------------------------------- #
 # Soft-invalidation primitive (graceful decay — demotion, never deletion)
 # --------------------------------------------------------------------------- #
@@ -348,7 +537,7 @@ def _strip_invalid_after(text: str) -> str:
     return "\n".join([lines[0]] + fm + lines[close:])
 
 
-def set_invalid_after(path: str, ts: Optional[str] = None) -> dict:
+def set_invalid_after(path: str, ts: Optional[str] = None, *, dry_run: bool = False) -> dict:
     """Set/refresh the ``invalid_after`` ADDITIVE frontmatter key on ONE memory file.
 
     Soft-invalidation: the validity window CLOSES at ``ts`` (an ISO-8601 timestamp; defaults
@@ -362,7 +551,9 @@ def set_invalid_after(path: str, ts: Optional[str] = None) -> dict:
     deliberate per-item re-mark, not a blind bulk pass (there is no batch parameter here, and
     no autonomous caller in this tier — the memory-master agent invokes this one memory at a
     time after judging it). Refuses (no write) on unparseable frontmatter, mirroring
-    ``reverify_file``'s guard. Never raises.
+    ``reverify_file``'s guard. ``dry_run`` reports (``changed``/``invalid_after``) without
+    writing — same preview contract as ``reverify_file``, needed by ``semantic_reverify``'s
+    LIF-1 demote chain so its ``--dry-run`` stays byte-exact. Never raises.
     """
     result = {"path": path, "changed": False, "invalid_after": None, "error": None}
     try:
@@ -405,12 +596,58 @@ def set_invalid_after(path: str, ts: Optional[str] = None) -> dict:
         new_text = "\n".join([lines[0]] + fm2 + lines[close:])
         changed = new_text != text
         result.update({"changed": changed, "invalid_after": ts})
-        if changed:
+        if changed and not dry_run:
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(new_text)
     except Exception as exc:
         result["error"] = str(exc)
     return result
+
+
+def read_invalid_after(text: str) -> Optional[str]:
+    """The memory's ``invalid_after`` (top-level or under ``metadata:``), or ``None``.
+
+    The text-level sibling of ``read_provenance``/``read_source_commit_time``, delegating
+    the frontmatter-dict lookup to ``build_index._extract_invalid_after`` — the ONE
+    extractor for this key (same ``metadata:`` fallback + YAML-date coercion the index
+    itself applies), so what LIF-1's producers see can never drift from what recall's
+    penalty actually acts on. Never raises; ``None`` on any failure (fails OPEN to
+    "not invalidated", the same direction as ``recall._invalidation_state``).
+    """
+    try:
+        from .build_index import _extract_invalid_after
+
+        return _extract_invalid_after(parse_frontmatter(text))
+    except Exception:
+        return None
+
+
+def invalid_after_map(names: List[str], memory_dir: str) -> Dict[str, str]:
+    """``{name: invalid_after}`` for the subset of ``names`` whose file carries the key.
+
+    LIF-1's read half of the soft-invalidation chain: an ``invalid_after``-carrying stale
+    memory is in demote's TERMINAL state (recall's pre-cut penalty is already ranking it
+    down), so the SessionStart staleness producer suppresses its per-item line and the
+    reconsolidation worklist stops re-nagging it. Deliberately bounded to the caller's
+    ``names`` (an already-small stale/worklist set) — never a corpus scan, and NOT folded
+    into ``find_stale`` itself: drift detection stays invalid_after-blind by pinned
+    contract (code-drift and content-validity are separate concerns). Read-only; never
+    raises; a missing/unreadable file is simply absent from the map (fails toward
+    re-nagging — the legible direction).
+    """
+    out: Dict[str, str] = {}
+    try:
+        for name in names:
+            try:
+                with open(os.path.join(memory_dir, f"{name}.md"), "r", encoding="utf-8") as fh:
+                    ia = read_invalid_after(fh.read())
+            except Exception:
+                continue
+            if ia:
+                out[name] = ia
+    except Exception:
+        return out
+    return out
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -428,10 +665,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         "there is no bulk invalidate. NAME is the slug, with or without .md",
     )
     parser.add_argument("--memory-dir", default=None)
+    parser.add_argument("--repo-root", default=None)
     args = parser.parse_args(argv)
 
     md, repo = resolve_dirs()
     memory_dir = args.memory_dir or md
+    repo_root = args.repo_root or repo
 
     if args.invalidate:
         name = args.invalidate if args.invalidate.endswith(".md") else f"{args.invalidate}.md"
@@ -451,8 +690,23 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"⚠ {len(broken)} memory file(s) have UNPARSEABLE frontmatter (fix the YAML):")
         for name in broken:
             print(f"  ! {name}")
+    # LIF-3: find_unparseable's citation-rot sibling — count-first, then per-memory with the
+    # vanished path(s) named; TOTAL rot (every citation gone) is called out distinctly because
+    # a refresh over it would zero cited_paths and make the memory staleness-exempt.
+    rot = find_citation_rot(memory_dir, repo_root)
+    if rot:
+        print(f"⚠ {len(rot)} memory file(s) cite paths that no longer exist in the repo (citation rot):")
+        for item in rot:
+            missing = ", ".join(item["missing_paths"][:6])
+            more = f" (+{len(item['missing_paths']) - 6} more)" if len(item["missing_paths"]) > 6 else ""
+            total = (
+                " — ALL its citations (a refresh would EMPTY cited_paths → staleness-EXEMPT)"
+                if len(item["missing_paths"]) == item["cited_count"]
+                else ""
+            )
+            print(f"  ! {item['name']}: {missing}{more}{total}")
     diagnostics: dict = {}
-    stale = find_stale(memory_dir, repo, diagnostics=diagnostics)
+    stale = find_stale(memory_dir, repo_root, diagnostics=diagnostics)
     if diagnostics.get("timed_out"):
         print("⚠ staleness scan timed out — signal may be incomplete")
     if not stale:

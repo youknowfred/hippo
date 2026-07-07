@@ -5,6 +5,73 @@ All notable changes to hippo are recorded here. Format is loosely
 (tags, version-sync CI, formal release process) will formalize this later;
 until then entries are written by hand alongside each release.
 
+## v0.5.0 — 2026-07-07 — "The graph earns its keep: typed relations and closed lifecycle loops"
+
+### Format changes
+
+This release introduces corpus format versioning (COR-7) and bumps it once:
+
+- **Corpus format 1 → 2** (GRA-4) — additive: `supersedes:` / `contradicts:` /
+  `refines:` typed relations may now appear in frontmatter alongside untyped
+  `[[wikilinks]]`. Existing corpora keep working unchanged; `/hippo:doctor`
+  reports the corpus's stamped format vs. what the plugin expects and names
+  the exact next step (stamp the marker, no autonomous migration).
+- **Index schema 2 → 3** (RET-5) — adds a `source_commit_time` field to each
+  manifest entry. COR-7's enforcement means a schema mismatch now costs
+  exactly one full rebuild instead of silently serving a stale shape; nothing
+  the operator needs to do by hand.
+
+New env vars: `HIPPO_DUP_THRESHOLD` (LIF-2 near-duplicate cosine/BM25
+threshold override) and `HIPPO_SALIENCE` (RET-5 salience-fusion ranking
+blend — **default off**; the eval numbers on this release's fixtures showed
+zero regression but also zero measurable lift, so it ships opt-in rather than
+on-by-default until a corpus with real usage/staleness signal can prove it).
+
+### Shipped this release
+
+- **COR-7** — enforces index schema versioning and adds corpus format
+  versioning, with a doctor-driven migration surface for both.
+- **GRA-4** — typed edges (`supersedes` / `contradicts` / `refines`): recall
+  demotes and annotates superseded memories pre-cut, flags contradictions,
+  and `lint_links` catches dangling typed targets.
+- **GRA-5** — `archive_memory` refuses (without `--force`) when inbound
+  links — untyped or typed — still point at the target, and reports the
+  referrer list either way.
+- **GRA-9** — the reconsolidation worklist grows a report-only 1-hop
+  "linked" column so a stale memory's neighbors surface for review too.
+- **LIF-1** — demote gets a terminal state: it now chains straight into
+  soft-invalidation (no second manual command), and a snooze/ack primitive
+  stops re-nagged items from re-appearing every session.
+- **LIF-2** — write-time near-duplicate/conflict detection (warn-only):
+  `write_memory` surfaces nearest-neighbor matches and the `/hippo:new`
+  skill routes the add / update-existing / supersede / skip decision.
+- **LIF-3** — citation rot (a renamed/deleted cited file silently dropping
+  out of `cited_paths`) is now surfaced instead of vanishing unnoticed.
+- **LIF-4** — usage aggregates now survive telemetry-ledger rotation, and
+  `archive_candidates` finally enforces its own ≥5-session soak gate.
+- **LIF-5** — a missing/renamed `MEMORY.md` floor section is repaired or
+  loudly reported — never a silent no-op.
+- **LIF-6** — staleness and reconsolidation SessionStart producers share one
+  computed stale set, so no memory is reported twice.
+- **RET-5** — salience fusion (recency/usage/staleness ranking priors),
+  shipped behind `HIPPO_SALIENCE` (default off) per this release's honest
+  eval numbers.
+- **RET-6** — drifted injections carry a one-line verify-at-use banner;
+  reverifying a memory clears it on the next SessionStart.
+- **TEA-4** — floor pointers insert at a deterministic sorted position
+  instead of always appending at the section tail, so concurrent teammate
+  writes to the same floor section merge cleanly instead of colliding.
+- **QUA-8** — the skills-contract suite now extracts and checks every fenced
+  code block in every `SKILL.md` for real (compiles, resolves every
+  `memory.*` reference and call signature against the live package).
+- **QUA-10** — `pytest.ini` hardening: `slow` marker, `filterwarnings =
+  error` with targeted ignores, a timeout default, and the suite's one
+  permanent skip repointed at the shipped operator-pack assets (now a real
+  packaging gate — the suite ends at 0 skipped).
+- **DOC-6** — `CONVENTIONS.md` seeded into every corpus by `/hippo:init`,
+  documenting the frontmatter schema, type taxonomy, floor rule, typed
+  relations, and evidence-block convention as actually shipped.
+
 ## v0.4.0 — 2026-07-06 — "Recall precision: earn every injected token, in every language"
 
 ### Breaking

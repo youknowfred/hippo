@@ -387,27 +387,64 @@ def check_index_count(ctx: DoctorContext) -> Dict[str, str]:
 
 
 def check_format_version(ctx: DoctorContext) -> Dict[str, str]:
-    """Persisted index ``schema_version`` vs the running module's ``SCHEMA_VERSION``.
+    """BOTH format versions on one line: index ``schema_version`` and corpus format (COR-7).
 
-    A corpus indexed by an older plugin carries an older on-disk schema; the next rebuild
-    upgrades it. This is a legible heads-up, not an error — recall degrades gracefully across
-    versions. Uses data that ALREADY exists (the manifest's ``schema_version``); no new
-    instrumentation. Silent-clean when the versions match or nothing is built.
+    INDEX: the persisted manifest's ``schema_version`` vs the running module's
+    ``SCHEMA_VERSION``. Since COR-7 this is enforced — every load path treats a mismatched
+    manifest as absent, so the state is transient (the next SessionStart refresh performs
+    one full rebuild) and needs no operator action. Read via the RAW manifest reader:
+    ``_load_manifest`` would hide exactly the mismatch this check exists to name.
+
+    CORPUS: the ``.claude/memory/.format`` marker's declared format vs the plugin's
+    ``CORPUS_FORMAT_VERSION`` — BOTH directions. Corpus NEWER than the plugin: this plugin
+    misreads/ignores conventions it predates — update the hippo plugin (same signal the
+    ``corpus_format`` SessionStart producer carries). Corpus OLDER than the plugin: user
+    data needs a MIGRATION, which is doctor-driven and agent-gated per the README's
+    "Corpus format versioning" section — hippo never migrates the corpus autonomously, so
+    doctor names the exact state and points at the documented path instead.
     """
     try:
-        from .build_index import SCHEMA_VERSION, _load_manifest, default_index_dir
+        from .build_index import SCHEMA_VERSION, _read_manifest_json, default_index_dir
+        from .provenance import CORPUS_FORMAT_VERSION, read_corpus_format
 
-        manifest = _load_manifest(default_index_dir(ctx.memory_dir))
+        status = "ok"
+        parts: List[str] = []
+
+        manifest = _read_manifest_json(default_index_dir(ctx.memory_dir))
         if manifest is None:
-            return {"status": "ok", "message": "no index built yet — nothing to version-check."}
-        on_disk = manifest.get("schema_version")
-        if on_disk == SCHEMA_VERSION:
-            return {"status": "ok", "message": f"index format version current (v{SCHEMA_VERSION})."}
-        return {
-            "status": "warn",
-            "message": f"index format version is v{on_disk}, this plugin writes v{SCHEMA_VERSION} "
-            "— the next rebuild upgrades it (recall degrades gracefully meanwhile).",
-        }
+            parts.append("no index built yet — nothing to version-check")
+        else:
+            on_disk = manifest.get("schema_version")
+            if on_disk == SCHEMA_VERSION:
+                parts.append(f"index format version current (v{SCHEMA_VERSION})")
+            else:
+                status = "warn"
+                parts.append(
+                    f"index format version is v{on_disk}, this plugin writes v{SCHEMA_VERSION} "
+                    "— the stale index is ignored (treated as absent) and the next "
+                    "SessionStart refresh performs one full rebuild"
+                )
+
+        declared = read_corpus_format(ctx.memory_dir)
+        if declared == CORPUS_FORMAT_VERSION:
+            parts.append(f"corpus format current (v{declared})")
+        elif declared > CORPUS_FORMAT_VERSION:
+            status = "warn"
+            parts.append(
+                f"corpus format is v{declared} but this plugin only understands "
+                f"v{CORPUS_FORMAT_VERSION} — update the hippo plugin (a newer-format corpus "
+                "can carry conventions this version misreads or silently ignores)"
+            )
+        else:
+            status = "warn"
+            parts.append(
+                f"corpus format is v{declared}, this plugin writes v{CORPUS_FORMAT_VERSION} "
+                "— the corpus needs a MIGRATION before newer-format features work; hippo "
+                "never migrates automatically — follow the doctor-driven path in "
+                "plugin/memory/README.md ('Corpus format versioning')"
+            )
+
+        return {"status": status, "message": "; ".join(parts) + "."}
     except Exception as exc:
         return {"status": "warn", "message": f"format-version check failed: {exc}."}
 

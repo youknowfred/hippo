@@ -31,6 +31,24 @@ def _sessions(n, name="a", backend="bm25"):
     return [{"session_id": f"s{i}", "names": [name], "backend": backend} for i in range(n)]
 
 
+def _seed_aggregates(td, count, memories=None, first_ts=None):
+    """Write a usage_aggregates.json shaped as telemetry's writer produces (LIF-4)."""
+    os.makedirs(td, exist_ok=True)
+    with open(os.path.join(td, "usage_aggregates.json"), "w", encoding="utf-8") as fh:
+        json.dump(
+            {
+                "version": 1,
+                "sessions": {"count": count, "first_ts": first_ts, "last_session_id": None},
+                "memories": memories or {},
+            },
+            fh,
+        )
+
+
+def _agg_record(sessions, ts=1_700_000_000.0):
+    return {"first_ts": ts, "last_ts": ts, "sessions": sessions, "last_session_id": None}
+
+
 # --------------------------------------------------------------------------- #
 # soak_status — the >=5-session curation-soak bar
 # --------------------------------------------------------------------------- #
@@ -70,6 +88,69 @@ def test_soak_status_empty_ledger_never_raises(tmp_path):
     st = soak.soak_status(str(tmp_path / "missing"))
     assert st["distinct_sessions"] == 0
     assert st["gate_met"] is False
+
+
+# --------------------------------------------------------------------------- #
+# LIF-4: analyzers union the rotation-surviving aggregates with the ledger
+# --------------------------------------------------------------------------- #
+def test_soak_status_survives_full_ledger_loss_via_aggregates(tmp_path):
+    """Rotation-survival end-to-end: sessions logged through the REAL writer, then the
+    ledger deleted outright — the soak gate must still stand on the aggregates."""
+    import memory.telemetry as T
+
+    td = str(tmp_path / "tele")
+    for i in range(7):
+        T.log_recall_event(
+            [{"name": "a", "backend": "bm25"}],
+            query="q", k=1, latency_ms=1.0, telemetry_dir=td, session_id=f"s{i}",
+        )
+    os.remove(os.path.join(td, "recall_events.jsonl"))
+
+    st = soak.soak_status(td)
+    assert st["distinct_sessions"] == 7
+    assert st["gate_met"] is True
+    assert st["total_events"] == 0  # event counts are ledger-window-only, honestly
+
+
+def test_soak_status_takes_max_of_ledger_and_aggregates(tmp_path):
+    """The two sources observe the same session stream — max(), never sum() (summing
+    would double-count sessions present in both)."""
+    td = str(tmp_path / "tele")
+    _seed(td, _sessions(3))
+    _seed_aggregates(td, count=2)  # stale/reset aggregates: the fuller ledger view wins
+    assert soak.soak_status(td)["distinct_sessions"] == 3
+    _seed_aggregates(td, count=9)  # rotated ledger: the fuller aggregate view wins
+    assert soak.soak_status(td)["distinct_sessions"] == 9
+
+
+def test_curation_never_recalled_unions_aggregates(tmp_path):
+    """A memory whose only recalls rotated out of the ledger is NOT dead weight."""
+    md = str(tmp_path / ".claude" / "memory")
+    _corpus(md, ["a", "b", "c"])
+    td = str(tmp_path / "tele")
+    _seed(td, [{"session_id": "s1", "names": ["a"], "backend": "bm25"}])
+    _seed_aggregates(td, count=6, memories={"b": _agg_record(5)})  # b's recalls pre-rotation
+
+    rep = soak.curation_report(md, td)
+    assert rep["never_recalled"] == ["c"]  # only c is genuinely never-recalled
+    assert rep["recalled_count"] == 2  # union of ledger (a) + aggregates (b)
+    assert rep["per_memory_hits"] == {"a": 1}  # raw hit counts stay ledger-window-only
+
+
+def test_strength_scores_survive_full_ledger_loss_via_aggregates(tmp_path):
+    td = str(tmp_path / "tele")
+    _seed_aggregates(td, count=8, memories={"m": _agg_record(4)})  # no ledger file at all
+    assert soak.compute_strength_scores(td) == {"m": 0.5}
+
+
+def test_strength_scores_union_takes_max_per_side_and_stays_bounded(tmp_path):
+    td = str(tmp_path / "tele")
+    _seed(td, _sessions(2, name="m"))  # ledger: m in 2 of 2 sessions
+    _seed_aggregates(td, count=4, memories={"m": _agg_record(3)})  # aggregates: 3 of 4
+
+    scores = soak.compute_strength_scores(td)
+    assert scores["m"] == 0.75  # max(2, 3) / max(2, 4)
+    assert all(0.0 < s <= 1.0 for s in scores.values())
 
 
 # --------------------------------------------------------------------------- #

@@ -132,6 +132,25 @@ comparison. Never raises.
 "$PY" -m memory.staleness
 ```
 
+### Citation rot (LIF-3) — a vanished cited path is loud, never a silent shrink
+
+A renamed/deleted cited file used to vanish from `cited_paths` on the next re-derivation
+— possibly to `[]`, after which the memory is permanently exempt from staleness with no
+record anything was lost. Two surfaces close that hole:
+
+- **The drop itself**: `backfill_file(refresh=True)` / `reverify_file` results carry
+  `dropped_citations` (paths in the frontmatter BEFORE the re-derivation, absent AFTER).
+  The provenance CLI (`--refresh` / `--refresh-one` / `--reverify`) and
+  `reconsolidate --reverify` print one shared per-file rot line
+  (`provenance.citation_rot_lines`) whenever it is non-empty; a drop to **zero** is
+  called out distinctly — the memory becomes staleness-EXEMPT.
+- **Current state, before any drop**: `staleness.find_citation_rot(memory_dir, repo_root)`
+  lists memories whose frontmatter cites paths no longer in the repo file index
+  (`find_unparseable`'s rot sibling; `[]` when the index is unavailable — under-flag
+  beats cry-wolf in a non-git dir). Surfaced count-first by the SessionStart
+  `citation_rot` producer and in `python -m memory.staleness`'s default report, next to
+  the unparseable block; TOTAL rot (every citation gone) is marked on its line.
+
 ### Clearing a flag: `--reverify` / `--refresh-one`
 
 ```bash
@@ -149,6 +168,22 @@ comparison. Never raises.
   its body), `source_commit` untouched. The corpus-wide `--refresh` does the same for
   every already-backfilled memory.
 
+### Verify-at-use banner + reinforcement (RET-6)
+
+A currently-stale memory's injected pointer line (`recall.format_results`) carries a
+one-line banner — `anchored to <sha>; N cited files changed since — verify before
+relying` — sourced entirely from `stale.json` (LIF-6's `SessionStart`-derived cache; an
+absent/corrupt cache degrades to **no banners**, never a hard error, and never a git call
+on the recall hot path). A fresh memory carries none. **Reinforcement needs no separate
+step**: `--reverify` (or `reconsolidate.semantic_reverify`'s `graduate`/`fix` outcome)
+already re-baselines `source_commit` to HEAD, so a reinforced memory simply drops out of
+the *next* `SessionStart`'s `find_stale` scan — and thus `stale.json` — and the banner is
+gone. The first time a memory is EVER reverified, `--reverify` also additively stamps a
+write-once `last_verified` timestamp (never overwritten by a later reverify) —
+supplementary audit provenance (`staleness.read_last_verified`), distinct from
+`source_commit`/`source_commit_time`, which remains the signal that actually clears the
+banner.
+
 ## The SessionStart dispatcher
 
 ### `session_start.py`
@@ -156,10 +191,17 @@ comparison. Never raises.
 ONE process, ONE corpus load, ONE merged `additionalContext`. Producers, in order:
 `stale_venv` (deps changed since bootstrap → re-bootstrap nudge), `integrity`
 (unparseable frontmatter — surfaced FIRST among corpus signals so a malformed memory
-can't hide), `staleness`, `reconsolidation` (recall-filtered staleness worklist),
+can't hide), `citation_rot` (cited paths gone from the repo, LIF-3), `staleness`,
+`reconsolidation` (recall-filtered staleness worklist),
 `git_recent`, `link_health`, `floor`. Self-suppresses when no producer has anything to
 say; bounds output under the harness's 10,000-char cap; **always exits 0**. Side effects
 (not producers): heal empty baselines, `refresh_index()`, `mark_session()`.
+
+LIF-1: the `staleness` producer suppresses the per-item lines of entries already
+carrying `invalid_after` (demote's terminal state — recall is already ranking them
+down) but keeps them **counted** in a `(+N already demoted)` tail, so suppression is
+never silent disappearance; once an invalidation ages past recall's 30-day old horizon,
+the same block names it and suggests the `/hippo:audit` archive flow (report-only).
 
 Wired via [`../hooks/memory_session_start.sh`](../hooks/memory_session_start.sh), which
 also owns the **first-run nudge**: venv/sentinel missing → "run /hippo:bootstrap";
@@ -180,8 +222,22 @@ zero-OUTBOUND (may still be well-cited), `isolates()` is zero-in AND zero-out (g
 disconnected). Soft aliases (prefix-strip / `name:` slug) claimed by two or more files
 are **ambiguous** — `resolve()` refuses them rather than guess (a full-stem claim still
 beats any soft claim). `lint_links` flags **dangling** targets, **ambiguous** targets
-(naming every claimant), **slug-mismatches**, and **orphans** — read-only, never edits a
-memory; its one-line summary is the `link_health` producer.
+(naming every claimant), **slug-mismatches**, **dangling typed relation targets**, and
+**orphans** — read-only, never edits a memory; its one-line summary is the `link_health`
+producer.
+
+**Typed edges (GRA-4, corpus format 2).** Frontmatter may declare
+`supersedes: [name]`, `contradicts: [name]`, `refines: [name]` (each a list of memory
+names/stems, top-level or under `metadata:` — the `cited_paths` read convention);
+`[[wikilinks]]` remain the untyped edge. Targets resolve through the SAME alias tiers as
+wikilinks. Consequences at recall time (served from the persisted `links.json`, zero
+corpus re-reads; cache absent → no effect): the TARGET of a live `supersedes` edge has
+its fused score halved BEFORE the top-k cut (its successor outranks it; wide-k still
+surfaces it) and its pointer carries `[superseded by <name>]`; a `contradicts` target is
+NOT demoted — it carries `[contradicts <name> — verify]` only; `refines` is navigational
+(no ranking effect, no annotation). The one write primitive is
+`links.add_typed_relation(path, relation, target)` — additive, body-preserving,
+idempotent, per-item; reconsolidation's `superseded_by` opt-in routes through it.
 
 ```bash
 "$PY" -m memory.links --traverse <name> --hops 2
@@ -198,9 +254,13 @@ memory; its one-line summary is the `link_health` producer.
 
 Writes the frontmatter the system depends on (`name`, `description` — **the recall
 hook** — and `metadata.type`), backfills provenance (born staleness-tracked), refreshes
-the index (**immediately recallable**), and appends a `MEMORY.md` floor pointer **only
-for `user`/`feedback`** types. Never overwrites an existing file. Prefer the
-`/hippo:new` skill, which wraps this with the what-not-to-save judgment.
+the index (**immediately recallable**), and inserts a `MEMORY.md` floor pointer **only
+for `user`/`feedback`** types — at its deterministic **sorted** position within the
+section (lexicographic by memory name) rather than always at the section tail, so two
+teammates adding different pointers to the same section land on different lines and
+merge cleanly instead of colliding on the shared tail line (TEA-4). Never overwrites an
+existing file. Prefer the `/hippo:new` skill, which wraps this with the
+what-not-to-save judgment.
 
 ### `lint_floor.py` — the floor invariant
 
@@ -222,7 +282,7 @@ floor link rot (read-only); its summary is the `floor` producer.
 |---|---|---|
 | `recall_events.jsonl` | `recall.main()` after results | `{ts, session_id, names, backend, latency_ms, k, query_preview}` |
 | `episode_buffer.jsonl` | `recall.main()`, same block | adds the repo HEAD watermark — soak data for the future capture pass |
-| `reconsolidation_events.jsonl` | `record_reconsolidation_outcome()` | `{ts, name, outcome}` verdicts |
+| `reconsolidation_events.jsonl` | `record_reconsolidation_outcome()` | `{ts, name, outcome[, invalidated]}` verdicts + LIF-1 snooze acks |
 
 Contract: never raises, never delays a recall (fires after results, fully wrapped), no
 sensitive content (an 80-char query preview, never the full prompt). **Hygiene:** a
@@ -230,11 +290,19 @@ project with no `.claude/memory` corpus gets NO ledgers at all, and the telemetr
 self-ignoring (a `.gitignore` containing `*` inside it) so `git add .` can never commit
 prompt previews.
 
+Beside the ledgers sits `usage_aggregates.json` (LIF-4) — a tiny per-memory summary
+(first/last recalled ts, distinct-session count) folded in on every recall append and
+**never rotated**, so the byte-capped ledger can drop its oldest tail without a
+long-lived corpus losing its oldest usage evidence. `read_usage_aggregates()` is the
+read surface; the soak/curation/archive analyzers union it with the ledger.
+
 ### `soak.py` — soak status + curation report (read-only)
 
 Distinct-session count vs the **≥5-session** curation-soak bar, per-memory recall hits,
 the never-recalled set (dead-weight candidates — clone-local, topic-biased; read with
-care), and the BM25-fallback rate. `compute_strength_scores()` returns
+care), and the BM25-fallback rate. Session counts and the never-recalled set union the
+rotation-surviving `usage_aggregates.json` with the retained ledger (LIF-4); raw hit
+counts stay ledger-window-only. `compute_strength_scores()` returns
 `{name: distinct_sessions_recalled / total_sessions}` — sessions, not events, so one
 chatty session can't inflate a memory's strength.
 
@@ -250,16 +318,40 @@ chatty session can't inflate a memory's strength.
 last N sessions) with the stale set — memories actively shaping behavior whose cited code
 drifted. Read-only CLI + the `reconsolidation` producer (silent unless non-empty).
 
+When the link graph is buildable (`links.build_graph`, cache-aware), each item also
+carries a `linked` column (GRA-9): up to 3 one-hop neighbors — inbound + outbound
+`[[wikilinks]]` unioned with typed edges, minus names already on the worklist — rendered
+as `X (+2 linked: Y, Z)`. Review-adjacent and **report-only** (zero write paths): when a
+memory drifts, its neighbors are the next most likely to be wrong. No graph → no column;
+the worklist is exactly its pre-GRA-9 self.
+
+LIF-1 closes the re-nag loop — the worklist is **actionable-only**: items whose file
+already carries `invalid_after` (demote's terminal state) are excluded (the staleness
+producer still counts them), and `--snooze <name>` records an explicit per-item ack in
+the reconsolidation ledger that silences an item for the next 5 new sessions, then
+expires (a deferral, not a verdict — only demote is terminal).
+
 ```bash
 "$PY" -m memory.reconsolidate
+"$PY" -m memory.reconsolidate --snooze <name>    # ack: skip for 5 sessions, then re-nag
 ```
 
 `semantic_reverify(name, outcome, ...)` is the per-item write primitive — `graduate` /
 `fix` route through `reverify_file` (clears the flag), **`demote` does NOT** (a
-confirmed-wrong memory must stay visible to staleness; demotion is
-`set_invalid_after`'s job). Verdicts land in the reconsolidation ledger;
-`eval_recall.graduation_rate()` reports `graduate / (graduate + demote)` (fixes excluded
-by design). No bulk variant exists.
+confirmed-wrong memory must stay visible to staleness) — instead it **chains
+`set_invalid_after`** onto the memory and refreshes the index (LIF-1), so recall's
+pre-cut penalty demotes it immediately: one command, no separate `--invalidate`.
+Verdicts land in the reconsolidation ledger (demote events carry `invalidated` for
+audit); `eval_recall.graduation_rate()` reports `graduate / (graduate + demote)` (fixes
+and snoozes excluded by design). No bulk variant exists.
+
+`superseded_by=<successor>` (GRA-4, `demote`/`fix` only, opt-in): when the agent knows
+WHICH memory replaces the demoted one's claim, this appends `supersedes: [name]` to the
+**successor's** frontmatter (via `links.add_typed_relation` — additive, body-preserving),
+so recall demotes the loser below its successor and annotates it. Per-item and
+agent-gated like everything else here; refused for `graduate` and when either memory is
+missing. CLI: `"$PY" -m memory.reconsolidate --reverify <name> --outcome demote
+--superseded-by <successor>`.
 
 ## Graceful decay — soft-invalidation + archive
 
@@ -268,17 +360,31 @@ Decay is DEMOTION, never deletion.
 - `staleness.set_invalid_after(name)` stamps an additive `invalid_after` frontmatter
   timestamp: **< 30 days old** → still recallable, fused score halved BEFORE the top-k
   cut (real demotion — it can fall out of top-k); **≥ 30 days** → dropped from recall
-  display only, still in corpus/index; **cleared** by a genuine `--reverify`.
+  display only, still in corpus/index; **cleared** by a genuine `--reverify`. A `demote`
+  verdict chains this automatically (LIF-1) — the manual `--invalidate` remains for
+  judging a memory questionable *without* rendering a reconsolidation verdict.
 - `archive.py` — `archive_candidates` reports the intersection of four gates (cold ∧
   stale ∧ zero-inbound ∧ not-cited-by-instructions, the last failing CLOSED on read
-  errors); `--archive <name>` is a per-item, git-reversible `git mv` into
+  errors). LIF-4: the report enforces its own trust threshold — until the ≥5-session
+  soak bar is met it returns `[]` with a machine-readable reason
+  (`diagnostics["reason"] = "soak_gate_unmet"`) instead of a maximally-permissive
+  fresh-install list, and would-be candidates younger than the soak window (per git
+  first-seen, not yet exposed to 5 distinct sessions) are excluded and named in the
+  report; `--archive <name>` is a per-item, git-reversible `git mv` into
   `.claude/memory/archive/` (a tracked subdir the corpus iterator skips). Never fires
-  automatically; no `--all` exists.
+  automatically; no `--all` exists. GRA-5: the move REFUSES — machine-readable
+  `refused: True` + the `referrers` list in the result, zero filesystem change — while
+  OTHER memories still reference the target (untyped `[[wikilinks]]` unioned with GRA-4
+  typed inbound edges, via the one canonical `LinkGraph.inbound()`/`typed_inbound()`
+  API), unless `--force`; every successful move also reports the referrers so the caller
+  rewrites those links in the same commit (a `supersedes:` edge on the successor memory
+  is the machine-readable forwarding pointer).
 
 ```bash
 "$PY" -m memory.staleness --invalidate <name>
-"$PY" -m memory.archive                       # report only
-"$PY" -m memory.archive --archive <name>      # per-item move, after review
+"$PY" -m memory.archive                             # report only
+"$PY" -m memory.archive --archive <name>            # per-item move; refuses while inbound links exist
+"$PY" -m memory.archive --archive <name> --force    # move anyway; referrers printed for same-commit rewrite
 ```
 
 ## Degraded modes (all legible, none fatal)
@@ -291,6 +397,45 @@ Decay is DEMOTION, never deletion.
 | No `.claude/memory` corpus | Hooks stay inert: no index, no ledgers, zero files created; SessionStart nudges `/hippo:init` |
 | Untrusted corpus (SEC-1) | A cloned/foreign git corpus injects NOTHING until trusted: recall returns `[]`, producers stay silent; a low-frequency SessionStart nudge points at `/hippo:doctor` (count + sample names → one-time consent). `/hippo:init` trusts corpora you create; `HIPPO_TRUST_ALL=1` bypasses for CI |
 | Unparseable frontmatter | Skipped by staleness AND refused by refresh/reverify; the `integrity` producer names the file loudly |
+
+## Corpus format versioning (the doctor-driven migration path)
+
+Two version numbers, two very different contracts (COR-7):
+
+- **Index** — `manifest.json` carries `schema_version` (`build_index.SCHEMA_VERSION`).
+  The index is a derived cache, so a mismatch (any plugin update that changes the manifest
+  shape) is **self-healing and needs zero operator action**: every load path treats a
+  mismatched manifest as absent, and the next SessionStart refresh performs one full
+  rebuild stamped with the current version.
+- **Corpus** — `.claude/memory/.format` declares `{"corpus_format": N}`
+  (`provenance.CORPUS_FORMAT_VERSION`, currently **2**). It is committed **with** the
+  corpus (it describes the corpus; it is not a rebuildable cache); `/hippo:init` stamps it
+  when seeding a fresh corpus, and **a corpus with no marker reads as format 1** — every
+  pre-marker corpus is already on the baseline, nothing to backfill.
+
+  Format history: **v1** = the pre-versioning baseline. **v2** (GRA-4) = frontmatter may
+  carry typed relations (`supersedes:`/`contradicts:`/`refines:` lists). v2 is purely
+  ADDITIVE, so the v1→v2 migration is the trivial case of the flow below: no per-memory
+  edits are required — review that no existing frontmatter uses those three keys for
+  something else, then stamp the marker (`write_corpus_format`). Until stamped, a v1
+  corpus is read identically; typed edges any teammate authors still work (formats are
+  additive where possible) — the marker just records which conventions the corpus has
+  adopted.
+
+**How a corpus format bump is detected, and what the operator does.** The corpus is the
+git-tracked source of authority, so hippo **never migrates it autonomously** — detection
+is loud, the fix is operator-driven:
+
+1. *Corpus newer than the plugin* (a teammate on newer hippo bumped the format): the
+   `corpus_format` SessionStart producer warns every session, and `/hippo:doctor`'s
+   format check names both versions → **update the hippo plugin**. Nothing else to do.
+2. *Corpus older than the plugin* (a plugin update shipped a format bump): `/hippo:doctor`
+   names both versions and points here. The release notes of the version that bumped
+   `CORPUS_FORMAT_VERSION` carry the migration steps; the operator runs them from doctor —
+   per-item, agent-gated frontmatter/body edits (the audit pattern: review each change,
+   no bulk sweep) — then stamps the marker as the final, explicit step
+   (`memory.provenance.write_corpus_format`). Until migrated, the plugin keeps reading
+   the old format (formats are additive where possible); newer-format features stay off.
 
 ## Environment overrides
 
