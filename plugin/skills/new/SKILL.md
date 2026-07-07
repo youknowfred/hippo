@@ -24,6 +24,12 @@ section below).
 ```bash
 . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
 hippo_resolve_py
+```
+
+CLI synopsis (`<required>` / `{choice-a|choice-b}` / `[optional]` — standard usage notation,
+not literal shell; fill in the placeholders before running):
+
+```
 "$PY" -m memory.new_memory \
   <name> "<one-line description — this is the recall hook, be specific>" \
   --type {user|feedback|project|reference} \
@@ -111,7 +117,7 @@ reviewable, per-item git diff — never a bulk sweep). **Read the flagged neighb
   per-item step:
 
   ```bash
-  "$PY" -m memory.reconsolidate --reverify <old-name> --outcome demote --superseded-by <new-name>
+  "$PY" -m memory.reconsolidate --reverify "<old-name>" --outcome demote --superseded-by "<new-name>"
   "$PY" -m memory.build_index   # refresh links.json so the demotion is live THIS session
   ```
 
