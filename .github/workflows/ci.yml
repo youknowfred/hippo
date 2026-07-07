@@ -37,8 +37,8 @@ jobs:
           cache: pip
           cache-dependency-path: plugin/requirements.txt
       - name: Install deps
-        run: python -m pip install -r plugin/requirements.txt pytest
-      - name: Hermetic suite (network tests deselected via addopts)
+        run: python -m pip install -r plugin/requirements.txt pytest pytest-timeout
+      - name: Hermetic suite (network + slow tests deselected via addopts)
         run: python -m pytest
 
   dense:
@@ -54,14 +54,18 @@ jobs:
           cache: pip
           cache-dependency-path: plugin/requirements.txt
       - name: Install deps
-        run: python -m pip install -r plugin/requirements.txt pytest
+        run: python -m pip install -r plugin/requirements.txt pytest pytest-timeout
       - name: Restore fastembed model cache
         uses: actions/cache@v4
         with:
           path: /home/runner/.cache/fastembed-ci
           key: fastembed-bge-small-en-v1.5-v1
-      - name: Dense tests (network-marked; downloads the model only on a cold cache)
-        run: python -m pytest -m network
+      # QUA-10: slow-marked tests are the real wall-clock assertions moved off the hermetic
+      # lane (timing-sensitive, not download-sensitive) — this restored-cache runner is the
+      # closest thing to a controlled timing environment CI has, so they run here alongside
+      # the network-marked (model-download) tests.
+      - name: Dense + slow tests (network-marked; downloads the model only on a cold cache)
+        run: python -m pytest -m "network or slow"
       - name: Seed a corpus from the shipped starter packs
         run: |
           mkdir -p .claude/memory
