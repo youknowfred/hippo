@@ -6,8 +6,8 @@ INTERSECTION:
   - **cold**          — never recalled in the telemetry ledger (``soak.curation_report``'s
                         ``never_recalled`` set)
   - **stale**          — cites code that has drifted (``staleness.find_stale``)
-  - **zero-inbound**   — no OTHER memory ``[[wikilinks]]`` to it (inverts
-                        ``links.LinkGraph.adjacency`` — distinct from
+  - **zero-inbound**   — no OTHER memory ``[[wikilinks]]`` to it (via
+                        ``links.LinkGraph.inbound()`` — distinct from
                         ``LinkGraph.orphans()``, which is zero-OUTBOUND)
   - **not-cited-by-CLAUDE.md** — the memory's filename is not referenced (backtick-quoted,
                         with or without ``.md``) anywhere across the project's instruction
@@ -65,21 +65,18 @@ def _corpus_names(memory_dir: str) -> Set[str]:
 def _zero_inbound_names(memory_dir: str) -> Set[str]:
     """Memory stems with NO inbound ``[[wikilink]]`` from any OTHER memory.
 
-    Distinct from ``links.LinkGraph.orphans()`` (zero OUTBOUND) — a new computation that
-    inverts the adjacency graph; no inbound-degree primitive existed before this. Never
-    raises; ``set()`` on any failure (fails toward "has inbound", i.e. NOT a candidate — the
-    safe direction for an archive gate, since this is one of four ANDed conditions).
+    Distinct from ``links.LinkGraph.orphans()`` (zero OUTBOUND). Since GRA-2 this is a
+    thin join over ``LinkGraph.inbound()`` — the graph builds its reverse adjacency once
+    in ``_build()`` and keys everything by stem, so no local inversion or ``.md``-stripping
+    remains here (one adjacency inversion in the codebase, by design). Never raises;
+    ``set()`` on any failure (fails toward "has inbound", i.e. NOT a candidate — the safe
+    direction for an archive gate, since this is one of four ANDed conditions).
     """
     try:
         g = build_graph(memory_dir)
         if g is None:
             return set()
-        has_inbound: Set[str] = set()
-        for targets in g.adjacency.values():
-            has_inbound |= targets
-        all_stems = {os.path.splitext(f)[0] for f in g.files}
-        has_inbound_stems = {os.path.splitext(f)[0] for f in has_inbound}
-        return all_stems - has_inbound_stems
+        return {stem for stem in g.files if not g.inbound(stem)}
     except Exception:
         return set()
 

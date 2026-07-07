@@ -21,8 +21,8 @@ Design constraints this module is shaped by (all load-bearing):
     ``mark_trusted``. ``/hippo:init`` marks a corpus trusted the moment the user creates it
     (or explicitly re-runs init against it) — running a hippo command against a corpus IS
     the review.
-  - CI override: ``MEMOBOT_TRUST_ALL=1`` bypasses the gate entirely (matches the codebase's
-    ``MEMOBOT_`` env convention). ``MEMOBOT_TRUST_FILE`` relocates the registry (hermetic
+  - CI override: ``HIPPO_TRUST_ALL=1`` bypasses the gate entirely (matches the codebase's
+    ``HIPPO_`` env convention). ``HIPPO_TRUST_FILE`` relocates the registry (hermetic
     tests point it at a tmp path so the real ``~/.claude`` is never touched).
 
 Fail posture: this is a SECURITY gate, so it fails CLOSED — an unresolvable ``repo_root``
@@ -42,20 +42,20 @@ from typing import List, Optional
 from .provenance import git_root
 
 # CI/automation bypass — set to any non-empty value to skip the gate entirely.
-_TRUST_ALL_ENV = "MEMOBOT_TRUST_ALL"
+_TRUST_ALL_ENV = "HIPPO_TRUST_ALL"
 # Hermetic-test / relocation override for the registry file path.
-_TRUST_FILE_ENV = "MEMOBOT_TRUST_FILE"
+_TRUST_FILE_ENV = "HIPPO_TRUST_FILE"
 
 
 def trust_all() -> bool:
-    """True when the CI/automation override (``MEMOBOT_TRUST_ALL``) is set non-empty."""
+    """True when the CI/automation override (``HIPPO_TRUST_ALL``) is set non-empty."""
     return bool(os.environ.get(_TRUST_ALL_ENV))
 
 
 def trust_registry_path() -> str:
     """Absolute path to the machine-local trust registry JSON.
 
-    ``MEMOBOT_TRUST_FILE`` wins (hermetic tests point it at a tmp file); otherwise the
+    ``HIPPO_TRUST_FILE`` wins (hermetic tests point it at a tmp file); otherwise the
     canonical ``~/.claude/hippo-trust.json`` — deliberately OUTSIDE any project repo so a
     foreign corpus can never commit its own trust marker.
     """

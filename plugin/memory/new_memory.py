@@ -4,26 +4,34 @@
 carries the three fields the system depends on — ``name``, ``description`` (the recall hook),
 and ``metadata.type`` — then:
 
-  1. backfills Tier-1 citation provenance (``cited_paths`` / ``source_commit``) so the new
+  1. discovers related EXISTING memories via ``recall()`` and appends a "Related: [[a]], [[b]]"
+     line to the body (GRA-3 — see ``_discover_links``), BEFORE rendering/writing, so the link
+     line lands in the file at birth; then
+  2. backfills Tier-1 citation provenance (``cited_paths`` / ``source_commit``) so the new
      memory is born staleness-tracked, and
-  2. refreshes the recall index so it is immediately recallable, and
-  3. appends a ``MEMORY.md`` floor pointer ONLY when ``type`` is ``user`` or ``feedback``.
+  3. refreshes the recall index so it is immediately recallable, and
+  4. appends a ``MEMORY.md`` floor pointer ONLY when ``type`` is ``user`` or ``feedback``.
 
 ``project`` / ``reference`` memories are deliberately NOT added to the floor — they are
 recalled on demand (the UserPromptSubmit recall hook + the SessionStart auto-refresh index
 them). This is the whole point: new memories never re-bloat the trimmed always-load.
 
 Never silently overwrites an existing file. The floor-pointer write is the ONLY edit to
-MEMORY.md; no existing memory BODY is ever modified.
+MEMORY.md; no existing memory BODY is ever modified — link discovery only ever touches the
+file being CREATED (the no-bulk-autonomous-sweeps invariant: this is a single-item write, not
+an edit to any pre-existing memory).
 """
 
 from __future__ import annotations
 
 import json
 import os
-from typing import Optional
+from typing import List, Optional
 
 VALID_TYPES = ("user", "feedback", "project", "reference")
+
+# GRA-3: how many related memories new_memory suggests via recall() at write time.
+_LINK_DISCOVERY_K = 3
 
 # Which floor section a pointer goes under, by type. project/reference => no floor pointer.
 _FLOOR_SECTION_BY_TYPE = {
@@ -34,6 +42,51 @@ _FLOOR_SECTION_BY_TYPE = {
 
 def _title_from_slug(name: str) -> str:
     return name.replace("_", " ").replace("-", " ").strip().title()
+
+
+def _discover_links(
+    name: str, description: str, memory_dir: str, repo_root: Optional[str], k: int
+) -> List[str]:
+    """Top-``k`` EXISTING memory names related to the new memory, via in-process ``recall()``.
+
+    GRA-3: a snap-in project starts at zero graph edges because no code path ever creates one —
+    hand-authored wikilinks accrete over months in a mature corpus, but a fresh install never
+    gets there. Running ``recall()`` against the query the new memory would itself be indexed
+    under (``"<name words>. <description>"`` — the exact ``doc_text`` shape ``build_index``
+    uses, so this asks "what would compete with THIS memory for recall rank?"), BEFORE the file
+    exists, surfaces the closest existing neighbors to seed as wikilinks at birth.
+
+    BM25-only by construction: this reuses ``recall()``'s own ``_ensure_index`` implicit-build
+    path, which explicitly disables dense for exactly this reason (a write-time call must not
+    block on loading a dense model — the hot-path invariant recall's implicit index build
+    already honors). Skipped entirely (returns ``[]``) when the corpus is empty/unbuilt/errors —
+    never raises, never blocks the write. The new memory's OWN name is excluded defensively
+    (it cannot appear in a pre-write index, but a stale/pre-seeded index could theoretically
+    carry a same-named stub — belt and suspenders against ever linking a memory to itself).
+    """
+    try:
+        from .recall import recall
+
+        query = f"{name.replace('_', ' ').replace('-', ' ')}. {description}".strip(". ").strip()
+        if not query:
+            return []
+        hits = recall(query, k=k + 1, memory_dir=memory_dir, repo_root=repo_root)
+        return [h["name"] for h in hits if h.get("name") != name][:k]
+    except Exception:
+        return []
+
+
+def _append_related_line(body: str, related: List[str]) -> str:
+    """Append a final ``Related: [[a]], [[b]]`` body line naming ``related`` memory names.
+
+    Additive only — never touches any existing body text, just appends one trailing line (the
+    same additive-write discipline provenance backfill and the floor pointer already follow).
+    """
+    if not related:
+        return body
+    line = "Related: " + ", ".join(f"[[{r}]]" for r in related)
+    body = (body or "").rstrip("\n")
+    return f"{body}\n\n{line}\n" if body else f"{line}\n"
 
 
 def _render_frontmatter(name: str, description: str, mtype: str, body: str) -> str:
@@ -109,11 +162,18 @@ def write_memory(
     repo_root: Optional[str] = None,
     title: Optional[str] = None,
     hook: Optional[str] = None,
+    links: Optional[List[str]] = None,
+    no_links: bool = False,
 ) -> dict:
     """Create a recall-ready memory file. Returns a small result dict.
 
     - Validates ``type`` ∈ VALID_TYPES.
     - Refuses to overwrite an existing ``<name>.md`` (``created=False``, ``error`` set).
+    - Discovers related EXISTING memories (GRA-3) and appends a "Related: [[a]], [[b]]" body
+      line BEFORE rendering — ``links`` (explicit names) OVERRIDES discovery entirely;
+      ``no_links=True`` suppresses it entirely (neither discovery nor an explicit ``links``
+      list is applied). ``result["related"]`` reports whatever list was actually used (``[]``
+      when suppressed/empty-corpus/no hits).
     - Backfills provenance + refreshes the recall index (best-effort; never fatal).
     - Adds a MEMORY.md floor pointer ONLY for ``user`` / ``feedback``.
     - Scans the rendered text for secret-looking patterns (SEC-2) and, on a match, populates
@@ -124,6 +184,7 @@ def write_memory(
         "path": None,
         "floor_pointer_added": False,
         "indexed": False,
+        "related": [],
         "warnings": [],
         "error": None,
     }
@@ -141,6 +202,23 @@ def write_memory(
     md, repo = resolve_dirs()
     memory_dir = memory_dir or md
     repo_root = repo_root or repo
+
+    # --- GRA-3: link discovery, BEFORE rendering (so it lands in the body at birth). ---
+    # This runs against the EXISTING corpus index only — the new file does not exist on disk
+    # yet, so recall() cannot possibly self-match. ``--links`` (explicit) OVERRIDES discovery
+    # outright (no recall() call at all — an agent-supplied list is authoritative);
+    # ``--no-links`` suppresses BOTH paths. Ordering matters here: this must happen before the
+    # provenance backfill / index refresh below so cited_paths/staleness computation sees the
+    # SAME rendered text that lands on disk, not a version missing its Related line.
+    related: List[str] = []
+    if no_links:
+        related = []
+    elif links is not None:
+        related = [ln for ln in links if ln and ln != name]
+    else:
+        related = _discover_links(name, description, memory_dir, repo_root, _LINK_DISCOVERY_K)
+    result["related"] = related
+    body = _append_related_line(body, related)
 
     path = os.path.join(memory_dir, f"{name}.md")
     rendered = _render_frontmatter(name, description, type, body)
@@ -207,7 +285,21 @@ def main(argv=None) -> int:
     parser.add_argument("--title", default=None, help="floor-pointer link text (user/feedback only)")
     parser.add_argument("--hook", default=None, help="floor-pointer trailing note (user/feedback only)")
     parser.add_argument("--memory-dir", default=None)
+    parser.add_argument(
+        "--links",
+        default=None,
+        help="comma-separated existing memory names — OVERRIDES recall-based link discovery (GRA-3)",
+    )
+    parser.add_argument(
+        "--no-links",
+        action="store_true",
+        help="suppress the Related: [[...]] line entirely (no discovery, no --links)",
+    )
     args = parser.parse_args(argv)
+
+    links_arg = None
+    if args.links is not None:
+        links_arg = [ln.strip() for ln in args.links.split(",") if ln.strip()]
 
     res = write_memory(
         args.name,
@@ -217,6 +309,8 @@ def main(argv=None) -> int:
         memory_dir=args.memory_dir,
         title=args.title,
         hook=args.hook,
+        links=links_arg,
+        no_links=args.no_links,
     )
     if res["error"]:
         print(f"error: {res['error']}")
@@ -224,6 +318,8 @@ def main(argv=None) -> int:
     print(f"created : {res['path']}")
     print(f"indexed : {res['indexed']}")
     print(f"floor pointer added : {res['floor_pointer_added']} (only user/feedback get one)")
+    if res["related"]:
+        print(f"related : {', '.join(res['related'])} (curate this — keep/trim/replace, see /hippo:new)")
     for warning in res["warnings"]:
         print(f"warning : {warning}")
     if args.type in ("project", "reference"):

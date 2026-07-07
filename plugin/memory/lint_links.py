@@ -1,8 +1,11 @@
 """Wikilink integrity linter for agent-memory files (Tier 3 of the activation roadmap).
 
-Reports three classes of link rot the corpus census found, READ-ONLY and idempotent —
+Reports four classes of link rot the corpus census found, READ-ONLY and idempotent —
 it NEVER edits a memory file:
   - dangling     : a ``[[target]]`` that resolves to NO file (after slug normalization).
+  - ambiguous    : a ``[[target]]`` whose soft alias is claimed by TWO OR MORE files
+                   (COR-9) — resolve() refuses it rather than guess, and the lint line
+                   names every claimant so the fix (link the full stem) is obvious.
   - slug-mismatch: a ``[[target]]`` that DOES resolve, but only via a soft alias
                    (prefix-strip / ``name:`` slug) rather than the canonical filename stem —
                    i.e. it works today but is written in a non-canonical form.
@@ -19,16 +22,38 @@ from typing import Dict, List, Optional
 from .links import LinkGraph, build_graph
 
 
-def lint(memory_dir: str) -> dict:
-    """Return a report dict. Pure / never raises / never writes."""
-    g = build_graph(memory_dir)
-    if g is None:
-        return {"ok": False, "dangling": [], "slug_mismatch": [], "orphans": [], "files": 0}
+def lint(memory_dir: str, index_dir: Optional[str] = None) -> dict:
+    """Return a report dict. Pure / never raises / never writes.
 
+    ``index_dir`` (GRA-6) opts into ``build_graph``'s persisted-cache fast path — the
+    SessionStart producer passes it so the dispatcher's ONE corpus read stays the index
+    refresh's own; a fresh cache makes this a stat sweep with zero file reads. The CLI
+    keeps the full re-read (a diagnostic should read the source of authority directly).
+    """
+    g = build_graph(memory_dir, index_dir=index_dir)
+    if g is None:
+        return {
+            "ok": False,
+            "dangling": [],
+            "ambiguous": [],
+            "slug_mismatch": [],
+            "orphans": [],
+            "files": 0,
+        }
+
+    # unresolved holds BOTH failure modes (resolve() returns None for each); split them
+    # here because the remedies differ — dangling means "nothing claims this", ambiguous
+    # means "two files claim it, refuse to guess" (COR-9). Reporting an ambiguous target
+    # as dangling would send the user hunting for a file that already exists twice.
     dangling: List[dict] = []
+    ambiguous: List[dict] = []
     for fname, missed in sorted(g.unresolved.items()):
         for t in missed:
-            dangling.append({"file": fname, "target": t})
+            claimants = g.ambiguous_claimants(t)
+            if claimants:
+                ambiguous.append({"file": fname, "target": t, "claimants": claimants})
+            else:
+                dangling.append({"file": fname, "target": t})
 
     slug_mismatch: List[dict] = []
     for fname in g.files:
@@ -44,6 +69,7 @@ def lint(memory_dir: str) -> dict:
         "files": len(g.files),
         "edges": sum(len(v) for v in g.adjacency.values()),
         "dangling": dangling,
+        "ambiguous": ambiguous,
         "slug_mismatch": slug_mismatch,
         "orphans": g.orphans(),
     }
@@ -54,15 +80,23 @@ def health_line(report: dict) -> Optional[str]:
     if not report.get("ok"):
         return None
     n_dangling = len(report.get("dangling", []))
+    n_ambiguous = len(report.get("ambiguous", []))
     n_mismatch = len(report.get("slug_mismatch", []))
     n_orphans = len(report.get("orphans", []))
-    if n_dangling == 0 and n_mismatch == 0:
+    if n_dangling == 0 and n_ambiguous == 0 and n_mismatch == 0:
         return None  # orphans alone are informational, not rot — don't nag every session
     bits = []
     if n_dangling:
         examples = ", ".join(d["target"] for d in report["dangling"][:3])
         more = "" if n_dangling <= 3 else f" (+{n_dangling - 3} more)"
         bits.append(f"{n_dangling} dangling [[wikilink]] target(s): {examples}{more}")
+    if n_ambiguous:
+        # An ambiguous link is REAL rot — it resolves to nothing until disambiguated —
+        # so it must be loud at SessionStart (legible-degradation invariant), same as
+        # dangling.
+        examples = ", ".join(d["target"] for d in report["ambiguous"][:3])
+        more = "" if n_ambiguous <= 3 else f" (+{n_ambiguous - 3} more)"
+        bits.append(f"{n_ambiguous} ambiguous [[wikilink]] target(s): {examples}{more}")
     if n_mismatch:
         bits.append(f"{n_mismatch} non-canonical (slug-mismatch) link(s)")
     tail = f"; {n_orphans} orphan memo(s)" if n_orphans else ""
@@ -70,8 +104,21 @@ def health_line(report: dict) -> Optional[str]:
 
 
 def lint_links_producer(memory_dir: str, repo_root: str) -> Optional[str]:
-    """SessionStart producer (signature matches the dispatcher). Self-suppresses when clean."""
-    return health_line(lint(memory_dir))
+    """SessionStart producer (signature matches the dispatcher). Self-suppresses when clean.
+
+    GRA-6: routes through the persisted edge cache so SessionStart performs ONE corpus
+    read total — the dispatcher's ``refresh_index`` side effect reads the corpus and
+    (re)persists ``links.json`` before producers run, so this lint reconstructs the graph
+    from the cache with zero file reads. A missing/stale cache silently falls back to the
+    full re-read inside ``build_graph`` (correctness never depends on the cache).
+    """
+    try:
+        from .build_index import default_index_dir
+
+        index_dir: Optional[str] = default_index_dir(memory_dir)
+    except Exception:
+        index_dir = None
+    return health_line(lint(memory_dir, index_dir=index_dir))
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -95,6 +142,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"dangling targets : {len(report['dangling'])}")
     for d in report["dangling"]:
         print(f"  ✗ {d['file']} -> [[{d['target']}]]")
+    print(f"ambiguous targets: {len(report['ambiguous'])}")
+    for d in report["ambiguous"]:
+        # Name the alias AND every claimant — the fix is linking a full stem instead.
+        print(f"  ? {d['file']} -> [[{d['target']}]] (claimed by {', '.join(d['claimants'])})")
     print(f"slug mismatches  : {len(report['slug_mismatch'])}")
     for d in report["slug_mismatch"][:50]:
         print(f"  ~ {d['file']} -> [[{d['target']}]] (resolves to {d['resolves_to']})")

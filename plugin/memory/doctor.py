@@ -516,7 +516,7 @@ def check_trust(ctx: DoctorContext) -> Dict[str, str]:
         if trust.trust_all():
             return {
                 "status": "ok",
-                "message": "corpus trust bypassed (MEMOBOT_TRUST_ALL) — recall ungated.",
+                "message": "corpus trust bypassed (HIPPO_TRUST_ALL) — recall ungated.",
             }
         gate_root = trust.gate_repo_root(ctx.memory_dir, ctx.repo_root)
         if gate_root is None:
@@ -533,7 +533,7 @@ def check_trust(ctx: DoctorContext) -> Dict[str, str]:
             "message": f"corpus UNTRUSTED ({count} memories) — recall injects nothing from it. "
             "Review the memory names, then trust it: "
             f"python -c \"from memory.trust import mark_trusted; mark_trusted('{gate_root}')\" "
-            "(or set MEMOBOT_TRUST_ALL=1 for CI).",
+            "(or set HIPPO_TRUST_ALL=1 for CI).",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"trust check failed: {exc}."}
@@ -564,6 +564,180 @@ def check_secrets(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"secret scan failed: {exc}."}
 
 
+# GRA-3: a corpus this small (< 5 memories) genuinely may have nothing worth cross-linking yet
+# — the nudge below is about a corpus that has GROWN without ever discovering [[wikilinks]],
+# not about a brand-new project's first couple of files.
+_LINK_DENSITY_MIN_CORPUS = 5
+
+
+def check_link_density(ctx: DoctorContext) -> Dict[str, str]:
+    """One-time hint when the corpus has grown but never gained a single wikilink edge.
+
+    GRA-3: the graph machinery (links.py / lint_links.py / recall's 1-hop expansion) was
+    extracted from a corpus where links were hand-authored over months — a snap-in install
+    starts at zero edges and, pre-GRA-3, no code path ever created one. ``new_memory`` now
+    seeds a "Related: [[...]]" suggestion at write time, but a corpus that already has
+    ``_LINK_DENSITY_MIN_CORPUS`` or more memories and STILL carries zero edges (memories
+    written before this feature landed, or every suggestion so far was trimmed) never
+    hears about the feature at all — this is the one-time doctor-level hint that closes that
+    gap. Deliberately NOT a per-session SessionStart nag (``lint_links.health_line`` already
+    treats bare orphan-hood as informational, never rot, on purpose — see its docstring); doctor
+    is invoked on demand, so surfacing it here is a single ask-when-asked signal, not a repeated
+    per-session nag. Silent (``ok``) below the corpus-size floor, when the graph fails to build,
+    or once at least one edge exists anywhere in the corpus.
+    """
+    try:
+        from .links import build_graph
+
+        n = len(_iter_memory_files_safe(ctx.memory_dir))
+        if n < _LINK_DENSITY_MIN_CORPUS:
+            return {
+                "status": "ok",
+                "message": f"link density: N/A ({n} memories, below the {_LINK_DENSITY_MIN_CORPUS}-file floor for this hint).",
+            }
+        g = build_graph(ctx.memory_dir)
+        if g is None:
+            return {"status": "ok", "message": "link density: could not build the link graph."}
+        total_edges = sum(len(v) for v in g.adjacency.values())
+        if total_edges > 0:
+            return {
+                "status": "ok",
+                "message": f"link density: {total_edges} wikilink edge(s) across {n} memories.",
+            }
+        return {
+            "status": "warn",
+            "message": f"link density is ZERO across {n} memories — memories can reference each "
+            "other with [[name]] — see /hippo:new (new memories now suggest related links "
+            "automatically; existing ones can be cross-linked by hand or via /hippo:audit's "
+            "link-densification pass).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"link-density check failed: {exc}."}
+
+
+# --------------------------------------------------------------------------- #
+# RET-3: non-English corpus served by the English default model
+# --------------------------------------------------------------------------- #
+# Codepoint ranges for "Latin script" alphabetic characters — Basic Latin + Latin-1 Supplement
+# + Latin Extended-A/B, which together cover English plus the accented Latin of French,
+# German, Spanish, Portuguese, Vietnamese (base letters), etc. Anything alphabetic OUTSIDE
+# these ranges (Cyrillic, CJK, Greek, Arabic, Devanagari, ...) counts as "non-Latin" for this
+# heuristic. Deliberately coarse (not a full script-detection library) — this is a doctor
+# HINT, not a certified language classifier; it only needs to catch the obvious case (a corpus
+# that reads as visibly non-English) without false-positiving on a mostly-English corpus that
+# happens to contain a few French loanwords or names.
+_LATIN_ALPHA_RANGES = (
+    (0x0041, 0x005A),  # A-Z
+    (0x0061, 0x007A),  # a-z
+    (0x00C0, 0x00FF),  # Latin-1 Supplement letters (À-ÿ, excl. ×/÷ which aren't alphabetic anyway)
+    (0x0100, 0x024F),  # Latin Extended-A/B (accented forms used by many European languages)
+)
+# Below this many sampled alphabetic chars, the sample is too small to call a verdict either
+# way (a corpus of one or two short-description memories) — stay silent rather than guess.
+_NON_ENGLISH_MIN_ALPHA_SAMPLE = 40
+# ">30%" per the roadmap's acceptance criterion — a visible fraction, not a strict majority (a
+# corpus that's mostly English with scattered non-Latin proper nouns should NOT fire this).
+_NON_ENGLISH_ALPHA_FRACTION = 0.30
+
+
+def _is_latin_alpha(ch: str) -> bool:
+    return any(lo <= ord(ch) <= hi for lo, hi in _LATIN_ALPHA_RANGES)
+
+
+def check_non_english_corpus(ctx: DoctorContext) -> Dict[str, str]:
+    """Warn when the corpus reads as visibly non-English but the model is the English default.
+
+    RET-3 / OQ-4: the release keeps ``bge-small-en-v1.5`` as the hardcoded default (an explicit
+    opt-in — ``--multilingual`` — switches it), so a corpus written mostly in, say, Japanese or
+    Russian would otherwise get dense embeddings from a model never trained on that language,
+    with NO signal anywhere that a better-fitting preset exists. This samples every memory's
+    ``description:`` (the same text the index embeds — reusing ``extract_description`` so this
+    check can never disagree with what actually gets indexed) and counts alphabetic characters
+    that fall OUTSIDE the Latin-script ranges. If more than
+    ``_NON_ENGLISH_ALPHA_FRACTION`` of a large-enough alphabetic sample is non-Latin AND the
+    manifest's recorded model is still ``ENGLISH_DEFAULT_MODEL``, this warns and names the
+    `--multilingual` bootstrap preset. Silent (``ok``) on an empty/tiny corpus (nothing to
+    sample, or the sample is below ``_NON_ENGLISH_MIN_ALPHA_SAMPLE``), when the model has
+    already been switched away from the English default (nothing to suggest), or on any
+    unexpected error. Heuristic and best-effort by design — never raises, never blocks.
+    """
+    try:
+        from .build_index import ENGLISH_DEFAULT_MODEL, _load_manifest, default_index_dir, extract_description
+
+        manifest = _load_manifest(default_index_dir(ctx.memory_dir))
+        # No index yet, or already using a non-English model -> nothing to suggest here.
+        if manifest is None:
+            return {"status": "ok", "message": "non-English corpus check: N/A (no index built yet)."}
+        manifest_model = manifest.get("model")
+        if manifest_model and manifest_model != ENGLISH_DEFAULT_MODEL:
+            return {
+                "status": "ok",
+                "message": f"non-English corpus check: N/A (model is already '{manifest_model}', not the English default).",
+            }
+
+        total_alpha = 0
+        non_latin_alpha = 0
+        for path in _iter_memory_files_safe(ctx.memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    desc = extract_description(fh.read())
+            except Exception:
+                continue
+            for ch in desc:
+                if not ch.isalpha():
+                    continue
+                total_alpha += 1
+                if not _is_latin_alpha(ch):
+                    non_latin_alpha += 1
+
+        if total_alpha < _NON_ENGLISH_MIN_ALPHA_SAMPLE:
+            return {
+                "status": "ok",
+                "message": f"non-English corpus check: N/A (only {total_alpha} alphabetic chars sampled, "
+                f"below the {_NON_ENGLISH_MIN_ALPHA_SAMPLE}-char floor for this heuristic).",
+            }
+
+        fraction = non_latin_alpha / total_alpha
+        if fraction <= _NON_ENGLISH_ALPHA_FRACTION:
+            return {
+                "status": "ok",
+                "message": f"corpus reads as Latin-script/English ({fraction:.0%} non-Latin alphabetic chars).",
+            }
+        return {
+            "status": "warn",
+            "message": f"corpus is {fraction:.0%} non-Latin-alphabetic but is served by the English "
+            "default embedding model — consider `/hippo:bootstrap --multilingual` (switches to "
+            "a multilingual model; forces a one-time full re-embed of the corpus).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"non-English corpus check failed: {exc}."}
+
+
+def check_stale_memobot_env(ctx: DoctorContext) -> Dict[str, str]:
+    """DOC-8: flag any lingering ``MEMOBOT_*`` env var — the pre-v0.4.0 name, now ignored.
+
+    The rename to ``HIPPO_*`` was a clean break (one-canonical-name invariant — no alias shims,
+    no fallback reads of the old prefix), which means a developer's stale shell profile or CI
+    secret still exporting e.g. ``MEMOBOT_TRUST_ALL`` is now SILENTLY inert: every module only
+    ever reads ``HIPPO_*``, so the old var has no effect and nothing else would ever say so. That
+    silent-fallback path needs a legible signal somewhere — this is it. Scans the live environment
+    (not the corpus) for any key starting with ``MEMOBOT_`` and warns, by name, that it is ignored
+    and what to rename it to. Sorted so multiple stale vars report in a stable order. Warn-only —
+    a leftover env var is a footgun, not a broken install, so this never fails the run.
+    """
+    try:
+        stale = sorted(k for k in os.environ if k.startswith("MEMOBOT_"))
+        if not stale:
+            return {"status": "ok", "message": "no stale MEMOBOT_* env vars in the environment."}
+        parts = []
+        for key in stale:
+            suffix = key[len("MEMOBOT_") :]
+            parts.append(f"{key} is ignored since v0.4.0 — use HIPPO_{suffix}")
+        return {"status": "warn", "message": "; ".join(parts) + "."}
+    except Exception as exc:
+        return {"status": "warn", "message": f"stale-env check failed: {exc}."}
+
+
 # (label, check_fn) in a FIXED order — the source of the deterministic output. New checks append
 # here; the order is never sorted-by-name or set-derived, so the printed sequence is stable.
 CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
@@ -581,6 +755,9 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("pack_drift", check_pack_drift),
     ("fill_me", check_fill_me),
     ("secrets", check_secrets),
+    ("link_density", check_link_density),
+    ("non_english_corpus", check_non_english_corpus),
+    ("stale_memobot_env", check_stale_memobot_env),
 ]
 
 

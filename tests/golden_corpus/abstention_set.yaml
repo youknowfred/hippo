@@ -1,0 +1,13 @@
+# RET-1: golden-corpus companion to tests/fixtures/recall_abstention_set.yaml -- same
+# clearly-off-topic-for-an-engineering-corpus probes (pizza dough, quantum physics, celebrity
+# gossip, cooking, marathon training, ancient history), run against tests/golden_corpus/memory/
+# instead of the shipped starter packs. Report-only (see eval_recall.py's gate docstring);
+# `abstention_rate` = fraction returning zero results. Bare list of query strings, no
+# `expected`/`relevant` field -- there is nothing these queries SHOULD retrieve.
+
+- query: "what's the ideal hydration ratio for pizza dough and how long should it ferment"
+- query: "explain quantum entanglement and Bell's inequality in a physics lecture"
+- query: "which celebrity just announced their engagement this week"
+- query: "best recipe for a classic French onion soup"
+- query: "how do I train for a marathon as a beginner runner"
+- query: "what is the history of the Roman Empire's collapse"

@@ -32,7 +32,7 @@ def _floor(md, body):
 
 
 def _nm_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))  # hermetic resolve_dirs
     md = str(tmp_path / ".claude" / "memory")
     _floor(md, _CLEAN_FLOOR)

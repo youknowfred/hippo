@@ -1,0 +1,21 @@
+# RET-1: report-only abstention fixture (eval_recall.py's `--abstention-set` / default-path
+# probing — never a merge gate, see the gate docstring's list of 5).
+#
+# Each `query` below is CLEARLY off-topic for the packs this repo ships (plugin/assets/ — see
+# recall_hard_set.yaml's header for the exact seed recipe): pizza dough, quantum physics,
+# celebrity gossip, cooking, marathon training, ancient history. None of them share
+# meaningful vocabulary OR topical intent with anything in the shipped starter packs, so the
+# CORRECT recall() output is [] (inject nothing) — abstention, not a wasted top-k of "least
+# irrelevant" pointers. `abstention_rate` = fraction of these queries for which recall()
+# actually returned zero results; report-only, printed alongside the 5 tracked gates.
+#
+# Deliberately has NO `expected`/`relevant` field (unlike recall_hard_set.yaml /
+# recall_relevance_set.yaml) -- there is nothing this query SHOULD retrieve; the schema is
+# just a bare list of query strings.
+
+- query: "what's the ideal hydration ratio for pizza dough and how long should it ferment"
+- query: "explain quantum entanglement and Bell's inequality in a physics lecture"
+- query: "which celebrity just announced their engagement this week"
+- query: "best recipe for a classic French onion soup"
+- query: "how do I train for a marathon as a beginner runner"
+- query: "what is the history of the Roman Empire's collapse"

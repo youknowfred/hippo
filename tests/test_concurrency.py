@@ -4,7 +4,7 @@ COR-12 made the index manifest/dense writes atomic (dense.npy replaced BEFORE
 manifest.json, both via tmp + os.replace). This module is the "prove it" half:
 
   - Ledger: multiple REAL processes append to one telemetry ledger concurrently, with
-    rotation forced (a tiny MEMOBOT_TELEMETRY_MAX_BYTES). telemetry.py's own docstring
+    rotation forced (a tiny HIPPO_TELEMETRY_MAX_BYTES). telemetry.py's own docstring
     concedes the single-writer-assumption rotation may drop a line under a concurrent
     writer race -- the bar here is NEVER a crash and NEVER a torn/corrupt line, not
     zero drops.
@@ -76,7 +76,7 @@ def test_ledger_concurrent_appenders_no_crash_no_torn_lines_across_rotation(tmp_
     or corrupt line) -- lost lines from the single-writer-assumption rotation race are
     tolerated (documented behavior), but corruption or a crash is not.
     """
-    monkeypatch.setenv("MEMOBOT_TELEMETRY_MAX_BYTES", "4000")  # force many rotations
+    monkeypatch.setenv("HIPPO_TELEMETRY_MAX_BYTES", "4000")  # force many rotations
     telemetry_dir = str(tmp_path / "tele")
     os.makedirs(telemetry_dir)
 
@@ -128,6 +128,8 @@ def test_ledger_concurrent_appenders_no_crash_no_torn_lines_across_rotation(tmp_
             "ts",
             "session_id",
             "names",
+            "scores",  # COR-8: true fused score per result, parallel to "names"
+            "ranks",  # COR-8: 1-based emission rank per result, parallel to "names"
             "backend",
             "latency_ms",
             "k",
@@ -145,7 +147,7 @@ def test_ledger_concurrent_appenders_no_crash_no_torn_lines_across_rotation(tmp_
 
 def test_episode_ledger_concurrent_appenders_no_crash_no_torn_lines(tmp_path, monkeypatch):
     """Same race, over log_episode's ledger (a separate file, same _rotate_if_needed path)."""
-    monkeypatch.setenv("MEMOBOT_TELEMETRY_MAX_BYTES", "4000")
+    monkeypatch.setenv("HIPPO_TELEMETRY_MAX_BYTES", "4000")
     telemetry_dir = str(tmp_path / "tele")
     os.makedirs(telemetry_dir)
 
@@ -213,7 +215,7 @@ def _assert_manifest_dense_consistent(loaded) -> None:
 def test_index_reader_never_observes_torn_manifest_dense_pair_during_rebuild(tmp_path, monkeypatch):
     """One thread rebuilds the index in a loop; another loads it + recalls in a loop.
 
-    The writer both (a) toggles MEMOBOT_DISABLE_DENSE between rebuilds -- exercising
+    The writer both (a) toggles HIPPO_DISABLE_DENSE between rebuilds -- exercising
     BOTH the dense.npy-write branch and the stale-dense-removal branch COR-12 made
     atomic -- and (b) VARIES THE CORPUS SIZE each rebuild (memories added/removed
     between SessionStart refreshes is the realistic trigger): a reader that reads
@@ -262,9 +264,9 @@ def test_index_reader_never_observes_torn_manifest_dense_pair_during_rebuild(tmp
                 _write_corpus(md, 10 + (i % 20))
                 dense_on = i % 2 == 0
                 if dense_on:
-                    os.environ.pop("MEMOBOT_DISABLE_DENSE", None)
+                    os.environ.pop("HIPPO_DISABLE_DENSE", None)
                 else:
-                    os.environ["MEMOBOT_DISABLE_DENSE"] = "1"
+                    os.environ["HIPPO_DISABLE_DENSE"] = "1"
                 B.build_index(md, idx, force=True)
         except BaseException as exc:  # noqa: BLE001 -- surfaced via `errors`, not silently lost
             errors.append(f"writer crashed: {exc!r}")

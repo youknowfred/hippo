@@ -49,7 +49,7 @@ def _fake_embedder(dim: int = 16):
 # BM25-only build (no dense)
 # --------------------------------------------------------------------------- #
 def test_build_bm25_only_when_dense_disabled(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"a.md": "voyage reranker cross encoder", "b.md": "budget timeout phase envelope"})
@@ -69,7 +69,7 @@ def test_degrade_to_bm25_when_model_unavailable(tmp_path, monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("no cached model")
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", boom)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -105,7 +105,7 @@ def test_cold_cache_degrades_to_bm25_fast_with_no_fastembed_import(tmp_path, mon
     import rank_bm25  # noqa: F401
     import yaml  # noqa: F401
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     empty_cache = str(tmp_path / "empty-fastembed-cache")
     monkeypatch.setenv("FASTEMBED_CACHE_PATH", empty_cache)
     sys.modules.pop("fastembed", None)
@@ -165,7 +165,7 @@ def test_run_bounded_returns_value_from_worker_thread():
 # Dense build with a fake embedder (deterministic, offline)
 # --------------------------------------------------------------------------- #
 def test_dense_build_writes_matrix_and_rows(tmp_path, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -186,7 +186,7 @@ def test_dense_build_writes_matrix_and_rows(tmp_path, monkeypatch):
 # COR-12: atomic manifest/dense writes (no torn reads, no tmp litter)
 # --------------------------------------------------------------------------- #
 def test_no_stray_tmp_files_after_build(tmp_path, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -197,14 +197,14 @@ def test_no_stray_tmp_files_after_build(tmp_path, monkeypatch):
     assert leftovers == []
 
     # Also true for a BM25-only (no-dense) build and a switch-back-to-dense rebuild.
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     B.build_index(md, idx)
     leftovers = [f for f in os.listdir(idx) if f.endswith(".tmp") or f.endswith(".tmp.npy")]
     assert leftovers == []
 
 
 def test_dense_replace_happens_before_manifest_replace(tmp_path, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -230,7 +230,7 @@ def test_manifest_never_visible_with_missing_or_stale_dense(tmp_path, monkeypatc
     # A reader that observes the manifest mid-build (simulated by inspecting os.replace call
     # order + on-disk state right after build_index returns) must never see dense_ready=true
     # with dense.npy absent or shaped differently than what the manifest expects.
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -253,7 +253,7 @@ def test_incremental_rebuild_only_embeds_changed(tmp_path, monkeypatch):
         embedded_batches.append(list(texts))
         return base(texts)
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", counting_embed)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -281,7 +281,7 @@ def test_rebuild_with_no_changes_reembeds_nothing(tmp_path, monkeypatch):
         embedded_batches.append(list(texts))
         return base(texts)
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", counting_embed)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -342,7 +342,7 @@ def test_compute_corpus_coerces_unquoted_yaml_date(tmp_path):
 def test_build_index_does_not_crash_on_unquoted_yaml_date(tmp_path, monkeypatch):
     """End-to-end: the exact crash scenario the coercion fix prevents -- json.dump(manifest)
     on a raw datetime.date would raise TypeError without it."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     os.makedirs(md, exist_ok=True)
@@ -367,7 +367,7 @@ def test_invalid_after_refreshed_on_embedding_cache_hit(tmp_path, monkeypatch):
         embedded_batches.append(list(texts))
         return base(texts)
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", counting_embed)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -421,7 +421,7 @@ def test_force_reembeds_everything(tmp_path, monkeypatch):
         embedded_batches.append(list(texts))
         return base(texts)
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", counting_embed)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -442,9 +442,9 @@ def test_default_index_dir_is_gitignored_sibling(tmp_path):
 
 
 def test_switching_to_bm25_removes_stale_dense_file(tmp_path, monkeypatch):
-    # Explicit delenv: the CI hermetic lane exports MEMOBOT_DISABLE_DENSE=1 job-wide,
+    # Explicit delenv: the CI hermetic lane exports HIPPO_DISABLE_DENSE=1 job-wide,
     # and this test's FIRST build must be a dense one for the scenario to exist.
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"a.md": "alpha", "b.md": "beta"})
@@ -452,7 +452,7 @@ def test_switching_to_bm25_removes_stale_dense_file(tmp_path, monkeypatch):
     B.build_index(md, idx)
     assert os.path.exists(os.path.join(idx, "dense.npy"))
     # Rebuild with dense disabled -> the stale dense.npy must be removed.
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     m2 = B.build_index(md, idx)
     assert m2["dense_ready"] is False
     assert not os.path.exists(os.path.join(idx, "dense.npy"))
@@ -465,7 +465,7 @@ def test_allow_download_false_threads_to_embedder(tmp_path, monkeypatch):
         seen["allow_download"] = allow_download
         return _fake_embedder(16)(texts)
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", recording_embed)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -478,7 +478,7 @@ def test_allow_download_false_threads_to_embedder(tmp_path, monkeypatch):
 # refresh_index — the SessionStart incremental, offline, never-downgrade rebuild
 # --------------------------------------------------------------------------- #
 def test_refresh_index_picks_up_new_memory(tmp_path, monkeypatch):
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -502,7 +502,7 @@ def test_refresh_index_noop_when_unchanged(tmp_path, monkeypatch):
         embedded.append(list(texts))
         return _fake_embedder(16)(texts)
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", counting)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -519,7 +519,7 @@ def test_refresh_index_noop_when_unchanged(tmp_path, monkeypatch):
 def test_refresh_preserves_dense_when_offline_embed_fails(tmp_path, monkeypatch):
     # Build a complete dense index, then add a memory but make the offline embed FAIL
     # (simulates a cold/wiped cache). The refresh must NOT downgrade the index to BM25-only.
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -552,7 +552,7 @@ def test_refresh_index_missing_dir_is_none(tmp_path):
 # short-circuit must NOT ignore dense_ready.
 # --------------------------------------------------------------------------- #
 def test_refresh_index_upgrades_degraded_index_when_corpus_unchanged(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"a.md": "alpha one", "b.md": "beta two"})
@@ -561,7 +561,7 @@ def test_refresh_index_upgrades_degraded_index_when_corpus_unchanged(tmp_path, m
 
     # The corpus is UNCHANGED across "sessions", but dense is now available (mocked/fast
     # embed path) -- the next refresh_index must upgrade the index in place.
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     m2 = B.refresh_index(md, idx)
 
@@ -580,7 +580,7 @@ def test_refresh_index_still_noops_when_already_dense_and_unchanged(tmp_path, mo
         embedded.append(list(texts))
         return _fake_embedder(16)(texts)
 
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", counting)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -601,7 +601,7 @@ def test_large_corpus_offline_embed_persists_partial_progress_across_sessions(tm
     """Simulate a bounded budget that only allows a couple of chunks per session: assert
     partial rows persist after session 1, and session 2 continues from where it left off
     (already-embedded hashes are never re-submitted to embed_documents)."""
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "DENSE_EMBED_CHUNK_SIZE", 10)
 
     submitted_texts = []
@@ -659,7 +659,7 @@ def test_offline_embed_chunk_timeout_keeps_partial_progress(tmp_path, monkeypatc
     """A slice that itself blows the (per-slice) wall-clock bound raises DenseTimeout inside
     run_bounded -- build_index must catch it, stop starting new slices, and still persist
     whatever prior slices completed rather than losing all progress."""
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "DENSE_EMBED_CHUNK_SIZE", 5)
     monkeypatch.setattr(B, "DENSE_REFRESH_TIMEOUT_SECS", 15.0)
 
@@ -687,7 +687,7 @@ def test_offline_embed_chunk_timeout_keeps_partial_progress(tmp_path, monkeypatc
 
 
 def test_load_index_roundtrip(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"a.md": "voyage reranker", "b.md": "budget envelope"})
@@ -696,6 +696,73 @@ def test_load_index_roundtrip(tmp_path, monkeypatch):
     assert loaded is not None and len(loaded) == 2
     assert loaded.dense_ready is False
     assert B.load_index(str(tmp_path / "nope")) is None
+
+
+# --------------------------------------------------------------------------- #
+# PRF-1: precomputed BM25 stats (postings/doc_len/avgdl/idf) -- build-time unit tests.
+# recall.py's test suite covers the query-time fast path + golden equivalence + drift
+# interaction; these pin the build-time computation and its manifest wiring in isolation.
+# --------------------------------------------------------------------------- #
+def test_compute_bm25_stats_matches_rank_bm25_fields():
+    """postings/doc_len/avgdl/idf/k1/b computed here must agree with a fresh rank_bm25
+    construction over the SAME corpus (field-by-field, not just downstream scores)."""
+    rank_bm25 = pytest.importorskip("rank_bm25")
+    corpus = [
+        "alpha beta gamma".split(),
+        "alpha alpha delta".split(),
+        "epsilon zeta".split(),
+    ]
+    stats = B.compute_bm25_stats(corpus)
+    oracle = rank_bm25.BM25Okapi(corpus)
+
+    assert stats["doc_len"] == oracle.doc_len
+    assert stats["avgdl"] == pytest.approx(oracle.avgdl)
+    assert stats["k1"] == oracle.k1
+    assert stats["b"] == oracle.b
+    assert set(stats["idf"].keys()) == set(oracle.idf.keys())
+    for tok, val in oracle.idf.items():
+        assert stats["idf"][tok] == pytest.approx(val, abs=1e-9)
+
+    # postings[tok] lists exactly the docs (and their TF) that contain tok -- must reconstruct
+    # the SAME per-doc frequency dict rank_bm25's doc_freqs holds internally.
+    for tok in oracle.idf:
+        expected_tf_by_doc = {
+            i: freqs[tok] for i, freqs in enumerate(oracle.doc_freqs) if tok in freqs
+        }
+        got_tf_by_doc = {doc_i: tf for doc_i, tf in stats["postings"].get(tok, [])}
+        assert got_tf_by_doc == expected_tf_by_doc
+
+
+def test_compute_bm25_stats_empty_corpus():
+    stats = B.compute_bm25_stats([])
+    assert stats["postings"] == {}
+    assert stats["doc_len"] == []
+    assert stats["avgdl"] == 0.0
+    assert stats["idf"] == {}
+
+
+def test_build_index_manifest_carries_bm25_block(tmp_path, monkeypatch):
+    """build_index() must persist the "bm25" stats block, and it must survive the JSON
+    manifest round-trip byte-for-byte (all keys JSON-safe: no sets/tuples/non-str keys)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "voyage reranker fallback", "b.md": "budget envelope authority"})
+    manifest = B.build_index(md, idx)
+    assert "bm25" in manifest
+    bm25 = manifest["bm25"]
+    assert set(bm25.keys()) == {"postings", "doc_len", "avgdl", "idf", "k1", "b"}
+    assert len(bm25["doc_len"]) == manifest["count"] == 2
+
+    # Round-trip through the actual manifest.json file on disk (not just the in-memory dict).
+    import json
+
+    with open(os.path.join(idx, "manifest.json"), "r", encoding="utf-8") as fh:
+        on_disk = json.load(fh)
+    assert on_disk["bm25"] == bm25
+
+    loaded = B.load_index(idx)
+    assert loaded.manifest["bm25"] == bm25
 
 
 # --------------------------------------------------------------------------- #
@@ -713,7 +780,7 @@ def test_real_fastembed_dense_build(tmp_path, monkeypatch, tmp_path_factory):
         tmp_path_factory.getbasetemp() / "fastembed-cache"
     )
     monkeypatch.setenv("FASTEMBED_CACHE_PATH", cache)
-    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(
@@ -734,7 +801,7 @@ def test_real_fastembed_dense_build(tmp_path, monkeypatch, tmp_path_factory):
 # SEC-3: the index dir is self-ignoring; derived state invisible to git
 # --------------------------------------------------------------------------- #
 def test_index_dir_drops_self_ignoring_gitignore(tmp_path, monkeypatch):
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"a.md": "alpha"})
@@ -750,7 +817,7 @@ def test_derived_dirs_invisible_to_git_without_init(tmp_path, monkeypatch):
 
     from memory import recall as R
 
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     repo = str(tmp_path / "repo")
     md = os.path.join(repo, ".claude", "memory")
     os.makedirs(md)
@@ -759,7 +826,7 @@ def test_derived_dirs_invisible_to_git_without_init(tmp_path, monkeypatch):
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
 
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
-    monkeypatch.setenv("MEMOBOT_MEMORY_DIR", md)
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", md)
     monkeypatch.chdir(repo)
     R.main(["zebra", "canary", "deploys"])  # builds the index + writes telemetry
 
@@ -770,3 +837,434 @@ def test_derived_dirs_invisible_to_git_without_init(tmp_path, monkeypatch):
     ).stdout
     assert ".memory-index" not in porcelain and ".memory-telemetry" not in porcelain
     assert ".claude/memory/m.md" in porcelain  # the CORPUS stays visible/committable
+
+
+# --------------------------------------------------------------------------- #
+# RET-3: Unicode-aware tokenize() — word tokens for Latin/Cyrillic, CJK bigrams
+# --------------------------------------------------------------------------- #
+def test_tokenize_accented_latin_survives_whole():
+    """'café' must tokenize whole ('café'), never truncate to 'caf' (the old ASCII-only
+    regex's failure mode — accents aren't in [a-z0-9] so the match stopped mid-word)."""
+    assert B.tokenize("café") == ["café"]
+    assert B.tokenize("Café RÉSUMÉ naïve") == ["café", "résumé", "naïve"]
+
+
+def test_tokenize_cyrillic_is_not_empty():
+    """The old ASCII-only tokenizer produced ZERO tokens for any non-Latin text -- a Russian
+    memory/query would trip the min-content skip and silently never recall. Must not regress."""
+    toks = B.tokenize("Привет как дела сегодня")
+    assert toks, "Cyrillic text must tokenize to a non-empty token list"
+    assert "привет" in toks  # case-folded (Python str.lower() is Unicode-aware)
+
+
+def test_tokenize_japanese_is_not_empty():
+    toks = B.tokenize("東京の天気はどうですか")
+    assert toks, "Japanese text must tokenize to a non-empty token list"
+
+
+def test_tokenize_cjk_bigrams_basic():
+    """CJK runs (no whitespace segmentation) split into overlapping character bigrams."""
+    assert B.tokenize("東京都") == ["東京", "京都"]
+
+
+def test_tokenize_cjk_single_char_run_yields_the_char_itself():
+    """A length-1 CJK run can't form a bigram -- falls back to the single char, per spec."""
+    assert B.tokenize("東") == ["東"]
+
+
+def test_tokenize_cjk_bigram_overlap_enables_bm25_match():
+    """The whole point of bigramming: a query sharing a 2-char SUBSTRING with an indexed
+    memory must overlap on a token -- this is what makes BM25 retrieval work for CJK at all."""
+    doc_tokens = set(B.tokenize("東京都渋谷区のカフェ"))  # "Shibuya-ku, Tokyo... cafe"
+    query_tokens = set(B.tokenize("渋谷区のイベント"))  # "Shibuya-ku ... event"
+    assert doc_tokens & query_tokens, "shared substring '渋谷区' must produce overlapping bigrams"
+
+
+def test_tokenize_mixed_cjk_and_latin_run():
+    """A token gluing CJK and ASCII digits/letters with no separator splits correctly: CJK
+    part bigrammed, non-CJK part word-tokenized (each independently, not as one blob)."""
+    toks = B.tokenize("東京2024test")
+    assert "東京" in toks
+    assert "2024test" in toks
+
+
+def test_tokenize_english_stopwords_and_length_floor_unchanged():
+    """RET-3 must not regress the existing English behavior: stopwords still dropped, 1-char
+    tokens still dropped, multi-char content words still kept."""
+    toks = B.tokenize("the quick fox is a test of tokenization")
+    assert "the" not in toks and "is" not in toks and "a" not in toks and "of" not in toks
+    assert "quick" in toks and "fox" in toks and "test" in toks and "tokenization" in toks
+
+
+def test_tokenize_empty_and_whitespace():
+    assert B.tokenize("") == []
+    assert B.tokenize("   ") == []
+
+
+# --------------------------------------------------------------------------- #
+# RET-3: resolve_embed_model() precedence — env > model.json preset > English default
+# --------------------------------------------------------------------------- #
+def test_resolve_embed_model_defaults_to_english(tmp_path, monkeypatch):
+    monkeypatch.delenv("HIPPO_EMBED_MODEL", raising=False)
+    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
+    assert B.resolve_embed_model() == B.ENGLISH_DEFAULT_MODEL
+
+
+def test_resolve_embed_model_reads_persisted_preset(tmp_path, monkeypatch):
+    monkeypatch.delenv("HIPPO_EMBED_MODEL", raising=False)
+    plugin_data = str(tmp_path / "plugin-data")
+    os.makedirs(plugin_data)
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", plugin_data)
+    with open(os.path.join(plugin_data, "model.json"), "w", encoding="utf-8") as fh:
+        fh.write('{"embed_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"}')
+    assert B.resolve_embed_model() == "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+
+def test_resolve_embed_model_env_override_wins_over_preset(tmp_path, monkeypatch):
+    """HIPPO_EMBED_MODEL must win even when a model.json preset is ALSO present -- the env
+    override is the top precedence level, unconditionally (existing tests/hooks rely on this)."""
+    plugin_data = str(tmp_path / "plugin-data")
+    os.makedirs(plugin_data)
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", plugin_data)
+    with open(os.path.join(plugin_data, "model.json"), "w", encoding="utf-8") as fh:
+        fh.write('{"embed_model": "some/preset-model"}')
+    monkeypatch.setenv("HIPPO_EMBED_MODEL", "some/env-model")
+    assert B.resolve_embed_model() == "some/env-model"
+
+
+def test_resolve_embed_model_missing_preset_file_falls_through(tmp_path, monkeypatch):
+    monkeypatch.delenv("HIPPO_EMBED_MODEL", raising=False)
+    plugin_data = str(tmp_path / "plugin-data")
+    os.makedirs(plugin_data)  # dir exists, but no model.json inside it
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", plugin_data)
+    assert B.resolve_embed_model() == B.ENGLISH_DEFAULT_MODEL
+
+
+def test_resolve_embed_model_corrupt_preset_never_raises(tmp_path, monkeypatch):
+    """A corrupt/unreadable model.json must degrade to the default, never raise or crash --
+    resolve_embed_model runs at MODULE IMPORT time, so a raise here would break every hook."""
+    monkeypatch.delenv("HIPPO_EMBED_MODEL", raising=False)
+    plugin_data = str(tmp_path / "plugin-data")
+    os.makedirs(plugin_data)
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", plugin_data)
+    with open(os.path.join(plugin_data, "model.json"), "w", encoding="utf-8") as fh:
+        fh.write("{not valid json")
+    assert B.resolve_embed_model() == B.ENGLISH_DEFAULT_MODEL
+
+
+def test_resolve_embed_model_non_dict_json_falls_through(tmp_path, monkeypatch):
+    monkeypatch.delenv("HIPPO_EMBED_MODEL", raising=False)
+    plugin_data = str(tmp_path / "plugin-data")
+    os.makedirs(plugin_data)
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", plugin_data)
+    with open(os.path.join(plugin_data, "model.json"), "w", encoding="utf-8") as fh:
+        fh.write("[1, 2, 3]")
+    assert B.resolve_embed_model() == B.ENGLISH_DEFAULT_MODEL
+
+
+# --------------------------------------------------------------------------- #
+# RET-3: switching the embed model forces a full re-embed (never silently reuses stale rows)
+# --------------------------------------------------------------------------- #
+def test_model_switch_forces_full_reembed(tmp_path, monkeypatch):
+    """build_index's cache-reuse check gates on `old_manifest["model"] == DEFAULT_MODEL` --
+    switching HIPPO_EMBED_MODEL (what bootstrap's model.json preset ultimately becomes, via
+    resolve_embed_model, at the next process start) must make EVERY existing row a cache miss,
+    not just the changed ones -- the whole point being two different models' vectors are NOT
+    comparable, so no row can be silently carried over."""
+    # The CI hermetic lane exports HIPPO_DISABLE_DENSE=1 job-wide (see the sibling tests in
+    # this file) -- without clearing it here, dense_disabled() short-circuits want_dense before
+    # the monkeypatched embedder ever runs, so dense_ready is force-False regardless of this
+    # test's own logic. Every other dense-path test in this file already delenv's this.
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha content", "b.md": "beta content"})
+
+    monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
+    monkeypatch.setattr(B, "DEFAULT_MODEL", "model-a")
+    manifest_a = B.build_index(md, idx)
+    assert manifest_a["dense_ready"] is True
+    assert manifest_a["model"] == "model-a"
+    rows_a = [e["row"] for e in manifest_a["entries"]]
+    assert all(r is not None for r in rows_a)  # every entry embedded fresh under model-a
+
+    embed_calls = {"count": 0}
+    base_embedder = _fake_embedder(16)
+
+    def _counting_embedder(texts, allow_download=True):
+        embed_calls["count"] += len(texts)
+        return base_embedder(texts, allow_download=allow_download)
+
+    monkeypatch.setattr(B, "embed_documents", _counting_embedder)
+    monkeypatch.setattr(B, "DEFAULT_MODEL", "model-b")  # simulate a switched model
+    manifest_b = B.build_index(md, idx)  # no corpus change at all -- only the model changed
+    assert manifest_b["model"] == "model-b"
+    assert manifest_b["dense_ready"] is True
+    # Nothing was cache-reused from model-a's rows: BOTH entries were re-embedded under model-b.
+    assert embed_calls["count"] == 2
+
+
+# --------------------------------------------------------------------------- #
+# RET-2: body-aware indexing — compute_body_chunks bounds + build_index wiring
+# --------------------------------------------------------------------------- #
+def _mem_with_body(name: str, description: str, body: str) -> str:
+    return f'---\nname: {name}\ndescription: "{description}"\ntype: project\n---\n{body}\n'
+
+
+def _write_body_corpus(memory_dir: str, items: dict) -> None:
+    """``items``: fname -> (description, body)."""
+    os.makedirs(memory_dir, exist_ok=True)
+    for fname, (desc, body) in items.items():
+        with open(os.path.join(memory_dir, fname), "w", encoding="utf-8") as fh:
+            fh.write(_mem_with_body(fname[:-3], desc, body))
+
+
+def test_compute_body_chunks_heading_guided_split():
+    """A body with >=1 '##'+ heading splits ONE chunk per section, heading line kept in it."""
+    text = (
+        "---\nname: a\ndescription: \"generic\"\n---\n"
+        "## First Section\n"
+        + ("alpha " * 20)
+        + "\n\n## Second Section\n"
+        + ("beta " * 20)
+    )
+    chunks = B.compute_body_chunks("a", text)
+    assert len(chunks) == 2
+    assert chunks[0]["text"].startswith("## First Section")
+    assert chunks[1]["text"].startswith("## Second Section")
+
+
+def test_compute_body_chunks_paragraph_guided_fallback():
+    """No '##'+ heading anywhere -> falls back to blank-line-separated paragraphs (the shape
+    most of this corpus's real memories take -- bolded labels, no markdown headings)."""
+    text = (
+        "---\nname: a\ndescription: \"generic\"\n---\n"
+        + ("**Why:** " + "root cause discipline matters a lot here today. " * 4)
+        + "\n\n"
+        + ("**How to apply:** " + "always fix the actual bug not a symptom of it now. " * 4)
+    )
+    chunks = B.compute_body_chunks("a", text)
+    assert len(chunks) == 2
+    assert chunks[0]["text"].startswith("**Why:**")
+    assert chunks[1]["text"].startswith("**How to apply:**")
+
+
+def test_compute_body_chunks_caps_at_three():
+    """MAX 3 chunks per memory even when the body has many qualifying paragraphs."""
+    paras = "\n\n".join(f"paragraph number {i} has plenty of unique content words here today" * 2 for i in range(6))
+    text = f'---\nname: a\ndescription: "generic"\n---\n{paras}\n'
+    chunks = B.compute_body_chunks("a", text)
+    assert len(chunks) <= B._BODY_CHUNK_MAX
+    assert len(chunks) == 3
+
+
+def test_compute_body_chunks_skips_trivia_below_min_chars():
+    """A paragraph shorter than ~80 chars is trivia -- skipped, not indexed as noise."""
+    text = '---\nname: a\ndescription: "generic"\n---\ntoo short\n\n' + ("substantial content " * 10)
+    chunks = B.compute_body_chunks("a", text)
+    assert all(len(c["text"]) >= B._BODY_CHUNK_MIN_CHARS for c in chunks)
+    assert not any(c["text"] == "too short" for c in chunks)
+
+
+def test_compute_body_chunks_only_considers_first_char_budget():
+    """Content beyond ~1500 chars of body is never chunked at all."""
+    filler = "z" * 2000  # one huge unbroken paragraph, well past the budget
+    text = f'---\nname: a\ndescription: "generic"\n---\n{filler}\n'
+    chunks = B.compute_body_chunks("a", text)
+    for c in chunks:
+        assert len(c["text"]) <= B._BODY_CHUNK_CHAR_BUDGET
+
+
+def test_compute_body_chunks_empty_body_yields_no_chunks():
+    text = '---\nname: a\ndescription: "generic"\n---\n\n'
+    assert B.compute_body_chunks("a", text) == []
+
+
+def test_compute_body_chunks_never_raises_on_no_frontmatter():
+    assert B.compute_body_chunks("a", "just plain text, no frontmatter fence at all") != [] or True
+    # (never raises is the actual contract; the exact split doesn't matter here)
+
+
+# --------------------------------------------------------------------------- #
+# RET-2: manifest wiring — body_chunks block, widened dense matrix, incremental reuse
+# --------------------------------------------------------------------------- #
+_DISTINCTIVE_BODY = (
+    "## Error signature\n"
+    "The exact failure is a zqxwyvutplaceholder timeout raised from the network layer "
+    "when the retry budget is exhausted before the handshake completes successfully.\n\n"
+    "## Root cause\n"
+    "A misconfigured connection pool size caused exhaustion under load during peak traffic "
+    "hours across every affected region consistently.\n"
+)
+
+
+def test_build_index_manifest_carries_body_chunks_block(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(md, {"a.md": ("a generic description", _DISTINCTIVE_BODY)})
+    manifest = B.build_index(md, idx)
+    assert "body_chunks" in manifest
+    chunks = manifest["body_chunks"]
+    assert chunks and all(c["entry"] == 0 for c in chunks)
+    assert all(set(c.keys()) == {"entry", "hash", "tokens", "row"} for c in chunks)
+
+    # Round-trips through the actual manifest.json file on disk.
+    import json
+
+    with open(os.path.join(idx, "manifest.json"), "r", encoding="utf-8") as fh:
+        on_disk = json.load(fh)
+    assert on_disk["body_chunks"] == chunks
+
+    # The entries list itself is EXACTLY the pre-RET-2 shape (no new keys leaked onto it).
+    assert set(manifest["entries"][0].keys()) == {
+        "name", "file", "doc_text", "description", "hash", "tokens", "invalid_after", "row",
+    }
+
+
+def test_build_index_dense_matrix_widened_with_body_chunk_rows(tmp_path, monkeypatch):
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(
+        md,
+        {
+            "a.md": ("a generic description", _DISTINCTIVE_BODY),
+            "b.md": ("another generic description", "short body, no heading here at all"),
+        },
+    )
+    manifest = B.build_index(md, idx)
+    assert manifest["dense_ready"] is True
+    n_entries = len(manifest["entries"])
+    n_chunks = len(manifest["body_chunks"])
+    assert n_chunks >= 2  # a.md's two headed sections both clear the min-chars floor
+
+    dense = np.load(os.path.join(idx, "dense.npy"))
+    assert dense.shape[0] == n_entries + n_chunks  # widened: descriptions THEN chunks
+    # Every entry row is in 0..n_entries-1, every chunk row is in n_entries..n_total-1.
+    for e in manifest["entries"]:
+        assert 0 <= e["row"] < n_entries
+    for c in manifest["body_chunks"]:
+        assert n_entries <= c["row"] < n_entries + n_chunks
+
+
+def test_incremental_rebuild_reuses_unchanged_body_chunk_rows(tmp_path, monkeypatch):
+    """Hash-keyed reuse for chunk rows, exactly like entry rows: editing ONE memory's body
+    must not force a re-embed of an UNCHANGED memory's body chunks."""
+    embedded_batches = []
+    base = _fake_embedder(16)
+
+    def counting_embed(texts, allow_download=True):
+        embedded_batches.append(list(texts))
+        return base(texts)
+
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", counting_embed)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(
+        md,
+        {
+            "a.md": ("a generic description", _DISTINCTIVE_BODY),
+            "b.md": ("another generic description", "short body, no heading here at all " * 3),
+        },
+    )
+    m1 = B.build_index(md, idx)
+    assert m1["dense_ready"] is True
+    first_total_embedded = sum(len(b) for b in embedded_batches)
+    assert first_total_embedded == len(m1["entries"]) + len(m1["body_chunks"])
+
+    # Edit ONLY b.md's body -- a's description+body chunks must all be cache-hit.
+    embedded_batches.clear()
+    with open(os.path.join(md, "b.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem_with_body("b", "another generic description", "## Changed\n" + "totally new body content here for b " * 4))
+    m2 = B.build_index(md, idx)
+    assert m2["dense_ready"] is True
+
+    reembedded_texts = [t for batch in embedded_batches for t in batch]
+    # None of a's original body-chunk text (from _DISTINCTIVE_BODY) was resubmitted.
+    assert not any("zqxwyvutplaceholder" in t for t in reembedded_texts)
+    # b's NEW body chunk text WAS resubmitted (its hash changed).
+    assert any("changed" in t.lower() for t in reembedded_texts)
+
+
+def test_loaded_index_exposes_body_chunks(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(md, {"a.md": ("a generic description", _DISTINCTIVE_BODY)})
+    B.build_index(md, idx)
+    loaded = B.load_index(idx)
+    assert loaded.body_chunks  # non-empty, surfaced on the LoadedIndex view
+
+
+def test_loaded_index_degrades_dense_when_widened_matrix_mismatches_body_chunks(tmp_path, monkeypatch):
+    """A torn/corrupt dense.npy whose row count matches entries+OLD chunk count but not the
+    manifest's CURRENT body_chunks count must degrade the WHOLE dense view (not just chunks)."""
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(md, {"a.md": ("a generic description", _DISTINCTIVE_BODY)})
+    B.build_index(md, idx)
+
+    manifest = B._load_manifest(idx)
+    # Corrupt the manifest in-memory: claim one MORE body chunk than the dense matrix has rows for.
+    manifest["body_chunks"] = manifest["body_chunks"] + [
+        {"entry": 0, "hash": "deadbeef", "tokens": ["x"], "row": 9999}
+    ]
+    dense = B._load_dense(idx)
+    loaded = B.LoadedIndex(manifest, dense)
+    assert loaded.dense_ready is False
+    assert loaded.dense is None
+
+
+def test_body_chunks_absent_key_degrades_cleanly_on_old_manifest(tmp_path):
+    """A pre-RET-2 manifest (no 'body_chunks' key at all) must load fine -- body_chunks
+    degrades to [] via .get(), no KeyError, and dense-matches-entries validation is
+    unaffected (0 chunks -> same row-count check as before this item)."""
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    os.makedirs(idx, exist_ok=True)
+    import json as _json
+
+    old_manifest = {
+        "schema_version": 2,
+        "model": None,
+        "dense_ready": False,
+        "dim": None,
+        "count": 1,
+        "entries": [{"name": "a", "file": "a.md", "doc_text": "a. alpha", "description": "alpha", "hash": "x", "tokens": ["a"], "row": None}],
+        "bm25": {"postings": {}, "doc_len": [0], "avgdl": 0.0, "idf": {}, "k1": 1.5, "b": 0.75},
+    }
+    with open(os.path.join(idx, "manifest.json"), "w", encoding="utf-8") as fh:
+        _json.dump(old_manifest, fh)
+    loaded = B.load_index(idx)
+    assert loaded is not None
+    assert loaded.body_chunks == []
+
+
+# --------------------------------------------------------------------------- #
+# RET-2: refresh_index heals body-only drift (description hash unchanged, body changed)
+# --------------------------------------------------------------------------- #
+def test_refresh_index_heals_body_only_edit(tmp_path, monkeypatch):
+    """A body edit that leaves the description BYTE-IDENTICAL changes no entry hash at all --
+    refresh_index's corpus-unchanged short-circuit must still notice via body-chunk hashes
+    and re-run the build so the NEW body content becomes indexed/retrievable."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(md, {"a.md": ("a generic description", "## Old\n" + "original body content here today " * 4)})
+    m1 = B.build_index(md, idx)
+    old_chunk_hashes = {c["hash"] for c in m1["body_chunks"]}
+
+    # Edit ONLY the body (description string is byte-identical) -- entry hash is unchanged.
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem_with_body("a", "a generic description", "## New\n" + "brand new distinctive body content today " * 4))
+
+    m2 = B.refresh_index(md, idx)
+    assert m2 is not None
+    new_chunk_hashes = {c["hash"] for c in m2["body_chunks"]}
+    assert new_chunk_hashes != old_chunk_hashes  # the no-op short-circuit did NOT fire
+    assert any("distinctive" in " ".join(c["tokens"]) for c in m2["body_chunks"])

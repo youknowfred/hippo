@@ -348,7 +348,7 @@ def test_archive_memory_refreshes_index_so_same_session_recall_drops_it(repo, me
     """Within the SAME process (no new SessionStart), recall() must stop surfacing an
     archived memory immediately -- this requires archive_memory's refresh_index() call to
     have actually run, not just the next SessionStart's index rebuild."""
-    monkeypatch.setenv("MEMOBOT_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     from memory import build_index as B
     from memory import recall as R
 
