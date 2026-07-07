@@ -971,6 +971,11 @@ def test_model_switch_forces_full_reembed(tmp_path, monkeypatch):
     resolve_embed_model, at the next process start) must make EVERY existing row a cache miss,
     not just the changed ones -- the whole point being two different models' vectors are NOT
     comparable, so no row can be silently carried over."""
+    # The CI hermetic lane exports MEMOBOT_DISABLE_DENSE=1 job-wide (see the sibling tests in
+    # this file) -- without clearing it here, dense_disabled() short-circuits want_dense before
+    # the monkeypatched embedder ever runs, so dense_ready is force-False regardless of this
+    # test's own logic. Every other dense-path test in this file already delenv's this.
+    monkeypatch.delenv("MEMOBOT_DISABLE_DENSE", raising=False)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"a.md": "alpha content", "b.md": "beta content"})
