@@ -1166,6 +1166,28 @@ def test_format_marker_is_invisible_to_the_corpus_iterator(tmp_path):
     assert [os.path.basename(p) for p in P._iter_memory_files(md)] == ["a.md"]
 
 
+def test_conventions_md_is_invisible_to_the_corpus_iterator(tmp_path):
+    """CONVENTIONS.md (DOC-6) is a reference doc seeded by /hippo:init, not a memory —
+    _iter_memory_files (THE corpus-membership filter) must never yield it, the same
+    canonical exclusion MEMORY.md/MEMORY.full.md already get. This is the one guard every
+    downstream consumer (indexing, floor lint, staleness, archive, the GRA-6 edge-cache
+    stat sweep) inherits for free, since all of them read through this one filter."""
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: a\n---\nbody\n")
+    with open(os.path.join(md, "CONVENTIONS.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Memory corpus conventions\n")
+    assert [os.path.basename(p) for p in P._iter_memory_files(md)] == ["a.md"]
+
+
+def test_is_memory_filename_excludes_conventions_md():
+    assert P._is_memory_filename("CONVENTIONS.md") is False
+    assert P._is_memory_filename("MEMORY.md") is False
+    assert P._is_memory_filename("MEMORY.full.md") is False
+    assert P._is_memory_filename("a.md") is True
+
+
 def test_corpus_format_version_is_2_for_typed_edges():
     """GRA-4 is the corpus's first real format change: typed frontmatter relations
     (supersedes/contradicts/refines) are a v2 convention. Pinned so a future bump is a

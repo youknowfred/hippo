@@ -22,9 +22,11 @@ symlink Claude Code's native memory system reads from.
   steps 1-2b** (starter-pack selection, `MEMORY.md` skeleton, format marker — there is
   nothing to seed, and stamping a format marker onto an unmigrated corpus is doctor's call,
   not init's) and run
-  **only the machine-local setup, steps 3-5** (including 4b): symlink, index build, trust-mark,
-  `.gitignore` check. Re-running init against an existing corpus is the user explicitly
-  reviewing it, so 4b marks it trusted (SEC-1) even on this path. This
+  **step 2c plus the machine-local setup, steps 3-5** (including 4b): `CONVENTIONS.md`
+  backfill, symlink, index build, trust-mark, `.gitignore` check. Step 2c is deliberately NOT
+  grouped with the skipped 1-2b range — see step 2c itself for why. Re-running init against
+  an existing corpus is the user explicitly reviewing it, so 4b marks it trusted (SEC-1) even
+  on this path. This
   makes re-running `/hippo:init` on an already-initialized project safe and useful — it is how
   `/hippo:doctor` tells a user to repair a missing/broken symlink, instead of routing them back
   to a hard stop.
@@ -42,18 +44,18 @@ symlink Claude Code's native memory system reads from.
 - **Teammate clones the repo.** `.claude/memory/MEMORY.md` already exists (it's in git), but
   this machine's `~/.claude/projects/<encoded>/memory` symlink and `.claude/.memory-index/`
   don't exist yet (both are gitignored, so cloning never brings them along). Preflight detects
-  the existing corpus and runs steps 3-5 only.
+  the existing corpus and runs steps 2c-5 only.
 - **New worktree of an existing repo.** `git worktree add` gives the worktree its own working
   directory (and its own `${CLAUDE_PROJECT_DIR}`), so it needs its OWN symlink and index even
   though `.claude/memory/` is the same tracked content as the main worktree. Same preflight
-  path as the teammate-clone case: steps 3-5 only.
+  path as the teammate-clone case: steps 2c-5 only.
 - **Second machine, same repo.** Identical shape to the teammate-clone case — the corpus
   travels via git, the symlink and index are machine-local and never do.
 
 ## What this does, in order
 
 Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump straight to step
-3; steps 3, 4, 4b (trust-mark), and 5 all still run.
+2c; steps 2c, 3, 4, 4b (trust-mark), and 5 all still run.
 
 1. **Offer the starter packs — default is core only.** The packs live in
    `${CLAUDE_PLUGIN_ROOT}/assets/packs/` (one directory per pack, each with a `manifest.json`;
@@ -89,6 +91,21 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    1-2: a corpus with NO marker already reads as format 1 (every pre-marker corpus), and an
    EXISTING corpus must never be stamped with a newer format it hasn't been migrated to —
    `/hippo:doctor`'s format check owns that comparison (COR-7).
+2c. **Seed `CONVENTIONS.md`** (DOC-6) — copy `${CLAUDE_PLUGIN_ROOT}/assets/CONVENTIONS.md`
+   into `.claude/memory/CONVENTIONS.md` verbatim, skipping (never overwriting) if the
+   destination already exists:
+   ```bash
+   [ -f .claude/memory/CONVENTIONS.md ] || cp "${CLAUDE_PLUGIN_ROOT}/assets/CONVENTIONS.md" .claude/memory/CONVENTIONS.md
+   ```
+   Unlike steps 1-2b, this step is **NOT** fresh-corpus-only — it also runs on the
+   existing-corpus preflight path: a corpus created before this file existed still needs it,
+   and the idempotent skip-if-present check makes re-running it on an already-seeded corpus a
+   no-op, exactly like the symlink/index steps that follow. `CONVENTIONS.md` documents the
+   corpus's own frontmatter schema, type taxonomy, floor rule, evidence-block convention, and
+   link conventions where memories actually get written — not only in the plugin bundle. It
+   is deliberately NOT a memory itself: `memory.provenance._is_memory_filename` excludes it
+   from every corpus-membership scan (indexing, floor lint, staleness, archive) the same
+   canonical way `MEMORY.md` is already excluded, so it is never indexed or recalled.
 3. **Create the cross-machine symlink**. The encoding is the harness's actual rule (SHP-5:
    every non-alphanumeric character becomes a literal `-`, one-for-one, no collapsing, no
    stripping), and the create-or-confirm logic itself is ONE tested Python helper

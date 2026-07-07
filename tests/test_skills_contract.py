@@ -203,6 +203,39 @@ def test_init_skill_seeds_the_canonical_corpus_format():
 
 
 # --------------------------------------------------------------------------- #
+# DOC-6: init seeds CONVENTIONS.md into every corpus, idempotently, on BOTH the
+# fresh-project path and the existing-corpus (teammate-clone/worktree/second-machine)
+# path — unlike steps 1-2b, which are fresh-corpus-only.
+# --------------------------------------------------------------------------- #
+def test_init_skill_seeds_conventions_md_idempotently():
+    with open(_INIT_SKILL, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    assert "${CLAUDE_PLUGIN_ROOT}/assets/CONVENTIONS.md" in text, (
+        "init SKILL.md no longer seeds CONVENTIONS.md from the plugin bundle (DOC-6)"
+    )
+    assert ".claude/memory/CONVENTIONS.md" in text, (
+        "init SKILL.md no longer copies CONVENTIONS.md into the corpus (DOC-6)"
+    )
+    assert "[ -f .claude/memory/CONVENTIONS.md ]" in text, (
+        "init SKILL.md's CONVENTIONS.md seeding step must skip (not overwrite) an "
+        "already-present copy — the same idempotent seeding-step style every other "
+        "init step uses"
+    )
+
+
+def test_init_skill_conventions_step_runs_on_the_existing_corpus_path():
+    """Step 2c must NOT be grouped with the fresh-corpus-only 1-2b range the preflight
+    branch skips — a corpus created before CONVENTIONS.md existed still needs it."""
+    with open(_INIT_SKILL, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    assert "steps 2c-5" in text or "step 2c plus the machine-local setup" in text, (
+        "init SKILL.md's existing-corpus preflight path no longer names step 2c as "
+        "one of the steps that still runs (DOC-6 must survive teammate-clone/"
+        "worktree/second-machine re-runs, not just a fresh project)"
+    )
+
+
+# --------------------------------------------------------------------------- #
 # LIF-2: the new skill must ROUTE the write-time duplicate decision to the agent —
 # all four Mem0-style branches named, supersede wired to the shipped per-item
 # primitive (reconsolidate's --superseded-by, which writes the GRA-4 edge).

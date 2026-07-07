@@ -746,8 +746,13 @@ def backfill_file(
 def _is_memory_filename(name: str) -> bool:
     """THE corpus-membership filter — one definition, shared with the edge cache's
     scandir stat sweep (GRA-6), which must see exactly the files ``_iter_memory_files``
-    yields or the cache-freshness check would silently drift from the graph builder."""
-    return name.endswith(".md") and name not in ("MEMORY.md", "MEMORY.full.md")
+    yields or the cache-freshness check would silently drift from the graph builder.
+
+    ``CONVENTIONS.md`` (DOC-6) is excluded the same canonical way as ``MEMORY.md`` /
+    ``MEMORY.full.md`` — it is a reference doc seeded into the corpus by ``/hippo:init``, not
+    a memory, and must never be indexed, recalled, floor-scanned, or counted in corpus stats.
+    """
+    return name.endswith(".md") and name not in ("MEMORY.md", "MEMORY.full.md", "CONVENTIONS.md")
 
 
 def _iter_memory_files(memory_dir: str):
