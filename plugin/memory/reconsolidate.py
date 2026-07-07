@@ -25,6 +25,14 @@ re-baseline path (mirrors ``reverify_head_only_no_bulk``). GRA-4's opt-in ``supe
 routes through ``links.add_typed_relation`` (the one typed-edge write primitive), equally
 per-item and agent-gated.
 
+GRA-9 (consolidation propagates along edges): each worklist item carries an OPTIONAL
+``"linked"`` column — its 1-hop graph neighborhood (untyped ``[[wikilinks]]`` + GRA-4
+typed edges, both directions) — because when a memory drifts, its linked neighbors are
+statistically the next most likely to be wrong. REPORT-ONLY: the column introduces zero
+write paths; the producer renders it as ``X (+2 linked: Y, Z)`` and the agent decides
+what (if anything) to re-check. When the graph is unavailable the column is simply
+absent — the worklist is exactly its pre-GRA-9 self.
+
 Read-mostly; never raises.
 """
 
@@ -39,6 +47,11 @@ from .telemetry import read_events, record_reconsolidation_outcome
 
 _DEFAULT_WINDOW_SESSIONS = 10
 _MAX_WORKLIST_ITEMS = 20
+# GRA-9: per-item cap on the "linked" review-adjacent column. Deliberately tiny — the
+# producer renders every item into session_start's shared 9000-char budget alongside all
+# the other producers, and the column is a whose-neighborhood-to-eyeball-next HINT, not a
+# graph dump (3 names ≈ the same width as the 4-path changed_paths render above it).
+_MAX_LINKED_NEIGHBORS = 3
 _VALID_OUTCOMES = frozenset({"graduate", "fix", "demote"})
 # Outcomes that legitimately clear the staleness flag -- a "demote" must NEVER re-baseline
 # source_commit (that would hide a CONFIRMED-WRONG memory from future staleness detection,
@@ -83,6 +96,43 @@ def _recently_recalled_names(telemetry_dir: Optional[str], window_sessions: int)
     return out
 
 
+def _attach_linked_neighbors(worklist: List[dict], memory_dir: str) -> None:
+    """Annotate each worklist item with its 1-hop graph neighborhood (GRA-9, report-only).
+
+    Adds a ``"linked"`` column: up to ``_MAX_LINKED_NEIGHBORS`` stems (sorted, JSON-safe
+    list) adjacent to the item in EITHER direction — untyped ``[[wikilinks]]`` (inbound +
+    outbound) unioned with GRA-4 typed edges (all ``TYPED_RELATIONS``, both directions) —
+    deduped, EXCLUDING names already independently on the worklist (they get their own
+    line; re-listing them as neighbors would double-report). Routed through the ONE
+    canonical cache-aware graph API (``links.build_graph``): the SessionStart dispatcher's
+    ``refresh_index`` has usually just re-persisted ``links.json``, so this is a stat
+    sweep, not a corpus re-read. Degrades to NO column — the worklist is byte-for-byte its
+    pre-GRA-9 self — when the graph is unavailable (no corpus, no cache, any graph
+    failure). Mutates ``worklist`` in place; zero writes anywhere else; never raises.
+    """
+    try:
+        from .links import TYPED_RELATIONS, build_graph
+
+        try:
+            from .build_index import default_index_dir
+
+            index_dir: Optional[str] = default_index_dir(memory_dir)
+        except Exception:
+            index_dir = None
+        graph = build_graph(memory_dir, index_dir=index_dir)
+        if graph is None:
+            return
+        on_worklist = {item["name"] for item in worklist}
+        for item in worklist:
+            neighbors: Set[str] = graph.inbound(item["name"]) | graph.outbound(item["name"])
+            for rel in TYPED_RELATIONS:
+                neighbors |= graph.typed_inbound(item["name"], rel)
+                neighbors |= graph.typed_outbound(item["name"], rel)
+            item["linked"] = sorted(neighbors - on_worklist)[:_MAX_LINKED_NEIGHBORS]
+    except Exception:
+        return  # graph trouble must never cost the caller the worklist itself
+
+
 def recalled_stale_worklist(
     memory_dir: str,
     repo_root: str,
@@ -91,20 +141,26 @@ def recalled_stale_worklist(
     *,
     since: Optional[str] = None,
 ) -> List[dict]:
-    """``[{"name", "changed_paths"}]`` — recently-recalled names ∩ ``find_stale()``'s stale set.
+    """``[{"name", "changed_paths"[, "linked"]}]`` — recently-recalled names ∩ ``find_stale()``'s stale set.
 
     Most-recently-drifted first (the order ``find_stale()`` already returns; the
     intersection preserves it). ``since`` passes through to ``find_stale`` (its own default
     when omitted) — exposed so hermetic tests can widen the wall-clock-relative window
     (mirrors ``test_staleness.py``'s ``_ALL`` override pattern for pinned-epoch fixtures).
-    Read-only; never raises; ``[]`` when the ledger is empty or nothing intersects.
+    ``"linked"`` is GRA-9's optional review-adjacent column (see
+    ``_attach_linked_neighbors``): present on every item when the link graph is buildable,
+    absent everywhere when it is not. Read-only; never raises; ``[]`` when the ledger is
+    empty or nothing intersects.
     """
     try:
         recent = _recently_recalled_names(telemetry_dir, window_sessions)
         if not recent:
             return []
         stale = find_stale(memory_dir, repo_root, **({"since": since} if since else {}))
-        return [item for item in stale if item["name"] in recent]
+        worklist = [item for item in stale if item["name"] in recent]
+        if worklist:
+            _attach_linked_neighbors(worklist, memory_dir)
+        return worklist
     except Exception:
         return []
 
@@ -212,6 +268,19 @@ def semantic_reverify(
 # --------------------------------------------------------------------------- #
 # SessionStart producer — registered into session_start.PRODUCERS, never a parallel hook
 # --------------------------------------------------------------------------- #
+def _linked_note(item: dict) -> str:
+    """Render GRA-9's review-adjacent annotation — ``" (+2 linked: y, z)"`` — or ``""``.
+
+    The roadmap's exact form (``X (+2 linked: Y, Z)``); N is the number of neighbors SHOWN
+    (the column is already capped at ``_MAX_LINKED_NEIGHBORS``). Empty both for an item
+    with no neighbors and for a worklist built without the graph (degraded, no column).
+    """
+    linked = item.get("linked") or []
+    if not linked:
+        return ""
+    return f" (+{len(linked)} linked: {', '.join(linked)})"
+
+
 def reconsolidation_producer(memory_dir: str, repo_root: str) -> Optional[str]:
     """SILENT (``None``) unless a recently-recalled memory is currently stale.
 
@@ -224,15 +293,24 @@ def reconsolidation_producer(memory_dir: str, repo_root: str) -> Optional[str]:
         worklist = []
     if not worklist:
         return None
-    lines = [
+    shown = worklist[:_MAX_WORKLIST_ITEMS]
+    header = (
         f"🧠 Reconsolidation worklist — {len(worklist)} recently-recalled memories cite code "
         "that has since drifted (most-recently-drifted first). Re-ground each against current "
-        "code, then `provenance --reverify <name>` once confirmed correct:"
-    ]
-    for item in worklist[:_MAX_WORKLIST_ITEMS]:
+        "code, then `provenance --reverify <name>` once confirmed correct"
+    )
+    if any(item.get("linked") for item in shown):
+        # GRA-9: one line of legend, and ONLY when a (+N linked: …) annotation actually
+        # renders below — a linkless worklist keeps its pre-GRA-9 header verbatim.
+        header += (
+            "; (+N linked: …) names an item's 1-hop graph neighbors — review-adjacent, "
+            "the next most likely to be wrong once it drifted"
+        )
+    lines = [header + ":"]
+    for item in shown:
         paths = ", ".join(item["changed_paths"][:4])
         more = "" if len(item["changed_paths"]) <= 4 else f" (+{len(item['changed_paths']) - 4} more)"
-        lines.append(f"  • {item['name']}: {paths}{more}")
+        lines.append(f"  • {item['name']}{_linked_note(item)}: {paths}{more}")
     if len(worklist) > _MAX_WORKLIST_ITEMS:
         lines.append(f"  …and {len(worklist) - _MAX_WORKLIST_ITEMS} more.")
     return "\n".join(lines)
@@ -316,7 +394,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
     print(f"{len(worklist)} recently-recalled memories cite code that changed since they were written:")
     for item in worklist:
-        print(f"  • {item['name']}: {', '.join(item['changed_paths'][:6])}")
+        # Same "X (+2 linked: Y, Z)" review-adjacent render as the SessionStart producer
+        # (GRA-9) — the CLI and the producer must describe the same worklist identically.
+        print(f"  • {item['name']}{_linked_note(item)}: {', '.join(item['changed_paths'][:6])}")
     return 0
 
 

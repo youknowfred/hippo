@@ -128,6 +128,164 @@ def test_worklist_never_raises_on_bogus_dirs():
 
 
 # --------------------------------------------------------------------------- #
+# GRA-9: review-adjacent worklist — the optional 1-hop "linked" graph column
+# --------------------------------------------------------------------------- #
+def _mem_body(name, cited, source_commit, body):
+    """``_mem()`` with a caller-supplied body — so a stale item can carry [[wikilinks]]."""
+    cp = "[" + ", ".join(f'"{c}"' for c in cited) + "]"
+    return f"---\nname: {name}\ndescription: \"{name} description\"\ncited_paths: {cp}\nsource_commit: \"{source_commit}\"\n---\n{body}\n"
+
+
+def _leaf(name, body=""):
+    """A neighbor memory with NO provenance (never stale); body carries any [[links]]."""
+    return f"---\nname: {name}\ndescription: \"{name} description\"\n---\n{body}\n"
+
+
+def _seed_linked_stale(repo, memory_dir, when=1_700_000_000):
+    """One stale+recalled memory (m_a) with one OUTBOUND ([[m_out]]) and one INBOUND
+    (m_in links [[m_a]]) untyped neighbor. Returns the telemetry dir, ledger seeded."""
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", when)
+    write_file(memory_dir, "m_a.md", _mem_body("m_a", ["src/foo.py"], c1, "see [[m_out]]"))
+    write_file(memory_dir, "m_out.md", _leaf("m_out", "leaf"))
+    write_file(memory_dir, "m_in.md", _leaf("m_in", "points at [[m_a]]"))
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", when + 100)
+    td = os.path.join(repo, "tele")
+    _seed_events(td, [("s1", ["m_a"])])
+    return td
+
+
+def test_worklist_items_carry_1hop_linked_neighbors(repo, memory_dir):
+    """The GRA-9 neighborhood: inbound + outbound wikilinks AND typed edges, deduped,
+    sorted — a drifted memory's 1-hop neighbors are the next most likely to be wrong."""
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_stale.md", _mem_body("m_stale", ["src/foo.py"], c1, "see [[m_out]]"))
+    write_file(memory_dir, "m_out.md", _leaf("m_out"))  # outbound wikilink neighbor
+    write_file(memory_dir, "m_in.md", _leaf("m_in", "points at [[m_stale]]"))  # inbound
+    # typed inbound neighbor (GRA-4): m_typed declares it supersedes m_stale
+    write_file(
+        memory_dir,
+        "m_typed.md",
+        '---\nname: m_typed\ndescription: "m_typed description"\nsupersedes: ["m_stale"]\n---\nsuccessor\n',
+    )
+    write_file(memory_dir, "m_far.md", _leaf("m_far", "no edges at all"))
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)
+
+    td = os.path.join(repo, "tele")
+    _seed_events(td, [("s1", ["m_stale"])])
+
+    worklist = R.recalled_stale_worklist(memory_dir, repo, telemetry_dir=td, since=_ALL)
+    assert [w["name"] for w in worklist] == ["m_stale"]
+    assert worklist[0]["linked"] == ["m_in", "m_out", "m_typed"]  # sorted; m_far absent
+
+
+def test_worklist_linked_excludes_names_already_on_the_worklist(repo, memory_dir):
+    """A neighbor that is INDEPENDENTLY stale+recalled gets its own worklist line — listing
+    it again as someone's neighbor would double-report it."""
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_a.md", _mem_body("m_a", ["src/foo.py"], c1, "see [[m_b]] and [[m_c]]"))
+    write_file(memory_dir, "m_b.md", _mem("m_b", ["src/foo.py"], c1))  # also stale+recalled
+    write_file(memory_dir, "m_c.md", _leaf("m_c"))
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)
+
+    td = os.path.join(repo, "tele")
+    _seed_events(td, [("s1", ["m_a", "m_b"])])
+
+    worklist = R.recalled_stale_worklist(memory_dir, repo, telemetry_dir=td, since=_ALL)
+    by_name = {w["name"]: w for w in worklist}
+    assert set(by_name) == {"m_a", "m_b"}
+    assert by_name["m_a"]["linked"] == ["m_c"]  # m_b is on the worklist -> excluded
+    assert by_name["m_b"]["linked"] == []  # its only neighbor (m_a) is on the worklist too
+
+
+def test_worklist_linked_neighbor_cap_is_bounded(repo, memory_dir):
+    """The column is capped at _MAX_LINKED_NEIGHBORS (the producer renders into
+    session_start's 9000-char budget) and the capped pick is deterministic (sorted)."""
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    n = R._MAX_LINKED_NEIGHBORS + 2
+    body = "hub: " + " ".join(f"[[m_n{i}]]" for i in range(n))
+    write_file(memory_dir, "m_hub.md", _mem_body("m_hub", ["src/foo.py"], c1, body))
+    for i in range(n):
+        write_file(memory_dir, f"m_n{i}.md", _leaf(f"m_n{i}"))
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)
+
+    td = os.path.join(repo, "tele")
+    _seed_events(td, [("s1", ["m_hub"])])
+
+    worklist = R.recalled_stale_worklist(memory_dir, repo, telemetry_dir=td, since=_ALL)
+    assert worklist[0]["linked"] == [f"m_n{i}" for i in range(R._MAX_LINKED_NEIGHBORS)]
+
+
+def test_worklist_no_linked_column_when_graph_unavailable(repo, memory_dir, monkeypatch):
+    """Graph unavailable (no cache, no corpus, any failure) -> the worklist is EXACTLY its
+    pre-GRA-9 self: same items, no "linked" key anywhere."""
+    td = _seed_linked_stale(repo, memory_dir)
+    monkeypatch.setattr("memory.links.build_graph", lambda *a, **k: None)
+    worklist = R.recalled_stale_worklist(memory_dir, repo, telemetry_dir=td, since=_ALL)
+    assert [w["name"] for w in worklist] == ["m_a"]
+    assert all("linked" not in w for w in worklist)
+
+
+def test_worklist_survives_a_raising_graph(repo, memory_dir, monkeypatch):
+    """Even an (impossible-by-contract) raising build_graph must never cost the caller the
+    worklist itself — degrade to no column, not to []."""
+    td = _seed_linked_stale(repo, memory_dir)
+
+    def _boom(*a, **k):
+        raise RuntimeError("graph exploded")
+
+    monkeypatch.setattr("memory.links.build_graph", _boom)
+    worklist = R.recalled_stale_worklist(memory_dir, repo, telemetry_dir=td, since=_ALL)
+    assert [w["name"] for w in worklist] == ["m_a"]
+    assert all("linked" not in w for w in worklist)
+
+
+def test_worklist_routes_through_cache_aware_graph_api(repo, memory_dir, monkeypatch):
+    """GRA-9 uses the ONE canonical graph entry point WITH its persisted-cache fast path —
+    build_graph(memory_dir, index_dir=default_index_dir(...)), never a bare corpus re-read."""
+    td = _seed_linked_stale(repo, memory_dir)
+    seen = {}
+
+    def _record(md, index_dir=None):
+        seen.update(memory_dir=md, index_dir=index_dir)
+        return None
+
+    monkeypatch.setattr("memory.links.build_graph", _record)
+    R.recalled_stale_worklist(memory_dir, repo, telemetry_dir=td, since=_ALL)
+
+    from memory.build_index import default_index_dir
+
+    assert seen == {"memory_dir": memory_dir, "index_dir": default_index_dir(memory_dir)}
+
+
+def test_worklist_neighborhood_column_is_report_only(repo, memory_dir):
+    """The roadmap AC's 'no autonomous writes introduced': building the annotated worklist
+    leaves every corpus byte identical and creates nothing on disk (not even an index dir)."""
+    td = _seed_linked_stale(repo, memory_dir)
+
+    def _snapshot():
+        return {
+            f: open(os.path.join(memory_dir, f), encoding="utf-8").read()
+            for f in sorted(os.listdir(memory_dir))
+        }
+
+    from memory.build_index import default_index_dir
+
+    before = _snapshot()
+    worklist = R.recalled_stale_worklist(memory_dir, repo, telemetry_dir=td, since=_ALL)
+    assert worklist and worklist[0]["linked"] == ["m_in", "m_out"]
+    assert _snapshot() == before
+    assert not os.path.exists(default_index_dir(memory_dir))  # read-side never creates it
+
+
+# --------------------------------------------------------------------------- #
 # semantic_reverify — per-item write primitive (wraps provenance.reverify_file)
 # --------------------------------------------------------------------------- #
 def test_semantic_reverify_graduate_clears_flag_and_logs_outcome(repo, memory_dir):
@@ -402,6 +560,41 @@ def test_producer_truncates_past_max_items(repo, memory_dir, monkeypatch):
 
     out = R.reconsolidation_producer(memory_dir, repo)
     assert "…and 5 more." in out
+
+
+def test_producer_renders_the_plus_n_linked_form(repo, memory_dir, monkeypatch):
+    """GRA-9's exact SessionStart render — `X (+2 linked: Y, Z)` — plus its one-line
+    legend, which appears ONLY when an annotation does."""
+    now = int(time.time())
+    td = _seed_linked_stale(repo, memory_dir, when=now - 200)
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+
+    out = R.reconsolidation_producer(memory_dir, repo)
+    assert "• m_a (+2 linked: m_in, m_out): src/foo.py" in out
+    assert "review-adjacent" in out  # the legend explains what (+N linked: …) means
+
+
+def test_producer_line_and_header_unchanged_when_graph_unavailable(repo, memory_dir, monkeypatch):
+    """Degradation is invisible: no column -> the pre-GRA-9 line AND header, verbatim."""
+    now = int(time.time())
+    td = _seed_linked_stale(repo, memory_dir, when=now - 200)
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    monkeypatch.setattr("memory.links.build_graph", lambda *a, **k: None)
+
+    out = R.reconsolidation_producer(memory_dir, repo)
+    assert "• m_a: src/foo.py" in out
+    assert "linked" not in out and "review-adjacent" not in out
+
+
+def test_reconsolidate_cli_worklist_renders_linked(repo, memory_dir, capsys):
+    """The CLI worklist describes the same neighborhoods the producer does."""
+    now = int(time.time())
+    td = _seed_linked_stale(repo, memory_dir, when=now - 200)
+
+    rc = R.main(["--memory-dir", memory_dir, "--repo-root", repo, "--telemetry-dir", td])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "• m_a (+2 linked: m_in, m_out): src/foo.py" in out
 
 
 def test_producer_never_raises_on_bogus_dirs():

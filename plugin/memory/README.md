@@ -272,6 +272,13 @@ chatty session can't inflate a memory's strength.
 last N sessions) with the stale set — memories actively shaping behavior whose cited code
 drifted. Read-only CLI + the `reconsolidation` producer (silent unless non-empty).
 
+When the link graph is buildable (`links.build_graph`, cache-aware), each item also
+carries a `linked` column (GRA-9): up to 3 one-hop neighbors — inbound + outbound
+`[[wikilinks]]` unioned with typed edges, minus names already on the worklist — rendered
+as `X (+2 linked: Y, Z)`. Review-adjacent and **report-only** (zero write paths): when a
+memory drifts, its neighbors are the next most likely to be wrong. No graph → no column;
+the worklist is exactly its pre-GRA-9 self.
+
 ```bash
 "$PY" -m memory.reconsolidate
 ```
