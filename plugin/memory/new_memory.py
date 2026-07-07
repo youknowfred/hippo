@@ -15,16 +15,20 @@ and ``metadata.type`` — then:
   3. backfills Tier-1 citation provenance (``cited_paths`` / ``source_commit``) so the new
      memory is born staleness-tracked, and
   4. refreshes the recall index so it is immediately recallable, and
-  5. appends a ``MEMORY.md`` floor pointer ONLY when ``type`` is ``user`` or ``feedback``.
+  5. appends a ``MEMORY.md`` floor pointer ONLY when ``type`` is ``user`` or ``feedback``,
+     and reports the floor OUTCOME explicitly (LIF-5 — see ``_append_floor_pointer``): a
+     renamed/deleted canonical section is re-created rather than silently no-oped; a missing
+     MEMORY.md is a loud machine-readable skip (floor creation is init's job, never faked here).
 
 ``project`` / ``reference`` memories are deliberately NOT added to the floor — they are
 recalled on demand (the UserPromptSubmit recall hook + the SessionStart auto-refresh index
 them). This is the whole point: new memories never re-bloat the trimmed always-load.
 
-Never silently overwrites an existing file. The floor-pointer write is the ONLY edit to
-MEMORY.md; no existing memory BODY is ever modified — link discovery only ever touches the
-file being CREATED (the no-bulk-autonomous-sweeps invariant: this is a single-item write, not
-an edit to any pre-existing memory).
+Never silently overwrites an existing file. The floor-pointer write (including re-creating a
+drifted-away canonical floor section, LIF-5) is the ONLY edit to MEMORY.md; no existing memory
+BODY is ever modified — link discovery only ever touches the file being CREATED (the
+no-bulk-autonomous-sweeps invariant: this is a single-item write, not an edit to any
+pre-existing memory).
 """
 
 from __future__ import annotations
@@ -300,27 +304,66 @@ def _render_frontmatter(name: str, description: str, mtype: str, body: str) -> s
 
 def _append_floor_pointer(
     memory_dir: str, section_header: str, name: str, title: str, hook: str
-) -> bool:
+) -> dict:
     """Insert ``- [title](name.md) — hook`` at the END of ``section_header`` in MEMORY.md.
 
-    Returns True if the pointer was added. Never raises. Idempotent: a pointer to the same
-    ``name.md`` already present is left as-is (returns False).
+    Returns the ``result["floor"]`` outcome dict — ``{"status", "reason"}`` (LIF-5). This used
+    to return a bare bool that silently no-oped on a missing file OR a renamed header, so a
+    user/feedback memory could lose its always-load pointer with no signal anywhere. Now every
+    outcome is explicit; never raises; MEMORY.md stays the ONLY file this module edits:
+
+    - ``appended`` (reason None) — the section exists; the pointer went in at the end of its
+      block, byte-identical to the pre-LIF-5 insertion (idempotent happy path unchanged).
+    - ``created-section`` — MEMORY.md exists but ``section_header`` does not (renamed or
+      deleted by hand — the floor drifted from ``assets/MEMORY.skeleton.md``). The canonical
+      section is re-created at the END of MEMORY.md in the skeleton's own format (one blank
+      separator line, ``## Header``, then the pointer as its first entry). Repairing beats
+      skipping here: the pointer is the whole point of a user/feedback write, and the created
+      section is exactly what lint_floor/floor_memory_names already parse as floor. Merging a
+      RENAMED section's leftovers into the canonical one stays agent-gated (/hippo:new routes
+      it) — this function never touches other sections.
+    - ``skipped`` — nothing written; ``reason`` is machine-readable: ``MEMORY.md missing``
+      (floor CREATION is /hippo:init's job — skeleton + starter packs; fabricating the whole
+      file here would shadow that), ``pointer already present`` (idempotence — the same
+      ``name.md`` is already floor-linked), or ``MEMORY.md unreadable/write failed: ...``.
     """
     path = os.path.join(memory_dir, "MEMORY.md")
     try:
         with open(path, "r", encoding="utf-8") as fh:
             lines = fh.read().split("\n")
-    except Exception:
-        return False
+    except FileNotFoundError:
+        return {
+            "status": "skipped",
+            "reason": "MEMORY.md missing — pointer NOT recorded; run /hippo:init to create "
+            "the floor, then add the pointer line by hand",
+        }
+    except Exception as exc:
+        return {"status": "skipped", "reason": f"MEMORY.md unreadable: {exc}"}
 
     link = f"]({name}.md)"
     if any(link in ln for ln in lines):
-        return False  # already pointed-to — don't duplicate
+        return {"status": "skipped", "reason": "pointer already present"}
+
+    pointer = f"- [{title}]({name}.md) — {hook}".rstrip()
 
     # Find the section header, then the end of its block (next "## " or EOF).
     start = next((i for i, ln in enumerate(lines) if ln.strip() == section_header), None)
     if start is None:
-        return False
+        # LIF-5: header renamed/deleted — re-create the canonical section at EOF, skeleton
+        # format. (An empty-but-existing MEMORY.md gets the section with no leading blank.)
+        text = "\n".join(lines).rstrip("\n")
+        section = f"{section_header}\n{pointer}\n"
+        new_text = f"{text}\n\n{section}" if text else section
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(new_text)
+        except Exception as exc:
+            return {"status": "skipped", "reason": f"MEMORY.md write failed: {exc}"}
+        return {
+            "status": "created-section",
+            "reason": f"section not found: {section_header} — created it at the end of MEMORY.md",
+        }
+
     end = len(lines)
     for j in range(start + 1, len(lines)):
         if lines[j].strip().startswith("## "):
@@ -332,14 +375,13 @@ def _append_floor_pointer(
         if lines[j].strip():
             insert = j + 1
 
-    pointer = f"- [{title}]({name}.md) — {hook}".rstrip()
     lines.insert(insert, pointer)
     try:
         with open(path, "w", encoding="utf-8") as fh:
             fh.write("\n".join(lines))
-        return True
-    except Exception:
-        return False
+    except Exception as exc:
+        return {"status": "skipped", "reason": f"MEMORY.md write failed: {exc}"}
+    return {"status": "appended", "reason": None}
 
 
 def write_memory(
@@ -371,14 +413,19 @@ def write_memory(
       add / update-existing / supersede / skip (see ``/hippo:new``). When the check cannot
       run at all (no index yet), ``result["note"]`` names why — no silent no-warning path.
     - Backfills provenance + refreshes the recall index (best-effort; never fatal).
-    - Adds a MEMORY.md floor pointer ONLY for ``user`` / ``feedback``.
+    - Adds a MEMORY.md floor pointer ONLY for ``user`` / ``feedback`` and reports the outcome
+      explicitly (LIF-5): ``result["floor"]`` is ``{"status": appended|created-section|skipped,
+      "reason"}`` — a renamed/deleted canonical section is re-created at the end of MEMORY.md
+      (never a silent no-op), a missing MEMORY.md is a loud machine-readable skip (floor
+      creation is /hippo:init's job), and ``project`` / ``reference`` report a skipped floor
+      by design (recalled on demand). ``None`` only when creation failed before the floor step.
     - Scans the rendered text for secret-looking patterns (SEC-2) and, on a match, populates
       ``warnings`` — WARN-not-block: the write still happens; the agent decides what to do.
     """
     result = {
         "created": False,
         "path": None,
-        "floor_pointer_added": False,
+        "floor": None,
         "indexed": False,
         "related": [],
         "neighbors": [],
@@ -473,9 +520,16 @@ def write_memory(
         pass
 
     # 3. Floor pointer ONLY for user / feedback (project / reference are recalled on demand).
+    # LIF-5: the outcome is ALWAYS explicit on the result — appended / created-section /
+    # skipped-with-reason — never a silent no-op the agent can't see.
     section = _FLOOR_SECTION_BY_TYPE.get(type)
-    if section is not None:
-        result["floor_pointer_added"] = _append_floor_pointer(
+    if section is None:
+        result["floor"] = {
+            "status": "skipped",
+            "reason": f"type '{type}' is never floor-linked — recalled on demand",
+        }
+    else:
+        result["floor"] = _append_floor_pointer(
             memory_dir, section, name, title or _title_from_slug(name), hook or description
         )
     return result
@@ -524,7 +578,19 @@ def main(argv=None) -> int:
         return 1
     print(f"created : {res['path']}")
     print(f"indexed : {res['indexed']}")
-    print(f"floor pointer added : {res['floor_pointer_added']} (only user/feedback get one)")
+    # LIF-5: the floor outcome is always printed; anything but a plain append carries its
+    # machine-readable reason (never silence — /hippo:new tells the agent to surface it).
+    floor = res["floor"] or {}
+    if floor.get("status") == "appended":
+        print("floor   : appended (only user/feedback get a floor pointer)")
+    elif floor.get("status"):
+        print(f"floor   : {floor['status']} — {floor.get('reason')}")
+        if floor["status"] == "created-section":
+            print(
+                "  merge   : MEMORY.md drifted from the skeleton — if the old section was "
+                "RENAMED (not deleted), fold its pointers into the re-created canonical "
+                "section — see /hippo:new"
+            )
     if res["related"]:
         print(f"related : {', '.join(res['related'])} (curate this — keep/trim/replace, see /hippo:new)")
     # LIF-2: the neighbor warning block. Bounded (<= _DUP_NEIGHBORS_K lines, descriptions
@@ -544,8 +610,6 @@ def main(argv=None) -> int:
         print(f"note    : {res['note']}")
     for warning in res["warnings"]:
         print(f"warning : {warning}")
-    if args.type in ("project", "reference"):
-        print("note    : project/reference memories are recalled on demand — NOT added to the floor.")
     return 0
 
 

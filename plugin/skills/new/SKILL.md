@@ -10,7 +10,8 @@ against the existing corpus (warn-only — see the decision flow below), citatio
 backfill (`cited_paths` / `source_commit`, so staleness detection works from day one), an
 index refresh (so it's recallable in THIS session, not just the next one), and — for
 `user`/`feedback` types only — a floor pointer appended to `MEMORY.md` under the right
-section.
+section, with the outcome reported explicitly (never a silent no-op — see the floor-outcome
+section below).
 
 ## Preflight (shared across all hippo skills)
 
@@ -126,6 +127,35 @@ When the check could not run at all, the result carries a machine-readable
 `note` (e.g. `duplicate check skipped: no index` — a first-ever memory, or a never-indexed
 corpus with `--links`/`--no-links`). No warning ≠ no duplicates in that case — apply the
 search-first judgment below yourself.
+
+## Floor-pointer outcome (LIF-5) — read the `floor` line, SURFACE anything unusual
+
+For `user`/`feedback` types the always-load pointer append used to silently no-op when
+`MEMORY.md` was missing or a section header had been hand-renamed — the memory quietly lost
+its floor presence. Now the outcome is an explicit result field
+(`floor: {status, reason}`) and a `floor   :` CLI line. **Never absorb a non-`appended`
+outcome silently — report it to the user and act on it:**
+
+- `appended` — the normal case: the pointer landed at the end of the type's canonical
+  section. Nothing to surface.
+- `created-section — section not found: ## <Header> …` — `MEMORY.md` exists but the
+  canonical section header was renamed or deleted (the floor drifted from
+  `assets/MEMORY.skeleton.md`). Rather than dropping the pointer, the tool re-created the
+  canonical section at the END of `MEMORY.md` (skeleton format) with the new pointer as its
+  first entry. Tell the user, then reconcile the drift yourself — per-item, in the visible
+  diff: if the old section still exists under a renamed header, fold its pointers into the
+  re-created canonical section and remove the stray header (the SessionStart floor lint
+  flags any leftovers).
+- `skipped — MEMORY.md missing …` — the floor file itself does not exist, so the pointer was
+  **not recorded anywhere** (the memory file + index are fine). The tool never fabricates
+  `MEMORY.md` — floor creation is `/hippo:init`'s job (skeleton + starter packs). Run
+  `/hippo:init`, then add the pointer line to the canonical section by hand
+  (`- [Title](name.md) — hook`, the skeleton's pointer style). Do NOT re-run this tool for
+  that — it refuses to overwrite the already-created memory file.
+- `skipped — pointer already present` — idempotence: the floor already links `<name>.md`;
+  nothing was duplicated. Worth a one-line mention only if you didn't expect it.
+- `skipped — type '…' is never floor-linked` — `project`/`reference`; recalled on demand by
+  design, not an error.
 
 ## What NOT to save (skip even if it seems tempting)
 

@@ -130,7 +130,7 @@ def test_new_memory_feedback_adds_pointer_and_is_recallable(tmp_path, monkeypatc
     assert "type: feedback" in text
 
     # floor pointer added under Working-Style for a feedback memory
-    assert res["floor_pointer_added"] is True
+    assert res["floor"] == {"status": "appended", "reason": None}
     mem = open(os.path.join(md, "MEMORY.md"), encoding="utf-8").read()
     assert "(feedback_test_unique.md)" in mem
 
@@ -152,7 +152,8 @@ def test_new_memory_project_skips_floor_pointer(tmp_path, monkeypatch):
         repo_root=str(tmp_path),
     )
     assert res["created"] is True
-    assert res["floor_pointer_added"] is False
+    assert res["floor"]["status"] == "skipped"
+    assert "never floor-linked" in res["floor"]["reason"]
     after = open(os.path.join(md, "MEMORY.md"), "rb").read()
     assert before == after  # the floor is UNCHANGED for a project memory (no re-bloat)
     assert "project_thing_xyz.md" not in after.decode("utf-8")
@@ -652,3 +653,190 @@ def test_related_line_lands_before_provenance_backfill_ordering(tmp_path, monkey
     # was discovered) — i.e. the persisted frontmatter is not stale/pre-Related.
     assert sc == head
     assert "src/app.py" in cited
+
+
+# --------------------------------------------------------------------------- #
+# LIF-5 — floor-pointer robustness when MEMORY.md diverges from the skeleton
+# (the append used to silently no-op on a missing file / renamed header — the
+#  outcome is now explicit: appended / created-section / skipped-with-reason)
+# --------------------------------------------------------------------------- #
+def test_floor_happy_path_append_is_byte_stable(tmp_path, monkeypatch):
+    """AC (LIF-5): the existing happy path is pinned byte-for-byte — same insertion point
+    (end of the section's block), same pointer format, no incidental reflow anywhere else."""
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    res = NM.write_memory(
+        "fb_byte_stable",
+        "the hook text",
+        "feedback",
+        memory_dir=md,
+        repo_root=str(tmp_path),
+        title="Fb Byte Stable",
+        hook="the hook text",
+        no_links=True,
+    )
+    assert res["created"] is True
+    assert res["floor"] == {"status": "appended", "reason": None}
+    expected = _CLEAN_FLOOR.replace(
+        "- [Some Feedback](feedback_x.md) — a process hook.\n",
+        "- [Some Feedback](feedback_x.md) — a process hook.\n"
+        "- [Fb Byte Stable](fb_byte_stable.md) — the hook text\n",
+    )
+    assert open(os.path.join(md, "MEMORY.md"), encoding="utf-8").read() == expected
+
+
+@pytest.mark.parametrize("mtype", ["user", "feedback"])
+def test_renamed_section_recreates_canonical_section_and_lint_stays_green(
+    tmp_path, monkeypatch, mtype
+):
+    """AC (LIF-5): a corpus whose canonical section header was hand-renamed away still gets
+    its always-load pointer — in a freshly re-created canonical section at the end of
+    MEMORY.md (skeleton format) — and lint_floor stays green on the result."""
+    from memory import new_memory as NM
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    md = str(tmp_path / ".claude" / "memory")
+    canonical = NM._FLOOR_SECTION_BY_TYPE[mtype]
+    other = next(h for t, h in NM._FLOOR_SECTION_BY_TYPE.items() if t != mtype)
+    # THIS type's section was renamed away (drift); the other type's section is intact.
+    _floor(
+        md,
+        "# Proj — Agent Memory Index (durable floor)\n"
+        "> Always-loaded floor preamble.\n"
+        f"{other}\n"
+        "- [Kept Pointer](kept_ptr.md) — survives under the intact section.\n"
+        f"{canonical.replace('## ', '## Renamed ')}\n"
+        "> hand-renamed: no canonical header for this type anymore, no pointers left here.\n"
+        "## Recalled on demand\n"
+        "> nav only.\n",
+    )
+    _touch_memory(md, "kept_ptr")
+
+    name, desc = f"{mtype}_lif5_repair", "a memory whose floor section header was renamed away"
+    res = NM.write_memory(name, desc, mtype, memory_dir=md, repo_root=str(tmp_path))
+    assert res["created"] is True and res["error"] is None
+    assert res["floor"]["status"] == "created-section"
+    assert f"section not found: {canonical}" in res["floor"]["reason"]
+
+    # Skeleton format at EOF: one separating blank line, the canonical header (exactly once),
+    # then the pointer as the section's first entry.
+    mem = open(os.path.join(md, "MEMORY.md"), encoding="utf-8").read()
+    pointer = f"- [{NM._title_from_slug(name)}]({name}.md) — {desc}"
+    assert mem.endswith(f"\n\n{canonical}\n{pointer}\n")
+    assert mem.count(f"\n{canonical}\n") == 1
+
+    # lint_floor is green on the result AND parses the pointer as a genuine floor entry.
+    import memory.lint_floor as lint
+
+    assert lint.floor_violations(md) == {"rebloat": [], "missing_targets": []}
+    assert name in lint.floor_memory_names(md)
+
+    # The re-created section is genuinely canonical: the NEXT write of the same type is a
+    # plain append into it (the one-time repair does not repeat).
+    name2 = f"{mtype}_lif5_second"
+    res2 = NM.write_memory(
+        name2, "another memory of the same type", mtype, memory_dir=md, repo_root=str(tmp_path)
+    )
+    assert res2["floor"] == {"status": "appended", "reason": None}
+    mem2 = open(os.path.join(md, "MEMORY.md"), encoding="utf-8").read()
+    assert mem2.index(f"({name}.md)") < mem2.index(f"({name2}.md)")
+    assert mem2.count(f"\n{canonical}\n") == 1
+
+
+def test_missing_memory_md_is_loud_skip_never_fabricated(tmp_path, monkeypatch):
+    """AC (LIF-5): MEMORY.md absent -> the memory is still created + indexed, but the floor
+    outcome is a loud machine-readable skip that names the fix — and the file is NOT
+    fabricated (floor CREATION is /hippo:init's job: skeleton + starter packs)."""
+    from memory import new_memory as NM
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    md = str(tmp_path / ".claude" / "memory")  # dir created by the write; MEMORY.md never seeded
+    res = NM.write_memory(
+        "orphaned_feedback",
+        "feedback with nowhere to floor-point",
+        "feedback",
+        memory_dir=md,
+        repo_root=str(tmp_path),
+    )
+    assert res["created"] is True and res["error"] is None
+    assert res["floor"]["status"] == "skipped"
+    assert res["floor"]["reason"].startswith("MEMORY.md missing")
+    assert "/hippo:init" in res["floor"]["reason"]  # names the fix, not just the failure
+    assert not os.path.exists(os.path.join(md, "MEMORY.md"))  # NOT fabricated
+
+
+def test_floor_pointer_already_present_skips_with_reason_and_no_edit(tmp_path, monkeypatch):
+    """Idempotence stays, but is now NAMED: a floor that already links <name>.md (e.g. a
+    hand-restored floor) yields skipped/'pointer already present' and zero bytes change."""
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    _floor(
+        md,
+        _CLEAN_FLOOR.replace(
+            "- [Some Feedback](feedback_x.md) — a process hook.\n",
+            "- [Some Feedback](feedback_x.md) — a process hook.\n"
+            "- [Hand Added](hand_added.md) — restored by hand.\n",
+        ),
+    )
+    before = open(os.path.join(md, "MEMORY.md"), "rb").read()
+    res = NM.write_memory(
+        "hand_added",
+        "a memory the floor already points to",
+        "feedback",
+        memory_dir=md,
+        repo_root=str(tmp_path),
+    )
+    assert res["created"] is True
+    assert res["floor"] == {"status": "skipped", "reason": "pointer already present"}
+    assert open(os.path.join(md, "MEMORY.md"), "rb").read() == before  # untouched
+
+
+def test_new_memory_cli_prints_floor_outcome_when_not_plain_appended(tmp_path, monkeypatch, capsys):
+    """AC (LIF-5): main() surfaces the machine-readable floor reason — missing MEMORY.md and
+    created-section both print loudly; the plain append prints a one-word status."""
+    from memory import new_memory as NM
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+
+    # Missing MEMORY.md -> loud skip, fix named.
+    md = str(tmp_path / "a" / ".claude" / "memory")
+    rc = NM.main(["orphan_fb", "desc text", "--type", "feedback", "--memory-dir", md, "--no-links"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "floor   : skipped — MEMORY.md missing" in out
+    assert "/hippo:init" in out
+
+    # Renamed section -> created-section with the reason, merge guidance routed to the agent.
+    md2 = str(tmp_path / "b" / ".claude" / "memory")
+    _floor(md2, "# Floor\n## User\n- [User Role](user_role.md) — role.\n## Renamed Feedback\n")
+    rc2 = NM.main(["repaired_fb", "desc text", "--type", "feedback", "--memory-dir", md2, "--no-links"])
+    out2 = capsys.readouterr().out
+    assert rc2 == 0
+    assert "floor   : created-section — section not found: ## Working Style & Process Feedback" in out2
+    assert "/hippo:new" in out2
+
+    # Plain append (into the just-repaired canonical section) -> quiet one-word status.
+    rc3 = NM.main(["second_fb", "another desc", "--type", "feedback", "--memory-dir", md2, "--no-links"])
+    out3 = capsys.readouterr().out
+    assert rc3 == 0
+    assert "floor   : appended" in out3
+    assert "section not found" not in out3
+
+
+def test_canonical_floor_sections_match_skeleton_and_lint():
+    """Three-way drift pin (LIF-5): the headers write_memory re-creates must be byte-identical
+    to the shipped skeleton's floor sections AND to the sections lint_floor treats as floor —
+    otherwise a 'repaired' section could itself be flagged (or unparsed) downstream."""
+    from memory import new_memory as NM
+
+    assets = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "plugin", "assets"))
+    with open(os.path.join(assets, "MEMORY.skeleton.md"), encoding="utf-8") as fh:
+        skeleton_lines = {ln.strip() for ln in fh.read().split("\n")}
+    for header in NM._FLOOR_SECTION_BY_TYPE.values():
+        assert header in skeleton_lines
+    assert {h[3:] for h in NM._FLOOR_SECTION_BY_TYPE.values()} == set(floor._FLOOR_SECTIONS)
