@@ -19,6 +19,21 @@ only — no ``mcp`` package, consistent with the vendoring/offline identity). Th
                               the caller can route add/update/supersede — never a bulk sweep).
   - ``traverse(name, hops)``— 1..N-hop graph neighbors (untyped + typed) for a memory.
 
+And two RESOURCES (RUL-5) — the baseline-memory pull path for subagents:
+
+  - ``hippo://floor``       — the always-on memory floor (project MEMORY.md + the TEA-1
+                              user/private-tier portable floor) as one markdown document. A
+                              Task subagent receives NONE of this automatically; reading this
+                              resource at start is its explicit, agent-PULLED substitute.
+  - ``hippo://rules-view``  — the rules↔memory reconciliation (RUL-1 conflict radar + RUL-2
+                              rules-plane rot), so an agent can inspect where the governance
+                              plane and the corpus disagree without running the audit skill.
+
+Resources are AGENT-INVOKED reads, never an implicit always-load channel — hippo's one
+always-load path stays the native-memory floor (the NATIVE_MEMORY.md promise), and both
+resources honor the SEC-1 trust gate (an untrusted corpus reads as an explicit "withheld"
+notice, never silently as its content).
+
 Offline + corpus-local: it pins the durable fastembed cache and honors every existing contract
 (SEC-1 trust gate, RET-1 abstention, the never-raise degradation ladder). Protocol I/O goes to
 stdout ONLY; all diagnostics go to stderr, so a stray print can never corrupt the JSON-RPC
@@ -191,6 +206,133 @@ _DISPATCH = {"recall": _tool_recall, "new_memory": _tool_new_memory, "traverse":
 
 
 # --------------------------------------------------------------------------- #
+# Resources (RUL-5) — agent-PULLED baseline memory; never an implicit always-load.
+# --------------------------------------------------------------------------- #
+_RESOURCES = [
+    {
+        "uri": "hippo://floor",
+        "name": "hippo memory floor",
+        "description": (
+            "The always-on memory floor (project MEMORY.md + the portable user/private-tier "
+            "floor) as one markdown document. Read this at SUBAGENT start to obtain the "
+            "baseline memory a main session gets natively — a Task subagent receives none of "
+            "it automatically. Agent-pulled on demand; never auto-loaded."
+        ),
+        "mimeType": "text/markdown",
+    },
+    {
+        "uri": "hippo://rules-view",
+        "name": "hippo rules-view",
+        "description": (
+            "The rules↔memory reconciliation: governance files (CLAUDE.md/AGENTS.md/"
+            ".claude/rules|agents|skills) citing memories the corpus disputes (superseded/"
+            "contradicted/never-recalled), plus rules-plane rot (dead code references and "
+            "paths: globs matching nothing). Read-only; findings route to per-item decisions."
+        ),
+        "mimeType": "text/markdown",
+    },
+]
+
+
+def _resource_floor() -> str:
+    """``hippo://floor`` — the always-on floor as one pulled document. Never raises upstream
+    (the resources/read handler wraps it); SEC-1: an untrusted corpus withholds BOTH in-repo
+    parts (project floor and private tier ride the same clone) — the exact posture
+    ``build_context``'s short-circuit gives SessionStart, made explicit instead of silent."""
+    from . import trust
+    from .provenance import resolve_dirs
+    from .recall import portable_floor_producer
+
+    memory_dir, repo_root = resolve_dirs()
+    header = (
+        "# hippo memory floor\n\n"
+        "Always-on memory, agent-pulled (a Task subagent receives none of this "
+        "automatically)."
+    )
+    gate_root = trust.gate_repo_root(memory_dir, repo_root)
+    if gate_root is not None and not trust.is_trusted(gate_root):
+        return (
+            header + "\n\nFloor WITHHELD — this project's memory corpus is untrusted "
+            "(SEC-1: a cloned corpus is an unreviewed prompt-injection channel). "
+            "Run /hippo:doctor to review and trust it."
+        )
+    parts = []
+    try:
+        with open(os.path.join(memory_dir, "MEMORY.md"), encoding="utf-8") as fh:
+            floor_md = fh.read().strip()
+        if floor_md:
+            parts.append("## Project floor (MEMORY.md)\n\n" + floor_md)
+    except Exception:
+        pass
+    portable = None
+    try:
+        portable = portable_floor_producer(memory_dir, repo_root, None)
+    except Exception:
+        portable = None
+    if portable:
+        parts.append("## Portable floor (user & private tiers)\n\n" + portable)
+    if not parts:
+        return header + "\n\nFloor empty — no always-on memory configured yet (/hippo:init)."
+    return header + "\n\n" + "\n\n".join(parts)
+
+
+def _resource_rules_view() -> str:
+    """``hippo://rules-view`` — the RUL-1/RUL-2 reconciliation as one pulled document.
+    SEC-1-gated like the floor: a foreign clone's governance files ARE the injection threat."""
+    from . import trust
+    from .provenance import resolve_dirs
+    from .rules_plane import conflict_radar, rules_rot
+
+    memory_dir, repo_root = resolve_dirs()
+    header = "# hippo rules-view — governance plane ↔ memory corpus reconciliation"
+    gate_root = trust.gate_repo_root(memory_dir, repo_root)
+    if gate_root is not None and not trust.is_trusted(gate_root):
+        return (
+            header + "\n\nView WITHHELD — this project's corpus is untrusted (SEC-1). "
+            "Run /hippo:doctor to review and trust it."
+        )
+    radar = conflict_radar(memory_dir, repo_root)
+    rot = rules_rot(repo_root)
+    lines = [header, ""]
+    conflicts = radar["edge_conflicts"]
+    gaps = radar["authority_gaps"]
+    if conflicts or gaps:
+        lines.append("## Conflicts (decide per item via /hippo:consolidate — nothing auto-resolves)")
+        for c in conflicts:
+            lines.append(
+                f"- {c['cited_by'][0]} cites `{c['name']}` but `{c['by']}` {c['relation']} it"
+            )
+        for g in gaps:
+            lines.append(
+                f"- {g['cited_by'][0]} cites `{g['name']}` but no session recalls it "
+                f"(strength {g['strength']:.2f})"
+            )
+    else:
+        note = "" if radar["gate_met"] else " (strength leg pending the telemetry soak gate)"
+        lines.append(f"## Conflicts: none — governance citations agree with the corpus{note}")
+    code_rot = rot["code_ref_rot"]
+    dead_globs = rot["dead_path_globs"]
+    if code_rot or dead_globs:
+        lines.append("")
+        lines.append("## Rules-plane rot (fix per item — hippo names it, you edit the file)")
+        for r in code_rot:
+            what = "path gone" if r["kind"] == "path" else "symbol gone"
+            lines.append(f"- {r['file']} references `{r['ref']}` — {what}")
+        for d in dead_globs:
+            lines.append(f"- {d['file']} scopes paths: '{d['glob']}' — matches nothing")
+    else:
+        lines.append("")
+        lines.append("## Rules-plane rot: none — code references and paths: globs resolve")
+    return "\n".join(lines)
+
+
+_RESOURCE_DISPATCH = {
+    "hippo://floor": _resource_floor,
+    "hippo://rules-view": _resource_rules_view,
+}
+
+
+# --------------------------------------------------------------------------- #
 # JSON-RPC plumbing
 # --------------------------------------------------------------------------- #
 def _log(msg: str) -> None:
@@ -223,7 +365,9 @@ def handle_request(req: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return result(
             {
                 "protocolVersion": proto if isinstance(proto, str) else _DEFAULT_PROTOCOL,
-                "capabilities": {"tools": {}},
+                # RUL-5: resources declared minimally ({} — no subscribe/listChanged), the
+                # same style as tools; the 2024-11-05 rev supports resources/list + /read.
+                "capabilities": {"tools": {}, "resources": {}},
                 "serverInfo": {"name": _SERVER_NAME, "version": _plugin_version()},
             }
         )
@@ -248,6 +392,20 @@ def handle_request(req: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             return result(
                 {"content": [{"type": "text", "text": f"tool error: {exc}"}], "isError": True}
             )
+    if method == "resources/list":
+        return result({"resources": _RESOURCES})
+    if method == "resources/read":
+        params = req.get("params") or {}
+        uri = params.get("uri")
+        fn = _RESOURCE_DISPATCH.get(uri)
+        if fn is None:
+            return error(-32602, f"unknown resource: {uri}")
+        try:
+            text = fn()
+        except Exception as exc:  # a resource failure is a legible payload, not a dead server
+            _log(f"resource {uri} raised: {exc!r}")
+            text = f"resource error: {exc}"
+        return result({"contents": [{"uri": uri, "mimeType": "text/markdown", "text": text}]})
     if is_notification:
         return None
     return error(-32601, f"method not found: {method}")

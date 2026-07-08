@@ -457,7 +457,7 @@ workstreams:
         title: "MCP resources — expose hippo://floor (and a rules-view) for subagents"
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: claude-rules, verdict: KEEP (resource half; prompts held)}
         problem: >-
           A Task subagent gets zero automatic memory injection (no UserPromptSubmit

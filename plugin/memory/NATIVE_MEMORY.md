@@ -24,7 +24,9 @@ lands where nothing reads it).
 `.claude/memory/`**. That is the entire integration: because the harness always-loads whatever
 is at that path, and hippo points it at the committed corpus, hippo's `MEMORY.md` floor (the
 `user`/`feedback` always-load pointers) reaches context every session **through the native
-mechanism** — hippo adds no second always-load channel of its own.
+mechanism** — hippo adds no second always-load channel of its own. (The MCP
+`hippo://floor` resource, RUL-5, does not weaken this promise: it is an **agent-pulled**
+read a Task subagent may request explicitly — nothing auto-loads it.)
 
 **hippo relies on exactly this and nothing else about native memory:**
 
