@@ -253,3 +253,157 @@ def test_bogus_dirs_never_raise(tmp_path):
     radar = RP.conflict_radar(bogus, bogus)
     assert radar["authority_gaps"] == [] and radar["edge_conflicts"] == []
     assert S.rules_conflict_producer(bogus, bogus) is None
+
+
+# =============================================================================================
+# RUL-2: rules_rot — citation rot + dead paths: globs over the rules plane itself
+# =============================================================================================
+from .conftest import git_commit  # noqa: E402
+
+
+def test_code_ref_rot_flags_missing_path_after_rename(repo, memory_dir):
+    write_file(repo, "src/dep.py", "x = 1\n")
+    git_commit(repo, "add dep", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "Keep `src/dep.py` and `src/dep.py:12` in sync.")
+    import subprocess
+
+    subprocess.run(["git", "mv", "src/dep.py", "src/dep_moved.py"], cwd=repo, check=True)
+    git_commit(repo, "mv dep", 1_700_000_100)
+    rot = RP.rules_rot(repo)
+    assert rot["code_ref_rot"] == [
+        {"file": "CLAUDE.md", "ref": "src/dep.py", "kind": "path"},
+        {"file": "CLAUDE.md", "ref": "src/dep.py:12", "kind": "path"},
+    ]
+
+
+def test_code_ref_alive_path_and_bare_basename_are_silent(repo, memory_dir):
+    write_file(repo, "src/dep.py", "x = 1\n")
+    git_commit(repo, "add dep", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "See `src/dep.py` and `dep.py` (bare basename).")
+    assert RP.rules_rot(repo)["code_ref_rot"] == []
+
+
+def test_symbol_ref_rot_flags_vanished_symbol_in_resolved_module(repo, memory_dir):
+    write_file(repo, "plugin/util.py", "def kept(a):\n    return a\n\nGONE_CONST = 1\n")
+    git_commit(repo, "add util", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/rules/10-api.md",
+        "Call `util.kept` never `util.vanished`; `util.GONE_CONST` is fine.",
+    )
+    rot = RP.rules_rot(repo)
+    assert rot["code_ref_rot"] == [
+        {"file": os.path.join(".claude", "rules", "10-api.md"), "ref": "util.vanished", "kind": "symbol"}
+    ]
+
+
+def test_symbol_ref_unresolvable_or_ambiguous_module_is_silence(repo, memory_dir):
+    write_file(repo, "a/dup.py", "def f():\n    pass\n")
+    write_file(repo, "b/dup.py", "def g():\n    pass\n")
+    git_commit(repo, "two dups", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "See `dup.missing` and `nosuchmodule.thing`.")
+    assert RP.rules_rot(repo)["code_ref_rot"] == []  # under-flag beats cry-wolf
+
+
+def test_dead_paths_glob_flagged_with_exact_glob(repo, memory_dir):
+    write_file(repo, "src/real.py", "x = 1\n")
+    git_commit(repo, "add real", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/rules/20-scoped.md",
+        '---\npaths:\n  - "src/legacy/**"\n---\nLegacy tree rules.\n',
+    )
+    rot = RP.rules_rot(repo)
+    assert rot["dead_path_globs"] == [
+        {"file": os.path.join(".claude", "rules", "20-scoped.md"), "glob": "src/legacy/**"}
+    ]
+
+
+def test_live_paths_glob_and_untracked_files_count_as_alive(repo, memory_dir):
+    write_file(repo, "src/real.py", "x = 1\n")
+    git_commit(repo, "add real", 1_700_000_000)
+    write_file(repo, "docs/notes.md", "untracked but not ignored\n")  # NOT committed
+    write_file(
+        repo,
+        ".claude/rules/30-scoped.md",
+        '---\npaths:\n  - "src/**/*.py"\n  - "docs/**"\n---\nScoped rules.\n',
+    )
+    assert RP.rules_rot(repo)["dead_path_globs"] == []
+
+
+def test_paths_glob_brace_expansion_matches(repo, memory_dir):
+    write_file(repo, "web/app.tsx", "export {}\n")
+    git_commit(repo, "add tsx", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/rules/40-web.md",
+        '---\npaths:\n  - "web/**/*.{ts,tsx}"\n---\nWeb rules.\n',
+    )
+    assert RP.rules_rot(repo)["dead_path_globs"] == []
+
+
+def test_rule_without_paths_frontmatter_is_not_a_glob_finding(repo, memory_dir):
+    write_file(repo, "src/real.py", "x = 1\n")
+    git_commit(repo, "add real", 1_700_000_000)
+    write_file(repo, ".claude/rules/50-unscoped.md", "Always-loaded rule, no frontmatter.\n")
+    assert RP.rules_rot(repo)["dead_path_globs"] == []
+
+
+# ---- RUL-2 surfaces -------------------------------------------------------------------------- #
+def test_rot_producer_names_file_and_exact_reference(repo, memory_dir):
+    write_file(repo, "src/dep.py", "x = 1\n")
+    git_commit(repo, "add dep", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "Keep `src/gone.py` in mind.")
+    write_file(
+        repo,
+        ".claude/rules/20-scoped.md",
+        '---\npaths:\n  - "src/legacy/**"\n---\nLegacy.\n',
+    )
+    out = S.rules_rot_producer(memory_dir, repo)
+    assert out is not None
+    assert out.startswith("🧭 Rules-plane rot")
+    assert "CLAUDE.md references `src/gone.py` — path no longer in the repo" in out
+    assert "scopes paths: 'src/legacy/**' — matches nothing" in out
+
+
+def test_rot_producer_silent_on_healthy_plane(repo, memory_dir):
+    write_file(repo, "src/dep.py", "x = 1\n")
+    git_commit(repo, "add dep", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "See `src/dep.py`.")
+    assert S.rules_rot_producer(memory_dir, repo) is None
+
+
+def test_rot_doctor_warns_with_counts_and_top_finding(repo, memory_dir):
+    write_file(repo, "src/dep.py", "x = 1\n")
+    git_commit(repo, "add dep", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "Keep `src/gone.py` in mind.")
+    r = D.check_rules_plane_rot(D.DoctorContext(memory_dir, repo))
+    assert r["status"] == "warn"
+    assert "1 rotten code reference(s)" in r["message"]
+    assert "CLAUDE.md references `src/gone.py`" in r["message"]
+
+
+def test_rot_doctor_ok_when_clean(repo, memory_dir):
+    write_file(repo, "src/dep.py", "x = 1\n")
+    git_commit(repo, "add dep", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "See `src/dep.py`.")
+    r = D.check_rules_plane_rot(D.DoctorContext(memory_dir, repo))
+    assert r["status"] == "ok"
+
+
+def test_rot_never_writes_and_never_raises(repo, memory_dir, tmp_path):
+    claude_md = write_file(repo, "CLAUDE.md", "Keep `src/gone.py` in mind.")
+    write_file(repo, "src/dep.py", "x = 1\n")
+    git_commit(repo, "add", 1_700_000_000)
+    before = open(claude_md, encoding="utf-8").read()
+    RP.rules_rot(repo)
+    S.rules_rot_producer(memory_dir, repo)
+    assert open(claude_md, encoding="utf-8").read() == before  # names the fix, never makes it
+    bogus = str(tmp_path / "nope")
+    assert RP.rules_rot(bogus) == {"code_ref_rot": [], "dead_path_globs": []}
+    assert S.rules_rot_producer(bogus, bogus) is None
+
+
+def test_rot_wired_into_producers_and_checks():
+    assert any(label == "rules_rot" for label, _fn in S.PRODUCERS)
+    assert "rules_plane_rot" in [label for label, _ in D.CHECKS]

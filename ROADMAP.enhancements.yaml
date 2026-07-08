@@ -393,7 +393,7 @@ workstreams:
         title: Staleness & citation-rot applied to the rules plane itself
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: claude-rules, verdict: KEEP (lead with CLAUDE.md code-ref drift)}
         problem: >-
           .claude/rules `paths:` globs and CLAUDE.md code references have ZERO

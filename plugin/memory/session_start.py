@@ -498,6 +498,54 @@ def rules_conflict_producer(
         return None
 
 
+# RUL-2: how many rules-plane rot lines show before folding into a count. Same loud family
+# as citation_rot — the rules plane is ALWAYS-LOADED, so a rotten reference there misleads
+# every session until fixed.
+_MAX_RULES_ROT_LINES = 4
+
+
+def rules_rot_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """RUL-2: staleness/citation-rot applied to the rules plane itself.
+
+    The governance plane has ZERO staleness tracking of its own: a CLAUDE.md backtick
+    reference to a moved file, a ``module.symbol`` that no longer exists, or a
+    ``.claude/rules`` ``paths:`` glob scoping a deleted tree (the lazy-load feature RUL-0
+    confirmed) silently wastes always-loaded context and misleads. This surfaces
+    ``rules_plane.rules_rot`` findings with the exact file + reference so the fix is a
+    per-item human edit — hippo never rewrites a governance file (inv1/inv4). Loud like
+    citation_rot (inv3); off the hot path (inv6). ``ctx`` (LIF-6) is unused.
+    """
+    try:
+        from .rules_plane import rules_rot
+
+        rot = rules_rot(repo_root)
+        code_rot = rot["code_ref_rot"]
+        dead_globs = rot["dead_path_globs"]
+        if not code_rot and not dead_globs:
+            return None
+        lines = [
+            "🧭 Rules-plane rot — governance files reference code that left the tree. "
+            "Fix per item (hippo names the reference, you edit the file):"
+        ]
+        entries: List[str] = []
+        for r in code_rot:
+            what = "path no longer in the repo" if r["kind"] == "path" else "symbol no longer defined"
+            entries.append(f"  • {r['file']} references `{r['ref']}` — {what}")
+        for d in dead_globs:
+            entries.append(
+                f"  • {d['file']} scopes paths: '{d['glob']}' — matches nothing, the rule can never load"
+            )
+        lines.extend(entries[:_MAX_RULES_ROT_LINES])
+        overflow = len(entries) - _MAX_RULES_ROT_LINES
+        if overflow > 0:
+            lines.append(f"  … and {overflow} more — run /hippo:doctor for the full list.")
+        return "\n".join(lines)
+    except Exception:
+        return None
+
+
 # SIG-1: how many relevant-to-current-work memories the positive producer lists, and how far
 # each description is trimmed. A positive block stays FOCUSED (a handful of top matches), unlike
 # the warning producers whose count is the point — so this cap is tighter than _MAX_ITEMS_PER_PRODUCER.
@@ -729,6 +777,7 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("index_integrity", index_integrity_producer),  # names on-disk index corruption (QUA-5) — recall/build_index already degrade silently
     ("unresolvable_baseline", unresolvable_baseline_producer),  # legibility for find_stale's sha-fallback path
     ("rules_conflict", rules_conflict_producer),  # RUL-1: governance cites a memory the corpus disputes (superseded/contradicted/never-recalled)
+    ("rules_rot", rules_rot_producer),  # RUL-2: citation-rot/staleness over the always-loaded rules plane itself
     ("relevant_to_work", relevant_to_work_producer),  # SIG-1: the first POSITIVE block — memories about the files you're editing
     ("resume_card", resume_card_producer),  # SIG-2: "where was I" — replay the last session from the episode buffer
     ("git_recent", git_recent_producer),

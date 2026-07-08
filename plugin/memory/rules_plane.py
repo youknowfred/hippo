@@ -9,6 +9,9 @@ convention, promoted to importable API) plus the read-only joins built over it:
   - RUL-1 ``conflict_radar`` — governance files citing memories the corpus disagrees with:
     the authority-evidence gap (cited but never recalled, strength < 0.15) and the
     typed-edge leg (cited but another memory ``supersedes``/``contradicts`` it).
+  - RUL-2 ``rules_rot`` — hippo's staleness discipline applied to the rules plane itself:
+    backtick code-references whose path/symbol left the tree, and ``.claude/rules``
+    ``paths:`` globs that match nothing (the harness lazy-load feature RUL-0 confirmed).
 
 Relationship to the two pre-existing scan surfaces (deliberately NOT merged, inv5):
 ``archive._SCAN_TARGETS`` is the ARCHIVE-PROTECTION surface (adds ``docs/prompts``, omits
@@ -197,5 +200,235 @@ def conflict_radar(
             "gate_met": gate_met,
             "distinct_sessions": distinct,
         }
+    except Exception:
+        return empty
+
+
+# --------------------------------------------------------------------------- #
+# RUL-2: staleness & citation rot over the rules plane itself
+# --------------------------------------------------------------------------- #
+# A backtick span whose CONTENT we inspect for code references. Distinct from
+# _BACKTICK_TOKEN_RE (memory-name-shaped tokens, RUL-1): rot cares about path-like and
+# dotted-symbol tokens, which that regex deliberately excludes.
+_BACKTICK_SPAN_RE = re.compile(r"`([^`\n]+)`")
+
+# A path-like backtick ref: optional dir segments + filename + a CODE extension (the same
+# extension gate as provenance._CITATION_RE — .md refs are memory citations, RUL-1's job),
+# with an optional :line/:line-range suffix we strip. Anchored to span content so `see
+# foo/bar.py for details` is prose, not a ref.
+_PATH_REF_RE = re.compile(
+    r"^((?:[\w.-]+/)*[\w.-]+\.(?:py|ts|tsx|js|jsx|sh|yaml|yml|json|toml|ini|cfg))"
+    r"(?::\d+(?:-\d+)?)?$"
+)
+
+# A dotted-symbol ref (``module.symbol`` / ``pkg.module.symbol``): resolved conservatively —
+# the module component must map to exactly ONE ``<module>.py`` in the tree, and only a
+# LOCATED-module-with-MISSING-symbol is a finding (an unresolvable module is silence, never
+# a cry-wolf guess).
+_SYMBOL_REF_RE = re.compile(r"^([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+)$")
+
+
+def _expand_braces(pattern: str) -> List[str]:
+    """Expand one level of ``{a,b}`` alternatives (the docs' ``src/**/*.{ts,tsx}`` form);
+    recursion covers multiple groups. The pattern itself when no braces."""
+    m = re.search(r"\{([^{}]*)\}", pattern)
+    if not m:
+        return [pattern]
+    head, tail = pattern[: m.start()], pattern[m.end() :]
+    out: List[str] = []
+    for alt in m.group(1).split(","):
+        out.extend(_expand_braces(head + alt + tail))
+    return out
+
+
+def _glob_to_re(pattern: str) -> "re.Pattern":
+    """Translate one ``paths:`` glob to a full-path regex: ``**/`` spans zero or more
+    directories, ``**`` spans anything, ``*``/``?`` stay within one path segment."""
+    out = []
+    i = 0
+    while i < len(pattern):
+        ch = pattern[i]
+        if pattern.startswith("**/", i):
+            out.append(r"(?:[^/]+/)*")
+            i += 3
+        elif pattern.startswith("**", i):
+            out.append(r".*")
+            i += 2
+        elif ch == "*":
+            out.append(r"[^/]*")
+            i += 1
+        elif ch == "?":
+            out.append(r"[^/]")
+            i += 1
+        else:
+            out.append(re.escape(ch))
+            i += 1
+    return re.compile("^" + "".join(out) + "$")
+
+
+def rule_paths_globs(text: str) -> List[str]:
+    """The ``paths:`` glob list from one ``.claude/rules`` file's YAML frontmatter
+    (the harness feature RUL-0 confirmed: block or flow list, strings only).
+    ``[]`` when absent/unparseable. Never raises."""
+    try:
+        from .provenance import parse_frontmatter
+
+        fm = parse_frontmatter(text)
+        raw = fm.get("paths")
+        if isinstance(raw, str):
+            raw = [raw]
+        if not isinstance(raw, list):
+            return []
+        return [g.strip() for g in raw if isinstance(g, str) and g.strip()]
+    except Exception:
+        return []
+
+
+def _rule_scoped_files(repo_root: str) -> List[str]:
+    """Absolute paths of the ``.claude/rules/*.md`` files only (the ``paths:``-bearing
+    subset of the governance plane)."""
+    try:
+        return [str(p) for p in sorted(Path(repo_root).glob(".claude/rules/*.md")) if p.is_file()]
+    except Exception:
+        return []
+
+
+def _repo_paths_for_globs(repo_root: str, repo_files: Set[str]) -> Set[str]:
+    """The path universe a ``paths:`` glob may legitimately scope: tracked files UNION
+    untracked-but-not-ignored ones (a rule scoping a not-yet-committed tree is alive;
+    an ignored/absent tree is not). Never raises; tracked-only on any git failure."""
+    paths = set(repo_files)
+    try:
+        import subprocess
+
+        out = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if out.returncode == 0:
+            paths.update(ln.strip() for ln in out.stdout.splitlines() if ln.strip())
+    except Exception:
+        pass
+    return paths
+
+
+def rules_rot(repo_root: str) -> dict:
+    """RUL-2: citation rot + staleness applied to the rules plane itself.
+
+    Returns::
+
+        {
+          "code_ref_rot":    [{"file", "ref", "kind": "path"|"symbol"}],
+          "dead_path_globs": [{"file", "glob"}],
+        }
+
+    CODE-REF leg (feature-independent): a backtick reference in any governance file whose
+    target left the tree — a path-like ref (code extension, optional ``:line`` stripped)
+    absent from ``git ls-files`` (bare basenames resolve through the basename index), or a
+    dotted ``module.symbol`` ref whose module resolves to exactly one ``.py`` file that no
+    longer defines the symbol (``def``/``class``/module-level assignment). Unresolvable
+    modules and ambiguous basenames are SILENCE, not findings — under-flag beats cry-wolf.
+
+    PATHS-GLOB leg (RUL-0-gated, confirmed 2026-07-08): a ``.claude/rules`` file whose
+    frontmatter ``paths:`` globs match NOTHING in the tree (tracked ∪ untracked-unignored)
+    silently wastes its lazy-load trigger — every glob dead means the rule can never fire.
+    Glob semantics mirror the documented harness feature (``**``, braces).
+
+    Read-only; offers per-item edits by NAMING the exact file+reference — never rewrites a
+    governance file (inv1/inv4). Never raises; empty findings on any failure.
+    """
+    empty: dict = {"code_ref_rot": [], "dead_path_globs": []}
+    try:
+        from .provenance import build_repo_file_index
+
+        repo_files, basename_index = build_repo_file_index(repo_root)
+        if not repo_files:
+            return empty  # non-git / empty tree: no oracle, no findings
+
+        code_rot: List[dict] = []
+        module_text_cache: Dict[str, Optional[str]] = {}
+        for path in gov_files(repo_root):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+            except Exception:
+                continue
+            rel = _rel(repo_root, path)
+            seen_refs: Set[str] = set()
+            for span in _BACKTICK_SPAN_RE.findall(text):
+                span = span.strip()
+                if span in seen_refs:
+                    continue
+                pm = _PATH_REF_RE.match(span)
+                if pm:
+                    token = pm.group(1)
+                    if "/" in token:
+                        alive = token in repo_files
+                    else:
+                        alive = bool(basename_index.get(token))
+                    if not alive:
+                        seen_refs.add(span)
+                        code_rot.append({"file": rel, "ref": span, "kind": "path"})
+                    continue
+                sm = _SYMBOL_REF_RE.match(span)
+                if sm:
+                    parts = sm.group(1).split(".")
+                    module_base = parts[-2] + ".py"
+                    symbol = parts[-1]
+                    candidates = basename_index.get(module_base) or []
+                    if len(candidates) != 1:
+                        continue  # unresolvable/ambiguous module: silence, not a guess
+                    mod_path = candidates[0]
+                    if mod_path not in module_text_cache:
+                        try:
+                            with open(
+                                os.path.join(repo_root, mod_path), "r", encoding="utf-8"
+                            ) as fh:
+                                module_text_cache[mod_path] = fh.read()
+                        except Exception:
+                            module_text_cache[mod_path] = None
+                    mod_text = module_text_cache[mod_path]
+                    if mod_text is None:
+                        continue
+                    defined = re.search(
+                        rf"(?m)^\s*(?:def|class)\s+{re.escape(symbol)}\b"
+                        rf"|^{re.escape(symbol)}\s*=",
+                        mod_text,
+                    )
+                    if not defined:
+                        seen_refs.add(span)
+                        code_rot.append({"file": rel, "ref": span, "kind": "symbol"})
+
+        dead_globs: List[dict] = []
+        universe: Optional[Set[str]] = None
+        for path in _rule_scoped_files(repo_root):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+            except Exception:
+                continue
+            globs = rule_paths_globs(text)
+            if not globs:
+                continue
+            if universe is None:
+                universe = _repo_paths_for_globs(repo_root, repo_files)
+            rel = _rel(repo_root, path)
+            for glob in globs:
+                try:
+                    matched = False
+                    for g in _expand_braces(glob):
+                        rx = _glob_to_re(g)
+                        if any(rx.match(p) for p in universe):
+                            matched = True
+                            break
+                except Exception:
+                    continue
+                if not matched:
+                    dead_globs.append({"file": rel, "glob": glob})
+
+        return {"code_ref_rot": code_rot, "dead_path_globs": dead_globs}
     except Exception:
         return empty
