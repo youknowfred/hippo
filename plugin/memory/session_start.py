@@ -12,6 +12,9 @@ SessionStart producer for the memory concerns):
   - relevant-to-work (SIG-1) — the FIRST positive block: memories whose cited_paths intersect
                            the session's uncommitted diff (the code you're actually editing),
                            ranked by recall strength. SILENT on a clean tree.
+  - resume-card (SIG-2)  — "where was I": replay the last session from the (clone-local) episode
+                           buffer — themes, relied-on memories, changed cited files. SILENT on a
+                           cold start or a trivial last session.
   - git-recent  (Tier 2) — memories captured within the recent window (newest first).
   - link-health (Tier 3) — dangling/orphan wikilink count across the corpus.
   - floor                — SILENT unless project/reference links re-bloat the MEMORY.md floor
@@ -503,6 +506,112 @@ def relevant_to_work_producer(
         return None
 
 
+# SIG-2: the resume card's strict caps + the substantive-thread gate. A trivial/exploratory
+# last session (one throwaway query, no recall) is BELOW the gate and produces nothing.
+_MAX_RESUME_THEMES = 4
+_MAX_RESUME_RELIED = 6
+_MAX_RESUME_CHANGED = 6
+_MIN_RESUME_THEMES = 2  # substantive iff it leaned on a memory OR asked >= this many distinct things
+
+
+def _corpus_cited_union(memory_dir: str) -> set:
+    """The union of every project memory's ``cited_paths`` (repo-relative). Never raises."""
+    from .staleness import _iter_memory_files, read_provenance
+
+    union: set = set()
+    try:
+        for path in _iter_memory_files(memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+            except Exception:
+                continue
+            cited, _sc = read_provenance(text)
+            for c in cited:
+                union.add(c)
+    except Exception:
+        return union
+    return union
+
+
+def resume_card_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """SIG-2: a 'where was I' resume card replayed from the episode buffer.
+
+    The episode buffer already soaks the exact ingredients for continuity — per-session query
+    previews, recalled names, and a repo HEAD watermark — but only ``capture`` (the SessionEnd
+    draft pass) ever read it; reopening a repo was a cold start. This replays the MOST RECENT
+    session in THIS clone's (gitignored, clone-local) buffer into a legible orientation block:
+    what you were working on, which memories you leaned on, and which cited files changed since.
+
+    Precise + bounded: the "changed cited files" list is the session's since-watermark diff
+    intersected with the corpus's own cited_paths (so it names only files a memory knows about,
+    strictly capped). GATED to substantive threads — a trivial/exploratory last session (no
+    recall, < _MIN_RESUME_THEMES distinct queries) produces nothing. Pure template assembly at
+    SessionStart over gitignored telemetry (inv1); read-only, never acts on prior work (inv3);
+    off the hot path (inv6). Labelled clone-local: the buffer is per-clone, so this can never
+    resume a teammate's thread. ``ctx`` (LIF-6) is unused — see ``stale_venv_producer``.
+    """
+    try:
+        from .capture import gather_session_context
+        from .telemetry import default_telemetry_dir, read_episodes
+
+        td = default_telemetry_dir(memory_dir)
+        # The most-recent session in the buffer. At SessionStart the CURRENT session has logged
+        # no episodes yet (recall logs on UserPromptSubmit, which fires later), so on a fresh
+        # start this is genuinely the PRIOR session; on resume/compact it is this same thread's
+        # earlier work — either way "where you left off" is the correct framing.
+        latest_ts = None
+        sid = None
+        any_episode = False
+        for e in read_episodes(td):
+            any_episode = True
+            ts = e.get("ts")
+            if ts is None:
+                continue
+            if latest_ts is None or ts > latest_ts:
+                latest_ts = ts
+                sid = e.get("session_id")
+        if not any_episode:
+            return None  # cold start — no local history to resume yet
+
+        seed = gather_session_context(
+            sid, repo_root=repo_root, telemetry_dir=td, memory_dir=memory_dir
+        )
+        if not seed:
+            return None
+        themes = seed.get("query_previews") or []
+        relied = seed.get("recalled_names") or []
+        if not relied and len(themes) < _MIN_RESUME_THEMES:
+            return None  # trivial/exploratory last session — nothing worth resuming
+
+        changed = set(seed.get("changed_paths") or [])
+        changed_cited = sorted(changed & _corpus_cited_union(memory_dir)) if changed else []
+
+        lines = [
+            "🧭 Where you left off — recent work in this repo (from your local session "
+            "history on this clone):"
+        ]
+        if themes:
+            shown = "; ".join(themes[:_MAX_RESUME_THEMES])
+            more = f" (+{len(themes) - _MAX_RESUME_THEMES} more)" if len(themes) > _MAX_RESUME_THEMES else ""
+            lines.append(f"  • you were working on: {shown}{more}")
+        if relied:
+            shown = ", ".join(relied[:_MAX_RESUME_RELIED])
+            more = f" (+{len(relied) - _MAX_RESUME_RELIED} more)" if len(relied) > _MAX_RESUME_RELIED else ""
+            lines.append(f"  • you leaned on: {shown}{more}")
+        if changed_cited:
+            shown = ", ".join(changed_cited[:_MAX_RESUME_CHANGED])
+            more = f" (+{len(changed_cited) - _MAX_RESUME_CHANGED} more)" if len(changed_cited) > _MAX_RESUME_CHANGED else ""
+            lines.append(
+                f"  • cited files that changed since (verify memories about them): {shown}{more}"
+            )
+        return "\n".join(lines)
+    except Exception:
+        return None
+
+
 # (label, fn). Each tier appends a producer here — never a parallel hook entry. Every fn
 # shares ONE call shape — ``(memory_dir, repo_root, ctx)`` — LIF-6's ``RunContext``, even
 # when a given producer ignores it (see the module docstring).
@@ -517,6 +626,7 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("index_integrity", index_integrity_producer),  # names on-disk index corruption (QUA-5) — recall/build_index already degrade silently
     ("unresolvable_baseline", unresolvable_baseline_producer),  # legibility for find_stale's sha-fallback path
     ("relevant_to_work", relevant_to_work_producer),  # SIG-1: the first POSITIVE block — memories about the files you're editing
+    ("resume_card", resume_card_producer),  # SIG-2: "where was I" — replay the last session from the episode buffer
     ("git_recent", git_recent_producer),
     ("link_health", lint_links_producer),
     ("floor", floor_producer),  # silent unless project/reference links re-bloat the MEMORY.md floor

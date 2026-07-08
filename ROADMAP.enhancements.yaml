@@ -208,7 +208,7 @@ workstreams:
         title: "'Where was I' resume card — task continuity from the episode buffer"
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: frontier, verdict: KEEP, leverage: 4}
         problem: >-
           The episode buffer soaks exactly the ingredients for continuity
