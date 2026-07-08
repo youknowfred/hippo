@@ -332,7 +332,7 @@ workstreams:
         title: "Spike — verify the .claude/rules `paths:` auto-load harness feature"
         priority: P0
         effort: S
-        status: planned
+        status: done
         source: {lens: claude-rules grounding, note: web-derived claim to confirm in-harness}
         problem: >-
           Several bridges lean on .claude/rules (Claude Code 2.0.64) being
@@ -347,6 +347,22 @@ workstreams:
           - a written, dated confirmation (or refutation) of the .claude/rules paths: behavior
           - RUL-2/RUL-6 paths:-dependent scope is enabled or descoped accordingly
         dependencies: []
+        finding: >-
+          CONFIRMED 2026-07-08 (three sources; see decisions.ED-3). (1) Official docs
+          (code.claude.com/docs/en/memory, "Organize rules with .claude/rules/"):
+          project .claude/rules/*.md discovered recursively; YAML frontmatter
+          `paths:` takes a list of globs (`**`, brace expansion supported); unscoped
+          rules load at session launch at CLAUDE.md priority; paths:-scoped rules
+          load LAZILY when Claude reads a file matching the glob; ~/.claude/rules is
+          the user-level tier (project rules win). Introduced v2.0.64. (2) The
+          installed harness binary (2.1.96) carries the feature's ".claude/rules/**"
+          machinery. (3) LIVE in-harness probe on this machine: a paths:-scoped rule
+          file was injected as a system-reminder immediately after a Read of a
+          matching file — including inside a Task SUBAGENT, which received NO
+          unscoped rules at start (confirms RUL-5's zero-automatic-injection premise)
+          but DID receive the scoped rule on matching Read. VERDICT — RUL-2's
+          paths:-glob-existence leg is ENABLED; RUL-6's paths: derivation is
+          unblocked on the harness side (still LIF-7-gated, tier T7).
 
       - id: RUL-1
         title: Rule↔memory conflict radar (a first-class loud producer)
@@ -1150,7 +1166,7 @@ release_train:
   - tier: T2
     target_version: 1.2.0
     theme: "The rules bridge"
-    status: planned
+    status: in_progress
     done_means: >-
       hippo is the ranking/hygiene/staleness layer over the Claude-rules plane it
       already reads: a loud rule↔memory conflict radar, staleness over rules,
@@ -1273,6 +1289,13 @@ decisions:
       RUL-0 spike confirms it before RUL-2's paths: leg and RUL-6 depend on it; the
       feature-independent legs (CLAUDE.md code-ref drift, the strength-gap radar)
       proceed regardless.
+      RESOLVED 2026-07-08 — RUL-0 ran (docs + binary inspection + live in-harness
+      probe on Claude Code 2.1.96) and CONFIRMED the feature end-to-end: unscoped
+      .claude/rules/*.md always-load at CLAUDE.md priority; `paths:`-scoped rules
+      lazy-inject when a matching file is read (verified live, main session and
+      Task subagent alike). Full evidence recorded on the RUL-0 item's `finding`.
+      The paths:-dependent legs (RUL-2 glob-existence, RUL-6 cited_paths→paths:
+      derivation) may now build on the feature.
   - id: ED-4
     question: How do schema-bearing items land?
     decision: clean break + one migration each, sequenced behind versioning
