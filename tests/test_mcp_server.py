@@ -198,3 +198,116 @@ def test_hook_path_never_imports_the_server():
     # if the hot-path modules never import mcp_server.
     for mod in (R, __import__("memory.session_start", fromlist=["x"])):
         assert "mcp_server" not in inspect.getsource(mod)
+
+
+# --------------------------------------------------------------------------- #
+# Resources (RUL-5) — hippo://floor + hippo://rules-view, agent-pulled
+# --------------------------------------------------------------------------- #
+def _read(uri, req_id=77):
+    return M.handle_request(
+        {"jsonrpc": "2.0", "id": req_id, "method": "resources/read", "params": {"uri": uri}}
+    )
+
+
+def _contents(resp):
+    return resp["result"]["contents"][0]
+
+
+def test_initialize_declares_resources_capability():
+    resp = M.handle_request({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+    assert "resources" in resp["result"]["capabilities"]
+    assert "tools" in resp["result"]["capabilities"]  # unchanged
+
+
+def test_resources_list_exposes_floor_and_rules_view():
+    resp = M.handle_request({"jsonrpc": "2.0", "id": 5, "method": "resources/list"})
+    resources = resp["result"]["resources"]
+    assert {r["uri"] for r in resources} == {"hippo://floor", "hippo://rules-view"}
+    for r in resources:
+        assert r["mimeType"] == "text/markdown"
+        assert r["name"] and r["description"]
+    floor = next(r for r in resources if r["uri"] == "hippo://floor")
+    assert "never auto-loaded" in floor["description"]  # the no-second-channel promise
+
+
+def test_resources_read_floor_returns_project_floor(corpus, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))  # hermetic repo_root
+    with open(os.path.join(corpus, "MEMORY.md"), "w") as fh:
+        fh.write("## User\n\n- [deploy runbook](deploy_runbook.md) — canary lane\n")
+    resp = _read("hippo://floor")
+    c = _contents(resp)
+    assert c["uri"] == "hippo://floor" and c["mimeType"] == "text/markdown"
+    assert "deploy runbook" in c["text"]  # the project floor content, pulled
+    assert "agent-pulled" in c["text"]  # labelled as the explicit substitute channel
+
+
+def test_resources_read_floor_empty_is_legible(corpus, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))  # hermetic repo_root
+    text = _contents(_read("hippo://floor"))["text"]
+    assert "Floor empty" in text  # no MEMORY.md in the fixture corpus — say so, don't fabricate
+
+
+def test_resources_read_floor_withheld_for_untrusted_corpus(repo, memory_dir, monkeypatch):
+    os.makedirs(memory_dir, exist_ok=True)
+    with open(os.path.join(memory_dir, "MEMORY.md"), "w") as fh:
+        fh.write("## User\n\n- [secret pointer](x.md) — should be withheld\n")
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", memory_dir)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)  # repo_root resolves to the test repo
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)  # exercise the real SEC-1 gate
+    text = _contents(_read("hippo://floor"))["text"]
+    assert "WITHHELD" in text and "untrusted" in text
+    assert "secret pointer" not in text  # explicit refusal, never silent content
+
+
+def test_resources_read_rules_view_reports_conflict_and_rot(repo, memory_dir, monkeypatch):
+    os.makedirs(memory_dir, exist_ok=True)
+    for name, extra in (("old_way", ""), ("new_way", "supersedes: old_way\n")):
+        with open(os.path.join(memory_dir, f"{name}.md"), "w") as fh:
+            fh.write(f"---\nname: {name}\ndescription: d\n{extra}metadata:\n  type: project\n---\nb\n")
+    with open(os.path.join(repo, "CLAUDE.md"), "w") as fh:
+        fh.write("Follow `old_way` and keep `src/gone.py` in mind.\n")
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", memory_dir)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)  # repo_root resolves to the test repo
+    import subprocess
+
+    subprocess.run(["git", "-C", repo, "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "seed"],
+        check=True,
+    )
+    text = _contents(_read("hippo://rules-view"))["text"]
+    assert "CLAUDE.md cites `old_way` but `new_way` supersedes it" in text
+    assert "`src/gone.py`" in text and "path gone" in text
+    assert "/hippo:consolidate" in text  # findings route to per-item decisions
+
+
+def test_resources_read_rules_view_clean_plane_is_legible(corpus, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))  # a governance-plane-less project
+    text = _contents(_read("hippo://rules-view"))["text"]
+    assert "Conflicts: none" in text and "rot: none" in text
+
+
+def test_resources_read_unknown_uri_is_invalid_params():
+    resp = _read("hippo://nope")
+    assert resp["error"]["code"] == -32602
+    assert "unknown resource" in resp["error"]["message"]
+
+
+def test_serve_stream_answers_resources_read(corpus):
+    lines = [
+        json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}),
+        json.dumps({"jsonrpc": "2.0", "id": 2, "method": "resources/list"}),
+        json.dumps(
+            {"jsonrpc": "2.0", "id": 3, "method": "resources/read",
+             "params": {"uri": "hippo://floor"}}
+        ),
+    ]
+    out = io.StringIO()
+    M.serve(io.StringIO("\n".join(lines) + "\n"), out)
+    resps = [json.loads(ln) for ln in out.getvalue().splitlines()]
+    assert [r["id"] for r in resps] == [1, 2, 3]
+    assert "resources" in resps[0]["result"]["capabilities"]
+    assert {r["uri"] for r in resps[1]["result"]["resources"]} == {
+        "hippo://floor", "hippo://rules-view",
+    }
+    assert resps[2]["result"]["contents"][0]["uri"] == "hippo://floor"

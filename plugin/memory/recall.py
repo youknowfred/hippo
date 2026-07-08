@@ -1114,9 +1114,103 @@ _PROJECT_TIER = "project"
 _USER_TIER = "user"
 _PRIVATE_TIER = "private"
 
+# RUL-4: the rules-plane recall SOURCE label — not a memory tier. A governance section
+# surfaced as a pointer carries corpus="rule" so both renderers label it; it is never a
+# corpus entry (no import, no duplication — the rules plane stays its own authority).
+_RULES_SOURCE = "rule"
+
 # Human-facing origin markers for fused hits (format_results / recall_view). The project tier
 # (and single-corpus recall, corpus=None) is unmarked so existing output stays byte-identical.
-_CORPUS_MARKER = {_USER_TIER: " (user memory)", _PRIVATE_TIER: " (private memory)"}
+_CORPUS_MARKER = {
+    _USER_TIER: " (user memory)",
+    _PRIVATE_TIER: " (private memory)",
+    _RULES_SOURCE: " (rule)",
+}
+
+# RUL-4: how many rules-plane pointers may APPEND to one recall (never displacing a corpus
+# hit), and the QUERY-CONTAINMENT floor one must clear: |query ∩ section| / |query| over
+# distinct content tokens. Containment — not BM25 — because the rules plane is routinely
+# 1-5 sections, where Okapi idf mass is all-zero/negative (the degenerate-corpus case
+# _bm25_dup_scores refuses to score); containment is scale-independent, deterministic, and
+# reads "the section covers most of what the query asks". Conservative by construction: a
+# long rambling prompt rarely clears 0.6, which is the right bias — a redundant rule
+# pointer on every prompt costs more trust than a missed one.
+_RULES_HIT_LIMIT = 2
+_RULES_HIT_FLOOR = 0.6
+
+
+def _rules_hit_floor() -> float:
+    """``HIPPO_RULES_RECALL_FLOOR`` override for the rules-pointer relevance floor."""
+    try:
+        return float(os.environ.get("HIPPO_RULES_RECALL_FLOOR", _RULES_HIT_FLOOR))
+    except Exception:
+        return _RULES_HIT_FLOOR
+
+
+def _rules_source_hits(
+    q_tokens: List[str],
+    index_dir: Optional[str],
+    repo_root: Optional[str],
+    *,
+    start_rank: int = 0,
+) -> List[dict]:
+    """RUL-4: governance sections genuinely relevant to this query, as labelled POINTERS.
+
+    Hot-path-safe by construction: ONE small-JSON read (``rules_plane.load_rules_cache``,
+    built off-path at SessionStart) + pure set arithmetic — no model, no network, no file
+    scan (inv6). Relevance is QUERY CONTAINMENT (``|q ∩ section| / |q|`` over distinct
+    content tokens — see ``_RULES_HIT_FLOOR``'s comment for why not BM25 at this corpus
+    scale); only sections clearing ``_rules_hit_floor()`` surface, capped at
+    ``_RULES_HIT_LIMIT``. Result dicts carry every conventional key with
+    ``corpus="rule"``/``via="rules"`` so both renderers label them — recall only ADDS a
+    pointer; always-loaded rules are never demoted, moved, or copied into the corpus.
+    Never raises; ``[]`` on any failure or when the cache is absent (the doctor
+    rules-source check keeps that degradation legible).
+    """
+    try:
+        from .rules_plane import load_rules_cache
+
+        qset = set(q_tokens)
+        if not qset:
+            return []
+        cache = load_rules_cache(index_dir)
+        if not cache:
+            return []
+        entries = cache.get("entries") or []
+        if not entries:
+            return []
+        floor = _rules_hit_floor()
+        scored = []
+        for i, e in enumerate(entries):
+            overlap = qset.intersection(e.get("tokens") or [])
+            if not overlap:
+                continue
+            containment = len(overlap) / len(qset)
+            if containment >= floor:
+                scored.append((i, containment))
+        scored.sort(key=lambda t: (-t[1], entries[t[0]]["file"], entries[t[0]]["title"]))
+        hits: List[dict] = []
+        for i, norm in scored[:_RULES_HIT_LIMIT]:
+            e = entries[i]
+            hits.append(
+                {
+                    "name": e["title"],
+                    "file": e["file"],
+                    "description": e.get("preview") or "",
+                    "score": round(float(norm), 6),
+                    "rank": start_rank + len(hits) + 1,
+                    "backend": "bm25",
+                    "via": "rules",
+                    "note": "",
+                    "stale_banner": "",
+                    "salience": None,
+                    "corpus": _RULES_SOURCE,
+                    "root": repo_root,
+                }
+            )
+        return hits
+    except Exception:
+        return []
 
 
 def _extra_recall_tiers(memory_dir: str) -> List[Tuple[str, str, str]]:
@@ -1514,7 +1608,15 @@ def recall(
         # organic list yields NO graph seeds and thus no expansion -- abstention is absolute,
         # never overridden by a linked memory that shares no signal with the query itself.
         if not rankings:
-            return []
+            # RUL-4: corpus abstention stays absolute for MEMORIES (no graph expansion, no
+            # padding) — but a governance section that strongly matches is still the right
+            # answer to "does anything I always carry cover this?", and this is exactly the
+            # case where the pointer is worth the most (the corpus has nothing). [] when the
+            # rules plane has nothing either, preserving RET-1 abstention end-to-end.
+            rules_index_dir = index_dir
+            if rules_index_dir is None and memory_dir:
+                rules_index_dir = default_index_dir(memory_dir)
+            return _rules_source_hits(q_tokens, rules_index_dir, repo_root)
         fused = _rrf_fuse(rankings, weights=weights)  # [(idx, score), ...] desc by fused score
         # backend label reflects the PRIMARY (description) signals only -- body rankings are
         # a backstop, not a third backend a user needs to reason about at the display layer.
@@ -1698,6 +1800,13 @@ def recall(
                     "root": e.get("root"),
                 }
             )
+        # RUL-4: rules-plane pointers APPEND after the organic top-k — extra lines, never
+        # competitors: they hold no top-k slot, feed no knee comparison, and displace no
+        # corpus hit (the acceptance bar: recall only ADDS a pointer). Same one-JSON-read
+        # cost class as the graph/stale caches above (inv6).
+        results.extend(
+            _rules_source_hits(q_tokens, graph_index_dir, repo_root, start_rank=len(results))
+        )
         return results
     except Exception:
         return []
@@ -1886,9 +1995,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         results = recall(
             query, k=pool_k, memory_dir=memory_dir, index_dir=args.index_dir, repo_root=repo_root
         )
+        # RUL-4: rules-plane pointers are EXTRA lines, not top-k competitors — split them out
+        # so the floor-dedup slice below can never cut them (nor let them displace a corpus
+        # hit), then re-append and renumber so the emitted rank sequence stays gapless.
+        rule_hits = [r for r in results if r.get("corpus") == _RULES_SOURCE]
+        results = [r for r in results if r.get("corpus") != _RULES_SOURCE]
         if floor:
             results = [r for r in results if r["name"] not in floor]
-        results = results[: args.k]
+        results = results[: args.k] + rule_hits
+        for i, r in enumerate(results):
+            r["rank"] = i + 1
     else:
         results = []  # hygiene skipped recall — no model load, no junk injection
     latency_ms = (time.perf_counter() - t0) * 1000.0

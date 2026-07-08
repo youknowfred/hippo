@@ -923,6 +923,124 @@ def check_injection_precision(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"injection-precision check failed: {exc}."}
 
 
+def check_rules_conflicts(ctx: DoctorContext) -> Dict[str, str]:
+    """RUL-1: the rule↔memory conflict radar's always-available surface.
+
+    Joins governance-plane citations (CLAUDE.md/AGENTS.md/.claude/rules|agents|skills)
+    against the corpus: a cited memory another memory ``supersedes``/``contradicts`` is a
+    live conflict; a cited memory no session recalls (strength < 0.15, once the 5-session
+    soak gate is met) is an authority-evidence gap. Read-only; findings route to a per-item
+    decision via /hippo:consolidate — nothing auto-resolves. ``ok`` when the planes agree;
+    never raises.
+    """
+    try:
+        from .rules_plane import conflict_radar
+        from .soak import SOAK_GATE_SESSIONS
+
+        radar = conflict_radar(ctx.memory_dir, ctx.repo_root)
+        conflicts = radar["edge_conflicts"]
+        gaps = radar["authority_gaps"]
+        if not conflicts and not gaps:
+            if radar["gate_met"]:
+                return {
+                    "status": "ok",
+                    "message": "rule↔memory conflicts: none — governance citations agree with the corpus.",
+                }
+            return {
+                "status": "ok",
+                "message": "rule↔memory conflicts: none — typed-edge leg clean; the "
+                f"strength leg waits on the soak gate ({radar['distinct_sessions']}/"
+                f"{SOAK_GATE_SESSIONS} sessions).",
+            }
+        if conflicts:
+            c = conflicts[0]
+            top = f"{c['cited_by'][0]} cites `{c['name']}` but `{c['by']}` {c['relation']} it"
+        else:
+            g = gaps[0]
+            top = (
+                f"{g['cited_by'][0]} cites `{g['name']}` but no session recalls it "
+                f"(strength {g['strength']:.2f})"
+            )
+        return {
+            "status": "warn",
+            "message": f"rule↔memory conflicts: {len(conflicts)} typed-edge conflict(s) + "
+            f"{len(gaps)} authority gap(s) — top: {top}. Decide per item via "
+            "/hippo:consolidate.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"rules-conflict check failed: {exc}."}
+
+
+def check_rules_plane_rot(ctx: DoctorContext) -> Dict[str, str]:
+    """RUL-2: citation rot + dead ``paths:`` globs across the always-loaded rules plane.
+
+    The doctor twin of the ``rules_rot`` producer: a governance backtick reference whose
+    path/symbol left the tree, or a ``.claude/rules`` frontmatter ``paths:`` glob matching
+    nothing (a rule that can never lazy-load). Read-only; names the exact reference so the
+    fix is a per-item human edit — never a rewrite. ``ok`` on a clean plane; never raises.
+    """
+    try:
+        from .rules_plane import rules_rot
+
+        rot = rules_rot(ctx.repo_root)
+        code_rot = rot["code_ref_rot"]
+        dead_globs = rot["dead_path_globs"]
+        if not code_rot and not dead_globs:
+            return {
+                "status": "ok",
+                "message": "rules-plane rot: none — governance code references and paths: globs resolve.",
+            }
+        if code_rot:
+            r = code_rot[0]
+            top = f"{r['file']} references `{r['ref']}` ({r['kind']} gone)"
+        else:
+            d = dead_globs[0]
+            top = f"{d['file']} scopes paths: '{d['glob']}' (matches nothing)"
+        return {
+            "status": "warn",
+            "message": f"rules-plane rot: {len(code_rot)} rotten code reference(s) + "
+            f"{len(dead_globs)} dead paths: glob(s) — top: {top}. Edit the named file per item.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"rules-plane rot check failed: {exc}."}
+
+
+def check_rules_source(ctx: DoctorContext) -> Dict[str, str]:
+    """RUL-4: the rules recall source's legibility line (inv3).
+
+    Recall silently skips the rules-plane source when its side-index is absent — this makes
+    that state visible: how many governance sections are indexed, or why none are (no
+    governance files, or a cache the next SessionStart will build). Read-only; ``ok``
+    always (an absent plane is a fact, not a fault); never raises.
+    """
+    try:
+        from .build_index import default_index_dir
+        from .rules_plane import gov_files, load_rules_cache
+
+        cache = load_rules_cache(default_index_dir(ctx.memory_dir))
+        if cache is not None:
+            n = len(cache.get("entries") or [])
+            files = len({e.get("file") for e in cache.get("entries") or []})
+            return {
+                "status": "ok",
+                "message": f"rules recall source: {n} governance section(s) indexed from "
+                f"{files} file(s) — strong query matches surface as '(rule)' pointers.",
+            }
+        if not gov_files(ctx.repo_root):
+            return {
+                "status": "ok",
+                "message": "rules recall source: no governance files (CLAUDE.md/.claude/rules) "
+                "in this repo — nothing to index.",
+            }
+        return {
+            "status": "ok",
+            "message": "rules recall source: side-index not built yet — the next SessionStart "
+            "builds it; until then recall surfaces no '(rule)' pointers.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"rules-source check failed: {exc}."}
+
+
 def check_plugin_version(ctx: DoctorContext) -> Dict[str, str]:
     """DOC-7: installed plugin version vs the version the venv was bootstrapped for (with COR-11).
 
@@ -985,6 +1103,9 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("hot_path_latency", check_hot_path_latency),
     ("recall_blind_spots", check_recall_blind_spots),
     ("injection_precision", check_injection_precision),
+    ("rules_conflicts", check_rules_conflicts),
+    ("rules_plane_rot", check_rules_plane_rot),
+    ("rules_source", check_rules_source),
     ("format_version", check_format_version),
     ("pack_drift", check_pack_drift),
     ("fill_me", check_fill_me),

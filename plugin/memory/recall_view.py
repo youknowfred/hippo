@@ -110,13 +110,18 @@ def describe(
         # basename joined to the project dir would read as "untyped" or collide with a same-named
         # project file. A single-corpus hit has no root and falls back to memory_dir.
         hit_root = h.get("root") or memory_dir
-        mtype = _memory_type(_read_text(os.path.join(hit_root, fname))) or "untyped"
         score = h.get("score")
         via = h.get("via")
-        tags = [f"{mtype}"]
         corpus = h.get("corpus")
-        if corpus and corpus != "project":
-            tags.append(f"{corpus} tier")  # provenance: which corpus this hit came from
+        if corpus == "rule":
+            # RUL-4: a governance-plane pointer, not a memory — no frontmatter type to read
+            # (h["file"] is the rule file itself) and no tier provenance to disambiguate.
+            tags = ["rule — governance plane, not a memory"]
+        else:
+            mtype = _memory_type(_read_text(os.path.join(hit_root, fname))) or "untyped"
+            tags = [f"{mtype}"]
+            if corpus and corpus != "project":
+                tags.append(f"{corpus} tier")  # provenance: which corpus this hit came from
         if isinstance(score, (int, float)):
             tags.append(f"relevance {score:.3f}")
         if via == "graph":

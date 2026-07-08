@@ -348,6 +348,7 @@ def check_candidate(
     body: str = "",
     *,
     memory_dir: Optional[str] = None,
+    repo_root: Optional[str] = None,
 ) -> dict:
     """CAP-3: DRY-RUN write-time decisioning for a captured candidate — writes NOTHING.
 
@@ -358,21 +359,46 @@ def check_candidate(
     write-then-warn. A duplicate captured candidate therefore never becomes a new file at all
     (the acceptance bar: approving a duplicate routes to update/supersede, not a new file).
 
-    Returns ``{"route": "add"|"review", "neighbors": [{name, score, description}], "note"}``:
-    ``route == "review"`` means at least one near-duplicate/conflict cleared the threshold and
-    the agent must choose update-existing / supersede / skip (naming the target); ``"add"``
-    means the candidate is novel (or the check could not run — ``note`` says which). It never
-    writes the corpus (no file, no index refresh, no floor edit) and never raises — it reuses
-    the same warn-only, no-autonomous-rejection contract as LIF-2.
+    Returns ``{"route": "add"|"review", "neighbors": [{name, score, description}],
+    "rule_neighbors": [{file, score, preview}], "note"}``: ``route == "review"`` means at
+    least one near-duplicate/conflict cleared the threshold and the agent must choose
+    update-existing / supersede / skip (naming the target); ``"add"`` means the candidate is
+    novel (or the check could not run — ``note`` says which). ``rule_neighbors`` (RUL-3)
+    carries governance blocks the candidate RESTATES — route those to "link, don't copy"
+    (they flag but do not flip the route: a rules-plane echo is a wording decision, not an
+    add/supersede fork). It never writes the corpus (no file, no index refresh, no floor
+    edit) and never raises — it reuses the same warn-only, no-autonomous-rejection contract
+    as LIF-2.
     """
     try:
         if memory_dir is None:
-            memory_dir, _ = resolve_dirs()
+            from .provenance import resolve_dirs
+
+            memory_dir, repo = resolve_dirs()
+            repo_root = repo_root or repo
         rendered = _render_frontmatter(name, description, type, body)
         neighbors, note = _duplicate_neighbors(name, rendered, memory_dir)
-        return {"route": "review" if neighbors else "add", "neighbors": neighbors, "note": note}
+        rule_neighbors: List[dict] = []
+        if repo_root:
+            try:
+                from .rules_plane import rule_dup_candidates
+
+                rule_neighbors = rule_dup_candidates(description, body, repo_root)
+            except Exception:
+                rule_neighbors = []
+        return {
+            "route": "review" if neighbors else "add",
+            "neighbors": neighbors,
+            "rule_neighbors": rule_neighbors,
+            "note": note,
+        }
     except Exception as exc:
-        return {"route": "add", "neighbors": [], "note": f"candidate check skipped: {exc}"}
+        return {
+            "route": "add",
+            "neighbors": [],
+            "rule_neighbors": [],
+            "note": f"candidate check skipped: {exc}",
+        }
 
 
 def _render_frontmatter(name: str, description: str, mtype: str, body: str) -> str:
@@ -528,6 +554,9 @@ def write_memory(
       overrides). WARN-ONLY — creation NEVER auto-rejects on a neighbor; the agent decides
       add / update-existing / supersede / skip (see ``/hippo:new``). When the check cannot
       run at all (no index yet), ``result["note"]`` names why — no silent no-warning path.
+    - Detects restated GOVERNANCE rules (RUL-3): ``result["rule_neighbors"]`` carries
+      ``[{file, score, preview}]`` for CLAUDE.md/.claude/rules/AGENTS.md blocks the draft
+      restates — "link, don't copy". Same warn-only contract; stops two-plane drift at birth.
     - Backfills provenance + refreshes the recall index (best-effort; never fatal).
     - Adds a MEMORY.md floor pointer ONLY for ``user`` / ``feedback`` and reports the outcome
       explicitly (LIF-5): ``result["floor"]`` is ``{"status": appended|created-section|skipped,
@@ -546,6 +575,7 @@ def write_memory(
         "indexed": False,
         "related": [],
         "neighbors": [],
+        "rule_neighbors": [],
         "note": None,
         "warnings": [],
         "error": None,
@@ -636,6 +666,17 @@ def write_memory(
     result["neighbors"], result["note"] = _duplicate_neighbors(
         name, rendered, memory_dir, index_dir=tier_index
     )
+
+    # --- RUL-3: rules-plane dedup, the PREVENTIVE leg of LIF-2. A draft that restates a
+    # rule already in CLAUDE.md/.claude/rules/AGENTS.md starts two-plane drift the moment it
+    # lands; warn "link, don't copy" alongside the corpus-neighbor warning. Same warn-only
+    # contract — the exclusive-create below proceeds unconditionally. Never fatal.
+    try:
+        from .rules_plane import rule_dup_candidates
+
+        result["rule_neighbors"] = rule_dup_candidates(description, body, repo_root)
+    except Exception:
+        result["rule_neighbors"] = []
 
     try:
         os.makedirs(memory_dir, exist_ok=True)
@@ -739,8 +780,24 @@ def main(argv=None) -> int:
     # CAP-3: dry-run decisioning — check a captured candidate BEFORE it can become a file, so a
     # duplicate routes to update/supersede instead of re-bloating the corpus. Writes nothing.
     if args.check:
+        # RUL-3: with an explicit --memory-dir, check_candidate skips its own resolve — so
+        # resolve the governance root here the same way the write path does, or the rules
+        # dedup leg would silently never run on the CLI dry-run surface.
+        check_repo_root = None
+        if args.memory_dir:
+            try:
+                from .provenance import resolve_dirs
+
+                _, check_repo_root = resolve_dirs()
+            except Exception:
+                check_repo_root = None
         decision = check_candidate(
-            args.name, args.description, args.type, body=args.body, memory_dir=args.memory_dir
+            args.name,
+            args.description,
+            args.type,
+            body=args.body,
+            memory_dir=args.memory_dir,
+            repo_root=check_repo_root,
         )
         print(f"route   : {decision['route']}")
         if decision["neighbors"]:
@@ -752,6 +809,11 @@ def main(argv=None) -> int:
                 print(f"  • {n['name']} (similarity {n['score']:.2f}) — {desc}")
         elif decision["route"] == "add":
             print("  → no near-duplicate cleared the threshold: safe to add as a new memory.")
+        # RUL-3: rules-plane echoes flag but never flip the route — a wording decision.
+        if decision.get("rule_neighbors"):
+            print("warning : restates the governance plane — link, don't copy:")
+            for r in decision["rule_neighbors"]:
+                print(f"  • {r['file']} (overlap {r['score']:.2f}) — \"{r['preview']}\"")
         if decision["note"]:
             print(f"note    : {decision['note']}")
         return 0
@@ -807,6 +869,18 @@ def main(argv=None) -> int:
                 desc = desc[:217].rstrip() + "…"
             print(f"  • {n['name']} (similarity {n['score']:.2f}) — {desc}")
         print("  decide  : add (keep both) / update-existing / supersede / skip — see /hippo:new")
+    # RUL-3: the preventive rules-plane warning. Same warn-only posture — the file is already
+    # written; the agent decides whether to reference the rule instead of restating it.
+    if res["rule_neighbors"]:
+        n_rules = len(res["rule_neighbors"])
+        noun = "a governance rule" if n_rules == 1 else f"{n_rules} governance rules"
+        print(f"warning : restates {noun} — link, don't copy:")
+        for r in res["rule_neighbors"]:
+            print(f"  • {r['file']} (overlap {r['score']:.2f}) — \"{r['preview']}\"")
+        print(
+            "  decide  : cite the rule file (rules stay in the rules plane) / keep both if "
+            "genuinely distinct — see /hippo:new"
+        )
     if res["note"]:
         print(f"note    : {res['note']}")
     for warning in res["warnings"]:
