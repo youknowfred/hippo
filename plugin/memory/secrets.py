@@ -26,8 +26,8 @@ Design constraints (all load-bearing):
   - No new dependency. Pure ``re`` + a tiny hand-rolled entropy heuristic.
 
 Remediation, appended once to any non-empty finding set: if it's a real secret, remove it,
-rotate the credential, and scrub it from git history before committing. (A full purge
-procedure is SEC-4, a separate item; this stays a generic pointer.)
+rotate the credential, and scrub it from git history before committing — pointing at SEC-4's
+full purge procedure (``plugin/memory/README.md``, "Purging a memory") for the exact recipe.
 """
 
 from __future__ import annotations
@@ -37,11 +37,13 @@ import os
 import re
 from typing import List
 
-# Remediation pointer appended to any non-empty warning set. Kept generic on purpose —
-# the full purge-procedure doc is SEC-4, not this item.
+# Remediation pointer appended to any non-empty warning set. SEC-4: names the purge doc so the
+# same pointer reaches BOTH surfaces that interpolate this constant — write-time new_memory
+# warnings (scan_with_remediation) and doctor's check_secrets — with one source of truth.
 REMEDIATION = (
-    "if this is a real secret, remove it, rotate the credential, "
-    "and scrub it from git history before committing"
+    "if this is a real secret, remove it, rotate the credential, and scrub it from git "
+    "history before committing — see plugin/memory/README.md ('Purging a memory') for the "
+    "full purge procedure"
 )
 
 # High-signal, anchored patterns → the human-readable KIND reported (never the match itself).
