@@ -878,6 +878,51 @@ def check_hot_path_latency(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"hot-path latency check failed: {exc}."}
 
 
+def check_recall_blind_spots(ctx: DoctorContext) -> Dict[str, str]:
+    """SIG-3: recurring recall abstentions (backend='none' clusters) the corpus can't answer.
+
+    The always-available surface for the blind-spot backlog (SessionStart shows it only rarely).
+    Reads the gitignored recall ledger, clusters recurring abstained queries, and reports the
+    top one so a genuine, repeated gap becomes a capture prompt instead of staying invisible.
+    Read-only; ``ok`` when there is no recurring backlog; never raises.
+    """
+    try:
+        from .telemetry import abstention_backlog, default_telemetry_dir
+
+        backlog = abstention_backlog(default_telemetry_dir(ctx.memory_dir))
+        if not backlog:
+            return {
+                "status": "ok",
+                "message": "recall blind spots: none — no recurring abstained queries in the ledger.",
+            }
+        top = backlog[0]
+        q = top.get("sample_query") or ", ".join(top.get("terms") or [])
+        return {
+            "status": "warn",
+            "message": f"recall blind spots: {len(backlog)} recurring question(s) your corpus "
+            f'can\'t answer — top: "{q}" (asked {top["count"]}× recently, nothing above the '
+            "floor). Capture via /hippo:consolidate.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"recall blind-spots check failed: {exc}."}
+
+
+def check_injection_precision(ctx: DoctorContext) -> Dict[str, str]:
+    """SIG-4/KPI-2: the injection-precision proxy over the outcome ledger — MEASUREMENT ONLY.
+
+    Reports the fraction of injected memories (that cite a file) whose cited file was later
+    touched in-session — the read-signal KPI-2 said nothing produced today. Read-only; ``ok``
+    always (a measurement, not a fault); ``ok`` with 'no signal yet' before any data. Never
+    raises. This number never influences ranking (that is gated on SIG-5).
+    """
+    try:
+        from .outcome import format_report
+
+        return {"status": "ok", "message": format_report(ctx.memory_dir)}
+    except Exception as exc:
+        return {"status": "warn", "message": f"injection-precision check failed: {exc}."}
+
+
 def check_plugin_version(ctx: DoctorContext) -> Dict[str, str]:
     """DOC-7: installed plugin version vs the version the venv was bootstrapped for (with COR-11).
 
@@ -938,6 +983,8 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("index_corruption", check_index_corruption),
     ("index_count", check_index_count),
     ("hot_path_latency", check_hot_path_latency),
+    ("recall_blind_spots", check_recall_blind_spots),
+    ("injection_precision", check_injection_precision),
     ("format_version", check_format_version),
     ("pack_drift", check_pack_drift),
     ("fill_me", check_fill_me),
