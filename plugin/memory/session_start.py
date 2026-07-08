@@ -446,6 +446,106 @@ def blind_spot_producer(
         return None
 
 
+# RUL-1: how many rule↔memory conflict lines the radar shows before folding into a count.
+# First-class loud (fires every session findings exist, like citation_rot — a live conflict
+# between the always-loaded rules plane and the corpus should not wait for a nudge cadence).
+_MAX_RULES_CONFLICT_LINES = 4
+
+
+def rules_conflict_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """RUL-1: the rule↔memory conflict radar — governance cites what the corpus disputes.
+
+    Generalizes the audit skill's authority-gap join into a standing producer over
+    ``rules_plane.conflict_radar``: the TYPED-EDGE leg (a rule cites a memory another memory
+    ``supersedes``/``contradicts`` — both files named) and the STRENGTH leg (a rule cites a
+    memory no session ever recalls, strength < 0.15 — gated on the 5-session soak bar so a
+    fresh clone is never nagged; /hippo:audit keeps the ungated join). Findings route to a
+    per-item human decision via /hippo:consolidate — nothing auto-resolves (inv4). Read-only
+    over user-owned governance files (inv1); off the hot path (inv6); loud (inv3).
+    ``ctx`` (LIF-6) is unused.
+    """
+    try:
+        from .rules_plane import conflict_radar
+
+        radar = conflict_radar(memory_dir, repo_root)
+        conflicts = radar["edge_conflicts"]
+        gaps = radar["authority_gaps"]
+        if not conflicts and not gaps:
+            return None
+        lines = [
+            "⚖ Rule↔memory conflicts — governance files cite memories the corpus disputes. "
+            "Decide per item via /hippo:consolidate (nothing auto-resolves):"
+        ]
+        entries: List[str] = []
+        for c in conflicts:
+            entries.append(
+                f"  • {c['cited_by'][0]} cites `{c['name']}` but `{c['by']}` "
+                f"{c['relation']} it — reconcile the rule with the newer memory"
+            )
+        for g in gaps:
+            entries.append(
+                f"  • {g['cited_by'][0]} cites `{g['name']}` but no session recalls it "
+                f"(strength {g['strength']:.2f}) — verify it still matters"
+            )
+        lines.extend(entries[:_MAX_RULES_CONFLICT_LINES])
+        overflow = len(entries) - _MAX_RULES_CONFLICT_LINES
+        if overflow > 0:
+            lines.append(f"  … and {overflow} more — run /hippo:doctor for the full list.")
+        return "\n".join(lines)
+    except Exception:
+        return None
+
+
+# RUL-2: how many rules-plane rot lines show before folding into a count. Same loud family
+# as citation_rot — the rules plane is ALWAYS-LOADED, so a rotten reference there misleads
+# every session until fixed.
+_MAX_RULES_ROT_LINES = 4
+
+
+def rules_rot_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """RUL-2: staleness/citation-rot applied to the rules plane itself.
+
+    The governance plane has ZERO staleness tracking of its own: a CLAUDE.md backtick
+    reference to a moved file, a ``module.symbol`` that no longer exists, or a
+    ``.claude/rules`` ``paths:`` glob scoping a deleted tree (the lazy-load feature RUL-0
+    confirmed) silently wastes always-loaded context and misleads. This surfaces
+    ``rules_plane.rules_rot`` findings with the exact file + reference so the fix is a
+    per-item human edit — hippo never rewrites a governance file (inv1/inv4). Loud like
+    citation_rot (inv3); off the hot path (inv6). ``ctx`` (LIF-6) is unused.
+    """
+    try:
+        from .rules_plane import rules_rot
+
+        rot = rules_rot(repo_root)
+        code_rot = rot["code_ref_rot"]
+        dead_globs = rot["dead_path_globs"]
+        if not code_rot and not dead_globs:
+            return None
+        lines = [
+            "🧭 Rules-plane rot — governance files reference code that left the tree. "
+            "Fix per item (hippo names the reference, you edit the file):"
+        ]
+        entries: List[str] = []
+        for r in code_rot:
+            what = "path no longer in the repo" if r["kind"] == "path" else "symbol no longer defined"
+            entries.append(f"  • {r['file']} references `{r['ref']}` — {what}")
+        for d in dead_globs:
+            entries.append(
+                f"  • {d['file']} scopes paths: '{d['glob']}' — matches nothing, the rule can never load"
+            )
+        lines.extend(entries[:_MAX_RULES_ROT_LINES])
+        overflow = len(entries) - _MAX_RULES_ROT_LINES
+        if overflow > 0:
+            lines.append(f"  … and {overflow} more — run /hippo:doctor for the full list.")
+        return "\n".join(lines)
+    except Exception:
+        return None
+
+
 # SIG-1: how many relevant-to-current-work memories the positive producer lists, and how far
 # each description is trimmed. A positive block stays FOCUSED (a handful of top matches), unlike
 # the warning producers whose count is the point — so this cap is tighter than _MAX_ITEMS_PER_PRODUCER.
@@ -676,6 +776,8 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("blind_spot", blind_spot_producer),  # SIG-3: recurring recall abstentions -> a low-frequency curation backlog
     ("index_integrity", index_integrity_producer),  # names on-disk index corruption (QUA-5) — recall/build_index already degrade silently
     ("unresolvable_baseline", unresolvable_baseline_producer),  # legibility for find_stale's sha-fallback path
+    ("rules_conflict", rules_conflict_producer),  # RUL-1: governance cites a memory the corpus disputes (superseded/contradicted/never-recalled)
+    ("rules_rot", rules_rot_producer),  # RUL-2: citation-rot/staleness over the always-loaded rules plane itself
     ("relevant_to_work", relevant_to_work_producer),  # SIG-1: the first POSITIVE block — memories about the files you're editing
     ("resume_card", resume_card_producer),  # SIG-2: "where was I" — replay the last session from the episode buffer
     ("git_recent", git_recent_producer),
@@ -797,6 +899,17 @@ def _build_run_context(memory_dir: str, repo_root: str) -> RunContext:
             from .build_index import default_index_dir
 
             write_stale_cache(default_index_dir(memory_dir), stale)
+    except Exception:
+        pass
+    # RUL-4: refresh the rules side-index at the SAME offline moment (signature fast-path —
+    # unchanged governance files cost one stat sweep). Trusted-only path (build_context
+    # short-circuits before here), so the rules recall source inherits the SEC-1 gate.
+    try:
+        if os.path.isdir(memory_dir):
+            from .build_index import default_index_dir
+            from .rules_plane import refresh_rules_cache
+
+            refresh_rules_cache(repo_root, default_index_dir(memory_dir))
     except Exception:
         pass
     return RunContext(
