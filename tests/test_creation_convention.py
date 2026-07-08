@@ -508,6 +508,27 @@ def test_new_memory_cli_prints_rule_dup_block(tmp_path, monkeypatch, capsys):
     assert "cite the rule file" in out
 
 
+def test_check_cli_resolves_repo_root_for_rule_dedup(tmp_path, monkeypatch, capsys):
+    """The --check CLI surface must run the rules dedup leg even with an explicit
+    --memory-dir (check_candidate skips its own resolve then — main resolves the
+    governance root the same way the write path does)."""
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    (tmp_path / "CLAUDE.md").write_text(_UV_RULE_TEXT, encoding="utf-8")
+    rc = NM.main(
+        [
+            "python_dep_management",
+            "use uv for python dependency management, never pip install",
+            "--type", "project", "--memory-dir", md, "--check",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "restates the governance plane — link, don't copy:" in out
+    assert "CLAUDE.md (overlap" in out
+
+
 def test_check_candidate_carries_rule_neighbors_without_flipping_route(tmp_path, monkeypatch):
     """CAP-3 dry-run twin: rule_neighbors ride out, but a rules-plane echo alone never flips
     the route to review (a wording decision, not an add/supersede fork)."""

@@ -372,6 +372,8 @@ def check_candidate(
     """
     try:
         if memory_dir is None:
+            from .provenance import resolve_dirs
+
             memory_dir, repo = resolve_dirs()
             repo_root = repo_root or repo
         rendered = _render_frontmatter(name, description, type, body)
@@ -778,8 +780,24 @@ def main(argv=None) -> int:
     # CAP-3: dry-run decisioning — check a captured candidate BEFORE it can become a file, so a
     # duplicate routes to update/supersede instead of re-bloating the corpus. Writes nothing.
     if args.check:
+        # RUL-3: with an explicit --memory-dir, check_candidate skips its own resolve — so
+        # resolve the governance root here the same way the write path does, or the rules
+        # dedup leg would silently never run on the CLI dry-run surface.
+        check_repo_root = None
+        if args.memory_dir:
+            try:
+                from .provenance import resolve_dirs
+
+                _, check_repo_root = resolve_dirs()
+            except Exception:
+                check_repo_root = None
         decision = check_candidate(
-            args.name, args.description, args.type, body=args.body, memory_dir=args.memory_dir
+            args.name,
+            args.description,
+            args.type,
+            body=args.body,
+            memory_dir=args.memory_dir,
+            repo_root=check_repo_root,
         )
         print(f"route   : {decision['route']}")
         if decision["neighbors"]:
