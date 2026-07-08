@@ -36,8 +36,9 @@ resolves the corpus/repo the same way recall does (`resolve_dirs`) and runs, in 
 bootstrap state, venv imports, corpus existence, project symlink (SHP-5/ONB-5), native-memory
 coexistence (INT-4: symlink-target drift + native-layout change), corpus
 resolution (SHP-2 nested-vs-root walk-up), git degraded-mode (SHP-4), corpus trust (SEC-1),
-frontmatter integrity, index corruption (QUA-5), index count vs corpus, index format version,
-pack drift, `<FILL-ME` templates, and the corpus-wide secret scan (SEC-2). Each line already
+frontmatter integrity, index corruption (QUA-5), index count vs corpus, hot-path p95 latency
+(INT-5), index format version, pack drift, `<FILL-ME` templates, and the corpus-wide secret
+scan (SEC-2). Each line already
 names the specific finding and the exact command to fix it.
 
 ## The one interactive step doctor still owns — untrusted-corpus consent (SEC-1)

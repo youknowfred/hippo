@@ -714,3 +714,42 @@ def test_native_coexistence_missing_link_is_ok(tmp_path, monkeypatch):
 
 def test_native_coexistence_is_registered_in_checks():
     assert "native_coexistence" in [label for label, _ in D.CHECKS]
+
+
+# --------------------------------------------------------------------------- #
+# INT-5 — hot-path p95 latency check over the recall ledger
+# --------------------------------------------------------------------------- #
+def _write_recall_ledger(memory_dir, latencies):
+    from memory.provenance import ensure_self_ignoring_dir
+    from memory.telemetry import default_telemetry_dir
+
+    td = default_telemetry_dir(memory_dir)
+    ensure_self_ignoring_dir(td)
+    with open(os.path.join(td, "recall_events.jsonl"), "w", encoding="utf-8") as fh:
+        for lat in latencies:
+            fh.write(json.dumps({
+                "ts": 1.0, "latency_ms": lat, "names": [], "backend": "bm25",
+                "k": 10, "query_preview": "q",
+            }) + "\n")
+
+
+def test_hot_path_latency_empty_ledger_is_ok(memory_dir, repo):
+    r = D.check_hot_path_latency(_ctx(memory_dir, repo))
+    assert r["status"] == "ok" and "no recall events" in r["message"]
+
+
+def test_hot_path_latency_reports_p95_under_budget(memory_dir, repo):
+    _write_recall_ledger(memory_dir, [10, 20, 30, 40, 50])
+    r = D.check_hot_path_latency(_ctx(memory_dir, repo))
+    assert r["status"] == "ok"
+    assert "p95 = 50ms" in r["message"] and "5 recall" in r["message"]
+
+
+def test_hot_path_latency_warns_over_budget(memory_dir, repo):
+    _write_recall_ledger(memory_dir, [100.0, 200.0, 5000.0])  # p95 = 5000 > 1500
+    r = D.check_hot_path_latency(_ctx(memory_dir, repo))
+    assert r["status"] == "warn" and "ABOVE" in r["message"]
+
+
+def test_hot_path_latency_registered_in_checks():
+    assert "hot_path_latency" in [label for label, _ in D.CHECKS]

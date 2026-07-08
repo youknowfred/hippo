@@ -1522,6 +1522,8 @@ def git_recent_producer(
 # --------------------------------------------------------------------------- #
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
+    import json
+    import sys
 
     parser = argparse.ArgumentParser(description="Recall top-K memories for a query.")
     parser.add_argument("query", nargs="*", help="the query text")
@@ -1535,9 +1537,29 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="harness-provided session id (COR-6) — keys telemetry directly instead of the "
         "shared file-based token, fixing concurrent-session attribution.",
     )
+    parser.add_argument(
+        "--stdin-json",
+        action="store_true",
+        help="INT-5: read the UserPromptSubmit hook JSON payload ({prompt, session_id}) from "
+        "stdin and emit the hookSpecificOutput JSON directly — so the whole recall hook is ONE "
+        "Python spawn (no separate prompt-parse, session-id-parse, or jq/python emission launches).",
+    )
     args = parser.parse_args(argv)
 
-    raw_query = " ".join(args.query).strip()
+    # INT-5: in hook mode the raw prompt + session id arrive as ONE JSON object on stdin, so the
+    # hook no longer pays a Python launch just to parse ".prompt" and another for ".session_id".
+    if args.stdin_json:
+        raw_query = ""
+        try:
+            payload = json.load(sys.stdin)
+            if isinstance(payload, dict):
+                raw_query = (payload.get("prompt") or "").strip()
+                if not args.session_id:
+                    args.session_id = payload.get("session_id") or None
+        except Exception:
+            raw_query = ""
+    else:
+        raw_query = " ".join(args.query).strip()
     # Query hygiene: strip harness envelopes / skip near-empty prompts BEFORE embedding, so a
     # task-notification blob or a "?" continuation never pays a model load to inject noise.
     query = clean_query(raw_query)
@@ -1581,7 +1603,21 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     out = format_results(results)
     if out:
-        print(out)
+        if args.stdin_json:
+            # INT-5: emit the full hook output JSON ourselves — no jq, no second Python launch.
+            print(
+                json.dumps(
+                    {
+                        "hookSpecificOutput": {
+                            "hookEventName": "UserPromptSubmit",
+                            "additionalContext": out,
+                        }
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        else:
+            print(out)
     # Telemetry: fire-and-forget AFTER results are computed/printed. Logs even a SKIP (empty
     # results -> backend "none") under the RAW prompt preview, so the ledger shows hygiene at
     # work. Logging lives ONLY in main() (the CLI/hook entry) — NOT in recall() — so

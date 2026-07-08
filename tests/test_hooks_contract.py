@@ -184,20 +184,58 @@ class TestUserPromptHook:
         _assert_contract(proc, "UserPromptSubmit")
         assert proc.stdout.strip() == ""
 
-    def test_missing_jq_falls_back_to_python_emission(self, tmp_path):
-        # jq is ABSENT from PATH in this matrix by default — the python fallback
-        # must still emit valid JSON (or nothing), never a partial line.
+    def test_emits_valid_json_without_jq(self, tmp_path):
+        # INT-5: recall --stdin-json emits the hookSpecificOutput JSON itself, so jq is no longer
+        # on the hook path at all — the hook must still emit valid JSON with jq ABSENT.
         stdin = json.dumps({"prompt": "zebra canary deploy escalation path"})
         proc, _, _ = _run_hook(_USER_PROMPT_HOOK, stdin, tmp_path, jq=False, venv_python=True)
         _assert_contract(proc, "UserPromptSubmit")
         assert proc.stdout.strip()
 
     @pytest.mark.skipif(shutil.which("jq") is None, reason="jq not installed on this machine")
-    def test_with_jq_present(self, tmp_path):
+    def test_emits_valid_json_with_jq_present(self, tmp_path):
+        # jq present but now unused — output must be identical/valid either way.
         stdin = json.dumps({"prompt": "zebra canary deploy escalation path"})
         proc, _, _ = _run_hook(_USER_PROMPT_HOOK, stdin, tmp_path, jq=True, venv_python=True)
         _assert_contract(proc, "UserPromptSubmit")
         assert proc.stdout.strip()
+
+    def test_valid_prompt_spawns_exactly_one_python(self, tmp_path):
+        # INT-5 acceptance: a single Python spawn per prompt. The interpreter is a counting
+        # wrapper that appends a line per invocation then execs the real python.
+        project = _make_project(tmp_path, with_corpus=True)
+        data_dir = tmp_path / "plugin-data"
+        os.makedirs(data_dir, exist_ok=True)
+        counter = tmp_path / "spawn-count"
+        bindir = tmp_path / "bin"
+        os.makedirs(bindir, exist_ok=True)
+        for tool in ("cat", "printf"):
+            _symlink_once(shutil.which(tool), bindir / tool)
+        wrapper = f"#!/bin/sh\necho x >> '{counter}'\nexec '{sys.executable}' \"$@\"\n"
+        (bindir / "python3").write_text(wrapper, encoding="utf-8")
+        os.chmod(bindir / "python3", 0o755)  # no venv python → PY resolves to this wrapper
+        home = tmp_path / "home"
+        os.makedirs(home, exist_ok=True)
+        env = {
+            "PATH": str(bindir),
+            "HOME": str(home),
+            "CLAUDE_PROJECT_DIR": project,
+            "CLAUDE_PLUGIN_ROOT": _PLUGIN_ROOT,
+            "CLAUDE_PLUGIN_DATA": str(data_dir),
+            "HIPPO_DISABLE_DENSE": "1",
+        }
+        stdin = json.dumps({
+            "prompt": "how is the zebra service deployed with canary rollout", "session_id": "s1"
+        })
+        proc = subprocess.run(
+            ["/bin/bash", _USER_PROMPT_HOOK],
+            input=stdin, capture_output=True, text=True, timeout=60, env=env,
+        )
+        _assert_contract(proc, "UserPromptSubmit")
+        spawns = counter.read_text().count("x") if counter.exists() else 0
+        assert spawns == 1, f"expected exactly ONE python spawn per prompt (INT-5), got {spawns}"
+        ctx = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+        assert "zebra_deploy_runbook" in ctx  # and it still injected the right memory
 
     def test_writes_only_derived_dirs(self, tmp_path):
         stdin = json.dumps({"prompt": "zebra canary deploy escalation path"})

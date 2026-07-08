@@ -833,6 +833,51 @@ def check_stale_memobot_env(ctx: DoctorContext) -> Dict[str, str]:
 
 # (label, check_fn) in a FIXED order — the source of the deterministic output. New checks append
 # here; the order is never sorted-by-name or set-derived, so the printed sequence is stable.
+_HOT_PATH_P95_BUDGET_MS = 1500.0  # KPI-3 / PRF-2: the cold per-prompt budget
+
+
+def check_hot_path_latency(ctx: DoctorContext) -> Dict[str, str]:
+    """INT-5: report the recall hook's measured p95 wall-time over the telemetry ledger.
+
+    ``latency_ms`` has always been in the recall ledger but nothing watched it. Because each
+    recall runs in a FRESH hook process, its logged latency includes the cold model load — it IS
+    the real per-prompt cost users pay, not a warm benchmark. This surfaces the p95 so a
+    regression (a heavier model, a new per-import cost) is visible, warning past the KPI-3 cold
+    budget. Read-only; N/A when the ledger is empty; never raises.
+    """
+    try:
+        from .telemetry import default_telemetry_dir, read_events
+
+        td = default_telemetry_dir(ctx.memory_dir)
+        lats = sorted(
+            float(e["latency_ms"])
+            for e in read_events(td)
+            if isinstance(e.get("latency_ms"), (int, float))
+        )
+        if not lats:
+            return {
+                "status": "ok",
+                "message": "hot-path latency: no recall events logged yet — nothing to measure.",
+            }
+        n = len(lats)
+        rank = max(1, min(n, (95 * n + 99) // 100))  # nearest-rank ceil(0.95*n), no float math
+        p95 = lats[rank - 1]
+        if p95 > _HOT_PATH_P95_BUDGET_MS:
+            return {
+                "status": "warn",
+                "message": f"hot-path p95 = {p95:.0f}ms over {n} recall(s) — ABOVE the "
+                f"{_HOT_PATH_P95_BUDGET_MS:.0f}ms per-prompt budget (KPI-3). A heavier model or "
+                "new per-import cost likely regressed it.",
+            }
+        return {
+            "status": "ok",
+            "message": f"hot-path p95 = {p95:.0f}ms over {n} recall(s) "
+            f"(budget {_HOT_PATH_P95_BUDGET_MS:.0f}ms).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"hot-path latency check failed: {exc}."}
+
+
 CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("bootstrap", check_bootstrap),
     ("venv", check_venv),
@@ -845,6 +890,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("integrity", check_integrity),
     ("index_corruption", check_index_corruption),
     ("index_count", check_index_count),
+    ("hot_path_latency", check_hot_path_latency),
     ("format_version", check_format_version),
     ("pack_drift", check_pack_drift),
     ("fill_me", check_fill_me),
