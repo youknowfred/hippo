@@ -9,10 +9,12 @@
 # sourced relative to this script's own known location — CLAUDE_PLUGIN_ROOT is pinned
 # to SCRIPT_DIR here so PYTHONPATH matches this exact plugin copy even when unset.
 #
-# Only wraps the genuinely stateless, single-purpose commands (recall, new, build-index,
-# staleness). init/bootstrap/doctor/audit are multi-step orchestrations that belong in
-# their SKILL.md files, not duplicated here — this script redirects to them instead of
-# re-implementing their logic.
+# Wraps the genuinely stateless, single-purpose commands (recall, new, build-index,
+# staleness) plus `mcp` — the long-lived stdio MCP server (INT-2), the one non-stateless
+# entry, kept here so plugin.json's mcpServers command can reuse this script's canonical PY
+# resolution (venv, else python3 pre-bootstrap). init/bootstrap/doctor/audit are multi-step
+# orchestrations that belong in their SKILL.md files, not duplicated here — this script
+# redirects to them instead of re-implementing their logic.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"  # plugin root (parent of bin/)
@@ -37,12 +39,17 @@ case "$cmd" in
   staleness)
     exec "$PY" -m memory.staleness "$@"
     ;;
+  mcp)
+    # INT-2: the stdio MCP server (mid-turn + subagent memory access). Long-lived — it owns
+    # stdin/stdout for the JSON-RPC stream, so exec (no wrapping) and let it run until EOF.
+    exec "$PY" -m memory.mcp_server "$@"
+    ;;
   init|bootstrap|doctor|audit)
     echo "hippo: '$cmd' is a multi-step skill, not a bare CLI command — use /hippo:$cmd instead." >&2
     exit 1
     ;;
   *)
-    echo "usage: hippo <recall|new|build-index|staleness> [args...]" >&2
+    echo "usage: hippo <recall|new|build-index|staleness|mcp> [args...]" >&2
     echo "  (init/bootstrap/doctor/audit are skills — use /hippo:<name>)" >&2
     exit 2
     ;;

@@ -49,11 +49,13 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
    - `.claude/.memory-telemetry/` (recall/episode/reconsolidation ledgers —
      `recall_events.jsonl`, `episode_buffer.jsonl`, `reconsolidation_events.jsonl` all live here;
      deleting the directory takes all three with it)
+   - `.claude/.memory-pending/` (CAP-2 draft-capture queue — un-approved session-capture seeds
+     awaiting review; deleting it discards those drafts, which never entered the corpus anyway)
 
-   Both are already gitignored derived state — deleting them loses no git history and nothing
-   committed. If the user declines, leave them exactly as they are and say so plainly (they're
-   inert without the symlink from step 1 anyway — nothing reads them once native memory has
-   nothing pointing at this corpus).
+   All three are already gitignored derived state — deleting them loses no git history and
+   nothing committed. If the user declines, leave them exactly as they are and say so plainly
+   (they're inert without the symlink from step 1 anyway — nothing reads them once native memory
+   has nothing pointing at this corpus).
 
 3. **Report (never delete) the shared, per-machine paths.** These are NOT per-project — removing
    them affects every other project on this machine still using the plugin, so this skill only

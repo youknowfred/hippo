@@ -51,31 +51,9 @@ else
   export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-${XDG_CACHE_HOME:-$HOME/.cache}/hippo-memory/fastembed}"
 fi
 
-QUERY="$(printf '%s' "$PAYLOAD" | "$PY" -c 'import sys,json
-try:
-    print((json.load(sys.stdin) or {}).get("prompt","") or "")
-except Exception:
-    pass' 2>/dev/null || true)"
-
-# Empty / unparseable prompt → nothing to recall; say nothing, exit clean.
-[ -z "${QUERY//[[:space:]]/}" ] && exit 0
-
-# COR-6: the harness's own session_id keys telemetry directly (see memory.telemetry) instead
-# of the shared, mutable session-token file — fixes concurrent-session misattribution.
-SESSION_ID="$(printf '%s' "$PAYLOAD" | "$PY" -c 'import sys,json
-try:
-    print((json.load(sys.stdin) or {}).get("session_id","") or "")
-except Exception:
-    pass' 2>/dev/null || true)"
-
-CTX="$("$PY" -m memory.recall "$QUERY" --session-id "$SESSION_ID" 2>/dev/null || true)"
-[ -z "$CTX" ] && exit 0
-
-if command -v jq >/dev/null 2>&1; then
-  jq -cn --arg c "$CTX" \
-    '{hookSpecificOutput:{hookEventName:"UserPromptSubmit", additionalContext:$c}}' 2>/dev/null || true
-else
-  "$PY" -c 'import json,sys
-print(json.dumps({"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":sys.argv[1]}}))' "$CTX" 2>/dev/null || true
-fi
+# INT-5: ONE Python spawn for the whole hook. memory.recall --stdin-json reads the hook JSON
+# payload (prompt + session_id, COR-6) directly off stdin and emits the hookSpecificOutput JSON
+# itself — replacing the previous three launches (parse .prompt, parse .session_id, recall) plus
+# the jq/python emission wrap. An empty/unparseable prompt or an empty result prints nothing.
+printf '%s' "$PAYLOAD" | "$PY" -m memory.recall --stdin-json 2>/dev/null || true
 exit 0

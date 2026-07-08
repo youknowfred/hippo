@@ -281,7 +281,7 @@ floor link rot (read-only); its summary is the `floor` producer.
 | Ledger | Written by | Content |
 |---|---|---|
 | `recall_events.jsonl` | `recall.main()` after results | `{ts, session_id, names, backend, latency_ms, k, query_preview}` |
-| `episode_buffer.jsonl` | `recall.main()`, same block | adds the repo HEAD watermark — soak data for the future capture pass |
+| `episode_buffer.jsonl` | `recall.main()`, same block | adds the repo HEAD watermark — replayed by the CAP-2 SessionEnd capture pass (`memory.capture`) into the gitignored `.memory-pending/` queue |
 | `reconsolidation_events.jsonl` | `record_reconsolidation_outcome()` | `{ts, name, outcome[, invalidated]}` verdicts + LIF-1 snooze acks |
 
 Contract: never raises, never delays a recall (fires after results, fully wrapped), no
