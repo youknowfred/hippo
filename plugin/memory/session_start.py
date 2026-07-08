@@ -40,7 +40,12 @@ from typing import Callable, List, Optional, Tuple
 from .lint_floor import floor_producer
 from .lint_links import lint_links_producer
 from .provenance import CORPUS_FORMAT_VERSION, read_corpus_format, resolve_dirs
-from .recall import _INVALIDATION_RECENT_DAYS, _invalidation_state, git_recent_producer
+from .recall import (
+    _INVALIDATION_RECENT_DAYS,
+    _invalidation_state,
+    git_recent_producer,
+    portable_floor_producer,
+)
 from .reconsolidate import recalled_stale_worklist, reconsolidation_producer
 from .staleness import (
     RunContext,
@@ -401,6 +406,7 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("git_recent", git_recent_producer),
     ("link_health", lint_links_producer),
     ("floor", floor_producer),  # silent unless project/reference links re-bloat the MEMORY.md floor
+    ("portable_floor", portable_floor_producer),  # TEA-1: deliver the user/private-tier floor (no native channel)
 ]
 
 
@@ -598,6 +604,20 @@ def main(
             from .build_index import refresh_index
 
             refresh_index(memory_dir)
+        except Exception:
+            pass
+        # TEA-1/TEA-3: keep the machine-local user tier's (and in-repo private tier's) index
+        # fresh too — OFFLINE + bounded, exactly like the project refresh — so the hot path can
+        # fuse them WITH dense (a BM25-only tier would force the whole merged view to BM25).
+        # Each tier's index NESTS inside the tier dir, so this never writes into the project's
+        # git tree. Never raises; a no-op when no extra tier exists.
+        try:
+            from .build_index import refresh_index
+            from .recall import _recall_tier_dirs
+
+            for tdir, tidx, label in _recall_tier_dirs(memory_dir, None):
+                if label != "project" and os.path.isdir(tdir):
+                    refresh_index(tdir, tidx)
         except Exception:
             pass
         # Open a NEW telemetry session so the recall ledger can count distinct sessions

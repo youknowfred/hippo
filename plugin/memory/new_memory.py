@@ -77,6 +77,35 @@ _FLOOR_SECTION_BY_TYPE = {
     "feedback": "## Working Style & Process Feedback",
 }
 
+# TEA-1/TEA-3: which corpus a memory is written to. "project" (default) = the git-native in-repo
+# corpus teammates share; "user" = the machine-local user tier that follows the person across
+# every project (TEA-1). TEA-3 adds "private" (a gitignored in-repo tier). A non-project tier
+# keeps its OWN floor file, so a user/feedback pointer written there never enters the shared,
+# git-tracked project MEMORY.md — the no-leakage invariant enforced at the write seam.
+_VALID_TIERS = ("project", "user")
+
+
+def _ensure_tier_floor(tier_dir: str, label: str) -> None:
+    """Seed a NON-project tier's ``MEMORY.md`` with the two canonical floor sections the first
+    time a memory is written there, so a ``user``/``feedback`` pointer has somewhere to land.
+    Created once, minimally; never overwrites an existing floor. Never raises."""
+    try:
+        floor_path = os.path.join(tier_dir, "MEMORY.md")
+        if os.path.exists(floor_path):
+            return
+        os.makedirs(tier_dir, exist_ok=True)
+        with open(floor_path, "w", encoding="utf-8") as fh:
+            fh.write(
+                f"# Portable Agent Memory ({label} tier)\n\n"
+                f"> {label.capitalize()}-tier user/feedback memories — recalled alongside every "
+                "project's corpus and delivered each session by the SessionStart portable-floor "
+                "producer (TEA-1), NOT the native symlink.\n\n"
+                "## User\n\n"
+                "## Working Style & Process Feedback\n"
+            )
+    except Exception:
+        pass
+
 
 def _title_from_slug(name: str) -> str:
     return name.replace("_", " ").replace("-", " ").strip().title()
@@ -474,6 +503,7 @@ def write_memory(
     hook: Optional[str] = None,
     links: Optional[List[str]] = None,
     no_links: bool = False,
+    tier: str = "project",
 ) -> dict:
     """Create a recall-ready memory file. Returns a small result dict.
 
@@ -503,6 +533,7 @@ def write_memory(
     result = {
         "created": False,
         "path": None,
+        "tier": "project",
         "floor": None,
         "indexed": False,
         "related": [],
@@ -514,17 +545,34 @@ def write_memory(
     if type not in VALID_TYPES:
         result["error"] = f"invalid type {type!r} (expected one of {VALID_TYPES})"
         return result
+    tier = (tier or "project").lower()
+    if tier not in _VALID_TIERS:
+        result["error"] = f"invalid tier {tier!r} (expected one of {_VALID_TIERS})"
+        return result
+    result["tier"] = tier
     # Name must be a bare slug — a path separator (or "..") would write the file OUTSIDE
     # memory_dir, where neither the index nor the floor would ever find it (a silent hole).
     if not name or os.path.basename(name) != name:
         result["error"] = f"invalid name {name!r} (must be a bare slug, no path separators)"
         return result
 
-    from .provenance import build_repo_file_index, resolve_dirs
+    from .provenance import build_repo_file_index, resolve_dirs, user_memory_dir
 
     md, repo = resolve_dirs()
-    memory_dir = memory_dir or md
     repo_root = repo_root or repo
+    # TEA-1: a ``--tier user`` write goes to the machine-local user tier — a SECOND corpus,
+    # recalled alongside every project, so a person-scoped lesson propagates across projects.
+    # Its index is the tier's plain sibling (``default_index_dir``), so recall/refresh/dedup all
+    # resolve it identically with no extra plumbing; its floor pointer lands in the tier's OWN
+    # MEMORY.md, never the shared project one (the no-leakage invariant). An explicit
+    # ``memory_dir`` (tests) always wins.
+    if memory_dir is None:
+        memory_dir = user_memory_dir() if tier == "user" else md
+    if tier != "project":
+        _ensure_tier_floor(memory_dir, tier)
+        if tier == "user":
+            # Machine-local, outside any repo: no git provenance to backfill against.
+            repo_root = memory_dir
 
     # --- GRA-3: link discovery, BEFORE rendering (so it lands in the body at birth). ---
     # This runs against the EXISTING corpus index only — the new file does not exist on disk
@@ -620,6 +668,14 @@ def main(argv=None) -> int:
     parser.add_argument("name", help="kebab/snake slug (also the filename stem)")
     parser.add_argument("description", help="one-line recall hook (indexed for recall)")
     parser.add_argument("--type", required=True, choices=VALID_TYPES)
+    parser.add_argument(
+        "--tier",
+        default="project",
+        choices=_VALID_TIERS,
+        help="TEA-1: 'project' (default, git-native in-repo) or 'user' (machine-local user "
+        "tier, recalled across every project; its floor pointer lands in the user tier's own "
+        "MEMORY.md, never the shared project one)",
+    )
     parser.add_argument("--body", default="", help="memory body text")
     parser.add_argument("--title", default=None, help="floor-pointer link text (user/feedback only)")
     parser.add_argument("--hook", default=None, help="floor-pointer trailing note (user/feedback only)")
@@ -676,11 +732,14 @@ def main(argv=None) -> int:
         hook=args.hook,
         links=links_arg,
         no_links=args.no_links,
+        tier=args.tier,
     )
     if res["error"]:
         print(f"error: {res['error']}")
         return 1
     print(f"created : {res['path']}")
+    if res.get("tier") and res["tier"] != "project":
+        print(f"tier    : {res['tier']} (recalled across every project; not in this repo's git)")
     print(f"indexed : {res['indexed']}")
     # LIF-5: the floor outcome is always printed; anything but a plain append carries its
     # machine-readable reason (never silence — /hippo:new tells the agent to surface it).

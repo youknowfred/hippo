@@ -294,6 +294,42 @@ def resolve_dirs() -> Tuple[str, str]:
     return memory_dir, repo_root
 
 
+# --------------------------------------------------------------------------- #
+# TEA-1: the machine-local USER tier — a second corpus, recalled ALONGSIDE the
+# project corpus in every project so a person-scoped lesson learned in project A is
+# known in project B. Decided machine-local only (OQ-5): no remote/sync; the location
+# is a plain dir so a dotfiles symlink Just Works for users who sync themselves.
+# --------------------------------------------------------------------------- #
+def user_memory_dir() -> str:
+    """The machine-local user-tier corpus dir (``~/.claude/hippo-memory`` by default).
+
+    ``HIPPO_USER_MEMORY_DIR`` overrides it (hermetic tests; a dotfiles-relocated home).
+    Returns a PATH, not a promise the dir exists — the fusion layer treats an absent dir
+    as "no user tier" (recall proceeds project-only), so an unconfigured machine pays
+    nothing. Sits beside the existing machine-local ``~/.claude/hippo-trust.json`` registry
+    and the native-memory symlink under ``~/.claude/projects/``; deliberately NOT under
+    ``platform_cache_dir`` (that is a rebuildable cache — user memories are data).
+    """
+    override = os.environ.get("HIPPO_USER_MEMORY_DIR")
+    if override:
+        return override
+    return os.path.join(os.path.expanduser("~"), ".claude", "hippo-memory")
+
+
+def tier_index_dir(tier_dir: str) -> str:
+    """Index-cache location for a NON-project tier — nested at ``<tier_dir>/.memory-index``.
+
+    The project tier keeps its historical SIBLING cache (``.claude/.memory-index`` via
+    ``build_index.default_index_dir``); the user tier (and TEA-3's private tier) NEST their
+    index inside the tier dir instead. Two reasons: (1) the private tier's sibling would be
+    ``.claude/.memory-index`` — colliding with the project's — so nesting keeps them distinct;
+    (2) a nested user-tier index lives under ``~/.claude/hippo-memory`` (outside every repo)
+    and a nested private-tier index is swept up by ``memory.local``'s own self-ignoring
+    ``.gitignore``, so neither can ever reach a project's git.
+    """
+    return os.path.join(tier_dir, ".memory-index")
+
+
 def ensure_self_ignoring_dir(path: str) -> None:
     """mkdir -p a DERIVED dir + drop a ``.gitignore`` containing ``*`` inside it.
 

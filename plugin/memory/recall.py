@@ -26,9 +26,11 @@ from typing import Dict, List, Optional, Tuple
 from .build_index import (
     DEFAULT_MODEL,
     DENSE_QUERY_TIMEOUT_SECS,
+    SCHEMA_VERSION,
     LoadedIndex,
     _hash,
     build_index,
+    compute_bm25_stats,
     default_index_dir,
     embed_query,
     entry_description,
@@ -38,8 +40,14 @@ from .build_index import (
     tokenize,
 )
 from . import trust
+from .build_index import extract_description
 from .lint_floor import floor_memory_names
-from .provenance import _iter_memory_files, resolve_dirs
+from .provenance import (
+    _iter_memory_files,
+    resolve_dirs,
+    split_frontmatter,
+    user_memory_dir,
+)
 from .staleness import RunContext, _commit_times, read_provenance
 
 # Harness caps hook output at 10,000 chars; stay well under it.
@@ -1087,6 +1095,251 @@ def _apply_salience(
 # --------------------------------------------------------------------------- #
 # Recall
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# TEA-1 / TEA-3: multi-corpus fusion. The machine-local USER tier (TEA-1) and the
+# in-repo gitignored PRIVATE tier (TEA-3) are recalled ALONGSIDE the project corpus so a
+# person-scoped lesson learned in project A is known in project B. Each tier keeps its OWN
+# persisted index — a merged manifest is NEVER written to disk (that is the no-leakage
+# invariant: user/private text must never land in a project-committable file). The merge is
+# purely IN MEMORY, at recall time, into ONE LoadedIndex so BM25/dense/RRF/floor/knee/graph/
+# salience all run once over the combined candidate space, unchanged. Each merged entry gains
+# a ``root`` (so the drift re-read / dangling check / view read open the RIGHT file) and a
+# ``corpus`` origin label (so a hit is provenance-labeled). When only the project tier is
+# present, the project index is returned UNCHANGED — the common case pays nothing and stays
+# byte-identical to the single-corpus era.
+# --------------------------------------------------------------------------- #
+_PROJECT_TIER = "project"
+_USER_TIER = "user"
+_PRIVATE_TIER = "private"
+
+# Human-facing origin markers for fused hits (format_results / recall_view). The project tier
+# (and single-corpus recall, corpus=None) is unmarked so existing output stays byte-identical.
+_CORPUS_MARKER = {_USER_TIER: " (user memory)", _PRIVATE_TIER: " (private memory)"}
+
+
+def _extra_recall_tiers(memory_dir: str) -> List[Tuple[str, str, str]]:
+    """The NON-project tiers as ``[(corpus_dir, index_dir, label)]``, in precedence order (the
+    project — prepended by ``_recall_tier_dirs`` — always wins a name collision; among the
+    extras, the private tier added by TEA-3 precedes the user tier). Each tier declares its OWN
+    index location so a single knob (``default_index_dir``/``tier_index_dir``) is chosen once,
+    consistently used by recall, refresh, and the write path. The user tier's index is its plain
+    sibling (``~/.claude/.memory-index`` — unique, machine-local); TEA-3's private tier NESTS
+    its index inside ``memory.local`` because its sibling would collide with the project's."""
+    dirs: List[Tuple[str, str, str]] = []
+    user = user_memory_dir()
+    if user:
+        dirs.append((user, default_index_dir(user), _USER_TIER))
+    return dirs
+
+
+def _recall_tier_dirs(memory_dir: str, index_dir: Optional[str]) -> List[Tuple[str, str, str]]:
+    """Ordered ``[(corpus_dir, index_dir, label)]`` for recall fusion, project FIRST.
+
+    A non-project tier is included only when its dir EXISTS and is distinct from the project
+    dir — an unconfigured machine lists only the project tier and the merge is a no-op.
+    """
+    project_index = index_dir or default_index_dir(memory_dir)
+    tiers: List[Tuple[str, str, str]] = [(memory_dir, project_index, _PROJECT_TIER)]
+    try:
+        project_abs = os.path.abspath(memory_dir)
+    except Exception:
+        project_abs = memory_dir
+    for tier_dir, tier_index, label in _extra_recall_tiers(memory_dir):
+        try:
+            if not tier_dir or os.path.abspath(tier_dir) == project_abs:
+                continue
+            if not os.path.isdir(tier_dir):
+                continue
+        except Exception:
+            continue
+        tiers.append((tier_dir, tier_index, label))
+    return tiers
+
+
+def _merge_loaded_indexes(
+    loadeds: List[Tuple[LoadedIndex, str, str]]
+) -> Optional[LoadedIndex]:
+    """Merge per-corpus ``LoadedIndex`` objects into ONE in-memory index.
+
+    First-wins dedup by entry ``name`` (the project tier is first, so it owns any cross-tier
+    slug collision). Every kept entry is tagged with its ``root`` (absolute corpus dir) and
+    ``corpus`` (origin label). Dense is vstacked ONLY when every tier is dense-ready under the
+    SAME model — otherwise the merged view degrades to BM25-only (a transient state healed at
+    the next per-tier dense rebuild), never a half-valid matrix. BM25 stats are recomputed once
+    over the unified doc space (entries then body chunks), byte-for-byte the way ``build_index``
+    assembles them. Returns the single index unchanged when there is nothing to merge.
+    """
+    loadeds = [(li, root, label) for (li, root, label) in loadeds if li is not None]
+    if not loadeds:
+        return None
+    if len(loadeds) == 1:
+        return loadeds[0][0]  # single corpus -> unchanged (byte-identical fast path)
+
+    models = {li.model for li, _r, _l in loadeds if li.model}
+    build_dense = len(models) <= 1 and all(
+        li.dense_ready and li.dense is not None for li, _r, _l in loadeds
+    )
+
+    merged_entries: List[dict] = []
+    merged_chunks: List[dict] = []
+    dense_vectors: List = []
+    seen_names: set = set()
+    model: Optional[str] = None
+
+    for li, root, label in loadeds:
+        if li.model and model is None:
+            model = li.model
+        remap: Dict[int, int] = {}  # this tier's entry-index -> merged entry-index
+        for old_i, e in enumerate(li.entries):
+            name = e.get("name")
+            if name in seen_names:
+                continue  # a higher-precedence tier already owns this slug
+            seen_names.add(name)
+            ne = dict(e)
+            ne["root"] = root
+            ne["corpus"] = label
+            remap[old_i] = len(merged_entries)
+            if build_dense:
+                ne["row"] = len(dense_vectors)
+                dense_vectors.append(li.dense[e.get("row")])
+            else:
+                ne["row"] = None
+            merged_entries.append(ne)
+        for c in li.body_chunks:
+            parent = c.get("entry")
+            if parent not in remap:
+                continue  # parent entry was deduped away -> drop its chunks too
+            nc = dict(c)
+            nc["entry"] = remap[parent]
+            if build_dense:
+                nc["row"] = len(dense_vectors)
+                dense_vectors.append(li.dense[c.get("row")])
+            else:
+                nc["row"] = None
+            merged_chunks.append(nc)
+
+    merged_dense = None
+    if build_dense and dense_vectors:
+        import numpy as np
+
+        merged_dense = np.vstack(dense_vectors)
+
+    bm25 = compute_bm25_stats(
+        [e.get("tokens") or [] for e in merged_entries]
+        + [c.get("tokens") or [] for c in merged_chunks]
+    )
+    manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "model": model if merged_dense is not None else None,
+        "dense_ready": merged_dense is not None,
+        "dim": int(merged_dense.shape[1]) if merged_dense is not None else None,
+        "count": len(merged_entries),
+        "entries": merged_entries,
+        "body_chunks": merged_chunks,
+        "bm25": bm25,
+    }
+    return LoadedIndex(manifest, merged_dense)
+
+
+def _fuse_recall_tiers(
+    project_idx: LoadedIndex,
+    memory_dir: str,
+    index_dir: Optional[str],
+    repo_root: Optional[str],
+) -> LoadedIndex:
+    """Fuse the machine-local user/private tiers into the (already loaded, already trust-gated)
+    project index. Returns the project index UNCHANGED when no extra tier exists. Never raises —
+    a tier that fails to load is skipped, so recall degrades to project-only, never crashes. The
+    extra tiers are the current user's OWN corpora (machine-local / created locally by init), so
+    they are trusted by construction and bypass the SEC-1 gate that only guards cloned project
+    corpora."""
+    try:
+        tiers = _recall_tier_dirs(memory_dir, index_dir)
+        if len(tiers) == 1:
+            return project_idx
+        loadeds: List[Tuple[LoadedIndex, str, str]] = [(project_idx, memory_dir, _PROJECT_TIER)]
+        for tdir, tidx, label in tiers:
+            if label == _PROJECT_TIER:
+                continue
+            li = _ensure_index(None, tdir, tidx)
+            if li is not None and len(li):
+                loadeds.append((li, tdir, label))
+        merged = _merge_loaded_indexes(loadeds)
+        return merged if merged is not None else project_idx
+    except Exception:
+        return project_idx
+
+
+def fused_floor_names(memory_dir: str, index_dir: Optional[str] = None) -> set:
+    """The floor drawn from BOTH corpora (TEA-1): the union of every recall tier's MEMORY.md
+    floor pointers (project + user tier + private tier). Recall's display-layer dedup subtracts
+    this so a floor-pinned memory — whichever tier it lives in — is never re-injected on demand.
+    Never raises: a tier whose floor can't be read contributes the empty set."""
+    names: set = set()
+    try:
+        for tdir, _tidx, _label in _recall_tier_dirs(memory_dir, index_dir):
+            try:
+                names |= floor_memory_names(tdir)
+            except Exception:
+                continue
+    except Exception:
+        return floor_memory_names(memory_dir) if memory_dir else set()
+    return names
+
+
+# --- Floor-from-both delivery (TEA-1) ------------------------------------------------ #
+# The project floor reaches context NATIVELY (the harness always-loads the symlinked
+# MEMORY.md and its linked bodies). The machine-local user tier and the in-repo private tier
+# have NO native always-load channel, so this SessionStart producer injects THEIR floor
+# (user/feedback) memories each session — bounded — so the floor is genuinely "drawn from
+# BOTH" corpora. Silent when no extra tier has a floor; degrades to silence for a teammate
+# who lacks a private file (a pointer with no target simply contributes nothing).
+_PORTABLE_FLOOR_MAX_ITEMS = 20
+_PORTABLE_FLOOR_MAX_CHARS = 3000
+_PORTABLE_FLOOR_BODY_CHARS = 500
+
+
+def portable_floor_producer(
+    memory_dir: str, repo_root: str, ctx: Optional["RunContext"] = None
+) -> Optional[str]:
+    """SessionStart producer: the always-on floor of the user tier (+ private tier). Never
+    raises. ``ctx`` (LIF-6's shared per-run ``RunContext``) is unused — declared only so every
+    producer in ``PRODUCERS`` shares ONE call shape."""
+    try:
+        blocks: List[str] = []
+        for tdir, _tidx, label in _recall_tier_dirs(memory_dir, None):
+            if label == _PROJECT_TIER:
+                continue  # the project floor is delivered natively (INT-4) — never re-inject it
+            for name in sorted(floor_memory_names(tdir)):
+                if len(blocks) >= _PORTABLE_FLOOR_MAX_ITEMS:
+                    break
+                try:
+                    with open(os.path.join(tdir, f"{name}.md"), "r", encoding="utf-8") as fh:
+                        text = fh.read()
+                except Exception:
+                    continue  # floor pointer whose target is absent (teammate lacks it) -> skip
+                desc = (extract_description(text) or "").replace("\n", " ").strip()
+                _fm, body = split_frontmatter(text)
+                body = (body or "").strip()
+                if len(body) > _PORTABLE_FLOOR_BODY_CHARS:
+                    body = body[: _PORTABLE_FLOOR_BODY_CHARS - 1].rstrip() + "…"
+                line = f"  • {name} ({label} tier)"
+                if desc:
+                    line += f" — {desc}"
+                blocks.append(line + (f"\n      {body}" if body else ""))
+        if not blocks:
+            return None
+        out = (
+            "🧠 Portable memory (always-on across projects — user & private tiers):\n"
+            + "\n".join(blocks)
+        )
+        if len(out) > _PORTABLE_FLOOR_MAX_CHARS:
+            out = out[: _PORTABLE_FLOOR_MAX_CHARS - 16].rstrip() + "\n…(truncated)"
+        return out
+    except Exception:
+        return None
+
+
 def _ensure_index(
     index: Optional[LoadedIndex], memory_dir: str, index_dir: Optional[str]
 ) -> Optional[LoadedIndex]:
@@ -1144,7 +1397,7 @@ def recall(
                 if repo_root is None:
                     repo_root = resolved
             idx = _ensure_index(None, memory_dir, index_dir)
-        if idx is None or not len(idx):
+        if idx is None:
             return []
 
         # Trust gate (SEC-1): a foreign corpus (clone any repo carrying .claude/memory)
@@ -1162,6 +1415,13 @@ def recall(
             gate_root = trust.gate_repo_root(memory_dir, repo_root)
             if gate_root is not None and not trust.is_trusted(gate_root):
                 return []
+            # TEA-1/TEA-3: only AFTER the project corpus clears the trust gate do we fuse the
+            # machine-local user tier and the in-repo private tier into ONE in-memory index —
+            # so an untrusted project can never pull the user's own memories into its context,
+            # and the extra tiers (the user's own) never need a gate of their own.
+            idx = _fuse_recall_tiers(idx, memory_dir, index_dir, repo_root)
+        if not len(idx):
+            return []
 
         entries = idx.entries
 
@@ -1184,7 +1444,11 @@ def recall(
             patched_entries = []
             for i, e in enumerate(entries):
                 if i < _MAX_DRIFT_CHECKS:
-                    patched = _drift_patch(e, memory_dir)
+                    # TEA-1/TEA-3: a fused entry carries its own corpus ``root`` (project /
+                    # user tier / private tier); re-read it against THAT dir, not the single
+                    # project ``memory_dir`` — a single-corpus entry has no ``root`` and falls
+                    # back to ``memory_dir`` exactly as before.
+                    patched = _drift_patch(e, e.get("root") or memory_dir)
                     if patched is not e:
                         patched_indices.add(i)
                     patched_entries.append(patched)
@@ -1345,7 +1609,10 @@ def recall(
             e = entries[i]
             # Deleted/renamed since the index was built (COR-4): drop it from THIS
             # session's output immediately rather than keep injecting a dangling path.
-            if memory_dir and not os.path.isfile(os.path.join(memory_dir, e["file"])):
+            # TEA-1/TEA-3: resolve against the entry's own corpus ``root`` (project / user /
+            # private) — a single-corpus entry has none and falls back to ``memory_dir``.
+            e_root = e.get("root") or memory_dir
+            if e_root and not os.path.isfile(os.path.join(e_root, e["file"])):
                 continue
             # RET-1: the knee compares PRIMARY-SIGNAL-ONLY relevance (`primary_relevance`,
             # see its construction above), never the display/sort score -- an entry with NO
@@ -1410,6 +1677,16 @@ def recall(
                     # the components without branching on the flag itself (COR-8 true-score
                     # discipline: no fabricated numbers, an honest None beats a fake 0).
                     "salience": salience_components.get(i),
+                    # TEA-1/TEA-3: corpus-of-origin provenance — ALWAYS present, same
+                    # no-key-branching convention as "via"/"note". "project" (or None on the
+                    # single-corpus fast path) for the git-native in-repo corpus; "user" for
+                    # the machine-local user tier that follows the person across projects;
+                    # "private" for the gitignored in-repo tier. ``root`` is the absolute corpus
+                    # dir the hit lives under, so a human-facing reader (recall_view) opens the
+                    # RIGHT file for a fused hit instead of joining a user-tier basename to the
+                    # project dir. Both are None for a single-corpus recall (entries untagged).
+                    "corpus": e.get("corpus"),
+                    "root": e.get("root"),
                 }
             )
         return results
@@ -1434,6 +1711,12 @@ def format_results(results: List[dict], max_chars: int = _MAX_RECALL_CHARS) -> s
         # inspectable — a "(linked)" entry is here because a top-seed memory links to it,
         # not because it matched the query lexically/semantically on its own.
         marker = " (linked)" if r.get("via") == "graph" else ""
+        # TEA-1/TEA-3: corpus-of-origin marker so a fused hit is legibly provenanced — a
+        # "(user memory)" / "(private memory)" line came from the machine-local user tier or
+        # the gitignored in-repo private tier, NOT this project's git-native corpus. The
+        # project tier (or a single-corpus recall) carries no marker, so existing output is
+        # byte-identical when no extra tier is in play.
+        origin = _CORPUS_MARKER.get(r.get("corpus"), "")
         # Typed-edge annotation (GRA-4): the one-line supersession/conflict note rides on
         # the same pointer line — bounded upstream (_typed_note caps names) and by the
         # overall max_chars truncation below, so it can never blow the injection budget.
@@ -1442,7 +1725,7 @@ def format_results(results: List[dict], max_chars: int = _MAX_RECALL_CHARS) -> s
         # carries it, a fresh one doesn't ("" -> no clause at all). Same bracket convention as
         # `note`, same overall max_chars truncation below — a banner can never blow the budget.
         banner = f" [{r['stale_banner']}]" if r.get("stale_banner") else ""
-        lines.append(f"  • {r['name']} ({r['file']}) — {desc}{marker}{note}{banner}")
+        lines.append(f"  • {r['name']} ({r['file']}) — {desc}{marker}{origin}{note}{banner}")
     out = "\n".join(lines)
     if len(out) > max_chars:
         out = out[: max_chars - 16].rstrip() + "\n…(truncated)"
@@ -1589,7 +1872,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         # self_recall probes directly): the User + Working-Style memories are ALREADY
         # always-loaded in the MEMORY.md floor, so re-surfacing them wastes a top-k slot +
         # injects redundant tokens. Over-fetch by the floor size, drop floor members, slice to k.
-        floor = floor_memory_names(memory_dir) if memory_dir else set()
+        floor = fused_floor_names(memory_dir, args.index_dir) if memory_dir else set()
         pool_k = args.k + len(floor) if floor else args.k
         results = recall(
             query, k=pool_k, memory_dir=memory_dir, index_dir=args.index_dir, repo_root=repo_root

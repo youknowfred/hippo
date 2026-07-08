@@ -35,6 +35,7 @@ not literal shell; fill in the placeholders before running):
 "$PY" -m memory.new_memory \
   <name> "<one-line description — this is the recall hook, be specific>" \
   --type {user|feedback|project|reference} \
+  [--tier {project|user}] \
   --body "<full memory body — the WHY, not just the WHAT>" \
   [--title "<floor link text>"] [--hook "<floor trailing note>"] \
   [--links name-a,name-b | --no-links] \
@@ -53,6 +54,15 @@ not literal shell; fill in the placeholders before running):
     NOT added to the floor — recalled on demand only.
   - `reference` — a pointer to an external system (a tracker, a dashboard, a channel) plus
     what it's for.
+- `--tier` (TEA-1) — where the memory lives:
+  - `project` (default) — the git-native in-repo corpus teammates share on clone.
+  - `user` — the **machine-local user tier** (`~/.claude/hippo-memory`, or
+    `HIPPO_USER_MEMORY_DIR`). It is recalled ALONGSIDE every project's corpus, so a
+    person-scoped lesson learned here propagates to all your projects — but it is NEVER
+    committed to any repo, and its floor pointer lands in the user tier's OWN `MEMORY.md`,
+    never the shared project one. Use it for `user`/`feedback` memories that are about YOU,
+    not this codebase (e.g. a personal workflow, a cross-project preference). A fused hit is
+    labelled `(user memory)` in the injected block and `user tier` in `/hippo:recall`.
 - `--title` / `--hook` are floor-pointer cosmetics for `user`/`feedback` only — omit for
   `project`/`reference` (they're recalled on demand, never floor-linked).
 - `--links a,b,c` — explicit related-memory names, comma-separated. OVERRIDES the automatic
