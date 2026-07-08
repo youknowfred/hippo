@@ -2,5 +2,6 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.hypothesis/
 .DS_Store
 *.egg-info/
