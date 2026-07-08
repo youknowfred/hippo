@@ -304,6 +304,40 @@ def _duplicate_neighbors(name: str, rendered: str, memory_dir: str):
         return [], "duplicate check skipped: error"
 
 
+def check_candidate(
+    name: str,
+    description: str,
+    type: str,
+    body: str = "",
+    *,
+    memory_dir: Optional[str] = None,
+) -> dict:
+    """CAP-3: DRY-RUN write-time decisioning for a captured candidate — writes NOTHING.
+
+    Renders the candidate (name + description + type) and scores it against the EXISTING
+    corpus with LIF-2's exact near-duplicate machinery (``_duplicate_neighbors``), so an agent
+    draining the CAP-2 pending queue routes each candidate to add / update-existing / supersede
+    / skip BEFORE any file is created — the check-FIRST counterpart to ``write_memory``'s
+    write-then-warn. A duplicate captured candidate therefore never becomes a new file at all
+    (the acceptance bar: approving a duplicate routes to update/supersede, not a new file).
+
+    Returns ``{"route": "add"|"review", "neighbors": [{name, score, description}], "note"}``:
+    ``route == "review"`` means at least one near-duplicate/conflict cleared the threshold and
+    the agent must choose update-existing / supersede / skip (naming the target); ``"add"``
+    means the candidate is novel (or the check could not run — ``note`` says which). It never
+    writes the corpus (no file, no index refresh, no floor edit) and never raises — it reuses
+    the same warn-only, no-autonomous-rejection contract as LIF-2.
+    """
+    try:
+        if memory_dir is None:
+            memory_dir, _ = resolve_dirs()
+        rendered = _render_frontmatter(name, description, type, body)
+        neighbors, note = _duplicate_neighbors(name, rendered, memory_dir)
+        return {"route": "review" if neighbors else "add", "neighbors": neighbors, "note": note}
+    except Exception as exc:
+        return {"route": "add", "neighbors": [], "note": f"candidate check skipped: {exc}"}
+
+
 def _render_frontmatter(name: str, description: str, mtype: str, body: str) -> str:
     """Recall-ready frontmatter: top-level name + description (indexed), metadata.type.
 
@@ -600,7 +634,33 @@ def main(argv=None) -> int:
         action="store_true",
         help="suppress the Related: [[...]] line entirely (no discovery, no --links)",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="CAP-3 DRY RUN: score this candidate against the corpus for near-dupes and print "
+        "the route (add / review) WITHOUT writing anything — used when draining captured candidates",
+    )
     args = parser.parse_args(argv)
+
+    # CAP-3: dry-run decisioning — check a captured candidate BEFORE it can become a file, so a
+    # duplicate routes to update/supersede instead of re-bloating the corpus. Writes nothing.
+    if args.check:
+        decision = check_candidate(
+            args.name, args.description, args.type, body=args.body, memory_dir=args.memory_dir
+        )
+        print(f"route   : {decision['route']}")
+        if decision["neighbors"]:
+            print("neighbors (decide update-existing / supersede / skip — NAME the target):")
+            for n in decision["neighbors"]:
+                desc = n["description"].replace("\n", " ").strip()
+                if len(desc) > 220:
+                    desc = desc[:217].rstrip() + "…"
+                print(f"  • {n['name']} (similarity {n['score']:.2f}) — {desc}")
+        elif decision["route"] == "add":
+            print("  → no near-duplicate cleared the threshold: safe to add as a new memory.")
+        if decision["note"]:
+            print(f"note    : {decision['note']}")
+        return 0
 
     links_arg = None
     if args.links is not None:
