@@ -368,7 +368,7 @@ workstreams:
         title: Rule↔memory conflict radar (a first-class loud producer)
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: claude-rules, verdict: KEEP (lead with the strength leg)}
         problem: >-
           Rules are unranked, un-staled, never reconciled with memory; a typed

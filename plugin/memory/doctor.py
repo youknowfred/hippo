@@ -923,6 +923,54 @@ def check_injection_precision(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"injection-precision check failed: {exc}."}
 
 
+def check_rules_conflicts(ctx: DoctorContext) -> Dict[str, str]:
+    """RUL-1: the rule↔memory conflict radar's always-available surface.
+
+    Joins governance-plane citations (CLAUDE.md/AGENTS.md/.claude/rules|agents|skills)
+    against the corpus: a cited memory another memory ``supersedes``/``contradicts`` is a
+    live conflict; a cited memory no session recalls (strength < 0.15, once the 5-session
+    soak gate is met) is an authority-evidence gap. Read-only; findings route to a per-item
+    decision via /hippo:consolidate — nothing auto-resolves. ``ok`` when the planes agree;
+    never raises.
+    """
+    try:
+        from .rules_plane import conflict_radar
+        from .soak import SOAK_GATE_SESSIONS
+
+        radar = conflict_radar(ctx.memory_dir, ctx.repo_root)
+        conflicts = radar["edge_conflicts"]
+        gaps = radar["authority_gaps"]
+        if not conflicts and not gaps:
+            if radar["gate_met"]:
+                return {
+                    "status": "ok",
+                    "message": "rule↔memory conflicts: none — governance citations agree with the corpus.",
+                }
+            return {
+                "status": "ok",
+                "message": "rule↔memory conflicts: none — typed-edge leg clean; the "
+                f"strength leg waits on the soak gate ({radar['distinct_sessions']}/"
+                f"{SOAK_GATE_SESSIONS} sessions).",
+            }
+        if conflicts:
+            c = conflicts[0]
+            top = f"{c['cited_by'][0]} cites `{c['name']}` but `{c['by']}` {c['relation']} it"
+        else:
+            g = gaps[0]
+            top = (
+                f"{g['cited_by'][0]} cites `{g['name']}` but no session recalls it "
+                f"(strength {g['strength']:.2f})"
+            )
+        return {
+            "status": "warn",
+            "message": f"rule↔memory conflicts: {len(conflicts)} typed-edge conflict(s) + "
+            f"{len(gaps)} authority gap(s) — top: {top}. Decide per item via "
+            "/hippo:consolidate.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"rules-conflict check failed: {exc}."}
+
+
 def check_plugin_version(ctx: DoctorContext) -> Dict[str, str]:
     """DOC-7: installed plugin version vs the version the venv was bootstrapped for (with COR-11).
 
@@ -985,6 +1033,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("hot_path_latency", check_hot_path_latency),
     ("recall_blind_spots", check_recall_blind_spots),
     ("injection_precision", check_injection_precision),
+    ("rules_conflicts", check_rules_conflicts),
     ("format_version", check_format_version),
     ("pack_drift", check_pack_drift),
     ("fill_me", check_fill_me),

@@ -446,6 +446,58 @@ def blind_spot_producer(
         return None
 
 
+# RUL-1: how many rule↔memory conflict lines the radar shows before folding into a count.
+# First-class loud (fires every session findings exist, like citation_rot — a live conflict
+# between the always-loaded rules plane and the corpus should not wait for a nudge cadence).
+_MAX_RULES_CONFLICT_LINES = 4
+
+
+def rules_conflict_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """RUL-1: the rule↔memory conflict radar — governance cites what the corpus disputes.
+
+    Generalizes the audit skill's authority-gap join into a standing producer over
+    ``rules_plane.conflict_radar``: the TYPED-EDGE leg (a rule cites a memory another memory
+    ``supersedes``/``contradicts`` — both files named) and the STRENGTH leg (a rule cites a
+    memory no session ever recalls, strength < 0.15 — gated on the 5-session soak bar so a
+    fresh clone is never nagged; /hippo:audit keeps the ungated join). Findings route to a
+    per-item human decision via /hippo:consolidate — nothing auto-resolves (inv4). Read-only
+    over user-owned governance files (inv1); off the hot path (inv6); loud (inv3).
+    ``ctx`` (LIF-6) is unused.
+    """
+    try:
+        from .rules_plane import conflict_radar
+
+        radar = conflict_radar(memory_dir, repo_root)
+        conflicts = radar["edge_conflicts"]
+        gaps = radar["authority_gaps"]
+        if not conflicts and not gaps:
+            return None
+        lines = [
+            "⚖ Rule↔memory conflicts — governance files cite memories the corpus disputes. "
+            "Decide per item via /hippo:consolidate (nothing auto-resolves):"
+        ]
+        entries: List[str] = []
+        for c in conflicts:
+            entries.append(
+                f"  • {c['cited_by'][0]} cites `{c['name']}` but `{c['by']}` "
+                f"{c['relation']} it — reconcile the rule with the newer memory"
+            )
+        for g in gaps:
+            entries.append(
+                f"  • {g['cited_by'][0]} cites `{g['name']}` but no session recalls it "
+                f"(strength {g['strength']:.2f}) — verify it still matters"
+            )
+        lines.extend(entries[:_MAX_RULES_CONFLICT_LINES])
+        overflow = len(entries) - _MAX_RULES_CONFLICT_LINES
+        if overflow > 0:
+            lines.append(f"  … and {overflow} more — run /hippo:doctor for the full list.")
+        return "\n".join(lines)
+    except Exception:
+        return None
+
+
 # SIG-1: how many relevant-to-current-work memories the positive producer lists, and how far
 # each description is trimmed. A positive block stays FOCUSED (a handful of top matches), unlike
 # the warning producers whose count is the point — so this cap is tighter than _MAX_ITEMS_PER_PRODUCER.
@@ -676,6 +728,7 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("blind_spot", blind_spot_producer),  # SIG-3: recurring recall abstentions -> a low-frequency curation backlog
     ("index_integrity", index_integrity_producer),  # names on-disk index corruption (QUA-5) — recall/build_index already degrade silently
     ("unresolvable_baseline", unresolvable_baseline_producer),  # legibility for find_stale's sha-fallback path
+    ("rules_conflict", rules_conflict_producer),  # RUL-1: governance cites a memory the corpus disputes (superseded/contradicted/never-recalled)
     ("relevant_to_work", relevant_to_work_producer),  # SIG-1: the first POSITIVE block — memories about the files you're editing
     ("resume_card", resume_card_producer),  # SIG-2: "where was I" — replay the last session from the episode buffer
     ("git_recent", git_recent_producer),
