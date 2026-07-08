@@ -12,6 +12,7 @@ reconsolidation, archive internals).
 | `/hippo:bootstrap` | Once per machine — builds the shared venv + warms the offline model cache |
 | `/hippo:init` | Once per new project — seeds `.claude/memory/` + the cross-machine symlink |
 | `/hippo:new` | Whenever the agent decides to save something to memory |
+| `/hippo:recall` | Deliberately recall the corpus — "what do you remember about X", or list it by type |
 | `/hippo:doctor` | Fast health check — is the plugin's own install/environment working |
 | `/hippo:audit` | Deep, judgment-based self-audit of the corpus's content — staleness, drift, archive candidates |
 | `/hippo:remove` | Uninstall/offboard THIS project — removes the symlink, offers to delete index/telemetry, reports (never deletes) shared venv/cache paths |

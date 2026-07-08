@@ -1,0 +1,79 @@
+---
+description: Deliberately recall what memory knows — answer "what do you remember about X", "what do you know here", or "why was that injected", and list the corpus by type. Wraps hybrid recall + the link graph into a human-readable listing (name, type, staleness, inbound/outbound links). Triggers include "what do you remember about", "what do you know here", "recall", "/hippo:recall". The read verb between /hippo:new (write) and /hippo:audit (maintenance); not plumbing (that's /hippo:doctor).
+---
+
+# /hippo:recall — the read-side verb
+
+The recall HOOK is invisible by design: it fires once per user prompt and silently injects
+matches. This skill is the DELIBERATE read entry point for the questions the hook can't answer
+— "what do you remember about deploys", "list what you know here", "why did that get injected".
+
+It reuses the exact same engine the hook does (`memory.recall` → the same fusion, relevance
+floor, knee cutoff, 1-hop graph expansion, and salience) — it never forks the ranking, so what
+you see here is what the hook would inject. On top of that it shows each match's **type**, a
+**staleness flag**, and its **inbound/outbound graph neighbors**, so the answer is browsable,
+not just a raw injection block.
+
+## Preflight (shared across all hippo skills)
+
+```bash
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty — this Claude Code version is too old for hippo's self-provisioning. Update Claude Code, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
+hippo_resolve_py
+```
+
+## Usage
+
+Query the corpus (natural language — phrase it as the underlying question, the way the recall
+index matches):
+
+```
+"$PY" -m memory.recall_view "<what to recall — e.g. how do we deploy the web service>" [-k <max matches>]
+```
+
+List everything this project knows, grouped by type (a map of the corpus — no query):
+
+```
+"$PY" -m memory.recall_view --list-by-type
+```
+
+## Reading the output
+
+Each match prints as:
+
+```
+  • <memory-name>  [<type> · relevance <score> · via 1-hop link · ⚠ stale — verify before relying]
+      <the memory's one-line description>
+      → links to: <outbound wikilink targets>
+      ← linked from: <inbound referrers>
+```
+
+- **`<type>`** — `user` / `feedback` / `project` / `reference` (the floor taxonomy).
+- **`relevance <score>`** — the true fused+penalized score (COR-8), NOT a rank proxy — higher
+  is a stronger match. This is the honest answer to "why was this injected".
+- **`via 1-hop link`** — present only when the memory entered top-k through GRA-1 graph
+  expansion (a linked neighbor of a lexical/dense hit), not by matching the query directly.
+- **`⚠ stale`** — the memory is anchored to a commit whose cited files have since changed
+  (RET-6). Treat its content as needing a re-check before you rely on it.
+- **`→ links to` / `← linked from`** — the memory's outbound and inbound `[[wikilink]]`
+  neighbors, so you can traverse related memory by hand.
+
+**Abstention is a feature.** If nothing clears the relevance floor the skill says so rather
+than padding out low-signal matches (RET-1) — an unrelated or too-thin query correctly
+surfaces nothing. Reach for `--list-by-type` to see what *is* known.
+
+## Agents and subagents (interim, until the MCP server)
+
+This is also the mid-turn / subagent retrieval path: the recall hook fires only on a top-level
+user prompt, so an agent that discovers mid-turn what it's actually working on — or a subagent
+launched via Task, which gets no `UserPromptSubmit` at all — can run
+`"${CLAUDE_PLUGIN_ROOT}/bin/hippo" recall "<focused query>"` (the raw injection block) or this
+skill's `memory.recall_view` for the browsable listing to pull relevant memory on demand.
+INT-2's stdio MCP server supersedes this with first-class `recall`/`traverse` tools; until
+then, this command is the retrieval path to reference in policy-critical Task prompts.
+
+## When NOT to use
+
+- "Is memory working / why is recall empty" — that's plumbing: use `/hippo:doctor`.
+- "Is the corpus content still accurate" (a judgment-based maintenance pass) — use `/hippo:audit`.
+- Saving something — use `/hippo:new`. This verb is read-only; it never writes the corpus.

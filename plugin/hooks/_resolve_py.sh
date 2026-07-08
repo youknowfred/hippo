@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # _resolve_py.sh — OSP-6 canonical PY-resolution snippet, sourced (never executed
-# directly) by every bash-invoked surface that needs a Python interpreter: both
-# hooks, plugin/bin/hippo, and the 5 SKILL.md preflight blocks.
+# directly) by every bash-invoked surface that needs a Python interpreter: the
+# recall + SessionStart hooks, plugin/bin/hippo, and every SKILL.md preflight
+# block (the PreCompact nudge hook is pure bash and needs no interpreter).
 #
-# Before this file existed, the same three lines were hand-copied into eight
-# places — two hooks, bin/hippo, and five skills — a drift-prone duplication.
+# Before this file existed, the same three lines were hand-copied into every
+# such surface — a drift-prone duplication.
 # Now there is ONE definition; every surface sources this file and calls
 # hippo_resolve_py instead of inlining the resolution logic.
 #
