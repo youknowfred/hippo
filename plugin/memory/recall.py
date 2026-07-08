@@ -400,6 +400,69 @@ def clean_query(raw: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# RCL-1: per-query dense/lexical intent routing
+# --------------------------------------------------------------------------- #
+# _mine_identifiers already extracts identifier-shaped tokens (dotted paths, snake_case,
+# camelCase, UPPER_CASE, traceback file/error lines) from every query for free -- the RATIO
+# of mined identifiers to total query tokens is a cheap, hot-path-safe proxy for "is this
+# query symbol/error-heavy (BM25 exactness matters more) or prose (semantic paraphrase
+# matters more)". Computed fresh INSIDE recall() (not clean_query, which is pure/
+# single-prompt and discards the count) so every surface that calls recall() directly --
+# the hook, /hippo:recall, the MCP tool, eval_recall -- gets the same routing regardless of
+# whether clean_query ran first. A dead-band around the boundary (and any query too short to
+# make the ratio meaningful) returns EXACTLY (1.0, 1.0) -- byte-identical to the pre-RCL-1
+# balanced default -- so a weak/ambiguous shape signal can never mis-route: there is no
+# baseline-diff eval gate, only the absolute thresholds, and a bad route could erode them
+# silently.
+_INTENT_MIN_TOKENS = 8  # override: HIPPO_INTENT_MIN_TOKENS -- below this a ratio is noise --
+# short queries (a handful of plain technical words, e.g. "oauth token refresh flow policy
+# gateway") must stay balanced: at low token counts the density ratio swings wildly on a
+# single incidental match, and the corpus's ACTUAL rank order (not just the primary_relevance
+# the knee compares) is sensitive enough to a weight shift that a short, ambiguously-shaped
+# query reordering the fused list can shift WHICH entry's relevance the knee compares against
+# next -- a real regression an earlier draft of this item hit on a 6-token fixture.
+_INTENT_DENSE_DENSITY = 0.10  # override: HIPPO_INTENT_DENSE_DENSITY -- at/below -> lean dense
+_INTENT_LEXICAL_DENSITY = 0.35  # override: HIPPO_INTENT_LEXICAL_DENSITY -- at/above -> lean lexical
+_INTENT_LEAN_WEIGHT = 1.3  # override: HIPPO_INTENT_LEAN_WEIGHT -- favored side's weight (the
+# other side gets 2.0 - lean, so the pair always sums to 2.0 -- the same total weight mass as
+# the balanced 1.0 + 1.0 default, just redistributed toward the favored signal).
+
+
+def _intent_weights(query: str, q_tokens: List[str]) -> Tuple[float, float]:
+    """``(dense_weight, lexical_weight)`` for the RRF fusion's primary (description) slots.
+
+    Malformed env overrides degrade to the module default (never raise); any internal
+    failure returns the balanced ``(1.0, 1.0)`` default -- this must never break recall.
+    """
+
+    def _env_float(name: str, default: float) -> float:
+        raw = os.environ.get(name)
+        if raw is None or not raw.strip():
+            return default
+        try:
+            return float(raw)
+        except ValueError:
+            return default
+
+    try:
+        total = len(q_tokens)
+        if total < int(_env_float("HIPPO_INTENT_MIN_TOKENS", _INTENT_MIN_TOKENS)):
+            return (1.0, 1.0)
+        density = len(_mine_identifiers(query)) / total
+        lexical_bound = _env_float("HIPPO_INTENT_LEXICAL_DENSITY", _INTENT_LEXICAL_DENSITY)
+        dense_bound = _env_float("HIPPO_INTENT_DENSE_DENSITY", _INTENT_DENSE_DENSITY)
+        if density >= lexical_bound:
+            lean = _env_float("HIPPO_INTENT_LEAN_WEIGHT", _INTENT_LEAN_WEIGHT)
+            return (2.0 - lean, lean)
+        if density <= dense_bound:
+            lean = _env_float("HIPPO_INTENT_LEAN_WEIGHT", _INTENT_LEAN_WEIGHT)
+            return (lean, 2.0 - lean)
+        return (1.0, 1.0)
+    except Exception:
+        return (1.0, 1.0)
+
+
+# --------------------------------------------------------------------------- #
 # Rankers
 # --------------------------------------------------------------------------- #
 def _bm25_score_via_postings(
@@ -1585,12 +1648,20 @@ def recall(
         bm25_body = _bm25_rank_body(q_tokens, idx, patched_indices=patched_indices)
         dense_body = _dense_rank_body(query, idx, raw_rows=raw_dense_rows)
 
+        # RCL-1: lean the PRIMARY (description) weights toward lexical or dense based on how
+        # identifier-dense this query is; body weights (_body_rrf_weight) are a SEPARATE,
+        # untouched signal (RET-2's backstop discount) and are never adjusted here. Only
+        # meaningful when BOTH backends actually have candidates -- with just one backend
+        # contributing there is no "which do I lean toward" decision to make, and applying a
+        # non-1.0 weight to the lone contributor would just rescale its score for nothing (a
+        # real regression an earlier draft hit on a dense-disabled/BM25-only fixture).
+        dense_w, lex_w = _intent_weights(query, q_tokens) if (dense and bm25) else (1.0, 1.0)
         rankings = [r for r in (dense, bm25, dense_body, bm25_body) if r]
         weights = [
             w
             for r, w in zip(
                 (dense, bm25, dense_body, bm25_body),
-                (1.0, 1.0, _body_rrf_weight(), _body_rrf_weight()),
+                (dense_w, lex_w, _body_rrf_weight(), _body_rrf_weight()),
             )
             if r
         ]

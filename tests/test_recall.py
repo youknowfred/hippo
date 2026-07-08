@@ -1720,6 +1720,101 @@ def test_body_rrf_weight_env_override(monkeypatch):
     assert R._body_rrf_weight() == R._BODY_RRF_WEIGHT
 
 
+# --------------------------------------------------------------------------- #
+# RCL-1: per-query dense/lexical intent routing
+# --------------------------------------------------------------------------- #
+def test_intent_weights_leans_lexical_on_identifier_dense_query():
+    """A pasted-stacktrace-shaped query (mostly mined identifiers) must lean lexical --
+    dense weight below 1.0, lexical weight above 1.0, pair still summing to 2.0."""
+    query = "TypeError foo_bar_baz.qux_module app/db/session.py CONNECTION_TIMEOUT_MS"
+    dense_w, lex_w = R._intent_weights(query, R.tokenize(query))
+    assert lex_w > 1.0 > dense_w
+    assert dense_w + lex_w == pytest.approx(2.0)
+
+
+def test_intent_weights_leans_dense_on_prose_query():
+    """A prose paraphrase (zero mined identifiers, plenty of content tokens) must lean
+    dense -- dense weight above 1.0, lexical weight below 1.0."""
+    query = "authentication timeout issue affecting login session token expiry handling please explain"
+    dense_w, lex_w = R._intent_weights(query, R.tokenize(query))
+    assert dense_w > 1.0 > lex_w
+    assert dense_w + lex_w == pytest.approx(2.0)
+
+
+def test_intent_weights_ambiguous_query_is_exact_balanced_default():
+    """A query with a single mild identifier amid plenty of prose must land in the
+    dead-band -- EXACTLY (1.0, 1.0), byte-identical to the pre-RCL-1 default."""
+    query = "can you check the config_value setting in the deploy pipeline please"
+    dense_w, lex_w = R._intent_weights(query, R.tokenize(query))
+    assert (dense_w, lex_w) == (1.0, 1.0)
+
+
+def test_intent_weights_short_query_is_exact_balanced_default():
+    """Too few tokens to trust a density ratio (below _INTENT_MIN_TOKENS) must never
+    mis-route, regardless of how identifier-shaped the few tokens are."""
+    query = "fix foo_bar_baz"
+    dense_w, lex_w = R._intent_weights(query, R.tokenize(query))
+    assert (dense_w, lex_w) == (1.0, 1.0)
+
+
+def test_intent_weights_env_overrides(monkeypatch):
+    query = "authentication timeout issue affecting login session token expiry handling please explain"
+    q_tokens = R.tokenize(query)
+    # Force the dense-density bound below zero so even a pure-prose query no longer clears
+    # the "lean dense" leg -- proves the override is actually read, not just the default.
+    monkeypatch.setenv("HIPPO_INTENT_DENSE_DENSITY", "-1")
+    assert R._intent_weights(query, q_tokens) == (1.0, 1.0)
+    monkeypatch.delenv("HIPPO_INTENT_DENSE_DENSITY", raising=False)
+
+    monkeypatch.setenv("HIPPO_INTENT_LEAN_WEIGHT", "not-a-number")
+    dense_w, lex_w = R._intent_weights(query, q_tokens)  # malformed -> module default lean
+    assert dense_w == pytest.approx(R._INTENT_LEAN_WEIGHT)
+    monkeypatch.delenv("HIPPO_INTENT_LEAN_WEIGHT", raising=False)
+
+
+def test_intent_weights_never_raises_on_empty_tokens():
+    assert R._intent_weights("", []) == (1.0, 1.0)
+
+
+def test_recall_weights_route_by_query_shape_end_to_end(tmp_path, monkeypatch):
+    """Acceptance: recall()'s actual RRF weights (not just the helper in isolation) reflect
+    the query's shape -- verified via a fake embedder so both backends are live."""
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    emb_docs, emb_query = _fake_embedder(16)
+    monkeypatch.setattr(B, "embed_documents", emb_docs)
+    monkeypatch.setattr(R, "embed_query", emb_query)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx)
+
+    # recall() calls _rrf_fuse TWICE -- once weighted (the fused/display ranking, the one
+    # RCL-1 routes) and once unweighted (primary_relevance, which RCL-1 must NOT touch --
+    # see the implementation note). Capture every call and isolate the weighted one.
+    calls = []
+    real_rrf_fuse = R._rrf_fuse
+
+    def _spy(rankings, k=R._RRF_K, *, weights=None):
+        calls.append(weights)
+        return real_rrf_fuse(rankings, k, weights=weights)
+
+    monkeypatch.setattr(R, "_rrf_fuse", _spy)
+    R.recall(
+        # "voyage"/"rerank" give this a real BM25 hit against reranker_voyage.md (so the
+        # rankings aren't empty and the early-abstention return never fires) while the
+        # identifier-shaped tokens still push density past the lexical-lean threshold.
+        "TypeError CONNECTION_TIMEOUT_MS app/db/session.py foo_bar_baz.qux_module voyage rerank",
+        k=5,
+        memory_dir=md,
+        index_dir=idx,
+    )
+    weighted_calls = [w for w in calls if w is not None]
+    assert weighted_calls
+    dense_w, lex_w = weighted_calls[0][0], weighted_calls[0][1]
+    assert lex_w > 1.0 > dense_w
+    assert None in calls  # the unweighted primary_relevance fusion must still occur, untouched
+
+
 def test_graph_expansion_still_operates_on_parent_entries_with_body_chunks_present(tmp_path, monkeypatch):
     """GRA-1 interplay (explicitly called out in the roadmap): 1-hop expansion must keep
     operating purely on parent ENTRY indices even when the corpus has body chunks -- the

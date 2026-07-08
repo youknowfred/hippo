@@ -639,7 +639,7 @@ workstreams:
         title: Per-query dense/lexical intent routing
         priority: P1
         effort: S
-        status: planned
+        status: done
         source: {lens: retrieval, verdict: KEEP}
         problem: >-
           Fusion weights are static (1,1,0.5,0.5); an identifier/stacktrace-dense
@@ -677,6 +677,26 @@ workstreams:
           regression gate; "no regression" = those gates stay green + a hermetic
           tests/test_recall.py pair (stacktrace→lexical lean, prose→dense lean,
           ambiguous→exact balanced default) with HIPPO_DISABLE_DENSE=1 conventions.
+        implementation_addendum: >-
+          SHIPPED 2026-07-08 (commit-local finding, not a premise correction): two guards the
+          note didn't spell out, both caught by existing hermetic tests before merge, not by
+          the eval gates (small-corpus eval numbers were byte-identical before/after either
+          way). (1) The lean must be a no-op whenever only ONE of dense/bm25 actually has
+          candidates (e.g. HIPPO_DISABLE_DENSE=1) — there is no "which backend to favor"
+          decision when just one contributes, and applying a non-1.0 weight to the lone
+          contributor only rescales its score for nothing;
+          test_recall_emitted_score_equals_true_penalized_fused_score pinned the old
+          byte-identical BM25-only score and caught this immediately. (2) _INTENT_MIN_TOKENS
+          needed to be 8, not a lower number — a short-but-plain technical query (6 tokens,
+          zero mined identifiers, e.g. "oauth token refresh flow policy gateway") is common
+          enough that leaning dense on it measurably reorders the fused list; primary_relevance
+          (unweighted, the knee's own input) doesn't change, but the knee cutoff compares
+          consecutive EMITTED entries in fused order, so a reorder can shift which entry's
+          relevance becomes "prev_relevance" and trip the cutoff early —
+          test_recall_superseded_ranks_below_successor_dense_path caught a memory dropping out
+          of top-k entirely. Both guards are in recall.py: the both-backends check lives at the
+          _intent_weights call site in recall(), not inside the helper itself (it needs
+          dense/bm25 presence, which the helper doesn't receive).
 
       - id: RCL-2
         title: Floor-dedup + within-session injection cooldown
