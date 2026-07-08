@@ -62,15 +62,18 @@ Each match prints as:
 than padding out low-signal matches (RET-1) — an unrelated or too-thin query correctly
 surfaces nothing. Reach for `--list-by-type` to see what *is* known.
 
-## Agents and subagents (interim, until the MCP server)
+## Agents and subagents
 
-This is also the mid-turn / subagent retrieval path: the recall hook fires only on a top-level
-user prompt, so an agent that discovers mid-turn what it's actually working on — or a subagent
-launched via Task, which gets no `UserPromptSubmit` at all — can run
-`"${CLAUDE_PLUGIN_ROOT}/bin/hippo" recall "<focused query>"` (the raw injection block) or this
-skill's `memory.recall_view` for the browsable listing to pull relevant memory on demand.
-INT-2's stdio MCP server supersedes this with first-class `recall`/`traverse` tools; until
-then, this command is the retrieval path to reference in policy-critical Task prompts.
+The recall hook fires only on a top-level user prompt, so mid-turn retrieval and subagents
+(launched via Task, which get no `UserPromptSubmit` at all) need another path. Two exist:
+
+- **The MCP server (INT-2), preferred.** The plugin declares a stdio MCP server exposing
+  first-class `recall(query, k)`, `new_memory(...)`, and `traverse(name, hops)` tools that
+  subagents inherit automatically — call them mid-turn, no user prompt required.
+- **`bin/hippo recall`, the fallback** (pre-bootstrap, or where MCP is unavailable): run
+  `"${CLAUDE_PLUGIN_ROOT}/bin/hippo" recall "<focused query>"` for the raw injection block, or
+  this skill's `memory.recall_view` for the browsable listing. This is the command to reference
+  in policy-critical Task prompts where you can't rely on the MCP tools being wired.
 
 ## When NOT to use
 

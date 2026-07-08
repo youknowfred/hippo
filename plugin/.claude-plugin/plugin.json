@@ -8,6 +8,12 @@
   "homepage": "https://github.com/youknowfred/hippo",
   "repository": "https://github.com/youknowfred/hippo",
   "license": "MIT",
-  "keywords": ["memory", "recall", "agent-memory", "knowledge-base"]
+  "keywords": ["memory", "recall", "agent-memory", "knowledge-base"],
+  "mcpServers": {
+    "hippo": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/hippo",
+      "args": ["mcp"]
+    }
+  }
 }
 

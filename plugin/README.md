@@ -17,6 +17,23 @@ reconsolidation, archive internals).
 | `/hippo:audit` | Deep, judgment-based self-audit of the corpus's content — staleness, drift, archive candidates |
 | `/hippo:remove` | Uninstall/offboard THIS project — removes the symlink, offers to delete index/telemetry, reports (never deletes) shared venv/cache paths |
 
+## MCP server — mid-turn & subagent memory (INT-2)
+
+The plugin declares a stdio MCP server (`plugin.json` → `bin/hippo mcp` → the PLUGIN_DATA venv
+python, falling back to `python3` pre-bootstrap). It closes the two gaps the once-per-prompt
+recall hook can't: mid-turn retrieval (after the agent discovers what it's working on) and
+subagent memory (Task turns get no `UserPromptSubmit`). Three tools, offline and corpus-local,
+reusing the exact hook ranking (no fork):
+
+| Tool | Purpose |
+|---|---|
+| `recall(query, k)` | Hybrid recall + graph/staleness annotations — the same engine the hook uses |
+| `new_memory(name, description, type, body, links)` | Per-item, agent-gated corpus write (LIF-2 dup neighbors reported) |
+| `traverse(name, hops)` | Outbound (≤N-hop) + inbound + typed (supersedes/contradicts/refines) neighbors |
+
+It is a dependency-free JSON-RPC 2.0 server (stdlib only — no `mcp` package). The hook path
+never imports it, so recall keeps working with the server absent.
+
 ### Unicode and multilingual retrieval (RET-3)
 
 BM25 tokenization is Unicode-aware unconditionally — word tokens for Latin/Cyrillic/etc.
