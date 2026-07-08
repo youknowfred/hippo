@@ -1,14 +1,19 @@
 # CI — the suite finally gates something (QUA-1).
 #
-# Three lanes:
-#   hermetic  — the default (network-deselected) pytest suite, dense disabled, across
-#               the declared support matrix {ubuntu, macos} × {py3.10, py3.12}.
+# Per-PR lanes (the six required checks):
+#   hermetic  — the default (network+slow+scale-deselected) pytest suite, dense disabled,
+#               across the declared support matrix {ubuntu, macos} × {py3.10, py3.12}.
 #   dense     — fastembed model restored from actions/cache; runs the network-marked
 #               dense tests plus the bare eval_recall CLI against a corpus seeded from
 #               the shipped starter packs (so default-path fossils fail loudly, COR-2).
 #   shellcheck — the hook scripts and bin/hippo launcher.
 #
-# Mark all three required on PRs to main in the repo's branch-protection settings.
+# Nightly-only lane (NOT a required PR check — gated on the schedule trigger):
+#   scale     — PRF-3's generated ~500-memory BM25 corpus, asserting recall latency,
+#               bounded output, and build/refresh time. `scale`-marked so it never runs on
+#               the hermetic or dense lanes; a scale regression names the budget it broke.
+#
+# Mark hermetic ×4 + dense + shellcheck required on PRs to main in branch-protection settings.
 
 name: CI
 
@@ -17,6 +22,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "0 7 * * *"  # 07:00 UTC nightly — the PRF-3 scale lane (see the `scale` job)
 
 jobs:
   hermetic:
@@ -88,3 +95,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: shellcheck hook scripts and bin/hippo
         run: shellcheck plugin/hooks/*.sh plugin/bin/hippo
+
+  scale:
+    name: scale (500-memory BM25 lane, nightly)
+    # NIGHTLY ONLY (PRF-3): gated on the schedule event so the 500-memory build never runs on a
+    # push/PR — it is a scale-envelope tripwire, not a per-PR gate. `scale`-marked tests are
+    # deselected everywhere else (hermetic addopts, and the dense lane's `-m "network or slow"`).
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    env:
+      HIPPO_DISABLE_DENSE: "1"  # BM25-only for speed — the scale lane asserts lexical-path envelope
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: plugin/requirements.txt
+      - name: Install deps
+        run: python -m pip install -r plugin/requirements.txt pytest pytest-timeout hypothesis
+      - name: PRF-3 500-memory scale lane (scale-marked; latency + bounded output + build/refresh budgets)
+        run: python -m pytest -m scale tests/test_scale.py

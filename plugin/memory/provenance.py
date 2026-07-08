@@ -294,6 +294,82 @@ def resolve_dirs() -> Tuple[str, str]:
     return memory_dir, repo_root
 
 
+# --------------------------------------------------------------------------- #
+# TEA-1: the machine-local USER tier — a second corpus, recalled ALONGSIDE the
+# project corpus in every project so a person-scoped lesson learned in project A is
+# known in project B. Decided machine-local only (OQ-5): no remote/sync; the location
+# is a plain dir so a dotfiles symlink Just Works for users who sync themselves.
+# --------------------------------------------------------------------------- #
+def user_memory_dir() -> str:
+    """The machine-local user-tier corpus dir (``~/.claude/hippo-memory`` by default).
+
+    ``HIPPO_USER_MEMORY_DIR`` overrides it (hermetic tests; a dotfiles-relocated home).
+    Returns a PATH, not a promise the dir exists — the fusion layer treats an absent dir
+    as "no user tier" (recall proceeds project-only), so an unconfigured machine pays
+    nothing. Sits beside the existing machine-local ``~/.claude/hippo-trust.json`` registry
+    and the native-memory symlink under ``~/.claude/projects/``; deliberately NOT under
+    ``platform_cache_dir`` (that is a rebuildable cache — user memories are data).
+    """
+    override = os.environ.get("HIPPO_USER_MEMORY_DIR")
+    if override:
+        return override
+    return os.path.join(os.path.expanduser("~"), ".claude", "hippo-memory")
+
+
+def local_memory_dir(project_memory_dir: str) -> str:
+    """TEA-3: the in-repo, gitignored PRIVATE tier dir — a sibling of the project corpus
+    (``.claude/memory.local`` beside ``.claude/memory``).
+
+    ``HIPPO_LOCAL_MEMORY_DIR`` overrides it (hermetic tests). Holds memories a user wants recall
+    over on THIS clone but never published to teammates: it is gitignored (init patches
+    ``.gitignore`` AND it self-ignores, SEC-3), so it is invisible in ``git status`` and can
+    never be committed, while staying fully recallable locally (fused like the user tier). A
+    teammate who clones the repo simply lacks the dir; its floor pointers degrade to silence.
+    """
+    override = os.environ.get("HIPPO_LOCAL_MEMORY_DIR")
+    if override:
+        return override
+    return os.path.join(os.path.dirname(os.path.abspath(project_memory_dir)), "memory.local")
+
+
+def current_user_slug(repo_root: str) -> str:
+    """A filesystem-safe slug identifying the current user, for TEA-5's committed per-user usage
+    summary (``.usage/<user>.json``).
+
+    Preference order: ``HIPPO_USAGE_USER`` override (hermetic tests) → git ``user.email`` → git
+    ``user.name`` → ``$USER``/``$LOGNAME`` → ``"unknown"``. Slugified to ``[a-z0-9_.-]`` (any
+    other char → ``_``, leading/trailing separators trimmed, capped at 64 chars). Never raises —
+    identity derivation must degrade to ``"unknown"``, never crash a curation pass."""
+    try:
+        raw = (os.environ.get("HIPPO_USAGE_USER") or "").strip()
+        if not raw:
+            raw = run_git(["config", "user.email"], repo_root).strip()
+        if not raw:
+            raw = run_git(["config", "user.name"], repo_root).strip()
+        if not raw:
+            raw = (os.environ.get("USER") or os.environ.get("LOGNAME") or "").strip()
+        if not raw:
+            raw = "unknown"
+        slug = re.sub(r"[^A-Za-z0-9_.-]", "_", raw.lower()).strip("._-")
+        return (slug or "unknown")[:64]
+    except Exception:
+        return "unknown"
+
+
+def tier_index_dir(tier_dir: str) -> str:
+    """Index-cache location for a NON-project tier — nested at ``<tier_dir>/.memory-index``.
+
+    The project tier keeps its historical SIBLING cache (``.claude/.memory-index`` via
+    ``build_index.default_index_dir``); the user tier (and TEA-3's private tier) NEST their
+    index inside the tier dir instead. Two reasons: (1) the private tier's sibling would be
+    ``.claude/.memory-index`` — colliding with the project's — so nesting keeps them distinct;
+    (2) a nested user-tier index lives under ``~/.claude/hippo-memory`` (outside every repo)
+    and a nested private-tier index is swept up by ``memory.local``'s own self-ignoring
+    ``.gitignore``, so neither can ever reach a project's git.
+    """
+    return os.path.join(tier_dir, ".memory-index")
+
+
 def ensure_self_ignoring_dir(path: str) -> None:
     """mkdir -p a DERIVED dir + drop a ``.gitignore`` containing ``*`` inside it.
 

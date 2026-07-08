@@ -9,6 +9,13 @@ Reads the recall-event ledger (``memory/telemetry.py``) into two decisions:
     "dead weight" — read with the topic-bias caveat: cold tracks recent session mix, not
     value), and the BM25-fallback rate (dense unavailable on some session).
 
+TEA-5: the ledger + aggregates are BOTH clone-local, so "never recalled" means "never in THIS
+clone" — a memory a teammate hits daily reads as dead weight here. ``curation_report`` and
+``soak_status`` therefore ALSO union every committed per-user usage summary
+(``telemetry.read_committed_usage`` over ``.claude/memory/.usage/*.json``, opt-in and committed)
+before judging coldness, and the CLI labels the signal's scope (clone-local vs cross-clone)
+explicitly. ``--record-usage`` folds this clone's aggregates into ``.usage/<user>.json``.
+
 LIF-4: the ledger is a byte-capped rotating buffer, so on a long-lived corpus its oldest
 evidence is exactly what rotation drops first — a genuinely-used memory would drift toward
 "never recalled" if the ledger were the only source. Every analyzer here therefore UNIONS
@@ -28,7 +35,12 @@ import os
 from collections import Counter
 from typing import List, Optional
 
-from .telemetry import default_telemetry_dir, read_events, read_usage_aggregates
+from .telemetry import (
+    default_telemetry_dir,
+    read_committed_usage,
+    read_events,
+    read_usage_aggregates,
+)
 
 # Curation-soak bar: enough distinct sessions that the never-recalled signal isn't one-session
 # topic noise (a floor for trusting the dead-weight report, NOT an Option-C unblock gate).
@@ -41,18 +53,24 @@ _SERVING_BACKENDS = ("dense+bm25", "dense", "bm25")
 # --------------------------------------------------------------------------- #
 # Soak status (the curation-soak session bar)
 # --------------------------------------------------------------------------- #
-def soak_status(telemetry_dir: Optional[str] = None) -> dict:
+def soak_status(telemetry_dir: Optional[str] = None, *, memory_dir: Optional[str] = None) -> dict:
     """Distinct-session count + whether the ``>=5``-session curation-soak bar is met.
 
     ``distinct_sessions`` is the LARGER of the ledger-window count and the
     rotation-surviving aggregate count (LIF-4) — the two observe the same session stream,
     so max() is the honest union: rotation can only shrink the ledger's view, and a
     deleted/reset aggregate file can only shrink the aggregate's. ``total_events`` stays
-    ledger-window-only (the aggregates don't store event counts). Read-only; never raises.
+    ledger-window-only (the aggregates don't store event counts).
+
+    TEA-5: when ``memory_dir`` is given, the summed distinct-session count from every committed
+    per-user summary (``.usage/<user>.json``) is unioned in via ``max`` too, so the gate reflects
+    TEAM-wide evidence — the coldness signal it guards is itself cross-clone once committed usage
+    is present. Read-only; never raises.
     """
     sessions: set = set()
     total = 0
     agg_sessions = 0
+    committed_sessions = 0
     try:
         for e in read_events(telemetry_dir):
             total += 1
@@ -60,14 +78,17 @@ def soak_status(telemetry_dir: Optional[str] = None) -> dict:
             if sid:
                 sessions.add(sid)
         agg_sessions = read_usage_aggregates(telemetry_dir)["sessions"]["count"]
+        if memory_dir:
+            committed_sessions = read_committed_usage(memory_dir)["sessions"]
     except Exception:
         pass
-    distinct = max(len(sessions), agg_sessions)
+    distinct = max(len(sessions), agg_sessions, committed_sessions)
     return {
         "distinct_sessions": distinct,
         "total_events": total,
         "gate_threshold": SOAK_GATE_SESSIONS,
         "gate_met": distinct >= SOAK_GATE_SESSIONS,
+        "committed_sessions": committed_sessions,
     }
 
 
@@ -100,6 +121,7 @@ def curation_report(memory_dir: str, telemetry_dir: Optional[str] = None) -> dic
     bm25_only = 0
     total = 0
     agg_recalled: set = set()
+    committed_recalled: set = set()
     try:
         for e in read_events(telemetry_dir):
             total += 1
@@ -112,11 +134,15 @@ def curation_report(memory_dir: str, telemetry_dir: Optional[str] = None) -> dic
                 if backend == "bm25":
                     bm25_only += 1
         agg_recalled = set(read_usage_aggregates(telemetry_dir)["memories"])
+        # TEA-5: a memory a TEAMMATE recalls (per their committed .usage summary) is NOT dead
+        # weight on this clone — union those names in before judging coldness, so "never
+        # recalled" stops meaning "never in THIS clone".
+        committed_recalled = read_committed_usage(memory_dir)["memories"]
     except Exception:
         pass
 
     corpus = _corpus_names(memory_dir)
-    recalled = set(hits) | agg_recalled
+    recalled = set(hits) | agg_recalled | committed_recalled
     never_recalled = sorted(n for n in corpus if n not in recalled)
     bm25_fallback_rate = round(bm25_only / serving, 4) if serving else 0.0
     return {
@@ -129,6 +155,9 @@ def curation_report(memory_dir: str, telemetry_dir: Optional[str] = None) -> dic
         "serving_events": serving,
         "bm25_fallback_events": bm25_only,
         "bm25_fallback_rate": bm25_fallback_rate,
+        # TEA-5: True iff any teammate's committed usage contributed to the recalled set — the
+        # signal is then cross-clone, not clone-local; the CLI/skill label reflects this.
+        "committed_usage_present": bool(committed_recalled),
     }
 
 
@@ -196,31 +225,65 @@ def compute_strength_scores(telemetry_dir: Optional[str] = None) -> dict:
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
-    from .provenance import resolve_dirs
+    from .provenance import current_user_slug, resolve_dirs
 
     parser = argparse.ArgumentParser(description="Recall soak ledger + curation report (read-only).")
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--telemetry-dir", default=None)
+    parser.add_argument("--repo-root", default=None)
+    parser.add_argument(
+        "--record-usage",
+        action="store_true",
+        help="TEA-5: fold THIS clone's usage aggregates into the COMMITTED per-user summary "
+        ".claude/memory/.usage/<user>.json (append-only, merge-friendly, no session ids) so a "
+        "teammate's clone unions your recalls before judging coldness. Then commit .usage/. "
+        "This is the only write this tool makes; agent/user-gated by invoking it explicitly.",
+    )
     args = parser.parse_args(argv)
 
-    memory_dir, _ = resolve_dirs()
+    memory_dir, repo_root = resolve_dirs()
     memory_dir = args.memory_dir or memory_dir
+    repo_root = args.repo_root or repo_root
     td = args.telemetry_dir or default_telemetry_dir(memory_dir)
 
-    status = soak_status(td)
+    if args.record_usage:
+        from .telemetry import write_user_usage_summary
+
+        user = current_user_slug(repo_root)
+        path = write_user_usage_summary(memory_dir, user, td)
+        if path:
+            print(f"recorded usage summary for '{user}' → {path}")
+            print("commit .claude/memory/.usage/ so teammates union it before judging coldness.")
+            return 0
+        print("could not record usage summary (no aggregates yet, or write failed).")
+        return 1
+
+    status = soak_status(td, memory_dir=memory_dir)
     report = curation_report(memory_dir, td)
+    # TEA-5: the coldness signal is clone-local UNLESS teammates' committed usage is unioned in.
+    cross_clone = report.get("committed_usage_present")
+    scope = (
+        "cross-clone: unions committed teammate usage"
+        if cross_clone
+        else "CLONE-LOCAL: only this clone's recalls — a teammate's daily hit reads as cold here"
+    )
 
     print("=== Recall soak ledger ===")
     print(f"distinct sessions     : {status['distinct_sessions']} (curation-soak bar >= {status['gate_threshold']})")
+    if status.get("committed_sessions"):
+        print(f"  (+{status['committed_sessions']} committed cross-clone sessions unioned in — TEA-5)")
     print(f"total events          : {status['total_events']}")
     print(f"curation soak         : {'MET ✅' if status['gate_met'] else 'pending'}")
     if status["gate_met"]:
         print("  (enough distinct sessions for the dead-weight signal below to be minimally meaningful)")
     print()
     print("=== Curation report ===")
+    print(f"usage-signal scope     : {scope}")
+    if not cross_clone:
+        print("  (run `python -m memory.soak --record-usage` on each clone + commit .usage/ to make it team-wide)")
     print(f"corpus memories        : {report['corpus_count']}")
     print(f"recalled >= once       : {report['recalled_count']}")
-    print(f"never recalled (dead weight): {report['never_recalled_count']}")
+    print(f"never recalled (dead weight, {'cross-clone' if cross_clone else 'this clone only'}): {report['never_recalled_count']}")
     serving = report["serving_events"]
     print(
         f"bm25-fallback rate     : {report['bm25_fallback_rate'] * 100:.1f}% "
@@ -241,7 +304,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"  • {name}: {score}")
 
     if report["never_recalled"]:
-        print("never-recalled memories:")
+        print(f"never-recalled memories ({'cross-clone' if cross_clone else 'this clone only'}):")
         for name in report["never_recalled"][:50]:
             print(f"  • {name}")
         if report["never_recalled_count"] > 50:

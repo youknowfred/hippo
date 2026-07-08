@@ -7,6 +7,60 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v0.7.0 — 2026-07-08 — "Team & fleet — memory that survives more than one human and one repo"
+
+**re-bootstrap: no** — `plugin/requirements.txt` is unchanged; the code swap on update is
+sufficient. No corpus format (still 2) or index schema (still 3) change this release: the
+multi-corpus fusion is a purely in-memory merge at recall time, so no persisted manifest shape
+changed and every golden/byte-identity pin holds.
+
+New env vars: `HIPPO_USER_MEMORY_DIR` (TEA-1 user-tier location, default `~/.claude/hippo-memory`),
+`HIPPO_LOCAL_MEMORY_DIR` (TEA-3 private-tier location, default `.claude/memory.local`), and
+`HIPPO_USAGE_USER` (TEA-5 usage-summary identity override). New surfaces: `/hippo:new --tier
+{project|user|private}`, `python -m memory.soak --record-usage`, a SessionStart `portable_floor`
+producer, a new `scale` pytest marker, and a nightly CI lane. New pytest marker: `scale`.
+
+The theme of the release: memory stops being trapped in one person's one clone. A person-scoped
+lesson learned in project A is now known in project B; a team corpus carries no one's personal
+policies; a private note is recallable locally yet invisible in git; usage signals say plainly
+when they only speak for this clone; and there is finally a documented way to make a memory
+truly forgotten. The sharpest invariant — a user/private-tier memory is recallable everywhere
+yet its content NEVER enters a project's git — is adversarially pinned.
+
+### Shipped this release
+
+- **TEA-1** — Two-tier corpus: a machine-local **user tier** (`~/.claude/hippo-memory`,
+  `HIPPO_USER_MEMORY_DIR`) holding person-scoped `user`/`feedback` memories, indexed and recalled
+  ALONGSIDE the project corpus via true two-corpus fusion (a single in-memory `LoadedIndex`, so
+  BM25/dense/RRF/floor/knee/graph all run once, unchanged), with each hit provenance-labelled
+  (`corpus`/`root`) and the floor drawn from BOTH (recall-dedup union + a bounded SessionStart
+  `portable_floor` producer, since the user tier has no native always-load channel). Machine-local
+  only (OQ-5). Each tier keeps its OWN gitignored index — no merged manifest is ever written to
+  disk — so **no user-tier content enters the project's git**; `/hippo:new --tier user` routes the
+  file and its floor pointer to the user tier's own `MEMORY.md`. An adversarial test pins that a
+  user-tier write leaves the project git tree pristine (`status`/`ls-files`/manifest all clean).
+- **TEA-3** — Private memory tier (`.claude/memory.local/`): a gitignored in-repo sibling merged
+  into the same recall (labelled `private memory`), created by init and self-ignoring (SEC-3 `*`
+  `.gitignore`) so it is invisible in `git status` and uncommittable even without the patch, while
+  staying fully recallable locally. Its index nests inside the tier (its plain sibling would
+  collide with the project's). A teammate who lacks the dir degrades to silence, never an error.
+- **TEA-5** — Usage signals honest about scope: every coldness surface (soak CLI, archive report,
+  audit skill) now LABELS the signal clone-local vs cross-clone, so "never recalled in THIS clone"
+  is never mistaken for team-wide dead weight. Opt-in committed per-user summaries
+  (`.claude/memory/.usage/<user>.json`, written by `soak --record-usage`, no session ids) that
+  `curation_report`/`soak_status` UNION before judging coldness. `provenance.current_user_slug`
+  is the first identity derivation in shipped code.
+- **SEC-4** — Documented purge procedure: a `plugin/memory/README.md` section (remove the file →
+  `git filter-repo` history scrub → index rebuild → ledger clear → recall verification),
+  contrasted with the reversible `/hippo:archive` and whole-project `/hippo:remove`. The pointer
+  is single-sourced in `secrets.REMEDIATION`, so both the write-time warning and doctor's secret
+  check name it.
+- **PRF-3** — 500-memory scale lane: a deterministic generated ~500-memory BM25 corpus asserting
+  recall latency (warm p95 < 300ms), bounded output with a 45-memory match set (≤ `DEFAULT_K`,
+  ≤ 9000 chars), and build/refresh time budgets — each failure naming the budget it broke.
+  `scale`-marked so it stays off the hermetic and per-PR dense lanes; a new nightly CI job
+  (`schedule:` 07:00 UTC) runs it.
+
 ## v0.6.0 — 2026-07-07 — "The write path — capture up to the approval gate; memory reaches every agent"
 
 **re-bootstrap: no** — `plugin/requirements.txt` is unchanged; the code swap on update is

@@ -105,10 +105,18 @@ def describe(
         # to the corpus dir to read the memory's frontmatter for its type.
         fname = h.get("file") or ""
         name = h.get("name") or _name_from_path(fname)
-        mtype = _memory_type(_read_text(os.path.join(memory_dir, fname))) or "untyped"
+        # TEA-1/TEA-3: a fused hit carries its own corpus ``root`` (project / user tier /
+        # private tier); read its type from THAT dir, not the single project dir — a user-tier
+        # basename joined to the project dir would read as "untyped" or collide with a same-named
+        # project file. A single-corpus hit has no root and falls back to memory_dir.
+        hit_root = h.get("root") or memory_dir
+        mtype = _memory_type(_read_text(os.path.join(hit_root, fname))) or "untyped"
         score = h.get("score")
         via = h.get("via")
         tags = [f"{mtype}"]
+        corpus = h.get("corpus")
+        if corpus and corpus != "project":
+            tags.append(f"{corpus} tier")  # provenance: which corpus this hit came from
         if isinstance(score, (int, float)):
             tags.append(f"relevance {score:.3f}")
         if via == "graph":
