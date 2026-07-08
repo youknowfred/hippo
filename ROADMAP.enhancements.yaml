@@ -178,7 +178,7 @@ workstreams:
         title: Relevant-to-current-work SessionStart producer (diff-seeded)
         priority: P0
         effort: M
-        status: planned
+        status: done
         source: {lens: retrieval+claude-rules, verdict: KEEP, leverage: 4, convergence: 3-lenses}
         problem: >-
           Recall is keyed on the raw opening prompt, and all 13 SessionStart

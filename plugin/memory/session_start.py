@@ -9,6 +9,9 @@ SessionStart producer for the memory concerns):
                            entries already on the reconsolidation worklist are counted,
                            not re-listed either — see below).
   - reconsolidation      — the recall-filtered subset of staleness (Tier 2).
+  - relevant-to-work (SIG-1) — the FIRST positive block: memories whose cited_paths intersect
+                           the session's uncommitted diff (the code you're actually editing),
+                           ranked by recall strength. SILENT on a clean tree.
   - git-recent  (Tier 2) — memories captured within the recent window (newest first).
   - link-health (Tier 3) — dangling/orphan wikilink count across the corpus.
   - floor                — SILENT unless project/reference links re-bloat the MEMORY.md floor
@@ -390,6 +393,116 @@ def pending_capture_producer(
     )
 
 
+# SIG-1: how many relevant-to-current-work memories the positive producer lists, and how far
+# each description is trimmed. A positive block stays FOCUSED (a handful of top matches), unlike
+# the warning producers whose count is the point — so this cap is tighter than _MAX_ITEMS_PER_PRODUCER.
+_MAX_RELEVANT_ITEMS = 8
+_RELEVANT_DESC_CHARS = 140
+
+
+def _diff_query(changed_paths: List[str]) -> str:
+    """A bounded recall query assembled from changed file paths — each file's stem + its parent
+    dir name (e.g. ``plugin/memory/recall.py`` -> ``recall memory``). Pure string assembly, no
+    LLM/network. Used ONLY to ORDER the cited-path matches by recall strength, never to select
+    them (selection is the exact cited_paths intersection in the producer)."""
+    tokens: List[str] = []
+    seen = set()
+    for p in changed_paths:
+        stem = os.path.splitext(os.path.basename(p))[0]
+        parent = os.path.basename(os.path.dirname(p))
+        for tok in (stem, parent):
+            t = tok.strip()
+            if t and t not in seen:
+                seen.add(t)
+                tokens.append(t)
+    return " ".join(tokens[:60])
+
+
+def relevant_to_work_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """SIG-1: the FIRST positive SessionStart block — memories about the code you're touching.
+
+    Every other producer is a warning or the floor; none says "here are the memories about the
+    files you're actually editing." This one does, BEFORE the first prompt. Selection is PRECISE:
+    project memories whose ``cited_paths`` intersect the session's uncommitted working-tree diff
+    (``ctx.changed_paths`` — modified-tracked + untracked since HEAD), so a clean tree emits
+    nothing (no false block) and only memories genuinely about a touched file appear. Ordering is
+    by recall STRENGTH: a diff-derived query is run through ``recall.recall`` (itself SEC-1-gated)
+    purely to rank the matches; when recall abstains the ranking falls back to match count. The
+    matched path is NAMED so the block is legible (inv3). Read-only over the git-native corpus
+    (inv1); all work is at SessionStart, never the UserPromptSubmit hot path (inv6). When ``ctx``
+    is absent (a standalone/test call) the diff is derived here instead.
+    """
+    try:
+        if ctx is not None:
+            changed = set(ctx.changed_paths)
+        else:
+            from .capture import _git_changed_paths
+
+            changed = set(_git_changed_paths("HEAD", repo_root))
+        if not changed:
+            return None
+
+        from .build_index import extract_description
+        from .staleness import _iter_memory_files, read_provenance
+
+        matches: List[Tuple[str, str, List[str]]] = []  # (name, description, matched_paths)
+        for path in _iter_memory_files(memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+            except Exception:
+                continue
+            cited, _sc = read_provenance(text)
+            if not cited:
+                continue
+            matched = [p for p in cited if p in changed]
+            if not matched:
+                continue
+            name = os.path.splitext(os.path.basename(path))[0]
+            matches.append((name, extract_description(text), matched))
+        if not matches:
+            return None
+
+        # Rank by recall STRENGTH (the diff-derived query is an ORDERING signal only — membership
+        # is the exact cited_paths intersection above). recall returns best-first with a fused
+        # score; abstention (empty) leaves score_by_name empty and the sort falls back to match count.
+        score_by_name: dict = {}
+        try:
+            from .recall import recall as _recall
+
+            for r in _recall(
+                _diff_query(sorted(changed)),
+                _MAX_ITEMS_PER_PRODUCER,
+                memory_dir=memory_dir,
+                repo_root=repo_root,
+            ):
+                score_by_name.setdefault(r.get("name"), r.get("score", 0.0))
+        except Exception:
+            score_by_name = {}
+        matches.sort(key=lambda m: m[0])  # name asc — stable tiebreak under the next sort
+        matches.sort(key=lambda m: (score_by_name.get(m[0], 0.0), len(m[2])), reverse=True)
+
+        lines = [
+            f"🎯 Relevant to your current work — {len(matches)} memory(ies) about files you're "
+            "editing this session (uncommitted changes):"
+        ]
+        for name, desc, matched in matches[:_MAX_RELEVANT_ITEMS]:
+            d = " ".join((desc or "").split())
+            if len(d) > _RELEVANT_DESC_CHARS:
+                d = d[: _RELEVANT_DESC_CHARS - 1].rstrip() + "…"
+            shown = ", ".join(matched[:3])
+            more = f", +{len(matched) - 3} more" if len(matched) > 3 else ""
+            suffix = f" — {d}" if d else ""
+            lines.append(f"  • {name}{suffix} [cites {shown}{more}]")
+        if len(matches) > _MAX_RELEVANT_ITEMS:
+            lines.append(f"  …and {len(matches) - _MAX_RELEVANT_ITEMS} more.")
+        return "\n".join(lines)
+    except Exception:
+        return None
+
+
 # (label, fn). Each tier appends a producer here — never a parallel hook entry. Every fn
 # shares ONE call shape — ``(memory_dir, repo_root, ctx)`` — LIF-6's ``RunContext``, even
 # when a given producer ignores it (see the module docstring).
@@ -403,6 +516,7 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("pending_capture", pending_capture_producer),  # CAP-2: surface the gitignored draft-capture queue so it never soaks silently
     ("index_integrity", index_integrity_producer),  # names on-disk index corruption (QUA-5) — recall/build_index already degrade silently
     ("unresolvable_baseline", unresolvable_baseline_producer),  # legibility for find_stale's sha-fallback path
+    ("relevant_to_work", relevant_to_work_producer),  # SIG-1: the first POSITIVE block — memories about the files you're editing
     ("git_recent", git_recent_producer),
     ("link_health", lint_links_producer),
     ("floor", floor_producer),  # silent unless project/reference links re-bloat the MEMORY.md floor
@@ -493,6 +607,7 @@ def _build_run_context(memory_dir: str, repo_root: str) -> RunContext:
     diagnostics: dict = {}
     stale: List[dict] = []
     worklist: List[dict] = []
+    changed_paths: List[str] = []
     try:
         stale = find_stale(memory_dir, repo_root, diagnostics=diagnostics)
     except Exception:
@@ -501,6 +616,16 @@ def _build_run_context(memory_dir: str, repo_root: str) -> RunContext:
         worklist = recalled_stale_worklist(memory_dir, repo_root, stale=stale)
     except Exception:
         worklist = []
+    # SIG-1: the session's uncommitted working-tree diff, computed ONCE (this path only runs
+    # for a TRUSTED corpus — build_context short-circuits before here — so the relevant-to-work
+    # producer inherits the SEC-1 gate). 'HEAD' as the watermark unions modified-tracked with
+    # untracked files; [] on a clean tree or non-git corpus. Off the hot path (inv6).
+    try:
+        from .capture import _git_changed_paths
+
+        changed_paths = _git_changed_paths("HEAD", repo_root)
+    except Exception:
+        changed_paths = []
     try:
         if os.path.isdir(memory_dir):
             from .build_index import default_index_dir
@@ -508,7 +633,12 @@ def _build_run_context(memory_dir: str, repo_root: str) -> RunContext:
             write_stale_cache(default_index_dir(memory_dir), stale)
     except Exception:
         pass
-    return RunContext(stale=stale, stale_diagnostics=diagnostics, worklist=worklist)
+    return RunContext(
+        stale=stale,
+        stale_diagnostics=diagnostics,
+        worklist=worklist,
+        changed_paths=changed_paths,
+    )
 
 
 def build_context(memory_dir: str, repo_root: str, max_chars: int = _MAX_CONTEXT_CHARS) -> str:
