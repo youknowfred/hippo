@@ -30,6 +30,7 @@ _USER_PROMPT_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_user_prompt.sh")
 _SESSION_START_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_session_start.sh")
 _PRE_COMPACT_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_pre_compact.sh")
 _SESSION_END_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_session_end.sh")
+_SUBAGENT_STOP_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_subagent_stop.sh")
 
 _MEMORY_MD = """---
 name: zebra_deploy_runbook
@@ -364,6 +365,48 @@ class TestSessionEndHook:
         # … and the corpus is byte-for-byte unchanged (the approval gate held).
         corpus_after = {r for r in _tree(project) if r.startswith(".claude/memory/")}
         assert corpus_after == corpus_before, "SessionEnd hook wrote into the corpus"
+
+
+# --------------------------------------------------------------------------- #
+# INT-3: SubagentStop capture — same gate as SessionEnd, labels the seed subagent-stop
+# --------------------------------------------------------------------------- #
+class TestSubagentStopHook:
+    def test_empty_stdin(self, tmp_path):
+        proc, _, _ = _run_hook(_SUBAGENT_STOP_HOOK, "", tmp_path)
+        _assert_contract(proc, "SubagentStop")
+
+    def test_garbage_json(self, tmp_path):
+        proc, _, _ = _run_hook(_SUBAGENT_STOP_HOOK, "{{{", tmp_path)
+        _assert_contract(proc, "SubagentStop")
+
+    def test_no_corpus_writes_nothing(self, tmp_path):
+        proc, project, _ = _run_hook(
+            _SUBAGENT_STOP_HOOK, json.dumps({"session_id": "s"}), tmp_path, with_corpus=False
+        )
+        _assert_contract(proc, "SubagentStop")
+        assert _tree(project) == set()
+
+    def test_captures_to_pending_labeled_subagent_stop(self, tmp_path):
+        proc0, project, _ = _run_hook(_SUBAGENT_STOP_HOOK, "", tmp_path)  # warm dirs
+        tele = os.path.join(project, ".claude", ".memory-telemetry")
+        os.makedirs(tele, exist_ok=True)
+        with open(os.path.join(tele, "episode_buffer.jsonl"), "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "ts": 1.0, "session_id": "sub-1", "query_preview": "what changed",
+                "recalled_names": ["zebra_deploy_runbook"], "head_commit": None,
+            }) + "\n")
+        corpus_before = {r for r in _tree(project) if r.startswith(".claude/memory/")}
+
+        proc, _, _ = _run_hook(_SUBAGENT_STOP_HOOK, json.dumps({"session_id": "sub-1"}), tmp_path)
+        _assert_contract(proc, "SubagentStop")
+
+        pending = os.path.join(project, ".claude", ".memory-pending")
+        seeds = [f for f in os.listdir(pending) if f.endswith(".json")] if os.path.isdir(pending) else []
+        assert seeds, "SubagentStop captured no seed"
+        with open(os.path.join(pending, seeds[0])) as fh:
+            assert json.load(fh)["reason"] == "subagent-stop"
+        # corpus untouched — same structural gate as SessionEnd
+        assert {r for r in _tree(project) if r.startswith(".claude/memory/")} == corpus_before
 
 
 # --------------------------------------------------------------------------- #

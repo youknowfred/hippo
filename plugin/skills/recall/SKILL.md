@@ -72,8 +72,20 @@ The recall hook fires only on a top-level user prompt, so mid-turn retrieval and
   subagents inherit automatically — call them mid-turn, no user prompt required.
 - **`bin/hippo recall`, the fallback** (pre-bootstrap, or where MCP is unavailable): run
   `"${CLAUDE_PLUGIN_ROOT}/bin/hippo" recall "<focused query>"` for the raw injection block, or
-  this skill's `memory.recall_view` for the browsable listing. This is the command to reference
-  in policy-critical Task prompts where you can't rely on the MCP tools being wired.
+  this skill's `memory.recall_view` for the browsable listing.
+
+**Task-prompt injection for policy-critical delegations.** When you delegate work whose
+correctness depends on remembered policy (a user's feedback rule, a project constraint), don't
+rely on the subagent discovering it — INJECT it. Run `bin/hippo recall "<the policy topic>"`
+yourself and paste the relevant memory into the Task prompt so the subagent is grounded from
+its first token, before it calls any tool. This is the deterministic path where "the subagent
+might query memory" isn't good enough.
+
+**Subagent discoveries are captured (INT-3).** When a subagent finishes, a `SubagentStop` hook
+runs the same draft-capture pass as `SessionEnd` (see `memory.capture`): what the subagent
+changed is snapshotted into the gitignored pending queue for later per-item approval, so a
+delegated discovery doesn't vanish when the subagent returns. Nothing it found reaches the
+corpus without an explicit approval, same gate as everywhere else.
 
 ## When NOT to use
 
