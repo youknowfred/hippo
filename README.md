@@ -88,7 +88,7 @@ plugin/
 ├── assets/packs/                 # starter packs (core seeded by default; rest opt-in)
 ├── bin/hippo                     # CLI launcher for the stateless engine commands
 ├── requirements.txt              # fastembed, numpy, PyYAML, rank-bm25 (the venv path)
-└── skills/                       # /hippo:bootstrap|init|new|recall|doctor|audit|remove
+└── skills/                       # /hippo:bootstrap|init|new|recall|doctor|audit|consolidate|remove
 tests/                            # hermetic test suite (no network/model download by default)
 .github/workflows/ci.yml          # hermetic matrix + dense lane + shellcheck
 ```

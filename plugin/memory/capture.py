@@ -287,12 +287,22 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="read the SessionEnd JSON payload (session_id, reason) from stdin",
     )
     parser.add_argument("--list", action="store_true", help="list pending captures and exit")
+    parser.add_argument(
+        "--discard",
+        default=None,
+        metavar="PATH",
+        help="remove ONE drained seed after it has been approved or skipped (the /hippo:consolidate drain)",
+    )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--repo-root", default=None)
     args = parser.parse_args(argv)
     try:
         if args.list:
             print(_format_listing(read_pending(memory_dir=args.memory_dir)))
+            return 0
+        if args.discard:
+            ok = discard_pending(args.discard)
+            print(f"discarded: {args.discard}" if ok else f"nothing to discard at {args.discard}")
             return 0
         session_id, reason = args.session_id, args.reason
         if args.from_hook:

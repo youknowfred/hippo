@@ -15,6 +15,7 @@ reconsolidation, archive internals).
 | `/hippo:recall` | Deliberately recall the corpus — "what do you remember about X", or list it by type |
 | `/hippo:doctor` | Fast health check — is the plugin's own install/environment working |
 | `/hippo:audit` | Deep, judgment-based self-audit of the corpus's content — staleness, drift, archive candidates |
+| `/hippo:consolidate` | Sleep-time drain — approve pending captures, work the reconsolidation worklist, refresh the graph |
 | `/hippo:remove` | Uninstall/offboard THIS project — removes the symlink, offers to delete index/telemetry, reports (never deletes) shared venv/cache paths |
 
 ## MCP server — mid-turn & subagent memory (INT-2)

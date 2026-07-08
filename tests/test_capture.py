@@ -228,3 +228,15 @@ def test_main_list(repo, monkeypatch, capsys):
     rc = C.main(["--list", "--memory-dir", md])
     assert rc == 0
     assert "1 pending capture" in capsys.readouterr().out
+
+
+def test_main_discard_drains_one_seed(repo, capsys):
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    _seed_episode(md, repo, "s1", ["a"], "q1")
+    path = C.write_session_capture("s1", memory_dir=md, repo_root=repo)
+    rc = C.main(["--discard", path])
+    assert rc == 0
+    assert "discarded" in capsys.readouterr().out
+    assert C.pending_count(memory_dir=md) == 0
