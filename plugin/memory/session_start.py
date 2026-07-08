@@ -359,6 +359,32 @@ def unresolvable_baseline_producer(
     )
 
 
+def pending_capture_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """Surface the CAP-2 pending-capture queue so it never soaks silently.
+
+    The SessionEnd draft-capture pass (``memory.capture``) snapshots a prior session's episode
+    buffer + ``git diff`` into the gitignored ``.claude/.memory-pending/`` queue. This nudge
+    makes that queue LEGIBLE (guiding invariant: every silent-fallback/soak path gains a
+    user-visible signal) and routes to the deliberate, per-item drain — NOTHING in the queue is
+    in the corpus until the agent explicitly approves each candidate. Self-clearing: it goes
+    silent once the seeds are drained/discarded. ``ctx`` (LIF-6) is unused.
+    """
+    try:
+        from .capture import default_pending_dir, pending_count
+
+        n = pending_count(default_pending_dir(memory_dir))
+    except Exception:
+        return None
+    if not n:
+        return None
+    return (
+        f"📥 {n} pending capture(s) from a prior session await review — run /hippo:consolidate "
+        "to draft them into memory (nothing is saved until you approve each one, per item)."
+    )
+
+
 # (label, fn). Each tier appends a producer here — never a parallel hook entry. Every fn
 # shares ONE call shape — ``(memory_dir, repo_root, ctx)`` — LIF-6's ``RunContext``, even
 # when a given producer ignores it (see the module docstring).
@@ -369,6 +395,7 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("citation_rot", citation_rot_producer),  # cited paths gone from the repo (LIF-3) — find_unparseable's rot sibling
     ("staleness", staleness_producer),
     ("reconsolidation", reconsolidation_producer),  # recall-filtered subset of staleness; silent unless a recently-recalled memory is stale
+    ("pending_capture", pending_capture_producer),  # CAP-2: surface the gitignored draft-capture queue so it never soaks silently
     ("index_integrity", index_integrity_producer),  # names on-disk index corruption (QUA-5) — recall/build_index already degrade silently
     ("unresolvable_baseline", unresolvable_baseline_producer),  # legibility for find_stale's sha-fallback path
     ("git_recent", git_recent_producer),

@@ -29,6 +29,7 @@ _PLUGIN_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "pl
 _USER_PROMPT_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_user_prompt.sh")
 _SESSION_START_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_session_start.sh")
 _PRE_COMPACT_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_pre_compact.sh")
+_SESSION_END_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_session_end.sh")
 
 _MEMORY_MD = """---
 name: zebra_deploy_runbook
@@ -301,6 +302,68 @@ class TestPreCompactHook:
         # present; the hook itself creates no index/telemetry/pending dirs.
         for rel in _tree(project):
             assert rel.startswith(".claude/memory/"), f"PreCompact hook wrote {rel}"
+
+
+# --------------------------------------------------------------------------- #
+# CAP-2: SessionEnd draft-capture pass — writes ONLY the gitignored pending queue
+# --------------------------------------------------------------------------- #
+class TestSessionEndHook:
+    def test_empty_stdin(self, tmp_path):
+        proc, _, _ = _run_hook(_SESSION_END_HOOK, "", tmp_path)
+        _assert_contract(proc, "SessionEnd")
+
+    def test_garbage_json(self, tmp_path):
+        proc, _, _ = _run_hook(_SESSION_END_HOOK, "{{{{", tmp_path)
+        _assert_contract(proc, "SessionEnd")
+
+    def test_no_corpus_writes_nothing(self, tmp_path):
+        proc, project, _ = _run_hook(
+            _SESSION_END_HOOK,
+            json.dumps({"session_id": "s", "reason": "clear"}),
+            tmp_path,
+            with_corpus=False,
+        )
+        _assert_contract(proc, "SessionEnd")
+        assert _tree(project) == set()
+
+    def test_missing_python3_degrades_silently(self, tmp_path):
+        proc, _, _ = _run_hook(_SESSION_END_HOOK, "", tmp_path, python3=False)
+        _assert_contract(proc, "SessionEnd")
+
+    def test_no_episodes_leaves_corpus_untouched(self, tmp_path):
+        # A valid payload but no episode buffer → no seed; the corpus stays exactly as seeded.
+        stdin = json.dumps({"session_id": "sess", "reason": "clear"})
+        proc, project, _ = _run_hook(_SESSION_END_HOOK, stdin, tmp_path)
+        _assert_contract(proc, "SessionEnd")
+        # Only the two seeded corpus files exist under .claude/memory/; nothing new landed there.
+        corpus = {r for r in _tree(project) if r.startswith(".claude/memory/")}
+        assert corpus == {".claude/memory/zebra_deploy_runbook.md", ".claude/memory/MEMORY.md"}
+
+    def test_captures_pending_seed_but_never_the_corpus(self, tmp_path):
+        # Pre-seed the episode buffer for a session, then fire SessionEnd for that session.
+        stdin = json.dumps({"session_id": "sess-cap", "reason": "clear"})
+        # Build the project first (idempotent) so we can drop an episode buffer beside it.
+        proc0, project, _ = _run_hook(_SESSION_END_HOOK, "", tmp_path)  # warm the dirs
+        tele = os.path.join(project, ".claude", ".memory-telemetry")
+        os.makedirs(tele, exist_ok=True)
+        with open(os.path.join(tele, "episode_buffer.jsonl"), "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "ts": 1.0, "session_id": "sess-cap", "query_preview": "how do we deploy",
+                "recalled_names": ["zebra_deploy_runbook"], "head_commit": None,
+            }) + "\n")
+        corpus_before = {r for r in _tree(project) if r.startswith(".claude/memory/")}
+
+        proc, _, _ = _run_hook(_SESSION_END_HOOK, stdin, tmp_path)
+        _assert_contract(proc, "SessionEnd")
+
+        # A seed landed in the gitignored pending queue …
+        pending = os.path.join(project, ".claude", ".memory-pending")
+        seeds = [f for f in os.listdir(pending) if f.endswith(".json")] if os.path.isdir(pending) else []
+        assert seeds, "SessionEnd captured no pending seed from the episode buffer"
+        assert os.path.exists(os.path.join(pending, ".gitignore"))  # self-ignoring (SEC-3)
+        # … and the corpus is byte-for-byte unchanged (the approval gate held).
+        corpus_after = {r for r in _tree(project) if r.startswith(".claude/memory/")}
+        assert corpus_after == corpus_before, "SessionEnd hook wrote into the corpus"
 
 
 # --------------------------------------------------------------------------- #

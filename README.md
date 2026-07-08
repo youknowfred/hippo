@@ -84,7 +84,7 @@ plugin/
 ├── .claude-plugin/plugin.json    # plugin manifest
 ├── memory/                       # the engine (Python package, imported as `memory`)
 │   └── _vendor/                  # pre-bootstrap fallbacks (BM25 + frontmatter parser)
-├── hooks/                        # UserPromptSubmit recall + SessionStart dispatcher + PreCompact nudge
+├── hooks/                        # UserPromptSubmit recall + SessionStart dispatcher + PreCompact nudge + SessionEnd capture
 ├── assets/packs/                 # starter packs (core seeded by default; rest opt-in)
 ├── bin/hippo                     # CLI launcher for the stateless engine commands
 ├── requirements.txt              # fastembed, numpy, PyYAML, rank-bm25 (the venv path)
