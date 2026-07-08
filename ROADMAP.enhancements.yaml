@@ -1166,7 +1166,7 @@ release_train:
   - tier: T2
     target_version: 1.2.0
     theme: "The rules bridge"
-    status: in_progress
+    status: done
     done_means: >-
       hippo is the ranking/hygiene/staleness layer over the Claude-rules plane it
       already reads: a loud rule↔memory conflict radar, staleness over rules,
