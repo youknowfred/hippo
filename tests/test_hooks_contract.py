@@ -28,6 +28,9 @@ import pytest
 _PLUGIN_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "plugin"))
 _USER_PROMPT_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_user_prompt.sh")
 _SESSION_START_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_session_start.sh")
+_PRE_COMPACT_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_pre_compact.sh")
+_SESSION_END_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_session_end.sh")
+_SUBAGENT_STOP_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_subagent_stop.sh")
 
 _MEMORY_MD = """---
 name: zebra_deploy_runbook
@@ -181,20 +184,58 @@ class TestUserPromptHook:
         _assert_contract(proc, "UserPromptSubmit")
         assert proc.stdout.strip() == ""
 
-    def test_missing_jq_falls_back_to_python_emission(self, tmp_path):
-        # jq is ABSENT from PATH in this matrix by default — the python fallback
-        # must still emit valid JSON (or nothing), never a partial line.
+    def test_emits_valid_json_without_jq(self, tmp_path):
+        # INT-5: recall --stdin-json emits the hookSpecificOutput JSON itself, so jq is no longer
+        # on the hook path at all — the hook must still emit valid JSON with jq ABSENT.
         stdin = json.dumps({"prompt": "zebra canary deploy escalation path"})
         proc, _, _ = _run_hook(_USER_PROMPT_HOOK, stdin, tmp_path, jq=False, venv_python=True)
         _assert_contract(proc, "UserPromptSubmit")
         assert proc.stdout.strip()
 
     @pytest.mark.skipif(shutil.which("jq") is None, reason="jq not installed on this machine")
-    def test_with_jq_present(self, tmp_path):
+    def test_emits_valid_json_with_jq_present(self, tmp_path):
+        # jq present but now unused — output must be identical/valid either way.
         stdin = json.dumps({"prompt": "zebra canary deploy escalation path"})
         proc, _, _ = _run_hook(_USER_PROMPT_HOOK, stdin, tmp_path, jq=True, venv_python=True)
         _assert_contract(proc, "UserPromptSubmit")
         assert proc.stdout.strip()
+
+    def test_valid_prompt_spawns_exactly_one_python(self, tmp_path):
+        # INT-5 acceptance: a single Python spawn per prompt. The interpreter is a counting
+        # wrapper that appends a line per invocation then execs the real python.
+        project = _make_project(tmp_path, with_corpus=True)
+        data_dir = tmp_path / "plugin-data"
+        os.makedirs(data_dir, exist_ok=True)
+        counter = tmp_path / "spawn-count"
+        bindir = tmp_path / "bin"
+        os.makedirs(bindir, exist_ok=True)
+        for tool in ("cat", "printf"):
+            _symlink_once(shutil.which(tool), bindir / tool)
+        wrapper = f"#!/bin/sh\necho x >> '{counter}'\nexec '{sys.executable}' \"$@\"\n"
+        (bindir / "python3").write_text(wrapper, encoding="utf-8")
+        os.chmod(bindir / "python3", 0o755)  # no venv python → PY resolves to this wrapper
+        home = tmp_path / "home"
+        os.makedirs(home, exist_ok=True)
+        env = {
+            "PATH": str(bindir),
+            "HOME": str(home),
+            "CLAUDE_PROJECT_DIR": project,
+            "CLAUDE_PLUGIN_ROOT": _PLUGIN_ROOT,
+            "CLAUDE_PLUGIN_DATA": str(data_dir),
+            "HIPPO_DISABLE_DENSE": "1",
+        }
+        stdin = json.dumps({
+            "prompt": "how is the zebra service deployed with canary rollout", "session_id": "s1"
+        })
+        proc = subprocess.run(
+            ["/bin/bash", _USER_PROMPT_HOOK],
+            input=stdin, capture_output=True, text=True, timeout=60, env=env,
+        )
+        _assert_contract(proc, "UserPromptSubmit")
+        spawns = counter.read_text().count("x") if counter.exists() else 0
+        assert spawns == 1, f"expected exactly ONE python spawn per prompt (INT-5), got {spawns}"
+        ctx = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+        assert "zebra_deploy_runbook" in ctx  # and it still injected the right memory
 
     def test_writes_only_derived_dirs(self, tmp_path):
         stdin = json.dumps({"prompt": "zebra canary deploy escalation path"})
@@ -249,6 +290,161 @@ class TestSessionStartHook:
             assert rel.startswith(
                 (".claude/memory/", ".claude/.memory-index/", ".claude/.memory-telemetry/")
             ), f"hook wrote outside the expected dirs: {rel}"
+
+
+# --------------------------------------------------------------------------- #
+# CAP-1: PreCompact capture nudge — prompt-level, no Python, no corpus writes
+# --------------------------------------------------------------------------- #
+class TestPreCompactHook:
+    def _ctx(self, proc) -> str:
+        out = proc.stdout.strip()
+        return json.loads(out)["hookSpecificOutput"]["additionalContext"] if out else ""
+
+    def test_valid_payload_nudges_capture(self, tmp_path):
+        stdin = json.dumps({"hook_event_name": "PreCompact", "trigger": "auto"})
+        proc, _, _ = _run_hook(_PRE_COMPACT_HOOK, stdin, tmp_path)
+        _assert_contract(proc, "PreCompact")
+        ctx = self._ctx(proc)
+        assert "/hippo:new" in ctx, "PreCompact nudge must point at the capture verb"
+
+    def test_manual_trigger_also_nudges(self, tmp_path):
+        stdin = json.dumps({"hook_event_name": "PreCompact", "trigger": "manual"})
+        proc, _, _ = _run_hook(_PRE_COMPACT_HOOK, stdin, tmp_path)
+        _assert_contract(proc, "PreCompact")
+        assert "/hippo:new" in self._ctx(proc)
+
+    def test_empty_stdin(self, tmp_path):
+        proc, _, _ = _run_hook(_PRE_COMPACT_HOOK, "", tmp_path)
+        _assert_contract(proc, "PreCompact")
+
+    def test_garbage_json_still_exits_zero(self, tmp_path):
+        proc, _, _ = _run_hook(_PRE_COMPACT_HOOK, "{{{{not json", tmp_path)
+        _assert_contract(proc, "PreCompact")
+
+    def test_no_corpus_stays_silent(self, tmp_path):
+        # A never-opted-in repo: the nudge would dead-end at a missing bootstrap/init, so the
+        # hook says nothing at all (COR-10 consistency) — but still exits 0.
+        proc, _, _ = _run_hook(_PRE_COMPACT_HOOK, "", tmp_path, with_corpus=False)
+        _assert_contract(proc, "PreCompact")
+        assert proc.stdout.strip() == "", "no corpus → no nudge output"
+
+    def test_missing_python3_still_nudges(self, tmp_path):
+        # The nudge is pure bash — no Python spawn — so it works even pre-bootstrap.
+        proc, _, _ = _run_hook(_PRE_COMPACT_HOOK, "", tmp_path, python3=False)
+        _assert_contract(proc, "PreCompact")
+        assert "/hippo:new" in self._ctx(proc)
+
+    def test_writes_nothing(self, tmp_path):
+        proc, project, _ = _run_hook(_PRE_COMPACT_HOOK, "", tmp_path)
+        _assert_contract(proc, "PreCompact")
+        # Prompt-level only: the corpus that was seeded by _make_project is the only thing
+        # present; the hook itself creates no index/telemetry/pending dirs.
+        for rel in _tree(project):
+            assert rel.startswith(".claude/memory/"), f"PreCompact hook wrote {rel}"
+
+
+# --------------------------------------------------------------------------- #
+# CAP-2: SessionEnd draft-capture pass — writes ONLY the gitignored pending queue
+# --------------------------------------------------------------------------- #
+class TestSessionEndHook:
+    def test_empty_stdin(self, tmp_path):
+        proc, _, _ = _run_hook(_SESSION_END_HOOK, "", tmp_path)
+        _assert_contract(proc, "SessionEnd")
+
+    def test_garbage_json(self, tmp_path):
+        proc, _, _ = _run_hook(_SESSION_END_HOOK, "{{{{", tmp_path)
+        _assert_contract(proc, "SessionEnd")
+
+    def test_no_corpus_writes_nothing(self, tmp_path):
+        proc, project, _ = _run_hook(
+            _SESSION_END_HOOK,
+            json.dumps({"session_id": "s", "reason": "clear"}),
+            tmp_path,
+            with_corpus=False,
+        )
+        _assert_contract(proc, "SessionEnd")
+        assert _tree(project) == set()
+
+    def test_missing_python3_degrades_silently(self, tmp_path):
+        proc, _, _ = _run_hook(_SESSION_END_HOOK, "", tmp_path, python3=False)
+        _assert_contract(proc, "SessionEnd")
+
+    def test_no_episodes_leaves_corpus_untouched(self, tmp_path):
+        # A valid payload but no episode buffer → no seed; the corpus stays exactly as seeded.
+        stdin = json.dumps({"session_id": "sess", "reason": "clear"})
+        proc, project, _ = _run_hook(_SESSION_END_HOOK, stdin, tmp_path)
+        _assert_contract(proc, "SessionEnd")
+        # Only the two seeded corpus files exist under .claude/memory/; nothing new landed there.
+        corpus = {r for r in _tree(project) if r.startswith(".claude/memory/")}
+        assert corpus == {".claude/memory/zebra_deploy_runbook.md", ".claude/memory/MEMORY.md"}
+
+    def test_captures_pending_seed_but_never_the_corpus(self, tmp_path):
+        # Pre-seed the episode buffer for a session, then fire SessionEnd for that session.
+        stdin = json.dumps({"session_id": "sess-cap", "reason": "clear"})
+        # Build the project first (idempotent) so we can drop an episode buffer beside it.
+        proc0, project, _ = _run_hook(_SESSION_END_HOOK, "", tmp_path)  # warm the dirs
+        tele = os.path.join(project, ".claude", ".memory-telemetry")
+        os.makedirs(tele, exist_ok=True)
+        with open(os.path.join(tele, "episode_buffer.jsonl"), "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "ts": 1.0, "session_id": "sess-cap", "query_preview": "how do we deploy",
+                "recalled_names": ["zebra_deploy_runbook"], "head_commit": None,
+            }) + "\n")
+        corpus_before = {r for r in _tree(project) if r.startswith(".claude/memory/")}
+
+        proc, _, _ = _run_hook(_SESSION_END_HOOK, stdin, tmp_path)
+        _assert_contract(proc, "SessionEnd")
+
+        # A seed landed in the gitignored pending queue …
+        pending = os.path.join(project, ".claude", ".memory-pending")
+        seeds = [f for f in os.listdir(pending) if f.endswith(".json")] if os.path.isdir(pending) else []
+        assert seeds, "SessionEnd captured no pending seed from the episode buffer"
+        assert os.path.exists(os.path.join(pending, ".gitignore"))  # self-ignoring (SEC-3)
+        # … and the corpus is byte-for-byte unchanged (the approval gate held).
+        corpus_after = {r for r in _tree(project) if r.startswith(".claude/memory/")}
+        assert corpus_after == corpus_before, "SessionEnd hook wrote into the corpus"
+
+
+# --------------------------------------------------------------------------- #
+# INT-3: SubagentStop capture — same gate as SessionEnd, labels the seed subagent-stop
+# --------------------------------------------------------------------------- #
+class TestSubagentStopHook:
+    def test_empty_stdin(self, tmp_path):
+        proc, _, _ = _run_hook(_SUBAGENT_STOP_HOOK, "", tmp_path)
+        _assert_contract(proc, "SubagentStop")
+
+    def test_garbage_json(self, tmp_path):
+        proc, _, _ = _run_hook(_SUBAGENT_STOP_HOOK, "{{{", tmp_path)
+        _assert_contract(proc, "SubagentStop")
+
+    def test_no_corpus_writes_nothing(self, tmp_path):
+        proc, project, _ = _run_hook(
+            _SUBAGENT_STOP_HOOK, json.dumps({"session_id": "s"}), tmp_path, with_corpus=False
+        )
+        _assert_contract(proc, "SubagentStop")
+        assert _tree(project) == set()
+
+    def test_captures_to_pending_labeled_subagent_stop(self, tmp_path):
+        proc0, project, _ = _run_hook(_SUBAGENT_STOP_HOOK, "", tmp_path)  # warm dirs
+        tele = os.path.join(project, ".claude", ".memory-telemetry")
+        os.makedirs(tele, exist_ok=True)
+        with open(os.path.join(tele, "episode_buffer.jsonl"), "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "ts": 1.0, "session_id": "sub-1", "query_preview": "what changed",
+                "recalled_names": ["zebra_deploy_runbook"], "head_commit": None,
+            }) + "\n")
+        corpus_before = {r for r in _tree(project) if r.startswith(".claude/memory/")}
+
+        proc, _, _ = _run_hook(_SUBAGENT_STOP_HOOK, json.dumps({"session_id": "sub-1"}), tmp_path)
+        _assert_contract(proc, "SubagentStop")
+
+        pending = os.path.join(project, ".claude", ".memory-pending")
+        seeds = [f for f in os.listdir(pending) if f.endswith(".json")] if os.path.isdir(pending) else []
+        assert seeds, "SubagentStop captured no seed"
+        with open(os.path.join(pending, seeds[0])) as fh:
+            assert json.load(fh)["reason"] == "subagent-stop"
+        # corpus untouched — same structural gate as SessionEnd
+        assert {r for r in _tree(project) if r.startswith(".claude/memory/")} == corpus_before
 
 
 # --------------------------------------------------------------------------- #

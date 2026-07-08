@@ -30,9 +30,11 @@ _RESOLVE_PY_SH = os.path.join(_PLUGIN_DIR, "hooks", "_resolve_py.sh")
 _GUARD = '[ -n "${CLAUDE_PLUGIN_DATA:-}" ] ||'
 
 
-def test_six_skills_ship():
+def test_shipped_skills_are_exactly_these():
     names = sorted(os.path.basename(os.path.dirname(p)) for p in _ALL_SKILLS)
-    assert names == ["audit", "bootstrap", "doctor", "init", "new", "remove"]
+    assert names == [
+        "audit", "bootstrap", "consolidate", "doctor", "init", "new", "recall", "remove"
+    ]
 
 
 def test_every_skill_carries_the_plugin_data_guard():

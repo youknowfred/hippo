@@ -1035,3 +1035,80 @@ def test_sorted_insertion_merges_cleanly_across_two_clones(tmp_path):
     section = merged.split("## Working Style & Process Feedback\n", 1)[1].split("## ", 1)[0]
     lines = [ln for ln in section.split("\n") if ln.strip()]
     assert [NM._pointer_name(ln) for ln in lines] == ["alpha_note", "feedback_x", "zulu_note"]
+
+
+# --------------------------------------------------------------------------- #
+# CAP-3 — write-time decisioning for captured candidates (check-FIRST dry run)
+# --------------------------------------------------------------------------- #
+def _corpus_files(md):
+    return {f for f in os.listdir(md) if f.endswith(".md")}
+
+
+def test_check_candidate_routes_duplicate_to_review(tmp_path, monkeypatch):
+    """A captured candidate that near-duplicates an existing memory routes to 'review' with the
+    twin named — and NO file is created (the check is a dry run; the drain decides)."""
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    _seed_dup_corpus(NM, md, tmp_path)
+    before = _corpus_files(md)
+
+    decision = NM.check_candidate(
+        "deploy_pipeline_recap",
+        "how the railway deploy pipeline builds and ships the app again",
+        "project",
+        body="re-captured months later.",
+        memory_dir=md,
+    )
+    assert decision["route"] == "review"
+    assert decision["note"] is None
+    assert decision["neighbors"] and decision["neighbors"][0]["name"] == "railway_deploy_pipeline"
+    # Dry run: nothing was written — the candidate did NOT become a file.
+    assert _corpus_files(md) == before
+    assert not os.path.exists(os.path.join(md, "deploy_pipeline_recap.md"))
+
+
+def test_check_candidate_routes_novel_to_add(tmp_path, monkeypatch):
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    _seed_dup_corpus(NM, md, tmp_path)
+    before = _corpus_files(md)
+
+    decision = NM.check_candidate(
+        "kubernetes_pod_autoscaler_tuning",
+        "tuning the horizontal pod autoscaler cpu targets for latency",
+        "project",
+        memory_dir=md,
+    )
+    assert decision["route"] == "add"
+    assert decision["neighbors"] == []
+    assert _corpus_files(md) == before  # still writes nothing
+
+
+def test_check_candidate_empty_corpus_notes_skip_and_defaults_to_add(tmp_path, monkeypatch):
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)  # floor only, no indexed memories
+    decision = NM.check_candidate("first_ever", "the first captured fact", "project", memory_dir=md)
+    assert decision["route"] == "add"
+    assert decision["note"]  # legible reason the check couldn't score (no index)
+
+
+def test_check_flag_cli_is_dry_run(tmp_path, monkeypatch, capsys):
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    _seed_dup_corpus(NM, md, tmp_path)
+    before = _corpus_files(md)
+    rc = NM.main([
+        "deploy_pipeline_recap",
+        "how the railway deploy pipeline builds and ships the app again",
+        "--type", "project", "--memory-dir", md, "--check",
+    ])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "route   : review" in out
+    assert "railway_deploy_pipeline" in out
+    assert _corpus_files(md) == before  # --check never writes
+    assert not os.path.exists(os.path.join(md, "deploy_pipeline_recap.md"))

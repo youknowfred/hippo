@@ -67,8 +67,12 @@ would provision into a root-owned path. Run this guard FIRST and stop if it fail
    hard contract, so they can never re-download a wiped model. Recall would silently degrade
    to BM25 until someone re-ran bootstrap. This step MUST land the model somewhere durable.
 4. **Write the sentinel** on success: `{"requirements_hash": "<hash>", "bootstrapped_at": "<ISO
-   timestamp>"}` to `${CLAUDE_PLUGIN_DATA}/.bootstrap-sentinel`. This is what step 1 checks —
-   without it, every session would re-attempt a multi-second venv build.
+   timestamp>", "plugin_version": "<version field from ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json>"}`
+   to `${CLAUDE_PLUGIN_DATA}/.bootstrap-sentinel`. This is what step 1 checks — without it, every
+   session would re-attempt a multi-second venv build. `plugin_version` records WHICH plugin
+   version this venv was provisioned for, so `/hippo:doctor` can flag an installed-vs-bootstrapped
+   version delta after an update (DOC-7); an older sentinel that predates this field simply reads
+   as "unknown" and prompts a re-bootstrap to record it.
 5. **Report** what happened: fresh bootstrap vs. re-provision (dep change detected) vs. already
    current. If `uv` was unavailable and the `venv` fallback was used, say so (slower but works).
    If the system `python3` was outside the supported window and `uv --python 3.12` was used

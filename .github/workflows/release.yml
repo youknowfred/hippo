@@ -1,0 +1,49 @@
+# Release — version-sync gate at TAG time (DOC-7).
+#
+# Fires only on a version tag push (post-merge), NOT on PRs, so it never adds a required PR
+# check. It enforces the strict four-way match the PR-time pytest gate can't (the CHANGELOG
+# entry is guaranteed present by the time a release is tagged): the tag, plugin.json,
+# marketplace.json, and the newest CHANGELOG heading must all name the same version.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  version-sync:
+    name: version sync (tag == manifests == CHANGELOG)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify tag matches both manifests and the CHANGELOG
+        run: |
+          python - <<'PY'
+          import json, os, re, sys
+
+          tag = os.environ["GITHUB_REF_NAME"]           # e.g. "v0.6.0"
+          ver = tag[1:] if tag.startswith("v") else tag
+          plugin = json.load(open("plugin/.claude-plugin/plugin.json"))["version"]
+          market = json.load(open(".claude-plugin/marketplace.json"))["plugins"][0]["version"]
+          changelog = None
+          for line in open("CHANGELOG.md", encoding="utf-8"):
+              m = re.match(r"^##\s+v(\d+\.\d+\.\d+)\b", line)
+              if m:
+                  changelog = m.group(1)
+                  break
+
+          problems = []
+          if plugin != ver:
+              problems.append(f"plugin.json version {plugin} != tag {ver}")
+          if market != ver:
+              problems.append(f"marketplace.json version {market} != tag {ver}")
+          if changelog != ver:
+              problems.append(f"newest CHANGELOG heading v{changelog} != tag {ver}")
+          if problems:
+              print("VERSION SYNC FAILED:")
+              for p in problems:
+                  print("  -", p)
+              sys.exit(1)
+          print(f"version sync OK: tag {tag}; plugin.json, marketplace.json, and CHANGELOG all at {ver}")
+          PY

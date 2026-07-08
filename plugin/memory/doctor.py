@@ -235,6 +235,62 @@ def check_symlink(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"symlink check failed: {exc}."}
 
 
+def check_native_coexistence(ctx: DoctorContext) -> Dict[str, str]:
+    """INT-4: the native-memory coexistence contract — detect drift + native-layout changes.
+
+    hippo's always-load floor piggybacks on ONE undocumented Claude Code internal: the
+    ``~/.claude/projects/<encoded>/memory`` symlink the harness reads as native memory, which
+    /hippo:init points at this corpus. That is the whole contract (see the compatibility doc,
+    ``plugin/memory/NATIVE_MEMORY.md``). check_symlink names the repair; this watches the same
+    link from the COEXISTENCE angle and names the two ways the native relationship silently
+    breaks: symlink-target DRIFT (the link resolves somewhere other than this corpus, so the
+    floor is drawn from a different target) and a NATIVE-LAYOUT CHANGE (a real file/dir occupies
+    the slot instead of hippo's symlink — Claude Code's native memory taking it over, an
+    unexpected native write path the floor cannot inject through). Read-only; never raises.
+    """
+    try:
+        r = check_project_symlink(ctx.repo_root, ctx.memory_dir)
+        expected = r.get("expected_path") or ""
+        # Strongest native-layout-change signal: something REAL (not hippo's symlink) sits in
+        # the slot the harness reads — native memory (or a stray dir) has taken it over.
+        if expected and os.path.lexists(expected) and not os.path.islink(expected):
+            kind = "directory" if os.path.isdir(expected) else "file"
+            return {
+                "status": "warn",
+                "message": f"native-layout change: {expected} is a real {kind}, not hippo's "
+                "symlink — Claude Code's native memory may have taken the projects-dir slot. "
+                "hippo's floor cannot inject through it; move it aside, then run /hippo:init.",
+            }
+        status = r.get("status")
+        if status == "ok":
+            return {
+                "status": "ok",
+                "message": "native coexistence intact — the projects-dir memory symlink (the one "
+                "native behavior hippo relies on) resolves to this corpus.",
+            }
+        if status == "broken":
+            return {
+                "status": "warn",
+                "message": "native-memory symlink DRIFT — the projects-dir link resolves to a "
+                "different target than this corpus, so the always-load floor is drawn elsewhere "
+                "(or nowhere). Fix: /hippo:init (the symlink check names the exact command).",
+            }
+        if status == "legacy_wrong_encoding":
+            return {
+                "status": "warn",
+                "message": "native projects-dir layout changed — a legacy-encoded link exists, so "
+                "the harness reads a different path now. Fix: /hippo:init.",
+            }
+        # missing → coexistence not established yet; check_symlink already flags it as the setup step.
+        return {
+            "status": "ok",
+            "message": "native coexistence: no projects-dir memory link yet — /hippo:init "
+            "establishes it (the floor injects via that native symlink).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"native-coexistence check failed: {exc}."}
+
+
 def check_corpus_resolution(ctx: DoctorContext) -> Dict[str, str]:
     """Which corpus resolved and WHY (monorepo nested-vs-root walk-up, SHP-2 / OQ-1).
 
@@ -777,17 +833,111 @@ def check_stale_memobot_env(ctx: DoctorContext) -> Dict[str, str]:
 
 # (label, check_fn) in a FIXED order — the source of the deterministic output. New checks append
 # here; the order is never sorted-by-name or set-derived, so the printed sequence is stable.
+_HOT_PATH_P95_BUDGET_MS = 1500.0  # KPI-3 / PRF-2: the cold per-prompt budget
+
+
+def check_hot_path_latency(ctx: DoctorContext) -> Dict[str, str]:
+    """INT-5: report the recall hook's measured p95 wall-time over the telemetry ledger.
+
+    ``latency_ms`` has always been in the recall ledger but nothing watched it. Because each
+    recall runs in a FRESH hook process, its logged latency includes the cold model load — it IS
+    the real per-prompt cost users pay, not a warm benchmark. This surfaces the p95 so a
+    regression (a heavier model, a new per-import cost) is visible, warning past the KPI-3 cold
+    budget. Read-only; N/A when the ledger is empty; never raises.
+    """
+    try:
+        from .telemetry import default_telemetry_dir, read_events
+
+        td = default_telemetry_dir(ctx.memory_dir)
+        lats = sorted(
+            float(e["latency_ms"])
+            for e in read_events(td)
+            if isinstance(e.get("latency_ms"), (int, float))
+        )
+        if not lats:
+            return {
+                "status": "ok",
+                "message": "hot-path latency: no recall events logged yet — nothing to measure.",
+            }
+        n = len(lats)
+        rank = max(1, min(n, (95 * n + 99) // 100))  # nearest-rank ceil(0.95*n), no float math
+        p95 = lats[rank - 1]
+        if p95 > _HOT_PATH_P95_BUDGET_MS:
+            return {
+                "status": "warn",
+                "message": f"hot-path p95 = {p95:.0f}ms over {n} recall(s) — ABOVE the "
+                f"{_HOT_PATH_P95_BUDGET_MS:.0f}ms per-prompt budget (KPI-3). A heavier model or "
+                "new per-import cost likely regressed it.",
+            }
+        return {
+            "status": "ok",
+            "message": f"hot-path p95 = {p95:.0f}ms over {n} recall(s) "
+            f"(budget {_HOT_PATH_P95_BUDGET_MS:.0f}ms).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"hot-path latency check failed: {exc}."}
+
+
+def check_plugin_version(ctx: DoctorContext) -> Dict[str, str]:
+    """DOC-7: installed plugin version vs the version the venv was bootstrapped for (with COR-11).
+
+    Version lives in ``.claude-plugin/plugin.json``; the bootstrap sentinel records which version
+    the venv was provisioned for (``plugin_version``, added in v0.6.0). After a plugin update the
+    code swaps but the venv does not, so a delta here is the signal to re-bootstrap. COR-11 covers
+    the DEPS side (requirements hash); this covers the VERSION side. Read-only; never raises.
+    """
+    try:
+        installed = None
+        pj = os.path.join(ctx.plugin_root, ".claude-plugin", "plugin.json")
+        try:
+            with open(pj, encoding="utf-8") as fh:
+                installed = json.load(fh).get("version")
+        except Exception:
+            installed = None
+        if not installed:
+            return {"status": "warn", "message": "plugin version unreadable (plugin.json missing or unparseable)."}
+        if not ctx.plugin_data:
+            return {"status": "ok", "message": f"plugin v{installed} installed (bootstrap state unknown — CLAUDE_PLUGIN_DATA unset)."}
+        sentinel = os.path.join(ctx.plugin_data, ".bootstrap-sentinel")
+        if not os.path.exists(sentinel):
+            return {"status": "ok", "message": f"plugin v{installed} installed — not bootstrapped yet (see the bootstrap check)."}
+        try:
+            with open(sentinel, encoding="utf-8") as fh:
+                bootstrapped = json.load(fh).get("plugin_version")
+        except Exception:
+            bootstrapped = None
+        if not bootstrapped:
+            return {
+                "status": "warn",
+                "message": f"plugin v{installed} installed, but the bootstrap sentinel predates "
+                "version tracking — run /hippo:bootstrap to record it.",
+            }
+        if bootstrapped == installed:
+            return {"status": "ok", "message": f"plugin v{installed} installed and bootstrapped — in sync."}
+        return {
+            "status": "warn",
+            "message": f"version delta: plugin v{installed} installed but the venv was bootstrapped "
+            f"for v{bootstrapped} — run /hippo:bootstrap (check the CHANGELOG's 're-bootstrap' flag "
+            "for whether deps changed).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"plugin-version check failed: {exc}."}
+
+
 CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("bootstrap", check_bootstrap),
+    ("plugin_version", check_plugin_version),
     ("venv", check_venv),
     ("corpus", check_corpus_exists),
     ("symlink", check_symlink),
+    ("native_coexistence", check_native_coexistence),
     ("resolution", check_corpus_resolution),
     ("git_mode", check_git_mode),
     ("trust", check_trust),
     ("integrity", check_integrity),
     ("index_corruption", check_index_corruption),
     ("index_count", check_index_count),
+    ("hot_path_latency", check_hot_path_latency),
     ("format_version", check_format_version),
     ("pack_drift", check_pack_drift),
     ("fill_me", check_fill_me),

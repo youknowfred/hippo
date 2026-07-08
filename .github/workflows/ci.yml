@@ -37,7 +37,7 @@ jobs:
           cache: pip
           cache-dependency-path: plugin/requirements.txt
       - name: Install deps
-        run: python -m pip install -r plugin/requirements.txt pytest pytest-timeout
+        run: python -m pip install -r plugin/requirements.txt pytest pytest-timeout hypothesis
       - name: Hermetic suite (network + slow tests deselected via addopts)
         run: python -m pytest
 
@@ -54,7 +54,7 @@ jobs:
           cache: pip
           cache-dependency-path: plugin/requirements.txt
       - name: Install deps
-        run: python -m pip install -r plugin/requirements.txt pytest pytest-timeout
+        run: python -m pip install -r plugin/requirements.txt pytest pytest-timeout hypothesis
       - name: Restore fastembed model cache
         uses: actions/cache@v4
         with:

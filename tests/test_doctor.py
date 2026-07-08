@@ -657,3 +657,143 @@ def test_main_output_is_deterministic(repo, memory_dir, monkeypatch, capsys):
     D.main()
     second = capsys.readouterr().out
     assert first == second
+
+
+# --------------------------------------------------------------------------- #
+# INT-4 — native-memory coexistence contract (symlink drift + native-layout change)
+# --------------------------------------------------------------------------- #
+def _projects_memory_link(fake_home, repo):
+    from memory.provenance import encode_project_dir
+
+    return os.path.join(fake_home, ".claude", "projects", encode_project_dir(repo), "memory")
+
+
+def _native_ctx(tmp_path, monkeypatch):
+    fake_home = str(tmp_path / "home")
+    os.makedirs(fake_home)
+    monkeypatch.setattr(os.path, "expanduser", lambda p: fake_home if p == "~" else p)
+    repo = str(tmp_path / "repo")
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    return fake_home, repo, md
+
+
+def test_native_coexistence_intact_when_symlink_resolves_to_corpus(tmp_path, monkeypatch):
+    fake_home, repo, md = _native_ctx(tmp_path, monkeypatch)
+    link = _projects_memory_link(fake_home, repo)
+    os.makedirs(os.path.dirname(link))
+    os.symlink(md, link)
+    r = D.check_native_coexistence(_ctx(md, repo))
+    assert r["status"] == "ok" and "coexistence intact" in r["message"]
+
+
+def test_native_coexistence_detects_symlink_target_drift(tmp_path, monkeypatch):
+    fake_home, repo, md = _native_ctx(tmp_path, monkeypatch)
+    elsewhere = str(tmp_path / "other-corpus")
+    os.makedirs(elsewhere)
+    link = _projects_memory_link(fake_home, repo)
+    os.makedirs(os.path.dirname(link))
+    os.symlink(elsewhere, link)  # symlink resolves to a DIFFERENT corpus
+    r = D.check_native_coexistence(_ctx(md, repo))
+    assert r["status"] == "warn" and "DRIFT" in r["message"]
+
+
+def test_native_coexistence_detects_native_layout_change(tmp_path, monkeypatch):
+    fake_home, repo, md = _native_ctx(tmp_path, monkeypatch)
+    link = _projects_memory_link(fake_home, repo)
+    os.makedirs(link)  # a REAL dir occupies the slot (native memory took it over) — not a symlink
+    r = D.check_native_coexistence(_ctx(md, repo))
+    assert r["status"] == "warn" and "native-layout change" in r["message"]
+
+
+def test_native_coexistence_missing_link_is_ok(tmp_path, monkeypatch):
+    fake_home, repo, md = _native_ctx(tmp_path, monkeypatch)  # no link created
+    r = D.check_native_coexistence(_ctx(md, repo))
+    assert r["status"] == "ok" and "no projects-dir memory link yet" in r["message"]
+
+
+def test_native_coexistence_is_registered_in_checks():
+    assert "native_coexistence" in [label for label, _ in D.CHECKS]
+
+
+# --------------------------------------------------------------------------- #
+# INT-5 — hot-path p95 latency check over the recall ledger
+# --------------------------------------------------------------------------- #
+def _write_recall_ledger(memory_dir, latencies):
+    from memory.provenance import ensure_self_ignoring_dir
+    from memory.telemetry import default_telemetry_dir
+
+    td = default_telemetry_dir(memory_dir)
+    ensure_self_ignoring_dir(td)
+    with open(os.path.join(td, "recall_events.jsonl"), "w", encoding="utf-8") as fh:
+        for lat in latencies:
+            fh.write(json.dumps({
+                "ts": 1.0, "latency_ms": lat, "names": [], "backend": "bm25",
+                "k": 10, "query_preview": "q",
+            }) + "\n")
+
+
+def test_hot_path_latency_empty_ledger_is_ok(memory_dir, repo):
+    r = D.check_hot_path_latency(_ctx(memory_dir, repo))
+    assert r["status"] == "ok" and "no recall events" in r["message"]
+
+
+def test_hot_path_latency_reports_p95_under_budget(memory_dir, repo):
+    _write_recall_ledger(memory_dir, [10, 20, 30, 40, 50])
+    r = D.check_hot_path_latency(_ctx(memory_dir, repo))
+    assert r["status"] == "ok"
+    assert "p95 = 50ms" in r["message"] and "5 recall" in r["message"]
+
+
+def test_hot_path_latency_warns_over_budget(memory_dir, repo):
+    _write_recall_ledger(memory_dir, [100.0, 200.0, 5000.0])  # p95 = 5000 > 1500
+    r = D.check_hot_path_latency(_ctx(memory_dir, repo))
+    assert r["status"] == "warn" and "ABOVE" in r["message"]
+
+
+def test_hot_path_latency_registered_in_checks():
+    assert "hot_path_latency" in [label for label, _ in D.CHECKS]
+
+
+# --------------------------------------------------------------------------- #
+# DOC-7 — installed-vs-bootstrapped plugin version delta
+# --------------------------------------------------------------------------- #
+def _version_ctx(tmp_path, installed, sentinel_version, *, write_sentinel=True):
+    proot = tmp_path / "plugin-root"
+    os.makedirs(proot / ".claude-plugin")
+    with open(proot / ".claude-plugin" / "plugin.json", "w", encoding="utf-8") as fh:
+        json.dump({"name": "hippo", "version": installed}, fh)
+    pdata = tmp_path / "plugin-data"
+    os.makedirs(pdata)
+    if write_sentinel:
+        rec = {"requirements_hash": "h", "bootstrapped_at": "test"}
+        if sentinel_version is not None:
+            rec["plugin_version"] = sentinel_version
+        with open(pdata / ".bootstrap-sentinel", "w", encoding="utf-8") as fh:
+            json.dump(rec, fh)
+    return _ctx(str(tmp_path / "m"), str(tmp_path / "r"), plugin_data=str(pdata), plugin_root=str(proot))
+
+
+def test_plugin_version_in_sync(tmp_path):
+    r = D.check_plugin_version(_version_ctx(tmp_path, "0.6.0", "0.6.0"))
+    assert r["status"] == "ok" and "in sync" in r["message"]
+
+
+def test_plugin_version_delta_warns(tmp_path):
+    r = D.check_plugin_version(_version_ctx(tmp_path, "0.6.0", "0.5.0"))
+    assert r["status"] == "warn" and "version delta" in r["message"]
+    assert "0.6.0" in r["message"] and "0.5.0" in r["message"]
+
+
+def test_plugin_version_sentinel_predates_tracking(tmp_path):
+    r = D.check_plugin_version(_version_ctx(tmp_path, "0.6.0", None))  # sentinel has no plugin_version
+    assert r["status"] == "warn" and "predates version tracking" in r["message"]
+
+
+def test_plugin_version_not_bootstrapped(tmp_path):
+    r = D.check_plugin_version(_version_ctx(tmp_path, "0.6.0", None, write_sentinel=False))
+    assert r["status"] == "ok" and "not bootstrapped" in r["message"]
+
+
+def test_plugin_version_registered_in_checks():
+    assert "plugin_version" in [label for label, _ in D.CHECKS]
