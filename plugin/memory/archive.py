@@ -7,8 +7,11 @@ met, and excluding memories younger than that soak window (LIF-4: the cold signa
 untrustworthy pre-soak and vacuous for a memory that hasn't been around long enough to be
 recalled):
   - **cold**          — never recalled in the telemetry ledger UNIONED with the
-                        rotation-surviving usage aggregates (``soak.curation_report``'s
-                        ``never_recalled`` set)
+                        rotation-surviving usage aggregates AND every committed per-user usage
+                        summary (TEA-5: ``.usage/*.json``, so a teammate's daily hit is NOT
+                        miscounted as cold on this clone) — ``soak.curation_report``'s
+                        ``never_recalled`` set. Absent committed usage, the signal is
+                        CLONE-LOCAL: "cold" then means "never recalled in THIS clone".
   - **stale**          — cites code that has drifted (``staleness.find_stale``)
   - **zero-inbound**   — no OTHER memory ``[[wikilinks]]`` to it (via
                         ``links.LinkGraph.inbound()`` — distinct from
@@ -312,7 +315,10 @@ def archive_candidates(
         if not corpus_names:
             return []
 
-        status = soak_status(telemetry_dir)
+        # TEA-5: pass memory_dir so the gate counts cross-clone committed sessions too — the
+        # coldness signal it guards (curation_report's never_recalled) is itself cross-clone
+        # whenever committed .usage summaries are present.
+        status = soak_status(telemetry_dir, memory_dir=memory_dir)
         if diagnostics is not None:
             diagnostics["soak_gate"] = {
                 "gate_met": bool(status.get("gate_met")),
@@ -550,7 +556,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         print(
             "The cold/never-recalled signal is not yet trustworthy — nothing is listed by "
-            "design; re-run after more sessions."
+            "design; re-run after more sessions. Note: coldness is CLONE-LOCAL unless teammates "
+            "commit per-user usage (TEA-5: `python -m memory.soak --record-usage` + commit "
+            ".claude/memory/.usage/), which unions cross-clone recalls before judging cold."
         )
         return 0
     excluded_young = diagnostics.get("excluded_young") or []
@@ -565,6 +573,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("No archive candidates (4-way: cold ∧ stale ∧ zero-inbound ∧ not-CLAUDE.md-cited).")
         return 0
     print(f"{len(candidates)} archive candidate(s) — review each before archiving:")
+    from .telemetry import read_committed_usage
+
+    if not read_committed_usage(memory_dir)["memories"]:
+        print(
+            "  ⚠ the 'cold' leg is CLONE-LOCAL (only this clone's recalls) — a memory a "
+            "teammate hits daily can appear here. Union team usage first: `python -m memory.soak "
+            "--record-usage` on each clone + commit .claude/memory/.usage/ (TEA-5)."
+        )
     for item in candidates:
         print(f"  • {item['name']}: {', '.join(item['changed_paths'][:6])}")
     return 0

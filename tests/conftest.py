@@ -84,6 +84,19 @@ def _isolate_trust_registry(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_memory_tiers(tmp_path, monkeypatch):
+    """Keep TEA-1/TEA-3 multi-corpus fusion hermetic across the whole suite.
+
+    Point ``HIPPO_USER_MEMORY_DIR`` (TEA-1 user tier) and ``HIPPO_LOCAL_MEMORY_DIR`` (TEA-3
+    private tier) at per-test tmp paths that do NOT exist, so recall fusion is a strict no-op
+    unless a test deliberately creates one — a developer or CI runner with a real
+    ``~/.claude/hippo-memory`` on disk can never bleed its memories into an unrelated test's
+    recall results. A test exercising a tier overrides these to a dir it populates."""
+    monkeypatch.setenv("HIPPO_USER_MEMORY_DIR", str(tmp_path / "absent-user-tier"))
+    monkeypatch.setenv("HIPPO_LOCAL_MEMORY_DIR", str(tmp_path / "absent-private-tier"))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_recall_global_state():
     """Keep the recall/index tests hermetic against PROCESS-GLOBAL side effects.
 

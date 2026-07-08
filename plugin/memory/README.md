@@ -306,9 +306,25 @@ counts stay ledger-window-only. `compute_strength_scores()` returns
 `{name: distinct_sessions_recalled / total_sessions}` — sessions, not events, so one
 chatty session can't inflate a memory's strength.
 
+**TEA-5 — usage signals are honest about their scope.** The ledger and aggregates are both
+clone-local, so "never recalled" means "never in **this** clone" — a memory a teammate hits
+daily reads as dead weight on your machine. The report **labels the signal's scope**
+(clone-local vs cross-clone) on every run. To make coldness team-wide, each teammate runs
+
+```bash
+"$PY" -m memory.soak --record-usage      # folds this clone's usage into .usage/<user>.json
+```
+
+and commits `.claude/memory/.usage/`. That directory is an **append-only, committed** (not
+gitignored) per-user summary — memory names + counts + timestamps only, **no session ids** — that
+`soak.curation_report` / `soak_status` union before judging coldness. It is never indexed,
+recalled, or floor-scanned (a `.usage` subdir of `.md`-only membership). A plain
+
 ```bash
 "$PY" -m memory.soak
 ```
+
+still reports without writing anything.
 
 ## Reconsolidation (the immune system)
 
@@ -386,6 +402,62 @@ Decay is DEMOTION, never deletion.
 "$PY" -m memory.archive --archive <name>            # per-item move; refuses while inbound links exist
 "$PY" -m memory.archive --archive <name> --force    # move anyway; referrers printed for same-commit rewrite
 ```
+
+## Purging a memory (and scrubbing its history)
+
+Archive is the *reversible* end of the decay spectrum — a tracked `git mv` you can undo. **Purge
+is the irreversible end**: excise ONE memory and every trace of it while keeping the rest of the
+corpus. Reach for it when a memory was created in error, contains a leaked secret (the SEC-2
+write-time/doctor warning points here), or must be forgotten for privacy. It is distinct from:
+
+- **`/hippo:archive`** — demotes a memory to `.claude/memory/archive/`; the content stays in git
+  history. Not a purge.
+- **`/hippo:remove`** — whole-project offboarding; it deletes the symlink and the derived caches
+  but **refuses to touch `.claude/memory/` files**. Not a purge.
+
+There is no bulk/automated purge command by design (the per-item agent-gate is permanent). Follow
+these steps for the one memory `<name>` in corpus `<memory_dir>` (its index dir is
+`<index_dir>` — the gitignored `.claude/.memory-index` sibling, or a tier's own index):
+
+1. **Remove the memory file** and drop its floor pointer.
+   ```bash
+   git rm "<memory_dir>/<name>.md"
+   # then delete the "- [...](<name>.md) — ..." line from <memory_dir>/MEMORY.md, if any
+   ```
+   (For a user/private-tier memory the file and its pointer live in that tier's own dir, e.g.
+   `~/.claude/hippo-memory/` or `.claude/memory.local/` — purge there instead.)
+
+2. **Scrub it from git history.** A `git rm` only removes it going forward; every prior commit
+   still carries the content, and any clone or fork keeps it. Rewrite history with
+   [`git filter-repo`](https://github.com/newren/git-filter-repo) (safer than `filter-branch`):
+   ```bash
+   git filter-repo --path ".claude/memory/<name>.md" --invert-paths --force
+   ```
+   This **rewrites every commit** and changes SHAs — coordinate with collaborators and force-push
+   (`git push --force-with-lease`), then have everyone re-clone. **If the memory held a real
+   secret, rotate the credential regardless** — assume any pushed history was already cloned.
+
+3. **Clear the index rows.** The dense/BM25 index embeds the memory's description *and body
+   chunks*, so its text survives in `manifest.json` / `dense.npy` until a rebuild. Rebuild it:
+   ```bash
+   "$PY" -m memory.build_index --memory-dir "<memory_dir>" --index-dir "<index_dir>"
+   ```
+   (SessionStart rebuilds automatically too, but run it now to verify immediately. `--force`
+   re-embeds every memory from scratch.)
+
+4. **Clear the ledgers.** The telemetry ledgers store recalled memory **names** and truncated
+   query previews (never bodies) in `.claude/.memory-telemetry/`. To erase a purged name, delete
+   or rotate that dir (all derived, rebuildable): `rm -rf .claude/.memory-telemetry`. If the name
+   was published in a committed per-user usage summary (TEA-5), also edit or `git rm`
+   `.claude/memory/.usage/<user>.json` and scrub it from history via step 2.
+
+5. **Verify nothing surfaces.** Confirm the memory is gone from the corpus, the index, and recall:
+   ```bash
+   grep -ri "<distinctive phrase from the memory>" .claude/memory        # -> no hits
+   "$PY" -m memory.recall "<the memory's own topic>"                      # -> does not list <name>
+   ```
+   Following these steps leaves no trace in the corpus, index, ledgers, or recall output.
+   `/hippo:doctor`'s secret check references this procedure in its remediation line.
 
 ## Degraded modes (all legible, none fatal)
 
