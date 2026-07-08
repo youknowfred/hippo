@@ -33,7 +33,8 @@ Print its output VERBATIM — every `✔`/`✘`/`⚠` line, in order. Do not re-
 or re-run individual checks by hand: the whole point of the engine is that the diagnostic is
 reproducible, and paraphrasing reintroduces the run-to-run variance DOC-4 removed. The engine
 resolves the corpus/repo the same way recall does (`resolve_dirs`) and runs, in a FIXED order:
-bootstrap state, venv imports, corpus existence, project symlink (SHP-5/ONB-5), corpus
+bootstrap state, venv imports, corpus existence, project symlink (SHP-5/ONB-5), native-memory
+coexistence (INT-4: symlink-target drift + native-layout change), corpus
 resolution (SHP-2 nested-vs-root walk-up), git degraded-mode (SHP-4), corpus trust (SEC-1),
 frontmatter integrity, index corruption (QUA-5), index count vs corpus, index format version,
 pack drift, `<FILL-ME` templates, and the corpus-wide secret scan (SEC-2). Each line already

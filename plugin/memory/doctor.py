@@ -235,6 +235,62 @@ def check_symlink(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"symlink check failed: {exc}."}
 
 
+def check_native_coexistence(ctx: DoctorContext) -> Dict[str, str]:
+    """INT-4: the native-memory coexistence contract — detect drift + native-layout changes.
+
+    hippo's always-load floor piggybacks on ONE undocumented Claude Code internal: the
+    ``~/.claude/projects/<encoded>/memory`` symlink the harness reads as native memory, which
+    /hippo:init points at this corpus. That is the whole contract (see the compatibility doc,
+    ``plugin/memory/NATIVE_MEMORY.md``). check_symlink names the repair; this watches the same
+    link from the COEXISTENCE angle and names the two ways the native relationship silently
+    breaks: symlink-target DRIFT (the link resolves somewhere other than this corpus, so the
+    floor is drawn from a different target) and a NATIVE-LAYOUT CHANGE (a real file/dir occupies
+    the slot instead of hippo's symlink — Claude Code's native memory taking it over, an
+    unexpected native write path the floor cannot inject through). Read-only; never raises.
+    """
+    try:
+        r = check_project_symlink(ctx.repo_root, ctx.memory_dir)
+        expected = r.get("expected_path") or ""
+        # Strongest native-layout-change signal: something REAL (not hippo's symlink) sits in
+        # the slot the harness reads — native memory (or a stray dir) has taken it over.
+        if expected and os.path.lexists(expected) and not os.path.islink(expected):
+            kind = "directory" if os.path.isdir(expected) else "file"
+            return {
+                "status": "warn",
+                "message": f"native-layout change: {expected} is a real {kind}, not hippo's "
+                "symlink — Claude Code's native memory may have taken the projects-dir slot. "
+                "hippo's floor cannot inject through it; move it aside, then run /hippo:init.",
+            }
+        status = r.get("status")
+        if status == "ok":
+            return {
+                "status": "ok",
+                "message": "native coexistence intact — the projects-dir memory symlink (the one "
+                "native behavior hippo relies on) resolves to this corpus.",
+            }
+        if status == "broken":
+            return {
+                "status": "warn",
+                "message": "native-memory symlink DRIFT — the projects-dir link resolves to a "
+                "different target than this corpus, so the always-load floor is drawn elsewhere "
+                "(or nowhere). Fix: /hippo:init (the symlink check names the exact command).",
+            }
+        if status == "legacy_wrong_encoding":
+            return {
+                "status": "warn",
+                "message": "native projects-dir layout changed — a legacy-encoded link exists, so "
+                "the harness reads a different path now. Fix: /hippo:init.",
+            }
+        # missing → coexistence not established yet; check_symlink already flags it as the setup step.
+        return {
+            "status": "ok",
+            "message": "native coexistence: no projects-dir memory link yet — /hippo:init "
+            "establishes it (the floor injects via that native symlink).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"native-coexistence check failed: {exc}."}
+
+
 def check_corpus_resolution(ctx: DoctorContext) -> Dict[str, str]:
     """Which corpus resolved and WHY (monorepo nested-vs-root walk-up, SHP-2 / OQ-1).
 
@@ -782,6 +838,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("venv", check_venv),
     ("corpus", check_corpus_exists),
     ("symlink", check_symlink),
+    ("native_coexistence", check_native_coexistence),
     ("resolution", check_corpus_resolution),
     ("git_mode", check_git_mode),
     ("trust", check_trust),

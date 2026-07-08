@@ -74,6 +74,27 @@ worktree).
 Python 3.10 and 3.12 are exercised in CI. Bootstrap runs once per machine; init runs once
 per project.
 
+## hippo and Claude Code's native memory
+
+hippo **composes** with Claude Code's built-in memory — it does not replace or fork it.
+
+- **What native memory does.** Claude Code always-loads a per-project memory location
+  (`~/.claude/projects/<encoded>/memory`). It's per-machine, opaque, and unconditionally
+  injected — great for a small always-on note, but not reviewable in git, not ranked, and not
+  shared with teammates.
+- **What hippo adds.** A **git-native, teammate-reviewable** markdown corpus with **hybrid
+  dense+BM25 recall** (the right memories on demand, not everything every prompt),
+  **staleness/provenance** tracking, a typed **link graph**, **reconsolidation**, and an
+  **automatic capture** path up to an explicit approval gate.
+- **How they compose.** `/hippo:init` points the native memory location at this repo's
+  `.claude/memory/` via a symlink, so hippo's always-load **floor** (the `user`/`feedback`
+  pointers) reaches context *through* native memory's own always-load — hippo adds no second
+  always-load channel. Everything else is served on demand by the recall hook and the MCP tools.
+
+That symlink is the **only** native behavior hippo depends on. The full contract — every
+assumption, how it can drift, and how `/hippo:doctor` detects a break — is documented in
+[`plugin/memory/NATIVE_MEMORY.md`](plugin/memory/NATIVE_MEMORY.md).
+
 ## Repo layout
 
 This repo is both a **plugin marketplace** and the **plugin itself**:

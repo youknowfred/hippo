@@ -657,3 +657,60 @@ def test_main_output_is_deterministic(repo, memory_dir, monkeypatch, capsys):
     D.main()
     second = capsys.readouterr().out
     assert first == second
+
+
+# --------------------------------------------------------------------------- #
+# INT-4 — native-memory coexistence contract (symlink drift + native-layout change)
+# --------------------------------------------------------------------------- #
+def _projects_memory_link(fake_home, repo):
+    from memory.provenance import encode_project_dir
+
+    return os.path.join(fake_home, ".claude", "projects", encode_project_dir(repo), "memory")
+
+
+def _native_ctx(tmp_path, monkeypatch):
+    fake_home = str(tmp_path / "home")
+    os.makedirs(fake_home)
+    monkeypatch.setattr(os.path, "expanduser", lambda p: fake_home if p == "~" else p)
+    repo = str(tmp_path / "repo")
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    return fake_home, repo, md
+
+
+def test_native_coexistence_intact_when_symlink_resolves_to_corpus(tmp_path, monkeypatch):
+    fake_home, repo, md = _native_ctx(tmp_path, monkeypatch)
+    link = _projects_memory_link(fake_home, repo)
+    os.makedirs(os.path.dirname(link))
+    os.symlink(md, link)
+    r = D.check_native_coexistence(_ctx(md, repo))
+    assert r["status"] == "ok" and "coexistence intact" in r["message"]
+
+
+def test_native_coexistence_detects_symlink_target_drift(tmp_path, monkeypatch):
+    fake_home, repo, md = _native_ctx(tmp_path, monkeypatch)
+    elsewhere = str(tmp_path / "other-corpus")
+    os.makedirs(elsewhere)
+    link = _projects_memory_link(fake_home, repo)
+    os.makedirs(os.path.dirname(link))
+    os.symlink(elsewhere, link)  # symlink resolves to a DIFFERENT corpus
+    r = D.check_native_coexistence(_ctx(md, repo))
+    assert r["status"] == "warn" and "DRIFT" in r["message"]
+
+
+def test_native_coexistence_detects_native_layout_change(tmp_path, monkeypatch):
+    fake_home, repo, md = _native_ctx(tmp_path, monkeypatch)
+    link = _projects_memory_link(fake_home, repo)
+    os.makedirs(link)  # a REAL dir occupies the slot (native memory took it over) — not a symlink
+    r = D.check_native_coexistence(_ctx(md, repo))
+    assert r["status"] == "warn" and "native-layout change" in r["message"]
+
+
+def test_native_coexistence_missing_link_is_ok(tmp_path, monkeypatch):
+    fake_home, repo, md = _native_ctx(tmp_path, monkeypatch)  # no link created
+    r = D.check_native_coexistence(_ctx(md, repo))
+    assert r["status"] == "ok" and "no projects-dir memory link yet" in r["message"]
+
+
+def test_native_coexistence_is_registered_in_checks():
+    assert "native_coexistence" in [label for label, _ in D.CHECKS]
