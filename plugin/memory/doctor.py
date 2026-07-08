@@ -878,8 +878,55 @@ def check_hot_path_latency(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"hot-path latency check failed: {exc}."}
 
 
+def check_plugin_version(ctx: DoctorContext) -> Dict[str, str]:
+    """DOC-7: installed plugin version vs the version the venv was bootstrapped for (with COR-11).
+
+    Version lives in ``.claude-plugin/plugin.json``; the bootstrap sentinel records which version
+    the venv was provisioned for (``plugin_version``, added in v0.6.0). After a plugin update the
+    code swaps but the venv does not, so a delta here is the signal to re-bootstrap. COR-11 covers
+    the DEPS side (requirements hash); this covers the VERSION side. Read-only; never raises.
+    """
+    try:
+        installed = None
+        pj = os.path.join(ctx.plugin_root, ".claude-plugin", "plugin.json")
+        try:
+            with open(pj, encoding="utf-8") as fh:
+                installed = json.load(fh).get("version")
+        except Exception:
+            installed = None
+        if not installed:
+            return {"status": "warn", "message": "plugin version unreadable (plugin.json missing or unparseable)."}
+        if not ctx.plugin_data:
+            return {"status": "ok", "message": f"plugin v{installed} installed (bootstrap state unknown — CLAUDE_PLUGIN_DATA unset)."}
+        sentinel = os.path.join(ctx.plugin_data, ".bootstrap-sentinel")
+        if not os.path.exists(sentinel):
+            return {"status": "ok", "message": f"plugin v{installed} installed — not bootstrapped yet (see the bootstrap check)."}
+        try:
+            with open(sentinel, encoding="utf-8") as fh:
+                bootstrapped = json.load(fh).get("plugin_version")
+        except Exception:
+            bootstrapped = None
+        if not bootstrapped:
+            return {
+                "status": "warn",
+                "message": f"plugin v{installed} installed, but the bootstrap sentinel predates "
+                "version tracking — run /hippo:bootstrap to record it.",
+            }
+        if bootstrapped == installed:
+            return {"status": "ok", "message": f"plugin v{installed} installed and bootstrapped — in sync."}
+        return {
+            "status": "warn",
+            "message": f"version delta: plugin v{installed} installed but the venv was bootstrapped "
+            f"for v{bootstrapped} — run /hippo:bootstrap (check the CHANGELOG's 're-bootstrap' flag "
+            "for whether deps changed).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"plugin-version check failed: {exc}."}
+
+
 CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("bootstrap", check_bootstrap),
+    ("plugin_version", check_plugin_version),
     ("venv", check_venv),
     ("corpus", check_corpus_exists),
     ("symlink", check_symlink),

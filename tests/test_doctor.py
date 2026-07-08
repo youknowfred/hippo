@@ -753,3 +753,47 @@ def test_hot_path_latency_warns_over_budget(memory_dir, repo):
 
 def test_hot_path_latency_registered_in_checks():
     assert "hot_path_latency" in [label for label, _ in D.CHECKS]
+
+
+# --------------------------------------------------------------------------- #
+# DOC-7 — installed-vs-bootstrapped plugin version delta
+# --------------------------------------------------------------------------- #
+def _version_ctx(tmp_path, installed, sentinel_version, *, write_sentinel=True):
+    proot = tmp_path / "plugin-root"
+    os.makedirs(proot / ".claude-plugin")
+    with open(proot / ".claude-plugin" / "plugin.json", "w", encoding="utf-8") as fh:
+        json.dump({"name": "hippo", "version": installed}, fh)
+    pdata = tmp_path / "plugin-data"
+    os.makedirs(pdata)
+    if write_sentinel:
+        rec = {"requirements_hash": "h", "bootstrapped_at": "test"}
+        if sentinel_version is not None:
+            rec["plugin_version"] = sentinel_version
+        with open(pdata / ".bootstrap-sentinel", "w", encoding="utf-8") as fh:
+            json.dump(rec, fh)
+    return _ctx(str(tmp_path / "m"), str(tmp_path / "r"), plugin_data=str(pdata), plugin_root=str(proot))
+
+
+def test_plugin_version_in_sync(tmp_path):
+    r = D.check_plugin_version(_version_ctx(tmp_path, "0.6.0", "0.6.0"))
+    assert r["status"] == "ok" and "in sync" in r["message"]
+
+
+def test_plugin_version_delta_warns(tmp_path):
+    r = D.check_plugin_version(_version_ctx(tmp_path, "0.6.0", "0.5.0"))
+    assert r["status"] == "warn" and "version delta" in r["message"]
+    assert "0.6.0" in r["message"] and "0.5.0" in r["message"]
+
+
+def test_plugin_version_sentinel_predates_tracking(tmp_path):
+    r = D.check_plugin_version(_version_ctx(tmp_path, "0.6.0", None))  # sentinel has no plugin_version
+    assert r["status"] == "warn" and "predates version tracking" in r["message"]
+
+
+def test_plugin_version_not_bootstrapped(tmp_path):
+    r = D.check_plugin_version(_version_ctx(tmp_path, "0.6.0", None, write_sentinel=False))
+    assert r["status"] == "ok" and "not bootstrapped" in r["message"]
+
+
+def test_plugin_version_registered_in_checks():
+    assert "plugin_version" in [label for label, _ in D.CHECKS]

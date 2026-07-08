@@ -1,9 +1,11 @@
 # Changelog
 
 All notable changes to hippo are recorded here. Format is loosely
-[Keep a Changelog](https://keepachangelog.com/)-shaped, kept plain — DOC-7
-(tags, version-sync CI, formal release process) will formalize this later;
-until then entries are written by hand alongside each release.
+[Keep a Changelog](https://keepachangelog.com/)-shaped, kept plain. The release
+process is formalized in [`RELEASING.md`](RELEASING.md) (DOC-7, v0.6.0): entries
+are written by hand as the final commit of each release PR, `plugin.json` and
+`marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
+and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
 ## v0.5.0 — 2026-07-07 — "The graph earns its keep: typed relations and closed lifecycle loops"
 
