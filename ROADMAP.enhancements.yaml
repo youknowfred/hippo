@@ -254,7 +254,7 @@ workstreams:
         title: Injection-precision MEASUREMENT (the KPI-2 read-signal)
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: frontier, verdict: KEEP (measurement half; ranking half deferred to T7)}
         problem: >-
           hippo records what it INJECTED but never whether it HELPED, so

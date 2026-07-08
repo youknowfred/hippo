@@ -907,6 +907,22 @@ def check_recall_blind_spots(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"recall blind-spots check failed: {exc}."}
 
 
+def check_injection_precision(ctx: DoctorContext) -> Dict[str, str]:
+    """SIG-4/KPI-2: the injection-precision proxy over the outcome ledger — MEASUREMENT ONLY.
+
+    Reports the fraction of injected memories (that cite a file) whose cited file was later
+    touched in-session — the read-signal KPI-2 said nothing produced today. Read-only; ``ok``
+    always (a measurement, not a fault); ``ok`` with 'no signal yet' before any data. Never
+    raises. This number never influences ranking (that is gated on SIG-5).
+    """
+    try:
+        from .outcome import format_report
+
+        return {"status": "ok", "message": format_report(ctx.memory_dir)}
+    except Exception as exc:
+        return {"status": "warn", "message": f"injection-precision check failed: {exc}."}
+
+
 def check_plugin_version(ctx: DoctorContext) -> Dict[str, str]:
     """DOC-7: installed plugin version vs the version the venv was bootstrapped for (with COR-11).
 
@@ -968,6 +984,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("index_count", check_index_count),
     ("hot_path_latency", check_hot_path_latency),
     ("recall_blind_spots", check_recall_blind_spots),
+    ("injection_precision", check_injection_precision),
     ("format_version", check_format_version),
     ("pack_drift", check_pack_drift),
     ("fill_me", check_fill_me),

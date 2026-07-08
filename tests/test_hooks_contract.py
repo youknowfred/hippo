@@ -31,6 +31,7 @@ _SESSION_START_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_session_start.
 _PRE_COMPACT_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_pre_compact.sh")
 _SESSION_END_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_session_end.sh")
 _SUBAGENT_STOP_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_subagent_stop.sh")
+_POST_TOOL_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_post_tool.sh")
 
 _MEMORY_MD = """---
 name: zebra_deploy_runbook
@@ -758,3 +759,61 @@ class TestConcurrentSessionAttribution:
         assert not os.path.exists(
             os.path.join(project, ".claude", ".memory-telemetry", "session")
         )
+
+
+# --------------------------------------------------------------------------- #
+# SIG-4: PostToolUse read-signal — records file touches into the gitignored outcome ledger
+# (KPI-2), never the corpus, always exit 0.
+# --------------------------------------------------------------------------- #
+class TestPostToolUseHook:
+    def test_empty_stdin(self, tmp_path):
+        proc, _, _ = _run_hook(_POST_TOOL_HOOK, "", tmp_path, venv_python=True)
+        _assert_contract(proc, "PostToolUse")
+        assert proc.stdout.strip() == ""  # a read-signal hook emits no context
+
+    def test_garbage_json(self, tmp_path):
+        proc, _, _ = _run_hook(_POST_TOOL_HOOK, "{not json]]", tmp_path, venv_python=True)
+        _assert_contract(proc, "PostToolUse")
+
+    def test_no_corpus_writes_nothing(self, tmp_path):
+        stdin = json.dumps({"tool_name": "Read", "tool_input": {"file_path": "x.py"}})
+        proc, project, _ = _run_hook(
+            _POST_TOOL_HOOK, stdin, tmp_path, with_corpus=False, venv_python=True
+        )
+        _assert_contract(proc, "PostToolUse")
+        assert _tree(project) == set()
+
+    def test_missing_python3_degrades_silently(self, tmp_path):
+        proc, _, _ = _run_hook(_POST_TOOL_HOOK, "", tmp_path, python3=False)
+        _assert_contract(proc, "PostToolUse")
+
+    def test_records_file_touch_into_outcome_ledger(self, tmp_path):
+        project = _make_project(tmp_path, with_corpus=True)
+        stdin = json.dumps(
+            {
+                "tool_name": "Read",
+                "tool_input": {"file_path": os.path.join(project, "src", "app.py")},
+                "session_id": "sess-touch",
+            }
+        )
+        proc, project, _ = _run_hook(_POST_TOOL_HOOK, stdin, tmp_path, venv_python=True)
+        _assert_contract(proc, "PostToolUse")
+        ledger = os.path.join(project, ".claude", ".memory-telemetry", "outcome_events.jsonl")
+        assert os.path.exists(ledger), "PostToolUse hook logged no outcome event"
+        with open(ledger, "r", encoding="utf-8") as fh:
+            events = [json.loads(line) for line in fh if line.strip()]
+        assert events and events[0]["tool"] == "Read"
+        assert events[0]["path"].endswith("app.py")
+        assert events[0]["session_id"] == "sess-touch"
+
+    def test_writes_only_derived_dirs(self, tmp_path):
+        project = _make_project(tmp_path, with_corpus=True)
+        stdin = json.dumps(
+            {"tool_name": "Edit", "tool_input": {"file_path": os.path.join(project, "a.py")}, "session_id": "s"}
+        )
+        proc, project, _ = _run_hook(_POST_TOOL_HOOK, stdin, tmp_path, venv_python=True)
+        _assert_contract(proc, "PostToolUse")
+        for rel in _tree(project):
+            assert rel.startswith(
+                (".claude/memory/", ".claude/.memory-index/", ".claude/.memory-telemetry/")
+            ), f"PostToolUse hook wrote outside the expected dirs: {rel}"

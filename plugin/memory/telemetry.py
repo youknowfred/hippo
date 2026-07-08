@@ -43,6 +43,7 @@ _TELEMETRY_DIRNAME = ".memory-telemetry"
 _LEDGER_NAME = "recall_events.jsonl"
 _EPISODE_LEDGER_NAME = "episode_buffer.jsonl"
 _RECONSOLIDATION_LEDGER_NAME = "reconsolidation_events.jsonl"
+_OUTCOME_LEDGER_NAME = "outcome_events.jsonl"  # SIG-4: PostToolUse read-signal (KPI-2)
 _USAGE_AGGREGATES_NAME = "usage_aggregates.json"
 _SESSION_NAME = "session"
 
@@ -104,6 +105,10 @@ def _episode_ledger_path(telemetry_dir: str) -> str:
 
 def _reconsolidation_ledger_path(telemetry_dir: str) -> str:
     return os.path.join(telemetry_dir, _RECONSOLIDATION_LEDGER_NAME)
+
+
+def _outcome_ledger_path(telemetry_dir: str) -> str:
+    return os.path.join(telemetry_dir, _OUTCOME_LEDGER_NAME)
 
 
 def _usage_aggregates_path(telemetry_dir: str) -> str:
@@ -730,6 +735,63 @@ def read_episodes(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
     try:
         td = _resolve_dir(telemetry_dir)
         path = _episode_ledger_path(td)
+        if not os.path.exists(path):
+            return
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(obj, dict):
+                    yield obj
+    except Exception:
+        return
+
+
+# --------------------------------------------------------------------------- #
+# SIG-4: outcome ledger (KPI-2 read-signal). A PostToolUse hook appends one event per
+# file-touching tool call — {ts, session_id, tool, path} (path repo-relative). The KPI-2
+# injection-precision proxy (see ``memory.outcome``) later JOINS this against the episode
+# buffer's recalled_names + the corpus's cited_paths, OFF the hot path — the hook writes the
+# raw signal only. Same contract as the other ledgers: NEVER raises, fire-and-forget,
+# byte-bounded (``_rotate_if_needed``), gitignored. MEASUREMENT ONLY — nothing here or in the
+# proxy influences ranking (that is gated on SIG-5, the salience keystone).
+# --------------------------------------------------------------------------- #
+def log_outcome(
+    tool: str,
+    path: str,
+    *,
+    session_id: Optional[str] = None,
+    telemetry_dir: Optional[str] = None,
+) -> bool:
+    """Append ONE file-touch outcome to ``outcome_events.jsonl``. Fire-and-forget; never raises."""
+    try:
+        td = _resolve_dir(telemetry_dir)
+        ensure_self_ignoring_dir(td)  # derived dir: mkdir + self-ignoring .gitignore (SEC-3)
+        event = {
+            "ts": round(time.time(), 3),
+            "session_id": current_session_id(td, session_id=session_id),
+            "tool": tool,
+            "path": path,
+        }
+        p = _outcome_ledger_path(td)
+        with open(p, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(event, ensure_ascii=False) + "\n")
+        _rotate_if_needed(p)
+        return True
+    except Exception:
+        return False
+
+
+def read_outcomes(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
+    """Yield parsed outcome-ledger entries, skipping corrupt/partial lines. Never raises."""
+    try:
+        td = _resolve_dir(telemetry_dir)
+        path = _outcome_ledger_path(td)
         if not os.path.exists(path):
             return
         with open(path, "r", encoding="utf-8") as fh:
