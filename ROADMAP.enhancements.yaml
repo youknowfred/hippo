@@ -1134,7 +1134,7 @@ release_train:
   - tier: T1
     target_version: 1.1.0
     theme: "Positive context & dark signals"
-    status: planned
+    status: done
     done_means: >-
       hippo injects context because of WHAT YOU ARE DOING (the first positive
       SessionStart producer) and starts consuming the signals it already collects:
