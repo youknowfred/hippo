@@ -407,3 +407,61 @@ def test_rot_never_writes_and_never_raises(repo, memory_dir, tmp_path):
 def test_rot_wired_into_producers_and_checks():
     assert any(label == "rules_rot" for label, _fn in S.PRODUCERS)
     assert "rules_plane_rot" in [label for label, _ in D.CHECKS]
+
+
+# =============================================================================================
+# RUL-3: rule_dup_candidates — write-time dedup against the rules plane (preventive)
+# =============================================================================================
+_UV_RULE = (
+    "# Python\n\n"
+    "Always use uv for python dependency management, never pip install directly "
+    "into the environment.\n\n"
+    "Unrelated second block about commit messages and changelog hygiene.\n"
+)
+
+
+def test_restated_rule_flagged_with_file_score_preview(repo, memory_dir):
+    write_file(repo, "CLAUDE.md", _UV_RULE)
+    cands = RP.rule_dup_candidates(
+        "use uv for python dependency management, never pip install", "", repo
+    )
+    assert len(cands) == 1
+    assert cands[0]["file"] == "CLAUDE.md"
+    assert cands[0]["score"] >= RP.RULE_DUP_CONTAINMENT
+    assert "uv for python dependency management" in cands[0]["preview"]
+
+
+def test_distinct_draft_not_flagged(repo, memory_dir):
+    write_file(repo, "CLAUDE.md", _UV_RULE)
+    assert (
+        RP.rule_dup_candidates(
+            "watering schedule for indoor houseplants during winter months", "", repo
+        )
+        == []
+    )
+
+
+def test_short_draft_is_never_judged(repo, memory_dir):
+    write_file(repo, "CLAUDE.md", _UV_RULE)
+    # 100%-contained but under the 5-content-token bar: silence, not a cheap match.
+    assert RP.rule_dup_candidates("uv python", "", repo) == []
+
+
+def test_candidates_best_first_and_capped(repo, memory_dir):
+    for i in range(5):
+        write_file(repo, f".claude/rules/{i}0-uv.md", _UV_RULE)
+    cands = RP.rule_dup_candidates(
+        "use uv for python dependency management, never pip install", "", repo
+    )
+    assert len(cands) == RP._RULE_DUP_MAX_CANDIDATES
+    assert [c["score"] for c in cands] == sorted((c["score"] for c in cands), reverse=True)
+
+
+def test_gov_blocks_strip_frontmatter():
+    text = '---\npaths:\n  - "src/**"\n---\nBlock one text.\n\nBlock two text.\n'
+    blocks = RP._gov_blocks(text)
+    assert blocks == ["Block one text.", "Block two text."]  # paths: scoping is not content
+
+
+def test_rule_dup_never_raises(tmp_path):
+    assert RP.rule_dup_candidates("anything at all here now", "", str(tmp_path / "nope")) == []

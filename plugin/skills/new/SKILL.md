@@ -146,6 +146,33 @@ When the check could not run at all, the result carries a machine-readable
 corpus with `--links`/`--no-links`). No warning ≠ no duplicates in that case — apply the
 search-first judgment below yourself.
 
+## Rules-plane echo check (RUL-3) — link, don't copy
+
+Alongside the corpus-neighbor check, the tool scores the draft's content against the
+project's GOVERNANCE plane (`CLAUDE.md`, `AGENTS.md`, `.claude/rules/`, `.claude/agents/`,
+`.claude/skills/`). A draft that RESTATES a rule already living there prints:
+
+```
+warning : restates a governance rule — link, don't copy:
+  • CLAUDE.md (overlap 0.83) — "Always use uv for python dependency management …"
+  decide  : cite the rule file (rules stay in the rules plane) / keep both if genuinely distinct — see /hippo:new
+```
+
+**Creation is never blocked** (same warn-only contract as LIF-2), but a memory that copies a
+rule starts two-plane drift the day it lands: the rule gets edited, the memory keeps
+asserting the old text, and recall injects the stale copy. Pick one:
+
+- **cite, don't copy** — rewrite the memory so its body says *why/when* and REFERENCES the
+  rule file (e.g. "per `CLAUDE.md`'s uv rule …") instead of restating its text. The rules
+  plane stays the single authority for its own content.
+- **keep both** — the overlap is vocabulary, not substance (the memory adds a genuinely
+  distinct fact, e.g. the *history* behind the rule). Keep it, ideally naming the rule file
+  so the connection is explicit.
+
+The flag is conservative (containment ≥ 0.6 of the draft's content tokens inside one rule
+block; short drafts are never judged) — silence does not certify novelty against the rules
+plane any more than LIF-2's silence does against the corpus.
+
 ## Floor-pointer outcome (LIF-5) — read the `floor` line, SURFACE anything unusual
 
 For `user`/`feedback` types the always-load pointer append used to silently no-op when

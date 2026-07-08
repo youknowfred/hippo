@@ -414,7 +414,7 @@ workstreams:
         title: Write-time dedup against the rules plane (preventive)
         priority: P2
         effort: S
-        status: planned
+        status: done
         source: {lens: claude-rules, verdict: KEEP (blind-spot — the preventive counterpart)}
         problem: >-
           Every other rules item cleans up two-plane drift AFTER it happens; nothing

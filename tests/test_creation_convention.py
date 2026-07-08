@@ -436,6 +436,97 @@ def test_new_memory_near_duplicate_surfaces_neighbor_and_never_rejects(tmp_path,
     assert top["description"] == "how the railway deploy pipeline builds and ships the app"
 
 
+# --------------------------------------------------------------------------- #
+# RUL-3: write-time dedup against the rules plane — warn-only, "link, don't copy"
+# --------------------------------------------------------------------------- #
+_UV_RULE_TEXT = (
+    "# Python\n\n"
+    "Always use uv for python dependency management, never pip install directly "
+    "into the environment.\n"
+)
+
+
+def test_new_memory_restated_rule_surfaces_rule_neighbor_and_never_rejects(tmp_path, monkeypatch):
+    """AC: creating a memory that restates a CLAUDE.md rule surfaces the rule (file + overlap
+    + preview) in result["rule_neighbors"] — and creation still proceeds (warn-only, the
+    agent decides link-don't-copy; no autonomous rejection)."""
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    (tmp_path / "CLAUDE.md").write_text(_UV_RULE_TEXT, encoding="utf-8")
+
+    res = NM.write_memory(
+        "python_dep_management",
+        "use uv for python dependency management, never pip install",
+        "project",
+        memory_dir=md,
+        repo_root=str(tmp_path),
+    )
+    assert res["created"] is True and res["error"] is None  # never blocked
+    assert res["rule_neighbors"], "expected the restated CLAUDE.md rule to surface"
+    top = res["rule_neighbors"][0]
+    assert top["file"] == "CLAUDE.md"
+    assert top["score"] >= 0.6
+    assert "uv for python dependency management" in top["preview"]
+
+
+def test_new_memory_distinct_draft_has_no_rule_neighbors(tmp_path, monkeypatch):
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    (tmp_path / "CLAUDE.md").write_text(_UV_RULE_TEXT, encoding="utf-8")
+
+    res = NM.write_memory(
+        "houseplant_watering",
+        "watering schedule for indoor houseplants during winter months",
+        "project",
+        memory_dir=md,
+        repo_root=str(tmp_path),
+    )
+    assert res["created"] is True and res["rule_neighbors"] == []
+
+
+def test_new_memory_cli_prints_rule_dup_block(tmp_path, monkeypatch, capsys):
+    """The CLI warning names the governance file and routes 'link, don't copy'."""
+    from memory import new_memory as NM
+
+    _nm_env(tmp_path, monkeypatch)
+    (tmp_path / "CLAUDE.md").write_text(_UV_RULE_TEXT, encoding="utf-8")
+
+    rc = NM.main(
+        [
+            "python_dep_management",
+            "use uv for python dependency management, never pip install",
+            "--type",
+            "project",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "restates a governance rule — link, don't copy:" in out
+    assert "CLAUDE.md (overlap" in out
+    assert "cite the rule file" in out
+
+
+def test_check_candidate_carries_rule_neighbors_without_flipping_route(tmp_path, monkeypatch):
+    """CAP-3 dry-run twin: rule_neighbors ride out, but a rules-plane echo alone never flips
+    the route to review (a wording decision, not an add/supersede fork)."""
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    (tmp_path / "CLAUDE.md").write_text(_UV_RULE_TEXT, encoding="utf-8")
+
+    decision = NM.check_candidate(
+        "python_dep_management",
+        "use uv for python dependency management, never pip install",
+        "project",
+        memory_dir=md,
+        repo_root=str(tmp_path),
+    )
+    assert decision["route"] == "add"  # no corpus neighbor — the rule echo doesn't flip it
+    assert decision["rule_neighbors"] and decision["rule_neighbors"][0]["file"] == "CLAUDE.md"
+
+
 def test_new_memory_distinct_creation_yields_no_neighbors(tmp_path, monkeypatch):
     """The calibrated BM25 threshold must NOT flag distinct memories (the existing
     fixture-style corpus cross-scores at ~0.0 — see the LIF-2 calibration)."""

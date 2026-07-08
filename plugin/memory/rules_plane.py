@@ -12,6 +12,9 @@ convention, promoted to importable API) plus the read-only joins built over it:
   - RUL-2 ``rules_rot`` — hippo's staleness discipline applied to the rules plane itself:
     backtick code-references whose path/symbol left the tree, and ``.claude/rules``
     ``paths:`` globs that match nothing (the harness lazy-load feature RUL-0 confirmed).
+  - RUL-3 ``rule_dup_candidates`` — the preventive counterpart: at write time, warn when
+    a draft memory RESTATES a rule already in the governance plane ("link, don't copy"),
+    stopping two-plane drift before it starts.
 
 Relationship to the two pre-existing scan surfaces (deliberately NOT merged, inv5):
 ``archive._SCAN_TARGETS`` is the ARCHIVE-PROTECTION surface (adds ``docs/prompts``, omits
@@ -432,3 +435,82 @@ def rules_rot(repo_root: str) -> dict:
         return {"code_ref_rot": code_rot, "dead_path_globs": dead_globs}
     except Exception:
         return empty
+
+
+# --------------------------------------------------------------------------- #
+# RUL-3: write-time dedup against the rules plane (preventive)
+# --------------------------------------------------------------------------- #
+# Containment of the draft's content tokens inside one governance BLOCK — asymmetric on
+# purpose: "the draft restates a rule" means the DRAFT's substance lives in the rule, not
+# that a short rule paragraph resembles a long memory. Calibrated conservative (warn-only
+# surface, but a nagging false positive still costs trust).
+RULE_DUP_CONTAINMENT = 0.6
+# A draft below this many content tokens can be "contained" by accident; stay silent.
+_RULE_DUP_MIN_DRAFT_TOKENS = 5
+# Governance blocks below this many tokens (a heading, a divider) are not rules.
+_RULE_DUP_MIN_BLOCK_TOKENS = 3
+# Mirror LIF-2's neighbor cap: the warning stays a decision aid, not a report.
+_RULE_DUP_MAX_CANDIDATES = 3
+_RULE_DUP_PREVIEW_CHARS = 100
+
+
+def _gov_blocks(text: str) -> List[str]:
+    """Blank-line-separated blocks of one governance file's BODY (frontmatter stripped —
+    ``paths:`` globs are scoping, not rule content)."""
+    try:
+        from .provenance import split_frontmatter
+
+        _fm, body = split_frontmatter(text)
+        return [b.strip() for b in re.split(r"\n\s*\n", body) if b.strip()]
+    except Exception:
+        return []
+
+
+def rule_dup_candidates(description: str, body: str, repo_root: str) -> List[dict]:
+    """RUL-3: governance blocks a draft memory RESTATES — "this duplicates rule X; link,
+    don't copy."
+
+    Every other rules item cleans up two-plane drift AFTER it happens; this is the
+    preventive gate: LIF-2's write-time dup discipline extended to the GOV_GLOBS plane.
+    Scores the draft's content tokens (``build_index.tokenize``, the canonical corpus
+    tokenizer) against each blank-line block of each governance file by CONTAINMENT
+    (``|draft ∩ block| / |draft|``): a draft whose substance already lives inside a rule
+    block clears ``RULE_DUP_CONTAINMENT``. Pure token arithmetic — no model, no index, so
+    it runs at write time for free even on a dense-less corpus.
+
+    Returns ``[{"file", "score", "preview"}]`` best-first, capped at 3. Warn-only by
+    contract: callers surface the candidates and the AGENT decides (link / rewrite / keep)
+    — nothing here rejects a write (inv4). Never raises; ``[]`` on any failure or when the
+    draft is too short to judge (< 5 content tokens).
+    """
+    try:
+        from .build_index import tokenize
+
+        draft = set(tokenize(f"{description}\n{body}"))
+        if len(draft) < _RULE_DUP_MIN_DRAFT_TOKENS:
+            return []
+        out: List[dict] = []
+        for path in gov_files(repo_root):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+            except Exception:
+                continue
+            rel = _rel(repo_root, path)
+            best_score, best_block = 0.0, ""
+            for block in _gov_blocks(text):
+                btoks = set(tokenize(block))
+                if len(btoks) < _RULE_DUP_MIN_BLOCK_TOKENS:
+                    continue
+                score = len(draft & btoks) / len(draft)
+                if score > best_score:
+                    best_score, best_block = score, block
+            if best_score >= RULE_DUP_CONTAINMENT:
+                preview = " ".join(best_block.split())
+                if len(preview) > _RULE_DUP_PREVIEW_CHARS:
+                    preview = preview[: _RULE_DUP_PREVIEW_CHARS - 1].rstrip() + "…"
+                out.append({"file": rel, "score": round(best_score, 4), "preview": preview})
+        out.sort(key=lambda c: (-c["score"], c["file"]))
+        return out[:_RULE_DUP_MAX_CANDIDATES]
+    except Exception:
+        return []
