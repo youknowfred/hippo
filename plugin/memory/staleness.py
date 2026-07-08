@@ -321,11 +321,17 @@ class RunContext:
     independently callable with no ``ctx`` at all (tests, the ``reconsolidate`` CLI) —
     they fall back to deriving their own single-producer view instead of needing one
     fabricated for them.
+
+    SIG-1: ``changed_paths`` carries the session's uncommitted working-tree diff (modified-
+    tracked + untracked files since HEAD, via ``capture._git_changed_paths``), computed ONCE
+    here so the ``relevant_to_work`` positive producer can intersect it against the corpus's
+    ``cited_paths`` without a second ``git diff``. Empty on a clean tree / non-git corpus.
     """
 
     stale: List[dict] = field(default_factory=list)
     stale_diagnostics: dict = field(default_factory=dict)
     worklist: List[dict] = field(default_factory=list)
+    changed_paths: List[str] = field(default_factory=list)
 
 
 STALE_CACHE_SCHEMA_VERSION = 1
