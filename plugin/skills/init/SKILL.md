@@ -146,10 +146,26 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    failed — report it (recall will stay gated until it succeeds), don't pretend it's trusted.
 5. **Patch `.gitignore`** — SKIP entirely when not a git repo (there's nothing for git to
    ignore yet; a future `git init` + this same nudge in step 6, once repeated after init, is
-   how it gets patched). In a git repo, append `.claude/.memory-index/` and
-   `.claude/.memory-telemetry/` if not already present (derived, rebuildable — never commit
-   them). Do NOT create `.gitignore` from scratch if the project doesn't have one without
-   asking first — a repo with zero `.gitignore` may be intentional (e.g. a throwaway test repo).
+   how it gets patched). In a git repo, append `.claude/.memory-index/`,
+   `.claude/.memory-telemetry/`, and `.claude/memory.local/` if not already present (the first
+   two are derived, rebuildable caches; `memory.local/` is the private tier from step 5b — never
+   commit any of them). Do NOT create `.gitignore` from scratch if the project doesn't have one
+   without asking first — a repo with zero `.gitignore` may be intentional (e.g. a throwaway test repo).
+5b. **Create the private memory tier (TEA-3)** — git repo only. `.claude/memory.local/` is a
+   gitignored sibling of `.claude/memory/` for memories you want recall over on THIS clone but
+   never published to teammates (a local scratchpad, a machine-specific pointer, a personal
+   note). Create it and make it self-ignoring so it can never be committed even without the
+   step-5 patch (SEC-3 pattern):
+   ```bash
+   "$PY" -c \
+     "import sys; from memory.provenance import ensure_self_ignoring_dir; \
+      ensure_self_ignoring_dir(sys.argv[1])" \
+     ".claude/memory.local"
+   ```
+   Write to it with `/hippo:new --tier private`. It is recalled locally alongside the project
+   corpus (labelled "private memory") and delivered on the floor by the SessionStart
+   portable-floor producer; a teammate who lacks the dir simply sees nothing from it. On an
+   existing corpus (ONB-5) this runs too — it is idempotent (never overwrites).
 ## Memories can reference each other
 
 `.claude/memory/` files support `[[wikilinks]]` — an outbound `[[some-other-memory]]` in a
@@ -180,8 +196,9 @@ months the way a hand-authored corpus without this feature would.
 
 ## Hard rules
 
-- **Never write outside `.claude/memory/`, `.claude/.memory-index/`, `.claude/.memory-telemetry/`,
-  `.gitignore`, and the one symlink.** No other files, no other directories.
+- **Never write outside `.claude/memory/`, `.claude/memory.local/`, `.claude/.memory-index/`,
+  `.claude/.memory-telemetry/`, `.gitignore`, and the one symlink.** No other files, no other
+  directories.
 - **Never overwrite an existing memory file.** If a name collision occurs (unlikely for a fresh
   project, but check), skip that one file and report it rather than silently clobbering.
 - **Never auto-commit.** The nudge in step 6 is the end of this skill's responsibility.

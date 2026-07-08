@@ -316,6 +316,22 @@ def user_memory_dir() -> str:
     return os.path.join(os.path.expanduser("~"), ".claude", "hippo-memory")
 
 
+def local_memory_dir(project_memory_dir: str) -> str:
+    """TEA-3: the in-repo, gitignored PRIVATE tier dir — a sibling of the project corpus
+    (``.claude/memory.local`` beside ``.claude/memory``).
+
+    ``HIPPO_LOCAL_MEMORY_DIR`` overrides it (hermetic tests). Holds memories a user wants recall
+    over on THIS clone but never published to teammates: it is gitignored (init patches
+    ``.gitignore`` AND it self-ignores, SEC-3), so it is invisible in ``git status`` and can
+    never be committed, while staying fully recallable locally (fused like the user tier). A
+    teammate who clones the repo simply lacks the dir; its floor pointers degrade to silence.
+    """
+    override = os.environ.get("HIPPO_LOCAL_MEMORY_DIR")
+    if override:
+        return override
+    return os.path.join(os.path.dirname(os.path.abspath(project_memory_dir)), "memory.local")
+
+
 def tier_index_dir(tier_dir: str) -> str:
     """Index-cache location for a NON-project tier — nested at ``<tier_dir>/.memory-index``.
 

@@ -44,8 +44,10 @@ from .build_index import extract_description
 from .lint_floor import floor_memory_names
 from .provenance import (
     _iter_memory_files,
+    local_memory_dir,
     resolve_dirs,
     split_frontmatter,
+    tier_index_dir,
     user_memory_dir,
 )
 from .staleness import RunContext, _commit_times, read_provenance
@@ -1126,6 +1128,13 @@ def _extra_recall_tiers(memory_dir: str) -> List[Tuple[str, str, str]]:
     sibling (``~/.claude/.memory-index`` — unique, machine-local); TEA-3's private tier NESTS
     its index inside ``memory.local`` because its sibling would collide with the project's."""
     dirs: List[Tuple[str, str, str]] = []
+    # TEA-3: the in-repo private tier — precedes the user tier (a repo-local override of a
+    # portable preference wins). Its index NESTS inside memory.local because its plain sibling
+    # would be the project's own ``.claude/.memory-index``; nesting keeps it distinct AND sweeps
+    # it into memory.local's own self-ignoring .gitignore, so private text never reaches git.
+    local = local_memory_dir(memory_dir)
+    if local:
+        dirs.append((local, tier_index_dir(local), _PRIVATE_TIER))
     user = user_memory_dir()
     if user:
         dirs.append((user, default_index_dir(user), _USER_TIER))
