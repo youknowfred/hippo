@@ -1191,6 +1191,110 @@ def _apply_salience(
 
 
 # --------------------------------------------------------------------------- #
+# RCL-4: MMR intra-block diversity re-rank
+# --------------------------------------------------------------------------- #
+# Nothing collapses near-DUPLICATE hits within the injected block -- two memories
+# paraphrasing one decision each eat a top-k slot that could have gone to a distinct facet.
+# Classic maximal-marginal-relevance re-cut over the top ~2k of `penalized`, using cheap
+# pairwise cosine from the dense matrix already resident in memory (idx.dense rows are
+# L2-normalized, so a dot product IS cosine -- no re-embedding, pure arithmetic, inv6-safe).
+# Runs AFTER graph expansion + salience (both already reordered `penalized`) and BEFORE the
+# emission loop, so graph neighbors are diversified too and the knee cutoff (which lives
+# inside the emission loop) measures gaps on the FINAL, diversified order.
+_MMR_LAMBDA = 0.8  # override: HIPPO_MMR_LAMBDA -- relevance weight (1-lambda is diversity weight).
+# Calibrated on the shipped starter-pack golden corpus (see the RCL-4 commit body): the
+# roadmap's suggested ~0.7 measurably eroded hard_recall@10/MRR (still above the absolute
+# gates, but a real, avoidable cost) by letting a WEAK diversity pick occasionally outrank a
+# genuinely-relevant close second; 0.8 recovers nearly all of that margin while an adversarial
+# near-paraphrase fixture (two memories on one decision) still gets diversified.
+_MMR_POOL_MULT = 2  # candidates considered for the re-cut, as a multiple of k
+
+
+def _mmr_lambda() -> float:
+    """``HIPPO_MMR_LAMBDA`` override; malformed/absent -> the module default. Never raises."""
+    raw = os.environ.get("HIPPO_MMR_LAMBDA")
+    if raw is None or not raw.strip():
+        return _MMR_LAMBDA
+    try:
+        return float(raw)
+    except ValueError:
+        return _MMR_LAMBDA
+
+
+def _mmr_rerank(
+    penalized: List[Tuple[int, float, Optional[str]]],
+    entries: List[dict],
+    dense,
+    k: int,
+) -> List[Tuple[int, float, Optional[str]]]:
+    """Re-cut the top ``~2k`` of ``penalized`` for intra-block diversity, preserving length.
+
+    A candidate with NO usable dense row -- ``dense`` itself absent (BM25-only corpus), or
+    ``entries[i]["row"]`` missing/out of range (a model-mismatch merge, a graph-injected
+    neighbor never itself embedded) -- KEEPS ITS ORIGINAL POSITION and is exempt from the
+    diversity math entirely, the same exemption posture the knee cutoff already uses for
+    entries with no primary-relevance signal. Never touches corpus="rule" pointers -- those
+    are appended after emission, hold no dense row, and are never part of ``penalized``.
+    Degrades to the untouched input (never raises, never drops/reorders-wrong on failure).
+    """
+    if dense is None or len(penalized) < 2:
+        return penalized
+    try:
+        import numpy as np
+
+        pool_n = min(len(penalized), max(k * _MMR_POOL_MULT, k))
+        pool = penalized[:pool_n]
+        tail = penalized[pool_n:]
+
+        eligible: List[Tuple[int, int, float, Optional[str]]] = []  # (pool_pos, i, score, state)
+        exempt_positions: Dict[int, Tuple[int, float, Optional[str]]] = {}
+        for pos, (i, score, state) in enumerate(pool):
+            row = entries[i].get("row")
+            if row is None or row < 0 or row >= len(dense):
+                exempt_positions[pos] = (i, score, state)
+            else:
+                eligible.append((pos, i, score, row, state))
+
+        if len(eligible) < 2:
+            return penalized  # nothing left to diversify against
+
+        rows = np.array([e[3] for e in eligible])
+        sims = dense[rows] @ dense[rows].T  # rows are L2-normalized -> dot == cosine
+        lam = _mmr_lambda()
+
+        remaining = list(range(len(eligible)))
+        max_sim_to_picked = np.zeros(len(eligible))
+        picked_order: List[int] = []
+        while remaining:
+            best_local, best_val = None, None
+            for local_i in remaining:
+                relevance = eligible[local_i][2]
+                mmr_score = lam * relevance - (1.0 - lam) * max_sim_to_picked[local_i]
+                if best_val is None or mmr_score > best_val:
+                    best_val, best_local = mmr_score, local_i
+            picked_order.append(best_local)
+            remaining.remove(best_local)
+            for local_i in remaining:
+                s = float(sims[local_i, best_local])
+                if s > max_sim_to_picked[local_i]:
+                    max_sim_to_picked[local_i] = s
+
+        # Exempt entries keep their ORIGINAL slot; MMR-ordered eligible entries fill the
+        # remaining slots in the order MMR picked them -- a pure re-order, same pool length.
+        out: List[Optional[Tuple[int, float, Optional[str]]]] = [None] * len(pool)
+        for pos, triple in exempt_positions.items():
+            out[pos] = triple
+        empty_slots = [p for p in range(len(pool)) if out[p] is None]
+        for slot, local_i in zip(empty_slots, picked_order):
+            _, i, score, _row, state = eligible[local_i]
+            out[slot] = (i, score, state)
+
+        return out + tail
+    except Exception:
+        return penalized
+
+
+# --------------------------------------------------------------------------- #
 # Recall
 # --------------------------------------------------------------------------- #
 # --------------------------------------------------------------------------- #
@@ -1792,32 +1896,43 @@ def recall(
         # looks a name up in it.
         stale_banner_map = _stale_banner_map(graph_index_dir)
 
-        # Walk the re-sorted list and emit up to k DISPLAY-eligible results, skipping "old"
-        # entries as we go. This is NOT `penalized[:k]` followed by a filter -- a fixed-size
-        # slice-then-filter could yield fewer than k results when an "old" entry occupies a
-        # slot inside the naive top-k window while a display-eligible candidate sits just
-        # past it. Walking in score order with a `continue`/`break` is the correct
-        # implementation of "filter old, then take k" without truncating early. The corpus
-        # itself (`idx.entries`, `idx.dense`, the BM25 corpus) is untouched by this filter --
-        # "old" entries still fully participate in `_bm25_rank`/`_dense_rank`/`_rrf_fuse`,
-        # they are simply never emitted into `results`.
+        # Walk the re-sorted list and admit up to POOL_N DISPLAY-eligible candidates,
+        # skipping "old" entries as we go. This is NOT `penalized[:k]` followed by a filter
+        # -- a fixed-size slice-then-filter could yield fewer than k results when an "old"
+        # entry occupies a slot inside the naive top-k window while a display-eligible
+        # candidate sits just past it. Walking in score order with a `continue`/`break` is
+        # the correct implementation of "filter old, then take k" without truncating early.
+        # The corpus itself (`idx.entries`, `idx.dense`, the BM25 corpus) is untouched by
+        # this filter -- "old" entries still fully participate in `_bm25_rank`/`_dense_rank`/
+        # `_rrf_fuse`, they are simply never admitted into `admissible`.
         #
-        # RET-1 leg 2 — knee/score-gap cutoff: k becomes "up to k". Compared against the
-        # PREVIOUS EMITTED score (not the previous `penalized` entry) so a skipped "old" or
-        # dangling-file candidate never counts as the reference point -- the gap that matters
-        # is between consecutive results a user would actually SEE, not internal bookkeeping
-        # rows. Only checked from the second result onward (`results` non-empty): the first
-        # result has no predecessor to be a "knee" relative to, and the floor/skip legs above
-        # already gate whether ANYTHING is admitted at all. A non-positive ratio (env
-        # override 0, or negative) disables the check outright -- `ratio <= 0` can never be
-        # satisfied by `score < ratio * prev` for any non-negative score/prev pair anyway,
-        # but the explicit early-out keeps the intent legible and skips a division-adjacent
-        # comparison entirely when the knee is turned off.
+        # RET-1 leg 2 — knee/score-gap cutoff: admission becomes "up to POOL_N". Compared
+        # against the PREVIOUS ADMITTED score (not the previous `penalized` entry) so a
+        # skipped "old" or dangling-file candidate never counts as the reference point -- the
+        # gap that matters is between consecutive candidates a user might actually SEE, not
+        # internal bookkeeping rows. Only checked from the second admission onward: the first
+        # has no predecessor to be a "knee" relative to, and the floor/skip legs above already
+        # gate whether ANYTHING is admitted at all. A non-positive ratio (env override 0, or
+        # negative) disables the check outright -- `ratio <= 0` can never be satisfied by
+        # `score < ratio * prev` for any non-negative score/prev pair anyway, but the explicit
+        # early-out keeps the intent legible and skips a division-adjacent comparison entirely
+        # when the knee is turned off.
+        #
+        # RCL-4: this admission pass runs in the TRUE organic order, BEFORE any MMR diversity
+        # reordering, and admits up to POOL_N (>= k, not just k) candidates -- both matter.
+        # Running the knee before MMR (not after) means a diversity-promoted low-relevance
+        # pick can never create a false "cliff" that stops the walk before a genuinely
+        # relevant candidate sitting right behind it is ever reached (an earlier draft ran
+        # MMR first and lost a clearly on-topic memory to exactly this interaction, both on a
+        # Japanese-corpus fixture and a supersession fixture -- see the commit body).
+        # Admitting POOL_N rather than k gives MMR real headroom: capping at k here would
+        # leave MMR nothing to diversify WITH beyond the same k it already had.
         knee_ratio = _knee_ratio()
-        results: List[dict] = []
+        pool_n = max(k * _MMR_POOL_MULT, k)
+        admissible: List[Tuple[int, float, Optional[str]]] = []
         prev_relevance: Optional[float] = None
-        for i, _adj_score, state in penalized:
-            if len(results) >= k:
+        for i, adj_score, state in penalized:
+            if len(admissible) >= pool_n:
                 break
             if state == "old":
                 continue
@@ -1835,7 +1950,7 @@ def recall(
             # neighbor that was never organically ranked -- see `_expand_neighbors`) has
             # nothing in `primary_relevance` at all. Such an entry is EXEMPT from the knee
             # check both ways: it is never cut for "falling off a cliff" relative to the
-            # previous result (its only relevance signal is a deliberate backstop weight or
+            # previous admission (its only relevance signal is a deliberate backstop weight or
             # graph discount, not a topical-relevance drop), and it never becomes the
             # reference point for the NEXT comparison either (`prev_relevance` only advances
             # on an entry that actually HAS a primary score) -- a body/graph hit sitting
@@ -1848,9 +1963,21 @@ def recall(
                 and prev_relevance is not None
                 and relevance < knee_ratio * prev_relevance
             ):
-                break  # relevance fell off a cliff relative to the last EMITTED result -- stop
+                break  # relevance fell off a cliff relative to the last ADMITTED entry -- stop
             if relevance is not None:
                 prev_relevance = relevance
+            admissible.append((i, adj_score, state))
+
+        # RCL-4: MMR diversifies the (possibly larger-than-k) ADMISSIBLE pool built above --
+        # every candidate here already cleared the SAME old/dangling/knee filters recall()
+        # always applied, in the TRUE organic order, so MMR can only ever choose among
+        # genuinely display-worthy candidates. Degrades to a no-op on a BM25-only corpus or
+        # when a candidate has no dense row -- see _mmr_rerank's docstring.
+        admissible = _mmr_rerank(admissible, entries, idx.dense, k)
+
+        results: List[dict] = []
+        for i, adj_score, state in admissible[:k]:
+            e = entries[i]
             results.append(
                 {
                     "name": e["name"],
@@ -1865,7 +1992,7 @@ def recall(
                     # is the separate, explicit 1-based EMISSION rank (position in `results`,
                     # not `penalized` index -- "old"/deleted entries are skipped above and
                     # must not leave gaps in the emitted rank sequence).
-                    "score": round(float(_adj_score), 6),
+                    "score": round(float(adj_score), 6),
                     "rank": len(results) + 1,
                     "backend": backend,
                     # Injection provenance (GRA-1) — ALWAYS present so downstream code never

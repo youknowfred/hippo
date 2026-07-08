@@ -843,6 +843,88 @@ def test_graph_expansion_applies_superseded_penalty_to_injected_neighbor(tmp_pat
 
 
 # --------------------------------------------------------------------------- #
+# RCL-4: MMR intra-block diversity re-rank
+# --------------------------------------------------------------------------- #
+def test_mmr_diversifies_near_paraphrase_block(tmp_path, monkeypatch):
+    """Acceptance: two near-paraphrase memories must not both occupy top-k -- the block
+    spans distinct facets instead (verified with a real dense matrix, fake embedder)."""
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    emb_docs, emb_query = _fake_embedder(16)
+    monkeypatch.setattr(B, "embed_documents", emb_docs)
+    monkeypatch.setattr(R, "embed_query", emb_query)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(
+        md,
+        {
+            "deploy_gate_a.md": (
+                "deploy pipeline manual approval gate required before production rollout ships"
+            ),
+            "deploy_gate_b.md": (
+                "deploy pipeline manual approval gate required before production rollout deploys"
+            ),
+            "db_migration.md": (
+                "database migration requires an approval gate from the platform team before running"
+            ),
+        },
+    )
+    B.build_index(md, idx)
+    query = "deploy pipeline manual approval gate rollout"
+
+    # WITH MMR (the real function, still in effect): the block spans both facets.
+    names = [r["name"] for r in R.recall(query, k=2, memory_dir=md, index_dir=idx)]
+    assert names == ["deploy_gate_a", "db_migration"]
+
+    # Baseline (MMR bypassed): the two near-paraphrases dominate top-2 instead -- confirms
+    # the fixture actually NEEDS diversification, not a coincidence of this corpus/query.
+    monkeypatch.setattr(R, "_mmr_rerank", lambda penalized, entries, dense, k: penalized)
+    baseline_names = [r["name"] for r in R.recall(query, k=2, memory_dir=md, index_dir=idx)]
+    assert baseline_names == ["deploy_gate_a", "deploy_gate_b"]
+
+
+def test_mmr_rerank_is_noop_without_dense_matrix():
+    """A BM25-only corpus (idx.dense is None) must be a byte-identical no-op."""
+    penalized = [(0, 0.9, None), (1, 0.8, None), (2, 0.5, None)]
+    assert R._mmr_rerank(penalized, [{}, {}, {}], None, k=3) == penalized
+
+
+def test_mmr_rerank_noop_with_fewer_than_two_candidates():
+    dense = np.array([[1.0, 0.0]], dtype="float32")
+    penalized = [(0, 0.9, None)]
+    assert R._mmr_rerank(penalized, [{"row": 0}], dense, k=5) == penalized
+
+
+def test_mmr_rerank_exempts_entries_without_dense_row():
+    """A candidate with no usable dense row (model-mismatch merge, a graph-injected
+    neighbor never itself embedded) keeps its ORIGINAL position -- exempt from the
+    diversity math entirely, mirroring the knee cutoff's exemption posture."""
+    dense = np.array([[1.0, 0.0], [1.0, 0.0], [0.0, 1.0]], dtype="float32")
+    entries = [{"row": 0}, {"row": None}, {"row": 1}]
+    penalized = [(0, 0.9, None), (1, 0.8, None), (2, 0.5, None)]
+    out = R._mmr_rerank(penalized, entries, dense, k=3)
+    assert out[1] == (1, 0.8, None)  # unmoved, still at its original slot
+
+
+def test_mmr_rerank_never_raises_on_malformed_input():
+    assert R._mmr_rerank([], [], None, k=5) == []
+    # a row index out of range for `dense` must degrade, not crash
+    dense = np.array([[1.0, 0.0]], dtype="float32")
+    entries = [{"row": 99}, {"row": 0}]
+    penalized = [(0, 0.9, None), (1, 0.5, None)]
+    out = R._mmr_rerank(penalized, entries, dense, k=2)
+    assert out == penalized  # only one usable row -> "fewer than two eligible" -> no-op
+
+
+def test_mmr_lambda_env_override(monkeypatch):
+    monkeypatch.setenv("HIPPO_MMR_LAMBDA", "0.5")
+    assert R._mmr_lambda() == pytest.approx(0.5)
+    monkeypatch.setenv("HIPPO_MMR_LAMBDA", "not-a-number")
+    assert R._mmr_lambda() == R._MMR_LAMBDA
+    monkeypatch.delenv("HIPPO_MMR_LAMBDA", raising=False)
+    assert R._mmr_lambda() == R._MMR_LAMBDA
+
+
+# --------------------------------------------------------------------------- #
 # Fused dense+BM25 recall with a fake embedder
 # --------------------------------------------------------------------------- #
 def test_recall_fused_dense_and_bm25(tmp_path, monkeypatch):
