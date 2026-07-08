@@ -332,6 +332,30 @@ def local_memory_dir(project_memory_dir: str) -> str:
     return os.path.join(os.path.dirname(os.path.abspath(project_memory_dir)), "memory.local")
 
 
+def current_user_slug(repo_root: str) -> str:
+    """A filesystem-safe slug identifying the current user, for TEA-5's committed per-user usage
+    summary (``.usage/<user>.json``).
+
+    Preference order: ``HIPPO_USAGE_USER`` override (hermetic tests) → git ``user.email`` → git
+    ``user.name`` → ``$USER``/``$LOGNAME`` → ``"unknown"``. Slugified to ``[a-z0-9_.-]`` (any
+    other char → ``_``, leading/trailing separators trimmed, capped at 64 chars). Never raises —
+    identity derivation must degrade to ``"unknown"``, never crash a curation pass."""
+    try:
+        raw = (os.environ.get("HIPPO_USAGE_USER") or "").strip()
+        if not raw:
+            raw = run_git(["config", "user.email"], repo_root).strip()
+        if not raw:
+            raw = run_git(["config", "user.name"], repo_root).strip()
+        if not raw:
+            raw = (os.environ.get("USER") or os.environ.get("LOGNAME") or "").strip()
+        if not raw:
+            raw = "unknown"
+        slug = re.sub(r"[^A-Za-z0-9_.-]", "_", raw.lower()).strip("._-")
+        return (slug or "unknown")[:64]
+    except Exception:
+        return "unknown"
+
+
 def tier_index_dir(tier_dir: str) -> str:
     """Index-cache location for a NON-project tier — nested at ``<tier_dir>/.memory-index``.
 

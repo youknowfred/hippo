@@ -433,6 +433,144 @@ def read_usage_aggregates(telemetry_dir: Optional[str] = None) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# TEA-5: committed per-user usage summary — ``.claude/memory/.usage/<user>.json``.
+# The rotating recall ledger and the ``usage_aggregates.json`` above are BOTH clone-local
+# and gitignored, so "never recalled" means "never in THIS clone" — a memory a teammate hits
+# daily reads as archive-cold on your machine. This tier is the opt-in fix: an append-only,
+# COMMITTED (NOT self-ignored — the whole point is that teammates union it) per-user summary
+# under the corpus tree, tiny and merge-friendly (memory names + counts + timestamps only, NO
+# session ids — those are bookkeeping and would leak into git). Curation UNIONS every user's
+# summary before judging coldness. It is NOT indexed/recalled/floor-scanned: ``.usage`` is a
+# subdir, and ``_iter_memory_files`` only yields ``*.md`` files (never recurses), so it is
+# skipped exactly like ``archive/``.
+# --------------------------------------------------------------------------- #
+_USAGE_DIRNAME = ".usage"
+_COMMITTED_USAGE_VERSION = 1
+
+
+def committed_usage_dir(memory_dir: str) -> str:
+    """``<memory_dir>/.usage`` — the committed per-user usage summaries' one canonical home."""
+    return os.path.join(memory_dir, _USAGE_DIRNAME)
+
+
+def read_committed_usage(memory_dir: Optional[str]) -> dict:
+    """Union of EVERY committed per-user summary under ``<memory_dir>/.usage/*.json`` (TEA-5).
+
+    Returns ``{"memories": set(names), "sessions": int}`` — the set of memory stems ANY
+    teammate has recalled, and the summed distinct-session count across users. Missing dir or a
+    corrupt file contributes nothing; never raises. This is what ``soak.curation_report`` unions
+    into its ``recalled`` set (and ``soak_status`` into its distinct count) so a teammate's daily
+    hit is never miscounted as clone-local dead weight."""
+    memories: set = set()
+    sessions = 0
+    try:
+        if not memory_dir:
+            return {"memories": memories, "sessions": 0}
+        usage_dir = committed_usage_dir(memory_dir)
+        if not os.path.isdir(usage_dir):
+            return {"memories": memories, "sessions": 0}
+        for fname in sorted(os.listdir(usage_dir)):
+            if not fname.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(usage_dir, fname), "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+            mems = data.get("memories")
+            if isinstance(mems, dict):
+                memories |= {k for k in mems if isinstance(k, str)}
+            sess = data.get("sessions")
+            if isinstance(sess, dict):
+                c = sess.get("count")
+                if isinstance(c, int) and not isinstance(c, bool) and c > 0:
+                    sessions += c
+    except Exception:
+        pass
+    return {"memories": memories, "sessions": sessions}
+
+
+def write_user_usage_summary(
+    memory_dir: str, user_slug: str, telemetry_dir: Optional[str] = None
+) -> Optional[str]:
+    """Fold THIS clone's rotation-surviving aggregates into the COMMITTED per-user summary
+    ``<memory_dir>/.usage/<user_slug>.json`` (TEA-5). Returns the path written, or None on
+    failure.
+
+    Append-only union — a re-run never loses ground: ``max`` on session/per-memory counts,
+    ``min`` on ``first_ts``, ``max`` on ``last_ts``. Session ids are deliberately NOT written
+    (bookkeeping, and they would leak into git). The file is COMMITTED, so — unlike the
+    telemetry aggregates — it is NEVER self-ignored. Agent/user-gated (never on the hot path).
+    Atomic write (tmp + os.replace, pid-suffixed). Never raises."""
+    try:
+        if not memory_dir or not user_slug:
+            return None
+        agg = read_usage_aggregates(telemetry_dir)
+        usage_dir = committed_usage_dir(memory_dir)
+        os.makedirs(usage_dir, exist_ok=True)
+        path = os.path.join(usage_dir, f"{user_slug}.json")
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                prior = json.load(fh)
+            if not isinstance(prior, dict):
+                prior = {}
+        except Exception:
+            prior = {}
+        prior_mems = prior.get("memories") if isinstance(prior.get("memories"), dict) else {}
+        prior_sess = prior.get("sessions") if isinstance(prior.get("sessions"), dict) else {}
+
+        def _mx(a, b):
+            a = a if isinstance(a, (int, float)) and not isinstance(a, bool) else None
+            b = b if isinstance(b, (int, float)) and not isinstance(b, bool) else None
+            vals = [v for v in (a, b) if v is not None]
+            return max(vals) if vals else None
+
+        def _mn(a, b):
+            a = a if isinstance(a, (int, float)) and not isinstance(a, bool) else None
+            b = b if isinstance(b, (int, float)) and not isinstance(b, bool) else None
+            vals = [v for v in (a, b) if v is not None]
+            return min(vals) if vals else None
+
+        merged_mems: dict = {k: v for k, v in prior_mems.items() if isinstance(v, dict)}
+        for name, rec in agg.get("memories", {}).items():
+            if not isinstance(name, str) or not isinstance(rec, dict):
+                continue
+            old = merged_mems.get(name) or {}
+            merged_mems[name] = {
+                "first_ts": _mn(old.get("first_ts"), rec.get("first_ts")),
+                "last_ts": _mx(old.get("last_ts"), rec.get("last_ts")),
+                "sessions": int(_mx(old.get("sessions"), rec.get("sessions")) or 0),
+            }
+        agg_sess = agg.get("sessions", {})
+        out = {
+            "version": _COMMITTED_USAGE_VERSION,
+            "user": user_slug,
+            "sessions": {
+                "count": int(_mx(prior_sess.get("count"), agg_sess.get("count")) or 0),
+                "first_ts": _mn(prior_sess.get("first_ts"), agg_sess.get("first_ts")),
+                "last_ts": _mx(prior_sess.get("last_ts"), agg_sess.get("last_ts")),
+            },
+            "memories": merged_mems,
+        }
+        tmp = f"{path}.tmp.{os.getpid()}"
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(out, ensure_ascii=False, separators=(",", ":")))
+            os.replace(tmp, path)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            return None
+        return path
+    except Exception:
+        return None
+
+
+# --------------------------------------------------------------------------- #
 # Episode buffer (instrumentation tier) — append-only, DISTINCT from the recall
 # ledger above. The recall ledger records memory NAMES surfaced per query; the episode
 # buffer additionally pins the repo HEAD commit at recall time, so a future (separately

@@ -399,7 +399,8 @@ The joins above are already computed as plain data; this phase is about **interp
    readings are possible and only Phase 3's actual read can tell them apart: (a) the citing doc
    already inlines the content, so low recall is fine; or (b) the citing doc's claim has drifted
    from what agents actually pull at runtime. Report which governance file cited it and the
-   exact strength score (or "absent — never recalled").
+   exact strength score (or "absent — never recalled in this clone; TEA-5: cross-clone only if
+   committed .usage/*.json is present").
 3. **Worklist recurrence** (`joins.worklist_recurrence` / `>= 3`) — a name recalled-and-stale for
    the 3rd+ consecutive audit run with no `last_verdict` on record is a stronger finding than a
    first-time flag. Escalate these into Phase 3 even if they'd otherwise rank below the
@@ -509,6 +510,7 @@ Fixtures: hard-set <present|absent>, relevance-set <present|absent>
 Recall backend this run: <dense+bm25|bm25-only> <— dense path unverified this run if bm25-only; ⚠ FIXTURE/BACKEND MISMATCH if eval_recall.evaluate() set backend_mismatch>
 Prior audit runs on record: <count from history file, or "none — first run">
 Soak state: <distinct_sessions>/5 sessions (gate_met=<bool>)
+Usage-signal scope: <CLONE-LOCAL — only this clone's recalls | cross-clone — unions committed .usage/*.json> (TEA-5)
 
 ## This week (ranked)
 1. **[<TAG>] <memory name>** — <verdict> — <one-sentence why>
@@ -616,6 +618,11 @@ never adds a batch wrapper around them:
   in the table, no matter how high the score.
 - **Never claim the never-recalled/cold signal is actionable while `soak_status()['gate_met']`
   is False.** State the exact session count and gap instead.
+- **Always name the coldness signal's SCOPE (TEA-5).** "Never recalled" is CLONE-LOCAL unless
+  `curation_report()['committed_usage_present']` is True — a memory a teammate hits daily reads
+  as cold on your clone. When flagging a cold/dead-weight memory on a team, say the signal is
+  clone-local and point at `python -m memory.soak --record-usage` (each clone commits
+  `.claude/memory/.usage/`) as the fix before any archive is proposed.
 - **The "This week" section is capped and self-contained** — 5 ranked + up to 2
   recurrence-escalated items, no more.
 - **`.claude/state/memory-audit-history.json` is this skill's one deliberate exception** to

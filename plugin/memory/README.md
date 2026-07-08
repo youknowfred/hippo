@@ -306,9 +306,25 @@ counts stay ledger-window-only. `compute_strength_scores()` returns
 `{name: distinct_sessions_recalled / total_sessions}` — sessions, not events, so one
 chatty session can't inflate a memory's strength.
 
+**TEA-5 — usage signals are honest about their scope.** The ledger and aggregates are both
+clone-local, so "never recalled" means "never in **this** clone" — a memory a teammate hits
+daily reads as dead weight on your machine. The report **labels the signal's scope**
+(clone-local vs cross-clone) on every run. To make coldness team-wide, each teammate runs
+
+```bash
+"$PY" -m memory.soak --record-usage      # folds this clone's usage into .usage/<user>.json
+```
+
+and commits `.claude/memory/.usage/`. That directory is an **append-only, committed** (not
+gitignored) per-user summary — memory names + counts + timestamps only, **no session ids** — that
+`soak.curation_report` / `soak_status` union before judging coldness. It is never indexed,
+recalled, or floor-scanned (a `.usage` subdir of `.md`-only membership). A plain
+
 ```bash
 "$PY" -m memory.soak
 ```
+
+still reports without writing anything.
 
 ## Reconsolidation (the immune system)
 
