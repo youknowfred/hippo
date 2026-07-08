@@ -1005,6 +1005,42 @@ def check_rules_plane_rot(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"rules-plane rot check failed: {exc}."}
 
 
+def check_rules_source(ctx: DoctorContext) -> Dict[str, str]:
+    """RUL-4: the rules recall source's legibility line (inv3).
+
+    Recall silently skips the rules-plane source when its side-index is absent — this makes
+    that state visible: how many governance sections are indexed, or why none are (no
+    governance files, or a cache the next SessionStart will build). Read-only; ``ok``
+    always (an absent plane is a fact, not a fault); never raises.
+    """
+    try:
+        from .build_index import default_index_dir
+        from .rules_plane import gov_files, load_rules_cache
+
+        cache = load_rules_cache(default_index_dir(ctx.memory_dir))
+        if cache is not None:
+            n = len(cache.get("entries") or [])
+            files = len({e.get("file") for e in cache.get("entries") or []})
+            return {
+                "status": "ok",
+                "message": f"rules recall source: {n} governance section(s) indexed from "
+                f"{files} file(s) — strong query matches surface as '(rule)' pointers.",
+            }
+        if not gov_files(ctx.repo_root):
+            return {
+                "status": "ok",
+                "message": "rules recall source: no governance files (CLAUDE.md/.claude/rules) "
+                "in this repo — nothing to index.",
+            }
+        return {
+            "status": "ok",
+            "message": "rules recall source: side-index not built yet — the next SessionStart "
+            "builds it; until then recall surfaces no '(rule)' pointers.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"rules-source check failed: {exc}."}
+
+
 def check_plugin_version(ctx: DoctorContext) -> Dict[str, str]:
     """DOC-7: installed plugin version vs the version the venv was bootstrapped for (with COR-11).
 
@@ -1069,6 +1105,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("injection_precision", check_injection_precision),
     ("rules_conflicts", check_rules_conflicts),
     ("rules_plane_rot", check_rules_plane_rot),
+    ("rules_source", check_rules_source),
     ("format_version", check_format_version),
     ("pack_drift", check_pack_drift),
     ("fill_me", check_fill_me),

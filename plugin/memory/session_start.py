@@ -901,6 +901,17 @@ def _build_run_context(memory_dir: str, repo_root: str) -> RunContext:
             write_stale_cache(default_index_dir(memory_dir), stale)
     except Exception:
         pass
+    # RUL-4: refresh the rules side-index at the SAME offline moment (signature fast-path —
+    # unchanged governance files cost one stat sweep). Trusted-only path (build_context
+    # short-circuits before here), so the rules recall source inherits the SEC-1 gate.
+    try:
+        if os.path.isdir(memory_dir):
+            from .build_index import default_index_dir
+            from .rules_plane import refresh_rules_cache
+
+            refresh_rules_cache(repo_root, default_index_dir(memory_dir))
+    except Exception:
+        pass
     return RunContext(
         stale=stale,
         stale_diagnostics=diagnostics,

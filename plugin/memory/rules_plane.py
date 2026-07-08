@@ -15,6 +15,10 @@ convention, promoted to importable API) plus the read-only joins built over it:
   - RUL-3 ``rule_dup_candidates`` — the preventive counterpart: at write time, warn when
     a draft memory RESTATES a rule already in the governance plane ("link, don't copy"),
     stopping two-plane drift before it starts.
+  - RUL-4 ``refresh_rules_cache``/``load_rules_cache`` — the derived, gitignored,
+    rebuildable side-index (inv1) that lets recall surface a governance section as a
+    labelled low-priority "(rule)" POINTER when genuinely relevant — no import, no
+    duplication, the rules plane stays the authority for its own content.
 
 Relationship to the two pre-existing scan surfaces (deliberately NOT merged, inv5):
 ``archive._SCAN_TARGETS`` is the ARCHIVE-PROTECTION surface (adds ``docs/prompts``, omits
@@ -514,3 +518,139 @@ def rule_dup_candidates(description: str, body: str, repo_root: str) -> List[dic
         return out[:_RULE_DUP_MAX_CANDIDATES]
     except Exception:
         return []
+
+
+# --------------------------------------------------------------------------- #
+# RUL-4: the rules side-index — a derived, gitignored cache recall can READ hot
+# --------------------------------------------------------------------------- #
+# Same class as links.json / stale.json: computed OFF the hot path (SessionStart), read as
+# ONE small JSON on it; absent/corrupt degrades to no rules source, never a scan (inv6).
+RULES_CACHE_NAME = "rules.json"
+RULES_CACHE_SCHEMA = 1
+
+# One markdown heading — a governance file splits into heading-scoped SECTIONS so a recall
+# pointer can name "CLAUDE.md § Python", not just the file.
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
+_RULE_PREVIEW_CHARS = 140
+
+
+def _split_sections(text: str) -> List[tuple]:
+    """``[(heading_or_None, section_text)]`` for one governance file's body (frontmatter
+    stripped). A file with no headings is one section; text before the first heading is its
+    own untitled section."""
+    from .provenance import split_frontmatter
+
+    _fm, body = split_frontmatter(text)
+    matches = list(_HEADING_RE.finditer(body))
+    if not matches:
+        stripped = body.strip()
+        return [(None, stripped)] if stripped else []
+    sections: List[tuple] = []
+    pre = body[: matches[0].start()].strip()
+    if pre:
+        sections.append((None, pre))
+    for i, m in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
+        sec = body[m.start() : end].strip()
+        if sec:
+            sections.append((m.group(2).strip(), sec))
+    return sections
+
+
+def _gov_signatures(repo_root: str) -> List[List]:
+    """``[[rel, mtime_ns, size]]`` for every governance file — the cache fast-path key."""
+    sigs: List[List] = []
+    for path in gov_files(repo_root):
+        try:
+            st = os.stat(path)
+            sigs.append([_rel(repo_root, path), st.st_mtime_ns, st.st_size])
+        except Exception:
+            continue
+    return sigs
+
+
+def load_rules_cache(index_dir: Optional[str]) -> Optional[dict]:
+    """The persisted rules side-index, or ``None`` (absent/corrupt/schema-mismatched —
+    recall degrades to no rules source; the doctor rules-source check makes that legible).
+    ONE small-JSON read; hot-path-safe; never raises."""
+    try:
+        if not index_dir:
+            return None
+        import json
+
+        with open(os.path.join(index_dir, RULES_CACHE_NAME), "r", encoding="utf-8") as fh:
+            cache = json.load(fh)
+        if not isinstance(cache, dict) or cache.get("schema") != RULES_CACHE_SCHEMA:
+            return None
+        return cache
+    except Exception:
+        return None
+
+
+def refresh_rules_cache(repo_root: str, index_dir: str) -> dict:
+    """Build/refresh ``<index_dir>/rules.json`` over the governance plane (RUL-4).
+
+    The heading-scoped sections of every GOV_GLOBS file, tokenized with the canonical corpus
+    tokenizer — everything recall needs to score a query against the rules plane with pure
+    set arithmetic (query containment; no model, no idf — the rules plane is routinely 1-5
+    sections, too small for honest BM25 mass). DERIVED and REBUILDABLE: lives in the
+    gitignored index dir (``ensure_self_ignoring_dir``), never committed (inv1). Signature
+    fast-path: unchanged governance mtimes/sizes → no rebuild (the same cheap-no-op posture
+    as ``refresh_index``). Sections edited MID-session serve their last-built preview until
+    the next SessionStart — the COR-4 posture body chunks already accept. Never raises;
+    returns ``{"entries": N, "built": bool}``.
+    """
+    try:
+        import json
+
+        from .build_index import tokenize
+        from .provenance import ensure_self_ignoring_dir
+
+        sigs = _gov_signatures(repo_root)
+        cache_path = os.path.join(index_dir, RULES_CACHE_NAME)
+        existing = load_rules_cache(index_dir)
+        if existing is not None and existing.get("sigs") == sigs:
+            return {"entries": len(existing.get("entries") or []), "built": False}
+
+        entries: List[dict] = []
+        for path in gov_files(repo_root):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+            except Exception:
+                continue
+            rel = _rel(repo_root, path)
+            for heading, sec_text in _split_sections(text):
+                toks = tokenize(sec_text)
+                if len(toks) < _RULE_DUP_MIN_BLOCK_TOKENS:
+                    continue
+                title = heading or os.path.basename(rel)
+                # The preview is the section BODY — the title already carries the heading.
+                body_text = sec_text.split("\n", 1)[1] if heading and "\n" in sec_text else (
+                    "" if heading else sec_text
+                )
+                preview = " ".join(body_text.split()) or title
+                if len(preview) > _RULE_PREVIEW_CHARS:
+                    preview = preview[: _RULE_PREVIEW_CHARS - 1].rstrip() + "…"
+                # tokens are stored DISTINCT — containment scoring is set arithmetic.
+                entries.append(
+                    {"file": rel, "title": title, "preview": preview, "tokens": sorted(set(toks))}
+                )
+
+        if not entries:
+            # No governance plane: remove a stale cache rather than serve ghosts.
+            try:
+                os.remove(cache_path)
+            except Exception:
+                pass
+            return {"entries": 0, "built": False}
+
+        ensure_self_ignoring_dir(index_dir)
+        cache = {"schema": RULES_CACHE_SCHEMA, "sigs": sigs, "entries": entries}
+        tmp = cache_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(cache, fh, ensure_ascii=False)
+        os.replace(tmp, cache_path)
+        return {"entries": len(entries), "built": True}
+    except Exception:
+        return {"entries": 0, "built": False}

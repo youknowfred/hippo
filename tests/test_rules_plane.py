@@ -465,3 +465,175 @@ def test_gov_blocks_strip_frontmatter():
 
 def test_rule_dup_never_raises(tmp_path):
     assert RP.rule_dup_candidates("anything at all here now", "", str(tmp_path / "nope")) == []
+
+
+# =============================================================================================
+# RUL-4: rules as an on-demand recall SOURCE — labelled pointer, no import, no displacement
+# =============================================================================================
+import memory.build_index as B  # noqa: E402
+import memory.recall as R  # noqa: E402
+import memory.recall_view as RV  # noqa: E402
+
+_GOV_MD = (
+    "# Deploys\n\n"
+    "Rollback procedure: run scripts/rollback.sh, verify the healthcheck endpoint, "
+    "then re-enable the deploy pipeline traffic gate.\n\n"
+    "# Style\n\n"
+    "Prefer short functions and explicit names over clever abstractions everywhere.\n"
+)
+
+
+def _seed_recall_corpus(md, idx, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    os.makedirs(md, exist_ok=True)
+    _mem(md, "billing_tiers", "billing plan tiers offered after onboarding completes")
+    _mem(md, "signup_validation", "signup form validation rules for the onboarding flow")
+    _mem(md, "rollback_incident", "the march incident where a rollback failed under load")
+    B.build_index(md, idx)
+
+
+def test_strong_query_surfaces_labelled_rule_pointer(repo, memory_dir, tmp_path, monkeypatch):
+    idx = str(tmp_path / "idx")
+    _seed_recall_corpus(memory_dir, idx, monkeypatch)
+    write_file(repo, "CLAUDE.md", _GOV_MD)
+    RP.refresh_rules_cache(repo, idx)
+
+    hits = R.recall(
+        "rollback procedure healthcheck deploy pipeline", k=6,
+        memory_dir=memory_dir, index_dir=idx, repo_root=repo,
+    )
+    rules = [h for h in hits if h["corpus"] == "rule"]
+    assert rules, "expected the Deploys section to surface as a rule pointer"
+    top = rules[0]
+    assert top["name"] == "Deploys" and top["file"] == "CLAUDE.md" and top["via"] == "rules"
+    assert "rollback" in top["description"]
+    rendered = R.format_results(hits)
+    assert "(rule)" in rendered  # the label, at the display layer
+
+
+def test_rule_pointers_append_and_never_displace_organic_hits(repo, memory_dir, tmp_path, monkeypatch):
+    """AC: recall only ADDS a pointer — the organic result set is byte-identical with and
+    without the rules cache, and every rule hit sits AFTER every organic hit."""
+    idx = str(tmp_path / "idx")
+    _seed_recall_corpus(memory_dir, idx, monkeypatch)
+    write_file(repo, "CLAUDE.md", _GOV_MD)
+    query = "rollback procedure healthcheck deploy pipeline"
+
+    before = R.recall(query, k=6, memory_dir=memory_dir, index_dir=idx, repo_root=repo)
+    assert all(h["corpus"] != "rule" for h in before)  # no cache yet -> no rule hits
+
+    RP.refresh_rules_cache(repo, idx)
+    after = R.recall(query, k=6, memory_dir=memory_dir, index_dir=idx, repo_root=repo)
+    organic = [h for h in after if h["corpus"] != "rule"]
+    assert organic == before  # identical organic set: nothing demoted, nothing displaced
+    kinds = ["rule" if h["corpus"] == "rule" else "mem" for h in after]
+    assert kinds == sorted(kinds, key=lambda s: s == "rule")  # every rule after every mem
+
+
+def test_rule_pointer_surfaces_even_on_corpus_abstention(repo, memory_dir, tmp_path, monkeypatch):
+    idx = str(tmp_path / "idx")
+    _seed_recall_corpus(memory_dir, idx, monkeypatch)
+    write_file(repo, "CLAUDE.md", _GOV_MD)
+    RP.refresh_rules_cache(repo, idx)
+
+    hits = R.recall(
+        "clever abstractions explicit names short functions", k=6,
+        memory_dir=memory_dir, index_dir=idx, repo_root=repo,
+    )
+    assert hits and all(h["corpus"] == "rule" for h in hits)
+    assert hits[0]["name"] == "Style"
+
+
+def test_irrelevant_query_clears_no_rule_floor(repo, memory_dir, tmp_path, monkeypatch):
+    idx = str(tmp_path / "idx")
+    _seed_recall_corpus(memory_dir, idx, monkeypatch)
+    write_file(repo, "CLAUDE.md", _GOV_MD)
+    RP.refresh_rules_cache(repo, idx)
+    hits = R.recall(
+        "watering indoor houseplants during winter", k=6,
+        memory_dir=memory_dir, index_dir=idx, repo_root=repo,
+    )
+    assert [h for h in hits if h["corpus"] == "rule"] == []
+
+
+def test_no_import_no_duplication(repo, memory_dir, tmp_path, monkeypatch):
+    """AC: the pointer copies nothing — the corpus gains no file, the rule file is untouched."""
+    idx = str(tmp_path / "idx")
+    _seed_recall_corpus(memory_dir, idx, monkeypatch)
+    gov = write_file(repo, "CLAUDE.md", _GOV_MD)
+    corpus_before = sorted(os.listdir(memory_dir))
+    gov_before = open(gov, encoding="utf-8").read()
+    RP.refresh_rules_cache(repo, idx)
+    R.recall(
+        "rollback procedure healthcheck deploy pipeline", k=6,
+        memory_dir=memory_dir, index_dir=idx, repo_root=repo,
+    )
+    assert sorted(os.listdir(memory_dir)) == corpus_before
+    assert open(gov, encoding="utf-8").read() == gov_before
+
+
+def test_refresh_cache_signature_fast_path_and_rebuild(repo, memory_dir, tmp_path):
+    idx = str(tmp_path / "idx")
+    write_file(repo, "CLAUDE.md", _GOV_MD)
+    first = RP.refresh_rules_cache(repo, idx)
+    assert first["built"] is True and first["entries"] == 2
+    second = RP.refresh_rules_cache(repo, idx)
+    assert second["built"] is False and second["entries"] == 2  # unchanged sigs -> no-op
+    write_file(repo, "CLAUDE.md", _GOV_MD + "\n# New\n\nA brand new governance section here.\n")
+    third = RP.refresh_rules_cache(repo, idx)
+    assert third["built"] is True and third["entries"] == 3
+
+
+def test_cache_is_gitignored_derived_state(repo, memory_dir, tmp_path):
+    idx = str(tmp_path / "idx")
+    write_file(repo, "CLAUDE.md", _GOV_MD)
+    RP.refresh_rules_cache(repo, idx)
+    assert os.path.exists(os.path.join(idx, RP.RULES_CACHE_NAME))
+    gi = os.path.join(idx, ".gitignore")
+    assert os.path.exists(gi) and "*" in open(gi, encoding="utf-8").read()  # inv1
+
+
+def test_no_governance_plane_removes_stale_cache(repo, memory_dir, tmp_path):
+    idx = str(tmp_path / "idx")
+    gov = write_file(repo, "CLAUDE.md", _GOV_MD)
+    RP.refresh_rules_cache(repo, idx)
+    os.remove(gov)
+    out = RP.refresh_rules_cache(repo, idx)
+    assert out == {"entries": 0, "built": False}
+    assert RP.load_rules_cache(idx) is None  # no ghosts served after the plane vanished
+
+
+def test_recall_view_tags_rule_pointer(repo, memory_dir, tmp_path, monkeypatch):
+    idx = str(tmp_path / "idx")
+    _seed_recall_corpus(memory_dir, idx, monkeypatch)
+    write_file(repo, "CLAUDE.md", _GOV_MD)
+    RP.refresh_rules_cache(repo, idx)
+    out = RV.describe(
+        "rollback procedure healthcheck deploy pipeline", 6,
+        memory_dir=memory_dir, index_dir=idx, repo_root=repo,
+    )
+    assert "rule — governance plane, not a memory" in out
+
+
+def test_doctor_rules_source_reports_cache_state(repo, memory_dir, tmp_path, monkeypatch):
+    r = D.check_rules_source(D.DoctorContext(memory_dir, repo))
+    assert r["status"] == "ok" and "no governance files" in r["message"]
+    write_file(repo, "CLAUDE.md", _GOV_MD)
+    r = D.check_rules_source(D.DoctorContext(memory_dir, repo))
+    assert r["status"] == "ok" and "not built yet" in r["message"]
+    from memory.build_index import default_index_dir
+
+    RP.refresh_rules_cache(repo, default_index_dir(memory_dir))
+    r = D.check_rules_source(D.DoctorContext(memory_dir, repo))
+    assert "2 governance section(s) indexed from 1 file(s)" in r["message"]
+    assert "rules_source" in [label for label, _ in D.CHECKS]
+
+
+def test_rules_source_never_raises(tmp_path):
+    assert R._rules_source_hits([], None, None) == []
+    assert R._rules_source_hits(["a"], str(tmp_path / "nope"), None) == []
+    assert RP.load_rules_cache(None) is None
+    assert RP.refresh_rules_cache(str(tmp_path / "nope"), str(tmp_path / "idx2")) == {
+        "entries": 0,
+        "built": False,
+    }

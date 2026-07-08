@@ -435,7 +435,7 @@ workstreams:
         title: Rules as an on-demand recall SOURCE (no import, no duplication)
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: claude-rules, verdict: KEEP-worthy (blind-spot — the elegant reverse direction)}
         problem: >-
           The obvious "import CLAUDE.md/rules into the corpus" move creates a SECOND
