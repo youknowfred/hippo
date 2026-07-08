@@ -39,7 +39,7 @@ from .build_index import (
     run_bounded,
     tokenize,
 )
-from . import trust
+from . import archive, trust
 from .build_index import extract_description
 from .lint_floor import floor_memory_names
 from .provenance import (
@@ -1914,7 +1914,16 @@ def format_results(results: List[dict], max_chars: int = _MAX_RECALL_CHARS) -> s
         # carries it, a fresh one doesn't ("" -> no clause at all). Same bracket convention as
         # `note`, same overall max_chars truncation below — a banner can never blow the budget.
         banner = f" [{r['stale_banner']}]" if r.get("stale_banner") else ""
-        lines.append(f"  • {r['name']} ({r['file']}) — {desc}{marker}{origin}{note}{banner}")
+        # RCL-2: a floor/cooldown COLLAPSE renders as one legible clause instead of the
+        # entry silently vanishing (inv3) — floor takes priority when both could apply (it
+        # is the more fundamental, every-session reason the pointer is redundant).
+        if r.get("floor_collapsed"):
+            collapse = " (already in floor)"
+        elif r.get("cooldown_collapsed"):
+            collapse = " (already surfaced this thread)"
+        else:
+            collapse = ""
+        lines.append(f"  • {r['name']} ({r['file']}) — {desc}{marker}{origin}{note}{banner}{collapse}")
     out = "\n".join(lines)
     if len(out) > max_chars:
         out = out[: max_chars - 16].rstrip() + "\n…(truncated)"
@@ -1992,6 +2001,28 @@ def git_recent_producer(
 # --------------------------------------------------------------------------- #
 # CLI / hook entry
 # --------------------------------------------------------------------------- #
+def _session_episodes(memory_dir: Optional[str], session_id: Optional[str]) -> List[dict]:
+    """This session's prior-turn episodes (ledger order), or ``[]`` if unavailable/inapplicable.
+
+    Shared by RCL-2 (the injection cooldown) and RCL-3 (the terse-follow-up query blend) — ONE
+    bounded ``telemetry.read_episodes`` scan (the ledger rotates at ~2MB, never an unbounded
+    disk scan), filtered to ``session_id``. No session id (a bare CLI invocation, or a harness
+    that never supplied one) or no memory dir -> ``[]``, the same degrade-silently posture as
+    every other hot-path telemetry read in this module. Since ``main()`` logs THIS turn's own
+    episode only AFTER recall+print, a call made anywhere during the current turn only ever
+    sees turns 1..N-1 — never the in-flight one.
+    """
+    if not memory_dir or not session_id:
+        return []
+    try:
+        from .telemetry import default_telemetry_dir, read_episodes
+
+        td = default_telemetry_dir(memory_dir)
+        return [ep for ep in read_episodes(td) if ep.get("session_id") == session_id]
+    except Exception:
+        return []
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
     import json
@@ -2060,9 +2091,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         # Floor-dedup (DISPLAY layer only — never inside recall(), which eval_recall's
         # self_recall probes directly): the User + Working-Style memories are ALREADY
         # always-loaded in the MEMORY.md floor, so re-surfacing them wastes a top-k slot +
-        # injects redundant tokens. Over-fetch by the floor size, drop floor members, slice to k.
+        # injects redundant tokens. RCL-2: over-fetch by BOTH the floor size AND this
+        # session's already-injected count so a COLLAPSED entry (see below) still costs no
+        # top-k slot — collapse, never drop, keeps the line legible instead of vanishing.
         floor = fused_floor_names(memory_dir, args.index_dir) if memory_dir else set()
-        pool_k = args.k + len(floor) if floor else args.k
+        session_episodes = _session_episodes(memory_dir, args.session_id)
+        already_injected: set = set()
+        for ep in session_episodes:
+            already_injected.update(ep.get("recalled_names") or [])
+        extra = len(floor) + len(already_injected)
+        pool_k = args.k + extra if extra else args.k
         results = recall(
             query, k=pool_k, memory_dir=memory_dir, index_dir=args.index_dir, repo_root=repo_root
         )
@@ -2071,9 +2109,45 @@ def main(argv: Optional[List[str]] = None) -> int:
         # hit), then re-append and renumber so the emitted rank sequence stays gapless.
         rule_hits = [r for r in results if r.get("corpus") == _RULES_SOURCE]
         results = [r for r in results if r.get("corpus") != _RULES_SOURCE]
-        if floor:
-            results = [r for r in results if r["name"] not in floor]
-        results = results[: args.k] + rule_hits
+
+        # RCL-2: widen the floor with CLAUDE.md/.claude/rules citations — a memory quoted
+        # verbatim in an always-loaded governance file is exactly as redundant to re-inject
+        # as a MEMORY.md floor pointer. Exact-name, conservative; fails CLOSED to "cited" on
+        # an unreadable governance file (more collapsing, never less — archive.py's own
+        # posture, reused as-is).
+        if repo_root and results:
+            try:
+                floor = floor | archive._cited_by_claude_md_names(
+                    repo_root, {r["name"] for r in results}
+                )
+            except Exception:
+                pass
+
+        # Collapse (never drop): a floor/cooldown member is TAGGED and rendered as one
+        # legible line instead of vanishing (inv3), but must still cost no top-k slot — the
+        # walk below only counts NON-collapsed entries against args.k, relying on the
+        # pool_k over-fetch above to keep enough real candidates in the pool. Natural rank
+        # order is preserved (a collapsed entry renders exactly where it would have ranked).
+        kept = 0
+        walked: List[dict] = []
+        for r in results:
+            if r["name"] in floor:
+                r["floor_collapsed"] = True
+                walked.append(r)
+            elif r["name"] in already_injected:
+                r["cooldown_collapsed"] = True
+                walked.append(r)
+            elif kept < args.k:
+                walked.append(r)
+                kept += 1
+        results = walked
+        # RUL-4/T2 guard: rule pointers are EXEMPT from floor-dedup (a rule is not a floor
+        # memory) but INCLUDED in the cooldown (they would otherwise re-fire every matching
+        # prompt for the rest of the thread) — never dropped, same collapse-not-drop posture.
+        for r in rule_hits:
+            if r["name"] in already_injected:
+                r["cooldown_collapsed"] = True
+        results = results + rule_hits
         for i, r in enumerate(results):
             r["rank"] = i + 1
     else:

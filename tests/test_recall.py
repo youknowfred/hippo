@@ -1139,7 +1139,9 @@ def test_floor_memory_names_parses_floor_pointers(tmp_path):
     assert floor_memory_names(md) == {"feedback_no_backward_compat", "user_role"}
 
 
-def test_main_floor_dedup_drops_always_loaded_members_and_tops_off(tmp_path, monkeypatch, capsys):
+def test_main_floor_dedup_collapses_always_loaded_members_and_tops_off(tmp_path, monkeypatch, capsys):
+    """RCL-2: a floor member COLLAPSES (renders once, legibly) instead of vanishing, and
+    still costs no top-k slot -- a non-floor memory is topped off to fill it."""
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -1156,8 +1158,117 @@ def test_main_floor_dedup_drops_always_loaded_members_and_tops_off(tmp_path, mon
     rc = R.main(["no backward compat refactor voyage reranker", "--memory-dir", md, "--index-dir", idx])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "feedback_no_backward_compat" not in out  # dropped — it's in the floor already
+    assert "feedback_no_backward_compat" in out  # COLLAPSED, not dropped
     assert "reranker_voyage" in out  # non-floor memory still surfaces (topped off to k)
+    lines = out.splitlines()
+    floor_line = next(l for l in lines if "feedback_no_backward_compat" in l)
+    voyage_line = next(l for l in lines if "reranker_voyage" in l)
+    assert "(already in floor)" in floor_line
+    assert "(already in floor)" not in voyage_line
+
+
+def test_main_floor_dedup_widens_with_claude_md_citations(repo, memory_dir, tmp_path, monkeypatch, capsys):
+    """RCL-2: a memory backtick-cited in CLAUDE.md (never in the MEMORY.md floor at all) is
+    exactly as redundant to re-inject as a true floor pointer -- it collapses too."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    idx = str(tmp_path / "idx")
+    _write_corpus(
+        memory_dir, {"deploy_runbook.md": "deploy runbook rollback steps for production incidents"}
+    )
+    B.build_index(memory_dir, idx)
+    write_file(repo, "CLAUDE.md", "See `deploy_runbook` for the rollback steps.\n")
+
+    rc = R.main(
+        [
+            "deploy runbook rollback steps",
+            "--memory-dir", memory_dir, "--index-dir", idx, "--repo-root", repo,
+        ]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "deploy_runbook" in out
+    assert "(already in floor)" in out
+
+
+def test_main_floor_widen_degrades_silently_without_repo_root(tmp_path, monkeypatch, capsys):
+    """No repo_root (a non-git corpus, or an explicit --memory-dir-only invocation) ->
+    the CLAUDE.md-citation widen step is simply skipped, never an error."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"reranker_voyage.md": _CORPUS["reranker_voyage.md"]})
+    B.build_index(md, idx)
+
+    rc = R.main(["voyage reranker cross encoder", "--memory-dir", md, "--index-dir", idx])
+    assert rc == 0
+    assert "reranker_voyage" in capsys.readouterr().out
+
+
+def test_main_cooldown_collapses_repeat_pointer_same_session_thread(
+    repo, memory_dir, tmp_path, monkeypatch, capsys
+):
+    """RCL-2: the SAME top pointer must not re-inject every turn of one thread -- a second
+    turn sharing --session-id collapses it; a different/absent session-id does not."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    idx = str(tmp_path / "idx")
+    _write_corpus(
+        memory_dir, {"deploy_runbook.md": "deploy rollback steps for production incidents"}
+    )
+    B.build_index(memory_dir, idx)
+    common = [
+        "deploy rollback steps",
+        "--memory-dir", memory_dir, "--index-dir", idx, "--repo-root", repo,
+        "--session-id", "sess-1",
+    ]
+
+    assert R.main(common) == 0
+    out1 = capsys.readouterr().out
+    assert "deploy_runbook" in out1
+    assert "already surfaced" not in out1  # first turn: nothing to cool down yet
+
+    assert R.main(common) == 0
+    out2 = capsys.readouterr().out
+    assert "deploy_runbook" in out2
+    assert "(already surfaced this thread)" in out2
+
+    other_session = common[:-1] + ["sess-2"]
+    assert R.main(other_session) == 0
+    out3 = capsys.readouterr().out
+    assert "already surfaced" not in out3  # a different thread never saw turn 1
+
+
+def test_main_cooldown_applies_to_rule_pointers_too(repo, memory_dir, tmp_path, monkeypatch, capsys):
+    """T2 guard: a rule pointer is EXEMPT from floor-dedup (a rule is not a floor memory)
+    but MUST still cool down across turns of the same thread -- otherwise it would re-fire
+    every matching prompt for the rest of the session."""
+    from memory import rules_plane as RP
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    idx = str(tmp_path / "idx")
+    _write_corpus(memory_dir, {"unrelated.md": "an unrelated memory about nothing in particular"})
+    B.build_index(memory_dir, idx)
+    write_file(
+        repo,
+        "CLAUDE.md",
+        "# Deploys\n\nAlways run the rollback healthcheck before re-enabling the deploy "
+        "pipeline traffic gate.\n",
+    )
+    RP.refresh_rules_cache(repo, idx)
+    common = [
+        "rollback healthcheck deploy pipeline",
+        "--memory-dir", memory_dir, "--index-dir", idx, "--repo-root", repo,
+        "--session-id", "sess-rule",
+    ]
+
+    assert R.main(common) == 0
+    out1 = capsys.readouterr().out
+    assert "(rule)" in out1
+    assert "already surfaced" not in out1
+
+    assert R.main(common) == 0
+    out2 = capsys.readouterr().out
+    assert "(rule)" in out2  # still rendered, never dropped
+    assert "(already surfaced this thread)" in out2
 
 
 def test_main_skips_recall_entirely_on_envelope_query(tmp_path, monkeypatch, capsys):

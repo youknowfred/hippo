@@ -702,7 +702,7 @@ workstreams:
         title: Floor-dedup + within-session injection cooldown
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: retrieval, verdict: KEEP + blind-spot (cooldown)}
         problem: >-
           Recall spends the 9000-char budget re-injecting memories the model already
