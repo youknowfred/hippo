@@ -747,7 +747,7 @@ workstreams:
         title: Multi-turn query formation — rescue terse follow-ups
         priority: P2
         effort: S
-        status: planned
+        status: done
         source: {lens: retrieval, verdict: KEEP-worthy (blind-spot)}
         problem: >-
           Terse follow-ups abstain: clean_query returns "" for continuation phrases

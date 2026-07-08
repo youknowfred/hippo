@@ -1271,6 +1271,118 @@ def test_main_cooldown_applies_to_rule_pointers_too(repo, memory_dir, tmp_path, 
     assert "(already surfaced this thread)" in out2
 
 
+# --------------------------------------------------------------------------- #
+# RCL-3: multi-turn query formation — rescue terse follow-ups
+# --------------------------------------------------------------------------- #
+def test_main_rescues_blank_terse_follow_up_via_session_episode_blend(tmp_path, monkeypatch, capsys):
+    """Acceptance: a terse follow-up that clean_query blanks entirely ("and the other
+    one" -> "") shares no vocabulary with any memory ALONE -- blended with the prior turn's
+    query preview (same session), it recalls what that turn's vocabulary reaches."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(
+        md, {"kubernetes_deploy.md": "kubernetes deployment rollout strategy helm chart canary"}
+    )
+    B.build_index(md, idx)
+    common = ["--memory-dir", md, "--index-dir", idx, "--session-id", "sess-rescue"]
+
+    assert R.clean_query("and the other one") == ""  # confirms this IS the blank-abstention case
+    assert R.recall("and the other one", k=5, memory_dir=md, index_dir=idx) == []  # baseline
+
+    assert R.main(["kubernetes deployment rollout strategy"] + common) == 0
+    out1 = capsys.readouterr().out
+    assert "kubernetes_deploy" in out1
+
+    assert R.main(["and the other one"] + common) == 0
+    out2 = capsys.readouterr().out
+    assert "kubernetes_deploy" in out2  # rescued via the blend, not abstained
+
+
+def test_main_rescues_short_nonempty_follow_up_via_session_episode_blend(tmp_path, monkeypatch, capsys):
+    """The OTHER rescue path: a follow-up clean_query lets through non-empty (it clears
+    clean_query's own 2-token floor) but that is still short of _RESCUE_MIN_TOKENS -- must
+    rescue too, not just the fully-blanked case."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(
+        md, {"kubernetes_deploy.md": "kubernetes deployment rollout strategy helm chart canary"}
+    )
+    B.build_index(md, idx)
+    common = ["--memory-dir", md, "--index-dir", idx, "--session-id", "sess-rescue-2"]
+
+    cleaned = R.clean_query("the other one please")
+    assert cleaned != "" and len(R.tokenize(cleaned)) < R._rescue_min_tokens()  # confirms path B
+
+    assert R.main(["kubernetes deployment rollout strategy"] + common) == 0
+    capsys.readouterr()
+    assert R.main(["the other one please"] + common) == 0
+    out2 = capsys.readouterr().out
+    assert "kubernetes_deploy" in out2
+
+
+def test_main_terse_follow_up_without_session_history_stays_abstained(tmp_path, monkeypatch, capsys):
+    """No --session-id (or no prior episodes to blend with) -> the rescue simply can't
+    fire -- a terse follow-up abstains exactly as it did before this item."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(
+        md, {"kubernetes_deploy.md": "kubernetes deployment rollout strategy helm chart canary"}
+    )
+    B.build_index(md, idx)
+
+    rc = R.main(["and the other one", "--memory-dir", md, "--index-dir", idx])
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == ""
+
+
+def test_main_substantive_followup_byte_identical_regardless_of_session_history(
+    tmp_path, monkeypatch, capsys
+):
+    """A SUBSTANTIVE prompt (clears _RESCUE_MIN_TOKENS on its own) must be byte-identical
+    whether or not this session has prior-turn history -- the rescue never touches a prompt
+    that doesn't need it."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx)
+    substantive = "which reranker do we use for search results ranking"
+
+    assert R.main([substantive, "--memory-dir", md, "--index-dir", idx]) == 0
+    out_no_history = capsys.readouterr().out
+
+    assert R.main(
+        ["kubernetes deployment rollout strategy", "--memory-dir", md, "--index-dir", idx,
+         "--session-id", "sess-substantive"]
+    ) == 0
+    capsys.readouterr()
+    assert R.main(
+        [substantive, "--memory-dir", md, "--index-dir", idx, "--session-id", "sess-substantive"]
+    ) == 0
+    out_with_history = capsys.readouterr().out
+
+    assert out_no_history == out_with_history
+
+
+def test_rescue_min_tokens_and_turns_env_overrides(monkeypatch):
+    monkeypatch.setenv("HIPPO_RESCUE_MIN_TOKENS", "7")
+    assert R._rescue_min_tokens() == 7
+    monkeypatch.setenv("HIPPO_RESCUE_MIN_TOKENS", "not-a-number")
+    assert R._rescue_min_tokens() == R._RESCUE_MIN_TOKENS
+    monkeypatch.delenv("HIPPO_RESCUE_MIN_TOKENS", raising=False)
+    assert R._rescue_min_tokens() == R._RESCUE_MIN_TOKENS
+
+    monkeypatch.setenv("HIPPO_RESCUE_TURNS", "1")
+    assert R._rescue_turns() == 1
+    monkeypatch.setenv("HIPPO_RESCUE_TURNS", "bogus")
+    assert R._rescue_turns() == R._RESCUE_TURNS
+    monkeypatch.delenv("HIPPO_RESCUE_TURNS", raising=False)
+    assert R._rescue_turns() == R._RESCUE_TURNS
+
+
 def test_main_skips_recall_entirely_on_envelope_query(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")

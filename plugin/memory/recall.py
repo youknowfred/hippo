@@ -275,6 +275,39 @@ _TAG_RE = re.compile(
     re.IGNORECASE,
 )
 _MIN_CONTENT_TOKENS = 2
+
+# RCL-3: main()-only (not clean_query -- see the rescue block there) -- a HIGHER bar than
+# _MIN_CONTENT_TOKENS above. clean_query already lets a query like "and the other one?"
+# through (it clears _MIN_CONTENT_TOKENS=2), but a query this short/pronoun-heavy routinely
+# shares no vocabulary with any memory and abstains downstream anyway -- _RESCUE_MIN_TOKENS
+# is the bar for "substantive enough to stand alone," gated well above the bare hygiene
+# floor so a genuinely substantive prompt is never touched by the rescue blend.
+_RESCUE_MIN_TOKENS = 4  # override: HIPPO_RESCUE_MIN_TOKENS
+_RESCUE_TURNS = 3  # override: HIPPO_RESCUE_TURNS -- how many prior same-session query
+# previews to blend in, most-recent-last (oldest of the window first).
+
+
+def _rescue_min_tokens() -> int:
+    """``HIPPO_RESCUE_MIN_TOKENS`` override; malformed/absent -> the module default."""
+    raw = os.environ.get("HIPPO_RESCUE_MIN_TOKENS")
+    if raw is None or not raw.strip():
+        return _RESCUE_MIN_TOKENS
+    try:
+        return int(raw)
+    except ValueError:
+        return _RESCUE_MIN_TOKENS
+
+
+def _rescue_turns() -> int:
+    """``HIPPO_RESCUE_TURNS`` override; malformed/absent -> the module default."""
+    raw = os.environ.get("HIPPO_RESCUE_TURNS")
+    if raw is None or not raw.strip():
+        return _RESCUE_TURNS
+    try:
+        return int(raw)
+    except ValueError:
+        return _RESCUE_TURNS
+
 # Terse continuation/filler prompts that carry no retrieval intent (matched normalized+lowered).
 _CONTINUATION_PHRASES = frozenset(
     {
@@ -2063,14 +2096,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             raw_query = ""
     else:
         raw_query = " ".join(args.query).strip()
-    # Query hygiene: strip harness envelopes / skip near-empty prompts BEFORE embedding, so a
-    # task-notification blob or a "?" continuation never pays a model load to inject noise.
-    query = clean_query(raw_query)
 
     # Resolve the memory dir + repo root once so we can both drive recall and read the
     # MEMORY.md floor for floor-dedup, plus stamp the episode-log watermark commit. A
     # resolution failure leaves whichever wasn't explicitly passed at None — recall resolves
     # its own dir, floor-dedup is skipped, and the episode log's head_commit is omitted.
+    # RCL-3 needs memory_dir resolved BEFORE clean_query runs (the terse-follow-up rescue
+    # below reads the episode buffer), so this now happens ahead of query hygiene.
     memory_dir = args.memory_dir
     repo_root = args.repo_root
     if memory_dir is None:
@@ -2086,6 +2118,34 @@ def main(argv: Optional[List[str]] = None) -> int:
         except Exception:
             memory_dir = None
 
+    # Query hygiene: strip harness envelopes / skip near-empty prompts BEFORE embedding, so a
+    # task-notification blob or a "?" continuation never pays a model load to inject noise.
+    query = clean_query(raw_query)
+
+    # RCL-2/RCL-3 SHARE this one bounded episode-buffer read: RCL-2's cooldown collapse and
+    # RCL-3's terse-follow-up rescue both need this session's prior-turn episodes.
+    session_episodes = _session_episodes(memory_dir, args.session_id)
+
+    # RCL-3: rescue a terse follow-up ("continue", "and the other one?") that carries no
+    # retrieval intent ON ITS OWN. Triggered when the cleaned query is blank OR still short
+    # of _RESCUE_MIN_TOKENS (a HIGHER bar than clean_query's own _MIN_CONTENT_TOKENS=2 — a
+    # query clean_query happily passes through, like a 3-4 token pronoun-heavy follow-up,
+    # can still share no vocabulary with any memory and abstain downstream; gated tightly so
+    # a genuinely substantive prompt is never touched). Pure string assembly (no LLM/network,
+    # inv6-safe): blend the RAW prompt with the last few same-session query previews and
+    # re-run clean_query on the combined text -- never mutates clean_query itself, which
+    # stays pure/single-prompt and unit-pinned.
+    if session_episodes and (not query or len(tokenize(query)) < _rescue_min_tokens()):
+        previews = [
+            ep["query_preview"]
+            for ep in session_episodes[-_rescue_turns():]
+            if ep.get("query_preview")
+        ]
+        if previews:
+            blended = clean_query((raw_query + " " + " ".join(previews)).strip())
+            if blended:
+                query = blended
+
     t0 = time.perf_counter()
     if query:
         # Floor-dedup (DISPLAY layer only — never inside recall(), which eval_recall's
@@ -2095,7 +2155,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         # session's already-injected count so a COLLAPSED entry (see below) still costs no
         # top-k slot — collapse, never drop, keeps the line legible instead of vanishing.
         floor = fused_floor_names(memory_dir, args.index_dir) if memory_dir else set()
-        session_episodes = _session_episodes(memory_dir, args.session_id)
         already_injected: set = set()
         for ep in session_episodes:
             already_injected.update(ep.get("recalled_names") or [])
