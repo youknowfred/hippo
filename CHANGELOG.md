@@ -7,6 +7,60 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v0.6.0 — 2026-07-07 — "The write path — capture up to the approval gate; memory reaches every agent"
+
+**re-bootstrap: no** — `plugin/requirements.txt` is unchanged; the code swap on update is
+sufficient. (`hypothesis` was added for QUA-9's fuzz tests, but as a CI/test-only install line,
+NOT a runtime dependency — mirroring QUA-10's pytest-timeout.) No corpus format or index schema
+change this release.
+
+New env var: `HIPPO_PENDING_DIR` (CAP-2 override for the gitignored draft-capture queue,
+`.claude/.memory-pending/`). New surfaces: two skills (`/hippo:recall`, `/hippo:consolidate`),
+a stdio MCP server, and three capture hooks (`PreCompact`, `SessionEnd`, `SubagentStop`).
+
+The theme of the release: durable facts stop dying with the session. Capture is now automated —
+but only ever UP TO an explicit approval gate, never past it. Nothing a capture pass produces
+can reach `.claude/memory/` without a per-item, agent-gated write; that boundary is structural
+(the capture module has no corpus writer) and adversarially tested.
+
+### Shipped this release
+
+- **CAP-1** — a `PreCompact` hook nudges the model to persist durable facts via `/hippo:new`
+  before compaction discards session detail. Prompt-level, no Python spawn, no corpus writes.
+- **CAP-2** — the `SessionEnd` draft-capture pass finally consumes the soaking episode buffer:
+  it snapshots a session's episode replay (queries + recalled names + HEAD watermark) plus
+  `git diff` since that watermark into ONE seed in the gitignored `.claude/.memory-pending/`
+  queue, for per-item approval next session. The approval gate is structural — `memory.capture`
+  imports no corpus writer — and a SessionStart producer surfaces the queue so it never soaks
+  silently.
+- **CAP-3** — `new_memory --check`: a dry-run that scores a captured candidate against the
+  corpus with LIF-2's near-duplicate machinery WITHOUT writing, so approving a duplicate routes
+  to update/supersede instead of a new file.
+- **CAP-4** — `/hippo:consolidate`, a sleep-time skill that drains the capture queue
+  (check-first), works the reconsolidation worklist, and refreshes the graph in one deliberate
+  turn — keeping the hook path pure retrieval.
+- **INT-1** — `/hippo:recall`, the read-side verb: "what do you remember about X" / list by
+  type, reusing the exact hook ranking and annotating each hit with type, staleness, and graph
+  neighbors.
+- **INT-2** — a dependency-free stdio MCP server (`recall` / `new_memory` / `traverse` tools)
+  giving mid-turn and subagent memory access; the hook path never imports it and still works
+  with it absent.
+- **INT-3** — a `SubagentStop` capture path (subagent discoveries become capture candidates)
+  plus the Task-prompt injection pattern for policy-critical delegations.
+- **INT-4** — the native-memory coexistence contract: a doctor check for symlink-target drift +
+  native-layout change, a compatibility doc (`plugin/memory/NATIVE_MEMORY.md`), and a README
+  positioning section.
+- **INT-5** — one Python launch per prompt (`memory.recall --stdin-json` reads the hook payload
+  and emits the output JSON itself, replacing three spawns + jq), and a doctor p95 hot-path
+  latency check over the ledger.
+- **QUA-9** — property-based (Hypothesis) fuzzing over the parsing surfaces: `split_frontmatter`
+  body-preservation, `backfill`/`set_invalid_after` never touching the body, `clean_query`
+  totality + input-bounded output, and `tokenize`/`normalize_slug` totality over Unicode.
+- **DOC-7** — release engineering: `plugin.json` / `marketplace.json` bumped to 0.6.0 and kept
+  in lockstep by a version-sync test + a tag-time `release.yml`; a doctor installed-vs-
+  bootstrapped version-delta check; and `RELEASING.md` formalizing the branch → per-item commits
+  → CHANGELOG capstone → squash-merge → tag process this file's header used to defer.
+
 ## v0.5.0 — 2026-07-07 — "The graph earns its keep: typed relations and closed lifecycle loops"
 
 ### Format changes
