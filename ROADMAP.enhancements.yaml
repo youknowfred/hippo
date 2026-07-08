@@ -230,7 +230,7 @@ workstreams:
         title: Recall blind-spot mining — turn silent abstention into a curation backlog
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: frontier+trust+capture, verdict: KEEP, leverage: 4, convergence: 3-lenses}
         problem: >-
           RET-1 correctly injects nothing when nothing clears the floor, but that

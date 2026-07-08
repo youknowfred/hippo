@@ -15,6 +15,8 @@ SessionStart producer for the memory concerns):
   - resume-card (SIG-2)  — "where was I": replay the last session from the (clone-local) episode
                            buffer — themes, relied-on memories, changed cited files. SILENT on a
                            cold start or a trivial last session.
+  - blind-spot  (SIG-3)  — recurring recall abstentions (backend='none') the corpus can't answer,
+                           as a low-frequency curation backlog. SILENT unless a cluster recurs.
   - git-recent  (Tier 2) — memories captured within the recent window (newest first).
   - link-health (Tier 3) — dangling/orphan wikilink count across the corpus.
   - floor                — SILENT unless project/reference links re-bloat the MEMORY.md floor
@@ -396,6 +398,54 @@ def pending_capture_producer(
     )
 
 
+# SIG-3: how many recurring blind-spot lines the SessionStart nudge shows, and how rarely it
+# fires. The doctor blind-spot check is the always-available surface; SessionStart is the RARE
+# nudge (every _BLIND_SPOT_NUDGE_EVERY-th session that has a backlog).
+_BLIND_SPOT_NUDGE_EVERY = 5
+_MAX_BLIND_SPOT_LINES = 2
+
+
+def blind_spot_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """SIG-3: turn silent recall abstention into a low-frequency curation backlog.
+
+    RET-1 correctly injects NOTHING when nothing clears the floor — but that abstention was
+    invisible, so the corpus never learned what it keeps being ASKED and can't answer. This reads
+    the gitignored recall ledger (``telemetry.abstention_backlog``), clusters recurring
+    ``backend='none'`` queries, and surfaces the top blind spot(s): 'you asked "X" N× recently;
+    no memory above the floor — capture one', routing to /hippo:consolidate. One-off/diverse
+    abstentions never cluster, so they never nag; recurring ones surface only every
+    ``_BLIND_SPOT_NUDGE_EVERY``-th session (the doctor blind-spot check is the always-available
+    surface). Read-only aggregation of the gitignored ledger (inv1); loud at doctor/SessionStart
+    while the hook stays silent (inv2/inv3); no writes (inv4). Clone-local: the ledger is
+    per-clone (and abstentions are only logged for trusted, telemetry-opted-in corpora, so the
+    backlog reflects THOSE). ``ctx`` (LIF-6) is unused.
+    """
+    try:
+        from .telemetry import abstention_backlog, default_telemetry_dir
+
+        backlog = abstention_backlog(default_telemetry_dir(memory_dir))
+        if not backlog:
+            return None
+        # Gate AFTER confirming there IS a backlog, so the cadence counts only backlog-bearing
+        # sessions (mirrors the untrusted-corpus nudge's gate-among-eligible-sessions pattern).
+        if not _periodic_nudge_should_fire(
+            repo_root, slug="blind-spot", every=_BLIND_SPOT_NUDGE_EVERY
+        ):
+            return None
+        lines = [
+            "🔎 Recall blind spots — recurring questions your corpus can't answer (asked, but "
+            "nothing cleared the floor). Capture one via /hippo:consolidate:"
+        ]
+        for c in backlog[:_MAX_BLIND_SPOT_LINES]:
+            q = c.get("sample_query") or ", ".join(c.get("terms") or [])
+            lines.append(f'  • "{q}" — asked {c["count"]}× recently, no memory above the floor')
+        return "\n".join(lines)
+    except Exception:
+        return None
+
+
 # SIG-1: how many relevant-to-current-work memories the positive producer lists, and how far
 # each description is trimmed. A positive block stays FOCUSED (a handful of top matches), unlike
 # the warning producers whose count is the point — so this cap is tighter than _MAX_ITEMS_PER_PRODUCER.
@@ -623,6 +673,7 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("staleness", staleness_producer),
     ("reconsolidation", reconsolidation_producer),  # recall-filtered subset of staleness; silent unless a recently-recalled memory is stale
     ("pending_capture", pending_capture_producer),  # CAP-2: surface the gitignored draft-capture queue so it never soaks silently
+    ("blind_spot", blind_spot_producer),  # SIG-3: recurring recall abstentions -> a low-frequency curation backlog
     ("index_integrity", index_integrity_producer),  # names on-disk index corruption (QUA-5) — recall/build_index already degrade silently
     ("unresolvable_baseline", unresolvable_baseline_producer),  # legibility for find_stale's sha-fallback path
     ("relevant_to_work", relevant_to_work_producer),  # SIG-1: the first POSITIVE block — memories about the files you're editing
@@ -639,14 +690,14 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
 _TRUST_NUDGE_EVERY = 5
 
 
-def _trust_nudge_should_fire(repo_root: str) -> bool:
-    """Low-frequency gate for the untrusted-corpus nudge (mirrors ONB-1's modulo pattern).
-
-    Fires on the 1st nudge-eligible session and every ``_TRUST_NUDGE_EVERY``-th after, using a
-    per-corpus counter file under ``CLAUDE_PLUGIN_DATA`` so trusting one corpus never silences
-    the nudge for another. When ``CLAUDE_PLUGIN_DATA`` is unset (dev checkout / hermetic test
-    with no plugin-data dir), there is nowhere durable to keep the counter — fail toward
-    LEGIBLE and fire every session rather than swallow the signal. Never raises.
+def _periodic_nudge_should_fire(repo_root: str, *, slug: str, every: int) -> bool:
+    """ONE low-frequency per-corpus gate for every SessionStart nudge that should be SEEN but
+    not NAG (mirrors ONB-1's modulo pattern). Fires on the 1st eligible session and every
+    ``every``-th after, using a per-corpus counter file ``.<slug>-<key>`` under
+    ``CLAUDE_PLUGIN_DATA`` — so a nudge's cadence on one corpus never affects another, and two
+    different nudges (``slug``) keep independent counters. When ``CLAUDE_PLUGIN_DATA`` is unset
+    (dev checkout / hermetic test with no plugin-data dir) there is nowhere durable to keep the
+    counter — fail toward LEGIBLE and fire every session rather than swallow the signal. Never raises.
     """
     try:
         import hashlib
@@ -655,7 +706,7 @@ def _trust_nudge_should_fire(repo_root: str) -> bool:
         if not data_dir:
             return True
         key = hashlib.sha256(os.path.realpath(repo_root).encode("utf-8")).hexdigest()[:16]
-        counter_path = os.path.join(data_dir, f".trust-nudge-{key}")
+        counter_path = os.path.join(data_dir, f".{slug}-{key}")
         try:
             with open(counter_path, "r", encoding="utf-8") as fh:
                 raw = fh.read().strip()
@@ -668,9 +719,14 @@ def _trust_nudge_should_fire(repo_root: str) -> bool:
                 fh.write(str(count + 1))
         except Exception:
             pass
-        return count % _TRUST_NUDGE_EVERY == 0
+        return count % every == 0
     except Exception:
         return True
+
+
+def _trust_nudge_should_fire(repo_root: str) -> bool:
+    """Low-frequency gate for the untrusted-corpus nudge (see ``_periodic_nudge_should_fire``)."""
+    return _periodic_nudge_should_fire(repo_root, slug="trust-nudge", every=_TRUST_NUDGE_EVERY)
 
 
 def untrusted_corpus_nudge(memory_dir: str, repo_root: str) -> Optional[str]:
