@@ -28,6 +28,7 @@ import pytest
 _PLUGIN_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "plugin"))
 _USER_PROMPT_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_user_prompt.sh")
 _SESSION_START_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_session_start.sh")
+_PRE_COMPACT_HOOK = os.path.join(_PLUGIN_ROOT, "hooks", "memory_pre_compact.sh")
 
 _MEMORY_MD = """---
 name: zebra_deploy_runbook
@@ -249,6 +250,57 @@ class TestSessionStartHook:
             assert rel.startswith(
                 (".claude/memory/", ".claude/.memory-index/", ".claude/.memory-telemetry/")
             ), f"hook wrote outside the expected dirs: {rel}"
+
+
+# --------------------------------------------------------------------------- #
+# CAP-1: PreCompact capture nudge — prompt-level, no Python, no corpus writes
+# --------------------------------------------------------------------------- #
+class TestPreCompactHook:
+    def _ctx(self, proc) -> str:
+        out = proc.stdout.strip()
+        return json.loads(out)["hookSpecificOutput"]["additionalContext"] if out else ""
+
+    def test_valid_payload_nudges_capture(self, tmp_path):
+        stdin = json.dumps({"hook_event_name": "PreCompact", "trigger": "auto"})
+        proc, _, _ = _run_hook(_PRE_COMPACT_HOOK, stdin, tmp_path)
+        _assert_contract(proc, "PreCompact")
+        ctx = self._ctx(proc)
+        assert "/hippo:new" in ctx, "PreCompact nudge must point at the capture verb"
+
+    def test_manual_trigger_also_nudges(self, tmp_path):
+        stdin = json.dumps({"hook_event_name": "PreCompact", "trigger": "manual"})
+        proc, _, _ = _run_hook(_PRE_COMPACT_HOOK, stdin, tmp_path)
+        _assert_contract(proc, "PreCompact")
+        assert "/hippo:new" in self._ctx(proc)
+
+    def test_empty_stdin(self, tmp_path):
+        proc, _, _ = _run_hook(_PRE_COMPACT_HOOK, "", tmp_path)
+        _assert_contract(proc, "PreCompact")
+
+    def test_garbage_json_still_exits_zero(self, tmp_path):
+        proc, _, _ = _run_hook(_PRE_COMPACT_HOOK, "{{{{not json", tmp_path)
+        _assert_contract(proc, "PreCompact")
+
+    def test_no_corpus_stays_silent(self, tmp_path):
+        # A never-opted-in repo: the nudge would dead-end at a missing bootstrap/init, so the
+        # hook says nothing at all (COR-10 consistency) — but still exits 0.
+        proc, _, _ = _run_hook(_PRE_COMPACT_HOOK, "", tmp_path, with_corpus=False)
+        _assert_contract(proc, "PreCompact")
+        assert proc.stdout.strip() == "", "no corpus → no nudge output"
+
+    def test_missing_python3_still_nudges(self, tmp_path):
+        # The nudge is pure bash — no Python spawn — so it works even pre-bootstrap.
+        proc, _, _ = _run_hook(_PRE_COMPACT_HOOK, "", tmp_path, python3=False)
+        _assert_contract(proc, "PreCompact")
+        assert "/hippo:new" in self._ctx(proc)
+
+    def test_writes_nothing(self, tmp_path):
+        proc, project, _ = _run_hook(_PRE_COMPACT_HOOK, "", tmp_path)
+        _assert_contract(proc, "PreCompact")
+        # Prompt-level only: the corpus that was seeded by _make_project is the only thing
+        # present; the hook itself creates no index/telemetry/pending dirs.
+        for rel in _tree(project):
+            assert rel.startswith(".claude/memory/"), f"PreCompact hook wrote {rel}"
 
 
 # --------------------------------------------------------------------------- #
