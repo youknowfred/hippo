@@ -61,6 +61,7 @@ _BACKTICK_TOKEN_RE = re.compile(r"`([A-Za-z0-9_-]+(?:\.md)?)`")
 # updates (CRITICAL RULES); both cite real corpus memories nowhere near CLAUDE.md/rules/*.md.
 _SCAN_TARGETS = (
     "CLAUDE.md",
+    "AGENTS.md",  # RUL-7: the export cites floor memories by backtick stem — archive-protect them
     ".claude/rules",
     ".claude/agents",
     ".claude/skills",
