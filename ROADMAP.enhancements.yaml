@@ -1966,7 +1966,7 @@ workstreams:
         title: Portability linter — a shared primitive (extract now)
         priority: P2
         effort: S
-        status: planned
+        status: done
         source: {lens: cross-project, verdict: RESHAPE (extract the reusable nugget)}
         problem: >-
           Both /hippo:promote and pack-extract need the same check — strip
