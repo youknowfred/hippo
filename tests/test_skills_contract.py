@@ -260,6 +260,64 @@ def test_new_skill_routes_the_duplicate_decision():
     )
 
 
+# --------------------------------------------------------------------------- #
+# GRW-3 + GRW-8: the audit skill's merge tier + contradiction fork ride ONE
+# neighbor sweep, with the load-bearing guards pinned as text — the correct
+# similarity scale (never recall()'s fused scores against a cosine threshold),
+# the both-directions rule, the archive guard as the structural no-dangling
+# enforcer, and the reworded-duplicate-is-not-a-contradiction mislabel guard.
+# --------------------------------------------------------------------------- #
+_AUDIT_SKILL = os.path.join(_SKILLS_DIR, "audit", "SKILL.md")
+
+
+def test_audit_skill_merge_tier_uses_the_calibrated_dup_scale():
+    with open(_AUDIT_SKILL, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    assert "committed_duplicate_neighbors" in text, (
+        "the merge tier must score pairs with the write-time dup mechanic (calibrated "
+        "cosine/BM25 scale), not recall()'s RRF-fused scores"
+    )
+    assert "BOTH directions" in text, "the both-directions rule is the false-pair filter"
+    assert "invalid_after_map" in text, (
+        "a demoted (invalid_after-bearing) side is supersede territory, never a merge"
+    )
+    assert "merge_candidates" in text, "Phase 1 must emit the merge_candidates JSON key"
+
+
+def test_audit_skill_merge_recipe_is_per_item_with_the_inbound_guard():
+    with open(_AUDIT_SKILL, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    assert "NO body-rewrite primitive" in text, (
+        "the merge recipe is per-item agent edits — no body-rewrite primitive exists or "
+        "may be simulated"
+    )
+    assert "inbound guard REFUSES" in text, (
+        "archive's GRA-5 refusal is the structural proof the inbound rewrite happened"
+    )
+    assert "--superseded-by <survivor>" in text, (
+        "the demote-in-place ending routes through the shipped supersede flow"
+    )
+
+
+def test_audit_skill_contradiction_fork_carries_the_mislabel_guard():
+    with open(_AUDIT_SKILL, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    assert "three-way fork" in text, "GRW-8's (a)/(b)/(c) classifier fork must be spelled out"
+    assert "reworded" in text and "NOT a contradiction" in text, (
+        "the mislabel guard — a reworded duplicate is not a contradiction — is the AC"
+    )
+    assert "Contradiction candidates" in text, "the deterministic report block must exist"
+    assert '"contradicts"' in text, (
+        "the (b) arm proposes links.add_typed_relation(..., 'contradicts', ...) per item"
+    )
+    assert "GOV-1" in text and "/hippo:resolve" in text, (
+        "accepted contradicts edges drain through the GOV-1 inbox"
+    )
+    assert "refresh_index" in text, (
+        "add_typed_relation writes frontmatter but not links.json — the apply arm must refresh"
+    )
+
+
 # =============================================================================================
 # QUA-8: the full skills-contract suite.
 #

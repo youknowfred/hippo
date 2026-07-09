@@ -1689,7 +1689,7 @@ workstreams:
         title: Contradiction adjudication on audit's existing neighbor pass
         priority: P2
         effort: S
-        status: planned
+        status: done
         source: {lens: capture, verdict: RESHAPE (augment audit, don't build a module)}
         problem: >-
           Two memories can directly contradict with zero code drift; reconsolidation
