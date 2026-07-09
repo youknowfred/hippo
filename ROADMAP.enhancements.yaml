@@ -590,7 +590,12 @@ workstreams:
         title: AGENTS.md fan-out — one ranked source for the cross-tool rule plane
         priority: P3
         effort: M
-        status: planned
+        # 2026-07-09: shipped — export_agents.py + /hippo:export-agents (propose-only,
+        # managed-block splice) + rules_plane.derive_paths_globs (the RUL-6-shared
+        # derivation with the over-scoping cap); drift-check via widened
+        # archive._SCAN_TARGETS + rules_plane._rule_scoped_files (both now cover
+        # AGENTS.md). All audited seams held — no premise correction needed.
+        status: done
         source: {lens: cross-project+claude-rules, verdict: RESHAPE (post-v1 reach; one target)}
         problem: >-
           Teams run multiple agents (Codex/Cursor/Copilot/…), each with its own
@@ -2204,7 +2209,13 @@ release_train:
   - tier: T7
     target_version: 1.7.0
     theme: "Learned ranking (salience-keystone-gated)"
-    status: planned
+    # 2026-07-09: RUL-7 shipped (the one item with no external blocker). Gate state
+    # re-verified against the live tree this session: RET-8 still greenfield (zero
+    # "category" hits) — SIG-5/SIG-6 stay planned; LIF-7 CAP-soak still an un-cleared
+    # OWNER judgment (ROADMAP.v1 §3 "DEFER post-v1", no dated decision here) — RUL-6
+    # stays planned. done_means NOT met (the salience keystone is undecided);
+    # this tier stays in_progress until RET-8/SIG-5 and the LIF-7 gate move.
+    status: in_progress
     gate: "SIG-5 decides salience default-on with RET-8 evidence; nothing in this tier ships as an always-on ranking prior until it does."
     done_means: >-
       With the salience keystone decided (SIG-5), the ranking class is unlocked
