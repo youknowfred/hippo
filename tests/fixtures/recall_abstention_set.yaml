@@ -1,5 +1,7 @@
-# RET-1: report-only abstention fixture (eval_recall.py's `--abstention-set` / default-path
-# probing — never a merge gate, see the gate docstring's list of 5).
+# RET-1: abstention fixture (eval_recall.py's `--abstention-set` / default-path probing).
+# Shipped report-only; RET-8 promoted abstention_rate to a TRACKED, fixture-gated entry
+# (GATE_ABSTENTION — a regression tripwire just under the measured pack-corpus rate,
+# 0.3333 on BOTH backends at promotion time; absent fixture = skip).
 #
 # Each `query` below is CLEARLY off-topic for the packs this repo ships (plugin/assets/ — see
 # recall_hard_set.yaml's header for the exact seed recipe): pizza dough, quantum physics,
@@ -7,7 +9,7 @@
 # meaningful vocabulary OR topical intent with anything in the shipped starter packs, so the
 # CORRECT recall() output is [] (inject nothing) — abstention, not a wasted top-k of "least
 # irrelevant" pointers. `abstention_rate` = fraction of these queries for which recall()
-# actually returned zero results; report-only, printed alongside the 5 tracked gates.
+# actually returned zero results; a tracked row in the gate table since RET-8.
 #
 # Deliberately has NO `expected`/`relevant` field (unlike recall_hard_set.yaml /
 # recall_relevance_set.yaml) -- there is nothing this query SHOULD retrieve; the schema is
