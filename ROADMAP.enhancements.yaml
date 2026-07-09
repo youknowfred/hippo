@@ -1554,7 +1554,7 @@ workstreams:
         title: Commit-watermark re-verify — staleness at commit precision
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: frontier, verdict: RESHAPE (watermark diff, NOT a git hook)}
         problem: >-
           Staleness is discovered lazily (find_stale re-scans against a git-log

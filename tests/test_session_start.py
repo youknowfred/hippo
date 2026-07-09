@@ -15,7 +15,7 @@ import os
 import memory.session_start as S
 from memory.staleness import set_invalid_after
 
-from .conftest import write_file
+from .conftest import git_commit, write_file
 
 
 def _producers(monkeypatch, producers):
@@ -785,3 +785,44 @@ def test_corpus_format_producer_is_registered_exactly_once():
     assert labels.count("corpus_format") == 1
     fns = [fn for label, fn in S.PRODUCERS if label == "corpus_format"]
     assert fns == [S.corpus_format_producer]
+
+
+# --------------------------------------------------------------------------- #
+# GRW-5: the commit-precise watermark lane joins the dispatcher's ONE worklist
+# --------------------------------------------------------------------------- #
+def test_watermark_lane_flags_uncalled_memory_end_to_end(repo, memory_dir, monkeypatch):
+    """A memory NEVER recently recalled still joins the reconsolidation worklist when a
+    commit since the last session's watermark touches its cited file — tagged
+    [since-watermark], routed through the same block (no new producer, no new verb)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    write_file(repo, "src/quiet.py", "q = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(
+        memory_dir, "m_quiet.md", _lif6_mem("m_quiet", ["src/quiet.py"], c1)
+    )
+    td = os.path.join(repo, "tele")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    os.makedirs(td, exist_ok=True)
+    # The last session's episode watermark = c1 (raw line — hermetic, pinned sha)…
+    with open(os.path.join(td, "episode_buffer.jsonl"), "w", encoding="utf-8") as fh:
+        fh.write(
+            json.dumps(
+                {
+                    "ts": 100.0,
+                    "session_id": "prior",
+                    "query_preview": "q",
+                    "recalled_names": ["unrelated"],
+                    "head_commit": c1,
+                }
+            )
+            + "\n"
+        )
+    # …and a commit SINCE the watermark touches the cited file.
+    write_file(repo, "src/quiet.py", "q = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)
+
+    ctx = S.build_context(memory_dir, repo)
+    blocks = ctx.split("\n\n")
+    recon_block = next((b for b in blocks if b.startswith("🧠 Reconsolidation worklist")), "")
+    assert "m_quiet [since-watermark]" in recon_block
+    assert "commits landed since your last session" in recon_block

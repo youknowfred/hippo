@@ -956,3 +956,152 @@ def test_producer_signature_matches_dispatcher_contract():
     sig = inspect.signature(R.reconsolidation_producer)
     assert list(sig.parameters) == ["memory_dir", "repo_root", "ctx"]
     assert sig.parameters["ctx"].default is None
+
+
+# --------------------------------------------------------------------------- #
+# GRW-5: commit-watermark re-verify — the precision lane
+# --------------------------------------------------------------------------- #
+def _episode_line(td, sid, ts, head_commit, names=("m",)):
+    """Write one raw episode-buffer line (hermetic — no live git read at log time)."""
+    os.makedirs(td, exist_ok=True)
+    with open(os.path.join(td, "episode_buffer.jsonl"), "a", encoding="utf-8") as fh:
+        fh.write(
+            json.dumps(
+                {
+                    "ts": ts,
+                    "session_id": sid,
+                    "query_preview": "q",
+                    "recalled_names": list(names),
+                    "head_commit": head_commit,
+                }
+            )
+            + "\n"
+        )
+
+
+def test_watermark_candidates_flag_commit_precise_hits(repo, memory_dir):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_alpha.md", _mem("m_alpha", ["src/foo.py"], c1))
+    write_file(memory_dir, "m_other.md", _mem("m_other", ["src/bar.py"], c1))
+    td = os.path.join(repo, "tele")
+    _episode_line(td, "last-sess", 100.0, c1)  # the last session started at c1
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)      # a commit since the watermark touches foo
+
+    cands = R.watermark_stale_candidates(memory_dir, repo, telemetry_dir=td)
+    assert cands == [{"name": "m_alpha", "changed_paths": ["src/foo.py"], "watermark": True}]
+
+
+def test_watermark_candidates_use_most_recent_sessions_earliest_head(repo, memory_dir):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(repo, "src/foo.py", "x = 2\n")
+    c2 = git_commit(repo, "c2", 1_700_000_100)
+    write_file(memory_dir, "m_alpha.md", _mem("m_alpha", ["src/foo.py"], c1))
+    td = os.path.join(repo, "tele")
+    # An OLDER session watermarked at c1; the MOST RECENT session started at c2.
+    _episode_line(td, "old-sess", 50.0, c1)
+    _episode_line(td, "new-sess", 200.0, c2)
+    write_file(repo, "src/foo.py", "x = 3\n")
+    git_commit(repo, "c3", 1_700_000_200)
+
+    cands = R.watermark_stale_candidates(memory_dir, repo, telemetry_dir=td)
+    # Diff is c2..HEAD (the LAST session's watermark), which still touches foo.
+    assert [c["name"] for c in cands] == ["m_alpha"]
+    # And an untouched window → nothing: simulate by rewriting the buffer to only c3.
+    head = R.run_git(["rev-parse", "HEAD"], repo).strip()
+    os.remove(os.path.join(td, "episode_buffer.jsonl"))
+    _episode_line(td, "newest", 300.0, head)
+    assert R.watermark_stale_candidates(memory_dir, repo, telemetry_dir=td) == []
+
+
+def test_watermark_candidates_unreachable_sha_and_empty_buffer_are_silent(repo, memory_dir):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_alpha.md", _mem("m_alpha", ["src/foo.py"], c1))
+    td = os.path.join(repo, "tele")
+    assert R.watermark_stale_candidates(memory_dir, repo, telemetry_dir=td) == []  # no episodes
+    _episode_line(td, "s", 10.0, "a" * 40)  # squash-simulated unreachable watermark
+    write_file(repo, "src/foo.py", "x = 2\n")
+    git_commit(repo, "c2", 1_700_000_100)
+    # run_git returns "" on the unreachable range → [] honestly (GRW-6 heals, never guess).
+    assert R.watermark_stale_candidates(memory_dir, repo, telemetry_dir=td) == []
+
+
+def test_worklist_unions_watermark_items_after_recency(repo, memory_dir):
+    """A watermark hit joins the worklist even though it was NEVER recently recalled —
+    precision beats recency — while recalled∩stale items keep leading."""
+    write_file(repo, "src/foo.py", "x = 1\n")
+    write_file(repo, "src/bar.py", "y = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_recalled.md", _mem("m_recalled", ["src/foo.py"], c1))
+    write_file(memory_dir, "m_quiet.md", _mem("m_quiet", ["src/bar.py"], c1))
+    td = os.path.join(repo, "tele")
+    _seed_events(td, [("s1", ["m_recalled"])])  # only m_recalled was ever recalled
+
+    precomputed = [{"name": "m_recalled", "changed_paths": ["src/foo.py"], "recency": 1}]
+    wm = [{"name": "m_quiet", "changed_paths": ["src/bar.py"], "watermark": True}]
+    worklist = R.recalled_stale_worklist(
+        memory_dir, repo, telemetry_dir=td, stale=precomputed, watermark_stale=wm
+    )
+    assert [w["name"] for w in worklist] == ["m_recalled", "m_quiet"]
+    assert worklist[1]["watermark"] is True
+    assert worklist[1] is not wm[0], "caller-owned watermark list items are copied"
+    assert "linked" not in wm[0]
+
+
+def test_worklist_dedups_watermark_by_name_stale_item_wins(repo, memory_dir):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_alpha.md", _mem("m_alpha", ["src/foo.py"], c1))
+    td = os.path.join(repo, "tele")
+    _seed_events(td, [("s1", ["m_alpha"])])
+    precomputed = [{"name": "m_alpha", "changed_paths": ["src/foo.py"], "recency": 9}]
+    wm = [{"name": "m_alpha", "changed_paths": ["src/foo.py"], "watermark": True}]
+    worklist = R.recalled_stale_worklist(
+        memory_dir, repo, telemetry_dir=td, stale=precomputed, watermark_stale=wm
+    )
+    assert len(worklist) == 1
+    assert worklist[0].get("recency") == 9, "the stale-derived item (richer) wins the dedup"
+    assert "watermark" not in worklist[0]
+
+
+def test_worklist_watermark_items_respect_invalid_after_and_snooze(repo, memory_dir):
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    body = _mem("m_dead", ["src/foo.py"], c1)
+    body = body.replace("---\nbody", 'invalid_after: "2026-01-01T00:00:00+00:00"\n---\nbody')
+    write_file(memory_dir, "m_dead.md", body)
+    td = os.path.join(repo, "tele")
+    _seed_events(td, [("s1", ["something_else"])])
+    wm = [{"name": "m_dead", "changed_paths": ["src/foo.py"], "watermark": True}]
+    worklist = R.recalled_stale_worklist(
+        memory_dir, repo, telemetry_dir=td, stale=[], watermark_stale=wm
+    )
+    assert worklist == [], "LIF-1 exclusions apply to the union — terminal items never re-nag"
+
+
+def test_worklist_without_watermark_param_is_unchanged(repo, memory_dir):
+    """No watermark_stale → byte-identical pre-GRW-5 behavior (empty recency → [])."""
+    td = os.path.join(repo, "tele")
+    assert R.recalled_stale_worklist(memory_dir, repo, telemetry_dir=td) == []
+
+
+def test_producer_tags_watermark_items(repo, memory_dir):
+    from memory.staleness import RunContext
+
+    ctx = RunContext(
+        stale=[],
+        stale_diagnostics={},
+        worklist=[
+            {"name": "m_recalled", "changed_paths": ["src/foo.py"]},
+            {"name": "m_precise", "changed_paths": ["src/bar.py"], "watermark": True},
+        ],
+        changed_paths=[],
+    )
+    out = R.reconsolidation_producer(memory_dir, repo, ctx)
+    assert out is not None
+    assert "m_precise [since-watermark]" in out
+    assert "m_recalled:" in out and "m_recalled [since-watermark]" not in out
+    assert "commits landed since your last session" in out  # the only-when-present legend

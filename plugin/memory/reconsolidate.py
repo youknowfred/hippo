@@ -59,9 +59,10 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Optional, Set
 
-from .provenance import build_repo_file_index, reverify_file
-from .staleness import RunContext, find_stale, invalid_after_map, set_invalid_after
+from .provenance import _iter_memory_files, build_repo_file_index, reverify_file, run_git
+from .staleness import RunContext, find_stale, invalid_after_map, read_provenance, set_invalid_after
 from .telemetry import (
+    read_episodes,
     read_events,
     read_reconsolidation_events,
     record_reconsolidation_outcome,
@@ -91,9 +92,92 @@ _OUTCOMES_THAT_CLEAR_STALENESS = frozenset({"graduate", "fix"})
 _EDGE_WRITING_OUTCOMES = frozenset({"fix", "demote"})
 
 
+# GRW-5: bound on the since-watermark diff read — the same cap discipline as
+# capture._MAX_CHANGED_PATHS, so a monorepo-wide <old-watermark>..HEAD stays cheap.
+_MAX_WATERMARK_PATHS = 200
+
+
 # --------------------------------------------------------------------------- #
 # Worklist (read-only)
 # --------------------------------------------------------------------------- #
+def _last_session_watermark(telemetry_dir: Optional[str]) -> Optional[str]:
+    """The most-recent session's episode watermark — its EARLIEST recorded ``head_commit``.
+
+    Lifts the resume card's most-recent-session scan (max ``ts`` picks the session) and the
+    capture seed's watermark convention (that session's first non-empty ``head_commit`` —
+    where the session STARTED, so the diff below covers everything it and any later commit
+    touched). ``None`` on an empty buffer or any failure — never raises.
+    """
+    try:
+        episodes = []
+        latest_ts, sid = None, None
+        for e in read_episodes(telemetry_dir):
+            episodes.append(e)
+            ts = e.get("ts")
+            if ts is None:
+                continue
+            if latest_ts is None or ts > latest_ts:
+                latest_ts, sid = ts, e.get("session_id")
+        for e in episodes:
+            if e.get("session_id") == sid and e.get("head_commit"):
+                return e["head_commit"]
+        return None
+    except Exception:
+        return None
+
+
+def watermark_stale_candidates(
+    memory_dir: str, repo_root: str, telemetry_dir: Optional[str] = None
+) -> List[dict]:
+    """GRW-5: commit-precision re-verify candidates — ``<last-watermark>..HEAD ∩ cited_paths``.
+
+    ``find_stale`` discovers staleness lazily against a git-log WINDOW; this lane is exact:
+    diff the commits landed since the last session's episode watermark and name every memory
+    whose ``cited_paths`` they touched — ``[{"name", "changed_paths", "watermark": True}]``,
+    name-sorted. Same commit-precision as an opt-in git hook with ZERO new run surface (the
+    roadmap killed the ``.git/hooks`` variant — inv2): it rides the episode watermark the
+    buffer already records and the ONE SessionStart git-read moment. ``run_git`` returns ""
+    when the watermark sha is unreachable (the squash-merge case) — that yields ``[]`` here,
+    honestly; GRW-6's producer detects and heals the break, this function never guesses. The
+    diff read is bounded (``_MAX_WATERMARK_PATHS``). Read-only; never raises; ``[]`` on any
+    failure. Consumers route every hit through ``recalled_stale_worklist``'s
+    ``watermark_stale=`` union — the ONE ``semantic_reverify`` gate — never a new verb.
+    """
+    try:
+        wm = _last_session_watermark(telemetry_dir)
+        if not wm or not repo_root or not os.path.isdir(memory_dir):
+            return []
+        changed: Set[str] = set()
+        for ln in run_git(["diff", "--name-only", f"{wm}..HEAD"], repo_root).splitlines():
+            ln = ln.strip()
+            if ln:
+                changed.add(ln)
+            if len(changed) >= _MAX_WATERMARK_PATHS:
+                break
+        if not changed:
+            return []
+        out: List[dict] = []
+        for path in _iter_memory_files(memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+            except OSError:
+                continue
+            cited, _sc = read_provenance(text)
+            hits = sorted(set(cited) & changed)
+            if hits:
+                out.append(
+                    {
+                        "name": os.path.splitext(os.path.basename(path))[0],
+                        "changed_paths": hits,
+                        "watermark": True,
+                    }
+                )
+        return out
+    except Exception:
+        return []
+
+
 def _recently_recalled_names(telemetry_dir: Optional[str], window_sessions: int) -> Set[str]:
     """Memory names surfaced in the last ``window_sessions`` DISTINCT sessions.
 
@@ -213,6 +297,7 @@ def recalled_stale_worklist(
     *,
     since: Optional[str] = None,
     stale: Optional[List[dict]] = None,
+    watermark_stale: Optional[List[dict]] = None,
 ) -> List[dict]:
     """``[{"name", "changed_paths"[, "linked"]}]`` — recently-recalled names ∩ ``find_stale()``'s stale set.
 
@@ -237,20 +322,37 @@ def recalled_stale_worklist(
     standalone caller), ``find_stale`` is still called here exactly as before. When given,
     it is trusted as-is and ``find_stale`` is never called — ``since`` is then ignored
     (the caller who computed ``stale`` already chose its window).
+
+    GRW-5: ``watermark_stale`` accepts the precomputed ``watermark_stale_candidates()``
+    result — commit-precise hits since the last session's episode watermark — and UNIONS
+    it in AFTER the recency intersection (precision beats recency: a memory whose cited
+    file a fresh commit touched belongs on the worklist whether or not it was recently
+    recalled). Dedup is by name with the ``stale``-derived item winning (it carries
+    recency/source_commit); the LIF-1 exclusions (``invalid_after``, snooze) apply to the
+    UNION, so everything still routes through the ONE ``semantic_reverify`` gate. When
+    omitted or empty, behavior is byte-identical to the pre-GRW-5 worklist.
     """
     try:
         recent = _recently_recalled_names(telemetry_dir, window_sessions)
-        if not recent:
+        if not recent and not watermark_stale:
             return []
-        if stale is None:
-            stale = find_stale(memory_dir, repo_root, **({"since": since} if since else {}))
-        # LIF-6: shallow-copy each item -- `stale` may now be a CALLER-OWNED list shared
-        # with something else (session_start.RunContext.stale), not always a freshly-
-        # derived one this function alone holds. `_attach_linked_neighbors` below mutates
-        # worklist items in place (adds "linked"); without the copy that mutation would
-        # leak back into the caller's `stale` list for any item that's on both, corrupting
-        # a shape callers were promised mirrors find_stale's own contract exactly.
-        worklist = [dict(item) for item in stale if item["name"] in recent]
+        worklist: List[dict] = []
+        if recent:
+            if stale is None:
+                stale = find_stale(memory_dir, repo_root, **({"since": since} if since else {}))
+            # LIF-6: shallow-copy each item -- `stale` may now be a CALLER-OWNED list shared
+            # with something else (session_start.RunContext.stale), not always a freshly-
+            # derived one this function alone holds. `_attach_linked_neighbors` below mutates
+            # worklist items in place (adds "linked"); without the copy that mutation would
+            # leak back into the caller's `stale` list for any item that's on both, corrupting
+            # a shape callers were promised mirrors find_stale's own contract exactly.
+            worklist = [dict(item) for item in stale if item["name"] in recent]
+        if watermark_stale:
+            on_worklist = {item["name"] for item in worklist}
+            for item in watermark_stale:
+                if item.get("name") and item["name"] not in on_worklist:
+                    worklist.append(dict(item))  # same caller-owned-list discipline as stale
+                    on_worklist.add(item["name"])
         if worklist:
             # LIF-1: drop terminal (invalid_after set — demote's chain, or a manual
             # --invalidate) and explicitly-snoozed items BEFORE the linked-column pass,
@@ -506,11 +608,20 @@ def reconsolidation_producer(
             "; (+N linked: …) names an item's 1-hop graph neighbors — review-adjacent, "
             "the next most likely to be wrong once it drifted"
         )
+    if any(item.get("watermark") for item in shown):
+        # GRW-5: same only-when-it-renders legend discipline — [since-watermark] items are
+        # commit-precise hits (commits since the last session touched their cited files),
+        # on the list whether or not they were recently recalled.
+        header += (
+            "; [since-watermark] items were flagged by commits landed since your last "
+            "session, recalled recently or not"
+        )
     lines = [header + ":"]
     for item in shown:
         paths = ", ".join(item["changed_paths"][:4])
         more = "" if len(item["changed_paths"]) <= 4 else f" (+{len(item['changed_paths']) - 4} more)"
-        lines.append(f"  • {item['name']}{_linked_note(item)}: {paths}{more}")
+        wm_tag = " [since-watermark]" if item.get("watermark") else ""
+        lines.append(f"  • {item['name']}{wm_tag}{_linked_note(item)}: {paths}{more}")
     if len(worklist) > _MAX_WORKLIST_ITEMS:
         lines.append(f"  …and {len(worklist) - _MAX_WORKLIST_ITEMS} more.")
     return "\n".join(lines)
@@ -626,17 +737,29 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(ln)
         return 0
 
+    # GRW-5: the CLI listing carries the same commit-precise watermark lane as the
+    # SessionStart dispatcher — the drain and the producer must describe the SAME worklist.
     worklist = recalled_stale_worklist(
-        memory_dir, repo_root, telemetry_dir=args.telemetry_dir, window_sessions=args.window_sessions
+        memory_dir,
+        repo_root,
+        telemetry_dir=args.telemetry_dir,
+        window_sessions=args.window_sessions,
+        watermark_stale=watermark_stale_candidates(
+            memory_dir, repo_root, telemetry_dir=args.telemetry_dir
+        ),
     )
     if not worklist:
         print("No recently-recalled memory is currently stale.")
         return 0
-    print(f"{len(worklist)} recently-recalled memories cite code that changed since they were written:")
+    print(
+        f"{len(worklist)} memories need re-grounding (recently recalled + stale, or "
+        "[since-watermark] commit-precise hits):"
+    )
     for item in worklist:
         # Same "X (+2 linked: Y, Z)" review-adjacent render as the SessionStart producer
         # (GRA-9) — the CLI and the producer must describe the same worklist identically.
-        print(f"  • {item['name']}{_linked_note(item)}: {', '.join(item['changed_paths'][:6])}")
+        wm_tag = " [since-watermark]" if item.get("watermark") else ""
+        print(f"  • {item['name']}{wm_tag}{_linked_note(item)}: {', '.join(item['changed_paths'][:6])}")
     return 0
 
 

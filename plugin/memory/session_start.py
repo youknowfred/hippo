@@ -54,7 +54,11 @@ from .recall import (
     git_recent_producer,
     portable_floor_producer,
 )
-from .reconsolidate import recalled_stale_worklist, reconsolidation_producer
+from .reconsolidate import (
+    recalled_stale_worklist,
+    reconsolidation_producer,
+    watermark_stale_candidates,
+)
 from .staleness import (
     RunContext,
     count_unresolvable_baselines,
@@ -1119,8 +1123,17 @@ def _build_run_context(memory_dir: str, repo_root: str) -> RunContext:
         stale = find_stale(memory_dir, repo_root, diagnostics=diagnostics)
     except Exception:
         stale = []
+    # GRW-5: the commit-precise lane — <last-session-watermark>..HEAD ∩ cited_paths — shares
+    # this ONE SessionStart git-read moment and unions into the SAME worklist, so everything
+    # still routes through the single semantic_reverify gate (no new verb, no .git/hooks).
     try:
-        worklist = recalled_stale_worklist(memory_dir, repo_root, stale=stale)
+        wm_stale = watermark_stale_candidates(memory_dir, repo_root)
+    except Exception:
+        wm_stale = []
+    try:
+        worklist = recalled_stale_worklist(
+            memory_dir, repo_root, stale=stale, watermark_stale=wm_stale
+        )
     except Exception:
         worklist = []
     # SIG-1: the session's uncommitted working-tree diff, computed ONCE (this path only runs
