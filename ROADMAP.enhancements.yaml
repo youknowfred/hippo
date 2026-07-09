@@ -2173,7 +2173,10 @@ release_train:
   - tier: T6
     target_version: 1.6.0
     theme: "Reach"
-    status: planned
+    # 2026-07-09: done_means met — promote (TEA-1's criterion landed), import (.mdc),
+    # decision replay, trust-gated global recall all shipped; RCH-5 is the named gated
+    # tail (extract slice shipped; install/update stay open on the v0.8.0 trust spine).
+    status: done
     done_means: >-
       Knowledge follows you: /hippo:promote lands TEA-1's unmet criterion, one solid
       /hippo:import adapter (Cursor .mdc) makes hippo the tool you graduate TO,
