@@ -442,6 +442,157 @@ def check_index_count(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"index-count check failed: {exc}."}
 
 
+def _scorecard_message(memory_dir: str, repo_root: str) -> Tuple[str, str]:
+    """GOV-6: the trust scorecard — one deterministic ``(status, message)`` rollup line.
+
+    The governance signals are scattered point-checks (contradictions, blind spots, floor
+    drift, steering, orphans); this is the ONE line a lead scans before trusting the
+    corpus — the point-checks below it stay the drill-down (deliberate overlap, not
+    double-reporting). Every input is INDIVIDUALLY guarded so an unshipped/failing
+    producer contributes 0/absent, never an error; every iteration is sorted and nothing
+    is timestamped, so identical state renders byte-identical (the doctor determinism
+    pin). Shared with the ``hippo://scorecard`` MCP resource — one implementation, two
+    surfaces.
+    """
+    from .build_index import _load_manifest, default_index_dir
+
+    index_dir = default_index_dir(memory_dir)
+
+    # GOV-1: contested-unresolved = corpus-wide contradicts pairs minus this clone's ledger.
+    contested = 0
+    try:
+        from .resolve_view import unresolved_contradictions
+
+        contested = len(unresolved_contradictions(memory_dir, repo_root=repo_root))
+    except Exception:
+        contested = 0
+
+    # T2: rule↔memory conflicts + authority gaps, and rules-plane rot.
+    rule_conflicts = 0
+    try:
+        from .rules_plane import conflict_radar
+
+        radar = conflict_radar(memory_dir, repo_root)
+        rule_conflicts = len(radar["edge_conflicts"]) + len(radar["authority_gaps"])
+    except Exception:
+        rule_conflicts = 0
+    rot = 0
+    try:
+        from .rules_plane import rules_rot
+
+        r = rules_rot(repo_root)
+        rot = len(r["code_ref_rot"]) + len(r["dead_path_globs"])
+    except Exception:
+        rot = 0
+
+    # T1/SIG-3: recurring recall blind spots.
+    blind = 0
+    try:
+        from .telemetry import abstention_backlog, default_telemetry_dir
+
+        blind = len(abstention_backlog(default_telemetry_dir(memory_dir)))
+    except Exception:
+        blind = 0
+
+    # GOV-2 / GOV-7: steering + author-confidence counts off the manifest (0 when absent —
+    # .get() on entries that predate the fields is exactly the graceful-absence contract).
+    pinned = muted = draft = 0
+    try:
+        manifest = _load_manifest(index_dir)
+        entries = manifest.get("entries", []) if manifest else []
+        pinned = sum(1 for e in entries if e.get("steer") == "pin")
+        muted = sum(1 for e in entries if e.get("steer") == "mute")  # 0 until MUTE ships
+        draft = sum(1 for e in entries if e.get("confidence") == "draft")
+    except Exception:
+        pinned = muted = draft = 0
+
+    # Orphans: graph isolates ∩ never-recalled (curation_report has no graph awareness).
+    orphans = 0
+    try:
+        from .links import build_graph
+        from .soak import curation_report
+        from .telemetry import default_telemetry_dir
+
+        graph = build_graph(memory_dir, index_dir)
+        report = curation_report(memory_dir, default_telemetry_dir(memory_dir))
+        if graph is not None:
+            orphans = len(sorted(set(graph.isolates()) & set(report["never_recalled"])))
+    except Exception:
+        orphans = 0
+
+    # GOV-4: floor/corpus changed since this clone's watermark (read-only peek — never
+    # consumes the producer's surfaced-once semantics).
+    floor_line = "floor/corpus delta: no watermark baseline yet"
+    try:
+        from .session_start import floor_change_peek
+
+        peek = floor_change_peek(memory_dir, repo_root)
+        if peek is not None:
+            if any(peek.values()):
+                floor_line = (
+                    f"floor +{len(peek['floor_added'])}/−{len(peek['floor_removed'])}"
+                    f"/{len(peek['floor_edited'])} edited, corpus +{peek['corpus_added']}"
+                    f"/−{peek['corpus_removed']} since last session (→ review the git log)"
+                )
+            else:
+                floor_line = "floor/corpus unchanged since last session"
+    except Exception:
+        pass
+
+    parts = [
+        f"{contested} contested-unresolved (→ /hippo:resolve)",
+        f"{rule_conflicts} rule↔memory conflict(s) (→ /hippo:consolidate)",
+        f"{rot} rules-plane rot (edit the named file)",
+        f"{blind} blind spot(s) (→ /hippo:consolidate)",
+        f"{orphans} orphan(s) never recalled (→ /hippo:audit)",
+        f"{pinned} pinned / {muted} muted",
+        f"{draft} draft",
+        floor_line,
+    ]
+    status = "warn" if (contested or rule_conflicts or rot or blind or orphans) else "ok"
+    return status, "trust scorecard: " + " · ".join(parts) + "."
+
+
+def check_trust_scorecard(ctx: DoctorContext) -> Dict[str, str]:
+    """GOV-6: the consolidated corpus-health rollup — see ``_scorecard_message``."""
+    try:
+        status, message = _scorecard_message(ctx.memory_dir, ctx.repo_root)
+        return {"status": status, "message": message}
+    except Exception as exc:
+        return {"status": "warn", "message": f"trust scorecard failed: {exc}."}
+
+
+def check_steering(ctx: DoctorContext) -> Dict[str, str]:
+    """GOV-2: how many memories carry an author steer — the control axis made visible.
+
+    Informational (always ok) and manifest-only (no file reads). This line deliberately
+    pre-wires the shape MUTE will need when it lands (a muted memory must be COUNTED here,
+    never silently gone — inv3); today the only shipped mode is ``pin``.
+    """
+    try:
+        from .build_index import _load_manifest, default_index_dir
+
+        manifest = _load_manifest(default_index_dir(ctx.memory_dir))
+        if manifest is None:
+            return {
+                "status": "ok",
+                "message": "steering: no index built yet — pin counts appear after the first build.",
+            }
+        pinned = sorted(
+            str(e.get("name")) for e in manifest.get("entries", []) if e.get("steer") == "pin"
+        )
+        if not pinned:
+            return {"status": "ok", "message": "steering: no memories pinned."}
+        shown = ", ".join(pinned[:5]) + (", …" if len(pinned) > 5 else "")
+        return {
+            "status": "ok",
+            "message": f"steering: {len(pinned)} memory(ies) pinned (bounded recall lift, "
+            f"capped — never beats a genuinely stronger match): {shown}.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"steering check failed: {exc}."}
+
+
 def check_format_version(ctx: DoctorContext) -> Dict[str, str]:
     """BOTH format versions on one line: index ``schema_version`` and corpus format (COR-7).
 
@@ -1097,9 +1248,11 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("resolution", check_corpus_resolution),
     ("git_mode", check_git_mode),
     ("trust", check_trust),
+    ("trust_scorecard", check_trust_scorecard),  # GOV-6: the one-line rollup a lead scans first; the point-checks below are the drill-down
     ("integrity", check_integrity),
     ("index_corruption", check_index_corruption),
     ("index_count", check_index_count),
+    ("steering", check_steering),  # GOV-2: N pinned (pre-wires the mandatory MUTE count)
     ("hot_path_latency", check_hot_path_latency),
     ("recall_blind_spots", check_recall_blind_spots),
     ("injection_precision", check_injection_precision),

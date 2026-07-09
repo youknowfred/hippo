@@ -43,7 +43,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from .lint_floor import floor_producer
 from .lint_links import lint_links_producer
@@ -546,6 +546,228 @@ def rules_rot_producer(
         return None
 
 
+# GOV-1: how many contradiction pairs the inbox lists before folding into a count. Same
+# loud family as rules_conflict — a live contradiction means the model is being injected
+# both sides of a dispute, which should not wait for a nudge cadence.
+_MAX_CONTRADICTION_LINES = 4
+
+
+def contradiction_inbox_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """GOV-1: the standing contradiction inbox — every unresolved ``contradicts`` pair.
+
+    A ``contradicts`` edge deliberately demotes neither side (GRA-4), so before this its
+    only surface was the hot-path annotation, visible IF both sides co-surfaced in one
+    recall — a live conflict could sit unresolved forever. This enumerates ALL pairs
+    corpus-wide (``LinkGraph.all_typed_edges`` via ``resolve_view``) minus the per-clone
+    resolved ledger, and routes each to a per-item human verdict via /hippo:resolve —
+    nothing auto-picks a winner (inv4). T2 boundary: ``rules_conflict_producer`` above
+    already prints the GOVERNANCE-cited subset loudly, and producers share no state, so
+    this one re-derives that subset from ``conflict_radar`` and skips re-PRINTING those
+    pairs (no double nag) while still COUNTING them — the header is the whole inbox.
+    Read-only (inv1); empty-is-fine; off the hot path (inv6). ``ctx`` (LIF-6) is unused.
+    """
+    try:
+        from .resolve_view import unresolved_contradictions
+
+        inbox = unresolved_contradictions(memory_dir, repo_root=repo_root)
+        if not inbox:
+            return None
+        radar_pairs = set()
+        try:
+            from .rules_plane import conflict_radar
+
+            radar = conflict_radar(memory_dir, repo_root)
+            for c in radar["edge_conflicts"]:
+                if c.get("relation") == "contradicts":
+                    radar_pairs.add(tuple(sorted((c["by"], c["name"]))))
+        except Exception:
+            radar_pairs = set()
+        fresh = [item for item in inbox if tuple(item["pair"]) not in radar_pairs]
+        lines = [
+            f"⚖ Contradiction inbox — {len(inbox)} unresolved contradiction pair(s) in the "
+            "corpus. Decide per item via /hippo:resolve (nothing auto-picks a winner):"
+        ]
+        for item in fresh[:_MAX_CONTRADICTION_LINES]:
+            lines.append(f"  • {item['pair'][0]} ⇄ {item['pair'][1]}")
+        overflow = len(fresh) - _MAX_CONTRADICTION_LINES
+        if overflow > 0:
+            lines.append(f"  … and {overflow} more — run /hippo:resolve for the full list.")
+        skipped = len(inbox) - len(fresh)
+        if skipped > 0:
+            lines.append(
+                f"  ({skipped} pair(s) already shown by the rule↔memory conflict radar above)"
+            )
+        return "\n".join(lines)
+    except Exception:
+        return None
+
+
+# GOV-4: floor & corpus change governance — how many names each delta clause lists.
+_GOV4_WATERMARK_PREFIX = ".gov4-watermark-"
+_MAX_FLOOR_DELTA_NAMES = 6
+
+
+def _gov4_watermark_path(repo_root: str) -> Optional[str]:
+    """This clone's floor/corpus watermark path, or ``None`` when CLAUDE_PLUGIN_DATA is unset.
+
+    Same per-corpus key derivation as the nudge counters above. UNLIKE
+    ``_periodic_nudge_should_fire``, an unset data dir means SILENT (``None``), not
+    fire-every-session: without a durable baseline every session would scream
+    "everything changed" — noise, not legibility.
+    """
+    data_dir = os.environ.get("CLAUDE_PLUGIN_DATA") or ""
+    if not data_dir:
+        return None
+    import hashlib
+
+    key = hashlib.sha256(os.path.realpath(repo_root).encode("utf-8")).hexdigest()[:16]
+    return os.path.join(data_dir, f"{_GOV4_WATERMARK_PREFIX}{key}")
+
+
+def _gov4_snapshot(memory_dir: str) -> dict:
+    """The watermarked view of the corpus: floor pointer-set, corpus stems, floor hashes.
+
+    Git-free by design (a teammate's pull changes files with no known base commit; a
+    sorted-set diff needs no git log — this producer stays cheap). ``floor_hashes`` is a
+    WHOLE-FILE sha1 per floor pointer resolvable in the PROJECT tier — the manifest's
+    entry hash is name+description only, so it would miss exactly the body-edit case the
+    floor (the highest-trust, always-loaded surface) most needs caught. User/private-tier
+    floor pointers are membership-tracked only: they are this machine's own local files —
+    a pull can't change them silently.
+    """
+    import hashlib
+
+    from .provenance import _iter_memory_files
+    from .recall import fused_floor_names
+
+    floor = sorted(fused_floor_names(memory_dir))
+    try:
+        corpus = sorted(
+            os.path.splitext(os.path.basename(p))[0] for p in _iter_memory_files(memory_dir)
+        )
+    except Exception:
+        corpus = []
+    floor_hashes: Dict[str, str] = {}
+    for name in floor:
+        try:
+            with open(os.path.join(memory_dir, f"{name}.md"), "r", encoding="utf-8") as fh:
+                floor_hashes[name] = hashlib.sha1(fh.read().encode("utf-8")).hexdigest()
+        except Exception:
+            continue
+    return {"floor": floor, "corpus": corpus, "floor_hashes": floor_hashes}
+
+
+def _gov4_delta(old: dict, now: dict) -> dict:
+    """Pure sorted-set diff between two snapshots — the producer's and GOV-6's shared read."""
+    old_floor, now_floor = set(old.get("floor") or []), set(now.get("floor") or [])
+    old_hashes = old.get("floor_hashes") or {}
+    now_hashes = now.get("floor_hashes") or {}
+    return {
+        "floor_added": sorted(now_floor - old_floor),
+        "floor_removed": sorted(old_floor - now_floor),
+        "floor_edited": sorted(
+            n
+            for n in now_floor & old_floor
+            if n in old_hashes and n in now_hashes and old_hashes[n] != now_hashes[n]
+        ),
+        "corpus_added": len(set(now.get("corpus") or []) - set(old.get("corpus") or [])),
+        "corpus_removed": len(set(old.get("corpus") or []) - set(now.get("corpus") or [])),
+    }
+
+
+def floor_change_peek(memory_dir: str, repo_root: str) -> Optional[dict]:
+    """Read-only delta vs this clone's stored watermark; ``None`` when there is no watermark
+    home (CLAUDE_PLUGIN_DATA unset) or no baseline yet. NEVER writes — the doctor scorecard
+    (GOV-6) reads this without consuming the producer's surfaced-once semantics."""
+    try:
+        path = _gov4_watermark_path(repo_root)
+        if path is None or not os.path.isfile(path):
+            return None
+        with open(path, "r", encoding="utf-8") as fh:
+            old = json.load(fh)
+        if not isinstance(old, dict) or not isinstance(old.get("floor"), list):
+            return None
+        return _gov4_delta(old, _gov4_snapshot(memory_dir))
+    except Exception:
+        return None
+
+
+def floor_change_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """GOV-4: "changed since your last session here" — floor & corpus change governance.
+
+    The always-loaded floor is the highest-trust, least-reviewed surface: it changes
+    silently via git pull, and more generally a teammate's pull can add/remove memories
+    with no legible signal. This diffs the current floor pointer-set (all recall tiers),
+    the project corpus stem-set, and each project-tier floor pointer's WHOLE-FILE hash (a
+    silent body edit to an always-loaded memory is exactly the risk) against a per-clone
+    gitignored watermark, then advances the watermark AFTER surfacing — a seen change
+    stays quiet (no re-nag), an unseen one waits. First run writes the baseline silently.
+    Read-only over the corpus; the watermark is derived per-clone state (inv1); loud when
+    something changed (inv3); ``ctx`` (LIF-6) is unused.
+    """
+    try:
+        path = _gov4_watermark_path(repo_root)
+        if path is None:
+            return None
+        now = _gov4_snapshot(memory_dir)
+
+        def _persist() -> None:
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as fh:
+                    json.dump(now, fh)
+            except Exception:
+                pass
+
+        old: Optional[dict] = None
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            if isinstance(data, dict) and isinstance(data.get("floor"), list):
+                old = data
+        except Exception:
+            old = None
+        if old is None:
+            _persist()  # first run (or corrupt watermark): baseline silently, no block
+            return None
+        delta = _gov4_delta(old, now)
+        if not any(delta.values()):
+            return None  # nothing changed — and nothing to persist either
+        _persist()  # advance AFTER surfacing: a seen change stays quiet from here on
+        lines = ["📜 Corpus changed since this clone's last session — review before relying:"]
+        if delta["floor_added"] or delta["floor_removed"]:
+            bits = []
+            if delta["floor_added"]:
+                shown = ", ".join(delta["floor_added"][:_MAX_FLOOR_DELTA_NAMES])
+                bits.append(f"+{len(delta['floor_added'])} ({shown})")
+            if delta["floor_removed"]:
+                shown = ", ".join(delta["floor_removed"][:_MAX_FLOOR_DELTA_NAMES])
+                bits.append(f"−{len(delta['floor_removed'])} ({shown})")
+            lines.append(
+                f"  • always-loaded floor: {' / '.join(bits)} — the highest-trust surface; "
+                "review with `git log -p -- .claude/memory/MEMORY.md`"
+            )
+        if delta["floor_edited"]:
+            shown = ", ".join(delta["floor_edited"][:_MAX_FLOOR_DELTA_NAMES])
+            lines.append(
+                f"  • floor memory edited in place: {shown} — body changed without an "
+                "add/remove; re-read before relying"
+            )
+        if delta["corpus_added"] or delta["corpus_removed"]:
+            lines.append(
+                f"  • corpus: added {delta['corpus_added']} / removed "
+                f"{delta['corpus_removed']} memory file(s) — see "
+                "`git log --stat -- .claude/memory/`"
+            )
+        return "\n".join(lines)
+    except Exception:
+        return None
+
+
 # SIG-1: how many relevant-to-current-work memories the positive producer lists, and how far
 # each description is trimmed. A positive block stays FOCUSED (a handful of top matches), unlike
 # the warning producers whose count is the point — so this cap is tighter than _MAX_ITEMS_PER_PRODUCER.
@@ -778,6 +1000,8 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("unresolvable_baseline", unresolvable_baseline_producer),  # legibility for find_stale's sha-fallback path
     ("rules_conflict", rules_conflict_producer),  # RUL-1: governance cites a memory the corpus disputes (superseded/contradicted/never-recalled)
     ("rules_rot", rules_rot_producer),  # RUL-2: citation-rot/staleness over the always-loaded rules plane itself
+    ("contradiction_inbox", contradiction_inbox_producer),  # GOV-1: every unresolved contradicts pair, not just the co-surfaced/governance-cited ones
+    ("floor_change", floor_change_producer),  # GOV-4: floor/corpus changed since this clone's last session (per-clone watermark; a seen change stays quiet)
     ("relevant_to_work", relevant_to_work_producer),  # SIG-1: the first POSITIVE block — memories about the files you're editing
     ("resume_card", resume_card_producer),  # SIG-2: "where was I" — replay the last session from the episode buffer
     ("git_recent", git_recent_producer),

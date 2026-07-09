@@ -1188,11 +1188,14 @@ def test_is_memory_filename_excludes_conventions_md():
     assert P._is_memory_filename("a.md") is True
 
 
-def test_corpus_format_version_is_2_for_typed_edges():
-    """GRA-4 is the corpus's first real format change: typed frontmatter relations
-    (supersedes/contradicts/refines) are a v2 convention. Pinned so a future bump is a
-    deliberate act with release-notes migration steps, never an accident."""
-    assert P.CORPUS_FORMAT_VERSION == 2
+def test_corpus_format_version_is_4_for_confidence():
+    """Each corpus format bump is a deliberate act with release-notes migration steps,
+    never an accident — pinned per bump. v2 = GRA-4 typed frontmatter relations
+    (supersedes/contradicts/refines); v3 = GOV-2 `steer: pin` (the author's bounded,
+    always-on recall lift; closed enum, MUTE deliberately excluded until the salience
+    keystone); v4 = GOV-7 `confidence: draft|verified|authoritative` (the author's trust
+    dial — display-only, never a ranking input)."""
+    assert P.CORPUS_FORMAT_VERSION == 4
 
 
 # --------------------------------------------------------------------------- #

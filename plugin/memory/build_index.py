@@ -55,6 +55,14 @@ _INDEX_DIRNAME = ".memory-index"
 # committer epoch — see ``staleness.read_source_commit_time`` — copied into the manifest at
 # build time) so recall's optional recency prior is pure arithmetic on already-loaded index
 # state, never a git call on the hot path.
+# v4 (RCL-6, evidence snippet): body_chunks entries regained "text"; manifest gained
+# "head_commit".
+# v5 (GOV-2, steer:pin): entries gained "steer" (the author's bounded always-on recall
+# lift, read from frontmatter by ``_extract_steer``) so the hot path reads steering off
+# the already-loaded manifest and never re-reads files per prompt.
+# v6 (GOV-7, confidence tier): entries gained "confidence" (the author's trust dial —
+# draft|verified|authoritative, read by ``_extract_confidence``) so the inject-time render
+# never re-reads a file per hit. Display-only: recall's scoring path never reads it.
 # COR-7 made this constant LOAD-BEARING: ``_load_manifest`` (the one gate every manifest
 # consumer goes through — build_index's incremental reuse, refresh_index's hash fast-path,
 # load_index and therefore recall) treats a manifest whose ``schema_version`` differs from
@@ -64,7 +72,7 @@ _INDEX_DIRNAME = ".memory-index"
 # separately (``provenance.CORPUS_FORMAT_VERSION`` + the ``.claude/memory/.format``
 # marker) — the corpus is authoritative and is never auto-migrated; see doctor's
 # ``check_format_version`` and plugin/memory/README.md.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 # Public (not underscore-prefixed): doctor's non-English-corpus check (RET-3) compares a
 # manifest's recorded model against this constant to decide whether the CURRENTLY configured
 # model is the English default vs. an already-switched multilingual/other model.
@@ -501,6 +509,56 @@ def _extract_invalid_after(fm: dict) -> Optional[str]:
     return None
 
 
+# GOV-2: the closed set of steer modes. `pin` is the only shipped mode — MUTE stays
+# deferred until the salience keystone (SIG-5/T7) decides the down-weight class, and when
+# it lands it must be COUNTED in doctor, never a silent full-suppress (inv3).
+_VALID_STEER = ("pin",)
+
+
+def _extract_steer(fm: dict) -> Optional[str]:
+    """The memory's ``steer`` mode (top-level or under ``metadata:``), or ``None``.
+
+    Mirrors ``_extract_invalid_after``'s exact top-level-then-``metadata:`` fallback — the
+    corpus uses both frontmatter schemas, and a top-level-only read would leave steering
+    PERMANENTLY inert for the nested one. The value is a CLOSED enum (``_VALID_STEER``),
+    never a user-supplied float: an unknown/junk value reads as ``None`` (unsteered),
+    fail-open, so a typo can never become an accidental ranking knob and the boost's cap
+    lives in code (recall's ``_pin_boost``), not in user data.
+    """
+    if not isinstance(fm, dict):
+        return None
+    val = fm.get("steer")
+    if not val:
+        meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+        val = meta.get("steer")
+    if isinstance(val, str) and val.strip().lower() in _VALID_STEER:
+        return val.strip().lower()
+    return None
+
+
+# GOV-7: the closed set of author confidence tiers. Display-only at inject/recall_view —
+# NEVER a ranking input (the popularity=correctness trap); an unknown value reads as
+# unset, i.e. today's default.
+_VALID_CONFIDENCE = ("draft", "verified", "authoritative")
+
+
+def _extract_confidence(fm: dict) -> Optional[str]:
+    """The memory's ``confidence`` tier (top-level or under ``metadata:``), or ``None``.
+
+    Same both-schema read as ``_extract_invalid_after``/``_extract_steer``; same
+    closed-enum fail-open posture as steer — junk reads as unset, never a passthrough.
+    """
+    if not isinstance(fm, dict):
+        return None
+    val = fm.get("confidence")
+    if not val:
+        meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+        val = meta.get("confidence")
+    if isinstance(val, str) and val.strip().lower() in _VALID_CONFIDENCE:
+        return val.strip().lower()
+    return None
+
+
 def compute_corpus(
     memory_dir: str,
     *,
@@ -509,7 +567,8 @@ def compute_corpus(
     body_chunks_out: Optional[Dict[int, List[dict]]] = None,
 ) -> List[dict]:
     """Scan the corpus -> ordered entries
-    ``{name, file, doc_text, hash, tokens, invalid_after, source_commit_time}``.
+    ``{name, file, doc_text, description, hash, tokens, invalid_after, source_commit_time,
+    steer, confidence}``.
 
     Order is deterministic (sorted filenames, from ``_iter_memory_files``). Re-scanned FRESH
     on every call (every file re-read from disk) — only the dense embedding ROW is
@@ -568,6 +627,11 @@ def compute_corpus(
                 "tokens": tokenize(doc_text),
                 "invalid_after": _extract_invalid_after(fm),
                 "source_commit_time": read_source_commit_time(text),
+                # GOV-2: carried in the manifest so recall's pin boost is pure arithmetic
+                # on already-loaded index state — never a file re-read on the hot path.
+                "steer": _extract_steer(fm),
+                # GOV-7: carried so the inject-time marker never re-reads a file per hit.
+                "confidence": _extract_confidence(fm),
             }
         )
     return entries
@@ -1310,11 +1374,23 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
             # stale baseline forever on an otherwise-quiet corpus.
             old_sct = [e.get("source_commit_time") for e in old.get("entries", [])]
             now_sct = [e.get("source_commit_time") for e in entries_now]
+            # GOV-2: steer is the THIRD metadata-not-in-doc_text field needing this exact
+            # starvation-proofing — pinning/unpinning never touches name/description, so a
+            # hash-only compare would leave the manifest's steer stale forever on an
+            # otherwise-quiet corpus and the boost would never engage (or never release).
+            old_steer = [e.get("steer") for e in old.get("entries", [])]
+            now_steer = [e.get("steer") for e in entries_now]
+            # GOV-7: confidence is the FOURTH — an author re-grading draft→verified on a
+            # quiet corpus must reach the inject-time marker, both directions.
+            old_conf = [e.get("confidence") for e in old.get("entries", [])]
+            now_conf = [e.get("confidence") for e in entries_now]
             corpus_unchanged = (
                 old_hashes == now_hashes
                 and old_chunk_hashes == now_chunk_hashes
                 and old_invalid == now_invalid
                 and old_sct == now_sct
+                and old_steer == now_steer
+                and old_conf == now_conf
             )
             if corpus_unchanged and (old.get("dense_ready") or dense_disabled()):
                 # GRA-6: "corpus unchanged" above compares doc_text hashes, which BODY

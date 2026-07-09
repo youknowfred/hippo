@@ -58,7 +58,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 from .provenance import _is_memory_filename, _iter_memory_files, parse_frontmatter
 
@@ -359,6 +359,23 @@ class LinkGraph:
         """
         s = self._node(name)
         return set(self._typed_inbound.get(s, {}).get(relation, set())) if s else set()
+
+    def all_typed_edges(self, relation: str) -> List[Tuple[str, str]]:
+        """Every resolved ``(src, tgt)`` pair carrying ``relation``, corpus-wide, sorted.
+
+        GOV-1's enumerator — the per-node accessors above answer "who relates to THIS
+        stem?", but nothing walked the typed map corpus-wide, so a live ``contradicts``
+        pair was only ever visible when both sides co-surfaced in one recall. Directional:
+        ``(a, b)`` means ``a`` DECLARES the relation toward ``b`` (a mutual declaration
+        yields both tuples — the consumer decides whether to collapse). Deliberately NOT
+        built on ``typed_unresolved``: that map records targets ``resolve()`` could not map
+        to a corpus file (dangling or ambiguous — the linter's concern), not edges awaiting
+        a verdict. Sorted for deterministic producer/doctor output; ``[]`` for a relation
+        no stem carries.
+        """
+        return sorted(
+            (src, tgt) for src, rels in self.typed.items() for tgt in rels.get(relation, set())
+        )
 
     def traverse(self, name: str, hops: int = 1) -> Set[str]:
         """Stems reachable from ``name`` within ``hops`` outbound edges (excludes ``name``)."""
