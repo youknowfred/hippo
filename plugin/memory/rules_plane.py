@@ -19,6 +19,10 @@ convention, promoted to importable API) plus the read-only joins built over it:
     rebuildable side-index (inv1) that lets recall surface a governance section as a
     labelled low-priority "(rule)" POINTER when genuinely relevant — no import, no
     duplication, the rules plane stays the authority for its own content.
+  - ``derive_paths_globs`` — the RUL-6/RUL-7 shared memory→rule scoping derivation:
+    conservative ``paths:`` globs from a memory's concrete ``cited_paths``, with the
+    over-scoping cap (a derived scope must never balloon into a near-unscoped
+    always-load).
 
 Relationship to the two pre-existing scan surfaces (deliberately NOT merged, inv5):
 ``archive._SCAN_TARGETS`` is the ARCHIVE-PROTECTION surface (adds ``docs/prompts``, omits
@@ -292,10 +296,15 @@ def rule_paths_globs(text: str) -> List[str]:
 
 
 def _rule_scoped_files(repo_root: str) -> List[str]:
-    """Absolute paths of the ``.claude/rules/*.md`` files only (the ``paths:``-bearing
-    subset of the governance plane)."""
+    """Absolute paths of the ``paths:``-bearing governance files: ``.claude/rules/*.md``
+    plus ``AGENTS.md`` when present (RUL-7 — the export stamps derived ``paths:`` globs
+    into its frontmatter; without this widening the dead-glob leg never sees them)."""
     try:
-        return [str(p) for p in sorted(Path(repo_root).glob(".claude/rules/*.md")) if p.is_file()]
+        out = [str(p) for p in sorted(Path(repo_root).glob(".claude/rules/*.md")) if p.is_file()]
+        agents = Path(repo_root) / "AGENTS.md"
+        if agents.is_file():
+            out.append(str(agents))
+        return out
     except Exception:
         return []
 
@@ -320,6 +329,79 @@ def _repo_paths_for_globs(repo_root: str, repo_files: Set[str]) -> Set[str]:
     except Exception:
         pass
     return paths
+
+
+# A collapsed glob may match at most this many times the cited files it stands for;
+# beyond that the derivation falls back to literal paths. The cap is the lossy-derivation
+# guard RUL-6 names: a promoted/exported scope must never become a near-unscoped
+# always-load because a directory happened to share an extension.
+DERIVE_OVERSCOPE_FACTOR = 3
+
+
+def derive_paths_globs(cited_paths: List[str], universe: Set[str]) -> tuple:
+    """The RUL-6/RUL-7 shared derivation: conservative ``paths:`` globs from a memory's
+    concrete ``cited_paths``.
+
+    Rules, most-conservative-first:
+
+    - a path absent from ``universe`` (tracked ∪ untracked-unignored) is flagged
+      ``missing`` and excluded — a derived scope is born alive or not at all (the
+      memory-side staleness machinery owns moved-citation findings);
+    - a SINGLE citation stays a literal path, never a directory glob — a literal is a
+      glob that matches exactly itself, so drift detection is per-file and exact;
+    - 2+ citations sharing one directory AND one extension may collapse to
+      ``<dir>/*<ext>``, but only when the collapse stays within the over-scoping cap
+      (match-set ≤ ``DERIVE_OVERSCOPE_FACTOR`` × the cited files it stands for);
+      over the cap → literal paths + an ``over_scope`` flag;
+    - ``**`` is never emitted; collapse never crosses a directory boundary;
+    - empty ``universe`` (no git oracle) → the cited paths as literals + one
+      ``no_oracle`` flag (nothing to validate against — mirror ``rules_rot``'s
+      no-oracle silence rather than guessing).
+
+    Returns ``(globs, flags)``: sorted de-duplicated glob strings plus
+    ``[{"kind": "missing"|"over_scope"|"no_oracle", ...}]``. Never raises.
+    """
+    try:
+        cited = sorted({p.strip() for p in cited_paths if isinstance(p, str) and p.strip()})
+        if not cited:
+            return [], []
+        if not universe:
+            return cited, [{"kind": "no_oracle"}]
+        flags: List[dict] = []
+        live: List[str] = []
+        for p in cited:
+            if p in universe:
+                live.append(p)
+            else:
+                flags.append({"kind": "missing", "path": p})
+        groups: Dict[tuple, List[str]] = {}
+        for p in live:
+            d, base = os.path.split(p)
+            _root, ext = os.path.splitext(base)
+            groups.setdefault((d, ext), []).append(p)
+        globs: Set[str] = set()
+        for (d, ext), members in sorted(groups.items()):
+            if len(members) < 2:
+                globs.update(members)
+                continue
+            candidate = (d + "/" if d else "") + "*" + ext
+            try:
+                rx = _glob_to_re(candidate)
+                matched = sum(1 for u in universe if rx.match(u))
+            except Exception:
+                globs.update(members)
+                continue
+            if matched <= DERIVE_OVERSCOPE_FACTOR * len(members):
+                globs.add(candidate)
+            else:
+                flags.append(
+                    {"kind": "over_scope", "glob": candidate,
+                     "matched": matched, "cited": len(members)}
+                )
+                globs.update(members)
+        return sorted(globs), flags
+    except Exception:
+        return [], [{"kind": "no_oracle"}]
 
 
 def rules_rot(repo_root: str) -> dict:
