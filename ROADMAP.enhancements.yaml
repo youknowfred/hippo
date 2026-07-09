@@ -1061,7 +1061,7 @@ workstreams:
         title: "steer: pin (then mute) — the missing control axis"
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: trust, verdict: RESHAPE (ship PIN first; defer MUTE)}
         problem: >-
           Users can only add or delete — there is no way to say "surface this more

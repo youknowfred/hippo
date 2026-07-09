@@ -442,6 +442,37 @@ def check_index_count(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"index-count check failed: {exc}."}
 
 
+def check_steering(ctx: DoctorContext) -> Dict[str, str]:
+    """GOV-2: how many memories carry an author steer — the control axis made visible.
+
+    Informational (always ok) and manifest-only (no file reads). This line deliberately
+    pre-wires the shape MUTE will need when it lands (a muted memory must be COUNTED here,
+    never silently gone — inv3); today the only shipped mode is ``pin``.
+    """
+    try:
+        from .build_index import _load_manifest, default_index_dir
+
+        manifest = _load_manifest(default_index_dir(ctx.memory_dir))
+        if manifest is None:
+            return {
+                "status": "ok",
+                "message": "steering: no index built yet — pin counts appear after the first build.",
+            }
+        pinned = sorted(
+            str(e.get("name")) for e in manifest.get("entries", []) if e.get("steer") == "pin"
+        )
+        if not pinned:
+            return {"status": "ok", "message": "steering: no memories pinned."}
+        shown = ", ".join(pinned[:5]) + (", …" if len(pinned) > 5 else "")
+        return {
+            "status": "ok",
+            "message": f"steering: {len(pinned)} memory(ies) pinned (bounded recall lift, "
+            f"capped — never beats a genuinely stronger match): {shown}.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"steering check failed: {exc}."}
+
+
 def check_format_version(ctx: DoctorContext) -> Dict[str, str]:
     """BOTH format versions on one line: index ``schema_version`` and corpus format (COR-7).
 
@@ -1100,6 +1131,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("integrity", check_integrity),
     ("index_corruption", check_index_corruption),
     ("index_count", check_index_count),
+    ("steering", check_steering),  # GOV-2: N pinned (pre-wires the mandatory MUTE count)
     ("hot_path_latency", check_hot_path_latency),
     ("recall_blind_spots", check_recall_blind_spots),
     ("injection_precision", check_injection_precision),

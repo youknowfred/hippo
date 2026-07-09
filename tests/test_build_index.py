@@ -625,6 +625,82 @@ def test_refresh_index_picks_up_metadata_only_invalid_after_change(tmp_path, mon
 
 
 # --------------------------------------------------------------------------- #
+# GOV-2: steer ingestion — the manifest-level half of steer:pin. Mirrors the
+# invalid_after family above exactly: same top-level/nested-under-metadata read
+# contract (_extract_steer), same "metadata never perturbs doc_text hash"
+# starvation-proofing in refresh_index. Plus the closed-enum guard: an unknown
+# steer value reads as None (unsteered), never a passthrough ranking knob.
+# --------------------------------------------------------------------------- #
+def test_compute_corpus_steer_absent_by_default(tmp_path):
+    md = str(tmp_path / "memory")
+    _write_corpus(md, {"a.md": "alpha"})
+    assert B.compute_corpus(md)[0]["steer"] is None
+
+
+def test_compute_corpus_reads_steer_top_level_and_nested(tmp_path):
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: a\ndescription: "alpha"\nsteer: pin\n---\nbody\n')
+    with open(os.path.join(md, "b.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: b\ndescription: "beta"\nmetadata:\n  steer: pin\n---\nbody\n')
+    by_name = {e["name"]: e["steer"] for e in B.compute_corpus(md)}
+    assert by_name == {"a": "pin", "b": "pin"}
+
+
+def test_compute_corpus_steer_is_a_closed_enum(tmp_path):
+    """A junk/unknown steer value reads as None (unsteered, fail-open) — a typo can never
+    become an accidental ranking knob, and no user-supplied float ever reaches recall."""
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    for name, val in (("a", "mute"), ("b", "2.5"), ("c", "[pin]"), ("d", '"PIN "')):
+        with open(os.path.join(md, f"{name}.md"), "w", encoding="utf-8") as fh:
+            fh.write(f'---\nname: {name}\ndescription: "d"\nsteer: {val}\n---\nbody\n')
+    by_name = {e["name"]: e["steer"] for e in B.compute_corpus(md)}
+    # "PIN " normalizes (case/whitespace) to the shipped mode; everything else drops.
+    assert by_name == {"a": None, "b": None, "c": None, "d": "pin"}
+
+
+def test_build_index_persists_steer_into_manifest(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    os.makedirs(md, exist_ok=True)
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: a\ndescription: "alpha"\nsteer: pin\n---\nbody\n')
+    manifest = B.build_index(md, idx)
+    assert manifest["entries"][0]["steer"] == "pin"
+    assert manifest["schema_version"] == B.SCHEMA_VERSION
+
+
+def test_refresh_index_picks_up_metadata_only_steer_change(tmp_path, monkeypatch):
+    """GOV-2: steer never perturbs a doc_text/body hash, so the unchanged-corpus
+    short-circuit must compare it explicitly — otherwise pinning (or UNpinning) a memory
+    on an otherwise-quiet corpus would be starved out of the index forever and the boost
+    would never engage (or never release)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha", "b.md": "beta"})
+    B.build_index(md, idx)
+    assert all(e.get("steer") is None for e in B.load_index(idx).entries)
+
+    # Pin a.md WITHOUT touching its description or body (metadata-only edit — neither the
+    # doc_text hash nor any body-chunk hash moves, so ONLY the steer compare can rescue it).
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: a\ndescription: "alpha"\ntype: project\nsteer: pin\n---\nbody text\n')
+    B.refresh_index(md, idx)
+    by_name = {e["name"]: e.get("steer") for e in B.load_index(idx).entries}
+    assert by_name["a"] == "pin"  # pinned -> propagated
+
+    # the reverse direction too: unpinning must not be no-op'd away either
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem("a", "alpha"))
+    B.refresh_index(md, idx)
+    assert all(e.get("steer") is None for e in B.load_index(idx).entries)
+
+
+# --------------------------------------------------------------------------- #
 # RET-5: source_commit_time ingestion — the manifest-level half of the recency prior.
 # Mirrors the invalid_after tests above exactly: same top-level/nested-under-metadata
 # read contract (staleness.read_source_commit_time), same "metadata never perturbs
@@ -1266,10 +1342,10 @@ def test_build_index_manifest_carries_body_chunks_block(tmp_path, monkeypatch):
     assert on_disk["body_chunks"] == chunks
 
     # The entries list itself is EXACTLY the pre-RET-2 shape plus RET-5's
-    # source_commit_time (no OTHER new keys leaked onto it).
+    # source_commit_time and GOV-2's steer (no OTHER new keys leaked onto it).
     assert set(manifest["entries"][0].keys()) == {
         "name", "file", "doc_text", "description", "hash", "tokens", "invalid_after",
-        "source_commit_time", "row",
+        "source_commit_time", "steer", "row",
     }
 
 

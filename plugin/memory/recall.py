@@ -138,6 +138,31 @@ _INVALIDATION_RECENT_DAYS = 30.0
 # no-demotion/no-annotation, never a corpus read per prompt.
 _SUPERSEDED_PENALTY = 0.5
 
+# GOV-2: steer:pin — the author's bounded, ALWAYS-ON relevance nudge, the exact bounded-
+# multiplier style of the two penalties above (real promotion, can reorder the top-k and
+# compete for graph-expansion seeds — never a reserved slot). Deliberately NOT part of
+# _apply_salience: salience is default-OFF behind HIPPO_SALIENCE, while pin is the user's
+# explicit per-item control and must work out of the box. The multiplier is capped small —
+# ~1.2 lifts a borderline candidate over a near-tie but is far short of the multi-x gaps a
+# genuine relevance difference produces in RRF scores, so a pinned memory can never beat a
+# strong organic hit on pin alone. The value lives in code (env-overridable), NEVER in
+# user data (`steer` is a closed enum — see build_index._extract_steer). MUTE (the
+# down-weight) stays deferred on the salience keystone (SIG-5/T7); when it lands it must
+# be counted in doctor, never a silent full-suppress.
+_PIN_BOOST = 1.2  # override: HIPPO_PIN_BOOST
+
+
+def _pin_boost() -> float:
+    """``HIPPO_PIN_BOOST`` override; malformed/absent -> the module default. Never raises."""
+    raw = os.environ.get("HIPPO_PIN_BOOST")
+    if raw is None or not raw.strip():
+        return _PIN_BOOST
+    try:
+        return float(raw)
+    except ValueError:
+        return _PIN_BOOST
+
+
 # Mid-session drift (COR-4) — a stat+reread per entry is cheap, but bound it so a huge
 # corpus can never turn the hot path into an O(corpus) disk scan of unbounded size.
 _MAX_DRIFT_CHECKS = 200
@@ -1946,6 +1971,12 @@ def recall(
             adj_score = score * _INVALIDATION_PENALTY if state == "recent" else score
             if i in superseded_by:
                 adj_score *= _SUPERSEDED_PENALTY
+            # GOV-2: the pin boost lives HERE in the base loop (not _apply_salience) so it
+            # is always-on, and pre-cut so a pinned memory competes for graph-expansion
+            # seeds exactly like the penalties do. An unpinned corpus takes no multiply at
+            # all — output stays byte-identical to before this item.
+            if entries[i].get("steer") == "pin":
+                adj_score *= _pin_boost()
             penalized.append((i, adj_score, state))
         penalized.sort(key=lambda triple: triple[1], reverse=True)
 
@@ -2093,6 +2124,11 @@ def recall(
                     # the components without branching on the flag itself (COR-8 true-score
                     # discipline: no fabricated numbers, an honest None beats a fake 0).
                     "salience": salience_components.get(i),
+                    # GOV-2: the steer mode behind this result's score — a DISTINCT key
+                    # (never overloaded onto `salience`, which is None when that flag is
+                    # off) so recall_view/GOV-5 can echo "pinned" legibly (COR-8). None for
+                    # an unsteered memory; rule pointers never carry steer at all.
+                    "steer": e.get("steer"),
                     # TEA-1/TEA-3: corpus-of-origin provenance — ALWAYS present, same
                     # no-key-branching convention as "via"/"note". "project" (or None on the
                     # single-corpus fast path) for the git-native in-repo corpus; "user" for

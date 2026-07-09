@@ -737,6 +737,109 @@ def test_recall_contradicts_annotates_without_demotion(tmp_path, monkeypatch):
     assert line.endswith("[contradicts bluegreen_deploy — verify]")
 
 
+# --------------------------------------------------------------------------- #
+# GOV-2: steer:pin — a bounded, capped, ALWAYS-ON lift in the BASE penalized loop
+# (beside the invalidation/supersession penalties, never inside default-off salience).
+# --------------------------------------------------------------------------- #
+def test_recall_pin_lifts_borderline_memory_into_topk(tmp_path, monkeypatch):
+    """The acceptance case: a one-line steer:pin frontmatter diff lifts a borderline
+    memory into the top-k, the emitted score IS the boosted true score (COR-8), and the
+    boost rides the result dict as a DISTINCT `steer` key (never overloaded on salience)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    words = ["alpha", "beta", "gamma", "delta", "epsilon"]
+    _write_corpus(md, {f"e{i}.md": " ".join(words[:i]) for i in range(1, 6)})
+    B.build_index(md, idx)
+    query = " ".join(words)
+    k = 2
+    full = [r["name"] for r in R.recall(query, k=10, memory_dir=md, index_dir=idx)]
+    borderline = full[k]  # the organic 3rd-place candidate sits just outside top-2
+    assert borderline not in full[:k]
+
+    # Pin it — the exact reviewable one-line diff the acceptance criterion names.
+    path = os.path.join(md, f"{borderline}.md")
+    with open(path, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text.replace("---\n", "---\nsteer: pin\n", 1))
+    B.refresh_index(md, idx)
+
+    index = B.load_index(idx)
+    after = R.recall(query, k=k, index=index)
+    by_name = {r["name"]: r for r in after}
+    assert borderline in by_name  # lifted into the top-k
+
+    # COR-8: the emitted score is the TRUE boosted fused score, recomputed independently.
+    q_tokens = R.tokenize(query)
+    fused = dict(R._rrf_fuse([R._bm25_rank(q_tokens, index.entries)]))
+    i_b = next(i for i, e in enumerate(index.entries) if e["name"] == borderline)
+    assert by_name[borderline]["score"] == round(fused[i_b] * R._pin_boost(), 6)
+    assert by_name[borderline]["steer"] == "pin"
+    assert all(r["steer"] is None for r in after if r["name"] != borderline)
+
+
+def test_recall_pin_cannot_beat_strong_organic_hit(monkeypatch):
+    """The bound: pin breaks near-ties, it does not override relevance. A pinned memory
+    with a single weak lexical signal never outranks a hit backed by BOTH backends — the
+    ~1.2 cap is far below the multi-x gap cross-backend agreement produces in RRF scores."""
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    qvec = np.zeros(8, dtype="float32")
+    qvec[0] = 1.0
+    weak_vec = np.zeros(8, dtype="float32")
+    weak_vec[1] = 1.0  # orthogonal to the query -> below the dense floor, bm25-only
+    entries = [
+        {
+            "name": "strong", "file": "strong.md", "row": 0, "hash": "h1",
+            "doc_text": "canary deploy rollout traffic",
+            "description": "canary deploy rollout traffic shifting",
+            "tokens": ["canary", "deploy", "rollout", "traffic"],
+        },
+        {
+            "name": "weak_pinned", "file": "weak_pinned.md", "row": 1, "hash": "h2",
+            "doc_text": "deploy notes", "description": "deploy notes",
+            "tokens": ["deploy", "notes"], "steer": "pin",
+        },
+    ]
+    manifest = {
+        "schema_version": B.SCHEMA_VERSION, "model": None, "dense_ready": True,
+        "dim": 8, "count": 2, "entries": entries,
+    }
+    index = B.LoadedIndex(manifest, np.stack([qvec, weak_vec]))
+    assert index.dense_ready
+    monkeypatch.setattr(R, "embed_query", lambda q, allow_download=False: qvec)
+    res = R.recall("canary deploy rollout traffic", k=2, index=index)
+    assert res and res[0]["name"] == "strong"  # pin never overrides genuine relevance
+    if len(res) > 1:  # the weak hit may also be knee-cut entirely — either way, bounded
+        assert res[1]["name"] == "weak_pinned"
+        assert res[1]["score"] < res[0]["score"]
+
+
+def test_recall_unpinned_corpus_takes_no_boost_multiply(tmp_path, monkeypatch):
+    """An unpinned corpus pays nothing: scores equal the plain fused values exactly (no
+    no-op float multiply even), so pre-GOV-2 output is byte-identical."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha beta", "b.md": "alpha beta gamma"})
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    res = R.recall("alpha beta gamma", k=2, index=index)
+    q_tokens = R.tokenize("alpha beta gamma")
+    fused = dict(R._rrf_fuse([R._bm25_rank(q_tokens, index.entries)]))
+    names = {e["name"]: i for i, e in enumerate(index.entries)}
+    for r in res:
+        assert r["score"] == round(fused[names[r["name"]]], 6)
+        assert r["steer"] is None
+
+
+def test_pin_boost_env_override_and_default(monkeypatch):
+    monkeypatch.delenv("HIPPO_PIN_BOOST", raising=False)
+    assert R._pin_boost() == R._PIN_BOOST == 1.2
+    monkeypatch.setenv("HIPPO_PIN_BOOST", "1.05")
+    assert R._pin_boost() == 1.05
+    monkeypatch.setenv("HIPPO_PIN_BOOST", "not-a-float")
+    assert R._pin_boost() == R._PIN_BOOST
+
+
 def test_recall_refines_is_navigational_only(tmp_path, monkeypatch):
     """refines carries NO ranking effect and NO annotation — parse/persist/lint only."""
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")

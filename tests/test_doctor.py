@@ -797,3 +797,45 @@ def test_plugin_version_not_bootstrapped(tmp_path):
 
 def test_plugin_version_registered_in_checks():
     assert "plugin_version" in [label for label, _ in D.CHECKS]
+
+
+# --------------------------------------------------------------------------- #
+# GOV-2: the steering count — "N memories pinned", the control axis made visible
+# (pre-wires the mandatory MUTE count for when the down-weight ships).
+# --------------------------------------------------------------------------- #
+def _steered_corpus(tmp_path, monkeypatch, *, pin_names=()):
+    import memory.build_index as B
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "smem")
+    idx_default = B.default_index_dir(md)
+    os.makedirs(md, exist_ok=True)
+    for name in ("one", "two", "three"):
+        steer = "steer: pin\n" if name in pin_names else ""
+        with open(os.path.join(md, f"{name}.md"), "w", encoding="utf-8") as fh:
+            fh.write(f'---\nname: {name}\ndescription: "d {name}"\n{steer}---\nbody\n')
+    B.build_index(md, idx_default)
+    return md
+
+
+def test_steering_counts_pinned_memories(tmp_path, monkeypatch):
+    md = _steered_corpus(tmp_path, monkeypatch, pin_names=("two", "three"))
+    r = D.check_steering(_ctx(md, str(tmp_path)))
+    assert r["status"] == "ok"
+    assert "steering: 2 memory(ies) pinned" in r["message"]
+    assert "three, two" in r["message"]  # sorted, deterministic
+
+
+def test_steering_ok_when_nothing_pinned(tmp_path, monkeypatch):
+    md = _steered_corpus(tmp_path, monkeypatch)
+    r = D.check_steering(_ctx(md, str(tmp_path)))
+    assert r["status"] == "ok" and "no memories pinned" in r["message"]
+
+
+def test_steering_ok_when_no_index_yet(tmp_path):
+    r = D.check_steering(_ctx(str(tmp_path / "empty"), str(tmp_path)))
+    assert r["status"] == "ok" and "no index built yet" in r["message"]
+
+
+def test_steering_registered_in_checks():
+    assert "steering" in [label for label, _ in D.CHECKS]
