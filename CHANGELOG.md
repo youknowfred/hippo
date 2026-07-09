@@ -7,6 +7,104 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.5.0 — 2026-07-09 — "Knowledge that grows itself"
+
+**re-bootstrap: no** — `plugin/requirements.txt` is unchanged across every tier below; the code
+swap on update is sufficient. Persisted-shape changes since v0.7.0, each a clean break per the
+usual discipline (stamp-only additive corpus bumps, one full index rebuild via the manifest
+schema gate — no migration code, no compat shims): **corpus format 2 → 4** (steer:pin in GOV-2,
+author confidence in GOV-7), **index schema 3 → 6** (manifest `head_commit` in RCL-6, then the
+two GOV bumps in lockstep), and the gitignored capture queue's own seed schema 1 → 2 (GRW-1/4 —
+not a corpus artifact).
+
+**First tagged release since v0.7.0.** The five post-v0.7.0 enhancement tiers were each merged
+to `main` as their own reviewed, CI-green PR and are released together here; per-tier detail
+lives in `ROADMAP.enhancements.yaml` (every item now `status: done`) and the tier PRs.
+
+The theme of the release: the corpus stops being something you maintain and starts maintaining
+itself — recall gets precise, rules join the plane, governance gets legible, and capture,
+graph, and staleness all close their loops with the human still holding every write gate.
+
+### T1 — Positive context & dark signals (v1.1.0, PR #9)
+
+- **SIG-1** — the first positive SessionStart producer: memories relevant to the uncommitted
+  working-tree diff are surfaced because of WHAT YOU ARE DOING, not just what you typed.
+- **SIG-2** — a "where you left off" resume card replayed from the episode buffer.
+- **SIG-3** — silent recall abstentions become a recurring blind-spot backlog (doctor check +
+  rare SessionStart nudge) instead of vanishing.
+- **SIG-4** — KPI-2 finally measured: a PostToolUse read-signal ledger for injection precision.
+
+### T2 — The rules bridge (v1.2.0, PR #10)
+
+- **RUL-0** — the `.claude/rules` `paths:` scoping claim verified live before anything built on
+  it (unscoped rules always-load; `paths:`-scoped rules lazy-inject on matching file reads).
+- **RUL-1** — a loud rule↔memory conflict radar (governance cites what the corpus disputes).
+- **RUL-2** — staleness over the rules plane itself (rules rot like memories do).
+- **RUL-3** — write-time dedup against rules: link, don't copy.
+- **RUL-4** — rules surfaced as an on-demand recall source (labelled `(rule)`, never duplicated).
+- **RUL-5** — `hippo://floor` + rules MCP resources so subagents share the plane.
+
+### T3 — Retrieval precision (v1.3.0, PR #11)
+
+- **RCL-1** — per-query intent routing on the hot path (hot-path-safe, eval-gated).
+- **RCL-2** — floor-dedup + within-session cooldown: injected tokens earn their place.
+- **RCL-3** — terse-follow-up rescue rides the same session-scoped episode read.
+- **RCL-4** — MMR intra-block diversity (applied after the knee — the ordering bug the tier's
+  own hermetic fixtures caught).
+- **RCL-6** — body-hit evidence snippets (index schema 3 → 4 for manifest `head_commit`).
+- **RCL-5** — an off-hot-path cross-encoder rerank on the explicit surfaces only.
+
+### T4 — A corpus you can govern (v1.4.0, PR #12)
+
+- **GOV-1** — a drainable contradiction inbox + `/hippo:resolve` (verdicts: supersede, scope,
+  merge, dismiss — the dismiss ledger is per-clone and refuses to run without a durable home).
+- **GOV-2** — `steer: pin`, the first author control axis (corpus format 2 → 3; bounded ×1.2
+  boost, closed enum, mute deliberately deferred to the salience keystone).
+- **GOV-3** — consolidation proposals carry evidence: a `--check` baseline (HEAD at proposal
+  time) and a fenced `Rationale:` in the written body.
+- **GOV-4** — floor/corpus change governance: a per-clone watermark diff surfaces what changed
+  underneath you, exactly once.
+- **GOV-5** — `/hippo:why` glass-box: per-hit "won via <backend>", salience components, and an
+  honesty-ordered abstention receipt (with the fused-vs-cosine scale premise correction).
+- **GOV-7** — author confidence tier (`draft|verified|authoritative`; corpus format 3 → 4;
+  display-only — pinned never to touch ranking).
+- **GOV-6** — the doctor trust scorecard: one deterministic line aggregating contested pairs,
+  rule conflicts, rot, blind spots, orphans, pins, drafts, and the floor delta.
+
+### T5 — Knowledge that grows itself (v1.5.0, PR #13)
+
+- **GRW-1** — capture quotes its evidence: bounded VERBATIM diff hunks in the SessionEnd seed
+  (tracked + untracked, binary-stripped, line-boundary byte cap), secret-linted at capture and
+  hard-gated again before any hunk lands in a memory body; plus a per-seed salience label that
+  orders the pending queue and marks trivial sessions (label, never a gate). Seed schema 1 → 2.
+- **GRW-2** — Hebbian co-recall: pairs that co-surface across ≥3 distinct sessions become
+  per-item untyped `[[wikilink]]` proposals at consolidate (sparse maps stay empty by design).
+- **GRW-3** — a merge tier for near-duplicate COMMITTED memories on the audit sweep, scored by
+  the calibrated write-time dup mechanic in both directions (never recall's fused scores — the
+  scale premise correction recorded in-file), with a per-item fold/rewrite/close recipe enforced
+  structurally by archive's inbound guard.
+- **GRW-8** — a contradiction-adjudication fork on that same sweep (merge / contradicts / link),
+  with the mislabel guard pinned: a reworded duplicate is NOT a contradiction. Accepted edges
+  drain through the GOV-1 inbox automatically.
+- **GRW-4** — the WHY captured in-session: an agent-driven decisions ledger
+  (`capture --add-decision`, PreCompact nudge with the session id baked in) folded into the
+  seed — transcription of what the user confirmed, never synthesis.
+- **GRW-5** — commit-precision re-verify: commits since the last session's episode watermark
+  that touch cited files join the reconsolidation worklist (`[since-watermark]`), recalled
+  recently or not — no `.git/hooks` surface added.
+- **GRW-6** — squash-merge healing: when a merge is detectable AND staleness baselines actually
+  broke, a producer names the broken memories and routes each to a confirmed per-item
+  `graduate` rebaseline (the healer was always `reverify_file`; now the break gets an offer).
+- **GRW-7** — supersession is an auditable boundary: demote `--superseded-by` stamps the
+  loser's `invalid_after` at the SUCCESSOR's commit date (ledger records boundary + successor;
+  no new field, no schema bump). `fix --superseded-by` now refuses — the old combination wrote
+  an edge and stamped nothing, a silent half-supersede.
+
+New skills since v0.7.0: `/hippo:resolve`, `/hippo:why` (pinned skill list now 10). MCP: 4
+tools (+`why`), 3 resources (+`hippo://scorecard`). Suite: 1371 hermetic tests; eval gates
+unchanged and green throughout (self 0.98 / hard 1.0 / mrr 0.92 / p95 <30ms on the golden
+corpus).
+
 ## v0.7.0 — 2026-07-08 — "Team & fleet — memory that survives more than one human and one repo"
 
 **re-bootstrap: no** — `plugin/requirements.txt` is unchanged; the code swap on update is
