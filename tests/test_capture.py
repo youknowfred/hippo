@@ -132,6 +132,12 @@ def test_seed_carries_full_provenance(repo):
     assert seed["recalled_names"] == ["deploy_runbook", "canary_steps"]
     assert seed["reason"] == "logout"
     assert seed["episode_count"] == 2
+    # GRW-1/GRW-4 seed schema 2: verbatim evidence + value label + the decisions field.
+    assert seed["schema"] == 2
+    assert "+print('v2')" in seed["diff_hunks"]         # the tracked change, VERBATIM
+    assert seed["hunks_secret_flagged"] is False
+    assert seed["decisions"] == []
+    assert isinstance(seed["salience"], dict) and "score" in seed["salience"]
 
 
 def test_no_episodes_writes_no_seed(repo):
@@ -154,12 +160,115 @@ def test_non_git_repo_still_captures_queries(tmp_path):
     assert path is not None
     seed = json.load(open(path))
     assert seed["changed_paths"] == []
+    assert seed["diff_hunks"] == ""                     # hunks degrade like changed_paths
+    assert seed["hunks_secret_flagged"] is False
     assert "a non-git query" in seed["query_previews"]
 
 
 # --------------------------------------------------------------------------- #
-# Queue read surface + idempotence
+# GRW-1: verbatim diff-hunk evidence + seed salience
 # --------------------------------------------------------------------------- #
+def test_hunks_capture_tracked_and_untracked_verbatim(repo):
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    write_file(repo, "src/app.py", "print('v1')\n")
+    git_commit(repo, "init", 1_700_000_000)
+    _seed_episode(md, repo, "s-hunks", ["m"], "q")
+    write_file(repo, "src/app.py", "print('v2')\n")          # tracked, modified
+    write_file(repo, "src/brand_new.py", "NEW_CONSTANT = 7\n")  # untracked — the high-value case
+
+    seed = json.load(open(C.write_session_capture("s-hunks", memory_dir=md, repo_root=repo)))
+    hunks = seed["diff_hunks"]
+    assert "-print('v1')" in hunks and "+print('v2')" in hunks   # tracked change, verbatim
+    assert "+NEW_CONSTANT = 7" in hunks                          # untracked file, verbatim
+    assert "brand_new.py" in hunks
+
+
+def test_hunks_byte_cap_cuts_on_a_line_boundary(repo):
+    write_file(repo, "big.txt", "start\n")
+    wm = git_commit(repo, "init", 1_700_000_000)
+    write_file(repo, "big.txt", "start\n" + ("x" * 60 + "\n") * 200)  # ~12KB tracked diff
+
+    hunks = C._git_diff_hunks(wm, repo, [], max_bytes=1_000)
+    assert len(hunks.encode("utf-8")) <= 1_000 + 64, "cap must bound the evidence"
+    assert "… (diff truncated at 1000 bytes)" in hunks, "truncation must be legible"
+    body = hunks.rsplit("\n… (diff truncated", 1)[0]
+    # The cut lands on a line boundary: the last kept line is a COMPLETE diff line, not a
+    # mid-line fragment of the 60-char x-run.
+    assert body.splitlines()[-1] == "+" + "x" * 60
+
+
+def test_hunks_skip_binary_sections(repo):
+    write_file(repo, "a.txt", "one\n")
+    wm = git_commit(repo, "init", 1_700_000_000)
+    write_file(repo, "a.txt", "one\ntwo\n")
+    with open(os.path.join(repo, "blob.bin"), "wb") as fh:
+        fh.write(b"\x00\x01\x02binary-payload")
+
+    hunks = C._git_diff_hunks(wm, repo, ["blob.bin"])
+    assert "+two" in hunks, "the text change survives"
+    assert "blob.bin" not in hunks, "binary sections carry no reviewable hunk — dropped"
+    assert "Binary files" not in hunks and "GIT binary patch" not in hunks
+
+
+def test_hunks_secret_lint_flags_the_seed(repo):
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    _seed_episode(md, repo, "s-secret", ["m"], "q")
+    # An AWS-shaped key in an untracked file — exactly the evidence a seed would quote.
+    write_file(repo, "oops.env", "AWS_KEY=AKIA" + "A" * 16 + "\n")
+
+    seed = json.load(open(C.write_session_capture("s-secret", memory_dir=md, repo_root=repo)))
+    assert "AKIA" in seed["diff_hunks"], "the hunk itself stays in the gitignored seed"
+    assert seed["hunks_secret_flagged"] is True, "…but the seed is loudly flagged for the drain"
+
+
+def test_salience_orders_pending_best_first_and_labels_trivial(repo):
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    # Session A: trivial — one query, no changes, nothing landed.
+    _seed_episode(md, repo, "a-trivial", [], "one lonely query")
+    C.write_session_capture("a-trivial", memory_dir=md, repo_root=repo)
+    # Session B: high value — a NEW file appears before its capture.
+    _seed_episode(md, repo, "b-busy", ["m"], "how do we ship this")
+    write_file(repo, "src/shipit.py", "ship = True\n")
+    C.write_session_capture("b-busy", memory_dir=md, repo_root=repo)
+
+    seeds = C.read_pending(memory_dir=md)
+    assert [s["session_id"] for s in seeds] == ["b-busy", "a-trivial"], "best-first ordering"
+    assert seeds[0]["salience"]["score"] > seeds[1]["salience"]["score"]
+    assert seeds[0]["salience"]["new_files"] >= 1
+    # Both seeds stayed in the queue — salience labels and orders, it NEVER gates/prunes.
+    assert len(seeds) == 2
+    assert seeds[1]["salience"]["trivial"] is True
+    listing = C._format_listing(seeds)
+    assert "(trivial session)" in listing
+    assert "value:" in listing
+
+
+def test_trivial_seed_scores_zero_and_producer_labels_it(repo):
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    _seed_episode(md, repo, "quiet", [], "just one question")
+    C.write_session_capture("quiet", memory_dir=md, repo_root=repo)
+
+    seeds = C.read_pending(memory_dir=md)
+    assert seeds[0]["salience"] == {
+        "score": 0,
+        "new_files": 0,
+        "commit_landed": False,
+        "distinct_queries": 1,
+        "abstained_queries": 0,
+        "trivial": True,
+    }
+    out = SS.pending_capture_producer(md, repo)
+    assert out and "1 pending" in out and "(1 trivial)" in out
+
+
+
 def test_read_and_count_pending(repo):
     md = os.path.join(repo, ".claude", "memory")
     os.makedirs(md)

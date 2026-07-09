@@ -382,19 +382,32 @@ def pending_capture_producer(
     makes that queue LEGIBLE (guiding invariant: every silent-fallback/soak path gains a
     user-visible signal) and routes to the deliberate, per-item drain — NOTHING in the queue is
     in the corpus until the agent explicitly approves each candidate. Self-clearing: it goes
-    silent once the seeds are drained/discarded. ``ctx`` (LIF-6) is unused.
+    silent once the seeds are drained/discarded. Since GRW-1 the nudge also labels how many of
+    the queued seeds look TRIVIAL (salience score 0 — no changes, no commit, no unanswered
+    queries) so a deep queue reads as "what's worth drafting", not an undifferentiated chore.
+    ``ctx`` (LIF-6) is unused.
     """
     try:
         from .capture import default_pending_dir, pending_count
 
-        n = pending_count(default_pending_dir(memory_dir))
+        pd = default_pending_dir(memory_dir)
+        n = pending_count(pd)
     except Exception:
         return None
     if not n:
         return None
+    trivial = 0
+    try:
+        from .capture import read_pending
+
+        trivial = sum(1 for s in read_pending(pd) if (s.get("salience") or {}).get("trivial"))
+    except Exception:
+        trivial = 0
+    label = f" ({trivial} trivial)" if trivial else ""
     return (
-        f"📥 {n} pending capture(s) from a prior session await review — run /hippo:consolidate "
-        "to draft them into memory (nothing is saved until you approve each one, per item)."
+        f"📥 {n} pending capture(s){label} from a prior session await review — run "
+        "/hippo:consolidate to draft them into memory (nothing is saved until you approve "
+        "each one, per item)."
     )
 
 
@@ -948,8 +961,10 @@ def resume_card_producer(
         if not any_episode:
             return None  # cold start — no local history to resume yet
 
+        # include_hunks=False: the resume card never persists (or renders) the seed's verbatim
+        # diff evidence, so skip GRW-1's hunk subprocesses on this read-only SessionStart path.
         seed = gather_session_context(
-            sid, repo_root=repo_root, telemetry_dir=td, memory_dir=memory_dir
+            sid, repo_root=repo_root, telemetry_dir=td, memory_dir=memory_dir, include_hunks=False
         )
         if not seed:
             return None

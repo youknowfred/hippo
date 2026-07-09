@@ -1353,7 +1353,7 @@ workstreams:
         title: Higher-fidelity capture — verbatim diff-hunk evidence + seed salience
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: capture, verdict: KEEP, leverage: 4}
         problem: >-
           The SessionEnd seed carries only changed_paths (name-only) + query

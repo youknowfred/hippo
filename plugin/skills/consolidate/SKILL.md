@@ -24,10 +24,12 @@ hippo_resolve_py
 ## Step 1 — Drain the pending capture queue (CAP-2 → CAP-3)
 
 The SessionEnd/SubagentStop capture pass leaves gitignored `session-capture` seeds — a
-prior session's episode replay (queries, recalled names) + `git diff` — in
-`.claude/.memory-pending/`. Nothing in there is in the corpus; you approve it here, per item.
+prior session's episode replay (queries, recalled names) + `git diff`, including bounded
+VERBATIM diff hunks (GRW-1) — in `.claude/.memory-pending/`. Nothing in there is in the
+corpus; you approve it here, per item.
 
-List what's queued:
+List what's queued (highest-value first — each seed carries a `value:` score and trivial
+sessions are labelled; the score orders your review, it never gates a seed):
 
 ```
 "$PY" -m memory.capture --list
@@ -57,8 +59,30 @@ proposal <candidate-name>: from session <sid> (queries: "<q1>", "<q2>", …)
 
 The baseline is the `--check` output's own `baseline:` line — HEAD at PROPOSAL time
 (`source_commit` does not exist yet; provenance backfill happens only on the real write).
-If a seed ever carries verbatim diff hunks (a future capture upgrade), include the relevant
-hunk lines in the `evidence` block too.
+
+When the seed carries `diff_hunks` (schema 2 — the listing shows an `evidence: … bytes`
+line), include the RELEVANT hunk lines in the `evidence` block and quote them verbatim in
+the drafted body where they ground the fact — verbatim beats extraction; a memory that
+quotes its diff never paraphrases its own evidence wrong.
+
+**HARD GATE — secret-lint any hunk before it lands in a body.** Verbatim hunks widen the
+secret-exposure surface (the seed is gitignored; a memory body is committed and recalled
+forever). Before fencing ANY hunk lines into a `--body`, run the shipped lint over the exact
+lines you intend to fence, and REFUSE the fence if it reports anything — drop or scrub the
+flagged lines instead (`write_memory`'s own write-time lint is the backstop, not the gate):
+
+```
+"$PY" - <<'PYEOF'
+from memory.secrets import scan_with_remediation
+hunk_lines = """<paste the exact hunk lines you intend to fence>"""
+for w in scan_with_remediation(hunk_lines):
+    print(w)
+PYEOF
+```
+
+Seeds already flagged at capture (`⚠ secret lint flagged these hunks` in the listing) get
+the same treatment: their hunks NEVER reach a body verbatim — summarize around the secret,
+or scrub it and lint again until the scan is clean.
 
 - **route `add`** → the candidate is novel; create it, fencing the rationale into the body
   so the WHY is git-committed with the memory (not a one-time drain display):

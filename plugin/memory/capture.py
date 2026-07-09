@@ -31,18 +31,27 @@ import time
 from typing import Dict, List, Optional
 
 from .provenance import ensure_self_ignoring_dir, resolve_dirs, run_git
-from .telemetry import default_telemetry_dir, read_episodes
+from .secrets import scan_text
+from .telemetry import abstention_backlog, default_telemetry_dir, read_episodes
 
 # The gitignored pending queue — a sibling of ``.claude/memory`` and of the index/telemetry
 # dirs, following the same self-ignoring-cache convention (SEC-3). It is NOT the corpus and is
 # NOT git-tracked: a draft here is a proposal awaiting explicit per-item approval, never memory.
 _PENDING_DIRNAME = ".memory-pending"
-_SEED_SCHEMA = 1
+# The QUEUE's own schema, not the corpus format: bumping it is not an ED-4 event because no
+# committed artifact changes shape — the queue is gitignored ephemera a drain consumes whole.
+# Schema 2 (GRW-1 + GRW-4, one coordinated bump): adds ``diff_hunks`` (verbatim evidence),
+# ``hunks_secret_flagged``, ``salience`` (a value LABEL, never a gate), and ``decisions``.
+_SEED_SCHEMA = 2
 # Bounds so a chatty session can't write a multi-megabyte seed (the previews/names are already
 # privacy-truncated in the episode buffer; these cap the COUNT).
 _MAX_QUERY_PREVIEWS = 40
 _MAX_RECALLED_NAMES = 60
 _MAX_CHANGED_PATHS = 200
+# Byte cap on the verbatim diff-hunk evidence (GRW-1). ``run_git`` imposes NO output bound, so
+# the slice happens here — always on a line boundary, with a legible truncation marker, so a
+# monorepo-wide diff can never balloon a seed. Counts capture COUNTS; this one caps BYTES.
+_MAX_HUNK_BYTES = 20_000
 
 
 def default_pending_dir(memory_dir: str) -> str:
@@ -66,7 +75,20 @@ def _resolve_pending_dir(pending_dir: Optional[str], memory_dir: Optional[str]) 
     return default_pending_dir(md)
 
 
-def _git_changed_paths(head_commit: Optional[str], repo_root: Optional[str]) -> List[str]:
+def _git_untracked(repo_root: Optional[str]) -> List[str]:
+    """Currently-untracked, non-ignored files — the NEW files a session created. Never raises."""
+    if not repo_root:
+        return []
+    out = []
+    for ln in run_git(["ls-files", "--others", "--exclude-standard"], repo_root).splitlines():
+        if ln.strip():
+            out.append(ln.strip())
+    return out
+
+
+def _git_changed_paths(
+    head_commit: Optional[str], repo_root: Optional[str], untracked: Optional[List[str]] = None
+) -> List[str]:
     """Files changed OR newly created since the ``head_commit`` watermark.
 
     A superset of the roadmap's ``<head_commit>..HEAD``, chosen because it is more useful for
@@ -74,8 +96,9 @@ def _git_changed_paths(head_commit: Optional[str], repo_root: Optional[str]) -> 
     against the watermark, so committed AND uncommitted-modified tracked files both show — with
     (b) ``git ls-files --others --exclude-standard`` — currently-untracked, non-ignored files,
     which are exactly the NEW files a session created (a plain ``git diff`` misses them, and
-    they are the most capture-worthy signal). Returns ``[]`` on any failure (not a git repo, an
-    unreachable watermark after a squash-merge, …) — never raises.
+    they are the most capture-worthy signal). ``untracked`` accepts a precomputed (b) so one
+    capture pass runs ``ls-files`` once, not per consumer. Returns ``[]`` on any failure (not a
+    git repo, an unreachable watermark after a squash-merge, …) — never raises.
     """
     if not repo_root:
         return []
@@ -84,10 +107,123 @@ def _git_changed_paths(head_commit: Optional[str], repo_root: Optional[str]) -> 
         for ln in run_git(["diff", "--name-only", head_commit], repo_root).splitlines():
             if ln.strip():
                 paths.add(ln.strip())
-    for ln in run_git(["ls-files", "--others", "--exclude-standard"], repo_root).splitlines():
-        if ln.strip():
-            paths.add(ln.strip())
+    paths.update(_git_untracked(repo_root) if untracked is None else untracked)
     return sorted(paths)[:_MAX_CHANGED_PATHS]
+
+
+def _truncate_on_line_boundary(text: str, max_bytes: int) -> str:
+    """Cut ``text`` to ``max_bytes`` (utf-8) at a line boundary, with a legible marker."""
+    raw = text.encode("utf-8")
+    if len(raw) <= max_bytes:
+        return text
+    cut = raw[:max_bytes].decode("utf-8", errors="ignore")
+    kept = cut.rsplit("\n", 1)[0] if "\n" in cut else ""
+    return kept + f"\n… (diff truncated at {max_bytes} bytes)"
+
+
+def _strip_binary_sections(diff_text: str) -> str:
+    """Drop per-file sections of a git diff that describe binary content.
+
+    A binary file's section carries no reviewable hunk lines ("Binary files … differ" or a
+    "GIT binary patch" blob) — verbatim evidence is for TEXT. Sections are the
+    ``diff --git …`` units; non-section preamble (shouldn't occur) passes through unchanged.
+    """
+    if "diff --git " not in diff_text:
+        return diff_text
+    parts = diff_text.split("\ndiff --git ")
+    # Re-attach the split marker to every section after the first, then filter.
+    sections = [parts[0]] + ["diff --git " + p for p in parts[1:]]
+    kept = [
+        s
+        for s in sections
+        if s.strip() and "\nBinary files " not in "\n" + s and "GIT binary patch" not in s
+    ]
+    return "\n".join(kept)
+
+
+def _git_diff_hunks(
+    head_commit: Optional[str],
+    repo_root: Optional[str],
+    untracked: Optional[List[str]] = None,
+    *,
+    max_bytes: int = _MAX_HUNK_BYTES,
+) -> str:
+    """Bounded VERBATIM diff hunks since the watermark — the seed's quotable evidence (GRW-1).
+
+    Two sources, mirroring ``_git_changed_paths``'s superset semantics: (a) tracked changes via
+    ``git diff --unified=3 -M <head_commit>`` (working tree vs the watermark, renames
+    detected); (b) UNTRACKED files — which a plain ``git diff`` misses and which are the
+    highest-value evidence — rendered per-path via ``git diff --no-index /dev/null <path>``
+    (``run_git`` ignores the nonzero found-a-difference exit, so stdout survives). Binary
+    sections are dropped; the concatenation is sliced to ``max_bytes`` ON A LINE BOUNDARY with
+    a legible truncation marker (``run_git`` itself imposes no cap). ``""`` when there is
+    nothing to quote or on any failure — never raises.
+    """
+    if not repo_root:
+        return ""
+    try:
+        pieces: List[str] = []
+        total = 0
+        if head_commit:
+            tracked = _strip_binary_sections(
+                run_git(["diff", "--unified=3", "-M", head_commit], repo_root)
+            ).strip("\n")
+            if tracked:
+                pieces.append(tracked)
+                total += len(tracked.encode("utf-8"))
+        for path in _git_untracked(repo_root) if untracked is None else untracked:
+            if total > max_bytes:
+                break  # already past the cap — the slice below owns the final boundary
+            piece = _strip_binary_sections(
+                run_git(["diff", "--no-index", "--", os.devnull, path], repo_root)
+            ).strip("\n")
+            if piece:
+                pieces.append(piece)
+                total += len(piece.encode("utf-8"))
+        return _truncate_on_line_boundary("\n".join(pieces).strip("\n"), max_bytes)
+    except Exception:
+        return ""
+
+
+def _seed_salience(seed: Dict, telemetry_dir: Optional[str], untracked: List[str]) -> Dict:
+    """A cheap per-seed VALUE LABEL (GRW-1) — never a gate, never an auto-prune.
+
+    Scores the signals a drain reviewer would weigh anyway: new files created (the strongest
+    capture-worthy evidence), a commit landing during the session, query breadth, and queries
+    that also show up in the abstention backlog (the user asked; hippo had nothing — exactly
+    what a new memory would fix). The formula is deliberately simple and documented here; the
+    score ORDERS the pending listing best-first and labels no-op sessions ``trivial`` — it
+    never gates or prunes a seed. Never raises.
+    """
+    new_files = len(untracked)
+    commit_landed = bool(
+        seed.get("head") and seed.get("head_commit") and seed["head"] != seed["head_commit"]
+    )
+    distinct_queries = len(seed.get("query_previews") or [])
+    abstained = 0
+    try:
+        previews = set(seed.get("query_previews") or [])
+        if previews:
+            for cluster in abstention_backlog(telemetry_dir):
+                if previews.intersection(cluster.get("queries") or []):
+                    abstained += 1
+    except Exception:
+        abstained = 0
+    score = (
+        2 * new_files
+        + (3 if commit_landed else 0)
+        + 2 * abstained
+        + (1 if distinct_queries >= 3 else 0)
+        + (1 if seed.get("changed_paths") else 0)
+    )
+    return {
+        "score": score,
+        "new_files": new_files,
+        "commit_landed": commit_landed,
+        "distinct_queries": distinct_queries,
+        "abstained_queries": abstained,
+        "trivial": score == 0,
+    }
 
 
 def gather_session_context(
@@ -96,14 +232,18 @@ def gather_session_context(
     repo_root: Optional[str] = None,
     telemetry_dir: Optional[str] = None,
     memory_dir: Optional[str] = None,
+    include_hunks: bool = True,
 ) -> Optional[Dict]:
     """Replay the episode buffer for ``session_id`` into a capture-seed dict, or ``None``.
 
     Reads ``episode_buffer.jsonl`` (via ``telemetry.read_episodes``), keeps only this session's
     episodes, derives the HEAD watermark (the earliest recorded ``head_commit``), unions the
     recalled names, collects the (already-truncated) query previews, and diffs the repo since
-    the watermark. Returns ``None`` when the session left no episodes to replay — there is
-    nothing to capture, so no empty seed is written. Never raises: any failure yields ``None``.
+    the watermark — including bounded VERBATIM diff hunks (GRW-1) so a drafted memory can quote
+    its evidence instead of paraphrasing. ``include_hunks=False`` skips the hunk subprocesses
+    for read-only consumers (the SessionStart resume card) that never persist the seed. Returns
+    ``None`` when the session left no episodes to replay — there is nothing to capture, so no
+    empty seed is written. Never raises: any failure yields ``None``.
     """
     try:
         if telemetry_dir is None and memory_dir is not None:
@@ -137,19 +277,35 @@ def gather_session_context(
                 previews.append(q)
 
         head_now = run_git(["rev-parse", "HEAD"], repo_root).strip() or None if repo_root else None
-
-        return {
+        untracked = _git_untracked(repo_root)
+        hunks = (
+            _git_diff_hunks(watermark, repo_root, untracked) if include_hunks else ""
+        )
+        # MANDATORY lint (GRW-1 invariant): verbatim hunks widen the secret-exposure surface,
+        # so every hunk-bearing seed is scanned AT CAPTURE. A hit only FLAGS the seed (the
+        # queue is gitignored, same trust domain as the episode buffer) — the consolidate
+        # drain refuses to fence flagged hunks into a corpus body, and write_memory's own
+        # lint is the backstop behind that.
+        seed = {
             "schema": _SEED_SCHEMA,
             "kind": "session-capture",
             "session_id": session_id,
             "head_commit": watermark,  # the session's starting watermark (from the buffer)
             "head": head_now,          # HEAD at capture time — the two bound the diff range
-            "changed_paths": _git_changed_paths(watermark, repo_root),
+            "changed_paths": _git_changed_paths(watermark, repo_root, untracked),
             "recalled_names": names[:_MAX_RECALLED_NAMES],
             "query_previews": previews[:_MAX_QUERY_PREVIEWS],
             "episode_count": len(episodes),
             "earliest_ts": episodes[0].get("ts"),
+            "diff_hunks": hunks,
+            "hunks_secret_flagged": bool(hunks and scan_text(hunks)),
+            # GRW-4's field, structurally part of seed schema 2 from day one so the queue
+            # never holds two flavors of the same schema; populated by the in-session
+            # decision ledger once that capture surface ships.
+            "decisions": [],
         }
+        seed["salience"] = _seed_salience(seed, telemetry_dir, untracked)
+        return seed
     except Exception:
         return None
 
@@ -206,8 +362,21 @@ def write_session_capture(
         return None
 
 
+def _seed_score(seed: Dict) -> int:
+    """The stored salience score of a seed; 0 for pre-GRW-1 (schema 1) seeds. Never raises."""
+    try:
+        return int((seed.get("salience") or {}).get("score", 0))
+    except Exception:
+        return 0
+
+
 def read_pending(pending_dir: Optional[str] = None, *, memory_dir: Optional[str] = None) -> List[Dict]:
-    """Every pending capture seed, sorted by filename. Skips corrupt files. Never raises."""
+    """Every pending capture seed, HIGH-VALUE FIRST (GRW-1), then by filename for stability.
+
+    The salience score only ORDERS the review queue so a deep backlog leads with the sessions
+    most worth drafting — a low score never drops a seed (label, not gate). Skips corrupt
+    files. Never raises.
+    """
     out: List[Dict] = []
     try:
         pd = _resolve_pending_dir(pending_dir, memory_dir)
@@ -224,6 +393,7 @@ def read_pending(pending_dir: Optional[str] = None, *, memory_dir: Optional[str]
                     out.append(obj)
             except Exception:
                 continue
+        out.sort(key=lambda s: (-_seed_score(s), os.path.basename(s.get("_path", ""))))
     except Exception:
         return out
     return out
@@ -259,6 +429,12 @@ def _format_listing(seeds: List[Dict]) -> str:
         head = (s.get("head") or "?")[:12]
         out.append(f"  • {os.path.basename(s.get('_path', ''))}  session={sid}")
         out.append(f"      commits: {wm}..{head}   episodes: {s.get('episode_count', 0)}")
+        sal = s.get("salience") or {}
+        if sal:
+            out.append(
+                f"      value: {sal.get('score', 0)}"
+                + (" (trivial session)" if sal.get("trivial") else "")
+            )
         cp = s.get("changed_paths") or []
         if cp:
             shown = ", ".join(cp[:8]) + (f", +{len(cp) - 8} more" if len(cp) > 8 else "")
@@ -269,6 +445,17 @@ def _format_listing(seeds: List[Dict]) -> str:
         qp = s.get("query_previews") or []
         if qp:
             out.append(f"      queries: {'; '.join(qp[:5])}")
+        hunks = s.get("diff_hunks") or ""
+        if hunks:
+            out.append(f"      evidence: {len(hunks.encode('utf-8'))} bytes of verbatim diff hunks")
+            if s.get("hunks_secret_flagged"):
+                out.append(
+                    "      ⚠ secret lint flagged these hunks — do NOT fence them into a memory "
+                    "body without scrubbing (run memory.secrets.scan_with_remediation first)"
+                )
+        dec = s.get("decisions") or []
+        if dec:
+            out.append(f"      decisions: {'; '.join(str(d) for d in dec[:5])}")
     return "\n".join(out)
 
 
