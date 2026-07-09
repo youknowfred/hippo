@@ -346,11 +346,26 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="GOV-5: the recall receipt — per-hit winning backend/edges/salience/steer, "
         "and on abstention the near-miss score vs the floor it missed",
     )
+    parser.add_argument(
+        "--history",
+        default=None,
+        metavar="NAME",
+        help="RCH-3: replay the supersedes/refines decision chain around a memory as an "
+        "ordered narrative (same builder the decision_history MCP tool renders)",
+    )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--index-dir", default=None)
     parser.add_argument("--repo-root", default=None)
     args = parser.parse_args(argv)
     try:
+        if args.history:
+            from .history import render_decision_history
+
+            memory_dir = args.memory_dir
+            if memory_dir is None:
+                memory_dir, _ = resolve_dirs()
+            print(render_decision_history(args.history, memory_dir, args.index_dir))
+            return 0
         if args.list_by_type:
             print(list_by_type(memory_dir=args.memory_dir))
             return 0

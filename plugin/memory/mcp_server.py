@@ -9,7 +9,7 @@ exposes memory as first-class tools that mid-turn calls and subagents both inher
 hooks, and the hook path is untouched and still works with this server absent.
 
 It is a dependency-free JSON-RPC 2.0 server over stdio (newline-delimited messages, stdlib
-only — no ``mcp`` package, consistent with the vendoring/offline identity). Three tools:
+only — no ``mcp`` package, consistent with the vendoring/offline identity). Five tools:
 
   - ``recall(query, k)``    — REUSES ``recall_view.describe`` → ``recall.recall`` (the exact
                               hook ranking; it does not fork behavior), returning the
@@ -18,8 +18,16 @@ only — no ``mcp`` package, consistent with the vendoring/offline identity). Th
                               /hippo:new skill runs, LIF-2 near-duplicate neighbors included so
                               the caller can route add/update/supersede — never a bulk sweep).
   - ``traverse(name, hops)``— 1..N-hop graph neighbors (untyped + typed) for a memory.
+  - ``why(query, k)``       — the GOV-5 glass-box recall receipt (same ``describe(why=True)``
+                              path as ``/hippo:recall --why``): per-hit winning backend, typed
+                              edges, steering, salience; near-miss receipts on abstention.
+  - ``decision_history(name)`` — RCH-3: replay the supersedes/refines chain around a memory
+                              as an ordered narrative ("chose X → refined to Y → Z superseded
+                              it"), with retirement boundaries and contradiction branch
+                              points — ``history.render_decision_history``, the same builder
+                              ``/hippo:recall --history`` renders.
 
-And two RESOURCES (RUL-5) — the baseline-memory pull path for subagents:
+And three RESOURCES (RUL-5) — the baseline-memory pull path for subagents:
 
   - ``hippo://floor``       — the always-on memory floor (project MEMORY.md + the TEA-1
                               user/private-tier portable floor) as one markdown document. A
@@ -28,6 +36,7 @@ And two RESOURCES (RUL-5) — the baseline-memory pull path for subagents:
   - ``hippo://rules-view``  — the rules↔memory reconciliation (RUL-1 conflict radar + RUL-2
                               rules-plane rot), so an agent can inspect where the governance
                               plane and the corpus disagree without running the audit skill.
+  - ``hippo://scorecard``   — the GOV-4 trust scorecard (corpus health at a glance).
 
 Resources are AGENT-INVOKED reads, never an implicit always-load channel — hippo's one
 always-load path stays the native-memory floor (the NATIVE_MEMORY.md promise), and both
@@ -146,6 +155,25 @@ _TOOLS = [
             "required": ["query"],
         },
     },
+    {
+        "name": "decision_history",
+        "description": (
+            "Replay how a decision evolved: walks the authored supersedes/refines chain "
+            "around a memory (both directions, transitively) into an ordered narrative — "
+            "'chose X → refined to Y → Z superseded it' — with each step dated, retired "
+            "links showing their invalid_after boundary, contradiction branch points "
+            "flagged, and a closing 'standing today' line. Use mid-turn when you need to "
+            "know WHY the current approach replaced an older one (traverse only shows "
+            "1..N-hop neighbors; this reconstructs the lineage)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "a memory name/stem to replay around"},
+            },
+            "required": ["name"],
+        },
+    },
 ]
 
 
@@ -243,11 +271,26 @@ def _tool_traverse(args: Dict[str, Any]) -> str:
     return "\n".join(out)
 
 
+def _tool_decision_history(args: Dict[str, Any]) -> str:
+    """RCH-3: delegates to the SAME history.render_decision_history the
+    /hippo:recall --history CLI renders — one chain builder, two surfaces."""
+    from .build_index import default_index_dir
+    from .history import render_decision_history
+    from .provenance import resolve_dirs
+
+    name = str(args.get("name") or "").strip()
+    if not name:
+        return "decision_history: a memory name is required."
+    memory_dir, _ = resolve_dirs()
+    return render_decision_history(name, memory_dir, default_index_dir(memory_dir))
+
+
 _DISPATCH = {
     "recall": _tool_recall,
     "new_memory": _tool_new_memory,
     "traverse": _tool_traverse,
     "why": _tool_why,
+    "decision_history": _tool_decision_history,
 }
 
 

@@ -1851,7 +1851,7 @@ workstreams:
         title: Decision-chain replay — memory as an active tool over typed edges
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: frontier, verdict: KEEP-worthy (blind-spot)}
         problem: >-
           Nothing walks the authored supersedes/refines/contradicts graph to
@@ -1887,6 +1887,21 @@ workstreams:
           decide X" question — ONE chain-builder, two surfaces (put the builder in
           links.py or a small history.py, imported by both; keep mcp_server
           un-imported by hot-path modules — that negative pin exists).
+        implementation_correction: >-
+          SHIPPED 2026-07-09. The note's COUNTS were two merged tiers stale (it was
+          audited post-T2): the pinned test was already
+          test_tools_list_exposes_exactly_FOUR_tools ({recall,new_memory,traverse,why} —
+          T4 added why) — updated to exactly-FIVE with decision_history; the server
+          docstring was doubly stale ("Three tools" AND "two RESOURCES" vs the live 4/3)
+          and now reads five/three. Chronology shipped per the note's primary
+          instruction (staleness.read_source_commit_time — the STAMPED epoch, which
+          survives squash-merges); n.b. the parenthetical "the recall.recent_memories
+          ordering precedent" is attribution-loose — recent_memories actually orders by
+          git-RESOLVED commit times (_commit_times), a mechanism the stamped-field read
+          deliberately avoids (no git subprocess per node). Builder landed in a new
+          history.py (the note's own alternative); extension taken: /hippo:recall
+          --history renders the same render_decision_history the MCP tool returns, with
+          the one-directional dependency pinned (history never imports the server).
 
       - id: RCH-4
         title: "/hippo:recall --all-projects — global recall across your local corpora"

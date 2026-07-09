@@ -37,6 +37,14 @@ List everything this project knows, grouped by type (a map of the corpus — no 
 "$PY" -m memory.recall_view --list-by-type
 ```
 
+Replay how a decision evolved (RCH-3 — walks the authored supersedes/refines chain around
+a memory into an ordered narrative, with retirement boundaries and contradiction branch
+points; answers "why did we decide X" / "what replaced Y"):
+
+```
+"$PY" -m memory.recall_view --history "<memory-name>"
+```
+
 ## Reading the output
 
 Each match prints as:
