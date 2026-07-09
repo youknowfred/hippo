@@ -1224,3 +1224,115 @@ def test_check_flag_cli_is_dry_run(tmp_path, monkeypatch, capsys):
     assert "railway_deploy_pipeline" in out
     assert _corpus_files(md) == before  # --check never writes
     assert not os.path.exists(os.path.join(md, "deploy_pipeline_recap.md"))
+
+
+# --------------------------------------------------------------------------- #
+# GOV-3 — consolidation proposals carry their evidence (rationale)
+# --------------------------------------------------------------------------- #
+def test_check_candidate_carries_proposal_time_baseline(repo, memory_dir, monkeypatch):
+    """The HONEST baseline: HEAD at proposal time. source_commit does NOT exist on a dry
+    run (provenance backfill happens only on the real write), so 'as of HEAD <sha>' is the
+    one anchor a reviewer can actually check out."""
+    from .conftest import git_commit, write_file
+    from memory import new_memory as NM
+    from memory import provenance as P
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    write_file(repo, "seed.txt", "seed")
+    git_commit(repo, "seed", 1_700_000_000)
+    decision = NM.check_candidate(
+        "novel_fact", "a brand new fact worth keeping", "project",
+        memory_dir=memory_dir, repo_root=repo,
+    )
+    assert decision["baseline"] == P.git_head(repo)
+    assert decision["baseline"] and len(decision["baseline"]) == 40
+
+
+def test_check_candidate_baseline_is_honest_none_without_git(tmp_path, monkeypatch):
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    decision = NM.check_candidate(
+        "novel", "a fact", "project", memory_dir=md, repo_root=str(tmp_path)
+    )
+    assert decision["baseline"] is None  # non-git: honest absence, never a fabricated sha
+
+
+def test_check_flag_cli_always_prints_a_baseline_line(tmp_path, monkeypatch, capsys):
+    """The drain skill quotes this line into every proposal's rationale — it must exist on
+    both the git (sha) and non-git (honest absence) paths."""
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)  # tmp_path is NOT a git repo
+    rc = NM.main(["novel", "a fact", "--type", "project", "--memory-dir", md, "--check"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "baseline: no git HEAD at proposal time" in out
+
+
+def test_check_flag_cli_prints_head_sha_in_git_repo(repo, memory_dir, monkeypatch, capsys):
+    from .conftest import git_commit, write_file
+    from memory import new_memory as NM
+    from memory import provenance as P
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    write_file(repo, "seed.txt", "seed")
+    git_commit(repo, "seed", 1_700_000_000)
+    rc = NM.main(["novel", "a fact", "--type", "project", "--memory-dir", memory_dir, "--check"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert f"baseline: as of HEAD {P.git_head(repo)[:12]}" in out
+
+
+def test_write_memory_fences_rationale_into_body(tmp_path, monkeypatch):
+    """Approval fences the WHY into the memory body — git-committed evidence, not a
+    one-time drain display. Rationale rides BEFORE Related, which stays the final line."""
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    res = NM.write_memory(
+        "why_fact", "unique describable fact for the rationale test", "project",
+        body="The fact body.",
+        memory_dir=md,
+        links=["some_other_memory"],
+        rationale="from session s-123; replaces old-fact (similarity 0.91); as of HEAD abc1234def",
+    )
+    assert res["created"]
+    with open(res["path"], "r", encoding="utf-8") as fh:
+        text = fh.read()
+    assert (
+        "Rationale: from session s-123; replaces old-fact (similarity 0.91); "
+        "as of HEAD abc1234def" in text
+    )
+    assert text.index("The fact body.") < text.index("Rationale:") < text.index("Related:")
+
+
+def test_rationale_absent_by_default_and_additive(tmp_path, monkeypatch):
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    res = NM.write_memory(
+        "plain_fact", "another unique describable fact", "project",
+        body="Body only.", memory_dir=md, no_links=True,
+    )
+    with open(res["path"], "r", encoding="utf-8") as fh:
+        assert "Rationale:" not in fh.read()
+    # the append helper itself: additive, newline-collapsing, no-op on empty
+    assert NM._append_rationale("b", "x\ny  z") == "b\n\nRationale: x y z\n"
+    assert NM._append_rationale("b", None) == "b"
+    assert NM._append_rationale("", "why") == "Rationale: why\n"
+
+
+def test_cli_rationale_flag_reaches_the_body(tmp_path, monkeypatch, capsys):
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    rc = NM.main([
+        "cli_rationale_fact", "cli rationale unique fact", "--type", "project",
+        "--memory-dir", md, "--no-links",
+        "--rationale", "from session s-9; as of HEAD 1234567",
+    ])
+    assert rc == 0
+    with open(os.path.join(md, "cli_rationale_fact.md"), "r", encoding="utf-8") as fh:
+        assert "Rationale: from session s-9; as of HEAD 1234567" in fh.read()

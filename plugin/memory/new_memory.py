@@ -386,10 +386,23 @@ def check_candidate(
                 rule_neighbors = rule_dup_candidates(description, body, repo_root)
             except Exception:
                 rule_neighbors = []
+        # GOV-3: the HONEST git baseline a proposal can carry — HEAD at proposal time.
+        # source_commit does NOT exist yet (this is a dry run; provenance backfill only
+        # happens on the real write), so "as of HEAD <sha>" is the evidence a reviewer can
+        # actually anchor to. None on a non-git corpus — an honest absence, never a fake.
+        baseline = None
+        if repo_root:
+            try:
+                from .provenance import git_head
+
+                baseline = git_head(repo_root)
+            except Exception:
+                baseline = None
         return {
             "route": "review" if neighbors else "add",
             "neighbors": neighbors,
             "rule_neighbors": rule_neighbors,
+            "baseline": baseline,
             "note": note,
         }
     except Exception as exc:
@@ -397,6 +410,7 @@ def check_candidate(
             "route": "add",
             "neighbors": [],
             "rule_neighbors": [],
+            "baseline": None,
             "note": f"candidate check skipped: {exc}",
         }
 
@@ -418,6 +432,20 @@ def _render_frontmatter(name: str, description: str, mtype: str, body: str) -> s
         body.rstrip("\n") + "\n" if body else "",
     ]
     return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def _append_rationale(body: str, rationale: Optional[str]) -> str:
+    """Append a final ``Rationale: <evidence>`` body line (GOV-3) — the git-committed WHY.
+
+    Additive only — never touches any existing body text, just appends one trailing line
+    (``_append_related_line``'s exact discipline). Newlines in the evidence collapse to
+    spaces so the fence stays one legible line.
+    """
+    if not rationale or not str(rationale).strip():
+        return body
+    line = "Rationale: " + " ".join(str(rationale).split())
+    body = (body or "").rstrip("\n")
+    return f"{body}\n\n{line}\n" if body else f"{line}\n"
 
 
 def _append_floor_pointer(
@@ -538,11 +566,17 @@ def write_memory(
     links: Optional[List[str]] = None,
     no_links: bool = False,
     tier: str = "project",
+    rationale: Optional[str] = None,
 ) -> dict:
     """Create a recall-ready memory file. Returns a small result dict.
 
     - Validates ``type`` ∈ VALID_TYPES.
     - Refuses to overwrite an existing ``<name>.md`` (``created=False``, ``error`` set).
+    - ``rationale`` (GOV-3): fences the proposal's evidence trail ("from session <sid>;
+      replaces <neighbor> (similarity 0.9x); as of HEAD <sha>") into the BODY as one
+      trailing ``Rationale:`` line — the WHY becomes git-committed with the memory, not a
+      one-time drain display. Additive-append discipline (``_append_rationale``), applied
+      before the Related line so that stays the final body line.
     - Discovers related EXISTING memories (GRA-3) and appends a "Related: [[a]], [[b]]" body
       line BEFORE rendering — ``links`` (explicit names) OVERRIDES discovery entirely;
       ``no_links=True`` suppresses it entirely (neither discovery nor an explicit ``links``
@@ -652,6 +686,9 @@ def write_memory(
             name, description, memory_dir, repo_root, _LINK_DISCOVERY_K, index_dir=tier_index
         )
     result["related"] = related
+    # GOV-3: rationale BEFORE the Related line, so Related stays the final body line (the
+    # additive-append convention both writers share).
+    body = _append_rationale(body, rationale)
     body = _append_related_line(body, related)
 
     path = os.path.join(memory_dir, f"{name}.md")
@@ -775,6 +812,13 @@ def main(argv=None) -> int:
         help="CAP-3 DRY RUN: score this candidate against the corpus for near-dupes and print "
         "the route (add / review) WITHOUT writing anything — used when draining captured candidates",
     )
+    parser.add_argument(
+        "--rationale",
+        default=None,
+        help="GOV-3: evidence trail fenced into the body as a trailing 'Rationale:' line "
+        "(e.g. 'from session <sid>; replaces <neighbor> (similarity 0.9x); as of HEAD <sha>') "
+        "— the git-committed WHY behind a consolidation-approved write",
+    )
     args = parser.parse_args(argv)
 
     # CAP-3: dry-run decisioning — check a captured candidate BEFORE it can become a file, so a
@@ -800,6 +844,12 @@ def main(argv=None) -> int:
             repo_root=check_repo_root,
         )
         print(f"route   : {decision['route']}")
+        # GOV-3: the proposal-time git baseline — the honest anchor a reviewer can check
+        # out ("as of HEAD <sha>"). source_commit exists only after the real write.
+        if decision.get("baseline"):
+            print(f"baseline: as of HEAD {decision['baseline'][:12]}")
+        else:
+            print("baseline: no git HEAD at proposal time (non-git corpus)")
         if decision["neighbors"]:
             print("neighbors (decide update-existing / supersede / skip — NAME the target):")
             for n in decision["neighbors"]:
@@ -833,6 +883,7 @@ def main(argv=None) -> int:
         links=links_arg,
         no_links=args.no_links,
         tier=args.tier,
+        rationale=args.rationale,
     )
     if res["error"]:
         print(f"error: {res['error']}")

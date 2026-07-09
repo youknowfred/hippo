@@ -1111,7 +1111,7 @@ workstreams:
         title: Consolidation proposals carry their evidence (rationale)
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: trust, verdict: RESHAPE (keep the rationale payload)}
         problem: >-
           A teammate pulling the repo sees a MEMORY.md diff with no "why was this
