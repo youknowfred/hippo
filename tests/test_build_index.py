@@ -125,6 +125,53 @@ def test_cold_cache_degrades_to_bm25_fast_with_no_fastembed_import(tmp_path, mon
 
 
 # --------------------------------------------------------------------------- #
+# RCL-5: the cross-encoder's OWN pure-stat cold-cache pre-check, mirroring OSP-4 exactly
+# --------------------------------------------------------------------------- #
+def test_cross_encoder_cached_false_on_empty_dir(tmp_path):
+    assert B._cross_encoder_cached(str(tmp_path / "empty-cache")) is False
+
+
+def test_cross_encoder_cached_true_when_onnx_present(tmp_path):
+    cache = str(tmp_path / "cache")
+    snapshot = os.path.join(cache, "models--Xenova--ms-marco-MiniLM-L-6-v2", "snapshots", "abc123")
+    os.makedirs(snapshot)
+    open(os.path.join(snapshot, "model.onnx"), "w").close()
+    assert B._cross_encoder_cached(cache) is True
+
+
+def test_get_cross_encoder_offline_raises_in_microseconds_on_cold_cache(tmp_path, monkeypatch):
+    """The load-bearing reason for the pre-check: fastembed's OWN model loader wraps a cache
+    MISS in a retry-with-backoff sleep loop regardless of why the load failed (confirmed
+    empirically -- HF_HUB_OFFLINE=1 correctly blocks the network reach but does nothing to
+    skip fastembed's retry wrapper, ~40s of sleep-and-retry). This pre-check must raise
+    BEFORE fastembed is ever imported, so a cold cache degrades in microseconds instead."""
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(tmp_path / "empty-cross-encoder-cache"))
+    B._CROSS_ENCODER_CACHE.clear()
+    sys.modules.pop("fastembed", None)
+
+    t0 = time.monotonic()
+    with pytest.raises(RuntimeError, match="not cached offline"):
+        B._get_cross_encoder(allow_download=False)
+    elapsed = time.monotonic() - t0
+
+    assert elapsed < 0.1  # microseconds in practice; nowhere near fastembed's ~40s retry loop
+    assert "fastembed" not in sys.modules
+
+
+def test_get_cross_encoder_caches_by_allow_download_key(monkeypatch):
+    """Same (model, allow_download) key -> the SAME cached instance; a different
+    allow_download value is a distinct cache slot (mirrors _get_model's key shape)."""
+    sentinel_offline = object()
+    sentinel_online = object()
+    B._CROSS_ENCODER_CACHE.clear()
+    B._CROSS_ENCODER_CACHE[(B._CROSS_ENCODER_MODEL, False)] = sentinel_offline
+    B._CROSS_ENCODER_CACHE[(B._CROSS_ENCODER_MODEL, True)] = sentinel_online
+    assert B._get_cross_encoder(allow_download=False) is sentinel_offline
+    assert B._get_cross_encoder(allow_download=True) is sentinel_online
+    B._CROSS_ENCODER_CACHE.clear()
+
+
+# --------------------------------------------------------------------------- #
 # OSP-4: run_bounded holds off the main thread (SIGALRM never worked there)
 # --------------------------------------------------------------------------- #
 def test_run_bounded_raises_dense_timeout_from_worker_thread():

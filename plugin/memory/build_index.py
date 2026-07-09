@@ -837,6 +837,69 @@ def _get_model(allow_download: bool):
     return model
 
 
+# --------------------------------------------------------------------------- #
+# RCL-5: offline cross-encoder rerank — EXPLICIT SURFACES ONLY (/hippo:recall, the MCP
+# recall tool). Never the UserPromptSubmit hot path, so there is no p95 budget to protect —
+# but a cold/uncached model must still degrade FAST: fastembed's own model loader wraps a
+# cache MISS in a retry-with-backoff sleep loop regardless of WHY the load failed (confirmed
+# empirically -- HF_HUB_OFFLINE=1 correctly blocks the actual network reach, but fastembed
+# still burns ~40s of sleep-and-retry around that local failure before raising). Mirrors
+# _get_model's cheap filesystem pre-check for exactly that reason: a cold cache must raise in
+# microseconds, not after a ~40s hang on an "explicit surface" a human is waiting on.
+# --------------------------------------------------------------------------- #
+# Smallest fastembed-supported cross-encoder (0.08 GB) -- this feature's whole point is a
+# cheap joint query/description read, not a heavyweight reranker. Verified against the
+# installed fastembed 0.7.4 (TextCrossEncoder.list_supported_models()): this model's HF
+# source repo IS its fastembed model name (unlike DEFAULT_MODEL's embedding mapping, which
+# goes through a qdrant/* re-export) -- grounded, not guessed.
+_CROSS_ENCODER_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2"
+_CROSS_ENCODER_HF_SOURCE_REPO = "Xenova/ms-marco-MiniLM-L-6-v2"
+_CROSS_ENCODER_CACHE: dict = {}
+
+
+def _cross_encoder_cached(cache_dir: str) -> bool:
+    """Pure-stat check: is the cross-encoder model already warmed on disk at ``cache_dir``?
+
+    Mirrors ``_fastembed_model_cached`` exactly (same snapshot-dir-then-.onnx-walk shape, no
+    fastembed import, no network) -- see the module comment above for why this pre-check is
+    load-bearing here, not just an optimization.
+    """
+    snapshot_dir = os.path.join(
+        cache_dir, f"models--{_CROSS_ENCODER_HF_SOURCE_REPO.replace('/', '--')}"
+    )
+    if not os.path.isdir(snapshot_dir):
+        return False
+    for root, _dirs, files in os.walk(snapshot_dir):
+        if any(f.endswith(".onnx") for f in files):
+            return True
+    return False
+
+
+def _get_cross_encoder(allow_download: bool):
+    """Return a cached ``fastembed`` ``TextCrossEncoder`` or raise -- mirrors ``_get_model``'s
+    contract exactly. ``allow_download=False`` (every recall-time caller -- this is never on
+    the hot path, but it never downloads either) forces HF Hub offline and pre-checks the
+    cache on disk BEFORE import/construction, so a cold cache raises in microseconds instead
+    of fastembed's own ~40s retry-and-sleep loop. ``allow_download=True`` (build/bootstrap
+    time only) may download and warm the cache -- callers should invoke this at
+    build_index/bootstrap time to warm it, exactly like the embedding model.
+    """
+    key = (_CROSS_ENCODER_MODEL, bool(allow_download))
+    if key in _CROSS_ENCODER_CACHE:
+        return _CROSS_ENCODER_CACHE[key]
+    if not allow_download:
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    cache_dir = ensure_fastembed_cache_path()
+    if not allow_download and not _cross_encoder_cached(cache_dir):
+        raise RuntimeError(f"cross-encoder model not cached offline at {cache_dir}")
+    from fastembed.rerank.cross_encoder import TextCrossEncoder  # lazy: never imported at module load
+
+    model = TextCrossEncoder(model_name=_CROSS_ENCODER_MODEL, cache_dir=cache_dir)
+    _CROSS_ENCODER_CACHE[key] = model
+    return model
+
+
 def embed_documents(texts: List[str], allow_download: bool = True):
     """L2-normalized passage embeddings as a float32 matrix [len(texts), dim]."""
     model = _get_model(allow_download=allow_download)

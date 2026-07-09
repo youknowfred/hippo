@@ -862,7 +862,7 @@ workstreams:
         title: Offline cross-encoder rerank — on explicit surfaces only
         priority: P3
         effort: L
-        status: planned
+        status: done
         source: {lens: retrieval, verdict: RESHAPE (off the hot path)}
         problem: >-
           RRF fuses ranks but never reads query-vs-description jointly; a
@@ -898,6 +898,30 @@ workstreams:
           hermetic CI lane deselects it; the dense lane opts in). tests/test_vendor.py +
           test_fastembed_cache_path.py pin the cache/vendor conventions — extend, don't
           fight them.
+        implementation_correction: >-
+          SHIPPED 2026-07-08. DEP CHECK confirmed clean: installed fastembed 0.7.4 (within
+          the pinned >=0.4,<0.8 band) exposes fastembed.rerank.cross_encoder.TextCrossEncoder
+          with .rerank(query, documents) -> scores; NO requirements.txt bump, re-bootstrap NO.
+          Picked the smallest supported model (Xenova/ms-marco-MiniLM-L-6-v2, 0.08 GB) via
+          TextCrossEncoder.list_supported_models() — its HF source repo IS its model name
+          (unlike DEFAULT_MODEL's qdrant/* re-export), grounded not guessed.
+          ONE finding the note's "mirror _get_model exactly" instruction turned out to be
+          load-bearing for, not just stylistic: empirically verified that
+          HF_HUB_OFFLINE=1 correctly blocks the real network reach ("Cannot reach
+          huggingface.co: offline mode is enabled") but fastembed's OWN model loader wraps
+          that local failure in a retry-with-backoff sleep loop ANYWAY (3s, 9s, 27s — ~40s
+          total) before finally raising. Without _get_model's cheap pre-check
+          (_cross_encoder_cached, a pure os.walk for a .onnx file, grounded against the same
+          models--<repo> snapshot-dir convention), a cold cache on an "explicit surface a
+          human is waiting on" would hang ~40s before degrading — confirmed the fix drops
+          this to ~100 microseconds (test_get_cross_encoder_offline_raises_in_microseconds_
+          on_cold_cache pins it under 0.1s). Also added a best-effort cross-encoder warm-up
+          step to plugin/skills/bootstrap/SKILL.md (mirroring the embedding-model warm-up
+          line already there) — with no OTHER natural trigger to download this model, a
+          fresh install would otherwise degrade to the un-reranked order FOREVER. The real
+          model was exercised network-marked (test_real_cross_encoder_reranks_by_actual_
+          relevance) and correctly ranked a genuinely on-topic description above an
+          off-topic one.
 
       - id: RCL-6
         title: Evidence-snippet form for the top body-hit
@@ -1981,7 +2005,7 @@ release_train:
   - tier: T3
     target_version: 1.3.0
     theme: "Retrieval precision (hot-path-safe)"
-    status: planned
+    status: done
     done_means: >-
       Every injected token earns its place: per-query intent routing, floor-dedup +
       within-session cooldown, terse-follow-up rescue, and intra-block diversity —

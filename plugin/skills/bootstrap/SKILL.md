@@ -66,6 +66,15 @@ would provision into a root-owned path. Run this guard FIRST and stop if it fail
    `$TMPDIR/fastembed_cache`, which macOS purges on a schedule — and the hooks are offline by
    hard contract, so they can never re-download a wiped model. Recall would silently degrade
    to BM25 until someone re-ran bootstrap. This step MUST land the model somewhere durable.
+
+   Also warm the RCL-5 cross-encoder (a small ~80MB model, `/hippo:recall` and the MCP recall
+   tool's offline rerank — never the hot path). Best-effort: a failure here must NOT fail
+   bootstrap (the rerank already degrades to the un-reranked order on any cache miss):
+   ```bash
+   PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -c \
+     "from memory.build_index import ensure_fastembed_cache_path; ensure_fastembed_cache_path(); from fastembed.rerank.cross_encoder import TextCrossEncoder; TextCrossEncoder('Xenova/ms-marco-MiniLM-L-6-v2')" \
+     || true
+   ```
 4. **Write the sentinel** on success: `{"requirements_hash": "<hash>", "bootstrapped_at": "<ISO
    timestamp>", "plugin_version": "<version field from ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json>"}`
    to `${CLAUDE_PLUGIN_DATA}/.bootstrap-sentinel`. This is what step 1 checks — without it, every
