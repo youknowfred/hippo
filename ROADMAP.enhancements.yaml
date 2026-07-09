@@ -1639,7 +1639,7 @@ workstreams:
         title: Temporal auto-stamp — close invalid_after at supersession
         priority: P3
         effort: S
-        status: planned
+        status: done
         source: {lens: capture, verdict: RESHAPE (stamp only; defer the as-of retrieval mode)}
         problem: >-
           GRA-4 uses invalid_after only as a recall penalty, and it is only ever
@@ -2104,7 +2104,7 @@ release_train:
   - tier: T5
     target_version: 1.5.0
     theme: "Knowledge that grows itself"
-    status: planned
+    status: done
     done_means: >-
       Capture drafts with verbatim evidence and ranks seeds by value; the graph
       densifies from real co-recall; near-duplicate committed memories can be

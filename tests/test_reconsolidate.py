@@ -365,6 +365,7 @@ def test_semantic_reverify_graduate_clears_flag_and_logs_outcome(repo, memory_di
         "cited": [],
         "dropped_citations": ["src/foo.py"],
         "invalidated": False,  # LIF-1's chain is demote-only — graduate never touches it
+        "invalid_after": None,  # GRW-7's stamped boundary — demote-with-successor only
         "edge_written": False,
         "logged": True,
         "error": None,
@@ -561,15 +562,24 @@ def test_semantic_reverify_demote_with_superseded_by_writes_edge_to_successor(re
     assert open(os.path.join(memory_dir, "m_new.md"), encoding="utf-8").read() == text
 
 
-def test_semantic_reverify_fix_with_superseded_by_also_clears_flag(repo, memory_dir):
+def test_semantic_reverify_fix_refuses_superseded_by(repo, memory_dir):
+    """GRW-7 closed the fix+superseded_by combination: fix re-baselines the memory as
+    CURRENT via reverify_file, and a supersede now stamps the loser's invalid_after —
+    the two verdicts contradict, so the combination refuses BEFORE any write (the
+    pre-GRW-7 behavior wrote the edge and stamped nothing, a silent half-supersede)."""
     _seed_pair(repo, memory_dir)
     td = os.path.join(repo, "tele")
+    before_new = open(os.path.join(memory_dir, "m_new.md"), encoding="utf-8").read()
+    before_old = open(os.path.join(memory_dir, "m_old.md"), encoding="utf-8").read()
     result = R.semantic_reverify(
         "m_old", "fix", memory_dir, repo, telemetry_dir=td, superseded_by="m_new"
     )
-    assert result["error"] is None
-    assert result["cleared"] is True  # fix still routes through reverify_file
-    assert result["edge_written"] is True
+    assert result["error"] is not None and "demote" in result["error"]
+    assert result["cleared"] is False and result["edge_written"] is False
+    assert result["logged"] is False
+    assert list(read_reconsolidation_events(td)) == []
+    assert open(os.path.join(memory_dir, "m_new.md"), encoding="utf-8").read() == before_new
+    assert open(os.path.join(memory_dir, "m_old.md"), encoding="utf-8").read() == before_old
 
 
 def test_semantic_reverify_graduate_refuses_superseded_by(repo, memory_dir):
@@ -1105,3 +1115,101 @@ def test_producer_tags_watermark_items(repo, memory_dir):
     assert "m_precise [since-watermark]" in out
     assert "m_recalled:" in out and "m_recalled [since-watermark]" not in out
     assert "commits landed since your last session" in out  # the only-when-present legend
+
+
+# --------------------------------------------------------------------------- #
+# GRW-7: a supersede stamps the loser's invalid_after at the SUCCESSOR's commit date
+# --------------------------------------------------------------------------- #
+def test_demote_superseded_by_stamps_the_successors_commit_date(repo, memory_dir, monkeypatch):
+    """The succession moment — not verdict-render time — is the validity boundary. The
+    successor here was committed at a PINNED epoch, so the loser's invalid_after equals
+    that exact instant, read back through the SHIPPED read_invalid_after (no new field,
+    no schema bump — the one canonical name, inv5)."""
+    import datetime as _dt
+
+    from memory.staleness import read_invalid_after
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _seed_pair(repo, memory_dir)  # c2 (epoch 1_700_000_100) commits m_new.md via add -A
+    td = os.path.join(repo, "tele")
+
+    result = R.semantic_reverify(
+        "m_old", "demote", memory_dir, repo, telemetry_dir=td, superseded_by="m_new"
+    )
+    assert result["error"] is None and result["invalidated"] is True
+
+    expected = _dt.datetime.fromtimestamp(1_700_000_100, _dt.timezone.utc).isoformat()
+    text = open(os.path.join(memory_dir, "m_old.md"), encoding="utf-8").read()
+    assert read_invalid_after(text) == expected, (
+        "the loser's validity window closes at the SUCCESSOR's commit date"
+    )
+    assert result["invalid_after"] == expected
+    # …and the body stayed byte-identical (the stamp is frontmatter-only).
+    assert text.split("---\n", 2)[-1].startswith("body for m_old")
+
+
+def test_demote_superseded_by_uncommitted_successor_falls_back_to_now(repo, memory_dir, monkeypatch):
+    import datetime as _dt
+
+    from memory.staleness import read_invalid_after
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_old.md", _mem("m_old", ["src/foo.py"], c1))
+    git_commit(repo, "commit m_old", 1_700_000_050)
+    # The successor is written but NEVER committed — just drafted this session.
+    write_file(memory_dir, "m_new.md", _mem("m_new", ["src/foo.py"], None))
+    td = os.path.join(repo, "tele")
+
+    before = _dt.datetime.now(_dt.timezone.utc)
+    result = R.semantic_reverify(
+        "m_old", "demote", memory_dir, repo, telemetry_dir=td, superseded_by="m_new"
+    )
+    assert result["error"] is None and result["invalidated"] is True
+    stamped = read_invalid_after(open(os.path.join(memory_dir, "m_old.md"), encoding="utf-8").read())
+    parsed = _dt.datetime.fromisoformat(stamped)
+    assert parsed >= before - _dt.timedelta(seconds=5), "uncommitted successor → now-UTC fallback"
+
+
+def test_demote_superseded_by_ledger_event_is_the_audit_trail(repo, memory_dir, monkeypatch):
+    import datetime as _dt
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _seed_pair(repo, memory_dir)
+    td = os.path.join(repo, "tele")
+    R.semantic_reverify("m_old", "demote", memory_dir, repo, telemetry_dir=td, superseded_by="m_new")
+
+    events = list(read_reconsolidation_events(td))
+    assert len(events) == 1
+    ev = events[0]
+    assert ev["name"] == "m_old" and ev["outcome"] == "demote" and ev["invalidated"] is True
+    assert ev["superseded_by"] == "m_new"
+    assert ev["invalid_after"] == _dt.datetime.fromtimestamp(1_700_000_100, _dt.timezone.utc).isoformat()
+
+
+def test_plain_demote_still_stamps_now_and_logs_no_successor_fields(repo, memory_dir, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _seed_pair(repo, memory_dir)
+    td = os.path.join(repo, "tele")
+    result = R.semantic_reverify("m_old", "demote", memory_dir, repo, telemetry_dir=td)
+    assert result["error"] is None and result["invalidated"] is True
+    ev = list(read_reconsolidation_events(td))[0]
+    assert "superseded_by" not in ev, "no successor named → no successor fields fabricated"
+    # invalid_after IS recorded (the stamp happened — now-UTC); the boundary is auditable.
+    assert "invalid_after" in ev
+
+
+def test_cli_demote_superseded_by_prints_the_boundary(repo, memory_dir, capsys, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _seed_pair(repo, memory_dir)
+    td = os.path.join(repo, "tele")
+    rc = R.main(
+        [
+            "--reverify", "m_old", "--outcome", "demote", "--superseded-by", "m_new",
+            "--memory-dir", memory_dir, "--repo-root", repo, "--telemetry-dir", td,
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "the successor's commit date" in out, "the stamped boundary is legible at the CLI"

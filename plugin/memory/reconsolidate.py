@@ -59,7 +59,13 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Optional, Set
 
-from .provenance import _iter_memory_files, build_repo_file_index, reverify_file, run_git
+from .provenance import (
+    _iter_memory_files,
+    build_repo_file_index,
+    git_last_commit_with_time,
+    reverify_file,
+    run_git,
+)
 from .staleness import RunContext, find_stale, invalid_after_map, read_provenance, set_invalid_after
 from .telemetry import (
     read_episodes,
@@ -88,8 +94,11 @@ _VALID_OUTCOMES = frozenset({"graduate", "fix", "demote"})
 _OUTCOMES_THAT_CLEAR_STALENESS = frozenset({"graduate", "fix"})
 # Outcomes that may OPTIONALLY record a supersedes edge (GRA-4's superseded_by opt-in):
 # the memory was confirmed wrong/replaced and a SUCCESSOR carries the current claim.
-# "graduate" is excluded — confirmed-correct and superseded are contradictory verdicts.
-_EDGE_WRITING_OUTCOMES = frozenset({"fix", "demote"})
+# "graduate" is excluded — confirmed-correct and superseded are contradictory verdicts —
+# and so is "fix" since GRW-7: a supersede now STAMPS the loser's invalid_after at the
+# successor's commit date, and a memory reverify_file just re-baselined as current must
+# never be stamped invalid in the same verdict. Demote is the one coherent supersede arm.
+_EDGE_WRITING_OUTCOMES = frozenset({"demote"})
 
 
 # GRW-5: bound on the since-watermark diff read — the same cap discipline as
@@ -374,6 +383,28 @@ def recalled_stale_worklist(
 # --------------------------------------------------------------------------- #
 # Write primitive (per-item, verification-gated — reuses provenance.reverify_file)
 # --------------------------------------------------------------------------- #
+def _successor_commit_iso(successor_path: str, repo_root: str) -> Optional[str]:
+    """The SUCCESSOR file's last-commit time as UTC ISO-8601 — GRW-7's validity boundary.
+
+    ``git_last_commit_with_time`` on the successor ``.md`` itself (its authorship/last-edit
+    moment in history), deliberately NOT ``read_source_commit_time`` — that field is the
+    successor's cited-CODE baseline, a different fact. ``None`` when the successor is
+    uncommitted (just written this session) or outside the repo — the caller's
+    ``set_invalid_after`` then falls back to its own now-UTC default. Never raises.
+    """
+    try:
+        rel = os.path.relpath(successor_path, repo_root)
+        _sha, epoch = git_last_commit_with_time(rel, repo_root)
+        if not epoch:
+            return None
+        from datetime import datetime, timezone
+
+        return datetime.fromtimestamp(int(epoch), timezone.utc).isoformat()
+    except Exception:
+        return None
+
+
+
 def semantic_reverify(
     name: str,
     outcome: str,
@@ -405,15 +436,24 @@ def semantic_reverify(
         one-memory verdict; the ledger event records ``invalidated`` so the chained
         action is auditable.
 
-    ``superseded_by`` (GRA-4, opt-in, ``demote``/``fix`` outcomes only): the name of the
-    SUCCESSOR memory that replaces this one's claim. When given, the ``supersedes``
-    relation is appended to the SUCCESSOR's frontmatter (``links.add_typed_relation`` —
-    additive, body-preserving, idempotent), so recall demotes+annotates the loser from the
-    next index refresh on. Explicitly per-item and agent-gated: the agent names ONE
-    successor for ONE re-verified memory; there is no batch form and nothing here ever
-    fires autonomously. Refused (no writes at all) for ``graduate`` — a memory just
-    confirmed CORRECT cannot simultaneously be superseded — and when either endpoint's
-    file is missing (a dangling edge must not be born from the engine's own write path).
+    ``superseded_by`` (GRA-4, opt-in, ``demote`` only): the name of the SUCCESSOR memory
+    that replaces this one's claim. When given, the ``supersedes`` relation is appended to
+    the SUCCESSOR's frontmatter (``links.add_typed_relation`` — additive, body-preserving,
+    idempotent), so recall demotes+annotates the loser from the next index refresh on —
+    AND (GRW-7) the loser's ``invalid_after`` is stamped at the SUCCESSOR's last-commit
+    date (``git_last_commit_with_time`` on the successor file — its authorship moment,
+    NOT ``read_source_commit_time``, which is the successor's cited-CODE baseline),
+    falling back to now-UTC when the successor is uncommitted (just written this
+    session). The succession moment becomes an explicit, auditable validity boundary
+    instead of a silent score nudge; the ledger event records both the boundary and the
+    successor. One write, not a second stamp — the demote arm's single
+    ``set_invalid_after`` call receives the successor timestamp. Explicitly per-item and
+    agent-gated: the agent names ONE successor for ONE re-verified memory; there is no
+    batch form and nothing here ever fires autonomously. Refused (no writes at all) for
+    ``graduate`` AND ``fix`` — a memory just confirmed/re-baselined as CURRENT cannot
+    simultaneously be superseded (GRW-7 closed the old fix+superseded_by combination for
+    exactly this reason) — and when either endpoint's file is missing (a dangling edge
+    must not be born from the engine's own write path).
 
     The staleness-flag write (when one happens) routes ENTIRELY through the existing
     ``provenance.reverify_file()``, the edge write through the ONE typed-edge primitive,
@@ -436,6 +476,7 @@ def semantic_reverify(
         "cited": [],
         "dropped_citations": [],
         "invalidated": False,
+        "invalid_after": None,
         "edge_written": False,
         "logged": False,
         "error": None,
@@ -451,8 +492,10 @@ def semantic_reverify(
             # verdict (reverify done, edge missing) behind.
             if outcome not in _EDGE_WRITING_OUTCOMES:
                 result["error"] = (
-                    f"superseded_by is only valid with outcomes "
-                    f"{sorted(_EDGE_WRITING_OUTCOMES)}, not {outcome!r}"
+                    f"superseded_by is only valid with outcome demote, not {outcome!r} — "
+                    "graduate/fix assert the memory is CURRENT, which contradicts naming a "
+                    "successor that replaces it (a supersede stamps the loser's "
+                    "invalid_after at the successor's commit date, GRW-7)"
                 )
                 return result
             sfname = superseded_by if superseded_by.endswith(".md") else f"{superseded_by}.md"
@@ -483,11 +526,21 @@ def semantic_reverify(
             if not os.path.isfile(path):
                 result["error"] = f"memory not found: {fname}"
                 return result
-            ia = set_invalid_after(path, dry_run=dry_run)
+            # GRW-7: when a successor is named, the validity boundary IS the succession
+            # moment — the successor's commit date — not the time somebody got around to
+            # rendering the verdict. One write: the same set_invalid_after call receives
+            # the timestamp (None → its own now-UTC default for an uncommitted successor).
+            successor_ts = (
+                _successor_commit_iso(successor_path, repo_root)
+                if successor_path is not None
+                else None
+            )
+            ia = set_invalid_after(path, successor_ts, dry_run=dry_run)
             if ia["error"]:
                 result["error"] = ia["error"]
                 return result
             result["invalidated"] = bool(ia["changed"])
+            result["invalid_after"] = ia.get("invalid_after")
             if result["invalidated"] and not dry_run:
                 # Same-session immediacy (mirrors archive_memory): the penalty reads the
                 # INDEX's invalid_after, so refresh now instead of waiting for the next
@@ -516,6 +569,9 @@ def semantic_reverify(
             # LIF-1: stamp the chained action onto the demote event so the ledger is an
             # audit trail of what the verdict actually DID, not just that it was rendered.
             invalidated=result["invalidated"] if outcome == "demote" else None,
+            # GRW-7: the boundary + the successor make the supersession itself auditable.
+            invalid_after=result["invalid_after"],
+            superseded_by=superseded_by if successor_path is not None else None,
         )
     except Exception as exc:
         result["error"] = str(exc)
@@ -667,9 +723,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--superseded-by",
         metavar="SUCCESSOR",
         default=None,
-        help="GRA-4 opt-in (demote/fix only): name the SUCCESSOR memory that replaces this "
-        "one's claim — appends `supersedes: [NAME]` to the successor's frontmatter so "
-        "recall demotes+annotates the loser. One successor, one memory, never autonomous.",
+        help="GRA-4 opt-in (demote only): name the SUCCESSOR memory that replaces this "
+        "one's claim — appends `supersedes: [NAME]` to the successor's frontmatter AND "
+        "stamps the loser's invalid_after at the successor's commit date (GRW-7), so the "
+        "supersession is an auditable boundary. One successor, one memory, never autonomous.",
     )
     parser.add_argument("--dry-run", action="store_true", help="report only; do not write")
     args = parser.parse_args(argv)
@@ -716,8 +773,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         bits.append(f"staleness flag {verb}cleared" if r["cleared"] else "staleness flag unchanged")
         if args.outcome == "demote":
             # LIF-1: name the chained action so the one-command demote is legible.
+            boundary = (
+                f" to {r['invalid_after']} (the successor's commit date)"
+                if args.superseded_by and r.get("invalid_after")
+                else ""
+            )
             bits.append(
-                f"invalid_after {verb}set — recall's pre-cut penalty engages with no second command"
+                f"invalid_after {verb}set{boundary} — recall's pre-cut penalty engages with no second command"
                 if r["invalidated"]
                 else "invalid_after unchanged"
             )

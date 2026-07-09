@@ -951,6 +951,8 @@ def record_reconsolidation_outcome(
     *,
     telemetry_dir: Optional[str] = None,
     invalidated: Optional[bool] = None,
+    invalid_after: Optional[str] = None,
+    superseded_by: Optional[str] = None,
 ) -> bool:
     """Append ONE reconsolidation outcome to the gitignored ``reconsolidation_events.jsonl``.
 
@@ -961,7 +963,10 @@ def record_reconsolidation_outcome(
     ``invalidated``, when not ``None``, is stamped onto the event — LIF-1's demote chain
     passes it so the ledger is an AUDIT TRAIL of whether the verdict also closed the
     memory's validity window (``staleness.set_invalid_after``), not just that it was
-    rendered. Fire-and-forget; NEVER raises; size-bounded (reuses ``_rotate_if_needed``);
+    rendered. ``invalid_after`` and ``superseded_by`` (GRW-7) extend that trail to the
+    supersession itself: the stamped validity BOUNDARY (the successor's commit date) and
+    the successor's name, so a demotion is an auditable fact, not a silent score nudge.
+    Fire-and-forget; NEVER raises; size-bounded (reuses ``_rotate_if_needed``);
     no sensitive content (only the memory name + the outcome).
     """
     if outcome not in _RECONSOLIDATION_OUTCOMES:
@@ -972,6 +977,10 @@ def record_reconsolidation_outcome(
         event = {"ts": round(time.time(), 3), "name": name, "outcome": outcome}
         if invalidated is not None:
             event["invalidated"] = bool(invalidated)
+        if invalid_after is not None:
+            event["invalid_after"] = str(invalid_after)
+        if superseded_by is not None:
+            event["superseded_by"] = str(superseded_by)
         path = _reconsolidation_ledger_path(td)
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, ensure_ascii=False) + "\n")

@@ -97,7 +97,7 @@ want the graph edge with zero ranking side effects.
 The one write primitive is `memory.links.add_typed_relation(path, relation, target)` —
 additive, body-preserving, idempotent, per-item (there is no bulk-relation writer, per the
 no-bulk-autonomous-sweeps invariant). In practice this is invoked via
-`reconsolidate --reverify <old-name> --outcome {fix|demote} --superseded-by <new-name>`,
+`reconsolidate --reverify <old-name> --outcome demote --superseded-by <new-name>`,
 which writes the `supersedes` edge onto the NEW (successor) memory's frontmatter — never onto
 the old one — so recall demotes/annotates the loser automatically from the next index
 refresh on. `contradicts`/`refines` currently have no CLI writer; author them by hand in the
@@ -283,9 +283,10 @@ verdict on one flagged memory:
   days, the staleness report names it as an archive candidate for `/hippo:audit` —
   report-only, never automatic.
 
-`--superseded-by <successor>` is an opt-in addition to `fix`/`demote` (never `graduate` — a
-confirmed-correct memory cannot simultaneously be superseded): it writes the `supersedes`
-typed edge described above onto the SUCCESSOR's frontmatter in the same call.
+`--superseded-by <successor>` is an opt-in addition to `demote` only (never `graduate` or
+`fix` — a memory just confirmed/re-baselined as current cannot simultaneously be superseded):
+it writes the `supersedes` typed edge described above onto the SUCCESSOR's frontmatter and
+stamps the loser's `invalid_after` at the successor's commit date, in the same call.
 
 `reconsolidate --snooze <name>` is a DIFFERENT, lighter action: it acks a flagged memory
 without a verdict, excluding it from the next 5 new reconsolidation-ledger sessions' worklist
