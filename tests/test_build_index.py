@@ -125,6 +125,53 @@ def test_cold_cache_degrades_to_bm25_fast_with_no_fastembed_import(tmp_path, mon
 
 
 # --------------------------------------------------------------------------- #
+# RCL-5: the cross-encoder's OWN pure-stat cold-cache pre-check, mirroring OSP-4 exactly
+# --------------------------------------------------------------------------- #
+def test_cross_encoder_cached_false_on_empty_dir(tmp_path):
+    assert B._cross_encoder_cached(str(tmp_path / "empty-cache")) is False
+
+
+def test_cross_encoder_cached_true_when_onnx_present(tmp_path):
+    cache = str(tmp_path / "cache")
+    snapshot = os.path.join(cache, "models--Xenova--ms-marco-MiniLM-L-6-v2", "snapshots", "abc123")
+    os.makedirs(snapshot)
+    open(os.path.join(snapshot, "model.onnx"), "w").close()
+    assert B._cross_encoder_cached(cache) is True
+
+
+def test_get_cross_encoder_offline_raises_in_microseconds_on_cold_cache(tmp_path, monkeypatch):
+    """The load-bearing reason for the pre-check: fastembed's OWN model loader wraps a cache
+    MISS in a retry-with-backoff sleep loop regardless of why the load failed (confirmed
+    empirically -- HF_HUB_OFFLINE=1 correctly blocks the network reach but does nothing to
+    skip fastembed's retry wrapper, ~40s of sleep-and-retry). This pre-check must raise
+    BEFORE fastembed is ever imported, so a cold cache degrades in microseconds instead."""
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(tmp_path / "empty-cross-encoder-cache"))
+    B._CROSS_ENCODER_CACHE.clear()
+    sys.modules.pop("fastembed", None)
+
+    t0 = time.monotonic()
+    with pytest.raises(RuntimeError, match="not cached offline"):
+        B._get_cross_encoder(allow_download=False)
+    elapsed = time.monotonic() - t0
+
+    assert elapsed < 0.1  # microseconds in practice; nowhere near fastembed's ~40s retry loop
+    assert "fastembed" not in sys.modules
+
+
+def test_get_cross_encoder_caches_by_allow_download_key(monkeypatch):
+    """Same (model, allow_download) key -> the SAME cached instance; a different
+    allow_download value is a distinct cache slot (mirrors _get_model's key shape)."""
+    sentinel_offline = object()
+    sentinel_online = object()
+    B._CROSS_ENCODER_CACHE.clear()
+    B._CROSS_ENCODER_CACHE[(B._CROSS_ENCODER_MODEL, False)] = sentinel_offline
+    B._CROSS_ENCODER_CACHE[(B._CROSS_ENCODER_MODEL, True)] = sentinel_online
+    assert B._get_cross_encoder(allow_download=False) is sentinel_offline
+    assert B._get_cross_encoder(allow_download=True) is sentinel_online
+    B._CROSS_ENCODER_CACHE.clear()
+
+
+# --------------------------------------------------------------------------- #
 # OSP-4: run_bounded holds off the main thread (SIGALRM never worked there)
 # --------------------------------------------------------------------------- #
 def test_run_bounded_raises_dense_timeout_from_worker_thread():
@@ -1207,7 +1254,9 @@ def test_build_index_manifest_carries_body_chunks_block(tmp_path, monkeypatch):
     assert "body_chunks" in manifest
     chunks = manifest["body_chunks"]
     assert chunks and all(c["entry"] == 0 for c in chunks)
-    assert all(set(c.keys()) == {"entry", "hash", "tokens", "row"} for c in chunks)
+    # RCL-6: "text" joined the persisted shape (the evidence-snippet render needs the
+    # winning chunk's verbatim text with no read-at-emit).
+    assert all(set(c.keys()) == {"entry", "hash", "tokens", "row", "text"} for c in chunks)
 
     # Round-trips through the actual manifest.json file on disk.
     import json
@@ -1222,6 +1271,30 @@ def test_build_index_manifest_carries_body_chunks_block(tmp_path, monkeypatch):
         "name", "file", "doc_text", "description", "hash", "tokens", "invalid_after",
         "source_commit_time", "row",
     }
+
+
+def test_build_index_manifest_carries_head_commit(repo, memory_dir, monkeypatch):
+    """RCL-6: the manifest stamps the CURRENT HEAD at build time -- one git call per BUILD,
+    never per query -- as the evidence-snippet's "indexed @sha" source."""
+    from .conftest import git_commit
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    idx = os.path.join(os.path.dirname(memory_dir), ".memory-index")
+    with open(os.path.join(memory_dir, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: a\ndescription: "d"\ntype: project\n---\nbody\n')
+    sha = git_commit(repo, "seed", 1_700_000_000)
+
+    manifest = B.build_index(memory_dir, idx)
+    assert manifest["head_commit"] == sha
+
+
+def test_build_index_manifest_head_commit_none_outside_git_repo(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(md, {"a.md": ("a generic description", _DISTINCTIVE_BODY)})
+    manifest = B.build_index(md, idx)
+    assert manifest["head_commit"] is None
 
 
 def test_build_index_dense_matrix_widened_with_body_chunk_rows(tmp_path, monkeypatch):

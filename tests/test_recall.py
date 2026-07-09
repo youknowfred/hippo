@@ -843,6 +843,88 @@ def test_graph_expansion_applies_superseded_penalty_to_injected_neighbor(tmp_pat
 
 
 # --------------------------------------------------------------------------- #
+# RCL-4: MMR intra-block diversity re-rank
+# --------------------------------------------------------------------------- #
+def test_mmr_diversifies_near_paraphrase_block(tmp_path, monkeypatch):
+    """Acceptance: two near-paraphrase memories must not both occupy top-k -- the block
+    spans distinct facets instead (verified with a real dense matrix, fake embedder)."""
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    emb_docs, emb_query = _fake_embedder(16)
+    monkeypatch.setattr(B, "embed_documents", emb_docs)
+    monkeypatch.setattr(R, "embed_query", emb_query)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(
+        md,
+        {
+            "deploy_gate_a.md": (
+                "deploy pipeline manual approval gate required before production rollout ships"
+            ),
+            "deploy_gate_b.md": (
+                "deploy pipeline manual approval gate required before production rollout deploys"
+            ),
+            "db_migration.md": (
+                "database migration requires an approval gate from the platform team before running"
+            ),
+        },
+    )
+    B.build_index(md, idx)
+    query = "deploy pipeline manual approval gate rollout"
+
+    # WITH MMR (the real function, still in effect): the block spans both facets.
+    names = [r["name"] for r in R.recall(query, k=2, memory_dir=md, index_dir=idx)]
+    assert names == ["deploy_gate_a", "db_migration"]
+
+    # Baseline (MMR bypassed): the two near-paraphrases dominate top-2 instead -- confirms
+    # the fixture actually NEEDS diversification, not a coincidence of this corpus/query.
+    monkeypatch.setattr(R, "_mmr_rerank", lambda penalized, entries, dense, k: penalized)
+    baseline_names = [r["name"] for r in R.recall(query, k=2, memory_dir=md, index_dir=idx)]
+    assert baseline_names == ["deploy_gate_a", "deploy_gate_b"]
+
+
+def test_mmr_rerank_is_noop_without_dense_matrix():
+    """A BM25-only corpus (idx.dense is None) must be a byte-identical no-op."""
+    penalized = [(0, 0.9, None), (1, 0.8, None), (2, 0.5, None)]
+    assert R._mmr_rerank(penalized, [{}, {}, {}], None, k=3) == penalized
+
+
+def test_mmr_rerank_noop_with_fewer_than_two_candidates():
+    dense = np.array([[1.0, 0.0]], dtype="float32")
+    penalized = [(0, 0.9, None)]
+    assert R._mmr_rerank(penalized, [{"row": 0}], dense, k=5) == penalized
+
+
+def test_mmr_rerank_exempts_entries_without_dense_row():
+    """A candidate with no usable dense row (model-mismatch merge, a graph-injected
+    neighbor never itself embedded) keeps its ORIGINAL position -- exempt from the
+    diversity math entirely, mirroring the knee cutoff's exemption posture."""
+    dense = np.array([[1.0, 0.0], [1.0, 0.0], [0.0, 1.0]], dtype="float32")
+    entries = [{"row": 0}, {"row": None}, {"row": 1}]
+    penalized = [(0, 0.9, None), (1, 0.8, None), (2, 0.5, None)]
+    out = R._mmr_rerank(penalized, entries, dense, k=3)
+    assert out[1] == (1, 0.8, None)  # unmoved, still at its original slot
+
+
+def test_mmr_rerank_never_raises_on_malformed_input():
+    assert R._mmr_rerank([], [], None, k=5) == []
+    # a row index out of range for `dense` must degrade, not crash
+    dense = np.array([[1.0, 0.0]], dtype="float32")
+    entries = [{"row": 99}, {"row": 0}]
+    penalized = [(0, 0.9, None), (1, 0.5, None)]
+    out = R._mmr_rerank(penalized, entries, dense, k=2)
+    assert out == penalized  # only one usable row -> "fewer than two eligible" -> no-op
+
+
+def test_mmr_lambda_env_override(monkeypatch):
+    monkeypatch.setenv("HIPPO_MMR_LAMBDA", "0.5")
+    assert R._mmr_lambda() == pytest.approx(0.5)
+    monkeypatch.setenv("HIPPO_MMR_LAMBDA", "not-a-number")
+    assert R._mmr_lambda() == R._MMR_LAMBDA
+    monkeypatch.delenv("HIPPO_MMR_LAMBDA", raising=False)
+    assert R._mmr_lambda() == R._MMR_LAMBDA
+
+
+# --------------------------------------------------------------------------- #
 # Fused dense+BM25 recall with a fake embedder
 # --------------------------------------------------------------------------- #
 def test_recall_fused_dense_and_bm25(tmp_path, monkeypatch):
@@ -1139,7 +1221,9 @@ def test_floor_memory_names_parses_floor_pointers(tmp_path):
     assert floor_memory_names(md) == {"feedback_no_backward_compat", "user_role"}
 
 
-def test_main_floor_dedup_drops_always_loaded_members_and_tops_off(tmp_path, monkeypatch, capsys):
+def test_main_floor_dedup_collapses_always_loaded_members_and_tops_off(tmp_path, monkeypatch, capsys):
+    """RCL-2: a floor member COLLAPSES (renders once, legibly) instead of vanishing, and
+    still costs no top-k slot -- a non-floor memory is topped off to fill it."""
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -1156,8 +1240,229 @@ def test_main_floor_dedup_drops_always_loaded_members_and_tops_off(tmp_path, mon
     rc = R.main(["no backward compat refactor voyage reranker", "--memory-dir", md, "--index-dir", idx])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "feedback_no_backward_compat" not in out  # dropped — it's in the floor already
+    assert "feedback_no_backward_compat" in out  # COLLAPSED, not dropped
     assert "reranker_voyage" in out  # non-floor memory still surfaces (topped off to k)
+    lines = out.splitlines()
+    floor_line = next(l for l in lines if "feedback_no_backward_compat" in l)
+    voyage_line = next(l for l in lines if "reranker_voyage" in l)
+    assert "(already in floor)" in floor_line
+    assert "(already in floor)" not in voyage_line
+
+
+def test_main_floor_dedup_widens_with_claude_md_citations(repo, memory_dir, tmp_path, monkeypatch, capsys):
+    """RCL-2: a memory backtick-cited in CLAUDE.md (never in the MEMORY.md floor at all) is
+    exactly as redundant to re-inject as a true floor pointer -- it collapses too."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    idx = str(tmp_path / "idx")
+    _write_corpus(
+        memory_dir, {"deploy_runbook.md": "deploy runbook rollback steps for production incidents"}
+    )
+    B.build_index(memory_dir, idx)
+    write_file(repo, "CLAUDE.md", "See `deploy_runbook` for the rollback steps.\n")
+
+    rc = R.main(
+        [
+            "deploy runbook rollback steps",
+            "--memory-dir", memory_dir, "--index-dir", idx, "--repo-root", repo,
+        ]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "deploy_runbook" in out
+    assert "(already in floor)" in out
+
+
+def test_main_floor_widen_degrades_silently_without_repo_root(tmp_path, monkeypatch, capsys):
+    """No repo_root (a non-git corpus, or an explicit --memory-dir-only invocation) ->
+    the CLAUDE.md-citation widen step is simply skipped, never an error."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"reranker_voyage.md": _CORPUS["reranker_voyage.md"]})
+    B.build_index(md, idx)
+
+    rc = R.main(["voyage reranker cross encoder", "--memory-dir", md, "--index-dir", idx])
+    assert rc == 0
+    assert "reranker_voyage" in capsys.readouterr().out
+
+
+def test_main_cooldown_collapses_repeat_pointer_same_session_thread(
+    repo, memory_dir, tmp_path, monkeypatch, capsys
+):
+    """RCL-2: the SAME top pointer must not re-inject every turn of one thread -- a second
+    turn sharing --session-id collapses it; a different/absent session-id does not."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    idx = str(tmp_path / "idx")
+    _write_corpus(
+        memory_dir, {"deploy_runbook.md": "deploy rollback steps for production incidents"}
+    )
+    B.build_index(memory_dir, idx)
+    common = [
+        "deploy rollback steps",
+        "--memory-dir", memory_dir, "--index-dir", idx, "--repo-root", repo,
+        "--session-id", "sess-1",
+    ]
+
+    assert R.main(common) == 0
+    out1 = capsys.readouterr().out
+    assert "deploy_runbook" in out1
+    assert "already surfaced" not in out1  # first turn: nothing to cool down yet
+
+    assert R.main(common) == 0
+    out2 = capsys.readouterr().out
+    assert "deploy_runbook" in out2
+    assert "(already surfaced this thread)" in out2
+
+    other_session = common[:-1] + ["sess-2"]
+    assert R.main(other_session) == 0
+    out3 = capsys.readouterr().out
+    assert "already surfaced" not in out3  # a different thread never saw turn 1
+
+
+def test_main_cooldown_applies_to_rule_pointers_too(repo, memory_dir, tmp_path, monkeypatch, capsys):
+    """T2 guard: a rule pointer is EXEMPT from floor-dedup (a rule is not a floor memory)
+    but MUST still cool down across turns of the same thread -- otherwise it would re-fire
+    every matching prompt for the rest of the session."""
+    from memory import rules_plane as RP
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    idx = str(tmp_path / "idx")
+    _write_corpus(memory_dir, {"unrelated.md": "an unrelated memory about nothing in particular"})
+    B.build_index(memory_dir, idx)
+    write_file(
+        repo,
+        "CLAUDE.md",
+        "# Deploys\n\nAlways run the rollback healthcheck before re-enabling the deploy "
+        "pipeline traffic gate.\n",
+    )
+    RP.refresh_rules_cache(repo, idx)
+    common = [
+        "rollback healthcheck deploy pipeline",
+        "--memory-dir", memory_dir, "--index-dir", idx, "--repo-root", repo,
+        "--session-id", "sess-rule",
+    ]
+
+    assert R.main(common) == 0
+    out1 = capsys.readouterr().out
+    assert "(rule)" in out1
+    assert "already surfaced" not in out1
+
+    assert R.main(common) == 0
+    out2 = capsys.readouterr().out
+    assert "(rule)" in out2  # still rendered, never dropped
+    assert "(already surfaced this thread)" in out2
+
+
+# --------------------------------------------------------------------------- #
+# RCL-3: multi-turn query formation — rescue terse follow-ups
+# --------------------------------------------------------------------------- #
+def test_main_rescues_blank_terse_follow_up_via_session_episode_blend(tmp_path, monkeypatch, capsys):
+    """Acceptance: a terse follow-up that clean_query blanks entirely ("and the other
+    one" -> "") shares no vocabulary with any memory ALONE -- blended with the prior turn's
+    query preview (same session), it recalls what that turn's vocabulary reaches."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(
+        md, {"kubernetes_deploy.md": "kubernetes deployment rollout strategy helm chart canary"}
+    )
+    B.build_index(md, idx)
+    common = ["--memory-dir", md, "--index-dir", idx, "--session-id", "sess-rescue"]
+
+    assert R.clean_query("and the other one") == ""  # confirms this IS the blank-abstention case
+    assert R.recall("and the other one", k=5, memory_dir=md, index_dir=idx) == []  # baseline
+
+    assert R.main(["kubernetes deployment rollout strategy"] + common) == 0
+    out1 = capsys.readouterr().out
+    assert "kubernetes_deploy" in out1
+
+    assert R.main(["and the other one"] + common) == 0
+    out2 = capsys.readouterr().out
+    assert "kubernetes_deploy" in out2  # rescued via the blend, not abstained
+
+
+def test_main_rescues_short_nonempty_follow_up_via_session_episode_blend(tmp_path, monkeypatch, capsys):
+    """The OTHER rescue path: a follow-up clean_query lets through non-empty (it clears
+    clean_query's own 2-token floor) but that is still short of _RESCUE_MIN_TOKENS -- must
+    rescue too, not just the fully-blanked case."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(
+        md, {"kubernetes_deploy.md": "kubernetes deployment rollout strategy helm chart canary"}
+    )
+    B.build_index(md, idx)
+    common = ["--memory-dir", md, "--index-dir", idx, "--session-id", "sess-rescue-2"]
+
+    cleaned = R.clean_query("the other one please")
+    assert cleaned != "" and len(R.tokenize(cleaned)) < R._rescue_min_tokens()  # confirms path B
+
+    assert R.main(["kubernetes deployment rollout strategy"] + common) == 0
+    capsys.readouterr()
+    assert R.main(["the other one please"] + common) == 0
+    out2 = capsys.readouterr().out
+    assert "kubernetes_deploy" in out2
+
+
+def test_main_terse_follow_up_without_session_history_stays_abstained(tmp_path, monkeypatch, capsys):
+    """No --session-id (or no prior episodes to blend with) -> the rescue simply can't
+    fire -- a terse follow-up abstains exactly as it did before this item."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(
+        md, {"kubernetes_deploy.md": "kubernetes deployment rollout strategy helm chart canary"}
+    )
+    B.build_index(md, idx)
+
+    rc = R.main(["and the other one", "--memory-dir", md, "--index-dir", idx])
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == ""
+
+
+def test_main_substantive_followup_byte_identical_regardless_of_session_history(
+    tmp_path, monkeypatch, capsys
+):
+    """A SUBSTANTIVE prompt (clears _RESCUE_MIN_TOKENS on its own) must be byte-identical
+    whether or not this session has prior-turn history -- the rescue never touches a prompt
+    that doesn't need it."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx)
+    substantive = "which reranker do we use for search results ranking"
+
+    assert R.main([substantive, "--memory-dir", md, "--index-dir", idx]) == 0
+    out_no_history = capsys.readouterr().out
+
+    assert R.main(
+        ["kubernetes deployment rollout strategy", "--memory-dir", md, "--index-dir", idx,
+         "--session-id", "sess-substantive"]
+    ) == 0
+    capsys.readouterr()
+    assert R.main(
+        [substantive, "--memory-dir", md, "--index-dir", idx, "--session-id", "sess-substantive"]
+    ) == 0
+    out_with_history = capsys.readouterr().out
+
+    assert out_no_history == out_with_history
+
+
+def test_rescue_min_tokens_and_turns_env_overrides(monkeypatch):
+    monkeypatch.setenv("HIPPO_RESCUE_MIN_TOKENS", "7")
+    assert R._rescue_min_tokens() == 7
+    monkeypatch.setenv("HIPPO_RESCUE_MIN_TOKENS", "not-a-number")
+    assert R._rescue_min_tokens() == R._RESCUE_MIN_TOKENS
+    monkeypatch.delenv("HIPPO_RESCUE_MIN_TOKENS", raising=False)
+    assert R._rescue_min_tokens() == R._RESCUE_MIN_TOKENS
+
+    monkeypatch.setenv("HIPPO_RESCUE_TURNS", "1")
+    assert R._rescue_turns() == 1
+    monkeypatch.setenv("HIPPO_RESCUE_TURNS", "bogus")
+    assert R._rescue_turns() == R._RESCUE_TURNS
+    monkeypatch.delenv("HIPPO_RESCUE_TURNS", raising=False)
+    assert R._rescue_turns() == R._RESCUE_TURNS
 
 
 def test_main_skips_recall_entirely_on_envelope_query(tmp_path, monkeypatch, capsys):
@@ -1669,6 +1974,132 @@ def test_bm25_rank_body_maps_chunks_back_to_parent_and_dedupes(tmp_path, monkeyp
     assert result.count(0) == 1  # entry 0 contributes exactly once, not twice
 
 
+# --------------------------------------------------------------------------- #
+# RCL-6: evidence-snippet form for the top body-hit
+# --------------------------------------------------------------------------- #
+def test_recall_body_win_snippet_renders_with_sha_for_rank1_body_only_hit(
+    repo, memory_dir, tmp_path, monkeypatch
+):
+    """Acceptance: a rank-1 body-signal-win hit carries body_win=True, its winning chunk's
+    verbatim text, and a real head_commit; format_results renders the snippet inline with
+    an "indexed @sha" mark."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    idx = str(tmp_path / "idx")
+    _write_body_corpus(memory_dir, {"incident.md": ("a generic description", _DISTINCTIVE_BODY)})
+    git_commit(repo, "seed corpus", 1_700_000_000)
+    B.build_index(memory_dir, idx)
+
+    res = R.recall("zqxwyvutplaceholder timeout", k=5, memory_dir=memory_dir, index_dir=idx)
+    assert res and res[0]["name"] == "incident"
+    assert res[0]["rank"] == 1
+    assert res[0]["body_win"] is True
+    assert res[0]["body_chunk_text"] and "zqxwyvutplaceholder" in res[0]["body_chunk_text"]
+    assert res[0]["head_commit"] and len(res[0]["head_commit"]) >= 7
+
+    out = R.format_results(res)
+    assert '↳ "' in out
+    assert "zqxwyvutplaceholder" in out
+    assert f"indexed @{res[0]['head_commit'][:7]}" in out
+
+
+def test_recall_body_win_false_for_description_signal_hit(tmp_path, monkeypatch):
+    """A normal description-matching hit must never be flagged a body-win, and must never
+    render a snippet -- the description IS the summary already."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"reranker_voyage.md": _CORPUS["reranker_voyage.md"]})
+    B.build_index(md, idx)
+
+    res = R.recall("voyage rerank cross encoder", k=5, memory_dir=md, index_dir=idx)
+    assert res and res[0]["name"] == "reranker_voyage"
+    assert res[0]["body_win"] is False
+    assert res[0]["body_chunk_text"] is None
+    assert '↳ "' not in R.format_results(res)
+
+
+def test_format_results_no_snippet_for_rank1_rule_pointer_even_if_flagged():
+    """Mandatory T2 guard, tested directly against format_results: a rule pointer must
+    NEVER render a snippet, even if (hypothetically) it carried body_win=True -- a rule
+    pointer has no chunk/sha; corpus="rule" wins over every other snippet condition."""
+    fake = [
+        {
+            "name": "Deploys", "file": "CLAUDE.md", "description": "deploy rules",
+            "rank": 1, "score": 999.0, "backend": "rules", "via": "rules", "note": "",
+            "stale_banner": "", "salience": None, "corpus": "rule", "root": None,
+            "body_win": True, "body_chunk_text": "should never render", "head_commit": "abcdef1",
+        }
+    ]
+    out = R.format_results(fake)
+    assert '↳ "' not in out
+    assert "should never render" not in out
+
+
+def test_format_results_snippet_gated_by_score_band(monkeypatch):
+    """A body-win below the score band must not render a snippet -- only the pointer line."""
+    fake = [
+        {
+            "name": "incident", "file": "incident.md", "description": "a generic description",
+            "rank": 1, "score": 0.001, "backend": "bm25", "via": "rank", "note": "",
+            "stale_banner": "", "salience": None, "corpus": None, "root": None,
+            "body_win": True, "body_chunk_text": "the distinctive fact", "head_commit": "abcdef1",
+        }
+    ]
+    assert '↳ "' not in R.format_results(fake)
+    monkeypatch.setenv("HIPPO_SNIPPET_SCORE_BAND", "0")  # admits any non-negative score
+    assert '↳ "' in R.format_results(fake)
+
+
+def test_format_results_snippet_truncates_to_max_chars(monkeypatch):
+    monkeypatch.setenv("HIPPO_MAX_SNIPPET_CHARS", "20")
+    fake = [
+        {
+            "name": "incident", "file": "incident.md", "description": "a generic description",
+            "rank": 1, "score": 1.0, "backend": "bm25", "via": "rank", "note": "",
+            "stale_banner": "", "salience": None, "corpus": None, "root": None,
+            "body_win": True, "body_chunk_text": "x" * 100, "head_commit": "abcdef1",
+        }
+    ]
+    out = R.format_results(fake)
+    snippet_line = next(ln for ln in out.splitlines() if "↳" in ln)
+    assert "…" in snippet_line
+    assert len(snippet_line) < 100  # bounded well below the raw 100-char body
+
+
+def test_snippet_score_band_and_max_chars_env_overrides(monkeypatch):
+    monkeypatch.setenv("HIPPO_SNIPPET_SCORE_BAND", "0.05")
+    assert R._snippet_score_band() == pytest.approx(0.05)
+    monkeypatch.setenv("HIPPO_SNIPPET_SCORE_BAND", "not-a-number")
+    assert R._snippet_score_band() == pytest.approx(
+        R._SNIPPET_SCORE_BAND_FRACTION * R._body_rrf_weight() / (R._RRF_K + 1)
+    )
+    monkeypatch.delenv("HIPPO_SNIPPET_SCORE_BAND", raising=False)
+
+    monkeypatch.setenv("HIPPO_MAX_SNIPPET_CHARS", "50")
+    assert R._max_snippet_chars() == 50
+    monkeypatch.setenv("HIPPO_MAX_SNIPPET_CHARS", "not-a-number")
+    assert R._max_snippet_chars() == R._MAX_SNIPPET_CHARS
+    monkeypatch.delenv("HIPPO_MAX_SNIPPET_CHARS", raising=False)
+    assert R._max_snippet_chars() == R._MAX_SNIPPET_CHARS
+
+
+def test_recall_body_win_and_head_commit_always_present_no_key_branching(tmp_path, monkeypatch):
+    """Convention pin: every result dict carries body_win/body_chunk_text/head_commit keys,
+    same no-key-branching posture as via/note/corpus -- a description hit gets False/None,
+    never a missing key."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx)
+    res = R.recall("voyage rerank cross encoder", k=5, memory_dir=md, index_dir=idx)
+    assert res
+    for r in res:
+        assert "body_win" in r and isinstance(r["body_win"], bool)
+        assert "body_chunk_text" in r
+        assert "head_commit" in r  # None outside a git repo, but the key always exists
+
+
 def test_dense_rank_body_maps_chunks_back_and_dedupes(tmp_path, monkeypatch):
     """Direct unit check on the dense half of the backstop: fake-embedder dense rank over the
     widened matrix, mapped back to parent entries, deduped to best rank."""
@@ -1718,6 +2149,101 @@ def test_body_rrf_weight_env_override(monkeypatch):
     assert R._body_rrf_weight() == R._BODY_RRF_WEIGHT  # malformed -> module default
     monkeypatch.delenv("HIPPO_BODY_RRF_WEIGHT", raising=False)
     assert R._body_rrf_weight() == R._BODY_RRF_WEIGHT
+
+
+# --------------------------------------------------------------------------- #
+# RCL-1: per-query dense/lexical intent routing
+# --------------------------------------------------------------------------- #
+def test_intent_weights_leans_lexical_on_identifier_dense_query():
+    """A pasted-stacktrace-shaped query (mostly mined identifiers) must lean lexical --
+    dense weight below 1.0, lexical weight above 1.0, pair still summing to 2.0."""
+    query = "TypeError foo_bar_baz.qux_module app/db/session.py CONNECTION_TIMEOUT_MS"
+    dense_w, lex_w = R._intent_weights(query, R.tokenize(query))
+    assert lex_w > 1.0 > dense_w
+    assert dense_w + lex_w == pytest.approx(2.0)
+
+
+def test_intent_weights_leans_dense_on_prose_query():
+    """A prose paraphrase (zero mined identifiers, plenty of content tokens) must lean
+    dense -- dense weight above 1.0, lexical weight below 1.0."""
+    query = "authentication timeout issue affecting login session token expiry handling please explain"
+    dense_w, lex_w = R._intent_weights(query, R.tokenize(query))
+    assert dense_w > 1.0 > lex_w
+    assert dense_w + lex_w == pytest.approx(2.0)
+
+
+def test_intent_weights_ambiguous_query_is_exact_balanced_default():
+    """A query with a single mild identifier amid plenty of prose must land in the
+    dead-band -- EXACTLY (1.0, 1.0), byte-identical to the pre-RCL-1 default."""
+    query = "can you check the config_value setting in the deploy pipeline please"
+    dense_w, lex_w = R._intent_weights(query, R.tokenize(query))
+    assert (dense_w, lex_w) == (1.0, 1.0)
+
+
+def test_intent_weights_short_query_is_exact_balanced_default():
+    """Too few tokens to trust a density ratio (below _INTENT_MIN_TOKENS) must never
+    mis-route, regardless of how identifier-shaped the few tokens are."""
+    query = "fix foo_bar_baz"
+    dense_w, lex_w = R._intent_weights(query, R.tokenize(query))
+    assert (dense_w, lex_w) == (1.0, 1.0)
+
+
+def test_intent_weights_env_overrides(monkeypatch):
+    query = "authentication timeout issue affecting login session token expiry handling please explain"
+    q_tokens = R.tokenize(query)
+    # Force the dense-density bound below zero so even a pure-prose query no longer clears
+    # the "lean dense" leg -- proves the override is actually read, not just the default.
+    monkeypatch.setenv("HIPPO_INTENT_DENSE_DENSITY", "-1")
+    assert R._intent_weights(query, q_tokens) == (1.0, 1.0)
+    monkeypatch.delenv("HIPPO_INTENT_DENSE_DENSITY", raising=False)
+
+    monkeypatch.setenv("HIPPO_INTENT_LEAN_WEIGHT", "not-a-number")
+    dense_w, lex_w = R._intent_weights(query, q_tokens)  # malformed -> module default lean
+    assert dense_w == pytest.approx(R._INTENT_LEAN_WEIGHT)
+    monkeypatch.delenv("HIPPO_INTENT_LEAN_WEIGHT", raising=False)
+
+
+def test_intent_weights_never_raises_on_empty_tokens():
+    assert R._intent_weights("", []) == (1.0, 1.0)
+
+
+def test_recall_weights_route_by_query_shape_end_to_end(tmp_path, monkeypatch):
+    """Acceptance: recall()'s actual RRF weights (not just the helper in isolation) reflect
+    the query's shape -- verified via a fake embedder so both backends are live."""
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    emb_docs, emb_query = _fake_embedder(16)
+    monkeypatch.setattr(B, "embed_documents", emb_docs)
+    monkeypatch.setattr(R, "embed_query", emb_query)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx)
+
+    # recall() calls _rrf_fuse TWICE -- once weighted (the fused/display ranking, the one
+    # RCL-1 routes) and once unweighted (primary_relevance, which RCL-1 must NOT touch --
+    # see the implementation note). Capture every call and isolate the weighted one.
+    calls = []
+    real_rrf_fuse = R._rrf_fuse
+
+    def _spy(rankings, k=R._RRF_K, *, weights=None):
+        calls.append(weights)
+        return real_rrf_fuse(rankings, k, weights=weights)
+
+    monkeypatch.setattr(R, "_rrf_fuse", _spy)
+    R.recall(
+        # "voyage"/"rerank" give this a real BM25 hit against reranker_voyage.md (so the
+        # rankings aren't empty and the early-abstention return never fires) while the
+        # identifier-shaped tokens still push density past the lexical-lean threshold.
+        "TypeError CONNECTION_TIMEOUT_MS app/db/session.py foo_bar_baz.qux_module voyage rerank",
+        k=5,
+        memory_dir=md,
+        index_dir=idx,
+    )
+    weighted_calls = [w for w in calls if w is not None]
+    assert weighted_calls
+    dense_w, lex_w = weighted_calls[0][0], weighted_calls[0][1]
+    assert lex_w > 1.0 > dense_w
+    assert None in calls  # the unweighted primary_relevance fusion must still occur, untouched
 
 
 def test_graph_expansion_still_operates_on_parent_entries_with_body_chunks_present(tmp_path, monkeypatch):

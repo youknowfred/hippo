@@ -639,7 +639,7 @@ workstreams:
         title: Per-query dense/lexical intent routing
         priority: P1
         effort: S
-        status: planned
+        status: done
         source: {lens: retrieval, verdict: KEEP}
         problem: >-
           Fusion weights are static (1,1,0.5,0.5); an identifier/stacktrace-dense
@@ -677,12 +677,32 @@ workstreams:
           regression gate; "no regression" = those gates stay green + a hermetic
           tests/test_recall.py pair (stacktrace→lexical lean, prose→dense lean,
           ambiguous→exact balanced default) with HIPPO_DISABLE_DENSE=1 conventions.
+        implementation_addendum: >-
+          SHIPPED 2026-07-08 (commit-local finding, not a premise correction): two guards the
+          note didn't spell out, both caught by existing hermetic tests before merge, not by
+          the eval gates (small-corpus eval numbers were byte-identical before/after either
+          way). (1) The lean must be a no-op whenever only ONE of dense/bm25 actually has
+          candidates (e.g. HIPPO_DISABLE_DENSE=1) — there is no "which backend to favor"
+          decision when just one contributes, and applying a non-1.0 weight to the lone
+          contributor only rescales its score for nothing;
+          test_recall_emitted_score_equals_true_penalized_fused_score pinned the old
+          byte-identical BM25-only score and caught this immediately. (2) _INTENT_MIN_TOKENS
+          needed to be 8, not a lower number — a short-but-plain technical query (6 tokens,
+          zero mined identifiers, e.g. "oauth token refresh flow policy gateway") is common
+          enough that leaning dense on it measurably reorders the fused list; primary_relevance
+          (unweighted, the knee's own input) doesn't change, but the knee cutoff compares
+          consecutive EMITTED entries in fused order, so a reorder can shift which entry's
+          relevance becomes "prev_relevance" and trip the cutoff early —
+          test_recall_superseded_ranks_below_successor_dense_path caught a memory dropping out
+          of top-k entirely. Both guards are in recall.py: the both-backends check lives at the
+          _intent_weights call site in recall(), not inside the helper itself (it needs
+          dense/bm25 presence, which the helper doesn't receive).
 
       - id: RCL-2
         title: Floor-dedup + within-session injection cooldown
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: retrieval, verdict: KEEP + blind-spot (cooldown)}
         problem: >-
           Recall spends the 9000-char budget re-injecting memories the model already
@@ -727,7 +747,7 @@ workstreams:
         title: Multi-turn query formation — rescue terse follow-ups
         priority: P2
         effort: S
-        status: planned
+        status: done
         source: {lens: retrieval, verdict: KEEP-worthy (blind-spot)}
         problem: >-
           Terse follow-ups abstain: clean_query returns "" for continuation phrases
@@ -769,7 +789,7 @@ workstreams:
         title: MMR intra-block diversity re-rank
         priority: P2
         effort: S
-        status: planned
+        status: done
         source: {lens: retrieval, verdict: KEEP-worthy (blind-spot)}
         problem: >-
           Nothing collapses near-DUPLICATE hits WITHIN the injected block — two
@@ -803,12 +823,46 @@ workstreams:
           p95 gate is untouched. Gate: eval_recall absolute gates stay green (no
           baseline-diff gate exists) + a hermetic test seeding two near-paraphrase
           memories + one distinct memory, asserting the block spans both facets.
+        implementation_correction: >-
+          SHIPPED 2026-07-08. The SLOT instruction above is WRONG and was caught by two
+          existing hermetic fixtures (a Japanese-corpus dense test, a supersession dense
+          test), not by the eval gates (both still passed the absolute thresholds despite the
+          bug — this is exactly the failure mode "no baseline-diff gate exists" cannot catch).
+          Running MMR on `penalized` BEFORE the knee cutoff lets a diversity-promoted
+          LOW-relevance candidate land ahead of a genuinely HIGH-relevance one in walk order;
+          the knee then sees a false "cliff" at the low-relevance candidate and BREAKS,
+          discarding the high-relevance candidate sitting right behind it -- observed
+          concretely: a 3-entry Japanese corpus returned only 1 result (the on-topic
+          tokyo_weather memory dropped entirely) because MMR swapped a low-similarity
+          distractor ahead of it. FIX (the shipped design): split the emission step into two
+          passes. PASS 1 walks `penalized` in the TRUE organic order (unchanged from
+          pre-RCL-4 code) applying the old-skip/dangling-file/knee-cliff filters exactly as
+          before, but admits up to `pool_n = max(k * _MMR_POOL_MULT, k)` candidates instead of
+          just `k` — this is the ONLY behavioral widening, and it only ever admits MORE
+          candidates, never fewer or different ones, for the same prefix (the knee/skip
+          filters are a pure function of the sequence walked so far, so the first
+          min(k, len(admissible)) entries are identical to the pre-RCL-4 k-capped walk).
+          PASS 2 runs `_mmr_rerank` over this ALREADY relevance-vetted, possibly
+          larger-than-k pool. PASS 3 builds result dicts from `admissible[:k]` post-MMR — no
+          further knee/old/dangling checks needed, they are already resolved. Net effect:
+          when idx.dense is None, `_mmr_rerank` is a no-op and the whole path is
+          byte-identical to pre-RCL-4 (confirmed: the entire pre-existing hermetic suite,
+          which is overwhelmingly BM25-only fixtures, passed unchanged). When dense is
+          available, MMR can still promote a genuinely admissible (knee-cleared) candidate
+          over a near-duplicate, satisfying the acceptance criterion, but can never resurrect
+          a candidate the ORGANIC ranking had already ruled irrelevant, and can never cause
+          the knee to falsely cut a candidate it would have kept. Also recalibrated
+          `_MMR_LAMBDA` from the proposal's ~0.7 to 0.8 after this fix — even correctly
+          sequenced, 0.7 measurably eroded the golden-corpus hard_recall@10/MRR (still
+          gate-passing) by letting diversity outvote relevance too readily; 0.8 recovers
+          hard_recall@10 to the pre-RCL-4 1.0 and MRR to within ~0.02 of baseline while the
+          adversarial near-paraphrase fixture still diversifies correctly.
 
       - id: RCL-5
         title: Offline cross-encoder rerank — on explicit surfaces only
         priority: P3
         effort: L
-        status: planned
+        status: done
         source: {lens: retrieval, verdict: RESHAPE (off the hot path)}
         problem: >-
           RRF fuses ranks but never reads query-vs-description jointly; a
@@ -844,12 +898,36 @@ workstreams:
           hermetic CI lane deselects it; the dense lane opts in). tests/test_vendor.py +
           test_fastembed_cache_path.py pin the cache/vendor conventions — extend, don't
           fight them.
+        implementation_correction: >-
+          SHIPPED 2026-07-08. DEP CHECK confirmed clean: installed fastembed 0.7.4 (within
+          the pinned >=0.4,<0.8 band) exposes fastembed.rerank.cross_encoder.TextCrossEncoder
+          with .rerank(query, documents) -> scores; NO requirements.txt bump, re-bootstrap NO.
+          Picked the smallest supported model (Xenova/ms-marco-MiniLM-L-6-v2, 0.08 GB) via
+          TextCrossEncoder.list_supported_models() — its HF source repo IS its model name
+          (unlike DEFAULT_MODEL's qdrant/* re-export), grounded not guessed.
+          ONE finding the note's "mirror _get_model exactly" instruction turned out to be
+          load-bearing for, not just stylistic: empirically verified that
+          HF_HUB_OFFLINE=1 correctly blocks the real network reach ("Cannot reach
+          huggingface.co: offline mode is enabled") but fastembed's OWN model loader wraps
+          that local failure in a retry-with-backoff sleep loop ANYWAY (3s, 9s, 27s — ~40s
+          total) before finally raising. Without _get_model's cheap pre-check
+          (_cross_encoder_cached, a pure os.walk for a .onnx file, grounded against the same
+          models--<repo> snapshot-dir convention), a cold cache on an "explicit surface a
+          human is waiting on" would hang ~40s before degrading — confirmed the fix drops
+          this to ~100 microseconds (test_get_cross_encoder_offline_raises_in_microseconds_
+          on_cold_cache pins it under 0.1s). Also added a best-effort cross-encoder warm-up
+          step to plugin/skills/bootstrap/SKILL.md (mirroring the embedding-model warm-up
+          line already there) — with no OTHER natural trigger to download this model, a
+          fresh install would otherwise degrade to the un-reranked order FOREVER. The real
+          model was exercised network-marked (test_real_cross_encoder_reranks_by_actual_
+          relevance) and correctly ranked a genuinely on-topic description above an
+          off-topic one.
 
       - id: RCL-6
         title: Evidence-snippet form for the top body-hit
         priority: P3
         effort: M
-        status: planned
+        status: done
         source: {lens: retrieval, verdict: RESHAPE (body-hit-only, staleness-banded)}
         problem: >-
           For a memory whose key fact is buried in the body behind a generic
@@ -892,6 +970,36 @@ workstreams:
           snippet within _MAX_RECALL_CHARS. Manifest gains a key → this is a
           SCHEMA_VERSION bump per ED-4 (clean break, one forced rebuild, re-bootstrap
           no); coordinate with any same-tier bump so the suite sees one break.
+        implementation_correction: >-
+          SHIPPED 2026-07-08. TWO corrections against the note above, both caught before
+          merge (not by the eval gates — the absolute gates stayed green either way).
+          (1) "GOOD NEWS: body-chunk TEXT is ALREADY PERSISTED" is WRONG against the live
+          tree: build_index.py's in-MEMORY body_chunks list does carry "text" (used for
+          embedding), but the block actually WRITTEN to manifest.json
+          (body_chunks_manifest) explicitly stripped it to {entry,hash,tokens,row} — the
+          RET-2 comment there said so outright ("no raw chunk text — reconstructible from
+          the source file"). idx.body_chunks[j]["text"] would have KeyError'd. FIX: added
+          "text" back to body_chunks_manifest (the persisted shape is now
+          {entry,hash,tokens,row,text}) — a real, if small, index-size increase, but it
+          keeps the promise this note assumed: the snippet render is genuinely read-free at
+          emit time. Confirmed as this tier's ONE schema break: SCHEMA_VERSION 3->4 covers
+          BOTH this and the new manifest-wide head_commit key in one bump.
+          (2) _SNIPPET_SCORE_BAND calibrated against _RRF_K ALONE (ignoring
+          _BODY_RRF_WEIGHT) sets a bar NO body-win entry could ever clear: a body-win's
+          entire score comes from body-discounted rankings, whose absolute ceiling is
+          `2 * _body_rrf_weight() / (_RRF_K+1)` (rank-0 in both dense_body AND bm25_body at
+          once) — roughly HALF that for a realistic single-lane rank-0 hit. A band
+          calibrated on primary-signal magnitude alone (~0.03) is 3-6x higher than a
+          body-win could ever reach (~0.008 for a real single-distinctive-fact fixture,
+          confirmed empirically), silently making the whole feature dead code — no hermetic
+          test would have caught this either, since a test asserting "the snippet renders"
+          would have just failed, which is what happened first. FIX: default now derives
+          from `_body_rrf_weight() / (_RRF_K+1)` (a fraction, `_SNIPPET_SCORE_BAND_FRACTION
+          = 0.6`, of a single body-ranking's OWN rank-0 ceiling) so the gate scales
+          correctly with whatever HIPPO_BODY_RRF_WEIGHT is configured, rather than a
+          fixed number silently detached from the score space it's compared against.
+          `HIPPO_SNIPPET_SCORE_BAND` still overrides with an absolute value for operators
+          who want to tune it directly.
 
   # ------------------------------------------------------------------ GOV ---
   - id: GOV
@@ -1897,7 +2005,7 @@ release_train:
   - tier: T3
     target_version: 1.3.0
     theme: "Retrieval precision (hot-path-safe)"
-    status: planned
+    status: done
     done_means: >-
       Every injected token earns its place: per-query intent routing, floor-dedup +
       within-session cooldown, terse-follow-up rescue, and intra-block diversity —
