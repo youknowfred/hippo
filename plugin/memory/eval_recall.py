@@ -23,15 +23,31 @@ description, so passing this metric proves something self_recall (description-de
 queries) cannot: that content living ONLY in the body is retrievable. The 5 gates above are
 unchanged in number/semantics.
 
-RET-1: ``abstention_rate`` is a second REPORT-ONLY addition, the mirror image of the 5
-gates above — where self_recall/hard_recall/mrr all measure "does recall() find the RIGHT
-memory", abstention_rate measures "does recall() correctly find NOTHING for a query with no
-right answer at all". Fed by an optional ``--abstention-set`` fixture of clearly off-topic
+RET-1: ``abstention_rate`` is the mirror image of the 5 gates above — where
+self_recall/hard_recall/mrr all measure "does recall() find the RIGHT memory",
+abstention_rate measures "does recall() correctly find NOTHING for a query with no right
+answer at all". Fed by an optional ``--abstention-set`` fixture of clearly off-topic
 queries (``recall_abstention_set.yaml`` / the golden corpus's ``abstention_set.yaml``);
-``rate`` = fraction of those queries for which recall() returned zero results. Never a merge
-gate (per the roadmap item) — it exists to make the dense-floor/knee-cutoff/hard-skip trio
-(the recall() changes that make abstention possible at all) measurable, not to block a merge
-on a number that depends entirely on which off-topic probes someone happened to write down.
+``rate`` = fraction of those queries for which recall() returned zero results. Shipped
+report-only by RET-1; PROMOTED to a tracked, fixture-gated entry by RET-8 (below) — the
+"depends on which probes someone wrote down" concern is handled the same way the hard-set
+gates handle it: no fixture → the gate SKIPS rather than fails, and the threshold is a
+regression tripwire calibrated against the shipped fixture, not an absolute quality claim.
+
+RET-8: the category-tagged eval suite — the measurement keystone (KPI-4). Three additions:
+  1. Hard-set rows may carry a ``category`` tag (canonical values: ``single-hop``,
+     ``multi-hop``, ``temporal``, ``update``, ``abstention``; absent → ``single-hop``,
+     which is what every pre-RET-8 row measured). Unknown strings pass through data-driven
+     rather than erroring — SIG-6's self-populating fixtures extend the set without a
+     loader change.
+  2. ``report["by_category"]`` emits recall@k/MRR@k PER CATEGORY (printed per line by
+     ``main``), so a regression is attributable to the question class that regressed —
+     multi-hop (validates GRA-1 expansion), temporal (validates GRA-4 invalidation),
+     update (post-reconsolidation truth), not just one aggregate.
+  3. ``precision@10`` and ``abstention_rate`` are PROMOTED from report-only to tracked
+     entries in the gates dict, with the hard-set gates' exact skip semantics (fixture
+     absent → ``pass: None`` + ``skipped``, excluded from ``ok``; fixture provided but
+     empty → loud FAIL). ROADMAP.v1 names this promotion as RET-8's license.
 
 RET-7: every report records the SERVING BACKEND (``report["backend"]`` = ``"dense+bm25"``
 when ``index.dense_ready`` else ``"bm25-only"``), printed on the gate-header line AND the
@@ -78,6 +94,23 @@ GATE_P95_MS = 300.0
 # CI lane (which restores a warm fastembed model cache) passes --gate-cold so a REAL cold-path
 # regression (e.g. a heavier model, a new per-import cost) fails the build.
 GATE_COLD_P50_MS = 1500.0
+# RET-8: the two promoted fixture-gated thresholds — REGRESSION TRIPWIRES calibrated against
+# the shipped fixtures on the pack-seeded corpus, NOT absolute quality claims. Measured at
+# promotion time (2026-07-09, 22-memory pack corpus): precision@10 0.1375 dense / 0.15
+# bm25-only; abstention_rate 0.3333 on BOTH backends (BM25's match-set filter admits an
+# off-topic query on a single coincidental token overlap, and the dense floor never
+# overrides a BM25 match — the RET-1 design). precision@10's ceiling is structurally low
+# (|relevant| is 1-3 per query, so a perfect run scores ~0.1-0.3). The thresholds sit just
+# under the min measured value: a change that breaks the floor/knee/hard-skip trio (rate
+# → 0.0) or tanks graded ranking trips them; normal jitter does not. Both gates SKIP
+# (never fail) when their fixture is absent.
+GATE_PRECISION_AT_K = 0.12
+GATE_ABSTENTION = 0.30
+
+# RET-8: the canonical category tags. Data-driven everywhere (an unknown tag forms its own
+# bucket rather than erroring) — this tuple is documentation + the default, not an enum wall.
+CATEGORIES = ("single-hop", "multi-hop", "temporal", "update", "abstention")
+_DEFAULT_CATEGORY = "single-hop"  # what every pre-RET-8 row measured
 
 _SELF_QUERY_TOKENS = 12
 # RET-2: body_probe queries keep the first N tokens that are BOTH in a memory's body chunks
@@ -112,7 +145,7 @@ def derive_self_query(entry: dict) -> str:
 # --------------------------------------------------------------------------- #
 # Gates
 # --------------------------------------------------------------------------- #
-def self_recall_at_k(index: LoadedIndex, k: int = 10) -> float:
+def self_recall_at_k(index: LoadedIndex, k: int = 10, *, index_dir: Optional[str] = None) -> float:
     entries = index.entries
     if not entries:
         return 0.0
@@ -123,7 +156,7 @@ def self_recall_at_k(index: LoadedIndex, k: int = 10) -> float:
         if not q:
             continue
         considered += 1
-        names = {r["name"] for r in recall(q, k=k, index=index)}
+        names = {r["name"] for r in recall(q, k=k, index=index, index_dir=index_dir)}
         if e["name"] in names:
             hits += 1
     return hits / considered if considered else 0.0
@@ -169,7 +202,9 @@ def derive_body_probe_query(index: LoadedIndex, entry_idx: int) -> str:
     return " ".join(out)
 
 
-def body_probe_recall_at_k(index: LoadedIndex, k: int = 10) -> Dict[str, float]:
+def body_probe_recall_at_k(
+    index: LoadedIndex, k: int = 10, *, index_dir: Optional[str] = None
+) -> Dict[str, float]:
     """recall@k of the PARENT entry for a body-derived probe query, over every entry that
     has a qualifying probe (see ``derive_body_probe_query``). REPORT-ONLY -- never a merge
     gate; ``n=0`` (and ``recall=0.0``) when no entry in the corpus has a body chunk carrying a
@@ -185,7 +220,7 @@ def body_probe_recall_at_k(index: LoadedIndex, k: int = 10) -> Dict[str, float]:
         if not q:
             continue
         considered += 1
-        names = {r["name"] for r in recall(q, k=k, index=index)}
+        names = {r["name"] for r in recall(q, k=k, index=index, index_dir=index_dir)}
         if e["name"] in names:
             hits += 1
     return {"recall": round(hits / considered, 4) if considered else 0.0, "n": considered}
@@ -239,41 +274,51 @@ def load_abstention_set(path: str) -> List[str]:
     return out
 
 
-def abstention_rate(index: LoadedIndex, abstention_set: List[str], k: int = 10) -> Dict[str, float]:
+def abstention_rate(
+    index: LoadedIndex, abstention_set: List[str], k: int = 10, *, index_dir: Optional[str] = None
+) -> Dict[str, float]:
     """Fraction of ``abstention_set`` queries for which recall() returned ZERO results.
 
-    REPORT-ONLY (never a merge gate, per the roadmap item) -- proves the NEW thing RET-1
-    adds (a clearly off-topic prompt can abstain, injecting nothing) the way ``body_probe``
-    proves RET-2's new capability: this is a metric no PRE-RET-1 index could ever score above
-    0 on (there was no floor/knee/hard-skip to abstain with), so a healthy run should show
-    ``rate`` near 1.0 on a fixture of genuinely off-topic queries. ``n=0`` (rate 0.0) when the
-    fixture is empty/missing -- a deliberately-absent input, not a failure (mirrors
-    ``precision_at_k``'s skip semantics).
+    Proves the NEW thing RET-1 adds (a clearly off-topic prompt can abstain, injecting
+    nothing) the way ``body_probe`` proves RET-2's new capability: this is a metric no
+    PRE-RET-1 index could ever score above 0 on (there was no floor/knee/hard-skip to
+    abstain with). The realistic ceiling is well under 1.0 — BM25's match-set filter
+    admits an off-topic query on a single coincidental token overlap and the dense floor
+    never overrides a BM25 match (measured 0.3333 on the pack corpus, both backends) —
+    which is why ``GATE_ABSTENTION`` is a just-under-measured tripwire, not a "near 1.0"
+    target. Shipped report-only by RET-1; PROMOTED to a tracked, fixture-gated entry by
+    RET-8 (hard-set skip semantics — see ``evaluate``).
+    ``n=0`` (rate 0.0) when the fixture is empty/missing -- a deliberately-absent input at
+    THIS layer; ``evaluate`` decides skip-vs-fail from whether a path was provided.
     """
     if not abstention_set:
         return {"rate": 0.0, "n": 0}
     zero = 0
     for q in abstention_set:
-        if not recall(q, k=k, index=index):
+        if not recall(q, k=k, index=index, index_dir=index_dir):
             zero += 1
     n = len(abstention_set)
     return {"rate": round(zero / n, 4), "n": n}
 
 
-def precision_at_k(index: LoadedIndex, relevance_set: List[dict], k: int = 10) -> Dict[str, float]:
+def precision_at_k(
+    index: LoadedIndex, relevance_set: List[dict], k: int = 10, *, index_dir: Optional[str] = None
+) -> Dict[str, float]:
     """precision@k = |top-k ∩ relevant| / k, averaged over a hand-judged relevance set.
 
     A GRADED measure, distinct from ``hard_set_metrics``' binary recall@k (any one expected
     name in the top-k counts as a full hit): a query whose relevant set spans several
-    memories is rewarded for surfacing MORE of them, not just one. REPORT-ONLY — never a
-    merge gate. ``n=0`` (zero precision) when the relevance set is empty/missing.
+    memories is rewarded for surfacing MORE of them, not just one. Shipped report-only;
+    PROMOTED to a tracked, fixture-gated entry by RET-8 (``GATE_PRECISION_AT_K``, hard-set
+    skip semantics — see ``evaluate``). ``n=0`` (zero precision) when the relevance set is
+    empty/missing; ``evaluate`` decides skip-vs-fail from whether a path was provided.
     """
     if not relevance_set or k <= 0:
         return {"precision": 0.0, "n": 0}
     total = 0.0
     for item in relevance_set:
         relevant = set(item["relevant"])
-        ranked = [r["name"] for r in recall(item["query"], k=k, index=index)]
+        ranked = [r["name"] for r in recall(item["query"], k=k, index=index, index_dir=index_dir)]
         total += len(relevant.intersection(ranked)) / k
     n = len(relevance_set)
     return {"precision": round(total / n, 4), "n": n}
@@ -323,6 +368,8 @@ def session_token_cost(
     index: LoadedIndex,
     hard_set: List[dict],
     k: int = 10,
+    *,
+    index_dir: Optional[str] = None,
 ) -> Dict[str, float]:
     """Average recall-injection tokens PER SESSION (vs ``token_reduction``'s per-QUERY figure).
 
@@ -351,7 +398,7 @@ def session_token_cost(
     if not sessions:
         return {"avg_events_per_session": 0.0, "avg_session_tokens": 0.0, "n_sessions": 0}
     avg_events = sum(sessions.values()) / len(sessions)
-    tok = token_reduction(memory_dir, index, hard_set, k=k)
+    tok = token_reduction(memory_dir, index, hard_set, k=k, index_dir=index_dir)
     return {
         "avg_events_per_session": round(avg_events, 2),
         "avg_session_tokens": round(avg_events * tok["recall_avg"], 1),
@@ -440,7 +487,13 @@ def _load_fixture_docs(path: str) -> tuple:
 
 
 def load_hard_set(path: str) -> List[dict]:
-    """Load ``[{query, expected: [name, ...]}]`` from a YAML fixture. [] if missing.
+    """Load ``[{query, expected: [name, ...], category}]`` from a YAML fixture. [] if missing.
+
+    RET-8: each row may carry a ``category`` tag (canonical set in ``CATEGORIES``); a row
+    without one loads as ``single-hop`` — the class every pre-RET-8 row measured — so every
+    existing fixture keeps loading unchanged. The tag is data-driven, not validated against
+    an enum: an unknown string forms its own ``by_category`` bucket (SIG-6's confirmed
+    abstention-cluster fixtures extend the set without touching this loader).
 
     Ignores an optional leading metadata document (see ``_load_fixture_docs``) -- callers
     that need the provenance header use ``load_hard_set_metadata`` instead.
@@ -455,7 +508,14 @@ def load_hard_set(path: str) -> List[dict]:
         if isinstance(exp, str):
             exp = [exp]
         if isinstance(q, str) and isinstance(exp, list) and exp:
-            out.append({"query": q, "expected": [str(x) for x in exp]})
+            cat = item.get("category")
+            out.append(
+                {
+                    "query": q,
+                    "expected": [str(x) for x in exp],
+                    "category": str(cat) if isinstance(cat, str) and cat.strip() else _DEFAULT_CATEGORY,
+                }
+            )
     return out
 
 
@@ -467,7 +527,9 @@ def load_hard_set_metadata(path: str) -> Dict[str, str]:
     return meta if isinstance(meta, dict) else {}
 
 
-def hard_set_metrics(index: LoadedIndex, hard_set: List[dict], k: int = 10) -> Dict[str, float]:
+def hard_set_metrics(
+    index: LoadedIndex, hard_set: List[dict], k: int = 10, *, index_dir: Optional[str] = None
+) -> Dict[str, float]:
     """recall@k (any expected in top-k) + MRR@k (1/rank of first expected) over the set."""
     if not hard_set:
         return {"recall": 0.0, "mrr": 0.0, "n": 0}
@@ -475,7 +537,7 @@ def hard_set_metrics(index: LoadedIndex, hard_set: List[dict], k: int = 10) -> D
     rr_sum = 0.0
     for item in hard_set:
         expected = set(item["expected"])
-        ranked = [r["name"] for r in recall(item["query"], k=k, index=index)]
+        ranked = [r["name"] for r in recall(item["query"], k=k, index=index, index_dir=index_dir)]
         if expected.intersection(ranked):
             hit += 1
         rr = 0.0
@@ -488,8 +550,31 @@ def hard_set_metrics(index: LoadedIndex, hard_set: List[dict], k: int = 10) -> D
     return {"recall": hit / n, "mrr": rr_sum / n, "n": n}
 
 
+def hard_set_metrics_by_category(
+    index: LoadedIndex, hard_set: List[dict], k: int = 10, *, index_dir: Optional[str] = None
+) -> Dict[str, Dict[str, float]]:
+    """RET-8: ``hard_set_metrics`` bucketed by each row's ``category`` tag.
+
+    ``{category: {recall, mrr, n}}``, categories sorted; a row without a tag (a hand-rolled
+    list passed directly, bypassing ``load_hard_set``'s default) buckets as ``single-hop``.
+    Scoring DELEGATES to ``hard_set_metrics`` per bucket — one scoring code path, so the
+    per-category numbers can never disagree with the aggregate gates about what a hit is.
+    This is what makes a regression ATTRIBUTABLE: the aggregate can hide a multi-hop
+    collapse behind twenty healthy single-hop rows; these buckets cannot.
+    """
+    buckets: Dict[str, List[dict]] = {}
+    for item in hard_set:
+        cat = item.get("category") or _DEFAULT_CATEGORY
+        buckets.setdefault(cat, []).append(item)
+    return {
+        cat: hard_set_metrics(index, items, k=k, index_dir=index_dir)
+        for cat, items in sorted(buckets.items())
+    }
+
+
 def token_reduction(
-    memory_dir: str, index: LoadedIndex, hard_set: List[dict], k: int = 10
+    memory_dir: str, index: LoadedIndex, hard_set: List[dict], k: int = 10,
+    *, index_dir: Optional[str] = None
 ) -> Dict[str, float]:
     """Tokens for the always-loaded full index vs (trimmed floor + per-prompt recall).
 
@@ -514,7 +599,7 @@ def token_reduction(
 
     sample = hard_set or [{"query": derive_self_query(e)} for e in index.entries[:20]]
     inj = [
-        _estimate_tokens(format_results(recall(s["query"], k=k, index=index)))
+        _estimate_tokens(format_results(recall(s["query"], k=k, index=index, index_dir=index_dir)))
         for s in sample
         if s.get("query")
     ]
@@ -531,14 +616,16 @@ def token_reduction(
     }
 
 
-def latency(index: LoadedIndex, queries: List[str], k: int = 10) -> Dict[str, float]:
+def latency(
+    index: LoadedIndex, queries: List[str], k: int = 10, *, index_dir: Optional[str] = None
+) -> Dict[str, float]:
     """Warm recall latency (index preloaded) — p50/p95 in ms over ``queries``."""
     samples: List[float] = []
     for q in queries:
         if not q:
             continue
         t0 = time.perf_counter()
-        recall(q, k=k, index=index)
+        recall(q, k=k, index=index, index_dir=index_dir)
         samples.append((time.perf_counter() - t0) * 1000.0)
     if not samples:
         return {"p50": 0.0, "p95": 0.0, "n": 0}
@@ -630,10 +717,22 @@ def evaluate(
 ) -> dict:
     """Run all 5 gates; return a report dict with per-gate values + pass flags.
 
-    ``relevance_set_path``/``repo_root``/``telemetry_dir``/``abstention_set_path`` feed
-    REPORT-ONLY scorecard additions (precision@k, staleness half-life, per-session token
-    cost, RET-1's abstention_rate) — none of the 5 gates above are affected by any of them;
-    omitting all of them reproduces the exact prior report shape plus zeroed report blocks.
+    ``repo_root``/``telemetry_dir`` feed REPORT-ONLY scorecard additions (staleness
+    half-life, per-session token cost). ``relevance_set_path``/``abstention_set_path``
+    feed the two RET-8-PROMOTED tracked gates (``precision@10``, ``abstention_rate``):
+    omit a path and its gate SKIPS (``pass: None`` + ``skipped``, excluded from ``ok``)
+    exactly like the hard-set gates on an absent fixture — so omitting all optional
+    inputs reproduces the prior ``ok`` semantics; pass a path that loads EMPTY and the
+    gate fails loudly, same as a truncated hard set.
+
+    RET-8 (the premise correction this item shipped on): ``index_dir`` now threads into
+    EVERY metric's ``recall()`` call. Before this, eval passed a bare preloaded index —
+    the shape ``_expand_neighbors`` documents as "no edges loaded" — so the eval
+    structurally measured an EDGE-BLIND variant of recall: GRA-1 expansion and GRA-4
+    typed-edge penalties never ran, and a multi-hop category (or GRA-7's
+    beats-GRA-1-on-multi-hop gate) could never measure anything. With the thread, the
+    eval scores the production ranking path; a helper called directly with a bare index
+    (hermetic tests) keeps the old edge-free behavior via ``index_dir=None``.
 
     ``gate_cold`` (PRF-2) opts INTO gating ``cold_latency``'s p50 against
     ``GATE_COLD_P50_MS`` -- default False so cold_latency stays the report-only honesty
@@ -686,13 +785,19 @@ def evaluate(
         fixture_meta.get("generated_with_backend") == "dense+bm25" and backend != "dense+bm25"
     )
 
-    self_recall = self_recall_at_k(index, k=k)
-    hs = hard_set_metrics(index, hard_set, k=k)
-    tok = token_reduction(memory_dir, index, hard_set, k=k)
+    self_recall = self_recall_at_k(index, k=k, index_dir=index_dir)
+    hs = hard_set_metrics(index, hard_set, k=k, index_dir=index_dir)
+    # RET-8: the same rows bucketed by category tag — regressions attributable to the
+    # question class (multi-hop/temporal/update/...) instead of hidden in the aggregate.
+    by_category = (
+        hard_set_metrics_by_category(index, hard_set, k=k, index_dir=index_dir)
+        if hard_set else {}
+    )
+    tok = token_reduction(memory_dir, index, hard_set, k=k, index_dir=index_dir)
     lat_queries = [item["query"] for item in hard_set] or [
         derive_self_query(e) for e in index.entries[:30]
     ]
-    lat = latency(index, lat_queries, k=k)
+    lat = latency(index, lat_queries, k=k, index_dir=index_dir)
     cold = cold_latency(memory_dir, index_dir, lat_queries, k=k)
 
     # Report-only scorecard additions (Tier 1 + Tier 2) — never feed a gate threshold above.
@@ -703,12 +808,14 @@ def evaluate(
     from .telemetry import default_telemetry_dir
 
     resolved_telemetry_dir = telemetry_dir or default_telemetry_dir(memory_dir)
-    precision = precision_at_k(index, relevance_set, k=k)
+    precision = precision_at_k(index, relevance_set, k=k, index_dir=index_dir)
     half_life = staleness_half_life(memory_dir, repo_root) if repo_root else {"median_days": 0.0, "n": 0}
-    sess_cost = session_token_cost(memory_dir, resolved_telemetry_dir, index, hard_set, k=k)
+    sess_cost = session_token_cost(
+        memory_dir, resolved_telemetry_dir, index, hard_set, k=k, index_dir=index_dir
+    )
     grad = graduation_rate(resolved_telemetry_dir)
-    body_probe = body_probe_recall_at_k(index, k=k)
-    abstention = abstention_rate(index, abstention_set, k=k)
+    body_probe = body_probe_recall_at_k(index, k=k, index_dir=index_dir)
+    abstention = abstention_rate(index, abstention_set, k=k, index_dir=index_dir)
 
     # A caller with NO hard-set fixture (hard_set_path=None — e.g. a fresh install of the
     # packaged plugin with no hand-curated calibration data yet, see /hippo:audit) is a
@@ -742,6 +849,24 @@ def evaluate(
         },
         "recall_p95_ms": {"value": lat["p95"], "threshold": GATE_P95_MS, "pass": lat["p95"] < GATE_P95_MS},
     }
+    # RET-8: the two promoted fixture-gated entries. Same skip-vs-fail split as the
+    # hard-set gates above: no path provided → skipped (pass=None, excluded from `ok`);
+    # a provided path that loads empty → loud FAIL (a truncated/malformed fixture is a
+    # real problem, not a deliberately-absent input).
+    relevance_provided = bool(relevance_set_path)
+    abstention_provided = bool(abstention_set_path)
+    gates["precision@10"] = {
+        "value": precision["precision"], "threshold": GATE_PRECISION_AT_K,
+        "pass": (precision["n"] > 0 and precision["precision"] >= GATE_PRECISION_AT_K)
+        if relevance_provided else None,
+        **({"skipped": True} if not relevance_provided else {}),
+    }
+    gates["abstention_rate"] = {
+        "value": abstention["rate"], "threshold": GATE_ABSTENTION,
+        "pass": (abstention["n"] > 0 and abstention["rate"] >= GATE_ABSTENTION)
+        if abstention_provided else None,
+        **({"skipped": True} if not abstention_provided else {}),
+    }
     # PRF-2: cold_p50_ms follows the SAME skip-vs-gate shape as the hard-set/token-reduction
     # gates above (pass=None + skipped=True + a reason string, excluded from `ok`) rather than
     # a bespoke boolean -- one pattern for "this gate wasn't asked to run" across the module.
@@ -771,6 +896,7 @@ def evaluate(
         "model": index.model,
         "count": len(index),
         "hard_set_n": hs["n"],
+        "by_category": by_category,
         "gates": gates,
         "tokens": tok,
         "latency": lat,
@@ -834,8 +960,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--abstention-set",
         default=None,
-        help="RET-1: report-only fixture of clearly off-topic queries — measures the "
-        "fraction recall() correctly abstains (returns []) on; never gates.",
+        help="RET-1/RET-8: fixture of clearly off-topic queries — measures the fraction "
+        "recall() correctly abstains (returns []) on. Tracked gate when provided "
+        "(GATE_ABSTENTION); skipped, never failed, when absent.",
     )
     parser.add_argument("--repo-root", default=None)
     parser.add_argument("--telemetry-dir", default=None)
@@ -851,15 +978,26 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("-k", type=int, default=10)
     args = parser.parse_args(argv)
 
+    # RET-8 hermeticity guard, the CLI twin of evaluate()'s memory_dir guard: the ambient
+    # default fixtures (this repo's tests/fixtures, or the resolved project's
+    # .audit-fixtures) calibrate the AMBIENT corpus. Scoring them against an explicitly
+    # overridden --memory-dir would judge one corpus by another corpus's fixtures —
+    # harmless while precision/abstention were report-only, a false gate verdict now that
+    # they (and the hard-set gates they sit beside) are tracked. Explicit --memory-dir →
+    # only explicitly-passed fixtures run; the fixtureless gates skip, exactly as a
+    # fixture-less fresh project skips them.
+    ambient = args.memory_dir is None
     report = evaluate(
         memory_dir=args.memory_dir,
         index_dir=args.index_dir,
-        hard_set_path=args.hard_set or _default_hard_set_path(),
+        hard_set_path=args.hard_set or (_default_hard_set_path() if ambient else None),
         k=args.k,
-        relevance_set_path=args.relevance_set or _default_relevance_set_path(),
+        relevance_set_path=args.relevance_set
+        or (_default_relevance_set_path() if ambient else None),
         repo_root=args.repo_root,
         telemetry_dir=args.telemetry_dir,
-        abstention_set_path=args.abstention_set or _default_abstention_set_path(),
+        abstention_set_path=args.abstention_set
+        or (_default_abstention_set_path() if ambient else None),
         gate_cold=args.gate_cold,
     )
     if not report.get("ok") and "error" in report:
@@ -889,6 +1027,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         "hard_recall@10": "no hard-set fixture",
         "mrr@10": "no hard-set fixture",
         "token_reduction": "no MEMORY.full.md pre-trim snapshot",
+        "precision@10": "no relevance-set fixture",
+        "abstention_rate": "no abstention-set fixture",
         "cold_p50_ms": (
             "not requested (--gate-cold)"
             if not args.gate_cold
@@ -902,6 +1042,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         if skipped:
             extra += f" — skipped ({_SKIP_REASONS.get(name, 'input absent')}; excluded from RESULT)"
         print(f"  {mark} {name:18s} = {g['value']} (threshold {g['threshold']}){extra}")
+    # RET-8: the per-category breakdown — the line that makes a regression attributable.
+    # One line per category present in the hard set; single-category (all-default) fixtures
+    # print it too, so the output shape doesn't shift when the first tagged row arrives.
+    for cat, m in (report.get("by_category") or {}).items():
+        print(
+            f"  category {cat:11s} recall@{args.k}={m['recall']:.4f} mrr@{args.k}={m['mrr']:.4f} "
+            f"n={m['n']} (RET-8)"
+        )
     t = report["tokens"]
     print(f"  tokens: full={t['full']} floor={t['floor']} recall_avg={t['recall_avg']} net={t['net']}")
     print(f"  latency (warm): p50={report['latency']['p50']}ms p95={report['latency']['p95']}ms n={report['latency']['n']}")
@@ -912,11 +1060,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             "— the REAL hook cost; the warm p95 above understates it (report-only, not gated)"
         )
 
-    # Report-only scorecard additions (Tier 1, memory-organism-instrument-immunize) — NONE of
-    # these feed a gate threshold above; they exist to MEASURE, not to merge-block.
-    p = report.get("precision_at_k") or {}
-    if p.get("n"):
-        print(f"  precision@{args.k} (graded, n={p['n']}): {p['precision']} (report-only)")
+    # Report-only scorecard additions (Tier 1, memory-organism-instrument-immunize) — none
+    # of THESE feed a gate threshold; they exist to MEASURE, not to merge-block. (precision
+    # and abstention_rate left this block for the gate table above — RET-8.)
     hl = report.get("staleness_half_life") or {}
     if hl.get("n"):
         print(f"  staleness half-life: median {hl['median_days']}d across {hl['n']} baselined memories (report-only)")
@@ -938,13 +1084,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"  body_probe@{args.k} (RET-2, n={bp['n']}): {bp['recall']} — parent recall for "
             "queries derived from body-only tokens (report-only)"
         )
-    ab = report.get("abstention_rate") or {}
-    if ab.get("n"):
-        print(
-            f"  abstention_rate (RET-1, n={ab['n']}): {ab['rate']} — fraction of clearly "
-            "off-topic queries recall() correctly injected NOTHING for (report-only)"
-        )
-
     # RET-7: the RESULT line always names the serving backend -- e.g.
     #   RESULT: ALL GATES PASS ✅ [backend=bm25-only — dense path unverified]
     # so a bm25-only pass can never be skimmed as "hybrid recall verified" from this one

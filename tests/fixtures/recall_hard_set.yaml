@@ -21,66 +21,110 @@
 # `expected` is a list — any one of the listed stems in the top-10 counts as a hit (some
 # queries legitimately map to a small cluster of related memories). This is the ONLY
 # hand-maintained eval data; keep stems in sync with the shipped packs.
+#
+# RET-8: every row carries a `category` tag (canonical set: single-hop, multi-hop,
+# temporal, update, abstention — eval_recall.CATEGORIES; an untagged row loads as
+# single-hop). eval_recall emits recall@10/MRR PER CATEGORY so a regression is
+# attributable to the question class that regressed. Categories present here:
+#   - single-hop  — the original paraphrase-lookup class (every pre-RET-8 row).
+#   - multi-hop   — the answer's own vocabulary is weak in the query; the query pulls
+#                   toward a LINKED memory, so GRA-1 neighbor expansion (or a strong
+#                   embedding) must carry the expected stem into the top-10. Cases target
+#                   the packs' two real wikilink clusters.
+#                   MEASURED AT RET-8 SHIP TIME (2026-07-09, pack corpus): bm25-only 1.0,
+#                   dense+bm25 0.0 — NOT fixture rot. Under BM25 a zero-term-overlap
+#                   neighbor has no primary rank, so GRA-1's injection rides in knee-exempt
+#                   (the designed path); under dense EVERY entry has a primary rank, so the
+#                   knee exemption never fires and expansion is structurally suppressed
+#                   (organic-or-knee-cut). The dense-side gap is a GRA-1/GRA-7 ranking
+#                   finding these rows exist to keep visible — do not "fix" it by rewording
+#                   the queries toward the expected stems (that just relabels single-hop).
+# temporal and update rows are DELIBERATELY ABSENT: the shipped starter packs are
+# evergreen (no superseded facts, no invalid_after boundaries — nothing temporal to ask
+# about honestly), so those categories grow in each project's own
+# .claude/memory/.audit-fixtures set (the audit skill's Phase-0.5 drafts / SIG-6's
+# confirmed abstention-cluster fixtures), where superseded facts actually exist. The
+# per-category machinery is pinned against synthetic corpora in tests/test_eval_recall.py.
 
 - query: "who is responsible for cleaning up outdated memories — do I approve each one?"
   expected: [claude_is_memory_master]
+  category: single-hop
 
 - query: "should we vet a consequential architecture with competing candidates and judges before writing code"
   expected: [adversarial_design_pinning_before_implementation]
+  category: single-hop
 
 - query: "the operator pointed me at one specific issue mid-task — do the other known fixes still apply?"
   expected: [feedback_additive_not_restrictive_redirects]
+  category: single-hop
 
 - query: "my background job vanished before finishing — the garbage collector ate the async task"
   expected: [feedback_anchor_fire_and_forget_tasks]
+  category: single-hop
 
 - query: "should I run the whole test suite after every single file edit during a big refactor"
   expected: [feedback_batch_tests_at_end]
+  category: single-hop
 
 - query: "the slowdown is probably just the upstream provider being slow again, right?"
   expected: [feedback_dont_blame_vendor_latency]
+  category: single-hop
 
 - query: "the urgent production fix is mergeable now — wait for the remaining checks or land it?"
   expected: [feedback_dont_poll_ci_on_hotfix_merges]
+  category: single-hop
 
 - query: "the primary path errored but the fallback caught it, so nothing needs fixing?"
   expected: [feedback_fallback_is_still_bug]
+  category: single-hop
 
 - query: "these failures predate my change — file them as a follow-up ticket instead?"
   expected: [feedback_fix_pre_existing_when_encountered]
+  category: single-hop
 
 - query: "the user sent fresh error output for something I already patched last week"
   expected: [feedback_new_logs_mean_recurrence]
+  category: single-hop
 
 - query: "keep the old code path alive so existing callers don't break during the migration?"
   expected: [feedback_no_backward_compat, feedback_no_legacy_read_fallbacks]
+  category: single-hop
 
 - query: "roll the internal refactor out behind an env flag with a phased canary first?"
   expected: [feedback_no_feature_flagged_refactor_rollouts]
+  category: single-hop
 
 - query: "stash my in-flight work to check whether the bug exists on a clean tree"
   expected: [feedback_no_git_stash_for_fault_attribution]
+  category: single-hop
 
 - query: "could we hit plan limits if we enable this — should I warn about upgrading the subscription?"
   expected: [feedback_no_hedging_on_confirmed_paid_services]
+  category: single-hop
 
 - query: "just wrap it in a try/except and log a warning so it stops crashing"
   expected: [feedback_root_cause_not_symptom_handling]
+  category: single-hop
 
 - query: "which MCP server should handle remembering things versus navigating code symbols"
   expected: [feedback_serena_tools_only]
+  category: single-hop
 
 - query: "three related bugs triaged together — open three separate pull requests?"
   expected: [feedback_single_pr_separate_commits]
+  category: single-hop
 
 - query: "will promoting this branch drop any commits — what diff do I trust to check"
   expected: [feedback_two_dot_diff_for_lost_work]
+  category: single-hop
 
 - query: "how should commits be attributed — do we include the AI co-author trailer?"
   expected: [oss-attribution-no-claude]
+  category: single-hop
 
 - query: "tempted to write a plan document and defer the hard half to avoid complexity"
   expected: [feedback_no_tactical_shortcuts]
+  category: single-hop
 
 # RET-4: code-heavy cases — a fenced traceback/symbol block should still retrieve the memory
 # citing that exact symbol/file, now that clean_query MINES fence contents instead of
@@ -99,6 +143,7 @@
     ```
     what is going on
   expected: [feedback_anchor_fire_and_forget_tasks]
+  category: single-hop
 
 - query: >-
     getting this from a code-nav MCP:
@@ -108,3 +153,15 @@
     ```
     should the LSP server really be persisting knowledge like this
   expected: [feedback_serena_tools_only]
+  category: single-hop
+
+# RET-8: multi-hop cases — the query leans on a SEED memory's situation; the expected stem
+# is the seed's [[wikilinked]] neighbor (the packs' two real link clusters), so the case
+# validates that connected knowledge surfaces (GRA-1) rather than only direct lookup.
+- query: "the timeout cascade recurred after we blamed provider latency again — a safety net caught it this time, so is there anything left to fix?"
+  expected: [feedback_fallback_is_still_bug]
+  category: multi-hop
+
+- query: "mid-migration the plan adds a canary env flag so existing callers keep working — which of our standing principles does that violate?"
+  expected: [feedback_no_backward_compat, feedback_no_tactical_shortcuts]
+  category: multi-hop

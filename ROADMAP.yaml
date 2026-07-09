@@ -864,6 +864,18 @@ workstreams:
         title: Category-tagged eval suite (multi-hop, temporal, update, abstention)
         priority: P3
         effort: M
+        # 2026-07-09: SHIPPED (owner-commissioned during the T7 cycle). Category-tagged
+        # loader (canonical set + single-hop default), per-category recall@10/MRR in the
+        # report + CLI, precision@10 + abstention_rate promoted to tracked fixture-gated
+        # entries (thresholds are measured regression tripwires: 0.12 / 0.30). Premise
+        # correction shipped with it: eval's recall() calls were EDGE-BLIND (bare index,
+        # no index_dir, so GRA-1 expansion / GRA-4 typed penalties never ran inside eval);
+        # index_dir now threads through every metric. First measured finding: multi-hop
+        # recall@10 = 1.0 bm25-only vs 0.0 dense+bm25 — the knee's graph exemption can't
+        # fire when dense ranks every entry, so expansion is structurally suppressed under
+        # dense (a GRA-1/GRA-7 ranking gap this category now keeps permanently visible).
+        # temporal/update rows grow in project-local .audit-fixtures (evergreen packs have
+        # no superseded facts); machinery pinned hermetically in tests/test_eval_recall.py.
         provenance: {dimension: landscape, landscape: [longmemeval, locomo]}
         problem: >-
           The current gates measure single-hop lookup only; the question

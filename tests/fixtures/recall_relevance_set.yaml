@@ -1,5 +1,7 @@
-# Hand-judged relevance set for the precision@k scorecard metric (eval_recall.py —
-# REPORT-ONLY, never a merge gate).
+# Hand-judged relevance set for the precision@k metric (eval_recall.py). Shipped
+# report-only; RET-8 promoted precision@10 to a TRACKED, fixture-gated entry
+# (GATE_PRECISION_AT_K — a regression tripwire just under the measured pack-corpus
+# values, 0.1375 dense / 0.15 bm25-only at promotion time; absent fixture = skip).
 #
 # Distinct from recall_hard_set.yaml's binary recall@k ("any ONE of `expected` in the top-k
 # counts as a full hit"): precision@k is a GRADED measure — `relevant` lists every memory
