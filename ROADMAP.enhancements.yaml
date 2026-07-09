@@ -1736,7 +1736,7 @@ workstreams:
         title: "/hippo:promote — lift a project lesson into the user tier with provenance"
         priority: P1
         effort: S
-        status: planned
+        status: done
         source: {lens: cross-project, verdict: KEEP, leverage: 4, note: lands TEA-1's own unmet acceptance criterion}
         problem: >-
           TEA-1 ships the user tier and PASSIVELY fuses it, but nothing deliberately
@@ -1785,7 +1785,7 @@ workstreams:
         title: "/hippo:import — migration on-ramp (start with Cursor .mdc)"
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: cross-project, verdict: KEEP, leverage: 4, note: highest ADOPTION lever; answers the me-too positioning blocker}
         problem: >-
           The only way into hippo is typing memories by hand; adopters start from
@@ -1827,12 +1827,31 @@ workstreams:
           description's own rule). Tests: tests/test_import_mdc.py — hermetic repo with
           a .cursor/rules fixture; assert globs land as cited_paths via backfill, the
           dup gate fires on re-import, a secret-bearing .mdc yields hold-warnings.
+        implementation_correction: >-
+          SHIPPED 2026-07-09. ONE premise correction against the note above, verified by
+          direct probe before coding: "rules_plane.rule_paths_globs parses exactly the
+          .mdc frontmatter list shape (rename-tolerant)" is WRONG for the DOMINANT
+          real-world Cursor shape — `globs: **/*.ts` starts a YAML value with `*` (an
+          alias node), yaml.safe_load raises, and parse_frontmatter returns {} for the
+          WHOLE block (description included), so a rename-tolerant re-read through the
+          same parser recovers nothing. Shipped instead: import_mdc.parse_mdc,
+          YAML-first (full fidelity for well-formed files) with a line-based
+          frontmatter fallback for the invalid-YAML reality, + comma-splitting of
+          Cursor's inline glob strings either way. The note's glob-MATCHING reuse held
+          exactly as written (resolve_globs = _expand_braces → _glob_to_re over
+          _repo_paths_for_globs's universe; nothing re-implemented). Everything else
+          shipped per the note: check_candidate-first dup gate (review holds unless
+          allow_duplicate), the Applies-to body line → backfill → cited_paths route,
+          secret-lint as a PRE-WRITE HOLD with no override parameter (stricter than
+          write_memory's warn-after-write — the untrusted-foreign-input posture),
+          idempotent re-import via exclusive-create, provenance as a GOV-3 rationale
+          line ("imported from <rel> (Cursor .mdc rule)").
 
       - id: RCH-3
         title: Decision-chain replay — memory as an active tool over typed edges
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: frontier, verdict: KEEP-worthy (blind-spot)}
         problem: >-
           Nothing walks the authored supersedes/refines/contradicts graph to
@@ -1868,12 +1887,27 @@ workstreams:
           decide X" question — ONE chain-builder, two surfaces (put the builder in
           links.py or a small history.py, imported by both; keep mcp_server
           un-imported by hot-path modules — that negative pin exists).
+        implementation_correction: >-
+          SHIPPED 2026-07-09. The note's COUNTS were two merged tiers stale (it was
+          audited post-T2): the pinned test was already
+          test_tools_list_exposes_exactly_FOUR_tools ({recall,new_memory,traverse,why} —
+          T4 added why) — updated to exactly-FIVE with decision_history; the server
+          docstring was doubly stale ("Three tools" AND "two RESOURCES" vs the live 4/3)
+          and now reads five/three. Chronology shipped per the note's primary
+          instruction (staleness.read_source_commit_time — the STAMPED epoch, which
+          survives squash-merges); n.b. the parenthetical "the recall.recent_memories
+          ordering precedent" is attribution-loose — recent_memories actually orders by
+          git-RESOLVED commit times (_commit_times), a mechanism the stamped-field read
+          deliberately avoids (no git subprocess per node). Builder landed in a new
+          history.py (the note's own alternative); extension taken: /hippo:recall
+          --history renders the same render_decision_history the MCP tool returns, with
+          the one-directional dependency pinned (history never imports the server).
 
       - id: RCH-4
         title: "/hippo:recall --all-projects — global recall across your local corpora"
         priority: P3
         effort: L
-        status: planned
+        status: done
         source: {lens: cross-project, verdict: RESHAPE (explicit + trust-gated)}
         problem: >-
           Recall fuses only the current repo's tiers; a lesson in a different
@@ -1920,7 +1954,12 @@ workstreams:
         title: Pack ecosystem — install / extract / update (gated, post-launch)
         priority: P3
         effort: L
-        status: planned
+        # T6 (2026-07-09): EXTRACT slice SHIPPED (packs.py pack_extract + /hippo:pack,
+        # shipped-shape parity-pinned, install/update absence negative-pinned);
+        # install/update remain GATED on the v0.8.0 trust spine (SEC-5/6/7, still not
+        # in the tree) — the acceptance_criteria below are install/update-shaped, so
+        # this item stays open until the spine lands.
+        status: in_progress
         source: {lens: cross-project, verdict: RESHAPE (mechanism yes, ecosystem later; full trust spine)}
         problem: >-
           TEA-2's packs can only come from inside the plugin; there is no way to
@@ -1966,7 +2005,7 @@ workstreams:
         title: Portability linter — a shared primitive (extract now)
         priority: P2
         effort: S
-        status: planned
+        status: done
         source: {lens: cross-project, verdict: RESHAPE (extract the reusable nugget)}
         problem: >-
           Both /hippo:promote and pack-extract need the same check — strip
@@ -2134,7 +2173,10 @@ release_train:
   - tier: T6
     target_version: 1.6.0
     theme: "Reach"
-    status: planned
+    # 2026-07-09: done_means met — promote (TEA-1's criterion landed), import (.mdc),
+    # decision replay, trust-gated global recall all shipped; RCH-5 is the named gated
+    # tail (extract slice shipped; install/update stay open on the v0.8.0 trust spine).
+    status: done
     done_means: >-
       Knowledge follows you: /hippo:promote lands TEA-1's unmet criterion, one solid
       /hippo:import adapter (Cursor .mdc) makes hippo the tool you graduate TO,

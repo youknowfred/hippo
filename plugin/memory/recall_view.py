@@ -50,6 +50,19 @@ def _memory_type(text: str) -> str:
     return str(fm.get("type") or "")
 
 
+def _memory_origin(text: str) -> str:
+    """The promote-time origin stamp (``metadata.origin``, RCH-1) — "" when never promoted.
+
+    Same both-schema read as ``_memory_type``. Display-only provenance: a promoted memory
+    answers "where was this learned" right in the recall view.
+    """
+    fm = parse_frontmatter(text)
+    md = fm.get("metadata")
+    if isinstance(md, dict) and md.get("origin"):
+        return str(md.get("origin"))
+    return str(fm.get("origin") or "")
+
+
 def _name_from_path(path: str) -> str:
     return os.path.splitext(os.path.basename(path))[0]
 
@@ -174,6 +187,21 @@ def _abstention_receipt(
     )
 
 
+def _corpora_note(res: dict) -> str:
+    """The one legible sources trailer for an --all-projects run (inv3): what was
+    searched, and every skipped source NAMED with why."""
+    parts = [f"searched: {', '.join(res['searched']) or '(nothing)'}"]
+    for key, reason in (
+        ("skipped_untrusted", "untrusted — review + trust via /hippo:doctor there"),
+        ("skipped_unavailable", "unavailable (no readable corpus/index)"),
+    ):
+        names = res.get(key) or []
+        if names:
+            noun = "corpus" if len(names) == 1 else "corpora"
+            parts.append(f"{len(names)} {noun} skipped: {', '.join(names)} — {reason}")
+    return "  (" + " · ".join(parts) + ")"
+
+
 def describe(
     query: str,
     k: int = DEFAULT_K,
@@ -182,6 +210,7 @@ def describe(
     index_dir: Optional[str] = None,
     repo_root: Optional[str] = None,
     why: bool = False,
+    all_projects: bool = False,
 ) -> str:
     """Human-readable answer to "what do you remember about ``query``".
 
@@ -192,20 +221,40 @@ def describe(
     containment it really is, and — on abstention — replaces the generic message with the
     near-miss receipt (sub-floor score + the floor it missed). Abstention (no hit clears
     the relevance floor) is reported as such — a feature, not an error.
+
+    ``all_projects=True`` (RCH-4) swaps the retrieval call for
+    ``recall.recall_all_projects`` — the current project's tiers plus every registered,
+    per-source-trust-gated local corpus — labels cross-project hits "from <repo>", and
+    appends a sources trailer naming everything searched and everything skipped (inv3).
+    Explicit surfaces only; the hook path never sets it.
     """
     if memory_dir is None:
         memory_dir, repo_root = resolve_dirs()
-    hits = recall(query, k, memory_dir=memory_dir, index_dir=index_dir, repo_root=repo_root)
+    corpora_res: Optional[dict] = None
+    if all_projects:
+        from .recall import recall_all_projects
+
+        corpora_res = recall_all_projects(
+            query, k, memory_dir=memory_dir, index_dir=index_dir, repo_root=repo_root
+        )
+        hits = corpora_res["hits"]
+    else:
+        hits = recall(
+            query, k, memory_dir=memory_dir, index_dir=index_dir, repo_root=repo_root
+        )
     if not hits:
-        if why:
+        if why and not all_projects:
             return _abstention_receipt(query, memory_dir, index_dir, repo_root)
-        return (
+        message = (
             f'No memories cleared the relevance floor for "{query}" — nothing would be '
             "injected for a prompt like this. Abstention is a feature (RET-1): an unrelated "
             "or too-thin query surfaces nothing rather than padding out low-signal matches. "
             "Try /hippo:recall --list-by-type to see everything this project knows "
             "(or /hippo:recall --why for the abstention receipt)."
         )
+        if corpora_res is not None:
+            message += "\n" + _corpora_note(corpora_res)
+        return message
     hits = _cross_encoder_rerank(query, hits)
     graph = _load_graph(memory_dir, index_dir)
     out: List[str] = [f'{len(hits)} memory match(es) for "{query}" (most relevant first):', ""]
@@ -233,10 +282,20 @@ def describe(
 
                 tags.append(f"containment {score:.3f} ≥ floor {_rules_hit_floor():.2f}")
         else:
-            mtype = _memory_type(_read_text(os.path.join(hit_root, fname))) or "untyped"
+            hit_text = _read_text(os.path.join(hit_root, fname))
+            mtype = _memory_type(hit_text) or "untyped"
             tags = [f"{mtype}"]
             if corpus and corpus != "project":
-                tags.append(f"{corpus} tier")  # provenance: which corpus this hit came from
+                # provenance: which corpus this hit came from — the machine-local tiers
+                # render as tiers; any other label is a registered repo's basename (RCH-4).
+                tags.append(
+                    f"{corpus} tier" if corpus in ("user", "private") else f"from {corpus}"
+                )
+            # RCH-1: the promote-time origin stamp — a lifted memory names the repo (and
+            # sha) it was learned in, so a cross-project hit is never mystery knowledge.
+            hit_origin = _memory_origin(hit_text)
+            if hit_origin:
+                tags.append(f"learned in {hit_origin}")
         if isinstance(score, (int, float)) and not (why and corpus == "rule"):
             tags.append(f"relevance {score:.3f}")
         if via == "graph":
@@ -273,6 +332,9 @@ def describe(
             out.append("      → links to: " + ", ".join(outbound))
         if inbound:
             out.append("      ← linked from: " + ", ".join(inbound))
+    if corpora_res is not None:
+        out.append("")
+        out.append(_corpora_note(corpora_res))
     return "\n".join(out)
 
 
@@ -327,11 +389,33 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="GOV-5: the recall receipt — per-hit winning backend/edges/salience/steer, "
         "and on abstention the near-miss score vs the floor it missed",
     )
+    parser.add_argument(
+        "--history",
+        default=None,
+        metavar="NAME",
+        help="RCH-3: replay the supersedes/refines decision chain around a memory as an "
+        "ordered narrative (same builder the decision_history MCP tool renders)",
+    )
+    parser.add_argument(
+        "--all-projects",
+        action="store_true",
+        help="RCH-4: search every registered local corpus alongside this project's tiers "
+        "— each source trust-gated at query time, each hit labeled by source repo; "
+        "explicit command only, never the hook",
+    )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--index-dir", default=None)
     parser.add_argument("--repo-root", default=None)
     args = parser.parse_args(argv)
     try:
+        if args.history:
+            from .history import render_decision_history
+
+            memory_dir = args.memory_dir
+            if memory_dir is None:
+                memory_dir, _ = resolve_dirs()
+            print(render_decision_history(args.history, memory_dir, args.index_dir))
+            return 0
         if args.list_by_type:
             print(list_by_type(memory_dir=args.memory_dir))
             return 0
@@ -347,6 +431,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 index_dir=args.index_dir,
                 repo_root=args.repo_root,
                 why=args.why,
+                all_projects=args.all_projects,
             )
         )
         return 0

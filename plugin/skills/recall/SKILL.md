@@ -37,6 +37,23 @@ List everything this project knows, grouped by type (a map of the corpus — no 
 "$PY" -m memory.recall_view --list-by-type
 ```
 
+Replay how a decision evolved (RCH-3 — walks the authored supersedes/refines chain around
+a memory into an ordered narrative, with retirement boundaries and contradiction branch
+points; answers "why did we decide X" / "what replaced Y"):
+
+```
+"$PY" -m memory.recall_view --history "<memory-name>"
+```
+
+Search EVERY registered project on this machine, not just this one (RCH-4 — explicit
+command only, never the hook; each source passes the SEC-1 trust gate at query time,
+cross-project hits are labeled `from <repo>`, and a trailer names every corpus searched
+or skipped):
+
+```
+"$PY" -m memory.recall_view --all-projects "<what to recall>"
+```
+
 ## Reading the output
 
 Each match prints as:

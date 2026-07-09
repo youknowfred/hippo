@@ -70,10 +70,10 @@ def test_initialize_defaults_protocol_when_absent():
     assert resp["result"]["protocolVersion"] == "2024-11-05"
 
 
-def test_tools_list_exposes_exactly_four_tools():
+def test_tools_list_exposes_exactly_five_tools():
     resp = M.handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     names = {t["name"] for t in resp["result"]["tools"]}
-    assert names == {"recall", "new_memory", "traverse", "why"}
+    assert names == {"recall", "new_memory", "traverse", "why", "decision_history"}
     for t in resp["result"]["tools"]:
         assert t["inputSchema"]["type"] == "object"  # every tool has a JSON schema
 
@@ -140,6 +140,35 @@ def test_traverse_tool_walks_the_graph(corpus):
 def test_traverse_unknown_name(corpus):
     resp = _call("traverse", {"name": "does-not-exist"})
     assert "no memory resolves" in _text(resp)
+
+
+def test_decision_history_tool_replays_the_chain(tmp_path, monkeypatch):
+    md = str(tmp_path / ".claude" / "memory")
+    os.makedirs(md)
+    with open(os.path.join(md, "api-v1.md"), "w") as fh:
+        fh.write(
+            '---\nname: api-v1\ndescription: "the original api"\nmetadata:\n'
+            "  type: project\n  source_commit_time: 1000000000\n---\nbody\n"
+        )
+    with open(os.path.join(md, "api-v2.md"), "w") as fh:
+        fh.write(
+            '---\nname: api-v2\ndescription: "the v2 api"\nsupersedes: ["api-v1"]\n'
+            "metadata:\n  type: project\n  source_commit_time: 1700000000\n---\nbody\n"
+        )
+    B.build_index(md, default_index_dir(md))
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", md)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    text = _text(_call("decision_history", {"name": "api-v1"}))
+    # One builder, two surfaces: the tool renders history.render_decision_history verbatim.
+    from memory.history import render_decision_history
+
+    assert text == render_decision_history("api-v1", md, default_index_dir(md))
+    assert "supersedes api-v1" in text and "standing today: api-v2" in text
+
+
+def test_decision_history_requires_name_and_degrades(corpus):
+    assert "required" in _text(_call("decision_history", {}))
+    assert "no memory resolves" in _text(_call("decision_history", {"name": "ghost"}))
 
 
 # --------------------------------------------------------------------------- #

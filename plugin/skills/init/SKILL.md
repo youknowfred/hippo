@@ -130,20 +130,27 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    .claude/.memory-index` — reuse the `$PY`/`PYTHONPATH` already resolved by `hippo_resolve_py`
    in step 3 (falls back to bare `python3` if bootstrap hasn't run yet — BM25-only index still
    builds and works).
-4b. **Mark this corpus TRUSTED (SEC-1).** Recall is gated: until this machine's user trusts a
-   corpus, recall injects nothing from it (a cloned repo's memories are otherwise an unreviewed
-   prompt-injection channel). Running `/hippo:init` here IS the user's explicit review — whether
-   they just created the corpus (steps 1-2) or re-ran init against an existing one (ONB-5) —
-   so mark it trusted now. Reuse the `$PY` + `REPO_ROOT` from step 3:
+4b. **Mark this corpus TRUSTED (SEC-1) + register it for cross-project recall (RCH-4).**
+   Recall is gated: until this machine's user trusts a corpus, recall injects nothing from it
+   (a cloned repo's memories are otherwise an unreviewed prompt-injection channel). Running
+   `/hippo:init` here IS the user's explicit review — whether they just created the corpus
+   (steps 1-2) or re-ran init against an existing one (ONB-5) — so mark it trusted now, and
+   register it in the machine-local project registry so `/hippo:recall --all-projects` can
+   find it from other projects (registration is a LIST, not a grant — every registered corpus
+   is still trust-gated per-source at query time). Reuse the `$PY` + `REPO_ROOT` from step 3:
    ```bash
    "$PY" -c \
      "import sys, json; from memory.trust import mark_trusted; \
-      print(json.dumps({'trusted': mark_trusted(sys.argv[1])}))" \
+      from memory.registry import register_project; \
+      print(json.dumps({'trusted': mark_trusted(sys.argv[1]), \
+                        'registered': register_project(sys.argv[1], sys.argv[1] + '/.claude/memory')}))" \
      "$REPO_ROOT"
    ```
-   The marker lives in the machine-local `~/.claude/hippo-trust.json` (OUTSIDE the project, so
-   a foreign repo can't commit its own "trust me"). A `false` result means the registry write
-   failed — report it (recall will stay gated until it succeeds), don't pretend it's trusted.
+   Both markers live machine-local under `~/.claude/` (`hippo-trust.json` /
+   `hippo-projects.json` — OUTSIDE the project, so a foreign repo can't commit its own "trust
+   me" or self-register). A `false` on either means that registry write failed — report it
+   (recall stays gated / the project stays unlisted until it succeeds), don't pretend
+   otherwise.
 5. **Patch `.gitignore`** — SKIP entirely when not a git repo (there's nothing for git to
    ignore yet; a future `git init` + this same nudge in step 6, once repeated after init, is
    how it gets patched). In a git repo, append `.claude/.memory-index/`,
