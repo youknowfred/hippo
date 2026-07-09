@@ -7,6 +7,67 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.7.0 — 2026-07-09 — "Reach — knowledge that travels"
+
+**re-bootstrap: no** — `plugin/requirements.txt` is unchanged across both tiers below; the code
+swap on update is sufficient. Persisted shapes are ALL unchanged since v1.5.0 (corpus format
+still 4, index schema still 6, capture-seed schema still 2): T6's origin/pack stamps are
+additive absence-emits-nothing frontmatter rendered from per-hit file reads, and T7 adds no
+persisted surface at all.
+
+**Covers tiers T6 and T7 (T7 partial by design).** T6 ("Reach", PR #14) and T7's one
+unblocked item (PR #15) were each merged to `main` as their own reviewed, CI-green PR and are
+released together here. The REST of T7 is hard-gated and NOT in this release: SIG-5/SIG-6
+wait on RET-8 (not yet built), RUL-6 waits on the LIF-7 CAP-soak owner judgment — the tier
+stays `in_progress` in `ROADMAP.enhancements.yaml` with dated gate notes, and the salience
+default stays OFF (no ranking behavior changed in this release).
+
+The theme: knowledge stops being repo-bound. A lesson promotes up with provenance, foreign
+rules import in, decisions replay their own history, recall spans every trusted project,
+curated subsets extract as packs, and the floor fans out to the cross-tool rule plane — every
+one of them per-item, propose-first, and drift-checked.
+
+### T6 — Reach (v1.6.0, PR #14)
+
+- **RCH-6** — the portability linter, the shared lift-time primitive: `repo_coupling` findings
+  route to strip/rewrite ("warn"), `consequential_default` findings (attribution/CI-bypass
+  policies) each demand an individual yes ("confirm") — manifest-parity-pinned to the shipped
+  packs so the two catalogs cannot drift.
+- **RCH-1** — `/hippo:promote`: lift ONE proven-portable memory into the user (or private)
+  tier with an origin stamp — recall everywhere then answers "learned in `<repo>@<sha>`".
+  All guards run before any write; a refusal is a zero-filesystem-change event.
+- **RCH-2** — `/hippo:import`, the Cursor `.mdc` adapter: foreign rules become ranked, deduped,
+  secret-linted memories with globs landing as `cited_paths` (born staleness-tracked). Ships
+  the tier's premise correction: real Cursor frontmatter is NOT valid YAML (`globs: **/*.ts` —
+  a bare `*` is a YAML alias), so a tolerant line-based fallback does the parsing.
+- **RCH-3** — decision-chain replay: `supersedes`/`refines` walked transitively into ONE
+  chronological narrative with branch-point annotations (`contradicts` never traversed),
+  behind the 5th MCP tool `decision_history` and `/hippo:recall --history`.
+- **RCH-4** — trust-gated `--all-projects` recall: every registered corpus passes the trust
+  gate AT QUERY TIME before its index loads; hits label their source repo; every skip is
+  named in the output trailer. Golden eval byte-identical before/after.
+- **RCH-5** — pack EXTRACT only: curated subsets leave as install-shaped packs (provenance
+  stripped, consequential markers auto-derived). Install/update stay gated on the v0.8.0
+  trust spine — a negative-capability pin in the suite is the tripwire that flips when the
+  spine ships.
+
+### T7 — Learned ranking, the unblocked slice (v1.7.0, PR #15)
+
+- **RUL-7** — `/hippo:export-agents`, the AGENTS.md fan-out: the project floor renders as a
+  PROPOSED `AGENTS.md` diff (the Linux-Foundation cross-tool rules file) — propose-only, the
+  module never writes; a marker-delimited managed block preserves hand-maintained content
+  byte-verbatim; project tier only (user/private tiers never enter a committed file). Glob
+  scoping derives from `cited_paths` via the new RUL-6-shared `derive_paths_globs` (single
+  citation stays a literal path; same-dir collapses capped at 3× over-coverage; `**` never
+  emitted). Once applied, the exported file is drift-checked by the EXISTING doctor/
+  SessionStart channels: `archive._SCAN_TARGETS` and the rules-plane dead-glob leg now cover
+  `AGENTS.md`, so a moved cited path flags loud with zero new reporting surface.
+
+New skills since v1.5.0: `/hippo:promote`, `/hippo:import`, `/hippo:pack`,
+`/hippo:export-agents` (pinned skill list 10 → 14). MCP: 5 tools (+`decision_history`),
+3 resources. Suite: 1462 hermetic tests; eval gates unchanged and green throughout
+(self 0.98 / hard 1.0 / mrr 0.92 on the golden corpus).
+
 ## v1.5.0 — 2026-07-09 — "Knowledge that grows itself"
 
 **re-bootstrap: no** — `plugin/requirements.txt` is unchanged across every tier below; the code
