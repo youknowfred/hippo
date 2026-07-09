@@ -1907,7 +1907,7 @@ workstreams:
         title: "/hippo:recall --all-projects — global recall across your local corpora"
         priority: P3
         effort: L
-        status: planned
+        status: done
         source: {lens: cross-project, verdict: RESHAPE (explicit + trust-gated)}
         problem: >-
           Recall fuses only the current repo's tiers; a lesson in a different

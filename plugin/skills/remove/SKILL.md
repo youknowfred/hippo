@@ -41,6 +41,20 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
      usually means either a prior manual setup or that `$REPO_ROOT` doesn't match what you
      expect; forcing it risks unlinking a symlink that belongs to a different project's corpus.
 
+1b. **De-register from the cross-project registry (RCH-4).** `/hippo:init` listed this project
+   in the machine-local `~/.claude/hippo-projects.json` so `/hippo:recall --all-projects`
+   could search it from other projects; offboarding removes that listing (idempotent — `true`
+   also when it was never registered):
+   ```bash
+   "$PY" -c \
+     "import sys, json; from memory.registry import deregister_project; \
+      print(json.dumps({'deregistered': deregister_project(sys.argv[1])}))" \
+     "$REPO_ROOT"
+   ```
+   Trust state (`hippo-trust.json`) is deliberately left as-is — trust records the user's
+   review of the CORPUS content, which removal does not un-review; re-running `/hippo:init`
+   later picks both straight back up.
+
 2. **Offer to delete the derived, gitignored dirs — agent-gated, never unconditional.** Ask the
    user (in this skill's own conversational turn) before deleting anything here; a "yes" to step
    1 is not consent for step 2. If confirmed, remove:

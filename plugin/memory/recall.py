@@ -1662,6 +1662,112 @@ def _fuse_recall_tiers(
         return project_idx
 
 
+def recall_all_projects(
+    query: str,
+    k: int = DEFAULT_K,
+    *,
+    memory_dir: Optional[str] = None,
+    index_dir: Optional[str] = None,
+    repo_root: Optional[str] = None,
+) -> dict:
+    """Explicit cross-project recall (RCH-4): the current project's tiers PLUS every
+    registered local corpus, each source trust-gated at query time.
+
+    Returns ``{"hits", "searched", "skipped_untrusted", "skipped_unavailable"}`` —
+    ``hits`` in recall's normal shape with each entry's ``corpus`` label set to its
+    source repo's BASENAME (the current project's tiers keep their project/user/private
+    labels), and every skipped source named so degradation is legible (inv3).
+
+    DELIBERATELY NOT ``_fuse_recall_tiers``: that fusion is trust-blind by design (the
+    user's own machine-local tiers). Registered corpora are other git clones — exactly
+    the SEC-1 threat class — so EVERY registered source passes
+    ``trust.gate_repo_root``/``is_trusted`` before its index is even loaded (an
+    untrusted corpus contributes nothing and costs nothing), and the current project is
+    gated the same way ``recall()`` gates it. Explicit surfaces only
+    (``/hippo:recall --all-projects`` and the CLI behind it) — the hook path never
+    calls this. Never raises.
+    """
+    out: dict = {
+        "hits": [],
+        "searched": [],
+        "skipped_untrusted": [],
+        "skipped_unavailable": [],
+    }
+    try:
+        if not query or not query.strip():
+            return out
+        if memory_dir is None:
+            memory_dir, resolved = resolve_dirs()
+            if repo_root is None:
+                repo_root = resolved
+
+        loadeds: List[Tuple[LoadedIndex, str, str]] = []
+        used_labels: set = set(_CORPUS_MARKER) | {_PROJECT_TIER}
+
+        # The current project + its own tiers — the same gate-then-fuse recall() runs.
+        gate_root = trust.gate_repo_root(memory_dir, repo_root)
+        if gate_root is not None and not trust.is_trusted(gate_root):
+            out["skipped_untrusted"].append(_PROJECT_TIER)
+        else:
+            for tdir, tidx, label in _recall_tier_dirs(memory_dir, index_dir):
+                li = _ensure_index(None, tdir, tidx)
+                if li is not None and len(li):
+                    loadeds.append((li, tdir, label))
+                    out["searched"].append(label)
+
+        # Registered corpora — foreign clones, per-source SEC-1 gate BEFORE any load.
+        from .registry import registered_projects
+
+        try:
+            current_root = os.path.realpath(gate_root or repo_root or memory_dir)
+        except Exception:
+            current_root = gate_root or repo_root or memory_dir
+        current_mdir = os.path.realpath(memory_dir) if memory_dir else memory_dir
+        regs = registered_projects()
+        for root in sorted(regs):
+            mdir = regs[root].get("memory_dir")
+            try:
+                if (
+                    os.path.realpath(root) == current_root
+                    or os.path.realpath(mdir) == current_mdir
+                ):
+                    continue  # the current project is already in (or already counted)
+            except Exception:
+                pass
+            base = os.path.basename(root.rstrip(os.sep)) or root
+            label, n = base, 2
+            while label in used_labels:
+                label = f"{base}~{n}"  # two clones named alike stay distinguishable
+                n += 1
+            reg_gate = trust.gate_repo_root(mdir, root)
+            if reg_gate is not None and not trust.is_trusted(reg_gate):
+                out["skipped_untrusted"].append(label)
+                continue
+            li = _ensure_index(None, mdir, default_index_dir(mdir))
+            if li is None or not len(li):
+                out["skipped_unavailable"].append(label)
+                continue
+            used_labels.add(label)
+            loadeds.append((li, mdir, label))
+            out["searched"].append(label)
+
+        merged = _merge_loaded_indexes(loadeds)
+        if merged is None or not len(merged):
+            return out
+        if len(loadeds) == 1:
+            # The merge's single-corpus fast path returns the index UNTAGGED; tag it here
+            # so a lone surviving source (e.g. the only trusted registered corpus) still
+            # renders its provenance label and drift-checks against its own root.
+            _li, root, label = loadeds[0]
+            for e in merged.entries:
+                e.setdefault("root", root)
+                e.setdefault("corpus", label)
+        out["hits"] = recall(query, k, index=merged, memory_dir=memory_dir)
+        return out
+    except Exception:
+        return out
+
+
 def fused_floor_names(memory_dir: str, index_dir: Optional[str] = None) -> set:
     """The floor drawn from BOTH corpora (TEA-1): the union of every recall tier's MEMORY.md
     floor pointers (project + user tier + private tier). Recall's display-layer dedup subtracts
@@ -2198,8 +2304,17 @@ def format_results(results: List[dict], max_chars: int = _MAX_RECALL_CHARS) -> s
         # "(user memory)" / "(private memory)" line came from the machine-local user tier or
         # the gitignored in-repo private tier, NOT this project's git-native corpus. The
         # project tier (or a single-corpus recall) carries no marker, so existing output is
-        # byte-identical when no extra tier is in play.
-        origin = _CORPUS_MARKER.get(r.get("corpus"), "")
+        # byte-identical when no extra tier is in play. RCH-4: an unknown label (a
+        # cross-project hit tagged with its source repo's basename) falls through to a
+        # generic "(label)" marker — every hit stays provenanced whatever renderer shows it.
+        corpus_label = r.get("corpus")
+        origin = _CORPUS_MARKER.get(corpus_label)
+        if origin is None:
+            origin = (
+                f" ({corpus_label})"
+                if corpus_label and corpus_label != _PROJECT_TIER
+                else ""
+            )
         # Typed-edge annotation (GRA-4): the one-line supersession/conflict note rides on
         # the same pointer line — bounded upstream (_typed_note caps names) and by the
         # overall max_chars truncation below, so it can never blow the injection budget.
