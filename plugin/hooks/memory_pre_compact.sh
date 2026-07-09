@@ -45,9 +45,11 @@ MSG="hippo: compaction is about to summarize and discard session detail. Before 
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   PY_FOR_NUDGE="${CLAUDE_PLUGIN_DATA:-}/venv/bin/python"
   [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -x "$PY_FOR_NUDGE" ] || PY_FOR_NUDGE="python3"
-  PY_SAFE="$(printf '%s' "$PY_FOR_NUDGE" | tr -d '"\\')"
-  ROOT_SAFE="$(printf '%s' "${CLAUDE_PLUGIN_ROOT}" | tr -d '"\\')"
-  SID_SAFE="$(printf '%s' "$SID" | tr -d '"\\')"
+  # \042 = double quote, \134 = backslash (tr's own octal escapes — the two characters the
+  # JSON embed below cannot carry; octal keeps shellcheck from misreading the class, SC1003).
+  PY_SAFE="$(printf '%s' "$PY_FOR_NUDGE" | tr -d '\042\134')"
+  ROOT_SAFE="$(printf '%s' "${CLAUDE_PLUGIN_ROOT}" | tr -d '\042\134')"
+  SID_SAFE="$(printf '%s' "$SID" | tr -d '\042\134')"
   SID_FLAG=""
   [ -n "$SID_SAFE" ] && SID_FLAG=" --session-id '$SID_SAFE'"
   MSG="$MSG Separately, record the WHY that cannot be re-derived from the diff — each decision the user explicitly made or confirmed this session (a tradeoff taken, an approach chosen, a constraint stated) — one command per decision, quoting or faithfully paraphrasing the user, never inferring: PYTHONPATH='$ROOT_SAFE' '$PY_SAFE' -m memory.capture --add-decision 'the decision, in one sentence'$SID_FLAG — these land in this session's capture seed for the next /hippo:consolidate drain."
