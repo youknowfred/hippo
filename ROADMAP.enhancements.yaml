@@ -1401,7 +1401,7 @@ workstreams:
         title: Hebbian co-recall edges — densify the graph from what surfaces together
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: capture, verdict: KEEP, leverage: 4}
         problem: >-
           GRA-3 auto-links only by write-time recall similarity (BM25-only by

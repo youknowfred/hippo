@@ -35,7 +35,7 @@ import os
 import re
 import time
 import uuid
-from typing import Iterator, List, Optional
+from typing import Dict, Iterator, List, Optional
 
 from .provenance import ensure_self_ignoring_dir
 
@@ -384,6 +384,61 @@ def abstention_backlog(
                 }
             )
         return out
+    except Exception:
+        return []
+
+
+# GRW-2: how many DISTINCT sessions two memories must co-surface in before the pair becomes
+# an edge proposal. Deliberately HIGH so a sparse/noisy co-recall map proposes NOTHING —
+# an empty result is the designed behavior on a young corpus, not a failure.
+_CORECALL_MIN_SESSIONS = 3
+_CORECALL_MAX_PAIRS = 20  # bounded output for the consolidate proposal turn
+
+
+def co_recall_pairs(
+    telemetry_dir: Optional[str] = None,
+    *,
+    min_sessions: int = _CORECALL_MIN_SESSIONS,
+    exclude_names: Optional[set] = None,
+) -> List[dict]:
+    """Hebbian co-recall tally (GRW-2): memory pairs that co-surface across many sessions.
+
+    GRA-3 links by write-time similarity, so it can never connect pairs that are semantically
+    DISTANT but operationally inseparable (a bug and its unrelated-looking workaround). The
+    episode buffer already records exactly that signal — which names surfaced together — and
+    nothing read it. This tallies it: per session, the recalled names are UNIONED FIRST (a
+    chatty single session counts ONCE, structurally), every unordered pair in that union is
+    credited one distinct session, and only pairs reaching ``min_sessions`` return, as
+    ``[{"pair": [a, b], "sessions": n}]`` (pair sorted, list most-sessions-first, capped at
+    ``_CORECALL_MAX_PAIRS``). Below threshold → ``[]`` — the sparse map STAYS empty rather
+    than proposing spurious edges. ``exclude_names`` drops names before pairing (pass
+    ``lint_floor.floor_memory_names`` so always-recalled floor memories can't dominate every
+    pair). Read-only over the gitignored buffer; a TALLY, never a writer — the consumer
+    (the consolidate skill) proposes each edge per-item, agent-gated. Never raises.
+    """
+    try:
+        excluded = exclude_names or set()
+        by_session: Dict[str, set] = {}
+        for e in read_episodes(telemetry_dir):
+            sid = e.get("session_id") or ""
+            names = {n for n in (e.get("recalled_names") or []) if n and n not in excluded}
+            if not names:
+                continue
+            by_session.setdefault(str(sid), set()).update(names)
+        counts: Dict[frozenset, int] = {}
+        for names in by_session.values():
+            ordered = sorted(names)
+            for i, a in enumerate(ordered):
+                for b in ordered[i + 1 :]:
+                    key = frozenset((a, b))
+                    counts[key] = counts.get(key, 0) + 1
+        out = [
+            {"pair": sorted(pair), "sessions": n}
+            for pair, n in counts.items()
+            if n >= min_sessions
+        ]
+        out.sort(key=lambda p: (-p["sessions"], p["pair"]))
+        return out[:_CORECALL_MAX_PAIRS]
     except Exception:
         return []
 

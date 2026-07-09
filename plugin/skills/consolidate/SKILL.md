@@ -137,6 +137,53 @@ For link densification on the existing corpus (GRA-3 — suggest edges between h
 pairs, agent-gated, never an autonomous body edit), use `/hippo:audit`'s densification pass;
 this skill's job is to drain and close loops, not to re-audit content.
 
+## Step 4 — Propose co-recall edges (GRW-2)
+
+Similarity can never link a bug to its unrelated-looking workaround — but the episode buffer
+records which memories actually SURFACE TOGETHER. Tally pairs that co-recalled across many
+distinct sessions (the threshold is deliberately high — on a sparse or noisy map this
+proposes NOTHING, and that empty result is the designed outcome, not a failure):
+
+```bash
+"$PY" - <<'PYEOF'
+from memory.lint_floor import floor_memory_names
+from memory.links import build_graph
+from memory.provenance import resolve_dirs
+from memory.telemetry import co_recall_pairs, default_telemetry_dir
+
+memory_dir, repo_root = resolve_dirs()
+pairs = co_recall_pairs(
+    default_telemetry_dir(memory_dir),
+    exclude_names=floor_memory_names(memory_dir),  # floor names would dominate every pair
+)
+adjacent = set()
+graph = build_graph(memory_dir)
+if graph:
+    for src, outs in graph.adjacency.items():
+        adjacent.update(frozenset((src, tgt)) for tgt in outs)
+    for src, rels in graph.typed.items():
+        for tgts in rels.values():
+            adjacent.update(frozenset((src, tgt)) for tgt in tgts)
+fresh = [p for p in pairs if frozenset(p["pair"]) not in adjacent]
+if not fresh:
+    print("no co-recall pairs above threshold — the sparse map stays empty (by design)")
+for p in fresh:
+    a, b = p["pair"]
+    print(f"{a} <-> {b}   (co-recalled in {p['sessions']} distinct sessions)")
+PYEOF
+```
+
+For EACH printed pair (already-linked pairs are dropped above), read both memories and judge
+whether the association is real — would someone recalling one genuinely need the other? If
+yes, ask for approval, then append a `[[the-other-name]]` reference into ONE side's body
+(its `Related:` line if present — an untyped wikilink, the GRA-3 convention; no new edge
+type, no schema change). Per item, agent-gated — never append the whole list in bulk. If no,
+skip it; the tally will keep its count and you can dismiss it again next drain.
+
+After any approved append, re-run `"$PY" -m memory.build_index` so `links.json` carries the
+new edge — GRA-1's 1-hop expansion picks it up on the very next recall, no ranking change
+involved.
+
 > A future auto-maintained map-of-content note (CAP-5) will also be refreshed here once it
 > ships; today consolidation ends at a drained queue, an addressed worklist, and a current graph.
 
