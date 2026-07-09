@@ -826,3 +826,99 @@ def test_watermark_lane_flags_uncalled_memory_end_to_end(repo, memory_dir, monke
     recon_block = next((b for b in blocks if b.startswith("🧠 Reconsolidation worklist")), "")
     assert "m_quiet [since-watermark]" in recon_block
     assert "commits landed since your last session" in recon_block
+
+
+# --------------------------------------------------------------------------- #
+# GRW-6 — squash_merge_heal_producer (detection + per-item rebaseline OFFER)
+# --------------------------------------------------------------------------- #
+def test_squash_heal_producer_needs_both_signals(monkeypatch):
+    # Break without a merge signal → silent (the generic SHP-3 producer covers it)…
+    monkeypatch.setattr(S, "unresolvable_baseline_names", lambda md, repo: ["m_gone"])
+    monkeypatch.setattr(S, "_recent_merge_signals", lambda repo: False)
+    assert S.squash_merge_heal_producer("md", "repo") is None
+    # …merge signal without a break → silent (nothing to heal)…
+    monkeypatch.setattr(S, "unresolvable_baseline_names", lambda md, repo: [])
+    monkeypatch.setattr(S, "_recent_merge_signals", lambda repo: True)
+    assert S.squash_merge_heal_producer("md", "repo") is None
+    # …both → the per-item offer, naming the memory and the confirmed-graduate route.
+    monkeypatch.setattr(S, "unresolvable_baseline_names", lambda md, repo: ["m_gone"])
+    out = S.squash_merge_heal_producer("md", "repo")
+    assert out is not None
+    assert "m_gone" in out
+    assert "/hippo:consolidate" in out
+    assert "--outcome graduate" in out
+    assert "per item" in out
+
+
+def test_squash_heal_producer_caps_names(monkeypatch):
+    monkeypatch.setattr(
+        S, "unresolvable_baseline_names", lambda md, repo: [f"m_{i:02d}" for i in range(9)]
+    )
+    monkeypatch.setattr(S, "_recent_merge_signals", lambda repo: True)
+    out = S.squash_merge_heal_producer("md", "repo")
+    assert "m_05" in out and "m_06" not in out
+    assert "(+3 more)" in out
+
+
+def test_squash_heal_producer_is_registered_after_unresolvable():
+    labels = [label for label, _ in S.PRODUCERS]
+    assert labels.count("squash_merge_heal") == 1
+    assert labels.index("squash_merge_heal") == labels.index("unresolvable_baseline") + 1
+
+
+def test_squash_merge_heal_end_to_end_and_reverify_clears(repo, memory_dir, monkeypatch):
+    """A REAL squash-merge: branch → memory cites the branch's file (source_commit = the
+    branch sha) → squash onto main with a forge-style '(#N)' subject → branch + objects
+    pruned → the sha no longer resolves. The producer fires once naming the memory; a
+    confirmed per-item graduate re-baselines it via reverify_file and BOTH producers go
+    silent (self-clearing)."""
+    import subprocess
+
+    from .conftest import git_commit as _commit
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+
+    def git(*args):
+        subprocess.run(
+            ["git", "-C", repo, *args], check=True, capture_output=True, text=True,
+            env={**os.environ, "GIT_AUTHOR_DATE": "1700000200 +0000",
+                 "GIT_COMMITTER_DATE": "1700000200 +0000",
+                 "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                 "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"},
+        )
+
+    write_file(repo, "src/base.py", "base = 1\n")
+    _commit(repo, "init", 1_700_000_000)
+    git("checkout", "-q", "-b", "feat")
+    write_file(repo, "src/feature.py", "feature = 1\n")
+    feat_sha = _commit(repo, "add feature", 1_700_000_100)
+    write_file(
+        memory_dir,
+        "m_feature_design.md",
+        "---\nname: m_feature_design\ndescription: \"how the feature works\"\n"
+        f'cited_paths: ["src/feature.py"]\nsource_commit: "{feat_sha}"\n'
+        "source_commit_time: 1700000100\n---\nthe feature design notes\n",
+    )
+    git("checkout", "-q", "-")
+    git("merge", "--squash", "feat")
+    git("commit", "-q", "-m", "feat: add the feature (#7)")
+    git("branch", "-D", "feat")
+    # Make the squash REAL for detection purposes: expire the reflog and prune the
+    # now-unreachable branch objects (what a fresh clone of the squashed repo looks like).
+    git("reflog", "expire", "--expire=now", "--all")
+    git("gc", "--prune=now", "--quiet")
+
+    names = S.unresolvable_baseline_names(memory_dir, repo)
+    assert names == ["m_feature_design"], "the squash genuinely broke the baseline"
+    out = S.squash_merge_heal_producer(memory_dir, repo)
+    assert out is not None and "m_feature_design" in out, (
+        "reflog is expired — the '(#N)' squash-subject probe must still detect the merge"
+    )
+
+    # The offered heal: agent confirms the memory still holds, renders graduate per item.
+    import memory.reconsolidate as R
+
+    res = R.semantic_reverify("m_feature_design", "graduate", memory_dir, repo)
+    assert res["error"] is None and res["cleared"] is True
+    assert S.unresolvable_baseline_names(memory_dir, repo) == []
+    assert S.squash_merge_heal_producer(memory_dir, repo) is None, "healed → self-cleared"

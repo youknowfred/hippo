@@ -1597,7 +1597,7 @@ workstreams:
         title: Squash-merge provenance auto-rebaseline (healing, not just detection)
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: frontier, verdict: KEEP-worthy (blind-spot)}
         problem: >-
           SHP-3 only DEGRADES around a source_commit sha absent after a squash-merge:

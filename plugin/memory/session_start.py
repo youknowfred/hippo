@@ -42,12 +42,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from typing import Callable, Dict, List, Optional, Tuple
 
 from .lint_floor import floor_producer
 from .lint_links import lint_links_producer
-from .provenance import CORPUS_FORMAT_VERSION, read_corpus_format, resolve_dirs
+from .provenance import CORPUS_FORMAT_VERSION, read_corpus_format, resolve_dirs, run_git
 from .recall import (
     _INVALIDATION_RECENT_DAYS,
     _invalidation_state,
@@ -66,6 +67,7 @@ from .staleness import (
     find_stale,
     find_unparseable,
     invalid_after_map,
+    unresolvable_baseline_names,
     write_stale_cache,
 )
 
@@ -374,6 +376,69 @@ def unresolvable_baseline_producer(
         f"⚠ {n} memories have unresolvable staleness baselines (source_commit sha not in "
         "history — likely squash-merge or a shallow clone); falling back to time-based comparison."
     )
+
+
+# GRW-6: how many broken-baseline memories the healing offer NAMES (the rest are counted).
+_MAX_HEAL_NAMES = 6
+# Squash-merge subjects as GitHub (and most forges) write them — "feat: thing (#123)".
+_SQUASH_SUBJECT_RE = re.compile(r"\(#\d+\)")
+
+
+def _recent_merge_signals(repo_root: str) -> bool:
+    """Cheap detection that a merge LANDED recently — reflog/log/branch probes, ORed.
+
+    A squash-merge leaves NO merge commit, so no single probe is authoritative: the reflog
+    remembers merge/pull actions in THIS clone; recent one-line subjects catch a forge's
+    squash commit ("(#N)") in ANY clone (a fresh clone has no reflog history); and a
+    non-current branch listed by ``branch --merged`` marks a true merge. Read-only, three
+    bounded git reads, ``False`` on any failure — and only ever consulted AFTER the
+    baseline break is confirmed, so a merge-looking history with nothing broken stays
+    silent. Never raises.
+    """
+    try:
+        reflog = run_git(["reflog", "-n", "50", "--format=%gs"], repo_root).lower()
+        if "merge" in reflog or "pull" in reflog:
+            return True
+        subjects = run_git(["log", "--oneline", "-n", "20", "--format=%s"], repo_root)
+        if _SQUASH_SUBJECT_RE.search(subjects):
+            return True
+        for ln in run_git(["branch", "--merged"], repo_root).splitlines():
+            if ln.strip() and not ln.lstrip().startswith("*"):
+                return True  # a NON-current local branch fully merged into HEAD
+        return False
+    except Exception:
+        return False
+
+
+def squash_merge_heal_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """GRW-6: turn the unresolvable-baseline DEGRADATION into a per-item REPAIR offer.
+
+    ``unresolvable_baseline_producer`` above reports the fallback; this fires only when a
+    recent merge event is ALSO detectable (reflog/log/branch probes) — the moment healing
+    is actually warranted — and NAMES the broken memories, routing each to the consolidate
+    drain where the agent confirms the memory still holds post-merge and re-baselines it
+    via the shipped ``reverify_file`` path (``--outcome graduate``). Detection + offer
+    ONLY: never a new write path, never bulk (semantic_reverify stays single-item by
+    signature pin) — inv4. Self-clearing: healed baselines resolve again and both
+    producers go silent. ``ctx`` (LIF-6) is unused.
+    """
+    try:
+        names = unresolvable_baseline_names(memory_dir, repo_root)
+        if not names or not _recent_merge_signals(repo_root):
+            return None
+        shown = ", ".join(names[:_MAX_HEAL_NAMES])
+        more = f" (+{len(names) - _MAX_HEAL_NAMES} more)" if len(names) > _MAX_HEAL_NAMES else ""
+        return (
+            f"🩹 A merge landed recently and {len(names)} memories' staleness baselines no "
+            "longer resolve (squash-merge rewrites history). Heal them per item via "
+            "/hippo:consolidate: confirm each memory still holds post-merge, then "
+            "`reconsolidate --reverify <name> --outcome graduate` re-baselines it to the "
+            f"current HEAD (reverify_file re-derives its citations too). Broken: {shown}{more}."
+        )
+    except Exception:
+        return None
 
 
 def pending_capture_producer(
@@ -1017,6 +1082,7 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("blind_spot", blind_spot_producer),  # SIG-3: recurring recall abstentions -> a low-frequency curation backlog
     ("index_integrity", index_integrity_producer),  # names on-disk index corruption (QUA-5) — recall/build_index already degrade silently
     ("unresolvable_baseline", unresolvable_baseline_producer),  # legibility for find_stale's sha-fallback path
+    ("squash_merge_heal", squash_merge_heal_producer),  # GRW-6: merge detected + baselines broken -> per-item rebaseline offer
     ("rules_conflict", rules_conflict_producer),  # RUL-1: governance cites a memory the corpus disputes (superseded/contradicted/never-recalled)
     ("rules_rot", rules_rot_producer),  # RUL-2: citation-rot/staleness over the always-loaded rules plane itself
     ("contradiction_inbox", contradiction_inbox_producer),  # GOV-1: every unresolved contradicts pair, not just the co-surfaced/governance-cited ones

@@ -138,6 +138,18 @@ Then, for each memory you re-ground, render exactly one verdict (per item):
 — auto-invalidates so recall stops surfacing it at full rank), `snooze` (explicitly defer — it
 drops off the next N worklists instead of re-nagging).
 
+Two SessionStart signals route extra items through this same per-item gate:
+
+- `[since-watermark]` worklist items (GRW-5) were flagged by COMMITS landed since your last
+  session touching their cited files — commit-precise, on the list whether or not they were
+  recently recalled. Same verdicts as above.
+- **Squash-merge healing (GRW-6):** when SessionStart reported a recent merge broke
+  staleness baselines (`🩹 … baselines no longer resolve`), re-ground each NAMED memory
+  against the post-merge code, and once you confirm it still holds, render `--outcome
+  graduate` — the reverify re-baselines its `source_commit` to the current HEAD and
+  re-derives its citations, healing the break (detection is automatic; the rebaseline is
+  only ever this per-item, confirmed verdict — never bulk).
+
 ## Step 3 — Refresh the graph
 
 Refresh the index + persisted edge list so the session's writes are live and staleness is

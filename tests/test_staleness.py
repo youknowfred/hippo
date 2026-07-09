@@ -809,3 +809,30 @@ def test_read_stale_cache_wrong_schema_version_is_none(tmp_path):
 
 def test_read_stale_cache_never_raises_on_a_bogus_index_dir():
     assert read_stale_cache("/nonexistent/path/does/not/exist") is None
+
+
+# --------------------------------------------------------------------------- #
+# GRW-6: the per-item form of the unresolvable-baseline check
+# --------------------------------------------------------------------------- #
+def test_unresolvable_baseline_names_lists_only_broken_memories(repo, memory_dir):
+    from memory.staleness import unresolvable_baseline_names
+
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_ok.md", _memory(["src/foo.py"], c1))
+    write_file(memory_dir, "m_squashed.md", _memory_with_time(["src/foo.py"], "c" * 40, 1_700_000_050))
+    write_file(memory_dir, "m_also_gone.md", _memory_with_time(["src/foo.py"], "d" * 40, 1_700_000_060))
+    write_file(memory_dir, "m_no_baseline.md", _memory([], None))
+
+    assert unresolvable_baseline_names(memory_dir, repo) == ["m_also_gone", "m_squashed"]
+    assert count_unresolvable_baselines(memory_dir, repo) == 2
+
+
+def test_unresolvable_baseline_names_empty_when_healthy(repo, memory_dir):
+    from memory.staleness import unresolvable_baseline_names
+
+    write_file(repo, "src/foo.py", "x = 1\n")
+    c1 = git_commit(repo, "c1", 1_700_000_000)
+    write_file(memory_dir, "m_ok.md", _memory(["src/foo.py"], c1))
+    assert unresolvable_baseline_names(memory_dir, repo) == []
+    assert unresolvable_baseline_names(str(memory_dir) + "-missing", repo) == []
