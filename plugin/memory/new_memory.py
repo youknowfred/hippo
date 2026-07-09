@@ -445,7 +445,12 @@ def check_candidate(
 
 
 def _render_frontmatter(
-    name: str, description: str, mtype: str, body: str, confidence: Optional[str] = None
+    name: str,
+    description: str,
+    mtype: str,
+    body: str,
+    confidence: Optional[str] = None,
+    origin: Optional[str] = None,
 ) -> str:
     """Recall-ready frontmatter: top-level name + description (indexed), metadata.type.
 
@@ -453,6 +458,10 @@ def _render_frontmatter(
     reads ``description`` via yaml.safe_load). ``confidence`` (GOV-7, optional) nests under
     ``metadata:`` like every other provenance-style key — absence emits nothing (today's
     default), keeping an unset memory byte-identical to before the field existed.
+    ``origin`` (RCH-1, optional) is the promote-time provenance stamp
+    (``"<repo>@<sha>"`` — where the lesson was learned); same nest-under-``metadata:``,
+    absence-emits-nothing contract, JSON-quoted like ``description`` so any repo name
+    stays valid YAML. Display-only (recall_view renders it) — never a ranking input.
     """
     lines = [
         "---",
@@ -461,6 +470,7 @@ def _render_frontmatter(
         "metadata:",
         f"  type: {mtype}",
         *([f"  confidence: {confidence}"] if confidence else []),
+        *([f"  origin: {json.dumps(origin)}"] if origin else []),
         "---",
         "",
         body.rstrip("\n") + "\n" if body else "",
@@ -587,6 +597,40 @@ def _append_floor_pointer(
     return {"status": "appended", "reason": None}
 
 
+def _remove_floor_pointer(memory_dir: str, name: str) -> dict:
+    """Drop ``name``'s floor pointer line from MEMORY.md — ``_append_floor_pointer``'s inverse.
+
+    RCH-1: when /hippo:promote lifts a user/feedback memory OUT of the project corpus, the
+    project floor's pointer to it would dangle (the .md is gone); this removes exactly that
+    line. What counts as "the pointer" is ``_pointer_name`` — the same notion the TEA-4
+    sorted insert and lint_floor parse — so a prose line that merely mentions ``name.md``
+    is never touched. Returns the same explicit outcome-dict contract as append, never
+    raises, and MEMORY.md stays the only file this module edits:
+
+    - ``removed`` (reason None) — the pointer line(s) were dropped.
+    - ``skipped`` — nothing written; ``reason`` names why: ``MEMORY.md missing``,
+      ``pointer not present`` (idempotence — safe to call for never-floor-linked types),
+      or ``MEMORY.md unreadable/write failed: ...``.
+    """
+    path = os.path.join(memory_dir, "MEMORY.md")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            lines = fh.read().split("\n")
+    except FileNotFoundError:
+        return {"status": "skipped", "reason": "MEMORY.md missing"}
+    except Exception as exc:
+        return {"status": "skipped", "reason": f"MEMORY.md unreadable: {exc}"}
+    kept = [ln for ln in lines if _pointer_name(ln) != name]
+    if len(kept) == len(lines):
+        return {"status": "skipped", "reason": "pointer not present"}
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(kept))
+    except Exception as exc:
+        return {"status": "skipped", "reason": f"MEMORY.md write failed: {exc}"}
+    return {"status": "removed", "reason": None}
+
+
 def write_memory(
     name: str,
     description: str,
@@ -602,8 +646,12 @@ def write_memory(
     tier: str = "project",
     rationale: Optional[str] = None,
     confidence: Optional[str] = None,
+    origin: Optional[str] = None,
 ) -> dict:
     """Create a recall-ready memory file. Returns a small result dict.
+
+    - ``origin`` (RCH-1): the promote-time provenance stamp (``"<repo>@<sha>"``), rendered
+      as ``metadata.origin``. Display-only; absence emits nothing (byte-identical default).
 
     - Validates ``type`` ∈ VALID_TYPES.
     - Refuses to overwrite an existing ``<name>.md`` (``created=False``, ``error`` set).
@@ -732,7 +780,7 @@ def write_memory(
     body = _append_related_line(body, related)
 
     path = os.path.join(memory_dir, f"{name}.md")
-    rendered = _render_frontmatter(name, description, type, body, confidence)
+    rendered = _render_frontmatter(name, description, type, body, confidence, origin)
 
     # --- LIF-2: duplicate/conflict detection, BEFORE the write + index refresh. ---
     # Ordering is load-bearing twice over: (a) it must score against the PRE-refresh
@@ -815,6 +863,273 @@ def write_memory(
             memory_dir, section, name, title or _title_from_slug(name), hook or description
         )
     return result
+
+
+def promote_memory(
+    name: str,
+    *,
+    memory_dir: Optional[str] = None,
+    repo_root: Optional[str] = None,
+    dest_tier: str = "user",
+    new_name: Optional[str] = None,
+    allow_consequential: bool = False,
+    force: bool = False,
+) -> dict:
+    """Lift ONE project memory into the user (or private) tier, with provenance (RCH-1).
+
+    The move, in order — every guard runs BEFORE anything is written, so a refusal is
+    always a zero-filesystem-change event:
+
+    1. Read ``<name>.md`` from the project corpus and parse its parts (description, type,
+       confidence, verbatim body).
+    2. REFUSE a retired memory (``invalid_after`` set) — a demoted/superseded lesson does
+       not get a second life in another tier; resolve its lifecycle first.
+    3. GRA-5 inbound guard (``archive``'s exact discipline): other project memories still
+       linking here would dangle when the project file goes — refuse unless ``force``;
+       an unbuildable graph fails CLOSED.
+    4. Portability lint (RCH-6): ``severity=="confirm"`` findings (consequential defaults)
+       REFUSE unless ``allow_consequential=True`` — the skill sets it only after each
+       finding got an explicit per-item yes. ``"warn"`` findings (repo coupling) ride out
+       on ``result["findings"]`` for the agent to strip/rewrite; they never block, because
+       the destination write is still reviewable markdown.
+    5. ORIGIN STAMP: ``"<repo>@<sha>"`` — the memory's own ``source_commit`` when stamped,
+       else the source repo's HEAD; just the repo basename when there is no git at all.
+    6. Write via ``write_memory(..., tier=dest_tier, origin=..., no_links=True)`` — the
+       body carries over VERBATIM (no re-discovery of Related links against the new
+       corpus), and the re-render is itself the provenance strip: ``cited_paths`` /
+       ``source_commit`` / ``source_commit_time`` / ``steer`` / ``last_verified`` are
+       project-scoped bookkeeping and deliberately do not survive the lift. A name
+       collision in the destination tier rides ``write_memory``'s exclusive-create
+       refusal — the caller renames via ``new_name``; the project file is NOT touched
+       (never silently shadow, inv5).
+    7. Only after the destination write succeeded: remove the project file (``git rm``,
+       falling back to a plain remove for an untracked file — the content already lives
+       in the destination tier, so the move is never lossy), drop its project floor
+       pointer (``_remove_floor_pointer``), and refresh the project index.
+
+    ``dest_tier`` is ``"user"`` (machine-local, recalled across every project) or
+    ``"private"`` (this repo's gitignored sibling — decoupled from the shared corpus
+    without cross-project spread). Per-item by design: no list/bulk parameter (inv4).
+    Never raises.
+    """
+    result = {
+        "promoted": False,
+        "name": name,
+        "dest_name": new_name or name,
+        "tier": dest_tier,
+        "origin": None,
+        "from": None,
+        "to": None,
+        "findings": [],
+        "referrers": [],
+        "refused": False,
+        "floor_removed": None,
+        "project_indexed": False,
+        "warnings": [],
+        "error": None,
+    }
+    try:
+        from .portability import scan_portability
+        from .provenance import (
+            local_memory_dir,
+            parse_frontmatter,
+            resolve_dirs,
+            split_frontmatter,
+            user_memory_dir,
+        )
+        from .staleness import read_invalid_after, read_provenance
+
+        dest_tier = (dest_tier or "").lower()
+        if dest_tier not in ("user", "private"):
+            result["error"] = (
+                f"invalid dest_tier {dest_tier!r} (expected 'user' or 'private' — "
+                "promotion lifts OUT of the project corpus)"
+            )
+            return result
+        md, repo = resolve_dirs()
+        memory_dir = memory_dir or md
+        repo_root = repo_root or repo
+        src = os.path.join(memory_dir, f"{name}.md")
+        result["from"] = src
+        if not os.path.isfile(src):
+            result["error"] = f"not found: {name}.md"
+            return result
+        with open(src, "r", encoding="utf-8") as fh:
+            text = fh.read()
+
+        fm = parse_frontmatter(text)
+        meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+        description = fm.get("description")
+        if not isinstance(description, str) or not description.strip():
+            result["error"] = "no description in frontmatter — not a recall-ready memory"
+            return result
+        mtype = (meta or {}).get("type") or fm.get("type")
+        if mtype not in VALID_TYPES:
+            result["error"] = (
+                f"invalid or missing type {mtype!r} (expected one of {VALID_TYPES})"
+            )
+            return result
+        confidence = (meta or {}).get("confidence")
+        if confidence not in _VALID_CONFIDENCE:
+            confidence = None
+
+        boundary = read_invalid_after(text)
+        if boundary is not None:
+            result["refused"] = True
+            result["error"] = (
+                f"retired (invalid_after {boundary}) — a demoted/superseded memory does "
+                "not promote; resolve its lifecycle first"
+            )
+            return result
+
+        # GRA-5: the project-side removal below would dangle every inbound link, exactly
+        # like an archive move — same guard, same fail-closed posture, same force escape.
+        from .archive import _inbound_referrers
+
+        referrers = _inbound_referrers(name, memory_dir)
+        if referrers is None:
+            if not force:
+                result["refused"] = True
+                result["error"] = (
+                    "could not build the link graph, so inbound referrers are "
+                    "unverifiable — refusing (fail closed); re-run with force=True to "
+                    "promote anyway"
+                )
+                return result
+            referrers = []
+        result["referrers"] = referrers
+        if referrers and not force:
+            result["refused"] = True
+            result["error"] = (
+                f"{len(referrers)} inbound referrer(s) still link here: "
+                f"{', '.join(referrers)}. Rewrite those references first, or re-run "
+                "with force=True to promote anyway"
+            )
+            return result
+
+        cited, sc = read_provenance(text)
+        findings = scan_portability(text, cited_paths=cited)
+        result["findings"] = findings
+        confirmables = [f for f in findings if f.get("severity") == "confirm"]
+        if confirmables and not allow_consequential:
+            result["refused"] = True
+            result["error"] = (
+                f"{len(confirmables)} consequential-default finding(s) require an "
+                "individual yes before this memory can spread beyond its repo — re-run "
+                "with allow_consequential=True after each has been explicitly confirmed"
+            )
+            return result
+
+        from .provenance import git_head
+
+        sha = sc or git_head(repo_root)
+        repo_name = os.path.basename(os.path.abspath(repo_root))
+        origin = f"{repo_name}@{sha}" if sha else repo_name
+        result["origin"] = origin
+
+        _, body = split_frontmatter(text)
+        body = body.lstrip("\n")
+
+        dest_dir = user_memory_dir() if dest_tier == "user" else local_memory_dir(memory_dir)
+        write = write_memory(
+            new_name or name,
+            description,
+            mtype,
+            body,
+            memory_dir=dest_dir,
+            repo_root=repo_root,
+            no_links=True,
+            tier=dest_tier,
+            confidence=confidence,
+            origin=origin,
+        )
+        result["warnings"] = write.get("warnings") or []
+        if write.get("error"):
+            err = write["error"]
+            if "already exists" in err:
+                err += (
+                    " in the destination tier — pass new_name= to promote under a "
+                    "different name (the project file was NOT touched)"
+                )
+            result["error"] = err
+            return result
+        result["to"] = write.get("path")
+
+        # Destination write is durable — now (and only now) the project side moves out.
+        import subprocess
+
+        proc = subprocess.run(
+            ["git", "-C", repo_root, "rm", "-q", "--", src],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if proc.returncode != 0:
+            # git rm refuses untracked/ignored paths — the content already lives in the
+            # destination tier, so a plain remove loses nothing.
+            os.remove(src)
+        result["floor_removed"] = _remove_floor_pointer(memory_dir, name)
+        try:
+            from .build_index import refresh_index
+
+            refresh_index(memory_dir)
+            result["project_indexed"] = True
+        except Exception:
+            pass
+        result["promoted"] = True
+    except Exception as exc:
+        result["error"] = result["error"] or f"promote failed: {exc}"
+    return result
+
+
+def promote_candidates(memory_dir: Optional[str] = None) -> List[dict]:
+    """DRY-RUN promote-candidate listing (RCH-1 extension) — listing only, never a lift.
+
+    A candidate is a user/feedback-type project memory (the floor-linked, working-style
+    class — the kind that transfers) that is repo-coupling-FREE (zero ``repo_coupling``
+    portability findings) and not retired. ``consequential`` counts its
+    confirm-severity findings so the agent knows a lift will need per-item confirmation.
+    Sorted by name; ``[]`` on any failure; the lift itself stays per-item
+    (``promote_memory``), never batch.
+    """
+    out: List[dict] = []
+    try:
+        from .portability import scan_portability
+        from .provenance import _iter_memory_files, parse_frontmatter, resolve_dirs
+        from .staleness import read_invalid_after, read_provenance
+
+        if memory_dir is None:
+            memory_dir, _ = resolve_dirs()
+        for path in _iter_memory_files(memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+            except Exception:
+                continue
+            fm = parse_frontmatter(text)
+            meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+            mtype = (meta or {}).get("type") or fm.get("type")
+            if mtype not in ("user", "feedback"):
+                continue
+            if read_invalid_after(text) is not None:
+                continue
+            cited, _ = read_provenance(text)
+            findings = scan_portability(text, cited_paths=cited)
+            if any(f.get("kind") == "repo_coupling" for f in findings):
+                continue
+            out.append(
+                {
+                    "name": os.path.splitext(os.path.basename(path))[0],
+                    "type": mtype,
+                    "consequential": sum(
+                        1 for f in findings if f.get("severity") == "confirm"
+                    ),
+                }
+            )
+        out.sort(key=lambda d: d["name"])
+    except Exception:
+        return out
+    return out
 
 
 def main(argv=None) -> int:

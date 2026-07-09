@@ -1736,7 +1736,7 @@ workstreams:
         title: "/hippo:promote — lift a project lesson into the user tier with provenance"
         priority: P1
         effort: S
-        status: planned
+        status: done
         source: {lens: cross-project, verdict: KEEP, leverage: 4, note: lands TEA-1's own unmet acceptance criterion}
         problem: >-
           TEA-1 ships the user tier and PASSIVELY fuses it, but nothing deliberately

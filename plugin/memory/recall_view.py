@@ -50,6 +50,19 @@ def _memory_type(text: str) -> str:
     return str(fm.get("type") or "")
 
 
+def _memory_origin(text: str) -> str:
+    """The promote-time origin stamp (``metadata.origin``, RCH-1) — "" when never promoted.
+
+    Same both-schema read as ``_memory_type``. Display-only provenance: a promoted memory
+    answers "where was this learned" right in the recall view.
+    """
+    fm = parse_frontmatter(text)
+    md = fm.get("metadata")
+    if isinstance(md, dict) and md.get("origin"):
+        return str(md.get("origin"))
+    return str(fm.get("origin") or "")
+
+
 def _name_from_path(path: str) -> str:
     return os.path.splitext(os.path.basename(path))[0]
 
@@ -233,10 +246,16 @@ def describe(
 
                 tags.append(f"containment {score:.3f} ≥ floor {_rules_hit_floor():.2f}")
         else:
-            mtype = _memory_type(_read_text(os.path.join(hit_root, fname))) or "untyped"
+            hit_text = _read_text(os.path.join(hit_root, fname))
+            mtype = _memory_type(hit_text) or "untyped"
             tags = [f"{mtype}"]
             if corpus and corpus != "project":
                 tags.append(f"{corpus} tier")  # provenance: which corpus this hit came from
+            # RCH-1: the promote-time origin stamp — a lifted memory names the repo (and
+            # sha) it was learned in, so a cross-project hit is never mystery knowledge.
+            hit_origin = _memory_origin(hit_text)
+            if hit_origin:
+                tags.append(f"learned in {hit_origin}")
         if isinstance(score, (int, float)) and not (why and corpus == "rule"):
             tags.append(f"relevance {score:.3f}")
         if via == "graph":
