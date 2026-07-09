@@ -59,9 +59,16 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Optional, Set
 
-from .provenance import build_repo_file_index, reverify_file
-from .staleness import RunContext, find_stale, invalid_after_map, set_invalid_after
+from .provenance import (
+    _iter_memory_files,
+    build_repo_file_index,
+    git_last_commit_with_time,
+    reverify_file,
+    run_git,
+)
+from .staleness import RunContext, find_stale, invalid_after_map, read_provenance, set_invalid_after
 from .telemetry import (
+    read_episodes,
     read_events,
     read_reconsolidation_events,
     record_reconsolidation_outcome,
@@ -87,13 +94,99 @@ _VALID_OUTCOMES = frozenset({"graduate", "fix", "demote"})
 _OUTCOMES_THAT_CLEAR_STALENESS = frozenset({"graduate", "fix"})
 # Outcomes that may OPTIONALLY record a supersedes edge (GRA-4's superseded_by opt-in):
 # the memory was confirmed wrong/replaced and a SUCCESSOR carries the current claim.
-# "graduate" is excluded — confirmed-correct and superseded are contradictory verdicts.
-_EDGE_WRITING_OUTCOMES = frozenset({"fix", "demote"})
+# "graduate" is excluded — confirmed-correct and superseded are contradictory verdicts —
+# and so is "fix" since GRW-7: a supersede now STAMPS the loser's invalid_after at the
+# successor's commit date, and a memory reverify_file just re-baselined as current must
+# never be stamped invalid in the same verdict. Demote is the one coherent supersede arm.
+_EDGE_WRITING_OUTCOMES = frozenset({"demote"})
+
+
+# GRW-5: bound on the since-watermark diff read — the same cap discipline as
+# capture._MAX_CHANGED_PATHS, so a monorepo-wide <old-watermark>..HEAD stays cheap.
+_MAX_WATERMARK_PATHS = 200
 
 
 # --------------------------------------------------------------------------- #
 # Worklist (read-only)
 # --------------------------------------------------------------------------- #
+def _last_session_watermark(telemetry_dir: Optional[str]) -> Optional[str]:
+    """The most-recent session's episode watermark — its EARLIEST recorded ``head_commit``.
+
+    Lifts the resume card's most-recent-session scan (max ``ts`` picks the session) and the
+    capture seed's watermark convention (that session's first non-empty ``head_commit`` —
+    where the session STARTED, so the diff below covers everything it and any later commit
+    touched). ``None`` on an empty buffer or any failure — never raises.
+    """
+    try:
+        episodes = []
+        latest_ts, sid = None, None
+        for e in read_episodes(telemetry_dir):
+            episodes.append(e)
+            ts = e.get("ts")
+            if ts is None:
+                continue
+            if latest_ts is None or ts > latest_ts:
+                latest_ts, sid = ts, e.get("session_id")
+        for e in episodes:
+            if e.get("session_id") == sid and e.get("head_commit"):
+                return e["head_commit"]
+        return None
+    except Exception:
+        return None
+
+
+def watermark_stale_candidates(
+    memory_dir: str, repo_root: str, telemetry_dir: Optional[str] = None
+) -> List[dict]:
+    """GRW-5: commit-precision re-verify candidates — ``<last-watermark>..HEAD ∩ cited_paths``.
+
+    ``find_stale`` discovers staleness lazily against a git-log WINDOW; this lane is exact:
+    diff the commits landed since the last session's episode watermark and name every memory
+    whose ``cited_paths`` they touched — ``[{"name", "changed_paths", "watermark": True}]``,
+    name-sorted. Same commit-precision as an opt-in git hook with ZERO new run surface (the
+    roadmap killed the ``.git/hooks`` variant — inv2): it rides the episode watermark the
+    buffer already records and the ONE SessionStart git-read moment. ``run_git`` returns ""
+    when the watermark sha is unreachable (the squash-merge case) — that yields ``[]`` here,
+    honestly; GRW-6's producer detects and heals the break, this function never guesses. The
+    diff read is bounded (``_MAX_WATERMARK_PATHS``). Read-only; never raises; ``[]`` on any
+    failure. Consumers route every hit through ``recalled_stale_worklist``'s
+    ``watermark_stale=`` union — the ONE ``semantic_reverify`` gate — never a new verb.
+    """
+    try:
+        wm = _last_session_watermark(telemetry_dir)
+        if not wm or not repo_root or not os.path.isdir(memory_dir):
+            return []
+        changed: Set[str] = set()
+        for ln in run_git(["diff", "--name-only", f"{wm}..HEAD"], repo_root).splitlines():
+            ln = ln.strip()
+            if ln:
+                changed.add(ln)
+            if len(changed) >= _MAX_WATERMARK_PATHS:
+                break
+        if not changed:
+            return []
+        out: List[dict] = []
+        for path in _iter_memory_files(memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+            except OSError:
+                continue
+            cited, _sc = read_provenance(text)
+            hits = sorted(set(cited) & changed)
+            if hits:
+                out.append(
+                    {
+                        "name": os.path.splitext(os.path.basename(path))[0],
+                        "changed_paths": hits,
+                        "watermark": True,
+                    }
+                )
+        return out
+    except Exception:
+        return []
+
+
 def _recently_recalled_names(telemetry_dir: Optional[str], window_sessions: int) -> Set[str]:
     """Memory names surfaced in the last ``window_sessions`` DISTINCT sessions.
 
@@ -213,6 +306,7 @@ def recalled_stale_worklist(
     *,
     since: Optional[str] = None,
     stale: Optional[List[dict]] = None,
+    watermark_stale: Optional[List[dict]] = None,
 ) -> List[dict]:
     """``[{"name", "changed_paths"[, "linked"]}]`` — recently-recalled names ∩ ``find_stale()``'s stale set.
 
@@ -237,20 +331,37 @@ def recalled_stale_worklist(
     standalone caller), ``find_stale`` is still called here exactly as before. When given,
     it is trusted as-is and ``find_stale`` is never called — ``since`` is then ignored
     (the caller who computed ``stale`` already chose its window).
+
+    GRW-5: ``watermark_stale`` accepts the precomputed ``watermark_stale_candidates()``
+    result — commit-precise hits since the last session's episode watermark — and UNIONS
+    it in AFTER the recency intersection (precision beats recency: a memory whose cited
+    file a fresh commit touched belongs on the worklist whether or not it was recently
+    recalled). Dedup is by name with the ``stale``-derived item winning (it carries
+    recency/source_commit); the LIF-1 exclusions (``invalid_after``, snooze) apply to the
+    UNION, so everything still routes through the ONE ``semantic_reverify`` gate. When
+    omitted or empty, behavior is byte-identical to the pre-GRW-5 worklist.
     """
     try:
         recent = _recently_recalled_names(telemetry_dir, window_sessions)
-        if not recent:
+        if not recent and not watermark_stale:
             return []
-        if stale is None:
-            stale = find_stale(memory_dir, repo_root, **({"since": since} if since else {}))
-        # LIF-6: shallow-copy each item -- `stale` may now be a CALLER-OWNED list shared
-        # with something else (session_start.RunContext.stale), not always a freshly-
-        # derived one this function alone holds. `_attach_linked_neighbors` below mutates
-        # worklist items in place (adds "linked"); without the copy that mutation would
-        # leak back into the caller's `stale` list for any item that's on both, corrupting
-        # a shape callers were promised mirrors find_stale's own contract exactly.
-        worklist = [dict(item) for item in stale if item["name"] in recent]
+        worklist: List[dict] = []
+        if recent:
+            if stale is None:
+                stale = find_stale(memory_dir, repo_root, **({"since": since} if since else {}))
+            # LIF-6: shallow-copy each item -- `stale` may now be a CALLER-OWNED list shared
+            # with something else (session_start.RunContext.stale), not always a freshly-
+            # derived one this function alone holds. `_attach_linked_neighbors` below mutates
+            # worklist items in place (adds "linked"); without the copy that mutation would
+            # leak back into the caller's `stale` list for any item that's on both, corrupting
+            # a shape callers were promised mirrors find_stale's own contract exactly.
+            worklist = [dict(item) for item in stale if item["name"] in recent]
+        if watermark_stale:
+            on_worklist = {item["name"] for item in worklist}
+            for item in watermark_stale:
+                if item.get("name") and item["name"] not in on_worklist:
+                    worklist.append(dict(item))  # same caller-owned-list discipline as stale
+                    on_worklist.add(item["name"])
         if worklist:
             # LIF-1: drop terminal (invalid_after set — demote's chain, or a manual
             # --invalidate) and explicitly-snoozed items BEFORE the linked-column pass,
@@ -272,6 +383,28 @@ def recalled_stale_worklist(
 # --------------------------------------------------------------------------- #
 # Write primitive (per-item, verification-gated — reuses provenance.reverify_file)
 # --------------------------------------------------------------------------- #
+def _successor_commit_iso(successor_path: str, repo_root: str) -> Optional[str]:
+    """The SUCCESSOR file's last-commit time as UTC ISO-8601 — GRW-7's validity boundary.
+
+    ``git_last_commit_with_time`` on the successor ``.md`` itself (its authorship/last-edit
+    moment in history), deliberately NOT ``read_source_commit_time`` — that field is the
+    successor's cited-CODE baseline, a different fact. ``None`` when the successor is
+    uncommitted (just written this session) or outside the repo — the caller's
+    ``set_invalid_after`` then falls back to its own now-UTC default. Never raises.
+    """
+    try:
+        rel = os.path.relpath(successor_path, repo_root)
+        _sha, epoch = git_last_commit_with_time(rel, repo_root)
+        if not epoch:
+            return None
+        from datetime import datetime, timezone
+
+        return datetime.fromtimestamp(int(epoch), timezone.utc).isoformat()
+    except Exception:
+        return None
+
+
+
 def semantic_reverify(
     name: str,
     outcome: str,
@@ -303,15 +436,24 @@ def semantic_reverify(
         one-memory verdict; the ledger event records ``invalidated`` so the chained
         action is auditable.
 
-    ``superseded_by`` (GRA-4, opt-in, ``demote``/``fix`` outcomes only): the name of the
-    SUCCESSOR memory that replaces this one's claim. When given, the ``supersedes``
-    relation is appended to the SUCCESSOR's frontmatter (``links.add_typed_relation`` —
-    additive, body-preserving, idempotent), so recall demotes+annotates the loser from the
-    next index refresh on. Explicitly per-item and agent-gated: the agent names ONE
-    successor for ONE re-verified memory; there is no batch form and nothing here ever
-    fires autonomously. Refused (no writes at all) for ``graduate`` — a memory just
-    confirmed CORRECT cannot simultaneously be superseded — and when either endpoint's
-    file is missing (a dangling edge must not be born from the engine's own write path).
+    ``superseded_by`` (GRA-4, opt-in, ``demote`` only): the name of the SUCCESSOR memory
+    that replaces this one's claim. When given, the ``supersedes`` relation is appended to
+    the SUCCESSOR's frontmatter (``links.add_typed_relation`` — additive, body-preserving,
+    idempotent), so recall demotes+annotates the loser from the next index refresh on —
+    AND (GRW-7) the loser's ``invalid_after`` is stamped at the SUCCESSOR's last-commit
+    date (``git_last_commit_with_time`` on the successor file — its authorship moment,
+    NOT ``read_source_commit_time``, which is the successor's cited-CODE baseline),
+    falling back to now-UTC when the successor is uncommitted (just written this
+    session). The succession moment becomes an explicit, auditable validity boundary
+    instead of a silent score nudge; the ledger event records both the boundary and the
+    successor. One write, not a second stamp — the demote arm's single
+    ``set_invalid_after`` call receives the successor timestamp. Explicitly per-item and
+    agent-gated: the agent names ONE successor for ONE re-verified memory; there is no
+    batch form and nothing here ever fires autonomously. Refused (no writes at all) for
+    ``graduate`` AND ``fix`` — a memory just confirmed/re-baselined as CURRENT cannot
+    simultaneously be superseded (GRW-7 closed the old fix+superseded_by combination for
+    exactly this reason) — and when either endpoint's file is missing (a dangling edge
+    must not be born from the engine's own write path).
 
     The staleness-flag write (when one happens) routes ENTIRELY through the existing
     ``provenance.reverify_file()``, the edge write through the ONE typed-edge primitive,
@@ -334,6 +476,7 @@ def semantic_reverify(
         "cited": [],
         "dropped_citations": [],
         "invalidated": False,
+        "invalid_after": None,
         "edge_written": False,
         "logged": False,
         "error": None,
@@ -349,8 +492,10 @@ def semantic_reverify(
             # verdict (reverify done, edge missing) behind.
             if outcome not in _EDGE_WRITING_OUTCOMES:
                 result["error"] = (
-                    f"superseded_by is only valid with outcomes "
-                    f"{sorted(_EDGE_WRITING_OUTCOMES)}, not {outcome!r}"
+                    f"superseded_by is only valid with outcome demote, not {outcome!r} — "
+                    "graduate/fix assert the memory is CURRENT, which contradicts naming a "
+                    "successor that replaces it (a supersede stamps the loser's "
+                    "invalid_after at the successor's commit date, GRW-7)"
                 )
                 return result
             sfname = superseded_by if superseded_by.endswith(".md") else f"{superseded_by}.md"
@@ -381,11 +526,21 @@ def semantic_reverify(
             if not os.path.isfile(path):
                 result["error"] = f"memory not found: {fname}"
                 return result
-            ia = set_invalid_after(path, dry_run=dry_run)
+            # GRW-7: when a successor is named, the validity boundary IS the succession
+            # moment — the successor's commit date — not the time somebody got around to
+            # rendering the verdict. One write: the same set_invalid_after call receives
+            # the timestamp (None → its own now-UTC default for an uncommitted successor).
+            successor_ts = (
+                _successor_commit_iso(successor_path, repo_root)
+                if successor_path is not None
+                else None
+            )
+            ia = set_invalid_after(path, successor_ts, dry_run=dry_run)
             if ia["error"]:
                 result["error"] = ia["error"]
                 return result
             result["invalidated"] = bool(ia["changed"])
+            result["invalid_after"] = ia.get("invalid_after")
             if result["invalidated"] and not dry_run:
                 # Same-session immediacy (mirrors archive_memory): the penalty reads the
                 # INDEX's invalid_after, so refresh now instead of waiting for the next
@@ -414,6 +569,9 @@ def semantic_reverify(
             # LIF-1: stamp the chained action onto the demote event so the ledger is an
             # audit trail of what the verdict actually DID, not just that it was rendered.
             invalidated=result["invalidated"] if outcome == "demote" else None,
+            # GRW-7: the boundary + the successor make the supersession itself auditable.
+            invalid_after=result["invalid_after"],
+            superseded_by=superseded_by if successor_path is not None else None,
         )
     except Exception as exc:
         result["error"] = str(exc)
@@ -506,11 +664,20 @@ def reconsolidation_producer(
             "; (+N linked: …) names an item's 1-hop graph neighbors — review-adjacent, "
             "the next most likely to be wrong once it drifted"
         )
+    if any(item.get("watermark") for item in shown):
+        # GRW-5: same only-when-it-renders legend discipline — [since-watermark] items are
+        # commit-precise hits (commits since the last session touched their cited files),
+        # on the list whether or not they were recently recalled.
+        header += (
+            "; [since-watermark] items were flagged by commits landed since your last "
+            "session, recalled recently or not"
+        )
     lines = [header + ":"]
     for item in shown:
         paths = ", ".join(item["changed_paths"][:4])
         more = "" if len(item["changed_paths"]) <= 4 else f" (+{len(item['changed_paths']) - 4} more)"
-        lines.append(f"  • {item['name']}{_linked_note(item)}: {paths}{more}")
+        wm_tag = " [since-watermark]" if item.get("watermark") else ""
+        lines.append(f"  • {item['name']}{wm_tag}{_linked_note(item)}: {paths}{more}")
     if len(worklist) > _MAX_WORKLIST_ITEMS:
         lines.append(f"  …and {len(worklist) - _MAX_WORKLIST_ITEMS} more.")
     return "\n".join(lines)
@@ -556,9 +723,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--superseded-by",
         metavar="SUCCESSOR",
         default=None,
-        help="GRA-4 opt-in (demote/fix only): name the SUCCESSOR memory that replaces this "
-        "one's claim — appends `supersedes: [NAME]` to the successor's frontmatter so "
-        "recall demotes+annotates the loser. One successor, one memory, never autonomous.",
+        help="GRA-4 opt-in (demote only): name the SUCCESSOR memory that replaces this "
+        "one's claim — appends `supersedes: [NAME]` to the successor's frontmatter AND "
+        "stamps the loser's invalid_after at the successor's commit date (GRW-7), so the "
+        "supersession is an auditable boundary. One successor, one memory, never autonomous.",
     )
     parser.add_argument("--dry-run", action="store_true", help="report only; do not write")
     args = parser.parse_args(argv)
@@ -605,8 +773,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         bits.append(f"staleness flag {verb}cleared" if r["cleared"] else "staleness flag unchanged")
         if args.outcome == "demote":
             # LIF-1: name the chained action so the one-command demote is legible.
+            boundary = (
+                f" to {r['invalid_after']} (the successor's commit date)"
+                if args.superseded_by and r.get("invalid_after")
+                else ""
+            )
             bits.append(
-                f"invalid_after {verb}set — recall's pre-cut penalty engages with no second command"
+                f"invalid_after {verb}set{boundary} — recall's pre-cut penalty engages with no second command"
                 if r["invalidated"]
                 else "invalid_after unchanged"
             )
@@ -626,17 +799,29 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(ln)
         return 0
 
+    # GRW-5: the CLI listing carries the same commit-precise watermark lane as the
+    # SessionStart dispatcher — the drain and the producer must describe the SAME worklist.
     worklist = recalled_stale_worklist(
-        memory_dir, repo_root, telemetry_dir=args.telemetry_dir, window_sessions=args.window_sessions
+        memory_dir,
+        repo_root,
+        telemetry_dir=args.telemetry_dir,
+        window_sessions=args.window_sessions,
+        watermark_stale=watermark_stale_candidates(
+            memory_dir, repo_root, telemetry_dir=args.telemetry_dir
+        ),
     )
     if not worklist:
         print("No recently-recalled memory is currently stale.")
         return 0
-    print(f"{len(worklist)} recently-recalled memories cite code that changed since they were written:")
+    print(
+        f"{len(worklist)} memories need re-grounding (recently recalled + stale, or "
+        "[since-watermark] commit-precise hits):"
+    )
     for item in worklist:
         # Same "X (+2 linked: Y, Z)" review-adjacent render as the SessionStart producer
         # (GRA-9) — the CLI and the producer must describe the same worklist identically.
-        print(f"  • {item['name']}{_linked_note(item)}: {', '.join(item['changed_paths'][:6])}")
+        wm_tag = " [since-watermark]" if item.get("watermark") else ""
+        print(f"  • {item['name']}{wm_tag}{_linked_note(item)}: {', '.join(item['changed_paths'][:6])}")
     return 0
 
 

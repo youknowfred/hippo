@@ -64,7 +64,9 @@ def _make_path_dir(tmp_path, *, python3: bool, jq: bool) -> str:
     """A minimal PATH dir: coreutils the scripts genuinely need, python3/jq optional."""
     bindir = tmp_path / "bin"
     os.makedirs(bindir, exist_ok=True)
-    for tool in ("cat", "printf"):
+    # sed/tr/head joined the genuine set with GRW-4 (the PreCompact nudge extracts the
+    # payload's session_id and sanitizes the embedded command, still zero Python spawn).
+    for tool in ("cat", "printf", "sed", "tr", "head"):
         _symlink_once(shutil.which(tool), bindir / tool)
     if python3:
         # The test venv's interpreter, exposed as `python3` — it has the pinned deps.
@@ -342,6 +344,28 @@ class TestPreCompactHook:
         # present; the hook itself creates no index/telemetry/pending dirs.
         for rel in _tree(project):
             assert rel.startswith(".claude/memory/"), f"PreCompact hook wrote {rel}"
+
+    # GRW-4: the nudge also routes the WHY into the decision ledger — with THIS session's id
+    # baked into the command (pure-bash sed extraction; still no Python spawn, no writes).
+    def test_nudge_names_the_decision_command_with_the_session_id(self, tmp_path):
+        stdin = json.dumps(
+            {"hook_event_name": "PreCompact", "session_id": "sess-wy-42", "trigger": "auto"}
+        )
+        proc, _, _ = _run_hook(_PRE_COMPACT_HOOK, stdin, tmp_path)
+        _assert_contract(proc, "PreCompact")
+        ctx = self._ctx(proc)
+        assert "/hippo:new" in ctx, "the base capture nudge must survive the GRW-4 extension"
+        assert "--add-decision" in ctx, "the WHY-capture command must be named"
+        assert "--session-id 'sess-wy-42'" in ctx, "the payload's session id keys the ledger"
+        assert "never inferring" in ctx, "capture-from-evidence: transcription, not synthesis"
+
+    def test_nudge_omits_session_flag_when_payload_has_none(self, tmp_path):
+        stdin = json.dumps({"hook_event_name": "PreCompact", "trigger": "manual"})
+        proc, _, _ = _run_hook(_PRE_COMPACT_HOOK, stdin, tmp_path)
+        _assert_contract(proc, "PreCompact")
+        ctx = self._ctx(proc)
+        assert "--add-decision" in ctx
+        assert "--session-id" not in ctx, "no session id in the payload → no stale flag"
 
 
 # --------------------------------------------------------------------------- #

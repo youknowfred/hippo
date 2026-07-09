@@ -691,3 +691,100 @@ def test_existing_gitignore_never_overwritten(tmp_path):
         fh.write("# user-edited\n")
     T.mark_session(td)
     assert open(os.path.join(td, ".gitignore"), encoding="utf-8").read() == "# user-edited\n"
+
+
+# --------------------------------------------------------------------------- #
+# GRW-2: Hebbian co-recall tally (co_recall_pairs)
+# --------------------------------------------------------------------------- #
+def _co_session(td, sid, names):
+    """One session recalling ``names`` (a single episode is enough — sessions are unioned)."""
+    T.log_episode(names, query=f"q-{sid}", telemetry_dir=td, session_id=sid)
+
+
+def test_co_recall_pairs_needs_min_distinct_sessions(tmp_path):
+    td = str(tmp_path / "tele")
+    for sid in ("s1", "s2", "s3"):
+        _co_session(td, sid, ["bug_workaround", "proxy_quirk"])
+    pairs = T.co_recall_pairs(td)
+    assert pairs == [{"pair": ["bug_workaround", "proxy_quirk"], "sessions": 3}]
+
+
+def test_co_recall_below_threshold_proposes_nothing(tmp_path):
+    # Two sessions < _CORECALL_MIN_SESSIONS (3): the sparse map STAYS EMPTY — by design.
+    td = str(tmp_path / "tele")
+    for sid in ("s1", "s2"):
+        _co_session(td, sid, ["a", "b"])
+    assert T.co_recall_pairs(td) == []
+
+
+def test_chatty_single_session_counts_once(tmp_path):
+    # 5 episodes in ONE session must credit the pair ONE distinct session, not five.
+    td = str(tmp_path / "tele")
+    for _ in range(5):
+        _co_session(td, "one-long-session", ["a", "b"])
+    assert T.co_recall_pairs(td, min_sessions=2) == []
+    assert T.co_recall_pairs(td, min_sessions=1) == [{"pair": ["a", "b"], "sessions": 1}]
+
+
+def test_co_recall_unions_names_within_a_session(tmp_path):
+    # Names recalled in DIFFERENT episodes of the same session still pair (session-level union).
+    td = str(tmp_path / "tele")
+    for sid in ("s1", "s2", "s3"):
+        _co_session(td, sid, ["a"])
+        _co_session(td, sid, ["b"])
+    assert T.co_recall_pairs(td) == [{"pair": ["a", "b"], "sessions": 3}]
+
+
+def test_co_recall_excludes_floor_names(tmp_path):
+    # Always-recalled floor memories would dominate every pair — the exclusion drops them
+    # BEFORE pairing, so only the non-floor pair survives.
+    td = str(tmp_path / "tele")
+    for sid in ("s1", "s2", "s3"):
+        _co_session(td, sid, ["floor_note", "a", "b"])
+    pairs = T.co_recall_pairs(td, exclude_names={"floor_note"})
+    assert pairs == [{"pair": ["a", "b"], "sessions": 3}]
+    assert all("floor_note" not in p["pair"] for p in pairs)
+
+
+def test_co_recall_orders_most_sessions_first_deterministically(tmp_path):
+    td = str(tmp_path / "tele")
+    for sid in ("h1", "h2", "h3", "h4"):
+        _co_session(td, sid, ["hot_a", "hot_b"])
+    for sid in ("w1", "w2", "w3"):
+        _co_session(td, sid, ["warm_x", "warm_y"])
+    pairs = T.co_recall_pairs(td)
+    assert [p["pair"] for p in pairs] == [["hot_a", "hot_b"], ["warm_x", "warm_y"]]
+    assert [p["sessions"] for p in pairs] == [4, 3]
+
+
+def test_co_recall_pairs_never_raises_on_missing_dir(tmp_path):
+    assert T.co_recall_pairs(str(tmp_path / "nope")) == []
+
+
+# --------------------------------------------------------------------------- #
+# GRW-4: the in-session decision ledger (log_decision / read_decisions)
+# --------------------------------------------------------------------------- #
+def test_log_decision_roundtrip_with_session_keying(tmp_path):
+    td = str(tmp_path / "tele")
+    assert T.log_decision("ship the v2 schema now, migrate v1 lazily", telemetry_dir=td, session_id="s-A")
+    rows = list(T.read_decisions(td))
+    assert len(rows) == 1
+    assert rows[0]["text"] == "ship the v2 schema now, migrate v1 lazily"
+    assert rows[0]["session_id"] == "s-A"
+    assert rows[0]["ts"] > 0
+
+
+def test_log_decision_truncates_and_refuses_empty(tmp_path):
+    td = str(tmp_path / "tele")
+    assert T.log_decision("   ", telemetry_dir=td) is False, "whitespace-only → nothing recorded"
+    assert list(T.read_decisions(td)) == []
+    long = "d" * (T._DECISION_MAX_CHARS + 200)
+    assert T.log_decision(long, telemetry_dir=td, session_id="s")
+    assert len(list(T.read_decisions(td))[0]["text"]) == T._DECISION_MAX_CHARS
+
+
+def test_decision_ledger_is_self_ignoring_and_never_raises(tmp_path):
+    td = str(tmp_path / "tele")
+    T.log_decision("x", telemetry_dir=td, session_id="s")
+    assert open(os.path.join(td, ".gitignore"), encoding="utf-8").read() == "*\n"
+    assert list(T.read_decisions(str(tmp_path / "missing"))) == []

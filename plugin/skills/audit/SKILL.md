@@ -292,6 +292,33 @@ if graph and names:
         if candidates:
             link_density_suggestions.append({"memory": name, "candidates": candidates})
 
+# --- GRW-3 merge-candidate pass: near-duplicate COMMITTED pairs, SUGGESTIONS only. ---
+# Committed-vs-committed duplicate detection reuses the WRITE-TIME dup checker
+# (new_memory.committed_duplicate_neighbors: dense cosine >= 0.80 when available,
+# normalized BM25 >= 0.45 otherwise — the calibrated [0,1]-ish similarity scales) fed each
+# sampled memory's own on-disk text. The densification hits above carry recall()'s
+# RRF-FUSED scores (~1/60 per backend) — NEVER compare those to a cosine threshold; that
+# scale mismatch is exactly why the merge tier calls the dup checker instead. A pair is a
+# merge CANDIDATE only when BOTH directions clear the threshold (one-way similarity is not
+# a merge signal) and NEITHER side already carries invalid_after (a demoted memory is
+# supersede territory — merging it would resurrect a claim someone demoted).
+merge_candidates = []
+if names:
+    from memory.new_memory import committed_duplicate_neighbors
+    invalidated = set(staleness.invalid_after_map(sorted(names), memory_dir))
+    dup_hits = {}
+    for name in sorted(names)[:LINK_SIM_MAX_SAMPLE]:
+        neighbors, _dup_note = committed_duplicate_neighbors(name, memory_dir)
+        dup_hits[name] = {n["name"]: n["score"] for n in neighbors}
+    for a in sorted(dup_hits):
+        for b, s_ab in sorted(dup_hits[a].items()):
+            if b <= a or a in invalidated or b in invalidated:
+                continue  # canonical order (count each unordered pair once) + demote guard
+            s_ba = dup_hits.get(b, {}).get(a)
+            if s_ba is None:
+                continue  # one-way similarity is not a merge signal
+            merge_candidates.append({"pair": [a, b], "score_a_to_b": s_ab, "score_b_to_a": s_ba})
+
 # --- Join 4: per-memory staleness-baseline age (eval_recall's own metric is a corpus-wide
 # median only — this decomposes it so an outlier-driven half-life is distinguishable from
 # broad aging) ---
@@ -378,6 +405,7 @@ print(json.dumps({
     },
     "graduation_history_for_stale": history_for_stale,
     "link_density_suggestions": link_density_suggestions,
+    "merge_candidates": merge_candidates,
 }, indent=2, default=str))
 PYEOF
 ```
@@ -422,6 +450,33 @@ The joins above are already computed as plain data; this phase is about **interp
    pair by whether the BODY content actually relates, not just the description text. Report every
    entry; don't pre-filter by score alone. **Suggestions only — the agent applies approved ones
    per-item in Phase 5; there is no bulk/autonomous body edit anywhere in this pass.**
+8. **Merge candidates** (`merge_candidates`, GRW-3) — pairs of COMMITTED memories that clear the
+   calibrated near-duplicate threshold in BOTH directions. Read both bodies before calling
+   anything a merge: a merge candidate is a **concordant restatement** — two files saying the
+   same thing — and folding them into one canonical memory un-splits their recall signal. A pair
+   that **disagrees** (opposing claims about the same thing) is a CONTRADICTION, never a merge —
+   merging it would silently erase one side of a dispute someone needs to adjudicate. Neither
+   verdict is applied here: merges route through Phase 5's per-item merge recipe, disagreements
+   through a typed `contradicts`/`supersedes` edge.
+9. **Contradiction adjudication — the three-way fork (GRW-8).** Every high-similarity pair the
+   sweep surfaces — a `merge_candidates` row OR a `link_density_suggestions` candidate whose
+   bodies you actually read — gets exactly ONE of three verdicts:
+   - **(a) concordant restatement** → merge candidate (GRW-3, Phase 5 merge recipe). Two
+     wordings of the same claim. High similarity + no opposing assertion.
+   - **(b) genuine disagreement** → contradiction candidate: the two bodies make OPPOSING
+     claims about the same thing (one says "always X", the other "never X"; different values
+     for the same constant; incompatible instructions for the same situation). Propose a
+     per-item typed edge — `contradicts` when the dispute needs adjudication, or `supersedes`
+     (on the winner) when one side is clearly the current truth and the other is history.
+   - **(c) neither** → plain densification link candidate, exactly as item 7 already treats it.
+   THE MISLABEL GUARD, spelled out because the two cases score identically: a **reworded
+   duplicate is NOT a contradiction** — similarity says the pair is ABOUT the same thing;
+   only the claims' actual CONTENT can say whether they disagree. Never render (b) from
+   scores, titles, or descriptions alone; cite the two opposing sentences in the report row.
+   Accepted `contradicts` edges drain through the GOV-1 inbox (`/hippo:resolve` — the
+   SessionStart contradiction-inbox producer picks them up automatically) and, when a
+   governance doc cites either side, light the T2 rules-conflict radar; recall annotates the
+   pair with its "contradicts … — verify" note on every co-surface until resolved.
 
 **Signal-maturity tag** — apply to every join above that depends on the recall-telemetry window
 (authority-evidence gap, staleness-half-life shape, graduation history, archive candidacy
@@ -540,6 +595,20 @@ report. Never a vague hedge.>
 <one row per candidate reviewed; "Applied this run?" is always "no" unless --apply AND the
 operator approved that specific pair — see Phase 5>
 
+## Merge candidates (GRW-3 — both-direction near-duplicates, SUGGESTIONS only, none auto-applied)
+| Pair | a→b | b→a | Verdict | Applied this run? |
+|---|---|---|---|---|
+<one row per merge_candidates pair; Verdict ∈ {merge — concordant restatement, contradiction —
+they disagree (route to a typed edge, never a merge), distinct — leave both}; "Applied this
+run?" is always "no" unless --apply AND the operator named that specific pair — see Phase 5>
+
+## Contradiction candidates (GRW-8 — proposals only, none auto-applied)
+| Pair | Opposing claims (quote both sides, one line each) | Proposed edge | Applied this run? |
+|---|---|---|---|
+<one row per pair verdicted (b) in Phase 2's three-way fork; "Proposed edge" ∈
+{contradicts — needs adjudication, supersedes <winner> — one side clearly current}; a row
+with no quoted opposing claims is invalid — similarity alone never makes a contradiction>
+
 ## Raw scorecard (reference only)
 eval_recall gates: <table, or "SKIPPED — no hard-set fixture for this project yet">
   backend=<dense+bm25|bm25-only> (from `eval_recall`'s own report — never re-derived here)
@@ -596,6 +665,49 @@ never adds a batch wrapper around them:
   Related line is additive-only) and re-runs `build_index.refresh_index` so the new edge is
   immediately reflected in `links.json`. Never touch more than the named pairs; never infer
   additional edges beyond what was explicitly approved.
+- **merge (GRW-3)** → same **two-turn confirmation gate**: the first `--apply` invocation only
+  produces the merge-candidates table; a follow-up invocation that **explicitly names the
+  specific pair** executes ONE merge, per item. There is NO body-rewrite primitive anywhere in
+  the tooling and this skill must not simulate one — a merge is a sequence of ordinary
+  single-item edits YOU make, with `archive`'s inbound guard as the structural no-dangling
+  enforcer:
+  1. Pick the SURVIVOR (the better-named, better-grounded side — usually the one with
+     provenance/citations and inbound links; say why in the report).
+  2. Fold the loser's unique body content into the survivor's body by hand (`Edit`), including
+     its `Rationale:`/`Related:` lines where still true. Add one provenance line to the
+     survivor's body — `(merged from <loser>, <date>)` — so the fold is legible in git history.
+  3. For every untyped referrer in `links.build_graph(memory_dir).inbound(<loser>)`: hand-edit
+     that referrer's `[[<loser>]]` → `[[<survivor>]]` (one memory at a time).
+  4. For every typed relation `rel` and referrer in `typed_inbound(<loser>, rel)`:
+     `links.add_typed_relation(<referrer-path>, rel, "<survivor>")`, then hand-remove the stale
+     `<loser>` entry from that referrer's frontmatter list.
+  5. Close the loser out — choose ONE ending, per item:
+     - **demote-in-place** (keeps a machine-readable forwarding pointer): `"$PY" -m
+       memory.reconsolidate --reverify <loser> --outcome demote --superseded-by <survivor>` —
+       the shipped supersede flow writes the `supersedes:` edge on the survivor and chains
+       `invalid_after` onto the loser, so recall demotes it immediately while the pointer
+       stays queryable.
+     - **archive** (clean removal): `archive.archive_memory(<loser>, memory_dir, repo_root)` —
+       its GRA-5 inbound guard REFUSES while ANY `[[wikilink]]` or typed edge still points at
+       the loser, which structurally proves steps 3-4 actually zeroed the inbound set. Do not
+       reach for `force=True` to skip the rewrite; a refusal here means a referrer was missed.
+       (Note the two endings are exclusive by construction: the demote ending's `supersedes:`
+       pointer is itself a typed inbound edge, so an archive AFTER it would refuse — pick the
+       ending first.)
+  6. Re-run `build_index.refresh_index` so `links.json` and the index reflect the fold.
+- **contradiction edge (GRW-8)** → same **two-turn confirmation gate**: the first `--apply`
+  invocation only produces the contradiction-candidates table; a follow-up invocation that
+  **explicitly names the specific pair** writes ONE typed edge, per item:
+  - dispute needs adjudication → `links.add_typed_relation("<path-of-the-declaring-side>",
+    "contradicts", "<other-name>")` — the pair lands in the GOV-1 contradiction inbox and
+    stays there until `/hippo:resolve` renders a verdict; recall's typed note flags every
+    co-surface with "contradicts … — verify" in the meantime.
+  - one side is clearly current → prefer the shipped supersede flow over a bare edge:
+    `"$PY" -m memory.reconsolidate --reverify <loser> --outcome demote --superseded-by
+    <winner>` (edge + `invalid_after` in one per-item verdict).
+  Then re-run `build_index.refresh_index` — `add_typed_relation` writes the frontmatter but
+  NOT `links.json`, and recall's hot-path contradiction note reads the cache (the inbox
+  re-reads the corpus, so it sees the edge either way).
 - Before committing, run the engine repo's own hermetic test suite if you have it vendored
   locally, or at minimum re-run Phase 0's import check — confirm the corpus is still valid after
   any frontmatter/git-mv changes. If red, do not commit; report and halt for review.
@@ -616,6 +728,18 @@ never adds a batch wrapper around them:
   output from Phase 1; Phase 5 appends a wikilink ONLY for pairs the operator explicitly named
   in a follow-up invocation, one memory at a time — never a bulk sweep across every suggestion
   in the table, no matter how high the score.
+- **Merge candidates come only from the both-direction dup check — never from the
+  densification scores.** `link_density_suggestions` carries `recall()`'s RRF-fused scores
+  (rank aggregates, ~1/60 per contributing backend); the merge tier's thresholds are dense
+  cosine / normalized BM25 similarities. Comparing one scale to the other is a category
+  error, and a one-way hit is not a merge signal. A merge is also never rendered without
+  reading BOTH bodies — "reworded duplicate" and "opposing claims" look identical in any
+  similarity score.
+- **A contradiction verdict requires quoted opposing claims (GRW-8).** The three-way fork's
+  (b) arm is rendered from body CONTENT only — never from similarity, titles, or
+  descriptions; a contradiction-candidates row must quote the two opposing sentences. And
+  the fork never auto-writes: every `contradicts`/`supersedes` edge is a per-item, two-turn
+  proposal like every other write in this skill.
 - **Never claim the never-recalled/cold signal is actionable while `soak_status()['gate_met']`
   is False.** State the exact session count and gap instead.
 - **Always name the coldness signal's SCOPE (TEA-5).** "Never recalled" is CLONE-LOCAL unless

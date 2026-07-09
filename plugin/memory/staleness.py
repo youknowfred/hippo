@@ -424,6 +424,33 @@ def read_stale_cache(index_dir: str) -> Optional[Dict[str, dict]]:
         return None
 
 
+def unresolvable_baseline_names(memory_dir: str, repo_root: str) -> List[str]:
+    """Names of memories whose ``source_commit`` sha is NOT in this repo's history.
+
+    The per-item form of ``count_unresolvable_baselines`` — GRW-6's healing offer needs the
+    NAMES so the agent can route each through ``reverify_file`` (confirm the memory still
+    holds post-merge, then re-baseline), not just know how many broke. Sorted for a
+    deterministic render. Never raises; ``[]`` on any failure.
+    """
+    try:
+        by_name: Dict[str, str] = {}
+        for path in _iter_memory_files(memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+            except Exception:
+                continue
+            _, sc = read_provenance(text)
+            if sc:
+                by_name[os.path.splitext(os.path.basename(path))[0]] = sc
+        if not by_name:
+            return []
+        commit_times = _commit_times(list(by_name.values()), repo_root)
+        return sorted(name for name, sc in by_name.items() if sc not in commit_times)
+    except Exception:
+        return []
+
+
 def count_unresolvable_baselines(memory_dir: str, repo_root: str) -> int:
     """Count memories whose ``source_commit`` sha is NOT in this repo's history.
 
@@ -432,6 +459,12 @@ def count_unresolvable_baselines(memory_dir: str, repo_root: str) -> int:
     being silently skipped, but that fallback is a WEAKER signal (a git-cross-checked sha
     beats a self-reported timestamp) — worth its own visible count at SessionStart and in
     doctor so the degradation is never silent. Never raises; ``0`` on any failure.
+
+    NOTE: deliberately COUNT-shaped (kept for its pinned callers) while GRW-6's
+    ``unresolvable_baseline_names`` above is the per-item form; a duplicate-named memory
+    file cannot occur (names are filenames), so ``len(names)`` and this count can only
+    differ when two memories share one unresolvable sha — both are honest, each for its
+    surface.
     """
     try:
         shas: List[str] = []
