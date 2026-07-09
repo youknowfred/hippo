@@ -21,9 +21,12 @@ set -uo pipefail
 # Operate against the CONSUMING project's root, not the plugin's own directory.
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" 2>/dev/null || exit 0
 
-# PreCompact delivers the event as JSON on stdin ({"trigger":"manual"|"auto", ...}); we do not
-# parse it (the nudge is identical either way) but drain it so the writer never sees EPIPE.
-cat >/dev/null 2>&1 || true
+# PreCompact delivers the event as JSON on stdin ({"session_id": "...", "trigger":
+# "manual"|"auto", ...}). GRW-4 reads ONE field — session_id, via pure-bash sed (still no
+# jq/Python on this path) — so the decision-capture command below can key its ledger entries
+# to THIS session; the rest of the payload is drained and ignored as before.
+PAYLOAD="$(cat 2>/dev/null || true)"
+SID="$(printf '%s' "$PAYLOAD" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' 2>/dev/null | head -1)"
 
 # Only nudge in a project that has opted into hippo memory — a corpus present means /hippo:new
 # has somewhere to write. In a never-opted-in repo (COR-10) the nudge would dead-end at a
@@ -33,6 +36,24 @@ cat >/dev/null 2>&1 || true
 # Static, self-contained message — no double quotes or backslashes, so it embeds into the JSON
 # string verbatim with no escaping (no jq/Python dependency on this path).
 MSG="hippo: compaction is about to summarize and discard session detail. Before it proceeds, persist any DURABLE facts worth keeping past this session — a user preference, a mistake you were corrected on, a project decision or non-obvious constraint discovered this session — by running /hippo:new once per fact. Skip anything re-derivable from the code or git history. This is the last point before the transcript is compacted."
+
+# GRW-4: also nudge the WHY into the SessionEnd capture seed. The decision ledger is written
+# by the AGENT (capture-from-evidence: quote/paraphrase what the user actually said — the
+# tooling never synthesizes an entry), so the nudge must hand it a runnable command — the
+# plugin venv python + PYTHONPATH, values sanitized of the two characters the JSON embed
+# forbids. Appended only when the plugin env is present (pre-bootstrap keeps the base nudge).
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  PY_FOR_NUDGE="${CLAUDE_PLUGIN_DATA:-}/venv/bin/python"
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -x "$PY_FOR_NUDGE" ] || PY_FOR_NUDGE="python3"
+  # \042 = double quote, \134 = backslash (tr's own octal escapes — the two characters the
+  # JSON embed below cannot carry; octal keeps shellcheck from misreading the class, SC1003).
+  PY_SAFE="$(printf '%s' "$PY_FOR_NUDGE" | tr -d '\042\134')"
+  ROOT_SAFE="$(printf '%s' "${CLAUDE_PLUGIN_ROOT}" | tr -d '\042\134')"
+  SID_SAFE="$(printf '%s' "$SID" | tr -d '\042\134')"
+  SID_FLAG=""
+  [ -n "$SID_SAFE" ] && SID_FLAG=" --session-id '$SID_SAFE'"
+  MSG="$MSG Separately, record the WHY that cannot be re-derived from the diff — each decision the user explicitly made or confirmed this session (a tradeoff taken, an approach chosen, a constraint stated) — one command per decision, quoting or faithfully paraphrasing the user, never inferring: PYTHONPATH='$ROOT_SAFE' '$PY_SAFE' -m memory.capture --add-decision 'the decision, in one sentence'$SID_FLAG — these land in this session's capture seed for the next /hippo:consolidate drain."
+fi
 
 printf '{"hookSpecificOutput":{"hookEventName":"PreCompact","additionalContext":"%s"}}\n' "$MSG" 2>/dev/null || true
 exit 0

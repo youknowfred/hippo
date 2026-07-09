@@ -42,19 +42,24 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from typing import Callable, Dict, List, Optional, Tuple
 
 from .lint_floor import floor_producer
 from .lint_links import lint_links_producer
-from .provenance import CORPUS_FORMAT_VERSION, read_corpus_format, resolve_dirs
+from .provenance import CORPUS_FORMAT_VERSION, read_corpus_format, resolve_dirs, run_git
 from .recall import (
     _INVALIDATION_RECENT_DAYS,
     _invalidation_state,
     git_recent_producer,
     portable_floor_producer,
 )
-from .reconsolidate import recalled_stale_worklist, reconsolidation_producer
+from .reconsolidate import (
+    recalled_stale_worklist,
+    reconsolidation_producer,
+    watermark_stale_candidates,
+)
 from .staleness import (
     RunContext,
     count_unresolvable_baselines,
@@ -62,6 +67,7 @@ from .staleness import (
     find_stale,
     find_unparseable,
     invalid_after_map,
+    unresolvable_baseline_names,
     write_stale_cache,
 )
 
@@ -372,6 +378,69 @@ def unresolvable_baseline_producer(
     )
 
 
+# GRW-6: how many broken-baseline memories the healing offer NAMES (the rest are counted).
+_MAX_HEAL_NAMES = 6
+# Squash-merge subjects as GitHub (and most forges) write them — "feat: thing (#123)".
+_SQUASH_SUBJECT_RE = re.compile(r"\(#\d+\)")
+
+
+def _recent_merge_signals(repo_root: str) -> bool:
+    """Cheap detection that a merge LANDED recently — reflog/log/branch probes, ORed.
+
+    A squash-merge leaves NO merge commit, so no single probe is authoritative: the reflog
+    remembers merge/pull actions in THIS clone; recent one-line subjects catch a forge's
+    squash commit ("(#N)") in ANY clone (a fresh clone has no reflog history); and a
+    non-current branch listed by ``branch --merged`` marks a true merge. Read-only, three
+    bounded git reads, ``False`` on any failure — and only ever consulted AFTER the
+    baseline break is confirmed, so a merge-looking history with nothing broken stays
+    silent. Never raises.
+    """
+    try:
+        reflog = run_git(["reflog", "-n", "50", "--format=%gs"], repo_root).lower()
+        if "merge" in reflog or "pull" in reflog:
+            return True
+        subjects = run_git(["log", "--oneline", "-n", "20", "--format=%s"], repo_root)
+        if _SQUASH_SUBJECT_RE.search(subjects):
+            return True
+        for ln in run_git(["branch", "--merged"], repo_root).splitlines():
+            if ln.strip() and not ln.lstrip().startswith("*"):
+                return True  # a NON-current local branch fully merged into HEAD
+        return False
+    except Exception:
+        return False
+
+
+def squash_merge_heal_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """GRW-6: turn the unresolvable-baseline DEGRADATION into a per-item REPAIR offer.
+
+    ``unresolvable_baseline_producer`` above reports the fallback; this fires only when a
+    recent merge event is ALSO detectable (reflog/log/branch probes) — the moment healing
+    is actually warranted — and NAMES the broken memories, routing each to the consolidate
+    drain where the agent confirms the memory still holds post-merge and re-baselines it
+    via the shipped ``reverify_file`` path (``--outcome graduate``). Detection + offer
+    ONLY: never a new write path, never bulk (semantic_reverify stays single-item by
+    signature pin) — inv4. Self-clearing: healed baselines resolve again and both
+    producers go silent. ``ctx`` (LIF-6) is unused.
+    """
+    try:
+        names = unresolvable_baseline_names(memory_dir, repo_root)
+        if not names or not _recent_merge_signals(repo_root):
+            return None
+        shown = ", ".join(names[:_MAX_HEAL_NAMES])
+        more = f" (+{len(names) - _MAX_HEAL_NAMES} more)" if len(names) > _MAX_HEAL_NAMES else ""
+        return (
+            f"🩹 A merge landed recently and {len(names)} memories' staleness baselines no "
+            "longer resolve (squash-merge rewrites history). Heal them per item via "
+            "/hippo:consolidate: confirm each memory still holds post-merge, then "
+            "`reconsolidate --reverify <name> --outcome graduate` re-baselines it to the "
+            f"current HEAD (reverify_file re-derives its citations too). Broken: {shown}{more}."
+        )
+    except Exception:
+        return None
+
+
 def pending_capture_producer(
     memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
 ) -> Optional[str]:
@@ -382,19 +451,32 @@ def pending_capture_producer(
     makes that queue LEGIBLE (guiding invariant: every silent-fallback/soak path gains a
     user-visible signal) and routes to the deliberate, per-item drain — NOTHING in the queue is
     in the corpus until the agent explicitly approves each candidate. Self-clearing: it goes
-    silent once the seeds are drained/discarded. ``ctx`` (LIF-6) is unused.
+    silent once the seeds are drained/discarded. Since GRW-1 the nudge also labels how many of
+    the queued seeds look TRIVIAL (salience score 0 — no changes, no commit, no unanswered
+    queries) so a deep queue reads as "what's worth drafting", not an undifferentiated chore.
+    ``ctx`` (LIF-6) is unused.
     """
     try:
         from .capture import default_pending_dir, pending_count
 
-        n = pending_count(default_pending_dir(memory_dir))
+        pd = default_pending_dir(memory_dir)
+        n = pending_count(pd)
     except Exception:
         return None
     if not n:
         return None
+    trivial = 0
+    try:
+        from .capture import read_pending
+
+        trivial = sum(1 for s in read_pending(pd) if (s.get("salience") or {}).get("trivial"))
+    except Exception:
+        trivial = 0
+    label = f" ({trivial} trivial)" if trivial else ""
     return (
-        f"📥 {n} pending capture(s) from a prior session await review — run /hippo:consolidate "
-        "to draft them into memory (nothing is saved until you approve each one, per item)."
+        f"📥 {n} pending capture(s){label} from a prior session await review — run "
+        "/hippo:consolidate to draft them into memory (nothing is saved until you approve "
+        "each one, per item)."
     )
 
 
@@ -948,8 +1030,10 @@ def resume_card_producer(
         if not any_episode:
             return None  # cold start — no local history to resume yet
 
+        # include_hunks=False: the resume card never persists (or renders) the seed's verbatim
+        # diff evidence, so skip GRW-1's hunk subprocesses on this read-only SessionStart path.
         seed = gather_session_context(
-            sid, repo_root=repo_root, telemetry_dir=td, memory_dir=memory_dir
+            sid, repo_root=repo_root, telemetry_dir=td, memory_dir=memory_dir, include_hunks=False
         )
         if not seed:
             return None
@@ -998,6 +1082,7 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("blind_spot", blind_spot_producer),  # SIG-3: recurring recall abstentions -> a low-frequency curation backlog
     ("index_integrity", index_integrity_producer),  # names on-disk index corruption (QUA-5) — recall/build_index already degrade silently
     ("unresolvable_baseline", unresolvable_baseline_producer),  # legibility for find_stale's sha-fallback path
+    ("squash_merge_heal", squash_merge_heal_producer),  # GRW-6: merge detected + baselines broken -> per-item rebaseline offer
     ("rules_conflict", rules_conflict_producer),  # RUL-1: governance cites a memory the corpus disputes (superseded/contradicted/never-recalled)
     ("rules_rot", rules_rot_producer),  # RUL-2: citation-rot/staleness over the always-loaded rules plane itself
     ("contradiction_inbox", contradiction_inbox_producer),  # GOV-1: every unresolved contradicts pair, not just the co-surfaced/governance-cited ones
@@ -1104,8 +1189,17 @@ def _build_run_context(memory_dir: str, repo_root: str) -> RunContext:
         stale = find_stale(memory_dir, repo_root, diagnostics=diagnostics)
     except Exception:
         stale = []
+    # GRW-5: the commit-precise lane — <last-session-watermark>..HEAD ∩ cited_paths — shares
+    # this ONE SessionStart git-read moment and unions into the SAME worklist, so everything
+    # still routes through the single semantic_reverify gate (no new verb, no .git/hooks).
     try:
-        worklist = recalled_stale_worklist(memory_dir, repo_root, stale=stale)
+        wm_stale = watermark_stale_candidates(memory_dir, repo_root)
+    except Exception:
+        wm_stale = []
+    try:
+        worklist = recalled_stale_worklist(
+            memory_dir, repo_root, stale=stale, watermark_stale=wm_stale
+        )
     except Exception:
         worklist = []
     # SIG-1: the session's uncommitted working-tree diff, computed ONCE (this path only runs

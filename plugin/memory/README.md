@@ -361,13 +361,16 @@ Verdicts land in the reconsolidation ledger (demote events carry `invalidated` f
 audit); `eval_recall.graduation_rate()` reports `graduate / (graduate + demote)` (fixes
 and snoozes excluded by design). No bulk variant exists.
 
-`superseded_by=<successor>` (GRA-4, `demote`/`fix` only, opt-in): when the agent knows
+`superseded_by=<successor>` (GRA-4, `demote` only, opt-in): when the agent knows
 WHICH memory replaces the demoted one's claim, this appends `supersedes: [name]` to the
-**successor's** frontmatter (via `links.add_typed_relation` — additive, body-preserving),
-so recall demotes the loser below its successor and annotates it. Per-item and
-agent-gated like everything else here; refused for `graduate` and when either memory is
-missing. CLI: `"$PY" -m memory.reconsolidate --reverify <name> --outcome demote
---superseded-by <successor>`.
+**successor's** frontmatter (via `links.add_typed_relation` — additive, body-preserving)
+AND stamps the loser's `invalid_after` at the **successor's commit date** (GRW-7 — the
+succession moment becomes an explicit, auditable validity boundary; an uncommitted
+successor falls back to now-UTC), so recall demotes the loser below its successor and
+annotates it. Per-item and agent-gated like everything else here; refused for `graduate`
+AND `fix` (both assert the memory is CURRENT, which contradicts naming a successor) and
+when either memory is missing. CLI: `"$PY" -m memory.reconsolidate --reverify <name>
+--outcome demote --superseded-by <successor>`.
 
 ## Graceful decay — soft-invalidation + archive
 

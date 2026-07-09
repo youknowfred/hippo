@@ -1388,3 +1388,74 @@ def test_cli_confidence_flag(tmp_path, monkeypatch, capsys):
     assert rc == 0
     with open(os.path.join(md, "cli_graded.md"), "r", encoding="utf-8") as fh:
         assert "  confidence: draft" in fh.read()
+
+
+# --------------------------------------------------------------------------- #
+# GRW-3 — committed-vs-committed near-duplicate check (the audit merge tier's scorer)
+# --------------------------------------------------------------------------- #
+def test_committed_duplicate_neighbors_finds_both_directions(tmp_path, monkeypatch):
+    """AC (hermetic BM25 path): two ALREADY-COMMITTED near-duplicates surface each other —
+    both directions above the calibrated threshold — via the same write-time dup machinery
+    (correct [0,1]-ish scale; never recall()'s RRF-fused scores).
+
+    The corpus is deliberately LARGER than the write-time dup fixtures: once the twin is
+    COMMITTED, its shared vocabulary sits at df=2, and in a 4-doc corpus Okapi idf(df=2) is
+    exactly ln(1)=0 — the scorer would honestly refuse ("unscorable"). Extra
+    distinct-vocabulary seeds keep df=2 terms at positive idf, which is also the realistic
+    shape (a merge-worthy corpus has more than two topics)."""
+    from memory import build_index as B
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    _seed_dup_corpus(NM, md, tmp_path)
+    for extra_name, extra_desc in [
+        ("grafana_dashboard_layout", "grafana dashboard layout conventions for the metrics team"),
+        ("incident_escalation_ladder", "incident escalation ladder and paging rotation ownership"),
+    ]:
+        NM.write_memory(
+            extra_name, extra_desc, "project",
+            body=f"notes about {extra_name}.", memory_dir=md, repo_root=str(tmp_path),
+        )
+    NM.write_memory(
+        "deploy_pipeline_rebuild_notes",
+        "how the railway deploy pipeline builds and ships the app again",
+        "project",
+        body="re-captured months later in nearly the same words.",
+        memory_dir=md,
+        repo_root=str(tmp_path),
+    )
+    B.refresh_index(md)
+
+    hits_a, note_a = NM.committed_duplicate_neighbors("railway_deploy_pipeline", md)
+    hits_b, note_b = NM.committed_duplicate_neighbors("deploy_pipeline_rebuild_notes", md)
+    assert note_a is None and note_b is None
+    assert "deploy_pipeline_rebuild_notes" in {h["name"] for h in hits_a}
+    assert "railway_deploy_pipeline" in {h["name"] for h in hits_b}
+    for h in hits_a + hits_b:
+        assert h["score"] >= NM._DUP_BM25_THRESHOLD
+    # Own-name exclusion: a committed memory never matches its own index row.
+    assert "railway_deploy_pipeline" not in {h["name"] for h in hits_a}
+
+
+def test_committed_duplicate_neighbors_distinct_pair_stays_clean(tmp_path, monkeypatch):
+    """Deliberately-distinct committed memories do NOT cross-surface — below threshold means
+    no merge candidate, so a healthy corpus proposes nothing."""
+    from memory import build_index as B
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    _seed_dup_corpus(NM, md, tmp_path)
+    B.refresh_index(md)
+
+    hits, note = NM.committed_duplicate_neighbors("billing_plan_tiers", md)
+    assert note is None
+    assert hits == [], "distinct-vocabulary memories must not clear the dup threshold"
+
+
+def test_committed_duplicate_neighbors_missing_file_is_legible(tmp_path, monkeypatch):
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    hits, note = NM.committed_duplicate_neighbors("never_written", md)
+    assert hits == []
+    assert note == "duplicate check skipped: memory file unreadable"

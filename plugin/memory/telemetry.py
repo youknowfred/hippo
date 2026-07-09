@@ -35,7 +35,7 @@ import os
 import re
 import time
 import uuid
-from typing import Iterator, List, Optional
+from typing import Dict, Iterator, List, Optional
 
 from .provenance import ensure_self_ignoring_dir
 
@@ -384,6 +384,61 @@ def abstention_backlog(
                 }
             )
         return out
+    except Exception:
+        return []
+
+
+# GRW-2: how many DISTINCT sessions two memories must co-surface in before the pair becomes
+# an edge proposal. Deliberately HIGH so a sparse/noisy co-recall map proposes NOTHING —
+# an empty result is the designed behavior on a young corpus, not a failure.
+_CORECALL_MIN_SESSIONS = 3
+_CORECALL_MAX_PAIRS = 20  # bounded output for the consolidate proposal turn
+
+
+def co_recall_pairs(
+    telemetry_dir: Optional[str] = None,
+    *,
+    min_sessions: int = _CORECALL_MIN_SESSIONS,
+    exclude_names: Optional[set] = None,
+) -> List[dict]:
+    """Hebbian co-recall tally (GRW-2): memory pairs that co-surface across many sessions.
+
+    GRA-3 links by write-time similarity, so it can never connect pairs that are semantically
+    DISTANT but operationally inseparable (a bug and its unrelated-looking workaround). The
+    episode buffer already records exactly that signal — which names surfaced together — and
+    nothing read it. This tallies it: per session, the recalled names are UNIONED FIRST (a
+    chatty single session counts ONCE, structurally), every unordered pair in that union is
+    credited one distinct session, and only pairs reaching ``min_sessions`` return, as
+    ``[{"pair": [a, b], "sessions": n}]`` (pair sorted, list most-sessions-first, capped at
+    ``_CORECALL_MAX_PAIRS``). Below threshold → ``[]`` — the sparse map STAYS empty rather
+    than proposing spurious edges. ``exclude_names`` drops names before pairing (pass
+    ``lint_floor.floor_memory_names`` so always-recalled floor memories can't dominate every
+    pair). Read-only over the gitignored buffer; a TALLY, never a writer — the consumer
+    (the consolidate skill) proposes each edge per-item, agent-gated. Never raises.
+    """
+    try:
+        excluded = exclude_names or set()
+        by_session: Dict[str, set] = {}
+        for e in read_episodes(telemetry_dir):
+            sid = e.get("session_id") or ""
+            names = {n for n in (e.get("recalled_names") or []) if n and n not in excluded}
+            if not names:
+                continue
+            by_session.setdefault(str(sid), set()).update(names)
+        counts: Dict[frozenset, int] = {}
+        for names in by_session.values():
+            ordered = sorted(names)
+            for i, a in enumerate(ordered):
+                for b in ordered[i + 1 :]:
+                    key = frozenset((a, b))
+                    counts[key] = counts.get(key, 0) + 1
+        out = [
+            {"pair": sorted(pair), "sessions": n}
+            for pair, n in counts.items()
+            if n >= min_sessions
+        ]
+        out.sort(key=lambda p: (-p["sessions"], p["pair"]))
+        return out[:_CORECALL_MAX_PAIRS]
     except Exception:
         return []
 
@@ -752,6 +807,78 @@ def read_episodes(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
         return
 
 
+# GRW-4: the in-session decision ledger. The WHY of a session — tradeoffs the user confirmed,
+# approaches they chose — cannot be re-derived from git or code and hooks can never scrape it
+# (no Stop event, no transcript access, no LLM in hooks — triply impossible by design). So the
+# capture moment is IN-SESSION: the AGENT records each user-confirmed decision explicitly via
+# ``memory.capture --add-decision`` (prompted by the PreCompact nudge), and SessionEnd folds
+# the session's entries into the capture seed. Same keying, rotation, and privacy posture as
+# the episode buffer; entries are bounded so a chatty session can't bloat the ledger.
+_DECISION_LEDGER_NAME = "decisions.jsonl"
+_DECISION_MAX_CHARS = 400
+
+
+def _decision_ledger_path(telemetry_dir: str) -> str:
+    return os.path.join(telemetry_dir, _DECISION_LEDGER_NAME)
+
+
+def log_decision(
+    text: str,
+    *,
+    telemetry_dir: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> bool:
+    """Append ONE user-confirmed session decision to the gitignored ``decisions.jsonl``.
+
+    CAPTURE-FROM-EVIDENCE, enforced at the surface: this is only ever called by the agent,
+    per decision, with text the user stated or confirmed — the tooling never synthesizes an
+    entry (there is no automated caller anywhere). Truncated to ``_DECISION_MAX_CHARS``,
+    keyed exactly like ``log_episode`` (harness session id when given, else the file token)
+    so SessionEnd's seed matching works identically for both ledgers. Fire-and-forget:
+    True on append, False on any failure, never raises.
+    """
+    try:
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return False
+        td = _resolve_dir(telemetry_dir)
+        ensure_self_ignoring_dir(td)  # derived dir: mkdir + self-ignoring .gitignore (SEC-3)
+        event = {
+            "ts": round(time.time(), 3),
+            "session_id": current_session_id(td, session_id=session_id),
+            "text": cleaned[:_DECISION_MAX_CHARS],
+        }
+        path = _decision_ledger_path(td)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(event, ensure_ascii=False) + "\n")
+        _rotate_if_needed(path)
+        return True
+    except Exception:
+        return False
+
+
+def read_decisions(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
+    """Yield parsed decision-ledger entries, skipping corrupt/partial lines. Never raises."""
+    try:
+        td = _resolve_dir(telemetry_dir)
+        path = _decision_ledger_path(td)
+        if not os.path.exists(path):
+            return
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(obj, dict):
+                    yield obj
+    except Exception:
+        return
+
+
 # --------------------------------------------------------------------------- #
 # SIG-4: outcome ledger (KPI-2 read-signal). A PostToolUse hook appends one event per
 # file-touching tool call — {ts, session_id, tool, path} (path repo-relative). The KPI-2
@@ -824,6 +951,8 @@ def record_reconsolidation_outcome(
     *,
     telemetry_dir: Optional[str] = None,
     invalidated: Optional[bool] = None,
+    invalid_after: Optional[str] = None,
+    superseded_by: Optional[str] = None,
 ) -> bool:
     """Append ONE reconsolidation outcome to the gitignored ``reconsolidation_events.jsonl``.
 
@@ -834,7 +963,10 @@ def record_reconsolidation_outcome(
     ``invalidated``, when not ``None``, is stamped onto the event — LIF-1's demote chain
     passes it so the ledger is an AUDIT TRAIL of whether the verdict also closed the
     memory's validity window (``staleness.set_invalid_after``), not just that it was
-    rendered. Fire-and-forget; NEVER raises; size-bounded (reuses ``_rotate_if_needed``);
+    rendered. ``invalid_after`` and ``superseded_by`` (GRW-7) extend that trail to the
+    supersession itself: the stamped validity BOUNDARY (the successor's commit date) and
+    the successor's name, so a demotion is an auditable fact, not a silent score nudge.
+    Fire-and-forget; NEVER raises; size-bounded (reuses ``_rotate_if_needed``);
     no sensitive content (only the memory name + the outcome).
     """
     if outcome not in _RECONSOLIDATION_OUTCOMES:
@@ -845,6 +977,10 @@ def record_reconsolidation_outcome(
         event = {"ts": round(time.time(), 3), "name": name, "outcome": outcome}
         if invalidated is not None:
             event["invalidated"] = bool(invalidated)
+        if invalid_after is not None:
+            event["invalid_after"] = str(invalid_after)
+        if superseded_by is not None:
+            event["superseded_by"] = str(superseded_by)
         path = _reconsolidation_ledger_path(td)
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, ensure_ascii=False) + "\n")
