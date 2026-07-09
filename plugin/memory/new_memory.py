@@ -346,6 +346,30 @@ def _duplicate_neighbors(name: str, rendered: str, memory_dir: str, index_dir: O
         return [], "duplicate check skipped: error"
 
 
+def committed_duplicate_neighbors(name: str, memory_dir: str, index_dir: Optional[str] = None):
+    """Committed-vs-committed near-duplicate check (GRW-3) -> ``(neighbors, note)``.
+
+    The write-time dup detector aimed at a memory ALREADY in the corpus: reads
+    ``<name>.md``'s on-disk text and scores it against the persisted index with the SAME
+    calibrated thresholds write-time dedup trusts (dense cosine ``_DUP_COSINE_THRESHOLD``,
+    normalized-BM25 ``_DUP_BM25_THRESHOLD`` — each a genuine [0,1]-ish similarity). This is
+    the scale a "near-duplicate" claim is calibrated in; ``recall()``'s fused scores are RRF
+    rank aggregates (~1/60 per contributing ranking, COR-8) and must NEVER be compared to
+    these thresholds — which is exactly why the audit skill's densification pass reports its
+    fused scores UNTHRESHOLDED while the merge tier calls THIS instead. The dup checker's
+    own-name exclusion keeps the memory from matching its own index row, so a committed
+    memory can be scored against the very index that contains it. PUBLIC on purpose: the
+    audit skill's merge sweep imports it, and skills never couple to underscore-private
+    helpers. Same warn-only posture as the write-time check: report, never act.
+    """
+    try:
+        with open(os.path.join(memory_dir, f"{name}.md"), "r", encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        return [], "duplicate check skipped: memory file unreadable"
+    return _duplicate_neighbors(name, text, memory_dir, index_dir)
+
+
 def check_candidate(
     name: str,
     description: str,

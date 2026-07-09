@@ -1448,7 +1448,7 @@ workstreams:
         title: Consolidate-time merge of near-duplicate committed memories
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: capture, verdict: KEEP-worthy (blind-spot)}
         problem: >-
           LIF-2 dedups one NEW memory at write time; audit ARCHIVES; nothing MERGES
@@ -1486,6 +1486,30 @@ workstreams:
           enforces the no-dangling AC. HOME: extend /hippo:audit (a "Merge candidates"
           report block + the existing two-turn apply gate) — it already owns the
           neighbor sweep; GRW-8 forks the same sweep (see its note).
+        implementation_correction: >-
+          SHIPPED 2026-07-09. TWO premise corrections against the note above, both the
+          same class T4's GOV-5 hit. (1) SCALE ERROR: "reuse the audit densification
+          pass … flag when the pair clears _DUP_COSINE_THRESHOLD=0.80" is incoherent
+          against the live tree — the densification pass reads recall()'s RRF-FUSED
+          h["score"] (~1/60 per contributing backend, COR-8; the pass applies NO
+          threshold at all, top-K report only), which never approaches a 0.80 COSINE.
+          And the note's own "NOT _duplicate_neighbors" prohibition rested on that same
+          false premise ("committed-vs-committed is what the audit sweep already
+          computes" — it computes fused ranks, not threshold-comparable similarity).
+          Shipped the inverse: a public new_memory.committed_duplicate_neighbors
+          wrapper (the write-time dup mechanic — dense cosine 0.80 / normalized BM25
+          0.45, own-name exclusion — fed the committed file's own text; public because
+          skills never import underscore-privates), called per sampled name in the
+          audit sweep; a pair is a candidate only when BOTH directions clear the
+          calibrated threshold, with staleness.invalid_after_map guarding the
+          demoted-side skip. (2) SEQUENCE BUG: the note's (v)-then-(vi) recipe cannot
+          pass its own enforcer — the optional supersedes pointer in (v) IS a typed
+          inbound edge on the loser, so (vi)'s GRA-5 guard refuses. Shipped as two
+          EXCLUSIVE per-item endings: demote-in-place via the shipped
+          `--reverify <loser> --outcome demote --superseded-by <survivor>` flow (keeps
+          the forwarding pointer, chains invalid_after), or archive after (iii)+(iv)
+          zero the inbound set (clean removal, guard-proven). Everything else in the
+          note held.
 
       - id: GRW-4
         title: Capture the WHY — session decisions/rationale into the seed
