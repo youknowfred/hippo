@@ -229,10 +229,12 @@ def test_initialize_declares_resources_capability():
     assert "tools" in resp["result"]["capabilities"]  # unchanged
 
 
-def test_resources_list_exposes_floor_and_rules_view():
+def test_resources_list_exposes_floor_rules_view_and_scorecard():
     resp = M.handle_request({"jsonrpc": "2.0", "id": 5, "method": "resources/list"})
     resources = resp["result"]["resources"]
-    assert {r["uri"] for r in resources} == {"hippo://floor", "hippo://rules-view"}
+    assert {r["uri"] for r in resources} == {
+        "hippo://floor", "hippo://rules-view", "hippo://scorecard"
+    }
     for r in resources:
         assert r["mimeType"] == "text/markdown"
         assert r["name"] and r["description"]
@@ -318,7 +320,7 @@ def test_serve_stream_answers_resources_read(corpus):
     assert [r["id"] for r in resps] == [1, 2, 3]
     assert "resources" in resps[0]["result"]["capabilities"]
     assert {r["uri"] for r in resps[1]["result"]["resources"]} == {
-        "hippo://floor", "hippo://rules-view",
+        "hippo://floor", "hippo://rules-view", "hippo://scorecard",
     }
     assert resps[2]["result"]["contents"][0]["uri"] == "hippo://floor"
 
@@ -333,3 +335,21 @@ def test_new_memory_tool_threads_confidence(corpus):
     assert "created:" in _text(resp)
     with open(os.path.join(corpus, "graded_via_mcp.md"), "r", encoding="utf-8") as fh:
         assert "  confidence: verified" in fh.read()
+
+
+def test_resources_read_scorecard_rolls_up(corpus, tmp_path, monkeypatch):
+    """GOV-6 extension: the same rollup as doctor's trust_scorecard line, agent-pulled."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    text = _contents(_read("hippo://scorecard"))["text"]
+    assert "trust scorecard:" in text
+    assert "contested-unresolved (→ /hippo:resolve)" in text
+    assert "/hippo:doctor" in text  # the drill-down route
+
+
+def test_resources_read_scorecard_withheld_for_untrusted_corpus(repo, memory_dir, monkeypatch):
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", memory_dir)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)  # exercise the real SEC-1 gate
+    text = _contents(_read("hippo://scorecard"))["text"]
+    assert "WITHHELD" in text and "untrusted" in text
+    assert "contested-unresolved" not in text  # no counts leak past the gate

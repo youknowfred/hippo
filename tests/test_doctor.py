@@ -839,3 +839,96 @@ def test_steering_ok_when_no_index_yet(tmp_path):
 
 def test_steering_registered_in_checks():
     assert "steering" in [label for label, _ in D.CHECKS]
+
+
+# --------------------------------------------------------------------------- #
+# GOV-6: the trust scorecard — one deterministic rollup line, graceful absence
+# --------------------------------------------------------------------------- #
+def test_trust_scorecard_all_zero_on_empty_state(memory_dir, repo):
+    r = D.check_trust_scorecard(D.DoctorContext(memory_dir, repo))
+    assert r["status"] == "ok"
+    m = r["message"]
+    assert m.startswith("trust scorecard: ")
+    assert "0 contested-unresolved (→ /hippo:resolve)" in m
+    assert "0 rule↔memory conflict(s) (→ /hippo:consolidate)" in m
+    assert "0 rules-plane rot (edit the named file)" in m
+    assert "0 blind spot(s) (→ /hippo:consolidate)" in m
+    assert "0 orphan(s) never recalled (→ /hippo:audit)" in m
+    assert "0 pinned / 0 muted" in m
+    assert "0 draft" in m
+    assert "no watermark baseline yet" in m
+    assert "\n" not in m  # ONE line — the doctor render/line-count determinism pins
+
+
+def test_trust_scorecard_aggregates_real_counts(memory_dir, repo, tmp_path, monkeypatch):
+    """The aggregation seam: GOV-1's inbox, GOV-2's pin, GOV-7's draft, and GOV-4's floor
+    delta all roll up with their fix routes — real non-zero numbers, not just zeros."""
+    import memory.build_index as B
+    import memory.session_start as S
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(tmp_path / "plugin-data"))
+    # a contradicts pair (GOV-1), a pinned memory (GOV-2), a draft memory (GOV-7)
+    with open(os.path.join(memory_dir, "old-api.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: old-api\ndescription: "we call v1 directly"\n---\nbody\n')
+    with open(os.path.join(memory_dir, "new-api.md"), "w", encoding="utf-8") as fh:
+        fh.write(
+            '---\nname: new-api\ndescription: "we stopped calling v1"\n'
+            "contradicts: [old-api]\nsteer: pin\n---\nbody\n"
+        )
+    with open(os.path.join(memory_dir, "guess.md"), "w", encoding="utf-8") as fh:
+        fh.write(
+            '---\nname: guess\ndescription: "an unverified hunch"\n'
+            "metadata:\n  confidence: draft\n---\nbody\n"
+        )
+    B.build_index(memory_dir, B.default_index_dir(memory_dir))
+    # GOV-4 watermark: baseline, then add a corpus file so the delta is non-zero
+    S.floor_change_producer(memory_dir, repo)
+    with open(os.path.join(memory_dir, "pulled.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: pulled\ndescription: "arrived via pull"\n---\nbody\n')
+
+    r = D.check_trust_scorecard(D.DoctorContext(memory_dir, repo))
+    m = r["message"]
+    assert r["status"] == "warn"  # a live contradiction is actionable
+    assert "1 contested-unresolved (→ /hippo:resolve)" in m
+    assert "1 pinned / 0 muted" in m
+    assert "1 draft" in m
+    assert "corpus +1/−0 since last session" in m
+    # the peek did NOT consume GOV-4's surfaced-once semantics
+    assert S.floor_change_producer(memory_dir, repo) is not None
+
+
+def test_trust_scorecard_orphans_are_isolates_intersect_never_recalled(memory_dir, repo, monkeypatch):
+    """Orphan = fully disconnected AND never recalled — a linked or recalled memory is not
+    curation backlog."""
+    import memory.build_index as B
+    from memory import telemetry as T
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    with open(os.path.join(memory_dir, "island.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: island\ndescription: "disconnected and never recalled"\n---\nbody\n')
+    with open(os.path.join(memory_dir, "linked_a.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: linked_a\ndescription: "links out"\n---\nsee [[linked_b]]\n')
+    with open(os.path.join(memory_dir, "linked_b.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: linked_b\ndescription: "is linked"\n---\nbody\n')
+    with open(os.path.join(memory_dir, "recalled_isle.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: recalled_isle\ndescription: "disconnected but recalled"\n---\nbody\n')
+    B.build_index(memory_dir, B.default_index_dir(memory_dir))
+    T.log_recall_event(
+        [{"name": "recalled_isle", "backend": "bm25", "score": 0.5, "rank": 1}],
+        query="q", k=6, latency_ms=1.0,
+        telemetry_dir=T.default_telemetry_dir(memory_dir), session_id="s",
+    )
+    m = D.check_trust_scorecard(D.DoctorContext(memory_dir, repo))["message"]
+    assert "1 orphan(s) never recalled" in m  # island only
+
+
+def test_trust_scorecard_registered_right_after_trust():
+    labels = [label for label, _ in D.CHECKS]
+    assert labels.index("trust_scorecard") == labels.index("trust") + 1
+
+
+def test_trust_scorecard_bogus_dirs_never_error(tmp_path):
+    r = D.check_trust_scorecard(D.DoctorContext(str(tmp_path / "nope"), str(tmp_path / "nah")))
+    assert r["status"] == "ok"
+    assert "0 contested-unresolved" in r["message"]  # absent producers read as zero

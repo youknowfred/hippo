@@ -277,6 +277,18 @@ _RESOURCES = [
         ),
         "mimeType": "text/markdown",
     },
+    {
+        "uri": "hippo://scorecard",
+        "name": "hippo trust scorecard",
+        "description": (
+            "GOV-6: the one-line corpus-health rollup a lead scans before trusting the "
+            "corpus — contested-unresolved contradictions, rule↔memory conflicts, rules-"
+            "plane rot, blind spots, orphans, pinned/muted/draft counts, and the floor/"
+            "corpus delta since this clone's last session. Each number names the skill "
+            "that resolves it. Read-only; agent-pulled, never auto-loaded."
+        ),
+        "mimeType": "text/markdown",
+    },
 ]
 
 
@@ -320,6 +332,29 @@ def _resource_floor() -> str:
     if not parts:
         return header + "\n\nFloor empty — no always-on memory configured yet (/hippo:init)."
     return header + "\n\n" + "\n\n".join(parts)
+
+
+def _resource_scorecard() -> str:
+    """``hippo://scorecard`` — GOV-6's rollup as one pulled document. SEC-1-gated like the
+    floor/rules-view; delegates to doctor's ``_scorecard_message`` (one implementation)."""
+    from . import trust
+    from .doctor import _scorecard_message
+    from .provenance import resolve_dirs
+
+    memory_dir, repo_root = resolve_dirs()
+    header = "# hippo trust scorecard — corpus-health rollup"
+    gate_root = trust.gate_repo_root(memory_dir, repo_root)
+    if gate_root is not None and not trust.is_trusted(gate_root):
+        return (
+            header + "\n\nScorecard WITHHELD — this project's corpus is untrusted (SEC-1). "
+            "Run /hippo:doctor to review and trust it."
+        )
+    status, message = _scorecard_message(memory_dir, repo_root)
+    glyph = "⚠" if status == "warn" else "✔"
+    return (
+        header + f"\n\n{glyph} {message}\n\nDrill down with /hippo:doctor (the point checks) "
+        "and resolve via the named skill per number."
+    )
 
 
 def _resource_rules_view() -> str:
@@ -375,6 +410,7 @@ def _resource_rules_view() -> str:
 _RESOURCE_DISPATCH = {
     "hippo://floor": _resource_floor,
     "hippo://rules-view": _resource_rules_view,
+    "hippo://scorecard": _resource_scorecard,
 }
 
 

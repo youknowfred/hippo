@@ -1264,7 +1264,7 @@ workstreams:
         title: Trust scorecard — a consolidated doctor corpus-health rollup
         priority: P2
         effort: S
-        status: planned
+        status: done
         source: {lens: trust, verdict: KEEP-worthy (blind-spot — the aggregation seam)}
         problem: >-
           The governance signals are scattered point-checks (contradictions,
@@ -2052,7 +2052,7 @@ release_train:
   - tier: T4
     target_version: 1.4.0
     theme: "A corpus you can govern"
-    status: planned
+    status: done
     done_means: >-
       Trust, control, and legibility: a drainable contradiction inbox + /hippo:resolve,
       the steer:pin control axis, evidence-bearing consolidation proposals, floor/
