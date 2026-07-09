@@ -516,10 +516,10 @@ def test_abstention_rate_measures_fraction_returning_zero_results(tmp_path, monk
     assert rate == {"rate": 1.0, "n": 3}
 
 
-def test_abstention_rate_is_report_only_never_gates(tmp_path, monkeypatch):
-    """A LOW abstention rate (queries that happen to share tokens with the corpus, so
-    recall() correctly does NOT abstain) must still produce ok=True -- this metric never
-    feeds a gate threshold, per the roadmap item."""
+def test_abstention_rate_gates_when_fixture_provided(tmp_path, monkeypatch):
+    """RET-8 promotion (supersedes the pre-RET-8 report-only pin): a provided abstention
+    fixture whose rate lands under GATE_ABSTENTION now FAILS the run — and omitting the
+    fixture skips the gate rather than failing it, so fixtureless callers keep ok=True."""
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
@@ -528,15 +528,21 @@ def test_abstention_rate_is_report_only_never_gates(tmp_path, monkeypatch):
     p = str(tmp_path / "abstain.yaml")
     import yaml
 
-    # Deliberately ON-topic (shares vocabulary with _CORPUS) -- recall() should NOT abstain,
-    # so this fixture's own rate is 0.0, yet the run must still pass every real gate.
+    # Deliberately ON-topic (shares vocabulary with _CORPUS) -- recall() correctly does NOT
+    # abstain, so this fixture's own rate is 0.0: under the promoted gate that is a FAIL.
     with open(p, "w", encoding="utf-8") as fh:
         yaml.safe_dump([{"query": "which reranker model runs first on search candidates"}], fh)
 
     report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10, abstention_set_path=p)
     assert report["abstention_rate"]["rate"] == 0.0
     assert report["abstention_rate"]["n"] == 1
-    assert report["ok"] is True  # report-only -- a 0.0 abstention rate never fails the run
+    assert report["gates"]["abstention_rate"]["pass"] is False
+    assert report["ok"] is False  # promoted: a provided-but-failing fixture reddens the run
+
+    without = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)
+    assert without["gates"]["abstention_rate"]["pass"] is None
+    assert without["gates"]["abstention_rate"]["skipped"] is True
+    assert without["ok"] is True  # absent fixture = skip, never a fail
 
 
 def test_default_abstention_set_path_probes_audit_fixtures_then_tests_fixtures(tmp_path, monkeypatch):
@@ -585,7 +591,10 @@ def test_main_cli_prints_abstention_rate_line_when_present(tmp_path, monkeypatch
     )
     out = capsys.readouterr().out
     assert rc == 0
-    assert "abstention_rate (RET-1, n=3): 1.0" in out
+    # RET-8: abstention_rate renders as a tracked row in the gate table (1.0 >= 0.8 -> pass),
+    # not the old report-only footer line.
+    assert "✅ abstention_rate" in out
+    assert "= 1.0 (threshold 0.8)" in out
 
 
 # --------------------------------------------------------------------------- #
@@ -663,9 +672,10 @@ def test_session_token_cost_no_sessions_returns_zeros_never_raises(tmp_path, mon
 
 
 # --------------------------------------------------------------------------- #
-# evaluate() — report-only additions never touch the 5 gates
+# evaluate() — the 5 core gates are untouched by the optional inputs; the RET-8
+# promoted entries key strictly off whether their fixture path was provided
 # --------------------------------------------------------------------------- #
-def test_evaluate_gates_byte_unchanged_with_or_without_new_report_params(tmp_path, monkeypatch):
+def test_evaluate_core_gates_unchanged_and_promoted_gates_key_off_paths(tmp_path, monkeypatch):
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
@@ -683,15 +693,23 @@ def test_evaluate_gates_byte_unchanged_with_or_without_new_report_params(tmp_pat
         repo_root=str(tmp_path),
         telemetry_dir=str(tmp_path / "tele"),
     )
-    # The 4 deterministic gates are byte-unchanged (BM25 ranking has no timing jitter).
+    # The 4 deterministic CORE gates are byte-unchanged (BM25 ranking has no timing jitter).
     # recall_p95_ms is a REAL wall-clock measurement re-timed on each evaluate() call, so its
     # exact `value` legitimately varies run-to-run -- compare its threshold/pass flag only.
     for name in ("self_recall@10", "hard_recall@10", "mrr@10", "token_reduction"):
         assert enriched["gates"][name] == baseline["gates"][name], name
     assert enriched["gates"]["recall_p95_ms"]["threshold"] == baseline["gates"]["recall_p95_ms"]["threshold"]
     assert enriched["gates"]["recall_p95_ms"]["pass"] == baseline["gates"]["recall_p95_ms"]["pass"]
-    assert enriched["ok"] == baseline["ok"]
-    assert "precision_at_k" in enriched and "precision_at_k" not in baseline.get("gates", {})
+    # RET-8: the promoted precision gate SKIPS without a path and goes LIVE with one — its
+    # value is exactly precision_at_k's (one scoring path), pass is the threshold comparison.
+    assert baseline["gates"]["precision@10"]["pass"] is None
+    assert baseline["gates"]["precision@10"]["skipped"] is True
+    live = enriched["gates"]["precision@10"]
+    assert live["value"] == enriched["precision_at_k"]["precision"]
+    assert live["pass"] == (live["value"] >= E.GATE_PRECISION_AT_K)
+    # comparative (QUA-10: no absolute ok assertion in a hermetic test — p95 is wall-clock):
+    # a skipped entry never feeds ok; a live one does.
+    assert enriched["ok"] == (baseline["ok"] and live["pass"])
     assert "staleness_half_life" in enriched
     assert "session_token_cost" in enriched
 
@@ -1121,7 +1139,8 @@ def test_load_hard_set_metadata_empty_for_bare_list_fixture(tmp_path):
     RET-7 keeps loading exactly as before, just with an empty metadata dict available."""
     hs_path = _write_hard_set(tmp_path)  # plain yaml.safe_dump of a list -- no header
     assert E.load_hard_set_metadata(hs_path) == {}
-    assert E.load_hard_set(hs_path) == _HARD_SET  # rows themselves are unaffected
+    # rows themselves are unaffected (RET-8 adds only the defaulted category tag)
+    assert E.load_hard_set(hs_path) == [{**r, "category": "single-hop"} for r in _HARD_SET]
 
 
 def test_load_hard_set_metadata_parses_leading_header_doc(tmp_path):
@@ -1139,7 +1158,7 @@ def test_load_hard_set_metadata_parses_leading_header_doc(tmp_path):
     assert meta["generated_at"] == "2026-07-06"
     # rows still load correctly from the SECOND document
     rows = E.load_hard_set(p)
-    assert rows == [{"query": "q1", "expected": ["a"]}]
+    assert rows == [{"query": "q1", "expected": ["a"], "category": "single-hop"}]
 
 
 def test_load_hard_set_metadata_missing_file_is_empty():
@@ -1478,3 +1497,171 @@ def test_golden_corpus_dense_abstention_rate_high(tmp_path, monkeypatch, tmp_pat
     # target -- a future BM25/tokenization change that pushes this to 0.0 (dense's floor
     # alone can't compensate for BM25 finding SOMETHING) should fail this test.
     assert rate["rate"] >= 0.15, rate
+
+
+# --------------------------------------------------------------------------- #
+# RET-8: category-tagged eval — loader tags, per-category buckets, the promoted
+# gates' three-way skip/fail/pass split, the index_dir edge thread, and the
+# CLI's per-category + hermeticity behavior
+# --------------------------------------------------------------------------- #
+def test_load_hard_set_category_default_and_passthrough(tmp_path):
+    p = str(tmp_path / "cats.yaml")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write(
+            "- query: q1\n  expected: [a]\n"
+            "- query: q2\n  expected: [b]\n  category: multi-hop\n"
+            "- query: q3\n  expected: [c]\n  category: somebody-elses-tag\n"
+        )
+    rows = E.load_hard_set(p)
+    assert [r["category"] for r in rows] == ["single-hop", "multi-hop", "somebody-elses-tag"]
+    assert "single-hop" in E.CATEGORIES and "abstention" in E.CATEGORIES
+
+
+def test_by_category_buckets_delegate_to_the_one_scoring_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    tagged = [
+        {**_HARD_SET[0], "category": "update"},
+        {**_HARD_SET[1], "category": "update"},
+        {**_HARD_SET[2]},  # untagged -> single-hop
+    ]
+    by_cat = E.hard_set_metrics_by_category(index, tagged, k=10)
+    assert sorted(by_cat) == ["single-hop", "update"]
+    assert by_cat["update"]["n"] == 2 and by_cat["single-hop"]["n"] == 1
+    # delegation: each bucket's numbers ARE hard_set_metrics on that subset
+    assert by_cat["update"] == E.hard_set_metrics(index, tagged[:2], k=10)
+    assert sum(m["n"] for m in by_cat.values()) == len(tagged)
+
+
+def _build_linked_corpus(tmp_path):
+    """A BM25 corpus where `hidden_gem` shares ZERO vocabulary with the seed query and is
+    reachable ONLY via the seed's [[wikilink]] — the exact case GRA-1 exists for."""
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    with open(os.path.join(md, "seed_topic.md"), "w", encoding="utf-8") as fh:
+        fh.write(
+            '---\nname: seed_topic\ndescription: "vendor cascade timeout recurrence '
+            'diagnosis discipline"\ntype: project\n---\nSee [[hidden_gem]] for the deeper rule.\n'
+        )
+    with open(os.path.join(md, "hidden_gem.md"), "w", encoding="utf-8") as fh:
+        fh.write(
+            '---\nname: hidden_gem\ndescription: "quiet unrelated lexicon entirely '
+            'disjoint wording"\ntype: project\n---\nbody\n'
+        )
+    with open(os.path.join(md, "bystander.md"), "w", encoding="utf-8") as fh:
+        fh.write(
+            '---\nname: bystander\ndescription: "vendor cascade adjacent chatter '
+            'noise"\ntype: project\n---\nbody\n'
+        )
+    with open(os.path.join(md, "MEMORY.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Floor\n## User\n## Working Style\n")
+    return md
+
+
+def test_multi_hop_category_measures_graph_expansion_via_index_dir(tmp_path, monkeypatch):
+    """The RET-8 substrate correction pinned end-to-end: WITH index_dir threaded the eval
+    sees GRA-1 expansion (the linked, zero-overlap neighbor lands in the top-k and the
+    multi-hop bucket scores 1.0); WITHOUT it (the pre-RET-8 bare-index shape) the same
+    fixture scores 0.0 — the eval was structurally edge-blind."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = _build_linked_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    hard = [{"query": "vendor cascade timeout recurrence", "expected": ["hidden_gem"],
+             "category": "multi-hop"}]
+    with_edges = E.hard_set_metrics_by_category(index, hard, k=10, index_dir=idx)
+    assert with_edges["multi-hop"]["recall"] == 1.0, with_edges
+    without = E.hard_set_metrics_by_category(index, hard, k=10)
+    assert without["multi-hop"]["recall"] == 0.0, without
+
+
+def test_temporal_category_measures_supersession_via_index_dir(tmp_path, monkeypatch):
+    """A temporal case: the query matches the SUPERSEDED memory's vocabulary at least as
+    well as its successor's, and the GRA-4 typed-edge penalty (loaded via the same
+    index_dir thread) is what puts the successor ABOVE the loser."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    with open(os.path.join(md, "deploy_old.md"), "w", encoding="utf-8") as fh:
+        fh.write(
+            '---\nname: deploy_old\ndescription: "deploy release pipeline makefile '
+            'runbook steps"\ntype: project\n---\nbody\n'
+        )
+    with open(os.path.join(md, "deploy_new.md"), "w", encoding="utf-8") as fh:
+        fh.write(
+            '---\nname: deploy_new\ndescription: "deploy release pipeline current '
+            'runbook"\ntype: project\nsupersedes: [deploy_old]\n---\nbody\n'
+        )
+    with open(os.path.join(md, "MEMORY.md"), "w", encoding="utf-8") as fh:
+        fh.write("# Floor\n## User\n## Working Style\n")
+    idx = str(tmp_path / ".memory-index")
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    hard = [{"query": "deploy release pipeline runbook", "expected": ["deploy_new"],
+             "category": "temporal"}]
+    by_cat = E.hard_set_metrics_by_category(index, hard, k=10, index_dir=idx)
+    assert by_cat["temporal"]["recall"] == 1.0
+    # the mechanism, not luck: with the typed edge loaded the successor OUTRANKS the loser
+    from memory.recall import recall
+
+    ranked = [r["name"] for r in recall(hard[0]["query"], k=10, index=index, index_dir=idx)]
+    assert ranked.index("deploy_new") < ranked.index("deploy_old"), ranked
+
+
+def test_precision_gate_provided_but_empty_fixture_fails_loud(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)
+    empty = str(tmp_path / "empty_relevance.yaml")
+    with open(empty, "w", encoding="utf-8") as fh:
+        fh.write("[]\n")
+    report = E.evaluate(
+        memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10, relevance_set_path=empty
+    )
+    assert report["gates"]["precision@10"]["pass"] is False
+    assert report["ok"] is False
+
+
+def test_main_cli_prints_per_category_lines(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    import yaml
+
+    p = str(tmp_path / "cats.yaml")
+    rows = [dict(_HARD_SET[0]), {**_HARD_SET[1], "category": "update"}]
+    with open(p, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(rows, fh)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", p])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "category single-hop " in out and "category update " in out
+    assert "n=1 (RET-8)" in out
+
+
+def test_main_cli_explicit_memory_dir_never_inherits_ambient_fixtures(tmp_path, monkeypatch):
+    """The RET-8 CLI hermeticity guard: an explicit --memory-dir must not be judged by the
+    AMBIENT corpus's default fixtures (this repo's tests/fixtures — which is exactly what
+    happens in this test's cwd) — those gates skip instead."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+
+    captured = {}
+    real_evaluate = E.evaluate
+
+    def _spy(*args, **kwargs):
+        captured.update(kwargs)
+        return real_evaluate(*args, **kwargs)
+
+    monkeypatch.setattr(E, "evaluate", _spy)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx])
+    assert rc == 0
+    assert captured["hard_set_path"] is None
+    assert captured["relevance_set_path"] is None
+    assert captured["abstention_set_path"] is None

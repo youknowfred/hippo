@@ -2215,6 +2215,11 @@ release_train:
     # OWNER judgment (ROADMAP.v1 §3 "DEFER post-v1", no dated decision here) — RUL-6
     # stays planned. done_means NOT met (the salience keystone is undecided);
     # this tier stays in_progress until RET-8/SIG-5 and the LIF-7 gate move.
+    # 2026-07-09 (later, same day): RET-8 SHIPPED (owner-commissioned — see its dated
+    # note in ROADMAP.yaml). SIG-5 is now UNBLOCKED: the category-tagged substrate +
+    # tracked precision/abstention gates exist, and eval now exercises the production
+    # (edge-aware) recall path. SIG-6 remains sequenced AFTER SIG-5. RUL-6 unchanged
+    # (LIF-7 owner gate).
     status: in_progress
     gate: "SIG-5 decides salience default-on with RET-8 evidence; nothing in this tier ships as an always-on ranking prior until it does."
     done_means: >-
