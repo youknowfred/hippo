@@ -39,7 +39,7 @@ from .build_index import (
     run_bounded,
     tokenize,
 )
-from . import trust
+from . import archive, trust
 from .build_index import extract_description
 from .lint_floor import floor_memory_names
 from .provenance import (
@@ -56,6 +56,19 @@ from .staleness import RunContext, _commit_times, read_provenance
 _MAX_RECALL_CHARS = 9000
 _RRF_K = 60
 DEFAULT_K = 10
+
+_MAX_SNIPPET_CHARS = 300  # override: HIPPO_MAX_SNIPPET_CHARS -- bounds the verbatim quote
+
+
+def _max_snippet_chars() -> int:
+    """``HIPPO_MAX_SNIPPET_CHARS`` override; malformed/absent -> the module default."""
+    raw = os.environ.get("HIPPO_MAX_SNIPPET_CHARS")
+    if raw is None or not raw.strip():
+        return _MAX_SNIPPET_CHARS
+    try:
+        return int(raw)
+    except ValueError:
+        return _MAX_SNIPPET_CHARS
 
 # RET-2: body-chunk rankings (bm25_body / dense_body) enter fusion as a BACKSTOP, not a peer
 # of the description rankings -- a memory whose crucial fact lives only in its body should be
@@ -77,6 +90,35 @@ def _body_rrf_weight() -> float:
         return float(raw)
     except ValueError:
         return _BODY_RRF_WEIGHT
+
+
+# RCL-6: evidence-snippet score band. A body-win entry's ENTIRE score comes from the
+# body-discounted rankings (_body_rrf_weight, 0.5 by default) -- its absolute ceiling is
+# `2 * _body_rrf_weight() / (_RRF_K + 1)` (rank-0 in BOTH dense_body and bm25_body at once),
+# roughly HALF that (`_body_rrf_weight() / (_RRF_K + 1)`) for a genuine rank-0 hit in just
+# ONE body ranking -- calibrating this band against _RRF_K alone (ignoring the body discount
+# entirely) would set a bar NO body-win could ever clear, silently making the whole feature
+# dead code. Default admits a solid single-lane rank-0..~2 hit while still filtering a
+# deep-tail, barely-there body match.
+_SNIPPET_SCORE_BAND_FRACTION = 0.6  # override: HIPPO_SNIPPET_SCORE_BAND (absolute, not a fraction)
+
+
+def _snippet_score_band() -> float:
+    """The MINIMUM score a rank-1 body-win must clear to render its snippet.
+
+    ``HIPPO_SNIPPET_SCORE_BAND`` overrides with an ABSOLUTE score value; malformed/absent
+    falls back to a fraction of a single body ranking's own rank-0 ceiling
+    (``_body_rrf_weight() / (_RRF_K + 1)``), so the default stays correctly calibrated even
+    if an operator tunes ``HIPPO_BODY_RRF_WEIGHT``.
+    """
+    raw = os.environ.get("HIPPO_SNIPPET_SCORE_BAND")
+    if raw is not None and raw.strip():
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return _SNIPPET_SCORE_BAND_FRACTION * _body_rrf_weight() / (_RRF_K + 1)
+
 
 # Soft-invalidation (Tier 3, graceful decay) — "recent" halves the fused score BEFORE the
 # top-k cut (real demotion, can fall out of top-k); "old" is filtered from DISPLAY only,
@@ -275,6 +317,39 @@ _TAG_RE = re.compile(
     re.IGNORECASE,
 )
 _MIN_CONTENT_TOKENS = 2
+
+# RCL-3: main()-only (not clean_query -- see the rescue block there) -- a HIGHER bar than
+# _MIN_CONTENT_TOKENS above. clean_query already lets a query like "and the other one?"
+# through (it clears _MIN_CONTENT_TOKENS=2), but a query this short/pronoun-heavy routinely
+# shares no vocabulary with any memory and abstains downstream anyway -- _RESCUE_MIN_TOKENS
+# is the bar for "substantive enough to stand alone," gated well above the bare hygiene
+# floor so a genuinely substantive prompt is never touched by the rescue blend.
+_RESCUE_MIN_TOKENS = 4  # override: HIPPO_RESCUE_MIN_TOKENS
+_RESCUE_TURNS = 3  # override: HIPPO_RESCUE_TURNS -- how many prior same-session query
+# previews to blend in, most-recent-last (oldest of the window first).
+
+
+def _rescue_min_tokens() -> int:
+    """``HIPPO_RESCUE_MIN_TOKENS`` override; malformed/absent -> the module default."""
+    raw = os.environ.get("HIPPO_RESCUE_MIN_TOKENS")
+    if raw is None or not raw.strip():
+        return _RESCUE_MIN_TOKENS
+    try:
+        return int(raw)
+    except ValueError:
+        return _RESCUE_MIN_TOKENS
+
+
+def _rescue_turns() -> int:
+    """``HIPPO_RESCUE_TURNS`` override; malformed/absent -> the module default."""
+    raw = os.environ.get("HIPPO_RESCUE_TURNS")
+    if raw is None or not raw.strip():
+        return _RESCUE_TURNS
+    try:
+        return int(raw)
+    except ValueError:
+        return _RESCUE_TURNS
+
 # Terse continuation/filler prompts that carry no retrieval intent (matched normalized+lowered).
 _CONTINUATION_PHRASES = frozenset(
     {
@@ -400,6 +475,69 @@ def clean_query(raw: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# RCL-1: per-query dense/lexical intent routing
+# --------------------------------------------------------------------------- #
+# _mine_identifiers already extracts identifier-shaped tokens (dotted paths, snake_case,
+# camelCase, UPPER_CASE, traceback file/error lines) from every query for free -- the RATIO
+# of mined identifiers to total query tokens is a cheap, hot-path-safe proxy for "is this
+# query symbol/error-heavy (BM25 exactness matters more) or prose (semantic paraphrase
+# matters more)". Computed fresh INSIDE recall() (not clean_query, which is pure/
+# single-prompt and discards the count) so every surface that calls recall() directly --
+# the hook, /hippo:recall, the MCP tool, eval_recall -- gets the same routing regardless of
+# whether clean_query ran first. A dead-band around the boundary (and any query too short to
+# make the ratio meaningful) returns EXACTLY (1.0, 1.0) -- byte-identical to the pre-RCL-1
+# balanced default -- so a weak/ambiguous shape signal can never mis-route: there is no
+# baseline-diff eval gate, only the absolute thresholds, and a bad route could erode them
+# silently.
+_INTENT_MIN_TOKENS = 8  # override: HIPPO_INTENT_MIN_TOKENS -- below this a ratio is noise --
+# short queries (a handful of plain technical words, e.g. "oauth token refresh flow policy
+# gateway") must stay balanced: at low token counts the density ratio swings wildly on a
+# single incidental match, and the corpus's ACTUAL rank order (not just the primary_relevance
+# the knee compares) is sensitive enough to a weight shift that a short, ambiguously-shaped
+# query reordering the fused list can shift WHICH entry's relevance the knee compares against
+# next -- a real regression an earlier draft of this item hit on a 6-token fixture.
+_INTENT_DENSE_DENSITY = 0.10  # override: HIPPO_INTENT_DENSE_DENSITY -- at/below -> lean dense
+_INTENT_LEXICAL_DENSITY = 0.35  # override: HIPPO_INTENT_LEXICAL_DENSITY -- at/above -> lean lexical
+_INTENT_LEAN_WEIGHT = 1.3  # override: HIPPO_INTENT_LEAN_WEIGHT -- favored side's weight (the
+# other side gets 2.0 - lean, so the pair always sums to 2.0 -- the same total weight mass as
+# the balanced 1.0 + 1.0 default, just redistributed toward the favored signal).
+
+
+def _intent_weights(query: str, q_tokens: List[str]) -> Tuple[float, float]:
+    """``(dense_weight, lexical_weight)`` for the RRF fusion's primary (description) slots.
+
+    Malformed env overrides degrade to the module default (never raise); any internal
+    failure returns the balanced ``(1.0, 1.0)`` default -- this must never break recall.
+    """
+
+    def _env_float(name: str, default: float) -> float:
+        raw = os.environ.get(name)
+        if raw is None or not raw.strip():
+            return default
+        try:
+            return float(raw)
+        except ValueError:
+            return default
+
+    try:
+        total = len(q_tokens)
+        if total < int(_env_float("HIPPO_INTENT_MIN_TOKENS", _INTENT_MIN_TOKENS)):
+            return (1.0, 1.0)
+        density = len(_mine_identifiers(query)) / total
+        lexical_bound = _env_float("HIPPO_INTENT_LEXICAL_DENSITY", _INTENT_LEXICAL_DENSITY)
+        dense_bound = _env_float("HIPPO_INTENT_DENSE_DENSITY", _INTENT_DENSE_DENSITY)
+        if density >= lexical_bound:
+            lean = _env_float("HIPPO_INTENT_LEAN_WEIGHT", _INTENT_LEAN_WEIGHT)
+            return (2.0 - lean, lean)
+        if density <= dense_bound:
+            lean = _env_float("HIPPO_INTENT_LEAN_WEIGHT", _INTENT_LEAN_WEIGHT)
+            return (lean, 2.0 - lean)
+        return (1.0, 1.0)
+    except Exception:
+        return (1.0, 1.0)
+
+
+# --------------------------------------------------------------------------- #
 # Rankers
 # --------------------------------------------------------------------------- #
 def _bm25_score_via_postings(
@@ -509,7 +647,11 @@ def _bm25_rank(
 
 
 def _bm25_rank_body(
-    query_tokens: List[str], index: LoadedIndex, *, patched_indices: Optional[set] = None
+    query_tokens: List[str],
+    index: LoadedIndex,
+    *,
+    patched_indices: Optional[set] = None,
+    winning_chunk_out: Optional[Dict[int, int]] = None,
 ) -> List[int]:
     """BM25 ranking over BODY CHUNKS, mapped back to parent entry indices, deduped to each
     parent's best (lowest-rank) chunk hit -- the lexical half of the body backstop.
@@ -522,6 +664,13 @@ def _bm25_rank_body(
     entries here, but the parameter is threaded for signature symmetry with ``_bm25_rank`` and
     so a future body-drift patch (documented as healing at the next SessionStart rebuild, not
     mid-session) would have somewhere to plug in without another signature change.
+
+    RCL-6: ``winning_chunk_out`` (caller-supplied dict, mutated in place, keyed by parent
+    entry index -> the WINNING (best-ranked) body-chunk index ``j`` into ``index.body_chunks``)
+    lets a caller recover WHICH chunk a body-win entry actually matched on, for the evidence
+    snippet -- the return value alone (entry indices only) discards this on purpose (every
+    other caller/ranking-list shape in this module is entry-index-only; adding it here as an
+    optional out-param keeps that contract unchanged for everyone else).
     """
     body_chunks = index.body_chunks
     if not body_chunks or not query_tokens:
@@ -542,6 +691,8 @@ def _bm25_rank_body(
             continue
         seen.add(parent)
         out.append(parent)
+        if winning_chunk_out is not None:
+            winning_chunk_out[parent] = j
     return out
 
 
@@ -617,7 +768,11 @@ def _dense_rank(query: str, index: LoadedIndex, *, raw_rows: Optional[List[int]]
 
 
 def _dense_rank_body(
-    query: str, index: LoadedIndex, *, raw_rows: Optional[List[int]] = None
+    query: str,
+    index: LoadedIndex,
+    *,
+    raw_rows: Optional[List[int]] = None,
+    winning_chunk_out: Optional[Dict[int, int]] = None,
 ) -> List[int]:
     """Body-CHUNK ranking, MAPPED BACK to parent entry indices, deduped to each parent's
     BEST (lowest-rank) chunk hit — a backstop ranking, never a second vote per memory.
@@ -632,6 +787,9 @@ def _dense_rank_body(
     ``raw_rows``: see ``_dense_rank``'s docstring -- shares the SAME single embed+matmul
     ``recall()`` already paid for the description ranking, instead of re-embedding the query
     a second time for the body ranking.
+
+    RCL-6: ``winning_chunk_out`` -- see ``_bm25_rank_body``'s docstring; same contract, same
+    caller-supplied out-param convention.
     """
     n_entries = len(index.entries)
     body_chunks = index.body_chunks
@@ -651,6 +809,8 @@ def _dense_rank_body(
             continue
         seen.add(parent)
         out.append(parent)
+        if winning_chunk_out is not None:
+            winning_chunk_out[parent] = j
     return out
 
 
@@ -1092,6 +1252,110 @@ def _apply_salience(
         return adjusted, components
     except Exception:
         return penalized, {}
+
+
+# --------------------------------------------------------------------------- #
+# RCL-4: MMR intra-block diversity re-rank
+# --------------------------------------------------------------------------- #
+# Nothing collapses near-DUPLICATE hits within the injected block -- two memories
+# paraphrasing one decision each eat a top-k slot that could have gone to a distinct facet.
+# Classic maximal-marginal-relevance re-cut over the top ~2k of `penalized`, using cheap
+# pairwise cosine from the dense matrix already resident in memory (idx.dense rows are
+# L2-normalized, so a dot product IS cosine -- no re-embedding, pure arithmetic, inv6-safe).
+# Runs AFTER graph expansion + salience (both already reordered `penalized`) and BEFORE the
+# emission loop, so graph neighbors are diversified too and the knee cutoff (which lives
+# inside the emission loop) measures gaps on the FINAL, diversified order.
+_MMR_LAMBDA = 0.8  # override: HIPPO_MMR_LAMBDA -- relevance weight (1-lambda is diversity weight).
+# Calibrated on the shipped starter-pack golden corpus (see the RCL-4 commit body): the
+# roadmap's suggested ~0.7 measurably eroded hard_recall@10/MRR (still above the absolute
+# gates, but a real, avoidable cost) by letting a WEAK diversity pick occasionally outrank a
+# genuinely-relevant close second; 0.8 recovers nearly all of that margin while an adversarial
+# near-paraphrase fixture (two memories on one decision) still gets diversified.
+_MMR_POOL_MULT = 2  # candidates considered for the re-cut, as a multiple of k
+
+
+def _mmr_lambda() -> float:
+    """``HIPPO_MMR_LAMBDA`` override; malformed/absent -> the module default. Never raises."""
+    raw = os.environ.get("HIPPO_MMR_LAMBDA")
+    if raw is None or not raw.strip():
+        return _MMR_LAMBDA
+    try:
+        return float(raw)
+    except ValueError:
+        return _MMR_LAMBDA
+
+
+def _mmr_rerank(
+    penalized: List[Tuple[int, float, Optional[str]]],
+    entries: List[dict],
+    dense,
+    k: int,
+) -> List[Tuple[int, float, Optional[str]]]:
+    """Re-cut the top ``~2k`` of ``penalized`` for intra-block diversity, preserving length.
+
+    A candidate with NO usable dense row -- ``dense`` itself absent (BM25-only corpus), or
+    ``entries[i]["row"]`` missing/out of range (a model-mismatch merge, a graph-injected
+    neighbor never itself embedded) -- KEEPS ITS ORIGINAL POSITION and is exempt from the
+    diversity math entirely, the same exemption posture the knee cutoff already uses for
+    entries with no primary-relevance signal. Never touches corpus="rule" pointers -- those
+    are appended after emission, hold no dense row, and are never part of ``penalized``.
+    Degrades to the untouched input (never raises, never drops/reorders-wrong on failure).
+    """
+    if dense is None or len(penalized) < 2:
+        return penalized
+    try:
+        import numpy as np
+
+        pool_n = min(len(penalized), max(k * _MMR_POOL_MULT, k))
+        pool = penalized[:pool_n]
+        tail = penalized[pool_n:]
+
+        eligible: List[Tuple[int, int, float, Optional[str]]] = []  # (pool_pos, i, score, state)
+        exempt_positions: Dict[int, Tuple[int, float, Optional[str]]] = {}
+        for pos, (i, score, state) in enumerate(pool):
+            row = entries[i].get("row")
+            if row is None or row < 0 or row >= len(dense):
+                exempt_positions[pos] = (i, score, state)
+            else:
+                eligible.append((pos, i, score, row, state))
+
+        if len(eligible) < 2:
+            return penalized  # nothing left to diversify against
+
+        rows = np.array([e[3] for e in eligible])
+        sims = dense[rows] @ dense[rows].T  # rows are L2-normalized -> dot == cosine
+        lam = _mmr_lambda()
+
+        remaining = list(range(len(eligible)))
+        max_sim_to_picked = np.zeros(len(eligible))
+        picked_order: List[int] = []
+        while remaining:
+            best_local, best_val = None, None
+            for local_i in remaining:
+                relevance = eligible[local_i][2]
+                mmr_score = lam * relevance - (1.0 - lam) * max_sim_to_picked[local_i]
+                if best_val is None or mmr_score > best_val:
+                    best_val, best_local = mmr_score, local_i
+            picked_order.append(best_local)
+            remaining.remove(best_local)
+            for local_i in remaining:
+                s = float(sims[local_i, best_local])
+                if s > max_sim_to_picked[local_i]:
+                    max_sim_to_picked[local_i] = s
+
+        # Exempt entries keep their ORIGINAL slot; MMR-ordered eligible entries fill the
+        # remaining slots in the order MMR picked them -- a pure re-order, same pool length.
+        out: List[Optional[Tuple[int, float, Optional[str]]]] = [None] * len(pool)
+        for pos, triple in exempt_positions.items():
+            out[pos] = triple
+        empty_slots = [p for p in range(len(pool)) if out[p] is None]
+        for slot, local_i in zip(empty_slots, picked_order):
+            _, i, score, _row, state = eligible[local_i]
+            out[slot] = (i, score, state)
+
+        return out + tail
+    except Exception:
+        return penalized
 
 
 # --------------------------------------------------------------------------- #
@@ -1582,15 +1846,33 @@ def recall(
         # see _drift_patch's docstring; a body edited mid-session keeps serving its
         # last-indexed chunk text until the next SessionStart rebuild, same rationale as the
         # stale dense row already accepted for entries pre-RET-2.
-        bm25_body = _bm25_rank_body(q_tokens, idx, patched_indices=patched_indices)
-        dense_body = _dense_rank_body(query, idx, raw_rows=raw_dense_rows)
+        # RCL-6: capture the WINNING chunk index per parent from each body ranking, keyed by
+        # entry index -- the evidence snippet needs the actual chunk text a body-win hit
+        # matched on, not just "this entry has a body backstop rank." A parent winning via
+        # BOTH lanes takes whichever lane's dict update runs last (bm25 then dense below) --
+        # either is a genuine winning chunk for that entry, so which one displays is immaterial.
+        winning_chunk: Dict[int, int] = {}
+        bm25_body = _bm25_rank_body(
+            q_tokens, idx, patched_indices=patched_indices, winning_chunk_out=winning_chunk
+        )
+        dense_body = _dense_rank_body(
+            query, idx, raw_rows=raw_dense_rows, winning_chunk_out=winning_chunk
+        )
 
+        # RCL-1: lean the PRIMARY (description) weights toward lexical or dense based on how
+        # identifier-dense this query is; body weights (_body_rrf_weight) are a SEPARATE,
+        # untouched signal (RET-2's backstop discount) and are never adjusted here. Only
+        # meaningful when BOTH backends actually have candidates -- with just one backend
+        # contributing there is no "which do I lean toward" decision to make, and applying a
+        # non-1.0 weight to the lone contributor would just rescale its score for nothing (a
+        # real regression an earlier draft hit on a dense-disabled/BM25-only fixture).
+        dense_w, lex_w = _intent_weights(query, q_tokens) if (dense and bm25) else (1.0, 1.0)
         rankings = [r for r in (dense, bm25, dense_body, bm25_body) if r]
         weights = [
             w
             for r, w in zip(
                 (dense, bm25, dense_body, bm25_body),
-                (1.0, 1.0, _body_rrf_weight(), _body_rrf_weight()),
+                (dense_w, lex_w, _body_rrf_weight(), _body_rrf_weight()),
             )
             if r
         ]
@@ -1688,32 +1970,43 @@ def recall(
         # looks a name up in it.
         stale_banner_map = _stale_banner_map(graph_index_dir)
 
-        # Walk the re-sorted list and emit up to k DISPLAY-eligible results, skipping "old"
-        # entries as we go. This is NOT `penalized[:k]` followed by a filter -- a fixed-size
-        # slice-then-filter could yield fewer than k results when an "old" entry occupies a
-        # slot inside the naive top-k window while a display-eligible candidate sits just
-        # past it. Walking in score order with a `continue`/`break` is the correct
-        # implementation of "filter old, then take k" without truncating early. The corpus
-        # itself (`idx.entries`, `idx.dense`, the BM25 corpus) is untouched by this filter --
-        # "old" entries still fully participate in `_bm25_rank`/`_dense_rank`/`_rrf_fuse`,
-        # they are simply never emitted into `results`.
+        # Walk the re-sorted list and admit up to POOL_N DISPLAY-eligible candidates,
+        # skipping "old" entries as we go. This is NOT `penalized[:k]` followed by a filter
+        # -- a fixed-size slice-then-filter could yield fewer than k results when an "old"
+        # entry occupies a slot inside the naive top-k window while a display-eligible
+        # candidate sits just past it. Walking in score order with a `continue`/`break` is
+        # the correct implementation of "filter old, then take k" without truncating early.
+        # The corpus itself (`idx.entries`, `idx.dense`, the BM25 corpus) is untouched by
+        # this filter -- "old" entries still fully participate in `_bm25_rank`/`_dense_rank`/
+        # `_rrf_fuse`, they are simply never admitted into `admissible`.
         #
-        # RET-1 leg 2 — knee/score-gap cutoff: k becomes "up to k". Compared against the
-        # PREVIOUS EMITTED score (not the previous `penalized` entry) so a skipped "old" or
-        # dangling-file candidate never counts as the reference point -- the gap that matters
-        # is between consecutive results a user would actually SEE, not internal bookkeeping
-        # rows. Only checked from the second result onward (`results` non-empty): the first
-        # result has no predecessor to be a "knee" relative to, and the floor/skip legs above
-        # already gate whether ANYTHING is admitted at all. A non-positive ratio (env
-        # override 0, or negative) disables the check outright -- `ratio <= 0` can never be
-        # satisfied by `score < ratio * prev` for any non-negative score/prev pair anyway,
-        # but the explicit early-out keeps the intent legible and skips a division-adjacent
-        # comparison entirely when the knee is turned off.
+        # RET-1 leg 2 — knee/score-gap cutoff: admission becomes "up to POOL_N". Compared
+        # against the PREVIOUS ADMITTED score (not the previous `penalized` entry) so a
+        # skipped "old" or dangling-file candidate never counts as the reference point -- the
+        # gap that matters is between consecutive candidates a user might actually SEE, not
+        # internal bookkeeping rows. Only checked from the second admission onward: the first
+        # has no predecessor to be a "knee" relative to, and the floor/skip legs above already
+        # gate whether ANYTHING is admitted at all. A non-positive ratio (env override 0, or
+        # negative) disables the check outright -- `ratio <= 0` can never be satisfied by
+        # `score < ratio * prev` for any non-negative score/prev pair anyway, but the explicit
+        # early-out keeps the intent legible and skips a division-adjacent comparison entirely
+        # when the knee is turned off.
+        #
+        # RCL-4: this admission pass runs in the TRUE organic order, BEFORE any MMR diversity
+        # reordering, and admits up to POOL_N (>= k, not just k) candidates -- both matter.
+        # Running the knee before MMR (not after) means a diversity-promoted low-relevance
+        # pick can never create a false "cliff" that stops the walk before a genuinely
+        # relevant candidate sitting right behind it is ever reached (an earlier draft ran
+        # MMR first and lost a clearly on-topic memory to exactly this interaction, both on a
+        # Japanese-corpus fixture and a supersession fixture -- see the commit body).
+        # Admitting POOL_N rather than k gives MMR real headroom: capping at k here would
+        # leave MMR nothing to diversify WITH beyond the same k it already had.
         knee_ratio = _knee_ratio()
-        results: List[dict] = []
+        pool_n = max(k * _MMR_POOL_MULT, k)
+        admissible: List[Tuple[int, float, Optional[str]]] = []
         prev_relevance: Optional[float] = None
-        for i, _adj_score, state in penalized:
-            if len(results) >= k:
+        for i, adj_score, state in penalized:
+            if len(admissible) >= pool_n:
                 break
             if state == "old":
                 continue
@@ -1731,7 +2024,7 @@ def recall(
             # neighbor that was never organically ranked -- see `_expand_neighbors`) has
             # nothing in `primary_relevance` at all. Such an entry is EXEMPT from the knee
             # check both ways: it is never cut for "falling off a cliff" relative to the
-            # previous result (its only relevance signal is a deliberate backstop weight or
+            # previous admission (its only relevance signal is a deliberate backstop weight or
             # graph discount, not a topical-relevance drop), and it never becomes the
             # reference point for the NEXT comparison either (`prev_relevance` only advances
             # on an entry that actually HAS a primary score) -- a body/graph hit sitting
@@ -1744,9 +2037,21 @@ def recall(
                 and prev_relevance is not None
                 and relevance < knee_ratio * prev_relevance
             ):
-                break  # relevance fell off a cliff relative to the last EMITTED result -- stop
+                break  # relevance fell off a cliff relative to the last ADMITTED entry -- stop
             if relevance is not None:
                 prev_relevance = relevance
+            admissible.append((i, adj_score, state))
+
+        # RCL-4: MMR diversifies the (possibly larger-than-k) ADMISSIBLE pool built above --
+        # every candidate here already cleared the SAME old/dangling/knee filters recall()
+        # always applied, in the TRUE organic order, so MMR can only ever choose among
+        # genuinely display-worthy candidates. Degrades to a no-op on a BM25-only corpus or
+        # when a candidate has no dense row -- see _mmr_rerank's docstring.
+        admissible = _mmr_rerank(admissible, entries, idx.dense, k)
+
+        results: List[dict] = []
+        for i, adj_score, state in admissible[:k]:
+            e = entries[i]
             results.append(
                 {
                     "name": e["name"],
@@ -1761,7 +2066,7 @@ def recall(
                     # is the separate, explicit 1-based EMISSION rank (position in `results`,
                     # not `penalized` index -- "old"/deleted entries are skipped above and
                     # must not leave gaps in the emitted rank sequence).
-                    "score": round(float(_adj_score), 6),
+                    "score": round(float(adj_score), 6),
                     "rank": len(results) + 1,
                     "backend": backend,
                     # Injection provenance (GRA-1) — ALWAYS present so downstream code never
@@ -1798,6 +2103,25 @@ def recall(
                     # project dir. Both are None for a single-corpus recall (entries untagged).
                     "corpus": e.get("corpus"),
                     "root": e.get("root"),
+                    # RCL-6: body-signal-win detection — ALWAYS present, same no-key-branching
+                    # convention as "via"/"note"/"corpus". Derived, never invented: an entry
+                    # ABSENT from `primary_relevance` (the desc-only fusion the knee already
+                    # exempts) but PRESENT in `winning_chunk` (a body ranking actually ranked
+                    # it) is a body-win — its key fact lives in the body, not the description.
+                    # Absent from both is a graph injection (no body signal, no snippet).
+                    "body_win": i not in primary_relevance and i in winning_chunk,
+                    # The winning chunk's own verbatim text (already resident from the
+                    # manifest — no read-at-emit), or None when not a body-win. format_results
+                    # gates the actual snippet render on rank==1 + score band + corpus.
+                    "body_chunk_text": (
+                        idx.body_chunks[winning_chunk[i]].get("text")
+                        if (i not in primary_relevance and i in winning_chunk)
+                        else None
+                    ),
+                    # The index-wide build commit — ALWAYS present (None on a non-git corpus
+                    # or a pre-RCL-6 manifest without the key yet). Source of the snippet's
+                    # "indexed @sha" mark; identical across every hit in one recall() call.
+                    "head_commit": idx.manifest.get("head_commit"),
                 }
             )
         # RUL-4: rules-plane pointers APPEND after the organic top-k — extra lines, never
@@ -1843,7 +2167,39 @@ def format_results(results: List[dict], max_chars: int = _MAX_RECALL_CHARS) -> s
         # carries it, a fresh one doesn't ("" -> no clause at all). Same bracket convention as
         # `note`, same overall max_chars truncation below — a banner can never blow the budget.
         banner = f" [{r['stale_banner']}]" if r.get("stale_banner") else ""
-        lines.append(f"  • {r['name']} ({r['file']}) — {desc}{marker}{origin}{note}{banner}")
+        # RCL-2: a floor/cooldown COLLAPSE renders as one legible clause instead of the
+        # entry silently vanishing (inv3) — floor takes priority when both could apply (it
+        # is the more fundamental, every-session reason the pointer is redundant).
+        if r.get("floor_collapsed"):
+            collapse = " (already in floor)"
+        elif r.get("cooldown_collapsed"):
+            collapse = " (already surfaced this thread)"
+        else:
+            collapse = ""
+        lines.append(f"  • {r['name']} ({r['file']}) — {desc}{marker}{origin}{note}{banner}{collapse}")
+        # RCL-6: rank-1 body-signal-win evidence snippet — progressive disclosure so a memory
+        # whose key fact is buried in the body behind a generic description doesn't force a
+        # read-the-file round-trip. Gated tightly: only the RANK-1 hit (a blanket rank-1
+        # snippet would be redundant for a description-signal hit — the description IS the
+        # snippet then), only when the winning signal was genuinely a body chunk, only above
+        # a high score band (avoid a marginal body-backstop hit), and never a rule pointer (a
+        # rule pointer has no chunk/sha — it is not a memory). Bounded independently of the
+        # overall max_chars truncation below, which still applies on top.
+        if (
+            r.get("rank") == 1
+            and r.get("body_win")
+            and r.get("body_chunk_text")
+            and r.get("corpus") != _RULES_SOURCE
+            and (r.get("score") or 0) >= _snippet_score_band()
+        ):
+            snippet = r["body_chunk_text"].replace("\n", " ").strip()
+            snippet = " ".join(snippet.split())
+            max_snip = _max_snippet_chars()
+            if len(snippet) > max_snip:
+                snippet = snippet[: max_snip - 1].rstrip() + "…"
+            sha = (r.get("head_commit") or "")[:7]
+            sha_mark = f" — indexed @{sha}" if sha else ""
+            lines.append(f'      ↳ "{snippet}"{sha_mark}')
     out = "\n".join(lines)
     if len(out) > max_chars:
         out = out[: max_chars - 16].rstrip() + "\n…(truncated)"
@@ -1921,6 +2277,28 @@ def git_recent_producer(
 # --------------------------------------------------------------------------- #
 # CLI / hook entry
 # --------------------------------------------------------------------------- #
+def _session_episodes(memory_dir: Optional[str], session_id: Optional[str]) -> List[dict]:
+    """This session's prior-turn episodes (ledger order), or ``[]`` if unavailable/inapplicable.
+
+    Shared by RCL-2 (the injection cooldown) and RCL-3 (the terse-follow-up query blend) — ONE
+    bounded ``telemetry.read_episodes`` scan (the ledger rotates at ~2MB, never an unbounded
+    disk scan), filtered to ``session_id``. No session id (a bare CLI invocation, or a harness
+    that never supplied one) or no memory dir -> ``[]``, the same degrade-silently posture as
+    every other hot-path telemetry read in this module. Since ``main()`` logs THIS turn's own
+    episode only AFTER recall+print, a call made anywhere during the current turn only ever
+    sees turns 1..N-1 — never the in-flight one.
+    """
+    if not memory_dir or not session_id:
+        return []
+    try:
+        from .telemetry import default_telemetry_dir, read_episodes
+
+        td = default_telemetry_dir(memory_dir)
+        return [ep for ep in read_episodes(td) if ep.get("session_id") == session_id]
+    except Exception:
+        return []
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
     import json
@@ -1961,14 +2339,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             raw_query = ""
     else:
         raw_query = " ".join(args.query).strip()
-    # Query hygiene: strip harness envelopes / skip near-empty prompts BEFORE embedding, so a
-    # task-notification blob or a "?" continuation never pays a model load to inject noise.
-    query = clean_query(raw_query)
 
     # Resolve the memory dir + repo root once so we can both drive recall and read the
     # MEMORY.md floor for floor-dedup, plus stamp the episode-log watermark commit. A
     # resolution failure leaves whichever wasn't explicitly passed at None — recall resolves
     # its own dir, floor-dedup is skipped, and the episode log's head_commit is omitted.
+    # RCL-3 needs memory_dir resolved BEFORE clean_query runs (the terse-follow-up rescue
+    # below reads the episode buffer), so this now happens ahead of query hygiene.
     memory_dir = args.memory_dir
     repo_root = args.repo_root
     if memory_dir is None:
@@ -1984,14 +2361,48 @@ def main(argv: Optional[List[str]] = None) -> int:
         except Exception:
             memory_dir = None
 
+    # Query hygiene: strip harness envelopes / skip near-empty prompts BEFORE embedding, so a
+    # task-notification blob or a "?" continuation never pays a model load to inject noise.
+    query = clean_query(raw_query)
+
+    # RCL-2/RCL-3 SHARE this one bounded episode-buffer read: RCL-2's cooldown collapse and
+    # RCL-3's terse-follow-up rescue both need this session's prior-turn episodes.
+    session_episodes = _session_episodes(memory_dir, args.session_id)
+
+    # RCL-3: rescue a terse follow-up ("continue", "and the other one?") that carries no
+    # retrieval intent ON ITS OWN. Triggered when the cleaned query is blank OR still short
+    # of _RESCUE_MIN_TOKENS (a HIGHER bar than clean_query's own _MIN_CONTENT_TOKENS=2 — a
+    # query clean_query happily passes through, like a 3-4 token pronoun-heavy follow-up,
+    # can still share no vocabulary with any memory and abstain downstream; gated tightly so
+    # a genuinely substantive prompt is never touched). Pure string assembly (no LLM/network,
+    # inv6-safe): blend the RAW prompt with the last few same-session query previews and
+    # re-run clean_query on the combined text -- never mutates clean_query itself, which
+    # stays pure/single-prompt and unit-pinned.
+    if session_episodes and (not query or len(tokenize(query)) < _rescue_min_tokens()):
+        previews = [
+            ep["query_preview"]
+            for ep in session_episodes[-_rescue_turns():]
+            if ep.get("query_preview")
+        ]
+        if previews:
+            blended = clean_query((raw_query + " " + " ".join(previews)).strip())
+            if blended:
+                query = blended
+
     t0 = time.perf_counter()
     if query:
         # Floor-dedup (DISPLAY layer only — never inside recall(), which eval_recall's
         # self_recall probes directly): the User + Working-Style memories are ALREADY
         # always-loaded in the MEMORY.md floor, so re-surfacing them wastes a top-k slot +
-        # injects redundant tokens. Over-fetch by the floor size, drop floor members, slice to k.
+        # injects redundant tokens. RCL-2: over-fetch by BOTH the floor size AND this
+        # session's already-injected count so a COLLAPSED entry (see below) still costs no
+        # top-k slot — collapse, never drop, keeps the line legible instead of vanishing.
         floor = fused_floor_names(memory_dir, args.index_dir) if memory_dir else set()
-        pool_k = args.k + len(floor) if floor else args.k
+        already_injected: set = set()
+        for ep in session_episodes:
+            already_injected.update(ep.get("recalled_names") or [])
+        extra = len(floor) + len(already_injected)
+        pool_k = args.k + extra if extra else args.k
         results = recall(
             query, k=pool_k, memory_dir=memory_dir, index_dir=args.index_dir, repo_root=repo_root
         )
@@ -2000,9 +2411,45 @@ def main(argv: Optional[List[str]] = None) -> int:
         # hit), then re-append and renumber so the emitted rank sequence stays gapless.
         rule_hits = [r for r in results if r.get("corpus") == _RULES_SOURCE]
         results = [r for r in results if r.get("corpus") != _RULES_SOURCE]
-        if floor:
-            results = [r for r in results if r["name"] not in floor]
-        results = results[: args.k] + rule_hits
+
+        # RCL-2: widen the floor with CLAUDE.md/.claude/rules citations — a memory quoted
+        # verbatim in an always-loaded governance file is exactly as redundant to re-inject
+        # as a MEMORY.md floor pointer. Exact-name, conservative; fails CLOSED to "cited" on
+        # an unreadable governance file (more collapsing, never less — archive.py's own
+        # posture, reused as-is).
+        if repo_root and results:
+            try:
+                floor = floor | archive._cited_by_claude_md_names(
+                    repo_root, {r["name"] for r in results}
+                )
+            except Exception:
+                pass
+
+        # Collapse (never drop): a floor/cooldown member is TAGGED and rendered as one
+        # legible line instead of vanishing (inv3), but must still cost no top-k slot — the
+        # walk below only counts NON-collapsed entries against args.k, relying on the
+        # pool_k over-fetch above to keep enough real candidates in the pool. Natural rank
+        # order is preserved (a collapsed entry renders exactly where it would have ranked).
+        kept = 0
+        walked: List[dict] = []
+        for r in results:
+            if r["name"] in floor:
+                r["floor_collapsed"] = True
+                walked.append(r)
+            elif r["name"] in already_injected:
+                r["cooldown_collapsed"] = True
+                walked.append(r)
+            elif kept < args.k:
+                walked.append(r)
+                kept += 1
+        results = walked
+        # RUL-4/T2 guard: rule pointers are EXEMPT from floor-dedup (a rule is not a floor
+        # memory) but INCLUDED in the cooldown (they would otherwise re-fire every matching
+        # prompt for the rest of the thread) — never dropped, same collapse-not-drop posture.
+        for r in rule_hits:
+            if r["name"] in already_injected:
+                r["cooldown_collapsed"] = True
+        results = results + rule_hits
         for i, r in enumerate(results):
             r["rank"] = i + 1
     else:

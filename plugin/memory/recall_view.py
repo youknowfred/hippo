@@ -74,6 +74,34 @@ def _neighbors(graph, name: str) -> Tuple[List[str], List[str]]:
         return [], []
 
 
+def _cross_encoder_rerank(query: str, hits: List[dict]) -> List[dict]:
+    """RCL-5: re-order ``hits`` by a local cross-encoder's joint query/description read.
+
+    An EXPLICIT-SURFACE-ONLY precision lever (never the UserPromptSubmit hot path — no p95
+    budget to protect here). T2 guard: ``corpus == "rule"`` pointers are excluded from the
+    rerank and re-attached at the tail in their ORIGINAL relative order — a rule pointer has
+    no query-vs-description joint signal to rerank on and must never be reordered among
+    corpus hits. Reorders ONLY; never mutates a hit's own ``score``/``rank`` (COR-8: those
+    stay the true fused-recall values, not a fabricated cross-encoder number on a different
+    scale). Degrades to the ORIGINAL order on any failure — no cached model, fastembed
+    unavailable, any exception — never downloads, never raises.
+    """
+    rule_hits = [h for h in hits if h.get("corpus") == "rule"]
+    corpus_hits = [h for h in hits if h.get("corpus") != "rule"]
+    if len(corpus_hits) < 2:
+        return hits  # nothing meaningful to reorder
+    try:
+        from .build_index import _get_cross_encoder
+
+        model = _get_cross_encoder(allow_download=False)
+        descriptions = [h.get("description") or "" for h in corpus_hits]
+        scores = list(model.rerank(query, descriptions))
+        order = sorted(range(len(corpus_hits)), key=lambda i: scores[i], reverse=True)
+        return [corpus_hits[i] for i in order] + rule_hits
+    except Exception:
+        return hits
+
+
 def describe(
     query: str,
     k: int = DEFAULT_K,
@@ -98,6 +126,7 @@ def describe(
             "or too-thin query surfaces nothing rather than padding out low-signal matches. "
             "Try /hippo:recall --list-by-type to see everything this project knows."
         )
+    hits = _cross_encoder_rerank(query, hits)
     graph = _load_graph(memory_dir, index_dir)
     out: List[str] = [f'{len(hits)} memory match(es) for "{query}" (most relevant first):', ""]
     for h in hits:

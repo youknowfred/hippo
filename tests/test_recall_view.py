@@ -160,3 +160,119 @@ def test_main_never_raises(tmp_path):
     # A bogus memory dir must degrade to rc 0 with a message, never raise.
     rc = V.main(["something", "--memory-dir", str(tmp_path / "does-not-exist")])
     assert rc == 0
+
+
+# --------------------------------------------------------------------------- #
+# RCL-5: offline cross-encoder rerank — explicit surfaces only
+# --------------------------------------------------------------------------- #
+def test_cross_encoder_rerank_degrades_to_unreranked_order_without_model():
+    """No cached cross-encoder model (the common case, hermetically) -> the ORIGINAL
+    order, never an error -- the hermetic suite never downloads anything."""
+    hits = [
+        {"name": "a", "description": "alpha", "corpus": None},
+        {"name": "b", "description": "beta", "corpus": None},
+    ]
+    assert V._cross_encoder_rerank("some query", hits) == hits
+
+
+def test_cross_encoder_rerank_noop_with_fewer_than_two_corpus_hits():
+    assert V._cross_encoder_rerank("q", []) == []
+    one = [{"name": "a", "description": "alpha", "corpus": None}]
+    assert V._cross_encoder_rerank("q", one) == one
+    only_rule = [{"name": "Deploys", "description": "rule section", "corpus": "rule"}]
+    assert V._cross_encoder_rerank("q", only_rule) == only_rule
+
+
+def test_cross_encoder_rerank_excludes_and_reattaches_rule_pointers(monkeypatch):
+    """T2 guard: a rule pointer is excluded from the rerank math and re-attached at the
+    tail in its original relative order -- never reordered among corpus hits."""
+    hits = [
+        {"name": "a", "description": "alpha topic", "corpus": None},
+        {"name": "b", "description": "beta topic", "corpus": None},
+        {"name": "Deploys", "description": "rule section", "corpus": "rule"},
+    ]
+
+    class _FakeCrossEncoder:
+        def rerank(self, query, documents, **kwargs):
+            # Reverse the natural order: "beta" scores higher than "alpha".
+            return [0.9 if "beta" in d else 0.1 for d in documents]
+
+    monkeypatch.setattr(B, "_get_cross_encoder", lambda allow_download: _FakeCrossEncoder())
+    out = V._cross_encoder_rerank("beta", hits)
+    assert [h["name"] for h in out] == ["b", "a", "Deploys"]
+
+
+def test_cross_encoder_rerank_never_mutates_score_or_rank(monkeypatch):
+    """COR-8: reordering must never fabricate/overwrite a hit's own score -- the cross-
+    encoder's output is on a different scale and is never displayed as "relevance"."""
+    hits = [
+        {"name": "a", "description": "alpha", "corpus": None, "score": 0.111, "rank": 1},
+        {"name": "b", "description": "beta", "corpus": None, "score": 0.099, "rank": 2},
+    ]
+
+    class _FakeCrossEncoder:
+        def rerank(self, query, documents, **kwargs):
+            return [0.1, 0.9]  # flips the order
+
+    monkeypatch.setattr(B, "_get_cross_encoder", lambda allow_download: _FakeCrossEncoder())
+    out = V._cross_encoder_rerank("q", hits)
+    assert [h["name"] for h in out] == ["b", "a"]
+    by_name = {h["name"]: h for h in out}
+    assert by_name["a"]["score"] == 0.111  # untouched, still the true fused score
+    assert by_name["b"]["score"] == 0.099
+
+
+def test_cross_encoder_rerank_degrades_on_model_exception(monkeypatch):
+    def _boom(allow_download):
+        raise RuntimeError("cross-encoder model not cached offline")
+
+    monkeypatch.setattr(B, "_get_cross_encoder", _boom)
+    hits = [
+        {"name": "a", "description": "alpha", "corpus": None},
+        {"name": "b", "description": "beta", "corpus": None},
+    ]
+    assert V._cross_encoder_rerank("q", hits) == hits
+
+
+def test_describe_invokes_cross_encoder_rerank(tmp_path, monkeypatch):
+    """Integration: describe() actually calls the rerank step, not just defines it."""
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    _seed(md, idx, {"deploy.md": _mem("deploy", "how the web service is deployed via canary")})
+    calls = []
+
+    def _spy(query, hits):
+        calls.append((query, [h["name"] for h in hits]))
+        return hits
+
+    monkeypatch.setattr(V, "_cross_encoder_rerank", _spy)
+    V.describe("how do we deploy the web service", memory_dir=md, index_dir=idx)
+    assert calls and calls[0][0] == "how do we deploy the web service"
+
+
+def test_describe_never_reranks_on_abstention(tmp_path, monkeypatch):
+    """Abstention (no hits) must never even attempt a rerank call."""
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    _seed(md, idx, {"deploy.md": _mem("deploy", "how the web service is deployed")})
+    calls = []
+    monkeypatch.setattr(V, "_cross_encoder_rerank", lambda q, h: calls.append(1) or h)
+    V.describe("zzqq xyzzy nonexistent qwertyuiop", memory_dir=md, index_dir=idx)
+    assert not calls
+
+
+@pytest.mark.network
+def test_real_cross_encoder_reranks_by_actual_relevance(tmp_path_factory, monkeypatch):
+    """The REAL model, network-marked (downloads ~80MB on a cold cache; the hermetic CI
+    lane deselects this, the dense lane opts in and restores a cache)."""
+    pytest.importorskip("fastembed")
+    cache = os.environ.get("FASTEMBED_CACHE_PATH") or str(
+        tmp_path_factory.getbasetemp() / "fastembed-cache"
+    )
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", cache)
+    B._get_cross_encoder(allow_download=True)  # warm (downloads only on a cold cache)
+
+    hits = [
+        {"name": "a", "description": "how to deploy a web service via canary rollout", "corpus": None},
+        {"name": "b", "description": "quarterly budget spreadsheet for the finance team", "corpus": None},
+    ]
+    out = V._cross_encoder_rerank("canary deployment rollout steps", hits)
+    assert out[0]["name"] == "a"  # the genuinely relevant document must win
