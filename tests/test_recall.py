@@ -3091,3 +3091,74 @@ def test_reinforcement_clears_banner_end_to_end(repo, memory_dir, monkeypatch):
     by_name2 = {r["name"]: r for r in res2}
     assert by_name2["m_alpha"]["stale_banner"] == ""  # the banner cleared
     assert "anchored to" not in R.format_results(res2)
+
+
+# --------------------------------------------------------------------------- #
+# GOV-7: confidence tier — display-only provenance, NEVER a ranking input
+# --------------------------------------------------------------------------- #
+def test_recall_confidence_renders_but_never_ranks(tmp_path, monkeypatch):
+    """The trap this item must not fall into: popularity=correctness. Scores and order are
+    byte-identical with and without the tier; only the display marker differs."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+
+    def _corpus_at(md: str, *, graded: bool) -> None:
+        os.makedirs(md, exist_ok=True)
+        conf = "confidence: draft\n" if graded else ""
+        items = {
+            "canary_deploy.md": _mem("canary_deploy", "deploy rollout uses canary traffic shifting"),
+            "bluegreen_deploy.md": (
+                f'---\nname: bluegreen_deploy\ndescription: "deploy rollout uses blue green swap"\n'
+                f"type: project\n{conf}---\nbody\n"
+            ),
+        }
+        for fname, content in items.items():
+            with open(os.path.join(md, fname), "w", encoding="utf-8") as fh:
+                fh.write(content)
+
+    query = "deploy rollout canary traffic"
+    md0, idx0 = str(tmp_path / "m0"), str(tmp_path / "i0")
+    _corpus_at(md0, graded=False)
+    B.build_index(md0, idx0)
+    plain = R.recall(query, k=5, memory_dir=md0, index_dir=idx0)
+
+    md1, idx1 = str(tmp_path / "m1"), str(tmp_path / "i1")
+    _corpus_at(md1, graded=True)
+    B.build_index(md1, idx1)
+    graded = R.recall(query, k=5, memory_dir=md1, index_dir=idx1)
+
+    assert [(r["name"], r["score"]) for r in graded] == [(r["name"], r["score"]) for r in plain]
+    by_name = {r["name"]: r for r in graded}
+    assert by_name["bluegreen_deploy"]["confidence"] == "draft"
+    assert by_name["canary_deploy"]["confidence"] is None
+    # the inject-time marker: compact bracket on the graded line, nothing on the other
+    rendered = R.format_results(graded)
+    line_graded = next(ln for ln in rendered.splitlines() if "bluegreen_deploy" in ln)
+    line_plain = next(ln for ln in rendered.splitlines() if "canary_deploy" in ln)
+    assert "[draft]" in line_graded
+    assert "[draft]" not in line_plain and "confidence" not in line_plain
+
+
+def test_recall_scoring_path_never_reads_confidence():
+    """AST pin (the grep-style negative the roadmap names): the ONLY function in recall.py
+    touching the "confidence" key are the two DISPLAY/EMISSION surfaces — recall() (the
+    result-dict copy) and format_results (the inject marker); every scoring helper is
+    confidence-blind. steer, by contrast, is legitimately read in recall()'s penalized
+    loop (its one ranking use) — pin that no OTHER function smuggles it in either."""
+    import ast as _ast
+    import inspect as _inspect
+
+    tree = _ast.parse(_inspect.getsource(R))
+    readers = {"confidence": set(), "steer": set()}
+    for node in _ast.walk(tree):
+        if not isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+            continue
+        consts = {
+            c.value
+            for c in _ast.walk(node)
+            if isinstance(c, _ast.Constant) and isinstance(c.value, str)
+        }
+        for key in readers:
+            if key in consts:
+                readers[key].add(node.name)
+    assert readers["confidence"] == {"recall", "format_results"}, readers["confidence"]
+    assert readers["steer"] == {"recall"}, readers["steer"]

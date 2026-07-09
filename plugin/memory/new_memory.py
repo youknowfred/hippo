@@ -85,6 +85,11 @@ _FLOOR_SECTION_BY_TYPE = {
 # invariant enforced at the write seam.
 _VALID_TIERS = ("project", "user", "private")
 
+# GOV-7: the author's trust dial — a CLOSED enum, optional (absence = today's default).
+# Display-only downstream: build_index carries it in the manifest, format_results/
+# recall_view render it, recall's scoring path never reads it (AST-pinned in tests).
+_VALID_CONFIDENCE = ("draft", "verified", "authoritative")
+
 
 def _ensure_tier_floor(tier_dir: str, label: str) -> None:
     """Seed a NON-project tier's ``MEMORY.md`` with the two canonical floor sections the first
@@ -415,11 +420,15 @@ def check_candidate(
         }
 
 
-def _render_frontmatter(name: str, description: str, mtype: str, body: str) -> str:
+def _render_frontmatter(
+    name: str, description: str, mtype: str, body: str, confidence: Optional[str] = None
+) -> str:
     """Recall-ready frontmatter: top-level name + description (indexed), metadata.type.
 
     ``description`` is JSON-quoted so any colon/character is valid YAML (the recall index
-    reads ``description`` via yaml.safe_load).
+    reads ``description`` via yaml.safe_load). ``confidence`` (GOV-7, optional) nests under
+    ``metadata:`` like every other provenance-style key — absence emits nothing (today's
+    default), keeping an unset memory byte-identical to before the field existed.
     """
     lines = [
         "---",
@@ -427,6 +436,7 @@ def _render_frontmatter(name: str, description: str, mtype: str, body: str) -> s
         f"description: {json.dumps(description)}",
         "metadata:",
         f"  type: {mtype}",
+        *([f"  confidence: {confidence}"] if confidence else []),
         "---",
         "",
         body.rstrip("\n") + "\n" if body else "",
@@ -567,6 +577,7 @@ def write_memory(
     no_links: bool = False,
     tier: str = "project",
     rationale: Optional[str] = None,
+    confidence: Optional[str] = None,
 ) -> dict:
     """Create a recall-ready memory file. Returns a small result dict.
 
@@ -622,6 +633,11 @@ def write_memory(
         result["error"] = f"invalid tier {tier!r} (expected one of {_VALID_TIERS})"
         return result
     result["tier"] = tier
+    if confidence is not None and confidence not in _VALID_CONFIDENCE:
+        result["error"] = (
+            f"invalid confidence {confidence!r} (expected one of {_VALID_CONFIDENCE})"
+        )
+        return result
     # Name must be a bare slug — a path separator (or "..") would write the file OUTSIDE
     # memory_dir, where neither the index nor the floor would ever find it (a silent hole).
     if not name or os.path.basename(name) != name:
@@ -692,7 +708,7 @@ def write_memory(
     body = _append_related_line(body, related)
 
     path = os.path.join(memory_dir, f"{name}.md")
-    rendered = _render_frontmatter(name, description, type, body)
+    rendered = _render_frontmatter(name, description, type, body, confidence)
 
     # --- LIF-2: duplicate/conflict detection, BEFORE the write + index refresh. ---
     # Ordering is load-bearing twice over: (a) it must score against the PRE-refresh
@@ -819,6 +835,13 @@ def main(argv=None) -> int:
         "(e.g. 'from session <sid>; replaces <neighbor> (similarity 0.9x); as of HEAD <sha>') "
         "— the git-committed WHY behind a consolidation-approved write",
     )
+    parser.add_argument(
+        "--confidence",
+        default=None,
+        choices=_VALID_CONFIDENCE,
+        help="GOV-7: the author's trust dial (draft | verified | authoritative) — rendered "
+        "at inject and in /hippo:recall, never a ranking input; omit for today's default",
+    )
     args = parser.parse_args(argv)
 
     # CAP-3: dry-run decisioning — check a captured candidate BEFORE it can become a file, so a
@@ -884,6 +907,7 @@ def main(argv=None) -> int:
         no_links=args.no_links,
         tier=args.tier,
         rationale=args.rationale,
+        confidence=args.confidence,
     )
     if res["error"]:
         print(f"error: {res['error']}")

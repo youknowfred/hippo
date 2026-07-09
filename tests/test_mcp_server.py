@@ -321,3 +321,15 @@ def test_serve_stream_answers_resources_read(corpus):
         "hippo://floor", "hippo://rules-view",
     }
     assert resps[2]["result"]["contents"][0]["uri"] == "hippo://floor"
+
+
+def test_new_memory_tool_threads_confidence(corpus):
+    """GOV-7: the MCP write surface can author the tier too — parity with --confidence."""
+    resp = _call(
+        "new_memory",
+        {"name": "graded_via_mcp", "description": "a graded mcp fact", "type": "project",
+         "confidence": "verified"},
+    )
+    assert "created:" in _text(resp)
+    with open(os.path.join(corpus, "graded_via_mcp.md"), "r", encoding="utf-8") as fh:
+        assert "  confidence: verified" in fh.read()

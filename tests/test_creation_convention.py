@@ -1336,3 +1336,55 @@ def test_cli_rationale_flag_reaches_the_body(tmp_path, monkeypatch, capsys):
     assert rc == 0
     with open(os.path.join(md, "cli_rationale_fact.md"), "r", encoding="utf-8") as fh:
         assert "Rationale: from session s-9; as of HEAD 1234567" in fh.read()
+
+
+# --------------------------------------------------------------------------- #
+# GOV-7 — author-set confidence tier (draft | verified | authoritative)
+# --------------------------------------------------------------------------- #
+def test_write_memory_confidence_lands_under_metadata_and_in_manifest(tmp_path, monkeypatch):
+    from memory import build_index as B
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    res = NM.write_memory(
+        "graded_fact", "a fact the author grades authoritative", "project",
+        body="Body.", memory_dir=md, no_links=True, confidence="authoritative",
+    )
+    assert res["created"] and res["error"] is None
+    with open(res["path"], "r", encoding="utf-8") as fh:
+        text = fh.read()
+    assert "\nmetadata:\n" in text and "\n  confidence: authoritative\n" in text
+    # carried into the manifest so inject-time render never re-reads the file
+    entry = next(
+        e for e in B.load_index(B.default_index_dir(md)).entries if e["name"] == "graded_fact"
+    )
+    assert entry["confidence"] == "authoritative"
+
+
+def test_write_memory_confidence_optional_and_validated(tmp_path, monkeypatch):
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    res = NM.write_memory(
+        "ungraded_fact", "a fact with no tier", "project", memory_dir=md, no_links=True
+    )
+    with open(res["path"], "r", encoding="utf-8") as fh:
+        assert "confidence" not in fh.read()  # absence = today's default, byte-identical
+    bad = NM.write_memory(
+        "bad_tier", "a fact", "project", memory_dir=md, confidence="canon"
+    )
+    assert bad["created"] is False and "invalid confidence" in bad["error"]
+    assert not os.path.exists(os.path.join(md, "bad_tier.md"))
+
+
+def test_cli_confidence_flag(tmp_path, monkeypatch, capsys):
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    rc = NM.main([
+        "cli_graded", "a cli graded fact", "--type", "project",
+        "--memory-dir", md, "--no-links", "--confidence", "draft",
+    ])
+    assert rc == 0
+    with open(os.path.join(md, "cli_graded.md"), "r", encoding="utf-8") as fh:
+        assert "  confidence: draft" in fh.read()

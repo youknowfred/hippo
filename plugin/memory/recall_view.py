@@ -241,6 +241,10 @@ def describe(
             tags.append(f"relevance {score:.3f}")
         if via == "graph":
             tags.append("via 1-hop link")  # answers "why was this injected" (GRA-1 expansion)
+        # GOV-7: the author's confidence tier — display-only provenance, never a ranking
+        # input; absence (the default) renders nothing.
+        if h.get("confidence"):
+            tags.append(str(h["confidence"]))
         # GOV-2: the steer echo — a pinned hit says so (and by how much), always.
         if h.get("steer") == "pin":
             from .recall import _pin_boost

@@ -410,3 +410,19 @@ def test_describe_never_reranks_on_abstention_why_mode(monkeypatch, tmp_path):
     monkeypatch.setattr(V, "_cross_encoder_rerank", _boom)
     out = V.describe("zzqq xyzzy nonexistent", memory_dir=md, index_dir=idx, why=True)
     assert "no memory shares a token" in out
+
+
+def test_describe_tags_confidence_tier(monkeypatch, tmp_path):
+    """GOV-7: the author's tier renders in recall_view — display-only provenance."""
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    (tmp_path / "memory" / "x.md").write_text(_mem("x", "a graded memory"), encoding="utf-8")
+    synthetic = [
+        {
+            "name": "x", "file": "x.md", "description": "a graded memory",
+            "score": 0.42, "via": "rank", "confidence": "draft",
+        }
+    ]
+    monkeypatch.setattr(V, "recall", lambda *a, **k: synthetic)
+    out = V.describe("anything", memory_dir=md)
+    assert "draft" in out

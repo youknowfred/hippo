@@ -102,6 +102,12 @@ _TOOLS = [
                     "items": {"type": "string"},
                     "description": "explicit related-memory names (overrides auto-discovery)",
                 },
+                "confidence": {
+                    "type": "string",
+                    "enum": ["draft", "verified", "authoritative"],
+                    "description": "GOV-7: the author's trust dial — display-only, never a "
+                    "ranking input; omit for the default",
+                },
             },
             "required": ["name", "description", "type"],
         },
@@ -167,8 +173,11 @@ def _tool_new_memory(args: Dict[str, Any]) -> str:
         return "new_memory: name, description, and type are all required."
     links = args.get("links")
     links = [str(x) for x in links] if isinstance(links, list) else None
+    confidence = args.get("confidence")
+    confidence = str(confidence) if isinstance(confidence, str) and confidence else None
     result = write_memory(
-        name, description, mtype, str(args.get("body") or ""), links=links
+        name, description, mtype, str(args.get("body") or ""), links=links,
+        confidence=confidence,
     )
     if result.get("error"):
         return f"new_memory failed: {result['error']}"

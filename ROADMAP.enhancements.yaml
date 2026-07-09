@@ -1307,7 +1307,7 @@ workstreams:
         title: Author-set confidence tier (draft | verified | authoritative)
         priority: P3
         effort: S
-        status: planned
+        status: done
         source: {lens: trust, verdict: KEEP-worthy (blind-spot — the author's trust dial)}
         problem: >-
           Every trust signal is SYSTEM-derived (reinforcement, usage, contradiction);

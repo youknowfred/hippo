@@ -2129,6 +2129,11 @@ def recall(
                     # off) so recall_view/GOV-5 can echo "pinned" legibly (COR-8). None for
                     # an unsteered memory; rule pointers never carry steer at all.
                     "steer": e.get("steer"),
+                    # GOV-7: the author's confidence tier — DISPLAY-ONLY provenance (a
+                    # compact " [draft]" marker at inject, a tag in recall_view). Read off
+                    # the manifest, never a per-hit file read; NEVER a ranking input (the
+                    # scoring path above does not touch it — AST-pinned). None when unset.
+                    "confidence": e.get("confidence"),
                     # TEA-1/TEA-3: corpus-of-origin provenance — ALWAYS present, same
                     # no-key-branching convention as "via"/"note". "project" (or None on the
                     # single-corpus fast path) for the git-native in-repo corpus; "user" for
@@ -2203,6 +2208,10 @@ def format_results(results: List[dict], max_chars: int = _MAX_RECALL_CHARS) -> s
         # carries it, a fresh one doesn't ("" -> no clause at all). Same bracket convention as
         # `note`, same overall max_chars truncation below — a banner can never blow the budget.
         banner = f" [{r['stale_banner']}]" if r.get("stale_banner") else ""
+        # GOV-7: the author's confidence tier — a compact marker, same bracket convention;
+        # absence (None — including every rule pointer) renders nothing, so an ungraded
+        # corpus is byte-identical to before the field existed.
+        conf = f" [{r['confidence']}]" if r.get("confidence") else ""
         # RCL-2: a floor/cooldown COLLAPSE renders as one legible clause instead of the
         # entry silently vanishing (inv3) — floor takes priority when both could apply (it
         # is the more fundamental, every-session reason the pointer is redundant).
@@ -2212,7 +2221,9 @@ def format_results(results: List[dict], max_chars: int = _MAX_RECALL_CHARS) -> s
             collapse = " (already surfaced this thread)"
         else:
             collapse = ""
-        lines.append(f"  • {r['name']} ({r['file']}) — {desc}{marker}{origin}{note}{banner}{collapse}")
+        lines.append(
+            f"  • {r['name']} ({r['file']}) — {desc}{marker}{origin}{conf}{note}{banner}{collapse}"
+        )
         # RCL-6: rank-1 body-signal-win evidence snippet — progressive disclosure so a memory
         # whose key fact is buried in the body behind a generic description doesn't force a
         # read-the-file round-trip. Gated tightly: only the RANK-1 hit (a blanket rank-1

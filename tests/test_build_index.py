@@ -701,6 +701,62 @@ def test_refresh_index_picks_up_metadata_only_steer_change(tmp_path, monkeypatch
 
 
 # --------------------------------------------------------------------------- #
+# GOV-7: confidence ingestion — same both-schema read + starvation-proofing family
+# as invalid_after/source_commit_time/steer above. Display-only downstream.
+# --------------------------------------------------------------------------- #
+def test_compute_corpus_confidence_absent_by_default(tmp_path):
+    md = str(tmp_path / "memory")
+    _write_corpus(md, {"a.md": "alpha"})
+    assert B.compute_corpus(md)[0]["confidence"] is None
+
+
+def test_compute_corpus_reads_confidence_top_level_and_nested(tmp_path):
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: a\ndescription: "alpha"\nconfidence: draft\n---\nbody\n')
+    with open(os.path.join(md, "b.md"), "w", encoding="utf-8") as fh:
+        fh.write(
+            '---\nname: b\ndescription: "beta"\nmetadata:\n  confidence: authoritative\n---\nbody\n'
+        )
+    by_name = {e["name"]: e["confidence"] for e in B.compute_corpus(md)}
+    assert by_name == {"a": "draft", "b": "authoritative"}
+
+
+def test_compute_corpus_confidence_is_a_closed_enum(tmp_path):
+    """An unknown tier reads as unset (today's default) — never a passthrough label."""
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    for name, val in (("a", "canon"), ("b", "0.9"), ("c", '"  VERIFIED "')):
+        with open(os.path.join(md, f"{name}.md"), "w", encoding="utf-8") as fh:
+            fh.write(f'---\nname: {name}\ndescription: "d"\nconfidence: {val}\n---\nbody\n')
+    by_name = {e["name"]: e["confidence"] for e in B.compute_corpus(md)}
+    assert by_name == {"a": None, "b": None, "c": "verified"}
+
+
+def test_refresh_index_picks_up_metadata_only_confidence_change(tmp_path, monkeypatch):
+    """An author re-grading draft→(unset) on a quiet corpus must reach the manifest —
+    confidence never perturbs a doc_text/body hash, so only the explicit compare can."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"a.md": "alpha", "b.md": "beta"})
+    B.build_index(md, idx)
+    assert all(e.get("confidence") is None for e in B.load_index(idx).entries)
+
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: a\ndescription: "alpha"\ntype: project\nconfidence: draft\n---\nbody text\n')
+    B.refresh_index(md, idx)
+    by_name = {e["name"]: e.get("confidence") for e in B.load_index(idx).entries}
+    assert by_name["a"] == "draft"
+
+    with open(os.path.join(md, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem("a", "alpha"))
+    B.refresh_index(md, idx)
+    assert all(e.get("confidence") is None for e in B.load_index(idx).entries)
+
+
+# --------------------------------------------------------------------------- #
 # RET-5: source_commit_time ingestion — the manifest-level half of the recency prior.
 # Mirrors the invalid_after tests above exactly: same top-level/nested-under-metadata
 # read contract (staleness.read_source_commit_time), same "metadata never perturbs
@@ -1342,10 +1398,11 @@ def test_build_index_manifest_carries_body_chunks_block(tmp_path, monkeypatch):
     assert on_disk["body_chunks"] == chunks
 
     # The entries list itself is EXACTLY the pre-RET-2 shape plus RET-5's
-    # source_commit_time and GOV-2's steer (no OTHER new keys leaked onto it).
+    # source_commit_time, GOV-2's steer, and GOV-7's confidence (no OTHER new keys
+    # leaked onto it).
     assert set(manifest["entries"][0].keys()) == {
         "name", "file", "doc_text", "description", "hash", "tokens", "invalid_after",
-        "source_commit_time", "steer", "row",
+        "source_commit_time", "steer", "confidence", "row",
     }
 
 

@@ -480,7 +480,7 @@ Two version numbers, two very different contracts (COR-7):
   mismatched manifest as absent, and the next SessionStart refresh performs one full
   rebuild stamped with the current version.
 - **Corpus** — `.claude/memory/.format` declares `{"corpus_format": N}`
-  (`provenance.CORPUS_FORMAT_VERSION`, currently **3**). It is committed **with** the
+  (`provenance.CORPUS_FORMAT_VERSION`, currently **4**). It is committed **with** the
   corpus (it describes the corpus; it is not a rebuildable cache); `/hippo:init` stamps it
   when seeding a fresh corpus, and **a corpus with no marker reads as format 1** — every
   pre-marker corpus is already on the baseline, nothing to backfill.
@@ -489,12 +489,15 @@ Two version numbers, two very different contracts (COR-7):
   carry typed relations (`supersedes:`/`contradicts:`/`refines:` lists). **v3** (GOV-2) =
   frontmatter may carry `steer: pin` — the author's bounded, always-on recall lift (an
   unknown/junk `steer` value reads as unsteered, fail-open; MUTE is deliberately NOT part
-  of v3 — it stays gated on the salience keystone). Both bumps are purely ADDITIVE, so
-  each migration is the trivial case of the flow below: no per-memory edits are required —
-  review that no existing frontmatter uses the new key(s) for something else, then stamp
-  the marker (`write_corpus_format`). Until stamped, an older corpus is read identically;
-  the conventions any teammate authors still work (formats are additive where possible) —
-  the marker just records which conventions the corpus has adopted.
+  of v3 — it stays gated on the salience keystone). **v4** (GOV-7) = frontmatter may carry
+  `confidence: draft|verified|authoritative` — the author's trust dial, rendered at inject
+  and in `/hippo:recall`, NEVER a ranking input; absence reads as today's default. All
+  three bumps are purely ADDITIVE, so each migration is the trivial case of the flow
+  below: no per-memory edits are required — review that no existing frontmatter uses the
+  new key(s) for something else, then stamp the marker (`write_corpus_format`). Until
+  stamped, an older corpus is read identically; the conventions any teammate authors still
+  work (formats are additive where possible) — the marker just records which conventions
+  the corpus has adopted.
 
 **How a corpus format bump is detected, and what the operator does.** The corpus is the
 git-tracked source of authority, so hippo **never migrates it autonomously** — detection
