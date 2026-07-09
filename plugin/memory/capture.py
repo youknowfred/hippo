@@ -32,7 +32,7 @@ from typing import Dict, List, Optional
 
 from .provenance import ensure_self_ignoring_dir, resolve_dirs, run_git
 from .secrets import scan_text
-from .telemetry import abstention_backlog, default_telemetry_dir, read_episodes
+from .telemetry import abstention_backlog, default_telemetry_dir, read_decisions, read_episodes
 
 # The gitignored pending queue — a sibling of ``.claude/memory`` and of the index/telemetry
 # dirs, following the same self-ignoring-cache convention (SEC-3). It is NOT the corpus and is
@@ -48,6 +48,7 @@ _SEED_SCHEMA = 2
 _MAX_QUERY_PREVIEWS = 40
 _MAX_RECALLED_NAMES = 60
 _MAX_CHANGED_PATHS = 200
+_MAX_DECISIONS = 20
 # Byte cap on the verbatim diff-hunk evidence (GRW-1). ``run_git`` imposes NO output bound, so
 # the slice happens here — always on a line boundary, with a legible truncation marker, so a
 # monorepo-wide diff can never balloon a seed. Counts capture COUNTS; this one caps BYTES.
@@ -185,6 +186,30 @@ def _git_diff_hunks(
         return ""
 
 
+def _session_decisions(session_id: Optional[str], telemetry_dir: Optional[str]) -> List[str]:
+    """This session's user-confirmed decisions from the GRW-4 ledger, deduped and bounded.
+
+    Matching mirrors the episode isolation above exactly (``d.get("session_id") ==
+    session_id`` — the two ledgers share ``log_*``'s keying), so a decision recorded
+    mid-session lands in the SAME seed as that session's episodes. Never raises.
+    """
+    out: List[str] = []
+    try:
+        seen = set()
+        for d in read_decisions(telemetry_dir):
+            if d.get("session_id") != session_id:
+                continue
+            t = (d.get("text") or "").strip()
+            if t and t not in seen:
+                seen.add(t)
+                out.append(t)
+            if len(out) >= _MAX_DECISIONS:
+                break
+    except Exception:
+        return out
+    return out
+
+
 def _seed_salience(seed: Dict, telemetry_dir: Optional[str], untracked: List[str]) -> Dict:
     """A cheap per-seed VALUE LABEL (GRW-1) — never a gate, never an auto-prune.
 
@@ -299,10 +324,10 @@ def gather_session_context(
             "earliest_ts": episodes[0].get("ts"),
             "diff_hunks": hunks,
             "hunks_secret_flagged": bool(hunks and scan_text(hunks)),
-            # GRW-4's field, structurally part of seed schema 2 from day one so the queue
-            # never holds two flavors of the same schema; populated by the in-session
-            # decision ledger once that capture surface ships.
-            "decisions": [],
+            # GRW-4: the session's user-confirmed WHY, replayed from the in-session decision
+            # ledger (memory.capture --add-decision) with the SAME session matching as the
+            # episodes above — agent-recorded transcription only, never synthesized here.
+            "decisions": _session_decisions(session_id, telemetry_dir),
         }
         seed["salience"] = _seed_salience(seed, telemetry_dir, untracked)
         return seed
@@ -480,10 +505,29 @@ def main(argv: Optional[List[str]] = None) -> int:
         metavar="PATH",
         help="remove ONE drained seed after it has been approved or skipped (the /hippo:consolidate drain)",
     )
+    parser.add_argument(
+        "--add-decision",
+        default=None,
+        metavar="TEXT",
+        help="GRW-4: record ONE user-confirmed session decision (quote or faithfully "
+        "paraphrase what the USER stated — never infer one from the diff); it lands in this "
+        "session's SessionEnd capture seed as its durable WHY",
+    )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--repo-root", default=None)
     args = parser.parse_args(argv)
     try:
+        if args.add_decision is not None:
+            from .telemetry import log_decision
+
+            td = default_telemetry_dir(args.memory_dir) if args.memory_dir else None
+            ok = log_decision(args.add_decision, telemetry_dir=td, session_id=args.session_id)
+            print(
+                "decision recorded — it will ride this session's capture seed"
+                if ok
+                else "nothing recorded (empty text or unwritable ledger)"
+            )
+            return 0
         if args.list:
             print(_format_listing(read_pending(memory_dir=args.memory_dir)))
             return 0

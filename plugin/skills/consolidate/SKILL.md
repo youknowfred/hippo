@@ -52,9 +52,23 @@ fused from what is already in hand (the seed listing + the `--check` block):
 ```
 proposal <candidate-name>: from session <sid> (queries: "<q1>", "<q2>", …)
   evidence : changed <paths…> across <head_commit>..<head> (the seed's commit range)
+  decisions : "<d1>"; "<d2>"                           [the seed's user-confirmed WHY, when any]
   restates/replaces : <neighbor> (similarity 0.9x)     [--check neighbors, when any]
   governance echo   : <file> (overlap 0.7x)            [--check warning block, when any]
   baseline : as of HEAD <sha>                          [--check's baseline line]
+```
+
+A seed's `decisions` entries (GRW-4) are the session's recorded WHY — text the agent captured
+in-session, quoting or paraphrasing what the USER stated or confirmed. Fold the relevant ones
+into the drafted `--body` (they are exactly the durable rationale a memory needs and the one
+thing git cannot re-derive). TRANSCRIPTION, NOT SYNTHESIS: never invent a WHY the seed does
+not carry — if the seed has no decisions and the diff alone doesn't justify the fact, ask, or
+write the WHAT without a fabricated WHY. When you are draining the SAME session you are still
+in (the context is live), you may also record decisions the user confirmed just now — one per
+command — before drafting:
+
+```
+"$PY" -m memory.capture --add-decision "<the decision, in the user's own terms>"
 ```
 
 The baseline is the `--check` output's own `baseline:` line — HEAD at PROPOSAL time

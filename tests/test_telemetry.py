@@ -759,3 +759,32 @@ def test_co_recall_orders_most_sessions_first_deterministically(tmp_path):
 
 def test_co_recall_pairs_never_raises_on_missing_dir(tmp_path):
     assert T.co_recall_pairs(str(tmp_path / "nope")) == []
+
+
+# --------------------------------------------------------------------------- #
+# GRW-4: the in-session decision ledger (log_decision / read_decisions)
+# --------------------------------------------------------------------------- #
+def test_log_decision_roundtrip_with_session_keying(tmp_path):
+    td = str(tmp_path / "tele")
+    assert T.log_decision("ship the v2 schema now, migrate v1 lazily", telemetry_dir=td, session_id="s-A")
+    rows = list(T.read_decisions(td))
+    assert len(rows) == 1
+    assert rows[0]["text"] == "ship the v2 schema now, migrate v1 lazily"
+    assert rows[0]["session_id"] == "s-A"
+    assert rows[0]["ts"] > 0
+
+
+def test_log_decision_truncates_and_refuses_empty(tmp_path):
+    td = str(tmp_path / "tele")
+    assert T.log_decision("   ", telemetry_dir=td) is False, "whitespace-only → nothing recorded"
+    assert list(T.read_decisions(td)) == []
+    long = "d" * (T._DECISION_MAX_CHARS + 200)
+    assert T.log_decision(long, telemetry_dir=td, session_id="s")
+    assert len(list(T.read_decisions(td))[0]["text"]) == T._DECISION_MAX_CHARS
+
+
+def test_decision_ledger_is_self_ignoring_and_never_raises(tmp_path):
+    td = str(tmp_path / "tele")
+    T.log_decision("x", telemetry_dir=td, session_id="s")
+    assert open(os.path.join(td, ".gitignore"), encoding="utf-8").read() == "*\n"
+    assert list(T.read_decisions(str(tmp_path / "missing"))) == []

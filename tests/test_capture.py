@@ -349,3 +349,48 @@ def test_main_discard_drains_one_seed(repo, capsys):
     assert rc == 0
     assert "discarded" in capsys.readouterr().out
     assert C.pending_count(memory_dir=md) == 0
+
+
+# --------------------------------------------------------------------------- #
+# GRW-4: the session's WHY — decisions ride the seed
+# --------------------------------------------------------------------------- #
+def test_seed_folds_this_sessions_decisions_only(repo):
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    td = default_telemetry_dir(md)
+    _seed_episode(md, repo, "mine", ["m"], "why did we choose sqlite")
+    T.log_decision("chose sqlite over postgres: zero-ops beats scale we don't have", telemetry_dir=td, session_id="mine")
+    T.log_decision("their decision, not ours", telemetry_dir=td, session_id="theirs")
+    T.log_decision("chose sqlite over postgres: zero-ops beats scale we don't have", telemetry_dir=td, session_id="mine")  # dupe
+
+    seed = json.load(open(C.write_session_capture("mine", memory_dir=md, repo_root=repo)))
+    assert seed["decisions"] == [
+        "chose sqlite over postgres: zero-ops beats scale we don't have"
+    ], "exact-session match, deduped — never another session's WHY"
+    listing = C._format_listing(C.read_pending(memory_dir=md))
+    assert "decisions:" in listing and "zero-ops" in listing
+
+
+def test_seed_without_decisions_stays_empty_list(repo):
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    _seed_episode(md, repo, "quiet-why", ["m"], "q")
+    seed = json.load(open(C.write_session_capture("quiet-why", memory_dir=md, repo_root=repo)))
+    assert seed["decisions"] == []
+
+
+def test_main_add_decision_records_for_next_capture(repo, capsys):
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    _seed_episode(md, repo, "cli-sess", ["m"], "q")
+    rc = C.main([
+        "--add-decision", "pin the retry budget at 3 — the user confirmed flakier is worse",
+        "--session-id", "cli-sess", "--memory-dir", md,
+    ])
+    assert rc == 0
+    assert "decision recorded" in capsys.readouterr().out
+    seed = json.load(open(C.write_session_capture("cli-sess", memory_dir=md, repo_root=repo)))
+    assert seed["decisions"] == ["pin the retry budget at 3 — the user confirmed flakier is worse"]

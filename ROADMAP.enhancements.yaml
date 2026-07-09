@@ -1515,7 +1515,7 @@ workstreams:
         title: Capture the WHY — session decisions/rationale into the seed
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: capture, verdict: KEEP-worthy (blind-spot)}
         problem: >-
           The seed captures WHAT changed (diff, GRW-1) but not the WHY — the salient

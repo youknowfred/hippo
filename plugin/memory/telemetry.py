@@ -807,6 +807,78 @@ def read_episodes(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
         return
 
 
+# GRW-4: the in-session decision ledger. The WHY of a session — tradeoffs the user confirmed,
+# approaches they chose — cannot be re-derived from git or code and hooks can never scrape it
+# (no Stop event, no transcript access, no LLM in hooks — triply impossible by design). So the
+# capture moment is IN-SESSION: the AGENT records each user-confirmed decision explicitly via
+# ``memory.capture --add-decision`` (prompted by the PreCompact nudge), and SessionEnd folds
+# the session's entries into the capture seed. Same keying, rotation, and privacy posture as
+# the episode buffer; entries are bounded so a chatty session can't bloat the ledger.
+_DECISION_LEDGER_NAME = "decisions.jsonl"
+_DECISION_MAX_CHARS = 400
+
+
+def _decision_ledger_path(telemetry_dir: str) -> str:
+    return os.path.join(telemetry_dir, _DECISION_LEDGER_NAME)
+
+
+def log_decision(
+    text: str,
+    *,
+    telemetry_dir: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> bool:
+    """Append ONE user-confirmed session decision to the gitignored ``decisions.jsonl``.
+
+    CAPTURE-FROM-EVIDENCE, enforced at the surface: this is only ever called by the agent,
+    per decision, with text the user stated or confirmed — the tooling never synthesizes an
+    entry (there is no automated caller anywhere). Truncated to ``_DECISION_MAX_CHARS``,
+    keyed exactly like ``log_episode`` (harness session id when given, else the file token)
+    so SessionEnd's seed matching works identically for both ledgers. Fire-and-forget:
+    True on append, False on any failure, never raises.
+    """
+    try:
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return False
+        td = _resolve_dir(telemetry_dir)
+        ensure_self_ignoring_dir(td)  # derived dir: mkdir + self-ignoring .gitignore (SEC-3)
+        event = {
+            "ts": round(time.time(), 3),
+            "session_id": current_session_id(td, session_id=session_id),
+            "text": cleaned[:_DECISION_MAX_CHARS],
+        }
+        path = _decision_ledger_path(td)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(event, ensure_ascii=False) + "\n")
+        _rotate_if_needed(path)
+        return True
+    except Exception:
+        return False
+
+
+def read_decisions(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
+    """Yield parsed decision-ledger entries, skipping corrupt/partial lines. Never raises."""
+    try:
+        td = _resolve_dir(telemetry_dir)
+        path = _decision_ledger_path(td)
+        if not os.path.exists(path):
+            return
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(obj, dict):
+                    yield obj
+    except Exception:
+        return
+
+
 # --------------------------------------------------------------------------- #
 # SIG-4: outcome ledger (KPI-2 read-signal). A PostToolUse hook appends one event per
 # file-touching tool call — {ts, session_id, tool, path} (path repo-relative). The KPI-2
