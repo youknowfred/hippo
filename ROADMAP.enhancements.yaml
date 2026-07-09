@@ -903,7 +903,7 @@ workstreams:
         title: Evidence-snippet form for the top body-hit
         priority: P3
         effort: M
-        status: planned
+        status: done
         source: {lens: retrieval, verdict: RESHAPE (body-hit-only, staleness-banded)}
         problem: >-
           For a memory whose key fact is buried in the body behind a generic
@@ -946,6 +946,36 @@ workstreams:
           snippet within _MAX_RECALL_CHARS. Manifest gains a key → this is a
           SCHEMA_VERSION bump per ED-4 (clean break, one forced rebuild, re-bootstrap
           no); coordinate with any same-tier bump so the suite sees one break.
+        implementation_correction: >-
+          SHIPPED 2026-07-08. TWO corrections against the note above, both caught before
+          merge (not by the eval gates — the absolute gates stayed green either way).
+          (1) "GOOD NEWS: body-chunk TEXT is ALREADY PERSISTED" is WRONG against the live
+          tree: build_index.py's in-MEMORY body_chunks list does carry "text" (used for
+          embedding), but the block actually WRITTEN to manifest.json
+          (body_chunks_manifest) explicitly stripped it to {entry,hash,tokens,row} — the
+          RET-2 comment there said so outright ("no raw chunk text — reconstructible from
+          the source file"). idx.body_chunks[j]["text"] would have KeyError'd. FIX: added
+          "text" back to body_chunks_manifest (the persisted shape is now
+          {entry,hash,tokens,row,text}) — a real, if small, index-size increase, but it
+          keeps the promise this note assumed: the snippet render is genuinely read-free at
+          emit time. Confirmed as this tier's ONE schema break: SCHEMA_VERSION 3->4 covers
+          BOTH this and the new manifest-wide head_commit key in one bump.
+          (2) _SNIPPET_SCORE_BAND calibrated against _RRF_K ALONE (ignoring
+          _BODY_RRF_WEIGHT) sets a bar NO body-win entry could ever clear: a body-win's
+          entire score comes from body-discounted rankings, whose absolute ceiling is
+          `2 * _body_rrf_weight() / (_RRF_K+1)` (rank-0 in both dense_body AND bm25_body at
+          once) — roughly HALF that for a realistic single-lane rank-0 hit. A band
+          calibrated on primary-signal magnitude alone (~0.03) is 3-6x higher than a
+          body-win could ever reach (~0.008 for a real single-distinctive-fact fixture,
+          confirmed empirically), silently making the whole feature dead code — no hermetic
+          test would have caught this either, since a test asserting "the snippet renders"
+          would have just failed, which is what happened first. FIX: default now derives
+          from `_body_rrf_weight() / (_RRF_K+1)` (a fraction, `_SNIPPET_SCORE_BAND_FRACTION
+          = 0.6`, of a single body-ranking's OWN rank-0 ceiling) so the gate scales
+          correctly with whatever HIPPO_BODY_RRF_WEIGHT is configured, rather than a
+          fixed number silently detached from the score space it's compared against.
+          `HIPPO_SNIPPET_SCORE_BAND` still overrides with an absolute value for operators
+          who want to tune it directly.
 
   # ------------------------------------------------------------------ GOV ---
   - id: GOV

@@ -57,6 +57,19 @@ _MAX_RECALL_CHARS = 9000
 _RRF_K = 60
 DEFAULT_K = 10
 
+_MAX_SNIPPET_CHARS = 300  # override: HIPPO_MAX_SNIPPET_CHARS -- bounds the verbatim quote
+
+
+def _max_snippet_chars() -> int:
+    """``HIPPO_MAX_SNIPPET_CHARS`` override; malformed/absent -> the module default."""
+    raw = os.environ.get("HIPPO_MAX_SNIPPET_CHARS")
+    if raw is None or not raw.strip():
+        return _MAX_SNIPPET_CHARS
+    try:
+        return int(raw)
+    except ValueError:
+        return _MAX_SNIPPET_CHARS
+
 # RET-2: body-chunk rankings (bm25_body / dense_body) enter fusion as a BACKSTOP, not a peer
 # of the description rankings -- a memory whose crucial fact lives only in its body should be
 # findABLE, but a description-vocabulary hit is still the stronger, more deliberate signal (the
@@ -77,6 +90,35 @@ def _body_rrf_weight() -> float:
         return float(raw)
     except ValueError:
         return _BODY_RRF_WEIGHT
+
+
+# RCL-6: evidence-snippet score band. A body-win entry's ENTIRE score comes from the
+# body-discounted rankings (_body_rrf_weight, 0.5 by default) -- its absolute ceiling is
+# `2 * _body_rrf_weight() / (_RRF_K + 1)` (rank-0 in BOTH dense_body and bm25_body at once),
+# roughly HALF that (`_body_rrf_weight() / (_RRF_K + 1)`) for a genuine rank-0 hit in just
+# ONE body ranking -- calibrating this band against _RRF_K alone (ignoring the body discount
+# entirely) would set a bar NO body-win could ever clear, silently making the whole feature
+# dead code. Default admits a solid single-lane rank-0..~2 hit while still filtering a
+# deep-tail, barely-there body match.
+_SNIPPET_SCORE_BAND_FRACTION = 0.6  # override: HIPPO_SNIPPET_SCORE_BAND (absolute, not a fraction)
+
+
+def _snippet_score_band() -> float:
+    """The MINIMUM score a rank-1 body-win must clear to render its snippet.
+
+    ``HIPPO_SNIPPET_SCORE_BAND`` overrides with an ABSOLUTE score value; malformed/absent
+    falls back to a fraction of a single body ranking's own rank-0 ceiling
+    (``_body_rrf_weight() / (_RRF_K + 1)``), so the default stays correctly calibrated even
+    if an operator tunes ``HIPPO_BODY_RRF_WEIGHT``.
+    """
+    raw = os.environ.get("HIPPO_SNIPPET_SCORE_BAND")
+    if raw is not None and raw.strip():
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return _SNIPPET_SCORE_BAND_FRACTION * _body_rrf_weight() / (_RRF_K + 1)
+
 
 # Soft-invalidation (Tier 3, graceful decay) — "recent" halves the fused score BEFORE the
 # top-k cut (real demotion, can fall out of top-k); "old" is filtered from DISPLAY only,
@@ -605,7 +647,11 @@ def _bm25_rank(
 
 
 def _bm25_rank_body(
-    query_tokens: List[str], index: LoadedIndex, *, patched_indices: Optional[set] = None
+    query_tokens: List[str],
+    index: LoadedIndex,
+    *,
+    patched_indices: Optional[set] = None,
+    winning_chunk_out: Optional[Dict[int, int]] = None,
 ) -> List[int]:
     """BM25 ranking over BODY CHUNKS, mapped back to parent entry indices, deduped to each
     parent's best (lowest-rank) chunk hit -- the lexical half of the body backstop.
@@ -618,6 +664,13 @@ def _bm25_rank_body(
     entries here, but the parameter is threaded for signature symmetry with ``_bm25_rank`` and
     so a future body-drift patch (documented as healing at the next SessionStart rebuild, not
     mid-session) would have somewhere to plug in without another signature change.
+
+    RCL-6: ``winning_chunk_out`` (caller-supplied dict, mutated in place, keyed by parent
+    entry index -> the WINNING (best-ranked) body-chunk index ``j`` into ``index.body_chunks``)
+    lets a caller recover WHICH chunk a body-win entry actually matched on, for the evidence
+    snippet -- the return value alone (entry indices only) discards this on purpose (every
+    other caller/ranking-list shape in this module is entry-index-only; adding it here as an
+    optional out-param keeps that contract unchanged for everyone else).
     """
     body_chunks = index.body_chunks
     if not body_chunks or not query_tokens:
@@ -638,6 +691,8 @@ def _bm25_rank_body(
             continue
         seen.add(parent)
         out.append(parent)
+        if winning_chunk_out is not None:
+            winning_chunk_out[parent] = j
     return out
 
 
@@ -713,7 +768,11 @@ def _dense_rank(query: str, index: LoadedIndex, *, raw_rows: Optional[List[int]]
 
 
 def _dense_rank_body(
-    query: str, index: LoadedIndex, *, raw_rows: Optional[List[int]] = None
+    query: str,
+    index: LoadedIndex,
+    *,
+    raw_rows: Optional[List[int]] = None,
+    winning_chunk_out: Optional[Dict[int, int]] = None,
 ) -> List[int]:
     """Body-CHUNK ranking, MAPPED BACK to parent entry indices, deduped to each parent's
     BEST (lowest-rank) chunk hit — a backstop ranking, never a second vote per memory.
@@ -728,6 +787,9 @@ def _dense_rank_body(
     ``raw_rows``: see ``_dense_rank``'s docstring -- shares the SAME single embed+matmul
     ``recall()`` already paid for the description ranking, instead of re-embedding the query
     a second time for the body ranking.
+
+    RCL-6: ``winning_chunk_out`` -- see ``_bm25_rank_body``'s docstring; same contract, same
+    caller-supplied out-param convention.
     """
     n_entries = len(index.entries)
     body_chunks = index.body_chunks
@@ -747,6 +809,8 @@ def _dense_rank_body(
             continue
         seen.add(parent)
         out.append(parent)
+        if winning_chunk_out is not None:
+            winning_chunk_out[parent] = j
     return out
 
 
@@ -1782,8 +1846,18 @@ def recall(
         # see _drift_patch's docstring; a body edited mid-session keeps serving its
         # last-indexed chunk text until the next SessionStart rebuild, same rationale as the
         # stale dense row already accepted for entries pre-RET-2.
-        bm25_body = _bm25_rank_body(q_tokens, idx, patched_indices=patched_indices)
-        dense_body = _dense_rank_body(query, idx, raw_rows=raw_dense_rows)
+        # RCL-6: capture the WINNING chunk index per parent from each body ranking, keyed by
+        # entry index -- the evidence snippet needs the actual chunk text a body-win hit
+        # matched on, not just "this entry has a body backstop rank." A parent winning via
+        # BOTH lanes takes whichever lane's dict update runs last (bm25 then dense below) --
+        # either is a genuine winning chunk for that entry, so which one displays is immaterial.
+        winning_chunk: Dict[int, int] = {}
+        bm25_body = _bm25_rank_body(
+            q_tokens, idx, patched_indices=patched_indices, winning_chunk_out=winning_chunk
+        )
+        dense_body = _dense_rank_body(
+            query, idx, raw_rows=raw_dense_rows, winning_chunk_out=winning_chunk
+        )
 
         # RCL-1: lean the PRIMARY (description) weights toward lexical or dense based on how
         # identifier-dense this query is; body weights (_body_rrf_weight) are a SEPARATE,
@@ -2029,6 +2103,25 @@ def recall(
                     # project dir. Both are None for a single-corpus recall (entries untagged).
                     "corpus": e.get("corpus"),
                     "root": e.get("root"),
+                    # RCL-6: body-signal-win detection — ALWAYS present, same no-key-branching
+                    # convention as "via"/"note"/"corpus". Derived, never invented: an entry
+                    # ABSENT from `primary_relevance` (the desc-only fusion the knee already
+                    # exempts) but PRESENT in `winning_chunk` (a body ranking actually ranked
+                    # it) is a body-win — its key fact lives in the body, not the description.
+                    # Absent from both is a graph injection (no body signal, no snippet).
+                    "body_win": i not in primary_relevance and i in winning_chunk,
+                    # The winning chunk's own verbatim text (already resident from the
+                    # manifest — no read-at-emit), or None when not a body-win. format_results
+                    # gates the actual snippet render on rank==1 + score band + corpus.
+                    "body_chunk_text": (
+                        idx.body_chunks[winning_chunk[i]].get("text")
+                        if (i not in primary_relevance and i in winning_chunk)
+                        else None
+                    ),
+                    # The index-wide build commit — ALWAYS present (None on a non-git corpus
+                    # or a pre-RCL-6 manifest without the key yet). Source of the snippet's
+                    # "indexed @sha" mark; identical across every hit in one recall() call.
+                    "head_commit": idx.manifest.get("head_commit"),
                 }
             )
         # RUL-4: rules-plane pointers APPEND after the organic top-k — extra lines, never
@@ -2084,6 +2177,29 @@ def format_results(results: List[dict], max_chars: int = _MAX_RECALL_CHARS) -> s
         else:
             collapse = ""
         lines.append(f"  • {r['name']} ({r['file']}) — {desc}{marker}{origin}{note}{banner}{collapse}")
+        # RCL-6: rank-1 body-signal-win evidence snippet — progressive disclosure so a memory
+        # whose key fact is buried in the body behind a generic description doesn't force a
+        # read-the-file round-trip. Gated tightly: only the RANK-1 hit (a blanket rank-1
+        # snippet would be redundant for a description-signal hit — the description IS the
+        # snippet then), only when the winning signal was genuinely a body chunk, only above
+        # a high score band (avoid a marginal body-backstop hit), and never a rule pointer (a
+        # rule pointer has no chunk/sha — it is not a memory). Bounded independently of the
+        # overall max_chars truncation below, which still applies on top.
+        if (
+            r.get("rank") == 1
+            and r.get("body_win")
+            and r.get("body_chunk_text")
+            and r.get("corpus") != _RULES_SOURCE
+            and (r.get("score") or 0) >= _snippet_score_band()
+        ):
+            snippet = r["body_chunk_text"].replace("\n", " ").strip()
+            snippet = " ".join(snippet.split())
+            max_snip = _max_snippet_chars()
+            if len(snippet) > max_snip:
+                snippet = snippet[: max_snip - 1].rstrip() + "…"
+            sha = (r.get("head_commit") or "")[:7]
+            sha_mark = f" — indexed @{sha}" if sha else ""
+            lines.append(f'      ↳ "{snippet}"{sha_mark}')
     out = "\n".join(lines)
     if len(out) > max_chars:
         out = out[: max_chars - 16].rstrip() + "\n…(truncated)"

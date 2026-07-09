@@ -1207,7 +1207,9 @@ def test_build_index_manifest_carries_body_chunks_block(tmp_path, monkeypatch):
     assert "body_chunks" in manifest
     chunks = manifest["body_chunks"]
     assert chunks and all(c["entry"] == 0 for c in chunks)
-    assert all(set(c.keys()) == {"entry", "hash", "tokens", "row"} for c in chunks)
+    # RCL-6: "text" joined the persisted shape (the evidence-snippet render needs the
+    # winning chunk's verbatim text with no read-at-emit).
+    assert all(set(c.keys()) == {"entry", "hash", "tokens", "row", "text"} for c in chunks)
 
     # Round-trips through the actual manifest.json file on disk.
     import json
@@ -1222,6 +1224,30 @@ def test_build_index_manifest_carries_body_chunks_block(tmp_path, monkeypatch):
         "name", "file", "doc_text", "description", "hash", "tokens", "invalid_after",
         "source_commit_time", "row",
     }
+
+
+def test_build_index_manifest_carries_head_commit(repo, memory_dir, monkeypatch):
+    """RCL-6: the manifest stamps the CURRENT HEAD at build time -- one git call per BUILD,
+    never per query -- as the evidence-snippet's "indexed @sha" source."""
+    from .conftest import git_commit
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    idx = os.path.join(os.path.dirname(memory_dir), ".memory-index")
+    with open(os.path.join(memory_dir, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: a\ndescription: "d"\ntype: project\n---\nbody\n')
+    sha = git_commit(repo, "seed", 1_700_000_000)
+
+    manifest = B.build_index(memory_dir, idx)
+    assert manifest["head_commit"] == sha
+
+
+def test_build_index_manifest_head_commit_none_outside_git_repo(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_body_corpus(md, {"a.md": ("a generic description", _DISTINCTIVE_BODY)})
+    manifest = B.build_index(md, idx)
+    assert manifest["head_commit"] is None
 
 
 def test_build_index_dense_matrix_widened_with_body_chunk_rows(tmp_path, monkeypatch):

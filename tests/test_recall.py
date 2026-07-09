@@ -1974,6 +1974,132 @@ def test_bm25_rank_body_maps_chunks_back_to_parent_and_dedupes(tmp_path, monkeyp
     assert result.count(0) == 1  # entry 0 contributes exactly once, not twice
 
 
+# --------------------------------------------------------------------------- #
+# RCL-6: evidence-snippet form for the top body-hit
+# --------------------------------------------------------------------------- #
+def test_recall_body_win_snippet_renders_with_sha_for_rank1_body_only_hit(
+    repo, memory_dir, tmp_path, monkeypatch
+):
+    """Acceptance: a rank-1 body-signal-win hit carries body_win=True, its winning chunk's
+    verbatim text, and a real head_commit; format_results renders the snippet inline with
+    an "indexed @sha" mark."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    idx = str(tmp_path / "idx")
+    _write_body_corpus(memory_dir, {"incident.md": ("a generic description", _DISTINCTIVE_BODY)})
+    git_commit(repo, "seed corpus", 1_700_000_000)
+    B.build_index(memory_dir, idx)
+
+    res = R.recall("zqxwyvutplaceholder timeout", k=5, memory_dir=memory_dir, index_dir=idx)
+    assert res and res[0]["name"] == "incident"
+    assert res[0]["rank"] == 1
+    assert res[0]["body_win"] is True
+    assert res[0]["body_chunk_text"] and "zqxwyvutplaceholder" in res[0]["body_chunk_text"]
+    assert res[0]["head_commit"] and len(res[0]["head_commit"]) >= 7
+
+    out = R.format_results(res)
+    assert '↳ "' in out
+    assert "zqxwyvutplaceholder" in out
+    assert f"indexed @{res[0]['head_commit'][:7]}" in out
+
+
+def test_recall_body_win_false_for_description_signal_hit(tmp_path, monkeypatch):
+    """A normal description-matching hit must never be flagged a body-win, and must never
+    render a snippet -- the description IS the summary already."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"reranker_voyage.md": _CORPUS["reranker_voyage.md"]})
+    B.build_index(md, idx)
+
+    res = R.recall("voyage rerank cross encoder", k=5, memory_dir=md, index_dir=idx)
+    assert res and res[0]["name"] == "reranker_voyage"
+    assert res[0]["body_win"] is False
+    assert res[0]["body_chunk_text"] is None
+    assert '↳ "' not in R.format_results(res)
+
+
+def test_format_results_no_snippet_for_rank1_rule_pointer_even_if_flagged():
+    """Mandatory T2 guard, tested directly against format_results: a rule pointer must
+    NEVER render a snippet, even if (hypothetically) it carried body_win=True -- a rule
+    pointer has no chunk/sha; corpus="rule" wins over every other snippet condition."""
+    fake = [
+        {
+            "name": "Deploys", "file": "CLAUDE.md", "description": "deploy rules",
+            "rank": 1, "score": 999.0, "backend": "rules", "via": "rules", "note": "",
+            "stale_banner": "", "salience": None, "corpus": "rule", "root": None,
+            "body_win": True, "body_chunk_text": "should never render", "head_commit": "abcdef1",
+        }
+    ]
+    out = R.format_results(fake)
+    assert '↳ "' not in out
+    assert "should never render" not in out
+
+
+def test_format_results_snippet_gated_by_score_band(monkeypatch):
+    """A body-win below the score band must not render a snippet -- only the pointer line."""
+    fake = [
+        {
+            "name": "incident", "file": "incident.md", "description": "a generic description",
+            "rank": 1, "score": 0.001, "backend": "bm25", "via": "rank", "note": "",
+            "stale_banner": "", "salience": None, "corpus": None, "root": None,
+            "body_win": True, "body_chunk_text": "the distinctive fact", "head_commit": "abcdef1",
+        }
+    ]
+    assert '↳ "' not in R.format_results(fake)
+    monkeypatch.setenv("HIPPO_SNIPPET_SCORE_BAND", "0")  # admits any non-negative score
+    assert '↳ "' in R.format_results(fake)
+
+
+def test_format_results_snippet_truncates_to_max_chars(monkeypatch):
+    monkeypatch.setenv("HIPPO_MAX_SNIPPET_CHARS", "20")
+    fake = [
+        {
+            "name": "incident", "file": "incident.md", "description": "a generic description",
+            "rank": 1, "score": 1.0, "backend": "bm25", "via": "rank", "note": "",
+            "stale_banner": "", "salience": None, "corpus": None, "root": None,
+            "body_win": True, "body_chunk_text": "x" * 100, "head_commit": "abcdef1",
+        }
+    ]
+    out = R.format_results(fake)
+    snippet_line = next(ln for ln in out.splitlines() if "↳" in ln)
+    assert "…" in snippet_line
+    assert len(snippet_line) < 100  # bounded well below the raw 100-char body
+
+
+def test_snippet_score_band_and_max_chars_env_overrides(monkeypatch):
+    monkeypatch.setenv("HIPPO_SNIPPET_SCORE_BAND", "0.05")
+    assert R._snippet_score_band() == pytest.approx(0.05)
+    monkeypatch.setenv("HIPPO_SNIPPET_SCORE_BAND", "not-a-number")
+    assert R._snippet_score_band() == pytest.approx(
+        R._SNIPPET_SCORE_BAND_FRACTION * R._body_rrf_weight() / (R._RRF_K + 1)
+    )
+    monkeypatch.delenv("HIPPO_SNIPPET_SCORE_BAND", raising=False)
+
+    monkeypatch.setenv("HIPPO_MAX_SNIPPET_CHARS", "50")
+    assert R._max_snippet_chars() == 50
+    monkeypatch.setenv("HIPPO_MAX_SNIPPET_CHARS", "not-a-number")
+    assert R._max_snippet_chars() == R._MAX_SNIPPET_CHARS
+    monkeypatch.delenv("HIPPO_MAX_SNIPPET_CHARS", raising=False)
+    assert R._max_snippet_chars() == R._MAX_SNIPPET_CHARS
+
+
+def test_recall_body_win_and_head_commit_always_present_no_key_branching(tmp_path, monkeypatch):
+    """Convention pin: every result dict carries body_win/body_chunk_text/head_commit keys,
+    same no-key-branching posture as via/note/corpus -- a description hit gets False/None,
+    never a missing key."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx)
+    res = R.recall("voyage rerank cross encoder", k=5, memory_dir=md, index_dir=idx)
+    assert res
+    for r in res:
+        assert "body_win" in r and isinstance(r["body_win"], bool)
+        assert "body_chunk_text" in r
+        assert "head_commit" in r  # None outside a git repo, but the key always exists
+
+
 def test_dense_rank_body_maps_chunks_back_and_dedupes(tmp_path, monkeypatch):
     """Direct unit check on the dense half of the backstop: fake-embedder dense rank over the
     widened matrix, mapped back to parent entries, deduped to best rank."""

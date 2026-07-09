@@ -64,7 +64,7 @@ _INDEX_DIRNAME = ".memory-index"
 # separately (``provenance.CORPUS_FORMAT_VERSION`` + the ``.claude/memory/.format``
 # marker) — the corpus is authoritative and is never auto-migrated; see doctor's
 # ``check_format_version`` and plugin/memory/README.md.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 # Public (not underscore-prefixed): doctor's non-English-corpus check (RET-3) compares a
 # manifest's recorded model against this constant to decide whether the CURRENTLY configured
 # model is the English default vs. an already-switched multilingual/other model.
@@ -1111,13 +1111,29 @@ def build_index(
         [e.get("tokens") or [] for e in entries] + [c.get("tokens") or [] for c in body_chunks]
     )
 
-    # RET-2: manifest's persisted body_chunks block -- entry/hash/tokens/row ONLY (no raw
-    # chunk text — the text is reconstructible from the source file via compute_body_chunks,
-    # exactly like description rows never persist doc_text's raw description twice either).
+    # RCL-6 CORRECTION (was RET-2's original comment here): chunk TEXT is now persisted
+    # after all -- RCL-6's evidence snippet needs the winning body chunk's verbatim text at
+    # recall/emit time, and re-reading the source file per-hit would be a hot-path file read
+    # this module's own contract forbids. Duplicating a bounded per-chunk string (the index
+    # is gitignored/derived/rebuildable either way, per inv1) is the cheaper, hot-path-safe
+    # trade -- SCHEMA_VERSION bumped 3->4 for this shape change.
     body_chunks_manifest = [
-        {"entry": c["entry"], "hash": c["hash"], "tokens": c["tokens"], "row": c["row"]}
+        {"entry": c["entry"], "hash": c["hash"], "tokens": c["tokens"], "row": c["row"], "text": c["text"]}
         for c in body_chunks
     ]
+
+    # RCL-6: manifest-wide ``head_commit`` -- the "indexed @<sha>" evidence-snippet mark's
+    # source. ``memory_dir`` is already resolved to a real path by this point; ``git -C``
+    # resolves the toplevel repo from a subdirectory transparently, so no repo_root plumbing
+    # is needed here. Mirrors telemetry.log_episode's identical rev-parse pattern. One git
+    # call PER BUILD (never per-query -- the hot path only ever reads this cached value).
+    head_commit = None
+    try:
+        from .provenance import run_git
+
+        head_commit = run_git(["rev-parse", "HEAD"], memory_dir).strip() or None
+    except Exception:
+        head_commit = None
 
     manifest = {
         "schema_version": SCHEMA_VERSION,
@@ -1130,6 +1146,7 @@ def build_index(
         "entries": entries,
         "body_chunks": body_chunks_manifest,
         "bm25": bm25_stats,
+        "head_commit": head_commit,
     }
 
     # COR-12: dense.npy (or its removal) is durably in place BEFORE the manifest that
@@ -1274,11 +1291,12 @@ class LoadedIndex:
     actual loaded matrix's shape and every entry's ``row`` index -- any mismatch
     degrades to BM25-only for this read, exactly like a fully-failed dense load would.
 
-    RET-2: ``body_chunks`` (a flat list of ``{entry, hash, tokens, row}``, may be empty for
-    an older pre-RET-2 manifest or a corpus with no qualifying body chunks) is validated
-    against the SAME widened dense matrix -- a torn read must degrade the WHOLE dense view
-    (entries AND chunks) to BM25-only together, never a half-valid matrix where entry rows
-    are trusted but chunk rows are garbage (or vice versa).
+    RET-2: ``body_chunks`` (a flat list of ``{entry, hash, tokens, row}`` -- RCL-6 added
+    ``text`` to this shape, SCHEMA_VERSION 3->4 -- may be empty for a corpus with no
+    qualifying body chunks) is validated against the SAME widened dense matrix -- a torn
+    read must degrade the WHOLE dense view (entries AND chunks) to BM25-only together, never
+    a half-valid matrix where entry rows are trusted but chunk rows are garbage (or vice
+    versa).
     """
 
     def __init__(self, manifest: dict, dense):
