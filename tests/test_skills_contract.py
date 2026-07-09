@@ -33,7 +33,8 @@ _GUARD = '[ -n "${CLAUDE_PLUGIN_DATA:-}" ] ||'
 def test_shipped_skills_are_exactly_these():
     names = sorted(os.path.basename(os.path.dirname(p)) for p in _ALL_SKILLS)
     assert names == [
-        "audit", "bootstrap", "consolidate", "doctor", "init", "new", "recall", "remove"
+        "audit", "bootstrap", "consolidate", "doctor", "init", "new", "recall", "remove",
+        "resolve", "why",
     ]
 
 

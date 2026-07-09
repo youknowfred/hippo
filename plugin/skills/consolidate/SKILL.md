@@ -43,14 +43,33 @@ nothing):
 "$PY" -m memory.new_memory --check <candidate-name> "<one-line description>" --type {user|feedback|project|reference}
 ```
 
-- **route `add`** → the candidate is novel; create it:
+Then, for each candidate that survives the check, **render its RATIONALE before asking for
+approval** (GOV-3) — the evidence a teammate reviewing the eventual MEMORY.md diff needs,
+fused from what is already in hand (the seed listing + the `--check` block):
+
+```
+proposal <candidate-name>: from session <sid> (queries: "<q1>", "<q2>", …)
+  evidence : changed <paths…> across <head_commit>..<head> (the seed's commit range)
+  restates/replaces : <neighbor> (similarity 0.9x)     [--check neighbors, when any]
+  governance echo   : <file> (overlap 0.7x)            [--check warning block, when any]
+  baseline : as of HEAD <sha>                          [--check's baseline line]
+```
+
+The baseline is the `--check` output's own `baseline:` line — HEAD at PROPOSAL time
+(`source_commit` does not exist yet; provenance backfill happens only on the real write).
+If a seed ever carries verbatim diff hunks (a future capture upgrade), include the relevant
+hunk lines in the `evidence` block too.
+
+- **route `add`** → the candidate is novel; create it, fencing the rationale into the body
+  so the WHY is git-committed with the memory (not a one-time drain display):
   ```
-  "$PY" -m memory.new_memory <candidate-name> "<description>" --type {user|feedback|project|reference} --body "<the WHY>"
+  "$PY" -m memory.new_memory <candidate-name> "<description>" --type {user|feedback|project|reference} --body "<the WHY>" --rationale "from session <sid>; as of HEAD <sha>"
   ```
 - **route `review`** → a near-duplicate/conflict was named. Read it, then pick one, naming the
   target explicitly (Mem0's ADD/UPDATE/SUPERSEDE/NOOP): **update-existing** (fold the fact into
   the named memory's body/description, don't create a file), **supersede** (the new fact
-  replaces the old claim — create it, then
+  replaces the old claim — create it with
+  `--rationale "replaces <old-name> (similarity 0.9x); from session <sid>; as of HEAD <sha>"`, then
   `"$PY" -m memory.reconsolidate --reverify <old-name> --outcome demote --superseded-by <new-name>`),
   or **skip** (already covered).
 

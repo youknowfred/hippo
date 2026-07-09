@@ -542,6 +542,7 @@ def test_rule_pointer_surfaces_even_on_corpus_abstention(repo, memory_dir, tmp_p
     )
     assert hits and all(h["corpus"] == "rule" for h in hits)
     assert hits[0]["name"] == "Style"
+    assert all("steer" not in h for h in hits)  # GOV-2: rule pointers never carry steer
 
 
 def test_irrelevant_query_clears_no_rule_floor(repo, memory_dir, tmp_path, monkeypatch):

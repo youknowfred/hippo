@@ -70,10 +70,10 @@ def test_initialize_defaults_protocol_when_absent():
     assert resp["result"]["protocolVersion"] == "2024-11-05"
 
 
-def test_tools_list_exposes_exactly_three_tools():
+def test_tools_list_exposes_exactly_four_tools():
     resp = M.handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     names = {t["name"] for t in resp["result"]["tools"]}
-    assert names == {"recall", "new_memory", "traverse"}
+    assert names == {"recall", "new_memory", "traverse", "why"}
     for t in resp["result"]["tools"]:
         assert t["inputSchema"]["type"] == "object"  # every tool has a JSON schema
 
@@ -193,6 +193,16 @@ def test_recall_tool_does_not_fork_the_hook_ranking(corpus):
         assert name in tool_text, f"MCP recall dropped {name} that the hook path surfaced"
 
 
+def test_why_tool_delegates_to_the_receipt_path(corpus):
+    """GOV-5: the MCP why tool and `recall_view --why` share ONE code path — identical
+    receipts for identical queries, hits and abstentions both."""
+    from memory.recall_view import describe
+
+    for query in ("how do we deploy the web service", "watering indoor houseplants in winter"):
+        tool_text = _text(_call("why", {"query": query, "k": 3}))
+        assert tool_text == describe(query, 3, why=True)
+
+
 def test_hook_path_never_imports_the_server():
     # Acceptance: the hook path is unchanged and works with the server absent — it can only be so
     # if the hot-path modules never import mcp_server.
@@ -219,10 +229,12 @@ def test_initialize_declares_resources_capability():
     assert "tools" in resp["result"]["capabilities"]  # unchanged
 
 
-def test_resources_list_exposes_floor_and_rules_view():
+def test_resources_list_exposes_floor_rules_view_and_scorecard():
     resp = M.handle_request({"jsonrpc": "2.0", "id": 5, "method": "resources/list"})
     resources = resp["result"]["resources"]
-    assert {r["uri"] for r in resources} == {"hippo://floor", "hippo://rules-view"}
+    assert {r["uri"] for r in resources} == {
+        "hippo://floor", "hippo://rules-view", "hippo://scorecard"
+    }
     for r in resources:
         assert r["mimeType"] == "text/markdown"
         assert r["name"] and r["description"]
@@ -308,6 +320,36 @@ def test_serve_stream_answers_resources_read(corpus):
     assert [r["id"] for r in resps] == [1, 2, 3]
     assert "resources" in resps[0]["result"]["capabilities"]
     assert {r["uri"] for r in resps[1]["result"]["resources"]} == {
-        "hippo://floor", "hippo://rules-view",
+        "hippo://floor", "hippo://rules-view", "hippo://scorecard",
     }
     assert resps[2]["result"]["contents"][0]["uri"] == "hippo://floor"
+
+
+def test_new_memory_tool_threads_confidence(corpus):
+    """GOV-7: the MCP write surface can author the tier too — parity with --confidence."""
+    resp = _call(
+        "new_memory",
+        {"name": "graded_via_mcp", "description": "a graded mcp fact", "type": "project",
+         "confidence": "verified"},
+    )
+    assert "created:" in _text(resp)
+    with open(os.path.join(corpus, "graded_via_mcp.md"), "r", encoding="utf-8") as fh:
+        assert "  confidence: verified" in fh.read()
+
+
+def test_resources_read_scorecard_rolls_up(corpus, tmp_path, monkeypatch):
+    """GOV-6 extension: the same rollup as doctor's trust_scorecard line, agent-pulled."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    text = _contents(_read("hippo://scorecard"))["text"]
+    assert "trust scorecard:" in text
+    assert "contested-unresolved (→ /hippo:resolve)" in text
+    assert "/hippo:doctor" in text  # the drill-down route
+
+
+def test_resources_read_scorecard_withheld_for_untrusted_corpus(repo, memory_dir, monkeypatch):
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", memory_dir)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)  # exercise the real SEC-1 gate
+    text = _contents(_read("hippo://scorecard"))["text"]
+    assert "WITHHELD" in text and "untrusted" in text
+    assert "contested-unresolved" not in text  # no counts leak past the gate

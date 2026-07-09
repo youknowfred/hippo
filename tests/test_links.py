@@ -422,6 +422,29 @@ def test_typed_accessors_both_directions_and_self_target_dropped(tmp_path):
     assert g.inbound("old_way") == set()
 
 
+def test_all_typed_edges_enumerates_corpus_wide_sorted(tmp_path):
+    """GOV-1's enumerator: every resolved (src, tgt) pair for a relation, corpus-wide —
+    unresolved targets stay in typed_unresolved (a lint concern), never in the edge list."""
+    md = str(tmp_path / "memory")
+    _typed_corpus(md)
+    _write(md, "rival2.md", _typed_mem("rival2", "contradicts: [old_way]\n"))
+    g = LinkGraph(md)
+    assert g.all_typed_edges("contradicts") == [("rival", "base"), ("rival2", "old_way")]
+    assert g.all_typed_edges("supersedes") == [("new_way", "old_way")]  # dangler's miss excluded
+    assert g.all_typed_edges("refines") == [("new_way", "base")]
+    assert g.all_typed_edges("no-such-relation") == []
+
+
+def test_all_typed_edges_is_directional(tmp_path):
+    """A mutual declaration yields BOTH tuples — collapsing to one conflict is the
+    consumer's call (resolve_view canonicalizes), not the graph's."""
+    md = str(tmp_path / "memory")
+    _write(md, "a.md", _typed_mem("a", "contradicts: [b]\n"))
+    _write(md, "b.md", _typed_mem("b", "contradicts: [a]\n"))
+    g = LinkGraph(md)
+    assert g.all_typed_edges("contradicts") == [("a", "b"), ("b", "a")]
+
+
 def test_lint_flags_dangling_typed_targets(tmp_path):
     md = str(tmp_path / "memory")
     _typed_corpus(md)

@@ -413,7 +413,18 @@ def ensure_self_ignoring_dir(path: str) -> None:
 #       typed relations is read identically by a v2 plugin, so the migration is just
 #       reviewing that no frontmatter key collides and stamping the marker
 #       (`write_corpus_format`); see plugin/memory/README.md "Corpus format versioning".
-CORPUS_FORMAT_VERSION = 2
+#   3 — GOV-2 steering: frontmatter may carry `steer: pin` (top-level or under
+#       `metadata:`) — the author's bounded, always-on recall lift (build_index carries it
+#       into the manifest; recall multiplies a capped _PIN_BOOST pre-cut). Purely ADDITIVE,
+#       same migration shape as v2: verify no existing frontmatter uses `steer` for
+#       something else, then stamp the marker. MUTE is deliberately NOT part of v3 — it
+#       stays gated on the salience keystone (SIG-5/T7) and will be its own convention.
+#   4 — GOV-7 confidence tier: frontmatter may carry `confidence: draft|verified|
+#       authoritative` (top-level or under `metadata:`) — the AUTHOR's trust dial,
+#       display-only at inject/recall_view, NEVER a ranking input (the popularity=
+#       correctness trap; AST-pinned in tests). Closed enum; unknown values read as
+#       unset (today's default). Purely ADDITIVE — same stamp-only migration as v2/v3.
+CORPUS_FORMAT_VERSION = 4
 _FORMAT_MARKER_NAME = ".format"
 
 

@@ -102,6 +102,12 @@ _TOOLS = [
                     "items": {"type": "string"},
                     "description": "explicit related-memory names (overrides auto-discovery)",
                 },
+                "confidence": {
+                    "type": "string",
+                    "enum": ["draft", "verified", "authoritative"],
+                    "description": "GOV-7: the author's trust dial — display-only, never a "
+                    "ranking input; omit for the default",
+                },
             },
             "required": ["name", "description", "type"],
         },
@@ -119,6 +125,25 @@ _TOOLS = [
                 "hops": {"type": "integer", "description": "outbound depth (default 1)", "minimum": 1},
             },
             "required": ["name"],
+        },
+    },
+    {
+        "name": "why",
+        "description": (
+            "The recall receipt (GOV-5, glass-box): re-runs the SAME ranking the recall "
+            "hook uses for a query and explains it — per hit the winning backend, typed "
+            "edges, steering and salience; on abstention, the best candidate's sub-floor "
+            "near-miss score and the floor it missed (or the honest reason: untrusted "
+            "corpus / BM25-only no-shared-token). Answers \"why did you surface that?\" "
+            "and \"why NOT the thing I know we wrote down?\"."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "the query to explain"},
+                "k": {"type": "integer", "description": "max matches (default 10)", "minimum": 1},
+            },
+            "required": ["query"],
         },
     },
 ]
@@ -148,8 +173,11 @@ def _tool_new_memory(args: Dict[str, Any]) -> str:
         return "new_memory: name, description, and type are all required."
     links = args.get("links")
     links = [str(x) for x in links] if isinstance(links, list) else None
+    confidence = args.get("confidence")
+    confidence = str(confidence) if isinstance(confidence, str) and confidence else None
     result = write_memory(
-        name, description, mtype, str(args.get("body") or ""), links=links
+        name, description, mtype, str(args.get("body") or ""), links=links,
+        confidence=confidence,
     )
     if result.get("error"):
         return f"new_memory failed: {result['error']}"
@@ -169,6 +197,19 @@ def _tool_new_memory(args: Dict[str, Any]) -> str:
     if result.get("note"):
         out.append(f"note: {result['note']}")
     return "\n".join(out)
+
+
+def _tool_why(args: Dict[str, Any]) -> str:
+    """GOV-5: delegates to the SAME recall_view.describe(why=True) code path the
+    /hippo:recall --why CLI uses — one receipt implementation, two surfaces."""
+    from .recall_view import describe
+
+    query = str(args.get("query") or "").strip()
+    if not query:
+        return "why: a non-empty query is required."
+    k = args.get("k")
+    k = int(k) if isinstance(k, (int, float)) and int(k) > 0 else 10
+    return describe(query, k, why=True)
 
 
 def _tool_traverse(args: Dict[str, Any]) -> str:
@@ -202,7 +243,12 @@ def _tool_traverse(args: Dict[str, Any]) -> str:
     return "\n".join(out)
 
 
-_DISPATCH = {"recall": _tool_recall, "new_memory": _tool_new_memory, "traverse": _tool_traverse}
+_DISPATCH = {
+    "recall": _tool_recall,
+    "new_memory": _tool_new_memory,
+    "traverse": _tool_traverse,
+    "why": _tool_why,
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -228,6 +274,18 @@ _RESOURCES = [
             ".claude/rules|agents|skills) citing memories the corpus disputes (superseded/"
             "contradicted/never-recalled), plus rules-plane rot (dead code references and "
             "paths: globs matching nothing). Read-only; findings route to per-item decisions."
+        ),
+        "mimeType": "text/markdown",
+    },
+    {
+        "uri": "hippo://scorecard",
+        "name": "hippo trust scorecard",
+        "description": (
+            "GOV-6: the one-line corpus-health rollup a lead scans before trusting the "
+            "corpus — contested-unresolved contradictions, rule↔memory conflicts, rules-"
+            "plane rot, blind spots, orphans, pinned/muted/draft counts, and the floor/"
+            "corpus delta since this clone's last session. Each number names the skill "
+            "that resolves it. Read-only; agent-pulled, never auto-loaded."
         ),
         "mimeType": "text/markdown",
     },
@@ -274,6 +332,29 @@ def _resource_floor() -> str:
     if not parts:
         return header + "\n\nFloor empty — no always-on memory configured yet (/hippo:init)."
     return header + "\n\n" + "\n\n".join(parts)
+
+
+def _resource_scorecard() -> str:
+    """``hippo://scorecard`` — GOV-6's rollup as one pulled document. SEC-1-gated like the
+    floor/rules-view; delegates to doctor's ``_scorecard_message`` (one implementation)."""
+    from . import trust
+    from .doctor import _scorecard_message
+    from .provenance import resolve_dirs
+
+    memory_dir, repo_root = resolve_dirs()
+    header = "# hippo trust scorecard — corpus-health rollup"
+    gate_root = trust.gate_repo_root(memory_dir, repo_root)
+    if gate_root is not None and not trust.is_trusted(gate_root):
+        return (
+            header + "\n\nScorecard WITHHELD — this project's corpus is untrusted (SEC-1). "
+            "Run /hippo:doctor to review and trust it."
+        )
+    status, message = _scorecard_message(memory_dir, repo_root)
+    glyph = "⚠" if status == "warn" else "✔"
+    return (
+        header + f"\n\n{glyph} {message}\n\nDrill down with /hippo:doctor (the point checks) "
+        "and resolve via the named skill per number."
+    )
 
 
 def _resource_rules_view() -> str:
@@ -329,6 +410,7 @@ def _resource_rules_view() -> str:
 _RESOURCE_DISPATCH = {
     "hippo://floor": _resource_floor,
     "hippo://rules-view": _resource_rules_view,
+    "hippo://scorecard": _resource_scorecard,
 }
 
 
