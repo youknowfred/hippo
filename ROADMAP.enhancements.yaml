@@ -309,7 +309,21 @@ workstreams:
         title: "Salience keystone — decide RET-5 default-on with RET-8 evidence"
         priority: P0
         effort: S
-        status: planned
+        # DECISION 2026-07-09 (OWNER-RATIFIED): salience default stays **OFF**; the
+        # HIPPO_SALIENCE flag remains the opt-in. Eval run both ways (dense, k=10) on
+        # RET-8's category-tagged set + the golden corpus, numbers BYTE-IDENTICAL
+        # off-vs-on everywhere — golden(50): self 0.98 / hard 1.0 / mrr 0.9213 /
+        # abstention 0.1667; packs(22): self 1.0 / hard 0.9167 / mrr 0.8032 /
+        # precision@10 0.1375 / abstention 0.3333; per-category buckets identical too.
+        # WHY OFF: the three priors act on usage telemetry, staleness drift, and recency
+        # variance — signals fixture corpora structurally lack — so the proposal's
+        # default-on bar ("a measurable precision lift", not mere no-regression) cannot
+        # be met with the evidence available; ED-2 demands affirmative evidence FOR, and
+        # absence-of-harm is not that. REVISIT trigger: a lived-in corpus (real usage
+        # ledger + drift) re-run both ways via the same RET-8 substrate — SIG-6's
+        # self-populating fixtures are the natural vehicle. The decision, not a silent
+        # flip: recorded here per the RUL-0 finding: pattern.
+        status: done
         source: {lens: retrieval, verdict: KEEP (= ROADMAP.v1 RET-10)}
         problem: >-
           RET-5 salience (recency/usage/staleness priors) ships DEFAULT OFF with
@@ -2220,6 +2234,11 @@ release_train:
     # tracked precision/abstention gates exist, and eval now exercises the production
     # (edge-aware) recall path. SIG-6 remains sequenced AFTER SIG-5. RUL-6 unchanged
     # (LIF-7 owner gate).
+    # 2026-07-09 (later still): SIG-5 DECIDED — salience default stays OFF, owner-
+    # ratified on RET-8 evidence (dated decision + revisit trigger on the item). The
+    # tier's gate is thus RESOLVED (decided-off): nothing here ships as an always-on
+    # ranking prior; the class stays flag-only. SIG-6 is now the one freely buildable
+    # item left in this tier; RUL-6 still waits on the LIF-7 owner judgment.
     status: in_progress
     gate: "SIG-5 decides salience default-on with RET-8 evidence; nothing in this tier ships as an always-on ranking prior until it does."
     done_means: >-
@@ -2269,6 +2288,11 @@ decisions:
       GATE STATUS 2026-07-08 (post-T2 audit): RET-8 is NOT SHIPPED and greenfield —
       the keystone cannot be decided yet; see SIG-5's implementation_notes for the
       build-RET-8-first path.
+      DECIDED 2026-07-09 (owner-ratified, RET-8 evidence): default stays OFF — the
+      priors' input signals don't exist in fixture corpora, so no lift is
+      demonstrable; the flag remains the opt-in and the dated decision (with the
+      revisit trigger) lives on SIG-5's item. The ranking class this decision gates
+      therefore stays flag-only until a lived-in-corpus re-run moves it.
   - id: ED-3
     question: Can we build on .claude/rules `paths:` scoping?
     decision: verify first (RUL-0), then build
