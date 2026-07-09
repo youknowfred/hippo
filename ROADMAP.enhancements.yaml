@@ -1155,7 +1155,7 @@ workstreams:
         title: Floor & corpus change governance ("changed since your last pull")
         priority: P2
         effort: S
-        status: planned
+        status: done
         source: {lens: trust, verdict: KEEP + blind-spot (generalize to whole corpus)}
         problem: >-
           The always-loaded floor is the highest-trust, least-reviewed surface — it
