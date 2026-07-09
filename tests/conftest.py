@@ -78,9 +78,14 @@ def _isolate_trust_registry(tmp_path, monkeypatch):
         resolve a real repo_root and be denied by the empty tmp registry) keep passing without
         each having to opt in. The dedicated trust tests (test_trust.py) delete this var to
         exercise the real deny/allow gate.
+
+    ``HIPPO_PROJECTS_FILE`` (RCH-4) gets the same tmp-path treatment: ``memory.registry``
+    must never read the runner's real ``~/.claude/hippo-projects.json`` — an
+    ``--all-projects`` test would otherwise search REAL corpora on the developer's machine.
     """
     monkeypatch.setenv("HIPPO_TRUST_FILE", str(tmp_path / "hippo-trust.json"))
     monkeypatch.setenv("HIPPO_TRUST_ALL", "1")
+    monkeypatch.setenv("HIPPO_PROJECTS_FILE", str(tmp_path / "hippo-projects.json"))
 
 
 @pytest.fixture(autouse=True)
