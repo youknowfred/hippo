@@ -1954,7 +1954,12 @@ workstreams:
         title: Pack ecosystem — install / extract / update (gated, post-launch)
         priority: P3
         effort: L
-        status: planned
+        # T6 (2026-07-09): EXTRACT slice SHIPPED (packs.py pack_extract + /hippo:pack,
+        # shipped-shape parity-pinned, install/update absence negative-pinned);
+        # install/update remain GATED on the v0.8.0 trust spine (SEC-5/6/7, still not
+        # in the tree) — the acceptance_criteria below are install/update-shaped, so
+        # this item stays open until the spine lands.
+        status: in_progress
         source: {lens: cross-project, verdict: RESHAPE (mechanism yes, ecosystem later; full trust spine)}
         problem: >-
           TEA-2's packs can only come from inside the plugin; there is no way to
