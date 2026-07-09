@@ -121,6 +121,25 @@ _TOOLS = [
             "required": ["name"],
         },
     },
+    {
+        "name": "why",
+        "description": (
+            "The recall receipt (GOV-5, glass-box): re-runs the SAME ranking the recall "
+            "hook uses for a query and explains it — per hit the winning backend, typed "
+            "edges, steering and salience; on abstention, the best candidate's sub-floor "
+            "near-miss score and the floor it missed (or the honest reason: untrusted "
+            "corpus / BM25-only no-shared-token). Answers \"why did you surface that?\" "
+            "and \"why NOT the thing I know we wrote down?\"."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "the query to explain"},
+                "k": {"type": "integer", "description": "max matches (default 10)", "minimum": 1},
+            },
+            "required": ["query"],
+        },
+    },
 ]
 
 
@@ -171,6 +190,19 @@ def _tool_new_memory(args: Dict[str, Any]) -> str:
     return "\n".join(out)
 
 
+def _tool_why(args: Dict[str, Any]) -> str:
+    """GOV-5: delegates to the SAME recall_view.describe(why=True) code path the
+    /hippo:recall --why CLI uses — one receipt implementation, two surfaces."""
+    from .recall_view import describe
+
+    query = str(args.get("query") or "").strip()
+    if not query:
+        return "why: a non-empty query is required."
+    k = args.get("k")
+    k = int(k) if isinstance(k, (int, float)) and int(k) > 0 else 10
+    return describe(query, k, why=True)
+
+
 def _tool_traverse(args: Dict[str, Any]) -> str:
     from .build_index import default_index_dir
     from .links import TYPED_RELATIONS, build_graph
@@ -202,7 +234,12 @@ def _tool_traverse(args: Dict[str, Any]) -> str:
     return "\n".join(out)
 
 
-_DISPATCH = {"recall": _tool_recall, "new_memory": _tool_new_memory, "traverse": _tool_traverse}
+_DISPATCH = {
+    "recall": _tool_recall,
+    "new_memory": _tool_new_memory,
+    "traverse": _tool_traverse,
+    "why": _tool_why,
+}
 
 
 # --------------------------------------------------------------------------- #

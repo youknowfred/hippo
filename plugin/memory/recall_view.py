@@ -102,6 +102,78 @@ def _cross_encoder_rerank(query: str, hits: List[dict]) -> List[dict]:
         return hits
 
 
+def _abstention_receipt(
+    query: str,
+    memory_dir: Optional[str],
+    index_dir: Optional[str],
+    repo_root: Optional[str],
+) -> str:
+    """GOV-5: WHY nothing surfaced — the near-miss score and the floor it missed, honestly.
+
+    The near-miss COSINES are discarded inside ``recall._dense_rank_rows`` (no ledger keeps
+    them), so this recovers them with one direct similarity probe over the already-loaded
+    dense matrix — the same ``index.dense @ qvec`` that function computes, minus the floor
+    filter. NOT a floors-disabled ``recall()`` re-run: recall emits RRF-FUSED scores
+    (~1/60 scale), which are not commensurable with the cosine floor — quoting one against
+    the other would be a fabricated comparison (COR-8). Branches, in order of honesty:
+    untrusted corpus (withheld ≠ sub-floor), no corpus at all, BM25-only (the match-set IS
+    the floor — no cosine to quote), then the dense near-miss.
+    """
+    from . import trust
+    from .recall import _dense_floor, _ensure_index, embed_query
+
+    base = (
+        f'No memories cleared the relevance floor for "{query}" — nothing would be '
+        "injected for a prompt like this."
+    )
+    tail = (
+        "\nAbstention is a feature (RET-1); if a memory SHOULD answer this, enrich its "
+        "description (/hippo:consolidate) or pin it (steer: pin)."
+    )
+    try:
+        gate_root = trust.gate_repo_root(memory_dir, repo_root)
+        if gate_root is not None and not trust.is_trusted(gate_root):
+            return (
+                base + "\nReason: this corpus is UNTRUSTED (SEC-1) — recall is withheld "
+                "entirely, nothing was scored at all. Run /hippo:doctor to review and "
+                "trust it."
+            )
+    except Exception:
+        pass
+    index = _ensure_index(None, memory_dir or "", index_dir)
+    if index is None or not len(index.entries):
+        return base + "\nReason: no memory corpus/index resolves here at all."
+    if not index.dense_ready:
+        return (
+            base + "\nReason: no memory shares a token with this query (BM25-only corpus "
+            "— lexical recall's match-set IS its floor, so there is no near-miss score to "
+            "report; the dense model would be needed for one)." + tail
+        )
+    try:
+        qvec = embed_query(query)
+        sims = index.dense @ qvec
+        entry_rows = {e["row"]: e for e in index.entries if isinstance(e.get("row"), int)}
+        best_row = max(entry_rows, key=lambda r: float(sims[r]))
+        best_sim, best = float(sims[best_row]), entry_rows[best_row]
+    except Exception:
+        return (
+            base + "\nReason: no memory shares a token with this query, and the dense "
+            "model was unavailable for a similarity probe (cold cache?)." + tail
+        )
+    floor = _dense_floor(index.model)
+    if best_sim < floor:
+        return (
+            base + f"\nReason: best candidate `{best['name']}` scored {best_sim:.3f}, "
+            f"below the dense relevance floor {floor:.2f} — the gap is the abstention."
+            + tail
+        )
+    return (
+        base + f"\nReason: best candidate `{best['name']}` scored {best_sim:.3f} (≥ floor "
+        f"{floor:.2f}) but was filtered at display time — e.g. soft-invalidated 'old' or "
+        "its file was deleted mid-session." + tail
+    )
+
+
 def describe(
     query: str,
     k: int = DEFAULT_K,
@@ -109,22 +181,30 @@ def describe(
     memory_dir: Optional[str] = None,
     index_dir: Optional[str] = None,
     repo_root: Optional[str] = None,
+    why: bool = False,
 ) -> str:
     """Human-readable answer to "what do you remember about ``query``".
 
     Runs the SAME ``recall.recall()`` the hook would, then annotates each hit with type,
-    staleness, and graph neighbors. Abstention (no hit clears the relevance floor) is reported
-    as such — a feature, not an error.
+    staleness, and graph neighbors — plus, always, the typed-edge note and the steer:pin
+    echo (GOV-2's legibility contract). ``why=True`` (GOV-5, the /hippo:why receipt) adds
+    the winning-backend/salience breakdown per hit, relabels a rule pointer's score as the
+    containment it really is, and — on abstention — replaces the generic message with the
+    near-miss receipt (sub-floor score + the floor it missed). Abstention (no hit clears
+    the relevance floor) is reported as such — a feature, not an error.
     """
     if memory_dir is None:
         memory_dir, repo_root = resolve_dirs()
     hits = recall(query, k, memory_dir=memory_dir, index_dir=index_dir, repo_root=repo_root)
     if not hits:
+        if why:
+            return _abstention_receipt(query, memory_dir, index_dir, repo_root)
         return (
             f'No memories cleared the relevance floor for "{query}" — nothing would be '
             "injected for a prompt like this. Abstention is a feature (RET-1): an unrelated "
             "or too-thin query surfaces nothing rather than padding out low-signal matches. "
-            "Try /hippo:recall --list-by-type to see everything this project knows."
+            "Try /hippo:recall --list-by-type to see everything this project knows "
+            "(or /hippo:recall --why for the abstention receipt)."
         )
     hits = _cross_encoder_rerank(query, hits)
     graph = _load_graph(memory_dir, index_dir)
@@ -146,15 +226,38 @@ def describe(
             # RUL-4: a governance-plane pointer, not a memory — no frontmatter type to read
             # (h["file"] is the rule file itself) and no tier provenance to disambiguate.
             tags = ["rule — governance plane, not a memory"]
+            if why and isinstance(score, (int, float)):
+                # GOV-5: a rule hit's score IS query containment (|q ∩ section| / |q|) —
+                # name it that, against its own floor, instead of a generic "relevance".
+                from .recall import _rules_hit_floor
+
+                tags.append(f"containment {score:.3f} ≥ floor {_rules_hit_floor():.2f}")
         else:
             mtype = _memory_type(_read_text(os.path.join(hit_root, fname))) or "untyped"
             tags = [f"{mtype}"]
             if corpus and corpus != "project":
                 tags.append(f"{corpus} tier")  # provenance: which corpus this hit came from
-        if isinstance(score, (int, float)):
+        if isinstance(score, (int, float)) and not (why and corpus == "rule"):
             tags.append(f"relevance {score:.3f}")
         if via == "graph":
             tags.append("via 1-hop link")  # answers "why was this injected" (GRA-1 expansion)
+        # GOV-2: the steer echo — a pinned hit says so (and by how much), always.
+        if h.get("steer") == "pin":
+            from .recall import _pin_boost
+
+            tags.append(f"pinned ×{_pin_boost():g}")
+        # GRA-4: the typed-edge annotation ("superseded by X" / "contradicts X — verify")
+        # was emitted but never rendered here — the receipt's "edges traversed" answer.
+        if h.get("note"):
+            tags.append(h["note"])
+        if why:
+            backend = h.get("backend")
+            if backend and corpus != "rule":
+                tags.append(f"won via {backend}")  # which ranking(s) produced this hit
+            sal = h.get("salience")
+            if isinstance(sal, dict) and sal:
+                parts = ", ".join(f"{k2} {v:+.2f}" for k2, v in sorted(sal.items()))
+                tags.append(f"salience {parts}")
         if h.get("stale_banner"):
             tags.append("⚠ stale — verify before relying")
         out.append(f"  • {name}  [{' · '.join(tags)}]")
@@ -214,6 +317,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="list the whole corpus grouped by type instead of querying",
     )
+    parser.add_argument(
+        "--why",
+        action="store_true",
+        help="GOV-5: the recall receipt — per-hit winning backend/edges/salience/steer, "
+        "and on abstention the near-miss score vs the floor it missed",
+    )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--index-dir", default=None)
     parser.add_argument("--repo-root", default=None)
@@ -233,6 +342,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 memory_dir=args.memory_dir,
                 index_dir=args.index_dir,
                 repo_root=args.repo_root,
+                why=args.why,
             )
         )
         return 0

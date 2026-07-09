@@ -276,3 +276,137 @@ def test_real_cross_encoder_reranks_by_actual_relevance(tmp_path_factory, monkey
     ]
     out = V._cross_encoder_rerank("canary deployment rollout steps", hits)
     assert out[0]["name"] == "a"  # the genuinely relevant document must win
+
+
+# --------------------------------------------------------------------------- #
+# GOV-5: /hippo:why — the recall receipt (glass-box, incl. abstention reason)
+# --------------------------------------------------------------------------- #
+def test_describe_always_echoes_note_and_pinned(monkeypatch, tmp_path):
+    """GOV-2's legibility contract: the typed-edge note and the steer echo render even
+    WITHOUT --why — they were emitted but invisible here before this item."""
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    (tmp_path / "memory" / "x.md").write_text(_mem("x", "the pinned one"), encoding="utf-8")
+    synthetic = [
+        {
+            "name": "x", "file": "x.md", "description": "the pinned one",
+            "score": 0.42, "via": "rank", "steer": "pin",
+            "note": "contradicts y — verify",
+        }
+    ]
+    monkeypatch.setattr(V, "recall", lambda *a, **k: synthetic)
+    out = V.describe("anything", memory_dir=md)
+    assert "pinned ×1.2" in out
+    assert "contradicts y — verify" in out
+
+
+def test_why_receipt_shows_backend_and_salience(monkeypatch, tmp_path):
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    (tmp_path / "memory" / "x.md").write_text(_mem("x", "a scored memory"), encoding="utf-8")
+    synthetic = [
+        {
+            "name": "x", "file": "x.md", "description": "a scored memory",
+            "score": 0.031, "via": "rank", "backend": "dense+bm25",
+            "salience": {"recency": 0.08, "usage": 0.0, "staleness": 0.0},
+        }
+    ]
+    monkeypatch.setattr(V, "recall", lambda *a, **k: synthetic)
+    out = V.describe("anything", memory_dir=md, why=True)
+    assert "won via dense+bm25" in out
+    assert "salience recency +0.08" in out
+    # without --why the receipt-only tags stay out of the default view
+    plain = V.describe("anything", memory_dir=md)
+    assert "won via" not in plain and "salience" not in plain
+
+
+def test_why_rule_pointer_names_containment_and_floor(monkeypatch, tmp_path):
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    synthetic = [
+        {
+            "name": "Style", "file": "CLAUDE.md", "description": "prefer explicit names",
+            "score": 0.71, "via": "rules", "corpus": "rule",
+        }
+    ]
+    monkeypatch.setattr(V, "recall", lambda *a, **k: synthetic)
+    out = V.describe("anything", memory_dir=md, why=True)
+    assert "containment 0.710 ≥ floor 0.60" in out
+    assert "relevance 0.710" not in out  # relabelled, not double-shown
+
+
+def test_why_abstention_bm25_only_names_no_shared_token(tmp_path):
+    """BM25-only corpus: the match-set IS the floor — no cosine to quote, say so."""
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    _seed(md, idx, {"deploy.md": _mem("deploy", "how the web service is deployed")})
+    out = V.describe("zzqq xyzzy nonexistent qwertyuiop", memory_dir=md, index_dir=idx, why=True)
+    assert "no memory shares a token with this query" in out
+    assert "BM25-only" in out
+
+
+def test_why_abstention_dense_names_subfloor_near_miss(monkeypatch, tmp_path):
+    """The dense receipt quotes the REAL near-miss: the best COSINE vs the cosine floor —
+    recovered straight off the dense matrix (recall's emitted scores are RRF-fused, a
+    different scale entirely; quoting those against the floor would be fabricated)."""
+    import numpy as np
+
+    import memory.recall as R
+
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    qvec = np.zeros(8, dtype="float32")
+    qvec[0] = 1.0
+    near = np.zeros(8, dtype="float32")
+    near[0], near[1] = 0.42, np.sqrt(1 - 0.42**2)  # cosine vs qvec = 0.42, below floor
+    entries = [{
+        "name": "near_miss", "file": "near_miss.md", "row": 0, "hash": "h",
+        "doc_text": "near miss", "description": "the near miss", "tokens": ["near", "miss"],
+    }]
+    manifest = {
+        "schema_version": B.SCHEMA_VERSION, "model": None, "dense_ready": True,
+        "dim": 8, "count": 1, "entries": entries,
+    }
+    fake_index = B.LoadedIndex(manifest, np.stack([near]))
+    assert fake_index.dense_ready
+    monkeypatch.setattr(V, "recall", lambda *a, **k: [])
+    monkeypatch.setattr(R, "_ensure_index", lambda index, md, idx: fake_index)
+    monkeypatch.setattr(R, "embed_query", lambda q, allow_download=False: qvec)
+    out = V.describe("some query", memory_dir=str(tmp_path), why=True)
+    assert "best candidate `near_miss` scored 0.420" in out
+    assert "below the dense relevance floor 0.50" in out
+
+
+def test_why_abstention_untrusted_names_withheld_not_subfloor(monkeypatch, tmp_path):
+    """SEC-1 honesty: an untrusted corpus is WITHHELD — nothing was scored; a fabricated
+    'sub-floor' reason would be a lie."""
+    from memory import trust as TR
+
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    monkeypatch.setattr(V, "recall", lambda *a, **k: [])
+    monkeypatch.setattr(TR, "gate_repo_root", lambda m, r: str(tmp_path))
+    monkeypatch.setattr(TR, "is_trusted", lambda root: False)
+    out = V.describe("anything", memory_dir=md, why=True)
+    assert "UNTRUSTED" in out and "withheld" in out
+    assert "scored" not in out.split("UNTRUSTED")[0]  # no fabricated near-miss before it
+
+
+def test_why_flag_on_cli(tmp_path, capsys):
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    _seed(md, idx, {"deploy.md": _mem("deploy", "how the web service is deployed")})
+    rc = V.main(["--why", "zzqq xyzzy nonexistent", "--memory-dir", md, "--index-dir", idx])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "no memory shares a token" in out
+
+
+def test_describe_never_reranks_on_abstention_why_mode(monkeypatch, tmp_path):
+    """The abstention receipt path stays upstream of the cross-encoder (RCL-5 guard)."""
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    _seed(md, idx, {"deploy.md": _mem("deploy", "how the web service is deployed")})
+
+    def _boom(*a, **k):
+        raise AssertionError("cross-encoder must not run on abstention")
+
+    monkeypatch.setattr(V, "_cross_encoder_rerank", _boom)
+    out = V.describe("zzqq xyzzy nonexistent", memory_dir=md, index_dir=idx, why=True)
+    assert "no memory shares a token" in out

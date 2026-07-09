@@ -1199,7 +1199,26 @@ workstreams:
         title: "/hippo:why — the recall receipt (glass-box, incl. abstention reason)"
         priority: P2
         effort: M
-        status: planned
+        status: done
+        implementation_correction: >-
+          SHIPPED 2026-07-08. ONE premise correction to the notes below: the ABSTENTION
+          recipe ("re-run recall.recall with HIPPO_DENSE_FLOOR=0 + HIPPO_KNEE_RATIO=0, take
+          the best hit, report its score against _dense_floor") quotes INCOMMENSURABLE
+          numbers — recall() emits RRF-FUSED scores (~1/(RRF_K+rank), ≈0.017 scale; COR-8
+          pins the emitted score to that fused value), while _dense_floor is a COSINE
+          (0.50 default). "best candidate scored 0.016 < floor 0.60" would be a fabricated
+          comparison. The shipped receipt instead recovers the exact thing
+          _dense_rank_rows discards: ONE direct similarity probe over the already-loaded
+          dense matrix (index.dense @ embed_query(query), entry rows only — the matrix is
+          RET-2-widened with body-chunk rows), reporting the true best COSINE against the
+          cosine floor. No env overrides needed at all; the env-override knobs stay
+          verified-correct for their own purposes. Also shipped: honesty ordering in the
+          receipt — untrusted corpus reports WITHHELD (SEC-1; nothing was scored) before
+          any near-miss talk, and a ≥-floor best candidate names the display-time filter
+          (old-invalidated / deleted file) instead of pretending a floor miss. Rest of the
+          note held: env floors ARE read per-call (verified), BM25-only branch on
+          index.dense_ready, containment relabel via _rules_hit_floor(), --why flag +
+          thin skill + MCP why tool all sharing describe(why=True).
         source: {lens: trust, verdict: RESHAPE (re-run recall live, don't replay the ledger)}
         problem: >-
           Two questions most erode trust — "why did you surface that?" and "why did

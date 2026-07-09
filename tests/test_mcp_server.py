@@ -70,10 +70,10 @@ def test_initialize_defaults_protocol_when_absent():
     assert resp["result"]["protocolVersion"] == "2024-11-05"
 
 
-def test_tools_list_exposes_exactly_three_tools():
+def test_tools_list_exposes_exactly_four_tools():
     resp = M.handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     names = {t["name"] for t in resp["result"]["tools"]}
-    assert names == {"recall", "new_memory", "traverse"}
+    assert names == {"recall", "new_memory", "traverse", "why"}
     for t in resp["result"]["tools"]:
         assert t["inputSchema"]["type"] == "object"  # every tool has a JSON schema
 
@@ -191,6 +191,16 @@ def test_recall_tool_does_not_fork_the_hook_ranking(corpus):
     assert hook_names, "precondition: the hook path returns something"
     for name in hook_names:
         assert name in tool_text, f"MCP recall dropped {name} that the hook path surfaced"
+
+
+def test_why_tool_delegates_to_the_receipt_path(corpus):
+    """GOV-5: the MCP why tool and `recall_view --why` share ONE code path — identical
+    receipts for identical queries, hits and abstentions both."""
+    from memory.recall_view import describe
+
+    for query in ("how do we deploy the web service", "watering indoor houseplants in winter"):
+        tool_text = _text(_call("why", {"query": query, "k": 3}))
+        assert tool_text == describe(query, 3, why=True)
 
 
 def test_hook_path_never_imports_the_server():
