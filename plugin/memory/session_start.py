@@ -546,6 +546,64 @@ def rules_rot_producer(
         return None
 
 
+# GOV-1: how many contradiction pairs the inbox lists before folding into a count. Same
+# loud family as rules_conflict — a live contradiction means the model is being injected
+# both sides of a dispute, which should not wait for a nudge cadence.
+_MAX_CONTRADICTION_LINES = 4
+
+
+def contradiction_inbox_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """GOV-1: the standing contradiction inbox — every unresolved ``contradicts`` pair.
+
+    A ``contradicts`` edge deliberately demotes neither side (GRA-4), so before this its
+    only surface was the hot-path annotation, visible IF both sides co-surfaced in one
+    recall — a live conflict could sit unresolved forever. This enumerates ALL pairs
+    corpus-wide (``LinkGraph.all_typed_edges`` via ``resolve_view``) minus the per-clone
+    resolved ledger, and routes each to a per-item human verdict via /hippo:resolve —
+    nothing auto-picks a winner (inv4). T2 boundary: ``rules_conflict_producer`` above
+    already prints the GOVERNANCE-cited subset loudly, and producers share no state, so
+    this one re-derives that subset from ``conflict_radar`` and skips re-PRINTING those
+    pairs (no double nag) while still COUNTING them — the header is the whole inbox.
+    Read-only (inv1); empty-is-fine; off the hot path (inv6). ``ctx`` (LIF-6) is unused.
+    """
+    try:
+        from .resolve_view import unresolved_contradictions
+
+        inbox = unresolved_contradictions(memory_dir, repo_root=repo_root)
+        if not inbox:
+            return None
+        radar_pairs = set()
+        try:
+            from .rules_plane import conflict_radar
+
+            radar = conflict_radar(memory_dir, repo_root)
+            for c in radar["edge_conflicts"]:
+                if c.get("relation") == "contradicts":
+                    radar_pairs.add(tuple(sorted((c["by"], c["name"]))))
+        except Exception:
+            radar_pairs = set()
+        fresh = [item for item in inbox if tuple(item["pair"]) not in radar_pairs]
+        lines = [
+            f"⚖ Contradiction inbox — {len(inbox)} unresolved contradiction pair(s) in the "
+            "corpus. Decide per item via /hippo:resolve (nothing auto-picks a winner):"
+        ]
+        for item in fresh[:_MAX_CONTRADICTION_LINES]:
+            lines.append(f"  • {item['pair'][0]} ⇄ {item['pair'][1]}")
+        overflow = len(fresh) - _MAX_CONTRADICTION_LINES
+        if overflow > 0:
+            lines.append(f"  … and {overflow} more — run /hippo:resolve for the full list.")
+        skipped = len(inbox) - len(fresh)
+        if skipped > 0:
+            lines.append(
+                f"  ({skipped} pair(s) already shown by the rule↔memory conflict radar above)"
+            )
+        return "\n".join(lines)
+    except Exception:
+        return None
+
+
 # SIG-1: how many relevant-to-current-work memories the positive producer lists, and how far
 # each description is trimmed. A positive block stays FOCUSED (a handful of top matches), unlike
 # the warning producers whose count is the point — so this cap is tighter than _MAX_ITEMS_PER_PRODUCER.
@@ -778,6 +836,7 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("unresolvable_baseline", unresolvable_baseline_producer),  # legibility for find_stale's sha-fallback path
     ("rules_conflict", rules_conflict_producer),  # RUL-1: governance cites a memory the corpus disputes (superseded/contradicted/never-recalled)
     ("rules_rot", rules_rot_producer),  # RUL-2: citation-rot/staleness over the always-loaded rules plane itself
+    ("contradiction_inbox", contradiction_inbox_producer),  # GOV-1: every unresolved contradicts pair, not just the co-surfaced/governance-cited ones
     ("relevant_to_work", relevant_to_work_producer),  # SIG-1: the first POSITIVE block — memories about the files you're editing
     ("resume_card", resume_card_producer),  # SIG-2: "where was I" — replay the last session from the episode buffer
     ("git_recent", git_recent_producer),

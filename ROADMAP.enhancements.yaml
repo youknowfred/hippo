@@ -1012,7 +1012,7 @@ workstreams:
         title: "Contradiction inbox + /hippo:resolve"
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: trust, verdict: KEEP, leverage: 4}
         problem: >-
           A `contradicts` edge only annotates a hot-path pointer IF both sides
