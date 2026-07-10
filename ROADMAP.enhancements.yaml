@@ -369,7 +369,14 @@ workstreams:
         title: "Abstention → self-populating eval fixtures (KPI-4)"
         priority: P2
         effort: M
-        status: planned
+        # 2026-07-09: shipped — eval_recall.draft_abstention_fixtures (clusters → draft
+        # rows in the gitignored pending-dir drafts queue, expected ALWAYS empty — the
+        # judgment is never automated) + eval_recall.confirm_hard_set_row (per-item
+        # admission, refuses fabricated stems/dups/empty judgments; confirmed rows tagged
+        # category: abstention). Wired into audit Phase 0.6 + consolidate Step 5. Drafts
+        # are never consumed by eval defaults; the tracked fixture is only ever appended
+        # to byte-verbatim through the confirm gate.
+        status: done
         source: {lens: frontier, verdict: KEEP-worthy (blind-spot)}
         problem: >-
           Per-project eval sets (RET-7) are hand-seeded, so KPI-4 measures what
@@ -565,7 +572,14 @@ workstreams:
         title: "Glob-scoped rule promotion (folds cited_paths→paths: into LIF-7)"
         priority: P3
         effort: M
-        status: planned
+        # 2026-07-09 OWNER DECISION (asked directly this session): LIF-7's CAP-soak gate
+        # is NOT cleared — CAP-2 has ~1 day of field soak, and the gate is an owner
+        # judgment of "proven across temporally-diverse sessions" (no wired metric; never
+        # proxy with soak.soak_status()). RUL-6 is therefore EXPLICITLY DEFERRED, not
+        # merely blocked: it re-enters when the owner writes a dated LIF-7 clearance here.
+        # Mechanics stay cheap when it clears (rules_plane.derive_paths_globs + the
+        # over-scoping cap shipped with RUL-7).
+        status: deferred
         source: {lens: claude-rules, verdict: FOLD into LIF-7 (scoping refinement)}
         problem: >-
           Promoting a reinforced procedural memory into CLAUDE.md (LIF-7's framing)
@@ -2239,7 +2253,13 @@ release_train:
     # tier's gate is thus RESOLVED (decided-off): nothing here ships as an always-on
     # ranking prior; the class stays flag-only. SIG-6 is now the one freely buildable
     # item left in this tier; RUL-6 still waits on the LIF-7 owner judgment.
-    status: in_progress
+    # 2026-07-09 (tier close): SIG-6 SHIPPED (draft/confirm loop, see its note) and the
+    # owner EXPLICITLY DEFERRED RUL-6 (LIF-7 CAP-soak not cleared — dated decision on the
+    # item). done_means is met per its own "if the LIF-7 gate has cleared" clause: the
+    # keystone is decided, SIG-6/RUL-7 shipped, the SIG-4 utility prior + GOV-2 read-side
+    # stay flag-only BY the SIG-5 decision (decided-off is a resolution, not a gap).
+    # Tier → done; RUL-6 carries forward as deferred until an owner-dated LIF-7 clearance.
+    status: done
     gate: "SIG-5 decides salience default-on with RET-8 evidence; nothing in this tier ships as an always-on ranking prior until it does."
     done_means: >-
       With the salience keystone decided (SIG-5), the ranking class is unlocked
