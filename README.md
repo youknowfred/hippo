@@ -49,6 +49,26 @@ for that pre-bootstrap window, so a bare `python3` with none of the pinned deps 
 serves real lexical recall. Bootstrap unlocks the dense half — dense recall degrades
 gracefully rather than blocking or erroring.
 
+## Automatic capture — memory that writes itself, gated by your review
+
+hippo remembers more than what you explicitly save. When a session ends, a background hook
+quietly drafts candidate memories from what actually happened — the queries you ran, the files
+that changed, the decisions you confirmed — and parks them, unwritten, in a gitignored pending
+queue. **Nothing enters your corpus automatically.**
+
+The next session's SessionStart nudge tells you when that queue is worth draining. You run:
+
+```
+/hippo:consolidate
+```
+
+and hippo walks you through each captured draft one at a time — showing its evidence (which
+files changed, the session's queries, any near-duplicate already in the corpus) and its
+rationale — then writes only the ones you approve, as an ordinary reviewable markdown diff.
+This is the part native memory doesn't have: **capture is automatic, but every write waits for
+a human.** You get the recall benefit of always-on capture without ever ceding control of what
+your corpus says.
+
 ## Removal / Uninstall
 
 To stop hippo from acting on a project, run inside Claude Code:

@@ -397,6 +397,12 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **CAP-8** `P2/S` — Surface the capture→approval loop in README quickstart + a
   worked `/hippo:consolidate` example (hippo's strongest differentiator vs native
   memory is currently discoverable only via one SessionStart nudge line).
+  **SHIPPED 2026-07-10**: README gained an "Automatic capture — memory that writes
+  itself, gated by your review" section: SessionEnd/SubagentStop drafts candidates into
+  a gitignored pending queue, the SessionStart nudge flags a deep queue, and
+  `/hippo:consolidate` walks each draft (evidence + rationale + near-dup check) to a
+  per-item human approval. Frames the differentiator explicitly — "capture is automatic,
+  but every write waits for a human." Kept small (one section, one worked command).
 - **CAP-9** `P3/S` — PreCompact/SessionEnd cross-surface dedup note in the skill.
 - **INT-8** `P2/M` — MCP **discoverability doc** (mid-turn/subagent recall) +
   **launch-health doctor check** (`bin/hippo mcp` actually starts) + bounds.
