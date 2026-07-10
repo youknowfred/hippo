@@ -66,6 +66,7 @@ any gate fails (use it as a pre-merge check).
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from typing import Dict, List, Optional
@@ -78,7 +79,7 @@ from .build_index import (
     load_index,
     tokenize,
 )
-from .provenance import resolve_dirs
+from .provenance import ensure_self_ignoring_dir, resolve_dirs
 from .recall import format_results, recall
 
 # Gate thresholds (the locked decisions from the roadmap).
@@ -525,6 +526,315 @@ def load_hard_set_metadata(path: str) -> Dict[str, str]:
     """
     meta, _rows = _load_fixture_docs(path)
     return meta if isinstance(meta, dict) else {}
+
+
+# --------------------------------------------------------------------------- #
+# SIG-6: abstention → self-populating eval fixtures (KPI-4).
+#
+# RET-7 fixtures are hand-seeded, so KPI-4 measures what someone thought to test, not what
+# users actually ASK. The SIG-3 abstention backlog is exactly the missing demand signal:
+# recurring queries recall answered with NOTHING. Two primitives close the loop:
+#
+#   draft_abstention_fixtures() — at audit/consolidate time, turn each recurring cluster
+#       into a CANDIDATE row in a gitignored drafts queue. A draft row's ``expected`` is
+#       ALWAYS written empty: which existing memory should answer the query is a JUDGMENT
+#       (the abstention has no answer by definition) — the agent proposes, a human
+#       confirms. Never fabricate a memory to make a fixture pass (the killed
+#       demand-gap-auto-draft); a cluster no existing memory answers is a CAPTURE gap
+#       (SIG-3's own nudge), not fixture material.
+#   confirm_hard_set_row()      — the per-item admission gate (inv4): validates the
+#       judgment (real stems only, no duplicates) and appends ONE row, tagged
+#       ``category: abstention`` (RET-8's data-driven tag), to the TRACKED project
+#       fixture ``.claude/memory/.audit-fixtures/recall_hard_set.yaml`` — so the
+#       per-category eval measures the gap-closing loop end-to-end.
+#
+# The drafts queue lives in the PENDING dir (``.claude/.memory-pending/``), NOT in
+# ``.audit-fixtures/``: draft rows carry raw ``query_preview`` text from the gitignored
+# telemetry ledger, and the pending queue is the shipped home for exactly that kind of
+# unreviewed session-derived text (self-ignoring ``.gitignore``, SEC-3 — the capture-seed
+# precedent). The tracked fixture dir stays committable because every row in it passed
+# the per-item confirm step. Nothing consumes the drafts file automatically:
+# ``_default_fixture_path`` probes only the canonical filenames, and an unfilled draft
+# row (``expected: []``) is not even loadable by ``load_hard_set``.
+# --------------------------------------------------------------------------- #
+_DRAFTS_FILENAME = "recall_hard_set.drafts.yaml"
+_DRAFTS_NOTE = (
+    "SIG-6 candidate eval fixtures drafted from recurring recall abstentions — UNCONFIRMED. "
+    "For each row: if a REAL existing memory should answer the query, put its stem in "
+    "'expected' and admit the row via eval_recall.confirm_hard_set_row (per item); if no "
+    "memory answers it, that is a capture gap — capture the memory first (never invent a "
+    "stem to make a fixture pass), or delete the row if it is noise."
+)
+
+
+def _project_fixture_path(memory_dir: str, filename: str = "recall_hard_set.yaml") -> str:
+    """The project-local TRACKED-fixture path (``.audit-fixtures/``, the RET-7 convention)."""
+    return os.path.join(memory_dir, ".audit-fixtures", filename)
+
+
+def default_drafts_path(memory_dir: str) -> str:
+    """The SIG-6 drafts-queue path — inside the gitignored pending dir (see block comment)."""
+    from .capture import default_pending_dir
+
+    return os.path.join(default_pending_dir(memory_dir), _DRAFTS_FILENAME)
+
+
+def _parseable_yaml(path: str) -> bool:
+    """False when ``path`` exists but is not loadable YAML — the append guards below refuse
+    to grow a file an agent hand-edit broke (appending after a parse error only buries it)."""
+    try:
+        import yaml
+
+        with open(path, "r", encoding="utf-8") as fh:
+            list(yaml.safe_load_all(fh))
+        return True
+    except Exception:
+        return False
+
+
+def draft_abstention_fixtures(
+    memory_dir: Optional[str] = None,
+    *,
+    telemetry_dir: Optional[str] = None,
+    drafts_path: Optional[str] = None,
+    index_dir: Optional[str] = None,
+    k: int = 10,
+    probe: bool = True,
+) -> dict:
+    """Turn recurring abstention clusters into CANDIDATE fixture rows in the drafts queue.
+
+    Reads ``telemetry.abstention_backlog`` (the SIG-3 arm: recurring ``backend='none'``
+    clusters) and appends one draft row per NEW cluster to the gitignored drafts file:
+    ``{query, count, terms, current_hits, expected: []}``. ``current_hits`` records what
+    ``recall()`` surfaces for the query NOW (the same edge-aware supplied-index call shape
+    as the eval metrics) — judgment MATERIAL for the reviewing agent, never a verdict;
+    ``expected`` is always written empty (the judgment is deliberately not automated — see
+    the block comment above). ``probe=False`` skips the recall probes entirely (e.g. the
+    audit skill's ``--skip-eval`` fast path, where a cold dense model must not be paid
+    for): ``current_hits`` stays ``[]`` and no backend is claimed in the header.
+
+    Skips clusters whose query is already a TRACKED fixture row (that loop is closed) or
+    already drafted (existing draft rows — including any agent-filled ``expected`` still
+    awaiting confirmation — are preserved byte-verbatim; new rows only APPEND). No new
+    rows → nothing is created or touched. Refuses (``error`` key, no write) when the
+    drafts file exists but no longer parses — fix or delete a hand-edit typo first.
+
+    ``memory_dir=None`` resolves the ambient corpus; an EXPLICIT memory_dir derives the
+    telemetry dir as its sibling (the ``session_token_cost`` hermeticity pattern) rather
+    than re-resolving ambient state. Returns a summary dict:
+    ``{path, clusters, added, kept, skipped_tracked}``.
+    """
+    from .telemetry import abstention_backlog, default_telemetry_dir
+
+    if memory_dir is None:
+        memory_dir, _repo = resolve_dirs()
+    td = telemetry_dir or default_telemetry_dir(memory_dir)
+    dp = drafts_path or default_drafts_path(memory_dir)
+
+    clusters = abstention_backlog(td)
+    tracked = {row["query"] for row in load_hard_set(_project_fixture_path(memory_dir))}
+    _meta, existing_rows = _load_fixture_docs(dp)
+    drafted = {(r.get("query") or "").strip() for r in existing_rows if isinstance(r, dict)}
+
+    resolved_index_dir = index_dir or default_index_dir(memory_dir)
+    idx = load_index(resolved_index_dir) if probe else None
+    backend = None
+    if idx is not None and len(idx):
+        backend = "dense+bm25" if idx.dense_ready else "bm25-only"
+
+    added: List[dict] = []
+    skipped_tracked: List[str] = []
+    for c in clusters:
+        q = (c.get("sample_query") or "").strip()
+        if not q:
+            continue
+        if q in tracked:
+            skipped_tracked.append(q)
+            continue
+        if q in drafted:
+            continue
+        hits: List[str] = []
+        if backend is not None:
+            hits = [r["name"] for r in recall(q, k=k, index=idx, index_dir=resolved_index_dir)]
+        added.append(
+            {
+                "query": q,
+                "count": int(c.get("count") or 0),
+                "terms": [str(t) for t in (c.get("terms") or [])],
+                "hits": hits,
+            }
+        )
+
+    summary = {
+        "path": dp,
+        "clusters": len(clusters),
+        "added": [r["query"] for r in added],
+        "kept": len(existing_rows),
+        "skipped_tracked": skipped_tracked,
+    }
+    if not added:
+        return summary
+    if os.path.exists(dp) and not _parseable_yaml(dp):
+        summary["added"] = []
+        summary["error"] = (
+            "drafts file exists but is not parseable YAML — fix or delete it before "
+            "drafting more rows"
+        )
+        return summary
+
+    def _row_text(r: dict) -> str:
+        terms = ", ".join(json.dumps(t, ensure_ascii=False) for t in r["terms"])
+        hits = ", ".join(json.dumps(h, ensure_ascii=False) for h in r["hits"])
+        return (
+            f"- query: {json.dumps(r['query'], ensure_ascii=False)}\n"
+            f"  count: {r['count']}\n"
+            f"  terms: [{terms}]\n"
+            f"  current_hits: [{hits}]\n"
+            f"  expected: []\n"
+        )
+
+    rows_text = "".join(_row_text(r) for r in added)
+    if os.path.exists(dp):
+        with open(dp, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        if text and not text.endswith("\n"):
+            text += "\n"
+        text += rows_text
+    else:
+        # First write: SEC-3 self-ignoring dir (raw ledger queries must never be a
+        # `git add .` away from a commit) + the unconfirmed-marking provenance header.
+        ensure_self_ignoring_dir(os.path.dirname(dp))
+        header_lines = ["draft: true", f"note: {json.dumps(_DRAFTS_NOTE, ensure_ascii=False)}"]
+        if backend is not None:
+            header_lines.append(f"generated_with_backend: {backend}")
+        header_lines.append(f"generated_at: {time.strftime('%Y-%m-%d')}")
+        text = "\n".join(header_lines) + "\n---\n" + rows_text
+    with open(dp, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    return summary
+
+
+def confirm_hard_set_row(
+    query: str,
+    expected: List[str],
+    memory_dir: Optional[str] = None,
+    *,
+    fixture_path: Optional[str] = None,
+    drafts_path: Optional[str] = None,
+    category: str = "abstention",
+) -> dict:
+    """Admit ONE confirmed row into the TRACKED project fixture — the SIG-6 confirm gate.
+
+    The write half of the draft→confirm loop, per-item and agent-gated (inv4): a human (or
+    an operator-approved agent turn) has judged that ``expected`` — real, existing
+    memories — SHOULD answer ``query``. Appends the row (tagged ``category`` — default
+    ``abstention``, RET-8's data-driven tag, so unknown future tags need no loader change)
+    to ``.claude/memory/.audit-fixtures/recall_hard_set.yaml`` TEXTUALLY, preserving the
+    existing fixture bytes verbatim above the append (never a regenerate); creates the
+    fixture (minimal ``generated_at`` header, deliberately NO backend claim — these rows
+    come from traffic, not query synthesis) when the project has none yet.
+
+    REFUSES — ``{"ok": False, "reason": ...}``, nothing written — when: the query or
+    ``expected`` is empty (a no-answer cluster is a CAPTURE gap, not a fixture); any stem
+    does not exist in THIS corpus (never fabricate a memory to make a fixture pass); the
+    query is already tracked (dup guard); or the existing fixture no longer parses.
+
+    On success the matching drafts-queue row (if any) is dropped, so the queue drains.
+    The admitted row is deliberately NOT pre-verified against ``recall()`` — a
+    currently-FAILING row is legitimate signal (the fixture documents a recall gap the
+    corpus should close), and whether to admit one anyway is exactly the judgment the
+    human makes at confirm time.
+    """
+    if memory_dir is None:
+        memory_dir, _repo = resolve_dirs()
+    q = (query or "").strip()
+    if not q:
+        return {"ok": False, "reason": "empty query"}
+    stems: List[str] = []
+    for s in expected if isinstance(expected, (list, tuple)) else [expected]:
+        s = str(s or "").strip()
+        if s.endswith(".md"):
+            s = s[:-3]
+        if s and s not in stems:
+            stems.append(s)
+    if not stems:
+        return {
+            "ok": False,
+            "reason": "expected is empty — a cluster no existing memory answers is a "
+            "capture gap (capture the memory first), not a fixture row",
+        }
+    bad = [s for s in stems if "/" in s or os.sep in s or s.startswith(".")]
+    if bad:
+        return {"ok": False, "reason": f"expected entries must be bare memory stems: {bad}"}
+    missing = [s for s in stems if not os.path.exists(os.path.join(memory_dir, f"{s}.md"))]
+    if missing:
+        return {
+            "ok": False,
+            "reason": f"expected cites memories that do not exist in this corpus: {missing} "
+            "— never fabricate a memory to make a fixture pass",
+        }
+    fp = fixture_path or _project_fixture_path(memory_dir)
+    if os.path.exists(fp) and not _parseable_yaml(fp):
+        return {
+            "ok": False,
+            "reason": "tracked fixture exists but is not parseable YAML — fix it before "
+            "admitting rows",
+        }
+    if any(row["query"] == q for row in load_hard_set(fp)):
+        return {"ok": False, "reason": "query is already a tracked fixture row"}
+
+    cat = str(category or "").strip() or "abstention"
+    row_text = (
+        f"- query: {json.dumps(q, ensure_ascii=False)}\n"
+        f"  expected: [{', '.join(json.dumps(s, ensure_ascii=False) for s in stems)}]\n"
+        f"  category: {json.dumps(cat, ensure_ascii=False)}\n"
+    )
+    if os.path.exists(fp):
+        with open(fp, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        if text and not text.endswith("\n"):
+            text += "\n"
+        text += row_text
+    else:
+        os.makedirs(os.path.dirname(fp), exist_ok=True)
+        created_note = (
+            "project-local recall eval fixture — rows admitted per-item via "
+            "eval_recall.confirm_hard_set_row (SIG-6)"
+        )
+        text = (
+            f"note: {json.dumps(created_note)}\n"
+            f"generated_at: {time.strftime('%Y-%m-%d')}\n---\n" + row_text
+        )
+    with open(fp, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+    removed = False
+    dp = drafts_path or default_drafts_path(memory_dir)
+    if os.path.exists(dp):
+        meta, rows = _load_fixture_docs(dp)
+        keep = [
+            r for r in rows if not (isinstance(r, dict) and (r.get("query") or "").strip() == q)
+        ]
+        if len(keep) != len(rows):
+            import yaml
+
+            parts = []
+            if meta:
+                parts.append(yaml.safe_dump(meta, sort_keys=False, allow_unicode=True).rstrip("\n") + "\n---\n")
+            parts.append(
+                yaml.safe_dump(keep, sort_keys=False, allow_unicode=True) if keep else "[]\n"
+            )
+            with open(dp, "w", encoding="utf-8") as fh:
+                fh.write("".join(parts))
+            removed = True
+    return {
+        "ok": True,
+        "path": fp,
+        "query": q,
+        "expected": stems,
+        "category": cat,
+        "removed_from_drafts": removed,
+    }
 
 
 def hard_set_metrics(
