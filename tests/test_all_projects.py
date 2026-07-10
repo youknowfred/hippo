@@ -196,7 +196,10 @@ def test_empty_registered_corpus_is_a_named_skip(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 def test_untrusted_registered_corpus_contributes_nothing(tmp_path, monkeypatch):
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
-    _, md, idx = _current(tmp_path, monkeypatch, {"m": "current fact"})  # non-git: gate n/a
+    # SEC-12 gates non-git corpora too; this test's focus is the GIT (cloned) registered
+    # corpus, so opt the non-git current/local corpora out via the documented override.
+    monkeypatch.setenv("HIPPO_TRUST_NONGIT", "1")
+    _, md, idx = _current(tmp_path, monkeypatch, {"m": "current fact"})  # non-git: opted out
     evil_root, evil_md = _project(
         tmp_path, "evilclone", {"payload": "widget canvas rendering fallback trick"},
         git=True,
@@ -235,6 +238,9 @@ def test_untrusted_current_project_is_skipped_but_trusted_sources_still_serve(
 # --------------------------------------------------------------------------- #
 def test_describe_all_projects_labels_and_sources_trailer(tmp_path, monkeypatch):
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    # SEC-12: widgetlib + the current project are non-git; this test checks provenance
+    # LABELING (not the gate), so opt the non-git corpora in via the documented override.
+    monkeypatch.setenv("HIPPO_TRUST_NONGIT", "1")
     _, md, idx = _current(tmp_path, monkeypatch, {"m": "current fact"})
     good_root, good_md = _project(
         tmp_path, "widgetlib", {"canvas-trick": "widget canvas rendering fallback trick"}

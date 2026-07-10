@@ -329,6 +329,14 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **SEC-12** `P2/S` — Close the **non-git (zip/tarball) trust bypass** — treat an
   unresolvable-git corpus containing `.claude/memory/` as untrusted-by-default
   (env/`init` override), not "gate inapplicable."
+  **SHIPPED 2026-07-10**: `gate_repo_root` now gates a non-git dir that carries an
+  actual corpus (`_has_memory_content` — cheap, early-exit, non-git branch only),
+  keyed on its real root, so the existing `is_trusted` check denies it until
+  `/hippo:init` or `/hippo:doctor` consent. An EMPTY non-git dir (resolve_dirs'
+  fallback, every hermetic path) stays inapplicable — hermetic recall untouched.
+  Overrides: `HIPPO_TRUST_NONGIT` (+ `HIPPO_TRUST_ALL`). The untrusted-corpus nudge
+  now names the download/extract case + the override (inv3). It also closed the same
+  gap in `--all-projects` (a non-git registered corpus was bypassing the gate).
 - **SEC-13** `P2/S` — MCP `new_memory` honors the trust gate (kill the
   write-without-read asymmetry) + a `serve()` max-message cap.
 - **SEC-14** `P2/S` — TEA-5 committed usage summary behind **explicit opt-in** +

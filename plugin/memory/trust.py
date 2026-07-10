@@ -26,11 +26,19 @@ Design constraints this module is shaped by (all load-bearing):
     tests point it at a tmp path so the real ``~/.claude`` is never touched).
 
 Fail posture: this is a SECURITY gate, so it fails CLOSED — an unresolvable ``repo_root``
-that IS a real corpus, or an unreadable/corrupt registry, denies rather than injects. The
-one exception is a corpus that is not inside a git repo at all: the clone-injection attack
-is a git-clone, a non-git corpus is one the user created locally by hand, and gating it
-would break every hermetic (non-git tmp) recall call — so ``gate_repo_root`` returns None
-there and the caller treats "no resolvable git root" as "gate inapplicable, proceed".
+that IS a real corpus, or an unreadable/corrupt registry, denies rather than injects.
+
+SEC-12: a corpus not inside a git repo is NOT automatically waved through. The clone-
+injection attack has a non-git twin — "Download ZIP" of a public repo extracts a git-less
+directory that still carries ``.claude/memory/``, and treating "no git root" as "gate
+inapplicable" auto-injected exactly that. So a non-git directory that carries an actual
+memory corpus (``_has_memory_content``) is gated too: keyed on its real root, untrusted
+by default, denied until the user consents (``/hippo:init`` on create, or ``/hippo:doctor``
+after review). Two overrides keep it usable: ``HIPPO_TRUST_NONGIT`` (and the broader
+``HIPPO_TRUST_ALL``) restore the old "inapplicable, proceed" behavior for hand-made local
+non-git corpora. An EMPTY / non-corpus non-git directory — ``resolve_dirs``' fallback for
+an ordinary non-git PROJECT, and every hermetic tmp path — stays inapplicable: there is no
+injectable content to gate, so hermetic recall paths are untouched.
 """
 
 from __future__ import annotations
@@ -45,6 +53,9 @@ from .provenance import git_root
 _TRUST_ALL_ENV = "HIPPO_TRUST_ALL"
 # Hermetic-test / relocation override for the registry file path.
 _TRUST_FILE_ENV = "HIPPO_TRUST_FILE"
+# SEC-12 opt-out — set non-empty to restore the pre-SEC-12 "non-git = gate inapplicable"
+# behavior (for a deliberately hand-made non-git local corpus you don't want gated).
+_TRUST_NONGIT_ENV = "HIPPO_TRUST_NONGIT"
 
 
 def trust_all() -> bool:
@@ -348,23 +359,55 @@ def untrusted_changes(repo_root: Optional[str], memory_dir: str) -> dict:
         return out
 
 
-def gate_repo_root(memory_dir: Optional[str], repo_root: Optional[str] = None) -> Optional[str]:
-    """Resolve the git ``repo_root`` the trust gate keys on, or None if the gate is inapplicable.
+def _has_memory_content(memory_dir: Optional[str]) -> bool:
+    """Cheap 'is this a real injectable corpus?' probe: True iff ``memory_dir`` yields >=1 file.
 
-    ALWAYS resolves through ``git_root`` — never trusts a passed-in path blind. ``resolve_dirs``
-    returns ``git_root(start) or start``, so a caller's ``repo_root`` can be a NON-git fallback
-    dir; keying the gate on that would wrongly deny an ordinary non-git project. So this asks
-    git for the toplevel of the best available start dir (the supplied ``repo_root`` if any,
-    else ``memory_dir``) and returns None when there is none. That None is deliberate and
-    load-bearing: the clone-injection attack is a git clone, a corpus with no git root is one
-    the user created locally by hand, and gating it would break every hermetic (non-git tmp)
-    recall path — so the caller treats None as "gate inapplicable, proceed". Never raises.
+    Early-exits on the FIRST memory file (one directory entry), so it stays hot-path-safe.
+    Only ever runs on the gate's non-git branch (git corpora return before reaching it), and
+    only for non-git dirs — the uncommon case. Never raises.
+    """
+    if not memory_dir:
+        return False
+    try:
+        from .provenance import _iter_memory_files
+
+        return next(_iter_memory_files(memory_dir), None) is not None
+    except Exception:
+        return False
+
+
+def gate_repo_root(memory_dir: Optional[str], repo_root: Optional[str] = None) -> Optional[str]:
+    """Resolve the ``repo_root`` the trust gate keys on, or None if the gate is inapplicable.
+
+    Git corpora: ALWAYS resolved through ``git_root`` — never the passed path taken blind.
+    ``resolve_dirs`` returns ``git_root(start) or start``, so a caller's ``repo_root`` can be a
+    NON-git fallback dir; keying blind on that would wrongly deny an ordinary non-git project.
+    So this asks git for the toplevel of the best start dir (supplied ``repo_root`` else
+    ``memory_dir``); a git root is the key.
+
+    SEC-12 — non-git corpora: when there is no git root, a non-git directory that carries an
+    actual memory corpus (``_has_memory_content``) is the "Download ZIP of a public repo"
+    shape — extracted, git-less, still auto-injecting. It is gated too, keyed on its real root
+    (``_corpus_key``), so the caller's ``is_trusted`` check denies it until the user consents.
+    ``HIPPO_TRUST_NONGIT`` (and ``HIPPO_TRUST_ALL``) restore the old "inapplicable, proceed"
+    behavior. An EMPTY / non-corpus non-git dir (the resolve_dirs fallback for a non-git
+    project, and every hermetic tmp path) has nothing injectable, so it stays inapplicable
+    (None) — hermetic recall paths are untouched. Never raises.
     """
     try:
         start = repo_root or memory_dir
         if not start:
             return None
-        return git_root(start)
+        root = git_root(start)
+        if root is not None:
+            return root
+        # No git root. SEC-12: gate a non-git dir only if it is a REAL corpus and no opt-out
+        # is set — otherwise stay inapplicable (the load-bearing hermetic/non-git-project case).
+        if os.environ.get(_TRUST_NONGIT_ENV) or trust_all():
+            return None
+        if _has_memory_content(memory_dir):
+            return _corpus_key(start)
+        return None
     except Exception:
         return None
 
