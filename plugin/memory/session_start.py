@@ -1071,11 +1071,52 @@ def resume_card_producer(
 # (label, fn). Each tier appends a producer here — never a parallel hook entry. Every fn
 # shares ONE call shape — ``(memory_dir, repo_root, ctx)`` — LIF-6's ``RunContext``, even
 # when a given producer ignores it (see the module docstring).
+_MAX_TRUST_DRIFT_NAMES = 4
+
+
+def trust_drift_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """SEC-6: a TRUSTED corpus whose content drifted from its consent baseline — LOUD.
+
+    Recall is actively WITHHOLDING the drifted/new files (the per-file quarantine), so
+    this is first-class loud (fires every session while drift exists, like the conflict
+    radar — an active degradation must never wait for a nudge cadence, KPI-5). Names the
+    first few withheld stems and routes to ``/hippo:doctor`` for the delta review +
+    re-consent. Silent when: the gate is inapplicable/bypassed, the corpus is untrusted
+    (the untrusted nudge owns that path), the record is legacy/fingerprint-less (no
+    quarantine is active — the doctor check names that upgrade), or there is no drift.
+    Read-only; ``ctx`` (LIF-6) unused; never raises.
+    """
+    try:
+        from . import trust
+
+        gate_root = trust.gate_repo_root(memory_dir, repo_root)
+        if gate_root is None or trust.trust_all() or not trust.is_trusted(gate_root):
+            return None
+        drift = trust.untrusted_changes(gate_root, memory_dir)
+        changed, added = drift.get("changed") or [], drift.get("added") or []
+        if not drift.get("baseline") or not (changed or added):
+            return None
+        withheld = changed + [f"{n} (new)" for n in added]
+        shown = ", ".join(withheld[:_MAX_TRUST_DRIFT_NAMES])
+        more = f" (+{len(withheld) - _MAX_TRUST_DRIFT_NAMES} more)" if len(withheld) > _MAX_TRUST_DRIFT_NAMES else ""
+        return (
+            f"🔒 Memory trust drift: {len(changed)} changed / {len(added)} new memory "
+            f"file(s) since you trusted this corpus (a git pull? a hand edit?) — recall is "
+            f"WITHHOLDING them until you re-review: {shown}{more}. Run /hippo:doctor to see "
+            "what each would inject and re-consent."
+        )
+    except Exception:
+        return None
+
+
 PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[str]]]] = [
     ("stale_venv", stale_venv_producer),  # environment-level — a stale venv taints everything below
     ("corpus_format", corpus_format_producer),  # a corpus NEWER than the plugin taints every reader below (COR-7)
     ("integrity", integrity_producer),  # a malformed memory must not hide
     ("citation_rot", citation_rot_producer),  # cited paths gone from the repo (LIF-3) — find_unparseable's rot sibling
+    ("trust_drift", trust_drift_producer),  # SEC-6: trusted corpus drifted from its consent baseline — recall is withholding files
     ("staleness", staleness_producer),
     ("reconsolidation", reconsolidation_producer),  # recall-filtered subset of staleness; silent unless a recently-recalled memory is stale
     ("pending_capture", pending_capture_producer),  # CAP-2: surface the gitignored draft-capture queue so it never soaks silently

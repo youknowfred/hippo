@@ -783,6 +783,60 @@ def check_trust(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"trust check failed: {exc}."}
 
 
+def check_trust_drift(ctx: DoctorContext) -> Dict[str, str]:
+    """SEC-6: content drift since consent — the always-available re-consent surface.
+
+    Three deterministic states for a TRUSTED, gate-applicable corpus:
+      - baseline present, no drift  -> ok.
+      - baseline present, drift     -> warn, naming the withheld stems (recall's per-file
+        quarantine is ACTIVE on them) + the exact re-consent command. The interactive
+        review (show what each changed file would inject — the SEC-5 consent sample —
+        then take the explicit yes) lives in the doctor SKILL, same as first consent.
+      - baseline ABSENT (a legacy, pre-SEC-6 trust record) -> warn: trust works but
+        change detection is OFF until a re-consent stamps a fingerprint.
+    ok/N-A on the bypassed / non-git / untrusted paths (``check_trust`` owns those).
+    """
+    try:
+        from . import trust
+
+        if trust.trust_all():
+            return {"status": "ok", "message": "trust drift: N/A (HIPPO_TRUST_ALL bypass)."}
+        gate_root = trust.gate_repo_root(ctx.memory_dir, ctx.repo_root)
+        if gate_root is None:
+            return {"status": "ok", "message": "trust drift: N/A (not a git corpus)."}
+        if not trust.is_trusted(gate_root):
+            return {
+                "status": "ok",
+                "message": "trust drift: N/A (corpus untrusted — see the trust line).",
+            }
+        drift = trust.untrusted_changes(gate_root, ctx.memory_dir)
+        if not drift.get("baseline"):
+            return {
+                "status": "warn",
+                "message": "trust record has NO content fingerprint (pre-SEC-6 consent) — "
+                "recall cannot detect upstream changes to this corpus. Re-consent to stamp "
+                "one: python -c \"from memory.trust import mark_trusted; "
+                f"mark_trusted('{gate_root}', memory_dir='{ctx.memory_dir}')\"",
+            }
+        changed, added = drift.get("changed") or [], drift.get("added") or []
+        if not changed and not added:
+            return {
+                "status": "ok",
+                "message": "corpus content matches its consent-time fingerprint.",
+            }
+        names = ", ".join(changed + [f"{n} (new)" for n in added])
+        return {
+            "status": "warn",
+            "message": f"{len(changed)} changed / {len(added)} new memory file(s) since "
+            f"consent — recall is WITHHOLDING them: {names}. Review what each would inject "
+            "(the consent sample shows descriptions), then re-consent: "
+            "python -c \"from memory.trust import mark_trusted; "
+            f"mark_trusted('{gate_root}', memory_dir='{ctx.memory_dir}')\"",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"trust-drift check failed: {exc}."}
+
+
 def check_secrets(ctx: DoctorContext) -> Dict[str, str]:
     """Corpus-wide secret-pattern sweep (SEC-2) — import and call the factored-out detector.
 
@@ -1249,6 +1303,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("git_mode", check_git_mode),
     ("trust", check_trust),
     ("trust_scorecard", check_trust_scorecard),  # GOV-6: the one-line rollup a lead scans first; the point-checks below are the drill-down
+    ("trust_drift", check_trust_drift),  # SEC-6: content drift since consent — quarantine state + the re-consent path
     ("integrity", check_integrity),
     ("index_corruption", check_index_corruption),
     ("index_count", check_index_count),
