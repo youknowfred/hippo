@@ -37,6 +37,12 @@ Battle-tested in daily use since 2026-06 across a 180+ memory production corpus.
    starts surface staleness, recent captures, and link health. If anything seems off:
    `/hippo:doctor`.
 
+5. **See it work.** Ask Claude *"what do you remember about my role?"* (or run
+   `/hippo:recall "my role"` directly). hippo matches your prompt against the corpus and
+   surfaces the relevant memory inline — that returned memory is the whole point: the right
+   context on demand, built with zero tokens and never leaving your machine. (Fill in
+   `user_role.md` first, from step 3, so there's something real to recall.)
+
 Before bootstrap has run, recall works immediately in BM25-only mode: the plugin vendors a
 dependency-free BM25 scorer and frontmatter parser (`plugin/memory/_vendor/`) precisely
 for that pre-bootstrap window, so a bare `python3` with none of the pinned deps still

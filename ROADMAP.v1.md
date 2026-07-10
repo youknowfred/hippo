@@ -417,6 +417,11 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **ONB-8** `P1/S` — **Observable first recall** in the quickstart (final step
   runs `/hippo:recall` / "what do you remember about X" so the stranger *sees*
   the memory return). This *is* KPI-1's metric; it is never exercised today.
+  **SHIPPED 2026-07-10**: README Quickstart gained a step 5 ("See it work") — ask
+  *"what do you remember about my role?"* or run `/hippo:recall "my role"`, with a
+  pointer back to step 3's `user_role.md` fill so there is real content to return.
+  The stranger now ends the quickstart on an observed recall, not on "just work …
+  injected automatically."
 - **ONB-9** `P1/S` — Post-init **"try it now" next-command nudge** — complete the
   KPI-8 funnel (narration currently stops one step short of the payoff).
 - **DOC-9** `P1/M` — **"How hippo thinks" concepts page** (what a memory is; floor
