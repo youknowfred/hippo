@@ -66,6 +66,58 @@ def git_root(start: Optional[str] = None) -> Optional[str]:
     return out or None
 
 
+# SEC-14: well-known PUBLIC git-hosting hosts. A repo on one of these MAY be world-readable —
+# we cannot tell public from private by URL alone, so this is the strongest signal we have that
+# a COMMITTED per-user usage summary (TEA-5) could become public. Any remote at all means
+# "shared with whoever can pull"; these get the loudest warning.
+_PUBLIC_GIT_HOSTS = (
+    "github.com", "gitlab.com", "bitbucket.org", "codeberg.org", "gitea.com", "sr.ht",
+)
+
+
+def _git_url_host(url: str) -> Optional[str]:
+    """Host of a git remote URL — ``https://host/…``, ``git@host:…``, or ``ssh://…``. None if unclear."""
+    try:
+        u = url.strip()
+        m = re.match(r"^[\w.+-]+@([^:/]+):", u)  # scp-like: git@host:path
+        if m:
+            return m.group(1).lower()
+        m = re.match(r"^[a-zA-Z][\w+.-]*://(?:[^@/]+@)?([^:/]+)", u)  # scheme://[user@]host[:port]/…
+        if m:
+            return m.group(1).lower()
+        return None
+    except Exception:
+        return None
+
+
+def git_remote_info(repo_root: Optional[str]) -> dict:
+    """``{"url", "host", "public_host"}`` for the repo's push remote (SEC-14). All-None if none.
+
+    Reads ``origin`` (else the first configured remote). ``public_host`` is True when the URL
+    points at a well-known public-hosting service — a repo there MAY be world-readable (not
+    determinable from the URL), the strongest signal that a committed per-user usage summary
+    could become public. Never raises; used only by user/agent-gated surfaces (the soak CLI's
+    --record-usage confirmation and a doctor check), never on the hot path.
+    """
+    out = {"url": None, "host": None, "public_host": False}
+    try:
+        if not repo_root:
+            return out
+        url = run_git(["config", "--get", "remote.origin.url"], repo_root).strip()
+        if not url:
+            remotes = run_git(["remote"], repo_root).split()
+            if remotes:
+                url = run_git(["config", "--get", f"remote.{remotes[0]}.url"], repo_root).strip()
+        if not url:
+            return out
+        host = _git_url_host(url)
+        out.update(url=url, host=host,
+                   public_host=bool(host and any(host == h or host.endswith("." + h) for h in _PUBLIC_GIT_HOSTS)))
+        return out
+    except Exception:
+        return out
+
+
 def encode_project_dir(repo_root: str) -> str:
     """Encode an absolute repo path the way Claude Code names ``~/.claude/projects/<encoded>``.
 

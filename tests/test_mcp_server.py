@@ -128,6 +128,43 @@ def test_new_memory_tool_validates_required_fields(corpus):
     assert "required" in _text(resp)
 
 
+def test_new_memory_refuses_untrusted_corpus_then_writes_after_consent(corpus, monkeypatch):
+    """SEC-13: MCP new_memory honors the trust gate — no write-without-read asymmetry.
+
+    conftest's autouse TRUST_ALL=1 normally opens the gate; delete it and the (non-git,
+    SEC-12-gated) corpus is untrusted, so the WRITE is refused just as recall would be —
+    until the user consents (what /hippo:init or /hippo:doctor do).
+    """
+    from memory import trust as T
+    from memory.provenance import resolve_dirs
+
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)  # HIPPO_TRUST_FILE stays tmp (conftest)
+    resp = _call("new_memory", {
+        "name": "leak_me", "description": "a write into an untrusted corpus", "type": "project",
+    })
+    assert "REFUSED" in _text(resp)
+    assert not os.path.exists(os.path.join(corpus, "leak_me.md"))  # nothing written
+
+    assert T.mark_trusted(T.gate_repo_root(*resolve_dirs()))  # consent
+    resp2 = _call("new_memory", {
+        "name": "leak_me", "description": "a write into an untrusted corpus", "type": "project",
+    })
+    assert "created" in _text(resp2)
+    assert os.path.exists(os.path.join(corpus, "leak_me.md"))
+
+
+def test_serve_rejects_oversized_message_and_keeps_serving(corpus, monkeypatch):
+    """SEC-13: an oversized JSON-RPC line is refused before parsing, and the loop keeps going."""
+    monkeypatch.setattr(M, "_MAX_MESSAGE_CHARS", 200)
+    big = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {"x": "z" * 500}})
+    good = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ping"})
+    out = io.StringIO()
+    M.serve(io.StringIO(big + "\n" + good + "\n"), out)
+    responses = [json.loads(ln) for ln in out.getvalue().splitlines() if ln.strip()]
+    assert any(r.get("error", {}).get("message") == "message too large" for r in responses)
+    assert any(r.get("id") == 2 for r in responses)  # the valid message after it still served
+
+
 def test_traverse_tool_walks_the_graph(corpus):
     resp = _call("traverse", {"name": "deploy_runbook", "hops": 1})
     text = _text(resp)

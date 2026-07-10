@@ -301,21 +301,59 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **SEC-8** `P1/S` — Broaden secret-lint prefixes (Slack/Google/Stripe/OpenAI/
   Anthropic/JWT/npm/PyPI/connection-strings, staying high-precision) + a **CI
   secret-scan gate** over shipped packs + repo.
+  **SHIPPED 2026-07-10**: 9 new high-precision prefix/shape patterns folded into the
+  ONE detector (`secrets._PATTERNS`); `scan_text(entropy=…)` gates the soft catch-all
+  so the gate stays deterministic. New `secrets.scan_files`/`_iter_repo_files`/`main`
+  → `python -m memory.secrets --repo .`, a `secret-scan` CI job over the tracked tree
+  (tests excluded — they ship detector vectors); exits 1 on a KIND hit, never echoes
+  the secret. Shipped starter packs pinned clean by a suite regression test.
 - **SEC-9** `P1/S` — `THIRD_PARTY_NOTICES` / `NOTICE`: dependency + **model**
   license inventory (Apache/BSD/MIT + bge-small model card).
+  **SHIPPED 2026-07-10**: repo-root `THIRD_PARTY_NOTICES` inventories the 4 direct
+  deps + fastembed's transitive tree + both embedding models (default bge-small MIT,
+  `--multilingual` preset Apache-2.0), all permissive, each verified against the
+  installed venv metadata. README License section + `requirements.txt` point to it;
+  a drift-guard test ties the inventory to `requirements.txt` (a new dep un-listed
+  reddens the suite). The `_vendor/` fallbacks are hippo's own MIT code, not third-party.
 - **SEC-10** `P1/S` — `SECURITY.md`: private disclosure channel, supported
   versions, pointer to SEC-2 lint / SEC-4 purge. *(also a COM launch-standard.)*
+  **SHIPPED 2026-07-10**: repo-root `SECURITY.md` — GitHub private vulnerability
+  reporting as the disclosure channel (no personal email exposed), a supported-
+  versions table (1.7.x), a threat model scoped to hippo's actual surface (untrusted
+  shared corpora / secrets-in-memory / prompt-injection), and the SEC-4 purge pointer
+  for an accidentally-committed secret. README links it; a drift-guard test pins the
+  channel, the versions section, and the purge link's live target.
 - **SEC-11** `P2/M` — Supply chain: pin/lock deps (or hash-locked requirements) +
   document/optionally verify the ~130MB model artifact. Bootstrap is the one
   online step; it currently fetches range-pinned wheels + an unverified binary.
 - **SEC-12** `P2/S` — Close the **non-git (zip/tarball) trust bypass** — treat an
   unresolvable-git corpus containing `.claude/memory/` as untrusted-by-default
   (env/`init` override), not "gate inapplicable."
+  **SHIPPED 2026-07-10**: `gate_repo_root` now gates a non-git dir that carries an
+  actual corpus (`_has_memory_content` — cheap, early-exit, non-git branch only),
+  keyed on its real root, so the existing `is_trusted` check denies it until
+  `/hippo:init` or `/hippo:doctor` consent. An EMPTY non-git dir (resolve_dirs'
+  fallback, every hermetic path) stays inapplicable — hermetic recall untouched.
+  Overrides: `HIPPO_TRUST_NONGIT` (+ `HIPPO_TRUST_ALL`). The untrusted-corpus nudge
+  now names the download/extract case + the override (inv3). It also closed the same
+  gap in `--all-projects` (a non-git registered corpus was bypassing the gate).
 - **SEC-13** `P2/S` — MCP `new_memory` honors the trust gate (kill the
   write-without-read asymmetry) + a `serve()` max-message cap.
+  **SHIPPED 2026-07-10**: `_tool_new_memory` runs the SAME gate the MCP resources do
+  and REFUSES a write into an untrusted corpus (gated on the same corpus resolve_dirs
+  hands `write_memory`, so refusal target == write target). `serve()` rejects a line
+  over `_MAX_MESSAGE_CHARS` (1 MiB, `HIPPO_MCP_MAX_MESSAGE_CHARS`-overridable) with a
+  null-id JSON-RPC error before parsing, and keeps serving.
 - **SEC-14** `P2/S` — TEA-5 committed usage summary behind **explicit opt-in** +
   a public-remote warning (doctor/doc). *Tension: TEA-5 deliberately excepts the
   gitignore invariant — narrow it for public remotes.*
+  **SHIPPED 2026-07-10**: `provenance.git_remote_info` classifies the push remote
+  (public-host detection). `soak --record-usage` now prints the privacy warning
+  (committed per-user recall names + counts) and, on a repo WITH a remote, REFUSES
+  unless `--yes` / `HIPPO_TEA5_OPT_IN=1` — a local-only repo (nothing to leak to)
+  still proceeds. New doctor `committed_usage_privacy` check warns when `.usage/`
+  summaries exist on a remote (loudest for a public host). Session ids already never
+  entered the committed file.
 
 ### RET / PRF / GRA — Retrieval precision, measurement & graph
 - **RET-8** `P1/M` — Category-tagged eval (multi-hop/temporal/update/abstention);

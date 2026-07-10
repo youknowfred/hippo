@@ -114,6 +114,10 @@ def _run_hook(
         "CLAUDE_PLUGIN_ROOT": _PLUGIN_ROOT,
         "CLAUDE_PLUGIN_DATA": data_dir,
         "HIPPO_DISABLE_DENSE": "1",
+        # SEC-12: this hermetic corpus is a non-git tmp dir; treat it as a trusted local
+        # corpus (as a user's own hand-made project would be) so the hook injects/nudges
+        # its real mechanics instead of the untrusted-corpus gate.
+        "HIPPO_TRUST_NONGIT": "1",
     }
     proc = subprocess.run(
         ["/bin/bash", hook],
@@ -226,6 +230,7 @@ class TestUserPromptHook:
             "CLAUDE_PLUGIN_ROOT": _PLUGIN_ROOT,
             "CLAUDE_PLUGIN_DATA": str(data_dir),
             "HIPPO_DISABLE_DENSE": "1",
+            "HIPPO_TRUST_NONGIT": "1",  # SEC-12: hermetic non-git corpus = trusted local
         }
         stdin = json.dumps({
             "prompt": "how is the zebra service deployed with canary rollout", "session_id": "s1"
@@ -622,6 +627,7 @@ class TestBashLevelCorpusGuard:
             "CLAUDE_PLUGIN_ROOT": _PLUGIN_ROOT,
             "CLAUDE_PLUGIN_DATA": str(data_dir),
             "HIPPO_DISABLE_DENSE": "1",
+            "HIPPO_TRUST_NONGIT": "1",  # SEC-12: hermetic non-git corpus = trusted local
         }
         return project, str(data_dir), canary, env
 
@@ -770,6 +776,7 @@ class TestConcurrentSessionAttribution:
                 "CLAUDE_PLUGIN_ROOT": _PLUGIN_ROOT,
                 "CLAUDE_PLUGIN_DATA": env_data_dir,
                 "HIPPO_DISABLE_DENSE": "1",
+                "HIPPO_TRUST_NONGIT": "1",  # SEC-12: hermetic non-git corpus = trusted local
             },
         )
         _assert_contract(proc_b, "UserPromptSubmit")

@@ -189,6 +189,9 @@ def test_bare_python3_serves_bm25_recall_through_the_hook(tmp_path, bare_python)
             "CLAUDE_PROJECT_DIR": project,
             "CLAUDE_PLUGIN_ROOT": _PLUGIN_ROOT,
             "CLAUDE_PLUGIN_DATA": str(data_dir),
+            # SEC-12: the hermetic corpus is a non-git tmp dir; treat it as a trusted local
+            # corpus so the pre-bootstrap recall path runs (not the untrusted-corpus gate).
+            "HIPPO_TRUST_NONGIT": "1",
         },
     )
     assert proc.returncode == 0, proc.stderr
@@ -216,7 +219,11 @@ def test_vendored_path_imports_no_numpy_or_fastembed(tmp_path, bare_python):
         capture_output=True,
         text=True,
         timeout=60,
-        env={"PYTHONPATH": _PLUGIN_ROOT, "HOME": str(tmp_path)},
+        env={
+            "PYTHONPATH": _PLUGIN_ROOT,
+            "HOME": str(tmp_path),
+            "HIPPO_TRUST_NONGIT": "1",  # SEC-12: hermetic non-git corpus = trusted local
+        },
     )
     assert proc.returncode == 0, proc.stderr
     data = json.loads(proc.stdout.strip())

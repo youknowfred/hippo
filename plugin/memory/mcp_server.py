@@ -192,13 +192,28 @@ def _tool_recall(args: Dict[str, Any]) -> str:
 
 
 def _tool_new_memory(args: Dict[str, Any]) -> str:
+    from . import trust
     from .new_memory import write_memory
+    from .provenance import resolve_dirs
 
     name = str(args.get("name") or "").strip()
     description = str(args.get("description") or "").strip()
     mtype = str(args.get("type") or "").strip()
     if not (name and description and mtype):
         return "new_memory: name, description, and type are all required."
+    # SEC-13: honor the trust gate on the WRITE path, exactly as recall + the resources do.
+    # Without this, a subagent in an untrusted-but-writable clone could WRITE memories it
+    # cannot READ — the write-without-read asymmetry. Gate on the same corpus resolve_dirs
+    # hands write_memory (it resolves the same way with no explicit dirs), so the refusal and
+    # the would-be write target are always the same corpus.
+    memory_dir, repo_root = resolve_dirs()
+    gate_root = trust.gate_repo_root(memory_dir, repo_root)
+    if gate_root is not None and not trust.is_trusted(gate_root):
+        return (
+            "new_memory REFUSED — this project's memory corpus is untrusted (SEC-13: writing "
+            "to an unreviewed corpus is gated just as reading it is). Run /hippo:doctor to "
+            "review and trust it, or /hippo:init if it's yours."
+        )
     links = args.get("links")
     links = [str(x) for x in links] if isinstance(links, list) else None
     confidence = args.get("confidence")
@@ -536,6 +551,13 @@ def handle_request(req: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return error(-32601, f"method not found: {method}")
 
 
+# SEC-13: a single JSON-RPC line larger than this is rejected before it is parsed or handled.
+# The largest legitimate message for this server is a new_memory call with a short body; 1 MiB
+# is orders of magnitude over that, so the cap only ever trips on a runaway/adversarial payload
+# (bounding json.loads + handler cost). Overridable for the rare huge-body case.
+_MAX_MESSAGE_CHARS = int(os.environ.get("HIPPO_MCP_MAX_MESSAGE_CHARS") or 1_048_576)
+
+
 def serve(stdin=None, stdout=None) -> int:
     """Read newline-delimited JSON-RPC from stdin, write responses to stdout. Never raises."""
     stdin = stdin or sys.stdin
@@ -552,6 +574,13 @@ def serve(stdin=None, stdout=None) -> int:
     except Exception:
         pass
     for line in stdin:
+        if len(line) > _MAX_MESSAGE_CHARS:
+            # SEC-13: refuse an oversized message rather than parse/handle an unbounded payload.
+            # The id is unrecoverable without parsing, so per JSON-RPC emit a null-id error and
+            # keep serving — one bad message never wedges or kills the loop.
+            _write(stdout, {"jsonrpc": "2.0", "id": None,
+                            "error": {"code": -32600, "message": "message too large"}})
+            continue
         line = line.strip()
         if not line:
             continue

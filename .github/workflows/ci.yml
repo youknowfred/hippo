@@ -7,13 +7,17 @@
 #               dense tests plus the bare eval_recall CLI against a corpus seeded from
 #               the shipped starter packs (so default-path fossils fail loudly, COR-2).
 #   shellcheck — the hook scripts and bin/hippo launcher.
+#   secret-scan — SEC-8: the secret-lint detector run over the shipped/committed tree
+#               (starter packs + docs + source, tests excluded) so a credential can never
+#               reach a user through a release. Deterministic prefixes only (entropy off).
 #
 # Nightly-only lane (NOT a required PR check — gated on the schedule trigger):
 #   scale     — PRF-3's generated ~500-memory BM25 corpus, asserting recall latency,
 #               bounded output, and build/refresh time. `scale`-marked so it never runs on
 #               the hermetic or dense lanes; a scale regression names the budget it broke.
 #
-# Mark hermetic ×4 + dense + shellcheck required on PRs to main in branch-protection settings.
+# Mark hermetic ×4 + dense + shellcheck + secret-scan required on PRs to main in
+# branch-protection settings.
 
 name: CI
 
@@ -95,6 +99,21 @@ jobs:
       - uses: actions/checkout@v4
       - name: shellcheck hook scripts and bin/hippo
         run: shellcheck plugin/hooks/*.sh plugin/bin/hippo
+
+  secret-scan:
+    name: secret-scan (SEC-8 — shipped packs + repo)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # No deps: secrets.py is pure-stdlib (re + a tiny entropy heuristic). Scans the TRACKED
+      # tree (git ls-files) for known credential shapes; exits 1 on any finding, reporting the
+      # KIND per file, never the secret. tests/ is excluded — it ships intentional detector
+      # vectors. A hit here means a release would carry a credential: rotate + purge history.
+      - name: Secret-scan the shipped/committed tree
+        run: PYTHONPATH=plugin python -m memory.secrets --repo .
 
   scale:
     name: scale (500-memory BM25 lane, nightly)

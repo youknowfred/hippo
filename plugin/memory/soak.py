@@ -239,6 +239,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         "teammate's clone unions your recalls before judging coldness. Then commit .usage/. "
         "This is the only write this tool makes; agent/user-gated by invoking it explicitly.",
     )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="SEC-14: confirm --record-usage even when the repo has a remote (the committed "
+        "summary — your recalled memory names + counts — is shared with anyone who can read it).",
+    )
     args = parser.parse_args(argv)
 
     memory_dir, repo_root = resolve_dirs()
@@ -247,12 +253,33 @@ def main(argv: Optional[List[str]] = None) -> int:
     td = args.telemetry_dir or default_telemetry_dir(memory_dir)
 
     if args.record_usage:
+        from .provenance import git_remote_info
         from .telemetry import write_user_usage_summary
+
+        # SEC-14: the committed usage summary excepts the gitignore invariant BY DESIGN (teammates
+        # must union it). That is a privacy footgun on a shared/public remote — a per-user record
+        # of which memories you recall. Warn about the exposure, and on a repo WITH a remote require
+        # an explicit --yes (or HIPPO_TEA5_OPT_IN=1) so it can never be committed to a public repo
+        # by reflex. A local-only repo has nothing to leak to, so it proceeds with a plain note.
+        remote = git_remote_info(repo_root)
+        if remote["url"]:
+            where = ("a PUBLIC-host remote" if remote["public_host"] else "a remote")
+            print("⚠ TEA-5 privacy: this writes a COMMITTED per-user usage summary")
+            print("  (.claude/memory/.usage/<user>.json — your recalled memory NAMES + counts; no")
+            print("  session ids). It is NOT gitignored: the whole point is that teammates union it.")
+            print(f"  This repo has {where} ({remote['url']}). Once you commit + push .usage/,")
+            print("  anyone who can read that remote sees your recall patterns — on a public repo,")
+            print("  the whole world.")
+            if not (args.yes or os.environ.get("HIPPO_TEA5_OPT_IN")):
+                print("  Nothing written. Re-run with --yes (or set HIPPO_TEA5_OPT_IN=1) to confirm.")
+                return 1
 
         user = current_user_slug(repo_root)
         path = write_user_usage_summary(memory_dir, user, td)
         if path:
             print(f"recorded usage summary for '{user}' → {path}")
+            if not remote["url"]:
+                print("  (this file is committed to git — local-only repo, so nothing is shared yet).")
             print("commit .claude/memory/.usage/ so teammates union it before judging coldness.")
             return 0
         print("could not record usage summary (no aggregates yet, or write failed).")
