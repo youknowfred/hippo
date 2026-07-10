@@ -567,6 +567,144 @@ def test_graph_expansion_keeps_higher_organic_score(tmp_path, monkeypatch):
     assert [r["name"] for r in res].index("token_rotation") < 2
 
 
+# --------------------------------------------------------------------------- #
+# GRA-1, the RET-8 dense-side finding: graph-ENDORSED entries vs the knee cliff.
+# Under dense every fused entry has a primary rank, so (1) a seed's neighbor is usually
+# organic-kept (injection declines) and (2) the old knee BREAK orphaned every endorsed
+# entry ranked past an organic cliff — multi-hop measured 1.0 bm25-only vs 0.0 dense+bm25.
+# The fix keys knee exemption on _expand_neighbors' endorsed set and latches the cliff
+# (organic admission ends; the walk continues for endorsed entries only). These tests
+# reproduce the structure hermetically on BM25 by raising HIPPO_KNEE_RATIO so that a
+# single-backend rank gap trips the cliff (consecutive RRF ranks ratio ~(60+r)/(61+r)).
+# --------------------------------------------------------------------------- #
+# Seed matches the oauth query hard (rank 1) and links [[token_rotation]]; the neighbor
+# shares ONE query token ("token") so it IS organically ranked (the dense-side shape:
+# organic-kept, not injected) but far below; the filler shares two tokens and sits between.
+_CLIFF_CORPUS = {
+    "auth_flow.md": (
+        "oauth token refresh flow for the api gateway",
+        "details\n\nRelated: [[token_rotation]]\n",
+    ),
+    "gateway_refresh_faq.md": ("refresh gateway questions and answers", "body"),
+    "token_rotation.md": ("token rotation policy quarterly cadence", "body"),
+    "excel_header.md": (_CORPUS["excel_header.md"], "body"),
+    "canvas_pdf.md": (_CORPUS["canvas_pdf.md"], "body"),
+    "formula_graph.md": (_CORPUS["formula_graph.md"], "body"),
+}
+
+
+def test_graph_endorsed_neighbor_survives_knee_cliff(tmp_path, monkeypatch):
+    """An organic-kept (never score-replaced) neighbor of the top seed survives a knee
+    ratio that cuts every other organic candidate past the cliff — endorsement, not its
+    own weak organic rank, is its admission signal."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_KNEE_RATIO", "0.99")  # trips on any single-backend rank gap
+    monkeypatch.setenv("HIPPO_GRAPH_SEEDS", "1")  # tiny corpus: keep the neighbor OUT of the seed window
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_linked_corpus(md, _CLIFF_CORPUS)
+    B.build_index(md, idx)
+
+    res = R.recall(_OAUTH_QUERY, k=6, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert names[0] == "auth_flow"  # the seed, organic rank 1
+    # The non-endorsed filler tripped the cliff and is dropped, exactly as before the fix…
+    assert "gateway_refresh_faq" not in names
+    # …but the endorsed neighbor past the cliff is admitted, carrying graph provenance
+    # (the graph is the only reason the line exists — inspectable per GRA-1's contract).
+    by_name = {r["name"]: r for r in res}
+    assert "token_rotation" in by_name
+    assert by_name["token_rotation"]["via"] == "graph"
+
+
+def test_knee_cliff_still_cuts_unlinked_tail(tmp_path, monkeypatch):
+    """Endorsement is the ONLY new admission channel: the same corpus without the wikilink
+    admits nothing past the cliff — the knee's tail-junk guarantee is intact."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_KNEE_RATIO", "0.99")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    items = dict(_CLIFF_CORPUS)
+    items["auth_flow.md"] = ("oauth token refresh flow for the api gateway", "details\n")
+    _write_linked_corpus(md, items)
+    B.build_index(md, idx)
+
+    res = R.recall(_OAUTH_QUERY, k=6, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert names == ["auth_flow"]  # everything past rank 1 fell off the 0.99 cliff
+
+
+def test_endorsed_neighbor_before_cliff_keeps_organic_provenance(tmp_path, monkeypatch):
+    """An endorsed neighbor admitted BEFORE any cliff is an ordinary organic admission:
+    no graph relabel (via=rank), and its exemption must not loosen the knee for what
+    follows (the filler after it still trips on the last ORGANIC reference point)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_KNEE_RATIO", "0.99")
+    monkeypatch.setenv("HIPPO_GRAPH_SEEDS", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    # Neighbor matches the query nearly as hard as the seed (5 content tokens, an
+    # unambiguous BM25 rank 2 — the faq's tf-doubled "refresh gateway" must not outrank
+    # it), admitted pre-cliff; the filler at rank 3 then trips against rank 1's reference
+    # (rank 2, the exempt neighbor, never advanced prev_relevance).
+    _write_linked_corpus(
+        md,
+        {
+            "auth_flow.md": (
+                "oauth token refresh flow for the api gateway",
+                "details\n\nRelated: [[token_rotation]]\n",
+            ),
+            "token_rotation.md": ("oauth token refresh flow rotation work policy", "body"),
+            "gateway_refresh_faq.md": ("refresh gateway questions and answers", "body"),
+            "excel_header.md": (_CORPUS["excel_header.md"], "body"),
+        },
+    )
+    B.build_index(md, idx)
+
+    res = R.recall(_OAUTH_QUERY, k=4, memory_dir=md, index_dir=idx)
+    by_name = {r["name"]: r for r in res}
+    assert "token_rotation" in by_name
+    assert by_name["token_rotation"]["via"] == "rank"  # pre-cliff organic admission
+    assert "gateway_refresh_faq" not in by_name  # the cliff still fired after it
+
+
+def test_endorsed_old_invalidated_neighbor_stays_dead_past_cliff(tmp_path, monkeypatch):
+    """The resurrection guard survives the cliff rewrite: an 'old'-invalidated endorsed
+    neighbor past the cliff is still display-filtered (the state skip precedes the
+    endorsement check) — the graph channel never overrides invalidation."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_KNEE_RATIO", "0.99")
+    monkeypatch.setenv("HIPPO_GRAPH_SEEDS", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_linked_corpus(md, _CLIFF_CORPUS)
+    rotation = os.path.join(md, "token_rotation.md")
+    with open(rotation, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    text = text.replace(
+        "type: project\n", f"type: project\ninvalid_after: {_iso_days_ago(400)}\n"
+    )
+    with open(rotation, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    B.build_index(md, idx)
+
+    res = R.recall(_OAUTH_QUERY, k=6, memory_dir=md, index_dir=idx)
+    assert "token_rotation" not in [r["name"] for r in res]
+
+
+def test_expand_neighbors_reports_endorsed_organic_kept(monkeypatch):
+    """Unit contract for the 3-tuple: an organic-kept neighbor (injection lost to its
+    organic score) is ENDORSED but not injected, and the list rides through untouched."""
+    monkeypatch.setenv("HIPPO_GRAPH_SEEDS", "1")  # keep the neighbor out of the seed window
+    entries = [{"name": "seed"}, {"name": "neighbor"}, {"name": "other"}]
+    penalized = [(0, 0.030, None), (1, 0.020, None), (2, 0.010, None)]
+    edges = {"seed": {"out": {"neighbor"}, "in": set()}}
+    out, injected, endorsed = R._expand_neighbors(penalized, entries, edges)
+    assert out == penalized  # 0.5 x 0.030 = 0.015 < 0.020 organic — no replacement
+    assert injected == set()
+    assert endorsed == {1}
+
+
 def test_graph_expansion_seed_count_env_override(tmp_path, monkeypatch):
     """HIPPO_GRAPH_SEEDS changes how deep the seed window reaches: a neighbor linked only
     from the #3-ranked hit appears at the default (3) but not at 1."""

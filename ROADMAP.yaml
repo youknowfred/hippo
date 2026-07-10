@@ -874,6 +874,10 @@ workstreams:
         # recall@10 = 1.0 bm25-only vs 0.0 dense+bm25 — the knee's graph exemption can't
         # fire when dense ranks every entry, so expansion is structurally suppressed under
         # dense (a GRA-1/GRA-7 ranking gap this category now keeps permanently visible).
+        # 2026-07-09 (later): that finding is RESOLVED — see GRA-1's dated note below
+        # (graph-ENDORSED knee exemption + cliff latch). Multi-hop now 1.0 on BOTH
+        # backends (pack corpus), golden/single-hop/precision/abstention unchanged —
+        # exactly the eval-gated bar, proven by this item's own per-category instrument.
         # temporal/update rows grow in project-local .audit-fixtures (evergreen packs have
         # no superseded facts); machinery pinned hermetically in tests/test_eval_recall.py.
         provenance: {dimension: landscape, landscape: [longmemeval, locomo]}
@@ -910,6 +914,18 @@ workstreams:
         title: 1-hop neighbor expansion in recall — the first load-bearing graph read
         priority: P1
         effort: M
+        # 2026-07-09: dense-side knee suppression FIXED (the RET-8 multi-hop finding).
+        # Two legs, verified live: (1) under dense a seed's neighbor usually already has
+        # an organic rank, so injection declines (organic-keep) and the entry lost its
+        # accidental knee exemption; (2) the knee's BREAK orphaned every neighbor ranked
+        # past an organic cliff. Fix: _expand_neighbors now also returns the ENDORSED set
+        # (all resolvable seed-neighbors, organic-kept included); the emission walk keys
+        # knee exemption on endorsement and latches the cliff — organic/body admission
+        # ends there exactly as before, while endorsed entries stay admissible (marked
+        # via=graph when the cliff is why they'd otherwise be gone). Eval both backends:
+        # multi-hop 0.0→1.0 dense (bm25 stays 1.0), golden byte-identical, single-hop/
+        # precision/abstention unchanged. GRA-7's "beats GRA-1 on multi-hop" gate is now
+        # measurable against a working dense baseline.
         provenance: {dimension: graph, severity: high, verdict: confirmed}
         problem: >-
           The hybrid recall path never consults the graph: no neighbor

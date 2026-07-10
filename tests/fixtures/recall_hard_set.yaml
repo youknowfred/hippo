@@ -36,9 +36,14 @@
 #                   neighbor has no primary rank, so GRA-1's injection rides in knee-exempt
 #                   (the designed path); under dense EVERY entry has a primary rank, so the
 #                   knee exemption never fires and expansion is structurally suppressed
-#                   (organic-or-knee-cut). The dense-side gap is a GRA-1/GRA-7 ranking
-#                   finding these rows exist to keep visible — do not "fix" it by rewording
-#                   the queries toward the expected stems (that just relabels single-hop).
+#                   (organic-or-knee-cut).
+#                   RESOLVED 2026-07-09 (later, the GRA-1 dense-knee fix): knee exemption
+#                   now keys on _expand_neighbors' graph-ENDORSED set and the cliff
+#                   latches instead of breaking — multi-hop measures 1.0 on BOTH backends
+#                   (dense mrr ~0.20: graph-discounted lines land mid-list by design).
+#                   These rows are the regression tripwire for that fix; still do not
+#                   reword the queries toward the expected stems (that just relabels
+#                   single-hop and un-measures the graph).
 # temporal and update rows are DELIBERATELY ABSENT: the shipped starter packs are
 # evergreen (no superseded facts, no invalid_after boundaries — nothing temporal to ask
 # about honestly), so those categories grow in each project's own
