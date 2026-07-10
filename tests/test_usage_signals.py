@@ -186,3 +186,134 @@ def test_usage_dir_is_not_self_ignored(tmp_path):
     T._update_usage_aggregates(td, names=["a"], session_id="s1", ts=1.0)
     T.write_user_usage_summary(md, "alice", td)
     assert not os.path.exists(os.path.join(md, ".usage", ".gitignore"))
+
+
+# --------------------------------------------------------------------------- #
+# SEC-14 — the committed usage summary excepts the gitignore invariant by design; it must be
+# behind an explicit opt-in on a shared/public remote, with a public-remote warning (doctor).
+# --------------------------------------------------------------------------- #
+import subprocess  # noqa: E402
+
+
+def _git_repo(tmp_path, name, remote_url=None):
+    repo = str(tmp_path / name)
+    os.makedirs(repo, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    if remote_url:
+        subprocess.run(["git", "remote", "add", "origin", remote_url], cwd=repo, check=True)
+    return repo
+
+
+def _seed_agg(td):
+    os.makedirs(td, exist_ok=True)
+    T._update_usage_aggregates(td, names=["mem-a"], session_id="s1", ts=100.0)
+
+
+def test_git_url_host_parses_all_forms():
+    assert P._git_url_host("git@github.com:acme/widgets.git") == "github.com"
+    assert P._git_url_host("https://gitlab.com/a/b") == "gitlab.com"
+    assert P._git_url_host("ssh://git@codeberg.org:22/a/b") == "codeberg.org"
+    assert P._git_url_host("https://user@bitbucket.org/a/b.git") == "bitbucket.org"
+    assert P._git_url_host("not a url at all") is None
+
+
+def test_git_remote_info_none_without_remote(tmp_path):
+    assert P.git_remote_info(_git_repo(tmp_path, "r")) == {"url": None, "host": None, "public_host": False}
+
+
+def test_git_remote_info_flags_public_host(tmp_path):
+    info = P.git_remote_info(_git_repo(tmp_path, "r", "git@github.com:acme/widgets.git"))
+    assert info["host"] == "github.com" and info["public_host"] is True
+
+
+def test_git_remote_info_private_host_is_not_public(tmp_path):
+    info = P.git_remote_info(_git_repo(tmp_path, "r", "https://git.internal.example.com/t/repo.git"))
+    assert info["host"] == "git.internal.example.com" and info["public_host"] is False
+
+
+def test_record_usage_refuses_on_remote_without_opt_in(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HIPPO_USAGE_USER", "tester")
+    monkeypatch.delenv("HIPPO_TEA5_OPT_IN", raising=False)
+    repo = _git_repo(tmp_path, "r", "git@github.com:acme/widgets.git")
+    md = os.path.join(repo, ".claude", "memory")
+    _seed_corpus(md, ["mem-a"])
+    td = str(tmp_path / ".telemetry")
+    _seed_agg(td)
+    rc = SK.main(["--record-usage", "--memory-dir", md, "--repo-root", repo, "--telemetry-dir", td])
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "PUBLIC" in out and "Nothing written" in out
+    assert not os.path.isdir(os.path.join(md, ".usage"))  # refused → no write
+
+
+def test_record_usage_writes_with_yes_on_remote(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_USAGE_USER", "tester")
+    repo = _git_repo(tmp_path, "r", "git@github.com:acme/widgets.git")
+    md = os.path.join(repo, ".claude", "memory")
+    _seed_corpus(md, ["mem-a"])
+    td = str(tmp_path / ".telemetry")
+    _seed_agg(td)
+    rc = SK.main(["--record-usage", "--yes", "--memory-dir", md, "--repo-root", repo, "--telemetry-dir", td])
+    assert rc == 0 and os.path.isfile(os.path.join(md, ".usage", "tester.json"))
+
+
+def test_record_usage_env_opt_in_on_remote(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_USAGE_USER", "tester")
+    monkeypatch.setenv("HIPPO_TEA5_OPT_IN", "1")
+    repo = _git_repo(tmp_path, "r", "git@github.com:acme/widgets.git")
+    md = os.path.join(repo, ".claude", "memory")
+    _seed_corpus(md, ["mem-a"])
+    td = str(tmp_path / ".telemetry")
+    _seed_agg(td)
+    rc = SK.main(["--record-usage", "--memory-dir", md, "--repo-root", repo, "--telemetry-dir", td])
+    assert rc == 0 and os.path.isfile(os.path.join(md, ".usage", "tester.json"))
+
+
+def test_record_usage_local_only_writes_without_opt_in(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HIPPO_USAGE_USER", "tester")
+    monkeypatch.delenv("HIPPO_TEA5_OPT_IN", raising=False)
+    repo = _git_repo(tmp_path, "r")  # no remote → nothing to leak to
+    md = os.path.join(repo, ".claude", "memory")
+    _seed_corpus(md, ["mem-a"])
+    td = str(tmp_path / ".telemetry")
+    _seed_agg(td)
+    rc = SK.main(["--record-usage", "--memory-dir", md, "--repo-root", repo, "--telemetry-dir", td])
+    assert rc == 0 and os.path.isfile(os.path.join(md, ".usage", "tester.json"))
+    assert "local-only" in capsys.readouterr().out
+
+
+def _doctor_ctx(md, repo):
+    from memory import doctor as D
+
+    return D.DoctorContext(md, repo, plugin_data="", plugin_root="")
+
+
+def test_doctor_privacy_check_warns_on_public_remote(tmp_path):
+    from memory import doctor as D
+
+    repo = _git_repo(tmp_path, "r", "git@github.com:acme/widgets.git")
+    md = os.path.join(repo, ".claude", "memory")
+    _seed_corpus(md, ["mem-a"])
+    _write_committed(md, "alice", ["mem-a"])
+    res = D.check_committed_usage_privacy(_doctor_ctx(md, repo))
+    assert res["status"] == "warn" and "PUBLIC" in res["message"]
+
+
+def test_doctor_privacy_check_ok_local_only(tmp_path):
+    from memory import doctor as D
+
+    repo = _git_repo(tmp_path, "r")  # no remote
+    md = os.path.join(repo, ".claude", "memory")
+    _write_committed(md, "alice", ["mem-a"])
+    res = D.check_committed_usage_privacy(_doctor_ctx(md, repo))
+    assert res["status"] == "ok" and "local-only" in res["message"]
+
+
+def test_doctor_privacy_check_ok_when_no_summaries(tmp_path):
+    from memory import doctor as D
+
+    repo = _git_repo(tmp_path, "r", "git@github.com:acme/widgets.git")
+    md = os.path.join(repo, ".claude", "memory")
+    _seed_corpus(md, ["mem-a"])  # no .usage/ written
+    res = D.check_committed_usage_privacy(_doctor_ctx(md, repo))
+    assert res["status"] == "ok"

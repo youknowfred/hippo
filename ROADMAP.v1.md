@@ -347,6 +347,13 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **SEC-14** `P2/S` — TEA-5 committed usage summary behind **explicit opt-in** +
   a public-remote warning (doctor/doc). *Tension: TEA-5 deliberately excepts the
   gitignore invariant — narrow it for public remotes.*
+  **SHIPPED 2026-07-10**: `provenance.git_remote_info` classifies the push remote
+  (public-host detection). `soak --record-usage` now prints the privacy warning
+  (committed per-user recall names + counts) and, on a repo WITH a remote, REFUSES
+  unless `--yes` / `HIPPO_TEA5_OPT_IN=1` — a local-only repo (nothing to leak to)
+  still proceeds. New doctor `committed_usage_privacy` check warns when `.usage/`
+  summaries exist on a remote (loudest for a public host). Session ids already never
+  entered the committed file.
 
 ### RET / PRF / GRA — Retrieval precision, measurement & graph
 - **RET-8** `P1/M` — Category-tagged eval (multi-hop/temporal/update/abstention);
