@@ -1,0 +1,1695 @@
+# ============================================================================
+# hippo — Enhancement & Capability Roadmap, ROUND 2 (post-trust-spine / v1.8+)
+# ============================================================================
+# The EXECUTABLE form of EXPLORATIONS2.md: the round-2 adversarially-vetted
+# enhancement catalog (47 candidates -> 37 merged -> 36 RESHAPE + 1 KILL across a
+# 158-agent ideation+vetting fan-out), formalized into fully-scoped, dependency-
+# sequenced items and work tiers for multi-session implementation.
+#
+# This is the SECOND enhancement train. It is downstream of, and uses the same
+# machinery as, ROADMAP.enhancements.yaml (round 1, tiers T1-T7). Round-2 tiers
+# are numbered T8-T13 and round-2 workstreams use NEW namespaces (MSR/GRF/SEN/
+# TMB/CLB/IOP) so ids never collide with round 1 (SIG/RUL/RCL/GOV/GRW/RCH),
+# ROADMAP.yaml (RET/GRA/LIF/CAP/INT/TEA/SEC/...), or ROADMAP.v1.md.
+#
+# Continuity across sessions lives in TWO synced places (same protocol as round 1):
+#   1. This file's per-item / per-tier `status:` — the durable progress LEDGER.
+#   2. A chain of CAPSTONE MEMORY files (`hippo-enh-t<N>-*`, continuing the round-1
+#      chain) — the narrative HANDOFF written at each tier session (session_protocol).
+#
+# Companion documents:
+#   ROADMAP.enhancements.yaml — round-1 enhancement train (T1-T7, shipped)
+#   ROADMAP.yaml              — shipped engine roadmap (v0.2.0-v0.7.0 + exploratory)
+#   ROADMAP.v1.md             — the v0.8.0->v1.0.0 OSS-launch plan
+#   EXPLORATIONS2.md          — the round-2 source catalog (verdicts, reshapes, kill)
+# ============================================================================
+
+meta:
+  title: hippo enhancement & capability roadmap — round 2
+  repo: youknowfred/hippo
+  authored: 2026-07-09
+  baseline_ref: 3a4a94a          # branch v080-trust-spine HEAD at authoring time
+  baseline_state: >-
+    corpus_format 4, index SCHEMA_VERSION 6, seed schema 2, MCP 5 tools / 3
+    resources, 14 skills, suite ~1474. SHIPPED since round 1 (verified live at
+    authoring): the GRA-1 dense-knee fix (4d16022 — multi-hop dense 0.0->1.0), the
+    v0.8.0 trust spine SEC-5/6/7 (2f960a7 — corpus_consent_sample / corpus_fingerprint
+    / untrusted_changes / record_authored_write / check_trust_drift), and RCH-5 pack
+    install/update (d6ec77d — pack_install_item / pack_install_plan). ON ITS OWN
+    UNMERGED PR since mid-cycle: SIG-6 is committed on branch enh-t7-sig6 (PR #17,
+    open, base main) but is ABSENT from both main and v080-trust-spine — a real
+    cross-file dependency for six items here (it must land / merge PR #17).
+  source: >-
+    Formalized from EXPLORATIONS2.md. Round-2 method: a 13-agent read-only grounding
+    fan-out (every claim file:symbol-verified against the tree) + a 6-survey landscape
+    fan-out (provenance-tagged) + an 8-lens ideation (47 candidates) + a 3-skeptic
+    adversarial panel per candidate (signal-existence / user-value / fit) + a judge,
+    then a coverage critic. Every item here is a surviving RESHAPE; the one KILL and
+    the disciplined cuts are recorded under not_pursuing.
+  method: >-
+    Items carry the vetters' reshape guidance in `proposal` and the verified seams in
+    `implementation_notes`. The governing design principle is decisions.ED-1
+    (detection-first, carried verbatim from round 1): ship the legible detection /
+    human-in-the-loop half; gate any autonomous ranking or corpus/rules write on
+    proven signal density. Every autonomous half in this file is severed and deferred
+    behind a DATED OWNER DECISION + measured evidence, never a metric-proxied gate.
+  audits:
+    - date: 2026-07-09
+      scope: >-
+        Live re-baseline during authoring (the round-1 premise-correction law): the
+        branch advanced three times mid-exploration. Confirmed by reading commits +
+        re-running the eval that the trust spine (2f960a7), the GRA-1 fix (4d16022),
+        and RCH-5 (d6ec77d) SHIPPED, and that SIG-6 lives on its own unmerged PR #17 (absent from main and v080-trust-spine). Re-measured multi-hop
+        on HEAD: production dense+bm25 = 1.0 (fixed); mixed-mode (dense index
+        resident, bm25 query-time ranking) = 0.0 (the residual MMR leg GRF-2 targets).
+        implementation_notes are BINDING but SNAPSHOT guidance: verify each named
+        symbol against the live tree before coding, then follow the note unless the
+        tree contradicts it (the repo is the source of truth) and correct it in-file.
+  scoring:
+    priority:
+      P0: broken promise / unblocks a tier — do first in its tier
+      P1: core to the tier's done_means
+      P2: quality and leverage
+      P3: opportunistic or gated on a proving condition
+    effort: {S: under a day / one PR, M: one to three days, L: multi-day / multi-PR}
+  status_legend:
+    planned: not started
+    in_progress: an agent session is actively implementing it
+    done: acceptance_criteria met, suite green, invariants preserved
+    deferred: blocked or descoped this cycle (reason recorded in the capstone)
+
+north_star: >-
+  With the engine measured, defended, and team-ready: make hippo's own behavior a
+  first-class deterministic artifact (a real eval flywheel over the ledgers it
+  already writes), turn the just-shipped trust spine into a proven, incident-ready
+  defense, and turn review-gated writes — hippo's identity — into team ergonomics —
+  all WITHOUT compromising the local, offline, git-native, zero-LLM-hot-path,
+  human-gated-write identity, and without shipping a single always-on read-side
+  ranking prior (the salience keystone stays owner-decided-OFF; this round builds
+  only the evidence substrate for its revisit).
+
+# ---------------------------------------------------------------------------
+# Invariants every item must preserve (carried VERBATIM from round 1 / ROADMAP.yaml).
+# An item that violates one is wrong, not bold. `invariant_note` names the guard
+# when an item sits in tension.
+# ---------------------------------------------------------------------------
+guiding_invariants:
+  - inv1: markdown-in-git is the single source of authority; index/telemetry/
+      graph/rules-derived caches are derived, rebuildable, gitignored.
+  - inv2: hooks always exit 0, never download, never block; recall failures
+      degrade silently at the hook boundary but become LOUD at doctor/SessionStart.
+  - inv3: degradation must be legible — every silent-fallback path gains a
+      user-visible signal (nudge/doctor/producer).
+  - inv4: destructive/corrective writes are per-item and agent-gated; no bulk
+      autonomous sweeps; writes into the rules plane are reviewable per-item diffs.
+  - inv5: one canonical name/path per concept; renames and schema changes are
+      clean breaks with a version bump, not compat shims.
+  - inv6: the UserPromptSubmit hot path stays PURE RETRIEVAL — no LLM calls, no
+      network, no consolidation work per-prompt.
+
+# ===========================================================================
+# SESSION PROTOCOL — identical discipline to round 1; the capstone chain continues.
+# ===========================================================================
+session_protocol:
+  purpose: >-
+    Multi-session, multi-agent implementation with no loss of context. This file's
+    `status:` fields are the source of truth for WHAT is done; the capstone memory
+    chain (hippo-enh-t8-* onward, continuing the round-1 chain) is the source of
+    truth for the STORY (decisions, gotchas, next).
+  pick_up: |
+    - Read MEMORY.md; open the most recent hippo-enh-t* capstone to learn the active
+      tier, what last shipped (with commit shas), and the next item.
+    - Read this file; select the next item whose status is planned and all of whose
+      dependencies are satisfied. A dependency id that is NOT a round-2 item (not in
+      workstreams below) is CROSS-FILE — resolve it against round 1
+      (ROADMAP.enhancements.yaml), ROADMAP.yaml, or ROADMAP.v1.md and confirm it is
+      shipped/planned there. SIG-6 (round 1) is the most common open cross-file dep.
+    - READ THE ITEM'S implementation_notes AND ITS TIER'S audit_note FIRST. They cite
+      verified seams (file:symbol) as of the baseline_ref. VERIFY EACH NAMED SYMBOL
+      STILL EXISTS (the tree moved three times DURING authoring — see meta.audits);
+      follow the note unless the live tree contradicts it, and correct it in-file as
+      part of your commit if it does.
+    - Sanity-check reality (git log, run the suite) before coding.
+  execute: |
+    - Implement ONE item (or a coherent slice) per RELEASING.md — one id-prefixed
+      commit (e.g. "MSR-1: ..."), full suite green after each.
+    - Preserve every guiding_invariant. If an item's invariant_note names a guard you
+      cannot honor, set status to deferred, record why in the capstone, and stop — do
+      not weaken an invariant to land a feature.
+    - Add tests pinning each acceptance_criterion (hermetic per-module convention;
+      negative-capability pins where an invariant forbids a primitive; byte-identity
+      pins where an additive field must not perturb existing output).
+    - Flip item status planned -> in_progress -> done (or deferred).
+  verify: |
+    - Every acceptance_criteria demonstrably met; full suite green; no invariant
+      regressed; any new silent-fallback path made legible at doctor/SessionStart.
+    - If an item bumps a schema/derived-cache version, follow ED-4 (clean break + one
+      migration + a doctor-reported delta) and state the re-bootstrap flag. NOTE: no
+      item in this round is EXPECTED to bump corpus_format or index SCHEMA_VERSION —
+      every new field is additive/absence-emits-nothing. If yours needs a bump,
+      re-read the item: it is probably out of scope.
+  capstone:
+    when: >-
+      ALWAYS at the end of a session that touched this roadmap, and ALWAYS at tier
+      completion. A multi-session tier gets a progress capstone each session.
+    do: |
+      - Write hippo-enh-t<N>-<slug>.md in the project memory dir (capstone_template
+        below); continue the round-1 chain (link the previous capstone).
+      - Refresh its one-line MEMORY.md pointer (supersede the prior same-tier line).
+      - Update this file's item + tier status to match what shipped.
+      - Link the new capstone to [[hippo-enh-exploration-r2]] and the prior capstone.
+    rationale: >-
+      The next session may be a different agent with none of this context. The
+      capstone + status fields are the entire handoff. Under-recording is the main
+      failure mode — write the capstone even if the session shipped nothing.
+  capstone_template: |
+    ---
+    name: hippo-enh-t<N>-<slug>
+    description: <tier theme> — shipped <X/Y> items; next: <next item id>
+    metadata:
+      type: project
+    ---
+    Tier T<N> (<target_version>, "<theme>") — session <YYYY-MM-DD>.
+    SHIPPED THIS SESSION: <item-id — one-liner — commit sha> (repeat).
+    TIER STATE: <n/total done>; done_means <met | not yet: what remains>.
+    ENGINE STATE: suite <green | N failing>; corpus_format <n>; index schema <n>;
+      re-bootstrap <yes/no>.
+    DECISIONS / GOTCHAS: <invariant guard applied, premise correction vs the note,
+      any dated owner decision recorded on an item>.
+    NEXT: <next unblocked item id + why>.
+    DEFERRED / BLOCKED: <item ids + reason (esp. SIG-6 cross-file)>.
+    Related: [[hippo-enh-exploration-r2]], [[hippo-enh-t<N-1>-<slug>]].
+
+# ===========================================================================
+# WORKSTREAMS — fully-scoped enhancement items, grouped by area, sequenced into
+# tiers by the release_train below. `extends` names the prior workstream each
+# relates to. `source.landscape` tags carry the round-2 survey provenance.
+# ===========================================================================
+workstreams:
+
+  # ---------------------------------------------------------------- MSR ---
+  - id: MSR
+    name: Measurement & the eval flywheel
+    extends: RET-8 + telemetry + SIG-4
+    goal: >-
+      Make hippo's own behavior a first-class, deterministic, reproducible artifact:
+      persist eval runs and diff baselines, read the ledgers hippo already writes but
+      never reads (dark scores/ranks, score-less abstention, telemetry-invisible MCP
+      recall), and account for the cost of what it injects — all report-only, all
+      off the hot path.
+    items:
+
+      - id: MSR-1
+        title: Eval run ledger + fingerprint-keyed baseline diff + pass^k determinism probe
+        priority: P1
+        effort: M
+        status: planned
+        source: {lens: eval-flywheel, verdict: RESHAPE, convergence: 2, landscape: [hidden-layer-2026, seeds-stddev-hygiene]}
+        problem: >-
+          RET-8 shipped category-tagged eval + tracked gates, but every gate is an
+          ABSOLUTE frozen threshold — a regression that stays above it is invisible.
+          There is no --json, no persisted run, no baseline diff, and no proof the
+          deterministic metrics are actually deterministic (pass^k).
+        proposal: >-
+          Add --json/--out serializing the full evaluate() report (incl. by_category)
+          to a gitignored append-only run ledger under the derived telemetry dir; a
+          report-only --baseline diff (per-metric/per-category deltas) against a
+          COMMITTED baseline file keyed to git HEAD + fixture fingerprint + corpus
+          fingerprint (reuse refresh_index's compare-field lists), mirroring RET-8's
+          skip-if-absent / provided-empty-loud-fail semantics; and a --repeat k
+          pass^k probe on the hermetic (HIPPO_DISABLE_DENSE=1) lane asserting
+          epsilon=0 byte-identity of deterministic metrics (latency excluded). The CI
+          FAIL ratchet is explicitly deferred behind a dated owner blessing of the
+          first baseline (never a metric-proxied gate).
+        acceptance_criteria:
+          - eval_recall.main gains --json/--out writing the full report to a gitignored run-ledger file; the 5+2 absolute gate constants and their pass/fail outcomes are byte-unchanged (additive-only, pin updates in lockstep per ED-4)
+          - --repeat k re-runs evaluate() k times in fresh processes on the hermetic lane and asserts exact byte-identity of deterministic metrics (epsilon=0; p95/cold-p50 excluded); any nonzero delta is a bug to fix, not jitter to tolerate
+          - --baseline compares against a committed baseline file keyed to git HEAD + fixture + corpus fingerprint; on fingerprint mismatch it skips with a loud note; any category at/below its n-floor (multi-hop, temporal, update) is always report-only
+          - no CI job fails on baseline drift and no new required check is added; the ratchet is deferred behind a dated owner decision
+        dependencies: [RET-8]           # cross-file: ROADMAP.v1 v0.9.0, SHIPPED (f2d1979)
+        invariant_note: >-
+          inv1 — run ledger is gitignored derived telemetry; the committed baseline is
+          a fixture-class pinned artifact (recall_hard_set.yaml precedent), not a
+          second authority. Latency is excluded from both byte-identity and baseline
+          diffs so the determinism claim holds. inv6 — CLI/CI only, never the hot path.
+        implementation_notes: >-
+          Serialize eval_recall.evaluate()'s report dict (the by_category values from
+          hard_set_metrics_by_category); argv surface at eval_recall.main. Home the
+          ledger via telemetry.default_telemetry_dir (SEC-3 self-ignoring pattern).
+          Corpus/fixture fingerprints reuse build_index.refresh_index's compare-field
+          lists (entry hashes, body hashes, invalid_after, source_commit_time, steer,
+          confidence). Run the --repeat probe FIRST to empirically establish
+          determinism before building baseline machinery. This is the KEYSTONE tier-T8
+          item — MSR-5, GRF-2/GRF-4, TMB-3, TMB-4 all consume persisted/diffable eval.
+
+      - id: MSR-2
+        title: Null-hypothesis eval arms (grep + true-bm25 + labeled mixed-mode)
+        priority: P1
+        effort: M
+        status: planned
+        source: {lens: eval-flywheel, verdict: RESHAPE, convergence: 1, landscape: [letta-filesystem-2025, condition-matrix]}
+        problem: >-
+          hippo's eval reports absolute recall but never what the ranking STACK adds
+          over trivial baselines, and it cannot distinguish the production dense path
+          from the production-reachable MIXED mode (dense index resident, bm25 ranking
+          at query time) — the exact condition where the residual multi-hop defect lives.
+        proposal: >-
+          evaluate() grows report-only, per-category delta arms over an index-mode x
+          query-mode condition matrix: (a) a pure-stdlib grep/token-overlap null,
+          relabeled a "ranking-stack lift" measure (NOT the Letta/Hidden-Layer
+          adopt-memory-at-all threshold — these fixtures cannot answer that); (b) a
+          TRUE bm25-only arm built as a second index in a scratch index_dir via
+          HIPPO_DISABLE_DENSE (never an in-process flag flip against the resident dense
+          matrix, never writing the real index_dir); (c) an explicitly-labeled
+          mixed/degraded arm — all three delegating to the unmodified
+          hard_set_metrics_by_category (one scoring path preserved), printing n per
+          category, skipping (not zero-emitting) degenerate deltas.
+        acceptance_criteria:
+          - evaluate() reports per-category deltas for >=3 explicitly labeled arms (full pipeline, true bm25-only in a scratch index_dir, mixed/degraded), with mixed mode NEVER presented as "bm25-only"
+          - all arms feed hard_set_metrics_by_category via a parameterized ranked-list source (no reimplemented hit-judgment); no arm can disagree about what counts as a hit
+          - the grep arm is documented as a ranking-stack-lift measure over the curated corpus, not an adoption-threshold result; no >=10-point adoption gate ships; the only gate is report-only
+        dependencies: []
+        invariant_note: >-
+          Eval-only, stdlib, offline — inv6 untouched. The true-bm25 arm builds into a
+          scratch index_dir (HIPPO_INDEX_DIR override / env save-restore precedent),
+          NEVER flips HIPPO_DISABLE_DENSE in-process against a resident dense index
+          (that is mixed mode, not bm25-only) and NEVER writes the real index_dir.
+        implementation_notes: >-
+          Attach at eval_recall.evaluate (arm orchestration + report keys) and a new
+          eval_recall._grep_baseline (pure stdlib token-overlap over memory_dir
+          markdown). Mechanism citations in docs/comments must use the corrected
+          re-measurement (mixed-mode MMR diversity-penalty defect), NOT the superseded
+          "1.0 bm25 vs 0.0 dense" headline — GRA-1 knee suppression already landed at
+          4d16022. This arm is what lets GRF-2 see the mixed-mode leg it must close.
+
+      - id: MSR-3
+        title: Channel-tagged recall_events telemetry for MCP recall/why
+        priority: P2
+        effort: M
+        status: planned
+        source: {lens: eval-flywheel, verdict: RESHAPE, convergence: 3, landscape: [amemgym-iclr26, mem0-no-self-feedback-2026]}
+        problem: >-
+          MCP recall and why are telemetry-INVISIBLE — recall_view.describe bypasses
+          recall.main, so every mid-turn and subagent recall is missing from soak,
+          blind spots, and the doctor p95 check. The usage ledger the ED-2 salience
+          revisit depends on is systematically undercounting the highest-intent recalls.
+        proposal: >-
+          Add an additive `channel` field ('hook'|'mcp'; absent=hook) to
+          log_recall_event; thread a channel kwarg through recall_view.describe with
+          fire-and-forget logging that REPLICATES main()'s SEC-1 untrusted-zero-trace
+          and SEC-3 corpus-existence gates; mcp_server's recall/why tools log through
+          it, feeding a new MCP arm of abstention_backlog and a per-channel doctor
+          volume line. SCOPE STRICTLY to recall_events.jsonl consumers; log_episode /
+          episode_buffer.jsonl (co-recall, KPI-2, resume card, RCL-2/RCL-3) is
+          explicitly out of scope.
+        acceptance_criteria:
+          - log_recall_event gains an additive `channel` field (absent reads as 'hook'); existing rows parse unchanged; no schema bump (ED-4)
+          - recall_view.describe's new fire-and-forget log fires only when the same trust + corpus-existence gates main() applies are satisfied — a test asserts an untrusted-corpus MCP recall leaves zero ledger trace
+          - doctor.check_hot_path_latency filters to channel in {hook, absent} before computing p95 — a byte-identity test proves the p95 line is unchanged after an MCP-channel event is appended
+          - log_episode/episode_buffer.jsonl is untouched (RCL-2/RCL-3/co_recall/KPI-2/resume-card byte-identical); abstention_backlog gains a channel-tagged MCP arm as its own line
+        dependencies: []
+        invariant_note: >-
+          inv6 — MCP is not the hot path; logging is fire-and-forget/never-raise. inv4/
+          ED-1 — pure detection, no new MCP tool (5-tool pin intact), no ranking change.
+          Do NOT extend logging to the 'cli' channel — describe()'s docstring states it
+          deliberately skips telemetry for human browsing; MCP (agent-issued) is the
+          only channel to add.
+        implementation_notes: >-
+          Seams: mcp_server.py recall tool (~:184) + why tool (~:233) -> recall_view.describe
+          (channel kwarg + fire-and-forget log) -> telemetry.log_recall_event (additive
+          channel). Two corrections the vetting verified and REQUIRES: (1) replicate
+          main()'s SEC-1 zero-trace + SEC-3 gates verbatim; (2) doctor.check_hot_path_latency
+          is a real unfiltered recall_events consumer the original risk-list missed — it
+          MUST be channel-filtered or an MCP call (heavier than a hook recall) corrupts
+          the KPI-3 p95 gate. A measurement rider (coverage-critic miss SEC-13): the
+          per-channel volume line MAY note MCP writes that hit an untrusted corpus, but
+          building the SEC-13 write-gate itself belongs to ROADMAP.v1, not this item.
+
+      - id: MSR-4
+        title: Drop-reason autopsy ledger (near-miss scores on abstention; per-category miss autopsy)
+        priority: P1
+        effort: M
+        status: planned
+        source: {lens: graph-retrieval, verdict: RESHAPE, convergence: 3, landscape: [memsyco-2026, post-retrieval-bottleneck]}
+        problem: >-
+          The recall pipeline throws away WHY a memory did not surface. The
+          scores[]/ranks[] arrays on recall_events are written and read by nothing
+          (telemetry.py:227-231); abstention events carry NO near-miss scores
+          (telemetry.py:300-303), so "how close was the miss" — the exact evidence
+          RET-11's BM25-floor decision and the SIG-5 revisit need — does not exist.
+        proposal: >-
+          Every admission-walk cut (floor, knee/cliff, MMR displacement, cooldown,
+          pool_n overflow, dangling/old-state skip) records an additive reason-code +
+          score-at-death on recall_events, capped per mechanism (top-N nearest misses
+          or a margin window). Abstention events gain near-miss scores. eval_recall
+          attributes every expected-but-missed RET-8 stem to the mechanism and margin
+          that cut it, per category. One deterministic doctor aggregation line. Pure
+          detection — nothing ranks on the data.
+        acceptance_criteria:
+          - each admission-walk cut records an additive reason-code + score-at-death, capped per mechanism so the byte-rotated ledger is not bloated; capture is O(already-computed) with zero hot-path recomputation (inv6 byte-identity/perf holds)
+          - abstention (backend='none') events log near-miss scores, closing telemetry.py:300-303 and giving RET-11's BM25-floor decision + the SIG-5 revisit their first measured evidence
+          - eval_recall attributes every missed RET-8 hard-set stem to the mechanism and margin that cut it, per category
+          - doctor gains exactly one deterministic aggregation line (gated on a min event count; no timestamps; line-count pin preserved)
+        dependencies: [RET-8]           # cross-file, SHIPPED
+        invariant_note: >-
+          ED-1/inv3 — reason codes are legibility only; nothing ranks or auto-tunes.
+          inv6 — capture bounded per mechanism (floor cuts are O(corpus); the ledger is
+          byte-rotated), scores read from values the walk already holds, no
+          recomputation. Does NOT absorb RET-9 (per-corpus floor sanity) — that is
+          GRF-3's sole deliverable; this item supplies the abstention-side evidence only.
+        implementation_notes: >-
+          Attach at recall.py's admission walk + emission loop (~2140-2230), _expand_neighbors
+          (declined-injection reasons), telemetry.log_recall_event (the dark scores/ranks
+          fields), the abstention arm (~telemetry.py:300-303), eval_recall.hard_set_metrics_by_category
+          (per-miss autopsy), doctor (aggregation line). Retell the GRA-1 story per the
+          re-measurement: the knee leg is FIXED at 4d16022 (graph_endorsed exemption +
+          cliff latch); the residual is the mixed-mode MMR leg. Deferred, not dropped:
+          answerable/unanswerable abstention twin rows (wait for SIG-6) and a --trace CLI
+          funnel (fold into recall_view or drop) are separate follow-ups.
+
+      - id: MSR-5
+        title: Salience-revisit A/B rig (lived-in-corpus, usage-prior precondition fix)
+        priority: P1
+        effort: M
+        status: planned
+        source: {lens: eval-flywheel, verdict: RESHAPE, convergence: 1, landscape: [sleep-time-2504, ed2-revisit]}
+        problem: >-
+          SIG-5 decided salience default-OFF because fixture corpora carry no usage/
+          staleness/recency signal; ED-2's revisit trigger names "a lived-in corpus
+          re-run" but there is no rig to do it — AND the current eval path is
+          usage-prior-BLIND (evaluate()'s internal recall() calls don't thread
+          memory_dir, so the ON arm can't even see usage_aggregates/stale.json).
+        proposal: >-
+          Add `eval --ab <flag>` (whitelist, default HIPPO_SALIENCE) that FIRST fixes
+          the usage-blind path (thread memory_dir through every evaluate()-internal
+          recall() call), then runs evaluate() twice in-process over the live
+          per-project corpus via SIG-6's fixture probe, emitting a paired per-category
+          delta (per-category n, an index-mode x query-mode x backend condition stamp,
+          an asserted OFF-arm byte-identity self-check, a dated evidence footer) to the
+          gitignored dir. MEASURES ONLY — never flips the default. One deterministic
+          doctor nudge line when a corpus crosses a lived-in threshold.
+        acceptance_criteria:
+          - eval --ab HIPPO_SALIENCE runs evaluate() twice over the live corpus and writes a paired per-category delta with per-category n + condition stamp + dated ED-2 footer to a gitignored dir; never committed, never the golden/CI report
+          - the ON arm's usage/staleness visibility is an asserted precondition — memory_dir threaded through every internal recall(); a test fails loudly if _usage_boost_map/_staleness_penalty_map resolve empty for a non-empty usage_aggregates/stale.json
+          - the OFF arm is asserted byte-identical to the pinned production result-dict both before and after; a byte-identical-arms outcome on a signal-less corpus is labeled a self-check pass, not a finding, and drops any "decision-grade" framing at low n
+          - no autonomous execution path — invoked only via explicit CLI/skill; the only automatic surface is a deterministic (no-timestamp) doctor nudge line at a lived-in threshold
+        dependencies: [SIG-6, RET-8]     # SIG-6 cross-file on open PR #17 (absent from baseline); RET-8 shipped
+        invariant_note: >-
+          ED-2 razor is binding — measures only, never flips salience; the flip stays a
+          dated owner decision regardless of deltas (the LIF-7 "don't proxy owner-gates
+          with metrics" law). inv6 — both arms offline/zero-LLM; the doctor nudge is a
+          boolean-threshold line, never hook-resident (a multi-second dense double-run
+          cannot be on any hook). inv1 — fixtures + report are corpus-private/derived.
+        implementation_notes: >-
+          The usage-prior-blind path is the RET-8-pattern edge-blindness repeat (brief
+          §8) — CLOSE IT FIRST (thread memory_dir at eval_recall.py's internal recall()
+          call sites) or the ON arm measures nothing. Attach: eval_recall.evaluate/main
+          (--ab, both arms share one index load), _default_fixture_path (SIG-6 sink),
+          recall._salience_enabled + HIPPO_SALIENCE + _SALIENCE_* caps,
+          telemetry.read_usage_aggregates, staleness stale.json. Absorbs the
+          team-soak-evidence usage-annotation lane: when committed .usage/<user>.json
+          exist, add ONE honestly-labeled committed-slug coverage column (never a
+          ranking input). This is THE ED-2 revisit vehicle.
+
+      - id: MSR-6
+        title: Injection cost ledger (injected_chars + per-producer bytes + scorecard cost line)
+        priority: P2
+        effort: S
+        status: planned
+        source: {lens: ux-legibility, verdict: RESHAPE, convergence: 2, landscape: [sandelin-2026-cost, chatgpt-dreaming-antipattern]}
+        problem: >-
+          hippo's value is silent injection, so its COST is invisible — memory saves
+          15-28% on complex tasks but is pure overhead on simple ones (landscape), and
+          hippo can neither show a user what it spent nor prove it stayed under budget.
+        proposal: >-
+          Additive injected_chars on log_recall_event (actual emitted hook-payload byte
+          length) + a rotating per-producer byte ledger against the existing 9000-char
+          cap, feeding eval_recall.session_token_cost measured actuals and ONE folded-in
+          GOV-6 scorecard cost-honesty line ("injected ~N chars over M sessions; P%
+          touched", reusing the live KPI-2 join). Session/producer aggregation only,
+          zero behavior change to injection. A new AST pin forbids per-memory
+          cross-session touch aggregation (keeps the round-1 inert-recall-noise-finder
+          kill enforced, not aspirational).
+        acceptance_criteria:
+          - log_recall_event gains additive injected_chars (len of the emitted payload at the existing fire-and-forget write); absence-emits-nothing, no schema bump; docs say "hook + SessionStart surfaces" (MCP stays telemetry-invisible)
+          - build_context records per-producer char contributions to a rotating byte-bounded ledger against _MAX_CONTEXT_CHARS=9000; output content/ordering/truncation byte-identical (byte-identity test)
+          - session_token_cost uses measured actuals when present, falls back to today's estimate otherwise; its report-only status and pinned gate constants are untouched
+          - the GOV-6 scorecard gains exactly one folded-in cost-honesty line (line-count == len(CHECKS) preserved); a new AST pin asserts the ledger/scorecard never aggregates per-memory touch rates across sessions
+        dependencies: [SIG-4, GOV-6]     # cross-file, SHIPPED
+        invariant_note: >-
+          inv6 — char counting rides existing telemetry writes, O(len(payload)), zero
+          spawns. ED-4 — additive/absence-emits-nothing, no bump. The AST pin against
+          per-memory cross-session touch aggregation is LOAD-BEARING (keeps the
+          inert-recall-noise-finder kill dead). Deferred: the cost/benefit-by-session-
+          length curve and a standalone `receipt` command (not implied by the line).
+        implementation_notes: >-
+          Attach: telemetry.log_recall_event, session_start.build_context
+          (_MAX_CONTEXT_CHARS=9000), eval_recall.session_token_cost (estimate-only today),
+          doctor._scorecard_message, recall.main (the payload emission point where len(out)
+          is measured).
+
+  # ---------------------------------------------------------------- GRF ---
+  - id: GRF
+    name: Graph & retrieval observability
+    extends: GRA-1/GRA-8 + RET
+    goal: >-
+      Finish the graph fix that 4d16022 started (the mixed-mode leg), grow the
+      multi-hop instrument past n=2 so it can gate anything (incl. GRA-7's PPR
+      decision), make the graph observable (GRA-8), and calibrate the dense floor
+      per-corpus (RET-9) — all eval-side/CLI, never the hot path.
+    items:
+
+      - id: GRF-1
+        title: GRA-8 graph-audit CLI (edge-class/degree/orphan/component/rot) + edge_origin stamp
+        priority: P1
+        effort: M
+        status: planned
+        source: {lens: graph-retrieval, verdict: RESHAPE, convergence: 1, landscape: [lazygraphrag-msr-2024]}
+        problem: >-
+          links.py's CLI exposes only --traverse/--hops; there is zero graph
+          observability (GRA-8 unbuilt), so a tool that markets "graph-backed" cannot
+          show its own graph, and edge rot (edges into archived/superseded stems) is
+          invisible.
+        proposal: >-
+          Extend links.py into a graph-audit subcommand rendering edge-class counts,
+          degree/orphan/component stats, and edge rot — computed LIVE from the existing
+          typed_out/typed_in maps + archive state, zero links.json schema change,
+          explicitly absorbing/closing GRA-8. One threshold-gated doctor line for edge
+          rot. As a cheap rider, the consolidate skill stamps newly-proposed co-recall
+          wikilinks with an absence-emits-nothing `edge_origin: co-recall` frontmatter
+          annotation (renamed from 'origin' to avoid the RCH-1 memory-level collision)
+          that the audit displays when present. Defer links.json v2 / per-edge {since} /
+          per-edge-class discounts to a future item with an actual consumer.
+        acceptance_criteria:
+          - links.py graph-audit prints edge-class counts (typed/untyped + edge_origin-tagged when present), degree/orphan/component stats, and an edge-rot list — all live from existing maps + archive/ state, no schema bump
+          - doctor gains one deterministic edge-rot line against a threshold (line-count == len(CHECKS), no timestamps)
+          - consolidate skill Step 4 stamps new co-recall wikilinks with edge_origin:co-recall; a hermetic test proves a corpus with no edge_origin round-trips byte-identical through build_index + doctor (CORPUS_FORMAT_VERSION==4 untouched)
+          - the open-surface ledger reflects GRA-8 as absorbed/closed by this item
+        dependencies: []
+        invariant_note: >-
+          inv1 — edge_origin lives in markdown frontmatter (authority); the audit output
+          is derived. ED-4/inv5 — no corpus_format bump (absence-emits-nothing, RCH-1
+          precedent); the edge-level key MUST be `edge_origin`, distinct from RCH-1's
+          memory-level `origin`. inv4 — stamping only inside the review-gated consolidate
+          flow, no bulk retro-stamp.
+        implementation_notes: >-
+          Attach: links.py load_edges / LinkGraph.typed_outbound / main; build_index
+          (links.json in-build side products); consolidate SKILL.md (co-recall proposal
+          step); recall._expand_neighbors (eventual weight consumer). GRA-8 lives today
+          only in ROADMAP.v1.md (P2/S) and ROADMAP.yaml (P3/S), not round 1 — cite it as
+          absorbed. "since" cannot derive from source_commit_time (per-file, GRW-6-mutable);
+          any future bi-temporal edge design needs an explicit stamp — out of scope here.
+
+      - id: GRF-2
+        title: Multi-hop instrument growth (n>=10) + close the mixed-mode MMR leg
+        priority: P1
+        effort: M
+        status: planned
+        source: {lens: graph-retrieval, verdict: RESHAPE, convergence: 1, landscape: [graphrag-bench-iclr26, hipporag2-2502]}
+        problem: >-
+          The GRA-1 knee fix (4d16022) resolved production dense multi-hop (0.0->1.0),
+          but two gaps remain: the multi-hop hard-set is still n=2 (too small to gate
+          anything), and the MIXED mode (dense index resident, bm25 ranking at query
+          time — reachable on embed_query timeout/cold-cache) STILL scores 0.0 because
+          MMR's diversity penalty drops the wikilink neighbor (definitionally similar
+          to its seed), the one graph-exemption posture 4d16022 did not unify.
+        proposal: >-
+          Grow the multi-hop category n=2 -> n>=10 with a documented index-mode x
+          query-mode condition matrix in the fixture header; extend 4d16022's
+          graph_endorsed exemption to MMR (an endorsed entry is exempt from the
+          diversity penalty the same way it is exempt from the knee), closing the
+          mixed-mode leg; re-measure and record the result as GRA-7's measurable
+          baseline. NO PPR ships here.
+        acceptance_criteria:
+          - tests/fixtures/recall_hard_set.yaml multi-hop grows 2 -> >=10 rows with the condition matrix documented in the header; no tracked/pinned CI gate is added on the category until n>=10 lands (stays report-only)
+          - the mixed-mode arm (MSR-2) multi-hop recovers from 0.0 by extending the graph_endorsed exemption to MMR; a hermetic test pins both production-dense (already 1.0) and mixed-mode paths, and pins that a no-link tail still admits nothing past the cliff (the 4d16022 resurrection guard)
+          - the golden(50) and packs(22) eval numbers stay byte-identical (self 0.98/hard 1.0/mrr 0.9213; hard 1.0/precision 0.1375/abstention 0.3333) — the eval-gated bar
+          - a dated note updates GRA-7's gate text to read "beats the grown multi-hop baseline" and records the mixed-mode fix
+        dependencies: [RET-8, MSR-1]     # RET-8 cross-file shipped; MSR-1 (T8) for baseline diffing
+        invariant_note: >-
+          inv6 — the MMR change is inside recall()'s existing off-cut re-rank, no new
+          hot-path cost; re-verify against the live tree that 4d16022's graph_endorsed
+          set is the seam (it returns a third set from _expand_neighbors). Do not
+          reintroduce the "0.0 dense" framing — that is fixed; the live residual is
+          mixed-mode only (re-measured 2026-07-09).
+        implementation_notes: >-
+          Seam: recall.py _mmr_rerank + the emission loop's graph_endorsed handling
+          (added by 4d16022 — verify it returns (list, injected, endorsed)). The fix is
+          the symmetric twin of the knee fix: exempt endorsed entries from the MMR
+          diversity penalty (or seed the MMR "selected" set with them) so a wikilink
+          neighbor is not punished for being similar to the seed that endorsed it.
+          _NEIGHBOR_DISCOUNT=0.5 still has no env override. Re-measure via MSR-2's
+          mixed-mode arm both before and after.
+
+      - id: GRF-3
+        title: Dense-floor calibration instrument (delivers RET-9)
+        priority: P1
+        effort: S
+        status: planned
+        source: {lens: graph-retrieval, verdict: RESHAPE, convergence: 1, landscape: [ettin-hf-2026-cut]}
+        problem: >-
+          The dense floor is a static per-model table calibrated to the maintainer's
+          golden corpus (recall.py _DENSE_FLOOR_BY_MODEL); nothing recalibrates
+          per-install, and RET-9 (per-corpus floor sanity, ROADMAP.v1) is unbuilt.
+        proposal: >-
+          Automate RET-1's documented cosine-separation recipe into an offline
+          eval_recall floor-sweep against the hard-set on-topic queries + off-topic
+          probes + per-project .audit-fixtures, computing separation in RAW cosine
+          space (not fused RET-8 metrics — the two logged fused-vs-cosine
+          incommensurability corrections), emitting a RECOMMENDED per-model/per-corpus
+          floor + one advisory doctor line comparing it to the configured table entry.
+          Human edits the table; nothing auto-writes. This item is the SOLE delivery
+          vehicle for RET-9. Ettin/Li-LSR bake-off and reranker-manifest wiring are CUT
+          (ED-3-blocked: fastembed TextCrossEncoder's supported list is a closed 6 with
+          no Ettin entry).
+        acceptance_criteria:
+          - eval_recall gains a floor-sweep mode embedding on-topic + off-topic probes (+ .audit-fixtures rows when present) with the corpus's configured/warm model, computing separation in raw cosine space and printing a recommended floor + abstention-safety delta
+          - doctor gains exactly one advisory CHECKS line comparing configured _DENSE_FLOOR_BY_MODEL to the sweep recommendation; it never edits the table (inv4) and preserves the line-count render pin
+          - this item is the stated RET-9 delivery vehicle (RET-9 closed by it, not left open in parallel)
+          - Ettin/Li-LSR arms and reranker-manifest wiring are explicitly out of scope; any future reranker swap requires its own dated ED-3 spike proving fastembed loadability
+        dependencies: []                 # delivers RET-9; no in-file dep
+        invariant_note: >-
+          Advisory-only (inv4) — sweep recommends, doctor surfaces, a human edits the
+          constant. Runs offline against the already-warm model (inv2). Output is a
+          derived/gitignored report (inv1). Cutting Ettin/Li-LSR removes the only
+          ED-3/inv6 exposure in the original candidate.
+        implementation_notes: >-
+          Attach: recall._get_cross_encoder/_cross_encoder_cached (offline-cache
+          template), recall._DENSE_FLOOR_BY_MODEL (bge 0.60 / multilingual 0.30 /
+          default 0.50), build_index (manifest model-mismatch re-embed + _HF_SOURCE_REPO_BY_MODEL),
+          eval_recall.main, doctor. RET-9's acceptance bar (ROADMAP.v1.md ~324) matches
+          this per-model/per-corpus recommendation precisely — cite it as closed here.
+
+      - id: GRF-4
+        title: Typed-2-hop reachability audit (GRA-7's measurable baseline arm)
+        priority: P3
+        effort: S
+        status: planned
+        source: {lens: graph-retrieval, verdict: RESHAPE, convergence: 1, landscape: [hipporag-ppr-baseline]}
+        problem: >-
+          GRA-7 (personalized PageRank) is gated on "beats GRA-1 on multi-hop", but
+          there is no typed-2-hop baseline to compare against — only the 1-hop
+          expansion GRA-1 ships.
+        proposal: >-
+          Add a static, eval-side min-hop-reachability audit (which depth 1/2, which
+          edge type wikilink/refines first reaches each expected stem from the top-N
+          seeds, over links.json) per multi-hop hard-set row, registered in a dated
+          roadmap note as the typed-2-hop baseline GRA-7's PPR gate must beat. Zero
+          hot-path change, no router, no shipped depth-2 expansion.
+        acceptance_criteria:
+          - for each multi-hop row, eval_recall reports the min hop depth (1/2) at which each expected stem becomes reachable via links.json adjacency + the edge types traversed — a pure offline walk, no recall.py/hot-path involvement
+          - the report is gated skip-if-fixture-too-small (activates only once multi-hop reaches n>=10 from GRF-2) rather than reporting on the vacuous n=2 set
+          - GRA-7's roadmap gate text gains a dated note ("beats typed-2-hop reachability baseline, not just GRA-1") so one canonical beyond-1-hop mechanism is evaluated
+          - no changes to recall.py, no new env flag default-on, no telemetry schema change — a derived/gitignored eval artifact only
+        dependencies: [GRA-7, RET-8, GRF-2]   # GRA-7 cross-file (gated in ROADMAP.yaml); GRF-2 same-tier (grows the instrument), build GRF-2 first
+        invariant_note: >-
+          inv6 — pure offline computation over the already-loaded links.json, zero
+          hot-path/latency change. ED-2 not implicated (structural reachability report,
+          not a ranking prior). Any FUTURE hot-path depth-2 mechanism is NOT authorized
+          by this item and would need its own gate + the GRA-5 superseded_by-map reuse.
+        implementation_notes: >-
+          Attach: links.LinkGraph.typed_outbound, recall._expand_neighbors /
+          _NEIGHBOR_DISCOUNT / _GRAPH_SEEDS (the seam it baselines), eval_recall.
+          Build AFTER GRF-2 grows the instrument (a reachability report over n=2 is
+          vacuous). This is opportunistic (P3) — it only matters if/when GRA-7 is revisited.
+
+      - id: GRF-5
+        title: Phrase-overlap vs GRA-3 spike (does phrase co-occurrence find links GRA-3 misses?)
+        priority: P3
+        effort: S
+        status: planned
+        source: {lens: graph-retrieval, verdict: RESHAPE, convergence: 1, landscape: [a-mem-zettelkasten, cooccurrence-no-llm]}
+        problem: >-
+          GRA-3's densification pass finds link candidates via recall()-fused
+          (BM25+dense) similarity; landscape says structural phrase co-occurrence (LLM-
+          free) sometimes surfaces links embeddings miss — but this is unmeasured for
+          hippo, and a naive shadow-edge cache would be a hot-path/schema liability.
+        proposal: >-
+          A dated RUL-0-style spike measuring whether stopword-filtered phrase n-gram
+          co-occurrence surfaces unlinked pairs GRA-3's fused densification does not
+          already find, on the golden + packs corpora. ONLY if a stated non-trivial
+          complement bar is cleared, merge phrase overlap into GRA-3's existing
+          link_density_suggestions loop as one more scored signal — no shadow-edge
+          cache, no new schema gate, no consolidate channel, no hot-path half.
+        acceptance_criteria:
+          - a dated spike reports, per corpus, rediscovery rate (fraction of existing wikilinks each method predicts) and net-new complement rate (phrase pairs absent from GRA-3's output), recorded with an explicit survive / not_pursuing call mirroring SIG-5's pattern
+          - no persisted shadow-edge cache, no schema/corpus_format gate, no new consolidate channel; if the bar clears, the only sanctioned follow-up is adding phrase overlap inside audit's existing link_density_suggestions (a diff touching only that loop)
+          - any phrase-extraction code shipped past the spike runs only inside the audit skill and is proven unreachable from build_index/recall._ensure_index's cold-start path via an AST/import pin (inv6 cannot regress)
+          - the item claims no multi-hop/graph-bench improvement — retrieval-quality claims defer to the GRF-2 stabilized instrument
+        dependencies: [GRA-3]           # cross-file, SHIPPED
+        invariant_note: >-
+          inv6 risk is real and confirmed — build_index is hot-path reachable via
+          recall._ensure_index's cold-start; keep ALL phrase-extraction inside the audit
+          skill's own invocation, never build_index's in-build links.json hook. inv1/inv4
+          — any surviving output stays inside GRA-3's review-gated suggestion shape, zero
+          new persisted artifact, ED-4 avoided.
+        implementation_notes: >-
+          Spike only, outcome-agnostic (record the dated finding either way, SIG-5
+          pattern). Attach if it survives: audit SKILL.md link_density_suggestions loop;
+          _vendor for pure-python phrase extraction (beside vendored BM25/miniyaml).
+
+  # ---------------------------------------------------------------- SEN ---
+  - id: SEN
+    name: Write-side quality & memory security (Sentinel)
+    extends: SEC-spine + secrets + new_memory
+    goal: >-
+      Turn the just-shipped trust spine into a PROVEN, incident-ready defense, and
+      mechanize the write-plane checks a reviewer does by eye — deterministic, local,
+      warn-only, human-in-the-loop, off the hot path.
+    items:
+
+      - id: SEN-1
+        title: Write-ticket verifier (mechanize the secret gate + fidelity + archive-shadow in check_candidate)
+        priority: P1
+        effort: M
+        status: planned
+        source: {lens: capture-consolidation, verdict: RESHAPE, convergence: 1, landscape: [cloudflare-8check, sage-2605]}
+        problem: >-
+          The consolidate secret gate is PROCEDURAL skill text, not code; check_candidate
+          runs dup/rules-echo/baseline but not a secret lint, a fenced-hunk fidelity
+          check, or an archive-shadow check — the reviewer does those by eye.
+        proposal: >-
+          Extend check_candidate into a small deterministic pre-write verifier — secret
+          lint (mechanizing the procedural gate via scan_with_remediation), fenced-hunk
+          fidelity against a freshly-fetched git HEAD, and archive-shadow name-collision
+          detection — alongside the existing checks, reusing staleness/lint_links
+          directly, surfaced as a "write ticket" (renamed off the GOV-5 recall receipt)
+          rendered verbatim at the consolidate/new approval prompt. Every check
+          warn-only, no schema bump, no persistent ledger this round. This is the
+          CONTAINER SEN-2 and SEN-3 land their line-items inside.
+        acceptance_criteria:
+          - check_candidate additionally invokes scan_with_remediation and surfaces secret-lint warnings in its dry-run dict, rendered at the same approval-prompt step as dup/rules-echo (closes the gap where write_memory only warns AFTER writing)
+          - a fenced-hunk fidelity check compares each fenced code block against `git show <fresh HEAD>:<path>` (baseline from a fresh git_head call at verify time, not parsed from rationale) and warns on byte mismatch
+          - an archive-shadow check warns when a candidate stem collides with an existing archive/ entry, reusing the GRA-5 fail-closed guard pattern
+          - no new frontmatter/corpus_format field, no new skill, no new MCP tool, no persistent ledger; all checks warn-only and check_candidate's never-raise/no-autonomous-rejection contract is unchanged (a test pins it)
+        dependencies: []
+        invariant_note: >-
+          inv4 — every check stays inside check_candidate's warn-only/never-raise
+          contract; autonomous refuse-write is cut, deferred to a per-check dated owner
+          decision. inv5 — the artifact is a "write ticket"/"gate stamp", NOT "receipt"
+          (that names GOV-5's shipped glass-box). inv6 — runs only in agent-gated write
+          flows. Scope explicitly orthogonal to SEC-8 (consumes scan_with_remediation
+          as-is, does not extend pattern breadth).
+        implementation_notes: >-
+          Attach: new_memory.check_candidate (subsumes/extends the existing battery),
+          write_memory (backstop -> ticket-emitting), secrets.scan_with_remediation,
+          rules_plane.rule_dup_candidates, staleness.read_provenance + build_repo_file_index,
+          lint_links.LinkGraph. Call staleness/lint_links helpers directly — do not
+          reimplement, or two scanners drift.
+
+      - id: SEN-2
+        title: Write-side threat lint (invisible Unicode & scoped exfil-shape detection, tiered by precision)
+        priority: P1
+        effort: M
+        status: planned
+        source: {lens: trust-security, verdict: RESHAPE, convergence: 2, landscape: [pillar-invisible-unicode-2025, minja-2503, spotlighting-microsoft]}
+        problem: >-
+          Memory-poisoning payloads (invisible Unicode zero-width/bidi/PUA, exfil-link
+          shapes, injection-imperative grammar) reach the corpus through capture/import
+          with no detection; secrets.py catches only credentials, and rules files are
+          the exact Pillar attack target.
+        proposal: >-
+          A secrets.py-sibling deterministic threat-lint shipping Tier-A classes
+          (invisible Unicode with emoji-ZWJ/variation-selector carve-outs + stated RTL
+          posture, mixed-script confusables, HTML comments LINT-ONLY pending an ED-3
+          spike, exfil-link shapes scoped strictly to image-embeds/data-bearing query
+          strings — never bare URLs) as review-surfaced flags + import HOLD at five
+          seams; Tier-B (imperative injection grammar) ships LEDGER-ONLY — measured,
+          never surfaced, never HOLD — until a dated owner decision graduates it on a
+          measured near-zero FP rate. Lands inside SEN-1's verifier.
+        acceptance_criteria:
+          - Tier-A classes produce deterministic regex/codepoint flags (zero LLM) at all five seams — capture.py hunks_threat_flagged beside hunks_secret_flagged, new_memory scan seam, import_mdc HOLD, doctor sweep, and the SEC-8 CI scan (via CLB-1's --ci)
+          - Tier-B writes to a persisted findings ledger + one aggregate doctor line ONLY — no per-write flag, no seed stamp, MUST NOT enter import_mdc's HOLD set — until a dated owner decision graduates it on a ledger-measured near-zero FP rate
+          - an ED-3 in-harness spike on whether Claude Code's HTML-comment stripping covers hooks' additionalContext is run and dated BEFORE any HTML-comment neutralization; until then HTML comments are lint-only
+          - secrets.py's _PATTERNS/scan_text/hunks_secret_flagged are unchanged (threat patterns are a sibling reusing the plumbing, not a fork); doctor line-count pin + hermetic fixtures (escape-sequence literals only, never literal invisible codepoints — filterwarnings=error) updated in lockstep
+        dependencies: [SEN-1, SEC-8, GRA-5]   # SEN-1 same-tier (container, build first); SEC-8 cross-file (ROADMAP.v1, open); GRA-5 shipped
+        invariant_note: >-
+          inv4 — per-item flags/HOLD, no bulk sweep; Tier-B is measurement-only. inv6 —
+          detection at capture/write/import/doctor/CI, never the hot path; the one
+          hot-path-adjacent capability (render-time codepoint stripping) is deferred
+          entirely. inv3 — the load-bearing reshape: an over-broad flag surface degrades
+          the human-review channel, so ED-1's split applies one level deeper (gate
+          USER-VISIBLE flagging per pattern-class precision, hold imperative-grammar dark
+          until FP measured).
+        implementation_notes: >-
+          Attach: secrets.py _PATTERNS/scan_text/scan_corpus (the one-list architecture
+          to sibling), capture.py (hunks_threat_flagged beside hunks_secret_flagged),
+          new_memory scan seam, import_mdc HOLD contract, doctor sweep, rules_plane.rules_rot
+          (rules files are the Pillar target). SEC-8's relationship resolved: this lint
+          FEEDS the single CI scan vehicle (CLB-1 --ci), not a second CI gate.
+
+      - id: SEN-3
+        title: Ungrounded-prescription lint (agent-voiced intent attribution, warn-only)
+        priority: P2
+        effort: M
+        status: planned
+        source: {lens: capture-consolidation, verdict: RESHAPE, convergence: 1, landscape: [mist-sycophancy-25x, transcription-not-synthesis]}
+        problem: >-
+          Capture-from-evidence is hippo's spine, but nothing flags a memory body that
+          asserts user intent ("the user always wants X") when that claim is grounded in
+          neither the captured hunk nor a rationale — the exact synthesized-prescription
+          shape that amplifies sycophancy (landscape: memory amplifies sycophancy 25x).
+        proposal: >-
+          A deterministic secrets.py-style lint flagging agent-voiced attribution-of-
+          intent constructs when grounded in neither the captured verbatim hunk (GRW-1)
+          nor an explicit --rationale (GOV-3); fires warn-only at write_memory + an
+          audit-skill corpus sweep feeding a doctor "ungrounded-prescription fraction"
+          line. No refuse-write path this item.
+        acceptance_criteria:
+          - the pattern set is restricted to agent-voiced attribution-of-intent (e.g. "the user wants/prefers/always wants"), not bare must/always/never; run against hippo's own docstrings/ROADMAP prose with zero false positives before defaulting on
+          - write_memory flags a candidate ungrounded only when the prescriptive span has no overlap in the write-time hunk AND no --rationale; unit tests cover grounded-by-hunk (passes), synthesized-no-support (flagged), rationale-only (passes)
+          - the audit sweep classifies the corpus grounded / ungrounded-prescription / observation and proposes per-item fixes only (inv4); doctor renders the fraction with no persisted per-item field unless a bump is separately budgeted
+          - lint output never reaches check_candidate's route/neighbor result or recall (confidence-never-ranking AST pin); warn-only forever in this item's scope
+        dependencies: [SEN-1, GRW-1, GOV-3, SEC-2]   # SEN-1 same-tier; rest cross-file, SHIPPED
+        invariant_note: >-
+          inv2/inv6 — write-plane only, never blocks. inv3 — doctor fraction + audit
+          sweep make the rate legible. inv4 — sweep proposes per-item, no bulk rewrite.
+          The refuse-write half is DROPPED not deferred: secrets.py's own warn-never-block
+          doctrine for a higher-severity/lower-FP class argues against a blocking ambition
+          for a fuzzier class.
+        implementation_notes: >-
+          Attach: new_memory.check_candidate (joins the dry-run battery, warn-only),
+          _append_rationale + write_memory (grounding = rationale/hunk presence),
+          telemetry.log_decision + capture seed decisions field (the grounding source),
+          secrets.py _PATTERNS (template), audit + consolidate SKILL.md (the
+          transcription-not-synthesis rule gains a mechanical check).
+
+      - id: SEN-4
+        title: Adversarial eval category (poisoned-memory fixtures acceptance-testing the shipped trust spine)
+        priority: P1
+        effort: L
+        status: planned
+        source: {lens: trust-security, verdict: RESHAPE, convergence: 1, landscape: [agentpoison-neurips24, skillcloak-2607]}
+        problem: >-
+          The v0.8.0 trust spine (SEC-5/6/7) shipped with no adversarial regression
+          harness — a defense with no poisoned fixtures is unproven, and the 2026 threat
+          model (MINJA, AgentPoison, invisible-Unicode) is exactly what it must withstand.
+        proposal: >-
+          A new 'adversarial' RET-8 eval category — poisoned-memory fixture corpora
+          (MINJA payloads, invisible-Unicode bodies, exfil-link descriptions, high-BM25
+          trigger phrases) landing beside .audit-fixtures with ZERO eval_recall loader
+          changes (data-driven unknown tags) — that deterministically reports per row:
+          (1) payload crossed raw into format_results output, (2) SEC-6 quarantine
+          withheld a post-consent-drifted file, (3) SEC-5 corpus_consent_sample exposed
+          the payload byte-equal, (4) a threat-lint pattern flagged it, (5) knee/floor/
+          MMR admitted it. Report-only, skip-if-no-fixture. The always-on spotlighting
+          envelope is CUT (deferred, honestly reframed as boundary-spoof-resistance, not
+          payload-crossing reduction).
+        acceptance_criteria:
+          - the 'adversarial' tag is recognized by the existing data-driven loader with ZERO loader changes; it surfaces in by_category only when fixtures exist under .audit-fixtures (absent = skip), never gating CI on its own
+          - each poisoned row emits five deterministic booleans (raw-crossing, SEC-6-quarantine-withheld, SEC-5-consent-byte-equal, threat-lint-flagged, admitted) by direct assertion over format_results / corpus_consent_sample / the recall admission path — no LLM, worded as admission/coverage, never "injection success"
+          - golden(50) and packs(22) numbers stay byte-identical (zero production ranking/render change)
+          - hermetic tests pin the poisoned-fixture shape (memory files under .audit-fixtures, not hard_set rows) and the report schema; no existing MCP/skills/AST/byte-identity pin breaks
+        dependencies: [SEN-2, RET-8, SEC-5, SEC-6, SEC-7]   # SEN-2 same-tier (threat-lint oracle, build first); rest cross-file, all SHIPPED (2f960a7 / f2d1979)
+        invariant_note: >-
+          ED-1 — ships only the detection/instrumentation half; the incoherent envelope
+          gate (gated on "payload-crossing reduction" for a mechanism that cannot reduce
+          crossing) is removed, not disguised. inv1 — fixtures + report under the existing
+          gitignored .audit-fixtures sink, no committed corpus, no schema bump (data-driven
+          tag). inv6/inv2 — eval/CI only.
+        implementation_notes: >-
+          Attach: recall.format_results (the single render seam; verify the SEC-7 header/
+          trust_note landed there per 2f960a7), eval_recall category loader,
+          trust.corpus_consent_sample (SEC-5), the SEC-6 quarantine path in recall,
+          .audit-fixtures sink, secrets.py threat-lint patterns (SEN-2, the oracle).
+          Implementation MUST re-verify the trust-spine's landed shape against the tree at
+          build time (2f960a7 moved recall/trust/doctor) before writing a fixture. A future
+          spotlighting-envelope follow-on must be reframed as boundary-spoof-resistance and
+          sequenced as a clean-break render change (inv5/ED-4) behind a dated owner decision.
+
+      - id: SEN-5
+        title: Incident response — untrust verb + blast-radius report
+        priority: P1
+        effort: S
+        status: planned
+        source: {lens: trust-security, verdict: RESHAPE, convergence: 1, landscape: [mcpoison-cve-2025]}
+        problem: >-
+          After discovering a bad/poisoned memory a user has no recourse — there is NO
+          untrust/revoke verb (only mark_trusted), and no way to see what a suspect
+          memory touched (which sessions recalled it, what links/rules cite it).
+        proposal: >-
+          Two verbs only: `untrust <repo>` — minimal registry-entry removal beside
+          mark_trusted, revocation-BY-GATE (is_trusted re-checks live on every injection
+          path, so no cache-wipe machinery; at most a doctor hint that untrusted-source
+          derived caches are stale-but-inert) — and `blast-radius <name>` — a read-only
+          report joining episode_buffer.recalled_names, links.json typed_out/typed_in
+          adjacency (its FIRST real consumer), gov_citations, and .archive_journal.jsonl,
+          extending GRA-8, with a coverage banner naming episode-rotation + MCP-telemetry
+          blind spots. Quarantine tier DROPPED (collides with shipped SEC-6).
+        acceptance_criteria:
+          - untrust <repo> removes exactly that repo's hippo-trust.json entry, is idempotent, preserves sibling keys; a hermetic test proves trust -> recall(injected) -> untrust -> recall(withheld) with zero on-disk index/cache files touched
+          - untrust ships zero cache-invalidation code; the only cache surface is at most one doctor line noting untrusted-source caches are stale-but-inert (inv1); remove/SKILL.md's "trust left as-is on removal" note is cross-referenced to state how untrust differs
+          - blast-radius <name> writes nothing, reads only episode_buffer / links.json / gov_citations / .archive_journal.jsonl, and its output explicitly states coverage limits (episode-rotation window; MCP recall invisible to episode_buffer today)
+          - no 'quarantine' verb ships; notes cite GRA-8 as extended and shipped SEC-6 as the reason a second quarantine concept was dropped
+        dependencies: [GRF-1, SEC-6]     # GRF-1 (T9, GRA-8) backward; SEC-6 cross-file SHIPPED
+        invariant_note: >-
+          inv5 — 'quarantine' already names SEC-6's shipped per-file drift-withholding;
+          a second verb under the same word is cut. inv1 — untrust needs no cache wipe
+          (is_trusted re-reads live). inv4 — blast-radius is pure read; untrust is a
+          single named target, not a sweep. inv3 — blast-radius's coverage banner must
+          state the episode-rotation + MCP-invisibility limits IN the report.
+        implementation_notes: >-
+          Attach: trust.py (untrust beside mark_trusted; sibling-key preservation),
+          archive.py GRA-5 guard + journal (the incident template), telemetry episode
+          readers, links.load_edges (typed_out — currently DARK, becomes a consumer),
+          rules_plane.gov_citations.
+
+  # ---------------------------------------------------------------- TMB ---
+  - id: TMB
+    name: Temporal truth, lifecycle & forgetting
+    extends: GOV-1 + LIF + reconsolidate + archive
+    goal: >-
+      Give the timestamp-less resolve/lifecycle plane a clock (git-mined, no new
+      state), close the retire-without-drift and archive-shadow blind spots, and
+      measure forgetting correctness — all detection-first, git-native.
+    items:
+
+      - id: TMB-1
+        title: Resolve-inbox evidence card (age + git-freshness + drift + prefill-agreement capture)
+        priority: P2
+        effort: M
+        status: planned
+        source: {lens: temporal-lifecycle, verdict: RESHAPE, convergence: 3, landscape: [zep-bitemporal-2501, memtrack-conflict]}
+        problem: >-
+          The contradiction inbox derives fresh every call with ZERO timestamps — no
+          pair age, no drain rate, no verdict provenance on three of four verdict paths
+          — so a stale conflict is indistinguishable from a fresh one and the human has
+          no evidence to adjudicate with.
+        proposal: >-
+          Render a deterministic evidence card in resolve_view.describe()/--list per
+          contradicts pair: commits-since-birth age (git-mined from the commit that
+          added the edge — satisfies the no-timestamps render pin), the git-newer side
+          (via provenance.git_last_commit_with_time on both .md files, NEVER importing
+          reconsolidate), cited-code drift (stale.json), usage asymmetry (only above a
+          session-count floor); a prefill suggestion expressed STRICTLY in the resolve
+          skill's own four verdict names; one additive field on each of the four verdict
+          paths (incl. merge + keep-both, which today record nothing) logging the
+          prefill next to the human's choice. No sibling ledger, no threshold-gated
+          automation. (Merges conflict-chronometer x3 + freshness-adjudicator.)
+        acceptance_criteria:
+          - resolve --list/describe() shows each pair's age as commits-since-introduction (git-mined; legible "age unknown" fallback for shallow/rewritten history) — zero new persisted files/fields
+          - the card's suggested verdict uses ONLY the four names the resolve skill exposes (keep-A-supersede-B with direction, keep-both-as-scoped, merge, mark-not-conflicting) + explicit abstain; grep finds no second verdict taxonomy
+          - usage asymmetry is omitted or low-confidence-labeled below a stated session-count threshold (unit-tested at the boundary)
+          - each of the four verdict paths gains one additive field capturing the prefill vs the actual verdict, with no new ledger and no change to _RECONSOLIDATION_OUTCOMES; accept-prefill/auto-default is absent and gated in the roadmap behind a dated owner decision + the SIG-5/RET-8 revisit trigger
+          - no git subprocess runs on the SessionStart or hot path (a test asserts zero git calls during SessionStart producer execution); resolve_view's no-corpus-write AST pin stays green
+        dependencies: [GOV-1, GOV-5, GOV-6]   # cross-file, SHIPPED
+        invariant_note: >-
+          inv1 — no new persisted state; pure on-demand git-history read. inv6 — git
+          calls confined to resolve_view/doctor cold paths, never SessionStart or the hot
+          path. inv5 — git history is the single canonical birth source (no per-clone
+          first-seen sidecar). The resolve_view no-corpus-write AST pin is preserved by
+          computing freshness via provenance.git_last_commit_with_time directly — NO
+          `from .reconsolidate import` in resolve_view.py.
+        implementation_notes: >-
+          Attach: resolve_view.unresolved_contradictions / describe, provenance.git_last_commit_with_time,
+          reconsolidate._successor_commit_iso (the freshness primitive — reuse verbatim,
+          do not import into resolve_view; hoist to provenance if shared), staleness stale.json,
+          telemetry.read_usage_aggregates, doctor._scorecard_message. Deferred (dark-reservoir
+          risk at solo scale, ~0-5 pairs): drain-rate metrics, scorecard_history.jsonl, a
+          ledger ts field — in-scope only via a dated owner decision once queue depth justifies it.
+
+      - id: TMB-2
+        title: invalid_after terminal-state surfacing + archive-admission leg for drift-free retirements
+        priority: P2
+        effort: S
+        status: planned
+        source: {lens: temporal-lifecycle, verdict: RESHAPE, convergence: 1, landscape: [forgeteval-deletion-correctness]}
+        problem: >-
+          invalid_after is visible only through the git-drift stale set, so a memory
+          retired via supersede/merge (no code drift) is invisible to BOTH
+          session_start's staleness_producer AND archive_candidates — it lingers with no
+          count anywhere and cannot reach the archive flow session_start points users at.
+        proposal: >-
+          Two small additive fixes reusing existing primitives: widen invalid_after
+          visibility from stale-scoped to CORPUS-WIDE (a producer/doctor count of
+          memories invalidated via non-drift paths), and add a 5th admission leg to
+          archive_candidates so a purely time-invalidated memory reaches the shipped
+          GRA-5-guarded archive flow. No new queue, no new write primitive, no new verb —
+          reinstatement is the existing semantic_reverify(name, outcome='graduate'|'fix')
+          which already strips invalid_after.
+        acceptance_criteria:
+          - a corpus-wide invalid_after-old count (session_start line or doctor check) reports memories past the old-invalidation horizon NOT in find_stale's set — verified with a fixture carrying invalid_after but no cited_paths/drift, which today signals nowhere
+          - archive_candidates (or a parallel fn reusing its soak gate + zero-inbound + not-cited-by-CLAUDE.md + GRA-5 guard verbatim) admits an invalid_after-old memory absent from find_stale — verified end-to-end it can reach a journaled archive move via report-then-approve
+          - no new write primitive/skill/ledger-outcome/verb; the new surfacing does NOT route through recalled_stale_worklist (whose LIF-1 exclusion of invalidated items is deliberate)
+          - byte-identity / cheap-at-zero — a corpus with no such memories produces no extra output and no measurable cost
+        dependencies: [LIF-1, GRA-5]     # cross-file, SHIPPED
+        invariant_note: >-
+          inv3 — closes a real legibility gap (non-drift-invalidated memories signal
+          nowhere). inv4 — reinstatement + archiving stay per-item human-gated through
+          shipped primitives, no queue/auto-move. inv5 — do NOT coin "resurrect" (it
+          already names the recall.py expansion invariant "expansion must never resurrect
+          an invalidated memory"); use graduate/fix. inv1 — reuses invalid_after
+          frontmatter + the archive journal, no bump. Distinct from the round-1-killed
+          spaced-reverify-scheduler-full: corpus-STATE-driven (a count of an existing
+          invisible population), not a calendar cadence — state this explicitly.
+        implementation_notes: >-
+          Attach: staleness.invalid_after_map / set_invalid_after / _strip_invalid_after,
+          recall._invalidation_state + the emission-loop display filter,
+          reconsolidate.semantic_reverify + snooze, archive journaled move, doctor.CHECKS.
+          Population is near-zero for typical solo corpora until an active supersede/merge
+          practice + 30 days elapse — cheap-at-zero is the acceptance bar, not volume.
+
+      - id: TMB-3
+        title: Forgetting correctness & archive reversibility (shadow check + report-only category + restore primitive + regret detector)
+        priority: P2
+        effort: M
+        status: planned
+        source: {lens: temporal-lifecycle, verdict: RESHAPE, convergence: 1, landscape: [memoryagentbench-forgetting-7pct, persistbench-leakage]}
+        problem: >-
+          Forgetting failures dominate production memory systems (deletion correctness
+          0-93%), yet hippo's archive is a one-way door: no unarchive primitive, archived
+          stems can shadow live ones (_first_seen_times deliberately skips archive/), and
+          there is zero measurement of whether forgetting is correct.
+        proposal: >-
+          Ship a pure-detection forgetting measurement + a decoupled reversibility
+          primitive: (a) a read-only check_archive_shadowing doctor check (archive/ vs
+          live stems, prints a manual git mv suggestion, zero write); (b) a hermetic pin
+          that corpus builds never traverse archive/; (c) a report-only 'forgetting'
+          eval category (archive-absence rows from an archive/*.md listing, scored by a
+          NEW absence-polarity metric, through SIG-6's confirm flow); (d) a standalone
+          archive.restore(stem) primitive (per-item, journaled, GRA-5-style collision
+          guard); (e) an evidence-only regret detector (abstention clusters vs archived
+          bodies via vendored BM25, inert text + a logged regret event). NO wiring
+          between detector and restore. (Merges forgetting-gate + archive-regret.)
+        acceptance_criteria:
+          - check_archive_shadowing flags any stem in both archive/ and live corpus with zero false positives on a clean corpus and a hit on a synthetic shadow; printed suggestion only, no corpus write; a hermetic test pins that build_index never includes archive/ contents
+          - a report-only 'forgetting' by_category line appears with archive-absence gold rows enumerated from an archive/*.md listing (journal used only as reversibility metadata) scored by an absence-polarity metric distinct from hard_set_metrics; rows populate via SIG-6's confirm flow with absent=skip
+          - archive.restore(stem) moves one named file back, journals it, collision-checks the stem against live memories with an _inbound_referrers-style guard, refusing (not overwriting) on collision; a no-bulk-restore test pin mirrors the no-bulk-archive pin; no code path connects detector output to restore execution
+          - the regret detector runs only at SessionStart-producer/doctor time (never per-prompt), surfaces matches as inert text + a logged regret event, with zero restore action attached
+        dependencies: [SIG-6, RET-8]     # SIG-6 cross-file on open PR #17 (absent from baseline); RET-8 shipped
+        invariant_note: >-
+          inv4 — the restore/unarchive write is per-item human/agent-invoked, journaled,
+          collision-guarded, no bulk verb; the detector is evidence-only, no prefilled
+          restore proposal (that would be the demand-gap-auto-draft shape round 1 killed +
+          races ahead of the tree's own soak-before-autonomous precedent). ED-1 — zero
+          measured incidence of shadow collisions yet, so no write-capable auto-fix ahead
+          of observed occurrence. The restore collision-check is load-bearing (it closes
+          the exact shadowing hazard _first_seen_times skips).
+        implementation_notes: >-
+          Attach: archive.py _JOURNAL_NAME / _journal_untracked_move / _inbound_referrers
+          (GRA-5 guard to mirror in restore) / _first_seen_times (the archive/ skip under
+          test), eval_recall.derive_self_query + load_hard_set (unknown tags -> own bucket),
+          doctor.CHECKS + new check_archive_shadowing, recall's invalidation/supersession
+          block (behavior under test), _vendor BM25 (regret matching). Before writing any
+          invalid_after-old / supersedes-ordering gold rows, re-verify recall's 'old'-state
+          emission handling against the live tree (two skeptic reads contradicted) — those
+          row types may reasonably defer; archive-absence rows (zero prior coverage) ship first.
+
+      - id: TMB-4
+        title: Edge-derived update / premise-resistance eval fixtures (extends SIG-6)
+        priority: P2
+        effort: M
+        status: planned
+        source: {lens: eval-flywheel, verdict: RESHAPE, convergence: 2, landscape: [longmemeval-knowledge-update, stale-2605]}
+        problem: >-
+          The temporal/update eval categories have ZERO shipped rows (evergreen packs
+          have no superseded facts), so knowledge-update — the measured-weakest ability
+          across the landscape — is unmeasured for hippo, exactly where its supersedes
+          edges + invalid_after should shine.
+        proposal: >-
+          A deterministic fixture synthesizer walks supersedes-chain typed edges
+          (load_edges typed_out + history.typed_inbound chain-tip resolution) + GRW-7
+          successor-date stamps to draft category:update rows — query = VERBATIM
+          derive_self_query text from the SUPERSEDED memory, gold = the live successor
+          stem — plus verbatim-template premise-resistance rows, routed one-at-a-time
+          through SIG-6's drafts/confirm flow into .audit-fixtures. Scoring is
+          stamp-state-bucketed (unstamped/recent: successor-must-outrank-corpse;
+          old-stamped: successor-presence-only, since those are recall-filtered).
+          by_category stays report-only until a dated owner decision promotes a
+          GATE_UPDATE_* gate.
+        acceptance_criteria:
+          - the synthesizer emits draft rows whose query is a literal verbatim span of the SUPERSEDED memory's file (no paraphrase) and gold = the live chain-tip via history.typed_inbound; a test asserts draft queries are literal substrings and zero LLM/network calls
+          - rows are tagged category:update (never temporal, which stays zero rows) and bucketed by the superseded memory's invalid_after state (unstamped/recent scored successor-must-outrank-corpse; old-stamped scored successor-presence-only); a test verifies both scoring paths
+          - every drafted row requires per-item human confirmation via SIG-6's confirm_hard_set_row before landing (inv4); a test confirms an N-row drafts file produces zero live fixtures until each is confirmed; no bulk-confirm path
+          - update numbers surface report-only in eval + a per-project doctor line naming the outrank-failure count; GATE_UPDATE_* promotion is never auto-triggered by a row count — a dated owner decision is required
+        dependencies: [SIG-6, GRW-7, GRA-4]   # SIG-6 cross-file on open PR #17 (absent from baseline); GRW-7/GRA-4 shipped
+        invariant_note: >-
+          inv4 — drafts-only, per-row human confirm via SIG-6's gate, no bulk autonomous
+          fixture writes. inv6 — synthesis at audit/CLI time, never the hot path.
+          Fabrication-kill adjacency: any templated/generative rewording collapses the
+          derivation-only property distinguishing this from demand-gap-auto-draft — query
+          assembly is verbatim-span-only and fails closed (skip the row) rather than
+          paraphrase. GATE_UPDATE_* promotion is a dated owner sign-off (the LIF-7
+          soak_status precedent), never an automatic threshold.
+        implementation_notes: >-
+          Attach: links.load_edges (typed_out — first production consumer), history.typed_inbound
+          (supersedes tip = live resolution), eval_recall._load_fixture_docs / load_hard_set,
+          _default_fixture_path (.audit-fixtures sink), and SIG-6's draft/confirm surface
+          (recall_hard_set.drafts.yaml + confirm_hard_set_row) — which is
+          ABSENT from this baseline (on open PR #17): re-read SIG-6's landed schema fresh
+          before coding (T3-T7 premise-correction law).
+
+      - id: TMB-5
+        title: Succession replay (verify a supersede's recall surface transfers)
+        priority: P2
+        effort: M
+        status: planned
+        source: {lens: capture-consolidation, verdict: RESHAPE, convergence: 1, landscape: [memoryagentbench-update-track]}
+        problem: >-
+          When a memory is superseded, nothing verifies that the queries which used to
+          recall the OLD name now recall the SUCCESSOR — a supersede can silently leave a
+          tombstone that still surfaces or a successor that never does.
+        proposal: >-
+          On semantic_reverify --outcome demote[--superseded-by], harvest historical
+          query_previews (recall_events/episode_buffer) that recalled the OLD name,
+          re-run recall() offline against the post-verdict corpus, and print PASS/FAIL/
+          INCONCLUSIVE per query (successor ranks now? tombstoned name still leaks?) at
+          verdict time + a doctor line for supersedes left with a failing/unrun replay.
+          Read-only, zero hot-path cost. The SIG-6-fixture-drafting half is CUT (SIG-6
+          absent from this baseline (open PR #17); re-propose only after it is verified merged and its schema re-read).
+        acceptance_criteria:
+          - given a demote/superseded_by verdict on a memory with >=1 prior recall_events hit for its name, the replay prints one line per harvested query — PASS (successor ranks), FAIL (tombstone still recalled, successor absent/low), or INCONCLUSIVE (80-char preview insufficient)
+          - given zero prior hits for the predecessor name, the replay reports "nothing to replay" rather than erroring or fabricating a query
+          - doctor gains exactly one new line surfacing supersedes with a failing/unrun replay; test_doctor's len(CHECKS) line-count assertion passes unmodified
+          - semantic_reverify's replay hook is exercised only via its existing single-item CLI path (the no-bulk AST pin passes); replay outcomes append only to the existing reconsolidation_events ledger (no new ledger, no draft-fixture generation)
+        dependencies: []
+        invariant_note: >-
+          inv6 — replay fires only inside semantic_reverify's CLI path, zero hot-path
+          cost. inv4 — confined to the single-item demote path already AST-pinned against
+          bulk; no replay_all verb. inv1 — outcomes append to the existing gitignored
+          reconsolidation_events ledger. inv5 by removal — the SIG-6-dependent
+          fixture-drafting half is CUT (SIG-6's draft surface is absent on the tree).
+        implementation_notes: >-
+          Attach: reconsolidate.semantic_reverify (the demote/superseded_by trigger),
+          telemetry.log_recall_event ledger (names + query_preview, both LIVE — do NOT
+          claim this reads the DARK scores/ranks; it reads query_preview+names only),
+          recall.recall (offline re-run, same API the eval drives). No SIG-6 dependency
+          in this cut.
+
+  # ---------------------------------------------------------------- CLB ---
+  - id: CLB
+    name: Team collaboration substrate
+    extends: TEA + SEC-spine + GRW
+    goal: >-
+      Turn review-gated writes — hippo's identity, and the unclaimed high ground the
+      landscape says no shipped system holds — into team ergonomics: a review packet,
+      per-verification attribution, cited-code re-verification-before-reuse, and
+      incoming-merge dedup — all human-merges-still, git-native.
+    items:
+
+      - id: CLB-1
+        title: Corpus review packet (op-classified diff + scoped lints + local recall-impact preview; --ci = SEC-8 vehicle)
+        priority: P1
+        effort: L
+        status: planned
+        source: {lens: team-substrate, verdict: RESHAPE, convergence: 1, landscape: [fountaincity-pr-review-2026, cc-team-bottleneck-38536]}
+        problem: >-
+          A teammate reviewing a memory PR has no tooling — no op-classified diff, no
+          scoped lints, no preview of how the change shifts recall. The landscape says
+          PR-review-for-memory is named best practice and NO shipped system implements
+          the human-promotion step; it is also the top Claude Code team bottleneck.
+        proposal: >-
+          A zero-LLM `memory review [base..head]` CLI (default HEAD~1..HEAD, or
+          working-tree-vs-HEAD solo) + a skill that op-classifies each touched memory
+          (ADD/UPDATE/SUPERSEDE/ARCHIVE/EDGE from frontmatter/edges/archive-moves), runs
+          touched-file-scoped lints (scan_text/scan_portability/conflict_radar/edge-
+          integrity) with a `--ci` mode whose nonzero-exit IS the SEC-8 CI-scan vehicle,
+          and — LOCAL-ONLY, never CI, disclosing the 80-char preview bound and printing
+          "no local episodes to replay" when empty — replays recent episode_buffer
+          previews against a temp-worktree shadow index at head-vs-base to preview which
+          memories would newly recall or stop recalling. Human still merges: no
+          auto-approve anywhere; the only future autonomous behavior (posting the packet
+          as a gh PR comment) is out of scope, gated behind the trust spine.
+        acceptance_criteria:
+          - the `memory review` CLI produces a pasteable markdown packet whose op classification is derivable purely from frontmatter/edges/archive-moves — an AST/import pin proves zero LLM/network in the classifier path
+          - lints run scoped to touched files, reusing scan_text/scan_portability/conflict_radar/edge-integrity verbatim; `--ci` exits nonzero iff a finding exists and is documented/wired as the SINGLE CI secret-scan surface (SEC-8's gate half, not a parallel one)
+          - the recall-impact preview never runs under CI/HIPPO_DISABLE_DENSE=1 (grep/test-verifiable local-only), always prints the 80-char truncation bound inline, and prints an explicit "no local episodes to replay" line when episode_buffer is empty
+          - no auto-approve/auto-merge/auto-post code path exists (grep-verifiable); test_skills_contract's literal skill-count pin is updated in the same PR that ships the skill
+        dependencies: [SEC-8]           # cross-file (ROADMAP.v1, open — this item is SEC-8's CI vehicle); trust spine SHIPPED
+        invariant_note: >-
+          inv4 — auto-approving clean memory PRs is REMOVED outright (deletes the
+          review-gated-writes identity pillar; cannot be metric-gated back); only
+          auto-posting survives as a future trust-spine-gated behavior. inv1/inv6 —
+          shadow index is temp/derived/gitignored, whole packet off the hot path. inv3 —
+          explicit "no local episodes" line for the fresh-clone/CI case. inv5 — the --ci
+          lint-gate is the single canonical CI secret-scan surface.
+        implementation_notes: >-
+          Attach: eval_recall.evaluate (shadow-eval machinery), build_index (shadow index
+          at ref), telemetry.log_episode (previews), rules_plane.conflict_radar,
+          portability.scan_portability, secrets.scan_text, links.all_typed_edges + load_edges,
+          a new skill (14-skill pin update). Reconcile with the shipped SEC-6 changed-file
+          consent-sample machinery (2f960a7) — reuse that "what changed" surface, don't
+          duplicate it. Use hippo's canonical edge vocabulary (supersedes/contradicts/
+          refines + archive moves); cite Mem0's ADD/UPDATE/DELETE taxonomy as a mapping
+          reference only, not the shipped vocabulary.
+
+      - id: CLB-2
+        title: verified_by attribution (per-verification identity + team-coverage reporting, suppressed at solo)
+        priority: P2
+        effort: M
+        status: planned
+        source: {lens: team-substrate, verdict: RESHAPE, convergence: 1, landscape: [copilot-citation-scoping-2026]}
+        problem: >-
+          hippo records WHO authored a memory (git) but not who VERIFIED it — last_verified
+          exists but its read path is dark, and there is no verified_by identity — so a
+          team cannot see coverage (which memories only their author has ever vouched for).
+        proposal: >-
+          Add an additive, absence-emits-nothing verified_by:<user_slug> stamp with its
+          OWN per-verification timestamp (decoupled from write-once last_verified) through
+          the existing gated reverify verdict; ship doctor + trust-scorecard consumers for
+          BOTH last_verified (lighting up its dark read path) and verified_by (never-
+          verified-by-non-author, authored-vs-verified ratio, departed-verifier signal);
+          SUPPRESS every team-coverage line at <=1 distinct git author; sequence the
+          identity-committing stamp behind SEC-14's opt-in/public-remote-warning switch.
+        acceptance_criteria:
+          - reverify_file additively stamps verified_by:<slug>@<own-ts> on every human-gated reverify verdict without altering last_verified's write-once semantics; corpus_format stays 4 (no bump)
+          - doctor + check_trust_scorecard ship real consumers for BOTH last_verified and verified_by, with every team-coverage line omitted (not just empty) at <=1 git author — a byte-identity/no-op test for solo corpora
+          - an AST pin proves verified_by is never read by any ranking-adjacent path (mirrors the confidence pin); git-log identities normalize through current_user_slug's slugification before any join
+          - the verified_by stamp ships gated on/after SEC-14; the departed-verifier line is dropped or rendered in a deterministic non-timestamp bucketed form (doctor no-timestamps pin)
+        dependencies: [SEC-6, SEC-14]   # SEC-6 shipped; SEC-14 cross-file (ROADMAP.v1, open) — sequencing gate
+        invariant_note: >-
+          ED-1 — detection-half only; writes through the existing per-item human-gated
+          reverify (inv4). ED-4 — additive/absence-emits-nothing, corpus_format 4. inv1 —
+          the coverage join is computed at report time, never persisted. inv6 — no hot
+          path. New AST pin: verified_by never a ranking input. ED-5 sequencing — this
+          opens a second committed-identity surface while SEC-14 is open, so it shares
+          that switch or lands after it.
+        implementation_notes: >-
+          Attach: provenance.reverify_file + _stamp_last_verified, staleness.read_last_verified
+          + find_citation_rot, reconsolidate.semantic_reverify (the ONE reverify gate),
+          telemetry user_slug discipline (TEA-5), doctor.CHECKS + check_trust_scorecard.
+          Re-anchor reverify_file to the current tree BEFORE the SEC-6 record_authored_write
+          consent-baseline fold (2f960a7 touched provenance).
+
+      - id: CLB-3
+        title: Evidence-fence contract + cited-code drift detector (hunk staleness)
+        priority: P2
+        effort: M
+        status: planned
+        source: {lens: team-substrate, verdict: RESHAPE, convergence: 1, landscape: [copilot-jit-reverify-2026]}
+        problem: >-
+          GRW-1 captures verbatim hunks into drafted bodies, but once a memory quotes a
+          code region there is no check that the region still matches the tree — the
+          quoted evidence silently rots, and a reviewer reusing it can't tell.
+        proposal: >-
+          Phase 1: an additive machine-recognizable evidence-fence marker (path:region-
+          attributed) in the consolidate drain contract for quoted hunk lines, future
+          drains only (no backfill). Phase 2: inside session_start's existing
+          _build_run_context/find_stale pass (the sole stale.json writer, off the hot
+          path — NEVER build_index), extract marked blocks and diff-aware-match them
+          (unified-diff prefixes stripped; removed lines excluded) against the tree,
+          writing an optional evidence_drift into stale.json; upgrade the RET-6 banner to
+          name the match level and union hits into the existing watermark_stale_candidates
+          -> semantic_reverify gate.
+        acceptance_criteria:
+          - consolidate SKILL.md defines a machine-recognizable evidence-fence marker (fence + path:region line); pre-existing unmarked bodies are out of scope (skipped, doctor-counted unverifiable) — no backfill claim
+          - extraction + matching run inside session_start's find_stale pipeline, never build_index, with an AST/behavioral pin that recall's hot-path _ensure_index performs zero evidence matching
+          - the matcher is diff-line-class aware (prefixes stripped; context/added lines checked exact-then-whitespace-normalized; removed lines excluded); tests cover all three classes + a whitespace-only-refactor false-positive case
+          - evidence_drift is an optional stale.json field (no bump); doctor + the upgraded RET-6 banner + the salience-off byte-identity pin stay green with the field absent and present; drifted memories union only into watermark_stale_candidates -> semantic_reverify (no new write verb)
+        dependencies: [GRW-1, RET-5, RET-6]   # cross-file, SHIPPED
+        invariant_note: >-
+          inv6 — the original build_index in-build slot is hot-path-reachable via
+          _ensure_index; relocate all matching into session_start's find_stale pass (already
+          an off-hot-path full-text read); add the AST pin. inv5 — stale.json's single-writer
+          contract preserved. inv3 — the banner states match level so refactor/whitespace
+          false positives stay legible. inv4 — routes into the existing gate, no new verb.
+          ED-4 — evidence_drift optional in the self-gating stale.json cache, no bump. ED-1 —
+          the autonomous nearest-region pre-fill half is dropped, deferred behind a dated
+          precision finding from reconsolidation_events.
+        implementation_notes: >-
+          Attach: capture._git_diff_hunks (evidence producer) + the drain fence contract in
+          consolidate SKILL.md, staleness.find_stale + write_stale_cache + read_stale_cache,
+          recall (RET-6 banner emission), reconsolidate.watermark_stale_candidates + semantic_reverify.
+
+      - id: CLB-4
+        title: Incoming-merge duplicate digest
+        priority: P2
+        effort: S
+        status: planned
+        source: {lens: team-substrate, verdict: RESHAPE, convergence: 1, landscape: [obsidian-git-conflicts-803, crdt-structure-not-semantics]}
+        problem: >-
+          When a teammate's memories arrive via git merge, nothing surfaces that an
+          incoming memory duplicates or conflicts with a local one — the two-plane drift
+          hippo prevents at write time is unguarded at merge time.
+        proposal: >-
+          At SessionStart, when the incoming commit range touching .claude/memory/ is
+          non-empty (via the existing _last_session_watermark/_recent_merge_signals
+          lineage, falling back to SEC-6's trust.untrusted_changes delta on untrusted
+          clones), run committed_duplicate_neighbors over just the incoming-touched
+          stems, cap <=5 pairs, and emit one bounded producer line + one doctor line
+          routing each pair to /hippo:consolidate (GRW-3 merge tier) or /hippo:resolve —
+          no second detector, no new ledger, no autonomous edge writes, no
+          same-stem-collision leg, no precision-gated phase 2.
+        acceptance_criteria:
+          - when the watermark-derived (or SEC-6 trust-drift) incoming range contains commits touching .claude/memory/, one producer line lists >=1 duplicate-candidate pair (committed_duplicate_neighbors over incoming stems, cap <=5); an empty/unreachable range (squash-merge) emits an explicit legible degradation line, never silent nothing
+          - no contradicts/supersedes edge is written autonomously; every pair routes to an existing human-gated flow; resolve_view's inbox derivation is untouched
+          - no second merge-detector or per-clone ledger is introduced — the digest reuses _recent_merge_signals/_last_session_watermark + the GOV-4 ledger pattern, verified against the current tree
+          - the 21+-producer pinned-order test + doctor CHECKS pin are updated in the same commit; existing AST pins stay green
+        dependencies: [SEC-6, GRW-3, GRW-6, GOV-4]   # cross-file (SEC-6 shipped; GRW-3/GRW-6/GOV-4 shipped)
+        invariant_note: >-
+          inv4 — every pair terminates in an existing human-gated flow, never an
+          autonomous edge write. inv5 — reuses _recent_merge_signals/_last_session_watermark
+          (single merge-range detector) + the GOV-4 ledger (single seen-state). inv6 —
+          bounded <=5, SessionStart-only, reuses resident dense vectors. inv3 — the
+          squash/unreachable-range case emits an explicit degradation line. Sequencing —
+          reads SEC-6's trust-drift delta (2f960a7), so lands after/alongside it.
+          Distinct from round-1-killed cross-clone-auto-harvest: single repo's own incoming
+          range, human-routed, no autonomous write — re-verify against that kill's rationale.
+        implementation_notes: >-
+          Attach: session_start.PRODUCERS (pinned order), reconsolidate._last_session_watermark,
+          resolve_view.unresolved_contradictions + describe, new_memory.committed_duplicate_neighbors
+          (GRW-3), rules_plane.rule_dup_candidates (template), links.all_typed_edges, doctor.CHECKS.
+
+  # ---------------------------------------------------------------- IOP ---
+  - id: IOP
+    name: Interop & reach
+    extends: RUL + RCH + import/export
+    goal: >-
+      Make hippo the git-drift hygiene layer over every rule dialect in the repo and
+      the tool you graduate TO from the incumbents — detection-only, trust-spine-gated
+      where it touches foreign content, one ED-3 spike before parsing any foreign format.
+    items:
+
+      - id: IOP-1
+        title: Foreign-dialect radar (census + cross-dialect divergence + git-drift rot)
+        priority: P2
+        effort: M
+        status: planned
+        source: {lens: interop-reach, verdict: RESHAPE, convergence: 1, landscape: [ctxlint-2026-07, scoped-frontmatter-converged-fragmented]}
+        problem: >-
+          A repo may carry Cursor .mdc, Copilot .instructions.md, and hippo memories that
+          say the same thing and drift apart, and a scoped-rule file may point at code
+          that moved — hippo has the only real drift machinery but applies it to none of
+          the foreign dialects.
+        proposal: >-
+          A report-only doctor/audit-skill check that (a) censuses known scoped-rule
+          dialect files by PRESENCE alone (Cursor .cursor/rules/*.mdc, Copilot
+          .github/instructions/*.instructions.md, watch-only unratified .agents/rules/),
+          (b) cross-applies rule_dup_candidates across discovered dialect files to flag
+          same-rule-diverged pairs, and (c) applies existence-check citation-rot + dead-
+          glob detection to .mdc files via the RCH-2 parse_mdc/resolve_globs — all in a
+          BRAND-NEW FOREIGN_GLOBS sibling NEVER merged into GOV_GLOBS and never added to
+          PRODUCERS. Writes nothing, parses no foreign frontmatter beyond .mdc, imports
+          nothing. (Merges rule-dialect-bridge + all-dialect-rules-rot.)
+        acceptance_criteria:
+          - the census reports which dialects have files present via filesystem glob-presence only (no foreign-frontmatter parsing beyond .mdc), degrading to a "no other dialects found" line for the single-dialect case
+          - cross-dialect divergence reuses rule_dup_candidates across discovered files as doctor/audit output only — never written, never enqueued as an import candidate
+          - two rot checks ship: existence-only stale-citation (NOT framed as git-log drift-since-written, since .mdc carry no source_commit baseline) + zero-match glob detection via resolve_globs; Copilot/nested-AGENTS.md/contradiction-via-conflict_radar are out of scope
+          - a new FOREIGN_GLOBS symbol (separate from GOV_GLOBS) is never passed to gov_citations/conflict_radar/rule_dup_candidates/load_rules_cache authority paths (grep/AST verified); rules_rot_producer + PRODUCERS untouched; doctor CHECKS pin updated in lockstep
+        dependencies: [RUL-2, RUL-7, RCH-2]   # cross-file, SHIPPED
+        invariant_note: >-
+          inv5 is binding — foreign enumeration lives in FOREIGN_GLOBS, never merged into
+          GOV_GLOBS, so RUL-1's authority-gap join, RUL-3's write-dedup, and RUL-4's
+          recall pointer never mistake un-owned Cursor content for hippo authority. inv6 —
+          audit-skill/doctor-only, on demand, NOT added to PRODUCERS. inv1/inv4 — derived/
+          gitignored report, read-only; per-item fix proposals stay behind a dated
+          precision-measurement decision. ED-3 — a completed live probe before any future
+          Copilot applyTo: support; .agents/rules/ (#179) is unratified, out of scope.
+        implementation_notes: >-
+          Attach: import_mdc.parse_mdc + resolve_globs + import_candidates, rules_plane.GOV_GLOBS
+          + rule_dup_candidates + _glob_to_re, staleness.find_citation_rot + _path_change_times,
+          audit SKILL.md. The cut import/export scope is where the real risk lived — keep
+          it out; this is evidence-gathering only until a census shows real multi-dialect usage.
+
+      - id: IOP-2
+        title: Import upstream fingerprints (hash-on-change re-review at the import plane)
+        priority: P2
+        effort: S
+        status: planned
+        source: {lens: interop-reach, verdict: RESHAPE, convergence: 1, landscape: [mcpoison-hash-on-change-2025]}
+        problem: >-
+          A .mdc-imported memory has no link back to its source file, so when the upstream
+          .mdc drifts or is deleted, the imported memory silently goes stale with no signal.
+        proposal: >-
+          At .mdc import (import_mdc_file, RCH-2), append the source .mdc's own repo-
+          relative path into the existing cited_paths route (the "Applies to:" backfill)
+          so RET-6's already-shipped git-log staleness scan + doctor flag BOTH upstream
+          drift AND deletion for free — no new frontmatter stamp, no new doctor check, no
+          re-import-diff pipeline. Non-git upstream adapters (claude-mem/Mem0) are out of
+          scope until a second adapter ships.
+        acceptance_criteria:
+          - after importing a .mdc, the memory's cited_paths (per staleness.read_provenance) includes the source .mdc's repo-relative path, verified alongside the existing glob-target paths
+          - editing the source .mdc post-import and running find_stale flags the memory, so RET-6's verify-at-use banner fires on next recall — verified live (ED-3 spike), doctor line-count unchanged (no new check)
+          - deleting the source .mdc post-import is picked up by the same git-log --name-only scan as a changed path — verified live, no separate orphaned-detection path
+          - byte-identical output for every write_memory call outside import_mdc_file (no bump — cited_paths already exists in schema)
+        dependencies: [RCH-2, RET-6]     # cross-file, SHIPPED
+        invariant_note: >-
+          ED-4 satisfied trivially — no new frontmatter field (cited_paths is pre-existing),
+          no bump, no new doctor CHECKS entry. inv4 — no new auto-write/refresh; RET-6's
+          banner is read-only signal, re-import stays manual. Scope confined to the shipped
+          .mdc adapter; a future non-git adapter reuses trust.file_sha256/corpus_fingerprint
+          (shipped SEC-6) rather than inventing hashing — but that is NOT this item.
+        implementation_notes: >-
+          Attach: import_mdc.import_mdc_file, new_memory.write_memory, staleness.read_provenance,
+          doctor, reconsolidate. Run the ED-3 live probe (edit + delete the source .mdc,
+          confirm RET-6 fires) before claiming the deletion path.
+
+      - id: IOP-3
+        title: Curated export receipts (evidence ledger for AGENTS.md floor items)
+        priority: P2
+        effort: S
+        status: planned
+        source: {lens: interop-reach, verdict: RESHAPE, convergence: 1, landscape: [eth-llm-agents-md-hurts-2602, progressive-disclosure-consensus]}
+        problem: >-
+          export_agents proposes an AGENTS.md diff but shows no evidence for WHY each
+          floor line earned export — and the landscape warns LLM-generated AGENTS.md HURTS
+          success (-3%); a curated, evidence-bearing export is the counter-story hippo can
+          uniquely tell, but the evidence is invisible today.
+        proposal: >-
+          export_agents gains a report-only curation receipt at export time — a thin
+          composition over existing compute_strength_scores/read_stale_cache/rules_rot/
+          conflict_radar/describe explaining, per floor line, why it earned export (soak
+          strength + gate_met/maturity, staleness, graduation, conflict hits, prior-block
+          rot) and what was excluded and why; ZERO bytes of the proposed AGENTS.md change.
+          Progressive-disclosure multi-file emission (#179) is out of scope (that is
+          RUL-6's LIF-7-gated deliverable).
+        acceptance_criteria:
+          - the receipt fires only via the explicit /hippo:export-agents invocation (never the hot path) as a separate report alongside the existing diff; the proposed AGENTS.md content is byte-identical to today
+          - the receipt is built by calling describe/compute_strength_scores/read_stale_cache/rules_rot/conflict_radar verbatim (no reimplemented evidence math); notes reconcile it with export_agents's "zero new reporting surface" design intent
+          - every item shows conflict_radar's gate_met/soak-maturity flag explicitly, so a thin/fresh-clone corpus renders "insufficient evidence" rather than indistinguishable-from-clean (inv3)
+          - no selection/filtering/ranking behavior changes — evidence is display-only, export stays a human-applied read-only proposal, confidence/strength never a ranking input (AST pin)
+        dependencies: [RUL-7]           # cross-file, SHIPPED
+        invariant_note: >-
+          ED-1 — report artifact, zero AGENTS.md bytes, no auto-exclude. AST pin — evidence
+          values display-only, never a selection/ranking input. inv4 — export stays
+          per-item human-applied. inv3 — per-item gate_met/maturity so thin evidence reads
+          "insufficient", never false-confidence clean. EXCLUDES progressive-disclosure/#179
+          emission (RUL-6's reserved LIF-7-gated path — must not be written under a
+          different code path). Do not conflate this export-time evidence with the
+          SIG-5/RET-8 read-side revisit trigger — label/gate independently.
+        implementation_notes: >-
+          Attach: export_agents.export_agents + _render_block + _splice, soak.compute_strength_scores,
+          staleness.read_stale_cache, rules_plane.rules_rot + conflict_radar, export-agents SKILL.md.
+
+      - id: IOP-4
+        title: claude-mem read-only migration audit (on the shipped import adapter tail)
+        priority: P2
+        effort: M
+        status: planned
+        source: {lens: interop-reach, verdict: RESHAPE, convergence: 1, landscape: [claude-mem-86k-stars, letta-memfs-convergence]}
+        problem: >-
+          claude-mem (86.6K stars) is the incumbent hippo should be the graduation path
+          FROM, but there is no adapter — and its auto-write-everything model is exactly
+          what hippo's review gate improves on, so a migration audit is the wedge.
+        proposal: >-
+          A single claude-mem (discover, parse) adapter plugging into import_mdc's existing
+          generic tail (import_candidates report; later import_one_candidate's per-item
+          check_candidate->secret-lint->write_memory), gated by an ED-3 live probe of
+          claude-mem's on-disk store as literal step zero. v1 ships AUDIT-ONLY (zero writes,
+          no pending-queue/_SEED_SCHEMA routing); any write leg reuses the shipped RCH-5
+          pack_install_item hard-refuse-on-secret + SEC-5 consent pattern (now shipped) for
+          foreign content instead of a new primitive. Letta MemFS + "adapter family"
+          framing dropped until this one proves the pattern.
+        acceptance_criteria:
+          - an ED-3 live probe of claude-mem's on-disk store (docs + binary + live inspection, dated finding recorded) completes before any reader/parser is written
+          - the `import --from claude-mem` command ships v1 audit-only — an import_candidates-shaped report (candidate count, dedupe rate via rule_dup_candidates, secrets/portability hit counts) with zero writes to corpus, rules.json, or the pending queue
+          - no dependency on a not-yet-shipped quarantine-lint sibling; any later write leg reuses pack_install_item's refuse-on-secret + SEC-5 consent verbatim and lands only after it is re-verified on the tree
+          - any later write leg follows import_one_candidate's per-item pattern (one file, one yes, one run) — no batch/loop enqueue, no new _SEED_SCHEMA kind
+        dependencies: [SEC-5, SEC-6, SEC-7, RCH-5, RCH-2]   # ALL cross-file, ALL SHIPPED (2f960a7 / d6ec77d)
+        invariant_note: >-
+          inv4 — writes (when they ship) go through import_one_candidate's per-item path,
+          never a loop. inv1/ED-4 — no new pending-queue seed kind / _SEED_SCHEMA bump.
+          ED-3 — live probe of claude-mem's format as literal step zero (web-claimed only).
+          inv5 — avoid the name "quarantine lint" (collides with shipped SEC-6). The trust
+          spine + RCH-5 are now SHIPPED, so unlike the round-1 framing this item's write leg
+          is unblocked once the ED-3 probe + audit half land — but still stays per-item.
+        implementation_notes: >-
+          Attach: import_mdc.import_candidates (the generic tail), capture.write_session_capture
+          / _SEED_SCHEMA (what NOT to route through), new_memory.write_memory, secrets.scan_text,
+          portability.scan_portability, rules_plane.rule_dup_candidates, packs.pack_install_item
+          (the shipped RCH-5 refuse-on-secret template — re-read on the tree), import SKILL.md.
+
+# ===========================================================================
+# RELEASE TRAIN — round-2 tiers T8-T13. done_means + a dependency-satisfied item
+# list + a tier gate where one applies. Build order within a tier respects the
+# same-tier deps noted on items (GRF-2 before GRF-4; SEN-1 before SEN-2/3; SEN-2
+# before SEN-4). No item depends on a LATER round-2 tier (validated).
+# ===========================================================================
+release_train:
+
+  - tier: T8
+    target_version: 1.8.0
+    theme: "The measurement spine"
+    status: planned
+    gate: "None — every T8 item's deps are shipped (RET-8/SIG-4/GOV-6). This is the foundation the rest of the round consumes; build it first."
+    done_means: >-
+      hippo can see its own behavior: eval runs persist and diff against a committed
+      baseline with a proven-deterministic (pass^k) core; the dark recall_events
+      scores/ranks arrays and the score-less abstention arm are read for the first
+      time (drop-reason autopsy); MCP recall/why stop being telemetry-invisible; and
+      the cost of what hippo injects is measured and surfaced. All report-only, no
+      ranking change, no schema bump.
+    items: [MSR-1, MSR-2, MSR-3, MSR-4, MSR-6]
+    audit_note: >-
+      Read each item's implementation_notes; re-verify every named symbol (the tree
+      moved three times during authoring). MSR-1 is the keystone (MSR-5, GRF-2/4,
+      TMB-3/4 consume persisted/diffable eval). MSR-3 MUST channel-filter
+      doctor.check_hot_path_latency or an MCP call corrupts the KPI-3 p95 gate. MSR-4
+      does NOT own RET-9 (GRF-3 does); it supplies the abstention-side evidence only.
+      MSR-6's anti-per-memory-aggregation AST pin is load-bearing (keeps the round-1
+      inert-recall-noise-finder kill dead).
+    capstone: >-
+      Write hippo-enh-t8-measurement: which ledgers lit up (dark scores/ranks?
+      abstention near-miss? MCP channel?), the run-ledger + baseline file shapes, the
+      pass^k determinism result, and confirm no gate constant / schema moved.
+
+  - tier: T9
+    target_version: 1.9.0
+    theme: "Graph & retrieval truth"
+    status: planned
+    gate: "MSR-1 (T8) supplies the baseline-diff GRF-2 needs; SIG-6 (cross-file, round 1) must land before MSR-5's A/B rig can measure a live corpus."
+    done_means: >-
+      The graph fix 4d16022 started is finished (the mixed-mode MMR leg closed) and
+      the multi-hop instrument is grown past n=2 so it can gate anything (incl. GRA-7);
+      the graph is observable (GRA-8) with edge rot legible; the dense floor is
+      calibrated per-corpus (RET-9 delivered); and the ED-2 salience-revisit A/B rig
+      exists (measures only, never flips). GRF-4/GRF-5 are opportunistic.
+    items: [GRF-1, GRF-2, GRF-3, MSR-5, GRF-4, GRF-5]
+    audit_note: >-
+      Re-measure multi-hop on the live tree FIRST (production dense is fixed at 1.0;
+      the residual is mixed-mode only — re-confirm before framing GRF-2). GRF-2 must
+      not reintroduce the "0.0 dense" framing. GRF-3 is RET-9's sole owner and CUTS
+      the Ettin/Li-LSR bake-off (ED-3-blocked). MSR-5 must FIRST close the
+      usage-prior-blind eval path (thread memory_dir) or the ON arm measures nothing,
+      and its OFF arm must stay byte-identical to the pinned production result. GRF-4
+      builds after GRF-2 grows the instrument (a reachability report over n=2 is vacuous).
+    capstone: >-
+      Write hippo-enh-t9-graph: the re-measured multi-hop numbers (dense + mixed-mode
+      before/after), the grown fixture n, the RET-9 floor recommendation shape, and
+      the salience A/B evidence (recorded, NOT acted on — the default stays OFF).
+
+  - tier: T10
+    target_version: 1.10.0
+    theme: "Sentinel: write-side quality & memory security"
+    status: planned
+    gate: "The trust spine (SEC-5/6/7) is SHIPPED (2f960a7) — SEN-4 acceptance-tests it. SEN-2's CI leg depends on SEC-8 (ROADMAP.v1, open); ship SEN-2's non-CI seams regardless and wire the CI leg when SEC-8/CLB-1 land."
+    done_means: >-
+      The just-shipped trust spine is a proven, incident-ready defense: a deterministic
+      write-ticket verifier mechanizes the reviewer's eye (secret gate, hunk fidelity,
+      archive-shadow); a tiered threat lint catches invisible-Unicode/exfil payloads
+      warn-first; an adversarial eval category acceptance-tests SEC-5/6/7 against
+      poisoned fixtures; and untrust + blast-radius give a user recourse after a bad memory.
+    items: [SEN-1, SEN-2, SEN-3, SEN-4, SEN-5]
+    audit_note: >-
+      Build order: SEN-1 (container) -> SEN-2 (threat lint, the SEN-4 oracle) -> SEN-4;
+      SEN-3 and SEN-5 are independent. SEN-1 renames off "receipt" (GOV-5). SEN-2's
+      HTML-comment leg is lint-only pending an ED-3 spike; Tier-B imperative-grammar is
+      ledger-only. SEN-4 must re-verify the trust spine's landed shape (2f960a7 moved
+      recall/trust/doctor) before writing a fixture, and CUTS the always-on spotlighting
+      envelope. SEN-5 DROPS the quarantine verb (collides with shipped SEC-6). SEC-8's CI
+      gate has ONE vehicle (CLB-1 --ci); SEN-2 feeds it, does not fork it.
+    capstone: >-
+      Write hippo-enh-t10-sentinel: the ED-3 HTML-comment-stripping finding, the
+      adversarial-category boolean report shape (which payloads the spine caught), the
+      untrust revocation-by-gate proof, and confirm the trust-spine pins held.
+
+  - tier: T11
+    target_version: 1.11.0
+    theme: "Temporal truth, lifecycle & forgetting"
+    status: planned
+    gate: "SIG-6 (cross-file, round 1, on open PR #17 / enh-t7-sig6, absent from baseline) must land before TMB-3's forgetting eval category and TMB-4's update fixtures can route through its confirm flow. TMB-1/TMB-2/TMB-5 have no SIG-6 dependency and can lead the tier."
+    done_means: >-
+      The timestamp-less resolve/lifecycle plane has a git-mined clock (conflict age +
+      freshness evidence card); a supersede/merge-retired memory is finally visible and
+      archivable (invalid_after terminal state); forgetting correctness is measured
+      (archive-shadow check + report-only category) and archive is reversible (guarded
+      restore); update knowledge is measured (edge-derived fixtures); and a supersede's
+      recall surface is verified to transfer (succession replay).
+    items: [TMB-1, TMB-2, TMB-5, TMB-3, TMB-4]
+    audit_note: >-
+      Lead with the SIG-6-free items (TMB-1, TMB-2, TMB-5). TMB-1 must NOT import
+      reconsolidate into resolve_view (the no-corpus-write AST pin) — compute freshness
+      via provenance.git_last_commit_with_time. TMB-2 must NOT coin "resurrect" (naming
+      collision) and must NOT route through recalled_stale_worklist (LIF-1 exclusion is
+      deliberate). TMB-3's restore collision-check is load-bearing; its detector stays
+      evidence-only (no prefilled restore — the demand-gap-auto-draft shape). TMB-4's
+      query assembly is verbatim-span-only (fabrication-kill adjacency); GATE_UPDATE_* is
+      a dated owner decision. TMB-3/TMB-4 re-read SIG-6's landed schema fresh (it is on unmerged PR #17).
+    capstone: >-
+      Write hippo-enh-t11-temporal: the resolve evidence-card fields, the invalid_after
+      terminal-state count semantics, the forgetting-category absence-polarity metric,
+      the restore collision-guard, and the SIG-6 dependency status at session end.
+
+  - tier: T12
+    target_version: 1.12.0
+    theme: "Team collaboration substrate"
+    status: planned
+    gate: "The trust spine is shipped, so the team surface is buildable now. CLB-1 IS the SEC-8 CI-scan vehicle (SEC-8 cross-file, ROADMAP.v1). CLB-2's identity stamp is sequenced behind SEC-14 (cross-file, open)."
+    done_means: >-
+      Review-gated writes become team ergonomics: a zero-LLM review packet
+      (op-classified diff + scoped lints + local recall-impact preview, --ci = the SEC-8
+      gate); per-verification attribution with solo-suppressed team coverage;
+      cited-code re-verification-before-reuse; and incoming-merge duplicate detection —
+      the human still merges everywhere.
+    items: [CLB-1, CLB-3, CLB-4, CLB-2]
+    audit_note: >-
+      CLB-1 REMOVES auto-approve outright (identity pillar) — only auto-post survives as
+      future trust-spine-gated scope; its --ci is the single canonical CI secret-scan
+      surface. CLB-2's verified_by is sequenced behind SEC-14 and gets a new
+      never-a-ranking-input AST pin. CLB-3 relocates all evidence-matching into
+      session_start's find_stale pass (NOT build_index — hot-path reachable) with an AST
+      pin. CLB-4 reuses the single merge-detector + GOV-4 ledger (no parallel), emits a
+      degradation line on the squash/unreachable case, and re-verifies against the
+      round-1 cross-clone-auto-harvest kill rationale.
+    capstone: >-
+      Write hippo-enh-t12-team: the review-packet op-classification + shadow-index
+      approach, the SEC-8 --ci wiring, the verified_by/SEC-14 sequencing, and the
+      evidence-fence contract shape.
+
+  - tier: T13
+    target_version: 1.13.0
+    theme: "Interop & reach"
+    status: planned
+    gate: "The trust spine + RCH-5 are SHIPPED, so IOP-4's write leg is unblocked once its ED-3 probe + audit half land. Every foreign-format item runs its own ED-3 live probe before parsing."
+    done_means: >-
+      hippo is the git-drift hygiene layer over every rule dialect in the repo
+      (foreign-dialect radar), keeps imported memories fresh against their upstream
+      (import fingerprints), tells a curated evidence-bearing export story (curation
+      receipts), and is the tool you graduate TO from the 86K-star incumbent
+      (claude-mem audit) — all detection-only, trust-spine-gated where foreign content
+      is touched.
+    items: [IOP-2, IOP-3, IOP-1, IOP-4]
+    audit_note: >-
+      IOP-1's FOREIGN_GLOBS must NEVER merge into GOV_GLOBS or reach the RUL-1/3/4
+      authority paths (inv5) and must NOT join PRODUCERS (audit/doctor on-demand only).
+      IOP-2 adds no new field (cited_paths pre-exists) — trivial ED-4, but run the ED-3
+      edit+delete probe. IOP-3 EXCLUDES the #179 progressive-disclosure emission (RUL-6's
+      LIF-7-gated path). IOP-4 runs the claude-mem store ED-3 probe as literal step zero,
+      ships audit-only first, and reuses the shipped RCH-5 pack_install_item template
+      (re-read on the tree) for any write leg.
+    capstone: >-
+      Write hippo-enh-t13-reach: the foreign-dialect census + FOREIGN_GLOBS isolation,
+      the import-fingerprint RET-6 reuse, the export curation-receipt composition, and
+      the claude-mem ED-3 probe finding + audit-only scope.
+
+# ===========================================================================
+# DECISIONS — governing choices this round rests on (owner-ratifiable). ED-1..ED-5
+# are carried from round 1 (ROADMAP.enhancements.yaml) and still bind; ED2R-* are new.
+# ===========================================================================
+decisions:
+  - id: ED-1
+    carried_from: round-1
+    decision: detection-first
+    detail: >-
+      Ship the LEGIBLE detection / human-in-the-loop half; gate any autonomous ranking
+      or corpus/rules write on proven signal density. Every autonomous half in this file
+      is severed and deferred behind a DATED OWNER DECISION + measured evidence, never a
+      metric-proxied gate. Still the governing law.
+  - id: ED-2
+    carried_from: round-1
+    decision: the salience keystone (SIG-5) stays owner-decided-OFF
+    detail: >-
+      SIG-5 decided salience default-OFF (owner-ratified 2026-07-09) because fixture
+      corpora carry no usage/staleness/recency signal. No round-2 item ships an always-on
+      read-side ranking prior. MSR-5 builds the lived-in-corpus A/B EVIDENCE the revisit
+      trigger names, but the flip stays a dated owner decision on affirmative evidence.
+  - id: ED2R-1
+    question: What gates the round-2 measurement class?
+    decision: the eval observability spine (T8, esp. MSR-1) must land first
+    detail: >-
+      Just as ED-2's salience keystone gates a ranking class, T8's eval spine gates a
+      MEASUREMENT class: MSR-5's salience A/B, GRF-2/GRF-4's GRA-7 baseline, TMB-3's
+      forgetting category, and TMB-4's update category all need persisted, baseline-
+      diffable, condition-matrixed eval that does not exist until MSR-1 ships. Sequence
+      T8 first; do not build a downstream measurement on an instrument that cannot
+      persist or diff a run.
+  - id: ED2R-2
+    question: SIG-6 is on its own unmerged PR mid-cycle — is it still a dependency?
+    decision: yes — SIG-6 is a hard cross-file dependency, treat it as planned
+    detail: >-
+      SIG-6 (round 1, the self-populating abstention-fixture draft/confirm flow) was
+      in-flight then committed to its own branch enh-t7-sig6 (PR #17, open, base main), NOT
+      merged and ABSENT from both main and v080-trust-spine at authoring. Six round-2 items
+      (MSR-5, TMB-3, TMB-4, and the confirm-flow riders) depend on it. It is the one
+      freely-buildable round-1 T7 item and should land (merge PR #17) before those tiers.
+      Any item that touches its draft/confirm surface MUST re-read the landed schema fresh
+      (its working-tree form moved once already — the T3-T7 premise-correction law).
+  - id: ED2R-3
+    question: The trust spine shipped mid-cycle — what changes?
+    decision: the security/reach tail is buildable now, but each foreign-format item still spikes first
+    detail: >-
+      SEC-5/6/7 (2f960a7) and RCH-5 (d6ec77d) SHIPPED during authoring. Items the round-1
+      framing gated "behind the trust spine" (SEN-4, CLB-1, IOP-4) now BUILD ON it —
+      SEN-4 exists to acceptance-test it. But every item that parses a foreign format
+      (IOP-1 Copilot, IOP-4 claude-mem) still runs its own ED-3 live probe before writing
+      a parser (the RCH-2 "Cursor frontmatter isn't valid YAML" lesson). One round-2
+      candidate (trust-ratchet-state-anchored-consent) was KILLED as superseded-by-shipped.
+  - id: ED-3
+    carried_from: round-1
+    decision: verify a web-claimed harness/format feature with an in-harness spike before building on it
+    detail: >-
+      Carried verbatim. Applies this round to SEN-2 (HTML-comment stripping coverage),
+      IOP-1 (Copilot applyTo:), IOP-2 (.mdc drift/delete detection), IOP-4 (claude-mem
+      store format), and any future reranker swap (fastembed loadability). Record the
+      dated finding on the item.
+  - id: ED-4
+    carried_from: round-1
+    decision: additive fields are absence-emits-nothing; schema bumps are clean breaks, one migration each
+    detail: >-
+      Every new field this round (channel, injected_chars, edge_origin, evidence_drift,
+      verified_by, hunks_threat_flagged) is additive/absence-emits-nothing — NO round-2
+      item is expected to bump corpus_format (stays 4) or index SCHEMA_VERSION (stays 6).
+      Derived-cache gates (stale.json, links.json, the eval run ledger) move only if a
+      specific item needs it, one clean break, doctor-reported, re-bootstrap flag stated.
+  - id: ED-5
+    carried_from: round-1
+    decision: this round is downstream of round 1 and the launch work
+    detail: >-
+      These are the SECOND enhancement train (v1.8+). They assume round 1 (T1-T7) and
+      the shipped trust spine. Cross-file deps into ROADMAP.v1 (SEC-8, SEC-14) and round 1
+      (SIG-6, GRA-7) are noted per item; do not start a tier whose gate names an unlanded
+      cross-file dep without either landing it or descoping the dependent leg.
+
+# ===========================================================================
+# NOT PURSUING — the kill + the disciplined cuts, recorded so their absence reads
+# as a decision (full reasoning in EXPLORATIONS2.md §4).
+# ===========================================================================
+not_pursuing:
+  - {id: trust-ratchet-state-anchored-consent, reason: "KILLED — materially SEC-5/6/7, which SHIPPED at 2f960a7 (corpus_fingerprint + consented_hashes + untrusted_changes + record_authored_write, per-file sha256 on consent, drift-quarantine at recall); building it again violates inv5. Residue (author+signature labels on the shipped drift delta) survives only as a P3-late detection rider, not a tier item."}
+  - {id: always-on-spotlighting-envelope, reason: "CUT from SEN-4 — a per-session random delimiter cannot REDUCE payload crossing (its honest benefit is boundary-spoof-resistance); deferred as a clean-break render change behind a dated owner decision, not shipped disguised as a crossing-reduction gate."}
+  - {id: auto-restore-from-regret, reason: "CUT from TMB-3 — wiring a prefilled restore proposal to a self-invented BM25-floor heuristic is the demand-gap-auto-draft shape round 1 killed + races ahead of the tree's soak-before-autonomous precedent; the detector stays evidence-only, restore stays an explicit named-target verb."}
+  - {id: auto-approve-clean-memory-prs, reason: "CUT from CLB-1 — auto-approving memory-only PRs deletes hippo's review-gated-writes identity pillar and cannot be metric-gated back (the LIF-7 owner-judgment rule); only auto-POSTING the packet survives as future trust-spine-gated scope."}
+  - {id: templated-fixture-queries, reason: "CUT from TMB-4 — any generative/templated rewording of update/premise-resistance queries collapses the derivation-only property distinguishing this from demand-gap-auto-draft; queries are verbatim spans, fail closed (skip the row)."}
+  - {id: tier-b-imperative-injection-flags, reason: "HELD DARK in SEN-2 — imperative-grammar patterns (ignore-previous-instructions, tool-mimicry) are ledger-only, never surfaced/HOLD, until a dated owner decision graduates them on a measured near-zero FP rate; an over-broad flag degrades the human-review channel (inv3)."}
+  - {id: mcp-channel-flight-recorder, reason: "DROPPED from MSR-3 — logging MCP trust-posture / attempted-writes-while-untrusted recreates exactly the ledger trace SEC-1 was built to eliminate and duplicates SEC-13's plumbing; the legitimate residue is the per-channel volume line already in scope."}
+  - {id: resolve-plane-drain-analytics, reason: "DEFERRED from TMB-1 — drain-rate metrics / scorecard_history.jsonl / a per-clone first-seen sidecar are measurement-only additions with no near-term consumer at solo scale (~0-5 pairs); in-scope only via a dated owner decision once queue depth justifies it (the dark-reservoir pattern round 2 warns against)."}
+  - {id: ettin-li-lsr-reranker-bakeoff, reason: "CUT from GRF-3 — Ettin is confirmed absent from fastembed TextCrossEncoder's closed 6-model list (verified live) and Li-LSR adds a second query-time model class with zero in-tree substrate; a reranker swap needs its own dated ED-3 spike, not a deferred flag."}
+  - {id: hot-path-depth-2-expansion, reason: "NOT AUTHORIZED by GRF-4 — a hot-path 2-hop/PPR mechanism needs its own gate behind the grown instrument (GRF-2), the MMR-x-graph exemption unification, and GRA-5 superseded_by-map reuse; GRF-4 ships only the offline reachability BASELINE."}
+
+# ===========================================================================
+# ADOPT-FROM-ROADMAP.v1 — coverage-critic misses that are launch-readiness items
+# owned by ROADMAP.v1, noted here so their absence from this train reads as a
+# scoping decision, not an oversight.
+# ===========================================================================
+adopt_from_v1:
+  - {id: RET-11, note: "BM25-only abstention floor — its DETECTION half is folded into MSR-4 (near-miss scores on the abstention arm give the decision its evidence); the production floor change stays a ROADMAP.v1 item."}
+  - {id: SEC-13, note: "MCP write-path trust-gate asymmetry (new_memory/traverse ungated) — MSR-3 adds a measurement rider (count MCP writes hitting an untrusted corpus); building the gate is ROADMAP.v1."}
+  - {id: SEC-12, note: "non-git zip/tarball trust bypass — genuine gap, but reconciling gate_repo_root's defended None-for-non-git posture is a ROADMAP.v1 security decision, not an enhancement bet."}
+  - {id: SEC-8, note: "secret-lint breadth + CI scan gate — CLB-1's --ci mode is the CI vehicle and SEN-2 feeds patterns into it; the pattern-breadth half stays ROADMAP.v1 SEC-8."}
+  - {id: SEC-14, note: "TEA-5 committed-usage opt-in / public-remote warning — a sequencing gate for CLB-2's verified_by identity stamp; the switch itself is ROADMAP.v1."}
+
+# ===========================================================================
+# KPIs — which measures each tier moves (existing + new round-2 EKPIs).
+# ===========================================================================
+kpis:
+  - {ref: KPI-2, name: injection_precision_proxy, moved_by: [MSR-3, MSR-6], note: "channel-complete recall ledger + measured injected-then-touched cost make the KPI-2 proxy honest"}
+  - {ref: KPI-3, name: hot_path_latency, moved_by: [MSR-3], note: "channel-filtering keeps MCP-tool latency out of the UserPromptSubmit p95 budget"}
+  - {ref: KPI-4, name: recall_quality_per_project, moved_by: [MSR-1, MSR-2, GRF-2, GRF-3, TMB-3, TMB-4], note: "persisted/baselined/condition-matrixed eval + grown categories make per-project quality measurable and regression-visible"}
+  - {ref: KPI-5, name: degradation_legibility, moved_by: [MSR-4, GRF-1, SEN-2, SEN-5, TMB-1, TMB-2, CLB-4], note: "drop-reasons, edge rot, threat flags, incident blast-radius, conflict age, invalid_after terminal state, merge dedup — silent conditions made loud"}
+  - {ref: KPI-6, name: staleness_loop_closure, moved_by: [CLB-3, IOP-2], note: "cited-code hunk drift + upstream .mdc drift/delete close staleness at new sources"}
+  - {ref: KPI-7, name: graph_liveness, moved_by: [GRF-1, GRF-2], note: "GRA-8 observability + the finished multi-hop expansion make the graph visible and effective"}
+  - {id: EKPI2R-1, name: eval_reproducibility, definition: "pass^k byte-identity of deterministic eval metrics + a diffable committed baseline", target: "epsilon=0 determinism proven; baseline drift attributable per-category", moved_by: [MSR-1, MSR-2]}
+  - {id: EKPI2R-2, name: trust_spine_coverage, definition: "fraction of poisoned adversarial-category fixtures the shipped spine (SEC-5/6/7) catches at consent / quarantine / threat-lint / admission", moved_by: [SEN-4, SEN-2]}
+  - {id: EKPI2R-3, name: team_review_ergonomics, definition: "a memory PR gets an op-classified, lint-checked, recall-impact-previewed review packet with zero LLM; team-coverage of verifications is legible", moved_by: [CLB-1, CLB-2]}
+  - {id: EKPI2R-4, name: forgetting_correctness, definition: "archive-shadow collisions surfaced; a report-only forgetting eval category with an absence-polarity metric; archive made reversible with a collision guard", moved_by: [TMB-3, TMB-2]}
+  - {id: EKPI2R-5, name: cross_dialect_hygiene, definition: "foreign rule dialects present in a repo are censused, cross-dialect divergence + git-drift rot flagged, imported memories kept fresh against upstream", moved_by: [IOP-1, IOP-2]}
