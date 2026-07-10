@@ -406,6 +406,14 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **DOC-14** `P0/S` — **Scrub origin-repo / "private repo" jargon** from README
   and the marketplace-visible `plugin.json` description. (Cheap, visible, a
   launch-credibility regression.)
+  **SHIPPED 2026-07-10**: reworded `README.md` intro ("battle-tested … 180+ memory
+  production corpus") and the `plugin.json` description (dropped the "Extracted from
+  the ic-memobot/Memosa …" tail); scrubbed the same jargon from `requirements.txt`'s
+  header comment. The License section keeps its (legally meaningful) relicensing
+  provenance — author wrote it for a private predecessor, relicensed MIT — with the
+  unresolvable internal repo name removed. `marketplace.json`'s description was already
+  clean. Internal docs (ROADMAP/CHANGELOG/RELEASING) and the load-bearing
+  `MEMOBOT_*` env-var references in `doctor.py` are left as-is.
 - **ONB-8** `P1/S` — **Observable first recall** in the quickstart (final step
   runs `/hippo:recall` / "what do you remember about X" so the stranger *sees*
   the memory return). This *is* KPI-1's metric; it is never exercised today.

@@ -4,8 +4,7 @@ Local, git-native agent memory for Claude Code — a markdown-in-git corpus with
 dense+BM25 hybrid recall, git-drift staleness/provenance tracking, recall-triggered
 reconsolidation, and a self-audit skill. Distributed as a Claude Code plugin.
 
-Extracted from the ic-memobot/Memosa agent-memory tooling (a private origin repo), where
-it has run in production since 2026-06 across a 180+ memory corpus.
+Battle-tested in daily use since 2026-06 across a 180+ memory production corpus.
 
 ## Quickstart
 
@@ -153,8 +152,8 @@ text).
 
 MIT — see [LICENSE](LICENSE). A copy ships inside the plugin bundle
 ([plugin/LICENSE](plugin/LICENSE)) so installs carry the license text too. The engine code
-extracted from the ic-memobot/Memosa agent-memory tooling was written by this repo's author
-and is relicensed here under the same MIT terms; no third-party code was ported with it.
+was written by this repo's author for a private predecessor project and is relicensed here
+under the same MIT terms; no third-party code was ported with it.
 The pre-bootstrap fallbacks in `plugin/memory/_vendor/` (a BM25 scorer and a frontmatter
 parser) are likewise original implementations, MIT like the rest — not copied vendor code.
 

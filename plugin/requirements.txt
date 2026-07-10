@@ -1,10 +1,10 @@
 # Agent-memory tooling dependencies.
 #
 # This is a standalone plugin venv (built by the /hippo:bootstrap skill into
-# ${CLAUDE_PLUGIN_DATA}/venv, NOT the consuming project's own venv) — unlike the
-# ic-memobot monorepo this engine was extracted from, there is no host product
-# requirements.txt to lean on for numpy/PyYAML/rank-bm25, so all four deps this
-# package actually imports are pinned here explicitly.
+# ${CLAUDE_PLUGIN_DATA}/venv, NOT the consuming project's own venv) — hippo ships as a
+# self-contained plugin with no host product's requirements.txt to lean on for
+# numpy/PyYAML/rank-bm25, so all four deps this package actually imports are pinned
+# here explicitly.
 #
 # Recall DEGRADES to BM25-only when fastembed's model cache is cold/unavailable —
 # only the dense (fastembed) half of hybrid recall is optional in the sense that
