@@ -682,6 +682,18 @@ def check_pack_drift(ctx: DoctorContext) -> Dict[str, str]:
                     shipped[str(data["pack"])] = str(data["version"])
             except Exception:
                 continue
+        # RCH-5: packs installed from EXTERNAL sources record their latest-known version
+        # in the corpus lockfile — fold those in so drift covers non-shipped packs too.
+        # A partially-updated pack then shows drift on exactly its not-yet-updated
+        # members (the correct signal, not noise). Shipped manifests win a name clash.
+        try:
+            from .packs import _load_lockfile
+
+            for pname, entry in (_load_lockfile(ctx.memory_dir).get("packs") or {}).items():
+                if isinstance(entry, dict) and entry.get("version") is not None:
+                    shipped.setdefault(str(pname), str(entry["version"]))
+        except Exception:
+            pass
         drifted: List[str] = []
         for path in _iter_memory_files_safe(ctx.memory_dir):
             try:

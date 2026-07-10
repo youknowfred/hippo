@@ -1978,7 +1978,20 @@ workstreams:
         # install/update remain GATED on the v0.8.0 trust spine (SEC-5/6/7, still not
         # in the tree) — the acceptance_criteria below are install/update-shaped, so
         # this item stays open until the spine lands.
-        status: in_progress
+        # 2026-07-09 (later, same cycle): the OWNER COMMISSIONED the v0.8.0 trust spine
+        # (SEC-5/6/7 shipped — see ROADMAP.v1.md §5 dated annotations) and the
+        # install/update tail SHIPPED on it: pack_install_plan/pack_install_item
+        # (per-item; SEC-5-style will_inject consent surface; secret-lint HARD gate —
+        # foreign content never gets write_memory's warn-only; check_candidate dup
+        # routing; exclusive-create collision refusal; SEC-6 baseline absorbs each
+        # approved item) + pack_update_plan/pack_update_item (per-item three-way via
+        # git merge-file — base = committed .packs.lock.json text-as-installed, local
+        # edits preserved, conflicts refuse until a human passes resolved_text; never
+        # deletes ours, never resurrects removed). Sources are LOCAL DIRS only (the
+        # skill clones; the module stays offline). doctor.check_pack_drift reads
+        # lockfile sources. The negative-capability pin in test_packs.py is REPLACED
+        # by the install/update contracts, per its own instruction.
+        status: done
         source: {lens: cross-project, verdict: RESHAPE (mechanism yes, ecosystem later; full trust spine)}
         problem: >-
           TEA-2's packs can only come from inside the plugin; there is no way to
