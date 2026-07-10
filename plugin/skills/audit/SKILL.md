@@ -168,6 +168,63 @@ Once confirmed, Phase 1 picks up the (possibly just-written) fixture via its exi
 discovery logic — no separate wiring needed; `_default_fixture_path` already probes
 `.claude/memory/.audit-fixtures/` first (see Phase 1's `hard_set`/`rel_set` resolution below).
 
+## Phase 0.6 — Abstention-fixture drafting (SIG-6 — routine drafting, gated admission)
+
+Phase 0.5 samples what someone thought to test; this phase grows the same fixture from what
+users actually ASK. The SIG-3 blind-spot backlog (recurring queries recall abstained on) is
+turned into CANDIDATE fixture rows — so KPI-4's yardstick self-populates from real
+un-answered traffic. Runs on every audit, no flag: the drafter only APPENDS to a gitignored
+drafts QUEUE (`.claude/.memory-pending/recall_hard_set.drafts.yaml` — raw ledger query text
+stays in the SEC-3 self-ignoring pending dir, the capture-seed precedent), which is
+bookkeeping like the Phase 1 history-file write, not a corpus mutation. ADMISSION into the
+tracked fixture is the gated act, and it is always per-item + human-approved.
+
+```bash
+"$PY" - <<'PYEOF'
+import json
+from memory.eval_recall import draft_abstention_fixtures
+print(json.dumps(draft_abstention_fixtures(), indent=2))
+PYEOF
+```
+
+(Under `--skip-eval`, pass `draft_abstention_fixtures(probe=False)` — the recall probes are
+what would pay a cold dense-model load; without them `current_hits` stays `[]` and the header
+honestly claims no backend.)
+
+The summary names what was `added` vs `kept` (existing draft rows — including judgments you
+filled on a prior run — are preserved byte-verbatim; re-drafting never clobbers them) and
+`skipped_tracked` (clusters whose loop already closed). Then judge every UNCONFIRMED row in
+the drafts file, newly added or not. Exactly one verdict each:
+
+- **(a) A real, existing memory should answer it** — fill `expected: [<stem>]` in the drafts
+  file and present the row to the human: the query, the proposed stem, and whether recall
+  CURRENTLY surfaces it (`current_hits` is judgment material, not a verdict). An admitted row
+  that currently FAILS is legitimate — it documents a recall gap the corpus should close —
+  but say so explicitly: it reddens `hard_recall@10` until the gap is fixed, and admitting
+  that tripwire is precisely the human's call. On explicit approval, admit it (see below).
+- **(b) No existing memory answers it** — a CAPTURE gap, not fixture material. Route it to
+  `/hippo:consolidate` (the SIG-3 nudge's own path) and leave the row drafted. **Never create
+  a memory just to make a fixture admissible** — that inverts the loop (the killed
+  demand-gap-auto-draft); capture decisions are made on their own merits in the drain.
+- **(c) Noise** (tool spew, a malformed preview, a never-again question) — delete the row
+  from the drafts file.
+
+Admission, per approved row (never a loop over the file):
+
+```bash
+"$PY" - <<'PYEOF'
+import json
+from memory.eval_recall import confirm_hard_set_row
+print(json.dumps(confirm_hard_set_row("<the query>", ["<stem>"]), indent=2))
+PYEOF
+```
+
+The row lands in `.claude/memory/.audit-fixtures/recall_hard_set.yaml` tagged
+`category: abstention` (RET-8's per-category bucket — the eval now measures the gap-closing
+loop end to end), the fixture's existing bytes are preserved verbatim above the append, and
+the drafts-queue row drains. The primitive REFUSES fabricated stems, duplicate queries, and
+empty judgments — a refusal is a verdict to report, never a thing to work around.
+
 ## Phase 1 — Gather (sequential, in-process — not parallel subagents)
 
 Run every signal source **in one sequential pass in this session**, not via spawned subagents.
@@ -609,6 +666,13 @@ run?" is always "no" unless --apply AND the operator named that specific pair �
 {contradicts — needs adjudication, supersedes <winner> — one side clearly current}; a row
 with no quoted opposing claims is invalid — similarity alone never makes a contradiction>
 
+## Abstention-fixture drafts (SIG-6 — admission per-item, human-approved)
+| Draft query | Asked | current_hits | Verdict | Admitted this run? |
+|---|---|---|---|---|
+<one row per drafts-queue row judged in Phase 0.6; Verdict ∈ {admit → <stem>, capture gap —
+route to /hippo:consolidate, noise — deleted}; "Admitted this run?" is "yes" only for rows
+the human explicitly approved (confirm_hard_set_row), each tagged category: abstention>
+
 ## Raw scorecard (reference only)
 eval_recall gates: <table, or "SKIPPED — no hard-set fixture for this project yet">
   backend=<dense+bm25|bm25-only> (from `eval_recall`'s own report — never re-derived here)
@@ -722,6 +786,12 @@ never adds a batch wrapper around them:
 - **No bulk anything.** `semantic_reverify`, `set_invalid_after`, `archive_memory` all take
   exactly one name. This skill must never simulate a batch by looping them silently in one turn
   without the Phase 3 per-item justification attached to each.
+- **Fixture admission is per-item and human-approved (SIG-6).** `confirm_hard_set_row` is
+  called once per explicitly-approved row — never looped over the drafts queue in one silent
+  sweep. And never CREATE a memory to make a fixture admissible: the primitive refuses stems
+  that don't exist, and satisfying it by fabricating the memory first is the exact inversion
+  (fixture drives corpus) the killed demand-gap-auto-draft was killed for. The corpus grows
+  only through the consolidate drain's own merits; the fixture then measures it.
 - **The graph-isolated watch-list never feeds an archive action.** Only
   `archive.archive_candidates()`'s real 4-way gate may.
 - **Link-densification never auto-edits a body.** `link_density_suggestions` is read-only

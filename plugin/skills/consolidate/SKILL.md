@@ -210,8 +210,45 @@ After any approved append, re-run `"$PY" -m memory.build_index` so `links.json` 
 new edge — GRA-1's 1-hop expansion picks it up on the very next recall, no ranking change
 involved.
 
+## Step 5 — Close the blind-spot loop (SIG-6)
+
+The SessionStart blind-spot nudge routes HERE: a recurring abstained query means the corpus
+kept being asked something it couldn't answer, and Step 1's drain may have just captured
+exactly the memory that closes such a gap. Record that as an eval fixture so KPI-4 measures
+the gap-closing loop end to end — first refresh the drafts queue:
+
+```bash
+"$PY" - <<'PYEOF'
+import json
+from memory.eval_recall import draft_abstention_fixtures
+print(json.dumps(draft_abstention_fixtures(), indent=2))
+PYEOF
+```
+
+Each recurring abstention cluster becomes an UNCONFIRMED row (`expected: []`) in the
+gitignored drafts queue the summary's `path` names (`.claude/.memory-pending/` — queue
+state, the same trust domain as the capture seeds; existing rows are preserved verbatim).
+For each unconfirmed row: if a memory you JUST captured — or an existing one — genuinely
+answers the query, propose the pair and, on explicit approval, admit it per item:
+
+```bash
+"$PY" - <<'PYEOF'
+import json
+from memory.eval_recall import confirm_hard_set_row
+print(json.dumps(confirm_hard_set_row("<the query>", ["<stem>"]), indent=2))
+PYEOF
+```
+
+The row lands in `.claude/memory/.audit-fixtures/recall_hard_set.yaml` tagged
+`category: abstention`, and the drafts row drains. If NO memory answers a row, it stays a
+capture gap — future drains are where it gets a memory on its own merits; **never fabricate
+a memory to make a fixture pass** (the primitive refuses stems that don't exist — a refusal
+is a verdict, not a thing to work around). Delete rows that are noise. Per item,
+agent-gated — never admit the whole queue in bulk.
+
 > A future auto-maintained map-of-content note (CAP-5) will also be refreshed here once it
-> ships; today consolidation ends at a drained queue, an addressed worklist, and a current graph.
+> ships; today consolidation ends at a drained queue, an addressed worklist, a current graph,
+> and a blind-spot queue that is judged rather than silently growing.
 
 ## When NOT to use
 
