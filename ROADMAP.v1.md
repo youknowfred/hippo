@@ -326,6 +326,19 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **SEC-11** `P2/M` — Supply chain: pin/lock deps (or hash-locked requirements) +
   document/optionally verify the ~130MB model artifact. Bootstrap is the one
   online step; it currently fetches range-pinned wheels + an unverified binary.
+  **SHIPPED 2026-07-10 (documentation-forward — FINDING first)**: an empirical `uv pip
+  compile --universal --generate-hashes` resolves numpy to 2.x (2.4.6/2.5.1), which
+  DROPS py3.10 — so no single exact/hash lock spans hippo's CPython 3.10–3.14 matrix.
+  A universal committed lock is INFEASIBLE and the ranges are load-bearing; **no
+  re-bootstrap** (the roadmap's "likely yes" is overturned). Delivered instead: (1) a
+  test-ENFORCED invariant that every dep is bounded on both sides (a bad new major
+  can't be pulled — the real supply-chain pin available here); (2) the per-environment
+  hardened hash-install recipe (`uv pip compile --generate-hashes` → `--require-hashes`)
+  documented where deps live; (3) model-artifact integrity documented — huggingface_hub
+  verifies each download against the repo's content-addressed hash (not an unverified
+  binary), with the revision-pin path for exact reproducibility. A committed env-specific
+  reference lock was deliberately NOT shipped (rots + footgun off its target platform);
+  the recipe generates one on demand.
 - **SEC-12** `P2/S` — Close the **non-git (zip/tarball) trust bypass** — treat an
   unresolvable-git corpus containing `.claude/memory/` as untrusted-by-default
   (env/`init` override), not "gate inapplicable."
