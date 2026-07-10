@@ -317,6 +317,12 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
   reddens the suite). The `_vendor/` fallbacks are hippo's own MIT code, not third-party.
 - **SEC-10** `P1/S` — `SECURITY.md`: private disclosure channel, supported
   versions, pointer to SEC-2 lint / SEC-4 purge. *(also a COM launch-standard.)*
+  **SHIPPED 2026-07-10**: repo-root `SECURITY.md` — GitHub private vulnerability
+  reporting as the disclosure channel (no personal email exposed), a supported-
+  versions table (1.7.x), a threat model scoped to hippo's actual surface (untrusted
+  shared corpora / secrets-in-memory / prompt-injection), and the SEC-4 purge pointer
+  for an accidentally-committed secret. README links it; a drift-guard test pins the
+  channel, the versions section, and the purge link's live target.
 - **SEC-11** `P2/M` — Supply chain: pin/lock deps (or hash-locked requirements) +
   document/optionally verify the ~130MB model artifact. Bootstrap is the one
   online step; it currently fetches range-pinned wheels + an unverified binary.

@@ -142,6 +142,13 @@ an implicit SessionStart auto-provision. Reasoning:
 Until bootstrap runs, the SessionStart hook nudges the next step (once every few
 sessions, permanently dismissable) instead of staying silent.
 
+## Security
+
+Found a vulnerability? Please report it privately — see [SECURITY.md](SECURITY.md)
+for the disclosure channel, supported versions, and hippo's threat model (untrusted
+shared corpora, credentials committed into memory, and prompt-injection via memory
+text).
+
 ## License
 
 MIT — see [LICENSE](LICENSE). A copy ships inside the plugin bundle
