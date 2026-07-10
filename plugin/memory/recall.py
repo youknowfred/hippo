@@ -1051,18 +1051,25 @@ def _expand_neighbors(
         ORGANIC tuple (and organic provenance); only a strictly-better injected score
         replaces it, and only then does the result carry the "graph" marker.
 
-    Returns ``(re-sorted list, {entry indices injected via graph})`` so the emission loop
-    can stamp provenance ("via"). Never raises; ANY failure — no edges loaded
-    (caller-supplied in-memory index with no dirs: eval self_recall probes, hermetic
-    LoadedIndex tests; absent/corrupt links.json), junk env — returns the input untouched,
-    so expansion can only ever be additive, never a new degradation mode.
+    Returns ``(re-sorted list, {injected entry indices}, {endorsed entry indices})``.
+    ``graph_injected`` (the second element) is the REPLACED set — entries whose tuple now
+    carries a discounted seed score — and stamps "via" provenance. ``graph_endorsed`` (the
+    third, a superset) is every resolvable seed-neighbor whether or not injection beat its
+    organic score: the GRA-1 dense-side finding (RET-8's multi-hop category) is that under
+    dense a neighbor usually ALREADY has an organic rank (cosine orders the whole corpus),
+    so injection declines — but the entry is still graph-endorsed, and the emission loop's
+    knee must judge it by that endorsement, not by its deliberately-weak organic rank.
+    Never raises; ANY failure — no edges loaded (caller-supplied in-memory index with no
+    dirs: eval self_recall probes, hermetic LoadedIndex tests; absent/corrupt links.json),
+    junk env — returns the input untouched, so expansion can only ever be additive, never
+    a new degradation mode.
     """
     try:
         if not edges or not penalized:
-            return penalized, set()
+            return penalized, set(), set()
         seeds_n = _graph_seed_count()
         if seeds_n <= 0:
-            return penalized, set()
+            return penalized, set(), set()
         seeds = penalized[:seeds_n]
         seed_idxs = {i for i, _score, _state in seeds}
         # Entry "name" == file stem == the edge list's node identity (both come from the
@@ -1082,7 +1089,8 @@ def _expand_neighbors(
                 if cand > injected.get(j, float("-inf")):
                     injected[j] = cand
         if not injected:
-            return penalized, set()
+            return penalized, set(), set()
+        endorsed = set(injected)  # every resolvable seed-neighbor, organic-kept or not
         replace: dict = {}  # entry idx -> (adj_score, state)
         for j, cand in injected.items():
             state = _invalidation_state(entries[j])
@@ -1093,13 +1101,13 @@ def _expand_neighbors(
                 continue  # organic rank is already at least as good — keep it (and its label)
             replace[j] = (adj, state)
         if not replace:
-            return penalized, set()
+            return penalized, set(), endorsed
         expanded = [t for t in penalized if t[0] not in replace]
         expanded.extend((j, adj, state) for j, (adj, state) in replace.items())
         expanded.sort(key=lambda triple: triple[1], reverse=True)
-        return expanded, set(replace)
+        return expanded, set(replace), endorsed
     except Exception:
-        return penalized, set()
+        return penalized, set(), set()
 
 
 # --------------------------------------------------------------------------- #
@@ -2099,7 +2107,9 @@ def recall(
             )
 
         # --- 1-hop graph expansion (GRA-1): AFTER fusion + invalidation/supersession re-sort. ---
-        penalized, graph_injected = _expand_neighbors(penalized, entries, edges, superseded_by)
+        penalized, graph_injected, graph_endorsed = _expand_neighbors(
+            penalized, entries, edges, superseded_by
+        )
 
         # --- RET-6: verify-at-use banner map — display-only, UNGATED (see the constants
         # block above), computed once here from the SAME graph_index_dir the salience/graph
@@ -2142,10 +2152,20 @@ def recall(
         pool_n = max(k * _MMR_POOL_MULT, k)
         admissible: List[Tuple[int, float, Optional[str]]] = []
         prev_relevance: Optional[float] = None
+        past_cliff = False
+        # Graph provenance for the emission loop's "via": replaced injections always carry
+        # it; an endorsed organic-kept entry earns it only when admitted PAST the cliff
+        # (below), because there the graph is the sole reason the line exists at all.
+        graph_admitted: set = set(graph_injected)
         for i, adj_score, state in penalized:
             if len(admissible) >= pool_n:
                 break
             if state == "old":
+                continue
+            if past_cliff and i not in graph_endorsed:
+                # Past the cliff only the graph channel admits (see the GRA-1 comment
+                # below) — organic and body-backstop candidates are done, exactly as the
+                # pre-GRA-1-fix `break` treated them. Cheap set check BEFORE the stat.
                 continue
             e = entries[i]
             # Deleted/renamed since the index was built (COR-4): drop it from THIS
@@ -2157,26 +2177,51 @@ def recall(
                 continue
             # RET-1: the knee compares PRIMARY-SIGNAL-ONLY relevance (`primary_relevance`,
             # see its construction above), never the display/sort score -- an entry with NO
-            # primary ranking of its own (a pure body-backstop hit, or a graph-injected
-            # neighbor that was never organically ranked -- see `_expand_neighbors`) has
-            # nothing in `primary_relevance` at all. Such an entry is EXEMPT from the knee
-            # check both ways: it is never cut for "falling off a cliff" relative to the
-            # previous admission (its only relevance signal is a deliberate backstop weight or
-            # graph discount, not a topical-relevance drop), and it never becomes the
-            # reference point for the NEXT comparison either (`prev_relevance` only advances
-            # on an entry that actually HAS a primary score) -- a body/graph hit sitting
-            # between two organic ones must not silently loosen or tighten the knee for
-            # whatever organic candidate comes after it.
-            relevance = primary_relevance.get(i)
+            # primary ranking of its own (a pure body-backstop hit) has nothing in
+            # `primary_relevance` at all. Such an entry is EXEMPT from the knee check both
+            # ways: it is never cut for "falling off a cliff" relative to the previous
+            # admission (its only relevance signal is a deliberate backstop weight or graph
+            # discount, not a topical-relevance drop), and it never becomes the reference
+            # point for the NEXT comparison either (`prev_relevance` only advances on an
+            # entry that actually HAS a primary score) -- a body/graph hit sitting between
+            # two organic ones must not silently loosen or tighten the knee for whatever
+            # organic candidate comes after it.
+            #
+            # GRA-1 (the RET-8 dense-side finding, multi-hop 1.0 bm25-only vs 0.0
+            # dense+bm25): a GRAPH-ENDORSED entry — any resolvable 1-hop neighbor of a top
+            # seed, whether injection replaced its score or its organic rank already beat
+            # the discount — gets the same exemption EXPLICITLY, keyed on
+            # `graph_endorsed`, never on happening to be absent from `primary_relevance`.
+            # Under BM25 a zero-term-overlap neighbor has no primary rank, so
+            # membership-based exemption worked by accident; under dense EVERY fused entry
+            # has a primary rank (cosine orders the whole corpus above the floor), so an
+            # endorsed neighbor was judged by its own — deliberately weak — organic rank
+            # and the knee cut it. And because the old knee was a BREAK, a cliff between
+            # two ORGANIC candidates orphaned every endorsed neighbor ranked past it, no
+            # matter how strong its seed. So the cliff now ENDS ORGANIC ADMISSION (a
+            # tripping entry is dropped and `past_cliff` latches — same outcome for
+            # organic/body candidates as the old break) while the walk continues for
+            # graph-endorsed entries only: their admission signal is the seed's relevance
+            # times a deliberate discount, which is not the topical cliff the knee exists
+            # to detect. The graph is 1-hop from ADMITTED-quality seeds and bounded by
+            # pool_n, so this can never open the tail-junk door the knee closes.
+            endorsed = i in graph_endorsed
+            relevance = None if endorsed else primary_relevance.get(i)
             if (
                 knee_ratio > 0
+                and not past_cliff
                 and relevance is not None
                 and prev_relevance is not None
                 and relevance < knee_ratio * prev_relevance
             ):
-                break  # relevance fell off a cliff relative to the last ADMITTED entry -- stop
+                # Relevance fell off a cliff relative to the last ADMITTED organic entry:
+                # organic admission ends here, this entry included (the old `break`).
+                past_cliff = True
+                continue
             if relevance is not None:
                 prev_relevance = relevance
+            if past_cliff:
+                graph_admitted.add(i)
             admissible.append((i, adj_score, state))
 
         # RCL-4: MMR diversifies the (possibly larger-than-k) ADMISSIBLE pool built above --
@@ -2207,10 +2252,12 @@ def recall(
                     "rank": len(results) + 1,
                     "backend": backend,
                     # Injection provenance (GRA-1) — ALWAYS present so downstream code never
-                    # branches on key existence: "graph" = surfaced by 1-hop expansion,
-                    # "rank" = organic fusion. format_results renders "graph" as " (linked)"
-                    # so a user reading the injected block can see WHY a line is there.
-                    "via": "graph" if i in graph_injected else "rank",
+                    # branches on key existence: "graph" = surfaced by 1-hop expansion
+                    # (score-replaced injection, or an endorsed neighbor admitted past the
+                    # knee cliff — either way the graph is why the line exists), "rank" =
+                    # organic fusion. format_results renders "graph" as " (linked)" so a
+                    # user reading the injected block can see WHY a line is there.
+                    "via": "graph" if i in graph_admitted else "rank",
                     # Typed-edge annotation (GRA-4) — ALWAYS present ("" when none), same
                     # no-key-branching convention as "via": "superseded by <successor>"
                     # names why the line ranks below its successor; "contradicts <name> —
