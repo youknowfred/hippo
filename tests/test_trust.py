@@ -3,8 +3,8 @@
 Hermetic: the trust registry is pointed at a tmp file via HIPPO_TRUST_FILE so the real
 ~/.claude/hippo-trust.json is NEVER touched. Corpora that must be gated live inside a real
 git repo (the conftest `repo`/`memory_dir` fixtures) so `git_root` resolves a repo_root for
-the gate to key on; a non-git tmp corpus is deliberately used to prove the gate is a no-op
-where it doesn't apply.
+the gate to key on. SEC-12: a non-git directory that carries an actual corpus is ALSO gated
+(the "Download ZIP" twin of the clone attack); only an EMPTY non-git dir stays a no-op.
 """
 
 from __future__ import annotations
@@ -145,20 +145,71 @@ def test_mark_trusted_is_idempotent_and_preserves_siblings(repo, tmp_path, monke
 
 
 # --------------------------------------------------------------------------- #
-# gate_repo_root: inapplicable (fail-open) for a non-git corpus and for index-only calls
+# gate_repo_root + SEC-12: a NON-git corpus WITH content is gated (untrusted by default);
+# an empty non-git dir stays inapplicable; env/init/consent are the overrides.
 # --------------------------------------------------------------------------- #
-def test_gate_inapplicable_for_non_git_corpus(tmp_path, monkeypatch):
+def test_non_git_corpus_with_content_is_untrusted_by_default(tmp_path, monkeypatch):
+    """SEC-12: an extracted ('Download ZIP') non-git corpus injects nothing until trusted."""
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
-    _point_registry(monkeypatch, tmp_path)
+    _point_registry(monkeypatch, tmp_path)  # deletes HIPPO_TRUST_ALL
     md = str(tmp_path / "memory")  # a bare tmp dir — NOT inside any git repo
     idx = str(tmp_path / "idx")
     _write_corpus(md)
     B.build_index(md, idx)
 
-    # No resolvable git root -> gate inapplicable -> recall proceeds even without a marker.
-    assert T.gate_repo_root(md) is None
+    # A real non-git corpus now resolves a gate key (its own real root) instead of None...
+    assert T.gate_repo_root(md) == os.path.realpath(md)
+    # ...and recall injects NOTHING because that key isn't trusted.
+    assert R.recall("which reranker do we use", k=5, memory_dir=md, index_dir=idx) == []
+
+
+def test_non_git_corpus_injects_after_consent(tmp_path, monkeypatch):
+    """The 'init override': marking the non-git corpus trusted (what /hippo:init does) restores it."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _point_registry(monkeypatch, tmp_path)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / "idx")
+    _write_corpus(md)
+    B.build_index(md, idx)
+
+    assert T.mark_trusted(md) is True  # init/doctor consent keys on the same real root
     res = R.recall("which reranker do we use", k=5, memory_dir=md, index_dir=idx)
     assert any(r["name"] == "reranker_voyage" for r in res)
+
+
+def test_non_git_corpus_env_override_restores_old_behavior(tmp_path, monkeypatch):
+    """The 'env override': HIPPO_TRUST_NONGIT makes a non-git corpus inapplicable again."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _point_registry(monkeypatch, tmp_path)
+    monkeypatch.setenv("HIPPO_TRUST_NONGIT", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / "idx")
+    _write_corpus(md)
+    B.build_index(md, idx)
+
+    assert T.gate_repo_root(md) is None  # opt-out → inapplicable
+    res = R.recall("which reranker do we use", k=5, memory_dir=md, index_dir=idx)
+    assert any(r["name"] == "reranker_voyage" for r in res)
+
+
+def test_empty_non_git_dir_stays_inapplicable(tmp_path, monkeypatch):
+    """An empty non-git dir (resolve_dirs' fallback / a hermetic path) has nothing to gate."""
+    _point_registry(monkeypatch, tmp_path)
+    empty = str(tmp_path / "empty-project")
+    os.makedirs(empty)
+    assert T.gate_repo_root(empty) is None
+    assert T.gate_repo_root(empty, empty) is None
+
+
+def test_non_git_untrusted_corpus_nudge_is_not_silent(tmp_path, monkeypatch):
+    """inv3 legibility: the untrusted-corpus nudge fires for a gated non-git corpus."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _point_registry(monkeypatch, tmp_path)
+    md = str(tmp_path / "memory")
+    _write_corpus(md)
+    # The nudge's low-frequency modulo fires on the first unseen root (count 0 -> due).
+    msg = S.untrusted_corpus_nudge(md, md)
+    assert msg is not None and "UNTRUSTED" in msg
 
 
 def test_gate_resolves_git_toplevel_not_passed_path_blind(repo, memory_dir, monkeypatch, tmp_path):

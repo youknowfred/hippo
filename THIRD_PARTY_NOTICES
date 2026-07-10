@@ -1,0 +1,75 @@
+# Third-Party Notices
+
+hippo's own source is MIT-licensed (see [LICENSE](LICENSE)). hippo does **not**
+bundle or redistribute third-party source code — the pre-bootstrap fallbacks in
+`plugin/memory/_vendor/` (a BM25 scorer and a frontmatter parser) are original MIT
+implementations, not copied vendor code.
+
+This file inventories the third-party components hippo **depends on at runtime**:
+the Python packages the `/hippo:bootstrap` step installs from PyPI into a
+standalone plugin venv, and the sentence-embedding model it downloads on first
+index build. None of these is committed to this repository or shipped inside the
+plugin bundle; each is fetched from its own distribution, and that distribution's
+license text travels with the artifact. `pip show <name>` (or the wheel's own
+LICENSE) on a bootstrapped venv is the authoritative source for any entry here.
+
+Every runtime dependency is permissively licensed — Apache-2.0, MIT, BSD-3-Clause,
+MPL-2.0, or HPND (MIT-CMU). There is no copyleft obligation on hippo's own code.
+
+## Direct dependencies (`plugin/requirements.txt`)
+
+| Package     | Version pin    | License      | Project |
+|-------------|----------------|--------------|---------|
+| `fastembed` | `>=0.4,<0.8`   | Apache-2.0 † | https://github.com/qdrant/fastembed |
+| `numpy`     | `>=1.26,<3`    | BSD-3-Clause | https://github.com/numpy/numpy |
+| `PyYAML`    | `>=6.0,<7.0`   | MIT          | https://github.com/yaml/pyyaml |
+| `rank-bm25` | `>=0.2.2,<0.3` | Apache-2.0   | https://github.com/dorianbrown/rank_bm25 |
+
+† fastembed is Apache-2.0 (its upstream `LICENSE`). Some published wheels — the
+`0.7.4` this repo resolves against included — carry a mislabeled
+`Other/Proprietary License` PyPI classifier; the repository license governs.
+
+Only the dense (`fastembed`) half of hybrid recall is optional: with the model
+cache cold or fastembed unavailable, recall degrades to BM25-only. `numpy` /
+`PyYAML` / `rank-bm25` are the full-fidelity path; the `_vendor/` fallbacks cover
+the bare-`python3` window before bootstrap.
+
+## Transitive dependencies (installed as `fastembed`'s dependencies)
+
+Pulled in automatically when `fastembed` is installed. Licenses as declared by
+each project, verified against the versions resolved in this repo's venv:
+
+| Package            | License         |
+|--------------------|-----------------|
+| `huggingface-hub`  | Apache-2.0      |
+| `onnxruntime`      | MIT             |
+| `tokenizers`       | Apache-2.0      |
+| `requests`         | Apache-2.0      |
+| `tqdm`             | MPL-2.0 AND MIT |
+| `pillow`           | HPND (MIT-CMU)  |
+| `loguru`           | MIT             |
+| `mmh3`             | MIT             |
+| `py-rust-stemmers` | MIT             |
+| `flatbuffers` ‡    | Apache-2.0      |
+| `protobuf` ‡       | BSD-3-Clause    |
+
+‡ second-order (dependencies of `onnxruntime`). The exact resolved set varies by
+platform, Python version, and the `fastembed` release in range; `pip show` on the
+bootstrapped venv is authoritative.
+
+## Embedding model
+
+Dense recall uses a sentence-embedding model downloaded (~130 MB) on the first
+`build_index` run and cached offline thereafter — never committed to git, never
+shipped in the plugin bundle. `fastembed` fetches a quantized-ONNX repackaging of
+the model from the Hugging Face Hub.
+
+| Role | Model (card) | License | Artifact fetched by fastembed |
+|------|--------------|---------|-------------------------------|
+| Default (English) | [`BAAI/bge-small-en-v1.5`](https://huggingface.co/BAAI/bge-small-en-v1.5) | MIT | [`qdrant/bge-small-en-v1.5-onnx-q`](https://huggingface.co/qdrant/bge-small-en-v1.5-onnx-q) |
+| `--multilingual` preset | [`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`](https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2) | Apache-2.0 | [`qdrant/paraphrase-multilingual-MiniLM-L12-v2-onnx-Q`](https://huggingface.co/qdrant/paraphrase-multilingual-MiniLM-L12-v2-onnx-Q) |
+
+Each ONNX repackaging carries the same license as its source model. See
+`plugin/memory/build_index.py` (`_HF_SOURCE_REPO_BY_MODEL`, `resolve_embed_model`)
+for the exact model resolution and cache paths, and `HIPPO_EMBED_MODEL` to override
+the model.

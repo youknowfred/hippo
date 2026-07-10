@@ -874,6 +874,47 @@ def check_secrets(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"secret scan failed: {exc}."}
 
 
+def check_committed_usage_privacy(ctx: DoctorContext) -> Dict[str, str]:
+    """SEC-14: TEA-5 committed per-user usage summaries are a privacy tradeoff on a shared remote.
+
+    ``.claude/memory/.usage/<user>.json`` is COMMITTED by design (teammates union it before
+    judging coldness), so it excepts the gitignore invariant — a per-user record of which
+    memories each person recalls. On a repo with a remote (especially a public host) that record
+    is shared with anyone who can read it. Warn when such summaries exist AND a remote is
+    configured; stay ``ok`` when there are none, or the repo is local-only (nothing to leak to).
+    Read-only; never raises.
+    """
+    try:
+        from .provenance import git_remote_info
+        from .telemetry import committed_usage_dir
+
+        usage_dir = committed_usage_dir(ctx.memory_dir)
+        summaries = (
+            [f for f in os.listdir(usage_dir) if f.endswith(".json")]
+            if os.path.isdir(usage_dir)
+            else []
+        )
+        if not summaries:
+            return {"status": "ok", "message": "no committed usage summaries (TEA-5 opt-in unused)."}
+        remote = git_remote_info(ctx.repo_root)
+        if not remote["url"]:
+            return {
+                "status": "ok",
+                "message": f"{len(summaries)} committed usage summary(ies) present; repo is "
+                "local-only (no remote), so recall patterns are not shared.",
+            }
+        where = "a PUBLIC-host remote" if remote["public_host"] else "a remote"
+        return {
+            "status": "warn",
+            "message": f"{len(summaries)} committed per-user usage summary(ies) in "
+            f".claude/memory/.usage/ on {where} ({remote['url']}) — recall patterns (memory "
+            "names + counts) are shared with anyone who can read it. Remove .claude/memory/.usage/ "
+            "if unintended (TEA-5/SEC-14).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"committed-usage privacy check failed: {exc}."}
+
+
 # GRA-3: a corpus this small (< 5 memories) genuinely may have nothing worth cross-linking yet
 # — the nudge below is about a corpus that has GROWN without ever discovering [[wikilinks]],
 # not about a brand-new project's first couple of files.
@@ -1332,6 +1373,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("secrets", check_secrets),
     ("link_density", check_link_density),
     ("non_english_corpus", check_non_english_corpus),
+    ("committed_usage_privacy", check_committed_usage_privacy),  # SEC-14: TEA-5 usage on a shared remote
     ("stale_memobot_env", check_stale_memobot_env),
 ]
 
