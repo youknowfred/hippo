@@ -301,6 +301,12 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **SEC-8** `P1/S` — Broaden secret-lint prefixes (Slack/Google/Stripe/OpenAI/
   Anthropic/JWT/npm/PyPI/connection-strings, staying high-precision) + a **CI
   secret-scan gate** over shipped packs + repo.
+  **SHIPPED 2026-07-10**: 9 new high-precision prefix/shape patterns folded into the
+  ONE detector (`secrets._PATTERNS`); `scan_text(entropy=…)` gates the soft catch-all
+  so the gate stays deterministic. New `secrets.scan_files`/`_iter_repo_files`/`main`
+  → `python -m memory.secrets --repo .`, a `secret-scan` CI job over the tracked tree
+  (tests excluded — they ship detector vectors); exits 1 on a KIND hit, never echoes
+  the secret. Shipped starter packs pinned clean by a suite regression test.
 - **SEC-9** `P1/S` — `THIRD_PARTY_NOTICES` / `NOTICE`: dependency + **model**
   license inventory (Apache/BSD/MIT + bge-small model card).
 - **SEC-10** `P1/S` — `SECURITY.md`: private disclosure channel, supported
