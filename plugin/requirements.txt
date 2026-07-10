@@ -19,6 +19,29 @@
 # Licenses: these four (Apache-2.0 / BSD-3-Clause / MIT / Apache-2.0), their
 # transitive tree, and the downloaded embedding model are inventoried in the
 # repo-root THIRD_PARTY_NOTICES — all permissive (SEC-9).
+#
+# Supply chain (SEC-11). Every dependency is BOUNDED on BOTH sides (>=lo,<hi), so a
+# compromised or breaking new MAJOR can never be pulled at bootstrap — the blast radius
+# is capped to a reviewed range. A test pins this invariant (no unbounded `>=`).
+#
+# These are RANGES, not exact/hash pins, on purpose: hippo supports CPython 3.10–3.14,
+# and no single numpy version spans that (numpy 2.x drops 3.10; 1.26 predates 3.13), so
+# a universal exact lock is INFEASIBLE — the range is load-bearing for the support
+# matrix. For a hardened, reproducible install, generate a hash-locked file FOR YOUR
+# environment and install with hash verification:
+#     uv pip compile --generate-hashes requirements.txt -o requirements.lock
+#     uv pip install --require-hashes -r requirements.lock   # (or: pip install --require-hashes)
+# The lock is platform- and Python-specific (binary wheels: onnxruntime, numpy), so it
+# is generated per environment rather than committed as a single universal file.
+#
+# Model artifact (~130MB, SEC-11). build_index downloads the embedding model
+# (BAAI/bge-small-en-v1.5 via fastembed → huggingface_hub) once, over HTTPS, and caches
+# it offline thereafter. huggingface_hub verifies each downloaded file against the
+# repository's recorded hash (content-addressed blobs), so the artifact is integrity-
+# checked on fetch — it is not an unverified binary. To reproduce the EXACT weights, pin
+# a model revision via the Hugging Face cache (a specific commit of the model repo);
+# absent a pin, the pinned repo's current revision is fetched. See THIRD_PARTY_NOTICES
+# and build_index.py (_HF_SOURCE_REPO_BY_MODEL) for the repos and cache paths.
 fastembed>=0.4,<0.8
 numpy>=1.26,<3
 PyYAML>=6.0,<7.0
