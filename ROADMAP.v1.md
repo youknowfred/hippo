@@ -424,6 +424,12 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
   injected automatically."
 - **ONB-9** `P1/S` — Post-init **"try it now" next-command nudge** — complete the
   KPI-8 funnel (narration currently stops one step short of the payoff).
+  **SHIPPED 2026-07-10**: `init/SKILL.md` step 6 now closes — on every path — with a
+  try-it-now blockquote naming the exact next command (*"what do you remember about my
+  role?"* / `/hippo:recall "my role"`), chained off the `user_role.md` fill so the
+  recall returns real content. The init narration lands on the payoff, not on the setup
+  report. (Blockquote, not a fenced block, so the QUA-8 skills-contract extractor leaves
+  it untouched.)
 - **DOC-9** `P1/M` — **"How hippo thinks" concepts page** (what a memory is; floor
   vs on-demand recall; the four types; why markdown-in-git) linked from the top
   of the README. Stop leading with acronym-dense feature copy; stop routing
