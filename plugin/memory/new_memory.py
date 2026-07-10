@@ -837,6 +837,20 @@ def write_memory(
     except Exception:
         pass
 
+    # SEC-6: authorship is consent — fold the just-written (and just-backfilled: the
+    # LAST mutation of the file in this call) bytes into the trusted-corpus consent
+    # baseline, so the author's own check-first, agent-gated write never quarantines
+    # itself. Project tier only: the user/private tiers are the user's own machine
+    # state and are never trust-gated. Best-effort (a legacy fingerprint-less record
+    # is a no-op by design); never fatal.
+    if tier == "project":
+        try:
+            from .trust import record_authored_write
+
+            record_authored_write(memory_dir, path, repo_root)
+        except Exception:
+            pass
+
     # 2. Refresh the recall index so the memory is immediately recallable.
     try:
         from .build_index import refresh_index

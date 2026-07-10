@@ -279,11 +279,25 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **SEC-5** `P0/S` — Consent surfaces the **descriptions** that actually inject
   (not just filenames), with framing that these strings enter every prompt.
   Closes SEC-1's own acceptance criterion. *Revisits OQ-6.*
+  **SHIPPED 2026-07-09** (owner-commissioned trust spine):
+  `trust.corpus_consent_sample` renders descriptions through the injection layer's
+  own `recall.inject_description` (byte-equal parity, test-pinned); doctor consent
+  step shows them as demarcated quoted data.
 - **SEC-6** `P1/M` — Trust record stores a corpus **content fingerprint**;
   re-prompt on material change (defeats trusted-upstream supply-chain injection).
   *Revisits OQ-6 → OQ-7.*
+  **SHIPPED 2026-07-09**: `mark_trusted(memory_dir=…)` stamps a per-file sha256
+  baseline; recall QUARANTINES drifted/new project-tier files per file; hippo's own
+  per-item write primitives fold their writes in (authorship = consent; index builds
+  never do); SessionStart `trust_drift` producer + doctor `trust_drift` check surface
+  the withheld delta; re-consent refreshes. Legacy records: no quarantine, doctor
+  names the upgrade.
 - **SEC-7** `P1/M` — **Inject-time provenance banner** + defensive demarcation
   for foreign/cloned-corpus lines in `format_results`. *(KPI-5.)*
+  **SHIPPED 2026-07-09**: header demarcates memory text as quoted data (always);
+  a corpus trusted with `origin="review"` (the doctor consent flow) carries a
+  per-injection FOREIGN-corpus banner naming root + consent date; `origin="init"`
+  (your own project) renders none.
 - **SEC-8** `P1/S` — Broaden secret-lint prefixes (Slack/Google/Stripe/OpenAI/
   Anthropic/JWT/npm/PyPI/connection-strings, staying high-precision) + a **CI
   secret-scan gate** over shipped packs + repo.

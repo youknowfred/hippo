@@ -200,14 +200,201 @@ def test_extract_refusals_are_zero_change(tmp_path):
     assert pack_extract([], dest, memory_dir=md, repo_root=str(tmp_path))["error"]
 
 
-def test_install_and_update_remain_absent_until_the_trust_spine_ships():
-    # RCH-5's gate, pinned as a negative capability: a foreign pack IS the public-corpus
-    # injection threat, and SEC-5/6/7 (the v0.8.0 trust spine) are not in the tree —
-    # so no inbound pack primitive may exist yet. When the spine ships, this test is
-    # REPLACED by the install/update contracts, not merely deleted.
-    from memory import packs
+# --------------------------------------------------------------------------- #
+# RCH-5 inbound — install/update on the v0.8.0 trust spine. These contracts REPLACE the
+# long-standing negative-capability pin (test_install_and_update_remain_absent_until_
+# the_trust_spine_ships): the spine (SEC-5/6/7) is in the tree, so the gate is met and
+# the tripwire's job is done — per its own comment, replaced, not merely deleted.
+# --------------------------------------------------------------------------- #
+def _pack_source(tmp_path, files: dict, *, pack="lessons", version="1.0.0"):
+    """A local pack source dir: files = {stem: (description, body)}."""
+    src = str(tmp_path / f"src-{pack}-{version}")
+    os.makedirs(src, exist_ok=True)
+    for stem, (desc, body) in files.items():
+        with open(os.path.join(src, f"{stem}.md"), "w", encoding="utf-8") as fh:
+            fh.write(f'---\nname: {stem}\ndescription: "{desc}"\ntype: feedback\n---\n{body}\n')
+    manifest = {
+        "pack": pack, "version": version, "title": pack, "description": "test pack",
+        "seed_by_default": False,
+        "memories": [{"file": f"{s}.md"} for s in sorted(files)],
+    }
+    with open(os.path.join(src, "manifest.json"), "w", encoding="utf-8") as fh:
+        json.dump(manifest, fh)
+    return src
 
-    for forbidden in ("install_pack", "update_pack", "pack_install", "pack_update"):
-        assert not hasattr(packs, forbidden), (
-            f"packs.{forbidden} must not exist before the v0.8.0 trust spine lands"
-        )
+
+def test_install_plan_is_read_only_review_material(tmp_path):
+    from memory.packs import pack_install_plan
+
+    md = str(tmp_path / "mem")
+    os.makedirs(md)
+    src = _pack_source(tmp_path, {
+        "deploy_lesson": ("never deploy on friday afternoons", "body"),
+        "leaky": ("has a key", "aws AKIAIOSFODNN7EXAMPLE secret"),
+    })
+    plan = pack_install_plan(src, memory_dir=md, repo_root=str(tmp_path))
+    assert plan["error"] is None and plan["pack"] == "lessons"
+    by_name = {i["name"]: i for i in plan["items"]}
+    assert by_name["deploy_lesson"]["installable"] is True
+    assert by_name["deploy_lesson"]["will_inject"] == "never deploy on friday afternoons"
+    assert by_name["leaky"]["secrets"] and by_name["leaky"]["installable"] is False
+    assert os.listdir(md) == []  # a plan writes NOTHING
+
+
+def test_install_plan_refuses_malformed_manifests(tmp_path):
+    from memory.packs import pack_install_plan
+
+    md = str(tmp_path / "mem")
+    os.makedirs(md)
+    src = str(tmp_path / "bad")
+    os.makedirs(src)
+    assert "no manifest.json" in pack_install_plan(src, memory_dir=md)["error"]
+    with open(os.path.join(src, "manifest.json"), "w", encoding="utf-8") as fh:
+        json.dump({"pack": "p", "version": "1", "memories": [{"file": "../evil.md"}]}, fh)
+    assert "illegal memory file name" in pack_install_plan(src, memory_dir=md)["error"]
+
+
+def test_install_item_is_per_item_stamped_locked_and_refuses(tmp_path):
+    from memory.packs import lockfile_path, pack_install_item
+
+    md = str(tmp_path / "mem")
+    os.makedirs(md)
+    src = _pack_source(tmp_path, {
+        "deploy_lesson": ("never deploy on friday afternoons", "body"),
+        "leaky": ("has a key", "aws AKIAIOSFODNN7EXAMPLE secret"),
+    })
+    r = pack_install_item(src, "deploy_lesson", memory_dir=md, repo_root=str(tmp_path),
+                          source="https://example.com/lessons.git")
+    assert r["installed"] is True
+    text = open(r["path"], encoding="utf-8").read()
+    fm = parse_frontmatter(text)
+    meta = fm.get("metadata") or {}
+    assert (fm.get("pack") or meta.get("pack")) == "lessons"
+    assert str(fm.get("pack_version") or meta.get("pack_version")) == "1.0.0"
+    lock = json.load(open(lockfile_path(md)))
+    entry = lock["packs"]["lessons"]
+    assert entry["source"] == "https://example.com/lessons.git"
+    assert entry["installed"]["deploy_lesson"]["base"] == text  # the future 3-way base
+
+    # The hard gates: secrets refuse; an existing target refuses; per-item only.
+    r2 = pack_install_item(src, "leaky", memory_dir=md, repo_root=str(tmp_path))
+    assert r2["installed"] is False and "secret-lint" in r2["error"]
+    assert not os.path.exists(os.path.join(md, "leaky.md"))
+    r3 = pack_install_item(src, "deploy_lesson", memory_dir=md, repo_root=str(tmp_path))
+    assert r3["installed"] is False and "already exists" in r3["error"]
+    r4 = pack_install_item(src, "ghost", memory_dir=md, repo_root=str(tmp_path))
+    assert "not in this pack's manifest" in r4["error"]
+
+
+def test_install_consents_the_bytes_on_a_fingerprinted_corpus(tmp_path, repo, memory_dir, monkeypatch):
+    """SEC-6 dovetail: the per-item approval IS the review — an installed pack memory
+    joins the consent baseline and is immediately recallable, not quarantined."""
+    from memory import build_index as B
+    from memory import recall as R
+    from memory import trust as T
+    from memory.packs import pack_install_item
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_TRUST_FILE", str(tmp_path / "trust.json"))
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    _corpus_mem(memory_dir, "existing", "an existing memory about spreadsheets")
+    idx = str(tmp_path / "idx")
+    B.build_index(memory_dir, idx)
+    assert T.mark_trusted(repo, memory_dir=memory_dir) is True
+
+    src = _pack_source(tmp_path, {"deploy_lesson": ("never deploy on friday afternoons", "body")})
+    r = pack_install_item(src, "deploy_lesson", memory_dir=memory_dir, repo_root=repo)
+    assert r["installed"] is True
+    B.build_index(memory_dir, idx)
+    names = {h["name"] for h in R.recall("deploy friday afternoons lesson", k=5,
+                                         memory_dir=memory_dir, index_dir=idx)}
+    assert "deploy_lesson" in names  # consented, not quarantined
+
+
+def test_update_three_way_preserves_local_edits(tmp_path):
+    """THE RCH-5 update acceptance criterion: per-item diffs, three-way merge, local
+    edits preserved through an upstream change."""
+    from memory.packs import pack_install_item, pack_update_item, pack_update_plan
+
+    md = str(tmp_path / "mem")
+    os.makedirs(md)
+    body_v1 = "line one\nline two\nline three"
+    src1 = _pack_source(tmp_path, {"lesson": ("a lesson", body_v1)}, version="1.0.0")
+    assert pack_install_item(src1, "lesson", memory_dir=md)["installed"]
+
+    # Local edit at the BOTTOM; upstream v2 changes the TOP — a clean three-way.
+    path = os.path.join(md, "lesson.md")
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("my local note\n")
+    src2 = _pack_source(
+        tmp_path, {"lesson": ("a lesson", body_v1.replace("line one", "line ONE (v2)"))},
+        version="2.0.0",
+    )
+    plan = pack_update_plan(src2, memory_dir=md)
+    assert plan["error"] is None and plan["version"] == "2.0.0"
+    row = plan["items"][0]
+    assert row["state"] == "merged" and not row["conflict"] and "line ONE (v2)" in row["diff"]
+
+    r = pack_update_item(src2, "lesson", memory_dir=md)
+    assert r["updated"] is True
+    text = open(path, encoding="utf-8").read()
+    assert "line ONE (v2)" in text and "my local note" in text  # both survive
+    assert 'pack_version: "2.0.0"' in text  # re-stamped to the new version
+
+
+def test_update_conflict_refuses_until_resolved(tmp_path):
+    from memory.packs import pack_install_item, pack_update_item, pack_update_plan
+
+    md = str(tmp_path / "mem")
+    os.makedirs(md)
+    src1 = _pack_source(tmp_path, {"lesson": ("a lesson", "the same line")}, version="1.0.0")
+    assert pack_install_item(src1, "lesson", memory_dir=md)["installed"]
+    path = os.path.join(md, "lesson.md")
+    edited = open(path, encoding="utf-8").read().replace("the same line", "my local version")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(edited)
+    src2 = _pack_source(tmp_path, {"lesson": ("a lesson", "upstream version")}, version="2.0.0")
+
+    plan = pack_update_plan(src2, memory_dir=md)
+    assert plan["items"][0]["state"] == "conflict"
+    r = pack_update_item(src2, "lesson", memory_dir=md)
+    assert r["updated"] is False and "CONFLICT" in r["error"]
+    assert "my local version" in open(path, encoding="utf-8").read()  # untouched
+
+    resolved = open(path, encoding="utf-8").read().replace("my local version", "reconciled")
+    r2 = pack_update_item(src2, "lesson", memory_dir=md, resolved_text=resolved)
+    assert r2["updated"] is True and "reconciled" in open(path, encoding="utf-8").read()
+
+
+def test_update_never_deletes_or_resurrects(tmp_path):
+    from memory.packs import pack_install_item, pack_update_item, pack_update_plan
+
+    md = str(tmp_path / "mem")
+    os.makedirs(md)
+    src1 = _pack_source(
+        tmp_path,
+        {"kept": ("stays upstream", "b"), "dropped": ("leaves upstream", "b")},
+        version="1.0.0",
+    )
+    for n in ("kept", "dropped"):
+        assert pack_install_item(src1, n, memory_dir=md)["installed"]
+    os.remove(os.path.join(md, "kept.md"))  # the user removed one locally
+    src2 = _pack_source(tmp_path, {"kept": ("stays upstream", "b2")}, version="2.0.0")
+
+    plan = pack_update_plan(src2, memory_dir=md)
+    states = {i["name"]: i["state"] for i in plan["items"]}
+    assert states == {"kept": "missing-local", "dropped": "removed-upstream"}
+    for n in ("kept", "dropped"):
+        r = pack_update_item(src2, n, memory_dir=md)
+        assert r["updated"] is False  # report-only states never apply
+    assert not os.path.exists(os.path.join(md, "kept.md"))  # never resurrected
+    assert os.path.exists(os.path.join(md, "dropped.md"))  # never deleted
+
+
+def test_update_requires_a_lockfile_record(tmp_path):
+    from memory.packs import pack_update_plan
+
+    md = str(tmp_path / "mem")
+    os.makedirs(md)
+    src = _pack_source(tmp_path, {"lesson": ("a lesson", "b")})
+    assert "no lockfile record" in pack_update_plan(src, memory_dir=md)["error"]

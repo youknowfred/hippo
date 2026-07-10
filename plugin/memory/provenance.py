@@ -1067,6 +1067,18 @@ def reverify_file(
         if changed and not dry_run:
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(new_text)
+        if not dry_run:
+            # SEC-6: a re-verify IS a per-item human review of this exact file — fold its
+            # current bytes into the trusted-corpus consent baseline (review = consent;
+            # a no-op on legacy fingerprint-less records and ungated corpora). Runs on
+            # the no-op path too: "I re-read it and it's correct" consents the bytes that
+            # were read, whether or not the provenance lines moved.
+            try:
+                from .trust import record_authored_write
+
+                record_authored_write(os.path.dirname(path), path, repo_root)
+            except Exception:
+                pass
     except Exception as exc:
         result["error"] = str(exc)
     return result

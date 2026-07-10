@@ -142,11 +142,15 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    "$PY" -c \
      "import sys, json; from memory.trust import mark_trusted; \
       from memory.registry import register_project; \
-      print(json.dumps({'trusted': mark_trusted(sys.argv[1]), \
+      print(json.dumps({'trusted': mark_trusted(sys.argv[1], memory_dir=sys.argv[1] + '/.claude/memory', origin='init'), \
                         'registered': register_project(sys.argv[1], sys.argv[1] + '/.claude/memory')}))" \
      "$REPO_ROOT"
    ```
-   Both markers live machine-local under `~/.claude/` (`hippo-trust.json` /
+   `memory_dir` stamps the SEC-6 content FINGERPRINT (the consent-time per-file baseline —
+   recall withholds files that later drift from it until re-review) and `origin='init'`
+   records that this trust came from the user creating/owning the corpus, not from
+   reviewing a foreign one (SEC-7's provenance banner keys on that distinction). Both
+   markers live machine-local under `~/.claude/` (`hippo-trust.json` /
    `hippo-projects.json` — OUTSIDE the project, so a foreign repo can't commit its own "trust
    me" or self-register). A `false` on either means that registry write failed — report it
    (recall stays gated / the project stays unlisted until it succeeds), don't pretend
