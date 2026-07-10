@@ -1490,6 +1490,22 @@ def test_main_floor_dedup_collapses_always_loaded_members_and_tops_off(tmp_path,
     assert "(already in floor)" not in voyage_line
 
 
+def test_main_cli_double_dash_separator_handles_leading_dash_query(tmp_path, monkeypatch, capsys):
+    """A prompt that STARTS with '-' parses as query text behind the standard `--`
+    separator (flags first) — pinned so the nargs="*" positional never silently loses
+    this escape hatch. Production is unaffected either way: the hook path delivers the
+    prompt via --stdin-json, never argv."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"reranker_voyage.md": "voyage rerank cross encoder primary reranker"})
+    B.build_index(md, idx)
+
+    rc = R.main(["--memory-dir", md, "--index-dir", idx, "--", "-v voyage reranker cross encoder"])
+    assert rc == 0
+    assert "reranker_voyage" in capsys.readouterr().out
+
+
 def test_main_floor_dedup_widens_with_claude_md_citations(repo, memory_dir, tmp_path, monkeypatch, capsys):
     """RCL-2: a memory backtick-cited in CLAUDE.md (never in the MEMORY.md floor at all) is
     exactly as redundant to re-inject as a true floor pointer -- it collapses too."""

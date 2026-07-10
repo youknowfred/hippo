@@ -2574,8 +2574,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     import json
     import sys
 
-    parser = argparse.ArgumentParser(description="Recall top-K memories for a query.")
-    parser.add_argument("query", nargs="*", help="the query text")
+    parser = argparse.ArgumentParser(
+        description="Recall top-K memories for a query.",
+        epilog="A query that STARTS with '-' needs the standard '--' separator "
+        "(flags first): python -m memory.recall --memory-dir X -- '-v shaped query'. "
+        "The hook path is unaffected — it passes the prompt via --stdin-json, never argv.",
+    )
+    parser.add_argument("query", nargs="*", help="the query text (see epilog for '-'-leading queries)")
     parser.add_argument("-k", type=int, default=DEFAULT_K)
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--index-dir", default=None)
