@@ -339,6 +339,11 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
   gap in `--all-projects` (a non-git registered corpus was bypassing the gate).
 - **SEC-13** `P2/S` — MCP `new_memory` honors the trust gate (kill the
   write-without-read asymmetry) + a `serve()` max-message cap.
+  **SHIPPED 2026-07-10**: `_tool_new_memory` runs the SAME gate the MCP resources do
+  and REFUSES a write into an untrusted corpus (gated on the same corpus resolve_dirs
+  hands `write_memory`, so refusal target == write target). `serve()` rejects a line
+  over `_MAX_MESSAGE_CHARS` (1 MiB, `HIPPO_MCP_MAX_MESSAGE_CHARS`-overridable) with a
+  null-id JSON-RPC error before parsing, and keeps serving.
 - **SEC-14** `P2/S` — TEA-5 committed usage summary behind **explicit opt-in** +
   a public-remote warning (doctor/doc). *Tension: TEA-5 deliberately excepts the
   gitignore invariant — narrow it for public remotes.*
