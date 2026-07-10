@@ -34,8 +34,8 @@ Battle-tested in daily use since 2026-06 across a 180+ memory production corpus.
 4. **Use it.** Say *"remember this: …"* (the `/hippo:new` skill writes a recall-ready
    memory), then just work — every prompt is matched against the corpus by the
    UserPromptSubmit hook and the relevant memories are injected automatically. Session
-   starts surface staleness, recent captures, and link health. If anything seems off:
-   `/hippo:doctor`.
+   starts surface staleness, recent captures, and link health. If anything seems off, run
+   `/hippo:doctor` (or see [Troubleshooting](#troubleshooting)).
 
 5. **See it work.** Ask Claude *"what do you remember about my role?"* (or run
    `/hippo:recall "my role"` directly). hippo matches your prompt against the corpus and
@@ -146,6 +146,25 @@ an implicit SessionStart auto-provision. Reasoning:
 
 Until bootstrap runs, the SessionStart hook nudges the next step (once every few
 sessions, permanently dismissable) instead of staying silent.
+
+## Troubleshooting
+
+- **Recall comes back empty.** Almost always one of three things: **(a) bootstrap never ran**
+  on this machine — dense recall is silently BM25-only until `/hippo:bootstrap` finishes;
+  **(b) the corpus isn't trusted yet** — a freshly cloned or downloaded corpus injects
+  *nothing* until you review it, and running `/hippo:init` (or `/hippo:doctor`) here is what
+  marks it trusted; **(c) `user_role.md` is still the `<FILL-ME>` template**, so the only
+  thing to recall is placeholder text — edit it with your real role and context.
+- **A memory I wrote never resurfaces.** Recall is on-demand and ranked, not always-on: only
+  the always-load *floor* (the `user`/`feedback` pointers) is injected every prompt;
+  everything else surfaces when a prompt actually matches it. Phrase your question closer to
+  the memory's own wording, or confirm it's indexed with `/hippo:doctor`.
+- **"Not a git repository" / staleness looks inactive.** Outside a git repo hippo runs in a
+  degraded mode: recall, indexing, links, and the floor all work, but staleness tracking and
+  provenance backfill need git — `git init` and commit to activate them.
+- **When in doubt, run `/hippo:doctor`.** It is the one-stop diagnostic — it checks the native
+  symlink, the recall index, corpus trust and drift, the corpus format version, stale links,
+  and unfilled templates, and prints the exact repair command for whatever it finds.
 
 ## Security
 

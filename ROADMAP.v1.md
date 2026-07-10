@@ -436,6 +436,11 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
   newcomers to the 575-line engine reference as "the full docs."
 - **DOC-11** `P1/S` — **Troubleshooting / FAQ** ("recall is empty →
   bootstrapped? corpus trusted? `user_role` still FILL-ME? run `/hippo:doctor`").
+  **SHIPPED 2026-07-10**: README gained a `## Troubleshooting` section covering the
+  empty-recall triage (bootstrap / trust / FILL-ME), why a written memory may not
+  resurface (on-demand ranked recall vs the always-load floor), the non-git degraded
+  mode, and `/hippo:doctor` as the one-stop diagnostic. Linked from the Quickstart via a
+  `#troubleshooting` anchor.
 - **ONB-10** `P2/M` — Reduce the `user_role.md` **FILL-ME friction** (ship a
   minimal 2-line default, and/or an optional interactive init fill via
   `AskUserQuestion` — user-supplied content, never an autonomous write).
