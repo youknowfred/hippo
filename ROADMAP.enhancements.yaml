@@ -572,14 +572,16 @@ workstreams:
         title: "Glob-scoped rule promotion (folds cited_paths→paths: into LIF-7)"
         priority: P3
         effort: M
-        # 2026-07-09 OWNER DECISION (asked directly this session): LIF-7's CAP-soak gate
-        # is NOT cleared — CAP-2 has ~1 day of field soak, and the gate is an owner
-        # judgment of "proven across temporally-diverse sessions" (no wired metric; never
-        # proxy with soak.soak_status()). RUL-6 is therefore EXPLICITLY DEFERRED, not
-        # merely blocked: it re-enters when the owner writes a dated LIF-7 clearance here.
-        # Mechanics stay cheap when it clears (rules_plane.derive_paths_globs + the
-        # over-scoping cap shipped with RUL-7).
-        status: deferred
+        # 2026-07-09 the owner DEFERRED this (LIF-7 CAP-soak not cleared). 2026-07-10 the
+        # owner CLEARED LIF-7's CAP-soak gate (judgment, via AskUserQuestion — enough field
+        # soak) and directed the build. SHIPPED: promote_rule.promote_to_rule + the
+        # /hippo:promote-rule skill + `python -m memory.promote_rule` CLI — propose-only
+        # (inv4), paths: derived from cited_paths via rules_plane.derive_paths_globs (the
+        # RUL-7-shared over-scoping cap: single citation → literal, same-dir/ext collapse only
+        # within DERIVE_OVERSCOPE_FACTOR, ** never emitted), refuses on no-cited/retired/
+        # all-missing/hand-authored-clobber. The broader LIF-7 typed-taxonomy schema change
+        # stays post-v1 — only its scoping-refinement leg (RUL-6) landed.
+        status: done
         source: {lens: claude-rules, verdict: FOLD into LIF-7 (scoping refinement)}
         problem: >-
           Promoting a reinforced procedural memory into CLAUDE.md (LIF-7's framing)

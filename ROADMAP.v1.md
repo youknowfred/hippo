@@ -129,7 +129,7 @@ Each gate was re-checked against real code. Summary first, evidence below.
 | **GRA-8** graph observability | none (opportunistic) | n/a — genuinely unshipped | **KEEP → v0.9.0** |
 | **LIF-8** verbatim-evidence convention | RET-2 landed | **CLEARED — but deliverable already shipped** under DOC-6 | **RECONCILE** (mark done; residual = low-pri polish) |
 | **GRA-7** personalized PageRank | beats GRA-1 on RET-8 multi-hop | **NOT CLEARED** — un-evaluatable until RET-8 exists | **DEFER post-v1** |
-| **LIF-7** typed-memory taxonomy | CAP-2 proven across sessions | **NOT CLEARED** — CAP-2 is 1 day old, zero field soak | **DEFER post-v1** |
+| **LIF-7** typed-memory taxonomy | CAP-2 proven across sessions | **CAP-SOAK CLEARED 2026-07-10** (owner judgment, via AskUserQuestion) — enough field soak; unblocks the memory→rule scoping refinement | **RUL-6 BUILT** (glob-scoped rule promotion); the broader typed-taxonomy schema change remains post-v1 |
 | **CAP-5** auto-MOC + rolling summary | CAP-4 proven | **NOT CLEARED** — CAP-4 1 day old; + invariant tension | **DEFER post-v1** |
 | **INT-6** warm recall daemon | INT-5 p95 shows it's worth it | **NOT CLEARED** — cold budget already met without it | **CUT for v1** |
 
