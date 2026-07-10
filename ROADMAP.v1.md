@@ -309,6 +309,12 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
   the secret. Shipped starter packs pinned clean by a suite regression test.
 - **SEC-9** `P1/S` — `THIRD_PARTY_NOTICES` / `NOTICE`: dependency + **model**
   license inventory (Apache/BSD/MIT + bge-small model card).
+  **SHIPPED 2026-07-10**: repo-root `THIRD_PARTY_NOTICES` inventories the 4 direct
+  deps + fastembed's transitive tree + both embedding models (default bge-small MIT,
+  `--multilingual` preset Apache-2.0), all permissive, each verified against the
+  installed venv metadata. README License section + `requirements.txt` point to it;
+  a drift-guard test ties the inventory to `requirements.txt` (a new dep un-listed
+  reddens the suite). The `_vendor/` fallbacks are hippo's own MIT code, not third-party.
 - **SEC-10** `P1/S` — `SECURITY.md`: private disclosure channel, supported
   versions, pointer to SEC-2 lint / SEC-4 purge. *(also a COM launch-standard.)*
 - **SEC-11** `P2/M` — Supply chain: pin/lock deps (or hash-locked requirements) +

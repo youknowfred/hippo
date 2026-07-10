@@ -150,3 +150,9 @@ extracted from the ic-memobot/Memosa agent-memory tooling was written by this re
 and is relicensed here under the same MIT terms; no third-party code was ported with it.
 The pre-bootstrap fallbacks in `plugin/memory/_vendor/` (a BM25 scorer and a frontmatter
 parser) are likewise original implementations, MIT like the rest — not copied vendor code.
+
+hippo's own source ports no third-party code, but bootstrap installs a small set of
+permissively-licensed Python packages (fastembed, numpy, PyYAML, rank-bm25 and their
+dependencies) and downloads an embedding model. Those runtime components and their licenses
+(all Apache-2.0 / MIT / BSD-3-Clause / MPL-2.0 / HPND) are inventoried in
+[THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
