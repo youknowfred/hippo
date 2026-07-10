@@ -638,6 +638,16 @@ def set_invalid_after(path: str, ts: Optional[str] = None, *, dry_run: bool = Fa
         if changed and not dry_run:
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(new_text)
+            # SEC-6: this per-item, agent-gated frontmatter write is a reviewed edit —
+            # fold the file's new bytes into the trusted-corpus consent baseline so a
+            # retire/demote verdict never quarantines the very file it just judged
+            # (no-op on legacy fingerprint-less records / ungated corpora; never fatal).
+            try:
+                from .trust import record_authored_write
+
+                record_authored_write(os.path.dirname(path), path)
+            except Exception:
+                pass
     except Exception as exc:
         result["error"] = str(exc)
     return result

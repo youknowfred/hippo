@@ -104,42 +104,248 @@ def is_trusted(repo_root: Optional[str]) -> bool:
     return _corpus_key(repo_root) in _load_registry()
 
 
-def mark_trusted(repo_root: str) -> bool:
+def _load_registry_doc() -> dict:
+    """The WHOLE registry document (not just the trusted sub-map); ``{}`` on any problem.
+
+    Writers re-read through this so they never drop sibling keys a future schema adds;
+    a corrupt/non-dict file degrades to a fresh document.
+    """
+    path = trust_registry_path()
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            loaded = json.load(fh)
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_registry_doc(doc: dict) -> bool:
+    path = trust_registry_path()
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, indent=2, sort_keys=True)
+    return True
+
+
+def mark_trusted(
+    repo_root: str, memory_dir: Optional[str] = None, origin: Optional[str] = None
+) -> bool:
     """Record ``repo_root`` as trusted in the machine-local registry. Idempotent.
 
     Called by ``/hippo:init`` when a corpus is created (or init is re-run against it) and by
-    ``/hippo:doctor`` after the user reviews the count+sample and consents. Creates the
+    ``/hippo:doctor`` after the user reviews the consent sample and consents. Creates the
     ``~/.claude`` dir + registry file if absent, preserving any existing entries. Returns
     True on a successful write (or an already-present no-op), False if the write failed —
     the caller surfaces a failure rather than pretending the corpus is now trusted.
+
+    SEC-6: pass ``memory_dir`` to stamp the consent-time CONTENT FINGERPRINT (per-file
+    sha256 over the corpus's memory files) into the record — the baseline that makes
+    "trusted upstream silently ships new injected memories" detectable: recall withholds
+    files whose bytes drift from this baseline until the user re-reviews the delta and
+    re-consents (which is just calling this again). Without ``memory_dir`` the record is
+    a LEGACY (fingerprint-less) entry — still trusted, no quarantine possible; the doctor
+    check names the upgrade path.
+
+    SEC-7: ``origin`` records HOW trust was established — ``"init"`` (the user created /
+    owns this corpus) vs ``"review"`` (a foreign/cloned corpus consented after review).
+    ``None`` PRESERVES an existing entry's origin (so a drift re-consent on your own
+    project never relabels it foreign), and leaves it unset for a fresh entry.
     """
     try:
         key = _corpus_key(repo_root)
-        path = trust_registry_path()
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        # Re-read the WHOLE file (not just the trusted sub-map) so we never drop sibling keys
-        # a future schema adds; degrade a corrupt/non-dict file to a fresh document.
-        doc: dict = {}
-        if os.path.isfile(path):
-            try:
-                with open(path, "r", encoding="utf-8") as fh:
-                    loaded = json.load(fh)
-                if isinstance(loaded, dict):
-                    doc = loaded
-            except Exception:
-                doc = {}
+        doc = _load_registry_doc()
         trusted = doc.get("trusted")
         if not isinstance(trusted, dict):
             trusted = {}
         from datetime import datetime, timezone
 
-        trusted[key] = {"trusted_at": datetime.now(timezone.utc).isoformat()}
+        prior = trusted.get(key) if isinstance(trusted.get(key), dict) else {}
+        entry: dict = {"trusted_at": datetime.now(timezone.utc).isoformat()}
+        effective_origin = origin or prior.get("origin")
+        if effective_origin:
+            entry["origin"] = str(effective_origin)
+        if memory_dir is not None:
+            entry["fingerprint"] = corpus_fingerprint(memory_dir)
+        elif isinstance(prior.get("fingerprint"), dict):
+            # Re-marking without a memory_dir must never DROP an existing baseline —
+            # losing it would silently disable quarantine (fail-open), the exact
+            # degradation SEC-6 exists to prevent.
+            entry["fingerprint"] = prior["fingerprint"]
+        trusted[key] = entry
         doc["trusted"] = trusted
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(doc, fh, indent=2, sort_keys=True)
-        return True
+        return _write_registry_doc(doc)
     except Exception:
         return False
+
+
+# --------------------------------------------------------------------------- #
+# SEC-6: content fingerprint — re-consent on material change.
+#
+# ``mark_trusted`` was TOFU: path + timestamp, so a trusted public upstream could ship
+# injected memories in any later commit with zero re-consent. The consent record now
+# carries a per-file content baseline; recall QUARANTINES (skips, per file) any
+# project-tier memory whose bytes drift from it, the SessionStart producer +
+# ``/hippo:doctor`` surface the withheld delta LOUDLY (KPI-5 — never a silent
+# degradation), and re-consent (``mark_trusted`` with ``memory_dir``) refreshes the
+# baseline after the user reviews the changed descriptions (SEC-5's surface).
+#
+# AUTHORSHIP IS CONSENT: hippo's own per-item, agent-gated write primitives
+# (``new_memory.write_memory``, ``provenance.reverify_file``,
+# ``staleness.set_invalid_after``, ``links.add_typed_relation``) call
+# ``record_authored_write`` after writing, so your own reviewed writes never nag.
+# ``build_index``/hooks NEVER consent — an automatic pass re-baselining the corpus would
+# be the gate consenting to itself. Hand edits outside the primitives (your editor, a
+# skill's Edit-tool fold) quarantine until the next doctor re-consent — deliberate: an
+# out-of-band change is exactly what a review is for. Boundary stated honestly: the
+# baseline covers the memory files (the recall-injectable surface); MEMORY.md/CLAUDE.md
+# are the harness's folder-trust domain, and rendering a verdict on a drift-flagged file
+# consents its current bytes — the drift banner fires BEFORE any verdict, and a per-item
+# verdict on a file you have read IS a review.
+# --------------------------------------------------------------------------- #
+def file_sha256(path: str) -> Optional[str]:
+    """sha256 hex of ``path``'s bytes, or None when unreadable (callers fail CLOSED)."""
+    import hashlib
+
+    try:
+        with open(path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except Exception:
+        return None
+
+
+def corpus_fingerprint(memory_dir: str) -> dict:
+    """``{"files": {stem: sha256}, "digest": sha256}`` over the corpus's memory files.
+
+    The injectable surface: exactly what ``_iter_memory_files`` yields (memory files;
+    MEMORY.md/CONVENTIONS.md excluded — they are the harness/docs domain, not recall
+    input). ``digest`` is a single roll-up over the sorted (stem, sha) pairs for cheap
+    equality. Deterministic; never raises; empty maps on any problem.
+    """
+    import hashlib
+
+    files: dict = {}
+    try:
+        from .provenance import _iter_memory_files
+
+        for path in _iter_memory_files(memory_dir):
+            stem = os.path.splitext(os.path.basename(path))[0]
+            h = file_sha256(path)
+            if h is not None:
+                files[stem] = h
+    except Exception:
+        files = {}
+    digest = hashlib.sha256(
+        "\n".join(f"{k}:{v}" for k, v in sorted(files.items())).encode("utf-8")
+    ).hexdigest()
+    return {"files": files, "digest": digest}
+
+
+def _trusted_entry(repo_root: Optional[str]) -> Optional[dict]:
+    if not repo_root:
+        return None
+    entry = _load_registry().get(_corpus_key(repo_root))
+    return entry if isinstance(entry, dict) else None
+
+
+def consented_hashes(repo_root: Optional[str]) -> Optional[dict]:
+    """The consent-time ``{stem: sha256}`` baseline for ``repo_root``, or None.
+
+    None means "no quarantine applies": the CI bypass is set, the corpus is untrusted
+    (the boolean gate already denied everything), or the record is legacy /
+    fingerprint-less (pre-SEC-6 consent — the doctor check names the upgrade). Cheap by
+    contract (one small-JSON read), hot-path safe. Never raises.
+    """
+    try:
+        if trust_all():
+            return None
+        entry = _trusted_entry(repo_root)
+        if not entry:
+            return None
+        fp = entry.get("fingerprint")
+        files = fp.get("files") if isinstance(fp, dict) else None
+        return files if isinstance(files, dict) else None
+    except Exception:
+        return None
+
+
+def trust_origin(repo_root: Optional[str]) -> Optional[dict]:
+    """``{"origin", "trusted_at"}`` for a trusted corpus, or None (SEC-7's banner input).
+
+    ``origin`` is ``"init"`` / ``"review"`` / None (legacy record). Never raises.
+    """
+    try:
+        entry = _trusted_entry(repo_root)
+        if not entry:
+            return None
+        return {"origin": entry.get("origin"), "trusted_at": entry.get("trusted_at")}
+    except Exception:
+        return None
+
+
+def record_authored_write(
+    memory_dir: str, path: str, repo_root: Optional[str] = None
+) -> bool:
+    """Fold ONE just-written memory file into the consent baseline (authorship = consent).
+
+    Called by hippo's own per-item, agent-gated write primitives AFTER a successful
+    write — the write was reviewed (check-first / per-item verdict / explicit approval),
+    so its bytes join the baseline instead of quarantining the author's own work. No-op
+    (returns False) when: the gate is inapplicable (non-git), the corpus is untrusted,
+    the record has no fingerprint (legacy), or the file can't be hashed — this function
+    can EXTEND an existing consent, never create one. Never raises. NEVER call this from
+    an automatic pass (hooks, index builds): an unattended re-baseline would be the gate
+    consenting to itself.
+    """
+    try:
+        gate_root = gate_repo_root(memory_dir, repo_root)
+        if gate_root is None:
+            return False
+        key = _corpus_key(gate_root)
+        doc = _load_registry_doc()
+        trusted = doc.get("trusted")
+        if not isinstance(trusted, dict) or not isinstance(trusted.get(key), dict):
+            return False
+        entry = trusted[key]
+        fp = entry.get("fingerprint")
+        if not isinstance(fp, dict) or not isinstance(fp.get("files"), dict):
+            return False  # legacy record — quarantine is off, nothing to extend
+        h = file_sha256(path)
+        if h is None:
+            return False
+        import hashlib
+
+        stem = os.path.splitext(os.path.basename(path))[0]
+        fp["files"][stem] = h
+        fp["digest"] = hashlib.sha256(
+            "\n".join(f"{k}:{v}" for k, v in sorted(fp["files"].items())).encode("utf-8")
+        ).hexdigest()
+        return _write_registry_doc(doc)
+    except Exception:
+        return False
+
+
+def untrusted_changes(repo_root: Optional[str], memory_dir: str) -> dict:
+    """The drift delta between the corpus's live content and its consent baseline.
+
+    ``{"baseline": bool, "changed": [stems], "added": [stems]}`` — ``baseline`` False
+    means a legacy (fingerprint-less or absent) record: no quarantine is active and the
+    lists are empty (the doctor check names the re-consent upgrade). Removed files are
+    deliberately NOT drift: an absent file injects nothing. Read-only; never raises.
+    """
+    out = {"baseline": False, "changed": [], "added": []}
+    try:
+        base = consented_hashes(repo_root)
+        if base is None:
+            return out
+        out["baseline"] = True
+        live = corpus_fingerprint(memory_dir)["files"]
+        out["changed"] = sorted(k for k, v in live.items() if k in base and base[k] != v)
+        out["added"] = sorted(k for k in live if k not in base)
+        return out
+    except Exception:
+        return out
 
 
 def gate_repo_root(memory_dir: Optional[str], repo_root: Optional[str] = None) -> Optional[str]:
@@ -164,12 +370,13 @@ def gate_repo_root(memory_dir: Optional[str], repo_root: Optional[str] = None) -
 
 
 def corpus_sample(memory_dir: str, limit: int = 8) -> List[str]:
-    """Up to ``limit`` memory NAMES (not bodies) from ``memory_dir``, for the consent prompt.
+    """Up to ``limit`` memory NAMES from ``memory_dir`` — a cheap names-only listing.
 
-    The trust prompt must show WHAT would be injected before the user consents — the count
-    plus a representative sample of names. Names only: the whole point of the gate is that an
-    untrusted corpus's CONTENT never reaches the context, so the review shows filenames, not
-    the bodies a malicious corpus might weaponize. Never raises; [] on any problem.
+    SEC-5 note: this is NOT the consent surface anymore. Consent showed names while
+    injection used descriptions — the exact gap ROADMAP.v1 §4 flagged as SEC-1
+    under-delivering its own acceptance criterion — so the consent review now goes
+    through ``corpus_consent_sample`` (names + the descriptions that actually inject).
+    Kept for cheap non-consent displays. Never raises; [] on any problem.
     """
     try:
         from .provenance import _iter_memory_files
@@ -179,6 +386,46 @@ def corpus_sample(memory_dir: str, limit: int = 8) -> List[str]:
             for p in _iter_memory_files(memory_dir)
         ]
         return names[:limit]
+    except Exception:
+        return []
+
+
+def corpus_consent_sample(memory_dir: str, limit: int = 8) -> List[dict]:
+    """Up to ``limit`` ``{"name", "description"}`` rows — the consent-review surface (SEC-5).
+
+    These are THE strings that enter every prompt once this corpus is trusted: the
+    ``description`` frontmatter is what recall injects per hit, rendered through the SAME
+    flatten/truncate the injection layer applies (``recall.inject_description``) — the
+    user consents to exactly what they will get, closing SEC-1's consent/injection gap
+    (consent sampled NAMES; injection used DESCRIPTIONS). Descriptions only, never
+    bodies: bodies stay unreviewed-and-uninjected behind the gate; the description is
+    the injectable surface being authorized.
+
+    The consuming review (the doctor skill) must present these as QUOTED DATA with
+    explicit framing that they are untrusted until consented — a malicious description
+    is itself a prompt-injection attempt against the reviewing agent, which is exactly
+    why the sample is bounded, truncated, and demarcated rather than dumped raw. A file
+    with unparseable frontmatter rows as ``description: ""`` (it cannot inject a
+    description either). Never raises; [] on any problem.
+    """
+    try:
+        from .provenance import _iter_memory_files, parse_frontmatter
+        from .recall import inject_description  # lazy: recall top-imports this module
+
+        out: List[dict] = []
+        for path in _iter_memory_files(memory_dir):
+            if len(out) >= limit:
+                break
+            name = os.path.splitext(os.path.basename(path))[0]
+            desc = ""
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    fm = parse_frontmatter(fh.read())
+                desc = inject_description(str(fm.get("description") or ""))
+            except Exception:
+                desc = ""
+            out.append({"name": name, "description": desc})
+        return out
     except Exception:
         return []
 

@@ -510,6 +510,15 @@ def add_typed_relation(path: str, relation: str, target: str, *, dry_run: bool =
         if result["changed"] and not dry_run:
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(new_text)
+            # SEC-6: per-item, agent-gated typed-edge write — fold the new bytes into the
+            # trusted-corpus consent baseline (review = consent; no-op on legacy
+            # fingerprint-less records / ungated corpora; never fatal).
+            try:
+                from .trust import record_authored_write
+
+                record_authored_write(os.path.dirname(path), path)
+            except Exception:
+                pass
     except Exception as exc:
         result["error"] = str(exc)
     return result
