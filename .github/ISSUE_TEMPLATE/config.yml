@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/youknowfred/hippo/security/advisories/new
+    about: Please report vulnerabilities privately via a GitHub security advisory — never as a public issue. See SECURITY.md.
+  - name: Question / usage help
+    url: https://github.com/youknowfred/hippo/discussions
+    about: For "how do I…" questions, start a Discussion. Bug reports and feature requests use the forms above.
