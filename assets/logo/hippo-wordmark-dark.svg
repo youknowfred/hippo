@@ -1,0 +1,14 @@
+<svg viewBox="0 0 236 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="hippo wordmark">
+  <!-- Dark-background variant (ink #7FCDD4); see hippo-wordmark.svg for construction notes. -->
+  <g fill="none" stroke="#7FCDD4" stroke-width="13" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18 10 V66"/>
+    <path d="M18 46 C18 29 50 29 50 46 V66"/>
+    <path d="M74 27 V66"/>
+    <path d="M98 27 V88"/>
+    <circle cx="111" cy="46.5" r="13"/>
+    <path d="M145 27 V88"/>
+    <circle cx="158" cy="46.5" r="13"/>
+    <circle cx="205" cy="46.5" r="13"/>
+  </g>
+  <circle cx="74" cy="11" r="6.5" fill="#66C3CA"/>
+</svg>
