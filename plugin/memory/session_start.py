@@ -457,7 +457,7 @@ def pending_capture_producer(
     ``ctx`` (LIF-6) is unused.
     """
     try:
-        from .capture import default_pending_dir, pending_count
+        from .capture import default_pending_dir, pending_count, queue_snoozed
 
         pd = default_pending_dir(memory_dir)
         n = pending_count(pd)
@@ -465,6 +465,14 @@ def pending_capture_producer(
         return None
     if not n:
         return None
+    # CAP-6: an explicit ``--snooze`` quiets this nudge for a bounded number of sessions (parity
+    # with the reconsolidation snooze). The queue is untouched and the nudge re-nags once the
+    # snooze ages out — "nothing nags forever" now cuts BOTH ways (it also never nags-forever).
+    try:
+        if queue_snoozed(pd, memory_dir=memory_dir):
+            return None
+    except Exception:
+        pass
     trivial = 0
     try:
         from .capture import read_pending
@@ -476,7 +484,7 @@ def pending_capture_producer(
     return (
         f"📥 {n} pending capture(s){label} from a prior session await review — run "
         "/hippo:consolidate to draft them into memory (nothing is saved until you approve "
-        "each one, per item)."
+        "each one, per item), or `hippo capture --snooze` to defer this nudge."
     )
 
 
