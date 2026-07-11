@@ -415,6 +415,12 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
   (the production path PRF-3 skips). *(KPI-3.)*
 - **PRF-5** `P2/S` — Align the CI cold gate to **p95** (the KPI-3/doctor
   statistic), not p50.
+  **SHIPPED 2026-07-10**: `cold_latency` now emits `p95` (same nearest-rank formula as the
+  warm `latency`, samples 3→5 for tail resolution) alongside p50/max; the `--gate-cold` gate
+  is renamed `cold_p50_ms`→`cold_p95_ms` (constant `GATE_COLD_P50_MS`→`GATE_COLD_P95_MS`,
+  still 1500 ms) and asserts the p95 tail so a slow worst-case can't hide behind a healthy
+  median. All call sites/tests/CI/engine-README updated in lockstep; the 6 hermetic cold-gate
+  stubs carry p95, the pin test tracks the renamed constant.
 - **GRA-8** `P2/S` — Graph observability CLI (`--components/--degree/--export`);
   feed component count to the audit scorecard. *(exploratory, gate-free.)*
 
