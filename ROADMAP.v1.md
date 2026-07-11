@@ -381,6 +381,16 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **RET-10** `P2/S` — **Decide RET-5 salience default-on** using RET-8 evidence
   (run eval both ways; flip if no recall@10 regression; retire flag-only debt).
   *New decision, OQ-10.*
+  **SHIPPED 2026-07-10 — DECIDED OFF (OQ-10 resolved by owner).** Ran the RET-8
+  category-tagged eval both ways (dense) on the 50-memory golden corpus: salience-ON was
+  BYTE-IDENTICAL to salience-OFF (recall@10 1.0, mrr@10 0.9213, single-hop recall@10 1.0).
+  Root cause: salience's usage and staleness terms are zero on a corpus with no usage
+  telemetry and no staleness baselines, so the eval cannot exercise the feature — "no
+  recall@10 regression" is true but VACUOUS. Defaulting-on would ship an unmeasured
+  ranking change against the "Proven for strangers" theme, so the flag-only debt is retired
+  as a *documented decision to stay OFF* (opt-in via `HIPPO_SALIENCE=1` remains). Pinned by
+  `test_salience_enabled_default_off_and_env_parsing` + a decision note on
+  `recall._salience_enabled`. Revisit only with a salience-exercising eval or field evidence.
 - **PRF-4** `P1/S` — Dense-enabled latency sample on the 500-memory scale lane
   (the production path PRF-3 skips). *(KPI-3.)*
 - **PRF-5** `P2/S` — Align the CI cold gate to **p95** (the KPI-3/doctor
@@ -552,7 +562,8 @@ stranger. SEC-5 is the sharpest single blocker and is effort-S.
 
 **Items:** RET-8 `P1`, RET-9 `P1`, RET-11 `P1`, PRF-4 `P1`, CAP-6 `P1`, QUA-11
 `P1`, RET-10 `P2`, PRF-5 `P2`, GRA-8 `P2`, CAP-7 `P2`, INT-8 `P2`, CAP-9 `P3`.
-**Decision:** OQ-10 (RET-5 salience default-on iff RET-8 shows no regression).
+**Decision:** OQ-10 (RET-5 salience default-on iff RET-8 shows no regression) —
+**RESOLVED 2026-07-10: default OFF** (RET-8 eval could not exercise salience; see RET-10).
 **re-bootstrap:** **no** (no `requirements.txt` change expected).
 
 *Note the sequencing truth:* LIF-7 and CAP-5 gate on capture/consolidation being
@@ -621,9 +632,13 @@ explicit owner call, in the project's OQ style.
 - **OQ-9 (NEW — INT-6 cut).** Record the warm-daemon deferral and its rationale
   (§3) in `decisions`, so its absence reads as a decision (the project's own
   pattern for OSP-5/Windows).
-- **OQ-10 (NEW — RET-5 default).** RET-5 shipped "behind an env flag first" with
-  no scoped follow-up to turn it on. v1 is the forcing function: decide on RET-8
-  evidence.
+- **OQ-10 (RET-5 default) — RESOLVED 2026-07-10: default OFF.** RET-5 shipped "behind
+  an env flag first" with no scoped follow-up. Decided on RET-8 evidence via RET-10: the
+  category-tagged eval both ways on the golden corpus was byte-identical (salience's
+  usage/staleness terms are zero without usage telemetry or staleness baselines), so
+  "no regression" was vacuous and default-on would be an unmeasured ranking change. Owner
+  resolved OFF; `HIPPO_SALIENCE=1` opt-in stays. Revisit only with a salience-exercising
+  eval or field evidence.
 - **Invariant tension — TEA-5 committed usage on public repos (SEC-14).** TEA-5
   deliberately excepts the "derived caches stay gitignored" invariant so
   teammates can union usage. On a *public* remote that publishes per-user recall
