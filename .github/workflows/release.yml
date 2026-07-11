@@ -1,9 +1,13 @@
-# Release — version-sync gate at TAG time (DOC-7).
+# Release — version-sync gate at TAG time (DOC-7) + GitHub Release publication (QUA-12).
 #
 # Fires only on a version tag push (post-merge), NOT on PRs, so it never adds a required PR
-# check. It enforces the strict four-way match the PR-time pytest gate can't (the CHANGELOG
-# entry is guaranteed present by the time a release is tagged): the tag, plugin.json,
-# marketplace.json, and the newest CHANGELOG heading must all name the same version.
+# check. `version-sync` enforces the strict four-way match the PR-time pytest gate can't (the
+# tag, plugin.json, marketplace.json, and the newest CHANGELOG heading must all name the same
+# version). Once that passes, `github-release` publishes a GitHub Release whose body is the
+# newest CHANGELOG section, extracted verbatim.
+#
+# Actions are pinned by commit SHA (supply-chain hardening, QUA-12); dependabot
+# (.github/dependabot.yml) keeps the pins current.
 
 name: Release
 
@@ -16,7 +20,7 @@ jobs:
     name: version sync (tag == manifests == CHANGELOG)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Verify tag matches both manifests and the CHANGELOG
         run: |
           python - <<'PY'
@@ -47,3 +51,39 @@ jobs:
               sys.exit(1)
           print(f"version sync OK: tag {tag}; plugin.json, marketplace.json, and CHANGELOG all at {ver}")
           PY
+
+  github-release:
+    name: publish GitHub Release (CHANGELOG notes)
+    needs: version-sync
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # required to create the Release
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Extract this version's CHANGELOG section
+        run: |
+          python - <<'PY' > release-notes.md
+          import os, re
+
+          tag = os.environ["GITHUB_REF_NAME"]
+          ver = tag[1:] if tag.startswith("v") else tag
+          out, capturing = [], False
+          for ln in open("CHANGELOG.md", encoding="utf-8").read().splitlines():
+              m = re.match(r"^##\s+v(\d+\.\d+\.\d+)\b", ln)
+              # Stop at the next version heading, OR the trailing "## Earlier releases" prose
+              # (so tagging the oldest itemized entry doesn't over-capture into that section).
+              if capturing and (m or re.match(r"^##\s+Earlier\b", ln)):
+                  break
+              if m:
+                  if m.group(1) == ver:
+                      capturing = True
+                      continue                 # skip the heading itself
+              if capturing:
+                  out.append(ln)
+          notes = "\n".join(out).strip() or f"Release {tag}."
+          print(notes)
+          PY
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md --verify-tag

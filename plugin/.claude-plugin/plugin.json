@@ -1,9 +1,10 @@
 {
   "name": "hippo",
-  "description": "Local, git-native agent memory for Claude Code — markdown-in-git corpus + offline dense+BM25 recall, staleness/provenance tracking, reconsolidation, and self-audit.",
+  "description": "Local, git-native memory for Claude Code — your repo is the store, recall is $0/prompt (no LLM, no network), staleness is git-drift (the cited code moved), and team memory ships through review.",
   "version": "1.8.0",
   "author": {
-    "name": "Fred"
+    "name": "youknowfred",
+    "url": "https://github.com/youknowfred"
   },
   "homepage": "https://github.com/youknowfred/hippo",
   "repository": "https://github.com/youknowfred/hippo",

@@ -22,8 +22,23 @@
 #               output, and build/refresh time. NIGHTLY only (schedule trigger). `scale`-marked
 #               so it never runs on the hermetic or dense lanes.
 #
-# Mark hermetic ×4 + dense + shellcheck + secret-scan required on PRs to main in
-# branch-protection settings.
+# Branch protection for `main` (QUA-12 — codified here so the intended ruleset is versioned,
+# not just a memory in the GitHub UI). Apply on `main` once the repo can enforce it (a public
+# repo, or a plan with branch protection — the free private plan returns 403 on the API, so the
+# maintainer self-merges until then):
+#   - Require a pull request before merging; require review from Code Owners (.github/CODEOWNERS).
+#   - Require these status checks to pass (use each job's FULL reported name — the string
+#     GitHub shows is the evaluated `name:` field, not the job id):
+#         hermetic (ubuntu-latest, py3.10) · hermetic (ubuntu-latest, py3.12)
+#         hermetic (macos-latest, py3.10)  · hermetic (macos-latest, py3.12)
+#         dense (cached model + eval_recall CLI)
+#         shellcheck (hooks + launcher)
+#         secret-scan (SEC-8 — shipped packs + repo)
+#     (the `resolution` and nightly `scale` lanes are intentionally NOT required.)
+#   - Require branches to be up to date before merging; require linear history.
+#   - Do not allow force pushes or deletions of `main`.
+# All GitHub Actions below are pinned by commit SHA (supply-chain hardening); dependabot
+# (.github/dependabot.yml) keeps the pins current.
 
 name: CI
 
@@ -47,8 +62,8 @@ jobs:
     env:
       HIPPO_DISABLE_DENSE: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -64,8 +79,8 @@ jobs:
     env:
       FASTEMBED_CACHE_PATH: /home/runner/.cache/fastembed-ci
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
         with:
           python-version: "3.12"
           cache: pip
@@ -73,7 +88,7 @@ jobs:
       - name: Install deps
         run: python -m pip install -r plugin/requirements.txt pytest pytest-timeout hypothesis
       - name: Restore fastembed model cache
-        uses: actions/cache@v4
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
           path: /home/runner/.cache/fastembed-ci
           key: fastembed-bge-small-en-v1.5-v1
@@ -102,7 +117,7 @@ jobs:
     name: shellcheck (hooks + launcher)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: shellcheck hook scripts and bin/hippo
         run: shellcheck plugin/hooks/*.sh plugin/bin/hippo
 
@@ -110,8 +125,8 @@ jobs:
     name: secret-scan (SEC-8 — shipped packs + repo)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
         with:
           python-version: "3.12"
       # No deps: secrets.py is pure-stdlib (re + a tiny entropy heuristic). Scans the TRACKED
@@ -135,8 +150,8 @@ jobs:
     env:
       HIPPO_DISABLE_DENSE: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -164,8 +179,8 @@ jobs:
     env:
       HIPPO_DISABLE_DENSE: "1"  # BM25-only for speed — the scale lane asserts lexical-path envelope
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
         with:
           python-version: "3.12"
           cache: pip

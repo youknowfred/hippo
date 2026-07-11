@@ -1,0 +1,76 @@
+name: Bug report
+description: Something in hippo isn't working — recall, capture, staleness, a skill, or the install.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. The three fields below (platform, corpus size, recall backend) are the
+        ones we almost always need to reproduce a recall or install problem — please fill them in.
+        For a **security vulnerability**, do NOT open an issue: see
+        [SECURITY.md](https://github.com/youknowfred/hippo/blob/main/SECURITY.md).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you get instead?
+      placeholder: "Ran /hippo:recall … and it returned nothing / the wrong memory / an error."
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The commands or actions that trigger it, ideally from a clean state.
+      placeholder: |
+        1. /hippo:init
+        2. remember this: …
+        3. /hippo:recall "…"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS
+        - Linux
+        - Windows (unsupported — see the support matrix)
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Recall backend
+      description: BM25-only means bootstrap hasn't run (or the dense model cache is cold). `/hippo:doctor` reports this.
+      options:
+        - "dense + BM25 (bootstrapped)"
+        - "BM25-only (pre-bootstrap / dense disabled)"
+        - "not sure — /hippo:doctor didn't say"
+    validations:
+      required: true
+  - type: input
+    id: corpus-size
+    attributes:
+      label: Corpus size
+      description: Roughly how many memory files under .claude/memory/ (a git-tracked count is fine).
+      placeholder: "e.g. ~40 memories"
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: /hippo:doctor output
+      description: Paste the doctor report if the problem is install/recall-related — it's the one-stop diagnostic. Scrub anything sensitive.
+      render: text
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: hippo version
+      description: From plugin.json, or the /plugin listing.
+      placeholder: "e.g. 1.8.0"
+    validations:
+      required: false

@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest a capability or improvement for hippo.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        hippo's engine is intentionally scoped (local, git-native, offline, review-gated, no LLM on
+        the hot path). Requests that fit that identity are most likely to land — see the `non_goals`
+        in [ROADMAP.yaml](https://github.com/youknowfred/hippo/blob/main/ROADMAP.yaml) for what's
+        deliberately out of scope (cloud/server, Windows, autonomous bulk writes, LLM on the hot path).
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: The use case or pain point, not just the proposed solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What you'd like hippo to do. Sketches/alternatives welcome.
+    validations:
+      required: false
+  - type: checkboxes
+    id: fit
+    attributes:
+      label: Fit with hippo's identity
+      options:
+        - label: This keeps recall local, offline, and free of an LLM on the hot path.
+        - label: This keeps corpus writes human-reviewed (no autonomous bulk writes).
