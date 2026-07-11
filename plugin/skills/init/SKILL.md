@@ -98,7 +98,8 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
 
    > **HARD RULE — user-supplied content ONLY.** Never infer, synthesize, guess, or "helpfully"
    > draft the user's role from the repo, the git history, or the conversation. Every word in
-   > `user_role.md` must be text the user actually gave you. If they decline the offer, or
+   > `user_role.md` must be text the user gave you **in answer to these questions** — not quoted
+   > from earlier chat, not paraphrased from what you've observed. If they decline the offer, or
    > `AskUserQuestion` isn't available, do NOT write the file — fall back to the step-2 reminder
    > to edit the template themselves. A fabricated user identity is worse than an unfilled one.
 2b. **Stamp the corpus format marker** — `.claude/memory/.format`, committed WITH the corpus
