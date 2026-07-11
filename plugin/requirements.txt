@@ -42,7 +42,7 @@
 # a model revision via the Hugging Face cache (a specific commit of the model repo);
 # absent a pin, the pinned repo's current revision is fetched. See THIRD_PARTY_NOTICES
 # and build_index.py (_HF_SOURCE_REPO_BY_MODEL) for the repos and cache paths.
-fastembed>=0.4,<0.8
+fastembed>=0.8.0,<0.9
 numpy>=1.26,<3
 PyYAML>=6.0.3,<7.0
 rank-bm25>=0.2.2,<0.3
