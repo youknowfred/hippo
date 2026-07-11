@@ -375,6 +375,16 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **RET-9** `P1/M` — Per-corpus dense-floor **sanity check** (doctor/audit runs
   the abstention fixture against the live corpus, warns on distribution overlap);
   stretch: auto-derive from the RET-7 set.
+  **SHIPPED 2026-07-10**: `doctor.check_abstention_floor_sanity` runs the corpus's OWN
+  off-topic fixture (`.audit-fixtures/recall_abstention_set.yaml`, /hippo:audit-written)
+  against the live index and reports the EMPIRICAL per-corpus leak — how many off-topic
+  queries returned a result instead of abstaining. Warns (`abstained/n`, backend-labelled)
+  when the live rate drops below `GATE_ABSTENTION`, with a backend-specific fix (bm25-only
+  → bootstrap/RET-11; dense → raise `HIPPO_DENSE_FLOOR`). Bounded (≤25 queries), read-only,
+  deterministic, skips cleanly with no fixture/index. Distinct from RET-11's structural
+  bm25-only statement — this fires on the dense path too when a stranger's corpus has a
+  too-permissive floor. Stretch (auto-derive from RET-7) deferred; the audit skill already
+  drafts the fixture (SIG-6).
 - **RET-11** `P1/M` — BM25-only **abstention floor** (normalized-score / IDF-mass
   threshold) *or* an explicit doctor/README statement that abstention is
   dense-gated + a warm-the-model nudge. *(KPI-1.)*

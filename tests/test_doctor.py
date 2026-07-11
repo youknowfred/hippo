@@ -307,6 +307,53 @@ def test_abstention_cold_start_ok_when_no_index(repo, memory_dir, tmp_path, monk
     assert r["status"] == "ok" and "no index built yet" in r["message"]
 
 
+def _seed_two_topic_corpus(memory_dir, idx):
+    _seed(memory_dir)
+    write_file(memory_dir, "a.md", _mem("apple", "apple orchard harvest pruning"))
+    write_file(memory_dir, "b.md", _mem("banana", "banana bread ripening recipe"))
+    B.build_index(memory_dir, idx)
+
+
+def test_abstention_floor_sanity_ok_when_no_fixture(repo, memory_dir, tmp_path, monkeypatch):
+    # RET-9: no corpus-local off-topic fixture → skip cleanly (nothing to measure).
+    idx = str(tmp_path / ".memory-index")
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _seed_two_topic_corpus(memory_dir, idx)
+    r = D.check_abstention_floor_sanity(_ctx(memory_dir, repo))
+    assert r["status"] == "ok" and "no corpus-local off-topic fixture" in r["message"]
+
+
+def test_abstention_floor_sanity_warns_when_offtopic_leaks(repo, memory_dir, tmp_path, monkeypatch):
+    # RET-9: an off-topic fixture whose queries SHARE tokens with the corpus leaks (they return
+    # results instead of abstaining) → low abstention rate → warn with the per-corpus count.
+    idx = str(tmp_path / ".memory-index")
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _seed_two_topic_corpus(memory_dir, idx)
+    write_file(
+        memory_dir, ".audit-fixtures/recall_abstention_set.yaml",
+        '- query: "apple"\n- query: "banana"\n- query: "orchard"\n- query: "recipe"\n',
+    )
+    r = D.check_abstention_floor_sanity(_ctx(memory_dir, repo))
+    assert r["status"] == "warn"
+    assert "off-topic fixture queries" in r["message"] and "bm25-only" in r["message"]
+
+
+def test_abstention_floor_sanity_ok_when_corpus_abstains(repo, memory_dir, tmp_path, monkeypatch):
+    # RET-9: genuinely off-topic queries (no token overlap) abstain → healthy rate → ok.
+    idx = str(tmp_path / ".memory-index")
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _seed_two_topic_corpus(memory_dir, idx)
+    write_file(
+        memory_dir, ".audit-fixtures/recall_abstention_set.yaml",
+        '- query: "xylophone zebra"\n- query: "quokka umbrella"\n- query: "tectonic glacier"\n',
+    )
+    r = D.check_abstention_floor_sanity(_ctx(memory_dir, repo))
+    assert r["status"] == "ok" and "correctly abstained" in r["message"]
+
+
 def test_format_version_ok_when_current(repo, memory_dir, tmp_path, monkeypatch):
     from memory.provenance import write_corpus_format
 
