@@ -2816,6 +2816,11 @@ def test_recall_rebuilds_and_serves_results_on_schema_stale_index(tmp_path, monk
 # of the three priors, all bm25-only.
 # --------------------------------------------------------------------------- #
 def test_salience_enabled_default_off_and_env_parsing(monkeypatch):
+    # RET-10 / OQ-10 (resolved 2026-07-10, owner): salience default OFF is a DECISION, not a
+    # placeholder — the RET-8 eval could not exercise salience on the golden corpus (no usage
+    # telemetry / no staleness baselines → identical recall@10), so defaulting-on would be an
+    # unmeasured ranking change. This assertion is the pin that keeps the decided default from
+    # silently flipping in a future refactor.
     monkeypatch.delenv("HIPPO_SALIENCE", raising=False)
     assert R._salience_enabled() is False
     for truthy in ("1", "true", "yes", "on"):

@@ -33,6 +33,13 @@ _CLUSTER_SIZE = 45  # >40 memories share the cluster token -> bounded-output str
 _WARM_P95_MS = E.GATE_P95_MS  # 300.0 — the repo's stated warm p95 budget (eval_recall)
 _BUILD_BUDGET_S = 15.0  # BM25-only build; matches the north-star refresh envelope (15s), far above actual
 _REFRESH_BUDGET_S = 8.0  # an incremental refresh after touching ONE memory (mostly hash re-check)
+# PRF-4: the DENSE (production) warm-p95 envelope at scale — the path the bm25-only lane above
+# skips. Dense recall pays a per-query ONNX embed (~200ms) the lexical path doesn't, so its warm
+# p95 sits ABOVE the bm25 budget: measured ~407ms locally at 500 memories (p50 ~215ms). This
+# budget is generous headroom over that — CPU CI runners + ONNX jitter run slower than a dev
+# laptop — so it catches a gross regression (a heavier model, a lost incremental-embed cache)
+# without flaking. It documents that dense@scale is a DIFFERENT, higher envelope than PRF-3's 300ms.
+_DENSE_WARM_P95_MS = 900.0
 
 _WORDS = (
     "cache invalidation retry backoff idempotent migration schema index shard replica "
@@ -84,6 +91,44 @@ def test_recall_latency_under_warm_gate_at_scale(scale_index):
     assert lat["p95"] < _WARM_P95_MS, (
         f"PRF-3 recall latency regressed: warm p95 {lat['p95']:.1f}ms >= budget {_WARM_P95_MS}ms "
         f"at {_N} memories"
+    )
+
+
+@pytest.fixture()
+def scale_index_dense(tmp_path, monkeypatch):
+    """PRF-4: the PRODUCTION dense+bm25 path at 500 memories — the envelope PRF-3's bm25-only
+    ``scale_index`` fixture deliberately skips. Builds a REAL dense index (500 fastembed embeds,
+    tens of seconds), so it SKIPS cleanly wherever the model is unavailable (no fastembed, a cold
+    cache, or ``HIPPO_DISABLE_DENSE``) rather than silently degrading to the bm25 number this lane
+    already measures. Its green nightly/dense CI run is a separate wiring step (the nightly scale
+    job is bm25-only today); this pins the test + budget and is verified by a local ``-m scale`` run."""
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    pytest.importorskip("fastembed")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _build_scale_corpus(md)
+    manifest = B.build_index(md, idx)
+    assert manifest["count"] == _N
+    if not manifest.get("dense_ready"):
+        pytest.skip("dense model unavailable (cold fastembed cache) — PRF-4 needs the real model")
+    return md, idx, B.load_index(idx)
+
+
+@pytest.mark.timeout(900)  # 500 real fastembed embeds at build — heavier than the bm25 lane
+def test_dense_recall_latency_under_warm_gate_at_scale(scale_index_dense):
+    """PRF-4: warm p95 of the DENSE production path at 500 memories — the number PRF-3's
+    bm25-only lane cannot see. Dense latency is dominated by the per-query ONNX embed (near
+    corpus-size-independent), so this pins the real hot-path envelope, which sits ABOVE the
+    lexical 300ms budget."""
+    _md, _idx, index = scale_index_dense
+    assert index.dense_ready, "PRF-4 must measure the dense path, not a bm25-only fallback"
+    rng = random.Random(99)
+    queries = [_sentence(rng, 4, 8) for _ in range(30)] + [_CLUSTER_TOKEN]
+    lat = E.latency(index, queries, k=10)
+    assert lat["n"] > 0
+    assert lat["p95"] < _DENSE_WARM_P95_MS, (
+        f"PRF-4 dense recall latency regressed: warm p95 {lat['p95']:.1f}ms >= budget "
+        f"{_DENSE_WARM_P95_MS}ms at {_N} memories (production dense+bm25 path; ~407ms baseline)"
     )
 
 

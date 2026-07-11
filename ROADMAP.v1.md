@@ -198,9 +198,9 @@ Each gate was re-checked against real code. Summary first, evidence below.
 ### CUT for v1
 
 - **INT-6 — warm recall daemon.** The very evidence its gate hinges on argues
-  *against* it: the cold-path p50 is **already gated at 1500ms**
-  (`GATE_COLD_P50_MS=1500`, `eval_recall.py:80`; enforced on the dense CI lane
-  via `--gate-cold`) and doctor enforces the same p95 budget
+  *against* it: the cold-path p95 is **already gated at 1500ms**
+  (`GATE_COLD_P95_MS=1500`, `eval_recall.py:98`; enforced on the dense CI lane
+  via `--gate-cold` — PRF-5 moved this gate p50→p95) and doctor enforces the same p95 budget
   (`doctor.py:836-878`). Green CI ⇒ **KPI-3's <1500ms is already met without a
   daemon.** The daemon only chases the aspirational <300ms half of KPI-3 (a
   nice-to-have), while INT-2's MCP server is *already* a long-lived process with
@@ -375,16 +375,62 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **RET-9** `P1/M` — Per-corpus dense-floor **sanity check** (doctor/audit runs
   the abstention fixture against the live corpus, warns on distribution overlap);
   stretch: auto-derive from the RET-7 set.
+  **SHIPPED 2026-07-10**: `doctor.check_abstention_floor_sanity` runs the corpus's OWN
+  off-topic fixture (`.audit-fixtures/recall_abstention_set.yaml`, /hippo:audit-written)
+  against the live index and reports the EMPIRICAL per-corpus leak — how many off-topic
+  queries returned a result instead of abstaining. Warns (`abstained/n`, backend-labelled)
+  when the live rate drops below `GATE_ABSTENTION`, with a backend-specific fix (bm25-only
+  → bootstrap/RET-11; dense → raise `HIPPO_DENSE_FLOOR`). Bounded (≤25 queries), read-only,
+  deterministic, skips cleanly with no fixture/index. Distinct from RET-11's structural
+  bm25-only statement — this fires on the dense path too when a stranger's corpus has a
+  too-permissive floor. Stretch (auto-derive from RET-7) deferred; the audit skill already
+  drafts the fixture (SIG-6).
 - **RET-11** `P1/M` — BM25-only **abstention floor** (normalized-score / IDF-mass
   threshold) *or* an explicit doctor/README statement that abstention is
   dense-gated + a warm-the-model nudge. *(KPI-1.)*
+  **SHIPPED 2026-07-10 — the documented-alternative arm, on evidence.** Designed and
+  empirically REJECTED a BM25-only floor first: on the golden fixture the off-topic and
+  on-topic classes overlap in every BM25-observable signal — summed matched-token IDF mass
+  (off-topic 4.19 vs on-topic *minimum* 3.67), matched-token count (real queries match as
+  few as 1 token), single-token IDF all interleave — so no lexical threshold rejects
+  off-topic queries without dropping real single-keyword hits (only the dense semantic floor
+  separates them). Shipped instead: `doctor.check_abstention_cold_start` (WARNs when serving
+  BM25-only that abstention is dense-gated + nudges `/hippo:bootstrap`), a README
+  Troubleshooting entry, and the finding recorded on `eval_recall.abstention_rate` so no one
+  re-attempts a BM25 floor blind. Abstention is dense-gated *by measurement*, not assumption.
 - **RET-10** `P2/S` — **Decide RET-5 salience default-on** using RET-8 evidence
   (run eval both ways; flip if no recall@10 regression; retire flag-only debt).
   *New decision, OQ-10.*
+  **SHIPPED 2026-07-10 — DECIDED OFF (OQ-10 resolved by owner).** Ran the RET-8
+  category-tagged eval both ways (dense) on the 50-memory golden corpus: salience-ON was
+  BYTE-IDENTICAL to salience-OFF (recall@10 1.0, mrr@10 0.9213, single-hop recall@10 1.0).
+  Root cause: salience's usage and staleness terms are zero on a corpus with no usage
+  telemetry and no staleness baselines, so the eval cannot exercise the feature — "no
+  recall@10 regression" is true but VACUOUS. Defaulting-on would ship an unmeasured
+  ranking change against the "Proven for strangers" theme, so the flag-only debt is retired
+  as a *documented decision to stay OFF* (opt-in via `HIPPO_SALIENCE=1` remains). Pinned by
+  `test_salience_enabled_default_off_and_env_parsing` + a decision note on
+  `recall._salience_enabled`. Revisit only with a salience-exercising eval or field evidence.
 - **PRF-4** `P1/S` — Dense-enabled latency sample on the 500-memory scale lane
   (the production path PRF-3 skips). *(KPI-3.)*
+  **SHIPPED 2026-07-10 — with a finding.** `tests/test_scale.py` gained a
+  `scale_index_dense` fixture + `test_dense_recall_latency_under_warm_gate_at_scale` that
+  builds a REAL 500-memory dense index and measures the production dense+bm25 warm p95.
+  **Finding: dense@500 warm p95 ≈ 407ms (p50 ≈ 215ms) — ABOVE the bm25-only lane's 300ms
+  budget**, because dense pays a per-query ONNX embed (~200ms) the lexical path doesn't, so
+  PRF-3's 300ms number understated the real hot path. Budget set to 900ms (headroom for CPU
+  CI + ONNX jitter; trips a gross regression). Skip-safe (fastembed/dense-required),
+  `@pytest.mark.timeout(900)` for the heavy build, `@pytest.mark.scale` (deselected by
+  default). Green nightly/dense CI run is a separate wiring step — the nightly scale job is
+  bm25-only today, and CI is billing-blocked — so this is locally `-m scale`-verified.
 - **PRF-5** `P2/S` — Align the CI cold gate to **p95** (the KPI-3/doctor
   statistic), not p50.
+  **SHIPPED 2026-07-10**: `cold_latency` now emits `p95` (same nearest-rank formula as the
+  warm `latency`, samples 3→5 for tail resolution) alongside p50/max; the `--gate-cold` gate
+  is renamed `cold_p50_ms`→`cold_p95_ms` (constant `GATE_COLD_P50_MS`→`GATE_COLD_P95_MS`,
+  still 1500 ms) and asserts the p95 tail so a slow worst-case can't hide behind a healthy
+  median. All call sites/tests/CI/engine-README updated in lockstep; the 6 hermetic cold-gate
+  stubs carry p95, the pin test tracks the renamed constant.
 - **GRA-8** `P2/S` — Graph observability CLI (`--components/--degree/--export`);
   feed component count to the audit scorecard. *(exploratory, gate-free.)*
 
@@ -552,7 +598,8 @@ stranger. SEC-5 is the sharpest single blocker and is effort-S.
 
 **Items:** RET-8 `P1`, RET-9 `P1`, RET-11 `P1`, PRF-4 `P1`, CAP-6 `P1`, QUA-11
 `P1`, RET-10 `P2`, PRF-5 `P2`, GRA-8 `P2`, CAP-7 `P2`, INT-8 `P2`, CAP-9 `P3`.
-**Decision:** OQ-10 (RET-5 salience default-on iff RET-8 shows no regression).
+**Decision:** OQ-10 (RET-5 salience default-on iff RET-8 shows no regression) —
+**RESOLVED 2026-07-10: default OFF** (RET-8 eval could not exercise salience; see RET-10).
 **re-bootstrap:** **no** (no `requirements.txt` change expected).
 
 *Note the sequencing truth:* LIF-7 and CAP-5 gate on capture/consolidation being
@@ -621,9 +668,13 @@ explicit owner call, in the project's OQ style.
 - **OQ-9 (NEW — INT-6 cut).** Record the warm-daemon deferral and its rationale
   (§3) in `decisions`, so its absence reads as a decision (the project's own
   pattern for OSP-5/Windows).
-- **OQ-10 (NEW — RET-5 default).** RET-5 shipped "behind an env flag first" with
-  no scoped follow-up to turn it on. v1 is the forcing function: decide on RET-8
-  evidence.
+- **OQ-10 (RET-5 default) — RESOLVED 2026-07-10: default OFF.** RET-5 shipped "behind
+  an env flag first" with no scoped follow-up. Decided on RET-8 evidence via RET-10: the
+  category-tagged eval both ways on the golden corpus was byte-identical (salience's
+  usage/staleness terms are zero without usage telemetry or staleness baselines), so
+  "no regression" was vacuous and default-on would be an unmeasured ranking change. Owner
+  resolved OFF; `HIPPO_SALIENCE=1` opt-in stays. Revisit only with a salience-exercising
+  eval or field evidence.
 - **Invariant tension — TEA-5 committed usage on public repos (SEC-14).** TEA-5
   deliberately excepts the "derived caches stay gitignored" invariant so
   teammates can union usage. On a *public* remote that publishes per-user recall
