@@ -289,6 +289,16 @@ def abstention_rate(
     which is why ``GATE_ABSTENTION`` is a just-under-measured tripwire, not a "near 1.0"
     target. Shipped report-only by RET-1; PROMOTED to a tracked, fixture-gated entry by
     RET-8 (hard-set skip semantics — see ``evaluate``).
+
+    RET-11 (2026-07-10): a BM25-only abstention FLOOR was designed and empirically rejected,
+    not skipped. On the golden fixture the off-topic and on-topic classes overlap in EVERY
+    BM25-observable signal — summed matched-token IDF mass (off-topic 4.19 vs an on-topic
+    minimum of 3.67), matched-token count (real queries match as few as 1 token), and
+    single-token IDF all interleave — so no lexical threshold rejects the off-topic queries
+    without also dropping real single-keyword hits. Only the dense semantic floor separates
+    them. Abstention is therefore DENSE-GATED by decision, surfaced by
+    ``doctor.check_abstention_cold_start`` + a warm-the-model nudge, rather than faked with a
+    false-precision BM25 floor.
     ``n=0`` (rate 0.0) when the fixture is empty/missing -- a deliberately-absent input at
     THIS layer; ``evaluate`` decides skip-vs-fail from whether a path was provided.
     """

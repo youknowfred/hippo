@@ -274,6 +274,39 @@ def test_index_corruption_surfaces_truncated_manifest(repo, memory_dir, tmp_path
     assert r["status"] == "fail" and "corrupt" in r["message"]
 
 
+def test_abstention_cold_start_warns_on_bm25_only(repo, memory_dir, tmp_path, monkeypatch):
+    # RET-11: a bm25-only index (no warmed dense model) → abstention is degraded; the check
+    # must NAME the dense-gating and nudge /hippo:bootstrap.
+    idx = str(tmp_path / ".memory-index")
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _seed(memory_dir)
+    write_file(memory_dir, "a.md", _mem("a", "alpha"))
+    B.build_index(memory_dir, idx)
+    r = D.check_abstention_cold_start(_ctx(memory_dir, repo))
+    assert r["status"] == "warn"
+    assert "/hippo:bootstrap" in r["message"] and "dense-gated" in r["message"]
+
+
+def test_abstention_cold_start_ok_when_dense_ready(repo, memory_dir, tmp_path, monkeypatch):
+    idx = str(tmp_path / ".memory-index")
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
+    monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    _seed(memory_dir)
+    write_file(memory_dir, "a.md", _mem("a", "alpha"))
+    B.build_index(memory_dir, idx)
+    r = D.check_abstention_cold_start(_ctx(memory_dir, repo))
+    assert r["status"] == "ok" and "abstention floor active" in r["message"]
+
+
+def test_abstention_cold_start_ok_when_no_index(repo, memory_dir, tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_INDEX_DIR", str(tmp_path / ".memory-index"))  # never built
+    _seed(memory_dir)
+    r = D.check_abstention_cold_start(_ctx(memory_dir, repo))
+    assert r["status"] == "ok" and "no index built yet" in r["message"]
+
+
 def test_format_version_ok_when_current(repo, memory_dir, tmp_path, monkeypatch):
     from memory.provenance import write_corpus_format
 

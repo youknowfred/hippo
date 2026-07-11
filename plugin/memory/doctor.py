@@ -1165,6 +1165,47 @@ def check_recall_blind_spots(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"recall blind-spots check failed: {exc}."}
 
 
+def check_abstention_cold_start(ctx: DoctorContext) -> Dict[str, str]:
+    """RET-11: reliable ABSTENTION (returning nothing for an off-topic prompt) is DENSE-GATED.
+
+    Measured, not assumed. On the BM25-only cold-start path — before ``/hippo:bootstrap`` warms
+    the dense model, or whenever the model cache is cold — recall cannot reliably reject an
+    off-topic query: BM25 admits any prompt that shares even ONE keyword with a memory, and no
+    lexical threshold (summed IDF mass, matched-token count, or single-token IDF) separates that
+    coincidental overlap from a genuine single-keyword match without also dropping real hits —
+    on the golden fixture the two classes overlap in every BM25-observable signal (a real
+    "combining a keyword and an embedding ranking" query and an off-topic "classic French onion
+    soup" query each match exactly one distinctive token). Only the dense model's semantic floor
+    tells them apart. So rather than ship a false-precision BM25 floor, this check NAMES the
+    limitation when it is live and nudges the one real fix. Read-only; ``ok`` once dense is
+    serving or nothing is indexed yet; never raises.
+    """
+    try:
+        from .build_index import _load_manifest, default_index_dir
+
+        manifest = _load_manifest(default_index_dir(ctx.memory_dir))
+        if manifest is None:
+            return {
+                "status": "ok",
+                "message": "abstention: no index built yet — SessionStart will build it.",
+            }
+        if manifest.get("dense_ready"):
+            return {
+                "status": "ok",
+                "message": "abstention floor active — the dense model is warmed.",
+            }
+        return {
+            "status": "warn",
+            "message": "recall is serving BM25-only (dense model not warmed), so ABSTENTION is "
+            "degraded: an off-topic prompt that shares even one keyword with a memory can still "
+            "surface a weak match. Reliable rejection of off-topic queries is dense-gated — no "
+            "lexical threshold separates a coincidental keyword overlap from a real one (RET-11) "
+            "— so run /hippo:bootstrap to warm the dense model and enable the abstention floor.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"abstention cold-start check failed: {exc}."}
+
+
 def check_injection_precision(ctx: DoctorContext) -> Dict[str, str]:
     """SIG-4/KPI-2: the injection-precision proxy over the outcome ledger — MEASUREMENT ONLY.
 
@@ -1363,6 +1404,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("steering", check_steering),  # GOV-2: N pinned (pre-wires the mandatory MUTE count)
     ("hot_path_latency", check_hot_path_latency),
     ("recall_blind_spots", check_recall_blind_spots),
+    ("abstention_cold_start", check_abstention_cold_start),  # RET-11: abstention is dense-gated
     ("injection_precision", check_injection_precision),
     ("rules_conflicts", check_rules_conflicts),
     ("rules_plane_rot", check_rules_plane_rot),

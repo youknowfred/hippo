@@ -378,6 +378,16 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **RET-11** `P1/M` — BM25-only **abstention floor** (normalized-score / IDF-mass
   threshold) *or* an explicit doctor/README statement that abstention is
   dense-gated + a warm-the-model nudge. *(KPI-1.)*
+  **SHIPPED 2026-07-10 — the documented-alternative arm, on evidence.** Designed and
+  empirically REJECTED a BM25-only floor first: on the golden fixture the off-topic and
+  on-topic classes overlap in every BM25-observable signal — summed matched-token IDF mass
+  (off-topic 4.19 vs on-topic *minimum* 3.67), matched-token count (real queries match as
+  few as 1 token), single-token IDF all interleave — so no lexical threshold rejects
+  off-topic queries without dropping real single-keyword hits (only the dense semantic floor
+  separates them). Shipped instead: `doctor.check_abstention_cold_start` (WARNs when serving
+  BM25-only that abstention is dense-gated + nudges `/hippo:bootstrap`), a README
+  Troubleshooting entry, and the finding recorded on `eval_recall.abstention_rate` so no one
+  re-attempts a BM25 floor blind. Abstention is dense-gated *by measurement*, not assumption.
 - **RET-10** `P2/S` — **Decide RET-5 salience default-on** using RET-8 evidence
   (run eval both ways; flip if no recall@10 regression; retire flag-only debt).
   *New decision, OQ-10.*
