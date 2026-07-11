@@ -13,8 +13,10 @@ HIPPO_DISABLE_DENSE=1 bench/run.sh # force the model-free path (no ~130MB downlo
 The eval runs hippo's real recall engine over the shipped **50-memory golden dev corpus**
 ([`tests/golden_corpus/memory/`](../tests/golden_corpus/memory/)) and scores it against **18
 hand-written cross-vocabulary paraphrase queries** ([`hard_set.yaml`](../tests/golden_corpus/hard_set.yaml))
-— queries deliberately worded *unlike* the memory they should surface, so a hit means the ranker
-bridged a vocabulary gap, not matched a keyword it was handed.
+— queries deliberately worded *unlike* the memory they should surface, a realistic paraphrase gap.
+(BM25 alone still clears `recall@10 = 1.0` here via content-word overlap; the dense half shows up in
+the `MRR@10` ranking-quality gap, 0.912 → 0.9213 — a top-10 hit is easy, ranking it #1 is where
+dense earns its keep.)
 
 | Metric | BM25-only (no model) | Dense hybrid (bootstrapped) |
 |---|---|---|

@@ -34,6 +34,14 @@ git init -q && git config user.email demo@example.com && git config user.name de
 mkdir -p src "$HIPPO_MEMORY_DIR"
 printf '# Memory Index\n\n## Project\n' > "$HIPPO_MEMORY_DIR/MEMORY.md"
 
+# Pin both commit timestamps with an explicit ≥1s gap, but keep them RECENT — staleness scans
+# `git log --since=<window>` and compares commit times (%ct, 1s granularity) with a strict `>`,
+# so two commits in the same wall-clock second wouldn't register as drift (the race this avoids),
+# and a far-past date would fall outside the scan window entirely. c1 = now−120s, c2 = now−60s:
+# a deterministic 60s gap, both well inside the window.
+now="$(date +%s)"
+export GIT_AUTHOR_DATE="@$((now - 120)) +0000" GIT_COMMITTER_DATE="@$((now - 120)) +0000"
+
 cat > src/auth.py <<'PY'
 def rotate_session_token(user):
     """Rotate on every privilege change; 3 retries then hard-fail."""
@@ -60,6 +68,7 @@ def rotate_session_token(user):
     """Rotate on every privilege change; now 5 retries with exponential backoff."""
     return _issue(user, retries=5, backoff=True)
 PY
+export GIT_AUTHOR_DATE="@$((now - 60)) +0000" GIT_COMMITTER_DATE="@$((now - 60)) +0000"  # 60s after c1
 git add -A && git commit -qm "auth: bump retries 3->5, add backoff"
 
 echo "── 4. nothing about the memory changed — but hippo now flags it STALE ───────"

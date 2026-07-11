@@ -91,15 +91,16 @@ excellent. hippo makes a specific set of trades the others don't:
 | **Store** | your **git repo** (plain markdown, diffable) | local store of AI-compressed logs | markdown + a derived index (Milvus / SQLite-FTS) | client-managed files / an auto `MEMORY.md` | hosted service |
 | **Recall** | hybrid dense+BM25, on-demand, ranked | AI-compressed context, auto-injected | hybrid semantic + keyword | the file(s), always loaded | hosted semantic search |
 | **Hot-path cost** | **$0** — no LLM, tokens, or network per prompt | AI compression in the loop | local embeddings; write path may summarize | injected file = tokens | API calls to the service |
-| **Staleness** | semantic **git-drift** (did the *cited code* move) | recency-based | — | — | — |
+| **Staleness** | semantic **git-drift** (did the *cited code* move) | recency-based | recency / content-hash | — | — |
 | **Team memory** | ships through **code review**; a foreign corpus is quarantined until you trust it | auto-captured, no review gate | shared index, no review gate | per-project / per-machine | shared via account |
-| **Runs** | local, offline | local | local (memsearch needs Milvus) | in-model + local files | cloud |
+| **Runs** | local, offline | local | local (memsearch needs Milvus) | in-model + local files | cloud (self-host on paid tiers) |
 
-Where hippo genuinely stands alone is the bottom three rows: **git *is* the store** (the history
-is the audit/review/revert trail, not a byproduct), **staleness is semantic** (no other tool checks
-whether the *code a memory cites* has moved — everyone else decays by calendar age or not at all),
-and **every team memory lands through review** rather than an autonomous write. The top rows —
-markdown, hybrid recall, local — are table stakes now; these are not.
+Where hippo genuinely stands alone is two rows nothing else reproduces: **staleness is semantic** —
+no other tool checks whether the *code a memory cites* has moved (they decay by calendar age, by
+content hash, or not at all) — and **every team memory lands through review** rather than an
+autonomous write. Underpinning both, **the whole store is plain, diffable git** (the history is the
+audit/review/revert trail — not a byproduct of, or a sidecar to, a separate database). The top rows
+— markdown, hybrid recall, local — are table stakes now; these are not.
 
 **See the staleness difference in 5 seconds:** [`demo/git_drift.sh`](demo/git_drift.sh) builds a
 throwaway repo, writes a memory that cites a function, edits that function, and shows hippo flag the
@@ -121,7 +122,7 @@ ranking — hippo calls no model API to retrieve, so a recall spends **zero toke
 leaves your machine**. The one online step in hippo's entire lifecycle is `/hippo:bootstrap`
 downloading the embedding model once; after that, recall is fully offline. For a privacy- or
 cost-sensitive team, "memory that costs nothing per prompt and never phones home" is a hard
-requirement a hosted or LLM-in-the-loop memory can't meet.
+requirement a hosted-by-default or LLM-in-the-loop memory can't meet without extra self-hosting work.
 
 ## Commands
 
@@ -222,11 +223,12 @@ Because hippo is the **ranking + hygiene + review layer on top of it**, not a co
 hippo **composes** with native memory — it does not replace or fork it.
 
 - **What native memory does.** Claude Code always-loads a per-project memory location
-  (`~/.claude/projects/<encoded>/memory`) and, with Auto Memory, auto-writes a `MEMORY.md` there.
-  It's per-machine, opaque, and unconditionally injected — great for a small always-on note, but
-  **always-loaded (not ranked)**, **not reviewable in git**, **auto-written (no approval gate)**,
-  and **not shared with teammates**. As the note grows, "inject all of it every prompt" stops
-  scaling and nothing tells you when an auto-captured fact went stale.
+  (`~/.claude/projects/<encoded>/memory`) and, with Auto Memory, auto-writes a `MEMORY.md` there at
+  session start (capped, with detail offloaded to per-topic files). It's per-machine, opaque, and
+  unconditionally injected — great for a small always-on note, but the always-loaded index is
+  **static and unranked** (it can't pick the *right* memory for your query the way on-demand recall
+  does), **not reviewable in git**, **auto-written (no approval gate)**, and **not shared with
+  teammates** — and nothing tells you when an auto-captured fact went stale.
 - **What hippo adds — the layer on top.** A **git-native, teammate-reviewable** corpus with
   **hybrid dense+BM25 recall** (the *right* memories on demand, not everything every prompt),
   **semantic git-drift staleness**, a typed **link graph**, **reconsolidation**, and an

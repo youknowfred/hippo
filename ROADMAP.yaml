@@ -2274,9 +2274,9 @@ shipping_products_landscape:
       pressures: [markdown-git-friendly, hybrid-recall, local-embeddings]
       does_not_pressure: [git-native-store, git-drift-staleness, review-gated-writes, no-vector-db-infra]
     - name: "memweave"
-      note: "markdown source + SQLite FTS5 (no vector DB), zero-infra, embedding cache"
-      pressures: [markdown-source, no-vector-db-infra, local]
-      does_not_pressure: [git-drift-staleness, review-gated-writes, dense-hybrid-recall]
+      note: "markdown source + SQLite (FTS5 lexical + sqlite-vec dense, embedded — no separate vector DB server), zero-infra"
+      pressures: [markdown-source, no-vector-db-infra, local, dense-hybrid-recall]
+      does_not_pressure: [git-drift-staleness, review-gated-writes]
     - name: "supermemory"
       note: "hosted memory API / real-time learning service"
       pressures: [cross-session-recall]

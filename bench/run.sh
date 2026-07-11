@@ -9,11 +9,14 @@
 #
 # By default this uses the dense model if it has been bootstrapped, and degrades to BM25-only
 # otherwise (both land recall@10 = 1.0 on this corpus). Force the model-free path — reproducible
-# with no ~130MB download — with:  HIPPO_DISABLE_DENSE=1 bench/run.sh
+# with no ~130MB model download — with:  HIPPO_DISABLE_DENSE=1 bench/run.sh
 #
-# Prerequisites: the plugin deps on the path (fastembed/numpy/PyYAML/rank-bm25 — normally
-# installed by /hippo:bootstrap), OR run with HIPPO_DISABLE_DENSE=1, which the pre-bootstrap
-# vendored BM25 scorer can serve on a bare python3.
+# Prerequisites: the plugin's Python deps must be importable (numpy, PyYAML, rank-bm25 — plus
+# fastembed for the dense path), normally installed by /hippo:bootstrap or `pip install -r
+# plugin/requirements.txt`. `HIPPO_DISABLE_DENSE=1` skips only the fastembed MODEL download, not
+# the deps: the eval's fixture loader needs PyYAML, so a truly bare interpreter reports 0 queries
+# rather than the real number. (The vendored BM25 scorer covers the recall HOT PATH pre-bootstrap;
+# the eval harness here is not on that path.)
 set -euo pipefail
 
 cd -- "$(dirname -- "$0")/.."
