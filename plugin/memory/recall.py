@@ -1116,9 +1116,18 @@ def _expand_neighbors(
 # (never a hard error) on any missing/corrupt input, matching the graph readers' posture.
 # --------------------------------------------------------------------------- #
 def _salience_enabled() -> bool:
-    """True only when ``HIPPO_SALIENCE`` is explicitly truthy — DEFAULT OFF (the roadmap:
-    "ship behind an env flag first"). Mirrors ``build_index.dense_disabled()``'s falsy set
-    so ``HIPPO_SALIENCE=0``/``false`` reads as an explicit opt-out, not a truthy string.
+    """True only when ``HIPPO_SALIENCE`` is explicitly truthy — DEFAULT OFF. Mirrors
+    ``build_index.dense_disabled()``'s falsy set so ``HIPPO_SALIENCE=0``/``false`` reads as
+    an explicit opt-out, not a truthy string.
+
+    RET-10 / OQ-10 (resolved 2026-07-10): default OFF is now a DECISION, not a "ship behind a
+    flag first" placeholder. Running the RET-8 category-tagged eval both ways on the golden
+    corpus produced IDENTICAL recall@10 / mrr@10 — salience's usage and staleness terms are
+    zero on a corpus with no usage telemetry and no staleness baselines, so the eval cannot
+    exercise it; "no regression" was vacuous, and defaulting-on would ship an unmeasured
+    ranking change. The owner resolved OQ-10 as default-OFF (revisit only with a
+    salience-exercising eval or field evidence). ``test_salience_enabled_default_off_and_env_parsing``
+    pins this default so it cannot silently drift.
     """
     raw = os.environ.get("HIPPO_SALIENCE", "").strip()
     return raw not in ("", "0", "false", "False")

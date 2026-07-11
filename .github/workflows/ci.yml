@@ -84,11 +84,11 @@ jobs:
           cp plugin/assets/MEMORY.skeleton.md .claude/memory/MEMORY.md
       - name: Build the dense index
         run: PYTHONPATH=plugin python -m memory.build_index --memory-dir .claude/memory --index-dir .claude/.memory-index
-      - name: eval_recall CLI, bare defaults + --gate-cold (gates 1-3 + warm p95 + cold p50; path fossils fail loudly)
-        # PRF-2: --gate-cold enforces GATE_COLD_P50_MS on this lane only -- the warm p95 gate
+      - name: eval_recall CLI, bare defaults + --gate-cold (gates 1-3 + warm p95 + cold p95; path fossils fail loudly)
+        # PRF-2/PRF-5: --gate-cold enforces GATE_COLD_P95_MS (the p95 tail, not the p50 median) on this lane only -- the warm p95 gate
         # (run everywhere, including hermetic) documents itself as ~10x under the real
         # per-prompt cost; this lane has a restored fastembed cache (index.dense_ready=True)
-        # so cold_latency's fresh-subprocess-per-sample p50 is the honest number and a real
+        # so cold_latency's fresh-subprocess-per-sample p95 is the honest tail number and a real
         # regression here (heavier model, new per-import cost) fails the build.
         run: PYTHONPATH=plugin python -m memory.eval_recall --gate-cold
 

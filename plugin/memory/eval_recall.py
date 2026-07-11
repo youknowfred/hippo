@@ -87,14 +87,15 @@ GATE_SELF_RECALL = 0.90
 GATE_HARD_RECALL = 0.80
 GATE_MRR = 0.60
 GATE_P95_MS = 300.0
-# PRF-2: the honest per-prompt budget for cold_latency's p50 (fresh-subprocess-per-sample,
-# see cold_latency()'s docstring). Gate 5 above is measured WARM and documents itself as
-# ~10x under the real per-prompt cost -- this is the number that actually reflects what a
-# freshly-spawned hook pays. Report-only by default (opt in via --gate-cold / evaluate()'s
-# gate_cold=True) so a cold OS cache on an ungated hermetic run never reddens CI; the dense
-# CI lane (which restores a warm fastembed model cache) passes --gate-cold so a REAL cold-path
-# regression (e.g. a heavier model, a new per-import cost) fails the build.
-GATE_COLD_P50_MS = 1500.0
+# PRF-2/PRF-5: the honest per-prompt budget for cold_latency, gated at p95 — the TAIL, not the
+# p50 median (PRF-5 aligned this to the KPI-3/doctor statistic so a slow worst-case can't hide
+# behind a healthy median). Fresh-subprocess-per-sample (see cold_latency()'s docstring); gate 5
+# above is measured WARM and ~10x under the real per-prompt cost, so this is the number that
+# reflects what a freshly-spawned hook actually pays. Report-only by default (opt in via
+# --gate-cold / evaluate()'s gate_cold=True) so a cold OS cache on an ungated hermetic run never
+# reddens CI; the dense CI lane (warm fastembed cache) passes --gate-cold so a REAL cold-path
+# regression (a heavier model, a new per-import cost) fails the build.
+GATE_COLD_P95_MS = 1500.0
 # RET-8: the two promoted fixture-gated thresholds — REGRESSION TRIPWIRES calibrated against
 # the shipped fixtures on the pack-seeded corpus, NOT absolute quality claims. Measured at
 # promotion time (2026-07-09, 22-memory pack corpus): precision@10 0.1375 dense / 0.15
@@ -289,6 +290,16 @@ def abstention_rate(
     which is why ``GATE_ABSTENTION`` is a just-under-measured tripwire, not a "near 1.0"
     target. Shipped report-only by RET-1; PROMOTED to a tracked, fixture-gated entry by
     RET-8 (hard-set skip semantics — see ``evaluate``).
+
+    RET-11 (2026-07-10): a BM25-only abstention FLOOR was designed and empirically rejected,
+    not skipped. On the golden fixture the off-topic and on-topic classes overlap in EVERY
+    BM25-observable signal — summed matched-token IDF mass (off-topic 4.19 vs an on-topic
+    minimum of 3.67), matched-token count (real queries match as few as 1 token), and
+    single-token IDF all interleave — so no lexical threshold rejects the off-topic queries
+    without also dropping real single-keyword hits. Only the dense semantic floor separates
+    them. Abstention is therefore DENSE-GATED by decision, surfaced by
+    ``doctor.check_abstention_cold_start`` + a warm-the-model nudge, rather than faked with a
+    false-precision BM25 floor.
     ``n=0`` (rate 0.0) when the fixture is empty/missing -- a deliberately-absent input at
     THIS layer; ``evaluate`` decides skip-vs-fail from whether a path was provided.
     """
@@ -960,7 +971,7 @@ _COLD_PROBE = (
 
 
 def cold_latency(
-    memory_dir: str, index_dir: str, queries: List[str], k: int = 10, samples: int = 3
+    memory_dir: str, index_dir: str, queries: List[str], k: int = 10, samples: int = 5
 ) -> Dict[str, float]:
     """COLD recall latency — the honest per-prompt number the WARM ``latency`` gate hides.
 
@@ -1001,12 +1012,18 @@ def cold_latency(
         except Exception:
             continue  # a failed/slow probe is dropped — cold latency must never break eval
     if not samples_ms:
-        return {"p50": 0.0, "max": 0.0, "n": 0}
+        return {"p50": 0.0, "p95": 0.0, "max": 0.0, "n": 0}
     samples_ms.sort()
+    n = len(samples_ms)
     return {
-        "p50": round(samples_ms[len(samples_ms) // 2], 2),
+        "p50": round(samples_ms[n // 2], 2),
+        # PRF-5: p95 is the TAIL statistic the cold gate now keys on (same nearest-rank
+        # formula as the warm ``latency`` above). With a handful of cold samples it coincides
+        # with the worst sample — which is exactly the honest worst-case a freshly-spawned hook
+        # can pay, and the number a p50-median gate would let hide.
+        "p95": round(samples_ms[min(n - 1, int(round(0.95 * (n - 1))))], 2),
         "max": round(samples_ms[-1], 2),
-        "n": len(samples_ms),
+        "n": n,
     }
 
 
@@ -1044,8 +1061,8 @@ def evaluate(
     eval scores the production ranking path; a helper called directly with a bare index
     (hermetic tests) keeps the old edge-free behavior via ``index_dir=None``.
 
-    ``gate_cold`` (PRF-2) opts INTO gating ``cold_latency``'s p50 against
-    ``GATE_COLD_P50_MS`` -- default False so cold_latency stays the report-only honesty
+    ``gate_cold`` (PRF-2/PRF-5) opts INTO gating ``cold_latency``'s p95 against
+    ``GATE_COLD_P95_MS`` -- default False so cold_latency stays the report-only honesty
     signal it always was on every hermetic/ungated caller. Even when requested, the gate is
     skipped (not failed) on a BM25-only run: without dense, cold ~= warm (no per-process
     model load to amortize), so a hermetic machine gating this would be gating nothing
@@ -1177,7 +1194,7 @@ def evaluate(
         if abstention_provided else None,
         **({"skipped": True} if not abstention_provided else {}),
     }
-    # PRF-2: cold_p50_ms follows the SAME skip-vs-gate shape as the hard-set/token-reduction
+    # PRF-2: cold_p95_ms follows the SAME skip-vs-gate shape as the hard-set/token-reduction
     # gates above (pass=None + skipped=True + a reason string, excluded from `ok`) rather than
     # a bespoke boolean -- one pattern for "this gate wasn't asked to run" across the module.
     # Two independent reasons a caller ends up skipped here:
@@ -1190,13 +1207,13 @@ def evaluate(
     #      actually being paid -- exactly the kind of false-negative-prone gate the hard-set
     #      skip semantics above already exist to avoid.
     if gate_cold and index.dense_ready:
-        gates["cold_p50_ms"] = {
-            "value": cold["p50"], "threshold": GATE_COLD_P50_MS,
-            "pass": cold["n"] > 0 and cold["p50"] < GATE_COLD_P50_MS,
+        gates["cold_p95_ms"] = {
+            "value": cold["p95"], "threshold": GATE_COLD_P95_MS,
+            "pass": cold["n"] > 0 and cold["p95"] < GATE_COLD_P95_MS,
         }
     else:
-        gates["cold_p50_ms"] = {
-            "value": cold["p50"], "threshold": GATE_COLD_P50_MS,
+        gates["cold_p95_ms"] = {
+            "value": cold["p95"], "threshold": GATE_COLD_P95_MS,
             "pass": None,
             "skipped": True,
         }
@@ -1279,8 +1296,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--gate-cold",
         action="store_true",
-        help="PRF-2: gate cold_latency's p50 (fresh-subprocess-per-sample, the honest "
-        "per-prompt cost) against GATE_COLD_P50_MS. Off by default so cold_latency stays a "
+        help="PRF-2/PRF-5: gate cold_latency's p95 tail (fresh-subprocess-per-sample, the honest "
+        "per-prompt cost) against GATE_COLD_P95_MS. Off by default so cold_latency stays a "
         "report-only signal everywhere except CI's dense lane, which restores a warm model "
         "cache and passes this flag so a real cold-path regression fails the build. Skipped "
         "(not failed) on a bm25-only run -- without dense, cold ~= warm.",
@@ -1339,7 +1356,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "token_reduction": "no MEMORY.full.md pre-trim snapshot",
         "precision@10": "no relevance-set fixture",
         "abstention_rate": "no abstention-set fixture",
-        "cold_p50_ms": (
+        "cold_p95_ms": (
             "not requested (--gate-cold)"
             if not args.gate_cold
             else "bm25-only — cold ~= warm without dense; hermetic machines must not redden"
@@ -1366,8 +1383,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     c = report.get("cold_latency") or {}
     if c.get("n"):
         print(
-            f"  latency (cold, per-process model load): p50={c['p50']}ms max={c['max']}ms n={c['n']} "
-            "— the REAL hook cost; the warm p95 above understates it (report-only, not gated)"
+            f"  latency (cold, per-process model load): p50={c['p50']}ms p95={c.get('p95')}ms "
+            f"max={c['max']}ms n={c['n']} — the REAL hook cost; the warm p95 above understates it "
+            "(p95 is what --gate-cold gates, PRF-5)"
         )
 
     # Report-only scorecard additions (Tier 1, memory-organism-instrument-immunize) — none

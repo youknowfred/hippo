@@ -1165,6 +1165,108 @@ def check_recall_blind_spots(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"recall blind-spots check failed: {exc}."}
 
 
+def check_abstention_cold_start(ctx: DoctorContext) -> Dict[str, str]:
+    """RET-11: reliable ABSTENTION (returning nothing for an off-topic prompt) is DENSE-GATED.
+
+    Measured, not assumed. On the BM25-only cold-start path — before ``/hippo:bootstrap`` warms
+    the dense model, or whenever the model cache is cold — recall cannot reliably reject an
+    off-topic query: BM25 admits any prompt that shares even ONE keyword with a memory, and no
+    lexical threshold (summed IDF mass, matched-token count, or single-token IDF) separates that
+    coincidental overlap from a genuine single-keyword match without also dropping real hits —
+    on the golden fixture the two classes overlap in every BM25-observable signal (a real
+    "combining a keyword and an embedding ranking" query and an off-topic "classic French onion
+    soup" query each match exactly one distinctive token). Only the dense model's semantic floor
+    tells them apart. So rather than ship a false-precision BM25 floor, this check NAMES the
+    limitation when it is live and nudges the one real fix. Read-only; ``ok`` once dense is
+    serving or nothing is indexed yet; never raises.
+    """
+    try:
+        from .build_index import _load_manifest, default_index_dir
+
+        manifest = _load_manifest(default_index_dir(ctx.memory_dir))
+        if manifest is None:
+            return {
+                "status": "ok",
+                "message": "abstention: no index built yet — SessionStart will build it.",
+            }
+        if manifest.get("dense_ready"):
+            return {
+                "status": "ok",
+                "message": "abstention floor active — the dense model is warmed.",
+            }
+        return {
+            "status": "warn",
+            "message": "recall is serving BM25-only (dense model not warmed), so ABSTENTION is "
+            "degraded: an off-topic prompt that shares even one keyword with a memory can still "
+            "surface a weak match. Reliable rejection of off-topic queries is dense-gated — no "
+            "lexical threshold separates a coincidental keyword overlap from a real one (RET-11) "
+            "— so run /hippo:bootstrap to warm the dense model and enable the abstention floor.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"abstention cold-start check failed: {exc}."}
+
+
+# Bound the per-corpus abstention sweep — doctor runs on every /hippo:doctor and each off-topic
+# query is a real recall() (an embed on the dense path), so cap how many the sanity check runs.
+_ABSTENTION_SANITY_MAX_QUERIES = 25
+
+
+def check_abstention_floor_sanity(ctx: DoctorContext) -> Dict[str, str]:
+    """RET-9: per-corpus dense-floor sanity — run the corpus's OWN off-topic fixture against the
+    live index and warn when off-topic queries LEAK through (the distribution-overlap symptom).
+
+    The dense floor (0.60 for bge) is a global default; a particular corpus can still admit
+    off-topic prompts whose scores overlap its real hits. This runs the corpus-local fixture
+    (``<memory_dir>/.audit-fixtures/recall_abstention_set.yaml``, written by ``/hippo:audit``)
+    against the live index and reports how many actually abstained — the EMPIRICAL per-corpus
+    number, distinct from ``check_abstention_cold_start`` (RET-11)'s STRUCTURAL bm25-only
+    statement, and it fires on the dense path too when a corpus's own floor is too permissive.
+    Bounded (``_ABSTENTION_SANITY_MAX_QUERIES``), read-only, deterministic (recall() is), and
+    degrades to ``ok``/``warn`` — never raises. Skips cleanly when there is no fixture or index.
+    """
+    try:
+        from .build_index import _load_manifest, default_index_dir, load_index
+        from .eval_recall import GATE_ABSTENTION, abstention_rate, load_abstention_set
+
+        fixture = os.path.join(ctx.memory_dir, ".audit-fixtures", "recall_abstention_set.yaml")
+        queries = load_abstention_set(fixture)
+        if not queries:
+            return {
+                "status": "ok",
+                "message": "abstention floor: no corpus-local off-topic fixture "
+                "(.audit-fixtures/recall_abstention_set.yaml) — run /hippo:audit to generate one.",
+            }
+        index_dir = default_index_dir(ctx.memory_dir)
+        if _load_manifest(index_dir) is None:
+            return {"status": "ok", "message": "abstention floor: no index built yet."}
+        index = load_index(index_dir)
+        sample = queries[:_ABSTENTION_SANITY_MAX_QUERIES]
+        result = abstention_rate(index, sample, index_dir=index_dir)
+        rate, n = result["rate"], result["n"]
+        abstained = round(n * rate)
+        backend = "dense" if index.dense_ready else "bm25-only"
+        if rate < GATE_ABSTENTION:
+            hint = (
+                "warm the dense model with /hippo:bootstrap — abstention is dense-gated (RET-11)"
+                if not index.dense_ready
+                else "the dense floor is too permissive for this corpus — consider raising "
+                "HIPPO_DENSE_FLOOR"
+            )
+            return {
+                "status": "warn",
+                "message": f"abstention floor: only {abstained}/{n} off-topic fixture queries "
+                f"abstained on this {backend} corpus (rate {rate:.2f} < {GATE_ABSTENTION}) — "
+                f"off-topic prompts may inject; {hint}.",
+            }
+        return {
+            "status": "ok",
+            "message": f"abstention floor: {abstained}/{n} off-topic queries correctly abstained "
+            f"on this {backend} corpus (rate {rate:.2f}).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"abstention floor sanity check failed: {exc}."}
+
+
 def check_injection_precision(ctx: DoctorContext) -> Dict[str, str]:
     """SIG-4/KPI-2: the injection-precision proxy over the outcome ledger — MEASUREMENT ONLY.
 
@@ -1363,6 +1465,8 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("steering", check_steering),  # GOV-2: N pinned (pre-wires the mandatory MUTE count)
     ("hot_path_latency", check_hot_path_latency),
     ("recall_blind_spots", check_recall_blind_spots),
+    ("abstention_cold_start", check_abstention_cold_start),  # RET-11: abstention is dense-gated
+    ("abstention_floor_sanity", check_abstention_floor_sanity),  # RET-9: per-corpus off-topic leak
     ("injection_precision", check_injection_precision),
     ("rules_conflicts", check_rules_conflicts),
     ("rules_plane_rot", check_rules_plane_rot),
