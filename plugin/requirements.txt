@@ -44,5 +44,5 @@
 # and build_index.py (_HF_SOURCE_REPO_BY_MODEL) for the repos and cache paths.
 fastembed>=0.4,<0.8
 numpy>=1.26,<3
-PyYAML>=6.0,<7.0
+PyYAML>=6.0.3,<7.0
 rank-bm25>=0.2.2,<0.3
