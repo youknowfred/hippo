@@ -23,17 +23,38 @@ reconsolidation, archive internals).
 The plugin declares a stdio MCP server (`plugin.json` → `bin/hippo mcp` → the PLUGIN_DATA venv
 python, falling back to `python3` pre-bootstrap). It closes the two gaps the once-per-prompt
 recall hook can't: mid-turn retrieval (after the agent discovers what it's working on) and
-subagent memory (Task turns get no `UserPromptSubmit`). Three tools, offline and corpus-local,
-reusing the exact hook ranking (no fork):
+subagent memory (Task turns get no `UserPromptSubmit`). Five tools + three resources, offline and
+corpus-local, reusing the exact hook ranking (no fork):
 
 | Tool | Purpose |
 |---|---|
-| `recall(query, k)` | Hybrid recall + graph/staleness annotations — the same engine the hook uses |
-| `new_memory(name, description, type, body, links)` | Per-item, agent-gated corpus write (LIF-2 dup neighbors reported) |
+| `recall(query, k)` | Hybrid recall + graph/staleness annotations — the same engine the hook uses; abstains on an off-topic query |
+| `new_memory(name, description, type, body, links, confidence)` | Per-item, agent-gated corpus write (LIF-2 dup neighbors reported; SEC-13 trust-gated) |
 | `traverse(name, hops)` | Outbound (≤N-hop) + inbound + typed (supersedes/contradicts/refines) neighbors |
+| `why(query, k)` | The recall receipt (GOV-5): re-runs the ranking and explains each hit — or, on abstention, the near-miss and the floor it missed |
+| `decision_history(name)` | Replays the supersedes/refines lineage around a memory into a dated "chose X → refined to Y → Z superseded it" narrative |
 
-It is a dependency-free JSON-RPC 2.0 server (stdlib only — no `mcp` package). The hook path
-never imports it, so recall keeps working with the server absent.
+| Resource | Purpose |
+|---|---|
+| `hippo://floor` | The always-on floor (project MEMORY.md + user/private tier) as one document — **read this at subagent start** to get the baseline a main session gets natively |
+| `hippo://rules-view` | Governance files (CLAUDE.md/AGENTS.md/rules) citing memories the corpus disputes, plus rules-plane rot |
+| `hippo://scorecard` | The GOV-6 one-line corpus-health rollup a lead scans before trusting the corpus |
+
+**When the agent reaches for it (discoverability).** The `UserPromptSubmit` hook fires once, on
+the *first* prompt of a main-session turn, before the agent knows what it's working on. Reach for
+the MCP tools in the two cases the hook structurally cannot serve:
+
+- **Mid-turn**, once the task is concrete: after grepping the codebase and discovering you're
+  touching (say) the auth flow, call `recall("auth session invalidation")` — the hook's
+  opening-prompt recall never saw that query. `why(...)` answers "why did/didn't you surface
+  that?", and `decision_history(name)` reconstructs why the current approach replaced an older one.
+- **In a subagent** (a `Task` turn): subagents get **no** `UserPromptSubmit`, so they start with
+  zero injected memory. Read `hippo://floor` first for the baseline, then `recall(...)` for the
+  task at hand. `new_memory(...)` lets a subagent persist a durable finding (trust-gated).
+
+It is a dependency-free JSON-RPC 2.0 server (stdlib only — no `mcp` package), bounded at a 1 MiB
+per-message cap (SEC-13, `HIPPO_MCP_MAX_MESSAGE_CHARS`). The hook path never imports it, so recall
+keeps working with the server absent, and `/hippo:doctor`'s `mcp_launch` check confirms it starts.
 
 ### Unicode and multilingual retrieval (RET-3)
 

@@ -1012,3 +1012,45 @@ def test_trust_scorecard_bogus_dirs_never_error(tmp_path):
     r = D.check_trust_scorecard(D.DoctorContext(str(tmp_path / "nope"), str(tmp_path / "nah")))
     assert r["status"] == "ok"
     assert "0 contested-unresolved" in r["message"]  # absent producers read as zero
+
+
+def test_trust_scorecard_reports_graph_components(tmp_path, memory_dir, repo, monkeypatch):
+    import memory.build_index as B
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    with open(os.path.join(memory_dir, "a.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: a\ndescription: "links to b"\n---\nsee [[b]]\n')
+    with open(os.path.join(memory_dir, "b.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: b\ndescription: "linked"\n---\nbody\n')
+    with open(os.path.join(memory_dir, "island.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: island\ndescription: "alone"\n---\nbody\n')
+    B.build_index(memory_dir, B.default_index_dir(memory_dir))
+    m = D.check_trust_scorecard(D.DoctorContext(memory_dir, repo))["message"]
+    assert "2 graph component(s)" in m  # {a,b} + {island}
+
+
+# --------------------------------------------------------------------------- #
+# INT-8: the stdio MCP server launch-health check (bin/hippo mcp actually starts)
+# --------------------------------------------------------------------------- #
+def test_mcp_launch_reports_the_server_starts(memory_dir, repo):
+    from memory import mcp_server as M
+
+    r = D.check_mcp_launch(D.DoctorContext(memory_dir, repo))
+    assert r["status"] == "ok"
+    assert "MCP server starts" in r["message"]
+    # The message reflects the REAL tool/resource surface + the SEC-13 per-message bound.
+    assert f"{len(M._TOOLS)} tool(s) / {len(M._RESOURCES)} resource(s)" in r["message"]
+    assert f"{M._MAX_MESSAGE_CHARS} bytes" in r["message"]
+
+
+def test_mcp_launch_does_not_leak_offline_env(memory_dir, repo, monkeypatch):
+    # serve() sets HF_HUB_OFFLINE via setdefault; the check must snapshot/restore it.
+    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    D.check_mcp_launch(D.DoctorContext(memory_dir, repo))
+    assert "HF_HUB_OFFLINE" not in os.environ
+
+
+def test_mcp_launch_registered_before_the_trailing_env_check():
+    labels = [label for label, _ in D.CHECKS]
+    assert "mcp_launch" in labels
+    assert labels[-1] == "stale_memobot_env"  # the env-hygiene check stays pinned last
