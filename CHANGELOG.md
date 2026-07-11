@@ -21,8 +21,9 @@ This release delivers the roadmap's **v0.8.0 "Safe in the open"** security tier
 (`ROADMAP.v1.md` §6) — the milestone that makes cloning hippo's own public repo, or any public
 repo carrying a hippo corpus, safe *by review of what actually injects* — together with the
 S-effort slice of the **v0.10.0 "Legible to strangers"** first-run polish, and the ranking,
-evaluation, and reach work that merged since v1.7.0. Every item below merged to `main` as its
-own reviewed PR.
+evaluation, and reach work that merged since v1.7.0. Every item below reached `main` through a
+reviewed PR — the numbers are noted per group below; several PRs bundled multiple items (e.g.
+#19, #21), and this first-run-polish set ships with the release PR itself.
 
 ### Security — the "Safe in the open" tier (SEC-5..14)
 

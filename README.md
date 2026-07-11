@@ -183,7 +183,7 @@ sessions, permanently dismissable) instead of staying silent.
   degraded mode: recall, indexing, links, and the floor all work, but staleness tracking and
   provenance backfill need git — `git init` and commit to activate them.
 - **When in doubt, run `/hippo:doctor`.** It is the one-stop diagnostic — it checks the native
-  symlink, the recall index, corpus trust and drift, the corpus format version, stale links,
+  symlink, the recall index, corpus trust and drift, the corpus format version, link density,
   and unfilled templates, and prints the exact repair command for whatever it finds.
 
 ## Security
