@@ -2255,3 +2255,41 @@ references:
   - {theme: salience = rel+rec+importance, source: "Generative Agents, MemoryBank", applied_in: [RET-5]}
   - {theme: human-legible memory wins,     source: "ChatGPT memory, Claude Code",  applied_in: [CAP-5, DOC-6]}
   - {theme: eval categories + abstention,  source: "LongMemEval, LoCoMo",          applied_in: [RET-8, RET-1]}
+
+# POS-6 (2026-07-10): landscape refresh against SHIPPING PRODUCTS, not just research frameworks.
+# The `references` above are research lineage (ideas hippo borrowed); this is the competitive
+# landscape a stranger will compare hippo to at launch, and which of hippo's identity choices each
+# product pressures. Verdict: shipping products pressure the CROWDED half of the identity (markdown
+# + hybrid recall + local); NONE pressure the surviving half (git-native store, git-drift SEMANTIC
+# staleness, zero-LLM hot path, review-gated team memory).
+shipping_products_landscape:
+  scanned: "2026-07-10"
+  products:
+    - name: "claude-mem"
+      note: "category incumbent (tens of thousands of GitHub stars); AI-compresses session logs and auto-injects; Apache-2.0, local"
+      pressures: [markdown-corpus, auto-capture-convenience]
+      does_not_pressure: [git-native-store, git-drift-staleness, zero-llm-hot-path, review-gated-writes]
+    - name: "memsearch (Zilliz)"
+      note: "markdown source-of-truth + Milvus vector index (derived, rebuildable); local ONNX bge-m3, multi-agent"
+      pressures: [markdown-git-friendly, hybrid-recall, local-embeddings]
+      does_not_pressure: [git-native-store, git-drift-staleness, review-gated-writes, no-vector-db-infra]
+    - name: "memweave"
+      note: "markdown source + SQLite FTS5 (no vector DB), zero-infra, embedding cache"
+      pressures: [markdown-source, no-vector-db-infra, local]
+      does_not_pressure: [git-drift-staleness, review-gated-writes, dense-hybrid-recall]
+    - name: "supermemory"
+      note: "hosted memory API / real-time learning service"
+      pressures: [cross-session-recall]
+      does_not_pressure: [local-offline, zero-cost-hot-path, privacy, git-native-store]
+    - name: "Anthropic native memory"
+      note: "GA memory_20250818 tool (client-managed files) + Claude Code Auto Memory (auto-maintained MEMORY.md)"
+      pressures: [always-on-note, auto-capture]
+      does_not_pressure: [ranked-on-demand-recall, git-review-gate, git-drift-staleness]
+      relationship: "hippo composes AS the ranking + hygiene + review layer on top (POS-7)"
+  conclusion: >-
+    The "markdown corpus + offline hybrid recall + local" wedge is now table stakes (memsearch,
+    memweave, claude-mem all occupy it). hippo's defensible identity at launch is the narrower set
+    nothing above reproduces: git IS the store (history = audit/review/revert), staleness is
+    SEMANTIC git-drift (did the cited code move — not calendar age), the hot path runs NO LLM
+    ($0/prompt, nothing leaves the machine), and team memory ships through code review. This is what
+    POS-1's re-cut one-liner and POS-2's comparison table now lead with.

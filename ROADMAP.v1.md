@@ -557,26 +557,61 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **POS-1** `P0/S` — **Re-cut the differentiation one-liner** around git-native +
   git-drift semantic staleness + zero-LLM/zero-token/zero-network hot path +
   review-gated team memory. Retire the crowded "markdown + hybrid recall" lead.
+  **SHIPPED 2026-07-10** (owner-chosen wording, AskUserQuestion): the README lead is now
+  "your repo is the store, recall costs zero tokens / zero network / zero LLM per prompt,
+  staleness is git-drift (the cited code moved — not calendar age), and every team memory
+  lands through code review," followed by a "the markdown+hybrid shelf is crowded; hippo's
+  line is narrower" paragraph. The DOC-9 acronym tagline it replaces is retired.
 - **POS-2** `P1/S` — **Competitive comparison table** in the README (claude-mem,
   EverOS/EverMind, memweave, memsearch, Anthropic native memory) across the axes
   hippo wins. Control the framing before HN supplies its own.
+  **SHIPPED 2026-07-10**: README `## Compared to other memory tools` — an axis×tool table (hippo /
+  claude-mem / memsearch+memweave / Anthropic native / supermemory) across store, recall, hot-path
+  cost, staleness, team memory, and where-it-runs, with a "hippo stands alone on the bottom three
+  rows" callout and a fair "as of mid-2026, corrections welcome" footnote. Landscape verified live
+  (memsearch=Milvus, memweave=SQLite-FTS5, claude-mem AI-compresses, native=memory_20250818+Auto Memory).
 - **POS-3** `P1/M` — Publish **one reproducible number** hippo wins (recall@10 /
   MRR@10 + cold p95 + **$0 per-prompt token cost** on a public dev corpus,
   one-command repro), and a principled statement of *why not* LongMemEval/
   LoCoMo/BEAM (they measure autonomous chat-history extraction; hippo gates
   extraction behind human approval). *(builds on RET-8 / QUA-6 / PRF-4.)*
+  **SHIPPED 2026-07-10** (owner OK'd a conservatively-framed public number): `bench/run.sh`
+  (one command) + `bench/README.md`. REAL measured numbers on the shipped 50-memory golden corpus /
+  18 cross-vocab paraphrase queries: **recall@10 = 1.0**, **MRR@10 ≈ 0.91** (bm25 0.912 / dense
+  0.9213), cold p95 ~48 ms bm25 / ~0.5 s dense, **$0/prompt**. recall@10/MRR@10 are deterministic
+  (reproduce to the digit, model or no model); the why-not-LongMemEval statement is in bench/README.
+  README callout links it. Conservatively framed: "on our golden dev corpus", run it on your own.
 - **POS-4** `P1/S` — **git-drift staleness hero demo**: a memory cites a
   function → someone moves/edits it → hippo flags it stale-at-use. No
   calendar-decay competitor can reproduce this.
+  **SHIPPED 2026-07-10**: `demo/git_drift.sh` — a tested, self-contained (throwaway repo,
+  `HIPPO_TRUST_ALL`/`HIPPO_DISABLE_DENSE`) scenario: writes a memory citing `rotate_session_token()`,
+  edits the function + commits, and the `staleness_producer` flags `⚠ session-token-rotation:
+  src/auth.py` while nothing about the memory itself changed. shellcheck-clean; README pointer added.
+  This IS the DOC-10 recording target.
 - **POS-5** `P2/S` — State the zero-LLM hot path as an explicit **cost + privacy
   claim** ("$0 and zero bytes leave your machine per prompt").
+  **SHIPPED 2026-07-10**: a "Why the hot path is $0 and private" paragraph in the comparison
+  section — recall is local lexical + cached-dense, calls no model API, spends zero tokens, and
+  nothing leaves the machine (the one online step is the one-time bootstrap download). Framed as a
+  hard requirement a hosted or LLM-in-the-loop memory can't meet.
 - **POS-6** `P2/S` — **Refresh the roadmap landscape scan** (`ROADMAP.yaml`
   references) against *shipping products*, not just research frameworks; record
   which choices they pressure (they pressure the markdown+hybrid identity; they
   do **not** pressure git-native, git-drift, or the zero-LLM hot path).
+  **SHIPPED 2026-07-10**: `ROADMAP.yaml` gained a `shipping_products_landscape` block (scanned
+  2026-07-10, verified live) — claude-mem / memsearch / memweave / supermemory / Anthropic native,
+  each with what it `pressures` vs `does_not_pressure`, and a conclusion: the markdown+hybrid+local
+  wedge is table stakes; git-native store, git-drift staleness, zero-LLM hot path, and review-gated
+  writes are the surviving identity. Distinct from the research-lineage `references` above.
 - **POS-7** `P2/S` — Update the native-memory section for Anthropic's 2026 GA
   `memory_20250818` tool + Auto Memory; frame hippo as the **ranking + hygiene +
   review layer** on top, pre-empting "why not just use Anthropic's memory?"
+  **SHIPPED 2026-07-10**: the README `## hippo and Claude Code's native memory` section now names
+  the GA `memory_20250818` tool + Claude Code Auto Memory (auto-maintained `MEMORY.md`), opens with
+  the "why not just use Anthropic's memory?" question, and answers it — hippo is the ranking +
+  staleness-hygiene + human-review layer the always-loaded, auto-written native note lacks; they
+  compose via the init symlink (hippo adds no second always-load channel).
 
 ### COM — Community & contribution *(NEW workstream)*
 - **COM-1** `P0/S` — `CONTRIBUTING.md`: **real dev-venv recipe** (`python -m venv
@@ -615,6 +650,11 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **DOC-10** `P1/S` — **Demo GIF / asciinema** for the README landing page
   (install → bootstrap → init → remember → recall-resurfaces / git-drift flag).
   *(depends POS-4.)*
+  **STORYBOARD SHIPPED 2026-07-10 — ⚠ ASSET AWAITS THE MAINTAINER (a model cannot record a real
+  terminal session).** `demo/README.md` carries the exact tested 6-beat storyboard (install →
+  bootstrap → init → remember → recall-resurfaces → git-drift flag), maps beats 4–6 to the verified
+  `demo/git_drift.sh`, and names the tooling (`asciinema`+`agg`, or `vhs`) + where to drop the
+  asset. FLAGGED for the owner to record; the README top-of-file GIF slot is the only remaining step.
 
 ---
 
