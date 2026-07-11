@@ -4,8 +4,7 @@ Local, git-native agent memory for Claude Code — a markdown-in-git corpus with
 dense+BM25 hybrid recall, git-drift staleness/provenance tracking, recall-triggered
 reconsolidation, and a self-audit skill. Distributed as a Claude Code plugin.
 
-Extracted from the ic-memobot/Memosa agent-memory tooling (a private origin repo), where
-it has run in production since 2026-06 across a 180+ memory corpus.
+Battle-tested in daily use since 2026-06 across a 180+ memory production corpus.
 
 ## Quickstart
 
@@ -35,14 +34,40 @@ it has run in production since 2026-06 across a 180+ memory corpus.
 4. **Use it.** Say *"remember this: …"* (the `/hippo:new` skill writes a recall-ready
    memory), then just work — every prompt is matched against the corpus by the
    UserPromptSubmit hook and the relevant memories are injected automatically. Session
-   starts surface staleness, recent captures, and link health. If anything seems off:
-   `/hippo:doctor`.
+   starts surface staleness, recent captures, and link health. If anything seems off, run
+   `/hippo:doctor` (or see [Troubleshooting](#troubleshooting)).
+
+5. **See it work.** Ask Claude *"what do you remember about my role?"* (or run
+   `/hippo:recall "my role"` directly). hippo matches your prompt against the corpus and
+   surfaces the relevant memory inline — that returned memory is the whole point: the right
+   context on demand, built with zero tokens and never leaving your machine. (Fill in
+   `user_role.md` first, from step 3, so there's something real to recall.)
 
 Before bootstrap has run, recall works immediately in BM25-only mode: the plugin vendors a
 dependency-free BM25 scorer and frontmatter parser (`plugin/memory/_vendor/`) precisely
 for that pre-bootstrap window, so a bare `python3` with none of the pinned deps still
 serves real lexical recall. Bootstrap unlocks the dense half — dense recall degrades
 gracefully rather than blocking or erroring.
+
+## Automatic capture — memory that writes itself, gated by your review
+
+hippo remembers more than what you explicitly save. When a session ends, a background hook
+quietly drafts candidate memories from what actually happened — the queries you ran, the files
+that changed, the decisions you confirmed — and parks them, unwritten, in a gitignored pending
+queue. **Nothing enters your corpus automatically.**
+
+The next session's SessionStart nudge tells you when that queue is worth draining. You run:
+
+```
+/hippo:consolidate
+```
+
+and hippo walks you through each captured draft one at a time — showing its evidence (which
+files changed, the session's queries, any near-duplicate already in the corpus) and its
+rationale — then writes only the ones you approve, as an ordinary reviewable markdown diff.
+This is the part native memory doesn't have: **capture is automatic, but every write waits for
+a human.** You get the recall benefit of always-on capture without ever ceding control of what
+your corpus says.
 
 ## Removal / Uninstall
 
@@ -142,6 +167,25 @@ an implicit SessionStart auto-provision. Reasoning:
 Until bootstrap runs, the SessionStart hook nudges the next step (once every few
 sessions, permanently dismissable) instead of staying silent.
 
+## Troubleshooting
+
+- **Recall comes back empty.** Almost always one of three things: **(a) bootstrap never ran**
+  on this machine — dense recall is silently BM25-only until `/hippo:bootstrap` finishes;
+  **(b) the corpus isn't trusted yet** — a freshly cloned or downloaded corpus injects
+  *nothing* until you review it, and running `/hippo:init` (or `/hippo:doctor`) here is what
+  marks it trusted; **(c) `user_role.md` is still the `<FILL-ME>` template**, so the only
+  thing to recall is placeholder text — edit it with your real role and context.
+- **A memory I wrote never resurfaces.** Recall is on-demand and ranked, not always-on: only
+  the always-load *floor* (the `user`/`feedback` pointers) is injected every prompt;
+  everything else surfaces when a prompt actually matches it. Phrase your question closer to
+  the memory's own wording, or confirm it's indexed with `/hippo:doctor`.
+- **"Not a git repository" / staleness looks inactive.** Outside a git repo hippo runs in a
+  degraded mode: recall, indexing, links, and the floor all work, but staleness tracking and
+  provenance backfill need git — `git init` and commit to activate them.
+- **When in doubt, run `/hippo:doctor`.** It is the one-stop diagnostic — it checks the native
+  symlink, the recall index, corpus trust and drift, the corpus format version, link density,
+  and unfilled templates, and prints the exact repair command for whatever it finds.
+
 ## Security
 
 Found a vulnerability? Please report it privately — see [SECURITY.md](SECURITY.md)
@@ -153,8 +197,8 @@ text).
 
 MIT — see [LICENSE](LICENSE). A copy ships inside the plugin bundle
 ([plugin/LICENSE](plugin/LICENSE)) so installs carry the license text too. The engine code
-extracted from the ic-memobot/Memosa agent-memory tooling was written by this repo's author
-and is relicensed here under the same MIT terms; no third-party code was ported with it.
+was written by this repo's author for a private predecessor project and is relicensed here
+under the same MIT terms; no third-party code was ported with it.
 The pre-bootstrap fallbacks in `plugin/memory/_vendor/` (a BM25 scorer and a frontmatter
 parser) are likewise original implementations, MIT like the rest — not copied vendor code.
 
