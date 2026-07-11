@@ -520,6 +520,17 @@ def _scorecard_message(memory_dir: str, repo_root: str) -> Tuple[str, str]:
     except Exception:
         orphans = 0
 
+    # GRA-8: how many weakly-connected components the memory graph fragments into. Informational
+    # (never flips the rollup to warn — a small young corpus is legitimately fragmented); the
+    # per-item drill-down is `hippo links --components`. None when the graph can't be built.
+    components = None
+    try:
+        from .links import component_count
+
+        components = component_count(memory_dir, index_dir)
+    except Exception:
+        components = None
+
     # GOV-4: floor/corpus changed since this clone's watermark (read-only peek — never
     # consumes the producer's surfaced-once semantics).
     floor_line = "floor/corpus delta: no watermark baseline yet"
@@ -547,6 +558,7 @@ def _scorecard_message(memory_dir: str, repo_root: str) -> Tuple[str, str]:
         f"{orphans} orphan(s) never recalled (→ /hippo:audit)",
         f"{pinned} pinned / {muted} muted",
         f"{draft} draft",
+        (f"{components} graph component(s)" if components is not None else "graph components: n/a"),
         floor_line,
     ]
     status = "warn" if (contested or rule_conflicts or rot or blind or orphans) else "ok"
@@ -1064,6 +1076,56 @@ def check_non_english_corpus(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"non-English corpus check failed: {exc}."}
 
 
+def check_mcp_launch(ctx: DoctorContext) -> Dict[str, str]:
+    """INT-8: the stdio MCP server (INT-2) actually starts — ``bin/hippo mcp`` launch health.
+
+    The MCP server closes the two recall gaps the once-per-prompt hook can't (mid-turn retrieval
+    and subagent memory), but nothing verified it can START until a live client tried and failed.
+    Exercises the REAL ``serve()`` read loop in-process with a canned ``initialize`` request (no
+    subprocess, no network) and confirms a well-formed handshake comes back, then reports the
+    tool/resource surface and the per-message bound (SEC-13). ``serve()`` pins the fastembed
+    cache path + sets offline env defaults, so the relevant keys are snapshotted and restored —
+    a diagnostic never mutates the caller's environment. Warn-only: a failure means a genuine
+    wiring break in a stdlib-only server, not a broken corpus.
+    """
+    try:
+        import io
+
+        from . import mcp_server as M
+
+        saved = {
+            k: os.environ.get(k)
+            for k in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "FASTEMBED_CACHE_PATH")
+        }
+        out = io.StringIO()
+        try:
+            req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+            M.serve(io.StringIO(req + "\n"), out)
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        lines = [ln for ln in out.getvalue().splitlines() if ln.strip()]
+        resp = json.loads(lines[0]) if lines else {}
+        info = (resp.get("result") or {}).get("serverInfo") or {}
+        if not info.get("name"):
+            return {
+                "status": "warn",
+                "message": "MCP server did not return a valid initialize handshake — "
+                "`bin/hippo mcp` may be broken (run it and send an initialize request to debug).",
+            }
+        return {
+            "status": "ok",
+            "message": f"MCP server starts (`bin/hippo mcp`) — {info.get('name')} "
+            f"v{info.get('version', '?')}, {len(M._TOOLS)} tool(s) / {len(M._RESOURCES)} "
+            f"resource(s), per-message cap {M._MAX_MESSAGE_CHARS} bytes.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"MCP launch check failed: {exc}."}
+
+
 def check_stale_memobot_env(ctx: DoctorContext) -> Dict[str, str]:
     """DOC-8: flag any lingering ``MEMOBOT_*`` env var — the pre-v0.4.0 name, now ignored.
 
@@ -1477,6 +1539,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("secrets", check_secrets),
     ("link_density", check_link_density),
     ("non_english_corpus", check_non_english_corpus),
+    ("mcp_launch", check_mcp_launch),  # INT-8: the stdio MCP server (bin/hippo mcp) actually starts
     ("committed_usage_privacy", check_committed_usage_privacy),  # SEC-14: TEA-5 usage on a shared remote
     ("stale_memobot_env", check_stale_memobot_env),
 ]

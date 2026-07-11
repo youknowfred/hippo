@@ -13,6 +13,8 @@ import glob
 import os
 import re
 
+import pytest
+
 _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 _DOC_FILES = sorted(
@@ -52,3 +54,66 @@ def test_every_relative_link_resolves():
             if not os.path.exists(os.path.normpath(os.path.join(base, target))):
                 broken.append(f"{os.path.relpath(doc, _REPO)} -> {target}")
     assert not broken, "dead relative links in shipped docs:\n  " + "\n  ".join(broken)
+
+
+# --------------------------------------------------------------------------- #
+# QUA-11: external-URL link check. `network`-marked (deselected by default so the
+# hermetic suite stays airplane-mode-safe); CI's dense lane opts in via `-m network`.
+# Conservative by design — only a DEFINITIVE 404/410 fails; a HEAD-hostile 403/405/429
+# is retried as GET, and any transient error (timeout, DNS, connection reset) is skipped
+# rather than reddening the suite on network weather.
+# --------------------------------------------------------------------------- #
+_EXTERNAL_LINK_RE = re.compile(r"\[[^\]]*\]\((https?://[^)\s]+)\)")
+_DEAD_CODES = frozenset({404, 410})
+_UA = "Mozilla/5.0 (compatible; hippo-docs-linkcheck/1.0)"
+
+
+def _external_targets(text: str):
+    text = _CODE_SPAN_RE.sub("", _FENCE_RE.sub("", text))
+    for m in _EXTERNAL_LINK_RE.finditer(text):
+        yield m.group(1).rstrip(".,)")  # trailing sentence punctuation isn't part of the URL
+
+
+def _all_external_urls():
+    urls = set()
+    for doc in _DOC_FILES:
+        with open(doc, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        urls.update(_external_targets(text))
+    return sorted(urls)
+
+
+def _status_code(url: str):
+    """The HTTP status for ``url``, or None if the request errored transiently (skip, don't fail).
+
+    Tries HEAD; on a method/bot rejection (403/405/429) retries GET, since many hosts reject
+    HEAD from a non-browser. A network-layer error returns None so a flaky runner never fails.
+    """
+    import urllib.error
+    import urllib.request
+
+    def _fetch(method):
+        req = urllib.request.Request(url, method=method, headers={"User-Agent": _UA})
+        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310 (docs URLs only)
+            return getattr(resp, "status", None) or resp.getcode()
+
+    for method in ("HEAD", "GET"):
+        try:
+            return _fetch(method)
+        except urllib.error.HTTPError as exc:
+            if method == "HEAD" and exc.code in (403, 405, 429):
+                continue  # HEAD-hostile host — retry as GET
+            return exc.code
+        except Exception:
+            return None  # transient (timeout/DNS/reset) — treat as inconclusive
+    return None
+
+
+@pytest.mark.network
+def test_external_links_are_not_dead():
+    dead = []
+    for url in _all_external_urls():
+        code = _status_code(url)
+        if code in _DEAD_CODES:
+            dead.append(f"{url} -> {code}")
+    assert not dead, "dead external links in shipped docs:\n  " + "\n  ".join(dead)

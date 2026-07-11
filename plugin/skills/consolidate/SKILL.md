@@ -112,10 +112,21 @@ or scrub it and lint again until the scan is clean.
   or **skip** (already covered).
 
 When a seed is fully processed (whatever you decided — including "nothing worth keeping"),
-discard it so the queue drains and the nudge clears:
+discard it so the queue drains and the nudge clears (`--dismiss` is the same op — use it when
+a capture isn't worth keeping at all):
 
 ```
 "$PY" -m memory.capture --discard <seed-path-from-the-list>
+```
+
+The queue is BOUNDED (CAP-6): each capture self-prunes to the highest-value, most-recent
+seeds, so an un-drained backlog can never grow without limit — a gitignored trivial seed a
+prune drops is nothing a future session couldn't re-capture. If you can't drain now, defer the
+SessionStart nudge for a few sessions instead of ignoring it (it re-nags after — a snooze is a
+deferral, not a dismissal):
+
+```
+"$PY" -m memory.capture --snooze
 ```
 
 ## Step 2 — Work the reconsolidation worklist (LIF-1)

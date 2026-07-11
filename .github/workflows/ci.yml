@@ -11,10 +11,16 @@
 #               (starter packs + docs + source, tests excluded) so a credential can never
 #               reach a user through a release. Deterministic prefixes only (entropy off).
 #
-# Nightly-only lane (NOT a required PR check — gated on the schedule trigger):
-#   scale     — PRF-3's generated ~500-memory BM25 corpus, asserting recall latency,
-#               bounded output, and build/refresh time. `scale`-marked so it never runs on
-#               the hermetic or dense lanes; a scale regression names the budget it broke.
+# Non-required lanes:
+#   resolution — QUA-11: dependency resolution + bootstrap smoke across the WIDER support
+#               matrix {py3.11, py3.13, py3.14}, proving OSP-3's numpy `<3` widening actually
+#               resolves on 3.13 (and the ranges hold on 3.11/3.14). NOT a required check —
+#               `fail-fast: false` so each interpreter reports independently, and a py3.14 miss
+#               (fastembed may not ship 3.14 wheels until upstream catches up) is informational,
+#               not a merge blocker. The hermetic lane above stays the {3.10, 3.12} gate.
+#   scale     — PRF-3's generated ~500-memory BM25 corpus, asserting recall latency, bounded
+#               output, and build/refresh time. NIGHTLY only (schedule trigger). `scale`-marked
+#               so it never runs on the hermetic or dense lanes.
 #
 # Mark hermetic ×4 + dense + shellcheck + secret-scan required on PRs to main in
 # branch-protection settings.
@@ -114,6 +120,39 @@ jobs:
       # vectors. A hit here means a release would carry a credential: rotate + purge history.
       - name: Secret-scan the shipped/committed tree
         run: PYTHONPATH=plugin python -m memory.secrets --repo .
+
+  resolution:
+    name: resolution (py${{ matrix.python }} dep bootstrap)
+    # QUA-11: NOT a required check. Proves the pinned dep RANGES resolve + bootstrap on the wider
+    # {3.11, 3.13, 3.14} interpreters (the hermetic gate covers {3.10, 3.12}). numpy was widened to
+    # `<3` for 3.13 (OSP-3); this is where that resolution is exercised. fail-fast: false so a
+    # py3.14 install miss (fastembed 3.14 wheels may lag upstream) reports without blocking 3.11/3.13.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13", "3.14"]
+    env:
+      HIPPO_DISABLE_DENSE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: plugin/requirements.txt
+      - name: Resolve + install the pinned dep ranges (proves OSP-3's numpy <3 widening)
+        run: python -m pip install -r plugin/requirements.txt pytest pytest-timeout hypothesis
+      - name: All four deps import on this interpreter
+        run: python -c "import numpy, rank_bm25, yaml, fastembed; print('deps import on', __import__('sys').version)"
+      - name: Bootstrap smoke — build a real BM25 index over a one-memory corpus
+        run: |
+          mkdir -p .claude/memory
+          printf '%s\n' '---' 'name: smoke' 'description: "a smoke-test memory"' 'metadata:' '  type: project' '---' 'body' > .claude/memory/smoke.md
+          printf '%s\n' '# Memory Index' '' '## Project' > .claude/memory/MEMORY.md
+          PYTHONPATH=plugin python -m memory.build_index --memory-dir .claude/memory --index-dir .claude/.memory-index
+      - name: Hermetic suite on this interpreter (dense disabled)
+        run: python -m pytest
 
   scale:
     name: scale (500-memory BM25 lane, nightly)

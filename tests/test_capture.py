@@ -394,3 +394,148 @@ def test_main_add_decision_records_for_next_capture(repo, capsys):
     assert "decision recorded" in capsys.readouterr().out
     seed = json.load(open(C.write_session_capture("cli-sess", memory_dir=md, repo_root=repo)))
     assert seed["decisions"] == ["pin the retry budget at 3 — the user confirmed flakier is worse"]
+
+
+# --------------------------------------------------------------------------- #
+# CAP-6: the queue is bounded (prune) and the nudge is deferrable (snooze) —
+# closing the LIF-goal violation that capture nagged forever, unbounded.
+# --------------------------------------------------------------------------- #
+def _write_raw_seed(pd, name, *, score=0, captured_at=0.0, session_id=None):
+    """Drop one hand-built seed JSON straight into the pending dir (bypasses the git pass)."""
+    os.makedirs(pd, exist_ok=True)
+    seed = {
+        "schema": C._SEED_SCHEMA,
+        "kind": "session-capture",
+        "session_id": session_id or name,
+        "salience": {"score": score, "trivial": score == 0},
+        "captured_at": captured_at,
+    }
+    with open(os.path.join(pd, f"capture-{name}.json"), "w", encoding="utf-8") as fh:
+        json.dump(seed, fh)
+
+
+def _append_recall_session(td, sid, ts):
+    """One recall-ledger event so ``queue_snoozed`` can age a snooze by sessions."""
+    os.makedirs(td, exist_ok=True)
+    with open(os.path.join(td, "recall_events.jsonl"), "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"session_id": sid, "names": [], "backend": "bm25", "ts": ts}) + "\n")
+
+
+def test_prune_bounds_queue_keeping_highest_value_and_newest(repo):
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    pd = C.default_pending_dir(md)
+    _write_raw_seed(pd, "low-old", score=0, captured_at=100.0)
+    _write_raw_seed(pd, "low-new", score=0, captured_at=200.0)
+    _write_raw_seed(pd, "mid", score=3, captured_at=150.0)
+    _write_raw_seed(pd, "high", score=9, captured_at=120.0)
+    assert C.pending_count(memory_dir=md) == 4
+
+    pruned = C.prune_pending(pd, max_seeds=2)
+    assert pruned == 2
+    survivors = {s["session_id"] for s in C.read_pending(pd)}
+    # Value-first: the two highest-scored seeds are kept; the two score-0 seeds are dropped.
+    assert survivors == {"high", "mid"}
+
+
+def test_prune_is_value_first_a_trivial_new_seed_yields_to_higher_value(repo):
+    """The honest contract behind the self-prune: a fresh LOW-value seed does NOT survive when
+    the queue is already full of strictly higher-value captures — value-first, not FIFO."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    pd = C.default_pending_dir(md)
+    _write_raw_seed(pd, "valuable-old", score=9, captured_at=100.0)
+    _write_raw_seed(pd, "trivial-new", score=0, captured_at=999.0)  # newest, but worthless
+    pruned = C.prune_pending(pd, max_seeds=1)
+    assert pruned == 1
+    survivors = {s["session_id"] for s in C.read_pending(pd)}
+    assert survivors == {"valuable-old"}, "recency must NOT override value when the queue is full"
+
+
+def test_prune_breaks_score_ties_by_recency(repo):
+    """When scores tie, the NEWER seed is kept — the recency tiebreak the self-prune relies on."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    pd = C.default_pending_dir(md)
+    _write_raw_seed(pd, "tied-old", score=3, captured_at=100.0)
+    _write_raw_seed(pd, "tied-new", score=3, captured_at=200.0)
+    assert C.prune_pending(pd, max_seeds=1) == 1
+    assert {s["session_id"] for s in C.read_pending(pd)} == {"tied-new"}
+
+
+def test_prune_is_noop_within_bound(repo):
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    pd = C.default_pending_dir(md)
+    _write_raw_seed(pd, "a", score=0, captured_at=1.0)
+    _write_raw_seed(pd, "b", score=0, captured_at=2.0)
+    assert C.prune_pending(pd, max_seeds=5) == 0
+    assert C.pending_count(memory_dir=md) == 2
+
+
+def test_capture_write_self_prunes_to_the_bound(repo, monkeypatch):
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    pd = C.default_pending_dir(md)
+    # Fill the queue up to a tiny bound with pre-existing trivial seeds…
+    monkeypatch.setattr(C, "_MAX_PENDING_SEEDS", 2)
+    _write_raw_seed(pd, "old1", score=0, captured_at=1.0)
+    _write_raw_seed(pd, "old2", score=0, captured_at=2.0)
+    # …then a real capture pushes past the bound and self-prunes on write.
+    _seed_episode(md, repo, "fresh", ["m"], "q")
+    path = C.write_session_capture("fresh", memory_dir=md, repo_root=repo)
+    assert path is not None
+    assert C.pending_count(memory_dir=md) == 2, "write must self-bound the queue (CAP-6)"
+    # The just-written seed is the newest, so it always survives its own prune.
+    assert os.path.exists(path), "a fresh capture must never prune itself away"
+
+
+def test_queue_snooze_silences_the_nudge_then_re_nags(repo):
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    td = default_telemetry_dir(md)
+    _seed_episode(md, repo, "s1", ["a"], "q1")
+    C.write_session_capture("s1", memory_dir=md, repo_root=repo)
+    assert SS.pending_capture_producer(md, repo)  # nags before the snooze
+
+    assert C.snooze_queue(memory_dir=md)
+    # Anchor the session timestamps to the marker's REAL ack ts (snooze uses time.time()).
+    pd = C.default_pending_dir(md)
+    acked = json.load(open(C._snooze_marker_path(pd)))["ts"]
+    _append_recall_session(td, "pre", acked - 100)  # PRECEDES the ack → does not age the snooze
+    assert C.queue_snoozed(memory_dir=md) is True
+    assert SS.pending_capture_producer(md, repo) is None  # snoozed → silent
+
+    # Age the snooze one session at a time; it holds for _SNOOZE_WINDOW_SESSIONS, then expires.
+    for i in range(1, C._SNOOZE_WINDOW_SESSIONS):
+        _append_recall_session(td, f"s{i}", acked + i)
+        assert C.queue_snoozed(memory_dir=md) is True
+    _append_recall_session(td, "last", acked + C._SNOOZE_WINDOW_SESSIONS)
+    assert C.queue_snoozed(memory_dir=md) is False, "a snooze is a deferral, not a dismissal"
+    assert SS.pending_capture_producer(md, repo), "the nudge re-nags after the snooze expires"
+
+
+def test_queue_snoozed_false_without_marker(repo):
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    # No marker at all → never snoozed (degrades toward re-nagging, never silence).
+    assert C.queue_snoozed(memory_dir=md) is False
+
+
+def test_main_snooze_and_dismiss_alias(repo, capsys):
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    _seed_episode(md, repo, "s1", ["a"], "q1")
+    path = C.write_session_capture("s1", memory_dir=md, repo_root=repo)
+
+    rc = C.main(["--snooze", "--memory-dir", md])
+    assert rc == 0 and "snoozed" in capsys.readouterr().out
+    assert C.queue_snoozed(memory_dir=md) is True
+
+    # --dismiss is an alias for --discard: the seed leaves the queue either way.
+    rc = C.main(["--dismiss", path])
+    assert rc == 0 and "discarded" in capsys.readouterr().out
+    assert C.pending_count(memory_dir=md) == 0

@@ -53,6 +53,22 @@ _MAX_DECISIONS = 20
 # the slice happens here — always on a line boundary, with a legible truncation marker, so a
 # monorepo-wide diff can never balloon a seed. Counts capture COUNTS; this one caps BYTES.
 _MAX_HUNK_BYTES = 20_000
+# CAP-6: hard bound on the pending queue. One seed lands per session that recalls anything, so
+# an un-drained queue would grow WITHOUT LIMIT — the exact "soaks forever" footgun the LIF
+# workstream goal ("nothing nags forever") already closed for reconsolidation. When a fresh
+# capture pushes the queue past this cap, the LOWEST-value then OLDEST seeds are pruned so the
+# queue keeps the sessions a drain would lead with (highest salience, most recent). Ephemera in
+# a gitignored dir: pruning a stale trivial seed loses nothing a re-capture couldn't redraft.
+_MAX_PENDING_SEEDS = 50
+# CAP-6: how many NEW recall-ledger sessions an explicit queue --snooze holds the SessionStart
+# nudge for before it re-nags. Parity with ``reconsolidate._SNOOZE_WINDOW_SESSIONS`` (same value,
+# same session-aging rhythm): a snooze is a DEFERRAL, never a dismissal — it must expire so a
+# growing backlog resurfaces. The nudge is the only thing snoozed; the seeds are untouched.
+_SNOOZE_WINDOW_SESSIONS = 5
+# The queue-snooze marker: a tiny sibling of the seeds inside the gitignored pending dir (queue
+# state lives with the queue). Dotfile so ``read_pending``/``pending_count`` (``*.json`` only)
+# never mistake it for a seed.
+_SNOOZE_MARKER = ".capture-snooze.json"
 
 
 def default_pending_dir(memory_dir: str) -> str:
@@ -382,6 +398,12 @@ def write_session_capture(
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(seed, fh, ensure_ascii=False, indent=2)
         os.replace(tmp, path)  # atomic: a reader never sees a half-written seed
+        # CAP-6: self-bound the queue so an un-drained backlog can't grow without limit. Prune
+        # keeps the highest-value seeds (recency breaks ties), so a just-written seed survives
+        # UNLESS the queue is already full of strictly higher-value captures — in which case a
+        # trivial new seed yields to them. Value-first, not FIFO: the queue keeps what a drain
+        # would lead with.
+        prune_pending(pd, max_seeds=_MAX_PENDING_SEEDS)
         return path
     except Exception:
         return None
@@ -408,7 +430,9 @@ def read_pending(pending_dir: Optional[str] = None, *, memory_dir: Optional[str]
         if not os.path.isdir(pd):
             return []
         for name in sorted(os.listdir(pd)):
-            if not name.endswith(".json"):
+            # Seeds are ``capture-*.json``; skip dotfiles (the ``.gitignore`` and the CAP-6
+            # ``.capture-snooze.json`` marker are queue state, never seeds).
+            if name.startswith(".") or not name.endswith(".json"):
                 continue
             try:
                 with open(os.path.join(pd, name), "r", encoding="utf-8") as fh:
@@ -430,16 +454,129 @@ def pending_count(pending_dir: Optional[str] = None, *, memory_dir: Optional[str
         pd = _resolve_pending_dir(pending_dir, memory_dir)
         if not os.path.isdir(pd):
             return 0
-        return sum(1 for n in os.listdir(pd) if n.endswith(".json"))
+        return sum(1 for n in os.listdir(pd) if n.endswith(".json") and not n.startswith("."))
     except Exception:
         return 0
 
 
 def discard_pending(path: str) -> bool:
-    """Remove one drained/approved seed from the queue. Returns True on success. Never raises."""
+    """Remove one drained/approved/dismissed seed from the queue. True on success. Never raises."""
     try:
         os.remove(path)
         return True
+    except Exception:
+        return False
+
+
+def _seed_captured_at(seed: Dict) -> float:
+    """A seed's capture timestamp for recency ordering; falls back to earliest_ts, then 0.0."""
+    for key in ("captured_at", "earliest_ts"):
+        val = seed.get(key)
+        try:
+            if isinstance(val, (int, float)) and not isinstance(val, bool):
+                return float(val)
+        except Exception:
+            pass
+    return 0.0
+
+
+def prune_pending(
+    pending_dir: Optional[str] = None,
+    *,
+    memory_dir: Optional[str] = None,
+    max_seeds: int = _MAX_PENDING_SEEDS,
+) -> int:
+    """Bound the queue at ``max_seeds`` — drop the LOWEST-value, then OLDEST, seeds past the cap.
+
+    A pending seed is gitignored ephemera awaiting review; a queue that grows one-seed-per-session
+    without limit is itself a soak the LIF goal forbids. Keeps the ``max_seeds`` a drain would
+    lead with — ranked by ``(salience score desc, captured_at desc)`` — so a just-written seed
+    (the newest ``captured_at``) always survives a same-score tie, giving a rolling window rather
+    than a hard stop that would silently swallow new captures. Returns the number pruned. A
+    label/order operation on the queue, NEVER on a seed's fate in the corpus. Never raises.
+    """
+    try:
+        pd = _resolve_pending_dir(pending_dir, memory_dir)
+        if not os.path.isdir(pd):
+            return 0
+        seeds = read_pending(pd)
+        if len(seeds) <= max_seeds:
+            return 0
+        ranked = sorted(seeds, key=lambda s: (-_seed_score(s), -_seed_captured_at(s)))
+        pruned = 0
+        for seed in ranked[max_seeds:]:
+            if discard_pending(seed.get("_path", "")):
+                pruned += 1
+        return pruned
+    except Exception:
+        return 0
+
+
+def _snooze_marker_path(pending_dir: str) -> str:
+    return os.path.join(pending_dir, _SNOOZE_MARKER)
+
+
+def snooze_queue(
+    pending_dir: Optional[str] = None, *, memory_dir: Optional[str] = None
+) -> bool:
+    """Defer the SessionStart pending-capture nudge for ``_SNOOZE_WINDOW_SESSIONS`` sessions.
+
+    Writes a timestamp marker inside the gitignored pending dir. The seeds are UNTOUCHED — this
+    quiets only the nudge, and only until it ages out (parity with the reconsolidation snooze:
+    a deferral, never a dismissal). Returns True on success. Never raises.
+    """
+    try:
+        pd = _resolve_pending_dir(pending_dir, memory_dir)
+        ensure_self_ignoring_dir(pd)
+        marker = _snooze_marker_path(pd)
+        tmp = marker + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"ts": round(time.time(), 3)}, fh)
+        os.replace(tmp, marker)
+        return True
+    except Exception:
+        return False
+
+
+def queue_snoozed(
+    pending_dir: Optional[str] = None,
+    *,
+    memory_dir: Optional[str] = None,
+    telemetry_dir: Optional[str] = None,
+) -> bool:
+    """True while an explicit queue snooze is younger than ``_SNOOZE_WINDOW_SESSIONS`` sessions.
+
+    Ages by SESSIONS, not wall-clock, exactly like ``reconsolidate._snoozed_names``: each recall-
+    ledger session whose first ts-carrying event lands after the ack counts once, and the snooze
+    expires once ``_SNOOZE_WINDOW_SESSIONS`` such sessions have started. Degrades toward
+    RE-NAGGING, never silence: a missing/corrupt marker, a ts-less ack, or an unreadable ledger
+    all read as "not snoozed". Read-only; never raises.
+    """
+    try:
+        pd = _resolve_pending_dir(pending_dir, memory_dir)
+        marker = _snooze_marker_path(pd)
+        if not os.path.isfile(marker):
+            return False
+        with open(marker, "r", encoding="utf-8") as fh:
+            acked = float((json.load(fh) or {}).get("ts") or 0.0)
+        if acked <= 0:
+            return False
+        if telemetry_dir is None and memory_dir is not None:
+            telemetry_dir = default_telemetry_dir(memory_dir)
+        from .telemetry import read_events
+
+        first_ts: Dict[str, float] = {}
+        for e in read_events(telemetry_dir):
+            sid, ts = e.get("session_id"), e.get("ts")
+            if (
+                sid
+                and sid not in first_ts
+                and isinstance(ts, (int, float))
+                and not isinstance(ts, bool)
+            ):
+                first_ts[sid] = float(ts)
+        started_since = sum(1 for s in first_ts.values() if s > acked)
+        return started_since < _SNOOZE_WINDOW_SESSIONS
     except Exception:
         return False
 
@@ -501,9 +638,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--list", action="store_true", help="list pending captures and exit")
     parser.add_argument(
         "--discard",
+        "--dismiss",
+        dest="discard",
         default=None,
         metavar="PATH",
-        help="remove ONE drained seed after it has been approved or skipped (the /hippo:consolidate drain)",
+        help="remove ONE seed by path — after it is approved/skipped in the drain, or to dismiss "
+        "a capture you don't want kept (the two are the same op: the seed leaves the queue)",
+    )
+    parser.add_argument(
+        "--snooze",
+        action="store_true",
+        help="CAP-6: defer the SessionStart pending-capture nudge for "
+        f"{_SNOOZE_WINDOW_SESSIONS} sessions (the seeds stay; only the nudge quiets, then re-nags)",
+    )
+    parser.add_argument(
+        "--prune",
+        action="store_true",
+        help=f"CAP-6: bound the queue to the {_MAX_PENDING_SEEDS} highest-value/newest seeds now "
+        "(runs automatically on every capture; this forces it)",
     )
     parser.add_argument(
         "--add-decision",
@@ -530,6 +682,23 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
         if args.list:
             print(_format_listing(read_pending(memory_dir=args.memory_dir)))
+            return 0
+        if args.snooze:
+            ok = snooze_queue(memory_dir=args.memory_dir)
+            print(
+                f"pending-capture nudge snoozed for {_SNOOZE_WINDOW_SESSIONS} sessions "
+                "(seeds kept; the nudge re-nags after it expires)"
+                if ok
+                else "could not record the snooze (unwritable pending dir)"
+            )
+            return 0
+        if args.prune:
+            n = prune_pending(memory_dir=args.memory_dir)
+            print(
+                f"pruned {n} low-value/old seed(s) — queue bounded to {_MAX_PENDING_SEEDS}"
+                if n
+                else f"nothing to prune (queue is within the {_MAX_PENDING_SEEDS}-seed bound)"
+            )
             return 0
         if args.discard:
             ok = discard_pending(args.discard)
