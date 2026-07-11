@@ -198,9 +198,9 @@ Each gate was re-checked against real code. Summary first, evidence below.
 ### CUT for v1
 
 - **INT-6 — warm recall daemon.** The very evidence its gate hinges on argues
-  *against* it: the cold-path p50 is **already gated at 1500ms**
-  (`GATE_COLD_P50_MS=1500`, `eval_recall.py:80`; enforced on the dense CI lane
-  via `--gate-cold`) and doctor enforces the same p95 budget
+  *against* it: the cold-path p95 is **already gated at 1500ms**
+  (`GATE_COLD_P95_MS=1500`, `eval_recall.py:98`; enforced on the dense CI lane
+  via `--gate-cold` — PRF-5 moved this gate p50→p95) and doctor enforces the same p95 budget
   (`doctor.py:836-878`). Green CI ⇒ **KPI-3's <1500ms is already met without a
   daemon.** The daemon only chases the aspirational <300ms half of KPI-3 (a
   nice-to-have), while INT-2's MCP server is *already* a long-lived process with
