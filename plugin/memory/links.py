@@ -418,6 +418,133 @@ class LinkGraph:
             s for s in self.files if not self.adjacency.get(s) and not self._inbound.get(s)
         )
 
+    # -- GRA-8: graph observability (read-only, deterministic) ------------- #
+    def _out_neighbors(self, stem: str) -> Set[str]:
+        """Distinct stems ``stem`` points at — untyped wikilinks ∪ every typed relation."""
+        out = set(self.adjacency.get(stem, set()))
+        for tgts in self.typed.get(stem, {}).values():
+            out |= tgts
+        return out
+
+    def _in_neighbors(self, stem: str) -> Set[str]:
+        """Distinct stems pointing AT ``stem`` — inbound wikilinks ∪ inbound typed relations."""
+        into = set(self._inbound.get(stem, set()))
+        for srcs in self._typed_inbound.get(stem, {}).values():
+            into |= srcs
+        return into
+
+    def undirected_neighbors(self, stem: str) -> Set[str]:
+        """All neighbors of ``stem`` with edge direction ignored (self excluded)."""
+        return (self._out_neighbors(stem) | self._in_neighbors(stem)) - {stem}
+
+    def connected_components(self) -> List[List[str]]:
+        """Weakly-connected components over ALL edges (wikilink + typed, direction ignored).
+
+        Each component is a sorted stem list; components are ordered largest-first, then by
+        their first stem, so identical corpora render byte-identically. A fragmented map (many
+        small components) means memories that don't cross-reference — the headline "inspect your
+        graph" number GRA-8 exposes and the component count the audit scorecard rolls up. An
+        isolated note is its own singleton component.
+        """
+        seen: Set[str] = set()
+        comps: List[List[str]] = []
+        for start in sorted(self.files):
+            if start in seen:
+                continue
+            stack = [start]
+            seen.add(start)
+            comp: List[str] = []
+            while stack:
+                cur = stack.pop()
+                comp.append(cur)
+                for nb in self.undirected_neighbors(cur):
+                    if nb not in seen:
+                        seen.add(nb)
+                        stack.append(nb)
+            comps.append(sorted(comp))
+        comps.sort(key=lambda c: (-len(c), c[0] if c else ""))
+        return comps
+
+    def degrees(self) -> List[Tuple[str, int, int, int]]:
+        """Per-stem ``(stem, out, in, total)`` degree, sorted by total desc then stem.
+
+        ``out``/``in`` count distinct neighbors in each direction; ``total`` is the undirected
+        neighbor count (a reciprocal pair is one total-degree, not two). Wikilink and typed
+        edges both count. Deterministic ordering for stable CLI/report output.
+        """
+        rows = [
+            (s, len(self._out_neighbors(s)), len(self._in_neighbors(s)), len(self.undirected_neighbors(s)))
+            for s in self.files
+        ]
+        rows.sort(key=lambda r: (-r[3], r[0]))
+        return rows
+
+    def _all_edges(self) -> List[Tuple[str, str, str]]:
+        """Every resolved edge as ``(src, tgt, kind)`` — ``kind`` is ``"link"`` or a relation."""
+        edges: List[Tuple[str, str, str]] = []
+        for src in sorted(self.adjacency):
+            for tgt in sorted(self.adjacency[src]):
+                edges.append((src, tgt, "link"))
+        for src in sorted(self.typed):
+            for rel in sorted(self.typed[src]):
+                for tgt in sorted(self.typed[src][rel]):
+                    edges.append((src, tgt, rel))
+        return edges
+
+    def export(self, fmt: str) -> str:
+        """Serialize the graph as ``json`` | ``dot`` | ``mermaid`` (deterministic). GRA-8.
+
+        ``json`` is the machine-readable form (nodes, edges, component count); ``dot`` and
+        ``mermaid`` render in Graphviz / any Mermaid viewer — a screenshot-able "here is my
+        memory graph" artifact for a tool that markets itself graph-backed.
+        """
+        fmt = (fmt or "").lower()
+        nodes = sorted(self.files)
+        edges = self._all_edges()
+        if fmt == "json":
+            import json as _json
+
+            return _json.dumps(
+                {
+                    "files": nodes,
+                    "edges": [{"src": s, "tgt": t, "type": k} for s, t, k in edges],
+                    "components": len(self.connected_components()),
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        if fmt == "dot":
+            lines = ["digraph hippo {"]
+            for n in nodes:
+                lines.append(f'  "{n}";')
+            for s, t, k in edges:
+                lines.append(f'  "{s}" -> "{t}";' if k == "link" else f'  "{s}" -> "{t}" [label="{k}"];')
+            lines.append("}")
+            return "\n".join(lines)
+        if fmt == "mermaid":
+            ids = {n: f"n{i}" for i, n in enumerate(nodes)}
+            lines = ["graph LR"]
+            for n in nodes:
+                lines.append(f'  {ids[n]}["{n}"]')
+            for s, t, k in edges:
+                lines.append(f"  {ids[s]} --> {ids[t]}" if k == "link" else f"  {ids[s]} -->|{k}| {ids[t]}")
+            return "\n".join(lines)
+        raise ValueError(f"unknown export format: {fmt!r} (expected json|dot|mermaid)")
+
+
+def component_count(memory_dir: str, index_dir: Optional[str] = None) -> Optional[int]:
+    """Number of weakly-connected components in the corpus graph, or ``None`` on failure.
+
+    GRA-8's one-number rollup for the GOV-6 trust scorecard — a guarded convenience over
+    ``build_graph(...).connected_components()`` that never raises (the scorecard tolerates an
+    absent signal, never an exception).
+    """
+    try:
+        graph = build_graph(memory_dir, index_dir)
+        return len(graph.connected_components()) if graph is not None else None
+    except Exception:
+        return None
+
 
 # --------------------------------------------------------------------------- #
 # GRA-4: the ONE typed-edge write primitive (per-item, agent-gated)
@@ -800,6 +927,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--traverse", default=None, help="show files reachable from NAME")
     parser.add_argument("--hops", type=int, default=2)
+    parser.add_argument(
+        "--components",
+        action="store_true",
+        help="GRA-8: list weakly-connected components (fragmentation of the memory graph)",
+    )
+    parser.add_argument(
+        "--degree",
+        action="store_true",
+        help="GRA-8: per-memory in/out/total degree, most-connected first",
+    )
+    parser.add_argument(
+        "--export",
+        choices=["json", "dot", "mermaid"],
+        default=None,
+        help="GRA-8: serialize the whole graph (json | Graphviz dot | mermaid)",
+    )
     args = parser.parse_args(argv)
 
     md, _ = resolve_dirs()
@@ -808,12 +951,25 @@ def main(argv: Optional[List[str]] = None) -> int:
     if g is None:
         print("could not build link graph")
         return 1
+    if args.export:
+        print(g.export(args.export))
+        return 0
     total_edges = sum(len(v) for v in g.adjacency.values())
     typed_edges = sum(len(t) for m in g.typed.values() for t in m.values())
+    comps = g.connected_components()
     print(
         f"files={len(g.files)} edges={total_edges} typed={typed_edges} "
-        f"orphans={len(g.orphans())} isolates={len(g.isolates())}"
+        f"components={len(comps)} orphans={len(g.orphans())} isolates={len(g.isolates())}"
     )
+    if args.components:
+        print(f"connected components ({len(comps)}, largest first):")
+        for i, comp in enumerate(comps):
+            head = ", ".join(comp[:8]) + (f", +{len(comp) - 8} more" if len(comp) > 8 else "")
+            print(f"  [{i}] {len(comp)} node(s): {head}")
+    if args.degree:
+        print("degree (out/in/total, most-connected first):")
+        for stem, out_d, in_d, total_d in g.degrees():
+            print(f"  {stem}: out={out_d} in={in_d} total={total_d}")
     if args.traverse:
         reach = g.traverse(args.traverse, hops=args.hops)
         print(f"reachable from {args.traverse} within {args.hops} hops ({len(reach)}):")
