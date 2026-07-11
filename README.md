@@ -74,6 +74,64 @@ This is the part native memory doesn't have: **capture is automatic, but every w
 a human.** You get the recall benefit of always-on capture without ever ceding control of what
 your corpus says.
 
+## Commands
+
+hippo ships as 15 `/hippo:*` skills. You rarely invoke most of them by hand — the agent runs the
+maintenance ones when a session-start signal calls for it — but here is the whole surface, grouped
+by what it's for.
+
+**Setup (you run these):**
+- `/hippo:bootstrap` — once per machine. Builds the plugin's venv and warms the offline embedding
+  model; the one online step in hippo's whole lifecycle.
+- `/hippo:init` — once per project (also safe on a teammate's clone, a new worktree, or a second
+  machine). Seeds `.claude/memory/`, wires the native-memory symlink, builds the recall index.
+
+**Everyday:**
+- `/hippo:new` — save one memory the right way (correct frontmatter, provenance backfill, index
+  refresh, floor pointer when applicable). This is what *"remember this: …"* routes to.
+- `/hippo:recall` — deliberately pull from the corpus: *"what do you remember about X"*, or list it
+  by type. (The prompt hook already recalls automatically every turn; this is for when you want to
+  *see* it.)
+- `/hippo:why` — the glass-box receipt: why hippo surfaced a memory for a query (winning backend,
+  typed edges, steering, salience) — or why it *didn't* (the near-miss score and the floor it missed).
+
+**Curation & health:**
+- `/hippo:doctor` — fast check of the *plumbing*: bootstrapped, venv healthy, corpus symlinked +
+  indexed + trusted, format current.
+- `/hippo:audit` — deep, judgment-based review of the *content*: staleness, drift, orphans, archive
+  candidates.
+- `/hippo:consolidate` — the sleep-time drain: approve pending captures, work the reconsolidation
+  worklist, refresh the graph. Run it when a session-start nudge says the queue or worklist is deep.
+- `/hippo:resolve` — drain the contradiction inbox: a per-item verdict on each unresolved
+  `contradicts` pair (keep one and supersede, scope both, merge, or mark not-conflicting).
+
+**Sharing & portability:**
+- `/hippo:promote` — lift one proven-portable memory into your machine-local user tier (or this
+  repo's private tier) with an origin stamp, so it recalls in every project.
+- `/hippo:promote-rule` — promote one reinforced procedural memory into a glob-scoped
+  `.claude/rules/` file the harness loads only for edits under the paths it cites.
+- `/hippo:pack` — share or adopt memory *packs*: extract chosen memories into a portable pack, or
+  install one (per-item, on the trust spine).
+- `/hippo:export-agents` — render your memory floor as a proposed `AGENTS.md` diff for the
+  cross-tool rule plane (Codex/Cursor/Copilot all read `AGENTS.md`).
+- `/hippo:import` — migration on-ramp: import existing rules/notes from other tools (Cursor
+  `.cursor/rules/*.mdc` first) into ranked, deduped, secret-linted hippo memories.
+
+**Offboarding:**
+- `/hippo:remove` — uninstall for this project: drop the symlink so native memory stops injecting
+  the floor, offer to delete the derived index/telemetry, and report (never delete) the shared
+  venv/cache.
+
+**Which one do I want?**
+- **recall vs. doctor** — `recall` asks the *corpus* a question; `doctor` asks whether the *plugin*
+  is healthy. Empty recall **and** a green doctor means you just haven't written that memory yet.
+- **doctor vs. audit** — `doctor` is fast plumbing (seconds, deterministic); `audit` is a slow,
+  judgment-based read of whether the content is still *accurate*. Doctor never tells you a memory
+  is out of date; audit does.
+- **consolidate vs. audit** — `consolidate` *drains and closes loops* (captures → memory, stale
+  worklist → verdicts, graph refresh); `audit` *diagnoses* content health but drains nothing.
+  Consolidate is routine sleep-time upkeep; audit is a periodic deep review.
+
 ## Removal / Uninstall
 
 To stop hippo from acting on a project, run inside Claude Code:
@@ -139,9 +197,9 @@ plugin/
 ├── assets/packs/                 # starter packs (core seeded by default; rest opt-in)
 ├── bin/hippo                     # CLI launcher for the stateless engine commands
 ├── requirements.txt              # fastembed, numpy, PyYAML, rank-bm25 (the venv path)
-└── skills/                       # /hippo:bootstrap|init|new|recall|doctor|audit|consolidate|remove
+└── skills/                       # 15 /hippo:* commands (see the Commands section above)
 tests/                            # hermetic test suite (no network/model download by default)
-.github/workflows/ci.yml          # hermetic matrix + dense lane + shellcheck
+.github/workflows/ci.yml          # hermetic matrix + dense/secret-scan/resolution lanes + shellcheck
 ```
 
 New to the ideas here? Start with [How hippo thinks](CONCEPTS.md). For the deep internals
