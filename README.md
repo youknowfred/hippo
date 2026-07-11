@@ -5,9 +5,15 @@ the right pieces of, on demand, every session. **New here? Start with
 [How hippo thinks](CONCEPTS.md)** — the five-minute mental model (what a memory is, the
 always-on floor vs. on-demand recall, the four types, why markdown-in-git).
 
-Local, git-native agent memory for Claude Code — a markdown-in-git corpus with offline
-dense+BM25 hybrid recall, git-drift staleness/provenance tracking, recall-triggered
-reconsolidation, and a self-audit skill. Distributed as a Claude Code plugin.
+**Local, git-native memory for Claude Code: your repo is the store, recall costs zero tokens /
+zero network / zero LLM per prompt, staleness is git-drift (the cited code moved — not calendar
+age), and every team memory lands through code review.** Distributed as a Claude Code plugin.
+
+By mid-2026 "a markdown corpus with hybrid recall" is a crowded shelf. hippo's line is narrower
+and sharper: **git *is* the store** (diff it, review it, revert it — not an opaque local DB),
+**staleness is semantic** (did the code a memory cites actually move?), the **hot path runs no
+LLM** ($0 and nothing leaves your machine per prompt), and **team memory ships through review**,
+never an autonomous write. See how it stacks up in [Compared to other memory tools](#compared-to-other-memory-tools).
 
 Battle-tested in daily use since 2026-06 across a 180+ memory production corpus.
 
@@ -73,6 +79,50 @@ rationale — then writes only the ones you approve, as an ordinary reviewable m
 This is the part native memory doesn't have: **capture is automatic, but every write waits for
 a human.** You get the recall benefit of always-on capture without ever ceding control of what
 your corpus says.
+
+## Compared to other memory tools
+
+Agent memory for Claude Code is a busy category — claude-mem, memsearch, memweave, supermemory,
+and Anthropic's own native memory all solve "the agent forgets between sessions." Several are
+excellent. hippo makes a specific set of trades the others don't:
+
+| | **hippo** | claude-mem | memsearch / memweave | Anthropic native memory | supermemory |
+|---|---|---|---|---|---|
+| **Store** | your **git repo** (plain markdown, diffable) | local store of AI-compressed logs | markdown + a derived index (Milvus / SQLite-FTS) | client-managed files / an auto `MEMORY.md` | hosted service |
+| **Recall** | hybrid dense+BM25, on-demand, ranked | AI-compressed context, auto-injected | hybrid semantic + keyword | the file(s), always loaded | hosted semantic search |
+| **Hot-path cost** | **$0** — no LLM, tokens, or network per prompt | AI compression in the loop | local embeddings; write path may summarize | injected file = tokens | API calls to the service |
+| **Staleness** | semantic **git-drift** (did the *cited code* move) | recency-based | recency / content-hash | — | — |
+| **Team memory** | ships through **code review**; a foreign corpus is quarantined until you trust it | auto-captured, no review gate | shared index, no review gate | per-project / per-machine | shared via account |
+| **Runs** | local, offline | local | local (memsearch needs Milvus) | in-model + local files | cloud (self-host on paid tiers) |
+
+Where hippo genuinely stands alone is two rows nothing else reproduces: **staleness is semantic** —
+no other tool checks whether the *code a memory cites* has moved (they decay by calendar age, by
+content hash, or not at all) — and **every team memory lands through review** rather than an
+autonomous write. Underpinning both, **the whole store is plain, diffable git** (the history is the
+audit/review/revert trail — not a byproduct of, or a sidecar to, a separate database). The top rows
+— markdown, hybrid recall, local — are table stakes now; these are not.
+
+**See the staleness difference in 5 seconds:** [`demo/git_drift.sh`](demo/git_drift.sh) builds a
+throwaway repo, writes a memory that cites a function, edits that function, and shows hippo flag the
+memory stale — because the code it points at moved, not because a timer expired. No download needed.
+
+*(Reflects each tool's documented behavior as of mid-2026; these projects move fast — corrections
+welcome via an issue.)*
+
+**One reproducible number.** On the shipped 50-memory golden dev corpus, over 18 hand-written
+cross-vocabulary paraphrase queries, hippo scores **recall@10 = 1.0** and **MRR@10 ≈ 0.91** — at
+**$0 per prompt** (no tokens, no network, no LLM). It reproduces to the digit on any machine, with
+or without the embedding model, via one command: `bench/run.sh`. Full methodology and the
+principled *why we don't run LongMemEval / LoCoMo / BEAM* (they measure autonomous chat-history
+extraction — a thing hippo deliberately gates behind human approval) are in
+[`bench/README.md`](bench/README.md).
+
+**Why the hot path is $0 and private.** Every prompt's recall is local lexical + cached-dense
+ranking — hippo calls no model API to retrieve, so a recall spends **zero tokens**, and **nothing
+leaves your machine**. The one online step in hippo's entire lifecycle is `/hippo:bootstrap`
+downloading the embedding model once; after that, recall is fully offline. For a privacy- or
+cost-sensitive team, "memory that costs nothing per prompt and never phones home" is a hard
+requirement a hosted-by-default or LLM-in-the-loop memory can't meet without extra self-hosting work.
 
 ## Commands
 
@@ -164,16 +214,26 @@ per project.
 
 ## hippo and Claude Code's native memory
 
-hippo **composes** with Claude Code's built-in memory — it does not replace or fork it.
+Anthropic now ships memory of its own: the GA `memory_20250818` tool (a client-managed
+file-memory API, view/create/edit/delete) and Claude Code's **Auto Memory**, which quietly
+maintains a project `MEMORY.md` — build commands, code style, architecture decisions, bugs it
+solved with you. So the fair question at launch is *"why not just use Anthropic's memory?"*
+
+Because hippo is the **ranking + hygiene + review layer on top of it**, not a competitor to it.
+hippo **composes** with native memory — it does not replace or fork it.
 
 - **What native memory does.** Claude Code always-loads a per-project memory location
-  (`~/.claude/projects/<encoded>/memory`). It's per-machine, opaque, and unconditionally
-  injected — great for a small always-on note, but not reviewable in git, not ranked, and not
-  shared with teammates.
-- **What hippo adds.** A **git-native, teammate-reviewable** markdown corpus with **hybrid
-  dense+BM25 recall** (the right memories on demand, not everything every prompt),
-  **staleness/provenance** tracking, a typed **link graph**, **reconsolidation**, and an
-  **automatic capture** path up to an explicit approval gate.
+  (`~/.claude/projects/<encoded>/memory`) and, with Auto Memory, auto-writes a `MEMORY.md` there at
+  session start (capped, with detail offloaded to per-topic files). It's per-machine, opaque, and
+  unconditionally injected — great for a small always-on note, but the always-loaded index is
+  **static and unranked** (it can't pick the *right* memory for your query the way on-demand recall
+  does), **not reviewable in git**, **auto-written (no approval gate)**, and **not shared with
+  teammates** — and nothing tells you when an auto-captured fact went stale.
+- **What hippo adds — the layer on top.** A **git-native, teammate-reviewable** corpus with
+  **hybrid dense+BM25 recall** (the *right* memories on demand, not everything every prompt),
+  **semantic git-drift staleness**, a typed **link graph**, **reconsolidation**, and an
+  **automatic-capture-behind-an-approval-gate** path. It is exactly the ranking, staleness
+  hygiene, and human review that Auto Memory's always-loaded, auto-written note lacks.
 - **How they compose.** `/hippo:init` points the native memory location at this repo's
   `.claude/memory/` via a symlink, so hippo's always-load **floor** (the `user`/`feedback`
   pointers) reaches context *through* native memory's own always-load — hippo adds no second
