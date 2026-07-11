@@ -1,5 +1,10 @@
 # hippo
 
+Give Claude Code a memory that lives in your repo: a corpus of small markdown files it recalls
+the right pieces of, on demand, every session. **New here? Start with
+[How hippo thinks](CONCEPTS.md)** — the five-minute mental model (what a memory is, the
+always-on floor vs. on-demand recall, the four types, why markdown-in-git).
+
 Local, git-native agent memory for Claude Code — a markdown-in-git corpus with offline
 dense+BM25 hybrid recall, git-drift staleness/provenance tracking, recall-triggered
 reconsolidation, and a self-audit skill. Distributed as a Claude Code plugin.
@@ -139,9 +144,10 @@ tests/                            # hermetic test suite (no network/model downlo
 .github/workflows/ci.yml          # hermetic matrix + dense lane + shellcheck
 ```
 
-See [`plugin/memory/README.md`](plugin/memory/README.md) for the full engine documentation
-(recall, staleness, reconsolidation, archive internals) and
-[`plugin/README.md`](plugin/README.md) for the skills overview.
+New to the ideas here? Start with [How hippo thinks](CONCEPTS.md). For the deep internals
+(recall, staleness, reconsolidation, archive), see the engine reference at
+[`plugin/memory/README.md`](plugin/memory/README.md); for the skills, see
+[`plugin/README.md`](plugin/README.md).
 
 ## Bootstrap vs. auto-provision (design decision)
 
