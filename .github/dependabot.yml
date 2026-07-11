@@ -1,0 +1,25 @@
+# QUA-12: keep the SHA-pinned GitHub Actions current, and surface dependency updates.
+version: 2
+updates:
+  # GitHub Actions are pinned by commit SHA in the workflows; dependabot bumps the SHA + the
+  # trailing version comment together, so pinning never means going stale.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "QUA"
+    labels: ["dependencies", "ci"]
+
+  # The plugin's Python deps live in plugin/requirements.txt as deliberately BOUNDED ranges
+  # (>=lo,<hi — load-bearing for the CPython 3.10–3.14 support matrix, SEC-11). Dependabot here
+  # is mainly for security visibility; a proposed bound change is reviewed against that policy,
+  # not merged blindly.
+  - package-ecosystem: "pip"
+    directory: "/plugin"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "SEC"
+    labels: ["dependencies"]
