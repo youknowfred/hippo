@@ -413,6 +413,16 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
   `recall._salience_enabled`. Revisit only with a salience-exercising eval or field evidence.
 - **PRF-4** `P1/S` — Dense-enabled latency sample on the 500-memory scale lane
   (the production path PRF-3 skips). *(KPI-3.)*
+  **SHIPPED 2026-07-10 — with a finding.** `tests/test_scale.py` gained a
+  `scale_index_dense` fixture + `test_dense_recall_latency_under_warm_gate_at_scale` that
+  builds a REAL 500-memory dense index and measures the production dense+bm25 warm p95.
+  **Finding: dense@500 warm p95 ≈ 407ms (p50 ≈ 215ms) — ABOVE the bm25-only lane's 300ms
+  budget**, because dense pays a per-query ONNX embed (~200ms) the lexical path doesn't, so
+  PRF-3's 300ms number understated the real hot path. Budget set to 900ms (headroom for CPU
+  CI + ONNX jitter; trips a gross regression). Skip-safe (fastembed/dense-required),
+  `@pytest.mark.timeout(900)` for the heavy build, `@pytest.mark.scale` (deselected by
+  default). Green nightly/dense CI run is a separate wiring step — the nightly scale job is
+  bm25-only today, and CI is billing-blocked — so this is locally `-m scale`-verified.
 - **PRF-5** `P2/S` — Align the CI cold gate to **p95** (the KPI-3/doctor
   statistic), not p50.
   **SHIPPED 2026-07-10**: `cold_latency` now emits `p95` (same nearest-rank formula as the
