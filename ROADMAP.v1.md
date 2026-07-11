@@ -445,8 +445,10 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **CAP-6** `P1/M` — Capture pending-queue **snooze/dismiss + seed bound/prune**
   (parity with LIF-1's `_snoozed_names`). Closes the LIF-goal violation.
   **SHIPPED 2026-07-10**: `prune_pending` bounds the queue at `_MAX_PENDING_SEEDS` (50), dropping
-  lowest-value then oldest seeds; `write_session_capture` self-prunes on every write (the fresh
-  seed is newest → survives its own prune: a rolling window). `snooze_queue`/`queue_snoozed`
+  lowest-value then oldest seeds; `write_session_capture` self-prunes on every write (value-first:
+  a fresh seed survives unless the queue is already full of strictly higher-value captures, in
+  which case a trivial new seed yields to them — the queue keeps what a drain would lead with).
+  `snooze_queue`/`queue_snoozed`
   defer the SessionStart nudge for `_SNOOZE_WINDOW_SESSIONS` (5) sessions, aging by SESSIONS not
   wall-clock exactly like `reconsolidate._snoozed_names` (degrades toward re-nagging, never
   silence); the seeds are untouched. CLI `capture --snooze`/`--prune`/`--dismiss` (alias for

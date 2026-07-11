@@ -92,7 +92,7 @@ def test_capture_to_approval_end_to_end(repo, monkeypatch):
     assert result.get("error") is None
     landed = os.path.join(md, f"{candidate}.md")
     assert os.path.isfile(landed), "the approved candidate must land in the corpus"
-    assert candidate not in corpus_before  # it genuinely did not exist before approval
+    assert f"{candidate}.md" not in corpus_before  # it genuinely did not exist before approval
 
     # 6) Drain the seed — the queue empties and the nudge self-clears.
     assert C.discard_pending(seed_path)

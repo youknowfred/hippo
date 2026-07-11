@@ -1044,10 +1044,14 @@ def test_mcp_launch_reports_the_server_starts(memory_dir, repo):
 
 
 def test_mcp_launch_does_not_leak_offline_env(memory_dir, repo, monkeypatch):
-    # serve() sets HF_HUB_OFFLINE via setdefault; the check must snapshot/restore it.
-    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    # serve() sets HF_HUB_OFFLINE/TRANSFORMERS_OFFLINE (setdefault) + FASTEMBED_CACHE_PATH (via
+    # ensure_fastembed_cache_path); the check snapshots/restores ALL THREE. Pin each one — the
+    # autouse recall-state fixture would otherwise silently absorb a leak of the latter two.
+    for key in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "FASTEMBED_CACHE_PATH"):
+        monkeypatch.delenv(key, raising=False)
     D.check_mcp_launch(D.DoctorContext(memory_dir, repo))
-    assert "HF_HUB_OFFLINE" not in os.environ
+    for key in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "FASTEMBED_CACHE_PATH"):
+        assert key not in os.environ, f"check_mcp_launch leaked {key}"
 
 
 def test_mcp_launch_registered_before_the_trailing_env_check():

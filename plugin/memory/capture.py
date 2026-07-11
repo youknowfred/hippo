@@ -398,8 +398,11 @@ def write_session_capture(
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(seed, fh, ensure_ascii=False, indent=2)
         os.replace(tmp, path)  # atomic: a reader never sees a half-written seed
-        # CAP-6: self-bound the queue so an un-drained backlog can't grow without limit. The
-        # just-written seed is the newest, so it survives its own prune (rolling window).
+        # CAP-6: self-bound the queue so an un-drained backlog can't grow without limit. Prune
+        # keeps the highest-value seeds (recency breaks ties), so a just-written seed survives
+        # UNLESS the queue is already full of strictly higher-value captures — in which case a
+        # trivial new seed yields to them. Value-first, not FIFO: the queue keeps what a drain
+        # would lead with.
         prune_pending(pd, max_seeds=_MAX_PENDING_SEEDS)
         return path
     except Exception:

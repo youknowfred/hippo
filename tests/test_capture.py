@@ -434,8 +434,33 @@ def test_prune_bounds_queue_keeping_highest_value_and_newest(repo):
     pruned = C.prune_pending(pd, max_seeds=2)
     assert pruned == 2
     survivors = {s["session_id"] for s in C.read_pending(pd)}
-    # Kept: highest score, then newest of the ties — never the lowest-value oldest seed.
+    # Value-first: the two highest-scored seeds are kept; the two score-0 seeds are dropped.
     assert survivors == {"high", "mid"}
+
+
+def test_prune_is_value_first_a_trivial_new_seed_yields_to_higher_value(repo):
+    """The honest contract behind the self-prune: a fresh LOW-value seed does NOT survive when
+    the queue is already full of strictly higher-value captures — value-first, not FIFO."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    pd = C.default_pending_dir(md)
+    _write_raw_seed(pd, "valuable-old", score=9, captured_at=100.0)
+    _write_raw_seed(pd, "trivial-new", score=0, captured_at=999.0)  # newest, but worthless
+    pruned = C.prune_pending(pd, max_seeds=1)
+    assert pruned == 1
+    survivors = {s["session_id"] for s in C.read_pending(pd)}
+    assert survivors == {"valuable-old"}, "recency must NOT override value when the queue is full"
+
+
+def test_prune_breaks_score_ties_by_recency(repo):
+    """When scores tie, the NEWER seed is kept — the recency tiebreak the self-prune relies on."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    pd = C.default_pending_dir(md)
+    _write_raw_seed(pd, "tied-old", score=3, captured_at=100.0)
+    _write_raw_seed(pd, "tied-new", score=3, captured_at=200.0)
+    assert C.prune_pending(pd, max_seeds=1) == 1
+    assert {s["session_id"] for s in C.read_pending(pd)} == {"tied-new"}
 
 
 def test_prune_is_noop_within_bound(repo):
