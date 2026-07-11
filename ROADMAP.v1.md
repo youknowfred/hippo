@@ -535,8 +535,23 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **ONB-10** `P2/M` — Reduce the `user_role.md` **FILL-ME friction** (ship a
   minimal 2-line default, and/or an optional interactive init fill via
   `AskUserQuestion` — user-supplied content, never an autonomous write).
+  **SHIPPED 2026-07-10**: `init/SKILL.md` gained step **2a** — on the fresh-corpus path, if
+  `AskUserQuestion` is available, OFFER to fill `user_role.md` from ~3–4 short questions (name,
+  role/what they're building, solo-vs-team, collaboration style) and write **only the user's
+  verbatim answers**, deleting the chosen branch's scaffolding and leaving unanswered spans as
+  `<FILL-ME>` (doctor still flags them). A **HARD RULE** blockquote forbids inferring/synthesizing
+  a role from the repo/history/conversation — decline or no-AskUserQuestion → fall back to the
+  edit-it-yourself reminder, never an autonomous write. (Chose the interactive-fill arm over a
+  2-line default: it removes the wall-of-placeholders friction without weakening the doctor
+  FILL-ME tripwire or shipping a template edit that pack tests pin.)
 - **DOC-12** `P2/S` — Per-skill **user command reference** (one paragraph +
   when-to-use per verb; recall-vs-doctor, doctor-vs-audit, consolidate-vs-audit).
+  **SHIPPED 2026-07-10**: README gained a `## Commands` section — all **15** `/hippo:*` skills
+  grouped by purpose (setup / everyday / curation+health / sharing+portability / offboarding),
+  each with a one-line when-to-use, plus an explicit "which one do I want?" block disambiguating
+  recall-vs-doctor, doctor-vs-audit, and consolidate-vs-audit. Fixed the stale "8 skills"
+  repo-layout code block (→ "15 /hippo:* commands") and the stale CI-lane comment; expanded
+  `plugin/README.md`'s Skills table from 8 to all 15 (it pointed at the root Commands guide).
 
 ### POS — Positioning & launch *(NEW workstream)*
 - **POS-1** `P0/S` — **Re-cut the differentiation one-liner** around git-native +

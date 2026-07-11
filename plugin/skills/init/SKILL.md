@@ -77,9 +77,31 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    (`## User` for `user` types, `## Working Style & Process Feedback` for `feedback`),
    `- [Title](file.md) — one-line hook` — mirror the skeleton's existing pointer style.
    `project`/`reference` memories never get floor pointers. `user_role.md` ships as an
-   editable `<FILL-ME>` template — tell the user to fill it in with their own role/context
-   before their first real session (skip this reminder only if they explicitly say they'll
-   do it later).
+   editable `<FILL-ME>` template; step 2a offers to fill it interactively so the newcomer
+   isn't left staring at a wall of placeholders (skip 2a only if they say they'll do it later).
+2a. **Optionally fill `user_role.md` interactively — from the USER's own words (ONB-10).**
+   Fresh-corpus path only (where core was just seeded and `user_role.md` is still the
+   `<FILL-ME>` template). The single unavoidable manual step is filling this file, and the
+   shipped template is a deliberately thorough `<FILL-ME>` scaffold — great for depth, but a lot
+   to face on a first run. If `AskUserQuestion` is available, OFFER to fill it now instead of
+   handing them the raw template: ask a few short questions and write **only their verbatim
+   answers** into the file. Reasonable questions (keep it to ~3–4, all optional):
+   - their name;
+   - their role and what they're building (one line);
+   - solo, or a small team (and if a team, roughly how many / who Claude is among);
+   - how they want Claude to collaborate (technical depth, decision authority) — optional.
+
+   Then rewrite `user_role.md`, replacing the matching `<FILL-ME>` spans with the user's answers
+   **verbatim** and deleting the scaffolding/checkboxes for the branch they chose (e.g. the
+   solo-vs-team options). Leave any span the user didn't answer as `<FILL-ME>` — `/hippo:doctor`
+   flags what's still unfilled.
+
+   > **HARD RULE — user-supplied content ONLY.** Never infer, synthesize, guess, or "helpfully"
+   > draft the user's role from the repo, the git history, or the conversation. Every word in
+   > `user_role.md` must be text the user gave you **in answer to these questions** — not quoted
+   > from earlier chat, not paraphrased from what you've observed. If they decline the offer, or
+   > `AskUserQuestion` isn't available, do NOT write the file — fall back to the step-2 reminder
+   > to edit the template themselves. A fabricated user identity is worse than an unfilled one.
 2b. **Stamp the corpus format marker** — `.claude/memory/.format`, committed WITH the corpus
    (it describes the corpus's on-disk conventions; it is NOT a derived cache, so it is never
    gitignored):

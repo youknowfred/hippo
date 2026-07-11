@@ -7,15 +7,25 @@ reconsolidation, archive internals).
 
 ## Skills
 
+All 15 `/hippo:*` commands (the root [README's Commands section](../README.md#commands) has the
+one-line "which one do I want?" guide for recall-vs-doctor, doctor-vs-audit, consolidate-vs-audit):
+
 | Skill | Run when |
 |---|---|
 | `/hippo:bootstrap` | Once per machine — builds the shared venv + warms the offline model cache |
-| `/hippo:init` | Once per new project — seeds `.claude/memory/` + the cross-machine symlink |
+| `/hippo:init` | Once per new project (or a fresh clone/worktree) — seeds `.claude/memory/` + the cross-machine symlink + index |
 | `/hippo:new` | Whenever the agent decides to save something to memory |
 | `/hippo:recall` | Deliberately recall the corpus — "what do you remember about X", or list it by type |
+| `/hippo:why` | The glass-box recall receipt — why a memory surfaced (or didn't) for a query |
 | `/hippo:doctor` | Fast health check — is the plugin's own install/environment working |
 | `/hippo:audit` | Deep, judgment-based self-audit of the corpus's content — staleness, drift, archive candidates |
 | `/hippo:consolidate` | Sleep-time drain — approve pending captures, work the reconsolidation worklist, refresh the graph |
+| `/hippo:resolve` | Drain the contradiction inbox — a per-item verdict on each unresolved `contradicts` pair |
+| `/hippo:promote` | Lift one proven-portable memory into the machine-local user (or repo private) tier with an origin stamp |
+| `/hippo:promote-rule` | Promote one reinforced procedural memory into a glob-scoped `.claude/rules/` file |
+| `/hippo:pack` | Share or adopt memory packs — extract a portable pack, or install one per-item on the trust spine |
+| `/hippo:export-agents` | Render the memory floor as a proposed `AGENTS.md` diff for the cross-tool rule plane |
+| `/hippo:import` | Migration on-ramp — import other tools' rules/notes (Cursor `.mdc` first) into deduped hippo memories |
 | `/hippo:remove` | Uninstall/offboard THIS project — removes the symlink, offers to delete index/telemetry, reports (never deletes) shared venv/cache paths |
 
 ## MCP server — mid-turn & subagent memory (INT-2)
