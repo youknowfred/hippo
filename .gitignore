@@ -5,3 +5,12 @@ __pycache__/
 .hypothesis/
 .DS_Store
 *.egg-info/
+
+# Secrets & local-only config — belt-and-suspenders now that the repo is public.
+# (No .env or machine-local Claude settings are tracked today; these keep it that way
+# rather than relying on a per-machine global excludesfile that doesn't travel with the repo.)
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+.claude/*.local.json

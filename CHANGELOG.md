@@ -96,6 +96,21 @@ PR (noted per group).
   for light+dark grounds; a `prefers-color-scheme` lockup at the README top), and
   `author.url → youknowfred.com` in both manifests.
 
+### Security & hygiene (pre-launch sweep)
+
+- **SEC-1 gate coverage** — the MCP `traverse` and `decision_history` tools now honor the trust
+  gate that `recall` / `why` / `new_memory` and every resource already enforce. Both rendered
+  memory **names + typed edges + dates** from an untrusted foreign corpus into agent context
+  without consent (metadata only — never descriptions or bodies — so the exposure was narrow);
+  they now withhold until the corpus is reviewed, with regression tests that run with the
+  trust-all test override removed.
+- **Fixture scrub** — a `tests/` fixture hard-coded a real personal absolute path; replaced with
+  a synthetic path (no behavior change). `.gitignore` gained explicit `.env*` /
+  `.claude/*.local.json` entries so local secrets can't be committed by accident.
+- **py3.13/3.14** — a test's `re.split(..., 1)` passed `maxsplit` positionally, which newer
+  Python deprecates and the suite escalates to an error; now `maxsplit=1`. Shipped code was
+  never affected.
+
 ## v1.8.0 — 2026-07-10 — "Safe in the open"
 
 **re-bootstrap: no** — `plugin/requirements.txt`'s dependency constraints are byte-identical to

@@ -779,7 +779,7 @@ def test_walk_up_for_memory_dir_reports_nested_reason():
 # encode_project_dir (SHP-5 — matches the harness's real one-char-per-'-' rule)
 # --------------------------------------------------------------------------- #
 def test_encode_project_dir_plain_path_only_slashes():
-    assert P.encode_project_dir("/Users/fredbook/GitHub/hippo") == "-Users-fredbook-GitHub-hippo"
+    assert P.encode_project_dir("/Users/x/GitHub/hippo") == "-Users-x-GitHub-hippo"
 
 
 def test_encode_project_dir_dotted_path_replaces_every_dot():
@@ -793,14 +793,14 @@ def test_encode_project_dir_underscored_path_replaces_underscore():
 
 def test_encode_project_dir_consecutive_punctuation_produces_consecutive_hyphens():
     # "/." (slash then dot) before "claude" -> TWO hyphens, not collapsed to one.
-    path = "/Users/fredbook/Documents/GitHub/ic-memobot/.claude/memory"
-    expected = "-Users-fredbook-Documents-GitHub-ic-memobot--claude-memory"
+    path = "/Users/x/dev/proj/.claude/memory"
+    expected = "-Users-x-dev-proj--claude-memory"
     assert P.encode_project_dir(path) == expected
 
 
 def test_encode_project_dir_existing_hyphens_pass_through_unchanged():
-    path = "/Users/fredbook/Documents/GitHub/ic-memobot/canvas-ui/src"
-    expected = "-Users-fredbook-Documents-GitHub-ic-memobot-canvas-ui-src"
+    path = "/Users/x/dev/proj/ui-lib/src"
+    expected = "-Users-x-dev-proj-ui-lib-src"
     assert P.encode_project_dir(path) == expected
 
 
@@ -809,7 +809,7 @@ def test_encode_project_dir_keeps_leading_hyphen_no_strip():
 
 
 def test_legacy_encode_project_dir_differs_from_fixed_only_when_punctuation_present():
-    plain = "/Users/fredbook/GitHub/hippo"
+    plain = "/Users/x/GitHub/hippo"
     assert P._legacy_encode_project_dir(plain) == P.encode_project_dir(plain)  # coincidentally same
 
     dotted = "/Users/x/dev/next.js-app"
