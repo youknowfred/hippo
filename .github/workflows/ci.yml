@@ -27,10 +27,13 @@
 # repo, or a plan with branch protection — the free private plan returns 403 on the API, so the
 # maintainer self-merges until then):
 #   - Require a pull request before merging; require review from Code Owners (.github/CODEOWNERS).
-#   - Require these status checks to pass:
+#   - Require these status checks to pass (use each job's FULL reported name — the string
+#     GitHub shows is the evaluated `name:` field, not the job id):
 #         hermetic (ubuntu-latest, py3.10) · hermetic (ubuntu-latest, py3.12)
 #         hermetic (macos-latest, py3.10)  · hermetic (macos-latest, py3.12)
-#         dense · shellcheck · secret-scan
+#         dense (cached model + eval_recall CLI)
+#         shellcheck (hooks + launcher)
+#         secret-scan (SEC-8 — shipped packs + repo)
 #     (the `resolution` and nightly `scale` lanes are intentionally NOT required.)
 #   - Require branches to be up to date before merging; require linear history.
 #   - Do not allow force pushes or deletions of `main`.

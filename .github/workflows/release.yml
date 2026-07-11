@@ -70,9 +70,11 @@ jobs:
           out, capturing = [], False
           for ln in open("CHANGELOG.md", encoding="utf-8").read().splitlines():
               m = re.match(r"^##\s+v(\d+\.\d+\.\d+)\b", ln)
+              # Stop at the next version heading, OR the trailing "## Earlier releases" prose
+              # (so tagging the oldest itemized entry doesn't over-capture into that section).
+              if capturing and (m or re.match(r"^##\s+Earlier\b", ln)):
+                  break
               if m:
-                  if capturing:               # reached the NEXT version heading -> stop
-                      break
                   if m.group(1) == ver:
                       capturing = True
                       continue                 # skip the heading itself

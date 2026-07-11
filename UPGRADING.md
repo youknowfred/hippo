@@ -30,10 +30,14 @@ increases. `read_corpus_format()` reads it (a corpus with no marker reads as for
 When you open an older corpus with a newer plugin, `/hippo:doctor` reports, for example:
 
 ```
-⚠ corpus format is v2, this plugin writes v4 — user data needs a migration (see UPGRADING.md)
+⚠ corpus format is v2, this plugin writes v4 — the corpus needs a MIGRATION before newer-format
+features work; hippo never migrates automatically — follow the doctor-driven path in
+plugin/memory/README.md ('Corpus format versioning')
 ```
 
-hippo does **not** migrate for you: a bulk autonomous rewrite of your memories would violate the
+(That "Corpus format versioning" section in the engine reference is the canonical short form; this
+file is its top-level, worked-example expansion of the same doctor-driven path.) hippo does **not**
+migrate for you: a bulk autonomous rewrite of your memories would violate the
 guiding invariant that corrective writes are per-item and agent-gated. Instead, the migration is a
 deliberate pass you run (ask Claude to "migrate my hippo corpus to the current format") that follows
 this pattern:
