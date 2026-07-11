@@ -7,6 +7,92 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.8.0 — 2026-07-10 — "Safe in the open"
+
+**re-bootstrap: no** — `plugin/requirements.txt`'s dependency constraints are byte-identical to
+v1.7.0 (`fastembed>=0.4,<0.8`, `numpy>=1.26,<3`, `PyYAML>=6.0,<7.0`, `rank-bm25>=0.2.2,<0.3`);
+SEC-11 added upper-bound *documentation* and a hardened-install recipe, not a version change.
+Persisted shapes are ALL unchanged since v1.7.0 (corpus format still 4, index schema still 6,
+capture-seed schema still 2) — the trust spine's content fingerprint lives in the machine-local
+trust record, outside the corpus. The `/hippo:*` skill set grew from 14 to 15 (RUL-6 added
+`/hippo:promote-rule`); the MCP tool set is unchanged.
+
+This release delivers the roadmap's **v0.8.0 "Safe in the open"** security tier
+(`ROADMAP.v1.md` §6) — the milestone that makes cloning hippo's own public repo, or any public
+repo carrying a hippo corpus, safe *by review of what actually injects* — together with the
+S-effort slice of the **v0.10.0 "Legible to strangers"** first-run polish, and the ranking,
+evaluation, and reach work that merged since v1.7.0. Every item below merged to `main` as its
+own reviewed PR.
+
+### Security — the "Safe in the open" tier (SEC-5..14)
+
+**Trust spine (SEC-5/6/7, PR #19).**
+
+- **SEC-5** — consent surfaces the memory **descriptions** that actually inject (not just
+  filenames), rendered through the injection layer's own formatter (byte-equal, test-pinned),
+  so you review the strings that will enter every prompt.
+- **SEC-6** — the trust record stores a per-file **content fingerprint**; recall QUARANTINES a
+  drifted or newly-added project-tier file, per file, until you re-review — defeating
+  trusted-upstream supply-chain injection. hippo's own write primitives fold their writes into
+  the baseline (authorship = consent); index builds never do.
+- **SEC-7** — an inject-time **provenance banner** + defensive demarcation for foreign/cloned
+  corpus lines; a corpus trusted by review (vs one you authored) is labelled as such at use.
+
+**Launch-security tail (SEC-8..14, PRs #21/#22).**
+
+- **SEC-8** — broadened the secret detector (Slack/Google/Stripe/OpenAI/Anthropic/JWT/npm/PyPI/
+  connection-string patterns, high-precision floors) and added a `secret-scan` CI job over the
+  tracked tree.
+- **SEC-9** — repo-root `THIRD_PARTY_NOTICES` inventories the four direct deps, their transitive
+  tree, and both embedding models, verified against installed venv metadata and drift-guarded.
+- **SEC-10** — repo-root `SECURITY.md`: private vulnerability disclosure channel, supported
+  versions, and threat model.
+- **SEC-12** — the trust gate now covers a **non-git directory that carries a real corpus**, so
+  a zip download is no longer a trust bypass; an empty non-git dir stays inapplicable.
+- **SEC-13** — the MCP `new_memory` tool runs the same resource gate as reads (no
+  write-without-review asymmetry); `serve()` rejects an over-long line before parsing it.
+- **SEC-14** — `--record-usage` refuses to write committed telemetry on a repo that has a git
+  remote unless explicitly opted in (local-only proceeds); a new doctor check surfaces
+  committed-usage privacy.
+- **SEC-11** — every dependency is **bounded on both sides**, so a compromised new major can't
+  be pulled at bootstrap; a test enforces the no-unbounded-`>=` invariant, and
+  `requirements.txt` documents a per-environment hardened hash-install recipe and the model's
+  content-addressed integrity check. Ranges stay ranges on purpose: no single numpy version
+  spans CPython 3.10–3.14, so a universal exact lock is infeasible.
+
+### Ranking, evaluation & reach
+
+- **GRA-1** (PR #18) — fixed the dense-side knee that suppressed graph expansion; multi-hop
+  neighbours the dense floor previously starved now surface (golden set byte-identical).
+- **RET-8** (PR #16) — a category-tagged eval suite, so recall precision is measurable
+  per-category on any corpus (unblocks the salience decision).
+- **SIG-6** (PR #17) — abstention blind-spots feed the eval fixtures; the T7 signals close-out.
+- **RCH-5** (PR #19) — trust-gated pack install/update: a curated memory subset lifts and
+  re-applies across projects, gated on the same trust spine.
+- **RUL-6** (PR #23) — glob-scoped rule promotion (`/hippo:promote-rule`, the 15th skill):
+  promote a proven memory into a path-scoped rule, propose-only, derived from its cited paths.
+  Unblocked by the owner clearing the LIF-7 capture-soak gate.
+
+### First-run polish for strangers (v0.10.0 S-slice)
+
+- **DOC-14** — scrubbed origin-repo jargon ("the ic-memobot/Memosa … private origin repo") from
+  every stranger-facing surface (README intro, `plugin.json` description, `requirements.txt`
+  header); the License section keeps its relicensing provenance with only the internal name
+  removed.
+- **ONB-8** — the README Quickstart now ends on an **observable first recall** ("what do you
+  remember about my role?" / `/hippo:recall`) — the KPI-1 metric it never exercised before.
+- **ONB-9** — `/hippo:init`'s closing narration ends with a **try-it-now** nudge naming the exact
+  next command, completing the init → observed-recall funnel.
+- **DOC-11** — a README **Troubleshooting** section (empty-recall triage, on-demand vs
+  always-load-floor recall, non-git degraded mode, `/hippo:doctor`).
+- **CAP-8** — the README now surfaces the **automatic-capture → `/hippo:consolidate` approval
+  loop** with a worked example — hippo's strongest differentiator versus native memory.
+
+### Docs
+
+- **explorations-r2** (PR #20) — a round-2 enhancement catalog + draft post-v1 roadmap
+  (`EXPLORATIONS2.md`, `ROADMAP.enhancements2.yaml`), owner-triage pending; no shipped behavior.
+
 ## v1.7.0 — 2026-07-09 — "Reach — knowledge that travels"
 
 **re-bootstrap: no** — `plugin/requirements.txt` is unchanged across both tiers below; the code
