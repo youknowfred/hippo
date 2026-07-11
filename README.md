@@ -1,5 +1,9 @@
 # hippo
 
+[![CI](https://github.com/youknowfred/hippo/actions/workflows/ci.yml/badge.svg)](https://github.com/youknowfred/hippo/actions/workflows/ci.yml)
+[![version](https://img.shields.io/github/v/tag/youknowfred/hippo?label=version&sort=semver)](https://github.com/youknowfred/hippo/releases)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Give Claude Code a memory that lives in your repo: a corpus of small markdown files it recalls
 the right pieces of, on demand, every session. **New here? Start with
 [How hippo thinks](CONCEPTS.md)** — the five-minute mental model (what a memory is, the

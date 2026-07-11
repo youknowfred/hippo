@@ -619,22 +619,48 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
   marker semantics (network/slow/scale), the six required CI checks, and the
   one-commit-per-item / id-prefixed convention. (The only dev-test hint today
   assumes an undocumented `.venv`.)
+  **SHIPPED 2026-07-10**: repo-root `CONTRIBUTING.md` — the CI-matching venv recipe, the
+  `HIPPO_DISABLE_DENSE=1` offline test path, the network/slow/scale marker table, the required
+  CI checks (hermetic matrix / dense / shellcheck / secret-scan) + the local secret-scan command,
+  and the branch-off-main / id-prefixed-commit / squash conventions + the guiding invariants.
 - **COM-2** `P1/S` — `CODE_OF_CONDUCT.md`, `.github/ISSUE_TEMPLATE/`
   (bug form capturing platform/corpus-size/backend), `PULL_REQUEST_TEMPLATE.md`,
   `CODEOWNERS`.
+  **SHIPPED 2026-07-10**: Contributor Covenant v2.1 CoC (CC BY 4.0, contact = GitHub advisories /
+  @youknowfred); `bug_report.yml` (captures platform + recall backend + corpus size + doctor
+  paste), `feature_request.yml`, `config.yml` (routes security→advisories, questions→Discussions);
+  `PULL_REQUEST_TEMPLATE.md` (green-suite / secret-scan / marker / invariant / frozen-surface
+  checklist); `CODEOWNERS` (@youknowfred).
 - **COM-5** `P0/M` — **v1.0.0 stability / semver commitment.** Enumerate & freeze
   the compatibility surface: `HIPPO_*` env names, the `/hippo:*` namespace,
   `corpus_format` + index `schema_version`, `bin/hippo` CLI, MCP tool names
   (recall/new_memory/traverse); state the support policy (marketplace =
   latest-only); reconcile with the clean-break invariant. *Load-bearing —
   new decision OQ-8.*
+  **SHIPPED 2026-07-10 (OQ-8 RATIFIED as proposed by owner):** repo-root `STABILITY.md` freezes
+  the surface at v1.0 — the `/hippo:*` namespace, `bin/hippo` subcommands, all 5 MCP tool names,
+  the `HIPPO_*` namespace + documented operational vars, and the committed `corpus_format` (4) +
+  frontmatter conventions. Explicitly NOT frozen: derived caches/schemas (rebuildable), the
+  internal ranking-tuning knobs, the Python API, exact recall wording/order. Policy: marketplace =
+  latest-only, forward-only; post-1.0 a frozen-surface rename/removal is a major bump or a
+  deprecation window, qualifying the clean-break invariant to pre-1.0 + major bumps. (Deliberately
+  did NOT freeze all ~37 `HIPPO_*` knobs — the ranker-tuning ones must stay adjustable.)
 - **COM-6** `P1/M` — Top-level `UPGRADING.md` + a **worked non-trivial
   migration** (format 2→3 template: doctor-detect → per-item agent-gated edits →
   `write_corpus_format` stamp). Today only the trivial additive case is written,
   buried in the engine reference.
+  **SHIPPED 2026-07-10**: repo-root `UPGRADING.md` — the three upgrade kinds (plugin update /
+  derived-cache rebuild / corpus-format migration) and a worked format 2→3 template following the
+  real pattern: `read_corpus_format` detect → doctor names the gap → per-item agent-gated edits
+  (body preserved, reviewable diff) → verify → `write_corpus_format` stamps LAST so a half-done
+  migration never claims a format it hasn't reached.
 - **COM-7** `P1/S` — Marketplace/listing polish: **real maintainer identity**
   (email/url) in both manifests; mirror keywords + author into `marketplace.json`;
   README CI/version badges.
+  **SHIPPED 2026-07-10 (owner-chosen identity: GitHub handle + repo URL, no personal email)**:
+  author/owner in both manifests → `youknowfred` + `https://github.com/youknowfred` (was a bare
+  "Fred"); mirrored keywords + author into `marketplace.json`'s plugin entry; aligned both
+  descriptions to the POS-1 capability line; README CI / version / license badges under the title.
 - **QUA-11** `P1/S` — CI **resolution/bootstrap lane on py3.11/3.13/3.14**
   (proves OSP-3's numpy `<3` widening) + extend the docs link-check to external
   URLs.
@@ -647,6 +673,13 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
   flakes on network weather). CI edits await the account billing fix to run green.
 - **QUA-12** `P2/S` — `release.yml` **publishes a GitHub Release** with extracted
   CHANGELOG notes; **codify branch protection**; pin actions by SHA + dependabot.
+  **SHIPPED 2026-07-10**: `release.yml` gained a `github-release` job (after the tag-time
+  version-sync gate) that extracts the newest CHANGELOG section verbatim and `gh release
+  create --verify-tag`s it. All Actions pinned by commit SHA (checkout@v4.2.2, setup-python
+  @v5.3.0, cache@v4.2.0 — SHAs verified against the GitHub API) with a version comment;
+  `.github/dependabot.yml` keeps the pins current (+ pip visibility). The intended `main`
+  branch-protection ruleset (required checks, PR + CODEOWNERS review, linear history, no
+  force-push) is codified in the ci.yml header. CI is billing-blocked so these await the fix.
 - **DOC-10** `P1/S` — **Demo GIF / asciinema** for the README landing page
   (install → bootstrap → init → remember → recall-resurfaces / git-drift flag).
   *(depends POS-4.)*
