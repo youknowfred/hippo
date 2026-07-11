@@ -7,6 +7,110 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.9.0 — 2026-07-11 — "Out in the open"
+
+**re-bootstrap: no** — `plugin/requirements.txt` is byte-identical to v1.8.0
+(`fastembed>=0.4,<0.8`, `numpy>=1.26,<3`, `PyYAML>=6.0,<7.0`, `rank-bm25>=0.2.2,<0.3`), and every
+persisted shape is unchanged (corpus format still 4, index schema still 6, capture-seed schema
+still 2). The `/hippo:*` skill set (15) and the MCP tool set (5 tools / 3 resources) are unchanged;
+nothing here touches the recall hot path's behavior. This is a **launch release**: it carries no
+new engine risk, only the measurement, positioning, community, and brand work that makes the repo
+safe to hand a stranger — and it accompanies flipping the repository **public**.
+
+Where v1.8.0 **"Safe in the open"** made a cloned corpus safe *by review of what injects*, v1.9.0
+takes hippo **out** into the open: a reproducible benchmark anyone can re-run, a self-authored
+comparison against the mid-2026 field, a written 1.0-grade stability contract, a stranger's
+contribution path, and — at last — a face. It folds the roadmap's **v0.9.0 "Proven for strangers"**
+measurement spine, the **v0.10.0 "Legible to strangers"** doc remainder, and the **v1.0 "Launch"**
+positioning/community milestone into one semver step. Every item reached `main` through a reviewed
+PR (noted per group).
+
+### Measurement spine — "Proven for strangers" (RET-9/10/11, PRF-4/5, PR #26)
+
+- **RET-9** — a per-corpus **abstention doctor check**: `/hippo:doctor` flags a corpus whose
+  recall can't cleanly abstain on off-topic queries, rather than letting it silently inject noise.
+- **RET-10** — the salience-weighting experiment was **run and DECIDED OFF**: on the category-tagged
+  eval it moved nothing (the signal was vacuous), so it ships disabled rather than as dead
+  complexity. (Owner-resolved OQ-10.)
+- **RET-11** — a BM25-only abstention floor was **empirically rejected**: on-topic and off-topic
+  queries overlap in every BM25 signal measured, so the honest abstention gate stays **dense-gated**;
+  the finding is captured as a doctor check, not a false promise.
+- **PRF-4/5** — the cold-latency gate moved from **p50 to p95** (the figure the recall hook actually
+  pays), with the measured dense@500-memory p95 (~407 ms) recorded against the BM25 budget.
+
+### "Proven for strangers" finish (CAP-6/7, GRA-8, INT-8, QUA-11, PR #27)
+
+- **CAP-6** — the pending-capture queue gained a **value-first bound + snooze/dismiss**, so the
+  SessionStart nudge defers a snoozed queue instead of nagging unboundedly.
+- **CAP-7** — an end-to-end **capture → approval** integration test over the real drain path.
+- **GRA-8** — `hippo links` grew `--components/--degree/--export (json|dot|mermaid)`; the link-graph
+  component count feeds the trust scorecard as an informational line.
+- **INT-8** — the README MCP table now lists all **5 tools + 3 resources** with mid-turn/subagent
+  discoverability notes, and `doctor.check_mcp_launch` exercises the real `serve()` handshake so a
+  broken MCP launch is a caught regression, not a silent one.
+- **QUA-11** — a CI **resolution lane** (py3.11/3.13/3.14 dependency bootstrap) and a
+  network-marked external-URL docs check.
+
+### Legible to strangers — first-run docs (ONB-10, DOC-12, PR #28)
+
+- **ONB-10** — `/hippo:init` can offer an optional **`user_role.md` fill** via a question prompt,
+  under a hard rule: only user-supplied answers are written, never inferred or synthesized.
+- **DOC-12** — a README **## Commands** reference covering all 15 skills, with the
+  recall-vs-doctor / doctor-vs-audit / consolidate-vs-audit distinctions, and the stale "8 skills"
+  layout block corrected.
+
+### Positioning & launch collateral (POS-1..7 + demo + benchmark, PR #29)
+
+- **POS-1/2** — the README lead is re-cut to hippo's durable, plain-language capability line, and a
+  **"Compared to other memory tools"** table places it honestly against claude-mem, memsearch/
+  memweave, native memory, and supermemory.
+- **POS-3** — a **reproducible benchmark** (`bench/run.sh`, `bench/README.md`): the real recall
+  engine over the shipped 50-memory golden corpus and 18 cross-vocabulary paraphrase queries —
+  **recall@10 = 1.0**, **MRR@10 0.912 → 0.9213** (BM25-only → dense hybrid), at **$0 per prompt**,
+  deterministic to the digit; with the principled *why not LongMemEval/LoCoMo/BEAM*.
+- **POS-4** — `demo/git_drift.sh`: a no-download hero demo that writes a memory citing a function,
+  edits the function, and shows hippo flag it stale — the one behavior no competitor reproduces.
+- **POS-5/6/7** — the `$0`/private rationale, the shipping-products landscape, and a native-memory
+  section for the GA `memory_20250818` tool + Auto Memory.
+
+### Community on-ramp (COM-1/2/5/6/7, QUA-12, PR #30)
+
+- **COM-1/2** — `CONTRIBUTING.md` (the CI-matching venv recipe, markers, checks, conventions),
+  `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), issue forms (platform/backend/corpus-size), a PR
+  template, and `CODEOWNERS`.
+- **COM-5** — `STABILITY.md` ratifies **OQ-8**: the frozen 1.0 surface (`/hippo:*`, `bin/hippo`, the
+  5 MCP tools, the `HIPPO_*` namespace, documented env vars, corpus format 4) — and, explicitly,
+  what is *not* frozen (caches, schemas, tuning knobs, the Python API).
+- **COM-6** — `UPGRADING.md`: a worked corpus-format 2→3 migration and the three upgrade kinds.
+- **COM-7** — manifests attribute to **youknowfred** with keywords/author mirrored across both;
+  README CI/version/MIT badges.
+- **QUA-12** — `release.yml` now cuts a **GitHub Release** from the CHANGELOG extract with
+  SHA-pinned actions, plus `dependabot.yml` and a codified branch-protection ruleset.
+
+### Concepts & brand
+
+- **DOC-9** (PR #25) — a **"How hippo thinks"** concepts page (`CONCEPTS.md`) and a README
+  mental-model lead: what a memory is, the always-on floor vs. on-demand recall, the four types,
+  why markdown-in-git.
+- **BRAND** (PR #37) — the **waterline-hippo** logo, wordmark, and lockup (`assets/logo/`, one file
+  for light+dark grounds; a `prefers-color-scheme` lockup at the README top), and
+  `author.url → youknowfred.com` in both manifests.
+
+### Security & hygiene (pre-launch sweep)
+
+- **SEC-1 gate coverage** — the MCP `traverse` and `decision_history` tools now honor the trust
+  gate that `recall` / `why` / `new_memory` and every resource already enforce. Both rendered
+  memory **names + typed edges + dates** from an untrusted foreign corpus into agent context
+  without consent (metadata only — never descriptions or bodies — so the exposure was narrow);
+  they now withhold until the corpus is reviewed, with regression tests that run with the
+  trust-all test override removed.
+- **Fixture scrub** — a `tests/` fixture hard-coded a real personal absolute path; replaced with
+  a synthetic path (no behavior change). `.gitignore` gained explicit `.env*` /
+  `.claude/*.local.json` entries so local secrets can't be committed by accident.
+- **py3.13/3.14** — a test's `re.split(..., 1)` passed `maxsplit` positionally, which newer
+  Python deprecates and the suite escalates to an error; now `maxsplit=1`. Shipped code was
+  never affected.
+
 ## v1.8.0 — 2026-07-10 — "Safe in the open"
 
 **re-bootstrap: no** — `plugin/requirements.txt`'s dependency constraints are byte-identical to

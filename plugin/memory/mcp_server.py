@@ -256,6 +256,7 @@ def _tool_why(args: Dict[str, Any]) -> str:
 
 
 def _tool_traverse(args: Dict[str, Any]) -> str:
+    from . import trust
     from .build_index import default_index_dir
     from .links import TYPED_RELATIONS, build_graph
     from .provenance import resolve_dirs
@@ -265,7 +266,18 @@ def _tool_traverse(args: Dict[str, Any]) -> str:
         return "traverse: a memory name is required."
     hops = args.get("hops")
     hops = int(hops) if isinstance(hops, (int, float)) and int(hops) >= 1 else 1
-    memory_dir, _ = resolve_dirs()
+    memory_dir, repo_root = resolve_dirs()
+    # SEC-1: gate on trust exactly as recall/why/new_memory and every resource do. The link
+    # graph renders memory NAMES + typed edges into agent context; on an untrusted foreign
+    # corpus those names are themselves attacker-controlled injection surface, so withhold
+    # them until the corpus is reviewed — the read-without-trust gap traverse used to leave.
+    gate_root = trust.gate_repo_root(memory_dir, repo_root)
+    if gate_root is not None and not trust.is_trusted(gate_root):
+        return (
+            "traverse: withheld — this project's memory corpus is untrusted (SEC-1: the link "
+            "graph exposes memory names and typed edges, gated just as recall is). Run "
+            "/hippo:doctor to review and trust it, or /hippo:init if it's yours."
+        )
     graph = build_graph(memory_dir, default_index_dir(memory_dir))
     if graph is None:
         return "traverse: no graph available (corpus empty or unbuilt)."
@@ -289,6 +301,7 @@ def _tool_traverse(args: Dict[str, Any]) -> str:
 def _tool_decision_history(args: Dict[str, Any]) -> str:
     """RCH-3: delegates to the SAME history.render_decision_history the
     /hippo:recall --history CLI renders — one chain builder, two surfaces."""
+    from . import trust
     from .build_index import default_index_dir
     from .history import render_decision_history
     from .provenance import resolve_dirs
@@ -296,7 +309,17 @@ def _tool_decision_history(args: Dict[str, Any]) -> str:
     name = str(args.get("name") or "").strip()
     if not name:
         return "decision_history: a memory name is required."
-    memory_dir, _ = resolve_dirs()
+    memory_dir, repo_root = resolve_dirs()
+    # SEC-1: gate on trust like every sibling. The lineage narrative renders memory names,
+    # dates, and typed edges — withhold them on an untrusted foreign corpus (the same
+    # read-without-trust gap traverse had).
+    gate_root = trust.gate_repo_root(memory_dir, repo_root)
+    if gate_root is not None and not trust.is_trusted(gate_root):
+        return (
+            "decision_history: withheld — this project's memory corpus is untrusted (SEC-1: "
+            "the lineage narrative exposes memory names, dates, and typed edges, gated just as "
+            "recall is). Run /hippo:doctor to review and trust it, or /hippo:init if it's yours."
+        )
     return render_decision_history(name, memory_dir, default_index_dir(memory_dir))
 
 

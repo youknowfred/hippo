@@ -208,6 +208,37 @@ def test_decision_history_requires_name_and_degrades(corpus):
     assert "no memory resolves" in _text(_call("decision_history", {"name": "ghost"}))
 
 
+def test_traverse_refuses_untrusted_corpus_then_walks_after_consent(corpus, monkeypatch):
+    """SEC-1: MCP traverse honors the trust gate. The link graph renders memory names +
+    typed edges into agent context; on an untrusted corpus those are withheld — just as
+    recall/why/new_memory withhold — until the user consents (what /hippo:init or doctor do).
+    conftest's autouse TRUST_ALL=1 normally opens the gate; delete it and the (non-git,
+    SEC-12-gated) corpus is untrusted."""
+    from memory import trust as T
+    from memory.provenance import resolve_dirs
+
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    text = _text(_call("traverse", {"name": "deploy_runbook", "hops": 1}))
+    assert "withheld" in text
+    assert "rollback_plan" not in text  # no linked memory name leaks past the gate
+
+    assert T.mark_trusted(T.gate_repo_root(*resolve_dirs()))  # consent
+    assert "rollback_plan" in _text(_call("traverse", {"name": "deploy_runbook", "hops": 1}))
+
+
+def test_decision_history_refuses_untrusted_corpus_then_renders_after_consent(corpus, monkeypatch):
+    """SEC-1: MCP decision_history honors the trust gate — the lineage narrative (names,
+    dates, typed edges) is withheld on an untrusted corpus until the user consents."""
+    from memory import trust as T
+    from memory.provenance import resolve_dirs
+
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    assert "withheld" in _text(_call("decision_history", {"name": "deploy_runbook"}))
+
+    assert T.mark_trusted(T.gate_repo_root(*resolve_dirs()))  # consent
+    assert "withheld" not in _text(_call("decision_history", {"name": "deploy_runbook"}))
+
+
 # --------------------------------------------------------------------------- #
 # End-to-end newline-delimited stream
 # --------------------------------------------------------------------------- #
