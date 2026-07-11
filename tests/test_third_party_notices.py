@@ -28,7 +28,7 @@ def _requirement_names() -> list:
             if not line or line.startswith("#"):
                 continue
             # strip the version specifier: name comes before any of < > = ! ~ [ ;
-            name = re.split(r"[<>=!~;\[ ]", line, 1)[0].strip()
+            name = re.split(r"[<>=!~;\[ ]", line, maxsplit=1)[0].strip()
             if name:
                 names.append(name)
     return names
