@@ -433,13 +433,33 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
   stubs carry p95, the pin test tracks the renamed constant.
 - **GRA-8** `P2/S` — Graph observability CLI (`--components/--degree/--export`);
   feed component count to the audit scorecard. *(exploratory, gate-free.)*
+  **SHIPPED 2026-07-10**: `LinkGraph.connected_components()` (weakly-connected over wikilink +
+  typed edges, direction-ignored, largest-first), `.degrees()` (per-stem out/in/total), and
+  `.export(json|dot|mermaid)` — a screenshot-able "here is my memory graph" artifact; `hippo
+  links` gains `--components`/`--degree`/`--export` and a `components=N` summary line.
+  `links.component_count()` feeds the GOV-6 trust scorecard a "N graph component(s)" line
+  (informational — never flips the rollup to warn; a young corpus is legitimately fragmented).
+  Read-only, deterministic, no deps.
 
 ### CAP / INT — Capture integrity & integration surfaces
 - **CAP-6** `P1/M` — Capture pending-queue **snooze/dismiss + seed bound/prune**
   (parity with LIF-1's `_snoozed_names`). Closes the LIF-goal violation.
+  **SHIPPED 2026-07-10**: `prune_pending` bounds the queue at `_MAX_PENDING_SEEDS` (50), dropping
+  lowest-value then oldest seeds; `write_session_capture` self-prunes on every write (the fresh
+  seed is newest → survives its own prune: a rolling window). `snooze_queue`/`queue_snoozed`
+  defer the SessionStart nudge for `_SNOOZE_WINDOW_SESSIONS` (5) sessions, aging by SESSIONS not
+  wall-clock exactly like `reconsolidate._snoozed_names` (degrades toward re-nagging, never
+  silence); the seeds are untouched. CLI `capture --snooze`/`--prune`/`--dismiss` (alias for
+  `--discard`); the nudge names the snooze escape hatch; the queue count skips the dotfile marker.
+  consolidate/SKILL.md documents it. "Nothing nags forever" now cuts both ways.
 - **CAP-7** `P2/M` — One **end-to-end integration test**: SessionEnd capture →
   SessionStart nudge → `/hippo:consolidate` drain (`--check` routing) → approved
   candidate lands in `.claude/memory/`.
+  **SHIPPED 2026-07-10**: `tests/test_capture_integration.py` walks the whole loop through the
+  real functions the hooks + drain skill call — `write_session_capture` → `pending_capture_
+  producer` → `check_candidate` (routes `add`) → `write_memory` → `discard_pending` — asserting
+  the corpus is byte-identical until the explicit approval, the approved memory is a real recall-
+  ready file, and the queue drains + the nudge self-clears. Pairs with the shipped CAP-8.
 - **CAP-8** `P2/S` — Surface the capture→approval loop in README quickstart + a
   worked `/hippo:consolidate` example (hippo's strongest differentiator vs native
   memory is currently discoverable only via one SessionStart nudge line).
@@ -453,6 +473,14 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **INT-8** `P2/M` — MCP **discoverability doc** (mid-turn/subagent recall) +
   **launch-health doctor check** (`bin/hippo mcp` actually starts) + bounds.
   *(KPI-5.)*
+  **SHIPPED 2026-07-10**: `plugin/README.md`'s MCP section now lists all 5 tools + 3 resources
+  (the table was stale at 3 tools) and adds a "When the agent reaches for it" discoverability
+  section — mid-turn recall once the task is concrete, and subagent recall (read `hippo://floor`
+  first, then `recall`). `doctor.check_mcp_launch` exercises the REAL `serve()` read loop
+  in-process with a canned `initialize` (no subprocess/network), confirms the handshake, and
+  reports the tool/resource surface + the SEC-13 1 MiB per-message cap; it snapshots/restores the
+  offline env keys `serve()` sets so a diagnostic never mutates the environment. Registered
+  mid-list (`stale_memobot_env` stays pinned last).
 
 ### ONB / DOC — First-run & documentation for strangers
 - **DOC-14** `P0/S` — **Scrub origin-repo / "private repo" jargon** from README
@@ -558,6 +586,13 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **QUA-11** `P1/S` — CI **resolution/bootstrap lane on py3.11/3.13/3.14**
   (proves OSP-3's numpy `<3` widening) + extend the docs link-check to external
   URLs.
+  **SHIPPED 2026-07-10**: new `resolution` CI job (matrix `{3.11, 3.13, 3.14}`, `fail-fast:
+  false`, NOT a required check) installs the pinned dep ranges, imports all four deps, builds a
+  real BM25 index (bootstrap smoke), and runs the hermetic suite on each — a py3.14 fastembed-
+  wheel lag reports independently without blocking 3.11/3.13; the `{3.10, 3.12}` hermetic lane
+  stays the gate. `test_docs_links` gained a `network`-marked external-URL check (HEAD → GET on
+  403/405/429, fails only on a definitive 404/410, transient errors inconclusive so it never
+  flakes on network weather). CI edits await the account billing fix to run green.
 - **QUA-12** `P2/S` — `release.yml` **publishes a GitHub Release** with extracted
   CHANGELOG notes; **codify branch protection**; pin actions by SHA + dependabot.
 - **DOC-10** `P1/S` — **Demo GIF / asciinema** for the README landing page
