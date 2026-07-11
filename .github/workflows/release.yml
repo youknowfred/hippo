@@ -20,7 +20,7 @@ jobs:
     name: version sync (tag == manifests == CHANGELOG)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Verify tag matches both manifests and the CHANGELOG
         run: |
           python - <<'PY'
@@ -59,7 +59,7 @@ jobs:
     permissions:
       contents: write   # required to create the Release
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Extract this version's CHANGELOG section
         run: |
           python - <<'PY' > release-notes.md
