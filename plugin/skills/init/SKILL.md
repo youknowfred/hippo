@@ -205,6 +205,16 @@ months the way a hand-authored corpus without this feature would.
    user_role.md is still the unfilled template — recall will index its placeholder text until
    you edit it (/hippo:doctor flags this too)."
 
+   Then — on EVERY path (fresh, existing, git or not), after the `user_role.md` warning if any
+   — close the report with the ONB-9 **try-it-now nudge** so the user reaches an *observable*
+   first recall instead of a finished-but-silent setup. Name the exact next move, e.g.:
+
+   > ▶ **Try it now** — once `user_role.md` has your real role, ask me *"what do you remember
+   > about my role?"* (or run `/hippo:recall "my role"`) and watch hippo surface it inline.
+   > That returned memory is the whole point of the setup you just ran.
+
+   Recall is the payoff the entire init exists for; never end on the setup report alone.
+
 ## Hard rules
 
 - **Never write outside `.claude/memory/`, `.claude/memory.local/`, `.claude/.memory-index/`,

@@ -397,6 +397,12 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **CAP-8** `P2/S` — Surface the capture→approval loop in README quickstart + a
   worked `/hippo:consolidate` example (hippo's strongest differentiator vs native
   memory is currently discoverable only via one SessionStart nudge line).
+  **SHIPPED 2026-07-10**: README gained an "Automatic capture — memory that writes
+  itself, gated by your review" section: SessionEnd/SubagentStop drafts candidates into
+  a gitignored pending queue, the SessionStart nudge flags a deep queue, and
+  `/hippo:consolidate` walks each draft (evidence + rationale + near-dup check) to a
+  per-item human approval. Frames the differentiator explicitly — "capture is automatic,
+  but every write waits for a human." Kept small (one section, one worked command).
 - **CAP-9** `P3/S` — PreCompact/SessionEnd cross-surface dedup note in the skill.
 - **INT-8** `P2/M` — MCP **discoverability doc** (mid-turn/subagent recall) +
   **launch-health doctor check** (`bin/hippo mcp` actually starts) + bounds.
@@ -406,17 +412,41 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
 - **DOC-14** `P0/S` — **Scrub origin-repo / "private repo" jargon** from README
   and the marketplace-visible `plugin.json` description. (Cheap, visible, a
   launch-credibility regression.)
+  **SHIPPED 2026-07-10**: reworded `README.md` intro ("battle-tested … 180+ memory
+  production corpus") and the `plugin.json` description (dropped the "Extracted from
+  the ic-memobot/Memosa …" tail); scrubbed the same jargon from `requirements.txt`'s
+  header comment. The License section keeps its (legally meaningful) relicensing
+  provenance — author wrote it for a private predecessor, relicensed MIT — with the
+  unresolvable internal repo name removed. `marketplace.json`'s description was already
+  clean. Internal docs (ROADMAP/CHANGELOG/RELEASING) and the load-bearing
+  `MEMOBOT_*` env-var references in `doctor.py` are left as-is.
 - **ONB-8** `P1/S` — **Observable first recall** in the quickstart (final step
   runs `/hippo:recall` / "what do you remember about X" so the stranger *sees*
   the memory return). This *is* KPI-1's metric; it is never exercised today.
+  **SHIPPED 2026-07-10**: README Quickstart gained a step 5 ("See it work") — ask
+  *"what do you remember about my role?"* or run `/hippo:recall "my role"`, with a
+  pointer back to step 3's `user_role.md` fill so there is real content to return.
+  The stranger now ends the quickstart on an observed recall, not on "just work …
+  injected automatically."
 - **ONB-9** `P1/S` — Post-init **"try it now" next-command nudge** — complete the
   KPI-8 funnel (narration currently stops one step short of the payoff).
+  **SHIPPED 2026-07-10**: `init/SKILL.md` step 6 now closes — on every path — with a
+  try-it-now blockquote naming the exact next command (*"what do you remember about my
+  role?"* / `/hippo:recall "my role"`), chained off the `user_role.md` fill so the
+  recall returns real content. The init narration lands on the payoff, not on the setup
+  report. (Blockquote, not a fenced block, so the QUA-8 skills-contract extractor leaves
+  it untouched.)
 - **DOC-9** `P1/M` — **"How hippo thinks" concepts page** (what a memory is; floor
   vs on-demand recall; the four types; why markdown-in-git) linked from the top
   of the README. Stop leading with acronym-dense feature copy; stop routing
   newcomers to the 575-line engine reference as "the full docs."
 - **DOC-11** `P1/S` — **Troubleshooting / FAQ** ("recall is empty →
   bootstrapped? corpus trusted? `user_role` still FILL-ME? run `/hippo:doctor`").
+  **SHIPPED 2026-07-10**: README gained a `## Troubleshooting` section covering the
+  empty-recall triage (bootstrap / trust / FILL-ME), why a written memory may not
+  resurface (on-demand ranked recall vs the always-load floor), the non-git degraded
+  mode, and `/hippo:doctor` as the one-stop diagnostic. Linked from the Quickstart via a
+  `#troubleshooting` anchor.
 - **ONB-10** `P2/M` — Reduce the `user_role.md` **FILL-ME friction** (ship a
   minimal 2-line default, and/or an optional interactive init fill via
   `AskUserQuestion` — user-supplied content, never an autonomous write).

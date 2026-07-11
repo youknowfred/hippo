@@ -1,7 +1,7 @@
 {
   "name": "hippo",
-  "description": "Local, git-native agent memory — markdown-in-git corpus + offline dense+BM25 recall, staleness/provenance tracking, reconsolidation, and self-audit. Extracted from the ic-memobot/Memosa agent-memory tooling.",
-  "version": "1.7.0",
+  "description": "Local, git-native agent memory for Claude Code — markdown-in-git corpus + offline dense+BM25 recall, staleness/provenance tracking, reconsolidation, and self-audit.",
+  "version": "1.8.0",
   "author": {
     "name": "Fred"
   },
