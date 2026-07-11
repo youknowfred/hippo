@@ -575,3 +575,76 @@ def test_add_typed_relation_is_single_item_only_no_bulk_path():
     params = list(inspect.signature(add_typed_relation).parameters)
     assert params[:3] == ["path", "relation", "target"]
     assert "targets" not in params and "names" not in params and "bulk" not in params
+
+
+# --------------------------------------------------------------------------- #
+# GRA-8: graph observability — components / degree / export
+# --------------------------------------------------------------------------- #
+def _observability_corpus(md: str) -> None:
+    """Three components: {a<->b via wikilink}, {c -supersedes-> d}, and the isolate e."""
+    _write(md, "a.md", _mem("a", "see [[b]]"))
+    _write(md, "b.md", _mem("b", "back to [[a]]"))
+    _write(md, "c.md", _typed_mem("c", "supersedes: [d]\n"))
+    _write(md, "d.md", _mem("d", "no links"))
+    _write(md, "e.md", _mem("e", "an isolate"))
+
+
+def test_connected_components_weakly_over_all_edge_kinds(tmp_path):
+    md = str(tmp_path / "memory")
+    _observability_corpus(md)
+    comps = LinkGraph(md).connected_components()
+    # Largest-first, then lexical; a typed edge unites c/d just like a wikilink unites a/b.
+    assert comps == [["a", "b"], ["c", "d"], ["e"]]
+
+
+def test_degrees_count_both_directions_and_edge_kinds(tmp_path):
+    md = str(tmp_path / "memory")
+    _observability_corpus(md)
+    deg = dict((stem, (out, ind, tot)) for stem, out, ind, tot in LinkGraph(md).degrees())
+    assert deg["a"] == (1, 1, 1)  # a<->b reciprocal → one undirected neighbor
+    assert deg["c"] == (1, 0, 1)  # c supersedes d (typed out)
+    assert deg["d"] == (0, 1, 1)  # d is superseded (typed in)
+    assert deg["e"] == (0, 0, 0)  # isolate
+
+
+def test_export_json_dot_mermaid_are_deterministic_and_complete(tmp_path):
+    import json as _json
+
+    md = str(tmp_path / "memory")
+    _observability_corpus(md)
+    g = LinkGraph(md)
+
+    payload = _json.loads(g.export("json"))
+    assert payload["files"] == ["a", "b", "c", "d", "e"]
+    assert payload["components"] == 3
+    assert {"src": "c", "tgt": "d", "type": "supersedes"} in payload["edges"]
+    assert {"src": "a", "tgt": "b", "type": "link"} in payload["edges"]
+
+    dot = g.export("dot")
+    assert dot.startswith("digraph hippo {") and dot.rstrip().endswith("}")
+    assert '"c" -> "d" [label="supersedes"];' in dot
+
+    mermaid = g.export("mermaid")
+    assert mermaid.startswith("graph LR")
+    assert "-->|supersedes|" in mermaid
+
+    # Deterministic: a fresh graph over the same corpus → byte-identical export.
+    assert LinkGraph(md).export("json") == g.export("json")
+
+
+def test_export_rejects_unknown_format(tmp_path):
+    import pytest
+
+    md = str(tmp_path / "memory")
+    _observability_corpus(md)
+    with pytest.raises(ValueError):
+        LinkGraph(md).export("svg")
+
+
+def test_component_count_helper_guards_and_matches(tmp_path):
+    from memory.links import component_count
+
+    md = str(tmp_path / "memory")
+    _observability_corpus(md)
+    assert component_count(md) == 3
+    assert component_count("/no/such/dir/xyz") is None  # guarded, never raises

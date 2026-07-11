@@ -520,6 +520,17 @@ def _scorecard_message(memory_dir: str, repo_root: str) -> Tuple[str, str]:
     except Exception:
         orphans = 0
 
+    # GRA-8: how many weakly-connected components the memory graph fragments into. Informational
+    # (never flips the rollup to warn — a small young corpus is legitimately fragmented); the
+    # per-item drill-down is `hippo links --components`. None when the graph can't be built.
+    components = None
+    try:
+        from .links import component_count
+
+        components = component_count(memory_dir, index_dir)
+    except Exception:
+        components = None
+
     # GOV-4: floor/corpus changed since this clone's watermark (read-only peek — never
     # consumes the producer's surfaced-once semantics).
     floor_line = "floor/corpus delta: no watermark baseline yet"
@@ -547,6 +558,7 @@ def _scorecard_message(memory_dir: str, repo_root: str) -> Tuple[str, str]:
         f"{orphans} orphan(s) never recalled (→ /hippo:audit)",
         f"{pinned} pinned / {muted} muted",
         f"{draft} draft",
+        (f"{components} graph component(s)" if components is not None else "graph components: n/a"),
         floor_line,
     ]
     status = "warn" if (contested or rule_conflicts or rot or blind or orphans) else "ok"
