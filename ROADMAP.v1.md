@@ -440,6 +440,15 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
   vs on-demand recall; the four types; why markdown-in-git) linked from the top
   of the README. Stop leading with acronym-dense feature copy; stop routing
   newcomers to the 575-line engine reference as "the full docs."
+  **SHIPPED 2026-07-10**: new repo-root `CONCEPTS.md` — a five-minute newcomer mental
+  model with exactly the four sections above, grounded in `CONVENTIONS.md`/engine README
+  for accuracy (dense+BM25 hybrid, floor-through-native-symlink, semantic git-drift
+  staleness, review-gated capture). README now LEADS with a plain-language sentence + a
+  top-of-file "New here? Start with [How hippo thinks]" pointer (the acronym-dense tagline
+  is demoted, kept intact for POS-1 to sharpen), and the Repo-layout footer reframes the
+  engine README as "deep internals," not "the full docs." `CONCEPTS.md` added to
+  `test_docs_links` coverage so its links can't rot. (POS-1's differentiation-one-liner
+  rewrite is deliberately NOT done here.)
 - **DOC-11** `P1/S` — **Troubleshooting / FAQ** ("recall is empty →
   bootstrapped? corpus trusted? `user_role` still FILL-ME? run `/hippo:doctor`").
   **SHIPPED 2026-07-10**: README gained a `## Troubleshooting` section covering the
