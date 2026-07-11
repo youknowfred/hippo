@@ -1,0 +1,28 @@
+<svg viewBox="0 0 372 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="hippo — a hippo surfacing at a waterline, wordmark floating on the same waterline">
+  <!-- Dark-background variant; see hippo-lockup.svg for construction notes. -->
+  <line x1="132" y1="78" x2="360" y2="78" stroke="#66C3CA" stroke-width="5" stroke-linecap="round" opacity="0.45"/>
+  <circle cx="36" cy="42" r="7.5" fill="#1B7A83"/>
+  <circle cx="92" cy="42" r="7.5" fill="#1B7A83"/>
+  <path d="M22 78 V62 Q22 44 44 44 H84 Q106 44 106 62 V78 Z" fill="#1B7A83"/>
+  <circle cx="44" cy="57" r="5" fill="#0C3B40"/>
+  <circle cx="84" cy="57" r="5" fill="#0C3B40"/>
+  <ellipse cx="54" cy="69" rx="4" ry="5.5" fill="#0C3B40"/>
+  <ellipse cx="74" cy="69" rx="4" ry="5.5" fill="#0C3B40"/>
+  <line x1="6" y1="78" x2="16" y2="78" stroke="#66C3CA" stroke-width="5" stroke-linecap="round"/>
+  <line x1="112" y1="78" x2="122" y2="78" stroke="#66C3CA" stroke-width="5" stroke-linecap="round"/>
+  <path d="M28 84 V90 Q28 102 44 102 H84 Q100 102 100 90 V84 Z" fill="#1B7A83" opacity="0.18"/>
+  <line x1="10" y1="90" x2="18" y2="90" stroke="#66C3CA" stroke-width="4" stroke-linecap="round" opacity="0.5"/>
+  <g transform="translate(136,12)">
+    <g fill="none" stroke="#7FCDD4" stroke-width="13" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M18 10 V66"/>
+      <path d="M18 46 C18 29 50 29 50 46 V66"/>
+      <path d="M74 27 V66"/>
+      <path d="M98 27 V88"/>
+      <circle cx="111" cy="46.5" r="13"/>
+      <path d="M145 27 V88"/>
+      <circle cx="158" cy="46.5" r="13"/>
+      <circle cx="205" cy="46.5" r="13"/>
+    </g>
+    <circle cx="74" cy="11" r="6.5" fill="#66C3CA"/>
+  </g>
+</svg>

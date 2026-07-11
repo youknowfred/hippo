@@ -1,0 +1,21 @@
+<svg viewBox="0 0 236 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="hippo wordmark">
+  <!-- Monoline rounded lowercase "hippo". The i-dot is waterline-aqua — the one
+       bit above the surface. Light-background variant (ink #123F44). -->
+  <g fill="none" stroke="#123F44" stroke-width="13" stroke-linecap="round" stroke-linejoin="round">
+    <!-- h -->
+    <path d="M18 10 V66"/>
+    <path d="M18 46 C18 29 50 29 50 46 V66"/>
+    <!-- i stem -->
+    <path d="M74 27 V66"/>
+    <!-- p -->
+    <path d="M98 27 V88"/>
+    <circle cx="111" cy="46.5" r="13"/>
+    <!-- p -->
+    <path d="M145 27 V88"/>
+    <circle cx="158" cy="46.5" r="13"/>
+    <!-- o -->
+    <circle cx="205" cy="46.5" r="13"/>
+  </g>
+  <!-- i-dot: the surfaced bit -->
+  <circle cx="74" cy="11" r="6.5" fill="#66C3CA"/>
+</svg>

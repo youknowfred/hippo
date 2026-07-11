@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/hippo-lockup-dark.svg">
+    <img src="assets/logo/hippo-lockup.svg" alt="hippo — a hippo surfacing at a waterline; the wordmark floats on the same line" width="360">
+  </picture>
+</p>
+
 # hippo
 
 [![CI](https://github.com/youknowfred/hippo/actions/workflows/ci.yml/badge.svg)](https://github.com/youknowfred/hippo/actions/workflows/ci.yml)
@@ -340,3 +347,7 @@ permissively-licensed Python packages (fastembed, numpy, PyYAML, rank-bm25 and t
 dependencies) and downloads an embedding model. Those runtime components and their licenses
 (all Apache-2.0 / MIT / BSD-3-Clause / MPL-2.0 / HPND) are inventoried in
 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
+
+## Author
+
+Built and maintained by [youknowfred](https://youknowfred.com).
