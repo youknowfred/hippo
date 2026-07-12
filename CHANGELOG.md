@@ -7,6 +7,57 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.10.0 — 2026-07-12 — "Second surface"
+
+**re-bootstrap: no** — `plugin/requirements.txt` is byte-identical to v1.9.0, and every persisted
+shape is unchanged (corpus format still 4, index schema still 6, capture-seed schema still 2). The
+`/hippo:*` skill set (15) is unchanged, the five frozen MCP tools keep their exact names and
+shapes (STABILITY.md), and the recall hot path is untouched. Everything here is **additive**: four
+new MCP tools and two new engine modules behind them.
+
+The release makes hippo first-class on its **second surface**: the Claude Desktop app's local
+sessions run installed plugins' hooks, skills, and MCP servers through the same engine as the
+terminal CLI (verified live against the desktop harness) — they only reject *typed* `/hippo:*`
+commands. Setup was the one thing stuck in the terminal; these tools unstick it. Install remains
+the single terminal step; bootstrap, init, consent, and diagnostics now work from either surface
+(and from subagents). The full no-terminal onboarding path — wire a cloned corpus, review it,
+consent, recall — is exercised end-to-end over the real stdio transport in the test suite.
+
+### The setup tools (INT-9..12)
+
+- **INT-9** — **`trust_corpus`**: the SEC-1 consent flow as a two-step tool. A review call
+  **never trusts** — it returns the memory count, the exact description strings recall would
+  inject (quoted as untrusted data), and a **consent digest**; the confirm call requires that
+  digest, binding consent to the reviewed bytes (a corpus that changes in between refuses — a
+  TOCTOU guard the single-sitting terminal flow never needed). First consent stamps the SEC-6
+  fingerprint + SEC-7 `origin="review"`; drift re-consent reviews exactly the changed/added
+  delta (`corpus_consent_sample` grew a `stems` filter) and preserves the existing origin.
+- **INT-10** — **`init`** + `memory/init_project.py`: the mechanical `/hippo:init` flow as one
+  tested engine function (the DOC-4 engine/skill shape). Fresh project: core pack + `MEMORY.md`
+  skeleton + format marker + `CONVENTIONS.md`, then the machine wiring; existing corpus: wiring
+  only. Idempotent, never overwrites a memory file, never commits. One deliberate divergence from
+  the skill, SEC-1-load-bearing: a **model-invoked init never auto-trusts a pre-existing corpus**
+  (typing `/hippo:init` is itself the user's review; a tool call is not) — only a corpus the call
+  *creates* is trusted (`origin="init"`), and consent otherwise routes through `trust_corpus`.
+- **INT-11** — **`bootstrap`** + `memory/bootstrap.py`: the one online step (venv + ~130MB model
+  warm) as kick-off-and-poll — `start` detaches a stdlib-only worker (own session, sentinel
+  written LAST, log + live-pid lock under `CLAUDE_PLUGIN_DATA`), `status` polls it. This is
+  load-bearing for the desktop app: the harness hands **each surface its own plugin-data dir**
+  (`hippo-<marketplace>` vs `hippo-inline`), so a terminal bootstrap's venv is invisible to
+  desktop sessions — without an in-surface bootstrap, desktop recall stays BM25-only forever.
+  `status` names a sibling surface's install so "why is it downloading again?" answers itself.
+- **INT-12** — **`doctor`**: the deterministic DOC-4 diagnostic engine verbatim, plus a mapping
+  from each report line's named fix to the tool that runs it on this surface. Deliberately
+  ungated (doctor is the pre-consent review entry point), with a pinned boundary: the report
+  exposes state, never the injectable description strings.
+
+### Docs (DOC-15)
+
+- The README Quickstart callout and Troubleshooting now tell the accurate two-surface story
+  (install from the terminal once; use hippo from terminal or desktop; typed commands and
+  cloud/remote are the real limits), including the per-surface bootstrap entry. plugin/README's
+  MCP section documents the nine-tool surface and the model-invoked-init consent rule.
+
 ## v1.9.0 — 2026-07-11 — "Out in the open"
 
 **re-bootstrap: no** — `plugin/requirements.txt` is byte-identical to v1.8.0

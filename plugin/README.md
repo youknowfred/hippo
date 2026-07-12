@@ -33,8 +33,10 @@ one-line "which one do I want?" guide for recall-vs-doctor, doctor-vs-audit, con
 The plugin declares a stdio MCP server (`plugin.json` → `bin/hippo mcp` → the PLUGIN_DATA venv
 python, falling back to `python3` pre-bootstrap). It closes the two gaps the once-per-prompt
 recall hook can't: mid-turn retrieval (after the agent discovers what it's working on) and
-subagent memory (Task turns get no `UserPromptSubmit`). Five tools + three resources, offline and
-corpus-local, reusing the exact hook ranking (no fork):
+subagent memory (Task turns get no `UserPromptSubmit`). Nine tools + three resources, offline
+(bootstrap's model download excepted) and corpus-local, reusing the exact hook ranking (no fork).
+
+The five core tools (the frozen v1.0 surface):
 
 | Tool | Purpose |
 |---|---|
@@ -43,6 +45,27 @@ corpus-local, reusing the exact hook ranking (no fork):
 | `traverse(name, hops)` | Outbound (≤N-hop) + inbound + typed (supersedes/contradicts/refines) neighbors |
 | `why(query, k)` | The recall receipt (GOV-5): re-runs the ranking and explains each hit — or, on abstention, the near-miss and the floor it missed |
 | `decision_history(name)` | Replays the supersedes/refines lineage around a memory into a dated "chose X → refined to Y → Z superseded it" narrative |
+
+And the four setup tools (INT-9..12) — the `/hippo:*` setup flows re-served as tools, so a
+surface with **no typed-command input can still set hippo up end to end**. The one that
+matters: the **Claude Desktop app**'s local sessions run installed plugins' hooks, skills,
+and MCP servers through the same engine as the terminal CLI — they only reject *typed*
+`/hippo:*` commands. With these tools, install is the single terminal step; everything after
+(bootstrap, init, consent, diagnostics, daily recall) works from either surface:
+
+| Tool | Purpose |
+|---|---|
+| `doctor()` | The `/hippo:doctor` engine verbatim (deterministic, read-only), plus a mapping from each named fix to the tool that runs it on this surface |
+| `bootstrap(action, multilingual)` | Per-machine-surface provisioning, kick-off-and-poll: `start` detaches the venv-build + ~130MB model-warm worker, `status` polls it (sentinel-last; log tail included). The terminal and the desktop app get **different plugin-data dirs** from the harness, so each surface bootstraps once — `status` names a sibling surface's install when it detects one |
+| `init()` | The mechanical `/hippo:init` flow: seed a fresh corpus (core pack + floor + format marker) or wire an existing one (symlink, index, CONVENTIONS backfill, `.gitignore`, private tier). Idempotent, never overwrites, never commits |
+| `trust_corpus(confirm_digest)` | The SEC-1 consent flow, two-step: a review call **never trusts** — it returns the memory count, the exact description strings recall would inject (quoted as untrusted data), and a consent digest; the confirm call requires that digest, binding consent to the reviewed bytes (a corpus that changed in between refuses). Also the SEC-6 drift re-consent path |
+
+One consent rule differs from the terminal skill, deliberately (SEC-1): typing `/hippo:init`
+is the user's own explicit review of an existing corpus, so the *skill* may trust it on
+re-run. A *model-invoked* `init` must not — it auto-trusts only a corpus it just **created**
+(whose entire content is the plugin's own starter files) and otherwise routes consent through
+`trust_corpus`'s review→confirm, so a prompt-injected session can never silently trust a
+foreign corpus by "helpfully" running setup.
 
 | Resource | Purpose |
 |---|---|
