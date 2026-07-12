@@ -1,5 +1,5 @@
 ---
-description: The generative sleep pass — replay the memory corpus against itself offline and surface the latent graph edges consolidate can't reach (transitive bridges, body-names-target-but-unlinked, undeclared refines). Tier-A edges auto-apply reversibly by default (capped, stamped, undoable — owner-ratified 2026-07-12); --dry-run previews. Triggers include "dream", "run a dream pass", "find latent links", "what edges am I missing", "/hippo:dream". Discovery, not housekeeping — that's consolidate/audit.
+description: The generative sleep pass — replay the memory corpus against itself offline and surface the latent graph edges consolidate can't reach (bridges, unlinked mentions, undeclared refines). Tier-A edges auto-apply reversibly (owner-ratified 2026-07-12); --dry-run previews; --deparasite runs the counterweight (hub caps, gated demotions, non-lossy dedup); reward-gated reverse replay boosts ranking. Triggers "dream", "find latent links", "de-parasite my graph", "/hippo:dream".
 ---
 
 # /hippo:dream — the generative sleep pass
@@ -94,3 +94,49 @@ source set only after 5 un-undone sessions (`DREAM_AGE_SESSIONS`):
 Prefer per-item hand-application when the user wants to review each edge: a
 **completion/bridge** is one `[[wikilink]]` added to the source body; a **refines** is
 additive frontmatter. Never bulk-apply the whole ledger by hand — the cap is the point.
+
+## De-parasiting counterweight (DRM-4) — the forgetting function
+
+An edge-only pass has no restoring force; this is sleep's downscaling half. Report/propose
+posture — the pass itself writes **nothing**:
+
+```
+"$PY" -m memory.dream --deparasite            # report/propose only
+"$PY" -m memory.dream --deparasite --retract  # + execute the Tier-A lane
+```
+
+It reports per-memory out-degree, flags hubs over `DREAM_MAX_OUT_DEGREE` (default 8), and
+splits every remedy along the reversibility gradient:
+
+- **retract (Tier A, the only auto-executable lane)** — /dream's OWN un-aged edges touching
+  a flagged hub, reverted through the byte-exact undo machinery (`--retract`). A retracted
+  pair never auto-re-applies on later passes.
+- **demote (GATED, never auto)** — aged-in dream edges (per-item `dream --undo <edge-id>`,
+  an owner action) and hand-authored out-links with no co-recall evidence (named for
+  review only; hippo never edits body prose autonomously).
+- **dedup-merge (GATED, per-item)** — near-duplicate pairs get a NON-LOSSY proposal:
+  survivor gains `supersedes: [loser]`, loser's validity window closes
+  (`set_invalid_after`) — additive frontmatter, no body byte touched, nothing deleted.
+  Execute ONE ratified proposal at a time:
+
+```
+"$PY" -m memory.dream --dedup-merge <survivor> <loser>
+```
+
+**Protected hubs — floor-linked, co-recalled (≥3 shared sessions), or cited by other
+memories — are never proposed for depression**; dream-created edges confer no protection
+(the counterweight cannot be disarmed by the pass it counterweighs). A pair already
+carrying `contradicts` is a disagreement, not a duplicate: it routes to `/hippo:resolve`
+and is never auto-resolved or merged. Present proposals as proposals — apply nothing
+without the owner's per-item yes.
+
+## Reward-gated reverse replay (DRM-5) — outcome-anchored boosts
+
+Runs inside every pass, silently when there is no signal. Memories with a RECORDED
+outcome (injected, then a cited file touched in-session — the KPI-2 join) anchor a
+backward walk along their `supersedes`/`refines` decision chain; the upstream chain earns
+**replay priority** (probed first) and its candidates earn **ordering priority** under the
+apply cap. Strictly reward-gated and ranking-only: no outcome → no boost; θ eligibility
+always reads the raw cofire; no memory byte ever changes. Boosted edges are logged to
+`boosts-<pass>.jsonl` in the derived dream dir, each row carrying the justifying
+decision chain; un-aged dream edges conduct no reward (the aging firewall extends here).

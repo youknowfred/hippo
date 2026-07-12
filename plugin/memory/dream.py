@@ -85,6 +85,23 @@ _HARD_MAX_APPLY = 9
 # 5 distinct sessions, reusing soak's bar).
 _DEFAULT_AGE_SESSIONS = 5
 
+# DRM-5: how much one unit of reward boost (one hit session on an outcome-anchored chain)
+# nudges a candidate's RANK position. CALIBRATED 2026-07-12 from the live corpus (29
+# memories, 197 pairs): co-fire strengths are rank-compressed — the entire θ-eligible band
+# spans ~0.90–0.98 — so a per-hit bump must be a FRACTION of that ~0.08 band or reward
+# leapfrogs the whole distribution (at 0.05/hit a 3-hit boost outranked an unboosted 0.98
+# from 0.90 — dominate, not promote). 0.01/hit, with the counted hits capped below, keeps
+# a boosted candidate promoted WITHIN its cofire neighborhood. Reward reorders candidates
+# under the cap; it never substitutes for co-fire evidence — the θ eligibility test always
+# reads the RAW cofire (a boost can never push a sub-θ candidate over the auto-apply bar;
+# widening autonomy is a dated owner decision, not a weight).
+_DEFAULT_REWARD_WEIGHT = 0.01
+
+# Rank-bonus saturation: hits beyond this count stop adding rank (max bonus at the default
+# weight = 0.05 ≈ half the live θ-eligible band). A daily-hit memory accumulates hit
+# sessions linearly; unbounded, weeks of routine use would re-dominate ordering.
+_REWARD_BOOST_RANK_CAP = 5.0
+
 # Replay probe depth: how many results each self-query probe considers as the co-firing set.
 _DEFAULT_PROBE_K = 10
 
@@ -132,6 +149,11 @@ def max_apply_per_pass() -> int:
 def age_sessions() -> int:
     """``DREAM_AGE_SESSIONS`` (≥1) — sessions an applied edge must survive to become source."""
     return max(1, _env_int("DREAM_AGE_SESSIONS", _DEFAULT_AGE_SESSIONS))
+
+
+def reward_weight() -> float:
+    """``DREAM_REWARD_WEIGHT`` (≥0) — per-hit rank nudge for DRM-5 boosts (default 0.05)."""
+    return max(0.0, _env_float("DREAM_REWARD_WEIGHT", _DEFAULT_REWARD_WEIGHT))
 
 
 def apply_eligible(candidate: dict, *, theta: Optional[float] = None) -> bool:
@@ -408,6 +430,162 @@ def _fuzzy_stem_match(raw_target: str, stems: List[str]) -> Optional[str]:
 
 
 # --------------------------------------------------------------------------- #
+# DRM-5 — reward-gated reverse replay (outcome-anchored edge boosts)
+#
+# Biological reverse replay propagates reward BACKWARD along the path that led to it, and
+# is reward-GATED (Ambrose/Pfeiffer/Foster 2016 — no reward, no propagation). hippo's
+# analogue: a memory whose injection was followed by a touch of one of its cited files in
+# the same session carries a RECORDED outcome (``outcome.injection_hits``, the KPI-2 join);
+# from each such memory the pass walks its authored lineage BACKWARD — the
+# ``history.decision_chain`` closure, predecessor direction only (the declarer is the newer
+# side, so ``typed_outbound`` supersedes/refines targets are the upstream steps that led
+# here) — and promotes the replay priority / candidate ordering of that chain.
+#
+# The boost is DERIVED STATE, never a write path of its own (inv1): it feeds
+#   - DRM-1's replay priority — boosted memories move to the FRONT of the replay worklist
+#     (outcome-anchored traces are over-sampled, like under-connected ones), and
+#   - DRM-2's cofire RANKING — a candidate touching a boosted memory sorts earlier among
+#     eligible candidates under the per-pass cap (``reward_weight`` per hit).
+# It NEVER changes apply eligibility (θ reads the raw cofire), never asserts a claim,
+# never mutates a body — a pass with boosts and no eligible candidates writes nothing.
+#
+# Hard preconditions, all firewall-family:
+#   - reward-gated: no recorded outcome → no boost (an empty outcome ledger is a no-op);
+#   - the backward walk never crosses an UN-AGED dream edge (inv-DRM-firewall extends to
+#     this round: a dream-applied refines edge cannot conduct reward before it ages in);
+#   - floor memories and confidence:draft memories are never boosted (same endpoint
+#     exclusions as candidate generation).
+# Every boosted edge gets a ledger row under the DERIVED dream dir carrying its justifying
+# decision_chain (provenance) — the acceptance-criteria audit surface.
+# --------------------------------------------------------------------------- #
+def reward_boosts(
+    memory_dir: str,
+    index_dir: Optional[str] = None,
+    telemetry_dir: Optional[str] = None,
+    *,
+    exclude_stems: Optional[Set[str]] = None,
+    unaged_pairs: Optional[Set[frozenset]] = None,
+) -> dict:
+    """Compute DRM-5 boosts. Read-only; never raises; empty maps when there is no outcome.
+
+    Returns::
+
+        {"outcome_memories": {stem: hits},          # the reward sources (recorded outcomes)
+         "memories": {stem: boost},                  # replay-priority map (source ∪ upstream)
+         "memory_sources": {stem: [outcome stems]},  # which outcome(s) justify each boost
+         "edges": [{"edge": {"from", "relation", "to"}, "boost", "outcome_memory",
+                    "hits", "decision_chain": [stems...]}, ...]}
+
+    ``boost`` accumulates hit-session counts across outcome memories; one ledger row is
+    emitted per (edge, outcome_memory) so every row carries exactly ITS justifying chain.
+    """
+    empty = {"outcome_memories": {}, "memories": {}, "memory_sources": {}, "edges": []}
+    try:
+        from .history import decision_chain
+        from .outcome import injection_hits
+
+        excluded = exclude_stems or set()
+        unaged = unaged_pairs or set()
+        hits_by_memory = injection_hits(memory_dir, telemetry_dir)
+        outcome_memories = {
+            s: rec.get("hits", 0)
+            for s, rec in hits_by_memory.items()
+            if s not in excluded and isinstance(rec.get("hits"), int) and rec["hits"] >= 1
+        }
+        if not outcome_memories:
+            return empty  # reward-gated: no recorded outcome → no boost, ever.
+
+        memories: Dict[str, float] = {}
+        memory_sources: Dict[str, Set[str]] = {}
+        edges: List[dict] = []
+        for origin in sorted(outcome_memories):
+            hits = outcome_memories[origin]
+            # The rewarded trace itself always earns replay priority (it is the terminus
+            # reverse replay re-fires first), chain or no chain.
+            memories[origin] = memories.get(origin, 0.0) + hits
+            memory_sources.setdefault(origin, set()).add(origin)
+
+            chain = decision_chain(origin, memory_dir, index_dir)
+            if not chain or not chain.get("edges"):
+                continue
+            # Chronological node order is the chain's narrative — the provenance each
+            # boosted-edge ledger row carries.
+            chain_nodes = [n.get("name") for n in chain.get("nodes", []) if n.get("name")]
+            # Forward-declared adjacency: from → [(relation, to)]. ``from`` is the newer
+            # side (the declarer), so following it IS the backward/upstream direction.
+            declared: Dict[str, List[Tuple[str, str]]] = {}
+            for e in chain["edges"]:
+                f, rel, t = e.get("from"), e.get("relation"), e.get("to")
+                if isinstance(f, str) and isinstance(rel, str) and isinstance(t, str):
+                    declared.setdefault(f, []).append((rel, t))
+
+            seen = {origin}
+            frontier = [origin]
+            while frontier:
+                cur = frontier.pop(0)
+                for rel, upstream in declared.get(cur, ()):
+                    if upstream in excluded:
+                        continue
+                    if frozenset((cur, upstream)) in unaged:
+                        # inv-DRM-firewall extension: an un-aged dream edge conducts no
+                        # reward — the chain is cut here until the edge ages in.
+                        continue
+                    edges.append(
+                        {
+                            "edge": {"from": cur, "relation": rel, "to": upstream},
+                            "boost": hits,
+                            "outcome_memory": origin,
+                            "hits": hits,
+                            "decision_chain": chain_nodes,
+                        }
+                    )
+                    memories[upstream] = memories.get(upstream, 0.0) + hits
+                    memory_sources.setdefault(upstream, set()).add(origin)
+                    if upstream not in seen:
+                        seen.add(upstream)
+                        frontier.append(upstream)
+        return {
+            "outcome_memories": outcome_memories,
+            "memories": memories,
+            "memory_sources": {s: sorted(v) for s, v in memory_sources.items()},
+            "edges": edges,
+        }
+    except Exception:
+        return empty
+
+
+def boost_ledger_path(telemetry_dir: str, pass_id: str) -> str:
+    return os.path.join(dream_dir(telemetry_dir), f"boosts-{pass_id}.jsonl")
+
+
+def write_boost_ledger(telemetry_dir: str, pass_id: str, edges: List[dict]) -> Optional[str]:
+    """Persist the pass's boosted-edge rows (with decision_chain provenance) to the derived
+    dream dir. One row per (edge, outcome_memory). Written only when boosts exist — the
+    candidate ledger is already the proof the pass ran (empty-norm hygiene). Never raises."""
+    if not edges:
+        return None
+    try:
+        os.makedirs(dream_dir(telemetry_dir), exist_ok=True)
+        path = boost_ledger_path(telemetry_dir, pass_id)
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with open(path, "w", encoding="utf-8") as fh:
+            for row in edges:
+                fh.write(
+                    json.dumps({"pass": pass_id, **row, "generated_at": stamp}, ensure_ascii=False)
+                    + "\n"
+                )
+        return path
+    except Exception:
+        return None
+
+
+def _candidate_boost(cand: dict, boost_of: Dict[str, float]) -> float:
+    """A candidate's rank boost: the STRONGER endpoint's memory boost (0.0 when neither
+    endpoint sits on an outcome-anchored chain — untouched, the DRM-5 assertion)."""
+    return max(boost_of.get(cand.get("source"), 0.0), boost_of.get(cand.get("target"), 0.0))
+
+
+# --------------------------------------------------------------------------- #
 # The discovery pass (DRM-1's core) — read-only over the corpus
 # --------------------------------------------------------------------------- #
 def discover(
@@ -438,6 +616,9 @@ def discover(
         "candidates": [],
         "stats": {},
         "soak": {},
+        # DRM-5: filled by reward_boosts on an ok pass; this empty shape on every early
+        # return keeps the reward surface total (consumers never KeyError on a refusal).
+        "reward": {"outcome_memories": {}, "memories": {}, "memory_sources": {}, "edges": []},
     }
 
     # Gate 1 — the soak bar (a young corpus proposes nothing; inv3: say so).
@@ -481,8 +662,19 @@ def discover(
     unaged = unaged_dream_pairs(memory_dir, int(soak.get("distinct_sessions") or 0))
     fw_view = _undirected_view(graph, unaged)
 
-    # Replay worklist — over-sample under-connected, under-consolidated traces: firewalled
-    # degree ascending (isolates first), then usage-sessions ascending (cold first).
+    # DRM-5: reward-gated reverse-replay boosts — outcome-anchored lineage chains earn
+    # replay priority + candidate-rank promotion. Same endpoint exclusions as generation
+    # (floor + drafts); the backward walk never crosses an un-aged dream pair. With no
+    # recorded outcome this is empty and every downstream consumer is provably inert.
+    reward = reward_boosts(
+        memory_dir, index_dir, td, exclude_stems=floor | drafts, unaged_pairs=unaged
+    )
+    boost_of = reward["memories"]
+
+    # Replay worklist — outcome-anchored traces FIRST (DRM-5 replay priority), then
+    # over-sample under-connected, under-consolidated traces: firewalled degree ascending
+    # (isolates first), then usage-sessions ascending (cold first). With no boosts the
+    # leading key is 0.0 everywhere and the pre-DRM-5 ordering is byte-identical.
     usage = {}
     try:
         usage = read_usage_aggregates(td).get("memories") or {}
@@ -496,10 +688,11 @@ def discover(
 
     worklist = sorted(
         (s for s in stems if _eligible(s)),
-        key=lambda s: (len(fw_view.get(s, ())), _usage_sessions(s), s),
+        key=lambda s: (-boost_of.get(s, 0.0), len(fw_view.get(s, ())), _usage_sessions(s), s),
     )
     if max_seeds and max_seeds > 0:
         worklist = worklist[:max_seeds]
+    worklist_preview = worklist[:10]  # exposed in stats: the replay-priority audit surface
 
     # The index for offline probes. refresh_index is offline/bounded/never-downgrade (the
     # SessionStart path) — an index write is a DERIVED-dir write, not a memory write.
@@ -689,7 +882,26 @@ def discover(
             # reporting beats a speculative fourth kind.
             unclassified_pairs += 1
 
-    candidates.sort(key=lambda c: (c["kind"] != "completion", -c["cofire"], c["source"], c["target"]))
+    # DRM-5 annotation: a candidate touching an outcome-anchored (boosted) memory carries
+    # its boost + the justifying outcome memories, and sorts earlier among its peers —
+    # RANKING ONLY (apply eligibility reads the raw cofire; see ``apply_eligible``).
+    rw = reward_weight()
+    sources = reward.get("memory_sources") or {}
+    for c in candidates:
+        b = _candidate_boost(c, boost_of)
+        if b > 0:
+            c["boost"] = b
+            c["boost_provenance"] = sorted(
+                set(sources.get(c["source"], [])) | set(sources.get(c["target"], []))
+            )
+    candidates.sort(
+        key=lambda c: (
+            c["kind"] != "completion",
+            -(c["cofire"] + rw * min(c.get("boost", 0.0), _REWARD_BOOST_RANK_CAP)),
+            c["source"],
+            c["target"],
+        )
+    )
 
     # --- Calibration stats (the DRM-1 deliverable). --------------------------------------
     all_strengths = sorted((rec["strength"] for rec in pair_best.values()), reverse=True)
@@ -713,6 +925,10 @@ def discover(
         "novelty_excluded": novelty_excluded,
         "unclassified_pairs": unclassified_pairs,
         "unaged_dream_pairs_firewalled": len(unaged),
+        "worklist_preview": worklist_preview,
+        "reward_outcome_memories": len(reward.get("outcome_memories") or {}),
+        "reward_boosted_memories": len(boost_of),
+        "reward_boosted_edges": len(reward.get("edges") or []),
         "kind_counts": kind_counts,
         "cofire_strengths_all_pairs": all_strengths,
         "cofire_strengths_candidates": sorted((c["cofire"] for c in candidates), reverse=True),
@@ -721,6 +937,7 @@ def discover(
         "cap_current": max_apply_per_pass(),
     }
     result["candidates"] = candidates
+    result["reward"] = reward
     return result
 
 
@@ -793,6 +1010,12 @@ def render_report(result: dict, *, ledger_path: Optional[str]) -> str:
             f"   aging firewall: {stats['unaged_dream_pairs_firewalled']} un-aged dream edge(s) "
             "excluded from the source graph this pass"
         )
+    if stats.get("reward_boosted_edges") or stats.get("reward_outcome_memories"):
+        lines.append(
+            f"   reward (DRM-5 reverse replay): {stats.get('reward_boosted_edges', 0)} upstream "
+            f"edge boost(s) from {stats.get('reward_outcome_memories', 0)} outcome-anchored "
+            f"memory(ies) — replay priority + candidate ORDERING only (θ reads raw cofire)"
+        )
     if not candidates:
         lines.append("   empty pass — no latent edges above the reporting floor (this is the norm).")
     for c in candidates[:20]:
@@ -803,6 +1026,7 @@ def render_report(result: dict, *, ledger_path: Optional[str]) -> str:
             f"   • {c['source']} → {c['target']}   {c['kind']:<10} "
             f"cofire={c['cofire']:.2f} {dist_s}"
             + (" mutual" if c.get("mutual") else "")
+            + (f" ★boost={c['boost']:g}" if c.get("boost") else "")
             + f" [{c.get('signal')}]"
             + (f' q="{q}"' if q else "")
         )
@@ -1058,6 +1282,7 @@ def run_apply_pass(
             result, ledger_path=None
         )
     write_candidate_ledger(td, result["pass_id"], result["candidates"])
+    write_boost_ledger(td, result["pass_id"], (result.get("reward") or {}).get("edges") or [])
 
     pass_id = result["pass_id"]
     theta = cofire_theta()
@@ -1074,6 +1299,19 @@ def run_apply_pass(
         if c.get("kind") in _TIER_A_KINDS and apply_eligible(c, theta=theta)
     ]
 
+    # An undone/retracted pair NEVER auto-re-applies: an undo (owner) or retraction
+    # (DRM-4 counterweight) is a standing verdict recorded in the committed ledger, and
+    # autonomy must not override the audit record (DREAM-KILL-2's spirit; also the
+    # retract→re-apply ping-pong guard the de-parasiting pass depends on). The candidate
+    # still appears in report passes — re-applying it is a per-item human/agent action.
+    prior_undone = {
+        frozenset((e["source"], e["target"]))
+        for e in read_apply_ledger(memory_dir)
+        if e.get("state") == "undone"
+        and isinstance(e.get("source"), str)
+        and isinstance(e.get("target"), str)
+    }
+
     applied: List[dict] = []
     refused: List[Tuple[dict, str]] = []
     ledger_lines: List[dict] = []
@@ -1081,6 +1319,12 @@ def run_apply_pass(
     for cand in eligible:
         if len(applied) >= cap:
             break
+        if frozenset((cand["source"], cand["target"])) in prior_undone:
+            refused.append(
+                (cand, "pair was undone/retracted before — never auto re-applied "
+                       "(re-apply by hand if genuinely wanted)")
+            )
+            continue
         edge_id = f"{pass_id}-e{len(applied) + 1}"
         ledger_row = {
             "edge_id": edge_id,
@@ -1252,6 +1496,8 @@ def undo_edges(
     *,
     edge_id: Optional[str] = None,
     since: Optional[str] = None,
+    edge_ids: Optional[List[str]] = None,
+    annotate: Optional[dict] = None,
 ) -> Tuple[int, str]:
     """``--undo`` (latest pass) / ``--undo <edge-id>`` / ``--undo-since <ISO date|N>``.
 
@@ -1259,13 +1505,24 @@ def undo_edges(
     superseding ``state: "undone"`` ledger lines (append-only audit — history intact), and
     rebuilds the index. Refuse-on-drift is PER EDGE: a hand-edited stamp refuses with a
     report while clean edges still revert; exit 1 signals any refusal.
+
+    ``edge_ids`` selects several specific edges in ONE call (one ledger append + one index
+    rebuild) — the DRM-4 retraction entry point, which is why there is no second undo
+    implementation anywhere. ``annotate`` merges extra provenance keys into each
+    superseding ledger line (e.g. ``retracted_by``/``retract_reason``); the canonical
+    ``edge_id``/``pass``/``state``/``undone_at_ts`` fields always win over it.
     """
     ledger = read_apply_ledger(memory_dir)
     active = [e for e in ledger if e.get("state") == "active"]
     if not active:
         return 0, "🌙 dream --undo: no active dream edges to revert."
 
-    if edge_id:
+    if edge_ids:
+        wanted = {str(x) for x in edge_ids}
+        targets = [e for e in active if e.get("edge_id") in wanted]
+        if not targets:
+            return 1, "🌙 dream --undo: none of the requested edges are ACTIVE (see dream --log)."
+    elif edge_id:
         targets = [e for e in active if e.get("edge_id") == edge_id]
         if not targets:
             return 1, f"🌙 dream --undo: no ACTIVE edge {edge_id!r} (see dream --log)."
@@ -1303,6 +1560,7 @@ def undo_edges(
                     fh.write(
                         json.dumps(
                             {
+                                **(annotate or {}),
                                 "edge_id": edge["edge_id"],
                                 "pass": edge.get("pass"),
                                 "state": "undone",
@@ -1413,6 +1671,7 @@ def run_report_pass(
     ledger = None
     if result["status"] == "ok":
         ledger = write_candidate_ledger(td, result["pass_id"], result["candidates"])
+        write_boost_ledger(td, result["pass_id"], (result.get("reward") or {}).get("edges") or [])
     text = render_report(result, ledger_path=ledger)
     code = 1 if result["status"] == "no-index" else 0
     return code, text
@@ -1463,6 +1722,29 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--log", action="store_true", help="list every dream edge (active / aged-in / undone)"
     )
+    parser.add_argument(
+        "--deparasite",
+        action="store_true",
+        help="DRM-4: the de-parasiting counterweight — report per-memory out-degree, flag "
+        "hubs over DREAM_MAX_OUT_DEGREE, and PROPOSE retractions (dream's own un-aged "
+        "edges) vs gated demotions/dedup-merges. Report/propose only; zero memory writes.",
+    )
+    parser.add_argument(
+        "--retract",
+        action="store_true",
+        help="with --deparasite: additionally EXECUTE the Tier-A lane — retract the "
+        "flagged, un-aged dream edges via the byte-exact undo machinery. Human "
+        "structures and aged-in edges stay gated regardless.",
+    )
+    parser.add_argument(
+        "--dedup-merge",
+        nargs=2,
+        metavar=("SURVIVOR", "LOSER"),
+        default=None,
+        help="execute ONE ratified dedup-merge proposal (per-item, no batch): SURVIVOR "
+        "gains supersedes:[LOSER], LOSER's validity window closes (set_invalid_after). "
+        "Non-lossy — additive frontmatter only, no body byte touched, nothing deleted.",
+    )
     parser.add_argument("--probe-k", type=int, default=None, help="co-fire probe depth (default 10)")
     parser.add_argument(
         "--max-seeds", type=int, default=None, help="cap the replay worklist (default 0 = all)"
@@ -1478,6 +1760,37 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.log:
         print(render_log(memory_dir))
+        return 0
+    if args.deparasite:
+        from .deparasite import run_deparasite_pass
+
+        code, text = run_deparasite_pass(
+            memory_dir, args.index_dir, args.telemetry_dir, retract=args.retract
+        )
+        print(text)
+        return code
+    if args.retract:
+        print("🧹 --retract is a --deparasite modifier — run `dream --deparasite --retract`.")
+        return 1
+    if args.dedup_merge:
+        from .deparasite import apply_dedup_merge
+
+        survivor, loser = args.dedup_merge
+        res = apply_dedup_merge(
+            memory_dir,
+            survivor,
+            loser,
+            telemetry_dir=args.telemetry_dir,
+            index_dir=args.index_dir,
+        )
+        if res.get("error"):
+            print(f"🧹 dedup-merge REFUSED: {res['error']}")
+            return 1
+        print(
+            f"🧹 dedup-merge applied (non-lossy, reversible): {survivor} now supersedes "
+            f"{loser}; {loser} invalid_after {res['invalid_after']['ts']}. Both files "
+            "remain on disk; commit stays yours."
+        )
         return 0
     if args.undo is not None or args.undo_since:
         code, text = undo_edges(
@@ -1508,6 +1821,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         if result["status"] == "ok":
             write_candidate_ledger(td, result["pass_id"], result["candidates"])
+            write_boost_ledger(
+                td, result["pass_id"], (result.get("reward") or {}).get("edges") or []
+            )
         print(json.dumps(result, indent=2, ensure_ascii=False, default=list))
         return 1 if result["status"] == "no-index" else 0
 

@@ -361,7 +361,26 @@ workstreams:
         title: De-parasiting counterweight — out-degree caps + hub demotion + non-lossy dedup-merge
         priority: P2
         effort: M
-        status: planned
+        status: done                   # 2026-07-12 — memory/deparasite.py (report/propose;
+                                       # --retract executes ONLY un-aged dream edges via the
+                                       # one undo path; --dedup-merge is the per-item gated
+                                       # executor); CLI on memory.dream; MCP action
+                                       # 'deparasite'/'dedup_merge'; tests/test_dream_deparasite.py.
+                                       # Includes the required DRM-2 hardening: an undone/
+                                       # retracted pair NEVER auto-re-applies (ping-pong guard,
+                                       # refused with reason in the digest).
+        calibration:
+          date: 2026-07-12
+          observed: >-
+            Live corpus (29 memories, densely hand-linked): max out-degree 5
+            (hippo-v080-sec-tail / hippo-v1-launch-readiness / hippo-v180-launch-polish),
+            so DREAM_MAX_OUT_DEGREE=8 flags nothing today (empty-norm holds with headroom —
+            the default only fires on genuine outliers above the dense-capstone band).
+            Dedup scan at DREAM_DEDUP_JACCARD=0.8 over doc_text token sets: zero pairs —
+            the corpus carries no near-duplicate accretion yet. "cited" protection counts
+            inbound wikilinks + inbound refines ONLY, minus active dream pairs (a dream
+            edge must never shield the hub the counterweight is inspecting), and inbound
+            supersedes/contradicts deliberately do not protect.
         source: {lens: synaptic-homeostasis, verdict: NEW, convergence: 2, landscape: [tononi-cirelli-2014, crick-mitchison-1983, van-de-ven-replay]}
         problem: >-
           An edge-only pass has no restoring force. Repeated passes can over-connect a
@@ -395,7 +414,28 @@ workstreams:
         title: Reward-gated reverse replay — outcome-anchored edge boosts
         priority: P2
         effort: M
-        status: planned
+        status: done                   # 2026-07-12 — dream.reward_boosts + outcome.injection_hits
+                                       # (per-memory KPI-2 join, same _injection_join as the
+                                       # aggregate); backward walk along history.decision_chain,
+                                       # predecessor direction, cut at un-aged dream pairs
+                                       # (firewall extension) and floor/draft endpoints; boosts
+                                       # feed the replay worklist + candidate ORDERING only
+                                       # (θ reads raw cofire — asserted); boosts-<pass>.jsonl
+                                       # ledger rows carry the justifying decision_chain;
+                                       # tests/test_dream_reward.py.
+        calibration:
+          date: 2026-07-12
+          observed: >-
+            Live telemetry already carries a real recorded outcome: hippo-dream-verb-design
+            (3 hit sessions — injected, then its cited files touched in-session), with no
+            authored lineage yet (0 upstream edges), so the memory-level replay-priority
+            path is live and the edge path is proven by fixture. KEY FINDING: cofire is
+            rank-compressed (θ-eligible band ≈ 0.90–0.98, width ~0.08), so the first-cut
+            0.05/hit rank bonus let a 3-hit boost lift a 0.90 candidate over an unboosted
+            0.98 — dominate, not promote. DREAM_REWARD_WEIGHT recalibrated to 0.01/hit with
+            counted hits saturating at 5 (max bonus 0.05 ≈ half the band): a boosted
+            candidate is promoted WITHIN its cofire neighborhood, never across the
+            distribution.
         source: {lens: reverse-replay, verdict: NEW, convergence: 2, landscape: [foster-wilson-2006, ambrose-2016]}
         problem: >-
           Not all edges are equal: edges on chains that led to a ratified good/bad OUTCOME

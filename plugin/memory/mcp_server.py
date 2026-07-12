@@ -310,15 +310,24 @@ _TOOLS = [
             "undo handles. apply=false runs report-only (zero writes). action='undo' "
             "reverts the latest pass (or edge_id for one edge), byte-exact, refusing on "
             "manual drift. action='log' lists every dream edge (active / aged-in / "
-            "undone). Offline deliberate turn — never needed for ordinary recall."
+            "undone). action='deparasite' runs the DRM-4 counterweight: reports "
+            "per-memory out-degree, flags hubs over DREAM_MAX_OUT_DEGREE, and PROPOSES "
+            "retractions (dream's own un-aged edges — executed only with retract=true) "
+            "vs per-item GATED demotions and non-lossy dedup-merges (never auto; "
+            "protected floor/co-recalled/cited hubs are never proposed for depression). "
+            "action='dedup_merge' executes ONE ratified merge proposal (survivor gains "
+            "supersedes, loser gets invalid_after — additive frontmatter, nothing "
+            "deleted). Offline deliberate turn — never needed for ordinary recall."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["pass", "undo", "log"],
-                    "description": "pass = run a dream pass (default); undo = revert; log = list edges",
+                    "enum": ["pass", "undo", "log", "deparasite", "dedup_merge"],
+                    "description": "pass = run a dream pass (default); undo = revert; "
+                    "log = list edges; deparasite = DRM-4 counterweight report; "
+                    "dedup_merge = execute one ratified merge",
                 },
                 "apply": {
                     "type": "boolean",
@@ -335,6 +344,22 @@ _TOOLS = [
                     "type": "string",
                     "description": "with action='undo': revert edges applied since an ISO "
                     "date or within the last N distinct sessions",
+                },
+                "retract": {
+                    "type": "boolean",
+                    "description": "with action='deparasite': additionally EXECUTE the "
+                    "Tier-A lane (retract flagged un-aged dream edges via the undo "
+                    "machinery). Default false = report/propose only.",
+                },
+                "survivor": {
+                    "type": "string",
+                    "description": "with action='dedup_merge': the memory that stays "
+                    "current (gains supersedes:[loser])",
+                },
+                "loser": {
+                    "type": "string",
+                    "description": "with action='dedup_merge': the memory being "
+                    "superseded (gets invalid_after; file stays on disk)",
                 },
             },
         },
@@ -879,6 +904,29 @@ def _tool_dream(args: Dict[str, Any]) -> str:
     try:
         if action == "log":
             return render_log(memory_dir)
+        if action == "deparasite":
+            from .deparasite import run_deparasite_pass
+
+            _code, text = run_deparasite_pass(
+                memory_dir, retract=bool(args.get("retract"))
+            )
+            return text
+        if action == "dedup_merge":
+            from .deparasite import apply_dedup_merge
+
+            survivor = str(args.get("survivor") or "").strip()
+            loser = str(args.get("loser") or "").strip()
+            if not survivor or not loser:
+                return "dream dedup_merge: both 'survivor' and 'loser' are required."
+            res = apply_dedup_merge(memory_dir, survivor, loser)
+            if res.get("error"):
+                return f"dedup-merge REFUSED: {res['error']}"
+            return (
+                f"dedup-merge applied (non-lossy, reversible): {survivor} now supersedes "
+                f"{loser}; {loser} invalid_after "
+                f"{(res.get('invalid_after') or {}).get('ts')}. Both files remain on "
+                "disk; the commit stays the owner's."
+            )
         if action == "undo":
             edge_id = str(args.get("edge_id") or "").strip() or None
             since = str(args.get("undo_since") or "").strip() or None
