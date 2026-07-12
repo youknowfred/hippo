@@ -245,6 +245,22 @@ def test_decision_history_refuses_untrusted_corpus_then_renders_after_consent(co
     assert "withheld" not in _text(_call("decision_history", {"name": "deploy_runbook"}))
 
 
+def test_untrusted_refusals_name_this_servers_own_tools(corpus, monkeypatch):
+    """Every SEC-1/SEC-13 refusal on this surface must name a remedy that WORKS here:
+    the server's own doctor/trust_corpus/init tools first, typed /hippo:* second — a
+    typed command is terminal-only (the Claude Desktop app rejects it), so a refusal
+    that named only /hippo:doctor would dead-end the exact client it refused."""
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    for tool, args in (
+        ("new_memory", {"name": "x", "description": "d", "type": "project"}),
+        ("traverse", {"name": "deploy_runbook"}),
+        ("decision_history", {"name": "deploy_runbook"}),
+    ):
+        text = _text(_call(tool, args))
+        assert "trust_corpus" in text, f"{tool} refusal must name the on-surface consent tool"
+        assert "/hippo:doctor" in text, f"{tool} refusal should still name the terminal path"
+
+
 # --------------------------------------------------------------------------- #
 # End-to-end newline-delimited stream
 # --------------------------------------------------------------------------- #

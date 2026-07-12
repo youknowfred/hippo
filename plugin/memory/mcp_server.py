@@ -298,6 +298,17 @@ _TOOLS = [
 # --------------------------------------------------------------------------- #
 # Tool implementations — each returns a plain string; never raises.
 # --------------------------------------------------------------------------- #
+
+# The ONE untrusted-corpus remedy every SEC-1 refusal on THIS surface appends. It names
+# this server's own tools FIRST (always present here — INT-9..12 — and the only working
+# invocation on surfaces that reject typed commands, e.g. the Claude Desktop app) and the
+# typed terminal commands second.
+_UNTRUSTED_REMEDY = (
+    "Review and trust it with this server's doctor + trust_corpus tools — or the init tool "
+    "if the corpus is yours (in a terminal: /hippo:doctor, or /hippo:init)."
+)
+
+
 def _tool_recall(args: Dict[str, Any]) -> str:
     from .recall_view import describe
 
@@ -329,8 +340,7 @@ def _tool_new_memory(args: Dict[str, Any]) -> str:
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
             "new_memory REFUSED — this project's memory corpus is untrusted (SEC-13: writing "
-            "to an unreviewed corpus is gated just as reading it is). Run /hippo:doctor to "
-            "review and trust it, or /hippo:init if it's yours."
+            "to an unreviewed corpus is gated just as reading it is). " + _UNTRUSTED_REMEDY
         )
     links = args.get("links")
     links = [str(x) for x in links] if isinstance(links, list) else None
@@ -393,8 +403,8 @@ def _tool_traverse(args: Dict[str, Any]) -> str:
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
             "traverse: withheld — this project's memory corpus is untrusted (SEC-1: the link "
-            "graph exposes memory names and typed edges, gated just as recall is). Run "
-            "/hippo:doctor to review and trust it, or /hippo:init if it's yours."
+            "graph exposes memory names and typed edges, gated just as recall is). "
+            + _UNTRUSTED_REMEDY
         )
     graph = build_graph(memory_dir, default_index_dir(memory_dir))
     if graph is None:
@@ -436,7 +446,7 @@ def _tool_decision_history(args: Dict[str, Any]) -> str:
         return (
             "decision_history: withheld — this project's memory corpus is untrusted (SEC-1: "
             "the lineage narrative exposes memory names, dates, and typed edges, gated just as "
-            "recall is). Run /hippo:doctor to review and trust it, or /hippo:init if it's yours."
+            "recall is). " + _UNTRUSTED_REMEDY
         )
     return render_decision_history(name, memory_dir, default_index_dir(memory_dir))
 
@@ -808,7 +818,7 @@ def _resource_floor() -> str:
         return (
             header + "\n\nFloor WITHHELD — this project's memory corpus is untrusted "
             "(SEC-1: a cloned corpus is an unreviewed prompt-injection channel). "
-            "Run /hippo:doctor to review and trust it."
+            + _UNTRUSTED_REMEDY
         )
     parts = []
     try:
@@ -843,7 +853,7 @@ def _resource_scorecard() -> str:
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
             header + "\n\nScorecard WITHHELD — this project's corpus is untrusted (SEC-1). "
-            "Run /hippo:doctor to review and trust it."
+            + _UNTRUSTED_REMEDY
         )
     status, message = _scorecard_message(memory_dir, repo_root)
     glyph = "⚠" if status == "warn" else "✔"
@@ -866,7 +876,7 @@ def _resource_rules_view() -> str:
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
             header + "\n\nView WITHHELD — this project's corpus is untrusted (SEC-1). "
-            "Run /hippo:doctor to review and trust it."
+            + _UNTRUSTED_REMEDY
         )
     radar = conflict_radar(memory_dir, repo_root)
     rot = rules_rot(repo_root)
