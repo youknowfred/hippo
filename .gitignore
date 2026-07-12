@@ -17,3 +17,7 @@ __pycache__/
 .claude/.memory-index/
 .claude/.memory-telemetry/
 .claude/memory.local/
+
+# hippo runs on this repo, but this corpus is PRIVATE dev history — never publish it
+# to the public repo. hippo reads it from disk regardless of git tracking.
+.claude/memory/
