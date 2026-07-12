@@ -149,45 +149,50 @@ def init_project(claude_projects_dir: Optional[str] = None) -> Dict[str, object]
         result["warnings"].append(f"could not create {memory_dir}: {exc}")
         return result
 
-    if not existing:
-        # Steps 1-2b (fresh only): core pack, MEMORY.md skeleton, format marker. The
-        # shipped skeleton already carries the core pack's floor pointers, so a
-        # core-only seed needs no pointer appends.
-        for fname in _core_pack_files(plugin_root):
-            status = _copy_if_absent(
-                os.path.join(plugin_root, "assets", "packs", "core", fname),
-                os.path.join(memory_dir, fname),
+    try:
+        if not existing:
+            # Steps 1-2b (fresh only): core pack, MEMORY.md skeleton, format marker. The
+            # shipped skeleton already carries the core pack's floor pointers, so a
+            # core-only seed needs no pointer appends.
+            for fname in _core_pack_files(plugin_root):
+                status = _copy_if_absent(
+                    os.path.join(plugin_root, "assets", "packs", "core", fname),
+                    os.path.join(memory_dir, fname),
+                )
+                if status == "seeded":
+                    result["seeded"].append(fname)
+                elif status is None:
+                    result["warnings"].append(f"core pack file missing from plugin: {fname}")
+            skel = _copy_if_absent(
+                os.path.join(plugin_root, "assets", "MEMORY.skeleton.md"),
+                os.path.join(memory_dir, "MEMORY.md"),
             )
-            if status == "seeded":
-                result["seeded"].append(fname)
-            elif status is None:
-                result["warnings"].append(f"core pack file missing from plugin: {fname}")
-        skel = _copy_if_absent(
-            os.path.join(plugin_root, "assets", "MEMORY.skeleton.md"),
-            os.path.join(memory_dir, "MEMORY.md"),
-        )
-        if skel == "seeded":
-            result["seeded"].append("MEMORY.md")
-        elif skel is None:
-            result["warnings"].append("MEMORY.skeleton.md missing from plugin bundle")
-        fmt_path = os.path.join(memory_dir, ".format")
-        if not os.path.exists(fmt_path):
-            with open(fmt_path, "w", encoding="utf-8") as fh:
-                fh.write(json.dumps({"corpus_format": CORPUS_FORMAT_VERSION}) + "\n")
-            result["format_marker"] = "stamped"
+            if skel == "seeded":
+                result["seeded"].append("MEMORY.md")
+            elif skel is None:
+                result["warnings"].append("MEMORY.skeleton.md missing from plugin bundle")
+            fmt_path = os.path.join(memory_dir, ".format")
+            if not os.path.exists(fmt_path):
+                with open(fmt_path, "w", encoding="utf-8") as fh:
+                    fh.write(json.dumps({"corpus_format": CORPUS_FORMAT_VERSION}) + "\n")
+                result["format_marker"] = "stamped"
+            else:
+                result["format_marker"] = "already_present"
         else:
-            result["format_marker"] = "already_present"
-    else:
-        # An existing corpus is never stamped with a format it wasn't migrated to —
-        # doctor's format check (COR-7) owns that comparison.
-        result["format_marker"] = "skipped_existing_corpus"
+            # An existing corpus is never stamped with a format it wasn't migrated to —
+            # doctor's format check (COR-7) owns that comparison.
+            result["format_marker"] = "skipped_existing_corpus"
 
-    # Step 2c (both paths): CONVENTIONS.md backfill, idempotent.
-    conv = _copy_if_absent(
-        os.path.join(plugin_root, "assets", "CONVENTIONS.md"),
-        os.path.join(memory_dir, "CONVENTIONS.md"),
-    )
-    result["conventions"] = conv or "source_missing"
+        # Step 2c (both paths): CONVENTIONS.md backfill, idempotent.
+        conv = _copy_if_absent(
+            os.path.join(plugin_root, "assets", "CONVENTIONS.md"),
+            os.path.join(memory_dir, "CONVENTIONS.md"),
+        )
+        result["conventions"] = conv or "source_missing"
+    except Exception as exc:
+        # Keep the never-raises contract: a filesystem error mid-seed is a reported,
+        # partial result (idempotent re-run resumes), not a dead tool call.
+        result["warnings"].append(f"seeding stopped early: {exc}")
 
     # Step 3: the cross-machine symlink (SHP-5 encoding, ONE tested helper).
     result["symlink"] = create_project_symlink(

@@ -569,21 +569,23 @@ def _tool_init(args: Dict[str, Any]) -> str:
         lines.append("✔ format marker stamped (.claude/memory/.format)")
     if r.get("conventions") == "seeded":
         lines.append("✔ CONVENTIONS.md seeded")
-    link = r.get("symlink") or {}
-    if link.get("status") in ("created", "already_correct"):
-        lines.append(f"✔ symlink {link['status']} → {link.get('expected_path')}")
-    else:
-        lines.append(
-            f"✘ symlink CONFLICT at {link.get('expected_path')}: {link.get('error')} — a "
-            "pre-existing link to a different target usually means a prior manual setup; "
-            "not overwriting it."
-        )
-    idx = r.get("index") or {}
-    if idx.get("error"):
-        lines.append(f"⚠ index build failed: {idx['error']}")
-    else:
-        dense = "hybrid" if idx.get("dense_ready") else "BM25-only (run the bootstrap tool for dense)"
-        lines.append(f"✔ index built — {idx.get('count')} memories, {dense}")
+    link = r.get("symlink")
+    if isinstance(link, dict):
+        if link.get("status") in ("created", "already_correct"):
+            lines.append(f"✔ symlink {link['status']} → {link.get('expected_path')}")
+        else:
+            lines.append(
+                f"✘ symlink CONFLICT at {link.get('expected_path')}: {link.get('error')} — a "
+                "pre-existing link to a different target usually means a prior manual setup; "
+                "not overwriting it."
+            )
+    idx = r.get("index")
+    if isinstance(idx, dict):
+        if idx.get("error"):
+            lines.append(f"⚠ index build failed: {idx['error']}")
+        else:
+            dense = "hybrid" if idx.get("dense_ready") else "BM25-only (run the bootstrap tool for dense)"
+            lines.append(f"✔ index built — {idx.get('count')} memories, {dense}")
     gi = r.get("gitignore")
     if gi == "patched":
         lines.append("✔ .gitignore patched (index/telemetry/private-tier entries)")
