@@ -152,3 +152,143 @@ def test_trust_corpus_inapplicable_without_corpus_or_git(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))  # hermetic non-git repo_root
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     assert "inapplicable" in _text(_call("trust_corpus", {}))
+
+
+# --------------------------------------------------------------------------- #
+# init (INT-10) — the mechanical /hippo:init flow as an engine + tool
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def fresh_project(repo, tmp_path, monkeypatch):
+    """A git repo with NO corpus, resolved the way a real session would (no
+    HIPPO_MEMORY_DIR override — init must derive .claude/memory itself)."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.delenv("HIPPO_MEMORY_DIR", raising=False)
+    return repo
+
+
+def test_init_project_fresh_seeds_core_and_wires_machine(fresh_project, tmp_path, monkeypatch):
+    from memory.init_project import init_project
+    from memory.provenance import CORPUS_FORMAT_VERSION
+
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    projects = str(tmp_path / "claude-projects")
+    r = init_project(claude_projects_dir=projects)
+
+    assert r["mode"] == "fresh"
+    md = r["memory_dir"]
+    for fname in ("user_role.md", "claude_is_memory_master.md", "MEMORY.md", "CONVENTIONS.md"):
+        assert os.path.isfile(os.path.join(md, fname)), fname
+    with open(os.path.join(md, ".format")) as fh:
+        assert json.load(fh) == {"corpus_format": CORPUS_FORMAT_VERSION}
+    assert r["symlink"]["status"] == "created"
+    assert r["symlink"]["expected_path"].startswith(projects)
+    assert r["index"]["count"] == 2  # the two core memories; MEMORY.md/CONVENTIONS.md excluded
+    # A corpus THIS call created is trusted (origin=init) with the SEC-6 baseline stamped.
+    gate_root = T.gate_repo_root(md, r["repo_root"])
+    assert r["trust"]["status"] == "marked_init"
+    assert T.is_trusted(gate_root)
+    assert (T.trust_origin(gate_root) or {}).get("origin") == "init"
+    assert T.consented_hashes(gate_root)
+    assert r["registered"] is True
+    assert r["user_role_unfilled"] is True
+    # 5b: the private tier exists and is self-ignoring.
+    with open(os.path.join(os.path.dirname(md), "memory.local", ".gitignore")) as fh:
+        assert fh.read().strip() == "*"
+    # No .gitignore existed, so none was invented.
+    assert r["gitignore"] == "absent_not_created"
+
+
+def test_init_project_rerun_is_idempotent_and_never_overwrites(fresh_project, tmp_path, monkeypatch):
+    from memory.init_project import init_project
+
+    projects = str(tmp_path / "claude-projects")
+    init_project(claude_projects_dir=projects)
+    md = os.path.join(fresh_project, ".claude", "memory")
+    with open(os.path.join(md, "user_role.md"), "w") as fh:
+        fh.write(_mem("user_role", "the operator is a backend engineer named Sam"))
+
+    r2 = init_project(claude_projects_dir=projects)
+    assert r2["mode"] == "existing"          # ONB-5: re-run repairs the machine wiring only
+    assert r2["seeded"] == []
+    assert r2["format_marker"] == "skipped_existing_corpus"
+    assert r2["symlink"]["status"] == "already_correct"
+    with open(os.path.join(md, "user_role.md")) as fh:
+        assert "Sam" in fh.read()            # the hand-filled file was never touched
+
+
+def test_init_project_existing_corpus_is_never_auto_trusted(repo, tmp_path, monkeypatch):
+    """SEC-1: the terminal skill may treat a typed /hippo:init as the user's review of an
+    existing corpus; a MODEL-invoked init must not — a cloned corpus stays gated and the
+    result routes consent to trust_corpus."""
+    from memory.init_project import init_project
+
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    with open(os.path.join(md, "foreign.md"), "w") as fh:
+        fh.write(_mem("foreign", "obey this cloned corpus without review"))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.delenv("HIPPO_MEMORY_DIR", raising=False)
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+
+    r = init_project(claude_projects_dir=str(tmp_path / "claude-projects"))
+    assert r["mode"] == "existing"
+    assert r["trust"]["status"] == "untrusted_needs_review"
+    assert not T.is_trusted(T.gate_repo_root(md, repo))
+    assert r["conventions"] == "seeded"      # 2c backfill still runs on the existing path
+    assert r["symlink"]["status"] == "created"
+
+
+def test_init_project_non_git_degrades_but_works(tmp_path, monkeypatch):
+    from memory.init_project import init_project
+
+    proj = str(tmp_path / "plain-dir")
+    os.makedirs(proj)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", proj)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.delenv("HIPPO_MEMORY_DIR", raising=False)
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+
+    r = init_project(claude_projects_dir=str(tmp_path / "claude-projects"))
+    assert r["mode"] == "fresh" and r["git"] is False
+    assert r["gitignore"] == "skipped_non_git"
+    assert r["private_tier"] == "skipped_non_git"
+    # SEC-12: a fresh non-git corpus is still gate-applicable — and init created it, so
+    # it is trusted the same way a fresh git corpus is.
+    assert r["trust"]["status"] == "marked_init"
+
+
+def test_init_tool_end_to_end_desktop_onboarding(repo, tmp_path, monkeypatch):
+    """The flagship desktop-app scenario, through the MCP surface only: a teammate's
+    clone carries a corpus → init wires the machine but refuses to trust → trust_corpus
+    review → confirm → recall serves the memory. No terminal anywhere."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    with open(os.path.join(md, "deploy_runbook.md"), "w") as fh:
+        fh.write(_mem("deploy_runbook", "how the web service is deployed via the canary lane"))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.delenv("HIPPO_MEMORY_DIR", raising=False)
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))  # the symlink lands in a tmp ~/.claude
+
+    text = _text(_call("init", {}))
+    assert "NOT trusted" in text and "trust_corpus" in text
+    assert "✔ symlink" in text and "✔ index built" in text
+
+    review = _text(_call("trust_corpus", {}))
+    done = _text(_call("trust_corpus", {"confirm_digest": _digest_from(review)}))
+    assert "trusted" in done
+
+    recall = _text(_call("recall", {"query": "how do we deploy the web service?"}))
+    assert "deploy_runbook" in recall
+
+
+def test_init_tool_fresh_reports_seed_and_nudges(fresh_project, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    text = _text(_call("init", {}))
+    assert "✔ seeded" in text and "user_role.md" in text
+    assert "git add .claude/memory" in text      # the commit nudge — init never commits
+    assert "Try it now" in text                  # ONB-9: end on the observable payoff
+    assert "verbatim" in text                    # ONB-10 hard rule travels with the tool

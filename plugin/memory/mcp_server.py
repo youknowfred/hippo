@@ -181,6 +181,23 @@ _TOOLS = [
     # STABILITY.md; the five tools above are the frozen v1.0 surface.
     # ------------------------------------------------------------------- #
     {
+        "name": "init",
+        "description": (
+            "One-time project setup — the mechanical core of the /hippo:init flow. On a "
+            "project with no corpus it seeds .claude/memory/ (core starter pack + MEMORY.md "
+            "floor + format marker), then on every run it wires THIS machine: the native-"
+            "memory symlink, the recall index, CONVENTIONS.md backfill, the .gitignore "
+            "entries, the private tier. Idempotent; never overwrites an existing memory "
+            "file; never commits. Trust: a corpus this call CREATES is marked trusted (its "
+            "content is the plugin's own starter files); a PRE-EXISTING corpus (teammate "
+            "clone, second machine) is never auto-trusted — the result names the "
+            "trust_corpus review as the next step. Call when the user asks to set up "
+            "hippo/memory for this project; follow the nudges in the result (fill "
+            "user_role.md from the user's own words — never invent its content)."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "trust_corpus",
         "description": (
             "The SEC-1 consent flow for this project's memory corpus — the ONLY way to "
@@ -394,6 +411,95 @@ def _consent_review_block(memory_dir: str, stems=None) -> str:
     return "\n".join(lines)
 
 
+def _tool_init(args: Dict[str, Any]) -> str:
+    from .init_project import init_project
+
+    r = init_project()
+    lines = [f"init ({r.get('mode')} corpus) — {r.get('memory_dir')}"]
+    if r.get("seeded"):
+        lines.append("✔ seeded: " + ", ".join(r["seeded"]))
+    if r.get("format_marker") == "stamped":
+        lines.append("✔ format marker stamped (.claude/memory/.format)")
+    if r.get("conventions") == "seeded":
+        lines.append("✔ CONVENTIONS.md seeded")
+    link = r.get("symlink") or {}
+    if link.get("status") in ("created", "already_correct"):
+        lines.append(f"✔ symlink {link['status']} → {link.get('expected_path')}")
+    else:
+        lines.append(
+            f"✘ symlink CONFLICT at {link.get('expected_path')}: {link.get('error')} — a "
+            "pre-existing link to a different target usually means a prior manual setup; "
+            "not overwriting it."
+        )
+    idx = r.get("index") or {}
+    if idx.get("error"):
+        lines.append(f"⚠ index build failed: {idx['error']}")
+    else:
+        dense = "hybrid" if idx.get("dense_ready") else "BM25-only (run the bootstrap tool for dense)"
+        lines.append(f"✔ index built — {idx.get('count')} memories, {dense}")
+    gi = r.get("gitignore")
+    if gi == "patched":
+        lines.append("✔ .gitignore patched (index/telemetry/private-tier entries)")
+    elif gi == "absent_not_created":
+        lines.append(
+            "⚠ no .gitignore here — not creating one unasked; add the entries "
+            "(.claude/.memory-index/, .claude/.memory-telemetry/, .claude/memory.local/) "
+            "if this repo should have one."
+        )
+    if not r.get("git"):
+        lines.append(
+            "⚠ Not a git repository — hippo runs DEGRADED here: staleness tracking, "
+            "provenance backfill, and archive's git-mv path are INACTIVE until you git init "
+            "and commit. Recall, indexing, links, and floor loading all work normally."
+        )
+    for w in r.get("warnings") or []:
+        lines.append(f"⚠ {w}")
+
+    trust_status = (r.get("trust") or {}).get("status")
+    if trust_status == "marked_init":
+        lines.append("✔ corpus marked trusted (you just created it) — recall active.")
+    elif trust_status == "already_trusted":
+        lines.append("✔ corpus already trusted — recall active.")
+    elif trust_status == "write_failed":
+        lines.append("✘ trust-registry write FAILED — recall stays gated; check ~/.claude is writable.")
+    elif trust_status == "untrusted_needs_review":
+        # SEC-1: a pre-existing corpus is never auto-trusted from a model-invoked surface.
+        lines.append("")
+        lines.append(
+            "🔒 This machine is wired up, but the PRE-EXISTING corpus is NOT trusted yet — "
+            "recall injects nothing from it until its content is reviewed (SEC-1; typing "
+            "/hippo:init in a terminal is itself that review, a model-invoked init is not). "
+            "Next step: call trust_corpus to review what it would inject and take the "
+            "user's explicit consent."
+        )
+
+    # Step-6 nudges (the skill's closing report, non-interactive form).
+    if r.get("mode") == "fresh" and r.get("git"):
+        lines.append("")
+        lines.append(
+            'To share it: git add .claude/memory .gitignore && git commit -m "seed agent '
+            'memory" — review the diff first; init never commits for you.'
+        )
+    if r.get("user_role_unfilled"):
+        lines.append("")
+        lines.append(
+            "⚠ user_role.md is still the unfilled template — recall will index its "
+            "placeholder text until it's filled in. Offer to fill it NOW from the user's "
+            "own words (ask their name, role, what they're building, how they want you to "
+            "collaborate) and write ONLY their verbatim answers — never infer or draft "
+            "their identity for them. AFTER editing it, run trust_corpus once more so the "
+            "edit joins the consent baseline (an out-of-primitive edit is otherwise "
+            "withheld as drift)."
+        )
+    lines.append("")
+    lines.append(
+        "▶ Try it now — once user_role.md has the real role, ask \"what do you remember "
+        "about my role?\" and watch the memory surface. That returned memory is the whole "
+        "point of this setup."
+    )
+    return "\n".join(lines)
+
+
 def _tool_trust_corpus(args: Dict[str, Any]) -> str:
     from . import trust
     from .provenance import resolve_dirs
@@ -485,6 +591,7 @@ _DISPATCH = {
     "traverse": _tool_traverse,
     "why": _tool_why,
     "decision_history": _tool_decision_history,
+    "init": _tool_init,
     "trust_corpus": _tool_trust_corpus,
 }
 
