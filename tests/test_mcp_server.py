@@ -73,7 +73,7 @@ def test_initialize_defaults_protocol_when_absent():
 # The frozen v1.0 tool surface (STABILITY.md) — these five names, FIRST and in this order.
 _FROZEN_TOOLS = ["recall", "new_memory", "traverse", "why", "decision_history"]
 # Additive post-1.0 tools (INT-9..12): the setup flows, for surfaces without typed /hippo:*.
-_SETUP_TOOLS = ["init", "trust_corpus"]
+_SETUP_TOOLS = ["bootstrap", "init", "trust_corpus"]
 
 
 def test_tools_list_exposes_frozen_five_plus_setup_tools():

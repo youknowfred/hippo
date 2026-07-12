@@ -292,3 +292,156 @@ def test_init_tool_fresh_reports_seed_and_nudges(fresh_project, tmp_path, monkey
     assert "git add .claude/memory" in text      # the commit nudge — init never commits
     assert "Try it now" in text                  # ONB-9: end on the observable payoff
     assert "verbatim" in text                    # ONB-10 hard rule travels with the tool
+
+
+# --------------------------------------------------------------------------- #
+# bootstrap (INT-11) — kick-off-and-poll; the worker's sequencing is the contract
+# --------------------------------------------------------------------------- #
+from memory import bootstrap as BOOT  # noqa: E402
+
+
+def _fake_spawn(record):
+    def spawn(cmd, env, log_path, cwd):
+        record.update({"cmd": cmd, "env": env, "log_path": log_path, "cwd": cwd})
+        return os.getpid()  # a live pid — ours — so the lock reads as running
+
+    return spawn
+
+
+def test_bootstrap_status_without_data_dir_is_legible():
+    # conftest's autouse fixture deletes CLAUDE_PLUGIN_DATA
+    assert BOOT.status() == {"state": "no_data_dir"}
+    assert "CLAUDE_PLUGIN_DATA" in _text(_call("bootstrap", {"action": "status"}))
+
+
+def test_bootstrap_tool_requires_an_action():
+    assert "action=" in _text(_call("bootstrap", {}))
+
+
+def test_bootstrap_start_spawns_detached_worker_with_online_env(tmp_path, monkeypatch):
+    """start() detaches the worker, records a live-pid lock, and strips the offline pins
+    (serve() sets them in-process; the worker's whole job is the sanctioned download)."""
+    data = str(tmp_path / "hippo-inline")
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", data)
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")  # prove the strip
+    seen = {}
+    monkeypatch.setattr(BOOT, "_spawn", _fake_spawn(seen))
+
+    r = BOOT.start()
+    assert r["status"] == "started" and r["pid"] == os.getpid()
+    assert "--worker" in seen["cmd"] and "-m" in seen["cmd"]
+    assert "HF_HUB_OFFLINE" not in seen["env"]
+    assert "TRANSFORMERS_OFFLINE" not in seen["env"]
+    assert seen["env"]["CLAUDE_PLUGIN_DATA"] == data
+    with open(os.path.join(data, ".bootstrap-lock")) as fh:
+        assert json.load(fh)["pid"] == os.getpid()
+
+    assert BOOT.start()["status"] == "already_running"  # the live lock blocks a second start
+    assert "RUNNING" in _text(_call("bootstrap", {"action": "status"}))
+
+
+def test_bootstrap_stale_lock_never_blocks(tmp_path, monkeypatch):
+    data = str(tmp_path / "hippo-inline")
+    os.makedirs(data)
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", data)
+    with open(os.path.join(data, ".bootstrap-lock"), "w") as fh:
+        json.dump({"pid": 2**30}, fh)  # no such process — a crashed worker's leftovers
+    seen = {}
+    monkeypatch.setattr(BOOT, "_spawn", _fake_spawn(seen))
+    assert BOOT.start()["status"] == "started"
+
+
+def test_bootstrap_already_current_short_circuits(tmp_path, monkeypatch):
+    import hashlib
+
+    data = str(tmp_path / "hippo-inline")
+    os.makedirs(data)
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", data)
+    with open(os.path.join(BOOT._plugin_root(), "requirements.txt"), "rb") as fh:
+        req_hash = hashlib.sha256(fh.read()).hexdigest()
+    with open(os.path.join(data, ".bootstrap-sentinel"), "w") as fh:
+        json.dump({"requirements_hash": req_hash}, fh)
+
+    assert BOOT.start()["status"] == "already_bootstrapped"
+    assert "nothing to do" in _text(_call("bootstrap", {"action": "start"}))
+    assert "✔ bootstrapped" in _text(_call("bootstrap", {"action": "status"}))
+    # --multilingual is a deliberate re-run (model switch), never short-circuited.
+    seen = {}
+    monkeypatch.setattr(BOOT, "_spawn", _fake_spawn(seen))
+    assert BOOT.start(multilingual=True)["status"] == "started"
+    assert "--multilingual" in seen["cmd"]
+
+
+def test_worker_sequences_steps_and_writes_sentinel_last(tmp_path, monkeypatch):
+    """The SKILL hard rule, executable: the sentinel means venv AND warm succeeded, so it
+    must not exist yet when the warm step runs — and a failed warm leaves none at all."""
+    data = str(tmp_path / "hippo-inline")
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", data)
+    sentinel = os.path.join(data, ".bootstrap-sentinel")
+    calls = []
+    monkeypatch.setattr(BOOT, "_provision_venv", lambda d, r: calls.append("venv"))
+    monkeypatch.setattr(BOOT, "_install_deps", lambda d, r: calls.append("deps"))
+
+    def warm(d, r, multilingual):
+        assert not os.path.exists(sentinel)
+        calls.append("warm")
+
+    monkeypatch.setattr(BOOT, "_warm_models", warm)
+    os.makedirs(data)
+    with open(os.path.join(data, ".bootstrap-lock"), "w") as fh:
+        json.dump({"pid": os.getpid()}, fh)
+
+    assert BOOT._run_worker() == 0
+    assert calls == ["venv", "deps", "warm"]
+    with open(sentinel) as fh:
+        s = json.load(fh)
+    assert s["requirements_hash"] and s["plugin_version"] not in ("", "unknown")
+    assert not os.path.exists(os.path.join(data, ".bootstrap-lock"))  # lock cleared
+
+
+def test_worker_failure_writes_no_sentinel_and_clears_lock(tmp_path, monkeypatch):
+    data = str(tmp_path / "hippo-inline")
+    os.makedirs(data)
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", data)
+    monkeypatch.setattr(BOOT, "_provision_venv", lambda d, r: None)
+    monkeypatch.setattr(BOOT, "_install_deps", lambda d, r: None)
+
+    def boom(d, r, multilingual):
+        raise RuntimeError("download failed")
+
+    monkeypatch.setattr(BOOT, "_warm_models", boom)
+    with open(os.path.join(data, ".bootstrap-lock"), "w") as fh:
+        json.dump({"pid": os.getpid()}, fh)
+
+    assert BOOT._run_worker() == 1
+    assert not os.path.exists(os.path.join(data, ".bootstrap-sentinel"))
+    assert not os.path.exists(os.path.join(data, ".bootstrap-lock"))
+
+
+def test_warm_models_multilingual_writes_preset_then_warms_that_model(tmp_path, monkeypatch):
+    data = str(tmp_path / "hippo-inline")
+    os.makedirs(data)
+    ran = []
+    monkeypatch.setattr(
+        BOOT.subprocess, "run", lambda cmd, **kw: ran.append(list(cmd)) or None
+    )
+    BOOT._warm_models(data, BOOT._plugin_root(), multilingual=True)
+    with open(os.path.join(data, "model.json")) as fh:
+        assert json.load(fh)["embed_model"] == BOOT._MULTILINGUAL_MODEL
+    assert BOOT._MULTILINGUAL_MODEL in ran[0][-1]  # the -c code warms the chosen model
+
+
+def test_sibling_surface_installs_are_named(tmp_path, monkeypatch):
+    """The per-surface data-dir split (terminal '<plugin>-<marketplace>' vs desktop
+    '<plugin>-inline') must be legible — status names the sibling that already
+    bootstrapped so 'why is it downloading again?' answers itself."""
+    parent = tmp_path / "data"
+    me = parent / "hippo-inline"
+    sib = parent / "hippo-hippo"
+    os.makedirs(me)
+    os.makedirs(sib)
+    with open(sib / ".bootstrap-sentinel", "w") as fh:
+        fh.write("{}")
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(me))
+    assert BOOT._sibling_installs(str(me)) == [str(sib)]
+    assert "sibling surface" in _text(_call("bootstrap", {"action": "status"}))

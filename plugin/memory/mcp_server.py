@@ -181,6 +181,39 @@ _TOOLS = [
     # STABILITY.md; the five tools above are the frozen v1.0 surface.
     # ------------------------------------------------------------------- #
     {
+        "name": "bootstrap",
+        "description": (
+            "One-time per-machine-surface provisioning — the /hippo:bootstrap flow: builds "
+            "the plugin venv and downloads the ~130MB offline embedding model (the ONE "
+            "online step in hippo's lifecycle; recall already works BM25-only without it). "
+            "action='start' kicks off a detached background worker and returns immediately; "
+            "poll with action='status' (a few minutes on first run — the log tail shows "
+            "progress). Only call on the user's explicit ask to set up hippo. Note: each "
+            "Claude Code surface (terminal CLI vs desktop app) keeps its OWN plugin-data "
+            "dir, so a machine bootstrapped in the terminal may still need this here — "
+            "status names any sibling-surface install it detects. After it completes, "
+            "dense recall reaches hooks from the next prompt; this MCP server process "
+            "itself stays BM25-only until the session restarts."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["status", "start"],
+                    "description": "status = poll the current state; start = kick off the worker",
+                },
+                "multilingual": {
+                    "type": "boolean",
+                    "description": "with start: provision the multilingual embedding model "
+                    "preset instead of the English default (only for a mostly non-English "
+                    "corpus — otherwise a pure downgrade)",
+                },
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "init",
         "description": (
             "One-time project setup — the mechanical core of the /hippo:init flow. On a "
@@ -411,6 +444,66 @@ def _consent_review_block(memory_dir: str, stems=None) -> str:
     return "\n".join(lines)
 
 
+_NO_DATA_DIR_MSG = (
+    "CLAUDE_PLUGIN_DATA is unset in this server's environment — there is nowhere to "
+    "provision. This Claude Code version may be too old for plugin self-provisioning; "
+    "update it, or bootstrap from a terminal (/hippo:bootstrap)."
+)
+
+
+def _tool_bootstrap(args: Dict[str, Any]) -> str:
+    from . import bootstrap as boot
+
+    action = str(args.get("action") or "").strip()
+    if action == "status":
+        s = boot.status()
+        if s.get("state") == "no_data_dir":
+            return "bootstrap status: " + _NO_DATA_DIR_MSG
+        lines = [f"bootstrap status: {s.get('state')}"]
+        if s.get("running"):
+            lines.append(f"worker RUNNING (pid {s.get('pid')}) — poll again in a minute.")
+        elif s.get("state") == "current":
+            lines.append(
+                "✔ bootstrapped — hooks serve dense recall from the next prompt; this MCP "
+                "server process picks the venv up when the session restarts."
+            )
+        elif s.get("state") == "stale":
+            lines.append(
+                "venv deps are STALE (requirements changed since the last bootstrap) — "
+                "run bootstrap with action='start' to re-provision."
+            )
+        else:
+            lines.append("not bootstrapped — run bootstrap with action='start'.")
+        for sib in s.get("siblings") or []:
+            lines.append(
+                f"note: a sibling surface already bootstrapped at {sib} — each Claude Code "
+                "surface (terminal vs desktop) keeps its own copy; this one still needs "
+                "its own run."
+            )
+        tail = s.get("log_tail")
+        if tail:
+            lines.append("--- bootstrap.log (tail) ---")
+            lines.append(str(tail))
+        return "\n".join(lines)
+    if action == "start":
+        r = boot.start(multilingual=bool(args.get("multilingual")))
+        st = r.get("status")
+        if st == "no_data_dir":
+            return "bootstrap: " + _NO_DATA_DIR_MSG
+        if st == "already_running":
+            return f"bootstrap: a worker is already running (pid {r.get('pid')}) — poll with action='status'."
+        if st == "already_bootstrapped":
+            return "bootstrap: already bootstrapped and deps are current — nothing to do."
+        if st == "started":
+            return (
+                f"bootstrap started (worker pid {r.get('pid')}) — the venv build + ~130MB "
+                "model download takes a few minutes. Poll with action='status'; done when "
+                "the state reads 'current'. Tell the user it is running in the background."
+            )
+        return f"bootstrap: failed to start — {r.get('error')}"
+    return "bootstrap: pass action='status' or action='start'."
+
+
 def _tool_init(args: Dict[str, Any]) -> str:
     from .init_project import init_project
 
@@ -591,6 +684,7 @@ _DISPATCH = {
     "traverse": _tool_traverse,
     "why": _tool_why,
     "decision_history": _tool_decision_history,
+    "bootstrap": _tool_bootstrap,
     "init": _tool_init,
     "trust_corpus": _tool_trust_corpus,
 }
