@@ -7,6 +7,46 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.10.1 — 2026-07-12 — "The right invocation per surface"
+
+**re-bootstrap: no** — `plugin/requirements.txt`, every persisted shape (corpus format 4, index
+schema 6, capture-seed schema 2), the 15 skills, and the frozen MCP tool names/shapes (STABILITY.md)
+are all unchanged. This is a remediation-wording patch on v1.10.0.
+
+v1.10.0 made setup work on the Claude Desktop app; this patch makes hippo's own *advice* follow.
+Hook-emitted nudges still told every surface to type `/hippo:*` commands — which only the terminal
+CLI accepts (verified live 2026-07-12: a Desktop session's SessionStart nudge advised
+`/hippo:bootstrap`, which the app rejects). Remediation strings are now surface-aware, keyed
+deterministically on the harness's `CLAUDE_CODE_ENTRYPOINT` env marker (`claude-desktop` in the
+Desktop app's hook/MCP env):
+
+- **ONB-1 first-run nudges** (`hooks/memory_session_start.sh`): on the Desktop surface the
+  bootstrap/init nudges name the v1.10.0 MCP setup tools ("run bootstrap once per machine, then
+  init once per project — just ask for it") instead of typed commands. Terminal wording is
+  byte-identical to v1.10.0.
+- **SessionStart dispatcher** (`memory/session_start.py`): when the merged producer context names
+  any `/hippo:*` command on the Desktop surface, `build_context` appends ONE mapping note
+  (bootstrap/init/doctor/trust → the MCP tools; consolidate/resolve/audit/new/recall/why → skills,
+  invoked by asking) — the same append-a-suffix shape the MCP doctor tool has used since v1.10.0.
+  Producers stay byte-identical for a given corpus state (the DOC-4 determinism posture); the note
+  is cap-aware (its budget is reserved before truncation, and it is dropped whole — never truncated
+  into garbage — when the cap can't carry both it and the signal). The SEC-1 untrusted-corpus nudge
+  routes through the same seam.
+- **MCP untrusted-corpus refusals** (`memory/mcp_server.py`): the SEC-1/SEC-13 refusals in
+  `new_memory`/`traverse`/`decision_history` and the `hippo://floor` / `hippo://scorecard` /
+  `hippo://rules-view` resources now share ONE remedy that names this server's own `doctor` +
+  `trust_corpus` (+ `init`) tools first and the typed terminal commands second — a refusal that
+  names only `/hippo:doctor` dead-ends the exact client it refused.
+- **Doctor engine untouched**: `doctor.render()` keeps its wording verbatim — the MCP doctor tool's
+  existing suffix already maps it per surface, preserving the byte-identical engine promise. The
+  PreCompact capture nudge is also unchanged: it addresses the agent, and skills are
+  agent-invocable on both surfaces.
+- **Tests**: surface-note unit tests (note only on `claude-desktop`, only when a command is named,
+  never past the cap, untrusted path included), Desktop + terminal ONB-1 nudge tests end-to-end
+  through the real shell hook (`_run_hook` gained an `entrypoint` knob), an MCP refusal-remedy
+  sweep, and a conftest scrub of the ambient `CLAUDE_CODE_ENTRYPOINT` so a suite run from inside a
+  Desktop session cannot flip outcomes.
+
 ## v1.10.0 — 2026-07-12 — "Second surface"
 
 **re-bootstrap: no** — `plugin/requirements.txt` is byte-identical to v1.9.0, and every persisted
