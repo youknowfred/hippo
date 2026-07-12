@@ -1,0 +1,44 @@
+{
+ "abstention_rate": 1.0,
+ "backend": "bm25-only",
+ "by_category": {
+  "multi-hop": {
+   "mrr": 0.0,
+   "n": 2,
+   "recall": 0.0
+  },
+  "single-hop": {
+   "mrr": 0.75,
+   "n": 2,
+   "recall": 1.0
+  }
+ },
+ "count": 8,
+ "per_probe": [
+  {
+   "category": "multi-hop",
+   "hit": false,
+   "query": "orbital satellite protocol array",
+   "rank": null
+  },
+  {
+   "category": "multi-hop",
+   "hit": false,
+   "query": "annual springtime coral colony",
+   "rank": null
+  },
+  {
+   "category": "single-hop",
+   "hit": true,
+   "query": "kestrel dish firmware rollback procedure",
+   "rank": 2
+  },
+  {
+   "category": "single-hop",
+   "hit": true,
+   "query": "sensor buoys temperature recording",
+   "rank": 1
+  }
+ ],
+ "self_recall": 1.0
+}

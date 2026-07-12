@@ -296,7 +296,17 @@ workstreams:
         title: /dream's OWN snapshot-diff proof harness (HIPPO_DREAM A/B)
         priority: P1
         effort: M
-        status: planned
+        status: done                   # 2026-07-12 — memory/dream_eval.py behind `eval --ab HIPPO_DREAM`
+                                       # (whitelist dispatch in eval_recall.main, MSR-5-absorbable);
+                                       # frozen fixture tests/fixtures/dream_ab/{S0,hard_set.yaml,
+                                       # abstention_set.yaml,pinned_off.json}. First full run: PASS —
+                                       # multi-hop recall 0.0→1.0 (+1.0), control flat +0.0, OFF arm
+                                       # byte-identical to the pre-dream pin, both conversions
+                                       # attributed to their enabling dream edge (via=graph), noise
+                                       # floor 0.0 over N=5 rebuilds/arm. Fix shipped en route: the
+                                       # dream:links block is stripped from body-chunk indexing
+                                       # UNCONDITIONALLY (build_index.compute_body_chunks) so stamp
+                                       # text can never perturb lexical ranking in either arm.
         source: {lens: eval-flywheel, verdict: NEW, convergence: 3, landscape: [musique-2022, gem-bwt-2017, locomo, longmemeval, mem0-10run-stddev]}
         problem: >-
           "Provable uplift" needs a real before/after that ATTRIBUTES the gain to the

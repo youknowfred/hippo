@@ -1,0 +1,4 @@
+# Clearly off-topic probes — recall must return NOTHING for these in BOTH A/B arms
+# (abstention non-decreasing under edge admission is a DRM-3 guardrail gate).
+- query: quarterly payroll tax filing deadlines
+- query: vintage synthesizer envelope repair
