@@ -181,6 +181,20 @@ _TOOLS = [
     # STABILITY.md; the five tools above are the frozen v1.0 surface.
     # ------------------------------------------------------------------- #
     {
+        "name": "doctor",
+        "description": (
+            "Fast, read-only health check of hippo's own install/environment — the "
+            "/hippo:doctor engine verbatim: bootstrap + venv state, corpus existence, the "
+            "native-memory symlink, corpus resolution, trust + drift, index health, "
+            "hot-path latency, format version, secret scan, and more; each line names the "
+            "finding and the exact fix. Deterministic (identical state → identical "
+            "report). Run it when recall seems silently empty or before troubleshooting "
+            "anything else. Present the report lines verbatim — never re-word, re-order, "
+            "or drop lines."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "bootstrap",
         "description": (
             "One-time per-machine-surface provisioning — the /hippo:bootstrap flow: builds "
@@ -444,6 +458,24 @@ def _consent_review_block(memory_dir: str, stems=None) -> str:
     return "\n".join(lines)
 
 
+def _tool_doctor(args: Dict[str, Any]) -> str:
+    """INT-12: the DOC-4 engine verbatim. Deliberately NOT trust-gated: doctor is the
+    designed review/repair entry point for an untrusted corpus (the terminal CLI runs it
+    pre-consent for exactly that reason) — its lines report counts and stems, never the
+    injectable descriptions; the consent sample itself lives behind trust_corpus."""
+    from .doctor import DoctorContext, render
+    from .provenance import resolve_dirs
+
+    memory_dir, repo_root = resolve_dirs()
+    report = render(DoctorContext(memory_dir, repo_root))
+    return report + (
+        "\n\nOn this MCP surface the named fixes map to tools: /hippo:bootstrap → the "
+        "bootstrap tool (action='start'), /hippo:init → the init tool, and the "
+        "trust/consent step (mark_trusted) → the trust_corpus tool. Typed /hippo:* "
+        "commands exist only in the Claude Code terminal."
+    )
+
+
 _NO_DATA_DIR_MSG = (
     "CLAUDE_PLUGIN_DATA is unset in this server's environment — there is nowhere to "
     "provision. This Claude Code version may be too old for plugin self-provisioning; "
@@ -684,6 +716,7 @@ _DISPATCH = {
     "traverse": _tool_traverse,
     "why": _tool_why,
     "decision_history": _tool_decision_history,
+    "doctor": _tool_doctor,
     "bootstrap": _tool_bootstrap,
     "init": _tool_init,
     "trust_corpus": _tool_trust_corpus,

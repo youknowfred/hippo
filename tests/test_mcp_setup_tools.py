@@ -431,6 +431,28 @@ def test_warm_models_multilingual_writes_preset_then_warms_that_model(tmp_path, 
     assert BOOT._MULTILINGUAL_MODEL in ran[0][-1]  # the -c code warms the chosen model
 
 
+# --------------------------------------------------------------------------- #
+# doctor (INT-12) — the DOC-4 engine verbatim, plus the MCP-surface fix mapping
+# --------------------------------------------------------------------------- #
+def test_doctor_tool_runs_the_engine_and_maps_fixes_to_tools(corpus, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))  # hermetic repo_root
+    text = _text(_call("doctor", {}))
+    assert "MCP server starts" in text          # a real engine line (check_mcp_launch)
+    assert "not bootstrapped" in text or "CLAUDE_PLUGIN_DATA" in text  # bootstrap line
+    # The one addition over the terminal engine: the fix→tool mapping for this surface.
+    assert "trust_corpus" in text and "bootstrap tool" in text and "init tool" in text
+
+
+def test_doctor_tool_reviews_an_untrusted_corpus_without_leaking_it(corpus, monkeypatch):
+    """Doctor is deliberately ungated — it IS the review entry point (the terminal CLI
+    runs it pre-consent). But its report must expose state, never the injectable
+    strings: the consent sample lives behind trust_corpus alone."""
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    text = _text(_call("doctor", {}))
+    assert "UNTRUSTED" in text
+    assert "how the web service is deployed" not in text  # no description leaks here
+
+
 def test_sibling_surface_installs_are_named(tmp_path, monkeypatch):
     """The per-surface data-dir split (terminal '<plugin>-<marketplace>' vs desktop
     '<plugin>-inline') must be legible — status names the sibling that already
