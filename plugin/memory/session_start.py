@@ -46,6 +46,7 @@ import re
 import sys
 from typing import Callable, Dict, List, Optional, Tuple
 
+from .dream import dream_applied_producer
 from .lint_floor import floor_producer
 from .lint_links import lint_links_producer
 from .provenance import CORPUS_FORMAT_VERSION, read_corpus_format, resolve_dirs, run_git
@@ -1181,6 +1182,7 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("staleness", staleness_producer),
     ("reconsolidation", reconsolidation_producer),  # recall-filtered subset of staleness; silent unless a recently-recalled memory is stale
     ("pending_capture", pending_capture_producer),  # CAP-2: surface the gitignored draft-capture queue so it never soaks silently
+    ("dream_applied", dream_applied_producer),  # DRM-2: dream edges awaiting age-in — the deferred half of notify-with-undo (aged-in edges drop off)
     ("blind_spot", blind_spot_producer),  # SIG-3: recurring recall abstentions -> a low-frequency curation backlog
     ("index_integrity", index_integrity_producer),  # names on-disk index corruption (QUA-5) — recall/build_index already degrade silently
     ("unresolvable_baseline", unresolvable_baseline_producer),  # legibility for find_stale's sha-fallback path

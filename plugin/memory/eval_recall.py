@@ -1303,7 +1303,33 @@ def main(argv: Optional[List[str]] = None) -> int:
         "(not failed) on a bm25-only run -- without dense, cold ~= warm.",
     )
     parser.add_argument("-k", type=int, default=10)
-    args = parser.parse_args(argv)
+    parser.add_argument(
+        "--ab",
+        default=None,
+        metavar="FLAG",
+        help="run a paired A/B over one frozen snapshot, toggling ONLY the named flag. "
+        "Whitelist today: HIPPO_DREAM (DRM-3 — the /dream snapshot-diff harness, "
+        "memory.dream_eval; extra args pass through, e.g. --ab HIPPO_DREAM --live). "
+        "The surface MSR-5's HIPPO_SALIENCE rig extends without a rewrite.",
+    )
+    args, ab_extra = parser.parse_known_args(argv)
+    if args.ab is None and ab_extra:
+        # Extras are pass-through ONLY under --ab; the plain eval keeps strict parsing.
+        parser.error(f"unrecognized arguments: {' '.join(ab_extra)}")
+
+    # DRM-3 (owner decision 3, 2026-07-12): the --ab whitelist dispatch. Each flag owns a
+    # self-contained harness module; eval_recall stays the one CLI front door.
+    if args.ab is not None:
+        from .dream_eval import AB_FLAGS
+        from .dream_eval import main as _dream_ab_main
+
+        if args.ab not in AB_FLAGS:
+            print(
+                f"eval --ab: unknown flag {args.ab!r} (whitelist: {', '.join(AB_FLAGS)}). "
+                "HIPPO_SALIENCE is MSR-5 — planned, not shipped."
+            )
+            return 2
+        return _dream_ab_main((ab_extra or []) + (["-k", str(args.k)] if args.k != 10 else []))
 
     # RET-8 hermeticity guard, the CLI twin of evaluate()'s memory_dir guard: the ambient
     # default fixtures (this repo's tests/fixtures, or the resolved project's

@@ -1,0 +1,25 @@
+# DRM-3 frozen fixture probe set — committed BEFORE any /dream run (S0 carries the LATENT
+# A–B–C bridges: sat-uplink-protocol→sat-groundstation-map→sat-firmware-rollback and
+# reef-coral-census→reef-dive-logbook→reef-sensor-buoys, with the A–C edges ABSENT).
+#
+# Each multi-hop probe uses vocabulary from the chain HEAD (A) ONLY — zero tokens shared
+# with the MIDDLE (B) or the expected memory (C) — so at OFF the sole seed is A, whose
+# 1-hop expansion reaches B but never C (the 2-hop miss), and under BM25 the expected
+# memory can only surface through the dream-discovered A–C edge. Sharing a token with B
+# would let B seed and its ORGANIC B–C edge inject the answer at OFF (and tie-break
+# nondeterministically across processes — the pinned baseline must be tie-free). Each
+# matched single-hop control (same expected memory, MuSiQue-style) uses the memory's OWN
+# vocabulary and must hit at OFF — the pair separates edge-attributable lift from general
+# lift. Controls are order-paired with the multi-hop rows.
+- query: orbital satellite protocol array
+  expected: [sat-firmware-rollback]
+  category: multi-hop
+- query: annual springtime coral colony
+  expected: [reef-sensor-buoys]
+  category: multi-hop
+- query: kestrel dish firmware rollback procedure
+  expected: [sat-firmware-rollback]
+  category: single-hop
+- query: sensor buoys temperature recording
+  expected: [reef-sensor-buoys]
+  category: single-hop

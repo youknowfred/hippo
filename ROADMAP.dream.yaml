@@ -1,0 +1,498 @@
+# ============================================================================
+# hippo — /dream: the generative sleep pass (EXECUTABLE roadmap)
+# ============================================================================
+# The EXECUTABLE form of EXPLORATIONS.dream.md (the design) + DRM-2.spec.md (the
+# auto-apply loop spec). A single new verb — /dream — decomposed into the DRM
+# workstream: six dependency-sequenced, fully-scoped items for multi-session
+# implementation.
+#
+# /dream is the GENERATIVE function of sleep — replay that recombines existing
+# memories into net-new graph structure — the one sleep function hippo's
+# housekeeping verbs (consolidate / reconsolidate / staleness / salience) do NOT
+# cover. Its identity move is REVERSIBLE AUTONOMY: the safety mechanism is
+# git-revertibility, not human approval, so /dream auto-applies its SAFEST outputs
+# and offers undo after — spending autonomy where undo is real and blast radius is
+# a ranking nudge, and holding the gate only where undo-after genuinely fails.
+#
+# DRM ids use a NEW namespace so they never collide with round 1 (SIG/RUL/RCL/GOV/
+# GRW/RCH), round 2 (MSR/GRF/SEN/TMB/CLB/IOP), ROADMAP.yaml (RET/GRA/LIF/CAP/INT/
+# TEA/SEC), or ROADMAP.v1.md.
+#
+# Companion documents:
+#   EXPLORATIONS.dream.md — the design (niche, landscape, autonomy model, proof)
+#   DRM-2.spec.md         — the Tier-A auto-apply + notify-with-undo loop spec
+#   ROADMAP.enhancements2.yaml — the round-2 train this mirrors in shape (MSR-5 etc.)
+# ============================================================================
+
+meta:
+  title: hippo — /dream generative sleep pass (DRM workstream)
+  repo: youknowfred/hippo
+  authored: 2026-07-12
+  baseline_ref: 1d7b19d          # main HEAD (v1.10.2) at authoring time
+  baseline_state: >-
+    main @ v1.10.2 ("Fresh interpreter"). 15 skills, MCP server exposing
+    recall/new_memory/why/traverse/decision_history + doctor/bootstrap/init/
+    trust_corpus. Corpus is markdown-in-git; index/telemetry/graph are derived,
+    rebuildable, gitignored. This repo DOGFOODS hippo since 2026-07-12 (native
+    session-memory migrated into .claude/memory). Backbone primitives VERIFIED live
+    at authoring (read against the tree, EXPLORATIONS.dream.md §8): links.
+    add_typed_relation (additive/body-verbatim/idempotent/no-batch),
+    LinkGraph.{resolve,resolved_via_stem,traverse,orphans,isolates,
+    connected_components,degrees}, recall._expand_neighbors + _NEIGHBOR_DISCOUNT=0.5,
+    soak.soak_status(>=5), eval_recall.{evaluate,by_category,
+    hard_set_metrics_by_category,derive_self_query}, outcome.injection_precision,
+    history.decision_chain, archive.archive_memory (git mv, reversible).
+  source: >-
+    Formalized from EXPLORATIONS.dream.md, produced by a 14-agent orchestrated pass
+    (4-lens landscape sweep — neuroscience of sleep-dependent consolidation, deployed
+    LLM-agent memory, self-sustaining/"dreaming" + continual-learning, eval
+    methodology; 4-angle design panel — replay/edges, schema/gist, downscaling,
+    insight/hypotheses; 3-judge adversarial score UNANIMOUS for the replay/edge
+    backbone; a proof-plan + red-team pair; a synthesis) THEN a hand verification
+    pass over plugin/memory/*.py. The winning conception is replay-driven latent-edge
+    discovery; the other three angles survive as grafts (DRM-4 downscaling, DRM-5
+    reverse-replay, DRM-6 schema/gist + hypotheses).
+  method: >-
+    Same discipline as ROADMAP.enhancements2.yaml. The governing principle is
+    ED-1 detection/HITL-first, EXTENDED by this workstream's own law — REVERSIBLE
+    AUTONOMY: an operation may auto-apply ONLY IF undo is a mechanical, prose-lossless
+    line/target removal (Tier A); anything that asserts a claim (Tier B) is quarantined
+    and self-decaying; anything that removes/overrides trusted knowledge (Tier C) stays
+    per-item gated. Every autonomous half is severed behind a DATED OWNER DECISION,
+    never a metric-proxied gate. implementation_notes are BINDING but SNAPSHOT guidance:
+    re-verify each named symbol against the live tree before coding.
+  owner_decisions:
+    - date: 2026-07-12
+      decisions: >-
+        (1) Tier-A auto-apply default APPROVED — but ship DRM-1 report-only, calibrate
+        signal-to-noise on the live corpus, THEN a dated flip to auto-apply (never
+        day-one). (2) Secret-lint hard-BLOCK on the /dream write path APPROVED — a
+        deliberate deviation from secrets.py's WARN-never-BLOCK, scoped to the dream
+        path, justified because dream GENERATES text rather than transcribing user
+        intent. (3) DRM-3 ships /dream's OWN snapshot-diff harness — does NOT block on
+        MSR-5 (which is gated on unshipped MSR-1/SIG-6); written to the eval --ab <flag>
+        shape so it converges if MSR-5 lands. (4) Aging window = 5 distinct sessions
+        (reuse soak's bar; DREAM_AGE_SESSIONS override).
+    - date: 2026-07-12
+      decisions: >-
+        (5) THE TIER-A FLIP — auto-apply is now the SHIPPED DEFAULT, ratified after
+        reviewing the DRM-1 calibration (pass p20260712210214: θ=0.90, cap 5,
+        bridges-require-MUTUAL-co-fire; live pool 9 → empty-norm holds) and DRM-3's
+        PASS (multi-hop 0.0→1.0, control flat, OFF byte-identical, edge-attributed).
+        dream.apply_mode_default() → True; HIPPO_DREAM_APPLY=0 / --dry-run /
+        MCP apply:false opt a pass back to report-only. Changing the default again
+        requires a new dated entry here.
+  corrections_binding:
+    - >-
+      secrets.py is WARN-NEVER-BLOCK by design (high precision over recall) — the
+      DRM-2 hard BLOCK is the ratified, dream-path-scoped deviation, NOT a corpus-wide
+      change.
+    - >-
+      `confidence` frontmatter EXISTS (GOV-7: draft|verified|authoritative,
+      build_index._extract_confidence) but is DISPLAY-ONLY — DRM-6 must wire it into
+      recall ranking. `derives-from` is NOT in links.TYPED_RELATIONS
+      (supersedes/contradicts/refines) — add_typed_relation refuses it until DRM-6
+      adds it (clean schema addition + version bump, inv5).
+    - >-
+      the eval --ab HIPPO_SALIENCE rig is MSR-5 — PLANNED, not shipped. DRM-3 builds
+      its own (owner decision 3).
+  scoring:
+    priority:
+      P0: unblocks the workstream — do first
+      P1: core capability slice
+      P2: hardening / counterweight
+      P3: bold frontier — ships last, behind a flag
+    effort: {S: <0.5 session, M: ~1 session, L: multi-session}
+  status_legend:
+    planned: not started
+    in_progress: an agent session is actively implementing it
+    done: acceptance_criteria met, suite green, invariants preserved
+    deferred: blocked or descoped this cycle (reason recorded in the capstone)
+
+north_star: >-
+  Move hippo off ~100% HITL WITHOUT weakening it: an offline generative pass that
+  proposes the latent graph structure the corpus is structurally missing, auto-applies
+  only the additive/ranking-only/reversible class, surfaces an undo affordance after,
+  and never consumes its own un-reviewed output — proven, on hippo's own eval spine, to
+  raise multi-hop recall because of the edges, with every guardrail a release gate and
+  every applied byte a stamped, git-revertible diff. The bold generative payloads
+  (schema/gist, hypotheses) ride on top, quarantined and self-decaying, only after the
+  edge backbone earns them.
+
+# ---------------------------------------------------------------------------
+# Invariants every DRM item must preserve. inv1-6 are carried VERBATIM from
+# ROADMAP.enhancements2.yaml / round 1; inv-DRM-* are this workstream's additions.
+# An item that violates one is wrong, not bold.
+# ---------------------------------------------------------------------------
+guiding_invariants:
+  - inv1: markdown-in-git is the single source of authority; index/telemetry/graph
+      caches are derived, rebuildable, gitignored. (The committed dream-ledger.jsonl
+      is audit provenance, a fixture-class artifact — NOT a second authority; the
+      aging state on top of it is DERIVED, never stored.)
+  - inv3: degradation must be legible — the empty pass says so; every applied edge
+      surfaces in a digest + a SessionStart producer; stamp/ledger mismatch is a loud
+      doctor finding.
+  - inv4: destructive/corrective writes are per-item and agent-gated; no bulk
+      autonomous sweeps. /dream auto-apply is the SOLE additive exception and only for
+      Tier A (reversible, body-prose-preserving, ranking-only); it NEVER auto-commits.
+  - inv5: one canonical name/path per concept; schema changes (e.g. derives-from) are
+      clean breaks with a version bump, not compat shims.
+  - inv6: the UserPromptSubmit hot path stays PURE RETRIEVAL. /dream is a deliberate
+      OFFLINE turn (like consolidate); the DRM-3 A/B is measure-only, off the hot path.
+  - inv-DRM-reversible: an operation auto-applies ONLY IF undo is a mechanical,
+      prose-lossless removal. Reversible-or-gated, never neither.
+  - inv-DRM-firewall: /dream reads only confidence:verified + user-asserted + AGED-IN
+      dream edges as SOURCE; never its own un-aged / draft output. The source firewall
+      is a hard precondition (kills the dream-cites-a-dream tower), not a heuristic.
+  - inv-DRM-empty-norm: theta + the per-pass cap are tuned so the EMPTY pass is the
+      common outcome; a non-empty digest must be rare enough that the owner reads it.
+
+phasing: >-
+  DRM-1 (report-only) FIRST — it earns the auto-apply flip by proving discovery
+  signal-to-noise + calibrating theta on the live corpus. THEN a dated owner flip
+  turns DRM-2 to auto-apply. DRM-3 gates release of the verb. DRM-4/5 harden. DRM-6
+  (generative, Tier B/C) ships LAST, behind a flag, only after the backbone proves out.
+
+workstreams:
+
+  # ---------------------------------------------------------------- DRM ---
+  - id: DRM
+    name: /dream — the generative sleep pass (reversible-autonomy latent-edge discovery)
+    extends: recall._expand_neighbors (GRA-1) + links.LinkGraph + consolidate/reconsolidate
+    goal: >-
+      Discover and (reversibly) apply the latent graph edges the corpus is
+      structurally missing — transitive A-B-C bridges, named-but-unlinked, undeclared
+      typed relations — that consolidate's two signals (write-time similarity GRA-3,
+      co-recall GRW-2) cannot reach, then prove on hippo's own eval spine that they
+      raise multi-hop recall because of the edges, all additive / stamped / git-revertible.
+    items:
+
+      - id: DRM-1
+        title: Replay harness + candidate-edge ledger (report-only, ZERO writes)
+        priority: P0
+        effort: M
+        status: done                   # 2026-07-12 — memory/dream.py + tests/test_dream.py + plugin/skills/dream/
+        calibration:                   # the acceptance-criteria doc note: θ/cap chosen FROM the live distribution
+          date: 2026-07-12
+          pass_id: p20260712210214    # live corpus (this repo dogfoods hippo): 29 memories, 28 probes, dense+bm25
+          observed: >-
+            190 co-fire pairs; 76 bridge candidates (0 completion / 0 refines — the corpus
+            is already densely hand-linked: 40 pairs novelty-excluded); strength =
+            pair score / probe top score. KEY FINDING: RRF fused-score ratios are
+            rank-compressed (rank-10/rank-1 ≈ 0.87 by construction), so raw ratio
+            under-discriminates at the top (p50=0.86, p90=0.95). The distribution's real
+            separator is MUTUALITY — the pair co-firing from BOTH endpoints' probes
+            (16/76 bridges; the eyeballed-true edges concentrate there, e.g.
+            terminal-cli-only↔v1101-surface-nudges, v030-open-followups↔v080-sec-tail),
+            while one-way pairs carry rank-tail noise down to 0.44.
+          chosen: >-
+            θ = 0.90 (DREAM_COFIRE_THETA default), cap = 5 (DREAM_MAX_APPLY_PER_PASS,
+            hard max 9), PLUS a calibration-derived structural bar encoded in
+            dream.apply_eligible: bridges auto-apply only if MUTUAL and cofire ≥ θ;
+            refines need cofire ≥ θ; completions are θ-exempt (text evidence). Live pool
+            at these knobs: 9 eligible → drains in ~2 capped passes → the empty-pass norm
+            (inv-DRM-empty-norm) holds. Owner may tighten to θ=0.93 (pool 4) or 0.95
+            (pool 3) at flip time.
+          flip_status: >-
+            FLIPPED 2026-07-12 (owner_decisions item 5) at the calibrated bar — θ=0.90,
+            cap 5, bridges-require-mutual. Auto-apply is the shipped default;
+            HIPPO_DREAM_APPLY=0 / --dry-run opt back to report-only.
+        source: {lens: generative-replay, verdict: NEW, convergence: 3, landscape: [foster-wilson-2006, dragoi-tonegawa-2011, hipporag, a-mem]}
+        problem: >-
+          consolidate's link refresh connects only already-similar (GRA-3) or
+          already-co-surfacing (GRW-2) memories; the latent edge class — transitive
+          A-B-C bridges (A-B present, A-C absent), body-names-target-but-unlinked,
+          undeclared typed relations — is UNREACHABLE by construction, yet it is
+          exactly what recall._expand_neighbors traverses to turn a 2-hop miss into a
+          1-hop hit. No verb replays the corpus against itself to find it. And before
+          ANY write path exists, we must SEE the discovery signal-to-noise on the live
+          corpus to calibrate theta and prove the empty-pass-is-norm bar.
+        proposal: >-
+          An offline `memory.dream` pass. Build a prioritized replay worklist from
+          LinkGraph.{degrees,isolates,orphans} + telemetry usage/staleness (over-sample
+          under-connected, under-consolidated traces). For each seed, re-run recall()
+          OFFLINE with a derive_self_query probe, capture the co-firing set, and exclude
+          already-reachable co-fires via _expand_neighbors. Diff against
+          LinkGraph.{traverse,connected_components,resolve,resolved_via_stem,
+          parse_wikilinks} to surface candidate edges by kind (dangling-completion /
+          latent-refines / transitive-bridge), each carrying source, target, graph
+          distance, co-fire strength, and the firing query. Emit a git-tracked candidate
+          ledger. Write NOTHING to any memory. Gate on soak_status(>=5); exclude
+          lint_floor.floor_memory_names as endpoints. Print the co-fire-strength
+          DISTRIBUTION + count-by-kind so DRM-2's theta and per-pass cap are calibrated
+          from live data, not guessed.
+        acceptance_criteria:
+          - the pass emits a candidate-edge ledger (jsonl) under a gitignored derived dir with per-candidate kind/source/target/distance/cofire/query; ZERO writes to any .md memory (asserted by a no-diff check over .claude/memory/*.md)
+          - a pass below the soak bar, or over an empty/young corpus, emits zero candidates and SAYS so (no silent no-op, inv3)
+          - floor memories never appear as an edge endpoint (asserted against lint_floor.floor_memory_names)
+          - a candidate duplicating an existing GRA-3/GRW-2 edge is excluded (novelty filter) — proven by a test with a pre-linked pair
+          - the pass prints the co-fire-strength distribution + count-by-kind; a doc note records the calibrated theta / cap chosen for DRM-2 from THIS distribution
+        dependencies: []               # all backbone primitives shipped (verified §8)
+        invariant_note: >-
+          inv1 (ledger is gitignored derived) + inv4 in its strongest form (report-only,
+          zero writes) + inv6 (offline turn, not the hot path). WORKSTREAM KEYSTONE:
+          DRM-2..6 all consume this ledger + its live-corpus calibration. This slice is
+          what EARNS the DRM-2 auto-apply flip.
+        implementation_notes: >-
+          Reuse recall.recall (offline), eval_recall.derive_self_query,
+          recall._expand_neighbors + _NEIGHBOR_DISCOUNT, links.LinkGraph.{degrees,
+          isolates,orphans,traverse,connected_components,resolve,resolved_via_stem,
+          parse_wikilinks}, soak.soak_status, lint_floor.floor_memory_names, telemetry
+          usage/staleness, build_index for the graph. Home the ledger via
+          telemetry.default_telemetry_dir (SEC-3 self-ignoring). Ship as a skill +
+          `python -m memory.dream --dry-run`. RUN THIS FIRST and study the distribution
+          before any DRM-2 threshold is fixed.
+
+      - id: DRM-2
+        title: Tier-A auto-apply + MCP notify-with-undo + the aging firewall
+        priority: P1
+        effort: L
+        status: done                   # 2026-07-12 — apply/undo/log in memory/dream.py; _tool_dream (mcp_server);
+                                       # dream_applied_producer (session_start); check_dream_ledger (doctor);
+                                       # HIPPO_DREAM admission view in links.py. Shipped report-only first;
+                                       # the auto-apply default FLIPPED ON later the same day by the dated
+                                       # owner decision (owner_decisions item 5) consuming DRM-1's
+                                       # calibration note above — HIPPO_DREAM_APPLY=0 / --dry-run opt out.
+        source: {lens: reversible-autonomy, verdict: NEW, convergence: 3, landscape: [mem0-autonomous-writes, letta-sleep-2504, undo-over-confirm]}
+        problem: >-
+          hippo's write path is 100% HITL (propose->gate->apply); safe, but it leaves
+          autonomy on the table. Memory lives in git, so an additive edge is trivially
+          reversible — for reversible actions, act-then-undo is a STRONGER safety model
+          than gate-then-act. Need a loop that auto-applies the SAFE class and offers
+          undo after, WITHOUT a body-prose write, WITHOUT an autonomous commit, and
+          WITHOUT /dream ever consuming its own un-reviewed output.
+        proposal: >-
+          The apply-reversibly->notify->undo-window->age-in loop over DRM-1's above-theta
+          candidates (full spec: DRM-2.spec.md). AUTO-APPLY Tier A ONLY: dangling-completion
+          + transitive-bridge into a delimited `<!-- dream:links -->` body block; latent
+          refines via links.add_typed_relation (additive frontmatter). supersedes ->
+          digest-gated; contradicts -> /resolve; schemas/hypotheses -> OUT OF SCOPE
+          (DRM-6). Effect is immediate (working tree + index rebuild, live in recall) but
+          NO autonomous commit — commit stays the owner's. Cap DREAM_MAX_APPLY_PER_PASS
+          (default 5, hard max 9); apply only cofire>=theta. Provenance: committed
+          append-only dream-ledger.jsonl + inline pass= stamp. THE AGING FIREWALL:
+          /dream's own SOURCE set excludes not-yet-aged dream edges (aged_in =
+          distinct_sessions_now - applied_at >= DREAM_AGE_SESSIONS=5). Hard secret BLOCK
+          on generated rationale (ratified deviation). Notify: _tool_dream digest +
+          dream_applied_producer SessionStart nudge (not-yet-aged edges). Undo:
+          dream --undo / --undo <id> / --undo-since / --log; refuse-on-drift.
+        acceptance_criteria:
+          - a pass auto-applies ONLY Tier-A candidates above theta, capped; supersedes->digest, contradicts->/resolve, schemas->not emitted; a test asserts NO prose byte changes outside the dream:links block and NO frontmatter change outside the target refines list
+          - below the soak bar / a floor target -> zero edges, said aloud (inv3)
+          - every applied edge has a complete dream-ledger.jsonl line + an on-disk pass= stamp; a doctor check fails loudly on any stamp/ledger mismatch
+          - dream --undo restores the pre-pass working tree BYTE-FOR-BYTE (asserted) + rebuilds the index; --undo <id> reverts exactly one; both refuse-with-report on manual drift
+          - aging-firewall test - a not-yet-aged dream edge is provably ABSENT from the next pass's candidate SOURCE set and PRESENT after >=DREAM_AGE_SESSIONS; an edge undone before aging never entered the source set
+          - secret-BLOCK test - a candidate whose rationale would emit a token-shaped string is REFUSED pre-write (not merely warned)
+          - _tool_dream returns the digest; dream_applied_producer surfaces not-yet-aged edges within budget and DROPS aged-in ones
+        dependencies: [DRM-1]
+        invariant_note: >-
+          inv1 (dream-ledger committed = audit; aging state DERIVED) + inv4
+          (auto-apply is Tier-A-only, reversible-or-gated, never bulk, never body-prose,
+          never an autonomous commit) + inv-DRM-reversible + inv-DRM-firewall +
+          inv-DRM-empty-norm. The secret-BLOCK is the DELIBERATE, owner-ratified
+          (2026-07-12) deviation from secrets.py WARN-never-BLOCK, scoped to the dream
+          write path. FLIP DISCIPLINE - ship report-only until DRM-1 calibration is
+          accepted, then a DATED owner flip to auto-apply (never metric-proxied).
+        implementation_notes: >-
+          links.add_typed_relation (additive/body-verbatim/idempotent/no-batch);
+          archive.archive_memory's git-mv reversibility pattern for undo; build_index
+          rebuild; soak.soak_status for aging; mcp_server._tool_* shape;
+          session_start.*_producer + _MAX_ITEMS_PER_PRODUCER; secrets.scan_text
+          (promote WARN->BLOCK ON THE DREAM PATH ONLY). The dream:links delimited block
+          is machine-managed; parse_wikilinks reads it for the graph but doc_text
+          (name+description) is unperturbed, so the semantic index is stable.
+
+      - id: DRM-3
+        title: /dream's OWN snapshot-diff proof harness (HIPPO_DREAM A/B)
+        priority: P1
+        effort: M
+        status: done                   # 2026-07-12 — memory/dream_eval.py behind `eval --ab HIPPO_DREAM`
+                                       # (whitelist dispatch in eval_recall.main, MSR-5-absorbable);
+                                       # frozen fixture tests/fixtures/dream_ab/{S0,hard_set.yaml,
+                                       # abstention_set.yaml,pinned_off.json}. First full run: PASS —
+                                       # multi-hop recall 0.0→1.0 (+1.0), control flat +0.0, OFF arm
+                                       # byte-identical to the pre-dream pin, both conversions
+                                       # attributed to their enabling dream edge (via=graph), noise
+                                       # floor 0.0 over N=5 rebuilds/arm. Fix shipped en route: the
+                                       # dream:links block is stripped from body-chunk indexing
+                                       # UNCONDITIONALLY (build_index.compute_body_chunks) so stamp
+                                       # text can never perturb lexical ranking in either arm.
+        source: {lens: eval-flywheel, verdict: NEW, convergence: 3, landscape: [musique-2022, gem-bwt-2017, locomo, longmemeval, mem0-10run-stddev]}
+        problem: >-
+          "Provable uplift" needs a real before/after that ATTRIBUTES the gain to the
+          edges (a naive recall-went-up claim confounds general lift). The existing --ab
+          salience rig is MSR-5 (planned, gated on unshipped MSR-1/SIG-6); /dream must
+          not block on it (owner decision 3).
+        proposal: >-
+          /dream's OWN snapshot-diff harness, written to the eval --ab <flag> shape so it
+          converges with MSR-5 if that lands. A HIPPO_DREAM arm toggles ONLY whether the
+          LinkGraph admits discovered-by:dream edges; evaluate() runs twice over one
+          FROZEN snapshot; the OFF arm must reproduce the pinned baseline BYTE-IDENTICAL
+          (hard assert). Primary metric: by_category['multi-hop']['recall']@10 (the
+          "validates GRA-1 expansion" bucket), paired Wilcoxon delta; secondary MRR@10.
+          ATTRIBUTION: a MuSiQue-style matched single-hop control per multi-hop probe
+          (must stay flat; multi-hop must rise MORE). Guardrails as release gates
+          (self_recall>=0.90 + zero hit->miss flips, abstention non-decreasing,
+          precision@10>=0.12, net-token>0, MRR>=0.60, p95<300ms). N>=5 rebuilds for the
+          noise floor. Because DRM-2 STAMPS edges, the same OFF/ON runs on the LIVE corpus
+          continuously, not just the fixture.
+        acceptance_criteria:
+          - eval --ab HIPPO_DREAM runs evaluate() twice over one frozen snapshot; the OFF arm is asserted byte-identical to the pinned pre-dream result; the ON arm admits discovered-by:dream edges into _expand_neighbors; emits the paired per-category delta + a significance column on the multi-hop bucket
+          - a frozen fixture S0 exists with genuinely-latent A-B-C bridges (target edges verified ABSENT at baseline via GRA-3/GRW-2), where every multi-hop probe MISSES and each matched single-hop control HITS at OFF; committed BEFORE any /dream run
+          - the harness NEVER writes the live corpus, never applies/removes a live edge, never flips a default (measure-only, CLI, off the hot path)
+          - the attribution check confirms each converted multi-hop probe entered via a discovered-by:dream edge (grep the /why receipt / endorsement set) and reports multi-hop-delta vs single-hop-control-delta so a general-lift confound is caught
+          - the guardrail gate table is emitted; nothing "passes" unless multi-hop rises above the N>=5 noise floor WITH the control flat
+        dependencies: [DRM-1, DRM-2]   # NOT MSR-5 (owner decision 2026-07-12); converges-with MSR-5 if it lands
+        invariant_note: >-
+          inv6 (measure-only, CLI, off the hot path); the OFF-byte-identity assert is the
+          regression tripwire (MSR-5 discipline). HONEST SCOPING (binding) - the fixture
+          guardrails gate RELEASE of the verb; they CANNOT run on the real unlabeled
+          corpus, where the live protection is git-revertibility + the undo affordance.
+          Any claim the eval protects the real corpus is struck from the doc/PR.
+        implementation_notes: >-
+          eval_recall.{evaluate,by_category,hard_set_metrics_by_category,
+          load_abstention_set}; reuse recall_hard_set.yaml row shape (add category:
+          multi-hop rows + matched single-hop control rows) + a pinned OFF result JSON.
+          The flag gates whether build_index/LinkGraph admit the discovered-by:dream
+          stamp. Write the flag surface as eval --ab <whitelist> so an eventual MSR-5
+          absorbs HIPPO_DREAM without a rewrite.
+
+      - id: DRM-4
+        title: De-parasiting counterweight — out-degree caps + hub demotion + non-lossy dedup-merge
+        priority: P2
+        effort: M
+        status: planned
+        source: {lens: synaptic-homeostasis, verdict: NEW, convergence: 2, landscape: [tononi-cirelli-2014, crick-mitchison-1983, van-de-ven-replay]}
+        problem: >-
+          An edge-only pass has no restoring force. Repeated passes can over-connect a
+          hub (a popular memory injected for everything -> crosstalk; precision/abstention
+          regress), and the corpus accretes weak/redundant edges. Sleep's forgetting
+          function (SHY downscaling, Crick-Mitchison unlearning) is the counterweight the
+          backbone alone lacks.
+        proposal: >-
+          A de-parasiting pass that PROPOSES removals/demotions: per-memory out-degree
+          caps + hub demotion via LinkGraph.degrees (PROTECT floor-linked / co-recalled /
+          cited hubs from depression), plus non-lossy dedup-merge of near-duplicate
+          memories (staleness.set_invalid_after + a superseded_by typed edge; contradictions
+          -> /resolve). Reversibility gradient applies: /dream's OWN un-aged edges may
+          auto-retract (Tier A); anything touching a human memory is per-item GATED. No
+          body is ever deleted.
+        acceptance_criteria:
+          - the pass reports per-memory out-degree, flags nodes over DREAM_MAX_OUT_DEGREE, and proposes which dream edges to retract (auto-reversible) vs which human structures to demote (gated)
+          - protected hubs (floor / co-recalled / cited) are NEVER proposed for depression (asserted)
+          - dedup-merge proposals use set_invalid_after + a superseded_by typed edge (non-lossy, reversible); no body is deleted; contradictions route to /resolve, never auto-resolved
+        dependencies: [DRM-2]
+        invariant_note: >-
+          inv4 (removals touching human memories stay per-item gated; only /dream's own
+          un-aged edges may auto-retract) + inv-DRM-reversible. Guards the top named risk
+          (hub over-connection / crosstalk) the red-team flagged.
+        implementation_notes: >-
+          links.LinkGraph.degrees; staleness.set_invalid_after; archive.archive_memory;
+          links.add_typed_relation (superseded_by/refines). Mirror reconsolidate's
+          demote->invalid_after chain (reconsolidate.py:92, LIF-1) for the gated demotions.
+
+      - id: DRM-5
+        title: Reward-gated reverse replay — outcome-anchored edge boosts
+        priority: P2
+        effort: M
+        status: planned
+        source: {lens: reverse-replay, verdict: NEW, convergence: 2, landscape: [foster-wilson-2006, ambrose-2016]}
+        problem: >-
+          Not all edges are equal: edges on chains that led to a ratified good/bad OUTCOME
+          deserve differential weighting (biological reverse replay propagates reward
+          backward along the path, and is reward-GATED). hippo records outcomes
+          (injection_precision) and decision chains (history) but the dream pass ignores
+          them.
+        proposal: >-
+          After the edge pass, walk the link graph BACKWARD from memories with a recorded
+          outcome (outcome.injection_precision) along history.decision_chain, and promote
+          the priority / co-fire weight of the upstream edges that led there — ONLY where
+          a ratified outcome signal exists (reward-gated; no outcome -> no boost). Carry
+          the decision_chain as provenance on the boosted edge. Changes ranking priority /
+          cofire ONLY — never asserts a claim, never mutates a body.
+        acceptance_criteria:
+          - the boost applies only to edges reachable backward from a memory with a recorded outcome; edges with no outcome chain are untouched (asserted)
+          - each boosted edge's ledger entry carries the justifying decision_chain (provenance)
+          - the boost changes ranking priority / cofire only — a test asserts no body byte change and no new asserted claim
+        dependencies: [DRM-2]
+        invariant_note: >-
+          inv6-adjacent (reads outcome/history ledgers, off the hot path). Reward-gating is
+          a HARD precondition (no outcome -> no propagation), preventing indiscriminate
+          strengthening (a reverse-replay analogue of FM2 avoidance).
+        implementation_notes: >-
+          outcome.injection_precision; history.decision_chain (see history.py:51/142 usage);
+          LinkGraph.traverse for the backward walk. Boost feeds DRM-1's replay priority +
+          DRM-2's cofire ranking, never a new write path of its own.
+
+      - id: DRM-6
+        title: Generative payload — schema/gist + hypotheses (Tier B/C, quarantined, opt-in)
+        priority: P3
+        effort: L
+        status: planned
+        source: {lens: schema-abstraction+insight, verdict: NEW, convergence: 2, landscape: [mcclelland-1995, generative-agents-2023, graphrag-communities, wagner-2004]}
+        problem: >-
+          The edge backbone CONNECTS existing memories but creates no net-new knowledge.
+          The bolder sleep functions — schema/gist abstraction (the token-reduction win +
+          generalization-query answering) and REM-style hypotheses — ASSERT claims (high
+          blast radius) and are where FM1/FM2 + the dream-cites-a-dream tower bite hardest.
+        proposal: >-
+          A QUARANTINED generative tier. Schema/gist: cluster DRM-1's co-firing clusters,
+          extract one net-new semantic PARENT with refines edges up from each child,
+          created at confidence:draft. Hypothesis: recombine distant memories into
+          A+B=>likely-C, also confidence:draft. BOTH enter down-weighted, excluded from
+          abstention-sensitive answering, and AUTO-PROPOSE-ARCHIVE past DREAM_DRAFT_HORIZON
+          unless an EXTERNAL evidence/outcome event graduates draft->verified. Never
+          auto-applied as verified. PREREQUISITE (net-new schema work): make `confidence`
+          LOAD-BEARING in recall ranking (today display-only, GOV-7) + add a `derives-from`
+          relation to links.TYPED_RELATIONS (add_typed_relation refuses it today). Add a
+          prospective-recall metric (freeze telemetry.abstention_backlog, count abstain->hit
+          flips) + a graduation_rate hallucination alarm.
+        acceptance_criteria:
+          - schema/hypothesis memories are created ONLY at confidence:draft, down-weighted in recall (a test proves a draft ranks below an equivalent verified), and excluded from abstention-sensitive answering
+          - a draft unconfirmed past DREAM_DRAFT_HORIZON auto-proposes for archive; graduation to verified requires an EXTERNAL evidence/outcome event, NOT a second human glance (asserted — no self-graduation path)
+          - the confidence tier is wired into recall ranking (the GOV-7 display-only gap closed) and a derives-from relation is added to links.TYPED_RELATIONS with add_typed_relation accepting it (version bump, inv5)
+          - a graduation_rate / draft-reject alarm reports proposal signal-to-noise; the prospective-recall metric counts abstain->hit flips over a frozen backlog
+          - /dream NEVER reads a confidence:draft or un-aged discovered-by:dream item as SOURCE (the firewall extends to generative output)
+        dependencies: [DRM-2, DRM-3]
+        invariant_note: >-
+          inv4 (generative claims quarantined + self-decaying — the FM2 closer; a
+          generation tier WITHOUT this decay path must NOT ship) + inv5 (derives-from is a
+          clean schema addition + version bump) + inv-DRM-firewall (extended to generative
+          output). The boldest tier — ships LAST, behind a flag, only after the edge
+          backbone proves out on DRM-3.
+        implementation_notes: >-
+          Wire confidence-into-ranking FIRST (build_index._extract_confidence exists; recall
+          must consume it — this closes the GOV-7 display-only gap), THEN add derives-from
+          to links.TYPED_RELATIONS (parse_typed_relations is already generic), THEN cluster
+          over DRM-1's co-fire sets, THEN new_memory/create at confidence:draft into
+          .memory-pending, THEN telemetry.abstention_backlog for the prospective-recall
+          metric. Reuse reconsolidate's horizon/archive machinery for draft decay.
+
+# ---------------------------------------------------------------------------
+# The disciplined cuts — what /dream deliberately does NOT do (the safety spine).
+# ---------------------------------------------------------------------------
+not_pursuing:
+  - id: DREAM-KILL-1
+    what: Auto-apply of Tier B/C (schemas, hypotheses, supersedes, contradicts)
+    why: >-
+      Blast radius too high for undo-after — a schema/hypothesis asserts a claim; a
+      supersede silently removes a trusted memory from recall in the undo window. Stays
+      quarantined-decaying (B) or per-item gated (C). Auto-apply is Tier-A only.
+  - id: DREAM-KILL-2
+    what: Autonomous commit by /dream
+    why: >-
+      Effect is auto (working tree, live in recall) but git history stays the owner's.
+      Autonomy over effect, never over the audit record.
+  - id: DREAM-KILL-3
+    what: Reading un-aged / draft /dream output as SOURCE material
+    why: >-
+      The dream-cites-a-dream speculation tower. The source firewall (inv-DRM-firewall)
+      is a hard precondition, not a tunable.
+  - id: DREAM-KILL-4
+    what: A corpus-wide bulk edge sweep
+    why: inv4 — no bulk autonomous sweeps; per-pass single-digit cap, empty pass the norm.
+  - id: DREAM-DESCOPE-1
+    what: Blocking DRM-3 on MSR-5
+    why: >-
+      Owner decision 2026-07-12 — /dream ships its own snapshot-diff harness, written to
+      the eval --ab shape so it converges with MSR-5 if that lands.

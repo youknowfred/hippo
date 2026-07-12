@@ -293,6 +293,52 @@ _TOOLS = [
             },
         },
     },
+    # ------------------------------------------------------------------- #
+    # /dream (DRM-2) — the generative sleep pass as a model-invocable verb.
+    # Additive per STABILITY.md, like the setup tools above.
+    # ------------------------------------------------------------------- #
+    {
+        "name": "dream",
+        "description": (
+            "The generative sleep pass: replay the memory corpus against itself offline "
+            "and surface the latent graph edges consolidate can't reach (transitive "
+            "bridges, body-names-target-but-unlinked, undeclared refines), with co-fire "
+            "strength + provenance. A bare pass AUTO-APPLIES Tier-A edges reversibly "
+            "(the owner-ratified default, 2026-07-12): additive stamped edges only, "
+            "capped single-digit, θ/mutuality-gated, secret-linted, never committed, live "
+            "in recall immediately — present the returned digest verbatim, it carries the "
+            "undo handles. apply=false runs report-only (zero writes). action='undo' "
+            "reverts the latest pass (or edge_id for one edge), byte-exact, refusing on "
+            "manual drift. action='log' lists every dream edge (active / aged-in / "
+            "undone). Offline deliberate turn — never needed for ordinary recall."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["pass", "undo", "log"],
+                    "description": "pass = run a dream pass (default); undo = revert; log = list edges",
+                },
+                "apply": {
+                    "type": "boolean",
+                    "description": "with action='pass': override the shipped default for "
+                    "this pass — false = report-only (zero writes), true = force apply. "
+                    "Omit to follow the default (auto-apply ON, owner-ratified "
+                    "2026-07-12).",
+                },
+                "edge_id": {
+                    "type": "string",
+                    "description": "with action='undo': revert exactly this edge (e.g. p7-e2)",
+                },
+                "undo_since": {
+                    "type": "string",
+                    "description": "with action='undo': revert edges applied since an ISO "
+                    "date or within the last N distinct sessions",
+                },
+            },
+        },
+    },
 ]
 
 
@@ -816,6 +862,39 @@ def _tool_trust_corpus(args: Dict[str, Any]) -> str:
     )
 
 
+def _tool_dream(args: Dict[str, Any]) -> str:
+    """DRM-2: the /dream verb — pass (apply or report) / undo / log. Never raises upstream.
+
+    A bare pass follows the SHIPPED default (auto-apply ON since the dated owner flip,
+    2026-07-12 — reversible, capped, θ/mutuality-gated); an explicit ``apply`` boolean
+    overrides in either direction (``apply: false`` = report-only). The apply path itself
+    re-checks the SEC-1 trust gate, the soak bar, and every per-edge precondition, and
+    every applied edge returns with its undo handle in the digest.
+    """
+    from .dream import apply_mode_default, render_log, run_apply_pass, run_report_pass, undo_edges
+    from .provenance import resolve_dirs
+
+    memory_dir, repo_root = resolve_dirs()
+    action = str(args.get("action") or "pass").strip().lower()
+    try:
+        if action == "log":
+            return render_log(memory_dir)
+        if action == "undo":
+            edge_id = str(args.get("edge_id") or "").strip() or None
+            since = str(args.get("undo_since") or "").strip() or None
+            _code, text = undo_edges(memory_dir, edge_id=edge_id, since=since)
+            return text
+        apply_arg = args.get("apply")
+        do_apply = bool(apply_arg) if apply_arg is not None else apply_mode_default()
+        if do_apply:
+            _code, text = run_apply_pass(memory_dir, repo_root=repo_root)
+        else:
+            _code, text = run_report_pass(memory_dir)
+        return text
+    except Exception as exc:
+        return f"dream: pass failed ({exc}) — nothing was changed."
+
+
 _DISPATCH = {
     "recall": _tool_recall,
     "new_memory": _tool_new_memory,
@@ -826,6 +905,7 @@ _DISPATCH = {
     "bootstrap": _tool_bootstrap,
     "init": _tool_init,
     "trust_corpus": _tool_trust_corpus,
+    "dream": _tool_dream,
 }
 
 

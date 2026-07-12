@@ -75,6 +75,63 @@ _LINKS_CACHE_NAME = "links.json"
 # consumer (lint report, recall annotations) uses, so output stays deterministic.
 TYPED_RELATIONS = ("supersedes", "contradicts", "refines")
 
+# --------------------------------------------------------------------------- #
+# DRM-2/DRM-3: the machine-managed dream:links block — the ONE canonical grammar.
+#
+# /dream (memory/dream.py) auto-applies its Tier-A edges as stamped lines inside a
+# delimited block appended to a memory's BODY:
+#
+#     <!-- dream:links -->
+#     [[other-memory]] <!-- dream: bridge · pass=p7 · edge=p7-e2 · cofire=0.71 · q="…" -->
+#     <!-- dream: refines other-memory · pass=p7 · edge=p7-e3 · cofire=0.68 -->
+#     <!-- /dream:links -->
+#
+# Bridge/completion lines carry a real ``[[wikilink]]`` (an untyped edge the normal
+# ``parse_wikilinks`` pass reads); a refines line is a PURE COMMENT stamp — its actual edge
+# lives in frontmatter via ``add_typed_relation`` — deliberately bracket-free so the
+# wikilink regex can never read it as an untyped edge. ``doc_text`` (name + description)
+# is never touched, so the semantic index is stable; only the adjacency graph changes.
+#
+# ``HIPPO_DREAM`` gates whether the graph ADMITS these edges (default: yes — an applied
+# edge is live in recall immediately, DRM-2's whole point). The DRM-3 A/B harness sets
+# ``HIPPO_DREAM=0`` on its OFF arm to measure the same corpus without them: the block is
+# stripped before wikilink parsing and dream-stamped refines targets are dropped from the
+# typed maps. The links.json cache records which view it was built under and reads as a
+# MISS on mismatch, so an admitted-view cache can never silently serve a filtered arm (or
+# vice versa).
+# --------------------------------------------------------------------------- #
+DREAM_BLOCK_OPEN = "<!-- dream:links -->"
+DREAM_BLOCK_CLOSE = "<!-- /dream:links -->"
+_DREAM_BLOCK_RE = re.compile(
+    re.escape(DREAM_BLOCK_OPEN) + r".*?" + re.escape(DREAM_BLOCK_CLOSE) + r"\n?",
+    re.DOTALL,
+)
+# The refines stamp: ``<!-- dream: refines <target> · … -->`` (target = first token).
+_DREAM_REFINES_STAMP_RE = re.compile(r"<!--\s*dream:\s*refines\s+(\S+)")
+
+
+def dream_edges_admitted() -> bool:
+    """Whether the graph admits dream-discovered edges (``HIPPO_DREAM``; default TRUE).
+
+    Only an explicit falsy value filters — mirrors ``recall._salience_enabled``'s parsing so
+    ``HIPPO_DREAM=0``/``false`` is the opt-out and junk values stay on the default.
+    """
+    return os.environ.get("HIPPO_DREAM", "").strip() not in ("0", "false", "False")
+
+
+def strip_dream_edges(text: str) -> Tuple[str, List[str]]:
+    """``(text with every dream:links block removed, [refines targets those blocks stamp])``.
+
+    The DRM-3 OFF-arm filter: removing the block removes the bridge/completion wikilinks;
+    the returned stamp targets let the typed-edge pass drop the matching ``refines``
+    frontmatter entries (the frontmatter itself is indistinguishable from hand-authored —
+    the stamp is what marks it dream-discovered). Pure; never raises.
+    """
+    refines: List[str] = []
+    for block in _DREAM_BLOCK_RE.findall(text or ""):
+        refines.extend(m.group(1) for m in _DREAM_REFINES_STAMP_RE.finditer(block))
+    return _DREAM_BLOCK_RE.sub("", text or ""), refines
+
 
 def normalize_slug(s: str) -> str:
     """Lowercase; unify ``_``, spaces and runs of separators to single ``-``; trim."""
@@ -235,6 +292,19 @@ class LinkGraph:
             }
         else:
             texts = self._read_texts()
+        # DRM-3: the HIPPO_DREAM=0 arm sees the corpus WITHOUT dream-discovered edges —
+        # blocks stripped before wikilink parsing, stamped refines targets remembered so
+        # the typed pass below can drop exactly those frontmatter entries. Default
+        # (admitted) is a no-op: applied dream edges are live like any hand edge.
+        dream_refines_filtered: Dict[str, Set[str]] = {}
+        if not dream_edges_admitted():
+            stripped: Dict[str, str] = {}
+            for stem, text in texts.items():
+                clean, stamped = strip_dream_edges(text)
+                stripped[stem] = clean
+                if stamped:
+                    dream_refines_filtered[stem] = {normalize_slug(t) for t in stamped}
+            texts = stripped
         self.files = list(texts.keys())
 
         # Pass 1: full-stem aliases (unique by construction) — highest-confidence tier.
@@ -287,6 +357,18 @@ class LinkGraph:
             # refusals a [[wikilink]] does. Self-targets are dropped (a memory cannot
             # supersede/contradict/refine itself), unresolved targets recorded for lint.
             raw_rels = parse_typed_relations(fms.get(stem, {}))
+            if stem in dream_refines_filtered and raw_rels.get("refines"):
+                # DRM-3 OFF arm: drop the refines targets this stem's dream stamps mark as
+                # dream-discovered; hand-authored refines entries are untouched.
+                kept = [
+                    t
+                    for t in raw_rels["refines"]
+                    if normalize_slug(t) not in dream_refines_filtered[stem]
+                ]
+                if kept:
+                    raw_rels["refines"] = kept
+                else:
+                    raw_rels.pop("refines")
             if raw_rels:
                 self.typed_raw[stem] = raw_rels
             for rel, raws in raw_rels.items():
@@ -670,6 +752,12 @@ def write_links_cache(index_dir: str, graph: LinkGraph, sigs: Dict[str, List[int
     try:
         payload = {
             "schema_version": LINKS_SCHEMA_VERSION,
+            # DRM-3: which admission view this cache was built under (see
+            # ``dream_edges_admitted``). A reader under the OTHER view treats the cache as
+            # a miss — an admitted-view cache must never serve the filtered A/B arm, nor a
+            # filtered build poison the default view. Absent key (pre-DRM cache) reads as
+            # True — those caches were all built admitted.
+            "dream_admitted": dream_edges_admitted(),
             "files": {
                 stem: {
                     "sig": list(sigs.get(stem) or (0, 0)),
@@ -718,6 +806,10 @@ def _load_links_payload(index_dir: str) -> Optional[dict]:
         if not isinstance(payload, dict):
             return None
         if payload.get("schema_version") != LINKS_SCHEMA_VERSION:
+            return None
+        # DRM-3: a cache built under the other HIPPO_DREAM admission view is a MISS (the
+        # safe direction — one wasted rebuild, never a wrong-view edge list served).
+        if bool(payload.get("dream_admitted", True)) != dream_edges_admitted():
             return None
         if not all(
             isinstance(payload.get(k), dict)

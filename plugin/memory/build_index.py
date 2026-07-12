@@ -457,7 +457,17 @@ def compute_body_chunks(name: str, text: str) -> List[dict]:
     """
     try:
         _, body = split_frontmatter(text)
-        body = (body or "").strip()
+        # DRM-2: the machine-managed dream:links block is ADJACENCY data, not memory
+        # content — strip it from chunking UNCONDITIONALLY (both HIPPO_DREAM arms). Its
+        # stamp text (target slugs, firing queries) would otherwise enter the BM25/dense
+        # body rows and let an applied edge perturb lexical RANKING — the A/B arm must
+        # toggle edge admission ONLY, and a query matching a stamp's tokens must never
+        # false-hit the stamped memory. The graph reader (links.LinkGraph) still sees the
+        # raw text and parses the block's wikilinks when admitted.
+        from .links import strip_dream_edges
+
+        body, _stamped = strip_dream_edges(body or "")
+        body = body.strip()
         if not body:
             return []
         budget = body[:_BODY_CHUNK_CHAR_BUDGET]
