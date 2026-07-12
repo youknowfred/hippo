@@ -30,7 +30,12 @@ Battle-tested in daily use since 2026-06 across a 180+ memory production corpus.
 
 ## Quickstart
 
-1. **Install** (inside Claude Code):
+> **Run hippo in the Claude Code _terminal_ (the `claude` CLI).** hippo is driven by its
+> `/hippo:*` slash commands, and typed plugin commands only work in the terminal — the **Claude
+> Desktop app** rejects them (*"Some commands only work in the Claude Code terminal"*), and
+> **cloud / remote sessions** can't run it at all (it needs local access to your files and git).
+
+1. **Install** (inside the `claude` terminal):
 
    ```
    /plugin marketplace add youknowfred/hippo
@@ -304,6 +309,12 @@ sessions, permanently dismissable) instead of staying silent.
 
 ## Troubleshooting
 
+- **`/hippo:init` (or any `/hippo:*` command) "isn't a recognized command" / "only works in the
+  Claude Code terminal."** hippo's commands run only in the Claude Code **terminal CLI** (the
+  `claude` command). The **desktop app** doesn't support typed plugin slash commands, and
+  **cloud / remote** sessions have no local filesystem to run hippo's hooks — so bootstrap, init,
+  and recall all have to happen from a terminal. (Nothing's wrong with your install; it's a
+  surface limitation.)
 - **Recall comes back empty.** Almost always one of three things: **(a) bootstrap never ran**
   on this machine — dense recall is silently BM25-only until `/hippo:bootstrap` finishes;
   **(b) the corpus isn't trusted yet** — a freshly cloned or downloaded corpus injects
