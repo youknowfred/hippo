@@ -227,9 +227,10 @@ _TOOLS = [
             "progress). Only call on the user's explicit ask to set up hippo. Note: each "
             "Claude Code surface (terminal CLI vs desktop app) keeps its OWN plugin-data "
             "dir, so a machine bootstrapped in the terminal may still need this here — "
-            "status names any sibling-surface install it detects. After it completes, "
-            "dense recall reaches hooks from the next prompt; this MCP server process "
-            "itself stays BM25-only until the session restarts."
+            "status names any sibling-surface install it detects. After it completes, run "
+            "the init tool once so the project index rebuilds with dense vectors; hooks "
+            "then serve dense recall from the next prompt (this server's own recall/why "
+            "stay BM25 until the session restarts)."
         ),
         "inputSchema": {
             "type": "object",
@@ -490,17 +491,81 @@ def _consent_review_block(memory_dir: str, stems=None) -> str:
     return "\n".join(lines)
 
 
+def _fresh_python() -> Optional[str]:
+    """The venv python the HOOKS would resolve right now, when it is fresher than this
+    process — else None (in-process is then both accurate and cheaper).
+
+    The stale-interpreter trap this exists for (found live, 2026-07-12): this server's
+    interpreter is frozen at session start. A server that booted pre-bootstrap runs bare
+    python3 forever, so anything venv-dependent done IN-PROCESS after a mid-session
+    bootstrap lies — doctor's venv check reported a healthy venv as corrupt (with
+    delete-and-redownload advice), and init's index rebuild silently couldn't embed
+    dense vectors. The terminal skills never had this bug because ``_resolve_py.sh``
+    re-resolves ``$PY`` on every command; this is that same per-invocation resolution.
+    """
+    data = os.environ.get("CLAUDE_PLUGIN_DATA") or ""
+    py = os.path.join(data, "venv", "bin", "python")
+    if not data or not os.access(py, os.X_OK):
+        return None
+    try:
+        if os.path.realpath(py) == os.path.realpath(sys.executable):
+            return None  # already running the venv — nothing fresher exists
+    except Exception:
+        pass
+    return py
+
+
+def _subprocess_env() -> Dict[str, str]:
+    """os.environ + PYTHONPATH pinned to this plugin copy, so ``import memory`` in a
+    fresh-interpreter subprocess resolves to the SAME code this server is running."""
+    root = os.environ.get("CLAUDE_PLUGIN_ROOT") or os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__))
+    )
+    env = dict(os.environ)
+    env["PYTHONPATH"] = root + (
+        os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
+    )
+    return env
+
+
 def _tool_doctor(args: Dict[str, Any]) -> str:
     """INT-12: the DOC-4 engine verbatim. Deliberately NOT trust-gated: doctor is the
     designed review/repair entry point for an untrusted corpus (the terminal CLI runs it
     pre-consent for exactly that reason) — its lines report counts and stems, never the
-    injectable descriptions; the consent sample itself lives behind trust_corpus."""
+    injectable descriptions; the consent sample itself lives behind trust_corpus.
+
+    Runs the engine under the freshly-resolved venv python when one exists (see
+    ``_fresh_python``): the venv/dense checks must reflect what the HOOKS will use on the
+    next prompt, not what this server process happened to boot with."""
     from .doctor import DoctorContext, render
     from .provenance import resolve_dirs
 
-    memory_dir, repo_root = resolve_dirs()
-    report = render(DoctorContext(memory_dir, repo_root))
-    return report + (
+    report = None
+    caveat = ""
+    py = _fresh_python()
+    if py is not None:
+        try:
+            import subprocess
+
+            out = subprocess.run(
+                [py, "-m", "memory.doctor"],
+                capture_output=True, text=True, timeout=180, env=_subprocess_env(),
+            )
+            if out.returncode == 0 and out.stdout.strip():
+                report = out.stdout.strip()
+        except Exception:
+            report = None
+        if report is None:
+            caveat = (
+                "\n\n⚠ a venv exists but the engine could not run under it — the lines "
+                "above come from this server's session-start interpreter, so "
+                "venv-dependent checks may be stale. Restart the session for exact "
+                "readouts."
+            )
+    if report is None:
+        memory_dir, repo_root = resolve_dirs()
+        report = render(DoctorContext(memory_dir, repo_root))
+    return report + caveat + (
         "\n\nOn this MCP surface the named fixes map to tools: /hippo:bootstrap → the "
         "bootstrap tool (action='start'), /hippo:init → the init tool, and the "
         "trust/consent step (mark_trusted) → the trust_corpus tool. Typed /hippo:* "
@@ -528,8 +593,11 @@ def _tool_bootstrap(args: Dict[str, Any]) -> str:
             lines.append(f"worker RUNNING (pid {s.get('pid')}) — poll again in a minute.")
         elif s.get("state") == "current":
             lines.append(
-                "✔ bootstrapped — hooks serve dense recall from the next prompt; this MCP "
-                "server process picks the venv up when the session restarts."
+                "✔ bootstrapped. To finish enabling dense recall for a project, run the "
+                "init tool once — it rebuilds the index under the new venv so it carries "
+                "dense vectors; hooks then serve dense recall from the next prompt. (The "
+                "core recall/why tools in THIS server process stay BM25 until the session "
+                "restarts — its interpreter is fixed at session start.)"
             )
         elif s.get("state") == "stale":
             lines.append(
@@ -562,7 +630,9 @@ def _tool_bootstrap(args: Dict[str, Any]) -> str:
             return (
                 f"bootstrap started (worker pid {r.get('pid')}) — the venv build + ~130MB "
                 "model download takes a few minutes. Poll with action='status'; done when "
-                "the state reads 'current'. Tell the user it is running in the background."
+                "the state reads 'current', then run the init tool once so the project "
+                "index rebuilds with dense vectors. Tell the user it is running in the "
+                "background."
             )
         return f"bootstrap: failed to start — {r.get('error')}"
     return "bootstrap: pass action='status' or action='start'."
@@ -571,7 +641,9 @@ def _tool_bootstrap(args: Dict[str, Any]) -> str:
 def _tool_init(args: Dict[str, Any]) -> str:
     from .init_project import init_project
 
-    r = init_project()
+    # dense_python: right after a mid-session bootstrap, only a freshly-resolved venv
+    # python can embed dense vectors — this process may still be the pre-venv python3.
+    r = init_project(dense_python=_fresh_python())
     lines = [f"init ({r.get('mode')} corpus) — {r.get('memory_dir')}"]
     if r.get("seeded"):
         lines.append("✔ seeded: " + ", ".join(r["seeded"]))

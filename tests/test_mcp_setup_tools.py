@@ -432,6 +432,101 @@ def test_warm_models_multilingual_writes_preset_then_warms_that_model(tmp_path, 
 
 
 # --------------------------------------------------------------------------- #
+# The stale-interpreter fix (v1.10.2) — found live: an MCP server that booted
+# pre-bootstrap runs bare python3 forever, so in-process doctor/init work after a
+# mid-session bootstrap lied (false venv-corrupt FAIL with delete-the-venv advice;
+# dense-blind index rebuilds). doctor + init must re-resolve the venv python per
+# invocation, exactly as hooks/_resolve_py.sh does.
+# --------------------------------------------------------------------------- #
+import sys  # noqa: E402
+
+
+@pytest.fixture
+def python_shim(tmp_path):
+    """An executable that IS a working python but is not sys.executable by realpath —
+    what a freshly-bootstrapped venv python looks like to a stale server process."""
+    shim = tmp_path / "venvish" / "python"
+    os.makedirs(shim.parent)
+    shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    os.chmod(shim, 0o755)
+    return str(shim)
+
+
+def test_fresh_python_resolution(tmp_path, monkeypatch, python_shim):
+    # No CLAUDE_PLUGIN_DATA (conftest deletes it) → nothing fresher exists.
+    assert M._fresh_python() is None
+    # A data dir whose venv python is missing → None.
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(tmp_path / "empty"))
+    assert M._fresh_python() is None
+    # A real venv python that differs from this process → resolved.
+    data = tmp_path / "data"
+    os.makedirs(data / "venv" / "bin")
+    os.symlink(python_shim, data / "venv" / "bin" / "python")
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(data))
+    assert M._fresh_python() == str(data / "venv" / "bin" / "python")
+    # The venv python resolving (by realpath) to THIS interpreter → None (in-process
+    # is accurate; don't pay a subprocess).
+    os.remove(data / "venv" / "bin" / "python")
+    os.symlink(sys.executable, data / "venv" / "bin" / "python")
+    assert M._fresh_python() is None
+
+
+def test_doctor_tool_runs_engine_under_the_fresh_interpreter(corpus, tmp_path, monkeypatch, python_shim):
+    """When a fresher venv python exists, the engine must run THERE — its venv/dense
+    checks describe what hooks will use on the next prompt, not this process's boot
+    state (the live false-'venv is corrupt' readout)."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setattr(M, "_fresh_python", lambda: python_shim)
+    text = _text(_call("doctor", {}))
+    assert "MCP server starts" in text          # real engine lines came back
+    assert "trust_corpus" in text               # the MCP-surface suffix still applies
+    assert "could not run under it" not in text  # no fallback caveat on the happy path
+
+
+def test_doctor_tool_falls_back_in_process_with_a_caveat(corpus, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setattr(M, "_fresh_python", lambda: "/nonexistent/venv/python")
+    text = _text(_call("doctor", {}))
+    assert "MCP server starts" in text           # the in-process engine still reported
+    assert "could not run under it" in text      # and the staleness caveat is explicit
+
+
+def test_init_project_builds_index_via_dense_python(fresh_project, tmp_path, python_shim):
+    from memory.init_project import init_project
+
+    r = init_project(claude_projects_dir=str(tmp_path / "cp"), dense_python=python_shim)
+    assert r["index"] == {"count": 2, "dense_ready": False}  # built BY the subprocess
+    assert not any("index build failed" in w for w in r["warnings"])
+
+
+def test_init_project_dense_python_failure_falls_back_in_process(fresh_project, tmp_path):
+    from memory.init_project import init_project
+
+    r = init_project(
+        claude_projects_dir=str(tmp_path / "cp"), dense_python="/nonexistent/python"
+    )
+    assert r["index"]["count"] == 2              # the fallback build still happened
+    assert any("fresh-interpreter index build failed" in w for w in r["warnings"])
+
+
+def test_init_tool_threads_the_fresh_interpreter(fresh_project, tmp_path, monkeypatch):
+    import memory.init_project as IP
+
+    seen = {}
+    real = IP.init_project
+
+    def spy(claude_projects_dir=None, dense_python=None):
+        seen["dense_python"] = dense_python
+        return real(claude_projects_dir=str(tmp_path / "cp"), dense_python=None)
+
+    monkeypatch.setattr(IP, "init_project", spy)
+    monkeypatch.setattr(M, "_fresh_python", lambda: "/the/resolved/venv/python")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    _call("init", {})
+    assert seen["dense_python"] == "/the/resolved/venv/python"
+
+
+# --------------------------------------------------------------------------- #
 # doctor (INT-12) — the DOC-4 engine verbatim, plus the MCP-surface fix mapping
 # --------------------------------------------------------------------------- #
 def test_doctor_tool_runs_the_engine_and_maps_fixes_to_tools(corpus, tmp_path, monkeypatch):
