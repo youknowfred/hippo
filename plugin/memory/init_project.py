@@ -112,12 +112,47 @@ def _patch_gitignore(repo_root: str) -> str:
         return "patch_failed"
 
 
-def init_project(claude_projects_dir: Optional[str] = None) -> Dict[str, object]:
+def _build_index_via(python: str, memory_dir: str, index_dir: str) -> Dict[str, object]:
+    """Build the index in a SUBPROCESS under ``python`` and return its manifest.
+
+    The MCP server's interpreter is frozen at session start; right after a mid-session
+    bootstrap only a freshly-resolved venv python can embed dense vectors. Raises on any
+    subprocess problem — the caller falls back to the in-process build (never worse than
+    before) and reports the degradation."""
+    import subprocess
+
+    root = os.environ.get("CLAUDE_PLUGIN_ROOT") or os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__))
+    )
+    env = dict(os.environ)
+    env["PYTHONPATH"] = root + (
+        os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
+    )
+    code = (
+        "import json, sys\n"
+        "from memory.build_index import build_index\n"
+        "m = build_index(sys.argv[1], sys.argv[2], allow_download=False)\n"
+        "print(json.dumps({'count': m.get('count'), 'dense_ready': bool(m.get('dense_ready'))}))\n"
+    )
+    out = subprocess.run(
+        [python, "-c", code, memory_dir, index_dir],
+        capture_output=True, text=True, timeout=600, env=env,
+    )
+    if out.returncode != 0:
+        raise RuntimeError(out.stderr.strip().splitlines()[-1] if out.stderr.strip() else "index subprocess failed")
+    return json.loads(out.stdout.strip().splitlines()[-1])
+
+
+def init_project(
+    claude_projects_dir: Optional[str] = None, dense_python: Optional[str] = None
+) -> Dict[str, object]:
     """Run the mechanical init flow against the resolved corpus. Returns a result dict;
     never raises (per-step failures degrade to reported statuses).
 
     ``claude_projects_dir`` overrides the symlink base (hermetic tests); None uses the
-    real ``~/.claude/projects``.
+    real ``~/.claude/projects``. ``dense_python`` runs the index build under that
+    interpreter (the MCP server passes its freshly-resolved venv python so a rebuild
+    right after a mid-session bootstrap embeds dense vectors); None builds in-process.
     """
     from . import trust
     from .build_index import build_index, default_index_dir
@@ -201,14 +236,24 @@ def init_project(claude_projects_dir: Optional[str] = None) -> Dict[str, object]
 
     # Step 4: the recall index. allow_download=False — init is offline by contract (the
     # model warm belongs to bootstrap alone); pre-bootstrap this builds BM25-only.
-    try:
-        manifest = build_index(memory_dir, default_index_dir(memory_dir), allow_download=False)
-        result["index"] = {
-            "count": manifest.get("count"),
-            "dense_ready": bool(manifest.get("dense_ready")),
-        }
-    except Exception as exc:
-        result["index"] = {"error": str(exc)}
+    index_dir = default_index_dir(memory_dir)
+    if dense_python:
+        try:
+            result["index"] = _build_index_via(dense_python, memory_dir, index_dir)
+        except Exception as exc:
+            result["warnings"].append(
+                f"fresh-interpreter index build failed ({exc}) — built in-process instead "
+                "(dense vectors may be missing until a rebuild under the venv)"
+            )
+    if "index" not in result:
+        try:
+            manifest = build_index(memory_dir, index_dir, allow_download=False)
+            result["index"] = {
+                "count": manifest.get("count"),
+                "dense_ready": bool(manifest.get("dense_ready")),
+            }
+        except Exception as exc:
+            result["index"] = {"error": str(exc)}
 
     # Step 4b — trust + registration. See the module docstring: fresh-created → trusted
     # (origin="init", SEC-6 fingerprint over the just-seeded bytes); pre-existing → NEVER

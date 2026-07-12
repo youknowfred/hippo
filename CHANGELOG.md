@@ -7,6 +7,28 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.10.2 — 2026-07-12 — "Fresh interpreter"
+
+**re-bootstrap: no** — `plugin/requirements.txt` and every persisted shape unchanged (corpus
+format 4, index schema 6, capture-seed schema 2); skills (15) and the MCP tool surface (9 + 3
+resources) keep their names and shapes. One defect fix, found **live** within hours of v1.10.0
+by the very Desktop bootstrap flow it shipped.
+
+- **INT-13** — **the stale-interpreter fix**: the MCP server's interpreter is frozen at session
+  start, so a server that booted pre-bootstrap runs bare python3 forever — and everything the
+  setup tools did *in-process* after a mid-session bootstrap lied. `doctor` reported a healthy,
+  fully-warmed venv as corrupt (with delete-the-venv-and-redownload advice), and `init`'s index
+  rebuild silently couldn't embed dense vectors while the bootstrap status promised dense "from
+  the next prompt". The terminal skills never had this bug (`_resolve_py.sh` re-resolves `$PY`
+  per command); the setup tools now do the same per-invocation resolution: `doctor` runs the
+  engine under the freshly-resolved venv python via subprocess (the in-process fallback carries
+  an explicit staleness caveat), `init` builds the index under it (`init_project` grew
+  `dense_python=`; subprocess failure falls back in-process with a warning), and the bootstrap
+  wording names the real remaining step — run `init` once so the index rebuilds with dense
+  vectors. Verified against the live failure: a bare-python3 server + a freshly-bootstrapped
+  venv now reports "venv healthy" and produces a `dense_ready` index; the recall hook upgrades
+  to `dense+bm25`.
+
 ## v1.10.1 — 2026-07-12 — "The right invocation per surface"
 
 **re-bootstrap: no** — `plugin/requirements.txt`, every persisted shape (corpus format 4, index
