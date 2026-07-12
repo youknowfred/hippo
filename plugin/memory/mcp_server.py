@@ -9,7 +9,8 @@ exposes memory as first-class tools that mid-turn calls and subagents both inher
 hooks, and the hook path is untouched and still works with this server absent.
 
 It is a dependency-free JSON-RPC 2.0 server over stdio (newline-delimited messages, stdlib
-only — no ``mcp`` package, consistent with the vendoring/offline identity). Five tools:
+only — no ``mcp`` package, consistent with the vendoring/offline identity). Five core tools
+(the frozen v1.0 surface, STABILITY.md):
 
   - ``recall(query, k)``    — REUSES ``recall_view.describe`` → ``recall.recall`` (the exact
                               hook ranking; it does not fork behavior), returning the
@@ -26,6 +27,27 @@ only — no ``mcp`` package, consistent with the vendoring/offline identity). Fi
                               it"), with retirement boundaries and contradiction branch
                               points — ``history.render_decision_history``, the same builder
                               ``/hippo:recall --history`` renders.
+
+Plus four SETUP tools (INT-9..12, additive post-1.0) — the /hippo:* setup flows re-served
+for surfaces with no typed-command input. The Claude desktop app's local sessions run
+installed plugins' hooks, skills, and MCP servers through the same engine as the CLI, but
+reject typed ``/hippo:*`` commands — before these tools, setup was terminal-only there:
+
+  - ``doctor()``          — the DOC-4 diagnostic engine verbatim + a fix→tool mapping for
+                            this surface. Ungated: doctor IS the pre-consent review path.
+  - ``bootstrap(action)`` — kick-off-and-poll per-surface provisioning (``memory.bootstrap``:
+                            detached worker, sentinel-last, log tail via action="status").
+                            Needed per SURFACE: the harness hands the terminal and the
+                            desktop app different plugin-data dirs.
+  - ``init()``            — the mechanical /hippo:init flow (``memory.init_project``). A
+                            corpus this call CREATES is trusted (it is the plugin's own
+                            starter content); a pre-existing corpus is NEVER auto-trusted
+                            from a model-invoked surface — consent routes to trust_corpus.
+  - ``trust_corpus(confirm_digest)`` — the SEC-1 consent flow, two-step: a review call
+                            returns count + the injectable descriptions + a consent digest
+                            (never trusts); the confirm call requires that digest, binding
+                            consent to the reviewed bytes (SEC-6 fingerprint + SEC-7 origin
+                            stamped; drift re-consent reviews the delta, preserves origin).
 
 And three RESOURCES (RUL-5) — the baseline-memory pull path for subagents:
 

@@ -30,10 +30,14 @@ Battle-tested in daily use since 2026-06 across a 180+ memory production corpus.
 
 ## Quickstart
 
-> **Run hippo in the Claude Code _terminal_ (the `claude` CLI).** hippo is driven by its
-> `/hippo:*` slash commands, and typed plugin commands only work in the terminal — the **Claude
-> Desktop app** rejects them (*"Some commands only work in the Claude Code terminal"*), and
-> **cloud / remote sessions** can't run it at all (it needs local access to your files and git).
+> **Install from the Claude Code _terminal_ (the `claude` CLI); use hippo from the terminal
+> _or_ the Claude Desktop app.** Typed `/hippo:*` commands work only in the terminal — the
+> desktop app rejects them (*"Some commands only work in the Claude Code terminal"*). But the
+> desktop app's **local sessions run the same plugins** — the auto-recall hook, the skills
+> (ask in plain words: *"set up hippo memory for this project"*), and the MCP setup tools
+> (`bootstrap`, `init`, `doctor`, `trust_corpus`) — so after the one-time install below,
+> setup and daily use work in both. **Cloud / remote sessions** can't run hippo at all
+> (it needs local access to your files and git).
 
 1. **Install** (inside the `claude` terminal):
 
@@ -310,11 +314,18 @@ sessions, permanently dismissable) instead of staying silent.
 ## Troubleshooting
 
 - **`/hippo:init` (or any `/hippo:*` command) "isn't a recognized command" / "only works in the
-  Claude Code terminal."** hippo's commands run only in the Claude Code **terminal CLI** (the
-  `claude` command). The **desktop app** doesn't support typed plugin slash commands, and
-  **cloud / remote** sessions have no local filesystem to run hippo's hooks — so bootstrap, init,
-  and recall all have to happen from a terminal. (Nothing's wrong with your install; it's a
-  surface limitation.)
+  Claude Code terminal."** Only *typed* plugin slash commands are terminal-only — the **desktop
+  app** has no `/`-command input surface, but its local sessions still run hippo's hook, skills,
+  and MCP tools. Just ask in plain words (*"set up hippo memory here"*, *"run hippo doctor"*):
+  the agent invokes the same flows via the `init` / `bootstrap` / `doctor` / `trust_corpus` MCP
+  tools. **Cloud / remote** sessions are the real limit — no local filesystem, no hippo.
+  (Nothing's wrong with your install.)
+- **Recall is BM25-only in the desktop app even though I already bootstrapped.** Bootstrap is
+  once per machine *per surface*: the harness gives the terminal CLI and the desktop app
+  **different plugin-data dirs** (`…/data/hippo-<marketplace>` vs `…/data/hippo-inline`), so the
+  terminal's venv and model cache aren't where a desktop session looks. Ask the desktop session
+  to run hippo bootstrap once — its `status` output names the sibling install so you can see
+  exactly this situation, and `/hippo:doctor` (or the `doctor` tool) flags it too.
 - **Recall comes back empty.** Almost always one of three things: **(a) bootstrap never ran**
   on this machine — dense recall is silently BM25-only until `/hippo:bootstrap` finishes;
   **(b) the corpus isn't trusted yet** — a freshly cloned or downloaded corpus injects
