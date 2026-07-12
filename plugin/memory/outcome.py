@@ -100,14 +100,14 @@ def _cited_paths_of(memory_dir: str, name: str, cache: dict) -> set:
     return cited
 
 
-def injection_precision(memory_dir: str, telemetry_dir: Optional[str] = None) -> dict:
-    """KPI-2 proxy: of the injected memories that cite a file, the fraction whose cited file was
-    subsequently touched in the SAME session (touch ts >= that memory's earliest recall ts).
+def _injection_join(memory_dir: str, telemetry_dir: Optional[str] = None) -> dict:
+    """The ONE episode×outcome×cited_paths join: ``{(session, name): {"cited", "hit"}}``.
 
-    Injected memories with NO cited_paths are excluded from the denominator — they carry no file
-    signal, so counting them as misses would understate precision. Returns
-    ``{"injected_with_cites", "hits", "precision", "sessions"}`` (``precision`` is ``None`` when
-    there is no signal yet). MEASUREMENT ONLY; never raises.
+    ``cited`` — the injected memory carries cited_paths (it has a file signal at all);
+    ``hit`` — one of those cited files was touched in the SAME session at/after the
+    memory's earliest recall ts. Both aggregates (``injection_precision``,
+    ``injection_hits``) read this so the join semantics can never fork. Never raises;
+    ``{}`` on any failure or empty ledgers.
     """
     try:
         td = telemetry_dir or default_telemetry_dir(memory_dir)
@@ -124,7 +124,7 @@ def injection_precision(memory_dir: str, telemetry_dir: Optional[str] = None) ->
                 if key not in injected or ts < injected[key]:
                     injected[key] = ts
         if not injected:
-            return {"injected_with_cites": 0, "hits": 0, "precision": None, "sessions": 0}
+            return {}
         # session -> [(path, ts)]
         touches: dict = {}
         for o in read_outcomes(td):
@@ -136,23 +136,69 @@ def injection_precision(memory_dir: str, telemetry_dir: Optional[str] = None) ->
                 (p, ts if isinstance(ts, (int, float)) else 0)
             )
         cache: dict = {}
-        denom = 0
-        hits = 0
+        out: dict = {}
         for (sid, name), inject_ts in injected.items():
             cited = _cited_paths_of(memory_dir, name, cache)
-            if not cited:
-                continue  # no file signal — excluded from the proxy
-            denom += 1
-            if any(p in cited and t >= inject_ts for p, t in touches.get(sid, [])):
-                hits += 1
+            out[(sid, name)] = {
+                "cited": bool(cited),
+                "hit": bool(cited)
+                and any(p in cited and t >= inject_ts for p, t in touches.get(sid, [])),
+            }
+        return out
+    except Exception:
+        return {}
+
+
+def injection_precision(memory_dir: str, telemetry_dir: Optional[str] = None) -> dict:
+    """KPI-2 proxy: of the injected memories that cite a file, the fraction whose cited file was
+    subsequently touched in the SAME session (touch ts >= that memory's earliest recall ts).
+
+    Injected memories with NO cited_paths are excluded from the denominator — they carry no file
+    signal, so counting them as misses would understate precision. Returns
+    ``{"injected_with_cites", "hits", "precision", "sessions"}`` (``precision`` is ``None`` when
+    there is no signal yet). MEASUREMENT ONLY; never raises.
+    """
+    try:
+        join = _injection_join(memory_dir, telemetry_dir)
+        if not join:
+            return {"injected_with_cites": 0, "hits": 0, "precision": None, "sessions": 0}
+        denom = sum(1 for r in join.values() if r["cited"])
+        hits = sum(1 for r in join.values() if r["hit"])
         return {
             "injected_with_cites": denom,
             "hits": hits,
             "precision": (hits / denom) if denom else None,
-            "sessions": len({sid for sid, _ in injected}),
+            "sessions": len({sid for sid, _ in join}),
         }
     except Exception:
         return {"injected_with_cites": 0, "hits": 0, "precision": None, "sessions": 0}
+
+
+def injection_hits(memory_dir: str, telemetry_dir: Optional[str] = None) -> dict:
+    """Per-MEMORY recorded-outcome evidence: ``{name: {"hits", "sessions"}}``, hits ≥ 1 only.
+
+    The DRM-5 read surface: a memory appears here iff at least one session both injected it
+    AND touched one of its cited files at/after the injection — the ledger-recorded,
+    positive outcome signal (today's outcome ledger records positive evidence only).
+    ``hits`` counts qualifying sessions; ``sessions`` lists them (sorted, for provenance).
+    Same join as ``injection_precision`` (``_injection_join``) — the semantics cannot fork.
+    STILL measurement-shaped: this module computes evidence; the /dream pass consumes it
+    OFFLINE (replay priority + candidate ordering, DRM-5) — hot-path recall ranking remains
+    SIG-5-gated and reads nothing here. Never raises; ``{}`` when there is no signal.
+    """
+    try:
+        out: dict = {}
+        for (sid, name), r in _injection_join(memory_dir, telemetry_dir).items():
+            if not r["hit"]:
+                continue
+            rec = out.setdefault(name, {"hits": 0, "sessions": []})
+            rec["hits"] += 1
+            rec["sessions"].append(str(sid))
+        for rec in out.values():
+            rec["sessions"].sort()
+        return out
+    except Exception:
+        return {}
 
 
 def format_report(memory_dir: str, telemetry_dir: Optional[str] = None) -> str:
