@@ -433,7 +433,9 @@ def corpus_sample(memory_dir: str, limit: int = 8) -> List[str]:
         return []
 
 
-def corpus_consent_sample(memory_dir: str, limit: int = 8) -> List[dict]:
+def corpus_consent_sample(
+    memory_dir: str, limit: int = 8, stems: Optional[List[str]] = None
+) -> List[dict]:
     """Up to ``limit`` ``{"name", "description"}`` rows — the consent-review surface (SEC-5).
 
     These are THE strings that enter every prompt once this corpus is trusted: the
@@ -443,6 +445,10 @@ def corpus_consent_sample(memory_dir: str, limit: int = 8) -> List[dict]:
     (consent sampled NAMES; injection used DESCRIPTIONS). Descriptions only, never
     bodies: bodies stay unreviewed-and-uninjected behind the gate; the description is
     the injectable surface being authorized.
+
+    ``stems`` (SEC-6 drift review) restricts the rows to exactly those file stems — the
+    re-consent flow reviews the changed/added DELTA, not whichever files happen to sort
+    first; None keeps the whole-corpus sampling for first consent.
 
     The consuming review (the doctor skill) must present these as QUOTED DATA with
     explicit framing that they are untrusted until consented — a malicious description
@@ -455,11 +461,14 @@ def corpus_consent_sample(memory_dir: str, limit: int = 8) -> List[dict]:
         from .provenance import _iter_memory_files, parse_frontmatter
         from .recall import inject_description  # lazy: recall top-imports this module
 
+        wanted = set(stems) if stems is not None else None
         out: List[dict] = []
         for path in _iter_memory_files(memory_dir):
             if len(out) >= limit:
                 break
             name = os.path.splitext(os.path.basename(path))[0]
+            if wanted is not None and name not in wanted:
+                continue
             desc = ""
             try:
                 with open(path, "r", encoding="utf-8") as fh:

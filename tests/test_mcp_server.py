@@ -70,10 +70,16 @@ def test_initialize_defaults_protocol_when_absent():
     assert resp["result"]["protocolVersion"] == "2024-11-05"
 
 
-def test_tools_list_exposes_exactly_five_tools():
+# The frozen v1.0 tool surface (STABILITY.md) — these five names, FIRST and in this order.
+_FROZEN_TOOLS = ["recall", "new_memory", "traverse", "why", "decision_history"]
+# Additive post-1.0 tools (INT-9..12): the setup flows, for surfaces without typed /hippo:*.
+_SETUP_TOOLS = ["trust_corpus"]
+
+
+def test_tools_list_exposes_frozen_five_plus_setup_tools():
     resp = M.handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
-    names = {t["name"] for t in resp["result"]["tools"]}
-    assert names == {"recall", "new_memory", "traverse", "why", "decision_history"}
+    names = [t["name"] for t in resp["result"]["tools"]]
+    assert names == _FROZEN_TOOLS + _SETUP_TOOLS
     for t in resp["result"]["tools"]:
         assert t["inputSchema"]["type"] == "object"  # every tool has a JSON schema
 
