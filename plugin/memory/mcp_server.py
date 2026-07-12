@@ -303,14 +303,14 @@ _TOOLS = [
             "The generative sleep pass: replay the memory corpus against itself offline "
             "and surface the latent graph edges consolidate can't reach (transitive "
             "bridges, body-names-target-but-unlinked, undeclared refines), with co-fire "
-            "strength + provenance. Default is REPORT-ONLY (zero memory writes) — present "
-            "the digest to the user. action='pass' with apply=true runs the Tier-A "
-            "auto-apply loop (additive stamped edges, capped single-digit, secret-linted, "
-            "never committed, live in recall immediately) — only on the user's explicit "
-            "ask; the digest then includes the undo handles. action='undo' reverts the "
-            "latest pass (or edge_id for one edge), byte-exact, refusing on manual drift. "
-            "action='log' lists every dream edge (active / aged-in / undone). Offline "
-            "deliberate turn — never needed for ordinary recall."
+            "strength + provenance. A bare pass AUTO-APPLIES Tier-A edges reversibly "
+            "(the owner-ratified default, 2026-07-12): additive stamped edges only, "
+            "capped single-digit, θ/mutuality-gated, secret-linted, never committed, live "
+            "in recall immediately — present the returned digest verbatim, it carries the "
+            "undo handles. apply=false runs report-only (zero writes). action='undo' "
+            "reverts the latest pass (or edge_id for one edge), byte-exact, refusing on "
+            "manual drift. action='log' lists every dream edge (active / aged-in / "
+            "undone). Offline deliberate turn — never needed for ordinary recall."
         ),
         "inputSchema": {
             "type": "object",
@@ -322,9 +322,10 @@ _TOOLS = [
                 },
                 "apply": {
                     "type": "boolean",
-                    "description": "with action='pass': auto-apply Tier-A edges this pass "
-                    "(reversible, capped; default false = report-only). Only set on the "
-                    "user's explicit ask — the shipped default stays report-only.",
+                    "description": "with action='pass': override the shipped default for "
+                    "this pass — false = report-only (zero writes), true = force apply. "
+                    "Omit to follow the default (auto-apply ON, owner-ratified "
+                    "2026-07-12).",
                 },
                 "edge_id": {
                     "type": "string",
@@ -862,14 +863,15 @@ def _tool_trust_corpus(args: Dict[str, Any]) -> str:
 
 
 def _tool_dream(args: Dict[str, Any]) -> str:
-    """DRM-2: the /dream verb — pass (report or apply) / undo / log. Never raises upstream.
+    """DRM-2: the /dream verb — pass (apply or report) / undo / log. Never raises upstream.
 
-    Report-only is this surface's default too; ``apply: true`` is the per-call, agent-gated
-    escalation (the same posture as new_memory's per-item writes — the SHIPPED default
-    stays report-only until the owner's dated flip). The apply path itself re-checks the
-    SEC-1 trust gate, the soak bar, and every per-edge precondition.
+    A bare pass follows the SHIPPED default (auto-apply ON since the dated owner flip,
+    2026-07-12 — reversible, capped, θ/mutuality-gated); an explicit ``apply`` boolean
+    overrides in either direction (``apply: false`` = report-only). The apply path itself
+    re-checks the SEC-1 trust gate, the soak bar, and every per-edge precondition, and
+    every applied edge returns with its undo handle in the digest.
     """
-    from .dream import render_log, run_apply_pass, run_report_pass, undo_edges
+    from .dream import apply_mode_default, render_log, run_apply_pass, run_report_pass, undo_edges
     from .provenance import resolve_dirs
 
     memory_dir, repo_root = resolve_dirs()
@@ -882,7 +884,9 @@ def _tool_dream(args: Dict[str, Any]) -> str:
             since = str(args.get("undo_since") or "").strip() or None
             _code, text = undo_edges(memory_dir, edge_id=edge_id, since=since)
             return text
-        if bool(args.get("apply")):
+        apply_arg = args.get("apply")
+        do_apply = bool(apply_arg) if apply_arg is not None else apply_mode_default()
+        if do_apply:
             _code, text = run_apply_pass(memory_dir, repo_root=repo_root)
         else:
             _code, text = run_report_pass(memory_dir)

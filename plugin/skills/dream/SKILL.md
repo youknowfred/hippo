@@ -1,5 +1,5 @@
 ---
-description: The generative sleep pass — replay the memory corpus against itself offline and surface the latent graph edges consolidate can't reach (transitive bridges, body-names-target-but-unlinked, undeclared refines), each with co-fire strength and provenance. Report-only by default (zero memory writes). Triggers include "dream", "run a dream pass", "find latent links", "what edges am I missing", "/hippo:dream". Discovery, not housekeeping — that's consolidate/audit.
+description: The generative sleep pass — replay the memory corpus against itself offline and surface the latent graph edges consolidate can't reach (transitive bridges, body-names-target-but-unlinked, undeclared refines). Tier-A edges auto-apply reversibly by default (capped, stamped, undoable — owner-ratified 2026-07-12); --dry-run previews. Triggers include "dream", "run a dream pass", "find latent links", "what edges am I missing", "/hippo:dream". Discovery, not housekeeping — that's consolidate/audit.
 ---
 
 # /hippo:dream — the generative sleep pass
@@ -22,12 +22,13 @@ Every pass is **offline** (a deliberate turn, like consolidate — never the per
 path) and gated on the soak bar (≥5 distinct sessions): a young corpus proposes nothing,
 and says so. **The empty pass is the norm** — a non-empty report is signal worth reading.
 
-**Report-only is the shipped default: a pass writes ZERO memory files.** Candidates land in
-a jsonl ledger under the derived telemetry dir (gitignored) plus a printed report with the
-co-fire-strength distribution and a θ sweep — the calibration surface for the (owner-gated)
-Tier-A auto-apply flip. Floor memories are never an edge endpoint; `confidence: draft`
-memories are quarantined from both ends; un-aged dream edges are firewalled out of the
-pass's own source set (a dream never cites an unreviewed dream).
+**Auto-apply is the shipped default (owner-ratified 2026-07-12), and it is REVERSIBLE
+AUTONOMY:** a bare pass applies only the Tier-A class above the calibrated bar (θ=0.90,
+cap 5/pass, bridges must co-fire mutually), every edge stamped and one-command undoable,
+never committed. `--dry-run` previews without writing. Floor memories are never an edge
+endpoint; `confidence: draft` memories are quarantined from both ends; un-aged dream
+edges are firewalled out of the pass's own source set (a dream never cites an unreviewed
+dream).
 
 ## Preflight (shared across all hippo skills)
 
@@ -37,16 +38,17 @@ pass's own source set (a dream never cites an unreviewed dream).
 hippo_resolve_py
 ```
 
-## Run a pass (report-only)
+## Run a pass
 
 ```
-"$PY" -m memory.dream --dry-run
+"$PY" -m memory.dream            # the default: discover + auto-apply Tier-A, digest w/ undo handles
+"$PY" -m memory.dream --dry-run  # report-only preview (zero memory writes)
 ```
 
-Read the report to the user roughly as printed — the status line (or the explicit
-below-soak / empty-corpus reason), the candidate list, and where the ledger landed. Do not
-editorialize candidates into facts: each is a *proposed* edge with its provenance (kind,
-co-fire strength, graph distance, firing query), not a claim.
+Present the digest/report to the user roughly as printed — the status line (or the
+explicit below-soak / empty-corpus reason), each applied or proposed edge with its
+provenance (kind, co-fire strength, graph distance, firing query), and the undo handles.
+Do not editorialize candidates into facts: an edge is a ranking hint, not a claim.
 
 Machine-readable form (for scripting / inspection):
 
@@ -59,10 +61,10 @@ Useful knobs (env or flags): `--probe-k <n>` co-fire probe depth (default 10),
 `DREAM_MAX_APPLY_PER_PASS` — the auto-apply calibration knobs the report's θ sweep feeds
 (they gate nothing in report-only mode).
 
-## Applying edges (Tier-A auto-apply — explicit, reversible, capped)
+## What auto-apply does (and never does)
 
-The DRM-2 loop exists behind an explicit ask (the *default* stays report-only until the
-owner's dated flip): on the user's request to apply, run
+The bare pass runs the DRM-2 loop — `apply-reversibly → notify → undo-window → age-in`
+(`--apply` forces it even under `HIPPO_DREAM_APPLY=0`):
 
 ```
 "$PY" -m memory.dream --apply

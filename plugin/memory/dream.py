@@ -839,10 +839,16 @@ def render_report(result: dict, *, ledger_path: Optional[str]) -> str:
         f"   current knobs: θ={stats.get('theta_current')} cap={stats.get('cap_current')} "
         "(DREAM_COFIRE_THETA / DREAM_MAX_APPLY_PER_PASS)"
     )
-    lines.append(
-        "   auto-apply is OFF (report-only) — the DRM-2 flip is a dated owner decision "
-        "after this calibration."
-    )
+    if apply_mode_default():
+        lines.append(
+            "   this was a report-only pass — the auto-apply default is ON (owner flip "
+            "2026-07-12): a bare pass applies Tier-A candidates above the calibrated bar."
+        )
+    else:
+        lines.append(
+            "   auto-apply is OFF (report-only) — the DRM-2 flip is a dated owner decision "
+            "after this calibration."
+        )
     return "\n".join(lines)
 
 
@@ -877,12 +883,15 @@ _ROUTED_KINDS = ("contradicts",)  # → the /hippo:resolve inbox, never auto
 
 
 def apply_mode_default() -> bool:
-    """Whether a bare pass auto-applies (``HIPPO_DREAM_APPLY``; SHIPPED DEFAULT: False).
+    """Whether a bare pass auto-applies (``HIPPO_DREAM_APPLY``; SHIPPED DEFAULT: True).
 
-    Flipping the shipped default is the owner's dated decision — change ``_SHIPPED_APPLY``
-    only alongside that date in ROADMAP.dream.yaml's owner_decisions.
+    FLIPPED ON by the dated owner decision 2026-07-12 (ROADMAP.dream.yaml
+    owner_decisions item 5), consuming the DRM-1 live-corpus calibration (θ=0.90, cap 5,
+    bridges-require-mutual — see ``apply_eligible``). ``HIPPO_DREAM_APPLY=0`` or
+    ``--dry-run`` opts a pass back to report-only; the default may only change again
+    alongside a new dated entry in owner_decisions.
     """
-    _SHIPPED_APPLY = False
+    _SHIPPED_APPLY = True
     raw = os.environ.get("HIPPO_DREAM_APPLY", "").strip()
     if not raw:
         return _SHIPPED_APPLY
@@ -1479,7 +1488,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         print(text)
         return code
-    if args.apply or (apply_mode_default() and not args.dry_run):
+    # --json is a READ surface (raw discovery dump) — it never applies unless --apply is
+    # explicit, regardless of the shipped default.
+    if args.apply or (apply_mode_default() and not args.dry_run and not args.json):
         code, text = run_apply_pass(
             memory_dir,
             args.index_dir,

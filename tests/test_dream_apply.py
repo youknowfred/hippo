@@ -69,15 +69,17 @@ def _apply(md, idx, td, **kw):
 
 
 # --------------------------------------------------------------------------- #
-# The shipped default is report-only — flipping it is a dated owner decision
+# The shipped default is Tier-A auto-apply — flipped by the DATED owner decision
+# 2026-07-12 (ROADMAP.dream.yaml owner_decisions item 5) consuming the DRM-1
+# calibration. Changing it again requires a new dated entry there.
 # --------------------------------------------------------------------------- #
-def test_shipped_default_is_report_only(monkeypatch):
+def test_shipped_default_is_auto_apply(monkeypatch):
     monkeypatch.delenv("HIPPO_DREAM_APPLY", raising=False)
-    assert dream.apply_mode_default() is False
-    monkeypatch.setenv("HIPPO_DREAM_APPLY", "1")
     assert dream.apply_mode_default() is True
     monkeypatch.setenv("HIPPO_DREAM_APPLY", "0")
-    assert dream.apply_mode_default() is False
+    assert dream.apply_mode_default() is False  # the explicit report-only opt-out
+    monkeypatch.setenv("HIPPO_DREAM_APPLY", "1")
+    assert dream.apply_mode_default() is True
 
 
 # --------------------------------------------------------------------------- #
@@ -476,10 +478,14 @@ def test_tool_dream_returns_digest(dirs, monkeypatch):
     _seed_sessions(td, 5)
     monkeypatch.setattr("memory.provenance.resolve_dirs", lambda: (md, os.path.dirname(md)))
 
-    out = M._tool_dream({"action": "pass"})
+    # apply: false is the explicit report-only override (zero writes).
+    before = _snapshot_corpus(md)
+    out = M._tool_dream({"action": "pass", "apply": False})
     assert "dream pass" in out and "REPORT-ONLY" in out
+    assert _snapshot_corpus(md) == before
 
-    out = M._tool_dream({"action": "pass", "apply": True})
+    # A bare pass follows the shipped default: auto-apply (owner flip 2026-07-12).
+    out = M._tool_dream({"action": "pass"})
     assert "applied" in out
 
     out = M._tool_dream({"action": "log"})

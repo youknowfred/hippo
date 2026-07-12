@@ -73,6 +73,15 @@ meta:
         MSR-5 (which is gated on unshipped MSR-1/SIG-6); written to the eval --ab <flag>
         shape so it converges if MSR-5 lands. (4) Aging window = 5 distinct sessions
         (reuse soak's bar; DREAM_AGE_SESSIONS override).
+    - date: 2026-07-12
+      decisions: >-
+        (5) THE TIER-A FLIP — auto-apply is now the SHIPPED DEFAULT, ratified after
+        reviewing the DRM-1 calibration (pass p20260712210214: θ=0.90, cap 5,
+        bridges-require-MUTUAL-co-fire; live pool 9 → empty-norm holds) and DRM-3's
+        PASS (multi-hop 0.0→1.0, control flat, OFF byte-identical, edge-attributed).
+        dream.apply_mode_default() → True; HIPPO_DREAM_APPLY=0 / --dry-run /
+        MCP apply:false opt a pass back to report-only. Changing the default again
+        requires a new dated entry here.
   corrections_binding:
     - >-
       secrets.py is WARN-NEVER-BLOCK by design (high precision over recall) — the
@@ -185,8 +194,9 @@ workstreams:
             (inv-DRM-empty-norm) holds. Owner may tighten to θ=0.93 (pool 4) or 0.95
             (pool 3) at flip time.
           flip_status: >-
-            Auto-apply default remains OFF (report-only shipped). The Tier-A flip is a
-            DATED OWNER DECISION consuming this note (owner_decisions item 1).
+            FLIPPED 2026-07-12 (owner_decisions item 5) at the calibrated bar — θ=0.90,
+            cap 5, bridges-require-mutual. Auto-apply is the shipped default;
+            HIPPO_DREAM_APPLY=0 / --dry-run opt back to report-only.
         source: {lens: generative-replay, verdict: NEW, convergence: 3, landscape: [foster-wilson-2006, dragoi-tonegawa-2011, hipporag, a-mem]}
         problem: >-
           consolidate's link refresh connects only already-similar (GRA-3) or
@@ -239,10 +249,10 @@ workstreams:
         effort: L
         status: done                   # 2026-07-12 — apply/undo/log in memory/dream.py; _tool_dream (mcp_server);
                                        # dream_applied_producer (session_start); check_dream_ledger (doctor);
-                                       # HIPPO_DREAM admission view in links.py. SHIPPED DEFAULT: report-only
-                                       # (apply_mode_default=False; --apply / HIPPO_DREAM_APPLY / MCP apply:true
-                                       # are the explicit paths) — the default flip AWAITS the dated owner
-                                       # decision consuming DRM-1's calibration note above.
+                                       # HIPPO_DREAM admission view in links.py. Shipped report-only first;
+                                       # the auto-apply default FLIPPED ON later the same day by the dated
+                                       # owner decision (owner_decisions item 5) consuming DRM-1's
+                                       # calibration note above — HIPPO_DREAM_APPLY=0 / --dry-run opt out.
         source: {lens: reversible-autonomy, verdict: NEW, convergence: 3, landscape: [mem0-autonomous-writes, letta-sleep-2504, undo-over-confirm]}
         problem: >-
           hippo's write path is 100% HITL (propose->gate->apply); safe, but it leaves
