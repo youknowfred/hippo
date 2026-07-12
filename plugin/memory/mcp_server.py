@@ -293,6 +293,51 @@ _TOOLS = [
             },
         },
     },
+    # ------------------------------------------------------------------- #
+    # /dream (DRM-2) — the generative sleep pass as a model-invocable verb.
+    # Additive per STABILITY.md, like the setup tools above.
+    # ------------------------------------------------------------------- #
+    {
+        "name": "dream",
+        "description": (
+            "The generative sleep pass: replay the memory corpus against itself offline "
+            "and surface the latent graph edges consolidate can't reach (transitive "
+            "bridges, body-names-target-but-unlinked, undeclared refines), with co-fire "
+            "strength + provenance. Default is REPORT-ONLY (zero memory writes) — present "
+            "the digest to the user. action='pass' with apply=true runs the Tier-A "
+            "auto-apply loop (additive stamped edges, capped single-digit, secret-linted, "
+            "never committed, live in recall immediately) — only on the user's explicit "
+            "ask; the digest then includes the undo handles. action='undo' reverts the "
+            "latest pass (or edge_id for one edge), byte-exact, refusing on manual drift. "
+            "action='log' lists every dream edge (active / aged-in / undone). Offline "
+            "deliberate turn — never needed for ordinary recall."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["pass", "undo", "log"],
+                    "description": "pass = run a dream pass (default); undo = revert; log = list edges",
+                },
+                "apply": {
+                    "type": "boolean",
+                    "description": "with action='pass': auto-apply Tier-A edges this pass "
+                    "(reversible, capped; default false = report-only). Only set on the "
+                    "user's explicit ask — the shipped default stays report-only.",
+                },
+                "edge_id": {
+                    "type": "string",
+                    "description": "with action='undo': revert exactly this edge (e.g. p7-e2)",
+                },
+                "undo_since": {
+                    "type": "string",
+                    "description": "with action='undo': revert edges applied since an ISO "
+                    "date or within the last N distinct sessions",
+                },
+            },
+        },
+    },
 ]
 
 
@@ -816,6 +861,36 @@ def _tool_trust_corpus(args: Dict[str, Any]) -> str:
     )
 
 
+def _tool_dream(args: Dict[str, Any]) -> str:
+    """DRM-2: the /dream verb — pass (report or apply) / undo / log. Never raises upstream.
+
+    Report-only is this surface's default too; ``apply: true`` is the per-call, agent-gated
+    escalation (the same posture as new_memory's per-item writes — the SHIPPED default
+    stays report-only until the owner's dated flip). The apply path itself re-checks the
+    SEC-1 trust gate, the soak bar, and every per-edge precondition.
+    """
+    from .dream import render_log, run_apply_pass, run_report_pass, undo_edges
+    from .provenance import resolve_dirs
+
+    memory_dir, repo_root = resolve_dirs()
+    action = str(args.get("action") or "pass").strip().lower()
+    try:
+        if action == "log":
+            return render_log(memory_dir)
+        if action == "undo":
+            edge_id = str(args.get("edge_id") or "").strip() or None
+            since = str(args.get("undo_since") or "").strip() or None
+            _code, text = undo_edges(memory_dir, edge_id=edge_id, since=since)
+            return text
+        if bool(args.get("apply")):
+            _code, text = run_apply_pass(memory_dir, repo_root=repo_root)
+        else:
+            _code, text = run_report_pass(memory_dir)
+        return text
+    except Exception as exc:
+        return f"dream: pass failed ({exc}) — nothing was changed."
+
+
 _DISPATCH = {
     "recall": _tool_recall,
     "new_memory": _tool_new_memory,
@@ -826,6 +901,7 @@ _DISPATCH = {
     "bootstrap": _tool_bootstrap,
     "init": _tool_init,
     "trust_corpus": _tool_trust_corpus,
+    "dream": _tool_dream,
 }
 
 

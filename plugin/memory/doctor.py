@@ -927,6 +927,66 @@ def check_committed_usage_privacy(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"committed-usage privacy check failed: {exc}."}
 
 
+def check_dream_ledger(ctx: DoctorContext) -> Dict[str, str]:
+    """DRM-2: the corpus's on-disk ``dream: … edge=`` stamps must reconcile with the ledger.
+
+    Every auto-applied dream edge leaves BOTH an inline stamp and an ACTIVE
+    ``dream-ledger.jsonl`` line — grep-reconcilable by design. A stamp with no active
+    ledger line (hand-copied? ledger truncated?) or an active line with no stamp (stamp
+    hand-deleted instead of ``dream --undo``) means the audit record and the corpus
+    disagree — a loud ``fail``, per the roadmap's acceptance criterion (a silent mismatch
+    would defeat the reversibility story). Quiet ok when /dream has never applied here.
+    """
+    try:
+        import re as _re
+
+        from .dream import read_apply_ledger
+        from .provenance import _iter_memory_files
+
+        on_disk: set = set()
+        for path in _iter_memory_files(ctx.memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    for line in fh:
+                        if "<!-- dream:" in line:
+                            m = _re.search(r"edge=([\w-]+)", line)
+                            if m:
+                                on_disk.add(m.group(1))
+            except Exception:
+                continue
+        active = {
+            e.get("edge_id")
+            for e in read_apply_ledger(ctx.memory_dir)
+            if e.get("state") == "active"
+        }
+        if not on_disk and not active:
+            return {"status": "ok", "message": "no dream edges applied (nothing to reconcile)."}
+        orphans = sorted(on_disk - active)
+        ghosts = sorted(active - on_disk)
+        if not orphans and not ghosts:
+            return {
+                "status": "ok",
+                "message": f"{len(active)} dream edge stamp(s) reconcile with dream-ledger.jsonl.",
+            }
+        parts = []
+        if orphans:
+            parts.append(
+                f"{len(orphans)} on-disk stamp(s) with no ACTIVE ledger line: {', '.join(orphans[:5])}"
+            )
+        if ghosts:
+            parts.append(
+                f"{len(ghosts)} active ledger edge(s) with no on-disk stamp: {', '.join(ghosts[:5])}"
+            )
+        return {
+            "status": "fail",
+            "message": "dream stamp/ledger MISMATCH — " + "; ".join(parts) + ". Reconcile "
+            "via `python -m memory.dream --log` (+ --undo for stray edges) or git history; "
+            "never hand-edit stamped lines.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"dream-ledger check failed: {exc}."}
+
+
 # GRA-3: a corpus this small (< 5 memories) genuinely may have nothing worth cross-linking yet
 # — the nudge below is about a corpus that has GROWN without ever discovering [[wikilinks]],
 # not about a brand-new project's first couple of files.
@@ -1538,6 +1598,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("fill_me", check_fill_me),
     ("secrets", check_secrets),
     ("link_density", check_link_density),
+    ("dream_ledger", check_dream_ledger),  # DRM-2: on-disk dream stamps ↔ dream-ledger.jsonl reconcile
     ("non_english_corpus", check_non_english_corpus),
     ("mcp_launch", check_mcp_launch),  # INT-8: the stdio MCP server (bin/hippo mcp) actually starts
     ("committed_usage_privacy", check_committed_usage_privacy),  # SEC-14: TEA-5 usage on a shared remote

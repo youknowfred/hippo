@@ -847,6 +847,542 @@ def render_report(result: dict, *, ledger_path: Optional[str]) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# DRM-2 — Tier-A auto-apply (apply-reversibly → notify → undo-window → age-in)
+#
+# The loop DRM-2.spec.md specifies. AUTO-APPLY IS NOT THE SHIPPED DEFAULT: a pass applies
+# only when explicitly asked (--apply / MCP apply:true) or when HIPPO_DREAM_APPLY is set —
+# the default flip is a DATED OWNER DECISION consuming DRM-1's calibration (owner_decisions
+# item 1; do not flip it in code without that date). Every applied edge is:
+#   - additive + body-prose-preserving: a stamped line inside the machine-managed
+#     dream:links block (bridge/completion), or additive refines frontmatter via
+#     links.add_typed_relation plus a comment stamp in the block;
+#   - capped (DREAM_MAX_APPLY_PER_PASS ≤ 9) and θ/mutuality-gated (apply_eligible);
+#   - secret-linted with a HARD BLOCK (the owner-ratified 2026-07-12 deviation from
+#     secrets.py's WARN-never-BLOCK, scoped to THIS write path only — dream GENERATES
+#     text; it does not transcribe user intent);
+#   - provenance-complete in the committed append-only dream-ledger.jsonl, with an inline
+#     pass=/edge= stamp so grep reconciles corpus against ledger (doctor checks this);
+#   - live immediately (working tree + index rebuild) but NEVER auto-committed — git
+#     history stays the owner's (DREAM-KILL-2);
+#   - mechanically undoable byte-for-byte (--undo / --undo <id> / --undo-since), with
+#     refuse-on-drift: a stamped line or frontmatter region edited by hand since apply is
+#     never clobbered.
+# --------------------------------------------------------------------------- #
+_TIER_A_KINDS = ("completion", "bridge", "refines")
+# Tier-C routing (DREAM-KILL-1): these kinds are NEVER auto-applied. Today's generator
+# does not emit them; the routing is enforced here anyway so a future/hand-fed candidate
+# stream cannot slip one through the apply path.
+_GATED_KINDS = ("supersedes",)   # → surfaced in the digest, applied only by explicit owner action
+_ROUTED_KINDS = ("contradicts",)  # → the /hippo:resolve inbox, never auto
+
+
+def apply_mode_default() -> bool:
+    """Whether a bare pass auto-applies (``HIPPO_DREAM_APPLY``; SHIPPED DEFAULT: False).
+
+    Flipping the shipped default is the owner's dated decision — change ``_SHIPPED_APPLY``
+    only alongside that date in ROADMAP.dream.yaml's owner_decisions.
+    """
+    _SHIPPED_APPLY = False
+    raw = os.environ.get("HIPPO_DREAM_APPLY", "").strip()
+    if not raw:
+        return _SHIPPED_APPLY
+    return raw not in ("0", "false", "False")
+
+
+def _sanitize_stamp_text(s: str, limit: int = 60) -> str:
+    """Stamp-safe text: quotes/newlines/comment-closers stripped, bounded."""
+    s = (s or "").replace('"', "'").replace("\n", " ").replace("-->", "")
+    return s[:limit].strip()
+
+
+def _stamp_line(edge_id: str, pass_id: str, cand: dict) -> str:
+    """The exact on-disk line for one applied edge (the grep-able provenance stamp)."""
+    q = _sanitize_stamp_text(cand.get("query") or "")
+    cof = float(cand.get("cofire") or 0.0)
+    if cand["kind"] == "refines":
+        # Deliberately bracket-free: the edge itself lives in frontmatter; this comment is
+        # the stamp only, and must never read as an untyped wikilink edge.
+        return (
+            f"<!-- dream: refines {cand['target']} · pass={pass_id} · edge={edge_id}"
+            f" · cofire={cof:.2f} -->"
+        )
+    return (
+        f"[[{cand['target']}]] <!-- dream: {cand['kind']} · pass={pass_id} · edge={edge_id}"
+        f" · cofire={cof:.2f}" + (f' · q="{q}"' if q else "") + " -->"
+    )
+
+
+def _insert_block_line(text: str, line: str) -> Tuple[str, dict]:
+    """Insert ``line`` into the dream:links block (creating it at EOF if absent).
+
+    Returns ``(new_text, undo_record)``. The undo record captures EXACTLY what was added:
+    ``{"inserted": <line+newline>, "wrapper": bool, "lead": <bytes prepended before the
+    block>}`` — enough to reverse this edit byte-for-byte, alone or in reverse-order
+    composition with the pass's other edits.
+    """
+    from .links import DREAM_BLOCK_CLOSE, DREAM_BLOCK_OPEN
+
+    close_marker = DREAM_BLOCK_CLOSE + "\n"
+    if DREAM_BLOCK_OPEN in text and close_marker in text:
+        idx = text.rindex(close_marker)
+        new_text = text[:idx] + line + "\n" + text[idx:]
+        return new_text, {"inserted": line + "\n", "wrapper": False, "lead": ""}
+    lead = "" if text.endswith("\n") else "\n"
+    appended = f"{lead}{DREAM_BLOCK_OPEN}\n{line}\n{DREAM_BLOCK_CLOSE}\n"
+    return text + appended, {"inserted": line + "\n", "wrapper": True, "lead": lead}
+
+
+def _frontmatter_region(text: str) -> Optional[Tuple[int, int, List[str]]]:
+    """``(start_line, end_line, fm_lines)`` of the frontmatter body (between fences)."""
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            return 1, i, lines[1:i]
+    return None
+
+
+def _apply_one(
+    memory_dir: str, cand: dict, edge_id: str, pass_id: str
+) -> Tuple[bool, str, Optional[dict]]:
+    """Apply ONE Tier-A candidate to the working tree. ``(ok, reason, undo_record)``.
+
+    The undo record is what the ledger persists so --undo can reverse this exact edit:
+      - bridge/completion: ``{"file", "block": {inserted, wrapper, lead}}``
+      - refines:           ``{"file", "block": {...stamp...}, "fm_before", "fm_after"}``
+    Nothing is written unless every part of the edit can proceed (per-edge atomicity).
+    """
+    from .links import add_typed_relation, parse_typed_relations
+
+    src_path = os.path.join(memory_dir, cand["source"] + ".md")
+    try:
+        with open(src_path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+    except Exception as exc:
+        return False, f"source unreadable: {exc}", None
+
+    line = _stamp_line(edge_id, pass_id, cand)
+
+    if cand["kind"] in ("completion", "bridge"):
+        # Idempotency re-check against CURRENT text (the discovery snapshot may be stale).
+        if cand["target"] in parse_wikilinks(text):
+            return False, "edge already present (wikilink)", None
+        new_text, block_rec = _insert_block_line(text, line)
+        try:
+            with open(src_path, "w", encoding="utf-8") as fh:
+                fh.write(new_text)
+        except Exception as exc:
+            return False, f"write failed: {exc}", None
+        return True, "", {"file": os.path.basename(src_path), "block": block_rec}
+
+    if cand["kind"] == "refines":
+        fm = parse_frontmatter(text)
+        existing = parse_typed_relations(fm).get("refines", [])
+        if normalize_slug(cand["target"]) in {normalize_slug(t) for t in existing}:
+            return False, "edge already present (refines)", None
+        region_before = _frontmatter_region(text)
+        if region_before is None:
+            return False, "no frontmatter — cannot write a typed relation", None
+        res = add_typed_relation(src_path, "refines", cand["target"])
+        if res.get("error") or not res.get("changed"):
+            return False, res.get("error") or "add_typed_relation was a no-op", None
+        try:
+            with open(src_path, "r", encoding="utf-8") as fh:
+                after_fm_text = fh.read()
+        except Exception as exc:
+            return False, f"re-read failed after frontmatter write: {exc}", None
+        region_after = _frontmatter_region(after_fm_text)
+        new_text, block_rec = _insert_block_line(after_fm_text, line)
+        try:
+            with open(src_path, "w", encoding="utf-8") as fh:
+                fh.write(new_text)
+        except Exception as exc:
+            return False, f"write failed: {exc}", None
+        return True, "", {
+            "file": os.path.basename(src_path),
+            "block": block_rec,
+            "fm_before": region_before[2],
+            "fm_after": region_after[2] if region_after else [],
+        }
+
+    return False, f"kind {cand.get('kind')!r} is not Tier-A", None
+
+
+def run_apply_pass(
+    memory_dir: str,
+    index_dir: Optional[str] = None,
+    telemetry_dir: Optional[str] = None,
+    *,
+    probe_k: Optional[int] = None,
+    max_seeds: Optional[int] = None,
+    repo_root: Optional[str] = None,
+) -> Tuple[int, str]:
+    """The DRM-2 loop: discover → gate → apply (capped) → stamp+ledger → digest.
+
+    Preconditions before ANY write (all must hold; each refusal is named in the digest):
+    soak bar met; corpus trusted (SEC-1 — autonomy never extends to an unreviewed corpus);
+    per-edge: Tier-A kind above the calibrated bar, endpoints non-floor/non-draft, edge not
+    already present, secret-lint CLEAN on every generated byte (hard BLOCK — the ratified
+    dream-path deviation), provenance complete. Effect is immediate (working tree + index
+    rebuild); the commit stays the owner's.
+    """
+    from . import trust
+    from .secrets import scan_text
+    from .telemetry import current_session_id
+
+    td = telemetry_dir or default_telemetry_dir(memory_dir)
+
+    # SEC-1: the write path refuses on an untrusted corpus (report-only remains available —
+    # like doctor, it is a pre-consent-safe analysis).
+    gate_root = trust.gate_repo_root(memory_dir, repo_root)
+    if gate_root is not None and not trust.is_trusted(gate_root):
+        return 1, (
+            "🌙 dream: APPLY REFUSED — this corpus is untrusted (SEC-1). Review and trust "
+            "it first (/hippo:doctor → trust flow); the report-only pass (--dry-run) "
+            "remains available."
+        )
+
+    result = discover(memory_dir, index_dir, td, probe_k=probe_k, max_seeds=max_seeds)
+    if result["status"] != "ok":
+        return (1 if result["status"] == "no-index" else 0), render_report(
+            result, ledger_path=None
+        )
+    write_candidate_ledger(td, result["pass_id"], result["candidates"])
+
+    pass_id = result["pass_id"]
+    theta = cofire_theta()
+    cap = max_apply_per_pass()
+    soak = result.get("soak") or {}
+    distinct_now = int(soak.get("distinct_sessions") or 0)
+    session_id = current_session_id(td)
+
+    gated = [c for c in result["candidates"] if c.get("kind") in _GATED_KINDS]
+    routed = [c for c in result["candidates"] if c.get("kind") in _ROUTED_KINDS]
+    eligible = [
+        c
+        for c in result["candidates"]
+        if c.get("kind") in _TIER_A_KINDS and apply_eligible(c, theta=theta)
+    ]
+
+    applied: List[dict] = []
+    refused: List[Tuple[dict, str]] = []
+    ledger_lines: List[dict] = []
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    for cand in eligible:
+        if len(applied) >= cap:
+            break
+        edge_id = f"{pass_id}-e{len(applied) + 1}"
+        ledger_row = {
+            "edge_id": edge_id,
+            "pass": pass_id,
+            "kind": cand["kind"],
+            "source": cand["source"],
+            "target": cand["target"],
+            "cofire": cand.get("cofire"),
+            "firing_query": cand.get("query") or "",
+            "derives_from": [cand["source"], cand["target"]],
+            "applied_at_session": session_id,
+            "applied_at_distinct_count": distinct_now,
+            "applied_at_ts": now_iso,
+            "state": "active",
+        }
+        # Provenance completeness is a hard precondition (DRM-2.spec.md §2): an edge with
+        # a missing field is rejected pre-write.
+        if not all(
+            ledger_row.get(k) not in (None, "")
+            for k in ("edge_id", "pass", "kind", "source", "target")
+        ) or ledger_row.get("cofire") is None:
+            refused.append((cand, "incomplete provenance"))
+            continue
+        # HARD secret BLOCK over every byte this edge would put on disk or in the ledger —
+        # the stamp line AND the ledger row (the firing query flows into both). Ratified
+        # dream-path deviation from secrets.py's WARN default: REFUSED, not warned.
+        rationale = _stamp_line(edge_id, pass_id, cand) + "\n" + json.dumps(
+            ledger_row, ensure_ascii=False
+        )
+        findings = scan_text(rationale)
+        if findings:
+            refused.append((cand, f"secret lint BLOCK: {'; '.join(findings)}"))
+            continue
+        ok, reason, undo_rec = _apply_one(memory_dir, cand, edge_id, pass_id)
+        if not ok:
+            refused.append((cand, reason))
+            continue
+        ledger_row["undo"] = undo_rec
+        ledger_lines.append(ledger_row)
+        applied.append({**cand, "edge_id": edge_id})
+
+    if ledger_lines:
+        try:
+            with open(apply_ledger_path(memory_dir), "a", encoding="utf-8") as fh:
+                for row in ledger_lines:
+                    fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except Exception as exc:
+            # A ledger append failure after a write would orphan stamps — undo the pass.
+            for row in reversed(ledger_lines):
+                _undo_one_edge(memory_dir, row)
+            return 1, f"🌙 dream: ledger append FAILED ({exc}) — pass rolled back, nothing applied."
+        _refresh_index_quiet(memory_dir, index_dir)
+
+    # ---- digest -------------------------------------------------------------------- #
+    lines = [
+        f"🌙 dream pass {pass_id} — applied {len(applied)} edge(s) "
+        f"(uncommitted, live in recall; cap {cap}, θ={theta:g}):"
+    ]
+    if not applied:
+        lines[0] = (
+            f"🌙 dream pass {pass_id} — applied 0 edges (cap {cap}, θ={theta:g}): "
+            "no candidate cleared the Tier-A bar. Empty is the norm."
+        )
+    glyph = {"bridge": "↔", "completion": "↔", "refines": "→"}
+    for a in applied:
+        q = (a.get("query") or "")[:40]
+        lines.append(
+            f"  • {a['source']} {glyph.get(a['kind'], '→')} {a['target']}   {a['kind']}"
+            f"  (cofire {float(a.get('cofire') or 0):.2f}"
+            + (f', q:"{q}"' if q else "")
+            + f")  [{a['edge_id']}]"
+        )
+    for cand, reason in refused:
+        lines.append(
+            f"  ✘ refused {cand['source']} → {cand['target']} ({cand['kind']}): {reason}"
+        )
+    if gated:
+        lines.append(
+            f"  ⛔ {len(gated)} supersedes candidate(s) GATED — never auto-applied; apply "
+            "only by explicit owner action:"
+        )
+        for c in gated[:5]:
+            lines.append(f"     • {c['source']} supersedes {c['target']} (cofire {c['cofire']:.2f})")
+    if routed:
+        lines.append(
+            f"  ↪ {len(routed)} contradicts candidate(s) routed to /hippo:resolve — never auto."
+        )
+    if applied:
+        lines.append(
+            f"  reply `undo` to revert all · `undo <edge-id>` for one · they age into "
+            f"/dream's trusted source set after {age_sessions()} sessions"
+        )
+    return 0, "\n".join(lines)
+
+
+def _refresh_index_quiet(memory_dir: str, index_dir: Optional[str]) -> None:
+    try:
+        from .build_index import default_index_dir, refresh_index
+
+        refresh_index(memory_dir, index_dir or default_index_dir(memory_dir))
+    except Exception:
+        pass
+
+
+# --------------------------------------------------------------------------- #
+# DRM-2 — undo (git-native reversibility, made one command)
+# --------------------------------------------------------------------------- #
+def _undo_one_edge(memory_dir: str, edge: dict) -> Tuple[bool, str]:
+    """Reverse ONE applied edge's exact edit. ``(ok, reason)``; refuse-on-drift.
+
+    Mechanics mirror apply in reverse, verified byte-exactly before any write:
+      1. the stamped block line must exist EXACTLY as inserted (else: manual drift → refuse);
+      2. for refines, the current frontmatter region must equal the recorded ``fm_after``
+         (else drift → refuse) and is replaced with ``fm_before``;
+      3. after removing the line, a block THIS edge created is removed entirely IF no other
+         dream line remains in it (restoring the pre-pass bytes).
+    A refusal writes NOTHING for this edge (report-then-skip, never clobber a human edit).
+    """
+    undo = edge.get("undo") or {}
+    fname = undo.get("file")
+    block = undo.get("block") or {}
+    inserted = block.get("inserted")
+    if not fname or not inserted:
+        return False, "ledger row carries no undo record"
+    path = os.path.join(memory_dir, fname)
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+    except Exception as exc:
+        return False, f"unreadable: {exc}"
+
+    if text.count(inserted) != 1:
+        return False, "stamped line missing or altered on disk (manual drift) — refusing"
+
+    new_text = text
+    # Refines: reverse the frontmatter edit first (verified against the recorded state).
+    if "fm_before" in undo:
+        region = _frontmatter_region(new_text)
+        if region is None:
+            return False, "frontmatter missing (manual drift) — refusing"
+        start, end, fm_lines = region
+        if fm_lines != undo.get("fm_after"):
+            return False, "frontmatter drifted since apply — refusing (undo it by hand or git)"
+        all_lines = new_text.split("\n")
+        new_text = "\n".join(all_lines[:start] + list(undo["fm_before"]) + all_lines[end:])
+        if new_text.count(inserted) != 1:
+            return False, "stamp line lost while reversing frontmatter — refusing"
+
+    new_text = new_text.replace(inserted, "", 1)
+
+    # Remove a block this edge created if nothing else lives in it now.
+    from .links import DREAM_BLOCK_CLOSE, DREAM_BLOCK_OPEN
+
+    if block.get("wrapper"):
+        empty_block = f"{block.get('lead', '')}{DREAM_BLOCK_OPEN}\n{DREAM_BLOCK_CLOSE}\n"
+        if empty_block in new_text:
+            new_text = new_text.replace(empty_block, "", 1)
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(new_text)
+    except Exception as exc:
+        return False, f"write failed: {exc}"
+    return True, ""
+
+
+def undo_edges(
+    memory_dir: str,
+    index_dir: Optional[str] = None,
+    *,
+    edge_id: Optional[str] = None,
+    since: Optional[str] = None,
+) -> Tuple[int, str]:
+    """``--undo`` (latest pass) / ``--undo <edge-id>`` / ``--undo-since <ISO date|N>``.
+
+    Reverts in reverse-apply order (so same-file edits compose back byte-for-byte), appends
+    superseding ``state: "undone"`` ledger lines (append-only audit — history intact), and
+    rebuilds the index. Refuse-on-drift is PER EDGE: a hand-edited stamp refuses with a
+    report while clean edges still revert; exit 1 signals any refusal.
+    """
+    ledger = read_apply_ledger(memory_dir)
+    active = [e for e in ledger if e.get("state") == "active"]
+    if not active:
+        return 0, "🌙 dream --undo: no active dream edges to revert."
+
+    if edge_id:
+        targets = [e for e in active if e.get("edge_id") == edge_id]
+        if not targets:
+            return 1, f"🌙 dream --undo: no ACTIVE edge {edge_id!r} (see dream --log)."
+    elif since:
+        if re.fullmatch(r"\d+", since):
+            # last N distinct sessions, via the same derived count aging uses
+            td = default_telemetry_dir(memory_dir)
+            now = int(soak_status(td, memory_dir=memory_dir).get("distinct_sessions") or 0)
+            window = int(since)
+            targets = [
+                e
+                for e in active
+                if isinstance(e.get("applied_at_distinct_count"), int)
+                and now - e["applied_at_distinct_count"] < window
+            ]
+        else:
+            targets = [e for e in active if str(e.get("applied_at_ts") or "") >= since]
+        if not targets:
+            return 0, f"🌙 dream --undo-since {since}: nothing in that window."
+    else:
+        last_pass = active[-1].get("pass")
+        targets = [e for e in active if e.get("pass") == last_pass]
+
+    undone: List[dict] = []
+    refused: List[Tuple[dict, str]] = []
+    for edge in reversed(targets):
+        ok, reason = _undo_one_edge(memory_dir, edge)
+        (undone if ok else refused).append((edge, reason) if not ok else edge)
+
+    if undone:
+        now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        try:
+            with open(apply_ledger_path(memory_dir), "a", encoding="utf-8") as fh:
+                for edge in undone:
+                    fh.write(
+                        json.dumps(
+                            {
+                                "edge_id": edge["edge_id"],
+                                "pass": edge.get("pass"),
+                                "state": "undone",
+                                "undone_at_ts": now_iso,
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+        except Exception as exc:
+            return 1, f"🌙 dream --undo: reverted {len(undone)} edge(s) but the ledger append failed: {exc}"
+        _refresh_index_quiet(memory_dir, index_dir)
+
+    lines = [f"🌙 dream --undo: reverted {len(undone)} edge(s)" + (":" if undone else ".")]
+    for edge in undone:
+        lines.append(f"  • {edge['edge_id']}  {edge.get('source')} ↔ {edge.get('target')} restored")
+    for edge, reason in refused:
+        lines.append(f"  ✘ {edge.get('edge_id')}: {reason}")
+    if refused:
+        lines.append("  (refused edges are untouched — resolve by hand or `git checkout`.)")
+    return (1 if refused else 0), "\n".join(lines)
+
+
+def render_log(memory_dir: str) -> str:
+    """``dream --log``: every edge's current state (active / aged-in / undone), oldest first."""
+    ledger = read_apply_ledger(memory_dir)
+    if not ledger:
+        return "🌙 dream --log: no dream edges have ever been applied here."
+    td = default_telemetry_dir(memory_dir)
+    now = int(soak_status(td, memory_dir=memory_dir).get("distinct_sessions") or 0)
+    lines = [f"🌙 dream --log — {len(ledger)} edge(s), distinct sessions now {now}:"]
+    for e in ledger:
+        state = e.get("state")
+        if state == "active":
+            state = "aged-in" if edge_aged_in(e, now) else (
+                f"active ({max(0, age_sessions() - (now - e.get('applied_at_distinct_count', now)))}"
+                " session(s) to age-in)"
+            )
+        lines.append(
+            f"  • {e.get('edge_id')}  {e.get('source')} → {e.get('target')}  "
+            f"{e.get('kind')}  cofire={e.get('cofire')}  [{state}]"
+        )
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
+# DRM-2 — the SessionStart notify surface (deferred half of notify-with-undo)
+# --------------------------------------------------------------------------- #
+_PRODUCER_MAX_ITEMS = 20
+
+
+def dream_applied_producer(memory_dir: str, repo_root: str, ctx=None) -> Optional[str]:
+    """SessionStart producer: dream edges applied but NOT yet aged in, with the undo handle.
+
+    Aged-in edges drop off (implicit ratification by non-undo — they are trusted now);
+    undone edges never appear. Silent (None) when there is nothing in the window, exactly
+    like every other quiet-by-default producer. ``ctx`` (LIF-6 RunContext) is unused —
+    declared so every producer shares ONE call shape. Read-only; never raises.
+    """
+    try:
+        ledger = read_apply_ledger(memory_dir)
+        active = [e for e in ledger if e.get("state") == "active"]
+        if not active:
+            return None
+        td = default_telemetry_dir(memory_dir)
+        now = int(soak_status(td, memory_dir=memory_dir).get("distinct_sessions") or 0)
+        fresh = [e for e in active if not edge_aged_in(e, now)]
+        if not fresh:
+            return None
+        window = age_sessions()
+        lines = [
+            f"🌙 dream applied {len(fresh)} edge(s) awaiting age-in (each becomes trusted "
+            f"/dream source after {window} sessions un-undone; revert any with "
+            "`python -m memory.dream --undo <edge-id>` or all recent with --undo-since):"
+        ]
+        for e in fresh[:_PRODUCER_MAX_ITEMS]:
+            left = window - (now - e.get("applied_at_distinct_count", now))
+            lines.append(
+                f"  • {e.get('edge_id')}  {e.get('source')} → {e.get('target')} "
+                f"({e.get('kind')}, cofire {e.get('cofire')}, {max(0, left)} session(s) left)"
+            )
+        if len(fresh) > _PRODUCER_MAX_ITEMS:
+            lines.append(f"  …and {len(fresh) - _PRODUCER_MAX_ITEMS} more (dream --log).")
+        return "\n".join(lines)
+    except Exception:
+        return None
+
+
+# --------------------------------------------------------------------------- #
 # Pass orchestration + CLI
 # --------------------------------------------------------------------------- #
 def run_report_pass(
@@ -891,8 +1427,32 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="explicit report-only pass (the shipped default — no flag needed; kept for "
-        "legibility and forward-compat with the DRM-2 apply mode)",
+        help="explicit report-only pass (the shipped default — auto-apply is OFF pending "
+        "the dated owner flip; see ROADMAP.dream.yaml owner_decisions)",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="run the DRM-2 Tier-A auto-apply loop this pass (capped, θ/mutuality-gated, "
+        "stamped, undoable; never commits). Also enabled by HIPPO_DREAM_APPLY=1.",
+    )
+    parser.add_argument(
+        "--undo",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="EDGE_ID",
+        help="revert applied dream edges: bare --undo reverts the latest pass; "
+        "--undo <edge-id> exactly one. Byte-exact; refuses on manual drift.",
+    )
+    parser.add_argument(
+        "--undo-since",
+        default=None,
+        metavar="DATE|N",
+        help="revert edges applied since an ISO date, or within the last N distinct sessions",
+    )
+    parser.add_argument(
+        "--log", action="store_true", help="list every dream edge (active / aged-in / undone)"
     )
     parser.add_argument("--probe-k", type=int, default=None, help="co-fire probe depth (default 10)")
     parser.add_argument(
@@ -906,6 +1466,29 @@ def main(argv: Optional[List[str]] = None) -> int:
     memory_dir = args.memory_dir
     if memory_dir is None:
         memory_dir, _ = resolve_dirs()
+
+    if args.log:
+        print(render_log(memory_dir))
+        return 0
+    if args.undo is not None or args.undo_since:
+        code, text = undo_edges(
+            memory_dir,
+            args.index_dir,
+            edge_id=(args.undo or None),
+            since=args.undo_since,
+        )
+        print(text)
+        return code
+    if args.apply or (apply_mode_default() and not args.dry_run):
+        code, text = run_apply_pass(
+            memory_dir,
+            args.index_dir,
+            args.telemetry_dir,
+            probe_k=args.probe_k,
+            max_seeds=args.max_seeds,
+        )
+        print(text)
+        return code
 
     if args.json:
         td = args.telemetry_dir or default_telemetry_dir(memory_dir)

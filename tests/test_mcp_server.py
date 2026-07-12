@@ -74,12 +74,14 @@ def test_initialize_defaults_protocol_when_absent():
 _FROZEN_TOOLS = ["recall", "new_memory", "traverse", "why", "decision_history"]
 # Additive post-1.0 tools (INT-9..12): the setup flows, for surfaces without typed /hippo:*.
 _SETUP_TOOLS = ["doctor", "bootstrap", "init", "trust_corpus"]
+# Additive verb tools: /dream (DRM-2) — the generative sleep pass with notify-with-undo.
+_VERB_TOOLS = ["dream"]
 
 
 def test_tools_list_exposes_frozen_five_plus_setup_tools():
     resp = M.handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     names = [t["name"] for t in resp["result"]["tools"]]
-    assert names == _FROZEN_TOOLS + _SETUP_TOOLS
+    assert names == _FROZEN_TOOLS + _SETUP_TOOLS + _VERB_TOOLS
     for t in resp["result"]["tools"]:
         assert t["inputSchema"]["type"] == "object"  # every tool has a JSON schema
 

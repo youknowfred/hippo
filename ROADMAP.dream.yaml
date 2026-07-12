@@ -237,7 +237,12 @@ workstreams:
         title: Tier-A auto-apply + MCP notify-with-undo + the aging firewall
         priority: P1
         effort: L
-        status: planned
+        status: done                   # 2026-07-12 — apply/undo/log in memory/dream.py; _tool_dream (mcp_server);
+                                       # dream_applied_producer (session_start); check_dream_ledger (doctor);
+                                       # HIPPO_DREAM admission view in links.py. SHIPPED DEFAULT: report-only
+                                       # (apply_mode_default=False; --apply / HIPPO_DREAM_APPLY / MCP apply:true
+                                       # are the explicit paths) — the default flip AWAITS the dated owner
+                                       # decision consuming DRM-1's calibration note above.
         source: {lens: reversible-autonomy, verdict: NEW, convergence: 3, landscape: [mem0-autonomous-writes, letta-sleep-2504, undo-over-confirm]}
         problem: >-
           hippo's write path is 100% HITL (propose->gate->apply); safe, but it leaves

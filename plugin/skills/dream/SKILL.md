@@ -59,16 +59,36 @@ Useful knobs (env or flags): `--probe-k <n>` co-fire probe depth (default 10),
 `DREAM_MAX_APPLY_PER_PASS` — the auto-apply calibration knobs the report's θ sweep feeds
 (they gate nothing in report-only mode).
 
-## Acting on candidates (today: by hand, per item)
+## Applying edges (Tier-A auto-apply — explicit, reversible, capped)
 
-Until the owner flips Tier-A auto-apply on (a dated decision, post-calibration), treat the
-report as a worklist for the existing per-item write paths:
+The DRM-2 loop exists behind an explicit ask (the *default* stays report-only until the
+owner's dated flip): on the user's request to apply, run
 
-- a **completion / bridge** you agree with → add the `[[wikilink]]` to the source memory's
-  body yourself (one edit, reviewable in git);
-- a **refines** you agree with → `"$PY" -c "from memory.links import add_typed_relation; ..."`
-  or edit the frontmatter directly — additive, body-preserving;
-- anything that smells like a *supersede/contradiction* is out of dream's lane — route it
-  through `/hippo:resolve`.
+```
+"$PY" -m memory.dream --apply
+```
 
-Never bulk-apply the whole ledger — per-item judgment is the point of the gate.
+It auto-applies ONLY the Tier-A class — additive, body-prose-preserving, ranking-only:
+bridges/completions as stamped `[[wikilinks]]` inside a machine-managed
+`<!-- dream:links -->` block, refines as additive frontmatter — capped single-digit per
+pass (`DREAM_MAX_APPLY_PER_PASS`, default 5, hard max 9), θ/mutuality-gated, secret-linted
+with a **hard block** (the one ratified deviation from hippo's warn-only lint), each edge
+stamped `pass=`/`edge=` and recorded in the committed append-only
+`.claude/memory/dream-ledger.jsonl`. Edges are live in recall immediately (index rebuilt)
+but **never committed** — git history stays the owner's. Present the digest verbatim,
+including the undo handles. Supersedes candidates are digest-gated (never auto);
+contradicts route to `/hippo:resolve`.
+
+Undo is one command, byte-exact, drift-refusing; applied edges age into /dream's own
+source set only after 5 un-undone sessions (`DREAM_AGE_SESSIONS`):
+
+```
+"$PY" -m memory.dream --undo              # revert the latest pass
+"$PY" -m memory.dream --undo <edge-id>    # revert exactly one edge
+"$PY" -m memory.dream --undo-since <N|date>
+"$PY" -m memory.dream --log               # every edge: active / aged-in / undone
+```
+
+Prefer per-item hand-application when the user wants to review each edge: a
+**completion/bridge** is one `[[wikilink]]` added to the source body; a **refines** is
+additive frontmatter. Never bulk-apply the whole ledger by hand — the cap is the point.
