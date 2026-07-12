@@ -14,3 +14,6 @@ __pycache__/
 !.env.example
 .claude/settings.local.json
 .claude/*.local.json
+.claude/.memory-index/
+.claude/.memory-telemetry/
+.claude/memory.local/
