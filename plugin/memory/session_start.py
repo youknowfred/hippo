@@ -75,6 +75,59 @@ from .staleness import (
 _MAX_CONTEXT_CHARS = 9000
 _MAX_ITEMS_PER_PRODUCER = 20
 
+# Typed /hippo:* commands exist only in the Claude Code terminal CLI. The Claude Desktop
+# app (CLAUDE_CODE_ENTRYPOINT=claude-desktop, present in the hook env) runs the same
+# hooks/skills/MCP server but REJECTS typed plugin commands — so producer advice like
+# "run /hippo:doctor" dead-ends there. Rather than fork every producer's wording, the
+# dispatcher appends ONE mapping note when (a) the merged context names a /hippo:* command
+# and (b) the surface is the Desktop app — the same append-a-suffix shape the MCP doctor
+# tool already uses. Producers stay byte-identical for a given corpus state (the DOC-4
+# determinism posture); the note is keyed deterministically on env state.
+_DESKTOP_ENTRYPOINT = "claude-desktop"
+_DESKTOP_SURFACE_NOTE = (
+    "⌨ Surface note: this session is the Claude Desktop app — typed /hippo:* commands are "
+    "terminal-only and will not work here. When acting on (or relaying) any /hippo:* advice "
+    "above, use the Desktop equivalents: /hippo:bootstrap → the hippo bootstrap MCP tool, "
+    "/hippo:init → the init tool, /hippo:doctor → the doctor tool (trust/re-consent → the "
+    "trust_corpus tool); the other verbs (consolidate, resolve, audit, new, recall, why) run "
+    'as hippo skills — invoke them directly, or the user asks in plain words (e.g. '
+    '"consolidate memory").'
+)
+
+
+def _surface_note(ctx: str) -> str:
+    """The Desktop mapping note for a merged context that names typed ``/hippo:*`` commands.
+
+    Empty (the common case) unless BOTH hold: the context mentions a ``/hippo:`` command
+    somewhere, and this process runs under the Claude Desktop app's harness. Reading the
+    entrypoint from the env at call time keeps the output deterministic per surface —
+    the same corpus state renders the same bytes on the same surface.
+    """
+    if "/hippo:" not in ctx:
+        return ""
+    if (os.environ.get("CLAUDE_CODE_ENTRYPOINT") or "").strip() != _DESKTOP_ENTRYPOINT:
+        return ""
+    return _DESKTOP_SURFACE_NOTE
+
+
+def _bound_with_surface_note(ctx: str, max_chars: int) -> str:
+    """Bound the merged context and append the Desktop surface note when it applies.
+
+    The note's budget is reserved BEFORE truncation so appending it can never push the
+    output past ``max_chars`` — and the note is dropped entirely (never truncated into
+    garbage) when ``max_chars`` is too small to carry both it and a useful signal. With
+    no note this reduces exactly to the old bound: byte-identical terminal output.
+    """
+    if not ctx:
+        return ""
+    note = _surface_note(ctx)
+    if note and len(note) + 200 > max_chars:
+        note = ""  # never let the mapping note crowd out the signal itself
+    budget = max_chars - (len(note) + 2 if note else 0)
+    if len(ctx) > budget:
+        ctx = ctx[: budget - 16].rstrip() + "\n…(truncated)"
+    return ctx + ("\n\n" + note if note else "")
+
 
 def bootstrap_state(
     plugin_data: Optional[str] = None, plugin_root: Optional[str] = None
@@ -1295,13 +1348,18 @@ def build_context(memory_dir: str, repo_root: str, max_chars: int = _MAX_CONTEXT
     SEC-1 short-circuit: when this project's corpus exists but is NOT trusted, EVERY content
     producer stays silent (an untrusted corpus injects nothing) and the ONLY block emitted is
     the low-frequency untrusted-corpus nudge — the single legible signal on the gated path.
+
+    Both return paths route through ``_bound_with_surface_note`` so any ``/hippo:*`` advice
+    (including the untrusted nudge's) names its Desktop-app equivalent on that surface.
     """
     try:
         from . import trust
 
         gate_root = trust.gate_repo_root(memory_dir, repo_root)
         if gate_root is not None and not trust.is_trusted(gate_root):
-            return untrusted_corpus_nudge(memory_dir, repo_root) or ""
+            return _bound_with_surface_note(
+                untrusted_corpus_nudge(memory_dir, repo_root) or "", max_chars
+            )
     except Exception:
         pass
     run_ctx = _build_run_context(memory_dir, repo_root)
@@ -1315,10 +1373,7 @@ def build_context(memory_dir: str, repo_root: str, max_chars: int = _MAX_CONTEXT
             blocks.append(out.rstrip())
     if not blocks:
         return ""
-    ctx = "\n\n".join(blocks)
-    if len(ctx) > max_chars:
-        ctx = ctx[: max_chars - 16].rstrip() + "\n…(truncated)"
-    return ctx
+    return _bound_with_surface_note("\n\n".join(blocks), max_chars)
 
 
 def _read_hook_payload() -> Tuple[Optional[str], Optional[str]]:

@@ -12,7 +12,7 @@
       "name": "hippo",
       "source": "./plugin",
       "description": "Local, git-native memory for Claude Code — your repo is the store, recall is $0/prompt (no LLM, no network), staleness is git-drift (the cited code moved), and team memory ships through review.",
-      "version": "1.10.0",
+      "version": "1.10.1",
       "author": {
         "name": "youknowfred",
         "url": "https://youknowfred.com"

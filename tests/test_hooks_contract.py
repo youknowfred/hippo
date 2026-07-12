@@ -87,8 +87,14 @@ def _run_hook(
     venv_python: bool = False,
     sentinel: bool = False,
     sentinel_hash: str = "",
+    entrypoint: str = "",
 ) -> tuple[subprocess.CompletedProcess, str, str]:
-    """Run one hook script in a controlled env; return (proc, project_dir, data_dir)."""
+    """Run one hook script in a controlled env; return (proc, project_dir, data_dir).
+
+    ``entrypoint`` sets CLAUDE_CODE_ENTRYPOINT (e.g. ``"claude-desktop"``) — the harness
+    surface marker the nudges key their /hippo:*-vs-MCP-tool wording on. Empty (the
+    default) models the terminal CLI, which doesn't guarantee the var.
+    """
     project = _make_project(tmp_path, with_corpus)
     data_dir = str(tmp_path / "plugin-data")
     os.makedirs(data_dir, exist_ok=True)
@@ -119,6 +125,8 @@ def _run_hook(
         # its real mechanics instead of the untrusted-corpus gate.
         "HIPPO_TRUST_NONGIT": "1",
     }
+    if entrypoint:
+        env["CLAUDE_CODE_ENTRYPOINT"] = entrypoint
     proc = subprocess.run(
         ["/bin/bash", hook],
         input=stdin,
@@ -533,6 +541,39 @@ class TestSessionStartNudge:
         _assert_contract(proc, "SessionStart")
         assert "/hippo:" not in self._ctx(proc)
 
+    # Surface-aware wording: the Claude Desktop app rejects TYPED /hippo:* commands, so
+    # there the nudge must name the MCP setup tools (v1.10.0) instead — the terminal
+    # wording would dead-end the exact user it is onboarding (verified live 2026-07-12).
+    def test_desktop_bootstrap_nudge_names_the_mcp_tools_not_typed_commands(self, tmp_path):
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, "", tmp_path, venv_python=False,
+            entrypoint="claude-desktop",
+        )
+        _assert_contract(proc, "SessionStart")
+        ctx = self._ctx(proc)
+        assert "/hippo:bootstrap" not in ctx and "/hippo:init" not in ctx
+        assert "MCP" in ctx and "bootstrap" in ctx and "init" in ctx
+        assert "terminal-only" in ctx
+        assert "\n" not in ctx  # still exactly one nudge line
+
+    def test_desktop_init_nudge_names_the_init_tool(self, tmp_path):
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, "", tmp_path, with_corpus=False, venv_python=True,
+            sentinel=True, entrypoint="claude-desktop",
+        )
+        _assert_contract(proc, "SessionStart")
+        ctx = self._ctx(proc)
+        assert "/hippo:init" not in ctx and "init MCP tool" in ctx
+
+    def test_terminal_wording_is_unchanged_by_an_unrelated_entrypoint(self, tmp_path):
+        # Any non-desktop entrypoint value (the terminal CLI sets e.g. "cli") keeps the
+        # typed-command wording — only the Desktop app rejects it.
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, "", tmp_path, venv_python=False, entrypoint="cli",
+        )
+        _assert_contract(proc, "SessionStart")
+        assert "/hippo:bootstrap" in self._ctx(proc)
+
 
 # --------------------------------------------------------------------------- #
 # COR-11: a simulated dep bump yields the re-bootstrap nudge (once per session —
@@ -554,6 +595,18 @@ class TestStaleVenvNudge:
         )
         _assert_contract(proc, "SessionStart")
         assert "deps changed" not in proc.stdout
+
+    def test_desktop_dep_bump_nudge_carries_the_surface_note(self, tmp_path):
+        # End-to-end through the shell hook + Python dispatcher: on the Desktop surface
+        # the producer's /hippo:bootstrap advice gains the one appended mapping note.
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, "", tmp_path, venv_python=True, sentinel=True,
+            sentinel_hash="0" * 64, entrypoint="claude-desktop",
+        )
+        _assert_contract(proc, "SessionStart")
+        ctx = json.loads(proc.stdout.strip())["hookSpecificOutput"]["additionalContext"]
+        assert "deps changed" in ctx and "/hippo:bootstrap" in ctx
+        assert "Surface note" in ctx and "terminal-only" in ctx
 
 
 # --------------------------------------------------------------------------- #

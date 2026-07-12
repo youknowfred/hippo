@@ -55,6 +55,80 @@ def test_output_is_bounded_under_cap(monkeypatch):
     assert ctx.endswith("(truncated)")
 
 
+# --------------------------------------------------------------------------- #
+# Desktop surface note — typed /hippo:* advice gains ONE mapping footer on the
+# Claude Desktop app (CLAUDE_CODE_ENTRYPOINT=claude-desktop) and nowhere else;
+# terminal bytes stay byte-identical (conftest strips the ambient entrypoint).
+# --------------------------------------------------------------------------- #
+
+
+def test_terminal_output_carries_no_surface_note(monkeypatch):
+    _producers(monkeypatch, [("a", lambda md, repo, ctx=None: "Run /hippo:doctor to review.")])
+    assert S.build_context("md", "repo") == "Run /hippo:doctor to review."
+
+
+def test_desktop_appends_the_mapping_note_after_the_signal(monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
+    _producers(monkeypatch, [("a", lambda md, repo, ctx=None: "Run /hippo:doctor to review.")])
+    ctx = S.build_context("md", "repo")
+    assert ctx.startswith("Run /hippo:doctor to review.")
+    assert ctx.endswith(S._DESKTOP_SURFACE_NOTE)
+    assert "terminal-only" in ctx and "trust_corpus" in ctx
+
+
+def test_desktop_note_only_when_a_typed_command_is_named(monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
+    _producers(monkeypatch, [("a", lambda md, repo, ctx=None: "plain block, no commands")])
+    assert S.build_context("md", "repo") == "plain block, no commands"
+
+
+def test_non_desktop_entrypoints_stay_on_terminal_wording(monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
+    _producers(monkeypatch, [("a", lambda md, repo, ctx=None: "Run /hippo:doctor to review.")])
+    assert "Surface note" not in S.build_context("md", "repo")
+
+
+def test_desktop_note_never_pushes_output_past_the_cap(monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
+    _producers(
+        monkeypatch,
+        [("big", lambda md, repo, ctx=None: "run /hippo:doctor " + "x" * 50_000)],
+    )
+    ctx = S.build_context("md", "repo", max_chars=2000)
+    assert len(ctx) <= 2000
+    assert "…(truncated)" in ctx
+    assert ctx.endswith(S._DESKTOP_SURFACE_NOTE)  # the note survives whole, at the end
+
+
+def test_desktop_note_dropped_when_cap_cannot_carry_both(monkeypatch):
+    # A cap too small to hold the note AND a useful signal keeps the signal, whole —
+    # the note is never itself truncated into garbage.
+    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
+    _producers(
+        monkeypatch,
+        [("big", lambda md, repo, ctx=None: "run /hippo:doctor " + "x" * 50_000)],
+    )
+    ctx = S.build_context("md", "repo", max_chars=500)
+    assert len(ctx) <= 500
+    assert "Surface note" not in ctx
+
+
+def test_untrusted_nudge_gains_the_note_on_desktop(monkeypatch):
+    # The SEC-1 short-circuit path returns ONLY the untrusted nudge — its /hippo:doctor
+    # advice must map on the Desktop surface too.
+    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
+    import memory.trust as trust
+
+    monkeypatch.setattr(trust, "gate_repo_root", lambda md, rr: "/gated/root")
+    monkeypatch.setattr(trust, "is_trusted", lambda root: False)
+    monkeypatch.setattr(
+        S, "untrusted_corpus_nudge", lambda md, rr: "Run /hippo:doctor to trust it."
+    )
+    ctx = S.build_context("md", "repo")
+    assert ctx.startswith("Run /hippo:doctor to trust it.")
+    assert ctx.endswith(S._DESKTOP_SURFACE_NOTE)
+
+
 def test_dispatcher_calls_every_producer_with_the_shared_run_context(monkeypatch):
     """LIF-6: the PRODUCERS loop shares ONE call shape — every registered fn is called
     ``(memory_dir, repo_root, run_ctx)``, the same ``RunContext`` instance, not a

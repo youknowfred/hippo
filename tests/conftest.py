@@ -59,10 +59,14 @@ def _strip_ambient_plugin_env(monkeypatch):
     A developer running the suite from INSIDE a Claude Code session (or any consumer
     with hippo bootstrapped) has CLAUDE_PLUGIN_DATA / CLAUDE_PLUGIN_ROOT pointing at a
     real install — the stale-venv producer (COR-11) and any future env-keyed check
-    would read REAL machine state and flip test outcomes. Tests that need these vars
-    set them explicitly (e.g. the hook subprocess tests pass a controlled env)."""
+    would read REAL machine state and flip test outcomes. CLAUDE_CODE_ENTRYPOINT gets
+    the same treatment: a suite run from inside a Desktop session would otherwise flip
+    every session-start test onto the Desktop surface-note branch. Tests that need
+    these vars set them explicitly (e.g. the hook subprocess tests pass a controlled
+    env, the surface-note tests monkeypatch the entrypoint)."""
     monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
     monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_ENTRYPOINT", raising=False)
 
 
 @pytest.fixture(autouse=True)
