@@ -7,6 +7,95 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.13.0 — 2026-07-13 — "Consolidate everywhere"
+
+**re-bootstrap: no** — `plugin/requirements.txt` is unchanged (every addition lives in the
+dependency-free, stdlib-only MCP server), and every persisted shape is untouched: corpus format
+still 4, index schema still 7, capture-seed schema still 2. The `/hippo:*` skill set (16) is
+unchanged and the five frozen MCP tools keep their exact names and shapes (STABILITY.md).
+Everything here is **additive**: six new MCP tools, one new flag on an existing tool, and the
+surface-mapping text that routes to them. No operator action.
+
+The release closes the last major terminal-only gap on hippo's second surface:
+`/hippo:consolidate` — sleep-time consolidation, the write-side maintenance turn — hard-failed
+on the Claude Desktop app, because its five steps run through the skill's bash blocks and the
+agent's Bash tool never inherits `CLAUDE_PLUGIN_DATA` there (only hippo's MCP server and hooks
+receive it; confirmed live 2026-07-13 with a pending capture sitting undrainable in the queue
+while doctor/bootstrap/trust all worked). Setup got its tools in v1.10.0 (INT-9..12);
+consolidation gets its own here.
+
+### INT-13 — the consolidate-flow tools
+
+`/hippo:consolidate`'s five steps as **thin, per-item MCP primitives** — deliberately NOT one
+monolithic "consolidate" tool: consolidation is agent-orchestrated with per-item approval, and
+nothing on this surface may batch writes past that gate. The skill remains the doctrine; each
+tool wraps the SAME engine call its bash blocks run (no behavior fork):
+
+- **`capture(action, path, text)`** — Step 1's queue verbs: `list` (highest-value first, with
+  provenance and the queue dir — each seed is a plain JSON file the agent can read directly for
+  the full evidence), `discard` ONE processed seed, `snooze` the SessionStart nudge,
+  `add_decision` ONE user-confirmed WHY (GRW-4; keyed like the CLI, so it rides the same
+  session's seed). One hardening over the CLI: a model-invoked `discard` is **contained to the
+  pending queue** (realpath check, seeds only, never dotfiles) — the CLI trusts a human-typed
+  path; a tool call must not. When a seed's hunks are secret-flagged, the listing maps the gate
+  to the `secrets_scan` tool for this surface.
+- **`secrets_scan(text)`** — the GRW-1 hard gate as a primitive: lint the exact lines BEFORE
+  any verbatim hunk is fenced into a committed body; any finding = scrub and re-scan, never
+  fence (`write_memory`'s write-time lint stays the backstop, not the gate). Pure function
+  over caller-supplied text; reads nothing from the corpus.
+- **`new_memory` grew `check: true`** — the CAP-3 dry-run (near-duplicate routing, RUL-3
+  governance echoes, the GOV-3 proposal-time baseline; writes nothing), so the drain checks
+  BEFORE it writes and a duplicate routes to update/supersede, never a new file. The SEC-13
+  trust gate covers the check too — the dry-run READS the corpus's descriptions, so an
+  untrusted corpus refuses it exactly as it refuses the write (a test pins the no-leak).
+- **`reconsolidate(action, name, outcome, superseded_by)`** — Step 2: the LIF-1 worklist
+  (`worklist`, GRW-5 watermark lane included — the tool and the SessionStart producer describe
+  the SAME list) plus the ONE per-item verdict gate (`reverify`): `graduate` / `fix` / `demote`
+  (chains `invalid_after`; optional `superseded_by` writes the GRA-4 edge and stamps the GRW-7
+  boundary at the successor's commit date) / `snooze` (the skill's fourth verdict — the CLI
+  spells it `--snooze`; one enum here). The engine's refusals (e.g. graduate+successor) and the
+  LIF-3 citation-rot lines travel to this surface verbatim.
+- **`build_index()`** — Step 3: refresh the recall index + persisted `links.json`. Runs the
+  full `memory.build_index` under the freshly-resolved venv python when one exists (the v1.10.2
+  stale-interpreter discipline — a server that booted pre-bootstrap never dense-blinds the
+  rebuild), else the never-downgrade in-process incremental refresh.
+- **`co_recall_proposals()`** — Step 4: the GRW-2 tally verbatim (floor names excluded,
+  already-linked pairs dropped), read-only — an empty result on a sparse map stays the designed
+  outcome. The approved append remains a per-item agent edit of ONE body, then `build_index`.
+- **`abstention_fixtures(action, query, expected)`** — Step 5: the SIG-6 blind-spot loop —
+  `draft` recurring abstained queries into the gitignored drafts queue (existing rows preserved
+  verbatim), `confirm` ONE judged row into the tracked eval fixture (`category: abstention`);
+  refuses stems that don't exist — never fabricate a memory to make a fixture pass.
+
+Trust posture (SEC-1/SEC-13): `reconsolidate`, `co_recall_proposals`, and
+`abstention_fixtures` are gated like recall/traverse/new_memory (they render memory names or
+write corpus files); `capture` stays ungated by design (the queue is gitignored session-local
+ephemera — the same trust domain as the episode buffer, never arriving via a clone — and its
+corpus writes all route through the gated `new_memory`); `secrets_scan` is pure;
+`build_index` writes only the gitignored index (init already builds pre-consent).
+
+### The surface mappings (DOC)
+
+- The consolidate SKILL.md preflight no longer claims "no Desktop-safe MCP-tool equivalent
+  yet" — the guard now routes Desktop to the tools step by step, and a body note carries the
+  full 1:1 mapping. The terminal bash flow is byte-for-byte unchanged.
+- `doctor`'s MCP-surface footer and the SessionStart Desktop surface note both map
+  `/hippo:consolidate` to the flow tools (the v1.10.1 right-invocation-per-surface
+  discipline).
+- READMEs: the plugin README documents the sixteen-tool surface — including a line for the
+  `dream` verb tool, whose absence had left the count silently stale at "nine" — and the
+  top-level Troubleshooting names the consolidate drain among the plain-words Desktop asks.
+
+Tests: `tests/test_mcp_consolidate_tools.py` covers every tool against real corpora, queues,
+and ledgers — the drain recipe end to end, discard containment, the trust gates (with
+`HIPPO_TRUST_ALL` deleted), all four reverify verdicts plus the graduate+successor refusal,
+the wikilink→`build_index`→`links.json` loop, co-recall threshold/already-linked behavior, the
+draft→confirm fixture loop with the fabricated-stem refusal, and pins that doctor's footer,
+the skill's preflight, and the surface note each name every flow tool the server actually
+serves. Verified live against this repo's own corpus: the tools surface the real pending queue
+(6 seeds) and the real 8-item reconsolidation worklist in byte-parity with the SessionStart
+producers.
+
 ## v1.12.0 — 2026-07-13 — "Sharper recall"
 
 **re-bootstrap: no** — `plugin/requirements.txt` is unchanged (the new stemming pass is
