@@ -74,7 +74,11 @@ _INDEX_DIRNAME = ".memory-index"
 # separately (``provenance.CORPUS_FORMAT_VERSION`` + the ``.claude/memory/.format``
 # marker) — the corpus is authoritative and is never auto-migrated; see doctor's
 # ``check_format_version`` and plugin/memory/README.md.
-SCHEMA_VERSION = 6
+# v7 (RET-12, BM25 stemming): entries' persisted "tokens" (both description rows and body
+# chunks) are now ``bm25_terms(tokenize(...))`` instead of raw ``tokenize(...)`` -- a
+# manifest built under v6 has un-stemmed postings that would silently under-match a stemmed
+# query token, so this MUST bump to force one full reindex rather than degrade quietly.
+SCHEMA_VERSION = 7
 # Public (not underscore-prefixed): doctor's non-English-corpus check (RET-3) compares a
 # manifest's recorded model against this constant to decide whether the CURRENTLY configured
 # model is the English default vs. an already-switched multilingual/other model.
@@ -317,7 +321,14 @@ def tokenize(text: str) -> List[str]:
     bigrams for whitespace-less CJK runs. Stopwords + <2-length tokens dropped (the stopword
     set is English-only by design — non-English tokens are simply never stopped; the CJK
     bigram path skips the length/stopword filter entirely since 1-2 char CJK tokens ARE the
-    unit of signal there, not noise to be filtered like a stray ASCII letter)."""
+    unit of signal there, not noise to be filtered like a stray ASCII letter).
+
+    Deliberately NOT stemmed — this is the shared, substring-safe primitive: ``clean_query``
+    is fuzz-tested (Hypothesis) on the invariant that every token it emits is a literal
+    substring of the raw input, and the min-content gate (``recall.clean_query``) only counts
+    tokens here, both of which stemming would be free to violate or wouldn't need. Stemming
+    for BM25 matching lives in ``bm25_terms`` below, applied as a SEPARATE pass over this
+    function's output only at the specific call sites that build/query BM25 postings."""
     if not text:
         return []
     out: List[str] = []
@@ -331,6 +342,101 @@ def tokenize(text: str) -> List[str]:
             continue
         out.append(tok)
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Light stemming for BM25 matching (RET-12: BM25's real weakness is surface-form
+# mismatch -- "embed"/"embeds"/"embedding" are three distinct terms without this).
+# --------------------------------------------------------------------------- #
+# Deliberately NOT the full Porter algorithm. Porter's steps 2-4 rewrite derivational
+# suffixes (-ational, -iveness, -aliti, ...) and are a well-documented source of
+# over-stemming false-positive collisions -- an acceptable trade on a web-scale corpus,
+# a much riskier one on hippo's small (tens-to-low-hundreds of memories) curated
+# corpora, where one bad collision measurably hurts precision. This implements only
+# the low-risk, high-value steps: plural -s/-es/-ies and verbal -ing/-ed, each with the
+# same doubled-consonant/vowel guards Porter uses to avoid mangling short or irregular
+# words. Applied ONLY to plain word tokens that already survived ``tokenize``'s
+# length/stopword filter -- never called on CJK bigrams (which contain no ASCII
+# suffix this can match) and never folded into ``tokenize`` itself (see its docstring).
+_VOWELS = frozenset("aeiou")
+
+# False positives for the -ies -> -y rule: a word whose SINGULAR already ends in "ie"
+# (movie, cookie, tie) pluralizes by just adding "s", not by the consonant+y -> consonant+
+# ies pattern "queries" collapses correctly on -- stripping "ies" and adding "y" back
+# mangles these into a non-word ("movies" -> "movy") instead of missing the merge safely.
+# No purely orthographic rule distinguishes "quer(y)+ies" from "mov(ie)+s" (both surface as
+# consonant+"ies"), so this is a plain, explicit exception list, not a smarter rule --
+# covers the common word/linguistics-literature cases; an uncovered "-ie" word still just
+# MISSES its merge (unchanged token), never gets actively mangled, since it wouldn't be in
+# here to mangle in the first place... except it would, by the general rule, if not listed.
+# Keep this list open to growing with any newly-observed corpus vocabulary.
+_STEM_IES_EXCEPTIONS = frozenset(
+    {
+        "series", "species",  # irregular: don't pluralize by adding -s at all
+        "movies", "cookies", "selfies", "veggies", "zombies", "genies", "rookies",
+        "calories", "ties", "pies", "prairies",
+    }
+)
+
+
+def _has_vowel(s: str) -> bool:
+    return any(ch in _VOWELS for ch in s)
+
+
+def _strip_double_consonant(s: str) -> str:
+    """Undouble a trailing doubled consonant from an -ing/-ed strip (hopp -> hop) UNLESS
+    it's l/s/z (call, pass, buzz keep both -- Porter's *L/*S/*Z exception: those double
+    consonants are part of the base word, not an inflectional doubling)."""
+    if len(s) >= 2 and s[-1] == s[-2] and s[-1] not in _VOWELS and s[-1] not in "lsz":
+        return s[:-1]
+    return s
+
+
+def stem(token: str) -> str:
+    """Light, dependency-free suffix stripping so morphological variants collapse to one
+    BM25 term. See the module comment above for scope and rationale."""
+    w = token
+    if w in _STEM_IES_EXCEPTIONS:
+        return w
+
+    if w.endswith("sses"):  # caresses -> caress, classes -> class
+        w = w[:-2]
+    elif w.endswith(("ches", "shes", "xes")) and len(w) > 4:  # boxes -> box, watches -> watch
+        w = w[:-2]
+    # NOT "zes": unlike ch/sh/x, "z" is at least as often the last letter of a base word
+    # that ALREADY ends in silent "e" (size, prize, maze, gaze, doze, blaze, glaze, freeze)
+    # as it is a true consonant-final base needing an inserted "e" before the plural "-s"
+    # (buzz -> buzzes) -- and this corpus's own vocabulary is full of the former via the
+    # -ize/-yze verb family's 3rd-person-singular form (tokenizes, serializes, optimizes,
+    # organizes, recognizes, analyzes, ...). Stripping "es" unconditionally here would
+    # mangle "tokenizes" -> "tokeniz" instead of "tokenize"; falling through to the plain
+    # single-"s" strip below gets the -ize family right (tokenizes -> tokenize) at the cost
+    # of the rarer buzz-style double-z merge (buzzes -> "buzze", not "buzz" -- unmerged, the
+    # safe direction, matching classic Porter's own accepted imprecision here).
+    elif w.endswith("ies") and len(w) > 4:  # queries -> query
+        w = w[:-3] + "y"
+    elif w.endswith("s") and not w.endswith(("ss", "us", "is", "as")) and len(w) > 3:
+        w = w[:-1]  # embeds -> embed; NOT corpus/analysis/basis/bias/atlas (false plurals)
+
+    # The resulting stem must be >=4 chars (len(w) > 6 for -ing, > 5 for -ed): a plain
+    # "has a vowel" guard alone still mangles a base word that merely ends in "ed"/"ing"
+    # without being inflected at all -- "embed" -> stem "emb" (3 chars, vowel present,
+    # textbook Porter would strip it too) is exactly the kind of false positive this
+    # exists to avoid on a corpus where "embed" is core vocabulary, not a rare miss. Some
+    # genuine short inflections (moved/moving) fall below the floor and stay unmerged --
+    # the safe failure mode (a missed collapse) over the dangerous one (a mangled word).
+    if w.endswith("ing") and len(w) > 6 and _has_vowel(w[:-3]):
+        w = _strip_double_consonant(w[:-3])  # embedding -> embed, hopping -> hop
+    elif w.endswith("ed") and len(w) > 5 and _has_vowel(w[:-2]):
+        w = _strip_double_consonant(w[:-2])  # tanned -> tan, tested -> test
+    return w
+
+
+def bm25_terms(tokens: List[str]) -> List[str]:
+    """Stem a ``tokenize()``-produced token list for BM25 indexing/matching. A distinct pass
+    over ``tokenize``'s output (never folded into ``tokenize`` itself) so callers that need
+    its substring/count guarantees are unaffected -- see ``tokenize``'s docstring."""
+    return [stem(t) for t in tokens]
 
 
 # --------------------------------------------------------------------------- #
@@ -483,7 +589,7 @@ def compute_body_chunks(name: str, text: str) -> List[dict]:
             chunks.append(
                 {
                     "text": section,
-                    "tokens": tokenize(section),
+                    "tokens": bm25_terms(tokenize(section)),
                     "hash": _hash(section),
                 }
             )
@@ -638,7 +744,7 @@ def compute_corpus(
                 "doc_text": doc_text,
                 "description": desc,  # stored separately so display never re-parses doc_text
                 "hash": _hash(doc_text),
-                "tokens": tokenize(doc_text),
+                "tokens": bm25_terms(tokenize(doc_text)),
                 "invalid_after": _extract_invalid_after(fm),
                 "source_commit_time": read_source_commit_time(text),
                 # GOV-2: carried in the manifest so recall's pin boost is pure arithmetic

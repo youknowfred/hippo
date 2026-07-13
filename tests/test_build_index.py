@@ -1181,6 +1181,80 @@ def test_tokenize_empty_and_whitespace():
 
 
 # --------------------------------------------------------------------------- #
+# RET-12: stem()/bm25_terms() — light BM25-only stemming, kept OUT of tokenize() itself
+# (see tokenize's own docstring: clean_query's Hypothesis substring invariant needs
+# tokenize() unstemmed). Deliberately NOT full Porter -- see stem()'s module comment.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    "word,expected",
+    [
+        # the headline case this item exists for -- base form must survive unmangled
+        ("embed", "embed"),
+        ("embeds", "embed"),
+        ("embedding", "embed"),
+        ("embedded", "embed"),
+        # generic -ing/-ed verb inflection, with doubled-consonant undoubling
+        ("recall", "recall"), ("recalling", "recall"), ("recalls", "recall"), ("recalled", "recall"),
+        ("hop", "hop"), ("hopping", "hop"), ("hopped", "hop"),
+        ("rank", "rank"), ("ranked", "rank"), ("ranking", "rank"), ("ranks", "rank"),
+        # Porter's *L/*S/*Z doubled-consonant exception: these keep BOTH letters
+        ("pass", "pass"), ("passing", "pass"), ("passed", "pass"),
+        ("fall", "fall"), ("falling", "fall"),
+        ("buzz", "buzz"), ("buzzing", "buzz"),
+        # plain -s/-es plurals
+        ("box", "box"), ("boxes", "box"),
+        ("watch", "watch"), ("watches", "watch"),
+        ("class", "class"), ("classes", "class"),
+        ("caress", "caress"), ("caresses", "caress"),
+        ("query", "query"), ("queries", "query"),
+        ("token", "token"), ("tokens", "token"),
+        # false-plural exceptions: real words ending in s/us/is/as that are NOT plurals
+        ("corpus", "corpus"), ("analysis", "analysis"), ("basis", "basis"),
+        ("bias", "bias"), ("atlas", "atlas"), ("canvas", "canvas"), ("gas", "gas"),
+        # the -ize/-yze verb family's 3rd-person-singular -- must NOT lose the "e"
+        # (regression: the "zes" sibilant rule used to strip it to "tokeniz")
+        ("tokenize", "tokenize"), ("tokenizes", "tokenize"),
+        ("serialize", "serialize"), ("serializes", "serialize"),
+        ("optimizes", "optimize"), ("organizes", "organize"),
+        ("recognizes", "recognize"), ("analyzes", "analyze"), ("synchronizes", "synchronize"),
+        # the same silent-e-before-s class outside the verb family
+        ("size", "size"), ("sizes", "size"),
+        ("prize", "prize"), ("prizes", "prize"),
+        ("maze", "maze"), ("mazes", "maze"),
+        ("freeze", "freeze"), ("freezes", "freeze"),
+        # -ies -> -y exceptions: words whose SINGULAR already ends in "ie" stay unchanged
+        # (a safe miss, not the "movy"-style mangling the general rule would otherwise do)
+        ("series", "series"), ("species", "species"),
+        ("movies", "movies"), ("movie", "movie"),
+        ("cookies", "cookies"), ("selfies", "selfies"), ("ties", "ties"),
+        # non-ASCII passes straight through (tokenize's job, not stem's, but must not crash)
+        ("café", "café"),
+        # a word too short to touch
+        ("is", "is"), ("as", "as"),
+    ],
+)
+def test_stem_cases(word, expected):
+    assert B.stem(word) == expected
+
+
+def test_bm25_terms_stems_a_token_list_and_preserves_order_and_length():
+    # "and"/"are"/"when"/"we" are English stopwords -- tokenize() drops them before
+    # bm25_terms ever sees them, so only the 5 content words survive to be stemmed.
+    toks = B.tokenize("Embeddings and embedding are embedded when we embed something")
+    assert toks == ["embeddings", "embedding", "embedded", "embed", "something"]
+    stemmed = B.bm25_terms(toks)
+    assert len(stemmed) == len(toks)  # one stem per input token, never merges/drops
+    assert stemmed == ["embed", "embed", "embed", "embed", "someth"]
+
+
+def test_bm25_terms_never_stems_cjk_bigrams():
+    """CJK bigrams (tokenize's separate script-aware path) contain no ASCII suffix any
+    stem() rule matches -- bm25_terms must pass them through byte-identical."""
+    toks = B.tokenize("東京都渋谷区")
+    assert B.bm25_terms(toks) == toks
+
+
+# --------------------------------------------------------------------------- #
 # RET-3: resolve_embed_model() precedence — env > model.json preset > English default
 # --------------------------------------------------------------------------- #
 def test_resolve_embed_model_defaults_to_english(tmp_path, monkeypatch):

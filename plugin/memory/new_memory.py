@@ -254,7 +254,7 @@ def _bm25_dup_scores(index, doc_text: str):
     """
     import math
 
-    from .build_index import tokenize
+    from .build_index import bm25_terms, tokenize
     from .recall import _bm25_score_via_postings
 
     stats = index.manifest.get("bm25")
@@ -264,7 +264,9 @@ def _bm25_dup_scores(index, doc_text: str):
         k1, b, avgdl, idf = stats["k1"], stats["b"], stats["avgdl"], stats["idf"]
         if not avgdl:
             return None
-        q_tokens = tokenize(doc_text)
+        # RET-12: the manifest's postings are stemmed (build_index.bm25_terms) -- stem the
+        # query side the same way, same rationale as recall._bm25_rank.
+        q_tokens = bm25_terms(tokenize(doc_text))
         if not q_tokens:
             return []
         freqs = {}
