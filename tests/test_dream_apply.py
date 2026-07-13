@@ -559,3 +559,35 @@ def test_cli_apply_undo_log_roundtrip(dirs, capsys):
     assert rc == 0
     assert "reverted" in capsys.readouterr().out
     assert _snapshot_corpus(md) == before
+
+
+# --------------------------------------------------------------------------- #
+# SEC-6 fold: applied/undone files re-enter the consent baseline (DRM-6 hardening)
+# --------------------------------------------------------------------------- #
+def test_apply_and_undo_fold_written_files_into_trust_baseline(dirs, monkeypatch):
+    """A fingerprinted corpus quarantines new-since-consent bytes out of recall — so the
+    apply pass must fold every stamped file (and undo must re-fold the restoration), or
+    'live in recall immediately' silently breaks on any SEC-6-baselined corpus."""
+    md, td, idx = dirs
+    _bridge_corpus(md)
+    _seed_sessions(td, 5)
+    calls = []
+    monkeypatch.setattr(
+        "memory.trust.record_authored_write",
+        lambda memory_dir, path, repo_root=None: (calls.append(os.path.basename(path)), True)[1],
+    )
+
+    code, digest = dream.run_apply_pass(md, idx, td)
+    assert code == 0 and "applied" in digest
+    applied_files = {
+        e["source"] + ".md"
+        for e in dream.read_apply_ledger(md)
+        if e.get("state") == "active"
+    }
+    assert applied_files, "the bridge corpus must apply at least one edge"
+    assert applied_files <= set(calls), f"unfolded applied files: {applied_files - set(calls)}"
+
+    calls.clear()
+    code, text = dream.undo_edges(md, idx)
+    assert code == 0, text
+    assert applied_files <= set(calls), f"unfolded restored files: {applied_files - set(calls)}"

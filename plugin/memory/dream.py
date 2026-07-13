@@ -1438,6 +1438,18 @@ def run_apply_pass(
         if not ok:
             refused.append((cand, reason))
             continue
+        # SEC-6: fold the stamped file's FINAL bytes into the consent baseline. Without
+        # this, a fingerprinted corpus quarantines every edge-stamped file out of recall
+        # (new-since-consent bytes are withheld) — the exact opposite of "live in recall
+        # immediately". The write is gated (trusted corpus, capped, θ-barred, secret-
+        # blocked), so authorship-is-consent applies the same way it does for
+        # add_typed_relation's own internal fold.
+        try:
+            trust.record_authored_write(
+                memory_dir, os.path.join(memory_dir, cand["source"] + ".md"), repo_root
+            )
+        except Exception:
+            pass
         ledger_row["undo"] = undo_rec
         ledger_lines.append(ledger_row)
         applied.append({**cand, "edge_id": edge_id})
@@ -1676,6 +1688,18 @@ def undo_edges(
     refused: List[Tuple[dict, str]] = []
     for edge in reversed(targets):
         ok, reason = _undo_one_edge(memory_dir, edge)
+        if ok:
+            # SEC-6: re-fold the restored bytes (the apply fold moved the baseline to
+            # the stamped content; the un-stamped restoration must move it back or the
+            # file quarantines). A deleted generated file simply no-ops the fold.
+            fname = (edge.get("undo") or {}).get("file")
+            if fname:
+                try:
+                    from .trust import record_authored_write
+
+                    record_authored_write(memory_dir, os.path.join(memory_dir, fname))
+                except Exception:
+                    pass
         (undone if ok else refused).append((edge, reason) if not ok else edge)
 
     if undone:
