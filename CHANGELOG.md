@@ -12,7 +12,7 @@ and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 **re-bootstrap: no** — `plugin/requirements.txt` is unchanged. The Desktop consolidate tools
 live entirely in the dependency-free, stdlib-only MCP server; the new standalone-LLM client is
 stdlib-`urllib` only (honoring the dependency-light philosophy). Every persisted shape is
-untouched: corpus format still 4, index schema still 7, capture-seed schema still 2. The
+untouched: corpus format still 5, index schema still 7, capture-seed schema still 2. The
 `/hippo:*` skill set (16) and the five frozen MCP tools keep their exact names and shapes
 (STABILITY.md). Everything here is **additive** — six new MCP tools, one new flag on an existing
 tool, the surface-mapping text that routes to them, and two new LLM enrichers that ship dark. No
