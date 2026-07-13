@@ -879,6 +879,71 @@ def test_plugin_version_registered_in_checks():
     assert "plugin_version" in [label for label, _ in D.CHECKS]
 
 
+def _bootstrapped_env(tmp_path, monkeypatch, *, installed, sentinel_version):
+    """A COMPLETE, deps-current bootstrap (matching requirements_hash) whose sentinel
+    records ``sentinel_version`` — the setup a version-only update produces."""
+    import hashlib
+
+    root = tmp_path / "plugin-root"
+    os.makedirs(root / ".claude-plugin")
+    (root / "requirements.txt").write_text("numpy>=2\n", encoding="utf-8")
+    with open(root / ".claude-plugin" / "plugin.json", "w", encoding="utf-8") as fh:
+        json.dump({"name": "hippo", "version": installed}, fh)
+    data = tmp_path / "plugin-data"
+    os.makedirs(data)
+    req_hash = hashlib.sha256(b"numpy>=2\n").hexdigest()
+    (data / ".bootstrap-sentinel").write_text(
+        json.dumps(
+            {
+                "requirements_hash": req_hash,
+                "bootstrapped_at": "2026-01-01T00:00:00+00:00",
+                "plugin_version": sentinel_version,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(data))
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(root))
+    return data / ".bootstrap-sentinel", req_hash
+
+
+def test_start_restamps_stale_version_on_fast_path(tmp_path, monkeypatch):
+    """A version-only ('re-bootstrap: no') update leaves the sentinel's plugin_version
+    stale; start()'s already-current fast path refreshes ONLY that label (offline), so the
+    DOC-7 delta becomes clearable instead of nagging to run a bootstrap that no-ops."""
+    from memory import bootstrap as B
+
+    sentinel, req_hash = _bootstrapped_env(tmp_path, monkeypatch, installed="1.11.1", sentinel_version="1.10.0")
+    ctx = _ctx(str(tmp_path / "m"), str(tmp_path / "r"),
+               plugin_data=str(sentinel.parent), plugin_root=str(tmp_path / "plugin-root"))
+
+    # before: doctor nags on the version delta
+    assert D.check_plugin_version(ctx)["status"] == "warn"
+
+    # start() fast-paths (deps current) AND re-stamps the label — never spawns a worker
+    result = B.start()
+    assert result["status"] == "already_bootstrapped" and result["restamped"] is True
+
+    rec = json.loads(sentinel.read_text(encoding="utf-8"))
+    assert rec["plugin_version"] == "1.11.1"                        # label refreshed
+    assert rec["requirements_hash"] == req_hash                     # deps state preserved
+    assert rec["bootstrapped_at"] == "2026-01-01T00:00:00+00:00"    # real bootstrap time preserved
+
+    # after: doctor now reads in-sync — the delta was actually clearable
+    assert D.check_plugin_version(ctx)["status"] == "ok"
+
+    # idempotent: a second run finds nothing to refresh
+    assert B.start()["restamped"] is False
+
+
+def test_start_no_restamp_when_version_already_matches(tmp_path, monkeypatch):
+    """When the sentinel already records the installed version, the fast path is a no-op."""
+    from memory import bootstrap as B
+
+    _bootstrapped_env(tmp_path, monkeypatch, installed="1.11.1", sentinel_version="1.11.1")
+    assert B.start() == {"status": "already_bootstrapped", "restamped": False}
+
+
 # --------------------------------------------------------------------------- #
 # GOV-2: the steering count — "N memories pinned", the control axis made visible
 # (pre-wires the mandatory MUTE count for when the down-weight ships).

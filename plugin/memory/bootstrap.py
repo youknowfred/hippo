@@ -162,7 +162,12 @@ def start(multilingual: bool = False) -> Dict[str, object]:
     if _running_pid(data) is not None:
         return {"status": "already_running", "pid": _running_pid(data)}
     if bootstrap_state(None, None) == "current" and not multilingual:
-        return {"status": "already_bootstrapped"}
+        # A version-only update ("re-bootstrap: no") leaves the venv genuinely current but the
+        # sentinel's plugin_version stale. Refresh just that label (offline, no rebuild) so
+        # doctor's DOC-7 delta doesn't nag to run a bootstrap that only fast-paths out here
+        # again — the no-op remedy that fix closes.
+        restamped = _restamp_plugin_version(data, _plugin_root())
+        return {"status": "already_bootstrapped", "restamped": restamped}
     try:
         os.makedirs(data, exist_ok=True)
         root = _plugin_root()
@@ -324,6 +329,47 @@ def _write_sentinel(data: str, root: str) -> None:
             fh,
         )
     _say("sentinel written — bootstrap complete")
+
+
+def _restamp_plugin_version(data: str, root: str) -> bool:
+    """DOC-7 companion: on an ALREADY-current bootstrap, refresh ONLY the sentinel's
+    ``plugin_version`` label when a version-only ("re-bootstrap: no") update left it stale.
+
+    ``start()``'s fast path returns before the worker — and thus before ``_write_sentinel``
+    — ever runs, so a release that changes code but keeps ``requirements.txt`` byte-identical
+    would otherwise leave the sentinel forever stamped with the OLD ``plugin_version``. Then
+    ``doctor.check_plugin_version`` (DOC-7) nags to "run /hippo:bootstrap" — a remedy that
+    hits this very fast path and returns again without touching the label: a no-op by
+    construction, so the nag could never be cleared by following its own advice.
+
+    This closes that loop with a cheap, OFFLINE metadata rewrite: no venv rebuild, no
+    download, ``requirements_hash`` and ``bootstrapped_at`` preserved (the venv genuinely
+    wasn't re-provisioned — only the label was wrong). It runs ONLY on the fast path, which
+    implies ``bootstrap_state == "current"`` (the sentinel exists and is complete), so it can
+    never mark a partial bootstrap complete. Never raises: on any error the sentinel is left
+    untouched (fail toward not-breaking). Returns True iff it rewrote the label.
+    """
+    try:
+        sentinel_path = os.path.join(data, _SENTINEL)
+        if not os.path.exists(sentinel_path):
+            return False
+        try:
+            with open(os.path.join(root, ".claude-plugin", "plugin.json"), encoding="utf-8") as fh:
+                current = str(json.load(fh).get("version") or "")
+        except Exception:
+            return False
+        if not current:
+            return False
+        with open(sentinel_path, encoding="utf-8") as fh:
+            sentinel = json.load(fh) or {}
+        if sentinel.get("plugin_version") == current:
+            return False
+        sentinel["plugin_version"] = current
+        with open(sentinel_path, "w", encoding="utf-8") as fh:
+            json.dump(sentinel, fh)
+        return True
+    except Exception:
+        return False
 
 
 def _run_worker(multilingual: bool = False) -> int:
