@@ -41,11 +41,17 @@ Typed edges (GRA-4, corpus format 2): additive frontmatter relations —
 ``supersedes: [name]``, ``contradicts: [name]``, ``refines: [name]`` — each a list of
 memory names/stems, read top-level OR under ``metadata:`` (the ``cited_paths`` read
 convention). ``[[wikilinks]]`` remain the untyped edge; typed relations live in their OWN
-structures (``typed``/``typed_inbound``), never in ``adjacency``, so GRA-1's untyped 1-hop
-expansion is untouched by them. Targets resolve through the SAME alias tiers as wikilinks
-(one resolution path — ``resolve()``); unresolved typed targets land in
-``typed_unresolved`` for the linter. Typed edges round-trip through links.json so recall
-reads them O(1) with zero corpus re-reads.
+structures (``typed``/``typed_inbound``), never merged into ``adjacency`` itself. RET-13
+(owner-directed): recall's 1-hop expansion (GRA-1) now ALSO reads ``refines``/
+``derives-from`` directly out of these typed structures (both directions) as an
+additional traversal source, alongside the untyped adjacency — so a memory related only
+via one of those frontmatter relations, with no body wikilink, is reachable too.
+``supersedes``/``contradicts`` are deliberately excluded from that traversal, unchanged —
+recall consumes them only for the dedicated demotion/annotation logic GRA-4 already
+built (see recall.py's ``_typed_relation_maps``/``_expand_neighbors``). Targets resolve
+through the SAME alias tiers as wikilinks (one resolution path — ``resolve()``);
+unresolved typed targets land in ``typed_unresolved`` for the linter. Typed edges
+round-trip through links.json so recall reads them O(1) with zero corpus re-reads.
 
 Read-only, with ONE exception: ``add_typed_relation`` — the per-item, agent-gated write
 primitive reconsolidation's supersede outcome routes through (additive, body-preserving,
@@ -78,10 +84,12 @@ _LINKS_CACHE_NAME = "links.json"
 # consumer (lint report, recall annotations) uses, so output stays deterministic.
 # "derives-from" (DRM-6): derivation provenance — a dream-generated schema/hypothesis
 # PARENT declares the child memories it was abstracted from (`derives-from: [a, b]` on
-# the parent; hand-authored derivations are welcome to use it too). Navigational like
-# `refines`: no ranking effect, no recall annotation — but it JOINS decision chains
-# (history._CHAIN_RELATIONS), so provenance walks and DRM-5 reward propagation follow
-# derivation lineage exactly like supersede/refine lineage.
+# the parent; hand-authored derivations are welcome to use it too). Like `refines`: no
+# penalty, no annotation (being derived-from isn't evidence a memory is wrong or
+# disputed) -- but RET-13 seeds both into recall's 1-hop graph expansion as an
+# additional traversal source, and it JOINS decision chains (history._CHAIN_RELATIONS),
+# so provenance walks and DRM-5 reward propagation follow derivation lineage exactly
+# like supersede/refine lineage.
 TYPED_RELATIONS = ("supersedes", "contradicts", "refines", "derives-from")
 
 # --------------------------------------------------------------------------- #

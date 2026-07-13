@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 from memory import build_index as B
+from memory import outcome as O
 from memory import recall as R
 from memory import staleness as S
 from memory import telemetry as T
@@ -978,8 +979,12 @@ def test_pin_boost_env_override_and_default(monkeypatch):
     assert R._pin_boost() == R._PIN_BOOST
 
 
-def test_recall_refines_is_navigational_only(tmp_path, monkeypatch):
-    """refines carries NO ranking effect and NO annotation — parse/persist/lint only."""
+def test_recall_refines_has_no_penalty_or_annotation(tmp_path, monkeypatch):
+    """refines carries NO penalty and NO annotation (unlike supersedes/contradicts) — it
+    doesn't reorder two candidates that both already rank organically, and never adds a
+    note. RET-13 (see test_graph_expansion_seeds_from_refines_and_derives_from below) DOES
+    let refines/derives-from seed 1-hop expansion for a candidate that ISN'T already
+    organically ranked — those are two different claims; this test only covers the former."""
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
     os.makedirs(md)
@@ -1001,6 +1006,190 @@ def test_recall_refines_is_navigational_only(tmp_path, monkeypatch):
     assert names.index("base_note") < names.index("detail_note")  # organic order, no demotion
     assert all(r["note"] == "" for r in res)
     assert "[" not in R.format_results(res).split("📎", 1)[1].replace("(linked)", "")
+
+
+def test_graph_expansion_seeds_from_refines_and_derives_from(tmp_path, monkeypatch):
+    """RET-13 (owner-directed): a memory reachable ONLY via a typed refines/derives-from
+    relation — no body [[wikilink]] at all — still gets pulled into 1-hop expansion, the
+    same acceptance case as test_graph_expansion_surfaces_lexically_distant_neighbor but
+    via a frontmatter relation instead of an inline wikilink. Still unpenalized/unannotated
+    (RET-13 widens the traversal SOURCE only, not the demotion/annotation rules)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    os.makedirs(md)
+    files = {
+        "auth_flow.md": (
+            '---\nname: auth_flow\ndescription: "oauth token refresh flow for the api gateway"\n'
+            "type: project\nrefines: [deploy_runbook]\n---\nbody with no wikilink at all\n"
+        ),
+        "deploy_runbook.md": _mem("deploy_runbook", "kubernetes helm chart rollout steps"),
+        "excel_header.md": _mem("excel_header", _CORPUS["excel_header.md"]),
+        "canvas_pdf.md": _mem("canvas_pdf", _CORPUS["canvas_pdf.md"]),
+        "formula_graph.md": _mem("formula_graph", _CORPUS["formula_graph.md"]),
+    }
+    for fname, content in files.items():
+        with open(os.path.join(md, fname), "w", encoding="utf-8") as fh:
+            fh.write(content)
+    B.build_index(md, idx)
+
+    res = R.recall(_OAUTH_QUERY, k=5, memory_dir=md, index_dir=idx)
+    by_name = {r["name"]: r for r in res}
+    assert "auth_flow" in by_name and by_name["auth_flow"]["via"] == "rank"
+    assert "deploy_runbook" in by_name  # lexically distant -- only the typed edge got it here
+    assert by_name["deploy_runbook"]["via"] == "graph"
+    assert by_name["deploy_runbook"]["note"] == ""  # seeded, but still unannotated/unpenalized
+
+
+def test_graph_expansion_derives_from_seeds_neighbor_too(tmp_path, monkeypatch):
+    """Same acceptance case, the OTHER typed relation RET-13 covers: derives-from."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    os.makedirs(md)
+    files = {
+        "auth_flow.md": (
+            '---\nname: auth_flow\ndescription: "oauth token refresh flow for the api gateway"\n'
+            "type: project\nderives-from: [deploy_runbook]\n---\nbody with no wikilink at all\n"
+        ),
+        "deploy_runbook.md": _mem("deploy_runbook", "kubernetes helm chart rollout steps"),
+        "excel_header.md": _mem("excel_header", _CORPUS["excel_header.md"]),
+        "canvas_pdf.md": _mem("canvas_pdf", _CORPUS["canvas_pdf.md"]),
+        "formula_graph.md": _mem("formula_graph", _CORPUS["formula_graph.md"]),
+    }
+    for fname, content in files.items():
+        with open(os.path.join(md, fname), "w", encoding="utf-8") as fh:
+            fh.write(content)
+    B.build_index(md, idx)
+
+    res = R.recall(_OAUTH_QUERY, k=5, memory_dir=md, index_dir=idx)
+    by_name = {r["name"]: r for r in res}
+    assert "auth_flow" in by_name and by_name["auth_flow"]["via"] == "rank"
+    assert "deploy_runbook" in by_name
+    assert by_name["deploy_runbook"]["via"] == "graph"
+    assert by_name["deploy_runbook"]["note"] == ""
+
+
+def _draft_typed_edge_corpus(md, relation: str):
+    """auth_flow is a DRAFT declaring ``relation: [deploy_runbook]`` on ITSELF, no body
+    wikilink -- the exact DRM-6-quarantine-bypass shape RET-13's draft carve-out exists to
+    close. deploy_runbook is lexically distant from the oauth query on purpose (same
+    fixture shape as the sibling non-draft tests above) so the ONLY possible path into the
+    result set is the typed-edge graph traversal this test is asserting stays CLOSED."""
+    os.makedirs(md, exist_ok=True)
+    files = {
+        "auth_flow.md": (
+            '---\nname: auth_flow\ndescription: "oauth token refresh flow for the api gateway"\n'
+            f"type: project\nconfidence: draft\n{relation}: [deploy_runbook]\n---\n"
+            "body with no wikilink at all\n"
+        ),
+        "deploy_runbook.md": _mem("deploy_runbook", "kubernetes helm chart rollout steps"),
+        "excel_header.md": _mem("excel_header", _CORPUS["excel_header.md"]),
+        "canvas_pdf.md": _mem("canvas_pdf", _CORPUS["canvas_pdf.md"]),
+        "formula_graph.md": _mem("formula_graph", _CORPUS["formula_graph.md"]),
+    }
+    for fname, content in files.items():
+        with open(os.path.join(md, fname), "w", encoding="utf-8") as fh:
+            fh.write(content)
+
+
+def test_graph_expansion_excludes_draft_seeds_own_derives_from(tmp_path, monkeypatch):
+    """RET-13's draft carve-out, the ONE exception its own design notes call out as needing
+    to be airtight: a DRAFT seed's outbound derives-from must NOT seed 1-hop expansion --
+    otherwise a dream-generated (or hand-authored) draft could manufacture apparent
+    corroboration from its own self-declared lineage regardless of query relevance,
+    defeating DRM-6's "a draft must never answer alone" quarantine. Mirrors
+    test_graph_expansion_derives_from_seeds_neighbor_too exactly, except the seed is a
+    draft -- deploy_runbook must NOT appear at all (no organic match, no graph path in)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _draft_typed_edge_corpus(md, "derives-from")
+    B.build_index(md, idx)
+
+    res = R.recall(_OAUTH_QUERY, k=5, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert "deploy_runbook" not in names  # the carve-out closed the only path in
+    # With the neighbor excluded, auth_flow (a draft) is the corpus's ONLY organic match --
+    # DRM-6's separate, pre-existing "a draft must never answer alone" guard then correctly
+    # collapses this to full abstention. That collapse is exactly the intended end-to-end
+    # behavior (not a symptom of a bug): had the carve-out failed to exclude deploy_runbook,
+    # its presence would have made this a draft+non-draft mix and the guard would NOT fire.
+    assert names == []
+
+
+def test_graph_expansion_excludes_draft_seeds_own_refines(tmp_path, monkeypatch):
+    """Same carve-out, the OTHER typed relation it must cover: refines. Nothing in the
+    codebase stops a hand- or agent-authored draft from declaring `refines:` on itself --
+    dream.py's auto-apply firewall only blocks ITS OWN automated refines-writing pass, it
+    cannot block a hand-authored frontmatter line -- so this needs the same exclusion as
+    derives-from, not just that one relation."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _draft_typed_edge_corpus(md, "refines")
+    B.build_index(md, idx)
+
+    res = R.recall(_OAUTH_QUERY, k=5, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert "deploy_runbook" not in names
+    assert names == []  # see the derives-from sibling test for why this is the correct end state
+
+
+def test_graph_expansion_still_admits_non_draft_seeds_own_refines_and_derives_from(tmp_path, monkeypatch):
+    """Control for the two tests above: the SAME fixture shape with confidence left unset
+    (not draft) must let the neighbor through -- proving the exclusion is keyed on draft
+    status specifically, not on some other accidental difference between these fixtures."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    os.makedirs(md)
+    files = {
+        "auth_flow.md": (
+            '---\nname: auth_flow\ndescription: "oauth token refresh flow for the api gateway"\n'
+            "type: project\nrefines: [deploy_runbook]\n---\nbody with no wikilink at all\n"
+        ),
+        "deploy_runbook.md": _mem("deploy_runbook", "kubernetes helm chart rollout steps"),
+        "excel_header.md": _mem("excel_header", _CORPUS["excel_header.md"]),
+        "canvas_pdf.md": _mem("canvas_pdf", _CORPUS["canvas_pdf.md"]),
+        "formula_graph.md": _mem("formula_graph", _CORPUS["formula_graph.md"]),
+    }
+    for fname, content in files.items():
+        with open(os.path.join(md, fname), "w", encoding="utf-8") as fh:
+            fh.write(content)
+    B.build_index(md, idx)
+
+    res = R.recall(_OAUTH_QUERY, k=5, memory_dir=md, index_dir=idx)
+    names = [r["name"] for r in res]
+    assert "deploy_runbook" in names  # unlike the draft-seed tests above, this DOES get in
+
+
+def test_expand_neighbors_draft_seed_derives_from_excluded_unit(monkeypatch):
+    """Direct unit test of _expand_neighbors' draft_seeds parameter, isolated from recall()'s
+    confidence-loop wiring -- pins the exact contract: passing seed index 0 in draft_seeds
+    must zero its outbound derives-from contribution, while typed_in derives-from (the
+    REVERSE direction) and refines from other seeds are unaffected."""
+    entries = [{"name": "draft_seed"}, {"name": "typed_child"}, {"name": "filler"}]
+    penalized = [(0, 1.0, None), (2, 0.5, None)]
+    edges = {
+        "draft_seed": {
+            "out": set(), "in": set(),
+            "typed_out": {"derives-from": {"typed_child"}},
+            "typed_in": {},
+        },
+        "typed_child": {"out": set(), "in": set(), "typed_out": {}, "typed_in": {}},
+        "filler": {"out": set(), "in": set(), "typed_out": {}, "typed_in": {}},
+    }
+    name_to_idx = {"draft_seed": 0, "typed_child": 1, "filler": 2}
+
+    # seed 0 IS a draft -> its outbound derives-from must NOT pull in typed_child
+    out, injected, endorsed = R._expand_neighbors(penalized, entries, edges, None, {0})
+    assert 1 not in {i for i, _s, _st in out}
+    assert 1 not in injected and 1 not in endorsed
+
+    # same fixture, seed 0 NOT a draft -> typed_child IS reachable
+    out2, injected2, endorsed2 = R._expand_neighbors(penalized, entries, edges, None, set())
+    assert 1 in endorsed2
 
 
 def test_recall_typed_edges_degrade_without_links_cache(tmp_path, monkeypatch):
@@ -3055,6 +3244,236 @@ def test_recall_salience_never_raises_when_telemetry_and_stale_cache_absent(tmp_
     assert len(res) == 2
     for r in res:
         assert r["salience"] == {"recency": 0.0, "usage": 0.0, "staleness": 0.0}
+
+
+# --------------------------------------------------------------------------- #
+# RET-14: the outcome prior — KPI-2 injection-precision (outcome.injection_hits, persisted
+# via outcome.write_outcome_cache), folded in as its OWN bounded prior behind ITS OWN flag
+# (HIPPO_OUTCOME_PRIOR), separate from HIPPO_SALIENCE. Hermetic throughout (BM25-only).
+# --------------------------------------------------------------------------- #
+def test_outcome_prior_enabled_default_off_and_env_parsing(monkeypatch):
+    monkeypatch.delenv("HIPPO_OUTCOME_PRIOR", raising=False)
+    assert R._outcome_prior_enabled() is False
+    for truthy in ("1", "true", "yes", "on"):
+        monkeypatch.setenv("HIPPO_OUTCOME_PRIOR", truthy)
+        assert R._outcome_prior_enabled() is True
+    for falsy in ("0", "false", "False", ""):
+        monkeypatch.setenv("HIPPO_OUTCOME_PRIOR", falsy)
+        assert R._outcome_prior_enabled() is False
+
+
+def test_outcome_boost_map_empty_without_index_dir_or_cache(tmp_path):
+    assert R._outcome_boost_map(None) == {}
+    assert R._outcome_boost_map(str(tmp_path / "idx")) == {}  # outcome.json never written
+
+
+def test_outcome_boost_map_saturates(tmp_path):
+    idx = str(tmp_path / ".memory-index")
+    O.write_outcome_cache(
+        idx,
+        {
+            "one_hit": {"hits": 1, "sessions": ["s1"]},
+            "way_over_saturation": {"hits": 50, "sessions": [f"s{i}" for i in range(50)]},
+        },
+    )
+    boosts = R._outcome_boost_map(idx)
+    expected_one = R._OUTCOME_PRIOR_CAP * (1 / R._OUTCOME_PRIOR_SATURATION)
+    assert boosts["one_hit"] == pytest.approx(expected_one)
+    assert boosts["way_over_saturation"] == R._OUTCOME_PRIOR_CAP  # saturates, never exceeds
+    assert "never_boosted" not in boosts
+
+
+def test_apply_outcome_prior_boosts_score_and_reports_component(tmp_path):
+    entries = [{"name": "corroborated"}, {"name": "no_evidence"}]
+    penalized = [(0, 1.0, None), (1, 1.0, None)]  # exact tie pre-prior
+    idx = str(tmp_path / ".memory-index")
+    O.write_outcome_cache(idx, {"corroborated": {"hits": 3, "sessions": ["s1", "s2", "s3"]}})
+
+    adjusted, components = R._apply_outcome_prior(penalized, entries, index_dir=idx)
+    order = [entries[i]["name"] for i, _score, _state in adjusted]
+    assert order == ["corroborated", "no_evidence"]
+    assert components[0] == R._OUTCOME_PRIOR_CAP
+    assert 1 not in components  # no evidence -> no component entry at all, not a fake 0.0
+
+
+def test_apply_outcome_prior_disabled_path_never_called_is_a_noop():
+    """Sanity pin mirroring _apply_salience's: a flag-off recall() must never call
+    _apply_outcome_prior at all, so this only pins the function's own no-signal behavior."""
+    penalized = [(0, 1.0, None)]
+    adjusted, components = R._apply_outcome_prior(penalized, [{"name": "x"}], index_dir=None)
+    assert adjusted == penalized
+    assert components == {}
+
+
+def test_recall_outcome_prior_flag_off_ranking_byte_identical(tmp_path, monkeypatch):
+    """Flag-off ranking is byte-identical whether HIPPO_OUTCOME_PRIOR is unset or explicitly
+    "0" — even with REAL outcome evidence on disk, proving flag-off never reads it."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.delenv("HIPPO_SALIENCE", raising=False)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"entry_a.md": "gizmo widget calibration alpha", "entry_b.md": "gizmo widget calibration beta"})
+    B.build_index(md, idx)
+    O.write_outcome_cache(idx, {"entry_b": {"hits": 3, "sessions": ["s1", "s2", "s3"]}})
+
+    monkeypatch.delenv("HIPPO_OUTCOME_PRIOR", raising=False)
+    default_off = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    monkeypatch.setenv("HIPPO_OUTCOME_PRIOR", "0")
+    explicit_off = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    assert default_off == explicit_off  # full dict equality: names, order, scores
+    assert [r["name"] for r in default_off] == ["entry_a", "entry_b"]  # untouched organic order
+    assert all(r["outcome_prior"] is None for r in default_off)  # ALWAYS present, None when off
+
+
+def test_recall_outcome_prior_flag_on_boosts_corroborated_memory(tmp_path, monkeypatch):
+    """THE acceptance case end-to-end through recall(): entry_a and entry_b tie organically
+    (same construction as the salience fixture); entry_b alone carries KPI-2 outcome
+    evidence. HIPPO_OUTCOME_PRIOR=1 must flip the order; HIPPO_SALIENCE stays OFF throughout
+    to prove the two priors are independently gated, not the same flag."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.delenv("HIPPO_SALIENCE", raising=False)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"entry_a.md": "gizmo widget calibration alpha", "entry_b.md": "gizmo widget calibration beta"})
+    B.build_index(md, idx)
+    O.write_outcome_cache(idx, {"entry_b": {"hits": 3, "sessions": ["s1", "s2", "s3"]}})
+
+    monkeypatch.delenv("HIPPO_OUTCOME_PRIOR", raising=False)
+    before = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    assert [r["name"] for r in before] == ["entry_a", "entry_b"]  # organic tie-break order, pre-prior
+
+    monkeypatch.setenv("HIPPO_OUTCOME_PRIOR", "1")
+    after = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    names_after = [r["name"] for r in after]
+    assert names_after == ["entry_b", "entry_a"]  # corroborated memory overtakes
+
+    by_name = {r["name"]: r for r in after}
+    assert by_name["entry_b"]["outcome_prior"] == R._OUTCOME_PRIOR_CAP
+    assert by_name["entry_a"]["outcome_prior"] is None
+    assert by_name["entry_b"]["salience"] is None  # HIPPO_SALIENCE never touched
+    assert by_name["entry_b"]["score"] > by_name["entry_a"]["score"]  # real post-prior score
+
+
+def test_recall_outcome_prior_never_raises_when_cache_absent(tmp_path, monkeypatch):
+    """Advisory posture: flag on but outcome.json never written (fresh corpus, no session
+    history yet) -> recall() degrades to no boost for anyone, never raises."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_OUTCOME_PRIOR", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"entry_a.md": "gizmo widget calibration alpha", "entry_b.md": "gizmo widget calibration beta"})
+    B.build_index(md, idx)
+    res = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    assert len(res) == 2
+    for r in res:
+        assert r["outcome_prior"] is None
+
+
+# --------------------------------------------------------------------------- #
+# RET-16: cross-encoder rerank on the HOT PATH — the SAME _cross_encoder_rerank RCL-5
+# shipped for /hippo:recall (recall_view.py now imports it from here instead of defining
+# its own copy), gated behind HIPPO_RERANK (default OFF: the hot path has a protected p95
+# budget the explicit surface doesn't) and bounded under its own timeout.
+# --------------------------------------------------------------------------- #
+class _FakeCrossEncoder:
+    def __init__(self, score_fn):
+        self._score_fn = score_fn
+
+    def rerank(self, query, documents, **kwargs):
+        return [self._score_fn(d) for d in documents]
+
+
+def test_rerank_enabled_default_off_and_env_parsing(monkeypatch):
+    monkeypatch.delenv("HIPPO_RERANK", raising=False)
+    assert R._rerank_enabled() is False
+    for truthy in ("1", "true", "yes", "on"):
+        monkeypatch.setenv("HIPPO_RERANK", truthy)
+        assert R._rerank_enabled() is True
+    for falsy in ("0", "false", "False", ""):
+        monkeypatch.setenv("HIPPO_RERANK", falsy)
+        assert R._rerank_enabled() is False
+
+
+def test_rerank_timeout_secs_env_override_and_malformed_fallback(monkeypatch):
+    monkeypatch.delenv("HIPPO_RERANK_TIMEOUT", raising=False)
+    assert R._rerank_timeout_secs() == R._RERANK_TIMEOUT_SECS
+    monkeypatch.setenv("HIPPO_RERANK_TIMEOUT", "5.5")
+    assert R._rerank_timeout_secs() == 5.5
+    monkeypatch.setenv("HIPPO_RERANK_TIMEOUT", "not-a-float")
+    assert R._rerank_timeout_secs() == R._RERANK_TIMEOUT_SECS
+
+
+def test_recall_rerank_flag_off_byte_identical_even_with_a_working_cross_encoder(tmp_path, monkeypatch):
+    """Flag-off must never invoke the model at all — proven here by wiring a cross-encoder
+    that WOULD flip the order, and confirming recall() ignores it."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"entry_a.md": "gizmo widget calibration alpha", "entry_b.md": "gizmo widget calibration beta"})
+    B.build_index(md, idx)
+    monkeypatch.setattr(B, "_get_cross_encoder", lambda allow_download: _FakeCrossEncoder(lambda d: 0.9 if "beta" in d else 0.1))
+
+    monkeypatch.delenv("HIPPO_RERANK", raising=False)
+    default_off = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    monkeypatch.setenv("HIPPO_RERANK", "0")
+    explicit_off = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    assert default_off == explicit_off
+    assert [r["name"] for r in default_off] == ["entry_a", "entry_b"]  # untouched organic order
+
+
+def test_recall_rerank_flag_on_reorders_final_results(tmp_path, monkeypatch):
+    """THE acceptance case end-to-end: entry_a organically leads, but a fake cross-encoder
+    scores entry_b higher — HIPPO_RERANK=1 must flip the final order without touching the
+    true fused score/rank (COR-8)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_RERANK", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"entry_a.md": "gizmo widget calibration alpha", "entry_b.md": "gizmo widget calibration beta"})
+    B.build_index(md, idx)
+    monkeypatch.setattr(B, "_get_cross_encoder", lambda allow_download: _FakeCrossEncoder(lambda d: 0.9 if "beta" in d else 0.1))
+
+    res = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    assert [r["name"] for r in res] == ["entry_b", "entry_a"]
+    by_name = {r["name"]: r for r in res}
+    assert by_name["entry_a"]["rank"] == 1  # COR-8: the true fused rank/score, untouched
+    assert by_name["entry_b"]["rank"] == 2
+
+
+def test_recall_rerank_degrades_to_fused_order_on_model_failure(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_RERANK", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"entry_a.md": "gizmo widget calibration alpha", "entry_b.md": "gizmo widget calibration beta"})
+    B.build_index(md, idx)
+
+    def _boom(allow_download):
+        raise RuntimeError("cross-encoder model not cached offline")
+
+    monkeypatch.setattr(B, "_get_cross_encoder", _boom)
+    res = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    assert [r["name"] for r in res] == ["entry_a", "entry_b"]  # fused order survives
+
+
+def test_recall_rerank_degrades_to_fused_order_on_timeout(tmp_path, monkeypatch):
+    """A slow/hung rerank call must never block recall() past its own timeout budget."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.setenv("HIPPO_RERANK", "1")
+    monkeypatch.setenv("HIPPO_RERANK_TIMEOUT", "0.05")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, {"entry_a.md": "gizmo widget calibration alpha", "entry_b.md": "gizmo widget calibration beta"})
+    B.build_index(md, idx)
+
+    class _SlowCrossEncoder:
+        def rerank(self, query, documents, **kwargs):
+            time.sleep(0.5)
+            return [0.9, 0.1]
+
+    monkeypatch.setattr(B, "_get_cross_encoder", lambda allow_download: _SlowCrossEncoder())
+    res = R.recall(_SALIENCE_QUERY, k=2, memory_dir=md, index_dir=idx)
+    assert [r["name"] for r in res] == ["entry_a", "entry_b"]  # fused order survives the timeout
 
 
 # --------------------------------------------------------------------------- #

@@ -1325,6 +1325,26 @@ def _build_run_context(memory_dir: str, repo_root: str) -> RunContext:
             write_stale_cache(default_index_dir(memory_dir), stale)
     except Exception:
         pass
+    # RET-14: same offline moment — refresh recall's outcome-prior cache from the KPI-2
+    # join (SIG-4's episode x outcome ledger reconciliation), so the hot path (gated by its
+    # OWN HIPPO_OUTCOME_PRIOR flag, independent of HIPPO_SALIENCE) only ever reads a small
+    # cached JSON, never re-runs the live join itself. Gated on the SAME flag being on for
+    # THIS session (checked here, not imported from recall.py, to keep this module's
+    # dependency graph as-is) — unlike stale.json (which has a SECOND, always-on consumer:
+    # the RET-6 verify-at-use banner), outcome.json has exactly one consumer and it's
+    # OFF by default, so computing the live ledger join on every session regardless would
+    # be pure waste. A user who flips the flag on gets a populated cache from THIS session's
+    # SessionStart onward (recall.py already degrades gracefully to no-boost on a cache
+    # that predates the flag being turned on).
+    if os.environ.get("HIPPO_OUTCOME_PRIOR", "").strip() not in ("", "0", "false", "False"):
+        try:
+            if os.path.isdir(memory_dir):
+                from .build_index import default_index_dir
+                from .outcome import injection_hits, write_outcome_cache
+
+                write_outcome_cache(default_index_dir(memory_dir), injection_hits(memory_dir))
+        except Exception:
+            pass
     # RUL-4: refresh the rules side-index at the SAME offline moment (signature fast-path —
     # unchanged governance files cost one stat sweep). Trusted-only path (build_context
     # short-circuits before here), so the rules recall source inherits the SEC-1 gate.

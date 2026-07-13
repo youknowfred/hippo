@@ -244,9 +244,23 @@ def test_describe_invokes_cross_encoder_rerank(tmp_path, monkeypatch):
         calls.append((query, [h["name"] for h in hits]))
         return hits
 
+    monkeypatch.delenv("HIPPO_RERANK", raising=False)
     monkeypatch.setattr(V, "_cross_encoder_rerank", _spy)
     V.describe("how do we deploy the web service", memory_dir=md, index_dir=idx)
     assert calls and calls[0][0] == "how do we deploy the web service"
+
+
+def test_describe_skips_its_own_rerank_when_recall_already_reranked(tmp_path, monkeypatch):
+    """RET-16: with HIPPO_RERANK=1, recall() already reranked internally -- describe() must
+    not pay the (bounded but real) model cost a second time for the same hit set."""
+    md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
+    _seed(md, idx, {"deploy.md": _mem("deploy", "how the web service is deployed via canary")})
+    calls = []
+
+    monkeypatch.setenv("HIPPO_RERANK", "1")
+    monkeypatch.setattr(V, "_cross_encoder_rerank", lambda q, h: calls.append(1) or h)
+    V.describe("how do we deploy the web service", memory_dir=md, index_dir=idx)
+    assert not calls
 
 
 def test_describe_never_reranks_on_abstention(tmp_path, monkeypatch):
