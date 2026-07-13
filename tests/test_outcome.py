@@ -2,8 +2,10 @@
 
 A PostToolUse hook records file touches into a gitignored outcome ledger; injection_precision
 later JOINS that against the episode buffer's injected memories via their cited_paths — "was an
-injected memory's cited file subsequently touched in the same session?" MEASUREMENT ONLY: this
-module influences no ranking (pinned by a negative-capability import test).
+injected memory's cited file subsequently touched in the same session?" This module still only
+COMPUTES and WRITES that evidence (pinned by a negative-capability import test: it must not
+import recall/new_memory) — RET-14's ranking consumer lives in recall.py, which reads the
+persisted outcome.json cache this module writes, never the reverse.
 """
 
 from __future__ import annotations
@@ -131,6 +133,74 @@ def test_no_signal_yet(repo, memory_dir):
     r = O.injection_precision(memory_dir)
     assert r["injected_with_cites"] == 0 and r["precision"] is None
     assert "no injected-then-touched signal yet" in O.format_report(memory_dir)
+
+
+# ---- RET-14: the outcome cache recall.py's hot-path prior reads --------------------------- #
+def test_outcome_cache_round_trips(tmp_path):
+    idx = str(tmp_path / ".memory-index")
+    hits = {"m1": {"hits": 2, "sessions": ["s2", "s1"]}}  # writer preserves order — injection_hits sorts, not this
+    assert O.write_outcome_cache(idx, hits) is True
+    read_back = O.read_outcome_cache(idx)
+    assert read_back == {"m1": {"hits": 2, "sessions": ["s2", "s1"]}}
+
+
+def test_outcome_cache_written_even_when_empty(tmp_path):
+    """An honest {} means 'checked this session, found no evidence yet' — never a skipped
+    write, mirroring staleness.write_stale_cache's same discipline."""
+    idx = str(tmp_path / ".memory-index")
+    assert O.write_outcome_cache(idx, {}) is True
+    assert O.read_outcome_cache(idx) == {}
+
+
+def test_outcome_cache_absent_or_corrupt_reads_as_none(tmp_path):
+    idx = str(tmp_path / ".memory-index")
+    assert O.read_outcome_cache(idx) is None  # never written
+    os.makedirs(idx, exist_ok=True)
+    with open(O.outcome_cache_path(idx), "w", encoding="utf-8") as fh:
+        fh.write("not json{{{")
+    assert O.read_outcome_cache(idx) is None  # corrupt
+
+
+def test_outcome_cache_schema_mismatch_reads_as_none(tmp_path):
+    idx = str(tmp_path / ".memory-index")
+    os.makedirs(idx, exist_ok=True)
+    with open(O.outcome_cache_path(idx), "w", encoding="utf-8") as fh:
+        json.dump({"schema_version": 999, "hits": {"m1": {"hits": 1, "sessions": []}}}, fh)
+    assert O.read_outcome_cache(idx) is None
+
+
+def test_session_start_refreshes_outcome_cache_when_prior_enabled(repo, memory_dir, monkeypatch):
+    """SessionStart's build_context writes outcome.json at the same offline moment it
+    writes stale.json, from the SAME injection_hits join this module already exposes --
+    but ONLY when HIPPO_OUTCOME_PRIOR is on: outcome.json has exactly one consumer (unlike
+    stale.json's second always-on banner consumer), so it's not worth computing for free."""
+    from memory import session_start as SS
+    from memory.build_index import default_index_dir
+
+    _mem(memory_dir, "app-note", ["src/app.py"])
+    td = default_telemetry_dir(memory_dir)
+    T.log_episode(["app-note"], query="q", repo_root=repo, telemetry_dir=td, session_id="s")
+    _touch(memory_dir, repo, "src/app.py", sid="s")
+
+    monkeypatch.setenv("HIPPO_OUTCOME_PRIOR", "1")
+    SS.build_context(memory_dir, repo)
+    cache = O.read_outcome_cache(default_index_dir(memory_dir))
+    assert cache is not None
+    assert cache.get("app-note", {}).get("hits") == 1
+
+
+def test_session_start_skips_outcome_cache_when_prior_disabled(repo, memory_dir, monkeypatch):
+    from memory import session_start as SS
+    from memory.build_index import default_index_dir
+
+    _mem(memory_dir, "app-note", ["src/app.py"])
+    td = default_telemetry_dir(memory_dir)
+    T.log_episode(["app-note"], query="q", repo_root=repo, telemetry_dir=td, session_id="s")
+    _touch(memory_dir, repo, "src/app.py", sid="s")
+
+    monkeypatch.delenv("HIPPO_OUTCOME_PRIOR", raising=False)
+    SS.build_context(memory_dir, repo)
+    assert O.read_outcome_cache(default_index_dir(memory_dir)) is None
 
 
 # ---- measurement-only guarantee ----------------------------------------------------------- #

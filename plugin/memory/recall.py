@@ -29,6 +29,7 @@ from .build_index import (
     SCHEMA_VERSION,
     LoadedIndex,
     _hash,
+    bm25_terms,
     build_index,
     compute_bm25_stats,
     default_index_dir,
@@ -132,10 +133,14 @@ _INVALIDATION_RECENT_DAYS = 30.0
 # demotion (it can fall out of top-k, and its successor outranks it), never a hard exclude
 # (a wide-k query still surfaces it, annotated). `contradicts` targets are deliberately
 # NOT demoted — a contradiction means "one of these is wrong, VERIFY", not "this one lost"
-# — they carry a conflict annotation only. `refines` is navigational: no ranking effect,
-# no annotation. Typed edges reach this hot path via GRA-6's persisted links.json ONLY
-# (one small-JSON read, shared with 1-hop expansion) — cache absent degrades to
-# no-demotion/no-annotation, never a corpus read per prompt.
+# — they carry a conflict annotation only. `refines`/`derives-from` carry no penalty and no
+# annotation either (unlike supersedes/contradicts, being refined-by or derived-from isn't
+# evidence the target is wrong or disputed) — RET-13 (owner-directed) instead seeds them
+# into 1-hop graph expansion below, the same discounted-candidate treatment an untyped
+# [[wikilink]] neighbor gets, on the theory that a memory a top hit refines/derives from is
+# usually also relevant. Typed edges reach this hot path via GRA-6's persisted links.json
+# ONLY (one small-JSON read, shared with 1-hop expansion) — cache absent degrades to
+# no-demotion/no-annotation/no-expansion, never a corpus read per prompt.
 _SUPERSEDED_PENALTY = 0.5
 
 # GOV-2: steer:pin — the author's bounded, ALWAYS-ON relevance nudge, the exact bounded-
@@ -244,6 +249,23 @@ _SALIENCE_RECENCY_WINDOW_DAYS = 180.0
 _SALIENCE_USAGE_CAP = 0.10
 _SALIENCE_STALENESS_CAP = 0.15
 _SALIENCE_STALENESS_SATURATION = 5
+
+# --------------------------------------------------------------------------- #
+# RET-14 (owner-directed): the outcome prior — KPI-2's "was this memory injected AND then
+# actually used" evidence (outcome.injection_hits, persisted via write_outcome_cache),
+# folded in as its OWN bounded ranking prior, gated by ITS OWN flag (``HIPPO_OUTCOME_PRIOR``,
+# default OFF) — deliberately SEPARATE from ``HIPPO_SALIENCE`` rather than a fourth term
+# inside ``_apply_salience``. Two reasons: (1) RET-10 measured recency/usage moving nothing
+# on the golden eval and the owner does not want a real signal's measurement entangled with
+# two that already tested inert; (2) usage/recency are POPULARITY/AGE proxies, while KPI-2
+# is actual outcome evidence (the cited file got touched after injection) — a qualitatively
+# different signal worth its own on/off switch to evaluate independently. Same bounded-
+# multiplier, pre-cut posture as every other prior here: relevance dominates, this only
+# nudges within it. Saturates at _OUTCOME_PRIOR_SATURATION corroborating sessions -- a
+# memory with that much positive evidence already earns the full (small) nudge; more
+# sessions add no further boost, so a heavily-used memory can't compound this indefinitely.
+_OUTCOME_PRIOR_CAP = 0.10
+_OUTCOME_PRIOR_SATURATION = 3
 
 # --------------------------------------------------------------------------- #
 # RET-6: verify-at-use banner — a currently-stale injected memory carries a one-line
@@ -684,6 +706,11 @@ def _bm25_rank(
     """
     if not query_tokens or not entries:
         return []
+    # RET-12: entries' persisted "tokens" are stemmed (build_index.bm25_terms); stem the
+    # query side the same way so both halves of the match are in the same term-space. Doing
+    # it here (rather than expecting every caller to pre-stem) covers _bm25_rank_body's
+    # delegation and the direct-call test site uniformly.
+    query_tokens = bm25_terms(query_tokens)
     corpus = [e.get("tokens") or [] for e in entries]
     qset = set(query_tokens)
     matched = [i for i in range(len(entries)) if qset.intersection(corpus[i])]
@@ -974,7 +1001,7 @@ def _drift_patch(entry: dict, memory_dir: str) -> dict:
         if fresh_hash == entry.get("hash"):
             return entry
         patched = dict(entry)
-        patched["tokens"] = tokenize(doc_text)
+        patched["tokens"] = bm25_terms(tokenize(doc_text))
         patched["description"] = doc_text.split(". ", 1)[1] if ". " in doc_text else doc_text
         patched["hash"] = fresh_hash
         return patched
@@ -1070,14 +1097,19 @@ def _expand_neighbors(
     entries: List[dict],
     edges: Optional[dict],
     superseded: Optional[Dict[int, List[str]]] = None,
+    draft_seeds: Optional[set] = None,
 ) -> Tuple[List[Tuple[int, float, Optional[str]]], set]:
     """1-hop neighbor expansion (GRA-1): inject linked memories at a discounted score.
 
     Takes the ALREADY-penalized candidate list (post-fusion, post-invalidation re-sort),
     seeds on its top-N entries, and unions their outbound+inbound 1-hop neighbor stems from
     GRA-6's persisted edge list (``edges`` — the ``_load_hot_edges`` result ``recall()``
-    loaded once, links.json only, the hot path's single extra small-JSON read). Injection
-    rules, in order:
+    loaded once, links.json only, the hot path's single extra small-JSON read) — RET-13:
+    now including typed ``refines``/``derives-from`` targets (both directions) alongside
+    the untyped ``[[wikilink]]`` adjacency, so a memory related only via one of those
+    frontmatter relations (no body wikilink) is reachable too; ``supersedes``/
+    ``contradicts`` are deliberately excluded from this traversal set, unchanged, since
+    they keep their own dedicated penalty/annotation handling. Injection rules, in order:
 
       - stems absent from the index are dropped (a link can outlive its target);
       - the seeds themselves are dropped (a seed is already ranked as well as it can be);
@@ -1124,7 +1156,43 @@ def _expand_neighbors(
             rec = edges.get(entries[si].get("name"))
             if not rec:
                 continue
-            for stem in rec.get("out", set()) | rec.get("in", set()):
+            # RET-13 (owner-directed): a memory a seed REFINES or DERIVES-FROM is usually
+            # also relevant to the same query in practice, so those typed relations now
+            # seed the SAME 1-hop pull as untyped [[wikilinks]] -- widening the traversal
+            # SOURCE only. supersedes/contradicts keep their existing dedicated handling
+            # (penalty/annotation below) and are deliberately NOT added here, unchanged.
+            #
+            # ONE exception: a DRAFT seed's own outbound refines/derives-from are BOTH
+            # excluded. A dream-generated draft declares `derives-from: [children]` on
+            # ITSELF (DRM-6) — letting that self-declared lineage seed expansion would let
+            # an unproven draft manufacture apparent corroboration from its own children
+            # regardless of query relevance, defeating the draft-quarantine guard ("a draft
+            # must never answer alone" — recall()'s all-draft-results collapse). The same
+            # risk applies to `refines`: nothing stops a hand- or agent-authored draft from
+            # declaring `refines: [x]` on itself the exact same way — dream.py's auto-apply
+            # firewall only blocks ITS OWN automated refines-writing pass from touching
+            # drafts, it cannot block a hand-authored frontmatter line — so both outbound
+            # typed relations get the same exclusion, not just derives-from. The REVERSE
+            # direction (a non-draft seed pulling in a draft that refines/derives FROM it)
+            # is unaffected — that draft still enters at the standard discount and still
+            # can't answer alone (the quarantine lives in the emission-time all-draft
+            # collapse, not here). ``draft_seeds`` is a caller-precomputed index set (never
+            # a fresh ``.get("confidence")`` read here) — confidence reads stay confined to
+            # recall() itself, a closed-set AST invariant a dedicated test pins.
+            typed_out = rec.get("typed_out") or {}
+            typed_in = rec.get("typed_in") or {}
+            seed_is_draft = bool(draft_seeds and si in draft_seeds)
+            refines_out = set() if seed_is_draft else typed_out.get("refines", set())
+            derives_out = set() if seed_is_draft else typed_out.get("derives-from", set())
+            neighbor_stems = (
+                rec.get("out", set())
+                | rec.get("in", set())
+                | refines_out
+                | derives_out
+                | typed_in.get("refines", set())
+                | typed_in.get("derives-from", set())
+            )
+            for stem in neighbor_stems:
                 j = name_to_idx.get(stem)
                 if j is None or j in seed_idxs:
                     continue
@@ -1337,6 +1405,158 @@ def _apply_salience(
         return adjusted, components
     except Exception:
         return penalized, {}
+
+
+def _outcome_prior_enabled() -> bool:
+    """True only when ``HIPPO_OUTCOME_PRIOR`` is explicitly truthy — DEFAULT OFF, same
+    falsy-set convention as ``_salience_enabled()``, but its OWN independent flag (see the
+    ``_OUTCOME_PRIOR_*`` constants' comment for why this isn't just a fourth salience term)."""
+    raw = os.environ.get("HIPPO_OUTCOME_PRIOR", "").strip()
+    return raw not in ("", "0", "false", "False")
+
+
+def _outcome_boost_map(index_dir: Optional[str]) -> Dict[str, float]:
+    """Name -> bounded ``[0, _OUTCOME_PRIOR_CAP]`` outcome prior from RET-14's persisted
+    ``outcome.json`` (``outcome.read_outcome_cache``) — ONE small JSON read, the same cost
+    class as ``stale.json``/``links.json``, NEVER the live episode/outcome ledger join on
+    this hot path (that join is ``outcome.injection_hits``, run once per SessionStart and
+    cached). Advisory: absent/corrupt cache -> ``{}`` (no boost for anyone). Never raises.
+    """
+    if not index_dir:
+        return {}
+    try:
+        from .outcome import read_outcome_cache
+
+        cache = read_outcome_cache(index_dir)
+        if not cache:
+            return {}
+        out: Dict[str, float] = {}
+        for name, rec in cache.items():
+            hits = rec.get("hits") if isinstance(rec, dict) else None
+            if not isinstance(hits, int) or isinstance(hits, bool) or hits <= 0:
+                continue
+            out[name] = _OUTCOME_PRIOR_CAP * min(1.0, hits / _OUTCOME_PRIOR_SATURATION)
+        return out
+    except Exception:
+        return {}
+
+
+def _apply_outcome_prior(
+    penalized: List[Tuple[int, float, Optional[str]]],
+    entries: List[dict],
+    *,
+    index_dir: Optional[str],
+) -> Tuple[List[Tuple[int, float, Optional[str]]], Dict[int, float]]:
+    """Fold RET-14's outcome prior into ``penalized``'s score, same pre-cut posture as
+    ``_apply_salience`` (so an outcome-boosted memory can compete for graph-expansion seed
+    slots too) — but a SEPARATE function/flag (``HIPPO_OUTCOME_PRIOR``), not a term inside
+    ``_apply_salience`` itself, so it can be measured independently (see the constants'
+    comment). Composes multiplicatively with whatever ``_apply_salience`` already did to
+    ``penalized`` when BOTH flags are on — each still individually capped and small, so the
+    combined swing stays in the same "break a near-tie, never override real relevance" class.
+
+    Returns ``(re-sorted list, {entry index: outcome boost float})`` — the COR-8 true-score
+    breakdown convention every other prior here follows. Only called when
+    ``_outcome_prior_enabled()``; never raises (fails open to the untouched input list and
+    an empty component map).
+    """
+    try:
+        boost_map = _outcome_boost_map(index_dir)
+        if not boost_map:
+            return penalized, {}
+        components: Dict[int, float] = {}
+        adjusted: List[Tuple[int, float, Optional[str]]] = []
+        for i, score, state in penalized:
+            boost = boost_map.get(entries[i].get("name"), 0.0)
+            adjusted.append((i, score * (1.0 + boost), state))
+            if boost:
+                components[i] = round(boost, 4)
+        adjusted.sort(key=lambda triple: triple[1], reverse=True)
+        return adjusted, components
+    except Exception:
+        return penalized, {}
+
+
+# --------------------------------------------------------------------------- #
+# RCL-5/RET-16: cross-encoder rerank. RCL-5 shipped this model (Xenova/ms-marco-MiniLM-L-6-
+# v2, offline ONNX via fastembed, build_index._get_cross_encoder) for /hippo:recall and the
+# MCP tool only — an explicit surface with "no p95 budget to protect" (unconditional there,
+# no flag). RET-16 (owner-directed) extends it to THIS module's hot path (UserPromptSubmit),
+# which DOES have a protected p95 (GATE_RECALL_P95_MS) — so here it's gated OFF by default
+# (HIPPO_RERANK=1 opts in) and BOUNDED under its own timeout via run_bounded, the same
+# pattern the dense query call already uses: a cold model load or slow rerank degrades to
+# the pre-rerank fused order, never blocks the hook past its budget. Both callers share ONE
+# function (previously duplicated in recall_view.py; that module now imports it from here)
+# so the reordering rule can never fork between the two surfaces — recall_view's caller
+# NEWLY inherits this bound too (it previously called the model with no timeout at all); a
+# generous bound is a strict improvement there (bounded beats unbounded even with "no p95 to
+# protect"), never a regression, as long as it doesn't starve a genuine cold load.
+#
+# IMPORTANT COST NOTE for anyone setting HIPPO_RERANK=1: the hook is a fresh subprocess
+# per prompt (no warm in-process model cache survives between prompts the way a long-lived
+# server would keep one) — so this is NOT a rare/tail cost. Expect the cross-encoder's
+# model-load-plus-inference cost on EVERY prompt this flag is on for, in the same latency
+# class as the dense embedding model's own cold load (bench's cold_p95_ms). Opt in only if
+# that per-prompt tax is acceptable; it is not free the way the other 4 items' gated priors
+# (pure arithmetic over an already-loaded cache) are.
+_RERANK_TIMEOUT_SECS = 5.0  # override: HIPPO_RERANK_TIMEOUT -- matches DENSE_QUERY_TIMEOUT_SECS,
+# the same "small offline ONNX model, cold-load-dominated" cost class; 2s left too little
+# headroom for a legitimate cold load to complete and was timing out productive work, not
+# just runaway calls.
+
+
+def _rerank_enabled() -> bool:
+    """True only when ``HIPPO_RERANK`` is explicitly truthy — DEFAULT OFF, same falsy-set
+    convention as ``_salience_enabled()``/``_outcome_prior_enabled()``."""
+    raw = os.environ.get("HIPPO_RERANK", "").strip()
+    return raw not in ("", "0", "false", "False")
+
+
+def _rerank_timeout_secs() -> float:
+    """``HIPPO_RERANK_TIMEOUT`` override; malformed/absent -> the module default. Never raises."""
+    raw = os.environ.get("HIPPO_RERANK_TIMEOUT")
+    if raw is None or not raw.strip():
+        return _RERANK_TIMEOUT_SECS
+    try:
+        return float(raw)
+    except ValueError:
+        return _RERANK_TIMEOUT_SECS
+
+
+def _cross_encoder_rerank(query: str, hits: List[dict]) -> List[dict]:
+    """Re-order ``hits`` by a local cross-encoder's joint query/description read.
+
+    ``corpus == "rule"`` pointers are excluded from the rerank and re-attached at the tail
+    in their ORIGINAL relative order — a rule pointer has no query-vs-description joint
+    signal to rerank on and must never be reordered among corpus hits. Reorders ONLY; never
+    mutates a hit's own ``score``/``rank`` (COR-8: those stay the true fused-recall values,
+    not a fabricated cross-encoder number on a different scale) — every consumer (this
+    module, ``recall_view``'s renderer, ``format_results``) walks list order for display and
+    never reads ``rank`` to number results, so reordering the list alone is sufficient.
+
+    BOUNDED (RET-16): the model call runs under ``run_bounded``/``_rerank_timeout_secs()``,
+    the same pattern ``embed_query`` already uses, so a cold model load can never block a
+    caller past its own timeout budget. Degrades to the ORIGINAL order on ANY failure — no
+    cached model, fastembed unavailable, timeout, any exception — never downloads, never
+    raises.
+    """
+    rule_hits = [h for h in hits if h.get("corpus") == "rule"]
+    corpus_hits = [h for h in hits if h.get("corpus") != "rule"]
+    if len(corpus_hits) < 2:
+        return hits  # nothing meaningful to reorder
+    try:
+        from .build_index import _get_cross_encoder
+
+        def _rerank_call():
+            model = _get_cross_encoder(allow_download=False)
+            descriptions = [h.get("description") or "" for h in corpus_hits]
+            return list(model.rerank(query, descriptions))
+
+        scores = run_bounded(_rerank_call, _rerank_timeout_secs())
+        order = sorted(range(len(corpus_hits)), key=lambda i: scores[i], reverse=True)
+        return [corpus_hits[i] for i in order] + rule_hits
+    except Exception:
+        return hits
 
 
 # --------------------------------------------------------------------------- #
@@ -2142,6 +2362,7 @@ def recall(
         # bookkeeping but never reaches `results`. Contradicted entries deliberately get NO
         # penalty (annotation-only — see _SUPERSEDED_PENALTY's comment block).
         penalized: List[Tuple[int, float, Optional[str]]] = []
+        draft_indices: set = set()  # RET-13: which seeds must not expand via derives-from
         for i, score in fused:
             state = _invalidation_state(entries[i])
             adj_score = score * _INVALIDATION_PENALTY if state == "recent" else score
@@ -2162,6 +2383,7 @@ def recall(
             conf = entries[i].get("confidence")
             if conf == "draft":
                 adj_score *= _draft_penalty()
+                draft_indices.add(i)
             elif conf == "authoritative":
                 adj_score *= _authoritative_boost()
             penalized.append((i, adj_score, state))
@@ -2179,9 +2401,18 @@ def recall(
                 penalized, entries, memory_dir=memory_dir, index_dir=graph_index_dir
             )
 
+        # --- RET-14: the outcome prior — its OWN flag, independent of HIPPO_SALIENCE (see
+        # the _OUTCOME_PRIOR_* constants' comment). Same pre-cut posture, applied right
+        # after salience so an outcome-boosted memory competes for graph-expansion seeds too.
+        outcome_components: Dict[int, float] = {}
+        if _outcome_prior_enabled():
+            penalized, outcome_components = _apply_outcome_prior(
+                penalized, entries, index_dir=graph_index_dir
+            )
+
         # --- 1-hop graph expansion (GRA-1): AFTER fusion + invalidation/supersession re-sort. ---
         penalized, graph_injected, graph_endorsed = _expand_neighbors(
-            penalized, entries, edges, superseded_by
+            penalized, entries, edges, superseded_by, draft_indices
         )
 
         # --- RET-6: verify-at-use banner map — display-only, UNGATED (see the constants
@@ -2368,6 +2599,12 @@ def recall(
                     # the components without branching on the flag itself (COR-8 true-score
                     # discipline: no fabricated numbers, an honest None beats a fake 0).
                     "salience": salience_components.get(i),
+                    # RET-14: the outcome-prior boost behind THIS result's score — its OWN
+                    # key (never folded into "salience", which is a distinct flag/blend) so
+                    # a consumer can tell the two priors apart. None when the flag is off or
+                    # this entry had no positive outcome evidence (COR-8: honest None beats
+                    # a fake 0).
+                    "outcome_prior": outcome_components.get(i),
                     # GOV-2: the steer mode behind this result's score — a DISTINCT key
                     # (never overloaded onto `salience`, which is None when that flag is
                     # off) so recall_view/GOV-5 can echo "pinned" legibly (COR-8). None for
@@ -2431,6 +2668,14 @@ def recall(
         results.extend(
             _rules_source_hits(q_tokens, graph_index_dir, repo_root, start_rank=len(results))
         )
+
+        # RET-16: hot-path cross-encoder rerank — gated OFF by default (see _rerank_enabled's
+        # comment on why this needs its own flag, unlike recall_view's unconditional use of
+        # the same function). Last step before return: reorders the FINAL small result list,
+        # never the corpus/candidate pool.
+        if results and _rerank_enabled():
+            results = _cross_encoder_rerank(query, results)
+
         return results
     except Exception:
         return []

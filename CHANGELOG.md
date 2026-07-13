@@ -7,6 +7,49 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.12.0 — 2026-07-13 — "Sharper recall"
+
+**re-bootstrap: no** — `plugin/requirements.txt` is unchanged (the new stemming pass is
+dependency-free, matching the vendored-BM25 philosophy); every manifest schema and the MCP
+surface are otherwise the same shape as v1.11.3. No operator action.
+
+A retrieval/ranking pass across five owner-commissioned items (RET-12..RET-16), each shipped
+behind its own env flag where it changes ranking behavior, plus fixes from a 5-lens
+adversarial review of the whole diff before merge.
+
+- **RET-12 — light BM25 stemming.** `build_index.stem()`/`bm25_terms()` collapses
+  morphological variants ("embed"/"embeds"/"embedding") to one BM25 term — plural -s/-es/-ies
+  and verbal -ing/-ed, with Porter's doubled-consonant exceptions, kept deliberately OUT of
+  `tokenize()` itself (that function stays the fuzz-tested, substring-safe primitive
+  `clean_query`'s Hypothesis test depends on; stemming is a separate pass applied only at the
+  specific BM25-postings call sites). `SCHEMA_VERSION` 6→7 forces one reindex. Caught and fixed
+  during review: a naive "-ies→-y" rule mangled "movies"→"movy", and a sibilant-plural rule
+  stripped the entire `-ize`/`-yze` verb family ("tokenizes"→"tokeniz" instead of "tokenize") —
+  exactly this codebase's own vocabulary. MRR@10 0.912→0.9144 on the golden corpus.
+- **RET-13 — graph expansion now also seeds from typed `refines`/`derives-from` relations**
+  (owner-directed), not just untyped `[[wikilinks]]` — a memory a top hit refines or derives
+  from is usually also relevant. A DRAFT memory's own outbound `refines`/`derives-from` are
+  excluded from seeding either way: a dream-generated (or hand-authored) draft could otherwise
+  manufacture apparent corroboration from its own self-declared lineage regardless of query
+  relevance, defeating DRM-6's "a draft must never answer alone" quarantine.
+- **RET-14 — the KPI-2 outcome prior.** `outcome.py`'s injection-precision signal (was an
+  injected memory's cited file actually touched, same session) is now an optional ranking
+  prior (`HIPPO_OUTCOME_PRIOR`, default off, independent of `HIPPO_SALIENCE` — RET-10 found
+  recency/usage moved nothing on the golden eval, and outcome evidence is a qualitatively
+  different signal worth measuring on its own). A new SessionStart-refreshed `outcome.json`
+  cache means the hot path never re-runs the live episode×outcome ledger join.
+- **RET-15 — a threshold calibration tool.** `memory.calibrate_thresholds` (`eval_recall.py
+  --calibrate`) grid-searches `HIPPO_KNEE_RATIO`/`HIPPO_DENSE_FLOOR` against the eval harness
+  instead of hand-tuning by feel each time a regression surfaces — report-only, never mutates
+  a shipped default. Run against the golden corpus: the knee ratio (0.5) is already optimal.
+- **RET-16 — cross-encoder rerank on the hot path.** The `Xenova/ms-marco-MiniLM-L-6-v2`
+  cross-encoder RCL-5 shipped for `/hippo:recall`'s explicit surface now optionally reranks
+  `recall()`'s own result set too (`HIPPO_RERANK`, default off — the hot path has a protected
+  p95 latency gate the explicit surface doesn't, and this is a genuine per-prompt cost, not a
+  rare tail one: the hook is a fresh subprocess per prompt, so there's no warm-cache
+  amortization across prompts). Bounded under a 5s timeout (matched to the dense query
+  timeout's own budget for the same model class).
+
 ## v1.11.3 — 2026-07-13 — "The honest guard"
 
 **re-bootstrap: no** — the shared preflight guard's message text changed in all 16 skills;

@@ -26,7 +26,7 @@ from typing import List, Optional, Set, Tuple
 
 from .build_index import default_index_dir, extract_description
 from .provenance import _iter_memory_files, parse_frontmatter, resolve_dirs
-from .recall import DEFAULT_K, recall
+from .recall import DEFAULT_K, _cross_encoder_rerank, _rerank_enabled, recall
 
 # Canonical floor-taxonomy order (mirrors new_memory.VALID_TYPES) so --list-by-type reads
 # user → feedback → project → reference; any unknown type sorts alphabetically after.
@@ -85,34 +85,6 @@ def _neighbors(graph, name: str) -> Tuple[List[str], List[str]]:
         return sorted(graph.outbound(name)), sorted(graph.inbound(name))
     except Exception:
         return [], []
-
-
-def _cross_encoder_rerank(query: str, hits: List[dict]) -> List[dict]:
-    """RCL-5: re-order ``hits`` by a local cross-encoder's joint query/description read.
-
-    An EXPLICIT-SURFACE-ONLY precision lever (never the UserPromptSubmit hot path — no p95
-    budget to protect here). T2 guard: ``corpus == "rule"`` pointers are excluded from the
-    rerank and re-attached at the tail in their ORIGINAL relative order — a rule pointer has
-    no query-vs-description joint signal to rerank on and must never be reordered among
-    corpus hits. Reorders ONLY; never mutates a hit's own ``score``/``rank`` (COR-8: those
-    stay the true fused-recall values, not a fabricated cross-encoder number on a different
-    scale). Degrades to the ORIGINAL order on any failure — no cached model, fastembed
-    unavailable, any exception — never downloads, never raises.
-    """
-    rule_hits = [h for h in hits if h.get("corpus") == "rule"]
-    corpus_hits = [h for h in hits if h.get("corpus") != "rule"]
-    if len(corpus_hits) < 2:
-        return hits  # nothing meaningful to reorder
-    try:
-        from .build_index import _get_cross_encoder
-
-        model = _get_cross_encoder(allow_download=False)
-        descriptions = [h.get("description") or "" for h in corpus_hits]
-        scores = list(model.rerank(query, descriptions))
-        order = sorted(range(len(corpus_hits)), key=lambda i: scores[i], reverse=True)
-        return [corpus_hits[i] for i in order] + rule_hits
-    except Exception:
-        return hits
 
 
 def _abstention_receipt(
@@ -255,7 +227,12 @@ def describe(
         if corpora_res is not None:
             message += "\n" + _corpora_note(corpora_res)
         return message
-    hits = _cross_encoder_rerank(query, hits)
+    # RET-16: recall() already reranked internally when HIPPO_RERANK is on — skip the
+    # second pass here rather than paying the (bounded but real) model cost twice for the
+    # same query/hit set. When the flag is off (the common case for this explicit surface,
+    # which never needed a flag), this is the ONLY rerank, exactly as before.
+    if not _rerank_enabled():
+        hits = _cross_encoder_rerank(query, hits)
     graph = _load_graph(memory_dir, index_dir)
     out: List[str] = [f'{len(hits)} memory match(es) for "{query}" (most relevant first):', ""]
     for h in hits:

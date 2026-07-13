@@ -73,6 +73,7 @@ from typing import Dict, List, Optional
 
 from .build_index import (
     LoadedIndex,
+    bm25_terms,
     build_index,
     default_index_dir,
     entry_description,
@@ -186,7 +187,10 @@ def derive_body_probe_query(index: LoadedIndex, entry_idx: int) -> str:
     entries = index.entries
     if entry_idx < 0 or entry_idx >= len(entries):
         return ""
-    desc_tokens = set(tokenize(_description_of(entries[entry_idx])))
+    # RET-12: body-chunk tokens are stemmed (build_index.bm25_terms); stem the description
+    # side the same way so "absent from description" compares like-for-like term-space,
+    # rather than treating a merely-inflected description word as novel body content.
+    desc_tokens = set(bm25_terms(tokenize(_description_of(entries[entry_idx]))))
     seen: set = set()
     out: List[str] = []
     for chunk in index.body_chunks:
@@ -1312,6 +1316,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         "memory.dream_eval; extra args pass through, e.g. --ab HIPPO_DREAM --live). "
         "The surface MSR-5's HIPPO_SALIENCE rig extends without a rewrite.",
     )
+    parser.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="RET-15: grid-search HIPPO_KNEE_RATIO/HIPPO_DENSE_FLOOR against this same "
+        "--memory-dir/--hard-set/--abstention-set (memory.calibrate_thresholds) instead of "
+        "running the normal gate report. Report-only — never mutates recall.py's default.",
+    )
     args, ab_extra = parser.parse_known_args(argv)
     if args.ab is None and ab_extra:
         # Extras are pass-through ONLY under --ab; the plain eval keeps strict parsing.
@@ -1330,6 +1341,22 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
             return 2
         return _dream_ab_main((ab_extra or []) + (["-k", str(args.k)] if args.k != 10 else []))
+
+    if args.calibrate:
+        from .calibrate_thresholds import format_report as _calibrate_report
+
+        ambient = args.memory_dir is None
+        print(
+            _calibrate_report(
+                memory_dir=args.memory_dir,
+                index_dir=args.index_dir,
+                hard_set_path=args.hard_set or (_default_hard_set_path() if ambient else None),
+                abstention_set_path=args.abstention_set
+                or (_default_abstention_set_path() if ambient else None),
+                k=args.k,
+            )
+        )
+        return 0
 
     # RET-8 hermeticity guard, the CLI twin of evaluate()'s memory_dir guard: the ambient
     # default fixtures (this repo's tests/fixtures, or the resolved project's

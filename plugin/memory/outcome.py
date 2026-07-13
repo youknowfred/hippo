@@ -11,9 +11,16 @@ never raising. The expensive JOIN is OFF the hook: ``injection_precision`` later
 episode buffer's injected memories against the outcome ledger's touches via each memory's
 ``cited_paths`` — "was an injected memory's cited file subsequently touched in the same session?"
 
-MEASUREMENT ONLY. Nothing here influences ranking — the ranking-utility prior that would consume
-this signal is deliberately gated on the salience keystone (SIG-5, tier T7). A negative-capability
-test pins that this module imports no recall/ranking writer.
+RET-14 (owner-directed): the ranking-utility prior this docstring used to say was "deliberately
+gated on the salience keystone" now exists — recall.py's ``_apply_outcome_prior`` consumes
+``write_outcome_cache``'s persisted ``outcome.json`` as its OWN independently-gated prior
+(``HIPPO_OUTCOME_PRIOR``, default OFF, separate from ``HIPPO_SALIENCE``) rather than folding it
+into the SIG-5 salience blend — RET-10 found recency/usage moved nothing on the golden eval, and
+KPI-2's "was this actually useful" signal is different enough in kind (outcome evidence, not a
+popularity/recency proxy) to deserve measuring on its own. This module itself still computes and
+WRITES the cache only — it does not read recall's ranking state, so the negative-capability test
+below (this module must not import recall/new_memory) still holds; only recall.py imports FROM
+outcome, never the reverse.
 """
 
 from __future__ import annotations
@@ -22,7 +29,8 @@ import argparse
 import json
 import os
 import sys
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Dict, Optional
 
 from .provenance import resolve_dirs
 from .telemetry import default_telemetry_dir, log_outcome, read_episodes, read_outcomes
@@ -182,9 +190,13 @@ def injection_hits(memory_dir: str, telemetry_dir: Optional[str] = None) -> dict
     positive outcome signal (today's outcome ledger records positive evidence only).
     ``hits`` counts qualifying sessions; ``sessions`` lists them (sorted, for provenance).
     Same join as ``injection_precision`` (``_injection_join``) — the semantics cannot fork.
-    STILL measurement-shaped: this module computes evidence; the /dream pass consumes it
-    OFFLINE (replay priority + candidate ordering, DRM-5) — hot-path recall ranking remains
-    SIG-5-gated and reads nothing here. Never raises; ``{}`` when there is no signal.
+    Computes the join LIVE over the raw episode/outcome ledgers — fine for an occasional
+    /dream pass or doctor report, too expensive to call per-prompt. RET-14: SessionStart
+    calls this ONCE per run and persists the result via ``write_outcome_cache`` so
+    recall.py's hot-path prior (``_apply_outcome_prior``) never re-runs this join itself,
+    the same "compute once upstream, read a small cached JSON on the hot path" posture
+    ``stale.json``/``usage_aggregates.json`` already have. Never raises; ``{}`` when there
+    is no signal.
     """
     try:
         out: dict = {}
@@ -199,6 +211,82 @@ def injection_hits(memory_dir: str, telemetry_dir: Optional[str] = None) -> dict
         return out
     except Exception:
         return {}
+
+
+# --------------------------------------------------------------------------- #
+# RET-14: the persisted cache recall.py's hot-path prior reads (never the live join above).
+# --------------------------------------------------------------------------- #
+_OUTCOME_CACHE_NAME = "outcome.json"
+OUTCOME_CACHE_SCHEMA_VERSION = 1
+
+
+def outcome_cache_path(index_dir: str) -> str:
+    """``<index_dir>/outcome.json`` — the one path the writer and ``read_outcome_cache``
+    below (recall.py's RET-14 outcome prior) must agree on."""
+    return os.path.join(index_dir, _OUTCOME_CACHE_NAME)
+
+
+def write_outcome_cache(index_dir: str, hits: dict) -> bool:
+    """Persist ``injection_hits``'s result to ``<index_dir>/outcome.json``.
+
+    Derived, rebuildable, gitignored — same standing as ``stale.json``/``links.json``, and
+    written the same tmp + ``os.replace`` way (``staleness.write_stale_cache``'s pattern) so
+    a reader never sees a torn file. Written on EVERY call, including an empty ``hits`` dict
+    — an honest ``{"hits": {}}`` means "checked this session, found no positive evidence
+    yet", never a skipped write. This function only WRITES a file computed from
+    ``injection_hits``'s already-measurement-shaped output — it reads no recall/ranking
+    state itself, so the negative-capability guarantee below (this module imports no
+    recall/new_memory) is untouched; only recall.py reads FROM this cache, never the
+    reverse. Never raises; ``True`` on a successful write, ``False`` on any failure.
+    """
+    try:
+        os.makedirs(index_dir, exist_ok=True)
+        payload = {
+            "schema_version": OUTCOME_CACHE_SCHEMA_VERSION,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "hits": {
+                name: {
+                    "hits": int(rec.get("hits") or 0),
+                    "sessions": list(rec.get("sessions") or []),
+                }
+                for name, rec in (hits or {}).items()
+            },
+        }
+        path = outcome_cache_path(index_dir)
+        tmp = path + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+            os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except Exception:
+                    pass
+        return True
+    except Exception:
+        return False
+
+
+def read_outcome_cache(index_dir: str) -> Optional[Dict[str, dict]]:
+    """The reader half of ``write_outcome_cache`` — ``{"<name>": {"hits", "sessions"}}``, or
+    ``None`` when the cache is absent, corrupt, or schema-mismatched.
+
+    Advisory, same posture as ``staleness.read_stale_cache``: a single small-JSON read of a
+    file SessionStart already refreshed once per run — never a live episode/outcome ledger
+    join on the hot path. Never raises.
+    """
+    try:
+        path = outcome_cache_path(index_dir)
+        with open(path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        if not isinstance(payload, dict) or payload.get("schema_version") != OUTCOME_CACHE_SCHEMA_VERSION:
+            return None
+        hits = payload.get("hits")
+        return hits if isinstance(hits, dict) else None
+    except Exception:
+        return None
 
 
 def format_report(memory_dir: str, telemetry_dir: Optional[str] = None) -> str:
