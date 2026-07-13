@@ -119,6 +119,29 @@ _DISTANCE_CUTOFF = 4
 
 _CANDIDATE_KINDS = ("completion", "bridge", "refines")
 
+# --------------------------------------------------------------------------- #
+# DRM-C (contradiction discovery) tunables — OPT-IN, default OFF.
+#
+# Cofire (cosine/Jaccard-family similarity over replayed self-queries) can say two memories
+# are ABOUT the same thing; it can never say they DISAGREE — semantic conflict needs actual
+# comprehension. DRM-C adds exactly that: one bounded small-model call per HIGH-cofire pair
+# ("do these conflict in substance, or merely relate?"), reusing the SAME pair surface the
+# pass already computed (``result["pairs"]``) so candidate volume stays bounded by dream's
+# existing "worth considering" filter. Propose-only, Tier-C by construction: ``contradicts``
+# is already in ``_ROUTED_KINDS`` (→ the /hippo:resolve inbox, never auto) and
+# ``apply_eligible`` never admits it — there is no Tier-A here because nothing about a
+# contradiction has the "direct text evidence" that lets completions auto-apply.
+# --------------------------------------------------------------------------- #
+# LLM attempts per pass (cost/wall-clock bound — attempts, not successes, so a dead
+# endpoint can't stall a pass timeout-by-timeout). Single-digit default, hard-capped.
+_DEFAULT_CONTRA_MAX_PAIRS = 6
+_HARD_CONTRA_MAX_PAIRS = 12
+# Seconds per LLM call (dream is an offline deliberate verb — roomier than a hook budget).
+_DEFAULT_CONTRA_TIMEOUT_S = 10.0
+# Verbatim text per side shown to the model (frontmatter included — name + description are
+# exactly the claim summary a conflict judgment needs).
+_CONTRA_SIDE_CHARS = 1_500
+
 
 def _env_float(name: str, default: float) -> float:
     try:
@@ -154,6 +177,34 @@ def age_sessions() -> int:
 def reward_weight() -> float:
     """``DREAM_REWARD_WEIGHT`` (≥0) — per-hit rank nudge for DRM-5 boosts (default 0.05)."""
     return max(0.0, _env_float("DREAM_REWARD_WEIGHT", _DEFAULT_REWARD_WEIGHT))
+
+
+def contradictions_enabled() -> bool:
+    """``HIPPO_DREAM_CONTRADICTIONS`` — the DRM-C flag. DEFAULT OFF; only an explicit
+    truthy value enables (the ``generative_enabled`` convention: junk stays off)."""
+    return os.environ.get("HIPPO_DREAM_CONTRADICTIONS", "").strip() in ("1", "true", "True")
+
+
+def contra_max_pairs() -> int:
+    """``DREAM_CONTRA_MAX_PAIRS`` clamped to [0, 12] — the hard max is not overridable."""
+    return max(
+        0, min(_env_int("DREAM_CONTRA_MAX_PAIRS", _DEFAULT_CONTRA_MAX_PAIRS), _HARD_CONTRA_MAX_PAIRS)
+    )
+
+
+def contra_min_cofire() -> float:
+    """``DREAM_CONTRA_MIN_COFIRE`` — the "high-cofire" bar for DRM-C; defaults to θ.
+
+    Reusing ``cofire_theta`` by default keeps "which pairs are even worth an LLM call"
+    consistent with the pass's existing calibrated notion of a strong pair.
+    """
+    return _env_float("DREAM_CONTRA_MIN_COFIRE", cofire_theta())
+
+
+def contra_llm_timeout() -> float:
+    """``HIPPO_DREAM_LLM_TIMEOUT`` (seconds) per DRM-C call; malformed/absent -> 10.0."""
+    val = _env_float("HIPPO_DREAM_LLM_TIMEOUT", _DEFAULT_CONTRA_TIMEOUT_S)
+    return val if val > 0 else _DEFAULT_CONTRA_TIMEOUT_S
 
 
 def apply_eligible(candidate: dict, *, theta: Optional[float] = None) -> bool:
@@ -1014,7 +1065,243 @@ def discover(
     }
     result["candidates"] = candidates
     result["reward"] = reward
+
+    # DRM-C (opt-in, default OFF): the LLM comprehension pass over the SAME high-cofire
+    # pairs serialized above. Appended AFTER the Tier-A sort + stats so the organic
+    # surface is byte-identical flag-off vs flag-on-but-empty; its own try/except because
+    # an LLM-layer failure must never break the organic pass (fail open — inv3 still
+    # holds: the stats block says what was judged/skipped when the flag is on).
+    if contradictions_enabled():
+        try:
+            contra = discover_contradictions(
+                pairs_out, texts, memory_dir, td, pass_id=pass_id, graph=graph
+            )
+            result["candidates"] = candidates + contra["candidates"]
+            result["stats"]["contradictions"] = contra["stats"]
+        except Exception:
+            pass
     return result
+
+
+# --------------------------------------------------------------------------- #
+# DRM-C — contradiction discovery (LLM comprehension over the high-cofire pairs)
+#
+# The gap this fills is structural, not an oversight: every organic signal in this module
+# is a similarity (cofire = the pair co-surfaced under each other's self-queries), and
+# similarity can never distinguish "these two memories disagree" from "these two memories
+# describe the same thing". The /hippo:resolve inbox — the standing human-verdict queue —
+# only ever enumerated PRE-EXISTING ``contradicts:`` frontmatter a human already typed;
+# nothing anywhere ever PROPOSED a new one. DRM-C proposes them:
+#
+#   - SOURCE SET: this pass's own ``result["pairs"]`` (no separate corpus scan), filtered
+#     to cofire ≥ the θ-defaulted bar, minus pairs already declared (``contradicts`` — the
+#     inbox has them — or ``supersedes`` — versions are EXPECTED to disagree; succession
+#     already resolved it), minus pairs a prior DRM-C pass already judged (verdicts
+#     persist in a derived ledger so a stable corpus never re-burns calls on the same
+#     pair; edit a memory and the pair's key is unchanged — re-judging after edits is a
+#     deliberate non-goal, precision-first).
+#   - PER PAIR: one ``llm_client.complete`` call ("conflict in substance, or merely
+#     related?") with a strict-JSON verdict. An unusable response (None / junk / missing
+#     field) means the pair is simply NOT proposed this pass — no verdict row, no crash,
+#     no partial write; it is retried on a future pass.
+#   - SINK: a ``conflict: true`` verdict becomes a ``kind: "contradicts"`` candidate —
+#     Tier-C by the pre-existing routing (``_ROUTED_KINDS``), NEVER apply-eligible — and a
+#     row in ``contradictions.jsonl`` under the DERIVED dream dir (inv1: gitignored,
+#     rebuildable-by-redreaming; the corpus is untouched). ``resolve_view`` reads that
+#     ledger and feeds the pairs into the SAME inbox + verdict flow humans already use.
+# --------------------------------------------------------------------------- #
+def contradictions_ledger_path(telemetry_dir: str) -> str:
+    """``<telemetry>/dream/contradictions.jsonl`` — DRM-C's derived verdict ledger."""
+    return os.path.join(dream_dir(telemetry_dir), "contradictions.jsonl")
+
+
+def _contra_key(a: str, b: str) -> Tuple[str, str]:
+    """One order-free identity per pair — ``resolve_view._canonical_pair``'s convention."""
+    return (a, b) if a <= b else (b, a)
+
+
+def read_contradiction_verdicts(telemetry_dir: str) -> Dict[Tuple[str, str], dict]:
+    """Latest DRM-C verdict per canonical pair (``read_apply_ledger``'s last-line-wins
+    merge). Missing file/junk lines contribute nothing; never raises."""
+    out: Dict[Tuple[str, str], dict] = {}
+    try:
+        with open(contradictions_ledger_path(telemetry_dir), "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                if not isinstance(rec, dict):
+                    continue
+                a, b = rec.get("a"), rec.get("b")
+                if not (isinstance(a, str) and a and isinstance(b, str) and b):
+                    continue
+                key = _contra_key(a, b)
+                if key in out:
+                    merged = dict(out[key])
+                    merged.update(rec)
+                    out[key] = merged
+                else:
+                    out[key] = rec
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        return out
+    return out
+
+
+def _append_contradiction_rows(telemetry_dir: str, rows: List[dict]) -> None:
+    """Append verdict rows to the derived ledger. No rows = no file touch. Never raises."""
+    if not rows:
+        return
+    try:
+        os.makedirs(dream_dir(telemetry_dir), exist_ok=True)
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with open(contradictions_ledger_path(telemetry_dir), "a", encoding="utf-8") as fh:
+            for row in rows:
+                fh.write(json.dumps({**row, "generated_at": stamp}, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def _contradiction_prompt(a: str, a_text: str, b: str, b_text: str) -> str:
+    """The per-pair verdict prompt: both memories verbatim (bounded), strict-JSON answer."""
+    return "\n".join(
+        [
+            "Two saved memory notes from the same project knowledge base follow. Decide",
+            "whether they ACTUALLY CONFLICT IN SUBSTANCE — they make claims that cannot both",
+            "be true or current (contradictory facts, incompatible instructions, one says X",
+            "is the way and the other says X was abandoned) — or whether they merely relate,",
+            "overlap, or complement each other on the same topic (NOT a conflict). Two",
+            "notes about different points in time conflict only if both claim to describe",
+            "the CURRENT state and disagree about it.",
+            "Respond with ONLY a JSON object, no prose:",
+            '{"conflict": true|false, "reason": "<one line, <=200 chars>"}',
+            "",
+            f"MEMORY A ({a}):",
+            a_text[:_CONTRA_SIDE_CHARS],
+            "",
+            f"MEMORY B ({b}):",
+            b_text[:_CONTRA_SIDE_CHARS],
+        ]
+    )
+
+
+def discover_contradictions(
+    pairs: List[dict],
+    texts: Dict[str, str],
+    memory_dir: str,
+    telemetry_dir: str,
+    *,
+    pass_id: str,
+    graph: Optional[LinkGraph] = None,
+    min_cofire: Optional[float] = None,
+    max_pairs: Optional[int] = None,
+    timeout_s: Optional[float] = None,
+) -> dict:
+    """Judge the high-cofire ``pairs`` for substantive conflict. PROPOSE-ONLY; never raises.
+
+    Returns ``{"candidates": [...], "stats": {...}}`` where each candidate is a Tier-C
+    ``kind: "contradicts"`` row (the ledger-row shape all candidates share, plus the
+    model's one-line ``reason``). Writes ONLY the derived verdict ledger — never a memory
+    file, never the corpus. See the section banner for the full contract.
+    """
+    from . import llm_client
+    from .secrets import scan_text
+
+    bar = contra_min_cofire() if min_cofire is None else min_cofire
+    cap = contra_max_pairs() if max_pairs is None else max_pairs
+    tmo = contra_llm_timeout() if timeout_s is None else timeout_s
+    stats = {
+        "pool_bar": bar,
+        "cap": cap,
+        "attempts": 0,
+        "judged": 0,
+        "proposed": 0,
+        "llm_failures": 0,
+        "skipped_prior_verdict": 0,
+        "skipped_declared": 0,
+        "model": llm_client.model_name(),
+    }
+    candidates: List[dict] = []
+    try:
+        if cap <= 0:
+            return {"candidates": candidates, "stats": stats}
+        prior = read_contradiction_verdicts(telemetry_dir)
+        declared: Set[Tuple[str, str]] = set()
+        if graph is not None:
+            for rel in ("contradicts", "supersedes"):
+                for src, tgt in graph.all_typed_edges(rel):
+                    declared.add(_contra_key(src, tgt))
+        rows: List[dict] = []
+        for p in pairs:  # discover() serialized these strength-desc
+            if stats["attempts"] >= cap:
+                break
+            a, b = p.get("a"), p.get("b")
+            cof = float(p.get("cofire") or 0.0)
+            if cof < bar:
+                break  # sorted desc — everything past here is below the bar
+            if not a or not b or a not in texts or b not in texts:
+                continue
+            key = _contra_key(a, b)
+            if key in declared:
+                stats["skipped_declared"] += 1
+                continue
+            if key in prior:
+                stats["skipped_prior_verdict"] += 1
+                continue
+            stats["attempts"] += 1  # counts the CALL, so a dead endpoint stays bounded
+            raw = llm_client.complete(
+                _contradiction_prompt(a, texts[a], b, texts[b]),
+                timeout_s=tmo,
+                max_tokens=256,
+            )
+            verdict = llm_client.extract_json(raw) if raw else None
+            if not isinstance(verdict, dict) or not isinstance(verdict.get("conflict"), bool):
+                stats["llm_failures"] += 1
+                continue  # fail open: not proposed, not recorded — retried a future pass
+            stats["judged"] += 1
+            conflict = verdict["conflict"]
+            reason = " ".join(str(verdict.get("reason") or "").split())[:240]
+            if reason and scan_text(reason):
+                # Generated-text discipline (the dream-path deviation): no secret byte
+                # persists, even into a derived file the resolve inbox will render.
+                reason = "(reason withheld: secret lint)"
+            rows.append(
+                {
+                    "pass": pass_id,
+                    "a": key[0],
+                    "b": key[1],
+                    "cofire": cof,
+                    "mutual": bool(p.get("mutual")),
+                    "conflict": conflict,
+                    "reason": reason,
+                    "model": llm_client.model_name(),
+                    "state": "proposed" if conflict else "no-conflict",
+                }
+            )
+            if conflict:
+                stats["proposed"] += 1
+                candidates.append(
+                    {
+                        "kind": "contradicts",
+                        "source": a,
+                        "target": b,
+                        "distance": p.get("distance"),
+                        "cofire": cof,
+                        "query": p.get("query") or "",
+                        "mutual": bool(p.get("mutual")),
+                        "signal": "llm-contradiction-verdict",
+                        "reason": reason,
+                    }
+                )
+        _append_contradiction_rows(telemetry_dir, rows)
+    except Exception:
+        return {"candidates": candidates, "stats": stats}
+    return {"candidates": candidates, "stats": stats}
 
 
 # --------------------------------------------------------------------------- #
@@ -1081,6 +1368,18 @@ def render_report(result: dict, *, ledger_path: Optional[str]) -> str:
         + f" · unclassified-cofire-pairs={stats.get('unclassified_pairs', 0)}"
         + f" · novelty-excluded={stats.get('novelty_excluded', 0)}"
     )
+    contra = stats.get("contradictions")
+    if contra:
+        lines.append(
+            f"   ⚡ contradiction discovery (DRM-C, LLM opt-in): {contra.get('attempts', 0)} "
+            f"pair(s) checked → {contra.get('judged', 0)} judged, {contra.get('proposed', 0)} "
+            "proposed into the /hippo:resolve inbox (propose-only — never auto-applied)"
+            + (
+                f" · {contra.get('llm_failures', 0)} LLM failure(s) skipped"
+                if contra.get("llm_failures")
+                else ""
+            )
+        )
     if stats.get("unaged_dream_pairs_firewalled"):
         lines.append(
             f"   aging firewall: {stats['unaged_dream_pairs_firewalled']} un-aged dream edge(s) "
@@ -1499,6 +1798,18 @@ def run_apply_pass(
     if routed:
         lines.append(
             f"  ↪ {len(routed)} contradicts candidate(s) routed to /hippo:resolve — never auto."
+        )
+    contra_stats = (result.get("stats") or {}).get("contradictions")
+    if contra_stats:
+        lines.append(
+            f"  ⚡ contradiction discovery (DRM-C): {contra_stats.get('attempts', 0)} pair(s) "
+            f"checked → {contra_stats.get('proposed', 0)} proposed into the /hippo:resolve "
+            "inbox (propose-only)"
+            + (
+                f" · {contra_stats.get('llm_failures', 0)} LLM failure(s) skipped"
+                if contra_stats.get("llm_failures")
+                else ""
+            )
         )
     if applied:
         lines.append(
@@ -1958,6 +2269,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="DRM-6 metric: abstain→hit flips over the FROZEN abstention backlog, with "
         "dream-attribution (measure-only, off the hot path)",
     )
+    parser.add_argument(
+        "--contradictions",
+        action="store_true",
+        help="DRM-C: run the LLM contradiction check over this pass's high-cofire pairs "
+        "(propose-only → the /hippo:resolve inbox; also enabled by "
+        "HIPPO_DREAM_CONTRADICTIONS=1; needs an API key — silently skipped without one)",
+    )
     parser.add_argument("--probe-k", type=int, default=None, help="co-fire probe depth (default 10)")
     parser.add_argument(
         "--max-seeds", type=int, default=None, help="cap the replay worklist (default 0 = all)"
@@ -1970,6 +2288,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     memory_dir = args.memory_dir
     if memory_dir is None:
         memory_dir, _ = resolve_dirs()
+
+    # --contradictions is the CLI spelling of the env flag (the --generate/HIPPO_DREAM_
+    # GENERATIVE convention): every downstream pass reads contradictions_enabled(), so the
+    # in-process env set is the one wiring point.
+    if args.contradictions:
+        os.environ["HIPPO_DREAM_CONTRADICTIONS"] = "1"
 
     if args.log:
         print(render_log(memory_dir))
