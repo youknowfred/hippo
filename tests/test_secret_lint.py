@@ -242,6 +242,57 @@ def test_entropy_flag_gates_only_the_catch_all():
 
 
 # --------------------------------------------------------------------------- #
+# Entropy catch-all PRECISION: `/ = _ -` are STRUCTURAL separators in ordinary prose as well as
+# genuine base64/base64url secret content. When a path, `KEY=value` assignment, slash-joined
+# name list, or hyphenated identifier (e.g. a model name) is read as one token, concatenating its
+# several diverse SHORT segments across those separators inflates aggregate diversity enough to
+# clear the ≥32-char / mixed-class / entropy≥4.0 bar and fire the soft catch-all — the exact
+# noisy-warning anti-pattern the module header warns against (a false positive trains the agent
+# to ignore the warning). The fix gates on the longest CONTIGUOUS opaque run (split on those
+# separators): structured text has only short segments, a real secret is one long run. Every
+# string below is ordinary text that appeared in the real dogfood corpus; each must scan CLEAN.
+def test_entropy_no_false_positive_on_structural_prose():
+    for prose in [
+        # filesystem paths — slashes separate short lowercase segments, not a secret
+        "the model cache lives at /Library/Caches/hippo-memory/fastembed on this machine",
+        "index dir /Users/dev/GitHub/hippo/.claude/.memory-index/vectors is derived state",
+        # KEY=value env-var assignments
+        "the surface note branches on CLAUDE_CODE_ENTRYPOINT=claude-desktop being set",
+        "export HIPPO_DISABLE_DENSE=1 keeps the hermetic suite airplane-mode-safe",
+        # slash-joined name lists (e.g. the detector's own prefix inventory)
+        "specific patterns cover Slack/Google/Stripe/OpenAI/Anthropic/JWT/npm/PyPI shapes",
+        "skip caches like venv/pyc/pytest/hypothesis/DS_Store/egg-info in the walk",
+        # hyphenated identifiers — the multilingual embedding model name, verbatim from the corpus
+        "the --multilingual flag swaps in paraphrase-multilingual-MiniLM-L12-v2 for embeddings",
+        "default embedder sentence-transformers/all-MiniLM-L6-v2 stays offline after bootstrap",
+    ]:
+        assert S.scan_text(prose) == [], f"entropy false positive on structural prose: {prose!r}"
+
+
+def test_entropy_gate_is_the_longest_opaque_run():
+    # The precision knob directly: a token whose entropy comes from short delimited segments has
+    # a short longest-run and is CLEAN; the same class-mix as one contiguous run trips.
+    assert S._longest_core_run("paraphrase-multilingual-MiniLM-L12-v2") < S._ENTROPY_CORE_MIN_LEN
+    assert S._longest_core_run("A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6") >= S._ENTROPY_CORE_MIN_LEN
+    # a UUID (hex + hyphens) is single-class per segment AND short-run — doubly clean
+    assert S.scan_text("run id 550e8400-e29b-41d4-a716-446655440000 in the trace") == []
+
+
+def test_entropy_still_flags_genuine_high_entropy_tokens():
+    # The precision fix must NOT weaken the base64/hex-blob backstop — a real opaque secret with
+    # no known prefix still trips the catch-all. The token class keeps `/ = + - _` so base64 and
+    # base64url blobs are captured whole, and each below retains a long contiguous opaque run.
+    for token in [
+        "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0",         # random 40-char mixed-class alnum
+        "dGhpcyBpcyBhIHJlYWxseSByYW5kb20gc2VjcmV0-_A1b2",   # base64url token with - _
+        "aGVsbG8gd29ybGR0aGlzaXNhbG9uZ3NlY3JldA==",         # base64 with trailing = padding
+        "abcdEFGH1234+ijklMNOP5678/qrstUVWX90ABcdEF==",     # standard base64 with + and /
+    ]:
+        assert any("high-entropy" in w for w in S.scan_text(token)), \
+            f"genuine high-entropy secret no longer flagged: {token!r}"
+
+
+# --------------------------------------------------------------------------- #
 # SEC-8 — the repo/pack scan gate (scan_files / _iter_repo_files / main CLI).
 # --------------------------------------------------------------------------- #
 def test_scan_files_flags_planted_secret_and_omits_clean(tmp_path):
