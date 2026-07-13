@@ -7,6 +7,54 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.13.0 — 2026-07-13 — "The second opinion"
+
+**re-bootstrap: no** — `plugin/requirements.txt` is unchanged (the new LLM client is
+stdlib-urllib only, honoring the dependency-light philosophy); no schema or corpus-format
+change; both new capabilities ship dark. No operator action — opting in is one edit to
+`~/.claude/hippo-llm.json` (or an env flag).
+
+hippo's first standalone LLM/API calls — and the invariant they had to survive: every write
+to the corpus still passes a human approval gate. Both features are PROPOSE-ONLY enrichers
+of queues a human already reviews, with no auto-apply tier anywhere (neither has the
+direct-text evidence that lets dream's Tier-A completions auto-apply). Recall stays
+$0/prompt — nothing here touches the hot path.
+
+- **LLM-CLIENT — `memory/llm_client.py`, the one seam for standalone calls.**
+  `complete(prompt, *, timeout_s) -> str | None`: `None` on ANY failure (no key, timeout,
+  junk response, unknown provider), never raises — every consumer fails open to exactly its
+  un-enriched behavior. Provider-agnostic (`_PROVIDERS` registry; Anthropic shipped),
+  defaulting to the `claude-haiku-4-5` ALIAS rather than a dated snapshot (owner decision:
+  tier refreshes arrive without a release). Config is centralized in ONE machine-local file,
+  `~/.claude/hippo-llm.json` (the `hippo-trust.json` dotfile family; `HIPPO_LLM_CONFIG`
+  relocates), layered per key as env var > file > default — the file is the durable
+  machine-wide setting, env vars stay per-run overrides.
+- **CAP-LLM — capture-time triage (`memory/capture_triage.py`), opt-in `capture_triage`.**
+  One bounded small-model call (6s default, clamped ≤20s of the hooks' 30s budget) at
+  SessionEnd/SubagentStop annotates the pending seed with SUGGESTIONS the
+  `/hippo:consolidate` reviewer ratifies per item: likely type + kebab name, a drafted
+  description, and near-duplicates twice over — the model's semantic flags BESIDE a pre-run
+  of the drain's own calibrated `check_candidate` (never instead of it). A carry-over guard
+  fingerprints the prompt evidence so the multi-fire hook path (SubagentStop×N, then
+  SessionEnd) re-bills only when the session's evidence actually changed. Secret
+  discipline: flagged hunks never leave the machine, the assembled prompt is re-linted, the
+  model's own output is scanned and flagged. The structural approval gate is untouched —
+  capture.py still never imports the corpus writer (the AST pin holds), and the
+  byte-identical-corpus test now runs with triage ENABLED.
+- **DRM-C — dream contradiction discovery, opt-in `dream_contradictions` (or
+  `dream --contradictions`).** Cofire is a similarity — it can say two memories are ABOUT
+  the same thing, never that they DISAGREE — so dream never proposed `contradicts` edges
+  and the `/hippo:resolve` inbox only ever showed edges a human typed. DRM-C judges dream's
+  own high-cofire pairs (the same `result["pairs"]` surface, no separate corpus scan) with
+  one bounded call each: "conflict in substance, or merely related?". Conflict verdicts
+  become `kind: "contradicts"` candidates — Tier-C via the pre-existing `_ROUTED_KINDS`
+  routing, never admitted by `apply_eligible` — persisted in the derived
+  `<telemetry>/dream/contradictions.jsonl` and merged by `resolve_view` into the SAME
+  inbox and keep/supersede/merge/dismiss verdict flow (proposals clear themselves on any
+  corpus outcome by read-time subtraction). Bounded: pool gated at cofire ≥ θ, attempts
+  capped at 6/pass (hard-max 12), declared/superseded pairs skipped, judged pairs never
+  re-billed, LLM failures simply not proposed.
+
 ## v1.12.0 — 2026-07-13 — "Sharper recall"
 
 **re-bootstrap: no** — `plugin/requirements.txt` is unchanged (the new stemming pass is
