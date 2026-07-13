@@ -7,6 +7,30 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.11.1 — 2026-07-12 — "The sleep model"
+
+**re-bootstrap: no** — docs only. `plugin/requirements.txt`, every manifest schema, the skill set
+(16), the MCP surface, and the recall path are byte-identical to v1.11.0. No operator action.
+
+Documentation follow-through for v1.11.0's `/dream`: the README under-told how deeply the memory
+system is shaped *like memory*, and had gone stale (said 15 skills; never named `/dream`; the word
+"dream" appeared zero times). This release surfaces the biomimetic architecture honestly and
+de-stales the command surface — no code changes.
+
+- **README — new "Why it's called hippo" section**: names the **hippocampus** etymology and maps
+  six verbs (recall, consolidate, reconsolidate, forget, dream) to their real mechanisms; adds a
+  `/hippo:dream` command entry and a `consolidate` vs. `dream` disambiguation line; adds the
+  generative-replay layer to the native-memory comparison; fixes the skill count **15 → 16** (two
+  spots). The lead's four differentiators stay load-bearing and untouched.
+- **CONCEPTS — optional fifth idea, "The sleep model"**: an *operation → what hippo actually does →
+  where the analogy ends* table that converts previously-undefined jargon (reconsolidation,
+  sleep-time, salience) into a coherent frame.
+- **Anti-hype discipline**: analogy verbs only, every analog tied to a code seam and its honest
+  limit in the same breath; the non-biological mechanisms (**git-drift staleness**, the `/dream`
+  **aging firewall**) are named as *departures* from biology, never dressed as biomimicry. The
+  test throughout: delete the neuroscience word and each sentence still states a true, diffable
+  mechanism.
+
 ## v1.11.0 — 2026-07-12 — "The generative sleep pass"
 
 **re-bootstrap: no** — `plugin/requirements.txt` is byte-identical to v1.10.2. Two persisted
