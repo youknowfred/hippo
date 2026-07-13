@@ -68,12 +68,21 @@ _WIKILINK_RE = re.compile(r"\[\[([^\]\[]+?)\]\]")
 # separately; a manifest bump must not silently invalidate a perfectly good edge cache).
 # v2 (GRA-4): per-file "typed" resolved-relation maps + top-level "typed_raw"/
 # "typed_unresolved" — a v1 cache reads as a miss and heals with one rebuild.
-LINKS_SCHEMA_VERSION = 2
+# v3 (DRM-6): the typed-relation set gained "derives-from" — a v2 cache's typed maps
+# predate the relation and would silently serve it as absent, so the bump forces one
+# rebuild (inv5: a clean break, never a compat shim).
+LINKS_SCHEMA_VERSION = 3
 _LINKS_CACHE_NAME = "links.json"
 
 # GRA-4: the closed set of typed frontmatter relations. Order is the render order every
 # consumer (lint report, recall annotations) uses, so output stays deterministic.
-TYPED_RELATIONS = ("supersedes", "contradicts", "refines")
+# "derives-from" (DRM-6): derivation provenance — a dream-generated schema/hypothesis
+# PARENT declares the child memories it was abstracted from (`derives-from: [a, b]` on
+# the parent; hand-authored derivations are welcome to use it too). Navigational like
+# `refines`: no ranking effect, no recall annotation — but it JOINS decision chains
+# (history._CHAIN_RELATIONS), so provenance walks and DRM-5 reward propagation follow
+# derivation lineage exactly like supersede/refine lineage.
+TYPED_RELATIONS = ("supersedes", "contradicts", "refines", "derives-from")
 
 # --------------------------------------------------------------------------- #
 # DRM-2/DRM-3: the machine-managed dream:links block — the ONE canonical grammar.

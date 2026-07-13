@@ -3253,56 +3253,112 @@ def test_reinforcement_clears_banner_end_to_end(repo, memory_dir, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# GOV-7: confidence tier — display-only provenance, NEVER a ranking input
+# GOV-7 → DRM-6: confidence tier — LOAD-BEARING in ranking (the display-only gap, closed)
 # --------------------------------------------------------------------------- #
-def test_recall_confidence_renders_but_never_ranks(tmp_path, monkeypatch):
-    """The trap this item must not fall into: popularity=correctness. Scores and order are
-    byte-identical with and without the tier; only the display marker differs."""
+def test_recall_confidence_draft_ranks_below_equivalent_verified(tmp_path, monkeypatch):
+    """DRM-6 acceptance: the tier is wired into ranking — a ``confidence: draft`` memory
+    ranks strictly BELOW an equivalent ``verified`` one (the ×0.5 quarantine weight),
+    while the " [draft]" inject marker stays. The dial is still the AUTHOR'S declared
+    tier, never popularity — the popularity=correctness trap GOV-7 named stays closed."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md, idx = str(tmp_path / "m"), str(tmp_path / "i")
+    os.makedirs(md)
+    desc = "deploy rollout uses canary traffic shifting"
+    for name, conf in (("alpha_verified", "verified"), ("beta_draft", "draft")):
+        with open(os.path.join(md, f"{name}.md"), "w", encoding="utf-8") as fh:
+            fh.write(
+                f'---\nname: {name}\ndescription: "{desc}"\ntype: project\n'
+                f"confidence: {conf}\n---\nbody\n"
+            )
+    B.build_index(md, idx)
+    res = R.recall("deploy rollout canary traffic", k=5, memory_dir=md, index_dir=idx)
+    assert [r["name"] for r in res] == ["alpha_verified", "beta_draft"]
+    by_name = {r["name"]: r for r in res}
+    assert by_name["beta_draft"]["score"] < by_name["alpha_verified"]["score"]
+    assert by_name["beta_draft"]["confidence"] == "draft"
+    assert by_name["alpha_verified"]["confidence"] == "verified"
+    # the inject-time marker survives the wiring: bracket on the draft line only
+    rendered = R.format_results(res)
+    line_draft = next(ln for ln in rendered.splitlines() if "beta_draft" in ln)
+    line_verified = next(ln for ln in rendered.splitlines() if "alpha_verified" in ln)
+    assert "[draft]" in line_draft
+    assert "[draft]" not in line_verified
+
+
+def test_recall_confidence_authoritative_outranks_equivalent_unset(tmp_path, monkeypatch):
+    """The dial's other end: ``authoritative`` is a bounded promotion (×1.1, deliberately
+    below the ×1.2 pin boost) — it wins an exact near-tie against an ungraded twin."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md, idx = str(tmp_path / "m"), str(tmp_path / "i")
+    os.makedirs(md)
+    desc = "deploy rollout uses canary traffic shifting"
+    # File order puts the ungraded twin FIRST so BM25's tie order favors it organically;
+    # only the boost can flip the ordering.
+    for name, extra in (("aaa_unset", ""), ("zzz_authoritative", "confidence: authoritative\n")):
+        with open(os.path.join(md, f"{name}.md"), "w", encoding="utf-8") as fh:
+            fh.write(
+                f'---\nname: {name}\ndescription: "{desc}"\ntype: project\n{extra}---\nbody\n'
+            )
+    B.build_index(md, idx)
+    res = R.recall("deploy rollout canary traffic", k=5, memory_dir=md, index_dir=idx)
+    assert res[0]["name"] == "zzz_authoritative"
+    assert res[0]["confidence"] == "authoritative"
+
+
+def test_recall_draft_only_results_collapse_to_abstention(tmp_path, monkeypatch):
+    """DRM-6 quarantine leg 2 — excluded from abstention-sensitive answering: a result
+    set consisting ONLY of drafts returns the abstention shape ([]); the same memory
+    regraded verified answers normally. Draft+verified mixes still answer (the draft
+    rides along, down-weighted)."""
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
 
-    def _corpus_at(md: str, *, graded: bool) -> None:
+    def _corpus(md: str, conf: str) -> None:
         os.makedirs(md, exist_ok=True)
-        conf = "confidence: draft\n" if graded else ""
-        items = {
-            "canary_deploy.md": _mem("canary_deploy", "deploy rollout uses canary traffic shifting"),
-            "bluegreen_deploy.md": (
-                f'---\nname: bluegreen_deploy\ndescription: "deploy rollout uses blue green swap"\n'
-                f"type: project\n{conf}---\nbody\n"
-            ),
-        }
-        for fname, content in items.items():
-            with open(os.path.join(md, fname), "w", encoding="utf-8") as fh:
-                fh.write(content)
+        with open(os.path.join(md, "quasar_notes.md"), "w", encoding="utf-8") as fh:
+            fh.write(
+                '---\nname: quasar_notes\ndescription: "quasar ramjet coolant telemetry '
+                f'calibration"\ntype: project\nconfidence: {conf}\n---\nbody\n'
+            )
+        with open(os.path.join(md, "tomato_beds.md"), "w", encoding="utf-8") as fh:
+            fh.write(
+                '---\nname: tomato_beds\ndescription: "heirloom tomato rotation beds '
+                'almanac"\ntype: project\n---\nbody\n'
+            )
 
-    query = "deploy rollout canary traffic"
+    query = "quasar ramjet coolant telemetry"
     md0, idx0 = str(tmp_path / "m0"), str(tmp_path / "i0")
-    _corpus_at(md0, graded=False)
+    _corpus(md0, "draft")
     B.build_index(md0, idx0)
-    plain = R.recall(query, k=5, memory_dir=md0, index_dir=idx0)
+    assert R.recall(query, k=5, memory_dir=md0, index_dir=idx0) == []
 
     md1, idx1 = str(tmp_path / "m1"), str(tmp_path / "i1")
-    _corpus_at(md1, graded=True)
+    _corpus(md1, "verified")
     B.build_index(md1, idx1)
-    graded = R.recall(query, k=5, memory_dir=md1, index_dir=idx1)
+    hits = R.recall(query, k=5, memory_dir=md1, index_dir=idx1)
+    assert [r["name"] for r in hits] == ["quasar_notes"]
 
-    assert [(r["name"], r["score"]) for r in graded] == [(r["name"], r["score"]) for r in plain]
-    by_name = {r["name"]: r for r in graded}
-    assert by_name["bluegreen_deploy"]["confidence"] == "draft"
-    assert by_name["canary_deploy"]["confidence"] is None
-    # the inject-time marker: compact bracket on the graded line, nothing on the other
-    rendered = R.format_results(graded)
-    line_graded = next(ln for ln in rendered.splitlines() if "bluegreen_deploy" in ln)
-    line_plain = next(ln for ln in rendered.splitlines() if "canary_deploy" in ln)
-    assert "[draft]" in line_graded
-    assert "[draft]" not in line_plain and "confidence" not in line_plain
+    # Mixed: a verified memory on the same topic keeps the answer alive; the draft
+    # accompanies it below (down-weighted, marked) instead of being suppressed.
+    md2, idx2 = str(tmp_path / "m2"), str(tmp_path / "i2")
+    _corpus(md2, "draft")
+    with open(os.path.join(md2, "quasar_verified.md"), "w", encoding="utf-8") as fh:
+        fh.write(
+            '---\nname: quasar_verified\ndescription: "quasar ramjet coolant telemetry '
+            'maintenance"\ntype: project\nconfidence: verified\n---\nbody\n'
+        )
+    B.build_index(md2, idx2)
+    mixed = R.recall(query, k=5, memory_dir=md2, index_dir=idx2)
+    names = [r["name"] for r in mixed]
+    assert "quasar_verified" in names and "quasar_notes" in names
+    assert names.index("quasar_verified") < names.index("quasar_notes")
 
 
-def test_recall_scoring_path_never_reads_confidence():
-    """AST pin (the grep-style negative the roadmap names): the ONLY function in recall.py
-    touching the "confidence" key are the two DISPLAY/EMISSION surfaces — recall() (the
-    result-dict copy) and format_results (the inject marker); every scoring helper is
-    confidence-blind. steer, by contrast, is legitimately read in recall()'s penalized
-    loop (its one ranking use) — pin that no OTHER function smuggles it in either."""
+def test_recall_confidence_reads_stay_confined():
+    """AST pin, DRM-6 edition: ``confidence`` IS a ranking input now, but its reads stay
+    CONFINED to recall() (the penalized-loop dial + the draft-only abstention guard +
+    the result-dict copy) and format_results (the inject marker) — no OTHER scoring
+    helper may smuggle the key in, so the quarantine has exactly one place to audit.
+    steer keeps the same discipline (its one ranking use lives in recall())."""
     import ast as _ast
     import inspect as _inspect
 

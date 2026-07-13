@@ -1,5 +1,5 @@
 ---
-description: The generative sleep pass — replay the memory corpus against itself offline and surface the latent graph edges consolidate can't reach (bridges, unlinked mentions, undeclared refines). Tier-A edges auto-apply reversibly (owner-ratified 2026-07-12); --dry-run previews; --deparasite runs the counterweight (hub caps, gated demotions, non-lossy dedup); reward-gated reverse replay boosts ranking. Triggers "dream", "find latent links", "de-parasite my graph", "/hippo:dream".
+description: The generative sleep pass — offline replay surfaces the latent graph edges consolidate can't reach (bridges, unlinked mentions, undeclared refines). Tier-A edges auto-apply reversibly; --dry-run previews; --deparasite runs the counterweight; reverse replay boosts ranking; --generate runs the quarantined DRM-6 schema/hypothesis draft tier (flagged, self-decaying, evidence-graduated). Triggers "dream", "find latent links", "de-parasite my graph", "generate schemas", "/hippo:dream".
 ---
 
 # /hippo:dream — the generative sleep pass
@@ -140,3 +140,54 @@ apply cap. Strictly reward-gated and ranking-only: no outcome → no boost; θ e
 always reads the raw cofire; no memory byte ever changes. Boosted edges are logged to
 `boosts-<pass>.jsonl` in the derived dream dir, each row carrying the justifying
 decision chain; un-aged dream edges conduct no reward (the aging firewall extends here).
+
+## Generative payload (DRM-6) — schema/gist + hypotheses, quarantined
+
+The boldest tier: net-new memories, not just edges. **OFF by default**
+(`HIPPO_DREAM_GENERATIVE=1` opts apply passes in; DREAM-KILL-1 — never auto-applied as
+verified) and quarantined end to end:
+
+```
+"$PY" -m memory.dream --generate           # report proposals only (zero memory writes)
+"$PY" -m memory.dream --generate --stage   # stage them as confidence:draft memories
+```
+
+- **schema/gist** — a mutual co-firing cluster (≥3 memories above θ) earns ONE net-new
+  parent that abstracts it: `[[child]]` links in the body, `derives-from: [children]`
+  typed frontmatter (the DRM-6 relation), cited paths inherited from the children.
+- **hypothesis** — a strong mutual pair with NO graph path (`A+B ⇒ likely related`),
+  same quarantine.
+
+Staged drafts are **created only at `confidence: draft`** — down-weighted in recall
+(×0.5), **never answering alone** (a draft-only result set collapses back to
+abstention), never floor material, never /dream source (the firewall extends to
+generative output: drafts and graduated-but-unaged generated memories are invisible to
+the next pass, node-level). Capped per pass (`DREAM_MAX_GENERATE_PER_PASS`, default 2,
+hard max 5), hard secret-BLOCKed, stamped + ledgered like edges, undoable
+(`--undo <edge-id>` deletes the staged file byte-exactly; a hand-edited or graduated
+draft refuses — archive or git-revert those).
+
+**The lifecycle is self-decaying (the sweep rides every apply pass, flag or no flag):**
+
+```
+"$PY" -m memory.dream --sweep-drafts          # graduate / expire, on demand
+"$PY" -m memory.dream --archive-draft <name>  # execute ONE proposed archive (per-item)
+"$PY" -m memory.dream --prospective           # abstain→hit flips over the frozen backlog
+```
+
+- **Graduation is external-evidence-only**: a draft flips to `verified` exactly when the
+  recorded outcome ledger shows it was injected AND one of its cited files was touched
+  that session. No self-graduation path exists; a human glance does not graduate.
+- **Expiry**: a draft unconfirmed past `DREAM_DRAFT_HORIZON` (default 10 distinct
+  sessions) auto-closes its validity window and PROPOSES its archive — executing the
+  archive stays per-item (`--archive-draft`).
+- **The alarm**: the sweep reports staged/graduated/expired/archived counts and a
+  `graduation_rate`; a low rate among decided drafts prints a loud HALLUCINATION ALARM —
+  believe it. Keep the flag off (or raise θ / `DREAM_SCHEMA_MIN_CLUSTER`) when it fires.
+- **Prospective recall** freezes the abstention backlog at first staging and counts which
+  recorded blind-spot queries now hit, attributing flips that ride a generated memory —
+  the metric this tier must move to earn its keep.
+
+Present staged drafts to the user as **hypotheses about structure, not facts** — they are
+marked `[draft]` at inject time for exactly that reason. Never hand-edit a draft's
+confidence to `verified`; evidence or the horizon decides.

@@ -468,7 +468,55 @@ workstreams:
         title: Generative payload — schema/gist + hypotheses (Tier B/C, quarantined, opt-in)
         priority: P3
         effort: L
-        status: planned
+        status: done                   # 2026-07-12 — memory/dream_generate.py (cluster → propose →
+                                       # stage → sweep → prospective) behind HIPPO_DREAM_GENERATIVE
+                                       # (default OFF); prereqs shipped first: confidence wired into
+                                       # recall ranking (draft ×0.5 + authoritative ×1.1 + the
+                                       # draft-only abstention guard; the GOV-7 display-only AST pin
+                                       # deliberately flipped) and derives-from added to
+                                       # links.TYPED_RELATIONS (LINKS_SCHEMA_VERSION 2→3,
+                                       # CORPUS_FORMAT_VERSION 4→5, history._CHAIN_RELATIONS grew it
+                                       # — derivation is lineage). Staging goes through
+                                       # new_memory.write_memory with confidence HARD-CODED "draft",
+                                       # capped (DREAM_MAX_GENERATE_PER_PASS=2, hard max 5), hard
+                                       # secret-BLOCKed, stamped+ledgered in dream-ledger.jsonl
+                                       # (edge ids continue past same-second passes), SEC-6
+                                       # trust-folded, undoable (whole-file delete, sha-verified
+                                       # refuse-on-drift — a graduated draft refuses). Decay sweep
+                                       # rides EVERY apply pass whether or not the flag is on;
+                                       # graduation is external-evidence-only (injection_hits);
+                                       # expiry auto-closes validity (set_invalid_after) + proposes
+                                       # the per-item archive (--archive-draft). tests/
+                                       # test_dream_generate.py (29); MCP actions generate/
+                                       # sweep_drafts/archive_draft/prospective.
+        calibration:
+          date: 2026-07-12
+          observed: >-
+            Live corpus (31 memories, dense+bm25, report-only): at θ=0.90 the release-
+            history family fused into ONE 19-member mutual co-fire component — the
+            corpus's dense capstone band is rank-compressed enough that mutuality alone
+            no longer separates within it. A schema over 19 children is a haystack, not
+            a gist, and its parent would be BORN over DRM-4's hub bar
+            (DREAM_MAX_OUT_DEGREE=8) — staged pre-flagged as a parasite. Also found: one
+            TRUE-positive hypothesis pair (hippo-v020-release-pr ↔ hippo-v060-release-pr,
+            cofire 0.94, mutual, disconnected in the firewalled graph) — genuinely
+            related, genuinely unlinked. Zero corpus bytes written (byte-oracle asserted).
+          chosen: >-
+            DREAM_SCHEMA_MAX_CLUSTER=8, deliberately EQUAL to DRM-4's
+            DREAM_MAX_OUT_DEGREE default so the two counterweights agree by construction:
+            an oversized component is reported as a θ-under-discriminates signal ("raise
+            DREAM_COFIRE_THETA before staging"), never staged. With the bound, the live
+            report is 0 schema / 1 hypothesis — the empty-norm posture holds for the
+            generative tier too. DREAM_MAX_GENERATE_PER_PASS=2 (hard max 5),
+            DREAM_DRAFT_HORIZON=10 distinct sessions (2× the edge aging window: a draft
+            needs time to be injected and earn an outcome before the tier calls it
+            unconfirmed), DREAM_SCHEMA_MIN_CLUSTER=3 (a pair is not a pattern).
+          flag_status: >-
+            HIPPO_DREAM_GENERATIVE stays OFF (DREAM-KILL-1: never auto-applied as
+            verified; P3 ships behind a flag). On THIS corpus the recommendation is to
+            keep it off until the oversized-cluster finding is resolved by a θ raise or
+            corpus curation — the one live hypothesis proposal is available via an
+            explicit `dream --generate --stage` if the owner wants it.
         source: {lens: schema-abstraction+insight, verdict: NEW, convergence: 2, landscape: [mcclelland-1995, generative-agents-2023, graphrag-communities, wagner-2004]}
         problem: >-
           The edge backbone CONNECTS existing memories but creates no net-new knowledge.

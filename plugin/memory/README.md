@@ -483,7 +483,7 @@ Two version numbers, two very different contracts (COR-7):
   mismatched manifest as absent, and the next SessionStart refresh performs one full
   rebuild stamped with the current version.
 - **Corpus** — `.claude/memory/.format` declares `{"corpus_format": N}`
-  (`provenance.CORPUS_FORMAT_VERSION`, currently **4**). It is committed **with** the
+  (`provenance.CORPUS_FORMAT_VERSION`, currently **5**). It is committed **with** the
   corpus (it describes the corpus; it is not a rebuildable cache); `/hippo:init` stamps it
   when seeding a fresh corpus, and **a corpus with no marker reads as format 1** — every
   pre-marker corpus is already on the baseline, nothing to backfill.
@@ -494,8 +494,12 @@ Two version numbers, two very different contracts (COR-7):
   unknown/junk `steer` value reads as unsteered, fail-open; MUTE is deliberately NOT part
   of v3 — it stays gated on the salience keystone). **v4** (GOV-7) = frontmatter may carry
   `confidence: draft|verified|authoritative` — the author's trust dial, rendered at inject
-  and in `/hippo:recall`, NEVER a ranking input; absence reads as today's default. All
-  three bumps are purely ADDITIVE, so each migration is the trivial case of the flow
+  and in `/hippo:recall`; shipped display-only, made LOAD-BEARING in ranking by DRM-6
+  (draft ×0.5 quarantine weight + the draft-only abstention guard; absence still reads as
+  the neutral default). **v5** (DRM-6) = frontmatter may carry `derives-from:` — the
+  derivation-provenance typed relation (a generated schema/hypothesis parent names the
+  children it was abstracted from; hand-authored derivations welcome). All four bumps are
+  purely ADDITIVE, so each migration is the trivial case of the flow
   below: no per-memory edits are required — review that no existing frontmatter uses the
   new key(s) for something else, then stamp the marker (`write_corpus_format`). Until
   stamped, an older corpus is read identically; the conventions any teammate authors still

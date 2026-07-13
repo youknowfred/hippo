@@ -317,17 +317,39 @@ _TOOLS = [
             "protected floor/co-recalled/cited hubs are never proposed for depression). "
             "action='dedup_merge' executes ONE ratified merge proposal (survivor gains "
             "supersedes, loser gets invalid_after — additive frontmatter, nothing "
-            "deleted). Offline deliberate turn — never needed for ordinary recall."
+            "deleted). action='generate' runs the DRM-6 generative tier: clusters "
+            "co-firing sets into schema/gist + hypothesis PROPOSALS (report-only unless "
+            "stage=true or HIPPO_DREAM_GENERATIVE=1) — staged memories are QUARANTINED: "
+            "created only at confidence:draft, down-weighted in recall, never answering "
+            "alone, firewalled from /dream's own sources, self-decaying past "
+            "DREAM_DRAFT_HORIZON, graduating draft→verified ONLY on recorded outcome "
+            "evidence. action='sweep_drafts' runs that decay sweep now; "
+            "action='archive_draft' executes ONE proposed draft archive (name=...); "
+            "action='prospective' reports abstain→hit flips over the frozen abstention "
+            "backlog. Offline deliberate turn — never needed for ordinary recall."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["pass", "undo", "log", "deparasite", "dedup_merge"],
+                    "enum": [
+                        "pass",
+                        "undo",
+                        "log",
+                        "deparasite",
+                        "dedup_merge",
+                        "generate",
+                        "sweep_drafts",
+                        "archive_draft",
+                        "prospective",
+                    ],
                     "description": "pass = run a dream pass (default); undo = revert; "
                     "log = list edges; deparasite = DRM-4 counterweight report; "
-                    "dedup_merge = execute one ratified merge",
+                    "dedup_merge = execute one ratified merge; generate = DRM-6 "
+                    "schema/hypothesis proposals (stage=true stages drafts); "
+                    "sweep_drafts = DRM-6 decay sweep; archive_draft = execute one "
+                    "proposed draft archive; prospective = the abstain→hit flip metric",
                 },
                 "apply": {
                     "type": "boolean",
@@ -360,6 +382,17 @@ _TOOLS = [
                     "type": "string",
                     "description": "with action='dedup_merge': the memory being "
                     "superseded (gets invalid_after; file stays on disk)",
+                },
+                "stage": {
+                    "type": "boolean",
+                    "description": "with action='generate': stage the proposals into "
+                    "the corpus as confidence:draft memories (explicit opt-in; trusted "
+                    "corpus required). Default false = report-only proposals.",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "with action='archive_draft': the dream-generated "
+                    "memory to archive (per-item)",
                 },
             },
         },
@@ -932,6 +965,35 @@ def _tool_dream(args: Dict[str, Any]) -> str:
             since = str(args.get("undo_since") or "").strip() or None
             _code, text = undo_edges(memory_dir, edge_id=edge_id, since=since)
             return text
+        if action == "generate":
+            from .dream_generate import run_generative_pass
+
+            _code, text = run_generative_pass(
+                memory_dir, stage=bool(args.get("stage")), repo_root=repo_root
+            )
+            return text
+        if action == "sweep_drafts":
+            from .dream_generate import sweep_drafts
+
+            _code, text = sweep_drafts(memory_dir, repo_root=repo_root)
+            return text
+        if action == "archive_draft":
+            from .dream_generate import archive_draft
+
+            name = str(args.get("name") or "").strip()
+            if not name:
+                return "dream archive_draft: 'name' is required."
+            res = archive_draft(memory_dir, name, repo_root=repo_root)
+            if res.get("error"):
+                return f"archive-draft REFUSED: {res['error']}"
+            return (
+                f"archived dream draft {name} (git-reversible move into archive/; "
+                "ledger updated; the commit stays the owner's)."
+            )
+        if action == "prospective":
+            from .dream_generate import prospective_recall, render_prospective
+
+            return render_prospective(prospective_recall(memory_dir))
         apply_arg = args.get("apply")
         do_apply = bool(apply_arg) if apply_arg is not None else apply_mode_default()
         if do_apply:
