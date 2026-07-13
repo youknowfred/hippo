@@ -7,6 +7,122 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.11.0 — 2026-07-12 — "The generative sleep pass"
+
+**re-bootstrap: no** — `plugin/requirements.txt` is byte-identical to v1.10.2. Two persisted
+shapes moved, each on its own contract: **corpus format 4 → 5** (a committed corpus convention —
+purely additive, see the migration note below) and **links.json schema 2 → 3** (a derived cache —
+self-heals with one rebuild, zero operator action). Index schema stays 6, capture-seed schema
+stays 2. The skill set grows 15 → 16 (**`/hippo:dream`**) and the MCP tool surface 9 → 10
+(**`dream`**) + the same 3 resources; every pre-existing tool keeps its exact name and shape
+(STABILITY.md). The recall hot path is untouched except for one deliberate, owner-ratified
+behavior change: the `confidence` tier is now **load-bearing in ranking** (below).
+
+This release ships **`/dream` — the generative sleep pass** (`ROADMAP.dream.yaml`, the whole
+DRM workstream: PRs #43, #44, #45). hippo's other verbs are the housekeeping functions of sleep;
+this is the generative one: an offline replay pass that re-runs recall over each memory's own
+derived self-query, watches what **co-fires**, and diffs that against the link graph to surface
+the latent edges the corpus is structurally missing. Its identity move is **REVERSIBLE
+AUTONOMY**: memory lives in git, so the safe-additive class auto-applies and offers undo after,
+instead of gating everything on a human — and every autonomous half is severed behind a dated
+owner decision, never a metric-proxied gate.
+
+### The edge backbone (DRM-1..3)
+
+- **DRM-1 — replay harness + candidate ledger**: `python -m memory.dream --dry-run` replays the
+  corpus against itself (soak-gated ≥5 distinct sessions; floor and `confidence: draft` memories
+  are never endpoints) and emits candidate edges by kind — **completion** (a body already names
+  the target), **bridge** (a co-firing transitive A–B–C gap, exactly what 1-hop graph expansion
+  turns into a hit), **refines** (an undeclared slug-prefix relation) — each with co-fire
+  strength, graph distance, and the firing query, plus the θ-sweep calibration surface. The
+  empty pass is the norm, and says so.
+- **DRM-2 — Tier-A auto-apply + notify-with-undo + the aging firewall**: a bare pass auto-applies
+  ONLY the additive, body-prose-preserving, ranking-only class above the live-calibrated bar
+  (**θ=0.90, cap 5/pass hard-max 9, bridges require MUTUAL co-fire** — ratified 2026-07-12 after
+  a report-only calibration pass), as stamped `[[wikilinks]]` in a machine-managed
+  `<!-- dream:links -->` block or additive `refines` frontmatter. Every edge is secret-linted
+  with a **hard BLOCK** (the one owner-ratified deviation from hippo's warn-only lint — dream
+  *generates* text), recorded in the committed append-only `dream-ledger.jsonl` with an inline
+  stamp (doctor reconciles the two), live in recall immediately, and **never committed** — git
+  history stays yours. `--undo` / `--undo <edge-id>` / `--undo-since` revert byte-exactly and
+  refuse on manual drift; applied edges age into /dream's own source set only after 5 un-undone
+  sessions (`DREAM_AGE_SESSIONS`) — /dream never consumes its own un-aged output (the
+  dream-cites-a-dream firewall). `supersedes` candidates stay digest-gated; `contradicts` route
+  to `/hippo:resolve`. Opt-outs: `HIPPO_DREAM_APPLY=0`, `--dry-run`, MCP `apply:false`.
+- **DRM-3 — /dream's own proof harness**: `eval --ab HIPPO_DREAM` runs the recall eval twice over
+  one frozen snapshot — the OFF arm asserted byte-identical to the pinned pre-dream baseline, the
+  ON arm admitting dream edges. First run: **multi-hop recall 0.0 → 1.0 with the matched
+  single-hop control flat** and both conversions attributed to their enabling edge. En-route fix:
+  dream:links blocks are stripped from body-chunk indexing unconditionally, so stamp text can
+  never perturb lexical ranking in either arm.
+
+### The counterweights (DRM-4..5)
+
+- **DRM-4 — de-parasiting**: `dream --deparasite` reports per-memory out-degree, flags hubs over
+  `DREAM_MAX_OUT_DEGREE` (8), and splits remedies along the reversibility gradient — /dream's own
+  un-aged edges retract via `--retract` (the one auto-executable lane; a retracted or undone pair
+  is NEVER auto-re-applied), everything touching a human memory stays per-item gated, and
+  near-duplicates get non-lossy `--dedup-merge` proposals (survivor `supersedes`, loser
+  `invalid_after`; nothing deleted). Protected hubs (floor / co-recalled / cited) are never
+  proposed for depression — and dream's own edges confer no protection.
+- **DRM-5 — reward-gated reverse replay**: memories with a **recorded outcome** (injected, then a
+  cited file touched that session — the KPI-2 join, now exposed per-memory as
+  `outcome.injection_hits`) anchor a backward walk along their decision chain; the upstream
+  lineage earns replay priority and candidate ORDERING under the cap (`DREAM_REWARD_WEIGHT`
+  0.01/hit, saturating at 5 — calibrated so a boost promotes within its co-fire neighborhood,
+  never across the distribution). Strictly reward-gated and ranking-only: θ always reads the raw
+  co-fire; no outcome → no boost.
+
+### The quarantined generative payload (DRM-6, behind a flag)
+
+- **`dream --generate`** clusters the co-firing sets: mutual components of 3–8 members propose
+  **schema/gist parents** (`[[child]]` links, `derives-from` frontmatter, cited paths inherited
+  from the children); strong mutual pairs with NO graph path propose **hypotheses**. Report-only
+  everywhere by default; staging (`--stage`, or `HIPPO_DREAM_GENERATIVE=1` for apply passes)
+  creates them **only at `confidence: draft`** — capped 2/pass (hard max 5), hard secret-BLOCKed,
+  stamped + ledgered like edges, trust-folded, and undoable (whole-file removal, sha-verified
+  refuse-on-drift; a graduated draft refuses). The firewall extends **node-level** to generative
+  output: drafts and graduated-but-unaged generated memories are invisible to the next pass's
+  topology entirely.
+- **Self-decay rides every apply pass, flag or no flag**: graduation to `verified` happens ONLY
+  on recorded outcome evidence (no self-graduation path exists — pinned); a draft unconfirmed
+  past `DREAM_DRAFT_HORIZON` (10 distinct sessions) auto-closes its validity window and
+  **proposes** its archive (`--archive-draft <name>` executes one per item). The sweep prints a
+  **graduation-rate hallucination alarm** when decided drafts mostly die unconfirmed.
+- **Prospective recall**: the recurring-abstention backlog freezes at first staging;
+  `--prospective` counts abstain→hit flips over that frozen baseline with via-dream attribution
+  — the metric the tier must move to earn its keep.
+- Live calibration on hippo's own corpus: at θ=0.90 the dense release-history family fused into
+  one 19-member mutual component — so `DREAM_SCHEMA_MAX_CLUSTER` (8) deliberately equals DRM-4's
+  hub cap, and an oversized component is reported as a *θ-under-discriminates* signal, never
+  staged. The flag ships **OFF** (DREAM-KILL-1: Tier B/C is never auto-applied as verified).
+
+### Ranking + schema changes (the DRM-6 prerequisites)
+
+- **`confidence` is load-bearing in recall ranking** (closes GOV-7's display-only gap):
+  `draft` ×0.5 (the quarantine weight — an equivalent verified memory always outranks a draft)
+  and `authoritative` ×1.1 (a bounded promotion, deliberately below the ×1.2 pin boost), applied
+  pre-cut in the penalized loop; verified/unset take no multiply, so an ungraded corpus is
+  byte-identical. Plus the **abstention guard**: a result set consisting only of drafts collapses
+  back to the abstention shape — drafts accompany verified content or seed expansion toward it,
+  never answer alone. Overrides: `HIPPO_DRAFT_PENALTY`, `HIPPO_AUTHORITATIVE_BOOST`.
+- **`derives-from`** joins the typed-relation set (derivation provenance: a parent names the
+  children it was abstracted from; hand-authored use welcome). `add_typed_relation` accepts it,
+  decision chains and DRM-5 reward propagation follow it, and the **corpus format bumps 4 → 5**
+  — purely additive: no per-memory edits; review that no existing frontmatter uses the key, then
+  stamp the marker (see UPGRADING.md). links.json bumps 2 → 3 and self-heals.
+- **SEC-6 fold on the dream write paths** (latent DRM-2 gap, fixed): apply now folds every
+  stamped file into the consent baseline and undo re-folds the restoration — on a fingerprinted
+  corpus, stamped files would otherwise have quarantined out of recall as new-since-consent
+  bytes, the opposite of "live immediately". Never bit a real corpus (zero edges had ever been
+  applied live).
+
+New surfaces: skill `plugin/skills/dream/` (`/hippo:dream`), MCP tool `dream` (actions
+`pass/undo/log/deparasite/dedup_merge/generate/sweep_drafts/archive_draft/prospective`), CLI
+`python -m memory.dream` (`--dry-run/--apply/--undo/--log/--deparasite/--retract/--dedup-merge/`
+`--generate/--stage/--sweep-drafts/--archive-draft/--prospective/--json`), doctor's
+`check_dream_ledger`, and the `dream_applied_producer` SessionStart nudge with undo handles.
+
 ## v1.10.2 — 2026-07-12 — "Fresh interpreter"
 
 **re-bootstrap: no** — `plugin/requirements.txt` and every persisted shape unchanged (corpus
