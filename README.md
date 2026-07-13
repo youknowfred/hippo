@@ -117,13 +117,20 @@ both **propose-only**, so the review gate above is untouched:
 Turn either on in one machine-local file, `~/.claude/hippo-llm.json`:
 
 ```json
-{ "capture_triage": true, "dream_contradictions": true }
+{
+  "capture_triage": true,
+  "dream_contradictions": true,
+  "api_key": "sk-ant-…"
+}
 ```
 
-Uses your `ANTHROPIC_API_KEY` and defaults to the `claude-haiku-4-5` alias (a heavy month of
-captures costs on the order of a dollar); `"model": "claude-sonnet-5"` upgrades the judgment
-at ~3× the (still tiny) per-call cost. Any failure — no key, no network, a malformed reply —
-falls back to exactly the un-enriched behavior. Full knob reference:
+The key can live in that file (as above) or in your `ANTHROPIC_API_KEY` environment variable —
+but on the Claude **Desktop** app the env var often doesn't reach the background capture hook, so
+the `api_key` field is the reliable route there. Defaults to the `claude-haiku-4-5` alias (a heavy
+month of captures costs on the order of a dollar); `"model": "claude-sonnet-5"` upgrades the
+judgment at ~3× the (still tiny) per-call cost. Any failure — no key, no network, a malformed
+reply — falls back to exactly the un-enriched behavior. The file is machine-local (`~/.claude/`,
+never in the repo). Full knob reference:
 [`plugin/memory/README.md`](plugin/memory/README.md#standalone-llm-enrichment-opt-in-default-off).
 
 ## Compared to other memory tools
