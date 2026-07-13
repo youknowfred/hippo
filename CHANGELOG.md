@@ -7,6 +7,30 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.11.2 — 2026-07-12 — "Quieter doctor"
+
+**re-bootstrap: no** — code-only. `plugin/requirements.txt`, every manifest schema, the skill set
+(16), the MCP surface, and the recall path are byte-identical to v1.11.1. No operator action.
+
+Two doctor-precision bug fixes — each removes a `/hippo:doctor` ⚠ that was either unclearable or a
+false alarm.
+
+- **DOC-7 — bootstrap re-stamps a stale sentinel version.** A version-only (`re-bootstrap: no`)
+  update left the bootstrap sentinel stamped with the OLD `plugin_version` — `start()`'s
+  already-current fast path returned before the worker (and `_write_sentinel`) ever ran — so
+  `check_plugin_version` nagged to "run /hippo:bootstrap," a remedy that hit the same fast path and
+  no-oped. `start()` now refreshes just that label on the fast path (offline; no venv rebuild, no
+  download; `requirements_hash`/`bootstrapped_at` preserved), so the delta is actually clearable —
+  every future version-only release self-heals instead of nagging forever.
+- **SEC — the secret-scanner entropy catch-all no longer fires on structured prose.** Its token
+  class spans `/ = _ -` (a real base64/base64url secret can contain them), so a filesystem path, a
+  `KEY=value` assignment, a slash-joined name list, or a hyphenated model name was read as one long
+  "token" and flagged as a "possible high-entropy secret." The catch-all now additionally requires
+  the token's *longest contiguous opaque run* (split on those separators) to reach 20 chars — a real
+  secret is one long run; structured text is short segments — killing the false positives while
+  every specific credential pattern and genuine high-entropy blob still flags. On the dogfood corpus
+  this drops the secret nudge from 15 files to 0.
+
 ## v1.11.1 — 2026-07-12 — "The sleep model"
 
 **re-bootstrap: no** — docs only. `plugin/requirements.txt`, every manifest schema, the skill set
