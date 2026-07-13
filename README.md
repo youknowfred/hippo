@@ -100,6 +100,32 @@ This is the part native memory doesn't have: **capture is automatic, but every w
 a human.** You get the recall benefit of always-on capture without ever ceding control of what
 your corpus says.
 
+### Optional: a small model as second opinion (off by default)
+
+If you give hippo an API key, two opt-in surfaces add one bounded small-model call each —
+both **propose-only**, so the review gate above is untouched:
+
+- **Capture triage** — each captured draft arrives pre-annotated with a suggested type, a
+  drafted description, and likely near-duplicates (judged semantically, alongside — never
+  instead of — hippo's calibrated similarity check). You still ratify per item at
+  `/hippo:consolidate`.
+- **Contradiction discovery** — the `/hippo:dream` sleep pass asks, for its strongest
+  co-firing memory pairs, "do these actually *disagree*, or merely relate?" — the one
+  judgment similarity math can't make. Confirmed candidates feed the `/hippo:resolve`
+  inbox, where you render the verdict as usual. Nothing auto-applies.
+
+Turn either on in one machine-local file, `~/.claude/hippo-llm.json`:
+
+```json
+{ "capture_triage": true, "dream_contradictions": true }
+```
+
+Uses your `ANTHROPIC_API_KEY` and defaults to the `claude-haiku-4-5` alias (a heavy month of
+captures costs on the order of a dollar); `"model": "claude-sonnet-5"` upgrades the judgment
+at ~3× the (still tiny) per-call cost. Any failure — no key, no network, a malformed reply —
+falls back to exactly the un-enriched behavior. Full knob reference:
+[`plugin/memory/README.md`](plugin/memory/README.md#standalone-llm-enrichment-opt-in-default-off).
+
 ## Compared to other memory tools
 
 Agent memory for Claude Code is a busy category — claude-mem, memsearch, memweave, supermemory,

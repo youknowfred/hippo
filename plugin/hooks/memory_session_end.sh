@@ -12,7 +12,10 @@
 #   - Writes ONLY to the gitignored pending queue. It NEVER writes .claude/memory/: the capture
 #     module has no corpus writer at all (structural approval gate — see memory/capture.py and
 #     its negative-capability test). Nothing reaches the corpus without an explicit /hippo:new.
-#   - No network, no model download. Off the hot path (SessionEnd, once) — zero per-prompt cost.
+#   - No network, no model download — UNLESS the owner explicitly opts in with
+#     HIPPO_CAPTURE_LLM=1, which adds ONE bounded triage API call (suggestions annotated onto
+#     the seed only; any failure falls back to the heuristic-only seed and this hook still
+#     exits 0). Off the hot path (SessionEnd, once) — zero per-prompt cost.
 #
 # Wired as a SessionEnd hook via plugin/hooks/hooks.json.
 set -uo pipefail

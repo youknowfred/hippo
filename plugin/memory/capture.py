@@ -12,14 +12,21 @@ session's HEAD watermark, into ONE ``session-capture`` seed in a GITIGNORED pend
 explicitly — approves any durable fact into the corpus via ``/hippo:new`` (or the
 ``/hippo:consolidate`` drain skill). Sleep-time-compute: the only work here is cheap I/O + one
 ``git diff``; the LLM work of drafting an actual memory from a seed happens off the hot path,
-at the agent's deliberate drain, never in this hook and never per-prompt.
+at the agent's deliberate drain, never in this hook and never per-prompt. ONE opt-in
+exception, default OFF: ``HIPPO_CAPTURE_LLM=1`` adds a single bounded small-model TRIAGE call
+at capture (``capture_triage.py`` — suggested type/description + a near-duplicate second
+opinion, annotated onto the seed as ``llm_triage``). Suggestions only: the drain's per-item
+human ratification is untouched, and any triage failure falls back to exactly this
+heuristic-only seed.
 
 THE APPROVAL GATE IS STRUCTURAL, NOT A MATTER OF DISCIPLINE. This module has NO code path that
 writes to ``.claude/memory/``: it imports no corpus writer (no ``new_memory``, no
-``write_memory``), it resolves only the pending dir, and every write it makes targets that
-gitignored dir. A negative-capability test pins that a full capture pass alone lands NOTHING in
-the corpus. That is the non-goal made unbreakable — "no autonomous bulk writes, ever": capture
-is automated up to the approval gate, never one byte past it.
+``write_memory`` — the opt-in triage seam lives in ``capture_triage``, which reuses only that
+module's DRY-RUN checker), it resolves only the pending dir, and every write it makes targets
+that gitignored dir. A negative-capability test pins that a full capture pass alone lands
+NOTHING in the corpus — with the triage flag ON as well as off. That is the non-goal made
+unbreakable — "no autonomous bulk writes, ever": capture is automated up to the approval gate,
+never one byte past it.
 """
 
 from __future__ import annotations
@@ -42,6 +49,9 @@ _PENDING_DIRNAME = ".memory-pending"
 # committed artifact changes shape — the queue is gitignored ephemera a drain consumes whole.
 # Schema 2 (GRW-1 + GRW-4, one coordinated bump): adds ``diff_hunks`` (verbatim evidence),
 # ``hunks_secret_flagged``, ``salience`` (a value LABEL, never a gate), and ``decisions``.
+# CAP-LLM rides schema 2 unbumped: ``llm_triage`` is OPTIONAL and purely advisory (present
+# only when HIPPO_CAPTURE_LLM opted in AND the call succeeded) — a drain that ignores it
+# loses nothing, so the shape a consumer must understand is unchanged.
 _SEED_SCHEMA = 2
 # Bounds so a chatty session can't write a multi-megabyte seed (the previews/names are already
 # privacy-truncated in the episode buffer; these cap the COUNT).
@@ -394,6 +404,28 @@ def write_session_capture(
         pd = _resolve_pending_dir(pending_dir, memory_dir)
         ensure_self_ignoring_dir(pd)  # gitignored queue: mkdir + self-ignoring .gitignore (SEC-3)
         path = os.path.join(pd, _seed_filename(seed))
+        # CAP-LLM (opt-in, default OFF): one bounded triage call annotates the seed with
+        # SUGGESTED fields the drain reviewer still ratifies per item. The PRIOR seed at
+        # this same per-session path rides along so an unchanged-evidence re-capture
+        # (SubagentStop×N, then SessionEnd) carries the suggestions over instead of
+        # re-billing. Lazy import behind the flag + its own catch: a triage failure of
+        # ANY kind (no key, timeout, junk response) leaves this seed exactly as built
+        # above — the fail-open contract.
+        try:
+            from .capture_triage import enrich_seed, triage_enabled
+
+            if triage_enabled():
+                prior = None
+                try:
+                    with open(path, "r", encoding="utf-8") as fh:
+                        prior = json.load(fh)
+                except Exception:
+                    prior = None
+                enrichment = enrich_seed(seed, memory_dir, repo_root=repo_root, prior=prior)
+                if enrichment:
+                    seed["llm_triage"] = enrichment
+        except Exception:
+            pass
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(seed, fh, ensure_ascii=False, indent=2)
@@ -618,6 +650,29 @@ def _format_listing(seeds: List[Dict]) -> str:
         dec = s.get("decisions") or []
         if dec:
             out.append(f"      decisions: {'; '.join(str(d) for d in dec[:5])}")
+        tri = s.get("llm_triage") or {}
+        if tri:
+            out.append(
+                f"      triage (LLM suggestion — ratify or discard at drain): "
+                f"type={tri.get('suggested_type') or '?'}  name={tri.get('suggested_name') or '?'}"
+            )
+            if tri.get("draft_description"):
+                out.append(f"        draft description: {tri['draft_description']}")
+            dups = tri.get("llm_duplicate_flags") or []
+            if dups:
+                out.append(f"        possible duplicates (LLM 2nd opinion): {', '.join(dups[:5])}")
+            dc = tri.get("dup_check") or {}
+            if dc.get("neighbors"):
+                shown = ", ".join(
+                    f"{n.get('name')} ({n.get('score')})" for n in dc["neighbors"][:3]
+                )
+                out.append(f"        index dup check: route={dc.get('route')} — {shown}")
+            elif dc.get("route"):
+                out.append(f"        index dup check: route={dc.get('route')}")
+            if tri.get("secret_flagged"):
+                out.append(
+                    "        ⚠ secret lint flagged the triage text — scrub before any corpus use"
+                )
     return "\n".join(out)
 
 

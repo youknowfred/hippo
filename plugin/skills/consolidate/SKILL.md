@@ -47,6 +47,16 @@ sessions are labelled; the score orders your review, it never gates a seed):
 "$PY" -m memory.capture --list
 ```
 
+When CAP-LLM triage is enabled (`capture_triage: true` in `~/.claude/hippo-llm.json`, or
+`HIPPO_CAPTURE_LLM=1`), a seed may also carry `triage (LLM suggestion …)` lines — a
+suggested type + name, a drafted description, and possible duplicates (the model's semantic
+second opinion, plus a pre-run of the same `--check` machinery you use below). These are
+SUGGESTIONS to verify, never decisions: use them as your starting draft when they hold up
+against the seed's own evidence, discard them when they don't, and still run `--check`
+yourself — the triage dup flags ride BESIDE the calibrated thresholds, not instead of them.
+A `⚠ secret lint flagged the triage text` line means scrub before any corpus use, exactly
+like flagged hunks.
+
 For EACH seed, read its provenance (changed/new files, query previews, recalled names) and
 decide what — if anything — is a durable fact worth keeping. Skip anything re-derivable from
 the code or git history. For each candidate fact you draft, **check it against the corpus

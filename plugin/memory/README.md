@@ -521,6 +521,60 @@ is loud, the fix is operator-driven:
    (`memory.provenance.write_corpus_format`). Until migrated, the plugin keeps reading
    the old format (formats are additive where possible); newer-format features stay off.
 
+## Standalone LLM enrichment (opt-in, default OFF)
+
+Until v1.14.0, ZERO standalone LLM/API calls existed anywhere in this package — every ounce
+of LLM judgment ran inside a live interactive session executing a skill, and everything
+headless was a heuristic in code. Two surfaces now can make one, both shipped dark, both
+PROPOSE-ONLY (they enrich existing human-reviewed queues; the corpus approval gate is
+untouched), and both routed through one auditable seam:
+
+### `llm_client.py` — the one seam for standalone calls
+
+`complete(prompt, *, timeout_s) -> str | None` — stdlib-urllib transport (no new deps),
+`None` on ANY failure (no key, timeout, junk response, unknown provider), never raises.
+Every consumer treats `None` as "skip the enrichment entirely", so a dead network can never
+break a hook or a dream pass. Provider/model/endpoint/key are config points (defaults:
+Anthropic, the `claude-haiku-4-5` alias — deliberately not a dated snapshot, so tier
+refreshes arrive without a release). Configuration is centralized in ONE machine-local file,
+**`~/.claude/hippo-llm.json`** (the `hippo-trust.json` dotfile family; `HIPPO_LLM_CONFIG`
+relocates it), layered per key as **env var > config file > shipped default** — the file is
+the durable machine-wide setting, an env var stays the per-run/CI override. Recognized keys:
+`provider`, `model`, `base_url`, `api_key`, `capture_triage`, `capture_timeout_s`,
+`dream_contradictions`, `dream_timeout_s`, `contra_max_pairs`, `contra_min_cofire`.
+
+### `capture_triage.py` — CAP-LLM, capture-time triage
+
+With `capture_triage: true` (or `HIPPO_CAPTURE_LLM=1`), the SessionEnd/SubagentStop capture
+pass makes ONE bounded small-model call (default 6s, clamped ≤20s of the hooks' 30s budget)
+that annotates the pending seed with SUGGESTIONS the `/hippo:consolidate` reviewer still
+ratifies per item: a likely `type` + kebab name, a drafted one-line description, and
+near-duplicates twice over — the model's own semantic flags PLUS a pre-run of the drain's
+exact calibrated machinery (`new_memory.check_candidate`). Fail-open everywhere: any failure
+yields exactly today's heuristic-only seed, and the hook still exits 0. A CARRY-OVER guard
+fingerprints the evidence the prompt is built from, so the multi-fire hook path
+(SubagentStop×N, then SessionEnd) re-bills only when the session's evidence actually
+changed. Secret discipline: flagged hunks never leave the machine, the assembled prompt is
+re-linted, and the model's own output is scanned and flagged for the drain. The structural
+approval gate stands — capture.py still never imports the corpus writer (the AST pin holds);
+the triage seam reuses only `check_candidate`, the documented write-nothing dry run.
+
+### DRM-C in `dream.py` — contradiction discovery
+
+Cofire is a similarity: it can say two memories are ABOUT the same thing, never that they
+DISAGREE. With `dream_contradictions: true` (or `HIPPO_DREAM_CONTRADICTIONS=1`, or `dream
+--contradictions`), the pass judges its own high-cofire pairs — the same `result["pairs"]`
+surface, no separate corpus scan — with one bounded call each: "conflict in substance, or
+merely related?". Conflict verdicts become `kind: "contradicts"` candidates — Tier-C via the
+pre-existing `_ROUTED_KINDS` routing, never admitted by `apply_eligible` (there is no Tier-A
+here: nothing about a contradiction has completion's direct-text evidence) — plus rows in
+the derived `<telemetry>/dream/contradictions.jsonl`. `resolve_view` merges the proposals
+into the SAME `/hippo:resolve` inbox and verdict flow humans already use; supersede/merge/
+declare clear a proposal by read-time subtraction, scope-both ends in the existing
+`--dismiss`. Bounded and thrifty: pool gated at cofire ≥ θ, attempts (calls, not successes)
+capped at 6/pass (hard-max 12), declared/superseded pairs skipped, judged pairs never
+re-billed.
+
 ## Environment overrides
 
 - `HIPPO_MEMORY_DIR` — point the tooling at a different memory dir (hermetic tests).
@@ -541,6 +595,17 @@ is loud, the fix is operator-driven:
 - `HIPPO_TRUST_FILE` — relocate the machine-local trust registry (default
   `~/.claude/hippo-trust.json`); hermetic tests point it at a tmp path.
 - `FASTEMBED_CACHE_PATH` — model cache override (default `${CLAUDE_PLUGIN_DATA}/fastembed`).
+- `HIPPO_LLM_CONFIG` — relocate the standalone-LLM config file (default
+  `~/.claude/hippo-llm.json`); hermetic tests point it at a tmp path. Every knob below ALSO
+  has a config-file key (see "Standalone LLM enrichment") — env wins per key.
+- `HIPPO_LLM_PROVIDER` / `HIPPO_LLM_MODEL` / `HIPPO_LLM_BASE_URL` / `HIPPO_LLM_API_KEY` —
+  standalone-call provider (default `anthropic`), model (default the `claude-haiku-4-5`
+  alias), endpoint root, and hippo-scoped key (falls back to `ANTHROPIC_API_KEY`).
+- `HIPPO_CAPTURE_LLM=1` — opt the SessionEnd/SubagentStop capture pass into CAP-LLM triage;
+  `HIPPO_CAPTURE_LLM_TIMEOUT` caps the call (default 6s, clamped ≤20s).
+- `HIPPO_DREAM_CONTRADICTIONS=1` — opt dream passes into DRM-C contradiction discovery;
+  `HIPPO_DREAM_LLM_TIMEOUT` per-call cap (default 10s), `DREAM_CONTRA_MAX_PAIRS` attempts
+  per pass (default 6, hard-max 12), `DREAM_CONTRA_MIN_COFIRE` the pool bar (default θ).
 
 ## Tests (dev checkout)
 
