@@ -7,6 +7,23 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.11.3 — 2026-07-13 — "The honest guard"
+
+**re-bootstrap: no** — the shared preflight guard's message text changed in all 16 skills;
+`plugin/requirements.txt`, every manifest schema, the skill set (16), the MCP surface, and the
+recall path are otherwise unchanged from v1.11.2. No operator action.
+
+- **Fixed the ONB-7 preflight guard's false "Claude Code is too old" diagnosis.** The shared
+  `CLAUDE_PLUGIN_DATA` guard in all 16 skills was written in v0.2.0 — four months before Claude
+  Desktop plugin support existed — on the assumption that an unset variable always meant an
+  outdated Claude Code binary. In fact, the agent's Bash tool never inherits plugin-scoped env
+  vars on at least some surfaces, even on a fully current, correctly-bootstrapped install — only
+  hippo's own MCP server and hooks receive them, since those are harness-launched subprocesses,
+  not agent-run Bash commands. The guard now says so instead of misdiagnosing the cause, and
+  names the matching MCP tool (`init`/`bootstrap`/`doctor`/`dream`/`recall`/`why`/`new_memory`)
+  where one exists in place of the skill's bash flow, or states plainly that the skill has no
+  Desktop-safe path yet where none does.
+
 ## v1.11.2 — 2026-07-12 — "Quieter doctor"
 
 **re-bootstrap: no** — code-only. `plugin/requirements.txt`, every manifest schema, the skill set
