@@ -90,9 +90,11 @@ _DESKTOP_SURFACE_NOTE = (
     "terminal-only and will not work here. When acting on (or relaying) any /hippo:* advice "
     "above, use the Desktop equivalents: /hippo:bootstrap → the hippo bootstrap MCP tool, "
     "/hippo:init → the init tool, /hippo:doctor → the doctor tool (trust/re-consent → the "
-    "trust_corpus tool); the other verbs (consolidate, resolve, audit, new, recall, why) run "
-    'as hippo skills — invoke them directly, or the user asks in plain words (e.g. '
-    '"consolidate memory").'
+    "trust_corpus tool), /hippo:consolidate → the consolidate skill driving its MCP tools "
+    "(capture, new_memory check:true, secrets_scan, reconsolidate, build_index, "
+    "co_recall_proposals, abstention_fixtures — per item); the other verbs (resolve, audit, "
+    "new, recall, why) run as hippo skills — invoke them directly, or the user asks in "
+    'plain words (e.g. "consolidate memory").'
 )
 
 

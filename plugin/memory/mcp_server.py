@@ -49,6 +49,28 @@ reject typed ``/hippo:*`` commands — before these tools, setup was terminal-on
                             consent to the reviewed bytes (SEC-6 fingerprint + SEC-7 origin
                             stamped; drift re-consent reviews the delta, preserves origin).
 
+Plus the ``dream`` verb tool (DRM-2, v1.11.0) and the CONSOLIDATE-FLOW tools (INT-13) —
+``/hippo:consolidate``'s five steps as thin, per-item primitives, so sleep-time
+consolidation runs on surfaces where the agent's Bash tool never inherits
+``CLAUDE_PLUGIN_DATA`` (the Claude desktop app) and in subagents. The skill stays the
+doctrine; these are the same engine calls its bash blocks run, one approval-gated step
+per call — deliberately NOT one monolithic "consolidate" tool that could batch writes
+past the per-item gate:
+
+  - ``capture(action)``       — the CAP-2 pending queue: list / discard / snooze /
+                                add_decision (the drain's read + housekeeping half; the
+                                corpus writes route through ``new_memory``, which grew a
+                                ``check`` flag for the CAP-3 dry-run).
+  - ``secrets_scan(text)``    — the drain's HARD GATE: lint exact lines BEFORE any
+                                verbatim hunk is fenced into a committed body.
+  - ``reconsolidate(action)`` — the LIF-1 worklist + the per-item reverify verdict
+                                (graduate/fix/demote/snooze, demote's superseded_by).
+  - ``build_index()``         — refresh the index + persisted link graph (Step 3).
+  - ``co_recall_proposals()`` — GRW-2 co-recall edge proposals, floor names excluded,
+                                already-linked pairs dropped (read-only; an approved
+                                append stays a per-item agent edit).
+  - ``abstention_fixtures(action)`` — the SIG-6 blind-spot loop: draft + per-item confirm.
+
 And three RESOURCES (RUL-5) — the baseline-memory pull path for subagents:
 
   - ``hippo://floor``       — the always-on memory floor (project MEMORY.md + the TEA-1
@@ -119,7 +141,9 @@ _TOOLS = [
             "frontmatter, citation-provenance backfill, index refresh, floor pointer for "
             "user/feedback types). Reports near-duplicate/conflict neighbors (warn-only) so you "
             "can decide add / update-existing / supersede / skip. A per-item, agent-initiated "
-            "write — never call it in a loop to bulk-import."
+            "write — never call it in a loop to bulk-import. Pass check:true FIRST when "
+            "draining the capture queue (the CAP-3 dry-run: neighbors + proposal-time "
+            "baseline, writes nothing), then call again without it for the real write."
         ),
         "inputSchema": {
             "type": "object",
@@ -138,6 +162,14 @@ _TOOLS = [
                     "enum": ["draft", "verified", "authoritative"],
                     "description": "GOV-7: the author's trust dial — display-only, never a "
                     "ranking input; omit for the default",
+                },
+                "check": {
+                    "type": "boolean",
+                    "description": "CAP-3 dry-run: score this candidate against the existing "
+                    "corpus (near-duplicate neighbors, governance echoes, the proposal-time "
+                    "git baseline) and write NOTHING — run it before the real write when "
+                    "draining captures, so a duplicate routes to update/supersede instead of "
+                    "becoming a new file",
                 },
             },
             "required": ["name", "description", "type"],
@@ -397,6 +429,196 @@ _TOOLS = [
             },
         },
     },
+    # ------------------------------------------------------------------- #
+    # Consolidate-flow tools (INT-13) — /hippo:consolidate's five steps as
+    # thin per-item primitives, for surfaces where the agent's Bash tool never
+    # inherits CLAUDE_PLUGIN_DATA (the Claude desktop app) and for subagents.
+    # Additive per STABILITY.md. The skill stays the doctrine; deliberately
+    # NOT one monolithic tool that could batch writes past the per-item gate.
+    # ------------------------------------------------------------------- #
+    {
+        "name": "capture",
+        "description": (
+            "The CAP-2 pending-capture queue — Step 1 of /hippo:consolidate's drain. "
+            "action='list' (default) shows every queued seed highest-value first with its "
+            "provenance (session, commit range, changed paths, queries, user-confirmed "
+            "decisions, verbatim-diff evidence + its secret-lint flag) and the queue dir; "
+            "nothing listed is in the corpus yet. Drain per item: draft the durable fact, "
+            "check it with new_memory (check:true), secret-lint any verbatim hunk with "
+            "secrets_scan BEFORE fencing it into a body, write with new_memory, then "
+            "action='discard' (path=…) removes that ONE processed seed (same op when a "
+            "capture isn't worth keeping). action='snooze' defers the SessionStart nudge a "
+            "few sessions (seeds untouched; it re-nags). action='add_decision' (text=…) "
+            "records ONE user-confirmed decision — quote or faithfully paraphrase what the "
+            "USER stated, never infer one — to ride this session's capture seed as its "
+            "durable WHY. Per-item approval throughout; never bulk-import a queue."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "discard", "snooze", "add_decision"],
+                    "description": "list = show the queue (default); discard = remove ONE "
+                    "processed seed; snooze = defer the nudge; add_decision = record ONE "
+                    "user-confirmed decision",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "with action='discard': the seed path or filename from "
+                    "the listing (must be inside the pending queue)",
+                },
+                "text": {
+                    "type": "string",
+                    "description": "with action='add_decision': the decision, in the "
+                    "user's own terms (transcription, never synthesis)",
+                },
+            },
+        },
+    },
+    {
+        "name": "secrets_scan",
+        "description": (
+            "The consolidate drain's HARD GATE for verbatim evidence: run hippo's secret "
+            "lint (with remediation guidance) over the EXACT lines you intend to fence "
+            "into a memory body, BEFORE fencing them. A capture seed is gitignored; a "
+            "memory body is committed and recalled forever — so any finding means do NOT "
+            "fence: drop or scrub the flagged lines and scan again until clean "
+            "(write_memory's own write-time lint is the backstop, not the gate). Also "
+            "worth running before any new_memory write whose body quotes diff/log/config "
+            "lines. Read-only over the supplied text; touches nothing on disk."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "the exact lines to lint (e.g. the diff hunk lines "
+                    "you intend to quote verbatim)",
+                },
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "reconsolidate",
+        "description": (
+            "The LIF-1 reconsolidation worklist — Step 2 of /hippo:consolidate. "
+            "action='worklist' (default) lists recently-recalled memories whose cited "
+            "code has since drifted (plus commit-precise [since-watermark] hits), "
+            "most-recently-drifted first, with 1-hop linked neighbors as review-adjacent "
+            "hints. Re-ground EACH against current code (read the memory, diff its cited "
+            "paths), then render ONE per-item verdict via action='reverify': outcome="
+            "'graduate' (re-verified current — clears staleness, re-baselines "
+            "source_commit to HEAD), 'fix' (you already corrected the body; re-baselines), "
+            "'demote' (confirmed wrong — staleness stays set and invalid_after chains on, "
+            "so recall's pre-cut penalty engages with no second command; optionally name "
+            "superseded_by=<successor> to write the supersedes edge and stamp the validity "
+            "boundary at the successor's commit date), or 'snooze' (explicit deferral — "
+            "expires after a few sessions, then re-nags). Per-item and verification-gated "
+            "by design; no bulk form exists."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["worklist", "reverify"],
+                    "description": "worklist = list what needs re-grounding (default); "
+                    "reverify = render ONE verdict (requires name + outcome)",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "with action='reverify': the memory slug, with or "
+                    "without .md",
+                },
+                "outcome": {
+                    "type": "string",
+                    "enum": ["graduate", "fix", "demote", "snooze"],
+                    "description": "the re-verification verdict for this ONE memory",
+                },
+                "superseded_by": {
+                    "type": "string",
+                    "description": "GRA-4 opt-in (demote only): the SUCCESSOR memory that "
+                    "replaces this one's claim — one successor, one memory, never bulk",
+                },
+            },
+        },
+    },
+    {
+        "name": "build_index",
+        "description": (
+            "Refresh the recall index + the persisted link graph (links.json) so this "
+            "session's writes are live and staleness is recomputed — Step 3 of "
+            "/hippo:consolidate, and the required follow-up after any approved co-recall "
+            "wikilink append or typed-edge write. Offline and bounded: runs the full "
+            "build under the freshly-bootstrapped venv python when one exists (dense "
+            "vectors), else a never-downgrade in-process incremental refresh (a dense "
+            "index is never silently rebuilt BM25-only). Writes only the gitignored "
+            "index dir — never the corpus."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "co_recall_proposals",
+        "description": (
+            "GRW-2 co-recall edge proposals — Step 4 of /hippo:consolidate. Similarity "
+            "can never link a bug to its unrelated-looking workaround, but the episode "
+            "buffer records which memories actually SURFACE TOGETHER: this tallies pairs "
+            "that co-recalled across many DISTINCT sessions (floor names excluded — they "
+            "would dominate every pair; already-linked pairs dropped). The threshold is "
+            "deliberately high: on a sparse or noisy map it proposes NOTHING, and that "
+            "empty result is the designed outcome, not a failure. For EACH printed pair: "
+            "read both memories and judge whether the association is real — would someone "
+            "recalling one genuinely need the other? On explicit approval, append a "
+            "[[the-other-name]] reference into ONE side's body (its Related: line if "
+            "present) — a per-item agent edit; this tool never writes — then call "
+            "build_index so links.json carries the edge. Skip = the tally keeps its count "
+            "for the next drain."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "abstention_fixtures",
+        "description": (
+            "The SIG-6 blind-spot loop — Step 5 of /hippo:consolidate. A recurring "
+            "abstained query means the corpus kept being asked something it couldn't "
+            "answer, and the drain may have just captured exactly the memory that closes "
+            "the gap. action='draft' (default) refreshes the gitignored drafts queue: one "
+            "UNCONFIRMED row (expected: []) per recurring abstention cluster, existing "
+            "rows preserved verbatim. For each unconfirmed row, judge whether a memory "
+            "(just captured, or existing) GENUINELY answers the query; if yes, "
+            "action='confirm' (query=…, expected=[stems]) admits that ONE row into the "
+            "tracked eval fixture (category: abstention) and drains the draft. It REFUSES "
+            "stems that don't exist — never fabricate a memory to make a fixture pass; a "
+            "refusal is a verdict, not a thing to work around. Rows nothing answers stay "
+            "capture gaps for future drains. Per item, agent-gated — never admit a queue "
+            "in bulk."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["draft", "confirm"],
+                    "description": "draft = refresh the drafts queue from the abstention "
+                    "backlog (default); confirm = admit ONE judged row (requires query + "
+                    "expected)",
+                },
+                "query": {
+                    "type": "string",
+                    "description": "with action='confirm': the abstained query, verbatim "
+                    "from the drafts row",
+                },
+                "expected": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "with action='confirm': the existing memory stem(s) "
+                    "that genuinely answer the query",
+                },
+            },
+        },
+    },
 ]
 
 
@@ -445,8 +667,46 @@ def _tool_new_memory(args: Dict[str, Any]) -> str:
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
             "new_memory REFUSED — this project's memory corpus is untrusted (SEC-13: writing "
-            "to an unreviewed corpus is gated just as reading it is). " + _UNTRUSTED_REMEDY
+            "to an unreviewed corpus is gated just as reading it is — and the check dry-run "
+            "reads its descriptions). " + _UNTRUSTED_REMEDY
         )
+    if args.get("check"):
+        # CAP-3: the check-FIRST dry-run — the same check_candidate the CLI --check runs,
+        # rendered the same way, so the drain can route add/update/supersede/skip BEFORE
+        # any file exists. Writes nothing (no file, no index refresh, no floor edit).
+        from .new_memory import check_candidate
+
+        decision = check_candidate(name, description, mtype, body=str(args.get("body") or ""))
+        out = [f"check (dry-run — nothing was written): route = {decision['route']}"]
+        # GOV-3: the proposal-time git baseline — the honest anchor a reviewer can check
+        # out ("as of HEAD <sha>"). source_commit exists only after the real write.
+        if decision.get("baseline"):
+            out.append(f"baseline: as of HEAD {decision['baseline'][:12]}")
+        else:
+            out.append("baseline: no git HEAD at proposal time (non-git corpus)")
+        if decision["neighbors"]:
+            out.append("neighbors (decide update-existing / supersede / skip — NAME the target):")
+            for n in decision["neighbors"]:
+                desc = str(n["description"]).replace("\n", " ").strip()
+                if len(desc) > 220:
+                    desc = desc[:217].rstrip() + "…"
+                out.append(f"  • {n['name']} (similarity {n['score']:.2f}) — {desc}")
+        elif decision["route"] == "add":
+            out.append("  → no near-duplicate cleared the threshold: safe to add as a new memory.")
+        # RUL-3: rules-plane echoes flag but never flip the route — a wording decision.
+        if decision.get("rule_neighbors"):
+            out.append("warning : restates the governance plane — link, don't copy:")
+            for r in decision["rule_neighbors"]:
+                out.append(f"  • {r['file']} (overlap {r['score']:.2f}) — \"{r['preview']}\"")
+        if decision.get("note"):
+            out.append(f"note: {decision['note']}")
+        out.append(
+            "Next: route add → call new_memory again WITHOUT check to write; route review → "
+            "update-existing (edit the named memory) / supersede (write the new one, then "
+            "reconsolidate action='reverify' outcome='demote' superseded_by=<the-new-name> "
+            "on the old) / skip."
+        )
+        return "\n".join(out)
     links = args.get("links")
     links = [str(x) for x in links] if isinstance(links, list) else None
     confidence = args.get("confidence")
@@ -671,9 +931,12 @@ def _tool_doctor(args: Dict[str, Any]) -> str:
         report = render(DoctorContext(memory_dir, repo_root))
     return report + caveat + (
         "\n\nOn this MCP surface the named fixes map to tools: /hippo:bootstrap → the "
-        "bootstrap tool (action='start'), /hippo:init → the init tool, and the "
-        "trust/consent step (mark_trusted) → the trust_corpus tool. Typed /hippo:* "
-        "commands exist only in the Claude Code terminal."
+        "bootstrap tool (action='start'), /hippo:init → the init tool, the "
+        "trust/consent step (mark_trusted) → the trust_corpus tool, and "
+        "/hippo:consolidate's steps → the capture, new_memory (check:true first), "
+        "secrets_scan, reconsolidate, build_index, co_recall_proposals, and "
+        "abstention_fixtures tools (per item, as the consolidate skill directs). Typed "
+        "/hippo:* commands exist only in the Claude Code terminal."
     )
 
 
@@ -1005,6 +1268,355 @@ def _tool_dream(args: Dict[str, Any]) -> str:
         return f"dream: pass failed ({exc}) — nothing was changed."
 
 
+# --------------------------------------------------------------------------- #
+# Consolidate-flow tools (INT-13) — /hippo:consolidate's five steps as thin,
+# per-item primitives. Each wraps the SAME engine call the skill's bash blocks
+# run (no behavior fork); every write stays one approval-gated item per call.
+# --------------------------------------------------------------------------- #
+def _tool_capture(args: Dict[str, Any]) -> str:
+    """CAP-2/CAP-6/GRW-4: the pending-queue verbs of ``memory.capture``'s CLI, re-served.
+
+    Deliberately UNGATED by SEC-1: the queue is gitignored session-local ephemera (the same
+    trust domain as the episode buffer — it never arrives via a clone), and the drain's
+    corpus writes all route through ``new_memory``, which carries the SEC-13 gate."""
+    from .capture import (
+        _SNOOZE_WINDOW_SESSIONS,
+        _format_listing,
+        default_pending_dir,
+        discard_pending,
+        read_pending,
+        snooze_queue,
+    )
+    from .provenance import resolve_dirs
+
+    memory_dir, _repo_root = resolve_dirs()
+    action = str(args.get("action") or "list").strip().lower()
+    if action == "list":
+        seeds = read_pending(memory_dir=memory_dir)
+        out = [_format_listing(seeds)]
+        if seeds:
+            out.append("")
+            out.append(
+                f"queue dir: {default_pending_dir(memory_dir)} — each seed is a readable "
+                "JSON file; open it for the full evidence (query previews, decisions, "
+                "verbatim diff hunks)."
+            )
+            if any(s.get("hunks_secret_flagged") for s in seeds):
+                out.append(
+                    "on this MCP surface, scan_with_remediation = the secrets_scan tool — "
+                    "lint the exact hunk lines there before fencing ANY into a body."
+                )
+            out.append(
+                "Drain per item: draft the fact → new_memory (check:true) → secrets_scan "
+                "any verbatim hunk → new_memory (the real write) → capture "
+                "(action='discard', path=<seed>). Nothing is approved in bulk."
+            )
+        return "\n".join(out)
+    if action == "discard":
+        path = str(args.get("path") or "").strip()
+        if not path:
+            return "capture discard: 'path' is required — a seed path or filename from action='list'."
+        pd = os.path.realpath(default_pending_dir(memory_dir))
+        candidate = path if os.path.isabs(path) else os.path.join(pd, path)
+        real = os.path.realpath(candidate)
+        base = os.path.basename(real)
+        # Containment: the CLI trusts a human-typed path; a model-invoked remove must only
+        # ever touch seeds inside the pending queue (never dotfiles — the queue's own
+        # .gitignore and snooze marker are queue state, not seeds).
+        if os.path.dirname(real) != pd or not base.endswith(".json") or base.startswith("."):
+            return (
+                "capture discard REFUSED — the path must name a seed file inside the "
+                f"pending queue ({pd}); this tool never removes anything else."
+            )
+        ok = discard_pending(real)
+        return f"discarded: {real}" if ok else f"nothing to discard at {real}"
+    if action == "snooze":
+        ok = snooze_queue(memory_dir=memory_dir)
+        return (
+            f"pending-capture nudge snoozed for {_SNOOZE_WINDOW_SESSIONS} sessions "
+            "(seeds kept; the nudge re-nags after it expires)"
+            if ok
+            else "could not record the snooze (unwritable pending dir)"
+        )
+    if action == "add_decision":
+        from .telemetry import log_decision
+
+        text = str(args.get("text") or "").strip()
+        if not text:
+            return (
+                "capture add_decision: 'text' is required — ONE user-confirmed decision, "
+                "quoted or faithfully paraphrased in the user's own terms (transcription, "
+                "never synthesis)."
+            )
+        ok = log_decision(text)
+        return (
+            "decision recorded — it will ride this session's capture seed as its durable WHY"
+            if ok
+            else "nothing recorded (empty text or unwritable ledger)"
+        )
+    return "capture: pass action='list' (default), 'discard' (path=…), 'snooze', or 'add_decision' (text=…)."
+
+
+def _tool_secrets_scan(args: Dict[str, Any]) -> str:
+    """The GRW-1 hard gate as a primitive: ``secrets.scan_with_remediation`` over the exact
+    lines the caller intends to fence. Ungated — a pure function over caller-supplied text
+    that reads nothing from the corpus and touches nothing on disk."""
+    from .secrets import scan_with_remediation
+
+    text = args.get("text")
+    if not isinstance(text, str) or not text.strip():
+        return "secrets_scan: 'text' is required — the exact lines you intend to fence into a memory body."
+    warnings = scan_with_remediation(text)
+    if not warnings:
+        return "✔ clean — no secret patterns found; these lines are safe to fence into a memory body."
+    return "\n".join(
+        [
+            "✘ HARD GATE — secret lint flagged these lines; do NOT fence them into a memory "
+            "body (a seed is gitignored, a body is committed and recalled forever). Drop or "
+            "scrub the flagged lines, then scan again until clean:"
+        ]
+        + [f"  {w}" for w in warnings]
+    )
+
+
+def _tool_reconsolidate(args: Dict[str, Any]) -> str:
+    """LIF-1: the worklist + the ONE per-item verdict gate (``semantic_reverify``/``snooze``),
+    mirroring the ``memory.reconsolidate`` CLI (watermark lane included — the tool and the
+    SessionStart producer must describe the SAME worklist)."""
+    from . import trust
+    from .provenance import resolve_dirs
+    from .reconsolidate import (
+        _SNOOZE_WINDOW_SESSIONS,
+        _linked_note,
+        recalled_stale_worklist,
+        semantic_reverify,
+        snooze,
+        watermark_stale_candidates,
+    )
+
+    memory_dir, repo_root = resolve_dirs()
+    # SEC-1: gate like traverse (the worklist renders memory names + typed-edge neighbors)
+    # and like new_memory (a reverify verdict WRITES corpus frontmatter).
+    gate_root = trust.gate_repo_root(memory_dir, repo_root)
+    if gate_root is not None and not trust.is_trusted(gate_root):
+        return (
+            "reconsolidate: withheld — this project's memory corpus is untrusted (SEC-1: "
+            "the worklist exposes memory names and a verdict writes corpus files, gated "
+            "just as recall and new_memory are). " + _UNTRUSTED_REMEDY
+        )
+    action = str(args.get("action") or "worklist").strip().lower()
+    if action == "worklist":
+        worklist = recalled_stale_worklist(
+            memory_dir,
+            repo_root,
+            watermark_stale=watermark_stale_candidates(memory_dir, repo_root),
+        )
+        if not worklist:
+            return "No recently-recalled memory is currently stale."
+        out = [
+            f"{len(worklist)} memories need re-grounding (recently recalled + stale, or "
+            "[since-watermark] commit-precise hits) — re-ground EACH against current code, "
+            "then render ONE verdict per item via action='reverify' "
+            "(outcome=graduate|fix|demote|snooze):"
+        ]
+        for item in worklist:
+            wm_tag = " [since-watermark]" if item.get("watermark") else ""
+            out.append(
+                f"  • {item['name']}{wm_tag}{_linked_note(item)}: "
+                + ", ".join(item["changed_paths"][:6])
+            )
+        return "\n".join(out)
+    if action == "reverify":
+        name = str(args.get("name") or "").strip()
+        outcome = str(args.get("outcome") or "").strip().lower()
+        if not name or not outcome:
+            return (
+                "reconsolidate reverify: 'name' and 'outcome' "
+                "(graduate|fix|demote|snooze) are both required."
+            )
+        base = name if name.endswith(".md") else f"{name}.md"
+        if outcome == "snooze":
+            # The skill's fourth verdict — the CLI spells it --snooze; one enum here.
+            r = snooze(name, memory_dir)
+            if r["error"]:
+                return f"snooze {base}: refused — {r['error']}"
+            return (
+                f"snooze {base}: ack logged — the worklist skips it until "
+                f"{_SNOOZE_WINDOW_SESSIONS} new sessions have started (a deferral, not a "
+                "verdict; it expires and re-nags)"
+            )
+        superseded_by = str(args.get("superseded_by") or "").strip() or None
+        r = semantic_reverify(
+            name, outcome, memory_dir, repo_root, superseded_by=superseded_by
+        )
+        if r["error"]:
+            return f"reverify {base}: refused — {r['error']}"
+        bits = [f"outcome={r['outcome']}"]
+        bits.append("staleness flag cleared" if r["cleared"] else "staleness flag unchanged")
+        if outcome == "demote":
+            # LIF-1: name the chained action so the one-command demote is legible.
+            boundary = (
+                f" to {r['invalid_after']} (the successor's commit date)"
+                if superseded_by and r.get("invalid_after")
+                else ""
+            )
+            bits.append(
+                f"invalid_after set{boundary} — recall's pre-cut penalty engages with no second command"
+                if r["invalidated"]
+                else "invalid_after unchanged"
+            )
+        if superseded_by:
+            bits.append(
+                f"supersedes edge written to {superseded_by}"
+                if r["edge_written"]
+                else "supersedes edge already present"
+            )
+        bits.append("logged" if r["logged"] else "not logged")
+        out = [f"reverify {base}: " + "; ".join(bits)]
+        # LIF-3: the ONE shared rot rendering — a graduate/fix re-derivation that dropped
+        # citations must be as loud here as on the provenance CLI.
+        from .provenance import citation_rot_lines
+
+        out.extend(citation_rot_lines(base, r["cited"], r["dropped_citations"]))
+        return "\n".join(out)
+    return "reconsolidate: pass action='worklist' (default) or action='reverify' (name=…, outcome=…)."
+
+
+def _tool_build_index(args: Dict[str, Any]) -> str:
+    """Step 3: refresh the index + persisted links.json. Runs the full ``memory.build_index``
+    under the freshly-resolved venv python when one exists (dense vectors — the same
+    ``_fresh_python`` discipline as doctor/init, so a server that booted pre-bootstrap never
+    dense-blinds the rebuild); else falls back to the in-process never-downgrade
+    ``refresh_index``. Ungated: it writes only the gitignored index dir (init already builds
+    pre-consent), and its output is counts, never content."""
+    from .build_index import default_index_dir, refresh_index
+    from .provenance import resolve_dirs
+
+    memory_dir, _repo_root = resolve_dirs()
+    py = _fresh_python()
+    if py is not None:
+        try:
+            import subprocess
+
+            out = subprocess.run(
+                [py, "-m", "memory.build_index"],
+                capture_output=True, text=True, timeout=600, env=_subprocess_env(),
+            )
+            if out.returncode == 0 and out.stdout.strip():
+                return out.stdout.strip()
+        except Exception:
+            pass
+    manifest = refresh_index(memory_dir)
+    if manifest is None:
+        return (
+            "build_index: no index was produced — is there a corpus here? Run the init "
+            "tool first."
+        )
+    dense = (
+        "hybrid" if manifest.get("dense_ready") else "BM25-only (run the bootstrap tool for dense)"
+    )
+    return (
+        f"index refreshed — {manifest.get('count')} memories, {dense}\n"
+        f"index dir: {default_index_dir(memory_dir)}\n"
+        "links.json re-persisted — new [[wikilinks]] and typed edges are live for the next recall."
+    )
+
+
+def _tool_co_recall_proposals(args: Dict[str, Any]) -> str:
+    """GRW-2 (Step 4): the SKILL.md tally verbatim — ``co_recall_pairs`` (floor excluded)
+    fused with ``links.build_graph`` adjacency so already-linked pairs drop. Read-only; the
+    approved append stays a per-item agent edit of ONE body, never a write here."""
+    from . import trust
+    from .lint_floor import floor_memory_names
+    from .links import build_graph
+    from .provenance import resolve_dirs
+    from .telemetry import co_recall_pairs, default_telemetry_dir
+
+    memory_dir, repo_root = resolve_dirs()
+    # SEC-1: proposals render memory names — gate exactly as traverse does.
+    gate_root = trust.gate_repo_root(memory_dir, repo_root)
+    if gate_root is not None and not trust.is_trusted(gate_root):
+        return (
+            "co_recall_proposals: withheld — this project's memory corpus is untrusted "
+            "(SEC-1: proposals expose memory names, gated just as recall is). "
+            + _UNTRUSTED_REMEDY
+        )
+    pairs = co_recall_pairs(
+        default_telemetry_dir(memory_dir),
+        exclude_names=floor_memory_names(memory_dir),  # floor names would dominate every pair
+    )
+    adjacent = set()
+    graph = build_graph(memory_dir)
+    if graph:
+        for src, outs in graph.adjacency.items():
+            adjacent.update(frozenset((src, tgt)) for tgt in outs)
+        for src, rels in graph.typed.items():
+            for tgts in rels.values():
+                adjacent.update(frozenset((src, tgt)) for tgt in tgts)
+    fresh = [p for p in pairs if frozenset(p["pair"]) not in adjacent]
+    if not fresh:
+        return (
+            "no co-recall pairs above threshold — the sparse map stays empty (by design; "
+            "already-linked pairs are dropped and floor names are excluded)"
+        )
+    out = [
+        f"{len(fresh)} co-recall edge proposal(s) — pairs that surfaced together across "
+        "distinct sessions (already-linked pairs dropped, floor names excluded):"
+    ]
+    for p in fresh:
+        a, b = p["pair"]
+        out.append(f"  {a} <-> {b}   (co-recalled in {p['sessions']} distinct sessions)")
+    out.append(
+        "For EACH pair: read both memories and judge whether the association is real — "
+        "would someone recalling one genuinely need the other? On explicit approval, append "
+        "a [[the-other-name]] reference into ONE side's body (its Related: line if present) "
+        "— a per-item agent edit; this tool never writes — then run the build_index tool so "
+        "links.json carries the edge. If no, skip it; the tally keeps its count."
+    )
+    return "\n".join(out)
+
+
+def _tool_abstention_fixtures(args: Dict[str, Any]) -> str:
+    """SIG-6 (Step 5): ``draft_abstention_fixtures`` + the per-item ``confirm_hard_set_row``
+    gate. SEC-1-gated as ONE loop: draft renders corpus stems (current_hits) and confirm
+    writes into ``.claude/memory/.audit-fixtures/`` — corpus reads and writes both."""
+    from . import trust
+    from .provenance import resolve_dirs
+
+    memory_dir, repo_root = resolve_dirs()
+    gate_root = trust.gate_repo_root(memory_dir, repo_root)
+    if gate_root is not None and not trust.is_trusted(gate_root):
+        return (
+            "abstention_fixtures: withheld — this project's memory corpus is untrusted "
+            "(SEC-1: fixture rows name corpus memories and the confirm step writes into "
+            ".claude/memory/, gated just as recall and new_memory are). " + _UNTRUSTED_REMEDY
+        )
+    action = str(args.get("action") or "draft").strip().lower()
+    if action == "draft":
+        from .eval_recall import draft_abstention_fixtures
+
+        r = draft_abstention_fixtures()
+        return (
+            "abstention drafts refreshed — unconfirmed rows (expected: []) are gitignored "
+            "queue state; nothing is tracked until a per-item confirm:\n"
+            + json.dumps(r, indent=2)
+        )
+    if action == "confirm":
+        from .eval_recall import confirm_hard_set_row
+
+        query = str(args.get("query") or "").strip()
+        expected = args.get("expected")
+        expected = [str(x) for x in expected] if isinstance(expected, list) else []
+        if not query or not expected:
+            return (
+                "abstention_fixtures confirm: 'query' and a non-empty 'expected' stem list "
+                "are both required — and only after judging that those memories genuinely "
+                "answer the query (never fabricate a memory to make a fixture pass)."
+            )
+        return json.dumps(confirm_hard_set_row(query, expected), indent=2)
+    return "abstention_fixtures: pass action='draft' (default) or action='confirm' (query=…, expected=[…])."
+
+
 _DISPATCH = {
     "recall": _tool_recall,
     "new_memory": _tool_new_memory,
@@ -1016,6 +1628,12 @@ _DISPATCH = {
     "init": _tool_init,
     "trust_corpus": _tool_trust_corpus,
     "dream": _tool_dream,
+    "capture": _tool_capture,
+    "secrets_scan": _tool_secrets_scan,
+    "reconsolidate": _tool_reconsolidate,
+    "build_index": _tool_build_index,
+    "co_recall_proposals": _tool_co_recall_proposals,
+    "abstention_fixtures": _tool_abstention_fixtures,
 }
 
 

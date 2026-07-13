@@ -351,7 +351,10 @@ sessions, permanently dismissable) instead of staying silent.
   app** has no `/`-command input surface, but its local sessions still run hippo's hook, skills,
   and MCP tools. Just ask in plain words (*"set up hippo memory here"*, *"run hippo doctor"*):
   the agent invokes the same flows via the `init` / `bootstrap` / `doctor` / `trust_corpus` MCP
-  tools. **Cloud / remote** sessions are the real limit — no local filesystem, no hippo.
+  tools — and *"consolidate memory"* likewise drives the full `/hippo:consolidate` drain
+  through the consolidate-flow tools (`capture`, `secrets_scan`, `reconsolidate`,
+  `build_index`, `co_recall_proposals`, `abstention_fixtures`), per item, same approval
+  gates. **Cloud / remote** sessions are the real limit — no local filesystem, no hippo.
   (Nothing's wrong with your install.)
 - **Recall is BM25-only in the desktop app even though I already bootstrapped.** Bootstrap is
   once per machine *per surface*: the harness gives the terminal CLI and the desktop app

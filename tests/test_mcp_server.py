@@ -76,12 +76,19 @@ _FROZEN_TOOLS = ["recall", "new_memory", "traverse", "why", "decision_history"]
 _SETUP_TOOLS = ["doctor", "bootstrap", "init", "trust_corpus"]
 # Additive verb tools: /dream (DRM-2) — the generative sleep pass with notify-with-undo.
 _VERB_TOOLS = ["dream"]
+# Additive consolidate-flow tools (INT-13): /hippo:consolidate's five steps as per-item
+# primitives, for surfaces whose Bash tool never inherits CLAUDE_PLUGIN_DATA (the desktop
+# app) and for subagents — listed in the skill's own step order.
+_CONSOLIDATE_TOOLS = [
+    "capture", "secrets_scan", "reconsolidate", "build_index",
+    "co_recall_proposals", "abstention_fixtures",
+]
 
 
 def test_tools_list_exposes_frozen_five_plus_setup_tools():
     resp = M.handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     names = [t["name"] for t in resp["result"]["tools"]]
-    assert names == _FROZEN_TOOLS + _SETUP_TOOLS + _VERB_TOOLS
+    assert names == _FROZEN_TOOLS + _SETUP_TOOLS + _VERB_TOOLS + _CONSOLIDATE_TOOLS
     for t in resp["result"]["tools"]:
         assert t["inputSchema"]["type"] == "object"  # every tool has a JSON schema
 

@@ -33,7 +33,7 @@ one-line "which one do I want?" guide for recall-vs-doctor, doctor-vs-audit, con
 The plugin declares a stdio MCP server (`plugin.json` → `bin/hippo mcp` → the PLUGIN_DATA venv
 python, falling back to `python3` pre-bootstrap). It closes the two gaps the once-per-prompt
 recall hook can't: mid-turn retrieval (after the agent discovers what it's working on) and
-subagent memory (Task turns get no `UserPromptSubmit`). Nine tools + three resources, offline
+subagent memory (Task turns get no `UserPromptSubmit`). Sixteen tools + three resources, offline
 (bootstrap's model download excepted) and corpus-local, reusing the exact hook ranking (no fork).
 
 The five core tools (the frozen v1.0 surface):
@@ -66,6 +66,28 @@ re-run. A *model-invoked* `init` must not — it auto-trusts only a corpus it ju
 (whose entire content is the plugin's own starter files) and otherwise routes consent through
 `trust_corpus`'s review→confirm, so a prompt-injected session can never silently trust a
 foreign corpus by "helpfully" running setup.
+
+The `/hippo:dream` generative sleep pass is likewise a verb tool — `dream(action, …)`
+(pass / undo / log / deparasite / dedup_merge / generate / sweep_drafts / archive_draft /
+prospective; see the dream skill for the doctrine).
+
+And the six **consolidate-flow tools (INT-13)** — `/hippo:consolidate`'s five steps as thin,
+per-item primitives, so the sleep-time drain runs from either surface too (the desktop app's
+Bash tool never inherits `CLAUDE_PLUGIN_DATA`, so the skill's bash blocks can't run there).
+The skill remains the doctrine; deliberately **not** one monolithic "consolidate" tool —
+nothing batches writes past the per-item approval gate:
+
+| Tool | Purpose |
+|---|---|
+| `capture(action, path, text)` | The CAP-2 pending queue: `list` (default — highest-value first, with provenance and the queue dir), `discard` ONE processed seed, `snooze` the SessionStart nudge, `add_decision` ONE user-confirmed WHY (GRW-4, transcription never synthesis) |
+| `secrets_scan(text)` | The drain's hard gate (GRW-1): lint the exact lines before ANY verbatim hunk is fenced into a committed body — any finding means scrub and re-scan, never fence |
+| `reconsolidate(action, name, outcome, superseded_by)` | The LIF-1 worklist (`worklist`, watermark lane included) + the per-item verdict (`reverify`: graduate / fix / demote [+`superseded_by`] / snooze) |
+| `build_index()` | Refresh the recall index + persisted link graph — full build under the freshly-bootstrapped venv when one exists, never-downgrade in-process refresh otherwise |
+| `co_recall_proposals()` | GRW-2: pairs that co-recalled across many distinct sessions (floor names excluded, already-linked pairs dropped) — read-only; an approved append is a per-item agent edit + `build_index` |
+| `abstention_fixtures(action, query, expected)` | The SIG-6 blind-spot loop: `draft` recurring abstained queries into the gitignored queue; `confirm` ONE judged row into the tracked eval fixture (refuses stems that don't exist) |
+
+`new_memory` grew a `check: true` flag for the same flow — the CAP-3 dry-run (near-duplicate
+routing + the proposal-time baseline, writes nothing), so the drain checks **before** it writes.
 
 | Resource | Purpose |
 |---|---|
