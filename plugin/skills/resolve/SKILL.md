@@ -28,6 +28,17 @@ Every unresolved `contradicts` pair in the corpus, whether or not the two memori
 co-surfaced in a recall. `(declared by: …)` names which file carries the `contradicts:`
 frontmatter — that is the file a corpus-mutating verdict edits.
 
+The inbox may also list `(PROPOSED by dream --contradictions …)` pairs — DRM-C candidates
+an LLM flagged as substantive conflicts among dream's high-cofire pairs, shown with the
+model's one-line rationale. No edge is declared yet, so there is no frontmatter to drop;
+the same verdicts below apply, with the proposal clearing itself on any corpus outcome
+(the listing repeats this inline): keep-one-supersede-other's `supersedes` edge clears it;
+declaring the edge (`contradicts: [<other>]` on one side) turns it into an ordinary
+declared pair if you want the dispute to stay visible instead; merging/retiring a side
+clears it; and scope-both ends in `--dismiss` (after scoping, "both stand as written" —
+exactly what dismiss records). A proposal is an LLM's opinion with a cofire receipt —
+read both files before believing it.
+
 ## Step 2 — For EACH pair, read both files and render ONE verdict
 
 Read both memories under `.claude/memory/` first — the descriptions in the listing are
