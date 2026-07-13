@@ -396,6 +396,49 @@ def test_knob_clamps_and_flag_convention(monkeypatch):
         assert dream.contradictions_enabled() is (junk.strip() in ("1", "true", "True"))
 
 
+def test_config_file_enables_and_bounds_the_pass(dirs, tmp_path, monkeypatch):
+    """One machine-wide ``hippo-llm.json`` can opt DRM-C in and set its knobs — no env
+    plumbing — while a SET env var still overrides in both directions."""
+    cfg = tmp_path / "hippo-llm.json"
+    cfg.write_text(
+        json.dumps({"dream_contradictions": True, "contra_max_pairs": 1, "dream_timeout_s": 4}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HIPPO_LLM_CONFIG", str(cfg))
+    assert dream.contradictions_enabled() is True
+    assert dream.contra_max_pairs() == 1
+    assert dream.contra_llm_timeout() == pytest.approx(4.0)
+    # Env still wins, including an explicit OFF over a file that says on.
+    monkeypatch.setenv("HIPPO_DREAM_CONTRADICTIONS", "0")
+    assert dream.contradictions_enabled() is False
+    monkeypatch.delenv("HIPPO_DREAM_CONTRADICTIONS", raising=False)
+    monkeypatch.setenv("DREAM_CONTRA_MAX_PAIRS", "2")
+    assert dream.contra_max_pairs() == 2
+
+    # And the file-driven pass actually runs, bounded by the file's cap.
+    monkeypatch.delenv("DREAM_CONTRA_MAX_PAIRS", raising=False)
+    md, td, idx = dirs
+    _conflicting_corpus(md)
+    _seed_sessions(td)
+    calls = _mock_llm(monkeypatch)
+    result = dream.discover(md, idx, td)
+    assert result["stats"]["contradictions"]["proposed"] == 1
+    assert len(calls) == 1
+
+
+def test_config_min_cofire_layered_under_env(dirs, tmp_path, monkeypatch):
+    cfg = tmp_path / "hippo-llm.json"
+    cfg.write_text(json.dumps({"contra_min_cofire": 0.33}), encoding="utf-8")
+    monkeypatch.setenv("HIPPO_LLM_CONFIG", str(cfg))
+    monkeypatch.delenv("DREAM_CONTRA_MIN_COFIRE", raising=False)  # module fixture set it
+    assert dream.contra_min_cofire() == pytest.approx(0.33)
+    monkeypatch.setenv("DREAM_CONTRA_MIN_COFIRE", "0.7")
+    assert dream.contra_min_cofire() == pytest.approx(0.7)
+    monkeypatch.setenv("HIPPO_LLM_CONFIG", str(tmp_path / "absent.json"))
+    monkeypatch.delenv("DREAM_CONTRA_MIN_COFIRE", raising=False)
+    assert dream.contra_min_cofire() == dream.cofire_theta()  # θ stays the shipped default
+
+
 def test_verdict_ledger_reader_is_last_line_wins_and_junk_tolerant(dirs):
     md, td, idx = dirs
     os.makedirs(dream.dream_dir(td), exist_ok=True)

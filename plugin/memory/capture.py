@@ -401,22 +401,31 @@ def write_session_capture(
             return None
         seed["reason"] = reason
         seed["captured_at"] = round(time.time(), 3)
+        pd = _resolve_pending_dir(pending_dir, memory_dir)
+        ensure_self_ignoring_dir(pd)  # gitignored queue: mkdir + self-ignoring .gitignore (SEC-3)
+        path = os.path.join(pd, _seed_filename(seed))
         # CAP-LLM (opt-in, default OFF): one bounded triage call annotates the seed with
-        # SUGGESTED fields the drain reviewer still ratifies per item. Lazy import behind
-        # the flag + its own catch: a triage failure of ANY kind (no key, timeout, junk
-        # response) leaves this seed exactly as built above — the fail-open contract.
+        # SUGGESTED fields the drain reviewer still ratifies per item. The PRIOR seed at
+        # this same per-session path rides along so an unchanged-evidence re-capture
+        # (SubagentStop×N, then SessionEnd) carries the suggestions over instead of
+        # re-billing. Lazy import behind the flag + its own catch: a triage failure of
+        # ANY kind (no key, timeout, junk response) leaves this seed exactly as built
+        # above — the fail-open contract.
         try:
             from .capture_triage import enrich_seed, triage_enabled
 
             if triage_enabled():
-                enrichment = enrich_seed(seed, memory_dir, repo_root=repo_root)
+                prior = None
+                try:
+                    with open(path, "r", encoding="utf-8") as fh:
+                        prior = json.load(fh)
+                except Exception:
+                    prior = None
+                enrichment = enrich_seed(seed, memory_dir, repo_root=repo_root, prior=prior)
                 if enrichment:
                     seed["llm_triage"] = enrichment
         except Exception:
             pass
-        pd = _resolve_pending_dir(pending_dir, memory_dir)
-        ensure_self_ignoring_dir(pd)  # gitignored queue: mkdir + self-ignoring .gitignore (SEC-3)
-        path = os.path.join(pd, _seed_filename(seed))
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(seed, fh, ensure_ascii=False, indent=2)

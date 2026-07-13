@@ -33,6 +33,21 @@ Budget: the hooks' hard timeout is 30s (plugin/hooks/hooks.json); the one LLM ca
 defaults to a 6s cap (``HIPPO_CAPTURE_LLM_TIMEOUT`` overrides) so triage plus the existing
 git/index work stays well inside it.
 
+Synchronous in the hook, BY DECISION (owner-ratified 2026-07-13): the deferred
+alternative — triage at the /hippo:consolidate drain — already has a live LLM (the
+draining agent itself), so a deferred standalone call would be redundant; and a background
+process would add a daemon/queue surface hippo deliberately doesn't have. What made
+synchronous costly was RE-triage: SubagentStop fires per subagent and SessionEnd fires
+after, each rewriting the same per-session seed. The CARRY-OVER guard fixes that instead:
+``enrich_seed`` fingerprints the evidence the prompt is built from and, when a prior seed's
+triage carries the same fingerprint, reuses it verbatim (zero API calls). New evidence —
+another episode, another changed file, a new decision — changes the fingerprint and
+correctly re-triages.
+
+Config: flag and timeout read env-first, then ``~/.claude/hippo-llm.json`` (the
+``llm_client.file_setting`` seam — keys ``capture_triage`` / ``capture_timeout_s``), so one
+machine-wide file can opt in without env plumbing while an env var still wins per-run.
+
 Secret discipline: a seed's diff hunks already carry ``hunks_secret_flagged`` (scanned at
 capture). Flagged hunks are NEVER sent to the API; unflagged prompt text is re-scanned
 whole and the hunk excerpt is dropped (then the call aborted) if the lint still hits. The
@@ -42,6 +57,7 @@ model's OWN output is scanned too — a draft description that echoes a secret i
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -68,29 +84,68 @@ _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
 def triage_enabled() -> bool:
-    """``HIPPO_CAPTURE_LLM`` — DEFAULT OFF; only an explicit truthy value enables.
+    """The CAP-LLM opt-in — DEFAULT OFF. Env ``HIPPO_CAPTURE_LLM`` > config file > off.
 
-    Same closed truthy set as ``dream_generate.generative_enabled`` (the flag-gating
-    convention for every capability that ships dark): junk stays off.
+    A SET env var decides entirely (the closed ``llm_client.TRUTHY`` set enables, any
+    other value is an explicit off — so ``HIPPO_CAPTURE_LLM=0`` overrides a config file
+    that says on); an UNSET one defers to ``capture_triage`` in ``hippo-llm.json``.
+    Junk stays off, the flag-gating convention for every capability that ships dark.
     """
-    return os.environ.get("HIPPO_CAPTURE_LLM", "").strip() in ("1", "true", "True")
+    env = os.environ.get("HIPPO_CAPTURE_LLM")
+    if env is not None and env.strip():
+        return env.strip() in llm_client.TRUTHY
+    return llm_client.as_bool(llm_client.file_setting("capture_triage"))
 
 
 def llm_timeout_s() -> float:
-    """``HIPPO_CAPTURE_LLM_TIMEOUT`` (seconds) override; malformed/absent -> 6.0.
+    """Per-call cap (seconds) — env ``HIPPO_CAPTURE_LLM_TIMEOUT`` > config
+    ``capture_timeout_s`` > 6.0; malformed values fall to the default.
 
     Clamped to (0, 20]: the hook's hard ceiling is 30s and the existing capture work
     (git diff + queue write) needs its own headroom, so even an aggressive override
     cannot spend the whole budget on the API call.
     """
     raw = os.environ.get("HIPPO_CAPTURE_LLM_TIMEOUT", "").strip()
-    try:
-        val = float(raw) if raw else _DEFAULT_TIMEOUT_S
-    except ValueError:
-        return _DEFAULT_TIMEOUT_S
-    if val <= 0:
+    val = None
+    if raw:
+        try:
+            val = float(raw)
+        except ValueError:
+            val = None
+    if val is None:
+        cfg = llm_client.file_setting("capture_timeout_s")
+        if isinstance(cfg, (int, float)) and not isinstance(cfg, bool):
+            val = float(cfg)
+    if val is None or val <= 0:
         return _DEFAULT_TIMEOUT_S
     return min(val, 20.0)
+
+
+# The seed fields the triage prompt is actually built from — the carry-over identity.
+_EVIDENCE_FIELDS = (
+    "query_previews",
+    "changed_paths",
+    "decisions",
+    "recalled_names",
+    "diff_hunks",
+    "hunks_secret_flagged",
+)
+
+
+def _evidence_fingerprint(seed: Dict) -> str:
+    """A stable hash of exactly the evidence the prompt sees — the carry-over key.
+
+    Deterministic (sorted keys) over the ``_EVIDENCE_FIELDS`` slice, so two captures of
+    the SAME session state fingerprint identically while any new episode, changed file,
+    decision, or hunk byte changes it. Never raises (junk hashes as its repr).
+    """
+    try:
+        payload = json.dumps(
+            {k: seed.get(k) for k in _EVIDENCE_FIELDS}, sort_keys=True, ensure_ascii=False
+        )
+    except Exception:
+        payload = repr([seed.get(k) for k in _EVIDENCE_FIELDS])
+    return hashlib.sha256(payload.encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
 def _slugify(raw: str) -> str:
@@ -240,6 +295,7 @@ def enrich_seed(
     repo_root: Optional[str] = None,
     index_dir: Optional[str] = None,
     timeout_s: Optional[float] = None,
+    prior: Optional[Dict] = None,
 ) -> Optional[Dict]:
     """The whole triage: ONE LLM call + the drain's own dup check. ``None`` = fail open.
 
@@ -247,8 +303,24 @@ def enrich_seed(
     case the caller persists exactly today's heuristic-only seed. Read-only over the
     corpus and the index; the ONLY writes this function ever causes are the caller's own
     queue write. Never raises.
+
+    ``prior`` is the PREVIOUS seed at the same queue path (SubagentStop and SessionEnd
+    both rewrite one per-session seed): when its triage carries the same evidence
+    fingerprint as this capture, the suggestions are CARRIED OVER verbatim — zero API
+    calls — because the prompt would have been byte-identical. Any evidence change
+    re-triages.
     """
     try:
+        fingerprint = _evidence_fingerprint(seed)
+        prior_triage = (prior or {}).get("llm_triage") if isinstance(prior, dict) else None
+        if (
+            isinstance(prior_triage, dict)
+            and prior_triage.get("evidence_sha") == fingerprint
+            and prior_triage.get("draft_description")
+        ):
+            carried = dict(prior_triage)
+            carried["carried_over"] = True
+            return carried
         neighbors = _neighbor_context(seed, memory_dir, index_dir)
         prompt = _build_prompt(seed, neighbors)
         # Belt over the per-field exclusions: if the assembled prompt still lints dirty,
@@ -303,6 +375,7 @@ def enrich_seed(
             "model": llm_client.model_name(),
             "generated_at": round(time.time(), 3),
             "secret_flagged": flagged,
+            "evidence_sha": fingerprint,
         }
     except Exception:
         return None

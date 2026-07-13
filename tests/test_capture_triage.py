@@ -357,3 +357,67 @@ def test_flag_parse_matches_house_convention(monkeypatch):
     for junk in ("", "0", "yes", "TRUE ", "on"):
         monkeypatch.setenv("HIPPO_CAPTURE_LLM", junk)
         assert CT.triage_enabled() is (junk.strip() in ("1", "true", "True"))
+
+
+# --------------------------------------------------------------------------- #
+# The config file — one machine-wide opt-in, env still wins per-run
+# --------------------------------------------------------------------------- #
+def _write_llm_config(tmp_path, monkeypatch, obj):
+    path = tmp_path / "hippo-llm.json"
+    path.write_text(json.dumps(obj), encoding="utf-8")
+    monkeypatch.setenv("HIPPO_LLM_CONFIG", str(path))
+
+
+def test_config_file_enables_triage_and_sets_timeout(tmp_path, monkeypatch):
+    _write_llm_config(tmp_path, monkeypatch, {"capture_triage": True, "capture_timeout_s": 3})
+    assert CT.triage_enabled() is True  # no env var anywhere — the file is the opt-in
+    assert CT.llm_timeout_s() == pytest.approx(3.0)
+    # A SET env var overrides the file in BOTH directions.
+    monkeypatch.setenv("HIPPO_CAPTURE_LLM", "0")
+    assert CT.triage_enabled() is False
+    monkeypatch.setenv("HIPPO_CAPTURE_LLM_TIMEOUT", "2")
+    assert CT.llm_timeout_s() == pytest.approx(2.0)
+
+
+def test_config_file_enabled_triage_runs_end_to_end(repo, tmp_path, monkeypatch):
+    _write_llm_config(tmp_path, monkeypatch, {"capture_triage": True})
+    md = _corpus(repo)
+    _episode(md, repo, "s-cfg")
+    monkeypatch.setattr(
+        "memory.llm_client.complete", lambda prompt, *, timeout_s, **kw: _good_llm_json()
+    )
+    path = C.write_session_capture("s-cfg", memory_dir=md, repo_root=repo)
+    assert "llm_triage" in _read_seed(path)
+
+
+# --------------------------------------------------------------------------- #
+# Carry-over — unchanged evidence is never re-billed; new evidence re-triages
+# --------------------------------------------------------------------------- #
+def test_carry_over_reuses_triage_until_the_evidence_changes(repo, monkeypatch):
+    """SubagentStop×N + SessionEnd rewrite ONE per-session seed. Same evidence → the prior
+    suggestions carry over with zero API calls; any new evidence → a fresh triage."""
+    md = _corpus(repo)
+    _episode(md, repo, "s-carry")
+    monkeypatch.setenv("HIPPO_CAPTURE_LLM", "1")
+    calls = []
+
+    def _fake(prompt, *, timeout_s, **kw):
+        calls.append(prompt)
+        return _good_llm_json()
+
+    monkeypatch.setattr("memory.llm_client.complete", _fake)
+
+    p1 = C.write_session_capture("s-carry", memory_dir=md, repo_root=repo)  # SubagentStop
+    p2 = C.write_session_capture("s-carry", memory_dir=md, repo_root=repo)  # SessionEnd
+    assert p1 == p2, "per-session seeds share one queue path"
+    assert len(calls) == 1, "unchanged evidence must not re-bill"
+    tri = _read_seed(p2)["llm_triage"]
+    assert tri.get("carried_over") is True
+    assert tri["draft_description"]  # the suggestions themselves rode along
+    assert tri["evidence_sha"]
+
+    # New evidence (another query landed in the episode buffer) → fingerprint changes.
+    _episode(md, repo, "s-carry", query="why does the deploy script retry twice")
+    p3 = C.write_session_capture("s-carry", memory_dir=md, repo_root=repo)
+    assert len(calls) == 2, "changed evidence must re-triage"
+    assert _read_seed(p3)["llm_triage"].get("carried_over") is not True

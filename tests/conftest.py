@@ -106,6 +106,24 @@ def _isolate_memory_tiers(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_llm_config(tmp_path, monkeypatch):
+    """Keep the CAP-LLM/DRM-C standalone-LLM surfaces hermetic + OFF across the whole suite.
+
+    ``HIPPO_LLM_CONFIG`` -> a per-test tmp path that does NOT exist, so ``memory.llm_client``
+    never reads the developer's real ``~/.claude/hippo-llm.json`` — a machine-wide
+    ``capture_triage: true`` (or a stored ``api_key``) would otherwise flip flag-off tests
+    into LIVE-API territory from inside the test suite. The opt-in env flags and ambient
+    API keys get the same strip, so only a test that explicitly sets them ever reaches the
+    (mocked) LLM path. Tests exercising the config layer point ``HIPPO_LLM_CONFIG`` at a
+    file they wrote themselves."""
+    monkeypatch.setenv("HIPPO_LLM_CONFIG", str(tmp_path / "absent-llm-config.json"))
+    monkeypatch.delenv("HIPPO_CAPTURE_LLM", raising=False)
+    monkeypatch.delenv("HIPPO_DREAM_CONTRADICTIONS", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("HIPPO_LLM_API_KEY", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_recall_global_state():
     """Keep the recall/index tests hermetic against PROCESS-GLOBAL side effects.
 

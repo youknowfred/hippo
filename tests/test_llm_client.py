@@ -171,3 +171,65 @@ def test_extract_json_none_on_junk_or_empty():
     assert L.extract_json("") is None
     assert L.extract_json("no json here") is None
     assert L.extract_json("{broken: json") is None
+
+
+# ---- the config file (~/.claude/hippo-llm.json; HIPPO_LLM_CONFIG relocates it) ---------- #
+def _write_config(tmp_path, monkeypatch, obj) -> str:
+    path = tmp_path / "hippo-llm.json"
+    path.write_text(json.dumps(obj), encoding="utf-8")
+    monkeypatch.setenv("HIPPO_LLM_CONFIG", str(path))
+    return str(path)
+
+
+def test_default_model_is_the_alias_not_a_dated_snapshot():
+    """Owner decision 2026-07-13 (max flexibility): the default tracks the tier's current
+    snapshot via the alias, so a model refresh needs no hippo release."""
+    import re
+
+    assert L.DEFAULT_MODEL == "claude-haiku-4-5"
+    assert not re.search(r"\d{8}$", L.DEFAULT_MODEL), "default must not pin a dated snapshot"
+
+
+def test_config_file_supplies_model_base_url_and_key(tmp_path, monkeypatch):
+    calls = []
+    _write_config(
+        tmp_path,
+        monkeypatch,
+        {"model": "claude-sonnet-5", "base_url": "https://gw.example.test/", "api_key": "file-key"},
+    )
+    _install_fake(monkeypatch, payload=_anthropic_payload("ok"), calls=calls)
+    assert L.model_name() == "claude-sonnet-5"
+    assert L.complete("hi", timeout_s=1.0) == "ok"
+    req = calls[0]["req"]
+    assert req.get_full_url() == "https://gw.example.test/v1/messages"
+    assert req.get_header("X-api-key") == "file-key"
+    assert json.loads(req.data.decode("utf-8"))["model"] == "claude-sonnet-5"
+
+
+def test_env_vars_win_over_the_config_file(tmp_path, monkeypatch):
+    calls = []
+    _write_config(tmp_path, monkeypatch, {"model": "claude-from-file", "api_key": "file-key"})
+    monkeypatch.setenv("HIPPO_LLM_MODEL", "claude-from-env")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
+    _install_fake(monkeypatch, payload=_anthropic_payload(), calls=calls)
+    assert L.complete("hi", timeout_s=1.0) == "hello"
+    req = calls[0]["req"]
+    assert req.get_header("X-api-key") == "env-key"
+    assert json.loads(req.data.decode("utf-8"))["model"] == "claude-from-env"
+
+
+def test_junk_or_absent_config_file_falls_to_defaults(tmp_path, monkeypatch):
+    (tmp_path / "hippo-llm.json").write_text("not json at all", encoding="utf-8")
+    monkeypatch.setenv("HIPPO_LLM_CONFIG", str(tmp_path / "hippo-llm.json"))
+    assert L.file_config() == {}
+    assert L.model_name() == L.DEFAULT_MODEL
+    assert L.provider_name() == L.DEFAULT_PROVIDER
+    # And a config-file key without a key anywhere else still means no network attempt.
+    assert L.complete("hi", timeout_s=1.0) is None
+
+
+def test_as_bool_matches_the_flag_convention():
+    assert L.as_bool(True) is True
+    assert L.as_bool("1") is True and L.as_bool(" true ") is True
+    for junk in (False, "0", "yes", 1, None, {}):
+        assert L.as_bool(junk) is False

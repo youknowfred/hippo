@@ -179,31 +179,74 @@ def reward_weight() -> float:
     return max(0.0, _env_float("DREAM_REWARD_WEIGHT", _DEFAULT_REWARD_WEIGHT))
 
 
+def _llm_file_setting(key: str):
+    """One key from ``~/.claude/hippo-llm.json`` via the llm_client seam; None on trouble."""
+    try:
+        from . import llm_client
+
+        return llm_client.file_setting(key)
+    except Exception:
+        return None
+
+
 def contradictions_enabled() -> bool:
-    """``HIPPO_DREAM_CONTRADICTIONS`` — the DRM-C flag. DEFAULT OFF; only an explicit
-    truthy value enables (the ``generative_enabled`` convention: junk stays off)."""
-    return os.environ.get("HIPPO_DREAM_CONTRADICTIONS", "").strip() in ("1", "true", "True")
+    """The DRM-C flag — DEFAULT OFF. Env ``HIPPO_DREAM_CONTRADICTIONS`` > config file > off.
+
+    A SET env var decides entirely (truthy enables, anything else is an explicit off, so
+    ``HIPPO_DREAM_CONTRADICTIONS=0`` overrides a config file that says on); an UNSET one
+    defers to ``dream_contradictions`` in ``hippo-llm.json``. Junk stays off (the
+    ``generative_enabled`` convention).
+    """
+    env = os.environ.get("HIPPO_DREAM_CONTRADICTIONS")
+    if env is not None and env.strip():
+        return env.strip() in ("1", "true", "True")
+    try:
+        from . import llm_client
+
+        return llm_client.as_bool(llm_client.file_setting("dream_contradictions"))
+    except Exception:
+        return False
 
 
 def contra_max_pairs() -> int:
-    """``DREAM_CONTRA_MAX_PAIRS`` clamped to [0, 12] — the hard max is not overridable."""
-    return max(
-        0, min(_env_int("DREAM_CONTRA_MAX_PAIRS", _DEFAULT_CONTRA_MAX_PAIRS), _HARD_CONTRA_MAX_PAIRS)
-    )
+    """LLM attempts per pass — env ``DREAM_CONTRA_MAX_PAIRS`` > config ``contra_max_pairs``
+    > 6; clamped to [0, 12] regardless of source (the hard max is not overridable)."""
+    raw = os.environ.get("DREAM_CONTRA_MAX_PAIRS", "").strip()
+    val = None
+    if raw:
+        try:
+            val = int(raw)  # an explicit env value wins outright, even a negative one
+        except ValueError:
+            val = None
+    if val is None:
+        cfg = _llm_file_setting("contra_max_pairs")
+        val = cfg if isinstance(cfg, int) and not isinstance(cfg, bool) else _DEFAULT_CONTRA_MAX_PAIRS
+    return max(0, min(val, _HARD_CONTRA_MAX_PAIRS))
 
 
 def contra_min_cofire() -> float:
-    """``DREAM_CONTRA_MIN_COFIRE`` — the "high-cofire" bar for DRM-C; defaults to θ.
+    """The "high-cofire" bar for DRM-C — env ``DREAM_CONTRA_MIN_COFIRE`` > config
+    ``contra_min_cofire`` > θ.
 
     Reusing ``cofire_theta`` by default keeps "which pairs are even worth an LLM call"
     consistent with the pass's existing calibrated notion of a strong pair.
     """
-    return _env_float("DREAM_CONTRA_MIN_COFIRE", cofire_theta())
+    val = _env_float("DREAM_CONTRA_MIN_COFIRE", float("nan"))
+    if val == val:  # not NaN — the env var parsed
+        return val
+    cfg = _llm_file_setting("contra_min_cofire")
+    if isinstance(cfg, (int, float)) and not isinstance(cfg, bool):
+        return float(cfg)
+    return cofire_theta()
 
 
 def contra_llm_timeout() -> float:
-    """``HIPPO_DREAM_LLM_TIMEOUT`` (seconds) per DRM-C call; malformed/absent -> 10.0."""
-    val = _env_float("HIPPO_DREAM_LLM_TIMEOUT", _DEFAULT_CONTRA_TIMEOUT_S)
+    """Per-call cap (seconds) — env ``HIPPO_DREAM_LLM_TIMEOUT`` > config
+    ``dream_timeout_s`` > 10.0; nonpositive/malformed falls to the default."""
+    val = _env_float("HIPPO_DREAM_LLM_TIMEOUT", float("nan"))
+    if val != val:  # NaN — no env var; try the config file
+        cfg = _llm_file_setting("dream_timeout_s")
+        val = float(cfg) if isinstance(cfg, (int, float)) and not isinstance(cfg, bool) else _DEFAULT_CONTRA_TIMEOUT_S
     return val if val > 0 else _DEFAULT_CONTRA_TIMEOUT_S
 
 

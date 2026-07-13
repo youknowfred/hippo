@@ -20,49 +20,142 @@ Design contract (every caller depends on it):
     so a dead network can never break a hook or a dream pass.
   - stdlib-only transport (``urllib``): the plugin venv pins exactly the deps the package
     imports (see plugin/requirements.txt) and this module must not grow that set.
-  - the provider/model are CONFIG POINTS, not hard-coded in callers:
-      ``HIPPO_LLM_PROVIDER``  — provider key (default ``anthropic``; the only one shipped)
-      ``HIPPO_LLM_MODEL``     — model id (default a small/fast Haiku-tier model)
-      ``HIPPO_LLM_BASE_URL``  — endpoint root (default https://api.anthropic.com), the
-                                escape hatch for any Anthropic-compatible proxy/gateway
-      ``HIPPO_LLM_API_KEY``   — hippo-scoped key override; falls back to the conventional
-                                ``ANTHROPIC_API_KEY``
-    Adding a provider = one function + one ``_PROVIDERS`` entry; no caller changes.
+  - ONE CONFIG FILE, layered under the env vars (owner decision 2026-07-13 — "centralize
+    config" over env-var sprawl): ``~/.claude/hippo-llm.json``, the same machine-local
+    dotfile family as ``hippo-trust.json`` / ``hippo-projects.json``
+    (``HIPPO_LLM_CONFIG`` relocates it — hermetic tests point it at a tmp path).
+    Precedence PER KEY is env var > config file > shipped default, so the file is the
+    durable machine-wide setting and an env var stays the per-invocation/CI override.
+    Recognized keys (all optional)::
+
+        {
+          "provider": "anthropic",            // HIPPO_LLM_PROVIDER
+          "model": "claude-haiku-4-5",        // HIPPO_LLM_MODEL
+          "base_url": "https://…",            // HIPPO_LLM_BASE_URL
+          "api_key": "sk-ant-…",              // HIPPO_LLM_API_KEY / ANTHROPIC_API_KEY
+          "capture_triage": true,              // HIPPO_CAPTURE_LLM (CAP-LLM opt-in)
+          "capture_timeout_s": 6,              // HIPPO_CAPTURE_LLM_TIMEOUT
+          "dream_contradictions": true,        // HIPPO_DREAM_CONTRADICTIONS (DRM-C opt-in)
+          "dream_timeout_s": 10,               // HIPPO_DREAM_LLM_TIMEOUT
+          "contra_max_pairs": 6,               // DREAM_CONTRA_MAX_PAIRS
+          "contra_min_cofire": 0.9             // DREAM_CONTRA_MIN_COFIRE
+        }
+
+    The feature modules (``capture_triage``, ``dream``) read their keys through
+    ``file_setting()`` here so the whole LLM surface has one config home. Adding a
+    provider = one function + one ``_PROVIDERS`` entry; no caller changes.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from typing import Optional
+from typing import Any, Optional
 
 DEFAULT_PROVIDER = "anthropic"
 # Small/fast tier by design: both shipped callers run inside bounded budgets (a hook's
-# hard timeout; an offline dream pass a human is watching). Override: HIPPO_LLM_MODEL.
-DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+# hard timeout; an offline dream pass a human is watching). Deliberately the ALIAS, not a
+# dated snapshot (owner decision 2026-07-13, max flexibility): Anthropic aliases track the
+# current snapshot of the tier, so hippo picks up model refreshes without a code change.
+# Override: HIPPO_LLM_MODEL / config "model".
+DEFAULT_MODEL = "claude-haiku-4-5"
 DEFAULT_BASE_URL = "https://api.anthropic.com"
 _ANTHROPIC_VERSION = "2023-06-01"
 # Response-body read cap — a misbehaving endpoint must not balloon a hook's memory.
 _MAX_RESPONSE_BYTES = 1_000_000
 _DEFAULT_MAX_TOKENS = 512
 
+_CONFIG_FILENAME = "hippo-llm.json"
+# The closed truthy set every hippo opt-in flag parses — shared here so the config file's
+# tolerated string forms ("1", "true") mean exactly what the env vars mean.
+TRUTHY = ("1", "true", "True")
+
+
+def config_path() -> str:
+    """``HIPPO_LLM_CONFIG`` override, else ``~/.claude/hippo-llm.json``.
+
+    The ``hippo-trust.json`` / ``hippo-projects.json`` machine-local dotfile convention:
+    one JSON file per machine-scoped concern, relocatable by env var for hermetic tests.
+    """
+    override = (os.environ.get("HIPPO_LLM_CONFIG") or "").strip()
+    if override:
+        return override
+    return os.path.join(os.path.expanduser("~"), ".claude", _CONFIG_FILENAME)
+
+
+def file_config() -> dict:
+    """The parsed config file, or ``{}`` on any trouble (absent, junk, non-dict).
+
+    Read fresh per call — the file is tiny, the callers are one-shot processes, and a
+    cache would only add a staleness bug surface. Never raises.
+    """
+    try:
+        with open(config_path(), "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def file_setting(key: str) -> Any:
+    """One key from the config file, or ``None`` — the feature modules' config seam."""
+    return file_config().get(key)
+
+
+def as_bool(value: Any) -> bool:
+    """A config value as an opt-in boolean: JSON ``true`` or a TRUTHY string; junk = off."""
+    if value is True:
+        return True
+    return isinstance(value, str) and value.strip() in TRUTHY
+
 
 def provider_name() -> str:
-    """``HIPPO_LLM_PROVIDER`` (trimmed), default ``anthropic``."""
-    return (os.environ.get("HIPPO_LLM_PROVIDER") or DEFAULT_PROVIDER).strip() or DEFAULT_PROVIDER
+    """Provider key — env ``HIPPO_LLM_PROVIDER`` > config ``provider`` > ``anthropic``."""
+    env = (os.environ.get("HIPPO_LLM_PROVIDER") or "").strip()
+    if env:
+        return env
+    cfg = file_setting("provider")
+    if isinstance(cfg, str) and cfg.strip():
+        return cfg.strip()
+    return DEFAULT_PROVIDER
 
 
 def model_name() -> str:
-    """``HIPPO_LLM_MODEL`` (trimmed), default the shipped small/fast model."""
-    return (os.environ.get("HIPPO_LLM_MODEL") or DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    """Model id — env ``HIPPO_LLM_MODEL`` > config ``model`` > the shipped alias."""
+    env = (os.environ.get("HIPPO_LLM_MODEL") or "").strip()
+    if env:
+        return env
+    cfg = file_setting("model")
+    if isinstance(cfg, str) and cfg.strip():
+        return cfg.strip()
+    return DEFAULT_MODEL
+
+
+def _base_url() -> str:
+    """Endpoint root — env ``HIPPO_LLM_BASE_URL`` > config ``base_url`` > Anthropic."""
+    env = (os.environ.get("HIPPO_LLM_BASE_URL") or "").strip()
+    if env:
+        return env.rstrip("/")
+    cfg = file_setting("base_url")
+    if isinstance(cfg, str) and cfg.strip():
+        return cfg.strip().rstrip("/")
+    return DEFAULT_BASE_URL
 
 
 def _api_key() -> Optional[str]:
-    """The key to send: ``HIPPO_LLM_API_KEY`` (hippo-scoped) else ``ANTHROPIC_API_KEY``."""
+    """The key to send: ``HIPPO_LLM_API_KEY`` > ``ANTHROPIC_API_KEY`` > config ``api_key``.
+
+    Both env vars outrank the file so a shell/CI key always wins; the file slot exists for
+    a machine that keeps a hippo-scoped key out of every shell profile. (A dotfile key is
+    a convenience, not a vault — same posture as the conventional ``~/.netrc``.)
+    """
     for var in ("HIPPO_LLM_API_KEY", "ANTHROPIC_API_KEY"):
         key = (os.environ.get(var) or "").strip()
         if key:
             return key
+    cfg = file_setting("api_key")
+    if isinstance(cfg, str) and cfg.strip():
+        return cfg.strip()
     return None
 
 
@@ -88,9 +181,8 @@ def _complete_anthropic(
     }
     if system:
         body["system"] = system
-    base = (os.environ.get("HIPPO_LLM_BASE_URL") or DEFAULT_BASE_URL).strip().rstrip("/")
     req = urllib.request.Request(
-        base + "/v1/messages",
+        _base_url() + "/v1/messages",
         data=json.dumps(body).encode("utf-8"),
         headers={
             "content-type": "application/json",
