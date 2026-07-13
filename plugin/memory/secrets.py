@@ -86,11 +86,43 @@ _PATTERNS = [
 ]
 
 # Entropy catch-all thresholds. Conservative so normal prose / hex shas / short base64 pass:
-# a token must be long AND draw from a mixed character class AND clear a Shannon-entropy bar.
+# a token must be long AND draw from a mixed character class AND clear a Shannon-entropy bar AND
+# contain one long CONTIGUOUS opaque run (see _ENTROPY_CORE_MIN_LEN below for why).
 _ENTROPY_MIN_LEN = 32
 _ENTROPY_MIN_BITS = 4.0
 _ENTROPY_TOKEN_RE = re.compile(r"[A-Za-z0-9+/_=-]{%d,}" % _ENTROPY_MIN_LEN)
+
+# The precision gate that keeps the catch-all off structured prose (SEC precision fix). The
+# token class above spans `/ = _ -` because a real secret CAN contain them (standard base64 uses
+# `/` and `=`; base64url uses `-` and `_`). But those same chars are the SEPARATORS in the three
+# shapes that were tripping the catch-all as one long "token": filesystem paths
+# (`/Library/Caches/hippo-memory/fastembed`), `KEY=value` env-var assignments
+# (`CLAUDE_CODE_ENTRYPOINT=claude-desktop`), slash-joined name lists (`Slack/Google/Stripe/…`),
+# and hyphenated identifiers like model names (`paraphrase-multilingual-MiniLM-L12-v2`). Each
+# clears the ≥32-char / mixed-class / entropy≥4.0 bar only because concatenating several diverse
+# SHORT segments across separators inflates aggregate character diversity — the exact noisy-
+# warning anti-pattern the module header warns against (a false positive trains the agent to
+# ignore the warning). We can't simply drop `/ = _ -` from the class: that would fragment a real
+# base64/base64url secret and cut recall. Instead we split the token on those separators and
+# require its LONGEST contiguous opaque run to reach this floor. A real secret is ONE long high-
+# entropy run; structured text is many short low-entropy segments, so its longest run stays well
+# under the floor (paths/env/lists/model-names top out ~12 chars). `+` is NOT a separator (it is
+# genuine base64 content), so a `+`-bearing blob is still measured whole. 20 sits comfortably
+# above the ~12-char structured-segment ceiling yet below the run length a genuine ≥32-char
+# secret retains even when a lone base64/base64url separator splits it near the middle.
+_ENTROPY_CORE_MIN_LEN = 20
+_ENTROPY_SEP_RE = re.compile(r"[/=_-]+")
 _ENTROPY_MSG = "possible high-entropy secret detected"
+
+
+def _longest_core_run(token: str) -> int:
+    """Length of the longest contiguous opaque run in ``token`` (split on `/ = _ -`).
+
+    The discriminator behind the entropy catch-all's precision: a real secret is one long
+    high-entropy run, while a path / KEY=value / slash-list / hyphenated identifier is short
+    low-entropy segments joined by those separators. Returns 0 for an all-separator string.
+    """
+    return max((len(seg) for seg in _ENTROPY_SEP_RE.split(token)), default=0)
 
 
 def _shannon_entropy(s: str) -> float:
@@ -141,11 +173,17 @@ def scan_text(text: str, *, entropy: bool = True) -> List[str]:
         for pattern, message in _PATTERNS:
             if pattern.search(text) and message not in found:
                 found.append(message)
-        # Entropy catch-all: only flag a long, mixed-class, high-entropy token — and only if
-        # a prefix pattern above didn't already flag this text (avoid a redundant second line).
+        # Entropy catch-all: only flag a long, mixed-class, high-entropy token that also holds
+        # one long contiguous opaque run (so a separator-joined path/env/list/identifier whose
+        # entropy comes from short segments does NOT trip) — and only if a prefix pattern above
+        # didn't already flag this text (avoid a redundant second line).
         if entropy and _ENTROPY_MSG not in found:
             for token in _ENTROPY_TOKEN_RE.findall(text):
-                if _has_mixed_classes(token) and _shannon_entropy(token) >= _ENTROPY_MIN_BITS:
+                if (
+                    _has_mixed_classes(token)
+                    and _shannon_entropy(token) >= _ENTROPY_MIN_BITS
+                    and _longest_core_run(token) >= _ENTROPY_CORE_MIN_LEN
+                ):
                     found.append(_ENTROPY_MSG)
                     break
         return found
