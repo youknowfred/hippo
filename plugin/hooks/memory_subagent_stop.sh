@@ -14,7 +14,9 @@
 #   - ALWAYS exits 0.
 #   - Writes ONLY to the gitignored pending queue — NEVER .claude/memory/ (the capture module
 #     has no corpus writer; nothing reaches the corpus without an explicit /hippo:new).
-#   - No network, no model download. Off the hot path.
+#   - No network, no model download — unless HIPPO_CAPTURE_LLM=1 explicitly opts the capture
+#     pass into one bounded triage API call (fail-open; see memory_session_end.sh). Off the
+#     hot path.
 #
 # Wired as a SubagentStop hook via plugin/hooks/hooks.json.
 set -uo pipefail
