@@ -62,7 +62,9 @@ _INDEX_DIRNAME = ".memory-index"
 # the already-loaded manifest and never re-reads files per prompt.
 # v6 (GOV-7, confidence tier): entries gained "confidence" (the author's trust dial —
 # draft|verified|authoritative, read by ``_extract_confidence``) so the inject-time render
-# never re-reads a file per hit. Display-only: recall's scoring path never reads it.
+# never re-reads a file per hit. Shipped display-only; DRM-6 later wired the SAME entry
+# key into ranking (draft down-weight + the draft-only abstention guard in recall) — an
+# entry-shape no-op, so no manifest bump was needed for it.
 # COR-7 made this constant LOAD-BEARING: ``_load_manifest`` (the one gate every manifest
 # consumer goes through — build_index's incremental reuse, refresh_index's hash fast-path,
 # load_index and therefore recall) treats a manifest whose ``schema_version`` differs from
@@ -546,9 +548,11 @@ def _extract_steer(fm: dict) -> Optional[str]:
     return None
 
 
-# GOV-7: the closed set of author confidence tiers. Display-only at inject/recall_view —
-# NEVER a ranking input (the popularity=correctness trap); an unknown value reads as
-# unset, i.e. today's default.
+# GOV-7 → DRM-6: the closed set of author confidence tiers. Shipped display-only; DRM-6
+# made the tier LOAD-BEARING in recall ranking (draft ×0.5 quarantine weight,
+# authoritative ×1.1 bounded promotion, draft-only result sets collapse to abstention).
+# The dial is the AUTHOR'S — ranking reads the declared tier, never popularity (the
+# popularity=correctness trap stays closed); an unknown value reads as unset.
 _VALID_CONFIDENCE = ("draft", "verified", "authoritative")
 
 

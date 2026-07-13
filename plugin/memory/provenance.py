@@ -476,7 +476,7 @@ def ensure_self_ignoring_dir(path: str) -> None:
 #       display-only at inject/recall_view, NEVER a ranking input (the popularity=
 #       correctness trap; AST-pinned in tests). Closed enum; unknown values read as
 #       unset (today's default). Purely ADDITIVE — same stamp-only migration as v2/v3.
-CORPUS_FORMAT_VERSION = 4
+CORPUS_FORMAT_VERSION = 5
 _FORMAT_MARKER_NAME = ".format"
 
 

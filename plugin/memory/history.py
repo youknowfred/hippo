@@ -33,8 +33,11 @@ import os
 from datetime import datetime, timezone
 from typing import List, Optional
 
-# Lineage relations — the two whose transitive closure IS the decision chain.
-_CHAIN_RELATIONS = ("supersedes", "refines")
+# Lineage relations — those whose transitive closure IS the decision chain.
+# "derives-from" (DRM-6) is lineage by definition: a generated schema/hypothesis parent
+# declares the children it was abstracted from, so a chain walk (and DRM-5's reward
+# propagation, which rides decision_chain) follows derivation exactly like supersession.
+_CHAIN_RELATIONS = ("supersedes", "refines", "derives-from")
 
 
 def _node_texts(memory_dir: str, stems: List[str]) -> dict:

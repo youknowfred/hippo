@@ -578,6 +578,49 @@ def test_add_typed_relation_is_single_item_only_no_bulk_path():
 
 
 # --------------------------------------------------------------------------- #
+# DRM-6: derives-from — derivation provenance joins the closed typed-relation set
+# --------------------------------------------------------------------------- #
+def test_derives_from_is_a_typed_relation_with_a_version_bump(tmp_path):
+    """DRM-6 acceptance (inv5, a clean schema addition + version bump): ``derives-from``
+    is in TYPED_RELATIONS, ``add_typed_relation`` accepts it (it refused it before this
+    item), ``parse_typed_relations`` round-trips it, the graph resolves it into the typed
+    maps, and BOTH version dials moved — LINKS_SCHEMA_VERSION 2→3 (a v2 cache predates
+    the relation and must read as a miss) and CORPUS_FORMAT_VERSION 4→5."""
+    from memory.links import (
+        LINKS_SCHEMA_VERSION,
+        TYPED_RELATIONS,
+        LinkGraph,
+        add_typed_relation,
+        parse_typed_relations,
+    )
+    from memory.provenance import CORPUS_FORMAT_VERSION, parse_frontmatter
+
+    assert "derives-from" in TYPED_RELATIONS
+    assert LINKS_SCHEMA_VERSION == 3
+    assert CORPUS_FORMAT_VERSION == 5
+
+    md = str(tmp_path / "memory")
+    _write(md, "child-a.md", _mem("child-a", "body"))
+    _write(md, "child-b.md", _mem("child-b", "body"))
+    _write(md, "parent.md", _mem("parent", "an abstraction over the children"))
+    p = os.path.join(md, "parent.md")
+
+    r = add_typed_relation(p, "derives-from", "child-a")
+    assert r["error"] is None and r["changed"] is True
+    assert add_typed_relation(p, "derives-from", "child-b")["changed"] is True
+    # idempotent on the slug-equivalent form, same as every other relation
+    assert add_typed_relation(p, "derives-from", "child_a")["changed"] is False
+
+    text = open(p, encoding="utf-8").read()
+    assert 'derives-from: ["child-a", "child-b"]' in text
+    assert parse_typed_relations(parse_frontmatter(text)) == {
+        "derives-from": ["child-a", "child-b"]
+    }
+    graph = LinkGraph(md)
+    assert graph.typed.get("parent", {}).get("derives-from") == {"child-a", "child-b"}
+
+
+# --------------------------------------------------------------------------- #
 # GRA-8: graph observability — components / degree / export
 # --------------------------------------------------------------------------- #
 def _observability_corpus(md: str) -> None:

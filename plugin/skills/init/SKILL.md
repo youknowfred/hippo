@@ -106,7 +106,7 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    (it describes the corpus's on-disk conventions; it is NOT a derived cache, so it is never
    gitignored):
    ```bash
-   printf '{"corpus_format": 4}\n' > .claude/memory/.format
+   printf '{"corpus_format": 5}\n' > .claude/memory/.format
    ```
    The number is `memory.provenance.CORPUS_FORMAT_VERSION` (a parity test pins this snippet
    to that constant so the two can't drift). Fresh-corpus path ONLY, like the rest of steps

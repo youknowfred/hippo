@@ -163,6 +163,49 @@ def _pin_boost() -> float:
         return _PIN_BOOST
 
 
+# --------------------------------------------------------------------------- #
+# DRM-6: the confidence tier is LOAD-BEARING in ranking — GOV-7's display-only gap,
+# closed (ROADMAP.dream.yaml corrections_binding item 2). Same bounded-multiplier style
+# as the invalidation/supersede penalties and the pin boost above — real demotion/
+# promotion applied pre-cut in the penalized loop, never a hard exclude:
+#   - draft          ×0.5 — the QUARANTINE weight (Tier B, inv4): a draft competes at
+#     half strength, so an equivalent verified memory always outranks it, yet a wide-k
+#     query still surfaces it, marked "[draft]". Matches _SUPERSEDED_PENALTY's magnitude
+#     deliberately: "unconfirmed claim" and "superseded claim" are the same trust class.
+#   - verified/unset ×1.0 — the neutral baseline (an ungraded corpus takes no multiply
+#     at all; output stays byte-identical to pre-DRM-6).
+#   - authoritative  ×1.1 — a bounded author promotion, capped BELOW the pin boost
+#     (1.2): "authoritative" grades content, pin is an explicit per-item steering act,
+#     and the explicit act must stay the stronger dial.
+# Quarantine leg 2 (the abstention half) lives at emission time in recall(): a
+# draft-ONLY result set collapses back to the abstention shape — drafts accompany
+# verified content or seed expansion toward it, but never answer alone.
+_DRAFT_PENALTY = 0.5          # override: HIPPO_DRAFT_PENALTY
+_AUTHORITATIVE_BOOST = 1.1    # override: HIPPO_AUTHORITATIVE_BOOST
+
+
+def _draft_penalty() -> float:
+    """``HIPPO_DRAFT_PENALTY`` override; malformed/absent -> the module default."""
+    raw = os.environ.get("HIPPO_DRAFT_PENALTY")
+    if raw is None or not raw.strip():
+        return _DRAFT_PENALTY
+    try:
+        return float(raw)
+    except ValueError:
+        return _DRAFT_PENALTY
+
+
+def _authoritative_boost() -> float:
+    """``HIPPO_AUTHORITATIVE_BOOST`` override; malformed/absent -> the module default."""
+    raw = os.environ.get("HIPPO_AUTHORITATIVE_BOOST")
+    if raw is None or not raw.strip():
+        return _AUTHORITATIVE_BOOST
+    try:
+        return float(raw)
+    except ValueError:
+        return _AUTHORITATIVE_BOOST
+
+
 # Mid-session drift (COR-4) — a stat+reread per entry is cheap, but bound it so a huge
 # corpus can never turn the hot path into an O(corpus) disk scan of unbounded size.
 _MAX_DRIFT_CHECKS = 200
@@ -2110,6 +2153,17 @@ def recall(
             # all — output stays byte-identical to before this item.
             if entries[i].get("steer") == "pin":
                 adj_score *= _pin_boost()
+            # DRM-6: the confidence dial — draft is quarantine weight, authoritative a
+            # bounded promotion; verified/unset take no multiply at all (an ungraded
+            # corpus stays byte-identical). Lives HERE like the pin boost: always-on,
+            # pre-cut, so a draft loses graph-seed competitions to verified near-ties
+            # too, and a down-weighted draft that still wins a seed slot may legitimately
+            # pull its verified neighbors in (the dream-schema abstention-flip path).
+            conf = entries[i].get("confidence")
+            if conf == "draft":
+                adj_score *= _draft_penalty()
+            elif conf == "authoritative":
+                adj_score *= _authoritative_boost()
             penalized.append((i, adj_score, state))
         penalized.sort(key=lambda triple: triple[1], reverse=True)
 
@@ -2319,10 +2373,12 @@ def recall(
                     # off) so recall_view/GOV-5 can echo "pinned" legibly (COR-8). None for
                     # an unsteered memory; rule pointers never carry steer at all.
                     "steer": e.get("steer"),
-                    # GOV-7: the author's confidence tier — DISPLAY-ONLY provenance (a
-                    # compact " [draft]" marker at inject, a tag in recall_view). Read off
-                    # the manifest, never a per-hit file read; NEVER a ranking input (the
-                    # scoring path above does not touch it — AST-pinned). None when unset.
+                    # GOV-7 → DRM-6: the author's confidence tier — LOAD-BEARING since
+                    # DRM-6 (draft ×0.5 / authoritative ×1.1 in the penalized loop, plus
+                    # the draft-only abstention guard below the emission loop), with the
+                    # same compact " [draft]" inject marker as before. Read off the
+                    # manifest, never a per-hit file read; the AST pin asserts the reads
+                    # stay confined to recall()/format_results. None when unset.
                     "confidence": e.get("confidence"),
                     # TEA-1/TEA-3: corpus-of-origin provenance — ALWAYS present, same
                     # no-key-branching convention as "via"/"note". "project" (or None on the
@@ -2355,6 +2411,19 @@ def recall(
                     "head_commit": idx.manifest.get("head_commit"),
                 }
             )
+        # DRM-6 quarantine, leg 2 — excluded from ABSTENTION-SENSITIVE answering: a
+        # result set consisting ONLY of confidence:draft memories is not an answer, it
+        # is an abstention with speculation attached, so it collapses back to the
+        # abstention shape (rules pointers below may still answer, exactly like the
+        # organic-abstention path). Drafts may ACCOMPANY verified content (down-weighted,
+        # marked "[draft]") and may SEED expansion that surfaces verified neighbors — a
+        # dream-drafted schema legitimately flips a recorded abstention to a hit by
+        # pulling its verified children in — but draft-only output never answers on its
+        # own signal alone (inv-DRM-firewall's answering half; applies to ANY draft,
+        # hand-graded or generated — the tier is the quarantine, whoever set it).
+        if results and all(r.get("confidence") == "draft" for r in results):
+            results = []
+
         # RUL-4: rules-plane pointers APPEND after the organic top-k — extra lines, never
         # competitors: they hold no top-k slot, feed no knee comparison, and displace no
         # corpus hit (the acceptance bar: recall only ADDS a pointer). Same one-JSON-read

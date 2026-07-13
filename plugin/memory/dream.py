@@ -283,6 +283,38 @@ def unaged_dream_pairs(memory_dir: str, distinct_sessions_now: int) -> Set[froze
     return out
 
 
+# DRM-6: ledger kinds that are generated MEMORIES (whole staged files), not edges. They
+# share the apply ledger (one audit record, one undo machinery, one doctor reconciler);
+# ``read_apply_ledger``'s pair helpers skip them naturally (no source/target fields).
+_GENERATED_KINDS = ("schema", "hypothesis")
+
+
+def generated_rows(memory_dir: str) -> List[dict]:
+    """Current-state ledger rows for the DRM-6 generative tier (schema/hypothesis)."""
+    return [e for e in read_apply_ledger(memory_dir) if e.get("kind") in _GENERATED_KINDS]
+
+
+def unaged_generated_stems(memory_dir: str, distinct_sessions_now: int) -> Set[str]:
+    """ACTIVE dream-GENERATED memories not yet aged in — excluded from /dream's SOURCE set.
+
+    The inv-DRM-firewall extension to generative output: a ``confidence: draft`` memory is
+    already excluded by tier; this catches the GRADUATED-BUT-YOUNG one (evidence flipped it
+    to verified, but it must still survive ``DREAM_AGE_SESSIONS`` un-undone before the pass
+    may read it — same window, same ``edge_aged_in`` arithmetic as edges). An archived or
+    undone draft has left the corpus and needs no entry here.
+    """
+    out: Set[str] = set()
+    for row in generated_rows(memory_dir):
+        if row.get("state") != "active":
+            continue
+        if edge_aged_in(row, distinct_sessions_now):
+            continue
+        stem = row.get("memory")
+        if isinstance(stem, str) and stem:
+            out.add(stem)
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Corpus + graph views
 # --------------------------------------------------------------------------- #
@@ -619,6 +651,9 @@ def discover(
         # DRM-5: filled by reward_boosts on an ok pass; this empty shape on every early
         # return keeps the reward surface total (consumers never KeyError on a refusal).
         "reward": {"outcome_memories": {}, "memories": {}, "memory_sources": {}, "edges": []},
+        # DRM-6: every observed co-fired pair (the generative tier clusters these) —
+        # same total-shape discipline as "reward" so consumers never KeyError.
+        "pairs": [],
     }
 
     # Gate 1 — the soak bar (a young corpus proposes nothing; inv3: say so).
@@ -647,11 +682,16 @@ def discover(
     floor = floor_memory_names(memory_dir)
     confidence = _confidence_map(texts)
     drafts = {s for s, c in confidence.items() if c == "draft"}
+    distinct_now = int(soak.get("distinct_sessions") or 0)
+    # DRM-6: graduated-but-young generated memories stay firewalled until they age in.
+    unaged_gen = unaged_generated_stems(memory_dir, distinct_now)
 
     def _eligible(stem: str) -> bool:
         # inv-DRM-firewall + floor exclusion: floor memories are never an endpoint;
-        # confidence:draft is quarantined content, never source nor target.
-        return stem not in floor and stem not in drafts
+        # confidence:draft is quarantined content, never source nor target; a dream-
+        # GENERATED memory (DRM-6) additionally has to age in after graduation before
+        # the pass may read it.
+        return stem not in floor and stem not in drafts and stem not in unaged_gen
 
     # The graph, two views: RAW (novelty — does ANY edge already connect this pair, aged or
     # not?) and FIREWALLED (generation — un-aged dream edges subtracted; inv-DRM-firewall).
@@ -659,15 +699,27 @@ def discover(
     if graph is None:
         graph = LinkGraph(memory_dir, texts=texts)
     raw_view = _undirected_view(graph, set())
-    unaged = unaged_dream_pairs(memory_dir, int(soak.get("distinct_sessions") or 0))
+    unaged = unaged_dream_pairs(memory_dir, distinct_now)
     fw_view = _undirected_view(graph, unaged)
+    # DRM-6 firewall extension: quarantined NODES (drafts + un-aged generated memories)
+    # leave the firewalled topology ENTIRELY — a staged draft's own [[child]] wikilinks
+    # must never manufacture the next pass's 2-hop bridge distances (the dream-cites-a-
+    # dream tower, node form). The RAW view keeps them: novelty must see every edge that
+    # exists, whatever its provenance.
+    quarantined_nodes = drafts | unaged_gen
+    if quarantined_nodes:
+        fw_view = {
+            s: {n for n in nbrs if n not in quarantined_nodes}
+            for s, nbrs in fw_view.items()
+            if s not in quarantined_nodes
+        }
 
     # DRM-5: reward-gated reverse-replay boosts — outcome-anchored lineage chains earn
     # replay priority + candidate-rank promotion. Same endpoint exclusions as generation
     # (floor + drafts); the backward walk never crosses an un-aged dream pair. With no
     # recorded outcome this is empty and every downstream consumer is provably inert.
     reward = reward_boosts(
-        memory_dir, index_dir, td, exclude_stems=floor | drafts, unaged_pairs=unaged
+        memory_dir, index_dir, td, exclude_stems=floor | drafts | unaged_gen, unaged_pairs=unaged
     )
     boost_of = reward["memories"]
 
@@ -882,6 +934,29 @@ def discover(
             # reporting beats a speculative fourth kind.
             unclassified_pairs += 1
 
+    # DRM-6: the raw co-fired pair surface the generative tier clusters (schema = a
+    # mutual component ≥ the cluster bar; hypothesis = a strong mutual pair with NO
+    # firewalled path). Serialized here — strength order, then name — so the clustering
+    # never re-probes the corpus. Firewall-clean by construction: only _eligible stems
+    # ever enter pair_best, and distances read the quarantine-stripped fw_view.
+    pairs_out: List[dict] = []
+    for key, rec in sorted(
+        pair_best.items(), key=lambda kv: (-kv[1]["strength"], sorted(kv[0]))
+    ):
+        a, b = sorted(key)
+        pairs_out.append(
+            {
+                "a": a,
+                "b": b,
+                "cofire": rec["strength"],
+                "mutual": len(rec["directions"]) > 1,
+                "distance": _distance(fw_view, a, b),
+                "query": rec["query"],
+                "seed": rec["seed"],
+            }
+        )
+    result["pairs"] = pairs_out
+
     # DRM-5 annotation: a candidate touching an outcome-anchored (boosted) memory carries
     # its boost + the justifying outcome memories, and sorts earlier among its peers —
     # RANKING ONLY (apply eligibility reads the raw cofire; see ``apply_eligible``).
@@ -925,6 +1000,7 @@ def discover(
         "novelty_excluded": novelty_excluded,
         "unclassified_pairs": unclassified_pairs,
         "unaged_dream_pairs_firewalled": len(unaged),
+        "unaged_generated_firewalled": sorted(unaged_gen),
         "worklist_preview": worklist_preview,
         "reward_outcome_memories": len(reward.get("outcome_memories") or {}),
         "reward_boosted_memories": len(boost_of),
@@ -1362,6 +1438,18 @@ def run_apply_pass(
         if not ok:
             refused.append((cand, reason))
             continue
+        # SEC-6: fold the stamped file's FINAL bytes into the consent baseline. Without
+        # this, a fingerprinted corpus quarantines every edge-stamped file out of recall
+        # (new-since-consent bytes are withheld) — the exact opposite of "live in recall
+        # immediately". The write is gated (trusted corpus, capped, θ-barred, secret-
+        # blocked), so authorship-is-consent applies the same way it does for
+        # add_typed_relation's own internal fold.
+        try:
+            trust.record_authored_write(
+                memory_dir, os.path.join(memory_dir, cand["source"] + ".md"), repo_root
+            )
+        except Exception:
+            pass
         ledger_row["undo"] = undo_rec
         ledger_lines.append(ledger_row)
         applied.append({**cand, "edge_id": edge_id})
@@ -1417,6 +1505,27 @@ def run_apply_pass(
             f"  reply `undo` to revert all · `undo <edge-id>` for one · they age into "
             f"/dream's trusted source set after {age_sessions()} sessions"
         )
+
+    # DRM-6: the generative tier rides the apply pass. NEW generation is flag-gated
+    # (HIPPO_DREAM_GENERATIVE, default OFF — DREAM-KILL-1: P3 ships behind a flag) and
+    # reuses THIS pass's discovery result so the corpus is probed once per pass; the
+    # decay SWEEP runs whenever generated rows exist, flag or no flag — the tier's
+    # self-decay must never depend on the flag staying on (inv4: a generation tier
+    # without the decay path must not ship). run_generative_pass sweeps internally on
+    # its stage path, so the two lanes never double-sweep.
+    try:
+        from . import dream_generate as _dg
+
+        if _dg.generative_enabled():
+            _gc, gen_text = _dg.run_generative_pass(
+                memory_dir, index_dir, td, stage=True, repo_root=repo_root, result=result
+            )
+            lines.append(gen_text)
+        elif generated_rows(memory_dir):
+            _sc, sweep_text = _dg.sweep_drafts(memory_dir, td, index_dir, repo_root=repo_root)
+            lines.append(sweep_text)
+    except Exception as exc:
+        lines.append(f"  (generative tier skipped: {exc})")
     return 0, "\n".join(lines)
 
 
@@ -1445,6 +1554,35 @@ def _undo_one_edge(memory_dir: str, edge: dict) -> Tuple[bool, str]:
     """
     undo = edge.get("undo") or {}
     fname = undo.get("file")
+
+    # DRM-6: a GENERATED memory's undo is whole-file removal — the file is entirely
+    # machine-authored, so deletion is the prose-lossless reverse of staging. Byte-exact
+    # refuse-on-drift via the staging-time hash: a hand-edited OR graduated draft (its
+    # confidence line changed) refuses — that content earned protection; archive it or
+    # use git from there.
+    if undo.get("created"):
+        if not fname:
+            return False, "ledger row carries no undo record"
+        path = os.path.join(memory_dir, fname)
+        try:
+            from .trust import file_sha256
+
+            live = file_sha256(path)
+        except Exception:
+            live = None
+        if live is None:
+            return False, "staged file already missing (archived or hand-moved) — refusing"
+        if live != undo.get("sha256"):
+            return False, (
+                "staged file was edited or graduated since staging (drift) — refusing "
+                "(archive it with --archive-draft, or revert via git)"
+            )
+        try:
+            os.remove(path)
+        except Exception as exc:
+            return False, f"remove failed: {exc}"
+        return True, ""
+
     block = undo.get("block") or {}
     inserted = block.get("inserted")
     if not fname or not inserted:
@@ -1550,6 +1688,18 @@ def undo_edges(
     refused: List[Tuple[dict, str]] = []
     for edge in reversed(targets):
         ok, reason = _undo_one_edge(memory_dir, edge)
+        if ok:
+            # SEC-6: re-fold the restored bytes (the apply fold moved the baseline to
+            # the stamped content; the un-stamped restoration must move it back or the
+            # file quarantines). A deleted generated file simply no-ops the fold.
+            fname = (edge.get("undo") or {}).get("file")
+            if fname:
+                try:
+                    from .trust import record_authored_write
+
+                    record_authored_write(memory_dir, os.path.join(memory_dir, fname))
+                except Exception:
+                    pass
         (undone if ok else refused).append((edge, reason) if not ok else edge)
 
     if undone:
@@ -1576,7 +1726,15 @@ def undo_edges(
 
     lines = [f"🌙 dream --undo: reverted {len(undone)} edge(s)" + (":" if undone else ".")]
     for edge in undone:
-        lines.append(f"  • {edge['edge_id']}  {edge.get('source')} ↔ {edge.get('target')} restored")
+        if edge.get("kind") in _GENERATED_KINDS:
+            lines.append(
+                f"  • {edge['edge_id']}  generated {edge.get('kind')} "
+                f"{edge.get('memory')} removed"
+            )
+        else:
+            lines.append(
+                f"  • {edge['edge_id']}  {edge.get('source')} ↔ {edge.get('target')} restored"
+            )
     for edge, reason in refused:
         lines.append(f"  ✘ {edge.get('edge_id')}: {reason}")
     if refused:
@@ -1599,10 +1757,21 @@ def render_log(memory_dir: str) -> str:
                 f"active ({max(0, age_sessions() - (now - e.get('applied_at_distinct_count', now)))}"
                 " session(s) to age-in)"
             )
-        lines.append(
-            f"  • {e.get('edge_id')}  {e.get('source')} → {e.get('target')}  "
-            f"{e.get('kind')}  cofire={e.get('cofire')}  [{state}]"
-        )
+        if e.get("kind") in _GENERATED_KINDS:
+            # DRM-6 rows are staged MEMORIES: show the tier lifecycle alongside aging.
+            tier = e.get("confidence") or "draft"
+            marks = [tier]
+            if e.get("expired"):
+                marks.append("expired-awaiting-archive")
+            lines.append(
+                f"  • {e.get('edge_id')}  {e.get('memory')}  generated-{e.get('kind')}  "
+                f"cofire={e.get('cofire')}  [{state} · {' · '.join(marks)}]"
+            )
+        else:
+            lines.append(
+                f"  • {e.get('edge_id')}  {e.get('source')} → {e.get('target')}  "
+                f"{e.get('kind')}  cofire={e.get('cofire')}  [{state}]"
+            )
     return "\n".join(lines)
 
 
@@ -1638,10 +1807,18 @@ def dream_applied_producer(memory_dir: str, repo_root: str, ctx=None) -> Optiona
         ]
         for e in fresh[:_PRODUCER_MAX_ITEMS]:
             left = window - (now - e.get("applied_at_distinct_count", now))
-            lines.append(
-                f"  • {e.get('edge_id')}  {e.get('source')} → {e.get('target')} "
-                f"({e.get('kind')}, cofire {e.get('cofire')}, {max(0, left)} session(s) left)"
-            )
+            if e.get("kind") in _GENERATED_KINDS:
+                tier = e.get("confidence") or "draft"
+                lines.append(
+                    f"  • {e.get('edge_id')}  {e.get('memory')} (generated {e.get('kind')}, "
+                    f"{tier}{', expired — archive proposed' if e.get('expired') else ''}, "
+                    f"{max(0, left)} session(s) to age-in)"
+                )
+            else:
+                lines.append(
+                    f"  • {e.get('edge_id')}  {e.get('source')} → {e.get('target')} "
+                    f"({e.get('kind')}, cofire {e.get('cofire')}, {max(0, left)} session(s) left)"
+                )
         if len(fresh) > _PRODUCER_MAX_ITEMS:
             lines.append(f"  …and {len(fresh) - _PRODUCER_MAX_ITEMS} more (dream --log).")
         return "\n".join(lines)
@@ -1745,6 +1922,42 @@ def main(argv: Optional[List[str]] = None) -> int:
         "gains supersedes:[LOSER], LOSER's validity window closes (set_invalid_after). "
         "Non-lossy — additive frontmatter only, no body byte touched, nothing deleted.",
     )
+    parser.add_argument(
+        "--generate",
+        action="store_true",
+        help="DRM-6: the generative tier — cluster co-firing sets into schema/gist + "
+        "hypothesis PROPOSALS (report-only by default; proposals land under the derived "
+        "dream dir). With --stage (or HIPPO_DREAM_GENERATIVE=1 on apply passes), stages "
+        "them into the corpus at confidence:draft — quarantined, capped, ledgered, "
+        "undoable, self-decaying.",
+    )
+    parser.add_argument(
+        "--stage",
+        action="store_true",
+        help="with --generate: actually stage the proposals as confidence:draft memories "
+        "(explicit opt-in, like --apply; the corpus must be trusted). Never verified — "
+        "graduation needs recorded outcome evidence (DREAM-KILL-1).",
+    )
+    parser.add_argument(
+        "--sweep-drafts",
+        action="store_true",
+        help="DRM-6 decay: graduate evidence-confirmed drafts (draft→verified on a "
+        "recorded outcome, never a glance), expire drafts past DREAM_DRAFT_HORIZON "
+        "(auto-close validity + propose archive). Also runs inside every apply pass.",
+    )
+    parser.add_argument(
+        "--archive-draft",
+        default=None,
+        metavar="NAME",
+        help="execute ONE proposed draft archive (per-item; only dream-generated "
+        "memories — human memories use the audit archive flow)",
+    )
+    parser.add_argument(
+        "--prospective",
+        action="store_true",
+        help="DRM-6 metric: abstain→hit flips over the FROZEN abstention backlog, with "
+        "dream-attribution (measure-only, off the hot path)",
+    )
     parser.add_argument("--probe-k", type=int, default=None, help="co-fire probe depth (default 10)")
     parser.add_argument(
         "--max-seeds", type=int, default=None, help="cap the replay worklist (default 0 = all)"
@@ -1801,6 +2014,50 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         print(text)
         return code
+    if args.generate:
+        from .dream_generate import run_generative_pass
+
+        code, text = run_generative_pass(
+            memory_dir,
+            args.index_dir,
+            args.telemetry_dir,
+            stage=args.stage,
+            probe_k=args.probe_k,
+            max_seeds=args.max_seeds,
+        )
+        print(text)
+        return code
+    if args.stage:
+        print("🌱 --stage is a --generate modifier — run `dream --generate --stage`.")
+        return 1
+    if args.sweep_drafts:
+        from .dream_generate import sweep_drafts
+
+        code, text = sweep_drafts(memory_dir, args.telemetry_dir, args.index_dir)
+        print(text)
+        return code
+    if args.archive_draft:
+        from .dream_generate import archive_draft
+
+        res = archive_draft(
+            memory_dir,
+            args.archive_draft,
+            telemetry_dir=args.telemetry_dir,
+            index_dir=args.index_dir,
+        )
+        if res.get("error"):
+            print(f"🌱 archive-draft REFUSED: {res['error']}")
+            return 1
+        print(
+            f"🌱 archived dream draft {args.archive_draft} (git-reversible move into "
+            "archive/; ledger updated; commit stays yours)."
+        )
+        return 0
+    if args.prospective:
+        from .dream_generate import prospective_recall, render_prospective
+
+        print(render_prospective(prospective_recall(memory_dir, args.telemetry_dir, args.index_dir)))
+        return 0
     # --json is a READ surface (raw discovery dump) — it never applies unless --apply is
     # explicit, regardless of the shipped default.
     if args.apply or (apply_mode_default() and not args.dry_run and not args.json):

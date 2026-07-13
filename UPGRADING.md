@@ -22,7 +22,7 @@ artifacts. A `schema_version` bump is a re-index, never a corpus migration.
 ## 3. Migrate the corpus format (agent-gated, per-item)
 
 This is the only upgrade that touches your **committed markdown**. The corpus format is stamped in
-`.claude/memory/.format` (`{"corpus_format": N}`, currently **4**) and describes the on-disk
+`.claude/memory/.format` (`{"corpus_format": N}`, currently **5**) and describes the on-disk
 conventions your memory files follow. It is committed with the corpus (not a cache), and it only ever
 increases. `read_corpus_format()` reads it (a corpus with no marker reads as format 1);
 `write_corpus_format()` stamps it.
@@ -30,7 +30,7 @@ increases. `read_corpus_format()` reads it (a corpus with no marker reads as for
 When you open an older corpus with a newer plugin, `/hippo:doctor` reports, for example:
 
 ```
-⚠ corpus format is v2, this plugin writes v4 — the corpus needs a MIGRATION before newer-format
+⚠ corpus format is v2, this plugin writes v5 — the corpus needs a MIGRATION before newer-format
 features work; hippo never migrates automatically — follow the doctor-driven path in
 plugin/memory/README.md ('Corpus format versioning')
 ```
@@ -73,5 +73,7 @@ illustrative convention change — real bumps are itemized in the CHANGELOG). Th
 
 The key properties, true of every corpus migration: **doctor detects it, you drive it per item, the
 body is preserved, and the `.format` stamp lands last** — so a half-finished migration never claims a
-format it hasn't reached. Migrate straight to the current version (v4) by applying each intermediate
-step's convention change in order, then stamping the final version once.
+format it hasn't reached. Migrate straight to the current version (v5) by applying each intermediate
+step's convention change in order, then stamping the final version once. (Every bump so far — v2
+typed relations, v3 `steer`, v4 `confidence`, v5 `derives-from` — has been purely additive, so in
+practice the migration is: review that no existing frontmatter already uses the new key, then stamp.)
