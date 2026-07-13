@@ -1,7 +1,7 @@
 {
   "name": "hippo",
   "description": "Local, git-native memory for Claude Code — your repo is the store, recall is $0/prompt (no LLM, no network), staleness is git-drift (the cited code moved), and team memory ships through review.",
-  "version": "1.10.2",
+  "version": "1.11.0",
   "author": {
     "name": "youknowfred",
     "url": "https://youknowfred.com"
