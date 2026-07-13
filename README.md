@@ -144,9 +144,32 @@ downloading the embedding model once; after that, recall is fully offline. For a
 cost-sensitive team, "memory that costs nothing per prompt and never phones home" is a hard
 requirement a hosted-by-default or LLM-in-the-loop memory can't meet without extra self-hosting work.
 
+## Why it's called hippo
+
+Named for the **hippocampus** — the brain's memory-indexing structure — not just the animal at the
+waterline. The analogy is loose and deliberately cheap: hippo is git + embeddings + staleness
+scoring, not a model of neural tissue. What it *does* borrow is the *shape* — six of its verbs are
+distinct passes over one shared store (the markdown corpus plus its derived index, link graph, and
+ledgers), the way memory is encoded, consolidated, and replayed:
+
+- **recall** — hybrid BM25 + dense retrieval, per prompt, `$0` and offline. No LLM, no network.
+- **consolidate** — *sleep-time compute*: a deliberate off-hot-path turn that drains pending
+  captures and re-verifies stale memories. One agent turn, per-item, approval-gated — nothing
+  autonomous or bulk.
+- **reconsolidate** — re-verify a memory when recall resurfaces it *and* its cited code has drifted.
+- **forget** — not calendar decay: a memory goes stale when a file it cites moved after its recorded
+  commit. Semantic, and always graceful demotion, never deletion.
+- **dream** — offline replay that re-runs recall over each memory's own self-query to surface latent
+  graph edges. Report-first, capped, soak-gated. **The empty pass is the norm.**
+
+The loose analogy earns the name; every claim above resolves to a file you can `git diff`. The
+sharpest ideas are the ones that *break* from biology — staleness is git-drift, not time — and the
+full map (with where each analogy ends) is in
+[How hippo thinks](CONCEPTS.md#one-more-idea-the-sleep-model).
+
 ## Commands
 
-hippo ships as 15 `/hippo:*` skills. You rarely invoke most of them by hand — the agent runs the
+hippo ships as 16 `/hippo:*` skills. You rarely invoke most of them by hand — the agent runs the
 maintenance ones when a session-start signal calls for it — but here is the whole surface, grouped
 by what it's for.
 
@@ -172,6 +195,11 @@ by what it's for.
   candidates.
 - `/hippo:consolidate` — the sleep-time drain: approve pending captures, work the reconsolidation
   worklist, refresh the graph. Run it when a session-start nudge says the queue or worklist is deep.
+- `/hippo:dream` — the *generative* sleep-time pass: offline, it replays recall over each memory's
+  own self-query, watches which memories co-fire, and diffs that against the link graph to surface
+  latent edges (and, behind a default-off flag, draft schema/hypothesis memories). Report-first,
+  θ-gated, capped per pass, and soak-gated before anything it proposes can feed the next pass. The
+  empty pass is the designed norm, not a failure.
 - `/hippo:resolve` — drain the contradiction inbox: a per-item verdict on each unresolved
   `contradicts` pair (keep one and supersede, scope both, merge, or mark not-conflicting).
 
@@ -201,6 +229,10 @@ by what it's for.
 - **consolidate vs. audit** — `consolidate` *drains and closes loops* (captures → memory, stale
   worklist → verdicts, graph refresh); `audit` *diagnoses* content health but drains nothing.
   Consolidate is routine sleep-time upkeep; audit is a periodic deep review.
+- **consolidate vs. dream** — both run *off* the hot path, but `consolidate` *drains* what you
+  already captured (pending queue → memory, stale worklist → verdicts); `dream` *discovers* what
+  wasn't captured — latent edges between existing memories — and proposes, never bulk-writes.
+  Reach for consolidate when the queue is deep; dream is a rare, mostly-silent surfacing pass.
 
 ## Removal / Uninstall
 
@@ -251,8 +283,9 @@ hippo **composes** with native memory — it does not replace or fork it.
   teammates** — and nothing tells you when an auto-captured fact went stale.
 - **What hippo adds — the layer on top.** A **git-native, teammate-reviewable** corpus with
   **hybrid dense+BM25 recall** (the *right* memories on demand, not everything every prompt),
-  **semantic git-drift staleness**, a typed **link graph**, **reconsolidation**, and an
-  **automatic-capture-behind-an-approval-gate** path. It is exactly the ranking, staleness
+  **semantic git-drift staleness**, a typed **link graph**, **reconsolidation**, an
+  **automatic-capture-behind-an-approval-gate** path, and an offline **generative-replay** pass
+  (`/hippo:dream`) that surfaces latent edges between memories. It is exactly the ranking, staleness
   hygiene, and human review that Auto Memory's always-loaded, auto-written note lacks.
 - **How they compose.** `/hippo:init` points the native memory location at this repo's
   `.claude/memory/` via a symlink, so hippo's always-load **floor** (the `user`/`feedback`
@@ -277,7 +310,7 @@ plugin/
 ├── assets/packs/                 # starter packs (core seeded by default; rest opt-in)
 ├── bin/hippo                     # CLI launcher for the stateless engine commands
 ├── requirements.txt              # fastembed, numpy, PyYAML, rank-bm25 (the venv path)
-└── skills/                       # 15 /hippo:* commands (see the Commands section above)
+└── skills/                       # 16 /hippo:* commands (see the Commands section above)
 tests/                            # hermetic test suite (no network/model download by default)
 .github/workflows/ci.yml          # hermetic matrix + dense/secret-scan/resolution lanes + shellcheck
 ```

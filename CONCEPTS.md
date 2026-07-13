@@ -2,12 +2,14 @@
 
 hippo gives Claude Code a memory that is nothing more exotic than **a pile of small markdown
 files in your repo's git history**. No database, no server, no cloud. This page is the
-five-minute mental model — four ideas that explain the whole system:
+five-minute mental model — four ideas that explain the whole system (plus an optional fifth,
+for the curious: the memory-science frame the design borrows its shape from):
 
 1. [What a memory is](#a-memory-is-a-small-markdown-file)
 2. [How a memory reaches Claude — the floor vs. on-demand recall](#two-ways-a-memory-reaches-claude)
 3. [The four kinds of memory](#four-kinds-of-memory)
 4. [Why markdown, in git](#why-markdown-in-git)
+5. *(optional)* [The sleep model — why it borrows from memory science](#one-more-idea-the-sleep-model)
 
 Read this first; then the [Quickstart](README.md#quickstart) is a five-minute install.
 
@@ -103,6 +105,28 @@ Everything hippo derives from these files — the recall index, caches, telemetr
 rebuildable and gitignored. The markdown in git is the single source of truth; if a derived
 cache ever disagrees, the files win.
 
+## One more idea: the sleep model
+
+*(Optional — you never need this to use hippo.)* The name is a wink at the **hippocampus**, the
+brain's memory-indexing structure, and hippo's verbs loosely borrow the *shape* of how memory is
+managed: encoded, retrieved, consolidated offline, re-checked when it resurfaces, and let go when
+stale. The analogy is loose on purpose — each verb is ordinary engineering, and hippo's sharpest
+ideas are the ones where it *departs* from the brain.
+
+| Memory operation | What hippo actually does | Where the analogy ends |
+|---|---|---|
+| **encode / retrieve** — `recall` | hybrid BM25 + dense retrieval, every prompt, `$0` and offline | plain information retrieval; no LLM in the loop |
+| **consolidate** — systems consolidation | a deliberate off-hot-path turn drains captures and re-verifies stale memories | one agent turn, per-item, approval-gated — not a gradual, autonomous hand-off |
+| **reconsolidate** | a recently-recalled memory whose cited code drifted goes on a re-verify worklist | recall destabilizes nothing; it's an intersection heuristic plus a human verdict |
+| **forget** — decay | a memory goes stale when a cited file moved after its recorded commit | *not biological at all* — it's git-drift, not time or disuse. The departure is the feature |
+| **replay** — `/dream` | offline, recall is re-run over each memory's self-query; memories that co-fire become candidate links | "co-fire" = co-rank for one probe, not temporal sequence re-firing; report-first, capped, empty-pass-is-the-norm |
+| **reward-gated replay** | an outcome-anchored memory boosts the ranking of the lineage that earned it | ranking-only; never changes what's eligible to be written |
+
+The one mechanism with **no** brain analog at all is the *aging firewall*: `/dream` won't trust its
+own freshly-proposed links as input until they've survived several sessions unchallenged. Nothing in
+memory works that way — it's a safety quarantine, and that deliberately un-biological caution is
+exactly what makes leaning on the loose analogy safe.
+
 ## Where to go next
 
 - **[Quickstart](README.md#quickstart)** — install, bootstrap, init, and see your first recall.
@@ -111,4 +135,4 @@ cache ever disagrees, the files win.
 - **[The engine reference](plugin/memory/README.md)** — how recall, staleness, and
   reconsolidation work under the hood (deep internals; you don't need it to *use* hippo).
 - **[The skills](plugin/README.md)** — the `/hippo:*` commands (`new`, `recall`, `doctor`,
-  `consolidate`, `audit`, …) you drive hippo with day to day.
+  `consolidate`, `dream`, `audit`, …) you drive hippo with day to day.
