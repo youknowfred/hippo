@@ -64,8 +64,25 @@ def test_scan_text_clean_on_ordinary_prose():
 
 
 def test_scan_text_no_false_positive_on_hex_sha():
-    # A 40-char git sha is single-class-ish (hex) — must NOT trip the entropy catch-all.
+    # DOC-15: a hex sha must not trip the entropy catch-all — but NOT for the reason this
+    # comment used to give. Hex is not "single-class-ish": it mixes letters and digits, so
+    # _has_mixed_classes returns True and that gate never fires here. What keeps this quiet
+    # is the entropy bar (hex is a 16-symbol alphabet). That protection is thin — see
+    # test_scan_text_labelled_hex_is_a_known_false_positive.
     assert S.scan_text("baseline sha 3f9a1c2e4b6d8f0a1c2e4b6d8f0a1c2e4b6d8f0a") == []
+
+
+def test_scan_text_labelled_hex_is_a_known_false_positive():
+    """DOC-15 pins the CURRENT (wrong) behaviour so SEC-16's fix has a witness.
+
+    Entropy is scored over the whole token while the run-length check is scored over its
+    longest segment — two different strings, one verdict. So labelling a sha pushes the
+    whole-token entropy over the bar and the identical digest that scans clean bare now
+    fires. This is the field false positive (a content-addressed asset store's digest).
+    """
+    sha = "a3f5b8c2d4e6f7a9b1c3d5e7f9a2b4c6d8e0f2a4b6c8d0e2f4a6b8c0d2e4f6a8"
+    assert S.scan_text(sha) == []  # bare: clean
+    assert S.scan_text(f"content_digest={sha}") != []  # labelled: FIRES — same digest
 
 
 def test_scan_text_never_echoes_the_secret():

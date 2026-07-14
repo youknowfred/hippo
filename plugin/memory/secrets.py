@@ -139,8 +139,17 @@ def _shannon_entropy(s: str) -> float:
 def _has_mixed_classes(s: str) -> bool:
     """True when ``s`` mixes at least two of {lower, upper, digit} — a real-token shape.
 
-    A long all-lowercase word (or an all-hex sha, which is single-class-ish) should NOT trip
-    the entropy catch-all; requiring class mixing keeps the heuristic off ordinary text.
+    This keeps the entropy catch-all off a long all-lowercase WORD (one class), which is what
+    it is for.
+
+    DOC-15 — what it does NOT do, despite an earlier version of this docstring saying so: it
+    does not keep hex out. A lowercase hex sha mixes letters and digits, so this returns
+    **True** for one and the gate never fires. What actually keeps a bare sha quiet is the
+    entropy bar (hex is a 16-symbol alphabet, so its Shannon entropy lands under the
+    threshold) — and that protection is incidental and thin: prefix the same sha with a label
+    and ``content_digest=<sha>`` DOES trip, because the entropy is scored over the whole token
+    while the run-length check is scored over its longest segment. Two different strings, one
+    verdict. SEC-16 fixes that; this docstring no longer claims a gate that isn't there.
     """
     classes = 0
     if any(c.islower() for c in s):
