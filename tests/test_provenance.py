@@ -1385,7 +1385,7 @@ def test_cli_refresh_dry_run_rot_line_says_would_drop_and_writes_nothing(repo, m
 
 
 def test_citation_rot_lines_empty_when_nothing_dropped():
-    assert P.citation_rot_lines("m.md", ["src/a.py"], []) == []
+    assert P.citation_rot_lines("m.md", {"cited": ["src/a.py"], "dropped_citations": []}) == []
 
 
 # --------------------------------------------------------------------------- #
@@ -1606,3 +1606,105 @@ def test_every_writer_preserves_parseability_across_the_corpus_shapes(repo, memo
             assert res["error"] is None, f"{label}/{writer}: {res['error']}"
             after = P.parse_frontmatter(open(target, encoding="utf-8").read())
             assert after, f"{label}/{writer} emitted unparseable frontmatter"
+
+
+# --------------------------------------------------------------------------- #
+# LIF-4 — the rot line reports the cause it MEASURED
+# --------------------------------------------------------------------------- #
+def test_partition_dropped_splits_on_repo_membership():
+    gone, not_derived = P.partition_dropped(
+        ["src/deleted.py", "src/present.py"], {"src/present.py"}
+    )
+    assert gone == ["src/deleted.py"]
+    assert not_derived == ["src/present.py"]
+
+
+def test_rot_line_says_no_longer_in_the_repo_only_for_paths_that_are_gone():
+    """LIF-3's original case still reads exactly as it did — that phrase is EARNED here."""
+    res = {
+        "cited": ["src/keep.py"],
+        "dropped_citations": ["src/dep.py"],
+        "dropped_gone": ["src/dep.py"],
+        "dropped_not_derived": [],
+    }
+    (line,) = P.citation_rot_lines("m.md", res)
+    assert "no longer in the repo" in line
+    assert "not derived" not in line
+    assert "1 citation(s) remain" in line
+
+
+def test_rot_line_does_not_claim_deletion_for_a_path_still_in_the_repo():
+    """AC (LIF-4): the em-growth-labs failure. `dropped` was a set-difference against the
+    re-derived list — a membership test that never ran — so a citation the extractor merely
+    failed to produce was reported as a deleted file, sending the reader to hunt a rename
+    that never happened. The file IS in the repo; say so."""
+    res = {
+        "cited": ["src/keep.py"],
+        "dropped_citations": ["Dockerfile", "package.json"],
+        "dropped_gone": [],
+        "dropped_not_derived": ["Dockerfile", "package.json"],
+    }
+    (line,) = P.citation_rot_lines("m.md", res)
+    assert "no longer in the repo" not in line, "the files are RIGHT THERE"
+    assert "still in the repo" in line
+    assert "Dockerfile" in line and "package.json" in line
+
+
+def test_rot_line_renders_both_causes_when_a_drop_has_both():
+    res = {
+        "cited": ["src/keep.py"],
+        "dropped_citations": ["src/deleted.py", "package.json"],
+        "dropped_gone": ["src/deleted.py"],
+        "dropped_not_derived": ["package.json"],
+    }
+    (line,) = P.citation_rot_lines("m.md", res)
+    assert "no longer in the repo (src/deleted.py)" in line
+    assert "still in the repo" in line and "package.json" in line
+
+
+def test_rot_line_drop_to_zero_keeps_the_exempt_warning_and_the_true_cause():
+    """The drop-to-zero branch carried the SAME unearned phrase as the partial branch.
+    Both are fixed; the EXEMPT warning (verified accurate) is preserved."""
+    res = {
+        "cited": [],
+        "dropped_citations": ["package.json"],
+        "dropped_gone": [],
+        "dropped_not_derived": ["package.json"],
+    }
+    (line,) = P.citation_rot_lines("m.md", res)
+    assert "EXEMPT" in line  # the worst rot state is still called out
+    assert "no longer in the repo" not in line  # ...but not with a fabricated cause
+    assert "still in the repo" in line
+
+
+def test_rot_line_falls_back_to_gone_for_a_producer_without_the_partition():
+    """Back-compat: a result dict predating LIF-4 renders as it always did, rather than
+    silently claiming everything is `not_derived`."""
+    res = {"cited": ["a.py"], "dropped_citations": ["b.py"]}
+    (line,) = P.citation_rot_lines("m.md", res)
+    assert "no longer in the repo" in line
+
+
+def test_refresh_partitions_a_real_not_derived_drop_end_to_end(repo, memory_dir):
+    """AC (LIF-4) on the live producer: a memory whose frontmatter cites a file the
+    extractor cannot derive from the body (`Dockerfile` — no dotted extension) must report
+    it as not_derived, NOT as gone. Both files exist at HEAD throughout."""
+    write_file(repo, "Dockerfile", "FROM scratch\n")
+    write_file(repo, "src/keep.py", "k = 1\n")
+    git_commit(repo, "code", 1_700_000_000)
+    target = write_file(
+        repo,
+        ".claude/memory/m.md",
+        '---\nname: M\ncited_paths: ["Dockerfile", "src/keep.py"]\nsource_commit: "abc"\n'
+        "---\nbody cites src/keep.py and the Dockerfile\n",
+    )
+    git_commit(repo, "memory", 1_700_000_001)
+
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    res = P.backfill_file(target, repo, repo_files, basename_index, refresh=True)
+    assert res["error"] is None
+    assert res["dropped_citations"] == ["Dockerfile"]
+    assert res["dropped_gone"] == [], "Dockerfile is right there — it was never deleted"
+    assert res["dropped_not_derived"] == ["Dockerfile"]
+    (line,) = P.citation_rot_lines("m.md", res)
+    assert "no longer in the repo" not in line

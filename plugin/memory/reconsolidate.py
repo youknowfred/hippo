@@ -468,6 +468,12 @@ def semantic_reverify(
     the one write path where a memory can silently shrink to zero citations (becoming
     staleness-exempt) with nobody watching. Both stay ``[]`` on demote (nothing is
     re-derived) and on any refusal.
+
+    ``dropped_gone``/``dropped_not_derived`` (LIF-4) ride along the same way — the WHY
+    behind each drop, partitioned by ``reverify_file`` where the repo index is in scope.
+    This function has no ``repo_files`` outside the ``reverify_file`` call, so the split
+    cannot be recomputed downstream; dropping it here is what left the shared renderer
+    asserting "no longer in the repo" about files that were never missing.
     """
     result = {
         "name": name,
@@ -475,6 +481,8 @@ def semantic_reverify(
         "cleared": False,
         "cited": [],
         "dropped_citations": [],
+        "dropped_gone": [],
+        "dropped_not_derived": [],
         "invalidated": False,
         "invalid_after": None,
         "edge_written": False,
@@ -516,6 +524,11 @@ def semantic_reverify(
             result["cleared"] = rv["changed"]
             result["cited"] = rv["cited"]
             result["dropped_citations"] = rv["dropped_citations"]
+            # LIF-4: carry the producer's partition through. This surface has no repo_files
+            # of its own to re-derive it from — dropping it here is what forced the renderer
+            # to guess "no longer in the repo" for every drop.
+            result["dropped_gone"] = rv["dropped_gone"]
+            result["dropped_not_derived"] = rv["dropped_not_derived"]
         if outcome == "demote":
             # LIF-1: the demote verdict OWNS its terminal state — close the validity
             # window on the memory itself so recall's pre-cut penalty (the EXISTING
@@ -795,7 +808,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         # re-derivation that dropped citations must be as loud here as on the provenance CLI.
         from .provenance import citation_rot_lines
 
-        for ln in citation_rot_lines(base, r["cited"], r["dropped_citations"], dry_run=args.dry_run):
+        for ln in citation_rot_lines(base, r, dry_run=args.dry_run):
             print(ln)
         return 0
 

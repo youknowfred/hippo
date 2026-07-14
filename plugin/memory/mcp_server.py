@@ -1477,7 +1477,7 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
         # citations must be as loud here as on the provenance CLI.
         from .provenance import citation_rot_lines
 
-        out.extend(citation_rot_lines(base, r["cited"], r["dropped_citations"]))
+        out.extend(citation_rot_lines(base, r))
         return "\n".join(out)
     return "reconsolidate: pass action='worklist' (default) or action='reverify' (name=…, outcome=…)."
 

@@ -942,6 +942,8 @@ def backfill_file(
         "changed": False,
         "cited": [],
         "dropped_citations": [],
+        "dropped_gone": [],
+        "dropped_not_derived": [],
         "source_commit": None,
         "source_commit_time": None,
         "error": None,
@@ -954,6 +956,8 @@ def backfill_file(
         cited = cited_paths_for_body(body, repo_files, basename_index)
         rel = os.path.relpath(path, repo_root)
         dropped: List[str] = []
+        gone: List[str] = []
+        not_derived: List[str] = []
         if refresh and _has_cited_paths(split_frontmatter(text)[0] or []):
             fm = parse_frontmatter(text)
             if not fm:
@@ -974,6 +978,9 @@ def backfill_file(
                 if sc is None:
                     sc, sct = git_head_with_time(repo_root)
             dropped = [p for p in _frontmatter_cited_paths(fm) if p not in cited]
+            # LIF-4: partition HERE, where repo_files is in scope. The renderer cannot do it
+            # — reconsolidate and the MCP tool call it with no repo index in hand.
+            gone, not_derived = partition_dropped(dropped, repo_files)
             text = _strip_provenance(text)  # drop old provenance; body untouched
         else:
             # A file with no commit history yet (just created by write_memory, or
@@ -996,6 +1003,8 @@ def backfill_file(
             {
                 "cited": cited,
                 "dropped_citations": dropped,
+                "dropped_gone": gone,
+                "dropped_not_derived": not_derived,
                 "source_commit": sc,
                 "source_commit_time": sct,
                 "changed": changed,
@@ -1171,6 +1180,8 @@ def reverify_file(
         "changed": False,
         "cited": [],
         "dropped_citations": [],
+        "dropped_gone": [],
+        "dropped_not_derived": [],
         "source_commit": None,
         "source_commit_time": None,
         "last_verified": None,
@@ -1196,6 +1207,8 @@ def reverify_file(
         sc, sct = git_head_with_time(repo_root)
         cited = cited_paths_for_body(body, repo_files, basename_index)
         dropped = [p for p in _frontmatter_cited_paths(fm) if p not in cited]
+        # LIF-4: partition where repo_files is in scope — see backfill_file.
+        gone, not_derived = partition_dropped(dropped, repo_files)
         stripped = _strip_invalid_after(_strip_provenance(text))
         # RET-6: last_verified is write-once — a memory that already carries one keeps its
         # FIRST confirmation timestamp; only an as-yet-never-verified memory gets stamped.
@@ -1232,6 +1245,8 @@ def reverify_file(
             {
                 "cited": cited,
                 "dropped_citations": dropped,
+                "dropped_gone": gone,
+                "dropped_not_derived": not_derived,
                 "source_commit": sc,
                 "source_commit_time": sct,
                 "last_verified": lv,
@@ -1258,34 +1273,96 @@ def reverify_file(
     return result
 
 
-def citation_rot_lines(
-    name: str, cited_after: List[str], dropped: List[str], *, dry_run: bool = False
-) -> List[str]:
-    """The ONE rendering of a per-file citation-drop event (LIF-3).
+def partition_dropped(dropped: List[str], repo_files: set) -> Tuple[List[str], List[str]]:
+    """Split dropped citations into ``(gone, not_derived)`` — LIF-4.
 
-    Shared by this module's CLI (``--refresh`` / ``--refresh-one`` / ``--reverify``) and
-    ``reconsolidate``'s ``--reverify`` so the loud line cannot drift between surfaces.
-    ``dropped`` is a result's ``dropped_citations``; ``cited_after`` its re-derived
-    ``cited``. A drop to ZERO is called out distinctly: with no cited_paths left,
-    ``find_stale`` has nothing to watch — the memory becomes staleness-EXEMPT, the worst
-    rot state, not a cosmetic shrink. Returns ``[]`` when nothing was dropped.
+    ``gone``        — the path is NOT in the repo file index: renamed or deleted. LIF-3's
+                      original case, and the only one "no longer in the repo" describes.
+    ``not_derived`` — the path IS still in the repo, but the body no longer yields a token
+                      for it. Causes: an extractor gap (it cannot produce the token at all),
+                      a hand-edited frontmatter entry being overwritten by the re-derivation,
+                      a body edit that removed the mention, or ambiguity-by-addition (a new
+                      same-basename file makes a bare citation ambiguous, which
+                      ``resolve_citations`` drops by documented design).
+
+    The distinction is not cosmetic: ``gone`` means go look at the code, ``not_derived``
+    means go look at hippo or at the memory's body. Reporting the second as the first sends
+    the reader hunting for a deletion that never happened.
     """
+    gone = [p for p in dropped if p not in repo_files]
+    not_derived = [p for p in dropped if p in repo_files]
+    return gone, not_derived
+
+
+def _rot_clause(paths: List[str], verb: str, reason: str, *, emphasise_all: bool = False) -> str:
+    shown = ", ".join(paths[:6])
+    more = f" (+{len(paths) - 6} more)" if len(paths) > 6 else ""
+    count = f"ALL {len(paths)}" if emphasise_all else str(len(paths))
+    return f"{verb} {count} cited path(s) {reason} ({shown}{more})"
+
+
+def citation_rot_lines(name: str, result: dict, *, dry_run: bool = False) -> List[str]:
+    """The ONE rendering of a per-file citation-drop event (LIF-3/LIF-4).
+
+    Shared by this module's CLI (``--refresh`` / ``--refresh-one`` / ``--reverify``),
+    ``reconsolidate``'s ``--reverify`` and the ``reconsolidate`` MCP tool, so the loud line
+    cannot drift between surfaces. Takes a producer ``result`` dict whole — the partition is
+    computed where ``repo_files`` is in scope (``backfill_file`` / ``reverify_file``), never
+    re-guessed here, because two of the four call sites have no repo index to check against.
+
+    LIF-4: this used to assert every dropped path was "no longer in the repo" while
+    ``dropped`` was computed as a set-difference against the re-derived list — a membership
+    test that never ran, over an oracle (``repo_files``) that was a parameter of the very
+    function that computed it. A citation the extractor simply failed to re-derive was
+    reported as a deleted file. ``staleness.find_citation_rot`` — this function's own
+    self-declared sibling — earns the same phrase with a real membership test; this one
+    borrowed the sentence without the test.
+
+    A drop to ZERO is still called out distinctly: with no cited_paths left, ``find_stale``
+    has nothing to watch — the memory becomes staleness-EXEMPT, the worst rot state, not a
+    cosmetic shrink. Returns ``[]`` when nothing was dropped.
+    """
+    dropped = result.get("dropped_citations") or []
     if not dropped:
         return []
+    cited_after = result.get("cited") or []
+    # Fall back to "all gone" only if a producer predates the partition — never re-derive it
+    # here from a repo index this function does not have.
+    gone = result.get("dropped_gone")
+    not_derived = result.get("dropped_not_derived")
+    if gone is None and not_derived is None:
+        gone, not_derived = dropped, []
+    gone, not_derived = list(gone or []), list(not_derived or [])
+
     verb = "would drop" if dry_run else "dropped"
-    shown = ", ".join(dropped[:6])
-    more = f" (+{len(dropped) - 6} more)" if len(dropped) > 6 else ""
+    # "ALL n" only when this single cause accounts for the whole drop AND nothing survived —
+    # with two causes in play neither one is "all", and claiming otherwise is the same kind
+    # of unearned assertion LIF-4 exists to remove.
+    def _all(paths):
+        return not cited_after and len(paths) == len(dropped)
+
+    clauses = []
+    if gone:
+        clauses.append(_rot_clause(gone, verb, "no longer in the repo", emphasise_all=_all(gone)))
+    if not_derived:
+        clauses.append(
+            _rot_clause(
+                not_derived,
+                verb,
+                "still in the repo but no longer derived from the body — an extractor gap, "
+                "a hand-edited frontmatter entry being overwritten, or the body no longer "
+                "citing them",
+                emphasise_all=_all(not_derived),
+            )
+        )
+    head = f"⚠ citation rot — {name}: " + "; ".join(clauses)
     if not cited_after:
         state = "would be" if dry_run else "is now"
         return [
-            f"⚠ citation rot — {name}: {verb} ALL {len(dropped)} cited path(s), no longer in "
-            f"the repo ({shown}{more}) — cited_paths {state} EMPTY, so this memory is EXEMPT "
-            "from staleness tracking until its body cites current code again"
+            f"{head} — cited_paths {state} EMPTY, so this memory is EXEMPT from staleness "
+            "tracking until its body cites current code again"
         ]
-    return [
-        f"⚠ citation rot — {name}: {verb} {len(dropped)} cited path(s) no longer in the repo "
-        f"({shown}{more}); {len(cited_after)} citation(s) remain"
-    ]
+    return [f"{head}; {len(cited_after)} citation(s) remain"]
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -1340,7 +1417,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"reverify {base}: {verb} source_commit -> HEAD ({(r['source_commit'] or '')[:9]})")
         else:
             print(f"reverify {base}: already current (no change)")
-        for ln in citation_rot_lines(base, r["cited"], r["dropped_citations"], dry_run=args.dry_run):
+        for ln in citation_rot_lines(base, r, dry_run=args.dry_run):
             print(ln)
         return 0
 
@@ -1357,7 +1434,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"refresh-one {base}: {verb} cited_paths ({len(r['cited'])} citation(s)); source_commit unchanged")
         else:
             print(f"refresh-one {base}: already current (no change)")
-        for ln in citation_rot_lines(base, r["cited"], r["dropped_citations"], dry_run=args.dry_run):
+        for ln in citation_rot_lines(base, r, dry_run=args.dry_run):
             print(ln)
         return 0
 
@@ -1379,7 +1456,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"citation rot         : {len(rotted)} file(s) {'would drop' if args.dry_run else 'dropped'} cited path(s)")
         for r in rotted:
             for ln in citation_rot_lines(
-                os.path.basename(r["path"]), r["cited"], r["dropped_citations"], dry_run=args.dry_run
+                os.path.basename(r["path"]), r, dry_run=args.dry_run
             ):
                 print(f"  {ln}")
     return 0
