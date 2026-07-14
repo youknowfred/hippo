@@ -710,28 +710,20 @@ def add_typed_relation(path: str, relation: str, target: str, *, dry_run: bool =
             fm2 = fm_lines[:key_idx] + [f"{indent}{relation}: {value}"] + fm_lines[end:]
         else:
             # Fresh key: nest under an existing `metadata:` block when present, else append
-            # top-level — the exact insertion walk backfill_text/set_invalid_after use.
-            meta_idx = next(
-                (i for i, ln in enumerate(fm_lines) if re.match(r"^metadata\s*:\s*$", ln)), None
-            )
-            if meta_idx is not None:
-                indent = "  "
-                last = meta_idx
-                j = meta_idx + 1
-                while j < len(fm_lines):
-                    ln = fm_lines[j]
-                    if ln.strip() == "" or not ln.startswith((" ", "\t")):
-                        break
-                    m = re.match(r"^(\s+)\S", ln)
-                    if m:
-                        indent = m.group(1)
-                    last = j
-                    j += 1
-                fm2 = fm_lines[: last + 1] + [f"{indent}{relation}: {value}"] + fm_lines[last + 1:]
-            else:
-                fm2 = fm_lines + [f"{relation}: {value}"]
+            # top-level. COR-9: this was a hand-copy of backfill_text/set_invalid_after's
+            # walk and shared its indent bug; all four now call the one primitive.
+            from .provenance import insert_frontmatter_keys
+
+            fm2 = insert_frontmatter_keys(fm_lines, [f"{relation}: {value}"])
 
         new_text = "\n".join([lines[0]] + fm2 + lines[close:])
+        from .provenance import _frontmatter_damage
+
+        # COR-9: a typed-edge write owns exactly the relation key it was asked to set.
+        damage = _frontmatter_damage(text, new_text, {relation})
+        if damage:
+            result["error"] = f"refusing to write: {damage} — this is a hippo bug, please report it"
+            return result
         result["changed"] = new_text != text
         if result["changed"] and not dry_run:
             with open(path, "w", encoding="utf-8") as fh:

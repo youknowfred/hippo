@@ -734,53 +734,79 @@ def backfill_text(
     if source_commit_time is not None:
         new_keys.append(f"source_commit_time: {json.dumps(source_commit_time)}")
 
-    # Locate a `metadata:` block; if present, the new keys nest under it.
+    return "\n".join([lines[0]] + insert_frontmatter_keys(fm, new_keys) + lines[close:]), True
+
+
+_PROVENANCE_KEY_RE = re.compile(r"^(\s*)(?:cited_paths|source_commit|source_commit_time)\s*:")
+_INVALID_AFTER_KEY_RE = re.compile(r"^(\s*)invalid_after\s*:")
+_BLOCK_ITEM_RE = re.compile(r"^(\s*)-\s")
+# An indented KEY line — deliberately NOT `^(\s+)\S`, which also matches a block-list item
+# (`    - keep-me`) and so reports the ITEM's indent as the block's key indent. See
+# ``insert_frontmatter_keys``.
+_INDENTED_KEY_RE = re.compile(r"^(\s+)(?!-\s)\S")
+
+
+def insert_frontmatter_keys(fm: List[str], new_keys: List[str]) -> List[str]:
+    """Insert rendered ``key: value`` strings into frontmatter lines ``fm``.
+
+    Nests them under an existing ``metadata:`` block when there is one (matching that
+    block's own key indent), else appends them top-level. Returns new lines; the caller
+    re-joins around the fences, so the body is untouched.
+
+    COR-9: this is the ONE implementation of a walk that had four hand-copied copies
+    (``backfill_text``, ``_stamp_last_verified``, ``staleness.set_invalid_after``,
+    ``links.add_typed_relation``), all sharing one bug — they took the indent from the last
+    INDENTED line rather than the last indented KEY. Given::
+
+        metadata:
+          tags:
+            - keep-me
+
+    the old walk read ``    - keep-me`` and indented the new keys to four spaces, emitting a
+    mapping inside a sequence — frontmatter that does not parse. The block-style
+    ``cited_paths`` bug made this reachable on ordinary corpus files, but the defect is
+    independent of it: any memory whose ``metadata:`` block ENDS in a block list hit it.
+    """
     meta_idx = next((i for i, ln in enumerate(fm) if re.match(r"^metadata\s*:\s*$", ln)), None)
-    if meta_idx is not None:
-        indent = "  "
-        last = meta_idx
-        j = meta_idx + 1
-        while j < len(fm):
-            ln = fm[j]
-            if ln.strip() == "" or not ln.startswith((" ", "\t")):
-                break
-            m = re.match(r"^(\s+)\S", ln)
-            if m:
-                indent = m.group(1)
-            last = j
-            j += 1
-        new = [f"{indent}{k}" for k in new_keys]
-        fm2 = fm[: last + 1] + new + fm[last + 1:]
-    else:
-        fm2 = fm + new_keys
-
-    new_text = "\n".join([lines[0]] + fm2 + lines[close:])
-    return new_text, True
+    if meta_idx is None:
+        return fm + list(new_keys)
+    indent = "  "
+    last = meta_idx
+    j = meta_idx + 1
+    while j < len(fm):
+        ln = fm[j]
+        if ln.strip() == "" or not ln.startswith((" ", "\t")):
+            break
+        m = _INDENTED_KEY_RE.match(ln)
+        if m:
+            indent = m.group(1)
+        last = j
+        j += 1
+    return fm[: last + 1] + [f"{indent}{k}" for k in new_keys] + fm[last + 1:]
 
 
-def _strip_provenance(text: str) -> str:
-    """Remove any existing cited_paths/source_commit/source_commit_time lines (body verbatim)."""
-    if not text.startswith(_FENCE):
-        return text
-    lines = text.split("\n")
-    close = next((i for i in range(1, len(lines)) if lines[i].strip() == _FENCE), None)
-    if close is None:
-        return text
-    fm = [
-        ln
-        for ln in lines[1:close]
-        if not re.match(r"\s*(cited_paths|source_commit|source_commit_time)\s*:", ln)
-    ]
-    return "\n".join([lines[0]] + fm + lines[close:])
+def strip_frontmatter_keys(text: str, key_re) -> str:
+    """Drop every frontmatter key matching ``key_re`` — AND the block-style continuation
+    lines that ARE its value — leaving the body byte-identical.
 
+    COR-9. A per-LINE filter is not sufficient, and that is the whole bug this replaces. A
+    block-style value::
 
-def _strip_invalid_after(text: str) -> str:
-    """Remove any existing ``invalid_after`` line from the frontmatter (body verbatim).
+        cited_paths:
+          - a.py
+          - b.py
 
-    Used ONLY by ``reverify_file`` — a genuine human-confirmed re-verification re-opens the
-    soft-invalidation validity window. Deliberately NOT applied in ``backfill_file``'s
-    ``--refresh`` path: a mechanical citation re-derivation (e.g. after a resolver fix) must
-    never silently clear a soft-invalidation flag without an actual content re-verification.
+    has only its KEY line matched, so a filter leaves ``- a.py`` orphaned under whichever
+    key precedes it. YAML then does one of two things, both silent: it folds the items into
+    that key's value (turning a ``last_verified`` date into a list of paths), or it refuses
+    the document outright — at which point ``parse_frontmatter`` degrades to ``{}`` by
+    design and the memory loses its name, type and provenance while still reading fine to a
+    human. ``staleness.find_unparseable`` then reports the wreck, which is detection of a
+    state this function MANUFACTURED from a healthy file.
+
+    The continuation-aware walk is not new here: ``links.add_typed_relation`` and
+    ``dream_generate`` both do it and say so in their docstrings. This is the oldest member
+    of that family and never got the fix; it is now the shared primitive for all of them.
     """
     if not text.startswith(_FENCE):
         return text
@@ -788,8 +814,101 @@ def _strip_invalid_after(text: str) -> str:
     close = next((i for i in range(1, len(lines)) if lines[i].strip() == _FENCE), None)
     if close is None:
         return text
-    fm = [ln for ln in lines[1:close] if not re.match(r"\s*invalid_after\s*:", ln)]
-    return "\n".join([lines[0]] + fm + lines[close:])
+    fm = lines[1:close]
+    out: List[str] = []
+    i = 0
+    while i < len(fm):
+        m = key_re.match(fm[i])
+        if not m:
+            out.append(fm[i])
+            i += 1
+            continue
+        key_indent = len(m.group(1))
+        inline = re.sub(r"\s+#.*$", "", fm[i].split(":", 1)[1]).strip()
+        i += 1
+        if inline:
+            continue  # flow style (`key: [a, b]`) — the value lives on the key line
+        # Block style (a bare `key:`): consume the `- item` lines that are its value. A
+        # sibling key ends the run (it is not a `- ` line), as does any dedent below the
+        # key's own indent — those items belong to something else.
+        while i < len(fm):
+            bm = _BLOCK_ITEM_RE.match(fm[i])
+            if not bm or len(bm.group(1)) < key_indent:
+                break
+            i += 1
+    return "\n".join([lines[0]] + out + lines[close:])
+
+
+def _fm_scopes(fm: dict):
+    """``[(prefix, mapping)]`` for both frontmatter schemas — top level, and ``metadata:``."""
+    out = [("", fm)]
+    if isinstance(fm.get("metadata"), dict):
+        out.append(("metadata.", fm["metadata"]))
+    return out
+
+
+def _frontmatter_damage(before: str, after: str, may_change) -> Optional[str]:
+    """Describe the damage a rewrite would do to keys its writer does not own — or None.
+
+    COR-9, the OUTPUT symmetry of the refuse-unparseable INPUT guards in ``backfill_file``
+    and ``reverify_file``: those refuse to rewrite an already-broken file, this refuses to
+    CREATE one. ``may_change`` names the keys THIS writer is entitled to touch; every other
+    key must survive with its value byte-identical.
+
+    Checking "does the output still parse" is NOT enough, and that is the whole reason this
+    takes ``may_change``. A dropped block-list key leaves its ``- item`` lines orphaned, and
+    YAML resolves that two ways depending on what precedes them:
+
+      - the orphans sit under a key with an inline value  -> the document does not parse,
+        ``parse_frontmatter`` degrades to ``{}``, and the memory loses everything at once;
+      - the orphans FOLD into that key as a multi-line plain scalar -> the document parses
+        perfectly and ``last_verified`` is now the string
+        ``"2026-07-01 - src/a.py - src/b.py"``.
+
+    The second is the dangerous one: no parse check can see it, and the file reads fine to a
+    human. So the invariant is value-level, not parse-level.
+    """
+    if split_frontmatter(before)[0] is None:
+        return None
+    fm_before = parse_frontmatter(before)
+    if not fm_before:
+        return None  # already broken on the way in — the input guards own that case
+    fm_after = parse_frontmatter(after)
+    if not fm_after:
+        return "it would no longer parse (it parses now)"
+    allowed = set(may_change) | {"metadata"}  # `metadata:` itself is compared key-by-key below
+    for prefix, scope_before in _fm_scopes(fm_before):
+        scope_after = fm_after if prefix == "" else (fm_after.get("metadata") or {})
+        for key, val in scope_before.items():
+            if key in allowed:
+                continue
+            if key not in scope_after:
+                return f"it would silently DROP the `{prefix}{key}` key"
+            if scope_after[key] != val:
+                return (
+                    f"it would silently CHANGE `{prefix}{key}` from {val!r} "
+                    f"to {scope_after[key]!r}"
+                )
+    return None
+
+
+_PROVENANCE_OWNED = frozenset({"cited_paths", "source_commit", "source_commit_time"})
+
+
+def _strip_provenance(text: str) -> str:
+    """Remove any existing cited_paths/source_commit/source_commit_time keys (body verbatim)."""
+    return strip_frontmatter_keys(text, _PROVENANCE_KEY_RE)
+
+
+def _strip_invalid_after(text: str) -> str:
+    """Remove any existing ``invalid_after`` key from the frontmatter (body verbatim).
+
+    Used ONLY by ``reverify_file`` — a genuine human-confirmed re-verification re-opens the
+    soft-invalidation validity window. Deliberately NOT applied in ``backfill_file``'s
+    ``--refresh`` path: a mechanical citation re-derivation (e.g. after a resolver fix) must
+    never silently clear a soft-invalidation flag without an actual content re-verification.
+    """
+    return strip_frontmatter_keys(text, _INVALID_AFTER_KEY_RE)
 
 
 def backfill_file(
@@ -830,6 +949,7 @@ def backfill_file(
     try:
         with open(path, "r", encoding="utf-8") as fh:
             text = fh.read()
+        original = text  # COR-9: `text` is re-assigned by the strip below; the guard needs this
         _, body = split_frontmatter(text)
         cited = cited_paths_for_body(body, repo_files, basename_index)
         rel = os.path.relpath(path, repo_root)
@@ -865,6 +985,13 @@ def backfill_file(
             if sc is None:
                 sc, sct = git_head_with_time(repo_root)
         new_text, changed = backfill_text(text, cited, sc, sct)
+        damage = _frontmatter_damage(original, new_text, _PROVENANCE_OWNED) if changed else None
+        if damage:
+            # COR-9: a backfill owns the three provenance keys and nothing else. If the
+            # rewrite would touch anything else, never write it — refuse loudly, exactly as
+            # the unparseable-INPUT guard above does.
+            result["error"] = f"refusing to write: {damage} — this is a hippo bug, please report it"
+            return result
         result.update(
             {
                 "cited": cited,
@@ -991,24 +1118,7 @@ def _stamp_last_verified(text: str, ts: str) -> str:
     if _has_last_verified(fm):
         return text
     new_key = f"last_verified: {json.dumps(ts)}"
-    meta_idx = next((i for i, ln in enumerate(fm) if re.match(r"^metadata\s*:\s*$", ln)), None)
-    if meta_idx is not None:
-        indent = "  "
-        last = meta_idx
-        j = meta_idx + 1
-        while j < len(fm):
-            ln = fm[j]
-            if ln.strip() == "" or not ln.startswith((" ", "\t")):
-                break
-            m = re.match(r"^(\s+)\S", ln)
-            if m:
-                indent = m.group(1)
-            last = j
-            j += 1
-        fm2 = fm[: last + 1] + [f"{indent}{new_key}"] + fm[last + 1:]
-    else:
-        fm2 = fm + [new_key]
-    return "\n".join([lines[0]] + fm2 + lines[close:])
+    return "\n".join([lines[0]] + insert_frontmatter_keys(fm, [new_key]) + lines[close:])
 
 
 # --------------------------------------------------------------------------- #
@@ -1106,6 +1216,18 @@ def reverify_file(
             pre_stamp = _stamp_last_verified(stripped, lv)
         new_text, _ = backfill_text(pre_stamp, cited, sc, sct)
         changed = new_text != text  # idempotent: a no-op when provenance already matches
+        # COR-9 — see backfill_file's guard. A re-verify additionally owns `invalid_after`
+        # (it strips it: a confirmation re-opens the validity window) and MAY ADD
+        # `last_verified` — but only when the file carries none. RET-6's stamp is write-once,
+        # so an EXISTING last_verified is a key this writer does not own, and saying otherwise
+        # would blind the guard to a fold INTO it (the exact damage seen in the wild).
+        owned = _PROVENANCE_OWNED | {"invalid_after"}
+        if not _has_last_verified(fm_lines):
+            owned = owned | {"last_verified"}
+        damage = _frontmatter_damage(text, new_text, owned) if changed else None
+        if damage:
+            result["error"] = f"refusing to write: {damage} — this is a hippo bug, please report it"
+            return result
         result.update(
             {
                 "cited": cited,

@@ -62,7 +62,9 @@ import os
 import re
 from typing import List, Optional, Tuple
 
-_STEER_LINE_RE = re.compile(r"^\s*steer\s*:")
+# Group 1 is the key's indent — `provenance.strip_frontmatter_keys` reads it to decide
+# which `- item` continuation lines belong to this key (COR-9).
+_STEER_LINE_RE = re.compile(r"^(\s*)steer\s*:")
 
 # RCH-5 inbound: the committed lockfile of installed pack sources. Lives IN the corpus
 # dir (committable — teammates share which packs/versions this project runs, and update's
@@ -120,9 +122,11 @@ def pack_extract(
     try:
         from .portability import scan_portability
         from .provenance import (
+            _frontmatter_damage,
             _strip_provenance,
             parse_frontmatter,
             resolve_dirs,
+            strip_frontmatter_keys,
         )
         from .staleness import read_invalid_after, read_provenance
 
@@ -192,10 +196,32 @@ def pack_extract(
                 entry["reason"] = "; ".join(reasons)
             entries.append(entry)
             portable = _strip_provenance(text)
-            portable = "\n".join(
-                ln for ln in portable.split("\n") if not _STEER_LINE_RE.match(ln)
-            )
+            # COR-9: `steer` is scalar today, but strip it with the same continuation-aware
+            # primitive rather than a bare line filter — a pack ships to another machine,
+            # so a frontmatter break here lands in someone else's corpus.
+            portable = strip_frontmatter_keys(portable, _STEER_LINE_RE)
             portable = _stamp_pack(portable, pack, version)
+            # COR-9: extraction owns the provenance triplet (stripped — a pack is portable),
+            # `steer` (stripped — project-local), and the two pack stamps it adds. A pack
+            # ships to someone else's corpus, so damage here lands on another machine.
+            damage = _frontmatter_damage(
+                text,
+                portable,
+                {
+                    "cited_paths",
+                    "source_commit",
+                    "source_commit_time",
+                    "steer",
+                    "pack",
+                    "pack_version",
+                },
+            )
+            if damage:
+                result["error"] = (
+                    f"refusing to extract {name}: {damage} — this is a hippo bug, "
+                    "please report it"
+                )
+                return result
             os.makedirs(dest, exist_ok=True)
             with open(os.path.join(dest, f"{name}.md"), "w", encoding="utf-8") as fh:
                 fh.write(portable)

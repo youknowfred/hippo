@@ -1386,3 +1386,223 @@ def test_cli_refresh_dry_run_rot_line_says_would_drop_and_writes_nothing(repo, m
 
 def test_citation_rot_lines_empty_when_nothing_dropped():
     assert P.citation_rot_lines("m.md", ["src/a.py"], []) == []
+
+
+# --------------------------------------------------------------------------- #
+# COR-9 — a frontmatter writer may never emit frontmatter that does not parse
+# --------------------------------------------------------------------------- #
+import pytest  # noqa: E402
+
+_PROV_KEYS = {"cited_paths", "source_commit", "source_commit_time"}
+
+# The same memory in both frontmatter schemas the corpus actually uses, each with a
+# BLOCK-STYLE cited_paths (what a hand edit, an import, or a foreign pack produces —
+# hippo's own _flow_list never emits it, which is why this went unseen for 14 minor
+# versions) and a non-provenance key both directly above and below it.
+_BLOCK_FLAT = (
+    "---\n"
+    "name: M\n"
+    "last_verified: 2026-07-01\n"
+    "cited_paths:\n"
+    "  - src/keep.py\n"
+    "  - src/dep.py\n"
+    "tags:\n"
+    "  - keep-me\n"
+    "---\n"
+    "body cites src/keep.py and src/dep.py\n"
+)
+_BLOCK_META = (
+    "---\n"
+    "name: M\n"
+    "metadata:\n"
+    "  type: project\n"
+    "  last_verified: 2026-07-01\n"
+    "  cited_paths:\n"
+    "    - src/keep.py\n"
+    "    - src/dep.py\n"
+    "  tags:\n"
+    "    - keep-me\n"
+    "---\n"
+    "body cites src/keep.py and src/dep.py\n"
+)
+
+
+def _prov_free(fm: dict) -> dict:
+    """``fm`` minus the three provenance keys, at BOTH schema levels."""
+    out = {k: v for k, v in fm.items() if k not in _PROV_KEYS}
+    if isinstance(out.get("metadata"), dict):
+        out["metadata"] = {k: v for k, v in out["metadata"].items() if k not in _PROV_KEYS}
+    return out
+
+
+def test_strip_provenance_consumes_block_style_continuation_lines():
+    """A block-style value IS its `- item` lines. Dropping only the key line orphans them:
+    YAML then folds them into the PRECEDING key or refuses the document outright — and
+    parse_frontmatter swallows that, so the memory silently loses name/type/provenance."""
+    assert P.parse_frontmatter(_BLOCK_META)  # sanity: it parses going in
+    out = P._strip_provenance(_BLOCK_META)
+    assert "- src/keep.py" not in out  # the value left with its key
+    fm = P.parse_frontmatter(out)
+    assert fm, "frontmatter must still parse after the strip"
+    assert fm["metadata"]["type"] == "project"  # not swallowed by the orphans
+    assert fm["metadata"]["last_verified"] is not None  # the fold victim in the wild
+    assert "cited_paths" not in fm["metadata"]
+
+
+def test_strip_provenance_leaves_an_adjacent_block_list_alone():
+    """The walk must stop at a sibling key — `tags:` sits directly below `cited_paths:`
+    at the same indent, and its items must survive intact."""
+    for text in (_BLOCK_FLAT, _BLOCK_META):
+        fm = P.parse_frontmatter(P._strip_provenance(text))
+        scope = fm.get("metadata") if "metadata" in fm else fm
+        assert scope["tags"] == ["keep-me"]
+
+
+def test_strip_provenance_flow_style_is_unchanged_behaviour():
+    """Regression control: flow style has no continuation lines, so nothing else moves."""
+    text = '---\nname: M\ncited_paths: ["a.py"]\ntags:\n  - keep-me\n---\nbody\n'
+    fm = P.parse_frontmatter(P._strip_provenance(text))
+    assert fm == {"name": "M", "tags": ["keep-me"]}
+
+
+@pytest.mark.parametrize("schema", ["flat", "metadata"], ids=["flat", "metadata-block"])
+def test_refresh_of_block_style_cited_paths_preserves_every_other_key(repo, memory_dir, schema):
+    """AC (COR-9): --refresh over a block-style cited_paths must not cost the file any
+    non-provenance key. Before the fix this rewrote `type`/`last_verified` into garbage or
+    made the file unparseable outright."""
+    write_file(repo, "src/keep.py", "k = 1\n")
+    write_file(repo, "src/dep.py", "v = 1\n")
+    git_commit(repo, "deps", 1_700_000_000)
+    text = _BLOCK_FLAT if schema == "flat" else _BLOCK_META
+    target = write_file(repo, ".claude/memory/m.md", text)
+    git_commit(repo, "memory", 1_700_000_001)
+    before = P.parse_frontmatter(text)
+    assert before  # the fixture is valid going in
+
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    res = P.backfill_file(target, repo, repo_files, basename_index, refresh=True)
+    assert res["error"] is None
+
+    after = P.parse_frontmatter(open(target, encoding="utf-8").read())
+    assert after, "the rewritten file must still parse"
+    assert _prov_free(after) == _prov_free(before)
+    # and the re-derivation actually landed
+    assert sorted(res["cited"]) == ["src/dep.py", "src/keep.py"]
+
+
+@pytest.mark.parametrize("schema", ["flat", "metadata"], ids=["flat", "metadata-block"])
+def test_reverify_of_block_style_cited_paths_preserves_every_other_key(repo, memory_dir, schema):
+    """AC (COR-9): the same guarantee on the reverify path — a re-verify must never destroy
+    the memory the human just confirmed is correct."""
+    write_file(repo, "src/keep.py", "k = 1\n")
+    write_file(repo, "src/dep.py", "v = 1\n")
+    git_commit(repo, "deps", 1_700_000_000)
+    text = _BLOCK_FLAT if schema == "flat" else _BLOCK_META
+    target = write_file(repo, ".claude/memory/m.md", text)
+    git_commit(repo, "memory", 1_700_000_001)
+    before = P.parse_frontmatter(text)
+
+    res = _reverify_one(memory_dir, repo, "m")
+    assert res["error"] is None
+
+    after = P.parse_frontmatter(open(target, encoding="utf-8").read())
+    assert after, "the rewritten file must still parse"
+    # last_verified is stamped by reverify (RET-6) — compare everything else.
+    a, b = _prov_free(after), _prov_free(before)
+    for d in (a, b):
+        d.pop("last_verified", None)
+        if isinstance(d.get("metadata"), dict):
+            d["metadata"].pop("last_verified", None)
+    assert a == b
+
+
+def _pre_cor9_line_filter(text):
+    """The pre-COR-9 ``_strip_provenance``, verbatim: a per-LINE filter."""
+    return "\n".join(
+        ln
+        for ln in text.split("\n")
+        if not P.re.match(r"\s*(cited_paths|source_commit|source_commit_time)\s*:", ln)
+    )
+
+
+def test_writer_refuses_rather_than_silently_fold_orphans_into_a_neighbour(
+    repo, memory_dir, monkeypatch
+):
+    """AC (COR-9), the net itself — and specifically the SILENT half.
+
+    Orphaned `- item` lines do not always break the parse. When the key above them carries an
+    inline scalar, YAML FOLDS them into it as a multi-line plain scalar: the file parses
+    perfectly and `last_verified` quietly becomes "2026-07-01 - src/keep.py - src/dep.py".
+    A parse check cannot see that, which is why the guard is value-level. Re-introduce the
+    old line filter and the writer must refuse, naming the key it would have damaged."""
+    write_file(repo, "src/keep.py", "k = 1\n")
+    write_file(repo, "src/dep.py", "v = 1\n")
+    git_commit(repo, "deps", 1_700_000_000)
+    target = write_file(repo, ".claude/memory/m.md", _BLOCK_META)
+    git_commit(repo, "memory", 1_700_000_001)
+    on_disk_before = open(target, encoding="utf-8").read()
+
+    monkeypatch.setattr(P, "_strip_provenance", _pre_cor9_line_filter)
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    res = P.backfill_file(target, repo, repo_files, basename_index, refresh=True)
+
+    assert res["error"] is not None, "the pre-COR-9 fold must not be written"
+    assert "refusing to write" in res["error"]
+    assert "last_verified" in res["error"]  # the guard NAMES the damaged key
+    assert res["changed"] is False
+    assert open(target, encoding="utf-8").read() == on_disk_before  # untouched
+
+
+def test_writer_refuses_rather_than_emit_unparseable_frontmatter(repo, memory_dir, monkeypatch):
+    """AC (COR-9), the LOUD half: when the orphans do break the parse, refuse too."""
+    write_file(repo, "src/keep.py", "k = 1\n")
+    git_commit(repo, "dep", 1_700_000_000)
+    # `metadata:` ending in the block list, with no trailing sibling key — the orphans land
+    # under `last_verified` and the re-inserted keys land inside the folded scalar's run.
+    text = (
+        "---\nname: M\nmetadata:\n  type: project\n  last_verified: 2026-07-01\n"
+        "  cited_paths:\n    - src/keep.py\n---\nbody cites src/keep.py\n"
+    )
+    target = write_file(repo, ".claude/memory/m.md", text)
+    git_commit(repo, "memory", 1_700_000_001)
+    on_disk_before = open(target, encoding="utf-8").read()
+
+    monkeypatch.setattr(P, "_strip_provenance", _pre_cor9_line_filter)
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    res = P.backfill_file(target, repo, repo_files, basename_index, refresh=True)
+
+    assert res["error"] is not None and "refusing to write" in res["error"]
+    assert res["changed"] is False
+    assert open(target, encoding="utf-8").read() == on_disk_before  # untouched
+
+
+def test_every_writer_preserves_parseability_across_the_corpus_shapes(repo, memory_dir):
+    """Property (COR-9): for every frontmatter shape the corpus uses, a file whose
+    frontmatter parses BEFORE any writer must parse AFTER it."""
+    write_file(repo, "src/keep.py", "k = 1\n")
+    write_file(repo, "src/dep.py", "v = 1\n")
+    git_commit(repo, "deps", 1_700_000_000)
+    shapes = {
+        "block-flat": _BLOCK_FLAT,
+        "block-meta": _BLOCK_META,
+        "flow-flat": '---\nname: M\ncited_paths: ["src/keep.py"]\n---\nbody src/keep.py\n',
+        "flow-meta": '---\nname: M\nmetadata:\n  type: project\n  cited_paths: ["src/keep.py"]\n'
+        "---\nbody src/keep.py\n",
+        "same-indent-seq": "---\nname: M\ncited_paths:\n- src/keep.py\n---\nbody src/keep.py\n",
+        "no-provenance": "---\nname: M\ntype: project\n---\nbody src/keep.py\n",
+    }
+    for label, text in shapes.items():
+        target = write_file(repo, f".claude/memory/{label}.md", text)
+    git_commit(repo, "memories", 1_700_000_001)
+    repo_files, basename_index = P.build_repo_file_index(repo)
+
+    for label in shapes:
+        target = os.path.join(memory_dir, f"{label}.md")
+        for writer in ("refresh", "reverify"):
+            if writer == "refresh":
+                res = P.backfill_file(target, repo, repo_files, basename_index, refresh=True)
+            else:
+                res = P.reverify_file(target, repo, repo_files, basename_index)
+            assert res["error"] is None, f"{label}/{writer}: {res['error']}"
+            after = P.parse_frontmatter(open(target, encoding="utf-8").read())
+            assert after, f"{label}/{writer} emitted unparseable frontmatter"
