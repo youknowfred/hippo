@@ -264,7 +264,13 @@ def init_project(
     elif gate_root is None:
         result["trust"] = {"status": "inapplicable"}
     elif trust.is_trusted(gate_root):
-        result["trust"] = {"status": "already_trusted"}
+        # SEC-15: "trusted" is a CORPUS-level marker; recall additionally withholds any
+        # file whose content drifted from the SEC-6 per-file fingerprint. Reporting only
+        # the marker made init print a green "recall active" over a corpus that was
+        # withholding memories — a conclusion it never computed, with the oracle
+        # (untrusted_changes) already taking both arguments we hold right here.
+        drift = trust.untrusted_changes(gate_root, memory_dir)
+        result["trust"] = {"status": "already_trusted", "drift": drift}
     elif not existing:
         ok = trust.mark_trusted(gate_root, memory_dir=memory_dir, origin="init")
         result["trust"] = {"status": "marked_init" if ok else "write_failed"}

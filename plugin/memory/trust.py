@@ -337,6 +337,29 @@ def record_authored_write(
         return False
 
 
+def drift_withholding_line(drift: dict, *, max_names: int = 6) -> Optional[str]:
+    """The ONE rendering of "this corpus is trusted but recall is withholding files".
+
+    SEC-15. Takes an ``untrusted_changes`` delta; returns None when nothing is withheld
+    (legacy fingerprint-less record, or no drift) so callers can treat None as "genuinely
+    clean". Shared by the SessionStart drift producer and the ``init`` MCP tool, which used
+    to read only the corpus-level boolean and print a green "recall active" over a corpus
+    that was actively withholding memories.
+    """
+    changed, added = drift.get("changed") or [], drift.get("added") or []
+    if not drift.get("baseline") or not (changed or added):
+        return None
+    withheld = changed + [f"{n} (new)" for n in added]
+    shown = ", ".join(withheld[:max_names])
+    more = f" (+{len(withheld) - max_names} more)" if len(withheld) > max_names else ""
+    return (
+        f"🔒 Memory trust drift: {len(changed)} changed / {len(added)} new memory "
+        f"file(s) since you trusted this corpus (a git pull? a hand edit?) — recall is "
+        f"WITHHOLDING them until you re-review: {shown}{more}. Run /hippo:doctor to see "
+        "what each would inject and re-consent."
+    )
+
+
 def untrusted_changes(repo_root: Optional[str], memory_dir: str) -> dict:
     """The drift delta between the corpus's live content and its consent baseline.
 

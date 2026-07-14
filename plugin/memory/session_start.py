@@ -1159,18 +1159,7 @@ def trust_drift_producer(
         if gate_root is None or trust.trust_all() or not trust.is_trusted(gate_root):
             return None
         drift = trust.untrusted_changes(gate_root, memory_dir)
-        changed, added = drift.get("changed") or [], drift.get("added") or []
-        if not drift.get("baseline") or not (changed or added):
-            return None
-        withheld = changed + [f"{n} (new)" for n in added]
-        shown = ", ".join(withheld[:_MAX_TRUST_DRIFT_NAMES])
-        more = f" (+{len(withheld) - _MAX_TRUST_DRIFT_NAMES} more)" if len(withheld) > _MAX_TRUST_DRIFT_NAMES else ""
-        return (
-            f"🔒 Memory trust drift: {len(changed)} changed / {len(added)} new memory "
-            f"file(s) since you trusted this corpus (a git pull? a hand edit?) — recall is "
-            f"WITHHOLDING them until you re-review: {shown}{more}. Run /hippo:doctor to see "
-            "what each would inject and re-consent."
-        )
+        return trust.drift_withholding_line(drift, max_names=_MAX_TRUST_DRIFT_NAMES)
     except Exception:
         return None
 

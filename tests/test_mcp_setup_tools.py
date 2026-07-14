@@ -562,3 +562,57 @@ def test_sibling_surface_installs_are_named(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(me))
     assert BOOT._sibling_installs(str(me)) == [str(sib)]
     assert "sibling surface" in _text(_call("bootstrap", {"action": "status"}))
+
+
+# --------------------------------------------------------------------------- #
+# SEC-15 — init reports the drift it can compute
+# --------------------------------------------------------------------------- #
+def test_init_on_trusted_corpus_with_no_drift_still_says_recall_active(corpus, monkeypatch):
+    """Control: the green check must survive when it is actually TRUE."""
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    md, rr = resolve_dirs()
+    assert T.mark_trusted(T.gate_repo_root(md, rr), memory_dir=md, origin="init")
+    text = _text(_call("init", {}))
+    assert "already trusted — recall active" in text
+    assert "WITHHOLDING" not in text
+
+
+def test_init_on_trusted_corpus_reports_the_per_file_drift_it_is_withholding(
+    corpus, monkeypatch
+):
+    """AC (SEC-15): "trusted" is the CORPUS-level marker; the SEC-6 per-file fingerprint
+    quarantines drifted/new files independently, and init does not clear it. Reading only
+    the boolean made init print a green "recall active" over a corpus that was actively
+    withholding memories — the exact false all-clear seen in the field, with
+    untrusted_changes (both args already in hand) never called."""
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    md, rr = resolve_dirs()
+    assert T.mark_trusted(T.gate_repo_root(md, rr), memory_dir=md, origin="init")
+    # drift the corpus the way a user's own session does: edit one, add one
+    with open(os.path.join(corpus, "deploy_runbook.md"), "w") as fh:
+        fh.write(_mem("deploy_runbook", "deploys now go through the blue-green lane"))
+    with open(os.path.join(corpus, "new_note.md"), "w") as fh:
+        fh.write(_mem("new_note", "a memory written after the consent baseline"))
+
+    text = _text(_call("init", {}))
+    assert "recall active" not in text, "recall is NOT active for the withheld files"
+    assert "WITHHOLDING" in text
+    assert "deploy_runbook" in text and "new_note" in text
+    assert "1 changed / 1 new" in text
+    # and it still tells the truth about the marker itself
+    assert "already trusted" in text
+
+
+def test_init_drift_line_is_the_same_rendering_sessionstart_uses(corpus, monkeypatch):
+    """One state, one rendering — init must not grow a second dialect for this."""
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    md, rr = resolve_dirs()
+    assert T.mark_trusted(T.gate_repo_root(md, rr), memory_dir=md, origin="init")
+    with open(os.path.join(corpus, "deploy_runbook.md"), "w") as fh:
+        fh.write(_mem("deploy_runbook", "deploys now go through the blue-green lane"))
+
+    from memory.session_start import trust_drift_producer
+
+    banner = trust_drift_producer(md, rr)
+    init_text = _text(_call("init", {}))
+    assert banner and banner in init_text
