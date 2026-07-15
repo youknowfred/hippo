@@ -399,6 +399,22 @@ def _has_memory_content(memory_dir: Optional[str]) -> bool:
         return False
 
 
+def _root_of_memory_dir(memory_dir: Optional[str]) -> Optional[str]:
+    """Invert ``provenance._candidate_memory_dir``: ``<root>/.claude/memory`` -> ``<root>``.
+
+    COR-10. Returns ``memory_dir`` unchanged when it does not have that tail (a custom
+    HIPPO_MEMORY_DIR has no root to invert, and must keep keying on itself).
+    """
+    if not memory_dir:
+        return memory_dir
+    norm = os.path.normpath(memory_dir)
+    head, tail = os.path.split(norm)
+    parent_head, parent_tail = os.path.split(head)
+    if tail == "memory" and parent_tail == ".claude":
+        return parent_head
+    return norm
+
+
 def gate_repo_root(memory_dir: Optional[str], repo_root: Optional[str] = None) -> Optional[str]:
     """Resolve the ``repo_root`` the trust gate keys on, or None if the gate is inapplicable.
 
@@ -416,6 +432,22 @@ def gate_repo_root(memory_dir: Optional[str], repo_root: Optional[str] = None) -
     behavior. An EMPTY / non-corpus non-git dir (the resolve_dirs fallback for a non-git
     project, and every hermetic tmp path) has nothing injectable, so it stays inapplicable
     (None) — hermetic recall paths are untouched. Never raises.
+
+    COR-10 — the key is derived from ``memory_dir`` when ``repo_root`` is omitted, NOT taken
+    from ``memory_dir`` itself. That difference only shows on the SEC-12 non-git branch, and
+    it silently broke the gate there: ``git_root`` walks UP, so on a git corpus
+    ``gate_repo_root(md)`` and ``gate_repo_root(md, rr)`` agree by luck, but ``_corpus_key``
+    does not walk anywhere — a caller that omitted ``repo_root`` keyed the fold on
+    ``<root>/.claude/memory`` while every gate READER keyed on ``<root>``. Two keys, one
+    corpus: the fold extended a consent record nobody reads, so an authored write stayed
+    quarantined forever and ``record_authored_write`` returned False with nothing to say.
+
+    Deriving it here rather than making every caller pass the pair (four already did not:
+    links, staleness, dream, dream_generate) is what makes the two IMPOSSIBLE to disagree.
+    The inversion is exact and layout-guaranteed: ``_candidate_memory_dir(d)`` is
+    ``d/.claude/memory``, so a memory_dir with that tail has root ``dirname(dirname(...))``.
+    A corpus at any other path (HIPPO_MEMORY_DIR pointed somewhere custom) has no root to
+    invert, so it keys on itself exactly as before.
     """
     try:
         start = repo_root or memory_dir
@@ -429,7 +461,7 @@ def gate_repo_root(memory_dir: Optional[str], repo_root: Optional[str] = None) -
         if os.environ.get(_TRUST_NONGIT_ENV) or trust_all():
             return None
         if _has_memory_content(memory_dir):
-            return _corpus_key(start)
+            return _corpus_key(repo_root or _root_of_memory_dir(memory_dir))
         return None
     except Exception:
         return None

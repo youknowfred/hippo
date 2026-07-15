@@ -507,16 +507,12 @@ def test_stale_cache_not_written_for_a_nonexistent_memory_dir():
     assert not os.path.isdir("does")
 
 
-def test_main_heals_empty_baselines_side_effect(tmp_path, monkeypatch, capsys):
-    """COR-1: SessionStart heals residual source_commit:"" baselines to HEAD (covers
-    hand-authored/pre-COR-1 memories) as a side effect, before the index refresh."""
+def _repo_with_empty_baseline(tmp_path):
+    """A git repo whose one memory carries a residual `source_commit: ""`."""
     import subprocess
-
-    from memory.staleness import read_provenance
 
     from .conftest import git_commit, write_file
 
-    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     repo = str(tmp_path / "repo")
     os.makedirs(repo)
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
@@ -531,11 +527,53 @@ def test_main_heals_empty_baselines_side_effect(tmp_path, monkeypatch, capsys):
         '---\nname: residual\ndescription: "left empty by a pre-COR-1 backfill"\n'
         'cited_paths: ["src/x.py"]\nsource_commit: ""\n---\nbody\n',
     )
+    return repo, md, path, head
+
+
+def test_main_does_not_write_to_memory_frontmatter(tmp_path, monkeypatch, capsys):
+    """AC (COR-10): a hook must not write to the corpus.
+
+    SessionStart used to heal residual `source_commit: ""` baselines here. trust.py states
+    "hooks NEVER consent", which is only sound if hooks never WRITE — the heal changed the
+    file's bytes, drifted it off its own SEC-6 fingerprint, and the trust-drift banner a few
+    lines later then asked the user "a git pull? a hand edit?" about hippo's own write. The
+    heal is still correct and still available; it moved to where a human runs it."""
+    from memory.staleness import read_provenance
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    repo, md, path, head = _repo_with_empty_baseline(tmp_path)
+    before = open(path, encoding="utf-8").read()
     monkeypatch.setattr(S, "resolve_dirs", lambda: (md, repo))
 
     assert S.main() == 0
+    after = open(path, encoding="utf-8").read()
+    assert after == before, "the hook wrote to a memory file"
+    # still unhealed — that IS the point: doctor names it, the CLI heals it, a human decides
+    assert 'source_commit: ""' in after
+    assert not read_provenance(after)[1]
+
+
+def test_cli_heal_baselines_still_heals(tmp_path, monkeypatch):
+    """COR-10: the heal did not disappear — it became a thing you run on purpose."""
+    from memory import provenance as P
+    from memory.staleness import read_provenance
+
+    repo, md, path, head = _repo_with_empty_baseline(tmp_path)
+    monkeypatch.setattr(P, "resolve_dirs", lambda: (md, repo))
+    assert P.main(["--heal-baselines"]) == 0
     _, sc = read_provenance(open(path, encoding="utf-8").read())
     assert sc == head
+
+
+def test_doctor_reports_the_empty_baseline_the_hook_no_longer_heals(tmp_path, monkeypatch):
+    """COR-10: removing the hook's write must not make the state invisible."""
+    from memory import doctor as D
+
+    repo, md, path, head = _repo_with_empty_baseline(tmp_path)
+    r = D.check_empty_baselines(D.DoctorContext(memory_dir=md, repo_root=repo))
+    assert r["status"] == "warn"
+    assert "residual" in r["message"]
+    assert "--heal-baselines" in r["message"]  # names the command the human runs
 
 
 # --------------------------------------------------------------------------- #

@@ -1912,3 +1912,100 @@ def test_the_extractor_fix_is_not_a_corpus_format_event(tmp_path):
     corpus-wide rewrite — the axis to say so did not exist."""
     assert P.CORPUS_FORMAT_VERSION == 5  # unmoved by ORC-1/DRV-1
     assert P.CITATION_DERIVATION_VERSION == 2  # the axis that DID move
+
+
+# --------------------------------------------------------------------------- #
+# MIG-1 — the consented re-derivation (the third verb)
+# --------------------------------------------------------------------------- #
+def _mig_repo(repo):
+    """A repo whose memory cites package.json — derivable by v2, invisible to v1."""
+    write_file(repo, "package.json", '{"name":"x"}\n')
+    write_file(repo, "src/keep.py", "k = 1\n")
+    c1 = git_commit(repo, "code", 1_700_000_000)
+    target = write_file(
+        repo,
+        ".claude/memory/m.md",
+        f'---\nname: M\ncited_paths: ["src/keep.py"]\nsource_commit: "{c1}"\n'
+        "---\nbody cites src/keep.py and package.json\n",
+    )
+    git_commit(repo, "memory", 1_700_000_001)
+    return target, c1
+
+
+def test_rederive_preview_is_read_only_and_attributes_the_diff(repo, memory_dir):
+    target, c1 = _mig_repo(repo)
+    before_bytes = open(target, encoding="utf-8").read()
+    repo_files, bn = P.build_repo_file_index(repo)
+    pv = P.rederive_preview(target, repo, repo_files, bn)
+    assert pv["changed"] is True
+    assert pv["gained"] == ["package.json"]  # the v1 extractor could not see it
+    assert pv["lost"] == []
+    assert open(target, encoding="utf-8").read() == before_bytes  # read-only
+
+
+def test_rederive_worklist_lists_only_memories_that_would_change(repo, memory_dir):
+    _mig_repo(repo)
+    write_file(repo, ".claude/memory/clean.md",
+               '---\nname: C\ncited_paths: ["src/keep.py"]\nsource_commit: "x"\n'
+               "---\nbody cites src/keep.py\n")
+    git_commit(repo, "second memory", 1_700_000_002)
+    work = P.rederive_worklist(memory_dir, repo)
+    assert [w["name"] for w in work] == ["m"]  # `clean` already matches — not busywork
+
+
+def test_rederive_preserves_the_staleness_baseline_unlike_reverify(repo, memory_dir):
+    """AC (MIG-1), half one. --reverify would re-baseline source_commit to HEAD and SILENTLY
+    CLEAR every staleness flag the corpus carries — trading a citation bug for total loss of
+    the signal citations exist to serve. The migration must not."""
+    target, c1 = _mig_repo(repo)
+    write_file(repo, "src/keep.py", "k = 2\n")  # drift the cited code
+    head = git_commit(repo, "drift", 1_700_000_100)
+    assert head != c1
+
+    repo_files, bn = P.build_repo_file_index(repo)
+    r = P.rederive_file(target, repo, repo_files, bn)
+    assert r["error"] is None and r["changed"] is True
+    assert "package.json" in r["cited"]  # the derivation landed
+    _, sc = read_provenance(open(target, encoding="utf-8").read())
+    assert sc == c1, "the staleness baseline must survive the migration"
+
+
+def test_rederive_folds_the_reviewed_bytes_so_the_migration_does_not_quarantine(
+    repo, memory_dir, monkeypatch
+):
+    """AC (MIG-1), half two. --refresh re-derives correctly and never folds (correctly — it
+    is a bulk pass, and trust forbids self-consent), so it would leave every memory it fixed
+    withheld by recall, under a banner blaming the user for hippo's write. The per-item verb
+    folds, because a human just reviewed THIS file's diff."""
+    from memory import trust as T
+
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    target, c1 = _mig_repo(repo)
+    gate_root = T.gate_repo_root(memory_dir, repo)
+    assert T.mark_trusted(gate_root, memory_dir=memory_dir, origin="init")
+    assert not T.untrusted_changes(gate_root, memory_dir)["changed"]  # clean baseline
+
+    repo_files, bn = P.build_repo_file_index(repo)
+    assert P.rederive_file(target, repo, repo_files, bn)["changed"] is True
+
+    drift = T.untrusted_changes(gate_root, memory_dir)
+    assert drift["changed"] == [], "the migration quarantined the memory it just fixed"
+
+
+def test_rederive_dry_run_writes_nothing(repo, memory_dir):
+    target, c1 = _mig_repo(repo)
+    before = open(target, encoding="utf-8").read()
+    repo_files, bn = P.build_repo_file_index(repo)
+    r = P.rederive_file(target, repo, repo_files, bn, dry_run=True)
+    assert r["changed"] is True  # it WOULD change...
+    assert open(target, encoding="utf-8").read() == before  # ...but nothing was written
+
+
+def test_snapshot_copies_the_corpus_before_a_migration(repo, memory_dir):
+    _mig_repo(repo)
+    dest = P.snapshot_corpus(memory_dir, "20260714")
+    assert dest.endswith("memory.pre-cite2-20260714")
+    assert os.path.isfile(os.path.join(dest, "m.md"))
+    assert open(os.path.join(dest, "m.md"), encoding="utf-8").read() == open(
+        os.path.join(memory_dir, "m.md"), encoding="utf-8"
+    ).read()

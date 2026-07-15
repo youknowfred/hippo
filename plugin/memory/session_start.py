@@ -1479,16 +1479,14 @@ def main(
         if session_id is None:
             session_id = stdin_session_id
         memory_dir, repo_root = resolve_dirs()
-        # Heal residual EMPTY staleness baselines (source_commit: "") to HEAD once
-        # resolvable — an empty baseline leaves a memory invisible to staleness forever
-        # (COR-1). Runs BEFORE the index refresh so the healed frontmatter is what gets
-        # hashed. Frontmatter-only, per-line, never touches a real baseline, never raises.
-        try:
-            from .provenance import heal_empty_baselines
-
-            heal_empty_baselines(memory_dir, repo_root)
-        except Exception:
-            pass
+        # COR-10: this hook used to call heal_empty_baselines() here — a WRITE to memory
+        # frontmatter from an automatic pass. trust.py states "hooks NEVER consent", which
+        # is only sound if hooks never WRITE: the heal changed the file's bytes, drifted it
+        # from its own SEC-6 fingerprint, and the trust-drift banner a few lines below then
+        # asked the user "a git pull? a hand edit?" about a write hippo had just done to
+        # itself. The heal is still available and still correct — it moved to the
+        # provenance CLI (--heal-baselines), which doctor's empty-baseline check names, so
+        # the write happens where a human can consent to it.
         # Bring the recall index up to date so a memory written during the LAST session is
         # indexed (recallable) this one. Incremental, OFFLINE, bounded, never-downgrade,
         # never-raises — a fast no-op when nothing changed. (Side effect, not a producer.)

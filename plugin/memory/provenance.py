@@ -1515,6 +1515,144 @@ def citation_rot_lines(name: str, result: dict, *, dry_run: bool = False) -> Lis
     return [f"{head}; {len(cited_after)} citation(s) remain"]
 
 
+# --------------------------------------------------------------------------- #
+# MIG-1 — the consented re-derivation (the THIRD verb)
+# --------------------------------------------------------------------------- #
+def rederive_preview(path: str, repo_root: str, repo_files: set, basename_index: Dict[str, List[str]]) -> dict:
+    """What re-deriving ONE memory's citations WOULD change — read-only. Never raises.
+
+    ``{"name", "before", "after", "gained", "lost", "unresolved", "changed", "error"}``.
+    The review payload for the worklist below: the operator sees the attributed diff for
+    THIS memory and approves THIS memory, which is what makes the fold that follows a
+    legitimate SEC-6 consent rather than the gate consenting to itself.
+    """
+    out = {
+        "name": os.path.basename(path)[:-3],
+        "before": [], "after": [], "gained": [], "lost": [], "unresolved": [],
+        "changed": False, "error": None,
+    }
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        fm = parse_frontmatter(text)
+        if not fm:
+            out["error"] = "unparseable frontmatter — fix the YAML first"
+            return out
+        _, body = split_frontmatter(text)
+        before = _frontmatter_cited_paths(fm)
+        after = cited_paths_for_body(body, repo_files, basename_index)
+        out.update(
+            before=before,
+            after=after,
+            gained=[p for p in after if p not in before],
+            lost=[p for p in before if p not in after],
+            unresolved=unresolved_citations(body, repo_files, basename_index),
+            changed=sorted(before) != sorted(after),
+        )
+        return out
+    except Exception as exc:
+        out["error"] = str(exc)
+        return out
+
+
+def rederive_worklist(memory_dir: str, repo_root: str) -> List[dict]:
+    """Every memory whose citations would change under this plugin's extractor (MIG-1).
+
+    Read-only. The operator reviews these, then approves them ONE AT A TIME via
+    ``rederive_file`` — there is deliberately no "approve all".
+    """
+    repo_files, basename_index = build_repo_file_index(repo_root)
+    out = []
+    for path in _iter_memory_files(memory_dir):
+        pv = rederive_preview(path, repo_root, repo_files, basename_index)
+        if pv["changed"] or pv["error"]:
+            out.append(pv)
+    return out
+
+
+def rederive_file(
+    path: str,
+    repo_root: str,
+    repo_files: set,
+    basename_index: Dict[str, List[str]],
+    *,
+    dry_run: bool = False,
+) -> dict:
+    """Re-derive ONE memory's cited_paths after a human reviewed THIS memory's diff (MIG-1).
+
+    The third verb, and it exists because neither of the other two can carry a corpus-wide
+    extractor fix — they are each correct, and each wrong for this:
+
+      --refresh   re-derives and PRESERVES source_commit (right), but never folds the write
+                  into the consent baseline (right — it is a bulk pass, and
+                  trust.record_authored_write forbids that by name: "an unattended
+                  re-baseline would be the gate consenting to itself"). So it rewrites N
+                  files, drifts every one of them off its SEC-6 fingerprint, and recall
+                  WITHHOLDS them — handing the user N mystery quarantines whose banner
+                  blames "a git pull? a hand edit?" for hippo's own write.
+      --reverify  folds (right — a re-verify IS a per-item human review) but re-baselines
+                  source_commit to HEAD, which SILENTLY CLEARS every staleness flag the
+                  corpus is carrying. It would trade a citation bug for the total loss of
+                  the signal citations exist to serve.
+
+    This one re-derives + PRESERVES the baseline + folds — legitimate only because the
+    caller has shown the operator THIS file's attributed diff and taken THIS file's
+    approval. That is the same condition reverify_file's own comment names ("a re-verify IS
+    a per-item human review of this exact file"); the difference is what is being reviewed
+    (the citation diff, not the memory's content), so the staleness baseline is untouched.
+
+    NOT autonomous, and there is no bulk counterpart on purpose. Never raises.
+    """
+    result = {
+        "path": path, "name": os.path.basename(path)[:-3], "changed": False,
+        "cited": [], "dropped_citations": [], "dropped_gone": [],
+        "dropped_not_derived": [], "error": None,
+    }
+    try:
+        # backfill_file(refresh=True) already does exactly the derivation half correctly —
+        # it preserves source_commit, partitions the loss (LIF-4), and refuses to damage a
+        # key it does not own (COR-9). Reuse it rather than re-implement its rules.
+        bf = backfill_file(path, repo_root, repo_files, basename_index, dry_run=dry_run, refresh=True)
+        result.update({k: bf[k] for k in
+                       ("changed", "cited", "dropped_citations", "dropped_gone",
+                        "dropped_not_derived", "error") if k in bf})
+        if bf.get("error"):
+            return result
+        if bf.get("changed") and not dry_run:
+            # SEC-6: the operator reviewed THIS file's diff and approved THIS file, so its
+            # new bytes join the consent baseline. Without this the migration quarantines
+            # every memory it fixes. WITH it on a bulk pass it would be self-consent — which
+            # is why this call lives here, behind a per-item approval, and NOT in
+            # backfill_file (whose --refresh path has no reviewer).
+            try:
+                from .trust import record_authored_write
+
+                record_authored_write(os.path.dirname(path), path, repo_root)
+            except Exception:
+                pass
+        return result
+    except Exception as exc:
+        result["error"] = str(exc)
+        return result
+
+
+def snapshot_corpus(memory_dir: str, stamp: str) -> str:
+    """Copy the corpus to a sibling ``memory.pre-cite2-<stamp>/`` before the first write.
+
+    MANDATORY before MIG-1's first non-dry write, and not merely belt-and-braces: hippo
+    SHIPS expecting a committed corpus (``.claude/memory/`` is deliberately absent from
+    init's GITIGNORE_ENTRIES, and the README says the corpus "stays committed in git"), so
+    upstream a re-derivation is undoable with ``git checkout``. A corpus the user chose to
+    gitignore has NO undo — and that is the first corpus this migration will ever touch.
+    Returns the snapshot path. Raises on failure: no snapshot, no migration.
+    """
+    import shutil
+
+    dest = os.path.join(os.path.dirname(memory_dir), f"memory.pre-cite2-{stamp}")
+    shutil.copytree(memory_dir, dest)
+    return dest
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
@@ -1546,6 +1684,39 @@ def main(argv: Optional[List[str]] = None) -> int:
         "or not). Preserves source_commit exactly like --refresh does. NAME is the slug, with "
         "or without .md",
     )
+    parser.add_argument(
+        "--heal-baselines",
+        action="store_true",
+        help="COR-10: set source_commit to HEAD for memories whose baseline is EMPTY (a "
+        "memory with one is invisible to staleness forever). This used to run silently on "
+        "every SessionStart — a hook writing to memory frontmatter, which drifted each file "
+        "off its own SEC-6 fingerprint and then blamed the user for the drift. It is a "
+        "write, so it lives here, where you ran it on purpose.",
+    )
+    parser.add_argument(
+        "--rederive-worklist",
+        action="store_true",
+        help="MIG-1: list every memory whose cited_paths would CHANGE under this plugin's "
+        "extractor, with the attributed diff. Read-only — review this, then approve one "
+        "memory at a time with --rederive-one.",
+    )
+    parser.add_argument(
+        "--rederive-one",
+        metavar="NAME",
+        default=None,
+        help="MIG-1: re-derive ONE memory's cited_paths after you have reviewed ITS diff. "
+        "Re-derives + PRESERVES source_commit (unlike --reverify, which resets it to HEAD "
+        "and silently clears every staleness flag) + folds the reviewed bytes into the "
+        "consent baseline (unlike --refresh, which would leave the memory quarantined). "
+        "Per-item by design; there is no bulk form.",
+    )
+    parser.add_argument(
+        "--snapshot",
+        metavar="STAMP",
+        default=None,
+        help="MIG-1: copy the corpus to memory.pre-cite2-<STAMP>/ before migrating. A "
+        "gitignored corpus has no `git checkout` undo — take this first.",
+    )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--repo-root", default=None)
     args = parser.parse_args(argv)
@@ -1553,6 +1724,57 @@ def main(argv: Optional[List[str]] = None) -> int:
     md, repo = resolve_dirs()
     memory_dir = args.memory_dir or md
     repo_root = args.repo_root or repo
+
+    if args.snapshot:
+        try:
+            dest = snapshot_corpus(memory_dir, args.snapshot)
+            print(f"snapshot: {dest}")
+            return 0
+        except Exception as exc:
+            print(f"snapshot FAILED: {exc} — do not migrate without one")
+            return 1
+
+    if args.heal_baselines:
+        healed = heal_empty_baselines(memory_dir, repo_root)
+        print(f"healed {len(healed)} empty baseline(s)" + (f": {', '.join(healed)}" if healed else ""))
+        return 0
+
+    if args.rederive_worklist:
+        work = rederive_worklist(memory_dir, repo_root)
+        if not work:
+            print("re-derivation worklist: empty — every memory's citations already match "
+                  "this plugin's extractor.")
+            return 0
+        print(f"re-derivation worklist: {len(work)} memory(ies) would change\n")
+        for w in work:
+            if w["error"]:
+                print(f"  ✘ {w['name']}: {w['error']}")
+                continue
+            print(f"  {w['name']}")
+            if w["gained"]:
+                print(f"      + gains  : {', '.join(w['gained'])}")
+            if w["lost"]:
+                print(f"      - loses  : {', '.join(w['lost'])}")
+            if w["unresolved"]:
+                print(f"      ? unresolved in body: {', '.join(w['unresolved'])}")
+        print("\nReview each, then approve individually: "
+              "python -m memory.provenance --rederive-one <name>")
+        return 0
+
+    if args.rederive_one:
+        repo_files, basename_index = build_repo_file_index(repo_root)
+        name = args.rederive_one if args.rederive_one.endswith(".md") else f"{args.rederive_one}.md"
+        target = os.path.join(memory_dir, name)
+        r = rederive_file(target, repo_root, repo_files, basename_index, dry_run=args.dry_run)
+        base = os.path.basename(target)
+        if r["error"]:
+            print(f"rederive {base}: refused — {r['error']}")
+            return 1
+        verb = "would re-derive" if args.dry_run else "re-derived"
+        print(f"{verb} {base}: cited_paths = {r['cited']}")
+        for ln in citation_rot_lines(base, r, dry_run=args.dry_run):
+            print(ln)
+        return 0
 
     if args.reverify:
         repo_files, basename_index = build_repo_file_index(repo_root)
