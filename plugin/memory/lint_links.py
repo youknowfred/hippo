@@ -133,7 +133,12 @@ def health_line(report: dict) -> Optional[str]:
         examples = ", ".join(f"{d['relation']}: {d['target']}" for d in report["typed_dangling"][:3])
         more = "" if n_typed <= 3 else f" (+{n_typed - 3} more)"
         bits.append(f"{n_typed} dangling typed relation target(s): {examples}{more}")
-    tail = f"; {n_orphans} orphan memo(s)" if n_orphans else ""
+    # GRA-7: carry the qualifier. Bare "3 orphan memo(s)" reads as rot beside the genuine rot
+    # it is appended to, and it is not — this module's own header defines an orphan as "a
+    # memory with zero OUTBOUND wikilinks (nothing points out of it)", which is an ordinary
+    # state for a leaf memory and is why orphans alone deliberately do not fire this line at
+    # all (see the early return above). Say which thing it is.
+    tail = f"; {n_orphans} orphan memo(s) (no outbound links)" if n_orphans else ""
     return "🔗 Memory link health — " + "; ".join(bits) + tail + " (run `memory.lint_links`)."
 
 
