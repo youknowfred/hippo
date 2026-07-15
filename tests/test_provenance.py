@@ -1866,3 +1866,49 @@ def test_backfill_unresolved_is_empty_when_everything_resolves(repo, memory_dir)
     res = P.backfill_file(target, repo, repo_files, basename_index)
     assert res["cited"] == ["src/tracked.py"]
     assert res["extracted_but_unresolved"] == []
+
+
+# --------------------------------------------------------------------------- #
+# DRV-2 — version the derivation
+# --------------------------------------------------------------------------- #
+def test_undeclared_corpus_reads_as_derivation_1(tmp_path):
+    """Every corpus written before DRV-2 WAS derived by the v1 extractor, so the default is
+    the truth, not a guess — the same reasoning as read_corpus_format's missing-marker == 1."""
+    md = str(tmp_path)
+    assert P.read_cite_derivation(md) == 1
+
+
+def test_cite_derivation_and_corpus_format_do_not_clobber_each_other(tmp_path):
+    """AC (DRV-2): two independent axes share one marker file. A whole-object writer would
+    silently erase the other's answer — which is the same class of bug as the frontmatter
+    strip this whole workstream started from."""
+    md = str(tmp_path)
+    assert P.write_corpus_format(md, 5)
+    assert P.write_cite_derivation(md, 2)
+    assert P.read_corpus_format(md) == 5  # survived the derivation stamp
+    assert P.read_cite_derivation(md) == 2
+    assert P.write_corpus_format(md, 6)  # a later FORMAT migration must not reset derivation
+    assert P.read_cite_derivation(md) == 2
+    assert P.read_corpus_format(md) == 6
+    assert json.loads(open(P.format_marker_path(md), encoding="utf-8").read()) == {
+        "corpus_format": 6,
+        "cite_derivation": 2,
+    }
+
+
+def test_cite_derivation_marker_degrades_to_1_not_an_exception(tmp_path):
+    md = str(tmp_path)
+    with open(P.format_marker_path(md), "w", encoding="utf-8") as fh:
+        fh.write("{not json at all")
+    assert P.read_cite_derivation(md) == 1
+    assert P.read_corpus_format(md) == 1
+
+
+def test_the_extractor_fix_is_not_a_corpus_format_event(tmp_path):
+    """Pins the distinction that DRV-2 exists to make. By the repo's OWN criterion
+    (packs.py: "deliberately NOT a corpus_format bump — the memory-file shapes are
+    unchanged") the ORC-1 fix changes VALUES, not shape, so it must not move
+    CORPUS_FORMAT_VERSION. That is exactly why it felt like a regex tweak and was in fact a
+    corpus-wide rewrite — the axis to say so did not exist."""
+    assert P.CORPUS_FORMAT_VERSION == 5  # unmoved by ORC-1/DRV-1
+    assert P.CITATION_DERIVATION_VERSION == 2  # the axis that DID move

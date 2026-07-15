@@ -663,6 +663,26 @@ def check_format_version(ctx: DoctorContext) -> Dict[str, str]:
                 "plugin/memory/README.md ('Corpus format versioning')"
             )
 
+        # DRV-2: the derivation is a SEPARATE axis from the shape. A corpus can be format-
+        # current and still hold citations produced by an extractor that has since been
+        # fixed — which is precisely the state that had no name, and so went unnoticed for
+        # 14 minor versions.
+        from .provenance import CITATION_DERIVATION_VERSION, read_cite_derivation
+
+        cite = read_cite_derivation(ctx.memory_dir)
+        if cite >= CITATION_DERIVATION_VERSION:
+            parts.append(f"citation derivation current (v{cite})")
+        else:
+            status = "warn"
+            parts.append(
+                f"citation derivation is v{cite}, this plugin derives "
+                f"v{CITATION_DERIVATION_VERSION} — cited_paths in this corpus were produced "
+                "by the pre-ORC-1 extractor (blind to .json/.tsx/.jsx/.mjs and a leading "
+                "./), so some memories watch the wrong file and some are staleness-EXEMPT "
+                "on an empty cited_paths; re-derive per memory (it rewrites frontmatter, so "
+                "it is consent-gated and never automatic)"
+            )
+
         return {"status": status, "message": "; ".join(parts) + "."}
     except Exception as exc:
         return {"status": "warn", "message": f"format-version check failed: {exc}."}

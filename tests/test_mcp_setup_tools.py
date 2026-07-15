@@ -169,7 +169,7 @@ def fresh_project(repo, tmp_path, monkeypatch):
 
 def test_init_project_fresh_seeds_core_and_wires_machine(fresh_project, tmp_path, monkeypatch):
     from memory.init_project import init_project
-    from memory.provenance import CORPUS_FORMAT_VERSION
+    from memory.provenance import CITATION_DERIVATION_VERSION, CORPUS_FORMAT_VERSION
 
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     projects = str(tmp_path / "claude-projects")
@@ -180,7 +180,14 @@ def test_init_project_fresh_seeds_core_and_wires_machine(fresh_project, tmp_path
     for fname in ("user_role.md", "claude_is_memory_master.md", "MEMORY.md", "CONVENTIONS.md"):
         assert os.path.isfile(os.path.join(md, fname)), fname
     with open(os.path.join(md, ".format")) as fh:
-        assert json.load(fh) == {"corpus_format": CORPUS_FORMAT_VERSION}
+        # DRV-2: a FRESH corpus is stamped on both axes. Its memories will be written by
+        # this plugin's extractor, so it is derivation-current by construction and must not
+        # be nudged to re-derive citations it never had. (A PRE-EXISTING corpus is
+        # deliberately stamped with neither — see the skipped_existing_corpus branch.)
+        assert json.load(fh) == {
+            "corpus_format": CORPUS_FORMAT_VERSION,
+            "cite_derivation": CITATION_DERIVATION_VERSION,
+        }
     assert r["symlink"]["status"] == "created"
     assert r["symlink"]["expected_path"].startswith(projects)
     assert r["index"]["count"] == 2  # the two core memories; MEMORY.md/CONVENTIONS.md excluded

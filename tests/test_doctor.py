@@ -355,7 +355,7 @@ def test_abstention_floor_sanity_ok_when_corpus_abstains(repo, memory_dir, tmp_p
 
 
 def test_format_version_ok_when_current(repo, memory_dir, tmp_path, monkeypatch):
-    from memory.provenance import write_corpus_format
+    from memory.provenance import write_cite_derivation, write_corpus_format
 
     idx = str(tmp_path / ".memory-index")
     monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
@@ -367,6 +367,7 @@ def test_format_version_ok_when_current(repo, memory_dir, tmp_path, monkeypatch)
     # CORPUS_FORMAT_VERSION past the v1 baseline, an unstamped corpus correctly warns
     # (it lags the plugin — the doctor-driven migration surface), so stamp it here.
     assert write_corpus_format(memory_dir) is True
+    assert write_cite_derivation(memory_dir) is True  # DRV-2: the other axis
     r = D.check_format_version(_ctx(memory_dir, repo))
     assert r["status"] == "ok" and f"v{B.SCHEMA_VERSION}" in r["message"]
 
@@ -404,9 +405,33 @@ def test_format_version_reports_corpus_format_alongside_index(repo, memory_dir, 
     write_file(memory_dir, "a.md", _mem("a", "alpha"))
     B.build_index(memory_dir, idx)
     assert P.write_corpus_format(memory_dir) is True
+    # DRV-2: a fully-current corpus is current on BOTH axes — shape AND derivation.
+    assert P.write_cite_derivation(memory_dir) is True
     r = D.check_format_version(_ctx(memory_dir, repo))
     assert r["status"] == "ok"
     assert f"corpus format current (v{P.CORPUS_FORMAT_VERSION})" in r["message"]
+    assert f"citation derivation current (v{P.CITATION_DERIVATION_VERSION})" in r["message"]
+
+
+def test_format_version_warns_when_citations_predate_the_extractor_fix(
+    repo, memory_dir, tmp_path, monkeypatch
+):
+    """AC (DRV-2): format-current and derivation-stale are INDEPENDENT states, and the
+    second had no name before this. A corpus can be perfectly shaped and still hold
+    cited_paths produced by an extractor that read package.json as package.js."""
+    idx = str(tmp_path / ".memory-index")
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _seed(memory_dir)
+    write_file(memory_dir, "a.md", _mem("a", "alpha"))
+    B.build_index(memory_dir, idx)
+    assert P.write_corpus_format(memory_dir) is True  # shape current...
+    # ...derivation deliberately left undeclared == v1
+    r = D.check_format_version(_ctx(memory_dir, repo))
+    assert r["status"] == "warn"
+    assert f"corpus format current (v{P.CORPUS_FORMAT_VERSION})" in r["message"]
+    assert "citation derivation is v1" in r["message"]
+    assert "consent-gated" in r["message"]  # never presented as something hippo just does
 
 
 def test_format_version_warns_when_corpus_newer_than_plugin(repo, memory_dir, monkeypatch):

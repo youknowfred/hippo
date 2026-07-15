@@ -231,6 +231,51 @@ def corpus_format_producer(
     )
 
 
+def cite_derivation_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """DRV-2: this corpus's cited_paths were derived by an extractor this plugin has fixed.
+
+    The OPPOSITE direction to ``corpus_format_producer``, and deliberately louder than that
+    one's older-corpus case, because the two "older" states are not alike. An older
+    corpus_format is FINE — v2/v3/v4 are additive, so a v5 plugin reads a v1 corpus
+    correctly and there is nothing to warn about. An older cite_derivation is a live
+    DEGRADATION: those citations were produced by the pre-ORC-1 extractor, so some memories
+    watch the wrong file and some sit at ``cited_paths: []`` — staleness-EXEMPT — for no
+    reason but a regex. KPI-5's rule (never a silent degradation) is what makes this a
+    per-session line rather than a doctor-only note, the same reasoning
+    ``trust_drift_producer`` uses.
+
+    Routes to the re-derivation rather than doing it: re-deriving rewrites user data and is
+    per-item and consent-gated (MIG-1). Silent when the corpus is already current, when it
+    is ahead (that is corpus_format_producer's taint case, not this one), and when it holds
+    no memories at all — an EMPTY corpus has no citations, so naming the extractor that
+    derived them is a nudge about nothing. ``ctx`` (LIF-6) unused.
+    """
+    try:
+        from .provenance import (
+            CITATION_DERIVATION_VERSION,
+            _iter_memory_files,
+            read_cite_derivation,
+        )
+
+        declared = read_cite_derivation(memory_dir)
+        if declared >= CITATION_DERIVATION_VERSION:
+            return None
+        if next(_iter_memory_files(memory_dir), None) is None:
+            return None  # nothing was derived, so nothing needs re-deriving
+    except Exception:
+        return None
+    return (
+        f"🧬 Citation derivation — this corpus's cited_paths were derived by extractor "
+        f"v{declared}; this plugin derives v{CITATION_DERIVATION_VERSION}. v1 could not see "
+        "`.json`/`.tsx`/`.jsx` (it read package.json as package.js), `.mjs`/`.cjs` at all, or "
+        "a leading `./` — so some memories watch the wrong file and some carry an empty "
+        "cited_paths, which makes them EXEMPT from staleness tracking. Run /hippo:doctor to "
+        "review the re-derivation per memory (it rewrites frontmatter, so it asks first)."
+    )
+
+
 def integrity_producer(
     memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
 ) -> Optional[str]:
@@ -1167,6 +1212,7 @@ def trust_drift_producer(
 PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[str]]]] = [
     ("stale_venv", stale_venv_producer),  # environment-level — a stale venv taints everything below
     ("corpus_format", corpus_format_producer),  # a corpus NEWER than the plugin taints every reader below (COR-7)
+    ("cite_derivation", cite_derivation_producer),  # citations derived by a fixed-since extractor (DRV-2)
     ("integrity", integrity_producer),  # a malformed memory must not hide
     ("citation_rot", citation_rot_producer),  # cited paths gone from the repo (LIF-3) — find_unparseable's rot sibling
     ("trust_drift", trust_drift_producer),  # SEC-6: trusted corpus drifted from its consent baseline — recall is withholding files

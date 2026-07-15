@@ -518,10 +518,92 @@ def ensure_self_ignoring_dir(path: str) -> None:
 CORPUS_FORMAT_VERSION = 5
 _FORMAT_MARKER_NAME = ".format"
 
+# DRV-2 — the version of the DERIVATION, deliberately a separate axis from the format.
+#
+# `corpus_format` versions the SHAPE of a memory file, and its own history above says so:
+# v2/v3/v4 are each "purely ADDITIVE… the migration is just… stamping the marker". packs.py
+# states the criterion outright ("deliberately NOT a corpus_format bump — the memory-file
+# shapes are unchanged"). By that rule the ORC-1 extractor fix is NOT a format event: it
+# changes no shape, only VALUES.
+#
+# That is exactly the trap. Nothing versioned the derivation, so a corpus whose cited_paths
+# came from the shadowed regex and one derived by the fixed regex both declare
+# `{"corpus_format": 5}` and are indistinguishable. There was no question you could ask a
+# hippo corpus that meant "were these values produced by an extractor I trust?" — which is
+# why a 14-minor-version-old bug had to be found by hand, in another repo, by an agent
+# noticing a memory was watching the wrong file.
+#
+# History:
+#   1 — the shipped v1.14.0 extractor: no trailing boundary (so `package.json` derived as
+#       `package.js`, and `.tsx`/`.jsx`/`.json` were declared-but-unreachable), no
+#       mjs/cjs/mts/cts, no `./` normalisation.
+#   2 — ORC-1 + DRV-1: trailing `(?!\w|\.\w)`, the mjs family, `./` normalisation.
+#
+# Kept on the corpus-level marker rather than in each file's frontmatter: a per-file key
+# WOULD be a shape change (a real corpus_format v6), needs a corpus-wide rewrite just to
+# introduce, and answers a question that is not per-file anyway.
+CITATION_DERIVATION_VERSION = 2
+
 
 def format_marker_path(memory_dir: str) -> str:
-    """``<memory_dir>/.format`` — the corpus format marker's one canonical location."""
+    """``<memory_dir>/.format`` — the corpus marker's one canonical location."""
     return os.path.join(memory_dir, _FORMAT_MARKER_NAME)
+
+
+def _read_marker(memory_dir: str) -> dict:
+    """The marker file's raw dict; ``{}`` when absent/unreadable/wrong-shape. Never raises."""
+    try:
+        p = format_marker_path(memory_dir)
+        if not os.path.isfile(p):
+            return {}
+        with open(p, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_marker_keys(memory_dir: str, **keys) -> bool:
+    """Merge ``keys`` into the marker, PRESERVING every key already there.
+
+    Read-modify-write, not clobber: ``corpus_format`` and ``cite_derivation`` are
+    independent axes living in one file, and a writer that rewrote the whole object would
+    silently erase the other one's answer.
+    """
+    try:
+        data = _read_marker(memory_dir)
+        data.update(keys)
+        with open(format_marker_path(memory_dir), "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+            fh.write("\n")
+        return True
+    except Exception:
+        return False
+
+
+def read_cite_derivation(memory_dir: str) -> int:
+    """The corpus's declared citation-derivation version; ``1`` when undeclared (DRV-2).
+
+    An undeclared corpus IS derivation 1 — every corpus written before DRV-2 was derived by
+    the pre-ORC-1 extractor, so the default is the truth rather than a guess. Same
+    never-raise, degrade-to-baseline contract as ``read_corpus_format``.
+    """
+    v = _read_marker(memory_dir).get("cite_derivation")
+    return v if isinstance(v, int) and not isinstance(v, bool) else 1
+
+
+def write_cite_derivation(memory_dir: str, version: Optional[int] = None) -> bool:
+    """Stamp the citation-derivation version (default: this plugin's).
+
+    MUST be the LAST step of a completed re-derivation, never a fix on its own: stamping
+    cite_derivation=2 over citations that were derived by extractor 1 asserts exactly the
+    thing DRV-2 exists to let you verify. Like ``write_corpus_format``, deliberately has no
+    bulk-migration counterpart — see MIG-1's per-item worklist.
+    """
+    return _write_marker_keys(
+        memory_dir,
+        cite_derivation=int(version if version is not None else CITATION_DERIVATION_VERSION),
+    )
 
 
 def read_corpus_format(memory_dir: str) -> int:
@@ -533,19 +615,8 @@ def read_corpus_format(memory_dir: str) -> int:
     check reports against whatever this returns, so a garbled marker at worst reads as
     the baseline rather than blocking recall.
     """
-    try:
-        p = format_marker_path(memory_dir)
-        if not os.path.isfile(p):
-            return 1
-        with open(p, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        if isinstance(data, dict):
-            v = data.get("corpus_format")
-            if isinstance(v, int) and not isinstance(v, bool):
-                return v
-        return 1
-    except Exception:
-        return 1
+    v = _read_marker(memory_dir).get("corpus_format")
+    return v if isinstance(v, int) and not isinstance(v, bool) else 1
 
 
 def write_corpus_format(memory_dir: str, version: Optional[int] = None) -> bool:
@@ -555,15 +626,14 @@ def write_corpus_format(memory_dir: str, version: Optional[int] = None) -> bool:
     surface the failure rather than pretending the corpus is stamped. Deliberately has NO
     bulk-migration counterpart: stamping a NEWER version onto an old corpus is the final,
     explicit step of a doctor-driven migration, never something a hook or sweep does.
+
+    DRV-2: merges rather than clobbers — ``cite_derivation`` shares this file and is an
+    independent axis; a whole-object rewrite would erase it.
     """
-    try:
-        marker = format_marker_path(memory_dir)
-        with open(marker, "w", encoding="utf-8") as fh:
-            json.dump({"corpus_format": int(version if version is not None else CORPUS_FORMAT_VERSION)}, fh)
-            fh.write("\n")
-        return True
-    except Exception:
-        return False
+    return _write_marker_keys(
+        memory_dir,
+        corpus_format=int(version if version is not None else CORPUS_FORMAT_VERSION),
+    )
 
 
 def split_frontmatter(text: str) -> Tuple[Optional[List[str]], str]:

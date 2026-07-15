@@ -52,6 +52,22 @@ def _make_project(tmp_path, with_corpus: bool) -> str:
     if with_corpus:
         (memdir / "zebra_deploy_runbook.md").write_text(_MEMORY_MD, encoding="utf-8")
         (memdir / "MEMORY.md").write_text("# Memory Index\n\n## User\n", encoding="utf-8")
+        # A provisioned project is one /hippo:init has run on, and init stamps .format on
+        # BOTH axes (shape + DRV-2 citation derivation). Without the marker this fixture
+        # would model a corpus whose citations predate the extractor fix, and the
+        # never-nudges tests below would be asserting silence over a real degradation.
+        from memory.provenance import CITATION_DERIVATION_VERSION, CORPUS_FORMAT_VERSION
+
+        (memdir / ".format").write_text(
+            json.dumps(
+                {
+                    "corpus_format": CORPUS_FORMAT_VERSION,
+                    "cite_derivation": CITATION_DERIVATION_VERSION,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     return str(project)
 
 
@@ -412,9 +428,14 @@ class TestSessionEndHook:
         stdin = json.dumps({"session_id": "sess", "reason": "clear"})
         proc, project, _ = _run_hook(_SESSION_END_HOOK, stdin, tmp_path)
         _assert_contract(proc, "SessionEnd")
-        # Only the two seeded corpus files exist under .claude/memory/; nothing new landed there.
+        # Only the seeded corpus files exist under .claude/memory/; nothing new landed there.
+        # (.format is part of the seed — a provisioned project has one; see _make_project.)
         corpus = {r for r in _tree(project) if r.startswith(".claude/memory/")}
-        assert corpus == {".claude/memory/zebra_deploy_runbook.md", ".claude/memory/MEMORY.md"}
+        assert corpus == {
+            ".claude/memory/zebra_deploy_runbook.md",
+            ".claude/memory/MEMORY.md",
+            ".claude/memory/.format",
+        }
 
     def test_captures_pending_seed_but_never_the_corpus(self, tmp_path):
         # Pre-seed the episode buffer for a session, then fire SessionEnd for that session.

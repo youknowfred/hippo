@@ -996,3 +996,51 @@ def test_squash_merge_heal_end_to_end_and_reverify_clears(repo, memory_dir, monk
     assert res["error"] is None and res["cleared"] is True
     assert S.unresolvable_baseline_names(memory_dir, repo) == []
     assert S.squash_merge_heal_producer(memory_dir, repo) is None, "healed → self-cleared"
+
+
+# --------------------------------------------------------------------------- #
+# DRV-2 — the citation-derivation nudge
+# --------------------------------------------------------------------------- #
+def test_cite_derivation_producer_nudges_a_corpus_derived_by_the_old_extractor(tmp_path):
+    """AC (DRV-2): an OLDER derivation is a live degradation (memories watching the wrong
+    file; memories staleness-EXEMPT on an empty cited_paths), so unlike an older
+    corpus_format it gets a per-session line — KPI-5, never a silent degradation."""
+    from memory.session_start import cite_derivation_producer
+
+    md = str(tmp_path)
+    with open(os.path.join(md, "m.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: m\n---\nbody cites src/a.py\n")
+    line = cite_derivation_producer(md, md)  # undeclared == v1
+    assert line and "Citation derivation" in line
+    assert "v1" in line and "v2" in line
+    assert "/hippo:doctor" in line  # routes to the consent-gated path, never self-migrates
+
+
+def test_cite_derivation_producer_is_silent_on_an_empty_corpus(tmp_path):
+    """A corpus with no memories has no citations, so naming the extractor that derived
+    them is a nudge about nothing."""
+    from memory.session_start import cite_derivation_producer
+
+    assert cite_derivation_producer(str(tmp_path), str(tmp_path)) is None
+
+
+def test_cite_derivation_producer_is_silent_once_the_corpus_is_current(tmp_path):
+    from memory.provenance import write_cite_derivation
+    from memory.session_start import cite_derivation_producer
+
+    md = str(tmp_path)
+    with open(os.path.join(md, "m.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: m\n---\nbody\n")
+    assert write_cite_derivation(md)
+    assert cite_derivation_producer(md, md) is None
+
+
+def test_cite_derivation_producer_is_silent_on_a_newer_corpus(tmp_path):
+    """A corpus AHEAD of the plugin is corpus_format_producer's taint case, not this one —
+    this producer must not double-report it."""
+    from memory.provenance import write_cite_derivation
+    from memory.session_start import cite_derivation_producer
+
+    md = str(tmp_path)
+    assert write_cite_derivation(md, 99)
+    assert cite_derivation_producer(md, md) is None
