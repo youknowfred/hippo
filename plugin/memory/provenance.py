@@ -1808,8 +1808,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--snapshot",
         metavar="STAMP",
         default=None,
-        help="MIG-1: copy the corpus to memory.pre-cite2-<STAMP>/ before migrating. A "
+        help="MIG-1: copy the corpus to memory.pre-cite<N>-<STAMP>/ before migrating. A "
         "gitignored corpus has no `git checkout` undo — take this first.",
+    )
+    parser.add_argument(
+        "--stamp-derivation",
+        action="store_true",
+        help="MIG-1's LAST step: record that this corpus's citations were derived by THIS "
+        "plugin's extractor, which stops the citation-derivation nudge. Refused while any "
+        "memory still derives differently — the stamp asserts a derivation, so it must be "
+        "earned (an empty worklist) rather than claimed.",
     )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--repo-root", default=None)
@@ -1831,6 +1839,29 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.heal_baselines:
         healed = heal_empty_baselines(memory_dir, repo_root)
         print(f"healed {len(healed)} empty baseline(s)" + (f": {', '.join(healed)}" if healed else ""))
+        return 0
+
+    if args.stamp_derivation:
+        work = rederive_worklist(memory_dir, repo_root)
+        if work:
+            print(
+                f"refused to stamp — {len(work)} memory(ies) still derive differently under "
+                "this plugin's extractor. Stamping now would assert a derivation this corpus "
+                "does not have, which is the one thing the marker exists to prevent. Run "
+                "--rederive-worklist, apply each with --rederive-one, then stamp."
+            )
+            return 1
+        was = read_cite_derivation(memory_dir)
+        if was >= CITATION_DERIVATION_VERSION:
+            print(f"already stamped cite_derivation={was} — nothing to do.")
+            return 0
+        if not write_cite_derivation(memory_dir):
+            print("stamp FAILED to write .format — check the corpus dir is writable.")
+            return 1
+        print(
+            f"stamped cite_derivation: {was} → {CITATION_DERIVATION_VERSION} "
+            "(earned: 0 memories derive differently)."
+        )
         return 0
 
     if args.rederive_worklist:

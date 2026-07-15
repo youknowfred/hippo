@@ -94,7 +94,9 @@ _DESKTOP_SURFACE_NOTE = (
     "(capture, new_memory check:true, secrets_scan, reconsolidate, build_index, "
     "co_recall_proposals, abstention_fixtures — per item); the other verbs (resolve, audit, "
     "new, recall, why) run as hippo skills — invoke them directly, or the user asks in "
-    'plain words (e.g. "consolidate memory").'
+    'plain words (e.g. "consolidate memory"). '
+    "The two corpus-repair verbs are MCP tools on BOTH surfaces, with no /hippo:* form: "
+    "rederive (action='worklist'|'one'|'snapshot'|'stamp') and heal_baselines."
 )
 
 
@@ -286,8 +288,12 @@ def cite_derivation_producer(
         f"🧬 Citation derivation — this corpus's cited_paths were derived by extractor "
         f"v{declared}; this plugin derives v{CITATION_DERIVATION_VERSION}. {'; '.join(gaps)} "
         "— so some memories watch the wrong file and some carry an empty cited_paths, which "
-        "makes them EXEMPT from staleness tracking. Run /hippo:doctor to review the "
-        "re-derivation per memory (it rewrites frontmatter, so it asks first)."
+        "makes them EXEMPT from staleness tracking. Review the attributed diff with the "
+        "`rederive` MCP tool (action='worklist'), apply it ONE memory at a time "
+        "(action='one' name=…), then action='stamp' to record it and stop this line. In a "
+        "terminal: `--rederive-worklist` / `--rederive-one <name>` / `--stamp-derivation` on "
+        "`python -m memory.provenance`. It rewrites frontmatter, so it is per-item and asks "
+        "first; take action='snapshot' first if this corpus is gitignored (no git undo)."
     )
 
 

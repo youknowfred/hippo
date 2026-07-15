@@ -743,3 +743,139 @@ def test_patch_gitignore_does_not_consult_machine_local_excludes(repo):
     # ...and _patch_gitignore patches anyway, on purpose.
     assert _pg(repo) == "patched"
     assert ".claude/.memory-index/" in open(os.path.join(repo, ".gitignore")).read()
+
+
+# --------------------------------------------------------------------------- #
+# INT-14 / INT-15 — MIG-1 + the COR-10 heal on the SECOND surface
+# --------------------------------------------------------------------------- #
+#
+# v1.15.0 shipped MIG-1 and COR-10 as CLI verbs only. The DRV-2 nudge that routes to them is
+# a HOOK, so it fires on BOTH surfaces — a Desktop user was told to migrate, sent to doctor,
+# and doctor named nothing callable. INT-13 closed exactly this class of gap for consolidate;
+# v1.15.0 reopened a small one. COR-10 is worse than a gap: heal_empty_baselines used to run
+# INSIDE the SessionStart hook (both surfaces, free), so moving it to a CLI verb — correct in
+# itself, a hook must not write — removed the capability from Desktop entirely.
+@pytest.fixture
+def rederive_repo(tmp_path, monkeypatch):
+    """A git repo whose memory cites a file the CURRENT extractor derives but whose stored
+    frontmatter predates it — i.e. a real re-derivation candidate."""
+    import subprocess
+
+    repo = str(tmp_path / "proj")
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    for cmd in (["git", "init", "-q"], ["git", "config", "user.email", "t@t.t"],
+                ["git", "config", "user.name", "t"]):
+        subprocess.run(cmd, cwd=repo, check=True)
+    with open(os.path.join(repo, "package.json"), "w") as fh:
+        fh.write('{"name":"x"}\n')
+    with open(os.path.join(repo, "keep.py"), "w") as fh:
+        fh.write("k = 1\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "seed"], cwd=repo, check=True)
+    with open(os.path.join(md, "m.md"), "w") as fh:
+        fh.write('---\nname: m\ndescription: "d"\ncited_paths: ["keep.py"]\n'
+                 'source_commit: "seed"\n---\nbody cites keep.py and package.json\n')
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", md)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    return repo, md
+
+
+def test_rederive_worklist_is_read_only_and_shows_the_attributed_diff(rederive_repo):
+    repo, md = rederive_repo
+    before = open(os.path.join(md, "m.md")).read()
+    text = _text(_call("rederive", {}))  # worklist is the default
+    assert "would change" in text and "m" in text
+    assert "+ gains" in text and "package.json" in text
+    assert open(os.path.join(md, "m.md")).read() == before  # read-only
+
+
+def test_rederive_one_applies_a_single_reviewed_memory(rederive_repo):
+    repo, md = rederive_repo
+    text = _text(_call("rederive", {"action": "one", "name": "m"}))
+    assert "re-derived m.md" in text and "package.json" in text
+    assert "source_commit PRESERVED" in text  # not a reverify — no flag was cleared
+    assert "package.json" in open(os.path.join(md, "m.md")).read()
+
+
+def test_rederive_one_dry_run_writes_nothing(rederive_repo):
+    repo, md = rederive_repo
+    before = open(os.path.join(md, "m.md")).read()
+    text = _text(_call("rederive", {"action": "one", "name": "m", "dry_run": True}))
+    assert "would re-derive" in text
+    assert open(os.path.join(md, "m.md")).read() == before
+
+
+def test_rederive_refuses_to_stamp_while_any_memory_still_differs(rederive_repo):
+    """AC (the sharpest half of INT-14): the stamp ASSERTS a derivation, which is precisely
+    what the marker exists to let you verify — so it must be EARNED (an empty worklist),
+    never claimed. This is the module's own thesis applied to its own last step."""
+    repo, md = rederive_repo
+    text = _text(_call("rederive", {"action": "stamp"}))
+    assert "refused to stamp" in text
+    assert "would assert a derivation this corpus does not have" in text
+    from memory.provenance import read_cite_derivation
+
+    assert read_cite_derivation(md) == 1  # unchanged
+
+
+def test_rederive_stamp_completes_the_migration_and_stops_the_nudge(rederive_repo):
+    """MIG-1 step 5 had NO verb on any surface — write_cite_derivation existed and only tests
+    called it, so a migration could be performed but never COMPLETED and the nudge fired
+    forever. Found live: this repo's own corpus sat at cite_derivation=2 under a v3 plugin
+    with an EMPTY worklist and no way to clear it."""
+    from memory.provenance import CITATION_DERIVATION_VERSION, read_cite_derivation
+    from memory.session_start import cite_derivation_producer
+
+    repo, md = rederive_repo
+    _call("rederive", {"action": "one", "name": "m"})  # worklist now empty
+    assert cite_derivation_producer(md, repo)  # ...but the nudge still fires
+    text = _text(_call("rederive", {"action": "stamp"}))
+    assert "stamped cite_derivation" in text and "earned" in text
+    assert read_cite_derivation(md) == CITATION_DERIVATION_VERSION
+    assert cite_derivation_producer(md, repo) is None  # the loop finally closes
+
+
+def test_rederive_worklist_names_the_stamp_when_there_is_nothing_to_migrate(rederive_repo):
+    """The state that had no exit: extractor moved, but this corpus derives identically."""
+    repo, md = rederive_repo
+    _call("rederive", {"action": "one", "name": "m"})
+    text = _text(_call("rederive", {}))
+    assert "empty" in text and "still declares" in text
+    assert "action='stamp'" in text  # names the way out
+
+
+def test_rederive_snapshot_is_self_ignoring(rederive_repo):
+    repo, md = rederive_repo
+    text = _text(_call("rederive", {"action": "snapshot", "stamp": "t1"}))
+    assert "snapshot:" in text and "Self-ignoring" in text
+    snap = os.path.join(os.path.dirname(md), "memory.pre-cite2-t1")
+    assert open(os.path.join(snap, ".gitignore")).read().strip() == "*"
+
+
+def test_rederive_and_heal_are_trust_gated_like_every_other_corpus_write(corpus, monkeypatch):
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    for tool in ("rederive", "heal_baselines"):
+        text = _text(_call(tool, {}))
+        assert "withheld" in text and "untrusted" in text, tool
+
+
+def test_heal_baselines_restores_the_capability_desktop_lost(rederive_repo):
+    """AC (INT-15): before COR-10 this ran in the SessionStart hook — both surfaces, free.
+    COR-10 correctly moved it off the hook (a hook must not write to the corpus) but moved it
+    to a CLI verb, which only the terminal can reach. Desktop lost it outright."""
+    from memory.staleness import read_provenance
+
+    repo, md = rederive_repo
+    with open(os.path.join(md, "empty.md"), "w") as fh:
+        fh.write('---\nname: empty\ndescription: "d"\ncited_paths: ["keep.py"]\n'
+                 'source_commit: ""\n---\nbody cites keep.py\n')
+    text = _text(_call("heal_baselines", {}))
+    assert "healed 1 empty baseline" in text and "empty" in text
+    _, sc = read_provenance(open(os.path.join(md, "empty.md")).read())
+    assert sc and sc.strip()  # healed to HEAD — tracked again
+
+
+def test_heal_baselines_is_a_clean_noop_when_there_is_nothing_to_heal(rederive_repo):
+    assert "nothing to heal" in _text(_call("heal_baselines", {}))

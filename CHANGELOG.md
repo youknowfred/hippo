@@ -7,6 +7,52 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.15.2 — 2026-07-15 — "The verb has a name"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**,
+index schema still **7**, citation derivation still **3**. No engine change and no migration:
+this release is entirely about REACHING the repair verbs v1.15.0 shipped. Two new MCP tools
+(`rederive`, `heal_baselines`) and one new CLI flag (`--stamp-derivation`). The STABILITY.md
+frozen five keep their names, shapes and positions.
+
+v1.15.0 shipped MIG-1's re-derivation and COR-10's baseline heal as **CLI verbs only**. The
+DRV-2 nudge that routes to them is a HOOK, so it fires on *both* surfaces — a Desktop user was
+told to migrate, sent to `/hippo:doctor`, and doctor named nothing callable. INT-13 closed
+exactly this class of gap for consolidate in v1.14.0; v1.15.0 reopened a small one.
+
+- **INT-14 — the `rederive` MCP tool.** Mirrors the CLI: `action='worklist'` (read-only, the
+  attributed diff per memory), `'one'` (name=…, ONE reviewed memory), `'snapshot'` (stamp=…).
+  Deliberately no bulk form on either surface — the per-item review is what makes the SEC-6
+  fold legitimate rather than the gate consenting to itself.
+- **INT-15 — `heal_baselines`.** Not a gap but a **regression**: `heal_empty_baselines` used
+  to run inside the SessionStart hook, which fires on both surfaces, so every user got it for
+  free. COR-10 correctly moved it off the hook (a hook must not write to the corpus — it
+  drifts each file off its own SEC-6 fingerprint, after which the drift banner blames the user
+  for hippo's own write), but moved it to a CLI verb only the terminal can reach. Terminal
+  kept the capability; Desktop lost it outright. Restored as a tool, still human-invoked and
+  never automatic — that is the whole point of COR-10.
+- **The one this uncovered: MIG-1 shipped four of its five steps.** `write_cite_derivation`
+  existed and only *tests* called it — no CLI flag, no MCP tool. A migration could be
+  performed but never **completed**, so the nudge fired forever. Found live on this repo's own
+  corpus: `cite_derivation: 2` under a v3 plugin, an **empty** worklist, and no way to clear
+  it. The stamp had been hand-rolled with a one-liner during the v1.15.0 migration and nobody
+  noticed the verb didn't exist.
+  `rederive action='stamp'` / `--stamp-derivation` closes it — and the stamp is **earned, not
+  claimed**: it REFUSES while any memory still derives differently, because it asserts a
+  derivation, which is precisely the thing the marker exists to let you verify. An empty
+  worklist is the proof. The module's own thesis, applied to its own last step.
+- **DOC-16 — name the verb.** The nudge said "review the re-derivation" and doctor said
+  "re-derive per memory"; **neither named a command, on either surface**. The loop dead-ended:
+  nudge → doctor → nothing. That is LIF-4's complaint one layer up — state a conclusion, never
+  name the oracle. Both now name the MCP tool *and* the terminal form; the empty-worklist case
+  names the stamp; and the Desktop surface note lists the two repair tools, which have no
+  `/hippo:*` form by design.
+
+The repair tools form their own category in the tool contract — not consolidate steps; they
+exist purely to undo a defect hippo itself shipped. A new assertion pins that the frozen five
+keep their POSITIONS too, and it earned its place immediately: the tools were first written
+into the middle of the consolidate block and the test caught it.
+
 ## v1.15.1 — 2026-07-14 — "The third file class"
 
 **re-bootstrap: no** — `plugin/requirements.txt` is unchanged. Corpus format stays **5**; this is
