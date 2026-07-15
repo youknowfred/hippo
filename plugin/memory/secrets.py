@@ -83,9 +83,14 @@ def _connstr_is_a_real_credential(match: "re.Match") -> bool:
     avoid hardcoding one — and it was reported as "possible connection string with
     credentials detected". A memory documenting good practice got flagged for it.
 
-    Judged on the PASSWORD half only: the username is not the secret, so
-    `postgres://${{USER}}:hunter2@h` MUST still fire (a real password beside a placeholder is
-    still a leak), while `postgres://realuser:${{PW}}@h` must not.
+    Judged on the PASSWORD half only: the username is not the secret, so a TEMPLATE user with a
+    LITERAL password must still fire (a real password beside a placeholder is still a leak),
+    while `postgres://realuser:${{PW}}@h` — a literal user with a template password — must not.
+
+    No firing example is spelled out here on purpose: this file is shipped source, and hippo's
+    own SEC-8 gate scans it. An earlier draft of this docstring carried one and reded the gate —
+    correctly, which is the nicest possible proof that the rule works. The firing vectors live
+    in tests/, which the gate excludes by design.
 
     This is not cosmetic. packs.py hard-REFUSES an install on any finding and
     capture_triage silently DROPS the capture — these false positives fail closed.
