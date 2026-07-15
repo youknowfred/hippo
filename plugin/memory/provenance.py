@@ -1645,11 +1645,28 @@ def snapshot_corpus(memory_dir: str, stamp: str) -> str:
     upstream a re-derivation is undoable with ``git checkout``. A corpus the user chose to
     gitignore has NO undo — and that is the first corpus this migration will ever touch.
     Returns the snapshot path. Raises on failure: no snapshot, no migration.
+
+    SELF-IGNORING (SEC-3), and this is load-bearing rather than tidy. The snapshot is a
+    verbatim copy of the corpus, but it is NOT the corpus: a project that gitignores
+    ``.claude/memory/`` does not thereby ignore ``.claude/memory.pre-cite2-*``, so the
+    snapshot lands as a fresh untracked directory holding every private memory — one
+    ``git add -A`` from being committed, in a repo that may well be public. Whatever
+    exposure rule the corpus lives under, its backup must inherit; the copy must not be the
+    thing that publishes it. Written BEFORE the payload so the window never exists.
     """
     import shutil
 
     dest = os.path.join(os.path.dirname(memory_dir), f"memory.pre-cite2-{stamp}")
-    shutil.copytree(memory_dir, dest)
+    if os.path.exists(dest):
+        raise FileExistsError(f"{dest} already exists — refusing to overwrite a snapshot")
+    ensure_self_ignoring_dir(dest)  # the `*` marker lands first — no unignored window
+    for entry in os.listdir(memory_dir):
+        src = os.path.join(memory_dir, entry)
+        dst = os.path.join(dest, entry)
+        if os.path.isdir(src):
+            shutil.copytree(src, dst)
+        else:
+            shutil.copy2(src, dst)
     return dest
 
 
