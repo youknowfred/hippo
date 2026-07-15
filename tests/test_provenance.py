@@ -1762,16 +1762,40 @@ def test_reordering_alone_would_not_have_fixed_the_truncation_family():
 
 def test_compiled_pattern_carries_a_trailing_boundary():
     """Source-level pin: the boundary is the whole fix, so make deleting it loud."""
-    assert r"(?![\w])" in P._CITATION_RE.pattern
+    assert r"(?!\w|\.\w)" in P._CITATION_RE.pattern
 
 
 def test_boundary_does_not_regress_prose_or_line_suffixes():
-    """The tail is deliberately `(?![\\w])`, NOT `(?![\\w./-])` mirroring the lookbehind.
-    The symmetric form reads right and breaks a sentence-ending citation."""
+    """The tail is deliberately NOT `(?![\\w./-])` mirroring the lookbehind: the symmetric
+    form reads right and breaks a sentence-ending citation, because it cannot tell a file
+    suffix from a full stop."""
     assert P.extract_citations("the bug is in foo.py.") == ["foo.py"]  # end-of-sentence period
     assert P.extract_citations("see `qux.py:3` in passing") == ["qux.py"]
     assert P.extract_citations("bar.py:5-9 and bar.py:99") == ["bar.py"]
     assert P.extract_citations("[scorer](src/q/scorer.py)") == ["src/q/scorer.py"]
+    assert P.extract_citations("app.v2.py") == ["app.v2.py"]  # a dotted STEM is not a suffix
+
+
+@pytest.mark.parametrize("token", ["test.py.bak", "config.json.orig", "recall.py.rej"])
+def test_dotted_suffix_after_a_complete_extension_cites_nothing(token):
+    """DRV-1: `test.py.bak` -> `test.py` survives a bare `(?![\\w])` tail, and when test.py
+    is a REAL file the memory is silently bound to the wrong one — the worst outcome in this
+    module. `(?!\\.\\w)` closes it while a sentence-ending period still matches, because it
+    requires a word char AFTER the dot."""
+    assert P.extract_citations(f"the backup at {token} is stale") == []
+
+
+def test_the_obvious_alternative_tail_is_measurably_worse():
+    """Pins why the tail is `(?!\\w|\\.\\w)` and not the tidier-looking `(?![\\w.]\\w)`, which
+    passes the test.py.bak case and RE-FABRICATES two families that ORC-1 had killed."""
+    import re as _re
+
+    naive = _re.compile(
+        r"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.(?:" + "|".join(P._CODE_EXTS) + r"))(?![\w.]\w)"
+    )
+    assert naive.search("foo.pyx").group(1) == "foo.py"  # fabricates
+    assert naive.search("data.jsonl").group(1) == "data.json"  # fabricates, worse than data.js
+    assert P.extract_citations("foo.pyx") == [] and P.extract_citations("data.jsonl") == []
 
 
 def test_mjs_family_is_covered():
@@ -1800,3 +1824,45 @@ def test_resolve_normalises_a_leading_dot_slash(repo):
     assert P.resolve_citations(["./src/a/dup.py"], repo_files, index) == ["src/a/dup.py"]
     # the bare ambiguous basename is still correctly dropped
     assert P.resolve_citations(["dup.py"], repo_files, index) == []
+
+
+# --------------------------------------------------------------------------- #
+# DRV-1 — every derived citation carries what it cost
+# --------------------------------------------------------------------------- #
+def test_unresolved_citations_names_what_the_oracle_refused():
+    repo_files = {"src/keep.py", "src/a/dup.py", "src/b/dup.py"}
+    index = {"keep.py": ["src/keep.py"], "dup.py": ["src/a/dup.py", "src/b/dup.py"]}
+    body = "cites src/keep.py, dup.py (ambiguous), and src/ghost.py (not tracked)"
+    assert P.cited_paths_for_body(body, repo_files, index) == ["src/keep.py"]
+    assert P.unresolved_citations(body, repo_files, index) == ["dup.py", "src/ghost.py"]
+
+
+def test_backfill_reports_unresolved_tokens_for_an_untracked_file(repo, memory_dir):
+    """AC (DRV-1): the citation oracle is `git ls-files`, NOT the filesystem. A memory
+    written before `git add` cites real code in plain sight and lands `cited_paths: []` —
+    the worst rot state — with nothing reported. The receipt makes it legible."""
+    write_file(repo, "src/tracked.py", "k = 1\n")
+    git_commit(repo, "tracked", 1_700_000_000)
+    write_file(repo, "src/untracked.py", "v = 1\n")  # exists on disk, NOT git-added
+    target = write_file(
+        repo, ".claude/memory/m.md", "---\nname: M\n---\nbody cites src/untracked.py only\n"
+    )
+
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    res = P.backfill_file(target, repo, repo_files, basename_index)
+    assert res["error"] is None
+    assert res["cited"] == []  # staleness-EXEMPT...
+    assert res["extracted_but_unresolved"] == ["src/untracked.py"]  # ...and now it SAYS why
+
+
+def test_backfill_unresolved_is_empty_when_everything_resolves(repo, memory_dir):
+    write_file(repo, "src/tracked.py", "k = 1\n")
+    git_commit(repo, "tracked", 1_700_000_000)
+    target = write_file(
+        repo, ".claude/memory/m.md", "---\nname: M\n---\nbody cites src/tracked.py\n"
+    )
+    git_commit(repo, "memory", 1_700_000_001)
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    res = P.backfill_file(target, repo, repo_files, basename_index)
+    assert res["cited"] == ["src/tracked.py"]
+    assert res["extracted_but_unresolved"] == []

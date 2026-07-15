@@ -60,12 +60,22 @@ _CODE_EXTS = (
 #                    resolve_citations keeps it and the memory is silently bound to the
 #                    wrong file (DRV-1's extension check is the permanent net for that).
 #
-# Deliberately `(?![\w])` and NOT `(?![\w./-])` mirroring the lookbehind: the symmetric
-# form reads right and regresses prose — "the file foo.py." (end of sentence) would stop
-# matching. `test.py.bak -> test.py` survives this tail; the only tail that catches it is
-# the one that breaks prose, so that is an accepted trade, covered by DRV-1's check.
+# The tail is `(?!\w|\.\w)`, and each half earns its place (DRV-1):
+#
+#   (?!\w)   kills the shadow + truncation families above.
+#   (?!\.\w) kills the residual: `test.py.bak` -> `test.py`. A dotted SUFFIX after a
+#            complete extension means the token was never this file — citing `test.py`
+#            from a mention of `test.py.bak` binds the memory to the wrong real file,
+#            silently, which is the worst outcome in this module.
+#
+# Deliberately NOT `(?![\w./-])` mirroring the lookbehind: the symmetric form reads right
+# and regresses prose — "the bug is in foo.py." (end of sentence) stops matching, because
+# it cannot tell a suffix from a full stop. `(?!\.\w)` can: it requires a word character
+# AFTER the dot, so a sentence-ending period still matches and `.bak` does not.
+# Also NOT `(?![\w.]\w)`, which looks equivalent and is strictly worse — measured, it
+# re-fabricates `foo.pyx -> foo.py` and `data.jsonl -> data.json`.
 _CITATION_RE = re.compile(
-    r"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.(?:" + "|".join(_CODE_EXTS) + r"))(?![\w])"
+    r"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.(?:" + "|".join(_CODE_EXTS) + r"))(?!\w|\.\w)"
     r"(?::\d+(?:-\d+)?)?"
 )
 
@@ -658,6 +668,28 @@ def cited_paths_for_body(body: str, repo_files: set, basename_index: Dict[str, L
     return resolve_citations(extract_citations(body), repo_files, basename_index)
 
 
+def unresolved_citations(
+    body: str, repo_files: set, basename_index: Dict[str, List[str]]
+) -> List[str]:
+    """Tokens the extractor produced from ``body`` that the oracle could not pin (DRV-1).
+
+    The receipt for a derivation that came back empty-handed. A token lands here when it
+    resolves to nothing: the file is untracked (written but not yet ``git add``ed — the
+    index is ``git ls-files``, not the filesystem), the path is wrong, or the bare basename
+    is ambiguous and ``resolve_citations`` dropped it by design.
+
+    Without this, all three are indistinguishable from "this memory cites no code" — the
+    body says ``src/thing.py`` in plain sight and ``cited_paths`` is ``[]``, which
+    ``citation_rot_lines`` itself calls the worst rot state (staleness-exempt). Reuses the
+    one resolver rather than re-implementing its rules, so the two can never disagree.
+    """
+    return [
+        tok
+        for tok in extract_citations(body)
+        if not resolve_citations([tok], repo_files, basename_index)
+    ]
+
+
 def _frontmatter_cited_paths(fm: dict) -> List[str]:
     """The ``cited_paths`` a PARSED frontmatter dict already carries (both schemas).
 
@@ -970,6 +1002,17 @@ def backfill_file(
     memory from staleness). Always ``[]`` on the initial-backfill path (nothing recorded
     yet, so nothing can be lost) and on a refusal (nothing was re-derived); callers must
     surface a non-empty list, never swallow it.
+
+    ``dropped_gone`` / ``dropped_not_derived`` (LIF-4): the same set, partitioned by CAUSE.
+    Computed here because this is where ``repo_files`` — the only oracle that can answer
+    "is it actually missing?" — is in scope.
+
+    ``extracted_but_unresolved`` (DRV-1): tokens the body offered that resolved to nothing
+    (untracked file, wrong path, ambiguous basename). Note this corrects the sentence above:
+    "nothing can be lost" on initial backfill is only true of the FRONTMATTER. Something can
+    absolutely be lost from the BODY — a memory written before ``git add`` cites real code
+    in plain sight and lands ``cited_paths: []``, the worst rot state, reporting nothing.
+    That blind spot is why this key exists, and it is populated on EVERY path.
     """
     result = {
         "path": path,
@@ -978,6 +1021,7 @@ def backfill_file(
         "dropped_citations": [],
         "dropped_gone": [],
         "dropped_not_derived": [],
+        "extracted_but_unresolved": [],
         "source_commit": None,
         "source_commit_time": None,
         "error": None,
@@ -988,6 +1032,8 @@ def backfill_file(
         original = text  # COR-9: `text` is re-assigned by the strip below; the guard needs this
         _, body = split_frontmatter(text)
         cited = cited_paths_for_body(body, repo_files, basename_index)
+        # DRV-1: the derivation's OTHER half — what the body offered that the oracle refused.
+        result["extracted_but_unresolved"] = unresolved_citations(body, repo_files, basename_index)
         rel = os.path.relpath(path, repo_root)
         dropped: List[str] = []
         gone: List[str] = []
