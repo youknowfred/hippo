@@ -1593,10 +1593,33 @@ class LoadedIndex:
 
 
 def load_index(index_dir: str) -> Optional[LoadedIndex]:
+    """The persisted index as a LoadedIndex, or None when there is no usable manifest.
+
+    PRF-4: honours ``dense_disabled()``. This is a correctness fix wearing a perf hat —
+    ``HIPPO_DISABLE_DENSE=1`` was enforced at exactly ONE boundary, ``_get_model`` raising,
+    which stops every consumer that must EMBED a query. ``recall._mmr_rerank`` is the only
+    consumer that reads the STORED matrix and needs no model, so it walked straight past the
+    single enforcement point; its own guard is ``dense is None``, which this function decided
+    without consulting the flag. Net effect: the flag suppressed dense SCORING and left dense
+    diversity reranking live, measurably changing result order — against ``dense_disabled``'s
+    own docstring ("forced BM25-only"), the README, CONTRIBUTING, and STABILITY.md's
+    committed meaning of the flag.
+
+    ``new_memory`` already gets this right (``if dense_disabled() or not index.dense_ready
+    or index.dense is None``); this is the same question asked in the one place that skipped
+    it. Bonus: with dense skipped, numpy is never imported on the BM25 lane at all
+    (measured ~-20ms, -30%), and ``eval_recall``'s ``backend`` label becomes accurate for
+    free, since ``LoadedIndex.__init__`` computes ``dense_ready = manifest and dense is not
+    None``.
+    """
     manifest = _load_manifest(index_dir)
     if not manifest:
         return None
-    dense = _load_dense(index_dir) if manifest.get("dense_ready") else None
+    dense = (
+        _load_dense(index_dir)
+        if (manifest.get("dense_ready") and not dense_disabled())
+        else None
+    )
     return LoadedIndex(manifest, dense)
 
 

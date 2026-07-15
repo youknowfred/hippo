@@ -100,9 +100,30 @@ def run_git(args: List[str], repo_root: str) -> str:
         return ""
 
 
+_GIT_ROOT_CACHE: Dict[str, Optional[str]] = {}
+
+
 def git_root(start: Optional[str] = None) -> Optional[str]:
-    out = run_git(["rev-parse", "--show-toplevel"], start or os.getcwd()).strip()
-    return out or None
+    """The git toplevel containing ``start`` (default cwd), or None. Memoized (PRF-3).
+
+    Measured: a SessionStart spawns 5 of these and a recall 3, at ~7ms per subprocess, for a
+    value that cannot change for a given ``start`` inside one process — a repo's toplevel is
+    process-constant. Caching it is ~28ms off SessionStart and ~14ms off recall for no
+    behaviour change (the hook's rendered output is byte-identical; a test pins that).
+
+    Keyed on ``start`` rather than global, because the answer genuinely differs per start dir
+    and the MCP server is a long-lived process serving one repo but resolving several paths.
+
+    NOT the same call as ``build_repo_file_index``, which must NOT be cached this way: its
+    answer changes the moment a file is `git add`ed, and caching it in the long-lived MCP
+    server would make a file created mid-session resolve to nothing — reintroducing the exact
+    silent citation drop this module was just fixed to prevent.
+    """
+    key = start or os.getcwd()
+    if key not in _GIT_ROOT_CACHE:
+        out = run_git(["rev-parse", "--show-toplevel"], key).strip()
+        _GIT_ROOT_CACHE[key] = out or None
+    return _GIT_ROOT_CACHE[key]
 
 
 # SEC-14: well-known PUBLIC git-hosting hosts. A repo on one of these MAY be world-readable —

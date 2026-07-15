@@ -2040,3 +2040,43 @@ def test_snapshot_refuses_to_overwrite_an_existing_one(repo, memory_dir):
         raise AssertionError("expected a refusal")
     except FileExistsError:
         pass
+
+
+# --------------------------------------------------------------------------- #
+# PRF-3 — memoize the process-constant toplevel
+# --------------------------------------------------------------------------- #
+def test_git_root_is_memoized_per_start_dir(repo, monkeypatch):
+    """A repo's toplevel cannot change for a given start dir inside one process. Measured:
+    SessionStart spawned 5 of these and recall 3, at ~7ms each."""
+    P._GIT_ROOT_CACHE.clear()
+    calls = []
+    real = P.run_git
+    monkeypatch.setattr(P, "run_git", lambda a, r: (calls.append(a), real(a, r))[1])
+    first = P.git_root(repo)
+    for _ in range(4):
+        assert P.git_root(repo) == first
+    toplevels = [a for a in calls if a[:2] == ["rev-parse", "--show-toplevel"]]
+    assert len(toplevels) == 1, f"spawned {len(toplevels)} subprocesses for a constant"
+
+
+def test_git_root_cache_is_keyed_per_start_dir(tmp_path, repo, monkeypatch):
+    """Keyed, not global — the answer genuinely differs per start dir, and the MCP server is
+    one long-lived process that resolves several paths."""
+    P._GIT_ROOT_CACHE.clear()
+    other = str(tmp_path / "not-a-repo")
+    os.makedirs(other)
+    assert P.git_root(repo) == P.run_git(["rev-parse", "--show-toplevel"], repo).strip()
+    assert P.git_root(other) is None  # a different start dir gets its own (correct) answer
+
+
+def test_build_repo_file_index_is_NOT_cached(repo, memory_dir):
+    """The counterpart pin, and the more important one. Caching THIS would reintroduce the
+    exact silent citation drop this module was fixed to prevent: its answer changes the
+    moment a file is `git add`ed, and the MCP server is a long-lived process where
+    new_memory reaches it as the citation oracle. A file created mid-session must resolve."""
+    write_file(repo, "src/first.py", "a = 1\n")
+    git_commit(repo, "first", 1_700_000_000)
+    assert "src/first.py" in P.build_repo_file_index(repo)[0]
+    write_file(repo, "src/second.py", "b = 2\n")
+    git_commit(repo, "second", 1_700_000_001)
+    assert "src/second.py" in P.build_repo_file_index(repo)[0], "the file index went stale"
