@@ -266,13 +266,28 @@ def cite_derivation_producer(
             return None  # nothing was derived, so nothing needs re-deriving
     except Exception:
         return None
+    # ORC-3: the gap description must name what's ACTUALLY missing for THIS `declared`, not
+    # just always recite the v1->v2 (ORC-1) delta — a v2 corpus never had those bugs, so
+    # telling it "v1 could not see .json/.tsx/.jsx" would be describing a defect it does not
+    # have. Each historical derivation bump adds one more conditional clause here, same shape
+    # as CITATION_DERIVATION_VERSION's own history comment.
+    gaps = []
+    if declared < 2:
+        gaps.append(
+            "v1 could not see `.json`/`.tsx`/`.jsx` (it read package.json as package.js), "
+            "`.mjs`/`.cjs` at all, or a leading `./`"
+        )
+    if declared < 3:
+        gaps.append(
+            "v2 could not see extensionless config/build filenames (`Dockerfile`, `Makefile`, "
+            "`LICENSE`, etc.) at all"
+        )
     return (
         f"🧬 Citation derivation — this corpus's cited_paths were derived by extractor "
-        f"v{declared}; this plugin derives v{CITATION_DERIVATION_VERSION}. v1 could not see "
-        "`.json`/`.tsx`/`.jsx` (it read package.json as package.js), `.mjs`/`.cjs` at all, or "
-        "a leading `./` — so some memories watch the wrong file and some carry an empty "
-        "cited_paths, which makes them EXEMPT from staleness tracking. Run /hippo:doctor to "
-        "review the re-derivation per memory (it rewrites frontmatter, so it asks first)."
+        f"v{declared}; this plugin derives v{CITATION_DERIVATION_VERSION}. {'; '.join(gaps)} "
+        "— so some memories watch the wrong file and some carry an empty cited_paths, which "
+        "makes them EXEMPT from staleness tracking. Run /hippo:doctor to review the "
+        "re-derivation per memory (it rewrites frontmatter, so it asks first)."
     )
 
 

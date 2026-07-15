@@ -239,16 +239,26 @@ def _path_ref_re() -> "re.Pattern":
     mjs/cjs/mts/cts, the fix half-landed: provenance derived `.mjs` citations while rules-rot
     silently stopped recognising the same refs. One concept, one list.
 
-    Built lazily and cached because ``_CODE_EXTS`` lives in ``provenance`` and every other
-    provenance import in this module is deliberately function-local; a module-level import
-    here would break that discipline for a regex used on one line.
+    ORC-3: also matches an extensionless name from ``provenance._EXTENSIONLESS_NAMES``
+    (``Dockerfile``, ``Makefile``, ``LICENSE``, ...), bare or directory-qualified — same
+    single-source-of-truth discipline as the extension list, imported not hand-copied. This
+    branch needs no SEPARATE "must have a directory" gate the way provenance's own bare form
+    does: this whole function is already whole-span-anchored (``^...$`` against ONE backtick
+    span's content), which is exactly the signal provenance needs backticks to manufacture
+    for its unanchored raw-text scan. The anchor already does the job either way.
+
+    Built lazily and cached because ``_CODE_EXTS``/``_EXTENSIONLESS_NAMES`` live in
+    ``provenance`` and every other provenance import in this module is deliberately
+    function-local; a module-level import here would break that discipline for a regex used
+    on one line.
     """
     if not _PATH_REF_RE_CACHE:
-        from .provenance import _CODE_EXTS
+        from .provenance import _CODE_EXTS, _EXTENSIONLESS_NAMES
 
         _PATH_REF_RE_CACHE.append(
             re.compile(
-                r"^((?:[\w.-]+/)*[\w.-]+\.(?:" + "|".join(_CODE_EXTS) + r"))"
+                r"^((?:[\w.-]+/)*[\w.-]+\.(?:" + "|".join(_CODE_EXTS) + r")"
+                r"|(?:[\w.-]+/)*(?:" + "|".join(re.escape(n) for n in _EXTENSIONLESS_NAMES) + r"))"
                 r"(?::\d+(?:-\d+)?)?$"
             )
         )

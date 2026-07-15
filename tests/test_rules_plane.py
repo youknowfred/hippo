@@ -681,3 +681,76 @@ def test_rules_plane_path_ref_still_requires_a_whole_span():
 
     assert R._path_ref_re().match("see foo/bar.py for details") is None
     assert R._path_ref_re().match("plugin/memory/recall.py:42").group(1) == "plugin/memory/recall.py"
+
+
+# --------------------------------------------------------------------------- #
+# ORC-3 — the extensionless-name gate is the same shared vocabulary too
+# --------------------------------------------------------------------------- #
+def test_rules_plane_extensionless_gate_is_built_from_provenance_s_list():
+    """AC (ORC-2's rule, applied to ORC-3): rules_plane's path-ref regex must be BUILT from
+    provenance._EXTENSIONLESS_NAMES, not hand-copied — the same discipline that already
+    covers _CODE_EXTS, enforced here instead of left to a comment."""
+    from memory import provenance as P
+    from memory import rules_plane as R
+
+    pattern = R._path_ref_re().pattern
+    for name in P._EXTENSIONLESS_NAMES:
+        import re as _re
+
+        assert _re.escape(name) in pattern, f"{name} missing from rules_plane's gate"
+
+
+def test_rules_plane_and_provenance_agree_on_every_extensionless_name():
+    """The parity test's ORC-3 sibling — same shared vector set, same guarantee: a name added
+    to provenance._EXTENSIONLESS_NAMES is reachable from rules_plane the moment it lands,
+    never a silent half-landing like the one ORC-2 found for .mjs."""
+    from memory import provenance as P
+    from memory import rules_plane as R
+
+    for name in P._EXTENSIONLESS_NAMES:
+        assert P.extract_citations(f"see `{name}` here") == [name], f"provenance lost {name}"
+        m = R._path_ref_re().match(name)
+        assert m and m.group(1) == name, f"rules_plane lost {name} — the gates have diverged"
+
+        qualified = f"config/{name}"
+        assert P.extract_citations(f"see {qualified} here") == [qualified], (
+            f"provenance lost directory-qualified {qualified}"
+        )
+        m2 = R._path_ref_re().match(qualified)
+        assert m2 and m2.group(1) == qualified, f"rules_plane lost directory-qualified {qualified}"
+
+
+def test_rules_plane_extensionless_ref_still_requires_a_whole_span():
+    """Same regression control as the dotted-extension sibling above, for the new branch:
+    a descriptive clause mentioning an allowlisted name is prose, not a ref."""
+    from memory import rules_plane as R
+
+    assert R._path_ref_re().match("see the Dockerfile for details") is None
+    assert R._path_ref_re().match("Dockerfile").group(1) == "Dockerfile"
+    assert R._path_ref_re().match("docker/Dockerfile").group(1) == "docker/Dockerfile"
+
+
+def test_rules_plane_code_ref_rot_flags_a_dangling_extensionless_reference(repo, memory_dir):
+    """End-to-end AC: a governance file backtick-citing a Dockerfile that then gets renamed
+    is now caught by rules_rot's code-ref-rot leg, exactly like a dangling `.py` ref."""
+    import memory.rules_plane as RP
+
+    write_file(repo, "Dockerfile", "FROM scratch\n")
+    git_commit(repo, "add dockerfile", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "Build the image per `Dockerfile`.")
+    import subprocess
+
+    subprocess.run(["git", "mv", "Dockerfile", "Dockerfile_prod"], cwd=repo, check=True)
+    git_commit(repo, "rename dockerfile", 1_700_000_100)
+
+    rot = RP.rules_rot(repo)
+    assert rot["code_ref_rot"] == [{"file": "CLAUDE.md", "ref": "Dockerfile", "kind": "path"}]
+
+
+def test_rules_plane_code_ref_extensionless_alive_reference_is_silent(repo, memory_dir):
+    import memory.rules_plane as RP
+
+    write_file(repo, "Dockerfile", "FROM scratch\n")
+    git_commit(repo, "add dockerfile", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "Build the image per `Dockerfile`.")
+    assert RP.rules_rot(repo)["code_ref_rot"] == []
