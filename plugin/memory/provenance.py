@@ -32,12 +32,41 @@ except Exception:  # pragma: no cover - bare python3 pre-bootstrap (ONB-2)
 # Code/config extensions we treat as "cited code" for the staleness signal.
 # .md is intentionally EXCLUDED — memory<->memory references are [[wikilinks]] (Tier 3),
 # and doc/changelog churn is not "code drift".
-_CODE_EXTS = ("py", "ts", "tsx", "js", "jsx", "sh", "yaml", "yml", "json", "toml", "ini", "cfg")
+#
+# ORC-1: sorted LONGEST-FIRST. This is intent-preservation, NOT the fix — the trailing
+# boundary in _CITATION_RE is what makes the alternation order irrelevant (the engine
+# backtracks into it and finds the longer branch itself). Kept sorted anyway so the
+# declared order matches the intended precedence and a future reader is not misled into
+# thinking order is load-bearing here. Adding an entry is enough to support it: the
+# reachability test loops over this tuple, so a shadowed entry fails immediately.
+_CODE_EXTS = (
+    "tsx", "jsx", "json", "yaml", "toml", "cts", "cjs", "mts", "mjs",
+    "cfg", "ini", "yml", "sh", "ts", "js", "py",
+)
 
 # A path-like token: optional dir segments + filename + a code extension, with an
 # optional :line or :line-range suffix (which we drop — we track files, not lines).
+#
+# ORC-1 — the `(?![\w])` after the extension group is load-bearing, and its absence was
+# the single defect behind two whole families of wrong citations:
+#
+#   prefix shadow  — with no boundary, `js` matched inside `package.json` and the pattern
+#                    completed, so the token became `package.js`. Same for App.tsx -> App.ts
+#                    and App.jsx -> App.js. .tsx/.jsx/.json were DECLARED in _CODE_EXTS and
+#                    structurally unreachable: config that the regex could not deliver.
+#   truncation     — `build.pyc` -> `build.py`, `data.jsonl` -> `data.js`, `x.tsv` -> `x.ts`,
+#                    `notes.shtml` -> `notes.sh`. These FABRICATE a path that was never
+#                    written; when the fabrication happens to name a real sibling file,
+#                    resolve_citations keeps it and the memory is silently bound to the
+#                    wrong file (DRV-1's extension check is the permanent net for that).
+#
+# Deliberately `(?![\w])` and NOT `(?![\w./-])` mirroring the lookbehind: the symmetric
+# form reads right and regresses prose — "the file foo.py." (end of sentence) would stop
+# matching. `test.py.bak -> test.py` survives this tail; the only tail that catches it is
+# the one that breaks prose, so that is an accepted trade, covered by DRV-1's check.
 _CITATION_RE = re.compile(
-    r"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.(?:" + "|".join(_CODE_EXTS) + r"))(?::\d+(?:-\d+)?)?"
+    r"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.(?:" + "|".join(_CODE_EXTS) + r"))(?![\w])"
+    r"(?::\d+(?:-\d+)?)?"
 )
 
 _FENCE = "---"
@@ -597,7 +626,11 @@ def resolve_citations(
 ) -> List[str]:
     """Resolve raw tokens to repo-relative paths — ONLY when a token pins exactly one file.
 
-    - A token that is already a tracked repo path is used as-is.
+    - A token that is already a tracked repo path is used as-is. A leading ``./`` is
+      normalised away first (ORC-1): ``git ls-files`` never emits one, so ``./src/a.py``
+      missed the exact match and fell through to the basename fallback — which DROPPED it
+      whenever the basename was ambiguous. A citation written MORE precisely resolved
+      WORSE than the bare basename, which is exactly backwards.
     - A bare basename is kept ONLY if it resolves to exactly ONE repo file. An AMBIGUOUS
       bare basename (e.g. ``contracts.py`` -> 52 files, ``config.py`` -> 38) is DROPPED:
       it is almost always a generic/pattern mention in prose, not a pinpoint citation, and
@@ -608,10 +641,11 @@ def resolve_citations(
     out: List[str] = []
     seen: set = set()
     for tok in tokens:
-        if tok in repo_files:
-            cands = [tok]
+        norm = tok[2:] if tok.startswith("./") else tok
+        if norm in repo_files:
+            cands = [norm]
         else:
-            matches = basename_index.get(tok.rsplit("/", 1)[-1], [])
+            matches = basename_index.get(norm.rsplit("/", 1)[-1], [])
             cands = matches if len(matches) == 1 else []  # drop ambiguous bare basenames
         for c in cands:
             if c not in seen:

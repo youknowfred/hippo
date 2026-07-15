@@ -1708,3 +1708,95 @@ def test_refresh_partitions_a_real_not_derived_drop_end_to_end(repo, memory_dir)
     assert res["dropped_not_derived"] == ["Dockerfile"]
     (line,) = P.citation_rot_lines("m.md", res)
     assert "no longer in the repo" not in line
+
+
+# --------------------------------------------------------------------------- #
+# ORC-1 — the extractor's declared config is its contract
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("ext", P._CODE_EXTS)
+def test_every_declared_extension_is_reachable(ext):
+    """THE test that would have caught this on day one, and the reason it is data-driven:
+    adding an entry to _CODE_EXTS auto-tests its own reachability.
+
+    Before ORC-1, `tsx`, `jsx` and `json` were DECLARED in _CODE_EXTS and structurally
+    unreachable — each sat after its own prefix (`ts`, `js`) in a first-match-wins
+    alternation with no trailing boundary, so `App.tsx` extracted as `App.ts` and
+    `package.json` as `package.js`. Config the regex could not deliver.
+
+    The pre-existing extraction test used only `.py` — _CODE_EXTS[0], structurally
+    unshadowable — and asserted membership (`in`), so a fabricated extra token was invisible
+    to it by construction. That is why 14 minor versions shipped over this.
+    """
+    tok = f"src/x.{ext}"
+    assert P.extract_citations(f"the fix is in {tok} somewhere") == [tok]
+
+
+@pytest.mark.parametrize(
+    "token",
+    ["build.pyc", "types.pyi", "data.jsonl", "x.tsv", "notes.shtml", "conf.inix"],
+)
+def test_truncation_family_fabricates_nothing(token):
+    """With no trailing boundary the regex matched a PREFIX of the real extension and
+    completed, inventing a path nobody wrote: data.jsonl -> data.js, build.pyc -> build.py.
+    Worse than a drop — when the invention names a real sibling, resolve_citations keeps it
+    and binds the memory to the wrong file (see the DRV-1 extension check)."""
+    assert P.extract_citations(f"see {token} for details") == []
+
+
+def test_reordering_alone_would_not_have_fixed_the_truncation_family():
+    """Pins WHY the fix is the boundary and not a sort. _CODE_EXTS is sorted longest-first
+    as intent-preservation, but sorting is not what does the work: rebuild the pattern
+    WITHOUT the boundary, keeping today's longest-first order, and the truncation family
+    fabricates again — and `data.jsonl -> data.json` is WORSE than the old `data.js`,
+    because data.json is far likelier to be a real file, turning a silent drop into a
+    silent wrong-binding."""
+    import re as _re
+
+    no_boundary = _re.compile(
+        r"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.(?:" + "|".join(P._CODE_EXTS) + r"))(?::\d+(?:-\d+)?)?"
+    )
+    m = no_boundary.search("see data.jsonl for details")
+    assert m and m.group(1) == "data.json"  # sorted longest-first, still fabricating
+    assert P.extract_citations("see data.jsonl for details") == []  # the boundary is the fix
+
+
+def test_compiled_pattern_carries_a_trailing_boundary():
+    """Source-level pin: the boundary is the whole fix, so make deleting it loud."""
+    assert r"(?![\w])" in P._CITATION_RE.pattern
+
+
+def test_boundary_does_not_regress_prose_or_line_suffixes():
+    """The tail is deliberately `(?![\\w])`, NOT `(?![\\w./-])` mirroring the lookbehind.
+    The symmetric form reads right and breaks a sentence-ending citation."""
+    assert P.extract_citations("the bug is in foo.py.") == ["foo.py"]  # end-of-sentence period
+    assert P.extract_citations("see `qux.py:3` in passing") == ["qux.py"]
+    assert P.extract_citations("bar.py:5-9 and bar.py:99") == ["bar.py"]
+    assert P.extract_citations("[scorer](src/q/scorer.py)") == ["src/q/scorer.py"]
+
+
+def test_mjs_family_is_covered():
+    """BUG C is orthogonal to the boundary — a membership gap, not an assertion gap. The
+    enforcement chain this repo's own memories cite (scripts/*.mjs) was uncitable."""
+    body = "the mirror is scripts/brand_redirect_stubs.mjs and scripts/check_import_graph.mjs"
+    assert P.extract_citations(body) == [
+        "scripts/brand_redirect_stubs.mjs",
+        "scripts/check_import_graph.mjs",
+    ]
+
+
+def test_extensionless_files_are_still_not_citable():
+    """Honest scope pin: BUG B (Dockerfile/Makefile) is NOT fixed by ORC-1 — the token
+    shape requires a dotted extension. LIF-4 now reports these as `not_derived` rather
+    than claiming they left the repo, which is the accurate statement of this gap."""
+    assert P.extract_citations("the Dockerfile mirrors the Makefile") == []
+
+
+def test_resolve_normalises_a_leading_dot_slash(repo):
+    """ORC-1: git ls-files never emits `./`, so `./src/a/dup.py` missed the exact match and
+    fell through to the basename fallback — which drops ambiguous basenames. A citation
+    written MORE precisely resolved WORSE than a bare one."""
+    repo_files = {"src/a/dup.py", "src/b/dup.py"}
+    index = {"dup.py": ["src/a/dup.py", "src/b/dup.py"]}  # ambiguous basename
+    assert P.resolve_citations(["./src/a/dup.py"], repo_files, index) == ["src/a/dup.py"]
+    # the bare ambiguous basename is still correctly dropped
+    assert P.resolve_citations(["dup.py"], repo_files, index) == []
