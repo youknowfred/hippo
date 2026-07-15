@@ -7,6 +7,34 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.15.1 — 2026-07-14 — "The third file class"
+
+**re-bootstrap: no** — `plugin/requirements.txt` is unchanged. Corpus format stays **5**; this is
+a `cite_derivation` bump only (2 → 3 — see v1.15.0's DRV-2 for why that is the correct axis, not
+`corpus_format`). **Operator action: same as v1.15.0's** — `/hippo:doctor` names any corpus
+behind the current extractor and routes to the existing per-item, consent-gated re-derivation
+(MIG-1); nothing migrates automatically.
+
+v1.15.0's motivating bug report named three uncitable file classes. That release closed two of
+them (ORC-1); this closes the third, deliberately deferred at the time and pinned with a test
+rather than mistaken for coverage.
+
+- **ORC-3 — extensionless filenames become citable, narrowly.** `Dockerfile`, `Makefile`,
+  `LICENSE` and friends have no dotted extension for the extractor to key on at all, and the naive
+  fix — match these names anywhere — fails this project's own rule: under-flag beats cry-wolf,
+  because most of them are ALSO ordinary English words ("the Dockerfile pattern is common in
+  monorepos" is not a citation). Measured before designing, against this repo's real corpus and
+  docs: every genuine citation found there was backtick-quoted, and `resolve_citations` — already
+  extension-agnostic basename matching — needed no change at all; its existing ambiguity-drop
+  protects an extensionless name exactly as it protects a `.py` one, so a monorepo with several
+  same-named files still correctly falls back to a directory-qualified mention (the same pattern
+  this repo's own README already uses for `LICENSE` vs `plugin/LICENSE`). Landed shape:
+  directory-qualified anywhere (`docker/Dockerfile`), or a whole backtick span and nothing else
+  (`` `Dockerfile` ``) — reusing `rules_plane._path_ref_re()`'s own whole-span anchor rather than
+  inventing a second one, extended in step under ORC-2's single-source-of-truth rule. A bare,
+  unmarked mid-sentence mention stays deliberately non-citable — a narrow, measured fix, not a
+  broad noisy one. `CITATION_DERIVATION_VERSION` moves to **3**.
+
 ## v1.15.0 — 2026-07-14 — "Say what you measured"
 
 **re-bootstrap: no** — `plugin/requirements.txt` is byte-identical. Corpus format stays **5**

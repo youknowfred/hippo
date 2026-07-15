@@ -44,6 +44,35 @@ _CODE_EXTS = (
     "cfg", "ini", "yml", "sh", "ts", "js", "py",
 )
 
+# ORC-3 — extensionless config/build filenames the extractor also recognizes. A bounded
+# allowlist, not "any dotless capitalized word": most of these names are ALSO ordinary
+# English vocabulary ("the Dockerfile pattern is common in monorepos" is not a citation),
+# so unlike _CODE_EXTS a dotted extension can't do the disambiguating work here — something
+# else has to. Recognized in exactly two shapes (see _CITATION_RE):
+#
+#   directory-qualified, anywhere — `docker/Dockerfile` — the same leniency a dotted file
+#     already gets bare (a sentence does not spontaneously produce "word/Dockerfile").
+#   a WHOLE backtick span, nothing else — `` `Dockerfile` `` — mirrors
+#     rules_plane._path_ref_re()'s own whole-span anchor (ORC-2's precedent, reused rather
+#     than reinvented): a human who backtick-quotes a bare word is asserting "this is a
+#     literal token", the same deliberate signal a dotted extension supplies structurally.
+#
+# A bare, UNMARKED mid-sentence mention ("see the Dockerfile") is a deliberate non-match:
+# nothing syntactically distinguishes it from "the Dockerfile pattern is common in
+# monorepos", and resolve_citations' own rule is under-flag beats cry-wolf. Measured
+# against this repo's real corpus + docs (read-only): every genuine citation found there
+# was backtick-quoted (`Dockerfile`/`CODEOWNERS` in CHANGELOG.md, `.env.example` in a real
+# memory); the one bare mid-list "CODEOWNERS" mention is an accepted miss, same class as
+# the LIF-4 fixture's own bare "the Dockerfile" body text, which this deliberately leaves
+# non-derivable (test_refresh_partitions_a_real_not_derived_drop_end_to_end pins it).
+# resolve_citations itself needed NO change — it is already extension-agnostic basename
+# matching, so the existing ambiguity-drop (two same-named files -> dropped) protects an
+# extensionless citation exactly as it protects a dotted one today.
+_EXTENSIONLESS_NAMES = (
+    "Dockerfile", "Makefile", "Procfile", "Justfile", "Rakefile", "Gemfile",
+    "Vagrantfile", "CODEOWNERS", "LICENSE", ".env.example", ".nvmrc", ".python-version",
+)
+
 # A path-like token: optional dir segments + filename + a code extension, with an
 # optional :line or :line-range suffix (which we drop — we track files, not lines).
 #
@@ -74,9 +103,28 @@ _CODE_EXTS = (
 # AFTER the dot, so a sentence-ending period still matches and `.bak` does not.
 # Also NOT `(?![\w.]\w)`, which looks equivalent and is strictly worse — measured, it
 # re-fabricates `foo.pyx -> foo.py` and `data.jsonl -> data.json`.
+#
+# ORC-3 adds two more alternatives, both reusing this same leading lookbehind + trailing
+# `(?!\w|\.\w)` boundary rather than inventing new ones — so `Gemfile.lock` cannot truncate
+# to `Gemfile` for exactly the reason `test.py.bak` cannot truncate to `test.py`:
+#
+#   directory-qualified extensionless — `(?:[\w.-]+/)+(?:Dockerfile|...)` — note the `+`,
+#     not the dotted branch's `*`: at least one dir segment is REQUIRED here, because
+#     without a directory a bare `Dockerfile` is also just an English word (see
+#     _EXTENSIONLESS_NAMES). A dotted file needs no such gate — its extension already
+#     supplies the signal a directory supplies here.
+#   bare-in-a-whole-backtick-span — `(?<=\`)(?:Dockerfile|...)(?::\d+(?:-\d+)?)?(?=\`)` — a
+#     SEPARATE top-level alternative (its own lookaround, not the shared lookbehind/tail
+#     above): the backtick must sit immediately either side of the name-plus-optional-line,
+#     i.e. the entire span is the reference and nothing else, same discipline
+#     rules_plane._path_ref_re() enforces with `^...$`. This is capture group 2;
+#     extract_citations reads `group(1) or group(2)`.
 _CITATION_RE = re.compile(
-    r"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.(?:" + "|".join(_CODE_EXTS) + r"))(?!\w|\.\w)"
-    r"(?::\d+(?:-\d+)?)?"
+    r"(?<![\w./-])("
+    r"(?:[\w.-]+/)*[\w.-]+\.(?:" + "|".join(_CODE_EXTS) + r")"
+    r"|(?:[\w.-]+/)+(?:" + "|".join(re.escape(n) for n in _EXTENSIONLESS_NAMES) + r")"
+    r")(?!\w|\.\w)(?::\d+(?:-\d+)?)?"
+    r"|(?<=`)(" + "|".join(re.escape(n) for n in _EXTENSIONLESS_NAMES) + r")(?::\d+(?:-\d+)?)?(?=`)"
 )
 
 _FENCE = "---"
@@ -559,11 +607,16 @@ _FORMAT_MARKER_NAME = ".format"
 #       `package.js`, and `.tsx`/`.jsx`/`.json` were declared-but-unreachable), no
 #       mjs/cjs/mts/cts, no `./` normalisation.
 #   2 — ORC-1 + DRV-1: trailing `(?!\w|\.\w)`, the mjs family, `./` normalisation.
+#   3 — ORC-3: extensionless config/build filenames (_EXTENSIONLESS_NAMES — Dockerfile,
+#       Makefile, LICENSE, etc.) become citable in two bounded shapes: directory-qualified
+#       anywhere, or a whole backtick span. A bare unmarked mid-sentence mention stays
+#       non-derivable, deliberately. resolve_citations itself is UNCHANGED — already
+#       extension-agnostic basename matching — only the extractor's vocabulary grew.
 #
 # Kept on the corpus-level marker rather than in each file's frontmatter: a per-file key
 # WOULD be a shape change (a real corpus_format v6), needs a corpus-wide rewrite just to
 # introduce, and answers a question that is not per-file anyway.
-CITATION_DERIVATION_VERSION = 2
+CITATION_DERIVATION_VERSION = 3
 
 
 def format_marker_path(memory_dir: str) -> str:
@@ -695,7 +748,10 @@ def extract_citations(body: str) -> List[str]:
     seen: set = set()
     out: List[str] = []
     for m in _CITATION_RE.finditer(body or ""):
-        tok = m.group(1)
+        # ORC-3: group(1) is the dotted-or-directory-qualified-extensionless branch;
+        # group(2) is the whole-backtick-span bare-extensionless branch. Exactly one is
+        # populated per match — the two are separate top-level alternatives.
+        tok = m.group(1) or m.group(2)
         if tok not in seen:
             seen.add(tok)
             out.append(tok)

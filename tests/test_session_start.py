@@ -1042,7 +1042,8 @@ def test_squash_merge_heal_end_to_end_and_reverify_clears(repo, memory_dir, monk
 def test_cite_derivation_producer_nudges_a_corpus_derived_by_the_old_extractor(tmp_path):
     """AC (DRV-2): an OLDER derivation is a live degradation (memories watching the wrong
     file; memories staleness-EXEMPT on an empty cited_paths), so unlike an older
-    corpus_format it gets a per-session line — KPI-5, never a silent degradation."""
+    corpus_format it gets a per-session line — KPI-5, never a silent degradation. A v1
+    (undeclared) corpus is behind BOTH historical fixes, so both gap clauses appear."""
     from memory.session_start import cite_derivation_producer
 
     md = str(tmp_path)
@@ -1050,8 +1051,28 @@ def test_cite_derivation_producer_nudges_a_corpus_derived_by_the_old_extractor(t
         fh.write("---\nname: m\n---\nbody cites src/a.py\n")
     line = cite_derivation_producer(md, md)  # undeclared == v1
     assert line and "Citation derivation" in line
-    assert "v1" in line and "v2" in line
+    assert "v1" in line and "v3" in line
+    assert "package.json as package.js" in line  # ORC-1's gap (v1 -> v2)
+    assert "extensionless config/build filenames" in line  # ORC-3's gap (v2 -> v3)
     assert "/hippo:doctor" in line  # routes to the consent-gated path, never self-migrates
+
+
+def test_cite_derivation_producer_nudges_a_corpus_derived_by_v2_extractor(tmp_path):
+    """AC (ORC-3): a corpus already at v2 (ORC-1 applied) is NOT behind the v1 bugs — the
+    message must not describe a defect this corpus does not have. Only the v2->v3 gap
+    (extensionless names) applies."""
+    from memory.provenance import write_cite_derivation
+    from memory.session_start import cite_derivation_producer
+
+    md = str(tmp_path)
+    with open(os.path.join(md, "m.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: m\n---\nbody cites src/a.py\n")
+    assert write_cite_derivation(md, 2)
+    line = cite_derivation_producer(md, md)
+    assert line and "Citation derivation" in line
+    assert "v2" in line and "v3" in line
+    assert "extensionless config/build filenames" in line  # ORC-3's gap — applies
+    assert "package.json as package.js" not in line  # ORC-1's gap — does NOT apply to a v2 corpus
 
 
 def test_cite_derivation_producer_is_silent_on_an_empty_corpus(tmp_path):

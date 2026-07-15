@@ -1808,13 +1808,6 @@ def test_mjs_family_is_covered():
     ]
 
 
-def test_extensionless_files_are_still_not_citable():
-    """Honest scope pin: BUG B (Dockerfile/Makefile) is NOT fixed by ORC-1 — the token
-    shape requires a dotted extension. LIF-4 now reports these as `not_derived` rather
-    than claiming they left the repo, which is the accurate statement of this gap."""
-    assert P.extract_citations("the Dockerfile mirrors the Makefile") == []
-
-
 def test_resolve_normalises_a_leading_dot_slash(repo):
     """ORC-1: git ls-files never emits `./`, so `./src/a/dup.py` missed the exact match and
     fell through to the basename fallback — which drops ambiguous basenames. A citation
@@ -1824,6 +1817,114 @@ def test_resolve_normalises_a_leading_dot_slash(repo):
     assert P.resolve_citations(["./src/a/dup.py"], repo_files, index) == ["src/a/dup.py"]
     # the bare ambiguous basename is still correctly dropped
     assert P.resolve_citations(["dup.py"], repo_files, index) == []
+
+
+# --------------------------------------------------------------------------- #
+# ORC-3 — extensionless config/build filenames become citable, narrowly
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("name", P._EXTENSIONLESS_NAMES)
+def test_every_declared_extensionless_name_is_reachable_directory_qualified(name):
+    """Mirrors ORC-1's data-driven extension-reachability discipline: adding an entry to
+    _EXTENSIONLESS_NAMES auto-tests its own reachability instead of relying on one hand-picked
+    example (the exact gap that let tsx/jsx/json sit declared-but-unreachable for 14 minor
+    versions)."""
+    tok = f"config/{name}"
+    assert P.extract_citations(f"see {tok} for details") == [tok]
+
+
+@pytest.mark.parametrize("name", P._EXTENSIONLESS_NAMES)
+def test_every_declared_extensionless_name_is_reachable_bare_backtick(name):
+    assert P.extract_citations(f"see `{name}` for details") == [name]
+
+
+def test_bare_unmarked_extensionless_mention_stays_uncited():
+    """The replacement for the deleted pinning test. Bare, unmarked, mid-sentence mentions of
+    an extensionless name are a DELIBERATE non-match — nothing syntactically distinguishes
+    "we containerised it, see the Dockerfile" (a real citation) from "the Dockerfile pattern
+    is common in monorepos" (generic prose); under-flag beats cry-wolf. This is also the exact
+    body text test_refresh_partitions_a_real_not_derived_drop_end_to_end relies on staying
+    non-derivable."""
+    assert P.extract_citations("the Dockerfile mirrors the Makefile") == []
+    assert P.extract_citations("we containerised it, see the Dockerfile") == []
+    assert P.extract_citations("body cites src/keep.py and the Dockerfile") == ["src/keep.py"]
+
+
+def test_bare_extensionless_name_requires_the_whole_backtick_span():
+    """Mirrors rules_plane._path_ref_re()'s own regression guard (ORC-2's precedent): a whole
+    descriptive clause in backticks is prose, not a reference, even when an allowlisted name
+    appears inside it."""
+    assert P.extract_citations("`see the Dockerfile for details`") == []
+    assert P.extract_citations("`Dockerfile`") == ["Dockerfile"]
+
+
+def test_extensionless_truncation_family_is_not_fabricated():
+    """Mirrors ORC-1's truncation-family guard for the new branches: a dotted SUFFIX after a
+    complete extensionless name means the token was never this file, in both shapes."""
+    assert P.extract_citations("see config/Gemfile.lock for pinned versions") == []
+    assert P.extract_citations("`Gemfile.lock`") == []
+    assert P.extract_citations("`LICENSE.txt`") == []
+
+
+def test_extensionless_backtick_line_suffix_is_stripped():
+    assert P.extract_citations("see `Dockerfile:12` for the base image") == ["Dockerfile"]
+    assert P.extract_citations("see `Dockerfile:12-18` for the stages") == ["Dockerfile"]
+
+
+def test_resolve_citations_extensionless_ambiguity_and_disambiguation():
+    """resolve_citations itself needed NO change (DRV-2's history comment says so; this is the
+    proof) — the existing extension-agnostic basename machinery already does the right thing:
+    an unambiguous bare name resolves, a genuinely ambiguous one (no exact path match, 2+
+    same-basename candidates) drops exactly like a same-named .py file would, and a
+    directory-qualified mention always disambiguates."""
+    repo_files = {
+        "services/api/Dockerfile", "services/web/Dockerfile",  # neither IS the bare token
+        "packages/a/LICENSE", "packages/b/LICENSE",             # ditto
+        ".github/CODEOWNERS",
+    }
+    index: dict = {}
+    for f in repo_files:
+        index.setdefault(f.rsplit("/", 1)[-1], []).append(f)
+
+    assert P.resolve_citations(["Dockerfile"], repo_files, index) == []  # ambiguous -> dropped
+    assert P.resolve_citations(["services/api/Dockerfile"], repo_files, index) == [
+        "services/api/Dockerfile"
+    ]
+    assert P.resolve_citations(["LICENSE"], repo_files, index) == []  # ambiguous -> dropped
+    assert P.resolve_citations(["packages/a/LICENSE"], repo_files, index) == ["packages/a/LICENSE"]
+    assert P.resolve_citations(["CODEOWNERS"], repo_files, index) == [".github/CODEOWNERS"]
+
+
+def test_resolve_citations_root_extensionless_file_wins_by_exact_path():
+    """This repo's OWN actual shape: a root LICENSE plus plugin/LICENSE (verified via `git
+    ls-files`). A bare "LICENSE" citation is NOT ambiguous here — it exact-path-matches the
+    root file directly, the same branch a bare "src/a.py" written for a root-level "a.py"
+    would take, so it resolves without ever reaching the basename fallback. The nested copy
+    still needs to be named to be cited — exactly the pattern this repo's own README.md
+    already uses ([LICENSE](LICENSE) vs [plugin/LICENSE](plugin/LICENSE))."""
+    repo_files = {"LICENSE", "plugin/LICENSE", "src/a.py"}
+    index = {"LICENSE": ["LICENSE", "plugin/LICENSE"], "a.py": ["src/a.py"]}
+    assert P.resolve_citations(["LICENSE"], repo_files, index) == ["LICENSE"]
+    assert P.resolve_citations(["plugin/LICENSE"], repo_files, index) == ["plugin/LICENSE"]
+
+
+def test_extensionless_citation_end_to_end_through_backfill(repo, memory_dir):
+    """AC: the motivating bug report, end to end. A memory whose body backtick-cites
+    `Dockerfile` and `package.json` (both real, unambiguous) now backfills BOTH into
+    cited_paths — the exact drift-detection gap the v1.15.0 release started from."""
+    write_file(repo, "Dockerfile", "FROM scratch\n")
+    write_file(repo, "package.json", '{"name": "x"}\n')
+    write_file(repo, "scripts/deploy_nightly.sh", "#!/bin/sh\n")
+    git_commit(repo, "init", 1_700_000_000)
+    write_file(
+        memory_dir,
+        "m.md",
+        "---\nname: M\ntype: project\n---\n"
+        "Watches drift between `Dockerfile`, `package.json` and `scripts/*.mjs`.\n",
+    )
+    results = P.backfill_corpus(memory_dir, repo)
+    r = next(x for x in results if x["path"].endswith("m.md"))
+    assert r["cited"] == ["Dockerfile", "package.json"]
+    assert "scripts/deploy_nightly.sh" not in r["cited"]  # never falls back to an unrelated file
 
 
 # --------------------------------------------------------------------------- #
@@ -1909,9 +2010,10 @@ def test_the_extractor_fix_is_not_a_corpus_format_event(tmp_path):
     (packs.py: "deliberately NOT a corpus_format bump — the memory-file shapes are
     unchanged") the ORC-1 fix changes VALUES, not shape, so it must not move
     CORPUS_FORMAT_VERSION. That is exactly why it felt like a regex tweak and was in fact a
-    corpus-wide rewrite — the axis to say so did not exist."""
-    assert P.CORPUS_FORMAT_VERSION == 5  # unmoved by ORC-1/DRV-1
-    assert P.CITATION_DERIVATION_VERSION == 2  # the axis that DID move
+    corpus-wide rewrite — the axis to say so did not exist. ORC-3 (extensionless names)
+    is the second extractor change to land on this same axis, for the same reason."""
+    assert P.CORPUS_FORMAT_VERSION == 5  # unmoved by ORC-1/DRV-1/ORC-3
+    assert P.CITATION_DERIVATION_VERSION == 3  # the axis that DID move, twice now
 
 
 # --------------------------------------------------------------------------- #
