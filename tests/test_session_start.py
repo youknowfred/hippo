@@ -1054,7 +1054,14 @@ def test_cite_derivation_producer_nudges_a_corpus_derived_by_the_old_extractor(t
     assert "v1" in line and "v3" in line
     assert "package.json as package.js" in line  # ORC-1's gap (v1 -> v2)
     assert "extensionless config/build filenames" in line  # ORC-3's gap (v2 -> v3)
-    assert "/hippo:doctor" in line  # routes to the consent-gated path, never self-migrates
+    # DOC-16: NAME the verb, on both surfaces. This used to assert "/hippo:doctor" — routing
+    # to a health check that then named nothing, so the loop dead-ended: nudge -> doctor ->
+    # (no command). Stating a conclusion while never naming the oracle is exactly LIF-4's
+    # complaint, one layer up. The line must now carry the verb itself.
+    assert "rederive" in line  # the MCP tool — the ONLY form a Desktop user can call
+    assert "action='worklist'" in line  # ...and how to review before writing anything
+    assert "--rederive-worklist" in line  # the terminal form
+    assert "per-item" in line  # still never a bulk self-migration
 
 
 def test_cite_derivation_producer_nudges_a_corpus_derived_by_v2_extractor(tmp_path):

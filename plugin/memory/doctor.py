@@ -407,7 +407,8 @@ def check_empty_baselines(ctx: DoctorContext) -> Dict[str, str]:
             "message": (
                 f"{len(empty)} memory(ies) have an EMPTY staleness baseline and are "
                 f"invisible to staleness tracking: {', '.join(sorted(empty))}. Heal them to "
-                "HEAD with: python -m memory.provenance --heal-baselines"
+                "HEAD with the heal_baselines MCP tool, or in a terminal: "
+                "python -m memory.provenance --heal-baselines"
             ),
         }
     except Exception as exc:
@@ -716,13 +717,21 @@ def check_format_version(ctx: DoctorContext) -> Dict[str, str]:
             parts.append(f"citation derivation current (v{cite})")
         else:
             status = "warn"
+            # DOC-16: NAME the verb. This line used to say "re-derive per memory" and stop —
+            # stating a conclusion while never naming the thing that acts on it, which is
+            # LIF-4's own complaint one layer up. The remediation loop dead-ended here on
+            # both surfaces: the nudge routed to doctor, and doctor routed to nothing.
             parts.append(
                 f"citation derivation is v{cite}, this plugin derives "
                 f"v{CITATION_DERIVATION_VERSION} — cited_paths in this corpus were produced "
-                "by the pre-ORC-1 extractor (blind to .json/.tsx/.jsx/.mjs and a leading "
-                "./), so some memories watch the wrong file and some are staleness-EXEMPT "
-                "on an empty cited_paths; re-derive per memory (it rewrites frontmatter, so "
-                "it is consent-gated and never automatic)"
+                "by an older extractor (v1 was blind to .json/.tsx/.jsx/.mjs and a leading "
+                "./; v2 to extensionless files like Dockerfile), so some memories watch the "
+                "wrong file and some are staleness-EXEMPT on an empty cited_paths. Review "
+                "with the rederive MCP tool (action='worklist'), apply per memory "
+                "(action='one' name=…), then action='stamp' — or in a terminal, "
+                "python -m memory.provenance --rederive-worklist / --rederive-one <name> / "
+                "--stamp-derivation. It rewrites frontmatter, so it is per-item, "
+                "consent-gated and never automatic"
             )
 
         return {"status": status, "message": "; ".join(parts) + "."}

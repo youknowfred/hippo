@@ -83,14 +83,25 @@ _CONSOLIDATE_TOOLS = [
     "capture", "secrets_scan", "reconsolidate", "build_index",
     "co_recall_proposals", "abstention_fixtures",
 ]
+# Additive corpus-REPAIR tools (INT-14/15): a category of their own, not consolidate steps —
+# they exist purely to undo a defect hippo itself shipped. MIG-1's re-derivation and COR-10's
+# baseline heal were CLI-only in v1.15.0, so the DRV-2 nudge (a hook — it fires on BOTH
+# surfaces) routed a Desktop user to doctor, and doctor routed them nowhere.
+_REPAIR_TOOLS = ["rederive", "heal_baselines"]
 
 
 def test_tools_list_exposes_frozen_five_plus_setup_tools():
     resp = M.handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     names = [t["name"] for t in resp["result"]["tools"]]
-    assert names == _FROZEN_TOOLS + _SETUP_TOOLS + _VERB_TOOLS + _CONSOLIDATE_TOOLS
+    assert names == (
+        _FROZEN_TOOLS + _SETUP_TOOLS + _VERB_TOOLS + _CONSOLIDATE_TOOLS + _REPAIR_TOOLS
+    )
     for t in resp["result"]["tools"]:
         assert t["inputSchema"]["type"] == "object"  # every tool has a JSON schema
+    # STABILITY.md: the frozen five keep their names, shapes AND positions. Additive tools
+    # append; they never reorder what shipped. This test is what made that true here — the
+    # repair tools were first written into the middle of the consolidate block.
+    assert names[: len(_FROZEN_TOOLS)] == _FROZEN_TOOLS
 
 
 def test_notifications_get_no_response():

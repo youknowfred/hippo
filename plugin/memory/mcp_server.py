@@ -619,6 +619,67 @@ _TOOLS = [
             },
         },
     },
+    {
+        "name": "rederive",
+        "description": (
+            "MIG-1: re-derive cited_paths after hippo's citation EXTRACTOR changed (the "
+            "DRV-2 'citation derivation' nudge / doctor line routes here). Corpora written "
+            "by an older extractor carry citations it could not see — so some memories "
+            "watch the wrong file and some sit at cited_paths: [], which makes them EXEMPT "
+            "from staleness tracking. action='worklist' (default) is READ-ONLY and shows "
+            "the attributed diff per memory (gains / losses / unresolved). Review EACH, "
+            "then apply ONE at a time with action='one' name=<slug> — the per-item review "
+            "is what makes the write consented; there is deliberately no bulk form. "
+            "action='one' re-derives and PRESERVES source_commit (unlike a reverify, which "
+            "would clear every staleness flag) and folds the reviewed bytes into the "
+            "consent baseline (unlike a bulk refresh, which would quarantine every memory "
+            "it fixed). It rewrites frontmatter and a gitignored corpus has no git undo — "
+            "take action='snapshot' stamp=<label> FIRST."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["worklist", "one", "snapshot", "stamp"],
+                    "description": "worklist = the read-only attributed diff (default); "
+                    "one = apply to ONE reviewed memory (requires name); "
+                    "snapshot = copy the corpus to memory.pre-cite<N>-<stamp>/ first; "
+                    "stamp = record the corpus as derived by this extractor, the LAST step "
+                    "(refused while any memory still differs — the stamp is earned, not "
+                    "claimed)",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "with action='one': the memory slug, with or without .md",
+                },
+                "stamp": {
+                    "type": "string",
+                    "description": "with action='snapshot': a label for the backup dir "
+                    "(e.g. '20260715-cite3')",
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "with action='one': report what would change, write nothing",
+                },
+            },
+        },
+    },
+    {
+        "name": "heal_baselines",
+        "description": (
+            "COR-10: set source_commit to HEAD for memories whose staleness baseline is "
+            "EMPTY. A memory with one is invisible to staleness, reconsolidation and "
+            "archive gating — forever. doctor's empty-baseline check names this tool. "
+            "This can never CLEAR a staleness flag (an empty baseline never raised one), "
+            "so it only turns tracking ON. Deliberately human-invoked and never automatic: "
+            "it used to run inside the SessionStart hook, which meant a hook writing to the "
+            "corpus — drifting each healed file off its own SEC-6 consent fingerprint, "
+            "after which the drift banner asked the user 'a git pull? a hand edit?' about "
+            "hippo's own write."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
 ]
 
 
@@ -1493,6 +1554,187 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
     return "reconsolidate: pass action='worklist' (default) or action='reverify' (name=…, outcome=…)."
 
 
+def _tool_rederive(args: Dict[str, Any]) -> str:
+    """INT-14 — MIG-1's consented re-derivation on the second surface.
+
+    MIG-1 shipped three CLI verbs and no MCP entrypoint, so the loop dead-ended on Desktop:
+    the DRV-2 SessionStart nudge fires (it is a hook — both surfaces), routes to doctor,
+    doctor reports the stale derivation… and nothing here could act on it. This is the same
+    gap INT-13 closed for consolidate, reopened by a release that only thought in CLI verbs.
+
+    Mirrors the CLI exactly — ``action='worklist'`` (read-only, the attributed diff),
+    ``action='one'`` (name=…, ONE memory, after its diff was reviewed), ``action='snapshot'``
+    (stamp=…, the mandatory backup). There is deliberately NO bulk form on either surface:
+    the per-item review is what makes the SEC-6 fold legitimate rather than the gate
+    consenting to itself (see ``provenance.rederive_file``).
+    """
+    from . import trust
+    from .provenance import (
+        CITATION_DERIVATION_VERSION,
+        build_repo_file_index,
+        citation_rot_lines,
+        read_cite_derivation,
+        rederive_file,
+        rederive_worklist,
+        resolve_dirs,
+        snapshot_corpus,
+        write_cite_derivation,
+    )
+
+    memory_dir, repo_root = resolve_dirs()
+    # SEC-1: gate like reconsolidate — the worklist renders memory names, and 'one' WRITES
+    # corpus frontmatter.
+    gate_root = trust.gate_repo_root(memory_dir, repo_root)
+    if gate_root is not None and not trust.is_trusted(gate_root):
+        return (
+            "rederive: withheld — this project's memory corpus is untrusted (SEC-1: the "
+            "worklist exposes memory names and 'one' writes corpus files, gated just as "
+            "recall and reconsolidate are). " + _UNTRUSTED_REMEDY
+        )
+
+    action = str(args.get("action") or "worklist").strip().lower()
+
+    if action == "snapshot":
+        stamp = str(args.get("stamp") or "").strip()
+        if not stamp:
+            return "rederive: action='snapshot' needs stamp=<label> (e.g. '20260715-cite3')."
+        try:
+            return (
+                f"snapshot: {snapshot_corpus(memory_dir, stamp)}\n"
+                "Self-ignoring (a `*` .gitignore lands before the payload), so the backup "
+                "cannot publish a corpus its project keeps private."
+            )
+        except FileExistsError as exc:
+            return f"rederive: refused — {exc}"
+        except Exception as exc:
+            return f"rederive: snapshot FAILED — {exc}. Do not migrate without one."
+
+    if action == "stamp":
+        # MIG-1 step 5, and the step that had no verb on ANY surface: `write_cite_derivation`
+        # existed and only tests called it, so a migration could be performed but never
+        # COMPLETED — the nudge fired forever.
+        #
+        # The stamp is EARNED, not claimed: it asserts "these citations were derived by vN",
+        # which is exactly the thing the marker exists to let you verify. So refuse while any
+        # memory still differs, and let an empty worklist be the proof.
+        work = rederive_worklist(memory_dir, repo_root)
+        if work:
+            return (
+                f"rederive: refused to stamp — {len(work)} memory(ies) still derive "
+                "differently under this plugin's extractor. Stamping now would assert a "
+                "derivation this corpus does not have, which is the one thing the marker "
+                "exists to prevent. Run action='worklist', apply each with action='one', "
+                "then stamp."
+            )
+        was = read_cite_derivation(memory_dir)
+        if was >= CITATION_DERIVATION_VERSION:
+            return f"rederive: already stamped cite_derivation={was} — nothing to do."
+        if not write_cite_derivation(memory_dir):
+            return "rederive: stamp FAILED to write .format — check the corpus dir is writable."
+        return (
+            f"stamped cite_derivation: {was} → {CITATION_DERIVATION_VERSION} "
+            f"(earned: 0 memories derive differently). The citation-derivation nudge stops."
+        )
+
+    if action == "worklist":
+        work = rederive_worklist(memory_dir, repo_root)
+        if not work:
+            declared = read_cite_derivation(memory_dir)
+            if declared < CITATION_DERIVATION_VERSION:
+                return (
+                    "re-derivation worklist: empty — every memory's citations already match "
+                    f"this plugin's extractor (v{CITATION_DERIVATION_VERSION}), but the "
+                    f"corpus still declares v{declared}, so the nudge keeps firing. Nothing "
+                    "to migrate; just record it: rederive action='stamp'."
+                )
+            return (
+                "re-derivation worklist: empty — every memory's citations already match this "
+                "plugin's extractor."
+            )
+        out = [f"re-derivation worklist: {len(work)} memory(ies) would change", ""]
+        for w in work:
+            if w["error"]:
+                out.append(f"  ✘ {w['name']}: {w['error']}")
+                continue
+            out.append(f"  {w['name']}")
+            if w["gained"]:
+                out.append(f"      + gains  : {', '.join(w['gained'])}")
+            if w["lost"]:
+                out.append(f"      - loses  : {', '.join(w['lost'])}")
+            if w["unresolved"]:
+                out.append(f"      ? unresolved in body: {', '.join(w['unresolved'])}")
+        out += [
+            "",
+            "Review EACH diff, then apply one at a time: rederive action='one' name=<name>.",
+            "This rewrites frontmatter and has no undo on a gitignored corpus — take "
+            "rederive action='snapshot' stamp=<label> first.",
+        ]
+        return "\n".join(out)
+
+    if action == "one":
+        name = str(args.get("name") or "").strip()
+        if not name:
+            return "rederive: action='one' needs name=<memory slug> (with or without .md)."
+        fname = name if name.endswith(".md") else f"{name}.md"
+        target = os.path.join(memory_dir, fname)
+        if not os.path.isfile(target):
+            return f"rederive: memory not found: {fname}"
+        repo_files, basename_index = build_repo_file_index(repo_root)
+        dry = bool(args.get("dry_run"))
+        r = rederive_file(target, repo_root, repo_files, basename_index, dry_run=dry)
+        if r["error"]:
+            return f"rederive {fname}: refused — {r['error']}"
+        verb = "would re-derive" if dry else "re-derived"
+        lines = [f"{verb} {fname}: cited_paths = {r['cited']}"]
+        lines += citation_rot_lines(fname, r, dry_run=dry)
+        if not dry and r["changed"]:
+            lines.append(
+                "source_commit PRESERVED (this is not a re-verify — no staleness flag was "
+                "cleared); the reviewed bytes were folded into the consent baseline, so the "
+                "memory is not quarantined."
+            )
+        return "\n".join(lines)
+
+    return (
+        "rederive: pass action='worklist' (default), 'one' (name=…), 'snapshot' (stamp=…), "
+        "or 'stamp'."
+    )
+
+
+def _tool_heal_baselines(args: Dict[str, Any]) -> str:
+    """INT-15 — the COR-10 heal on the second surface.
+
+    A v1.15.0 REGRESSION, and the reason this tool exists rather than a doc line: before
+    COR-10, ``heal_empty_baselines`` ran inside the SessionStart hook, which fires on BOTH
+    surfaces, so every user got it for free. COR-10 correctly moved it off the hook (a hook
+    must not write to the corpus — it drifts each file off its own SEC-6 fingerprint and then
+    the drift banner blames the user for hippo's own write) — but it moved it to a CLI verb,
+    which only the terminal can reach. Terminal users kept the capability; Desktop users lost
+    it outright.
+
+    Deliberately a human-invoked TOOL, never automatic: that is the whole point of COR-10.
+    Restoring parity must not restore the hook write.
+    """
+    from . import trust
+    from .provenance import heal_empty_baselines, resolve_dirs
+
+    memory_dir, repo_root = resolve_dirs()
+    gate_root = trust.gate_repo_root(memory_dir, repo_root)
+    if gate_root is not None and not trust.is_trusted(gate_root):
+        return (
+            "heal_baselines: withheld — this project's memory corpus is untrusted (SEC-1: "
+            "this writes corpus files). " + _UNTRUSTED_REMEDY
+        )
+    healed = heal_empty_baselines(memory_dir, repo_root)
+    if not healed:
+        return "heal_baselines: nothing to heal — no memory carries an empty staleness baseline."
+    return (
+        f"healed {len(healed)} empty baseline(s) to HEAD: {', '.join(healed)}\n"
+        "Each was invisible to staleness, reconsolidation and archive gating; they are now "
+        "tracked. This can never CLEAR a flag — an empty baseline never raised one."
+    )
+
+
 def _tool_build_index(args: Dict[str, Any]) -> str:
     """Step 3: refresh the index + persisted links.json. Runs the full ``memory.build_index``
     under the freshly-resolved venv python when one exists (dense vectors — the same
@@ -1645,6 +1887,10 @@ _DISPATCH = {
     "build_index": _tool_build_index,
     "co_recall_proposals": _tool_co_recall_proposals,
     "abstention_fixtures": _tool_abstention_fixtures,
+    # INT-14/15 — corpus REPAIR, a category of its own: not a consolidate step, and the only
+    # verbs that exist purely to undo a defect hippo itself shipped.
+    "rederive": _tool_rederive,
+    "heal_baselines": _tool_heal_baselines,
 }
 
 
