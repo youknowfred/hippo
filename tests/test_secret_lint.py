@@ -64,25 +64,59 @@ def test_scan_text_clean_on_ordinary_prose():
 
 
 def test_scan_text_no_false_positive_on_hex_sha():
-    # DOC-15: a hex sha must not trip the entropy catch-all — but NOT for the reason this
-    # comment used to give. Hex is not "single-class-ish": it mixes letters and digits, so
-    # _has_mixed_classes returns True and that gate never fires here. What keeps this quiet
-    # is the entropy bar (hex is a 16-symbol alphabet). That protection is thin — see
-    # test_scan_text_labelled_hex_is_a_known_false_positive.
+    # DOC-15 corrected the REASON, SEC-16 made it true. Hex is not "single-class-ish": it
+    # mixes letters and digits, so the old _has_mixed_classes gate returned True and never
+    # fired for the shape it was documented as excluding. Hex IS single-CASE, which is what
+    # the gate now tests — a property no base64/base64url secret has.
     assert S.scan_text("baseline sha 3f9a1c2e4b6d8f0a1c2e4b6d8f0a1c2e4b6d8f0a") == []
 
 
-def test_scan_text_labelled_hex_is_a_known_false_positive():
-    """DOC-15 pins the CURRENT (wrong) behaviour so SEC-16's fix has a witness.
+def test_scan_text_labelled_hex_no_longer_false_positives():
+    """SEC-16: the same digest gets the same verdict whether or not it carries a label.
 
-    Entropy is scored over the whole token while the run-length check is scored over its
-    longest segment — two different strings, one verdict. So labelling a sha pushes the
-    whole-token entropy over the bar and the identical digest that scans clean bare now
-    fires. This is the field false positive (a content-addressed asset store's digest).
+    This was the field false positive (a content-addressed asset store's digest, flagged as
+    "possible high-entropy secret"). The cause was that the three predicates scored two
+    DIFFERENT strings: entropy and class-mixing over the whole token, run-length over its
+    longest segment — so the label itself pushed the token over the entropy bar and the
+    label WAS the secret, as far as the gate could tell. All three now score the core run.
     """
     sha = "a3f5b8c2d4e6f7a9b1c3d5e7f9a2b4c6d8e0f2a4b6c8d0e2f4a6b8c0d2e4f6a8"
-    assert S.scan_text(sha) == []  # bare: clean
-    assert S.scan_text(f"content_digest={sha}") != []  # labelled: FIRES — same digest
+    assert S.scan_text(sha) == []
+    assert S.scan_text(f"content_digest={sha}") == []  # the label no longer decides
+    assert S.scan_text(f"sha256:{sha}") == []
+
+
+def test_scan_text_catches_aws_secret_access_key_with_slashes():
+    """SEC-16 (the false NEGATIVE, and the more serious half).
+
+    `_longest_core_run` splits on `/`, but `/` is standard-base64 CONTENT, not a separator.
+    AWS's OWN DOCUMENTED example secret access key fragments into 13/7/18 — every piece
+    under the old floor of 20 — and scanned CLEAN. The old docstring promised 20 sat "below
+    the run length a genuine >=32-char secret retains even when a LONE separator splits it
+    near the middle"; a real key carries several, so the promise was false at the boundary
+    it named.
+    """
+    aws_secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"  # AWS docs' own example value
+    assert any("high-entropy" in w for w in S.scan_text(f"aws_secret_access_key = {aws_secret}"))
+
+
+def test_entropy_gate_scores_one_string_not_two():
+    """The invariant behind both fixes: length, case-mixing and entropy are all measured on
+    the SAME string (the core run), so no prefix/suffix can change the verdict on a payload."""
+    sha = "a3f5b8c2d4e6f7a9b1c3d5e7f9a2b4c6d8e0f2a4b6c8d0e2f4a6b8c0d2e4f6a8"
+    for label in ("", "digest=", "sha256:", "content_digest=", "x" * 40 + "="):
+        assert S.scan_text(f"{label}{sha}") == [], f"the label {label!r} changed the verdict"
+
+
+def test_camelcase_identifier_false_positive_is_known_and_unfixed():
+    """Honest scope pin — SEC-16 does NOT claim to fix precision generally.
+
+    A long camelCase identifier still trips the catch-all, and no entropy threshold can fix
+    it: measured, `getUserAuthenticationTokenFromCache` scores 4.01 bits while AWS's real
+    secret key core scores 3.68. The identifier is MORE 'random' by this metric than the
+    secret. Separating them needs a different signal (dictionary-word structure), not a
+    tuned bar. Pinned so the limitation is visible rather than folklore."""
+    assert S.scan_text("the handler is getUserAuthenticationTokenFromCache in the cache") != []
 
 
 def test_scan_text_never_echoes_the_secret():
@@ -374,3 +408,49 @@ def test_main_cli_returns_1_on_finding_and_0_when_clean(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "Google API key" in out
     assert _FAKE_GOOGLE not in out  # the CLI reports the KIND, never the secret
+
+
+# --------------------------------------------------------------------------- #
+# SEC-17 — a placeholder is not a credential
+# --------------------------------------------------------------------------- #
+def test_connstr_placeholder_template_is_not_a_credential():
+    """AC (SEC-17): the field false positive. A variable-reference template contains no
+    credential at all — it is the documented CORRECT way to avoid hardcoding one — and the
+    rule flagged it because it shares the `scheme://user:pass@` SHAPE.
+
+    Not cosmetic: packs hard-REFUSES an install on any finding and capture_triage silently
+    DROPS the capture, so these fail closed."""
+    for template in [
+        "postgres://${{PGUSER}}:${{PGPASSWORD}}@${{PGHOST}}:${{PGPORT}}/${{PGDATABASE}}",
+        "postgres://user:${DB_PASS}@host:5432/db",
+        "postgres://user:$DB_PASS@host/db",
+        "mysql://root:<PASSWORD>@localhost/app",
+        "redis://user:{{redis_pw}}@cache:6379",
+        "mongodb+srv://user:%(pw)s@cluster.mongodb.net",
+        "amqps://user:REDACTED@broker",
+    ]:
+        assert S.scan_text(template, entropy=False) == [], f"placeholder flagged: {template!r}"
+
+
+def test_connstr_still_fires_on_a_real_password_beside_a_placeholder_user():
+    """The username is not the secret — a real password beside a placeholder user is still
+    a leak, so the allowlist is judged on the PASSWORD half only."""
+    assert any(
+        "connection string" in w
+        for w in S.scan_text("postgres://${{PGUSER}}:hunter2SuperSecret@host/db", entropy=False)
+    )
+
+
+def test_connstr_still_fires_on_a_real_credential():
+    assert any(
+        "connection string" in w
+        for w in S.scan_text("postgres://admin:s3cr3tP4ss@db.internal:5432/prod", entropy=False)
+    )
+    # and the pinned fake in this suite must keep firing
+    assert any("connection string" in w for w in S.scan_text(_FAKE_CONNSTR, entropy=False))
+
+
+def test_connstr_has_a_length_floor_like_every_other_variable_span_rule():
+    """It was the only variable-span rule in _PATTERNS with no floor at all, against the
+    module's own stated inclusion criterion."""
+    assert S.scan_text("postgres://a:b@h", entropy=False) == []
