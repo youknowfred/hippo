@@ -364,6 +364,11 @@ def test_semantic_reverify_graduate_clears_flag_and_logs_outcome(repo, memory_di
         # re-derivation drops the frontmatter's src/foo.py — reported, never silent.
         "cited": [],
         "dropped_citations": ["src/foo.py"],
+        # LIF-4: the WHY rides along the same pass-through. src/foo.py is still committed at
+        # HEAD — the body simply never cites it — so this is `not_derived`, NOT `gone`. The
+        # pre-LIF-4 renderer announced this very file as "no longer in the repo".
+        "dropped_gone": [],
+        "dropped_not_derived": ["src/foo.py"],
         "invalidated": False,  # LIF-1's chain is demote-only — graduate never touches it
         "invalid_after": None,  # GRW-7's stamped boundary — demote-with-successor only
         "edge_written": False,

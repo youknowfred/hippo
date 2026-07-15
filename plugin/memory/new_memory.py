@@ -835,7 +835,25 @@ def write_memory(
         from .provenance import backfill_file
 
         repo_files, basename_index = build_repo_file_index(repo_root)
-        backfill_file(path, repo_root, repo_files, basename_index)
+        bf = backfill_file(path, repo_root, repo_files, basename_index)
+        # DRV-1: this return used to be discarded, which made ONE outcome indistinguishable
+        # from "cites no code": the body names real files, none resolve, and the memory is
+        # born with `cited_paths: []` — staleness-EXEMPT, the worst rot state, silently. The
+        # common cause is benign and invisible (the oracle is `git ls-files`, so a file
+        # written but not yet `git add`ed does not exist to it), which is exactly why it
+        # needs saying out loud at write time rather than being discovered months later.
+        unresolved = bf.get("extracted_but_unresolved") or []
+        if unresolved and not bf.get("cited"):
+            shown = ", ".join(unresolved[:6])
+            more = f" (+{len(unresolved) - 6} more)" if len(unresolved) > 6 else ""
+            result["warnings"] = (result.get("warnings") or []) + [
+                f"⚠ this memory's body cites {len(unresolved)} path(s) that resolve to "
+                f"nothing ({shown}{more}), so it was born with cited_paths: [] — EXEMPT "
+                "from staleness tracking. Usually the file is not `git add`ed yet (the "
+                "citation oracle is the git index, not the filesystem); it can also be a "
+                "wrong path, or a bare basename that matches several files. Fix the path or "
+                "commit the file, then re-run provenance --refresh-one on this memory."
+            ]
     except Exception:
         pass
 

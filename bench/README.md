@@ -14,16 +14,24 @@ The eval runs hippo's real recall engine over the shipped **50-memory golden dev
 ([`tests/golden_corpus/memory/`](../tests/golden_corpus/memory/)) and scores it against **18
 hand-written cross-vocabulary paraphrase queries** ([`hard_set.yaml`](../tests/golden_corpus/hard_set.yaml))
 — queries deliberately worded *unlike* the memory they should surface, a realistic paraphrase gap.
-(BM25 alone still clears `recall@10 = 1.0` here via content-word overlap; the dense half shows up in
-the `MRR@10` ranking-quality gap, 0.912 → 0.9213 — a top-10 hit is easy, ranking it #1 is where
-dense earns its keep.)
 
 | Metric | BM25-only (no model) | Dense hybrid (bootstrapped) |
 |---|---|---|
 | **recall@10** (a correct memory in the top 10) | **1.00** | **1.00** |
-| **MRR@10** (mean reciprocal rank of the first hit) | **0.912** | **0.9213** |
-| **cold p95** (per-process, incl. model load) | ~48 ms | ~0.5 s |
+| **MRR@10** (mean reciprocal rank of the first hit) | **0.9144** | **0.9111** |
+| **cold p95** (per-process, incl. model load) | ~46 ms | ~300 ms |
 | **per-prompt token / network / LLM cost** | **$0** | **$0** |
+
+**Read the MRR@10 row as a tie, and read this corpus as unable to settle the question.** The two
+backends land 0.0033 apart on 18 queries, where a single query slipping one rank is worth 0.0278 —
+8.4× the gap. That is noise, not a result, in either direction. `recall@10` ties at the 1.0 ceiling
+because BM25 alone clears it here on content-word overlap, which is exactly why this corpus cannot
+discriminate: it is the only fixture in the suite with real lexical overlap (the others are
+engineered with near-zero overlap so BM25 trivially clears their gates), and 18 paraphrase queries
+is too few to resolve a difference this small. An earlier version of this page reported
+0.912 → 0.9213 and told you dense "earns its keep" on the ranking gap. Both halves have since
+drifted — `RET-12` stemming moved BM25 up, `recall.py` moved dense down — and the conclusion was
+never re-measured. Deciding between the backends needs a bigger paraphrase hard set than this one.
 
 recall@10 and MRR@10 are **deterministic** — the same corpus + queries produce the same ranking on
 any machine, so your run should reproduce these to the digit. Latency is machine-dependent (CPU,

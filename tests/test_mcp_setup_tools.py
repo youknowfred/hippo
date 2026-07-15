@@ -169,7 +169,7 @@ def fresh_project(repo, tmp_path, monkeypatch):
 
 def test_init_project_fresh_seeds_core_and_wires_machine(fresh_project, tmp_path, monkeypatch):
     from memory.init_project import init_project
-    from memory.provenance import CORPUS_FORMAT_VERSION
+    from memory.provenance import CITATION_DERIVATION_VERSION, CORPUS_FORMAT_VERSION
 
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     projects = str(tmp_path / "claude-projects")
@@ -180,7 +180,14 @@ def test_init_project_fresh_seeds_core_and_wires_machine(fresh_project, tmp_path
     for fname in ("user_role.md", "claude_is_memory_master.md", "MEMORY.md", "CONVENTIONS.md"):
         assert os.path.isfile(os.path.join(md, fname)), fname
     with open(os.path.join(md, ".format")) as fh:
-        assert json.load(fh) == {"corpus_format": CORPUS_FORMAT_VERSION}
+        # DRV-2: a FRESH corpus is stamped on both axes. Its memories will be written by
+        # this plugin's extractor, so it is derivation-current by construction and must not
+        # be nudged to re-derive citations it never had. (A PRE-EXISTING corpus is
+        # deliberately stamped with neither — see the skipped_existing_corpus branch.)
+        assert json.load(fh) == {
+            "corpus_format": CORPUS_FORMAT_VERSION,
+            "cite_derivation": CITATION_DERIVATION_VERSION,
+        }
     assert r["symlink"]["status"] == "created"
     assert r["symlink"]["expected_path"].startswith(projects)
     assert r["index"]["count"] == 2  # the two core memories; MEMORY.md/CONVENTIONS.md excluded
@@ -562,3 +569,177 @@ def test_sibling_surface_installs_are_named(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(me))
     assert BOOT._sibling_installs(str(me)) == [str(sib)]
     assert "sibling surface" in _text(_call("bootstrap", {"action": "status"}))
+
+
+# --------------------------------------------------------------------------- #
+# SEC-15 — init reports the drift it can compute
+# --------------------------------------------------------------------------- #
+def test_init_on_trusted_corpus_with_no_drift_still_says_recall_active(corpus, monkeypatch):
+    """Control: the green check must survive when it is actually TRUE."""
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    md, rr = resolve_dirs()
+    assert T.mark_trusted(T.gate_repo_root(md, rr), memory_dir=md, origin="init")
+    text = _text(_call("init", {}))
+    assert "already trusted — recall active" in text
+    assert "WITHHOLDING" not in text
+
+
+def test_init_on_trusted_corpus_reports_the_per_file_drift_it_is_withholding(
+    corpus, monkeypatch
+):
+    """AC (SEC-15): "trusted" is the CORPUS-level marker; the SEC-6 per-file fingerprint
+    quarantines drifted/new files independently, and init does not clear it. Reading only
+    the boolean made init print a green "recall active" over a corpus that was actively
+    withholding memories — the exact false all-clear seen in the field, with
+    untrusted_changes (both args already in hand) never called."""
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    md, rr = resolve_dirs()
+    assert T.mark_trusted(T.gate_repo_root(md, rr), memory_dir=md, origin="init")
+    # drift the corpus the way a user's own session does: edit one, add one
+    with open(os.path.join(corpus, "deploy_runbook.md"), "w") as fh:
+        fh.write(_mem("deploy_runbook", "deploys now go through the blue-green lane"))
+    with open(os.path.join(corpus, "new_note.md"), "w") as fh:
+        fh.write(_mem("new_note", "a memory written after the consent baseline"))
+
+    text = _text(_call("init", {}))
+    assert "recall active" not in text, "recall is NOT active for the withheld files"
+    assert "WITHHOLDING" in text
+    assert "deploy_runbook" in text and "new_note" in text
+    assert "1 changed / 1 new" in text
+    # and it still tells the truth about the marker itself
+    assert "already trusted" in text
+
+
+def test_init_drift_line_is_the_same_rendering_sessionstart_uses(corpus, monkeypatch):
+    """One state, one rendering — init must not grow a second dialect for this."""
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    md, rr = resolve_dirs()
+    assert T.mark_trusted(T.gate_repo_root(md, rr), memory_dir=md, origin="init")
+    with open(os.path.join(corpus, "deploy_runbook.md"), "w") as fh:
+        fh.write(_mem("deploy_runbook", "deploys now go through the blue-green lane"))
+
+    from memory.session_start import trust_drift_producer
+
+    banner = trust_drift_producer(md, rr)
+    init_text = _text(_call("init", {}))
+    assert banner and banner in init_text
+
+
+# --------------------------------------------------------------------------- #
+# ONB-6 — cover the one init branch that mutates a TRACKED file
+# --------------------------------------------------------------------------- #
+#
+# Scope discipline: these tests CHANGE NO BEHAVIOUR. _patch_gitignore string-matches the
+# tracked .gitignore, and the intuitive "use `git check-ignore` instead" fix is ACTIVELY
+# WRONG: `.git/info/exclude` and `core.excludesFile` are machine-local and never travel to a
+# clone, so honouring them would let one developer's private exclude silently deprive every
+# teammate of coverage — in exactly the scenario the patch exists for. GITIGNORE_ENTRIES
+# holds only DERIVED paths (.memory-index/, .memory-telemetry/, memory.local/); the corpus
+# itself is deliberately absent because hippo ships expecting it COMMITTED. The tracked
+# .gitignore is the only file that clones, so it is the right thing to write.
+#
+# The real gap is coverage: _patch_gitignore is invoked 9x across the suite and returns
+# absent_not_created 9/9, because the `repo` fixture bare-`git init`s with no .gitignore.
+# patched / already_covered / patch_failed never EXECUTE.
+def _pg(repo):
+    from memory.init_project import _patch_gitignore
+
+    return _patch_gitignore(repo)
+
+
+def test_patch_gitignore_absent_is_never_created(repo):
+    """The shipped no-op path, now asserted rather than merely reached: a repo with zero
+    .gitignore may be intentional, so init reports instead of creating one."""
+    assert _pg(repo) == "absent_not_created"
+    assert not os.path.exists(os.path.join(repo, ".gitignore"))
+
+
+def test_patch_gitignore_appends_the_derived_entries(repo):
+    """The branch no test executed: an EXISTING tracked .gitignore gains the entries."""
+    from memory.init_project import GITIGNORE_ENTRIES
+
+    gi = os.path.join(repo, ".gitignore")
+    with open(gi, "w") as fh:
+        fh.write("node_modules/\n")
+    assert _pg(repo) == "patched"
+    body = open(gi).read()
+    assert body.startswith("node_modules/\n")  # the user's own content is preserved
+    for e in GITIGNORE_ENTRIES:
+        assert e in body
+
+
+def test_patch_gitignore_is_idempotent_and_one_shot(repo):
+    """Re-running init must not re-append. (Also falsifies "every init dirties the file".)"""
+    gi = os.path.join(repo, ".gitignore")
+    with open(gi, "w") as fh:
+        fh.write("node_modules/\n")
+    assert _pg(repo) == "patched"
+    after_first = open(gi).read()
+    for _ in range(3):
+        assert _pg(repo) == "already_covered"
+    assert open(gi).read() == after_first  # byte-identical; the write is one-shot
+
+
+def test_patch_gitignore_appends_a_trailing_newline_when_missing(repo):
+    """A .gitignore whose last line lacks \\n must not have an entry glued onto it."""
+    gi = os.path.join(repo, ".gitignore")
+    with open(gi, "w") as fh:
+        fh.write("node_modules/")  # no trailing newline
+    assert _pg(repo) == "patched"
+    lines = open(gi).read().splitlines()
+    assert lines[0] == "node_modules/"  # not "node_modules/.claude/.memory-index/"
+
+
+def test_patch_gitignore_tolerates_a_trailing_slash_spelling(repo):
+    """The e.rstrip("/") half of the coverage test — an entry already present without its
+    trailing slash must count as covered rather than being appended twice."""
+    from memory.init_project import GITIGNORE_ENTRIES
+
+    gi = os.path.join(repo, ".gitignore")
+    with open(gi, "w") as fh:
+        fh.write("\n".join(e.rstrip("/") for e in GITIGNORE_ENTRIES) + "\n")
+    assert _pg(repo) == "already_covered"
+
+
+def test_patch_gitignore_reports_failure_instead_of_raising(repo, monkeypatch):
+    """patch_failed never executed either. init must degrade to a report, never raise into
+    a caller mid-setup."""
+    gi = os.path.join(repo, ".gitignore")
+    with open(gi, "w") as fh:
+        fh.write("node_modules/\n")
+    import builtins
+
+    real_open = builtins.open
+
+    def boom(path, mode="r", *a, **k):
+        if str(path).endswith(".gitignore") and "a" in mode:
+            raise PermissionError("read-only fs")
+        return real_open(path, mode, *a, **k)
+
+    monkeypatch.setattr(builtins, "open", boom)
+    assert _pg(repo) == "patch_failed"
+
+
+def test_patch_gitignore_does_not_consult_machine_local_excludes(repo):
+    """The load-bearing pin, and the reason the intuitive fix here is wrong.
+
+    Entries present ONLY in .git/info/exclude are ignored on THIS machine and travel to
+    NOBODY: the file is not tracked and never clones. If _patch_gitignore consulted git's
+    real ignore oracle it would report "already covered" and skip writing the tracked
+    .gitignore — and the teammate who clones this repo would get an unignored .claude/
+    cache, which is the exact scenario the patch exists to prevent. So it MUST still patch.
+    """
+    import subprocess
+
+    with open(os.path.join(repo, ".git", "info", "exclude"), "a") as fh:
+        fh.write("\n.claude/.memory-index/\n.claude/.memory-telemetry/\n.claude/memory.local/\n")
+    with open(os.path.join(repo, ".gitignore"), "w") as fh:
+        fh.write("node_modules/\n")
+    # The entries are directory-scoped (trailing slash), so git needs the dir to exist
+    # before it will match — create it, then confirm git DOES consider it ignored here.
+    os.makedirs(os.path.join(repo, ".claude", ".memory-index"), exist_ok=True)
+    r = subprocess.run(["git", "check-ignore", "-q", ".claude/.memory-index"], cwd=repo)
+    assert r.returncode == 0, "fixture: the exclude should make git report this as ignored"
+    # ...and _patch_gitignore patches anyway, on purpose.
+    assert _pg(repo) == "patched"
+    assert ".claude/.memory-index/" in open(os.path.join(repo, ".gitignore")).read()

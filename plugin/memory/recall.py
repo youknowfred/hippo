@@ -1482,7 +1482,8 @@ def _apply_outcome_prior(
 # v2, offline ONNX via fastembed, build_index._get_cross_encoder) for /hippo:recall and the
 # MCP tool only — an explicit surface with "no p95 budget to protect" (unconditional there,
 # no flag). RET-16 (owner-directed) extends it to THIS module's hot path (UserPromptSubmit),
-# which DOES have a protected p95 (GATE_RECALL_P95_MS) — so here it's gated OFF by default
+# which DOES have a protected p95 (eval_recall.GATE_P95_MS, gating the report's recall_p95_ms
+# key) — so here it's gated OFF by default
 # (HIPPO_RERANK=1 opts in) and BOUNDED under its own timeout via run_bounded, the same
 # pattern the dense query call already uses: a cold model load or slow rerank degrades to
 # the pre-rerank fused order, never blocks the hook past its budget. Both callers share ONE

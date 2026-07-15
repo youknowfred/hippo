@@ -372,6 +372,48 @@ def check_unresolvable_baselines(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"baseline check failed: {exc}."}
 
 
+def check_empty_baselines(ctx: DoctorContext) -> Dict[str, str]:
+    """Memories whose staleness baseline is EMPTY (``source_commit: ""``) — COR-10.
+
+    A memory with an empty baseline is invisible to staleness, reconsolidation and archive
+    gating, forever. SessionStart used to heal these silently on every run; that was a hook
+    WRITING to memory frontmatter, which drifted each healed file off its own SEC-6
+    fingerprint and left the trust banner asking the user "a git pull? a hand edit?" about
+    hippo's own write. The heal moved to the CLI, so this check is what keeps the state
+    visible — doctor reports and names the command; the human runs it.
+    """
+    try:
+        from .provenance import _iter_memory_files, parse_frontmatter
+
+        empty = []
+        for path in _iter_memory_files(ctx.memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    fm = parse_frontmatter(fh.read())
+                if not fm:
+                    continue  # check_integrity owns unparseable files
+                meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+                sc = fm.get("source_commit")
+                if sc is None:
+                    sc = (meta or {}).get("source_commit")
+                if sc is not None and not str(sc).strip():
+                    empty.append(os.path.basename(path)[:-3])
+            except Exception:
+                continue
+        if not empty:
+            return {"status": "ok", "message": "no empty staleness baselines."}
+        return {
+            "status": "warn",
+            "message": (
+                f"{len(empty)} memory(ies) have an EMPTY staleness baseline and are "
+                f"invisible to staleness tracking: {', '.join(sorted(empty))}. Heal them to "
+                "HEAD with: python -m memory.provenance --heal-baselines"
+            ),
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"empty-baseline check failed: {exc}."}
+
+
 def check_integrity(ctx: DoctorContext) -> Dict[str, str]:
     """Memory files whose frontmatter does not yaml-parse (invisible to staleness, QUA-5 sibling).
 
@@ -661,6 +703,26 @@ def check_format_version(ctx: DoctorContext) -> Dict[str, str]:
                 "— the corpus needs a MIGRATION before newer-format features work; hippo "
                 "never migrates automatically — follow the doctor-driven path in "
                 "plugin/memory/README.md ('Corpus format versioning')"
+            )
+
+        # DRV-2: the derivation is a SEPARATE axis from the shape. A corpus can be format-
+        # current and still hold citations produced by an extractor that has since been
+        # fixed — which is precisely the state that had no name, and so went unnoticed for
+        # 14 minor versions.
+        from .provenance import CITATION_DERIVATION_VERSION, read_cite_derivation
+
+        cite = read_cite_derivation(ctx.memory_dir)
+        if cite >= CITATION_DERIVATION_VERSION:
+            parts.append(f"citation derivation current (v{cite})")
+        else:
+            status = "warn"
+            parts.append(
+                f"citation derivation is v{cite}, this plugin derives "
+                f"v{CITATION_DERIVATION_VERSION} — cited_paths in this corpus were produced "
+                "by the pre-ORC-1 extractor (blind to .json/.tsx/.jsx/.mjs and a leading "
+                "./), so some memories watch the wrong file and some are staleness-EXEMPT "
+                "on an empty cited_paths; re-derive per memory (it rewrites frontmatter, so "
+                "it is consent-gated and never automatic)"
             )
 
         return {"status": status, "message": "; ".join(parts) + "."}
@@ -1594,6 +1656,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("rules_plane_rot", check_rules_plane_rot),
     ("rules_source", check_rules_source),
     ("format_version", check_format_version),
+    ("empty_baselines", check_empty_baselines),  # COR-10: the heal moved off the hook
     ("pack_drift", check_pack_drift),
     ("fill_me", check_fill_me),
     ("secrets", check_secrets),

@@ -1057,7 +1057,18 @@ def _tool_init(args: Dict[str, Any]) -> str:
     if trust_status == "marked_init":
         lines.append("✔ corpus marked trusted (you just created it) — recall active.")
     elif trust_status == "already_trusted":
-        lines.append("✔ corpus already trusted — recall active.")
+        # SEC-15: the corpus-level marker being set does NOT mean recall is active for every
+        # memory — the SEC-6 per-file fingerprint quarantines drifted/new files separately,
+        # and init does not (and must not) clear that. Say which one is true.
+        from . import trust as _trust
+
+        drift_line = _trust.drift_withholding_line((r.get("trust") or {}).get("drift") or {})
+        if drift_line:
+            lines.append("✔ corpus already trusted (corpus-level marker).")
+            lines.append("")
+            lines.append(drift_line)
+        else:
+            lines.append("✔ corpus already trusted — recall active.")
     elif trust_status == "write_failed":
         lines.append("✘ trust-registry write FAILED — recall stays gated; check ~/.claude is writable.")
     elif trust_status == "untrusted_needs_review":
@@ -1477,7 +1488,7 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
         # citations must be as loud here as on the provenance CLI.
         from .provenance import citation_rot_lines
 
-        out.extend(citation_rot_lines(base, r["cited"], r["dropped_citations"]))
+        out.extend(citation_rot_lines(base, r))
         return "\n".join(out)
     return "reconsolidate: pass action='worklist' (default) or action='reverify' (name=…, outcome=…)."
 

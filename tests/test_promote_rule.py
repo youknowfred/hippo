@@ -170,3 +170,4 @@ def test_cli_refusal_returns_1(tmp_path, capsys):
     rc = PR.main(["--name", "m", "--memory-dir", md, "--repo-root", root])
     assert rc == 1
     assert "REFUSED" in capsys.readouterr().out
+

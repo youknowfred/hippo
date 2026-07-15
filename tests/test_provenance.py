@@ -1385,4 +1385,698 @@ def test_cli_refresh_dry_run_rot_line_says_would_drop_and_writes_nothing(repo, m
 
 
 def test_citation_rot_lines_empty_when_nothing_dropped():
-    assert P.citation_rot_lines("m.md", ["src/a.py"], []) == []
+    assert P.citation_rot_lines("m.md", {"cited": ["src/a.py"], "dropped_citations": []}) == []
+
+
+# --------------------------------------------------------------------------- #
+# COR-9 — a frontmatter writer may never emit frontmatter that does not parse
+# --------------------------------------------------------------------------- #
+import pytest  # noqa: E402
+
+_PROV_KEYS = {"cited_paths", "source_commit", "source_commit_time"}
+
+# The same memory in both frontmatter schemas the corpus actually uses, each with a
+# BLOCK-STYLE cited_paths (what a hand edit, an import, or a foreign pack produces —
+# hippo's own _flow_list never emits it, which is why this went unseen for 14 minor
+# versions) and a non-provenance key both directly above and below it.
+_BLOCK_FLAT = (
+    "---\n"
+    "name: M\n"
+    "last_verified: 2026-07-01\n"
+    "cited_paths:\n"
+    "  - src/keep.py\n"
+    "  - src/dep.py\n"
+    "tags:\n"
+    "  - keep-me\n"
+    "---\n"
+    "body cites src/keep.py and src/dep.py\n"
+)
+_BLOCK_META = (
+    "---\n"
+    "name: M\n"
+    "metadata:\n"
+    "  type: project\n"
+    "  last_verified: 2026-07-01\n"
+    "  cited_paths:\n"
+    "    - src/keep.py\n"
+    "    - src/dep.py\n"
+    "  tags:\n"
+    "    - keep-me\n"
+    "---\n"
+    "body cites src/keep.py and src/dep.py\n"
+)
+
+
+def _prov_free(fm: dict) -> dict:
+    """``fm`` minus the three provenance keys, at BOTH schema levels."""
+    out = {k: v for k, v in fm.items() if k not in _PROV_KEYS}
+    if isinstance(out.get("metadata"), dict):
+        out["metadata"] = {k: v for k, v in out["metadata"].items() if k not in _PROV_KEYS}
+    return out
+
+
+def test_strip_provenance_consumes_block_style_continuation_lines():
+    """A block-style value IS its `- item` lines. Dropping only the key line orphans them:
+    YAML then folds them into the PRECEDING key or refuses the document outright — and
+    parse_frontmatter swallows that, so the memory silently loses name/type/provenance."""
+    assert P.parse_frontmatter(_BLOCK_META)  # sanity: it parses going in
+    out = P._strip_provenance(_BLOCK_META)
+    assert "- src/keep.py" not in out  # the value left with its key
+    fm = P.parse_frontmatter(out)
+    assert fm, "frontmatter must still parse after the strip"
+    assert fm["metadata"]["type"] == "project"  # not swallowed by the orphans
+    assert fm["metadata"]["last_verified"] is not None  # the fold victim in the wild
+    assert "cited_paths" not in fm["metadata"]
+
+
+def test_strip_provenance_leaves_an_adjacent_block_list_alone():
+    """The walk must stop at a sibling key — `tags:` sits directly below `cited_paths:`
+    at the same indent, and its items must survive intact."""
+    for text in (_BLOCK_FLAT, _BLOCK_META):
+        fm = P.parse_frontmatter(P._strip_provenance(text))
+        scope = fm.get("metadata") if "metadata" in fm else fm
+        assert scope["tags"] == ["keep-me"]
+
+
+def test_strip_provenance_flow_style_is_unchanged_behaviour():
+    """Regression control: flow style has no continuation lines, so nothing else moves."""
+    text = '---\nname: M\ncited_paths: ["a.py"]\ntags:\n  - keep-me\n---\nbody\n'
+    fm = P.parse_frontmatter(P._strip_provenance(text))
+    assert fm == {"name": "M", "tags": ["keep-me"]}
+
+
+@pytest.mark.parametrize("schema", ["flat", "metadata"], ids=["flat", "metadata-block"])
+def test_refresh_of_block_style_cited_paths_preserves_every_other_key(repo, memory_dir, schema):
+    """AC (COR-9): --refresh over a block-style cited_paths must not cost the file any
+    non-provenance key. Before the fix this rewrote `type`/`last_verified` into garbage or
+    made the file unparseable outright."""
+    write_file(repo, "src/keep.py", "k = 1\n")
+    write_file(repo, "src/dep.py", "v = 1\n")
+    git_commit(repo, "deps", 1_700_000_000)
+    text = _BLOCK_FLAT if schema == "flat" else _BLOCK_META
+    target = write_file(repo, ".claude/memory/m.md", text)
+    git_commit(repo, "memory", 1_700_000_001)
+    before = P.parse_frontmatter(text)
+    assert before  # the fixture is valid going in
+
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    res = P.backfill_file(target, repo, repo_files, basename_index, refresh=True)
+    assert res["error"] is None
+
+    after = P.parse_frontmatter(open(target, encoding="utf-8").read())
+    assert after, "the rewritten file must still parse"
+    assert _prov_free(after) == _prov_free(before)
+    # and the re-derivation actually landed
+    assert sorted(res["cited"]) == ["src/dep.py", "src/keep.py"]
+
+
+@pytest.mark.parametrize("schema", ["flat", "metadata"], ids=["flat", "metadata-block"])
+def test_reverify_of_block_style_cited_paths_preserves_every_other_key(repo, memory_dir, schema):
+    """AC (COR-9): the same guarantee on the reverify path — a re-verify must never destroy
+    the memory the human just confirmed is correct."""
+    write_file(repo, "src/keep.py", "k = 1\n")
+    write_file(repo, "src/dep.py", "v = 1\n")
+    git_commit(repo, "deps", 1_700_000_000)
+    text = _BLOCK_FLAT if schema == "flat" else _BLOCK_META
+    target = write_file(repo, ".claude/memory/m.md", text)
+    git_commit(repo, "memory", 1_700_000_001)
+    before = P.parse_frontmatter(text)
+
+    res = _reverify_one(memory_dir, repo, "m")
+    assert res["error"] is None
+
+    after = P.parse_frontmatter(open(target, encoding="utf-8").read())
+    assert after, "the rewritten file must still parse"
+    # last_verified is stamped by reverify (RET-6) — compare everything else.
+    a, b = _prov_free(after), _prov_free(before)
+    for d in (a, b):
+        d.pop("last_verified", None)
+        if isinstance(d.get("metadata"), dict):
+            d["metadata"].pop("last_verified", None)
+    assert a == b
+
+
+def _pre_cor9_line_filter(text):
+    """The pre-COR-9 ``_strip_provenance``, verbatim: a per-LINE filter."""
+    return "\n".join(
+        ln
+        for ln in text.split("\n")
+        if not P.re.match(r"\s*(cited_paths|source_commit|source_commit_time)\s*:", ln)
+    )
+
+
+def test_writer_refuses_rather_than_silently_fold_orphans_into_a_neighbour(
+    repo, memory_dir, monkeypatch
+):
+    """AC (COR-9), the net itself — and specifically the SILENT half.
+
+    Orphaned `- item` lines do not always break the parse. When the key above them carries an
+    inline scalar, YAML FOLDS them into it as a multi-line plain scalar: the file parses
+    perfectly and `last_verified` quietly becomes "2026-07-01 - src/keep.py - src/dep.py".
+    A parse check cannot see that, which is why the guard is value-level. Re-introduce the
+    old line filter and the writer must refuse, naming the key it would have damaged."""
+    write_file(repo, "src/keep.py", "k = 1\n")
+    write_file(repo, "src/dep.py", "v = 1\n")
+    git_commit(repo, "deps", 1_700_000_000)
+    target = write_file(repo, ".claude/memory/m.md", _BLOCK_META)
+    git_commit(repo, "memory", 1_700_000_001)
+    on_disk_before = open(target, encoding="utf-8").read()
+
+    monkeypatch.setattr(P, "_strip_provenance", _pre_cor9_line_filter)
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    res = P.backfill_file(target, repo, repo_files, basename_index, refresh=True)
+
+    assert res["error"] is not None, "the pre-COR-9 fold must not be written"
+    assert "refusing to write" in res["error"]
+    assert "last_verified" in res["error"]  # the guard NAMES the damaged key
+    assert res["changed"] is False
+    assert open(target, encoding="utf-8").read() == on_disk_before  # untouched
+
+
+def test_writer_refuses_rather_than_emit_unparseable_frontmatter(repo, memory_dir, monkeypatch):
+    """AC (COR-9), the LOUD half: when the orphans do break the parse, refuse too."""
+    write_file(repo, "src/keep.py", "k = 1\n")
+    git_commit(repo, "dep", 1_700_000_000)
+    # `metadata:` ending in the block list, with no trailing sibling key — the orphans land
+    # under `last_verified` and the re-inserted keys land inside the folded scalar's run.
+    text = (
+        "---\nname: M\nmetadata:\n  type: project\n  last_verified: 2026-07-01\n"
+        "  cited_paths:\n    - src/keep.py\n---\nbody cites src/keep.py\n"
+    )
+    target = write_file(repo, ".claude/memory/m.md", text)
+    git_commit(repo, "memory", 1_700_000_001)
+    on_disk_before = open(target, encoding="utf-8").read()
+
+    monkeypatch.setattr(P, "_strip_provenance", _pre_cor9_line_filter)
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    res = P.backfill_file(target, repo, repo_files, basename_index, refresh=True)
+
+    assert res["error"] is not None and "refusing to write" in res["error"]
+    assert res["changed"] is False
+    assert open(target, encoding="utf-8").read() == on_disk_before  # untouched
+
+
+def test_every_writer_preserves_parseability_across_the_corpus_shapes(repo, memory_dir):
+    """Property (COR-9): for every frontmatter shape the corpus uses, a file whose
+    frontmatter parses BEFORE any writer must parse AFTER it."""
+    write_file(repo, "src/keep.py", "k = 1\n")
+    write_file(repo, "src/dep.py", "v = 1\n")
+    git_commit(repo, "deps", 1_700_000_000)
+    shapes = {
+        "block-flat": _BLOCK_FLAT,
+        "block-meta": _BLOCK_META,
+        "flow-flat": '---\nname: M\ncited_paths: ["src/keep.py"]\n---\nbody src/keep.py\n',
+        "flow-meta": '---\nname: M\nmetadata:\n  type: project\n  cited_paths: ["src/keep.py"]\n'
+        "---\nbody src/keep.py\n",
+        "same-indent-seq": "---\nname: M\ncited_paths:\n- src/keep.py\n---\nbody src/keep.py\n",
+        "no-provenance": "---\nname: M\ntype: project\n---\nbody src/keep.py\n",
+    }
+    for label, text in shapes.items():
+        target = write_file(repo, f".claude/memory/{label}.md", text)
+    git_commit(repo, "memories", 1_700_000_001)
+    repo_files, basename_index = P.build_repo_file_index(repo)
+
+    for label in shapes:
+        target = os.path.join(memory_dir, f"{label}.md")
+        for writer in ("refresh", "reverify"):
+            if writer == "refresh":
+                res = P.backfill_file(target, repo, repo_files, basename_index, refresh=True)
+            else:
+                res = P.reverify_file(target, repo, repo_files, basename_index)
+            assert res["error"] is None, f"{label}/{writer}: {res['error']}"
+            after = P.parse_frontmatter(open(target, encoding="utf-8").read())
+            assert after, f"{label}/{writer} emitted unparseable frontmatter"
+
+
+# --------------------------------------------------------------------------- #
+# LIF-4 — the rot line reports the cause it MEASURED
+# --------------------------------------------------------------------------- #
+def test_partition_dropped_splits_on_repo_membership():
+    gone, not_derived = P.partition_dropped(
+        ["src/deleted.py", "src/present.py"], {"src/present.py"}
+    )
+    assert gone == ["src/deleted.py"]
+    assert not_derived == ["src/present.py"]
+
+
+def test_rot_line_says_no_longer_in_the_repo_only_for_paths_that_are_gone():
+    """LIF-3's original case still reads exactly as it did — that phrase is EARNED here."""
+    res = {
+        "cited": ["src/keep.py"],
+        "dropped_citations": ["src/dep.py"],
+        "dropped_gone": ["src/dep.py"],
+        "dropped_not_derived": [],
+    }
+    (line,) = P.citation_rot_lines("m.md", res)
+    assert "no longer in the repo" in line
+    assert "not derived" not in line
+    assert "1 citation(s) remain" in line
+
+
+def test_rot_line_does_not_claim_deletion_for_a_path_still_in_the_repo():
+    """AC (LIF-4): the em-growth-labs failure. `dropped` was a set-difference against the
+    re-derived list — a membership test that never ran — so a citation the extractor merely
+    failed to produce was reported as a deleted file, sending the reader to hunt a rename
+    that never happened. The file IS in the repo; say so."""
+    res = {
+        "cited": ["src/keep.py"],
+        "dropped_citations": ["Dockerfile", "package.json"],
+        "dropped_gone": [],
+        "dropped_not_derived": ["Dockerfile", "package.json"],
+    }
+    (line,) = P.citation_rot_lines("m.md", res)
+    assert "no longer in the repo" not in line, "the files are RIGHT THERE"
+    assert "still in the repo" in line
+    assert "Dockerfile" in line and "package.json" in line
+
+
+def test_rot_line_renders_both_causes_when_a_drop_has_both():
+    res = {
+        "cited": ["src/keep.py"],
+        "dropped_citations": ["src/deleted.py", "package.json"],
+        "dropped_gone": ["src/deleted.py"],
+        "dropped_not_derived": ["package.json"],
+    }
+    (line,) = P.citation_rot_lines("m.md", res)
+    assert "no longer in the repo (src/deleted.py)" in line
+    assert "still in the repo" in line and "package.json" in line
+
+
+def test_rot_line_drop_to_zero_keeps_the_exempt_warning_and_the_true_cause():
+    """The drop-to-zero branch carried the SAME unearned phrase as the partial branch.
+    Both are fixed; the EXEMPT warning (verified accurate) is preserved."""
+    res = {
+        "cited": [],
+        "dropped_citations": ["package.json"],
+        "dropped_gone": [],
+        "dropped_not_derived": ["package.json"],
+    }
+    (line,) = P.citation_rot_lines("m.md", res)
+    assert "EXEMPT" in line  # the worst rot state is still called out
+    assert "no longer in the repo" not in line  # ...but not with a fabricated cause
+    assert "still in the repo" in line
+
+
+def test_rot_line_falls_back_to_gone_for_a_producer_without_the_partition():
+    """Back-compat: a result dict predating LIF-4 renders as it always did, rather than
+    silently claiming everything is `not_derived`."""
+    res = {"cited": ["a.py"], "dropped_citations": ["b.py"]}
+    (line,) = P.citation_rot_lines("m.md", res)
+    assert "no longer in the repo" in line
+
+
+def test_refresh_partitions_a_real_not_derived_drop_end_to_end(repo, memory_dir):
+    """AC (LIF-4) on the live producer: a memory whose frontmatter cites a file the
+    extractor cannot derive from the body (`Dockerfile` — no dotted extension) must report
+    it as not_derived, NOT as gone. Both files exist at HEAD throughout."""
+    write_file(repo, "Dockerfile", "FROM scratch\n")
+    write_file(repo, "src/keep.py", "k = 1\n")
+    git_commit(repo, "code", 1_700_000_000)
+    target = write_file(
+        repo,
+        ".claude/memory/m.md",
+        '---\nname: M\ncited_paths: ["Dockerfile", "src/keep.py"]\nsource_commit: "abc"\n'
+        "---\nbody cites src/keep.py and the Dockerfile\n",
+    )
+    git_commit(repo, "memory", 1_700_000_001)
+
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    res = P.backfill_file(target, repo, repo_files, basename_index, refresh=True)
+    assert res["error"] is None
+    assert res["dropped_citations"] == ["Dockerfile"]
+    assert res["dropped_gone"] == [], "Dockerfile is right there — it was never deleted"
+    assert res["dropped_not_derived"] == ["Dockerfile"]
+    (line,) = P.citation_rot_lines("m.md", res)
+    assert "no longer in the repo" not in line
+
+
+# --------------------------------------------------------------------------- #
+# ORC-1 — the extractor's declared config is its contract
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("ext", P._CODE_EXTS)
+def test_every_declared_extension_is_reachable(ext):
+    """THE test that would have caught this on day one, and the reason it is data-driven:
+    adding an entry to _CODE_EXTS auto-tests its own reachability.
+
+    Before ORC-1, `tsx`, `jsx` and `json` were DECLARED in _CODE_EXTS and structurally
+    unreachable — each sat after its own prefix (`ts`, `js`) in a first-match-wins
+    alternation with no trailing boundary, so `App.tsx` extracted as `App.ts` and
+    `package.json` as `package.js`. Config the regex could not deliver.
+
+    The pre-existing extraction test used only `.py` — _CODE_EXTS[0], structurally
+    unshadowable — and asserted membership (`in`), so a fabricated extra token was invisible
+    to it by construction. That is why 14 minor versions shipped over this.
+    """
+    tok = f"src/x.{ext}"
+    assert P.extract_citations(f"the fix is in {tok} somewhere") == [tok]
+
+
+@pytest.mark.parametrize(
+    "token",
+    ["build.pyc", "types.pyi", "data.jsonl", "x.tsv", "notes.shtml", "conf.inix"],
+)
+def test_truncation_family_fabricates_nothing(token):
+    """With no trailing boundary the regex matched a PREFIX of the real extension and
+    completed, inventing a path nobody wrote: data.jsonl -> data.js, build.pyc -> build.py.
+    Worse than a drop — when the invention names a real sibling, resolve_citations keeps it
+    and binds the memory to the wrong file (see the DRV-1 extension check)."""
+    assert P.extract_citations(f"see {token} for details") == []
+
+
+def test_reordering_alone_would_not_have_fixed_the_truncation_family():
+    """Pins WHY the fix is the boundary and not a sort. _CODE_EXTS is sorted longest-first
+    as intent-preservation, but sorting is not what does the work: rebuild the pattern
+    WITHOUT the boundary, keeping today's longest-first order, and the truncation family
+    fabricates again — and `data.jsonl -> data.json` is WORSE than the old `data.js`,
+    because data.json is far likelier to be a real file, turning a silent drop into a
+    silent wrong-binding."""
+    import re as _re
+
+    no_boundary = _re.compile(
+        r"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.(?:" + "|".join(P._CODE_EXTS) + r"))(?::\d+(?:-\d+)?)?"
+    )
+    m = no_boundary.search("see data.jsonl for details")
+    assert m and m.group(1) == "data.json"  # sorted longest-first, still fabricating
+    assert P.extract_citations("see data.jsonl for details") == []  # the boundary is the fix
+
+
+def test_compiled_pattern_carries_a_trailing_boundary():
+    """Source-level pin: the boundary is the whole fix, so make deleting it loud."""
+    assert r"(?!\w|\.\w)" in P._CITATION_RE.pattern
+
+
+def test_boundary_does_not_regress_prose_or_line_suffixes():
+    """The tail is deliberately NOT `(?![\\w./-])` mirroring the lookbehind: the symmetric
+    form reads right and breaks a sentence-ending citation, because it cannot tell a file
+    suffix from a full stop."""
+    assert P.extract_citations("the bug is in foo.py.") == ["foo.py"]  # end-of-sentence period
+    assert P.extract_citations("see `qux.py:3` in passing") == ["qux.py"]
+    assert P.extract_citations("bar.py:5-9 and bar.py:99") == ["bar.py"]
+    assert P.extract_citations("[scorer](src/q/scorer.py)") == ["src/q/scorer.py"]
+    assert P.extract_citations("app.v2.py") == ["app.v2.py"]  # a dotted STEM is not a suffix
+
+
+@pytest.mark.parametrize("token", ["test.py.bak", "config.json.orig", "recall.py.rej"])
+def test_dotted_suffix_after_a_complete_extension_cites_nothing(token):
+    """DRV-1: `test.py.bak` -> `test.py` survives a bare `(?![\\w])` tail, and when test.py
+    is a REAL file the memory is silently bound to the wrong one — the worst outcome in this
+    module. `(?!\\.\\w)` closes it while a sentence-ending period still matches, because it
+    requires a word char AFTER the dot."""
+    assert P.extract_citations(f"the backup at {token} is stale") == []
+
+
+def test_the_obvious_alternative_tail_is_measurably_worse():
+    """Pins why the tail is `(?!\\w|\\.\\w)` and not the tidier-looking `(?![\\w.]\\w)`, which
+    passes the test.py.bak case and RE-FABRICATES two families that ORC-1 had killed."""
+    import re as _re
+
+    naive = _re.compile(
+        r"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.(?:" + "|".join(P._CODE_EXTS) + r"))(?![\w.]\w)"
+    )
+    assert naive.search("foo.pyx").group(1) == "foo.py"  # fabricates
+    assert naive.search("data.jsonl").group(1) == "data.json"  # fabricates, worse than data.js
+    assert P.extract_citations("foo.pyx") == [] and P.extract_citations("data.jsonl") == []
+
+
+def test_mjs_family_is_covered():
+    """BUG C is orthogonal to the boundary — a membership gap, not an assertion gap. The
+    enforcement chain this repo's own memories cite (scripts/*.mjs) was uncitable."""
+    body = "the mirror is scripts/brand_redirect_stubs.mjs and scripts/check_import_graph.mjs"
+    assert P.extract_citations(body) == [
+        "scripts/brand_redirect_stubs.mjs",
+        "scripts/check_import_graph.mjs",
+    ]
+
+
+def test_extensionless_files_are_still_not_citable():
+    """Honest scope pin: BUG B (Dockerfile/Makefile) is NOT fixed by ORC-1 — the token
+    shape requires a dotted extension. LIF-4 now reports these as `not_derived` rather
+    than claiming they left the repo, which is the accurate statement of this gap."""
+    assert P.extract_citations("the Dockerfile mirrors the Makefile") == []
+
+
+def test_resolve_normalises_a_leading_dot_slash(repo):
+    """ORC-1: git ls-files never emits `./`, so `./src/a/dup.py` missed the exact match and
+    fell through to the basename fallback — which drops ambiguous basenames. A citation
+    written MORE precisely resolved WORSE than a bare one."""
+    repo_files = {"src/a/dup.py", "src/b/dup.py"}
+    index = {"dup.py": ["src/a/dup.py", "src/b/dup.py"]}  # ambiguous basename
+    assert P.resolve_citations(["./src/a/dup.py"], repo_files, index) == ["src/a/dup.py"]
+    # the bare ambiguous basename is still correctly dropped
+    assert P.resolve_citations(["dup.py"], repo_files, index) == []
+
+
+# --------------------------------------------------------------------------- #
+# DRV-1 — every derived citation carries what it cost
+# --------------------------------------------------------------------------- #
+def test_unresolved_citations_names_what_the_oracle_refused():
+    repo_files = {"src/keep.py", "src/a/dup.py", "src/b/dup.py"}
+    index = {"keep.py": ["src/keep.py"], "dup.py": ["src/a/dup.py", "src/b/dup.py"]}
+    body = "cites src/keep.py, dup.py (ambiguous), and src/ghost.py (not tracked)"
+    assert P.cited_paths_for_body(body, repo_files, index) == ["src/keep.py"]
+    assert P.unresolved_citations(body, repo_files, index) == ["dup.py", "src/ghost.py"]
+
+
+def test_backfill_reports_unresolved_tokens_for_an_untracked_file(repo, memory_dir):
+    """AC (DRV-1): the citation oracle is `git ls-files`, NOT the filesystem. A memory
+    written before `git add` cites real code in plain sight and lands `cited_paths: []` —
+    the worst rot state — with nothing reported. The receipt makes it legible."""
+    write_file(repo, "src/tracked.py", "k = 1\n")
+    git_commit(repo, "tracked", 1_700_000_000)
+    write_file(repo, "src/untracked.py", "v = 1\n")  # exists on disk, NOT git-added
+    target = write_file(
+        repo, ".claude/memory/m.md", "---\nname: M\n---\nbody cites src/untracked.py only\n"
+    )
+
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    res = P.backfill_file(target, repo, repo_files, basename_index)
+    assert res["error"] is None
+    assert res["cited"] == []  # staleness-EXEMPT...
+    assert res["extracted_but_unresolved"] == ["src/untracked.py"]  # ...and now it SAYS why
+
+
+def test_backfill_unresolved_is_empty_when_everything_resolves(repo, memory_dir):
+    write_file(repo, "src/tracked.py", "k = 1\n")
+    git_commit(repo, "tracked", 1_700_000_000)
+    target = write_file(
+        repo, ".claude/memory/m.md", "---\nname: M\n---\nbody cites src/tracked.py\n"
+    )
+    git_commit(repo, "memory", 1_700_000_001)
+    repo_files, basename_index = P.build_repo_file_index(repo)
+    res = P.backfill_file(target, repo, repo_files, basename_index)
+    assert res["cited"] == ["src/tracked.py"]
+    assert res["extracted_but_unresolved"] == []
+
+
+# --------------------------------------------------------------------------- #
+# DRV-2 — version the derivation
+# --------------------------------------------------------------------------- #
+def test_undeclared_corpus_reads_as_derivation_1(tmp_path):
+    """Every corpus written before DRV-2 WAS derived by the v1 extractor, so the default is
+    the truth, not a guess — the same reasoning as read_corpus_format's missing-marker == 1."""
+    md = str(tmp_path)
+    assert P.read_cite_derivation(md) == 1
+
+
+def test_cite_derivation_and_corpus_format_do_not_clobber_each_other(tmp_path):
+    """AC (DRV-2): two independent axes share one marker file. A whole-object writer would
+    silently erase the other's answer — which is the same class of bug as the frontmatter
+    strip this whole workstream started from."""
+    md = str(tmp_path)
+    assert P.write_corpus_format(md, 5)
+    assert P.write_cite_derivation(md, 2)
+    assert P.read_corpus_format(md) == 5  # survived the derivation stamp
+    assert P.read_cite_derivation(md) == 2
+    assert P.write_corpus_format(md, 6)  # a later FORMAT migration must not reset derivation
+    assert P.read_cite_derivation(md) == 2
+    assert P.read_corpus_format(md) == 6
+    assert json.loads(open(P.format_marker_path(md), encoding="utf-8").read()) == {
+        "corpus_format": 6,
+        "cite_derivation": 2,
+    }
+
+
+def test_cite_derivation_marker_degrades_to_1_not_an_exception(tmp_path):
+    md = str(tmp_path)
+    with open(P.format_marker_path(md), "w", encoding="utf-8") as fh:
+        fh.write("{not json at all")
+    assert P.read_cite_derivation(md) == 1
+    assert P.read_corpus_format(md) == 1
+
+
+def test_the_extractor_fix_is_not_a_corpus_format_event(tmp_path):
+    """Pins the distinction that DRV-2 exists to make. By the repo's OWN criterion
+    (packs.py: "deliberately NOT a corpus_format bump — the memory-file shapes are
+    unchanged") the ORC-1 fix changes VALUES, not shape, so it must not move
+    CORPUS_FORMAT_VERSION. That is exactly why it felt like a regex tweak and was in fact a
+    corpus-wide rewrite — the axis to say so did not exist."""
+    assert P.CORPUS_FORMAT_VERSION == 5  # unmoved by ORC-1/DRV-1
+    assert P.CITATION_DERIVATION_VERSION == 2  # the axis that DID move
+
+
+# --------------------------------------------------------------------------- #
+# MIG-1 — the consented re-derivation (the third verb)
+# --------------------------------------------------------------------------- #
+def _mig_repo(repo):
+    """A repo whose memory cites package.json — derivable by v2, invisible to v1."""
+    write_file(repo, "package.json", '{"name":"x"}\n')
+    write_file(repo, "src/keep.py", "k = 1\n")
+    c1 = git_commit(repo, "code", 1_700_000_000)
+    target = write_file(
+        repo,
+        ".claude/memory/m.md",
+        f'---\nname: M\ncited_paths: ["src/keep.py"]\nsource_commit: "{c1}"\n'
+        "---\nbody cites src/keep.py and package.json\n",
+    )
+    git_commit(repo, "memory", 1_700_000_001)
+    return target, c1
+
+
+def test_rederive_preview_is_read_only_and_attributes_the_diff(repo, memory_dir):
+    target, c1 = _mig_repo(repo)
+    before_bytes = open(target, encoding="utf-8").read()
+    repo_files, bn = P.build_repo_file_index(repo)
+    pv = P.rederive_preview(target, repo, repo_files, bn)
+    assert pv["changed"] is True
+    assert pv["gained"] == ["package.json"]  # the v1 extractor could not see it
+    assert pv["lost"] == []
+    assert open(target, encoding="utf-8").read() == before_bytes  # read-only
+
+
+def test_rederive_worklist_lists_only_memories_that_would_change(repo, memory_dir):
+    _mig_repo(repo)
+    write_file(repo, ".claude/memory/clean.md",
+               '---\nname: C\ncited_paths: ["src/keep.py"]\nsource_commit: "x"\n'
+               "---\nbody cites src/keep.py\n")
+    git_commit(repo, "second memory", 1_700_000_002)
+    work = P.rederive_worklist(memory_dir, repo)
+    assert [w["name"] for w in work] == ["m"]  # `clean` already matches — not busywork
+
+
+def test_rederive_preserves_the_staleness_baseline_unlike_reverify(repo, memory_dir):
+    """AC (MIG-1), half one. --reverify would re-baseline source_commit to HEAD and SILENTLY
+    CLEAR every staleness flag the corpus carries — trading a citation bug for total loss of
+    the signal citations exist to serve. The migration must not."""
+    target, c1 = _mig_repo(repo)
+    write_file(repo, "src/keep.py", "k = 2\n")  # drift the cited code
+    head = git_commit(repo, "drift", 1_700_000_100)
+    assert head != c1
+
+    repo_files, bn = P.build_repo_file_index(repo)
+    r = P.rederive_file(target, repo, repo_files, bn)
+    assert r["error"] is None and r["changed"] is True
+    assert "package.json" in r["cited"]  # the derivation landed
+    _, sc = read_provenance(open(target, encoding="utf-8").read())
+    assert sc == c1, "the staleness baseline must survive the migration"
+
+
+def test_rederive_folds_the_reviewed_bytes_so_the_migration_does_not_quarantine(
+    repo, memory_dir, monkeypatch
+):
+    """AC (MIG-1), half two. --refresh re-derives correctly and never folds (correctly — it
+    is a bulk pass, and trust forbids self-consent), so it would leave every memory it fixed
+    withheld by recall, under a banner blaming the user for hippo's write. The per-item verb
+    folds, because a human just reviewed THIS file's diff."""
+    from memory import trust as T
+
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    target, c1 = _mig_repo(repo)
+    gate_root = T.gate_repo_root(memory_dir, repo)
+    assert T.mark_trusted(gate_root, memory_dir=memory_dir, origin="init")
+    assert not T.untrusted_changes(gate_root, memory_dir)["changed"]  # clean baseline
+
+    repo_files, bn = P.build_repo_file_index(repo)
+    assert P.rederive_file(target, repo, repo_files, bn)["changed"] is True
+
+    drift = T.untrusted_changes(gate_root, memory_dir)
+    assert drift["changed"] == [], "the migration quarantined the memory it just fixed"
+
+
+def test_rederive_dry_run_writes_nothing(repo, memory_dir):
+    target, c1 = _mig_repo(repo)
+    before = open(target, encoding="utf-8").read()
+    repo_files, bn = P.build_repo_file_index(repo)
+    r = P.rederive_file(target, repo, repo_files, bn, dry_run=True)
+    assert r["changed"] is True  # it WOULD change...
+    assert open(target, encoding="utf-8").read() == before  # ...but nothing was written
+
+
+def test_snapshot_copies_the_corpus_before_a_migration(repo, memory_dir):
+    _mig_repo(repo)
+    dest = P.snapshot_corpus(memory_dir, "20260714")
+    assert dest.endswith("memory.pre-cite2-20260714")
+    assert os.path.isfile(os.path.join(dest, "m.md"))
+    assert open(os.path.join(dest, "m.md"), encoding="utf-8").read() == open(
+        os.path.join(memory_dir, "m.md"), encoding="utf-8"
+    ).read()
+
+
+def test_snapshot_is_self_ignoring_so_the_backup_cannot_publish_the_corpus(repo, memory_dir):
+    """AC: the snapshot inherits the corpus's exposure, it does not widen it.
+
+    A project that gitignores `.claude/memory/` does NOT thereby ignore
+    `.claude/memory.pre-cite2-*` — so without the SEC-3 marker the safety copy lands as a
+    fresh untracked directory holding every private memory, one `git add -A` from being
+    committed in a repo that may be public. Caught live: the first real snapshot taken on
+    this repo showed up as `?? .claude/memory.pre-cite2-...`."""
+    import subprocess
+
+    _mig_repo(repo)
+    dest = P.snapshot_corpus(memory_dir, "20260714")
+    assert os.path.isfile(os.path.join(dest, ".gitignore"))
+    assert open(os.path.join(dest, ".gitignore"), encoding="utf-8").read().strip() == "*"
+    porcelain = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True
+    ).stdout
+    assert "pre-cite2" not in porcelain, "the snapshot is visible to git"
+
+
+def test_snapshot_refuses_to_overwrite_an_existing_one(repo, memory_dir):
+    """The snapshot is the only undo a gitignored corpus has — never clobber one."""
+    _mig_repo(repo)
+    P.snapshot_corpus(memory_dir, "20260714")
+    try:
+        P.snapshot_corpus(memory_dir, "20260714")
+        raise AssertionError("expected a refusal")
+    except FileExistsError:
+        pass
+
+
+# --------------------------------------------------------------------------- #
+# PRF-3 — memoize the process-constant toplevel
+# --------------------------------------------------------------------------- #
+def test_git_root_is_memoized_per_start_dir(repo, monkeypatch):
+    """A repo's toplevel cannot change for a given start dir inside one process. Measured:
+    SessionStart spawned 5 of these and recall 3, at ~7ms each."""
+    P._GIT_ROOT_CACHE.clear()
+    calls = []
+    real = P.run_git
+    monkeypatch.setattr(P, "run_git", lambda a, r: (calls.append(a), real(a, r))[1])
+    first = P.git_root(repo)
+    for _ in range(4):
+        assert P.git_root(repo) == first
+    toplevels = [a for a in calls if a[:2] == ["rev-parse", "--show-toplevel"]]
+    assert len(toplevels) == 1, f"spawned {len(toplevels)} subprocesses for a constant"
+
+
+def test_git_root_cache_is_keyed_per_start_dir(tmp_path, repo, monkeypatch):
+    """Keyed, not global — the answer genuinely differs per start dir, and the MCP server is
+    one long-lived process that resolves several paths."""
+    P._GIT_ROOT_CACHE.clear()
+    other = str(tmp_path / "not-a-repo")
+    os.makedirs(other)
+    assert P.git_root(repo) == P.run_git(["rev-parse", "--show-toplevel"], repo).strip()
+    assert P.git_root(other) is None  # a different start dir gets its own (correct) answer
+
+
+def test_build_repo_file_index_is_NOT_cached(repo, memory_dir):
+    """The counterpart pin, and the more important one. Caching THIS would reintroduce the
+    exact silent citation drop this module was fixed to prevent: its answer changes the
+    moment a file is `git add`ed, and the MCP server is a long-lived process where
+    new_memory reaches it as the citation oracle. A file created mid-session must resolve."""
+    write_file(repo, "src/first.py", "a = 1\n")
+    git_commit(repo, "first", 1_700_000_000)
+    assert "src/first.py" in P.build_repo_file_index(repo)[0]
+    write_file(repo, "src/second.py", "b = 2\n")
+    git_commit(repo, "second", 1_700_000_001)
+    assert "src/second.py" in P.build_repo_file_index(repo)[0], "the file index went stale"

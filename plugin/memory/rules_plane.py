@@ -223,14 +223,36 @@ def conflict_radar(
 # dotted-symbol tokens, which that regex deliberately excludes.
 _BACKTICK_SPAN_RE = re.compile(r"`([^`\n]+)`")
 
-# A path-like backtick ref: optional dir segments + filename + a CODE extension (the same
-# extension gate as provenance._CITATION_RE — .md refs are memory citations, RUL-1's job),
-# with an optional :line/:line-range suffix we strip. Anchored to span content so `see
-# foo/bar.py for details` is prose, not a ref.
-_PATH_REF_RE = re.compile(
-    r"^((?:[\w.-]+/)*[\w.-]+\.(?:py|ts|tsx|js|jsx|sh|yaml|yml|json|toml|ini|cfg))"
-    r"(?::\d+(?:-\d+)?)?$"
-)
+_PATH_REF_RE_CACHE: List["re.Pattern"] = []
+
+
+def _path_ref_re() -> "re.Pattern":
+    """A path-like backtick ref: optional dir segments + filename + a CODE extension, with an
+    optional :line/:line-range suffix we strip. Anchored to span content so `see foo/bar.py
+    for details` is prose, not a ref (that anchoring is this regex's own property — it is
+    what supplies the end boundary provenance._CITATION_RE had to add explicitly in ORC-1,
+    and it is why this one never suffered the prefix-shadow bug).
+
+    ORC-2: the extension list is IMPORTED from ``provenance._CODE_EXTS``, not hand-copied.
+    The copy this replaces claimed to be "the same extension gate as provenance._CITATION_RE"
+    and was true only for as long as nobody edited either list — the moment ORC-1 added
+    mjs/cjs/mts/cts, the fix half-landed: provenance derived `.mjs` citations while rules-rot
+    silently stopped recognising the same refs. One concept, one list.
+
+    Built lazily and cached because ``_CODE_EXTS`` lives in ``provenance`` and every other
+    provenance import in this module is deliberately function-local; a module-level import
+    here would break that discipline for a regex used on one line.
+    """
+    if not _PATH_REF_RE_CACHE:
+        from .provenance import _CODE_EXTS
+
+        _PATH_REF_RE_CACHE.append(
+            re.compile(
+                r"^((?:[\w.-]+/)*[\w.-]+\.(?:" + "|".join(_CODE_EXTS) + r"))"
+                r"(?::\d+(?:-\d+)?)?$"
+            )
+        )
+    return _PATH_REF_RE_CACHE[0]
 
 # A dotted-symbol ref (``module.symbol`` / ``pkg.module.symbol``): resolved conservatively —
 # the module component must map to exactly ONE ``<module>.py`` in the tree, and only a
@@ -451,7 +473,7 @@ def rules_rot(repo_root: str) -> dict:
                 span = span.strip()
                 if span in seen_refs:
                     continue
-                pm = _PATH_REF_RE.match(span)
+                pm = _path_ref_re().match(span)
                 if pm:
                     token = pm.group(1)
                     if "/" in token:

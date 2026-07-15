@@ -560,20 +560,19 @@ def find_citation_rot(memory_dir: str, repo_root: str) -> List[dict]:
 # --------------------------------------------------------------------------- #
 # Soft-invalidation primitive (graceful decay — demotion, never deletion)
 # --------------------------------------------------------------------------- #
-_INVALID_AFTER_RE = re.compile(r"\s*invalid_after\s*:")
 _FENCE = "---"
 
 
 def _strip_invalid_after(text: str) -> str:
-    """Remove any existing ``invalid_after`` line from the frontmatter (body verbatim)."""
-    if not text.startswith(_FENCE):
-        return text
-    lines = text.split("\n")
-    close = next((i for i in range(1, len(lines)) if lines[i].strip() == _FENCE), None)
-    if close is None:
-        return text
-    fm = [ln for ln in lines[1:close] if not _INVALID_AFTER_RE.match(ln)]
-    return "\n".join([lines[0]] + fm + lines[close:])
+    """Remove any existing ``invalid_after`` key from the frontmatter (body verbatim).
+
+    COR-9: this was a duplicate of ``provenance._strip_invalid_after`` and carried the same
+    line-filter bug (a block-style value's ``- item`` lines survived their own key). One
+    concept, one implementation — delegate rather than fix it twice.
+    """
+    from .provenance import _strip_invalid_after as _strip
+
+    return _strip(text)
 
 
 def set_invalid_after(path: str, ts: Optional[str] = None, *, dry_run: bool = False) -> dict:
@@ -608,32 +607,29 @@ def set_invalid_after(path: str, ts: Optional[str] = None, *, dry_run: bool = Fa
             result["error"] = "unparseable frontmatter -- refusing to write (fix the YAML)"
             return result
 
+        from .provenance import insert_frontmatter_keys
+
         stripped = _strip_invalid_after(text)
         lines = stripped.split("\n")
         close = next((i for i in range(1, len(lines)) if lines[i].strip() == _FENCE), None)
         fm = lines[1:close]
         ia_val = json.dumps(ts)
 
-        meta_idx = next((i for i, ln in enumerate(fm) if re.match(r"^metadata\s*:\s*$", ln)), None)
-        if meta_idx is not None:
-            indent = "  "
-            last = meta_idx
-            j = meta_idx + 1
-            while j < len(fm):
-                ln = fm[j]
-                if ln.strip() == "" or not ln.startswith((" ", "\t")):
-                    break
-                m = re.match(r"^(\s+)\S", ln)
-                if m:
-                    indent = m.group(1)
-                last = j
-                j += 1
-            fm2 = fm[: last + 1] + [f"{indent}invalid_after: {ia_val}"] + fm[last + 1:]
-        else:
-            fm2 = fm + [f"invalid_after: {ia_val}"]
-
+        # COR-9: one shared insertion walk — see provenance.insert_frontmatter_keys for why
+        # the hand-copied version got the indent wrong when a metadata block ends in a list.
+        fm2 = insert_frontmatter_keys(fm, [f"invalid_after: {ia_val}"])
         new_text = "\n".join([lines[0]] + fm2 + lines[close:])
         changed = new_text != text
+        if changed:
+            from .provenance import _frontmatter_damage
+
+            # COR-9: this writer owns `invalid_after` and nothing else.
+            damage = _frontmatter_damage(text, new_text, {"invalid_after"})
+            if damage:
+                result["error"] = (
+                    f"refusing to write: {damage} — this is a hippo bug, please report it"
+                )
+                return result
         result.update({"changed": changed, "invalid_after": ts})
         if changed and not dry_run:
             with open(path, "w", encoding="utf-8") as fh:

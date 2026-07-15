@@ -157,6 +157,7 @@ def init_project(
     from . import trust
     from .build_index import build_index, default_index_dir
     from .provenance import (
+        CITATION_DERIVATION_VERSION,
         CORPUS_FORMAT_VERSION,
         create_project_symlink,
         ensure_self_ignoring_dir,
@@ -208,14 +209,28 @@ def init_project(
                 result["warnings"].append("MEMORY.skeleton.md missing from plugin bundle")
             fmt_path = os.path.join(memory_dir, ".format")
             if not os.path.exists(fmt_path):
+                # DRV-2: a FRESH corpus is stamped with the derivation too — its memories
+                # will be written by this plugin's extractor, so it is current by
+                # construction and must not be nudged to re-derive citations it never had.
                 with open(fmt_path, "w", encoding="utf-8") as fh:
-                    fh.write(json.dumps({"corpus_format": CORPUS_FORMAT_VERSION}) + "\n")
+                    fh.write(
+                        json.dumps(
+                            {
+                                "corpus_format": CORPUS_FORMAT_VERSION,
+                                "cite_derivation": CITATION_DERIVATION_VERSION,
+                            }
+                        )
+                        + "\n"
+                    )
                 result["format_marker"] = "stamped"
             else:
                 result["format_marker"] = "already_present"
         else:
             # An existing corpus is never stamped with a format it wasn't migrated to —
-            # doctor's format check (COR-7) owns that comparison.
+            # doctor's format check (COR-7) owns that comparison. Same for the derivation
+            # (DRV-2): a pre-existing corpus's cited_paths were produced by whichever
+            # extractor wrote them, and stamping "current" here would assert exactly the
+            # thing the marker exists to let you verify.
             result["format_marker"] = "skipped_existing_corpus"
 
         # Step 2c (both paths): CONVENTIONS.md backfill, idempotent.
@@ -264,7 +279,13 @@ def init_project(
     elif gate_root is None:
         result["trust"] = {"status": "inapplicable"}
     elif trust.is_trusted(gate_root):
-        result["trust"] = {"status": "already_trusted"}
+        # SEC-15: "trusted" is a CORPUS-level marker; recall additionally withholds any
+        # file whose content drifted from the SEC-6 per-file fingerprint. Reporting only
+        # the marker made init print a green "recall active" over a corpus that was
+        # withholding memories — a conclusion it never computed, with the oracle
+        # (untrusted_changes) already taking both arguments we hold right here.
+        drift = trust.untrusted_changes(gate_root, memory_dir)
+        result["trust"] = {"status": "already_trusted", "drift": drift}
     elif not existing:
         ok = trust.mark_trusted(gate_root, memory_dir=memory_dir, origin="init")
         result["trust"] = {"status": "marked_init" if ok else "write_failed"}

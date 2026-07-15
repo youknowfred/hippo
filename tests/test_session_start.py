@@ -507,16 +507,12 @@ def test_stale_cache_not_written_for_a_nonexistent_memory_dir():
     assert not os.path.isdir("does")
 
 
-def test_main_heals_empty_baselines_side_effect(tmp_path, monkeypatch, capsys):
-    """COR-1: SessionStart heals residual source_commit:"" baselines to HEAD (covers
-    hand-authored/pre-COR-1 memories) as a side effect, before the index refresh."""
+def _repo_with_empty_baseline(tmp_path):
+    """A git repo whose one memory carries a residual `source_commit: ""`."""
     import subprocess
-
-    from memory.staleness import read_provenance
 
     from .conftest import git_commit, write_file
 
-    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     repo = str(tmp_path / "repo")
     os.makedirs(repo)
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
@@ -531,11 +527,53 @@ def test_main_heals_empty_baselines_side_effect(tmp_path, monkeypatch, capsys):
         '---\nname: residual\ndescription: "left empty by a pre-COR-1 backfill"\n'
         'cited_paths: ["src/x.py"]\nsource_commit: ""\n---\nbody\n',
     )
+    return repo, md, path, head
+
+
+def test_main_does_not_write_to_memory_frontmatter(tmp_path, monkeypatch, capsys):
+    """AC (COR-10): a hook must not write to the corpus.
+
+    SessionStart used to heal residual `source_commit: ""` baselines here. trust.py states
+    "hooks NEVER consent", which is only sound if hooks never WRITE — the heal changed the
+    file's bytes, drifted it off its own SEC-6 fingerprint, and the trust-drift banner a few
+    lines later then asked the user "a git pull? a hand edit?" about hippo's own write. The
+    heal is still correct and still available; it moved to where a human runs it."""
+    from memory.staleness import read_provenance
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    repo, md, path, head = _repo_with_empty_baseline(tmp_path)
+    before = open(path, encoding="utf-8").read()
     monkeypatch.setattr(S, "resolve_dirs", lambda: (md, repo))
 
     assert S.main() == 0
+    after = open(path, encoding="utf-8").read()
+    assert after == before, "the hook wrote to a memory file"
+    # still unhealed — that IS the point: doctor names it, the CLI heals it, a human decides
+    assert 'source_commit: ""' in after
+    assert not read_provenance(after)[1]
+
+
+def test_cli_heal_baselines_still_heals(tmp_path, monkeypatch):
+    """COR-10: the heal did not disappear — it became a thing you run on purpose."""
+    from memory import provenance as P
+    from memory.staleness import read_provenance
+
+    repo, md, path, head = _repo_with_empty_baseline(tmp_path)
+    monkeypatch.setattr(P, "resolve_dirs", lambda: (md, repo))
+    assert P.main(["--heal-baselines"]) == 0
     _, sc = read_provenance(open(path, encoding="utf-8").read())
     assert sc == head
+
+
+def test_doctor_reports_the_empty_baseline_the_hook_no_longer_heals(tmp_path, monkeypatch):
+    """COR-10: removing the hook's write must not make the state invisible."""
+    from memory import doctor as D
+
+    repo, md, path, head = _repo_with_empty_baseline(tmp_path)
+    r = D.check_empty_baselines(D.DoctorContext(memory_dir=md, repo_root=repo))
+    assert r["status"] == "warn"
+    assert "residual" in r["message"]
+    assert "--heal-baselines" in r["message"]  # names the command the human runs
 
 
 # --------------------------------------------------------------------------- #
@@ -996,3 +1034,51 @@ def test_squash_merge_heal_end_to_end_and_reverify_clears(repo, memory_dir, monk
     assert res["error"] is None and res["cleared"] is True
     assert S.unresolvable_baseline_names(memory_dir, repo) == []
     assert S.squash_merge_heal_producer(memory_dir, repo) is None, "healed → self-cleared"
+
+
+# --------------------------------------------------------------------------- #
+# DRV-2 — the citation-derivation nudge
+# --------------------------------------------------------------------------- #
+def test_cite_derivation_producer_nudges_a_corpus_derived_by_the_old_extractor(tmp_path):
+    """AC (DRV-2): an OLDER derivation is a live degradation (memories watching the wrong
+    file; memories staleness-EXEMPT on an empty cited_paths), so unlike an older
+    corpus_format it gets a per-session line — KPI-5, never a silent degradation."""
+    from memory.session_start import cite_derivation_producer
+
+    md = str(tmp_path)
+    with open(os.path.join(md, "m.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: m\n---\nbody cites src/a.py\n")
+    line = cite_derivation_producer(md, md)  # undeclared == v1
+    assert line and "Citation derivation" in line
+    assert "v1" in line and "v2" in line
+    assert "/hippo:doctor" in line  # routes to the consent-gated path, never self-migrates
+
+
+def test_cite_derivation_producer_is_silent_on_an_empty_corpus(tmp_path):
+    """A corpus with no memories has no citations, so naming the extractor that derived
+    them is a nudge about nothing."""
+    from memory.session_start import cite_derivation_producer
+
+    assert cite_derivation_producer(str(tmp_path), str(tmp_path)) is None
+
+
+def test_cite_derivation_producer_is_silent_once_the_corpus_is_current(tmp_path):
+    from memory.provenance import write_cite_derivation
+    from memory.session_start import cite_derivation_producer
+
+    md = str(tmp_path)
+    with open(os.path.join(md, "m.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: m\n---\nbody\n")
+    assert write_cite_derivation(md)
+    assert cite_derivation_producer(md, md) is None
+
+
+def test_cite_derivation_producer_is_silent_on_a_newer_corpus(tmp_path):
+    """A corpus AHEAD of the plugin is corpus_format_producer's taint case, not this one —
+    this producer must not double-report it."""
+    from memory.provenance import write_cite_derivation
+    from memory.session_start import cite_derivation_producer
+
+    md = str(tmp_path)
+    assert write_cite_derivation(md, 99)
+    assert cite_derivation_producer(md, md) is None

@@ -231,6 +231,51 @@ def corpus_format_producer(
     )
 
 
+def cite_derivation_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """DRV-2: this corpus's cited_paths were derived by an extractor this plugin has fixed.
+
+    The OPPOSITE direction to ``corpus_format_producer``, and deliberately louder than that
+    one's older-corpus case, because the two "older" states are not alike. An older
+    corpus_format is FINE — v2/v3/v4 are additive, so a v5 plugin reads a v1 corpus
+    correctly and there is nothing to warn about. An older cite_derivation is a live
+    DEGRADATION: those citations were produced by the pre-ORC-1 extractor, so some memories
+    watch the wrong file and some sit at ``cited_paths: []`` — staleness-EXEMPT — for no
+    reason but a regex. KPI-5's rule (never a silent degradation) is what makes this a
+    per-session line rather than a doctor-only note, the same reasoning
+    ``trust_drift_producer`` uses.
+
+    Routes to the re-derivation rather than doing it: re-deriving rewrites user data and is
+    per-item and consent-gated (MIG-1). Silent when the corpus is already current, when it
+    is ahead (that is corpus_format_producer's taint case, not this one), and when it holds
+    no memories at all — an EMPTY corpus has no citations, so naming the extractor that
+    derived them is a nudge about nothing. ``ctx`` (LIF-6) unused.
+    """
+    try:
+        from .provenance import (
+            CITATION_DERIVATION_VERSION,
+            _iter_memory_files,
+            read_cite_derivation,
+        )
+
+        declared = read_cite_derivation(memory_dir)
+        if declared >= CITATION_DERIVATION_VERSION:
+            return None
+        if next(_iter_memory_files(memory_dir), None) is None:
+            return None  # nothing was derived, so nothing needs re-deriving
+    except Exception:
+        return None
+    return (
+        f"🧬 Citation derivation — this corpus's cited_paths were derived by extractor "
+        f"v{declared}; this plugin derives v{CITATION_DERIVATION_VERSION}. v1 could not see "
+        "`.json`/`.tsx`/`.jsx` (it read package.json as package.js), `.mjs`/`.cjs` at all, or "
+        "a leading `./` — so some memories watch the wrong file and some carry an empty "
+        "cited_paths, which makes them EXEMPT from staleness tracking. Run /hippo:doctor to "
+        "review the re-derivation per memory (it rewrites frontmatter, so it asks first)."
+    )
+
+
 def integrity_producer(
     memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
 ) -> Optional[str]:
@@ -1159,18 +1204,7 @@ def trust_drift_producer(
         if gate_root is None or trust.trust_all() or not trust.is_trusted(gate_root):
             return None
         drift = trust.untrusted_changes(gate_root, memory_dir)
-        changed, added = drift.get("changed") or [], drift.get("added") or []
-        if not drift.get("baseline") or not (changed or added):
-            return None
-        withheld = changed + [f"{n} (new)" for n in added]
-        shown = ", ".join(withheld[:_MAX_TRUST_DRIFT_NAMES])
-        more = f" (+{len(withheld) - _MAX_TRUST_DRIFT_NAMES} more)" if len(withheld) > _MAX_TRUST_DRIFT_NAMES else ""
-        return (
-            f"🔒 Memory trust drift: {len(changed)} changed / {len(added)} new memory "
-            f"file(s) since you trusted this corpus (a git pull? a hand edit?) — recall is "
-            f"WITHHOLDING them until you re-review: {shown}{more}. Run /hippo:doctor to see "
-            "what each would inject and re-consent."
-        )
+        return trust.drift_withholding_line(drift, max_names=_MAX_TRUST_DRIFT_NAMES)
     except Exception:
         return None
 
@@ -1178,6 +1212,7 @@ def trust_drift_producer(
 PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[str]]]] = [
     ("stale_venv", stale_venv_producer),  # environment-level — a stale venv taints everything below
     ("corpus_format", corpus_format_producer),  # a corpus NEWER than the plugin taints every reader below (COR-7)
+    ("cite_derivation", cite_derivation_producer),  # citations derived by a fixed-since extractor (DRV-2)
     ("integrity", integrity_producer),  # a malformed memory must not hide
     ("citation_rot", citation_rot_producer),  # cited paths gone from the repo (LIF-3) — find_unparseable's rot sibling
     ("trust_drift", trust_drift_producer),  # SEC-6: trusted corpus drifted from its consent baseline — recall is withholding files
@@ -1444,16 +1479,14 @@ def main(
         if session_id is None:
             session_id = stdin_session_id
         memory_dir, repo_root = resolve_dirs()
-        # Heal residual EMPTY staleness baselines (source_commit: "") to HEAD once
-        # resolvable — an empty baseline leaves a memory invisible to staleness forever
-        # (COR-1). Runs BEFORE the index refresh so the healed frontmatter is what gets
-        # hashed. Frontmatter-only, per-line, never touches a real baseline, never raises.
-        try:
-            from .provenance import heal_empty_baselines
-
-            heal_empty_baselines(memory_dir, repo_root)
-        except Exception:
-            pass
+        # COR-10: this hook used to call heal_empty_baselines() here — a WRITE to memory
+        # frontmatter from an automatic pass. trust.py states "hooks NEVER consent", which
+        # is only sound if hooks never WRITE: the heal changed the file's bytes, drifted it
+        # from its own SEC-6 fingerprint, and the trust-drift banner a few lines below then
+        # asked the user "a git pull? a hand edit?" about a write hippo had just done to
+        # itself. The heal is still available and still correct — it moved to the
+        # provenance CLI (--heal-baselines), which doctor's empty-baseline check names, so
+        # the write happens where a human can consent to it.
         # Bring the recall index up to date so a memory written during the LAST session is
         # indexed (recallable) this one. Incremental, OFFLINE, bounded, never-downgrade,
         # never-raises — a fast no-op when nothing changed. (Side effect, not a producer.)

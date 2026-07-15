@@ -7,6 +7,156 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.15.0 — 2026-07-14 — "Say what you measured"
+
+**re-bootstrap: no** — `plugin/requirements.txt` is byte-identical. Corpus format stays **5**
+and the index schema stays **7**: this release changes VALUES, not shapes. It does add one new
+axis, `cite_derivation` (see DRV-2), on the existing `.claude/memory/.format` marker — additive,
+and the marker file is now merged rather than clobbered so the two axes cannot erase each other.
+The `/hippo:*` skill set and the five frozen MCP tools keep their exact names and shapes
+(STABILITY.md). **Operator action: one.** Corpora written before this release carry citations
+derived by the old extractor; `/hippo:doctor` and SessionStart now name that state and route to
+a per-item, consent-gated re-derivation (MIG-1). Nothing migrates automatically.
+
+This release started as one bug report from another repo — a memory whose entire purpose was to
+catch drift between `Dockerfile`, `package.json` and `scripts/*.mjs` turned out to be blind to
+all three of those file classes, and had silently fallen back to watching an unrelated file. It
+did not fail loudly; it reported healthy while watching nothing.
+
+The root cause was not the regex. **hippo sells provenance and kept none of its own: at every
+seam it stated a conclusion it never computed — with the oracle already in scope, and the receipt
+already thrown away.** `dropped` was a set-difference while `repo_files` — the actual answer —
+was a parameter of the same function. `init` read a corpus-level boolean while `untrusted_changes`
+sat there with both arguments in hand. The secrets gate scored entropy on one string and run
+length on another. And nothing versioned the DERIVATION, so a corpus derived by a broken
+extractor and one derived by a fixed extractor both declared `corpus_format: 5` and were
+indistinguishable. That is why a 14-minor-version-old bug had to be found by hand.
+
+### The data-integrity core
+
+- **COR-9 — a frontmatter writer may never damage a key it does not own.** `_strip_provenance`
+  removed `cited_paths:` with a per-LINE filter. A block-style value IS its `- item` lines, so
+  the filter dropped the key and orphaned its value; YAML then either FOLDED the orphans into the
+  preceding key (`last_verified` silently becoming the string `"2026-07-01 - src/a.py -
+  src/b.py"` — the file still parses, nothing reports it) or refused the document, at which point
+  `parse_frontmatter` degrades to `{}` by design and the memory loses name/type/provenance at
+  once. Only hand-edited, imported or pack-authored memories carry block style (hippo's own
+  `_flow_list` emits flow), which is why it survived 14 minor versions. Fixed with ONE
+  continuation-aware strip primitive — the walk already existed in `links.add_typed_relation`
+  and `dream_generate`; `_strip_provenance` was the oldest member of that family and never got
+  it. Plus ONE insertion primitive: four hand-copied walks all took the indent from the last
+  INDENTED LINE rather than the last indented KEY, so any `metadata:` block ending in a list
+  indented new keys into the sequence — a second, independent break. And a value-level output
+  guard: each writer declares the keys it owns, and touching anything else refuses the write and
+  names the key. Value-level, not parse-level, because no parse check can see the fold.
+- **LIF-4 — the rot line reports the cause it measured.** `citation_rot_lines` asserted every
+  dropped citation was "no longer in the repo" and never tested repo membership, sending readers
+  to hunt renames that never happened. Now partitioned at the PRODUCER (where `repo_files` is in
+  scope) into `gone` (renamed/deleted — the phrase is earned) and `not_derived` (still in the
+  repo; an extractor gap, a hand-edited entry being overwritten, or a body edit). Ships
+  regardless of the extractor fix, and gates MIG-1: re-deriving a corpus is the largest
+  citation-rot event it will ever see, and the old renderer would have called every drop a
+  deletion.
+- **COR-10 — a memory file is written only where a human can consent to it.** `trust.py` says
+  "hooks NEVER consent", which is only sound if hooks never WRITE — and SessionStart wrote,
+  drifting each healed file off its own SEC-6 fingerprint, after which the drift banner asked the
+  user "a git pull? a hand edit?" about hippo's own write. The heal MOVED to
+  `provenance --heal-baselines` (doctor names it); no exemption was granted, because `trust.py`
+  forbids the shortcut by name. Also fixes four mis-keyed consent folds — on a non-git corpus the
+  fold keyed on `<root>/.claude/memory` while every gate READER keyed on `<root>`, so an authored
+  write stayed quarantined forever. Fixed by deriving the key centrally, so gate and fold cannot
+  disagree — including for callers not yet written.
+
+### The extractor
+
+- **ORC-1 — the extractor's declared config is its contract.** `_CITATION_RE` had a leading
+  lookbehind and NO trailing boundary, so a match was accepted mid-token. `package.json` extracted
+  as `package.js`; `.tsx`/`.jsx`/`.json` were DECLARED in `_CODE_EXTS` and structurally
+  unreachable — config the regex could not deliver. A second family FABRICATED paths nobody wrote
+  (`data.jsonl` → `data.js`, `build.pyc` → `build.py`), and when the invention names a real
+  sibling the memory is silently bound to the WRONG file. Adds the boundary, adds
+  `mjs`/`cjs`/`mts`/`cts` (an orthogonal MEMBERSHIP gap the boundary does not touch), and
+  normalises a leading `./` (git never emits one, so a MORE precise citation resolved WORSE than
+  a bare basename). The test that would have caught this on day one now exists: a data-driven
+  loop over EVERY `_CODE_EXTS` entry, so adding an extension auto-tests its own reachability.
+- **ORC-2 — one extension gate.** `rules_plane` hand-copied the extension list while claiming to
+  be "the same extension gate as `provenance._CITATION_RE`". True until someone edited one — and
+  ORC-1 edited one. Measured immediately after: provenance derived `.mjs`, rules_plane returned
+  None. The fix half-landed. Parity is now a test over a shared vector set, not a comment.
+- **DRV-1 — every derived citation carries what it cost.** The planned resolve-time
+  extension-consistency check is DROPPED: it cannot fire (`resolve_citations` can never change a
+  token's extension) and cannot catch `test.py.bak → test.py`, the case it was specified for.
+  The real fix is the extractor tail `(?!\w|\.\w)` — a dotted SUFFIX after a complete extension
+  means the token was never this file, and citing `test.py` from `test.py.bak` binds the memory
+  to the wrong REAL file. Also adds `extracted_but_unresolved`: `new_memory` DISCARDED
+  `backfill_file`'s return, making one outcome indistinguishable from "cites no code" — the body
+  names real files, none resolve (usually: not `git add`ed yet, since the oracle is the git
+  index, not the filesystem), and the memory is born `cited_paths: []`, staleness-EXEMPT, in
+  silence.
+- **DRV-2 — version the derivation.** The missing axis. Corpus-level side-marker, deliberately
+  NOT a `corpus_format` bump (shape unchanged — the repo's own criterion), because that is
+  exactly the trap that made a corpus-wide rewrite feel like a regex tweak.
+
+### The migration
+
+- **MIG-1 — the third verb.** Neither existing verb can carry a corpus-wide extractor fix, and
+  each is correct: `--refresh` re-derives and PRESERVES the baseline but never folds (right — it
+  is a bulk pass, and self-consent is forbidden), so it would quarantine every memory it fixed;
+  `--reverify` folds but re-baselines `source_commit` to HEAD, silently clearing every staleness
+  flag in the corpus. Trapped between two correct invariants, so the deliverable is the verb that
+  satisfies both: `--rederive-worklist` (read-only, attributed diff), `--rederive-one NAME`
+  (re-derive + preserve + fold, legitimate ONLY because a human reviewed THIS file's diff), and
+  `--snapshot STAMP`. The snapshot is self-ignoring: a project that gitignores `.claude/memory/`
+  does not thereby ignore `.claude/memory.pre-cite2-*`, and the first real snapshot taken landed
+  as an untracked copy of a private corpus in a public repo. A copy inherits the original's
+  exposure; it never widens it.
+
+### Precision, honesty, speed
+
+- **SEC-16 — the secrets gate judges the string it measured.** Three predicates ran over TWO
+  strings: length on the longest segment, entropy and class-mixing on the whole token. Both field
+  symptoms fall out of that: `content_digest=<sha>` fired while the identical bare `<sha>` scanned
+  clean (the label WAS the secret, as far as the gate could tell), and — the more serious half —
+  **AWS's own documented example secret access key scanned CLEAN**, because `_longest_core_run`
+  splits on `/`, which is standard-base64 CONTENT: the 40-char key fragments to 13/7/18, every
+  piece under the floor of 20. The docstring promised 20 sat below what a real secret retains
+  "even when a LONE separator splits it" — real keys carry several. All three predicates now score
+  the core run; thresholds re-derived over 23 vectors rather than adopted. Honest scope: a long
+  camelCase identifier still trips it, and no threshold can fix that —
+  `getUserAuthenticationTokenFromCache` scores 4.01 bits while AWS's real secret core scores 3.68.
+  Pinned as a known limitation.
+- **SEC-17 — a placeholder is not a credential.** `postgres://${{PGUSER}}:${{PGPASSWORD}}@…` was
+  reported as a leaked credential. It contains none — it is a variable reference, the documented
+  CORRECT way to avoid hardcoding one. Judged on the password half only, so a real password beside
+  a placeholder still fires. Not cosmetic: packs hard-REFUSE an install on any finding and
+  capture_triage silently DROPS the capture — these failed closed.
+- **SEC-15 — init reports the drift it can compute.** It printed "✔ corpus already trusted —
+  recall active" over a corpus that was actively WITHHOLDING memories, reading the corpus-level
+  boolean while the per-file fingerprint quarantine ran independently.
+- **DOC-15 — retire the assertions that measure otherwise.** `bench/README.md` claimed MRR@10
+  0.912 → 0.9213 under a line promising reproduction "to the digit"; measured, it is 0.9144 →
+  0.9111 — REVERSED. Rewritten as the tie it is (0.0033 apart on 18 queries where one rank slip
+  is worth 0.0278), with the reason this corpus structurally cannot settle the question. The
+  default is NOT flipped on a tie. Also a `GATE_RECALL_P95_MS` that exists nowhere, and a
+  class-mixing rationale that never fired.
+- **PRF-3** — `git_root` memoized: a SessionStart spawned it 5×, recall 3×, for a
+  process-constant. Measured 390→375ms (4%) — smaller than projected, reported as measured;
+  free, since the rendered output is sha256-identical. A test pins the thing NOT to do:
+  `build_repo_file_index` must never be cached this way, or a file created mid-session resolves
+  to nothing.
+- **PRF-4** — `load_index` honours `dense_disabled()`. `HIPPO_DISABLE_DENSE=1` was enforced at
+  exactly one boundary (`_get_model` raising), which stops every consumer that must EMBED a
+  query — but `_mmr_rerank` reads the STORED matrix and needs no model, so it walked past and
+  kept reranking on a dense index, changing result order. numpy is now never imported on the
+  BM25 lane.
+- **GRA-7** — the link banner says "orphan memo(s) (no outbound links)" rather than a bare
+  "orphan", which read as rot beside the real rot it was appended to.
+- **ONB-6** — tests for the one init branch that mutates a TRACKED file (9/9 prior invocations
+  hit `absent_not_created`). **No behaviour change, deliberately**: the intuitive "ask git via
+  check-ignore" fix is actively WRONG — `.git/info/exclude` and `core.excludesFile` are
+  machine-local and never travel to a clone, so honouring them would let one developer's private
+  exclude deprive every teammate of coverage, in exactly the scenario the patch exists for.
+
 ## v1.14.0 — 2026-07-13 — "Consolidate everywhere, and a second opinion"
 
 **re-bootstrap: no** — `plugin/requirements.txt` is unchanged. The Desktop consolidate tools

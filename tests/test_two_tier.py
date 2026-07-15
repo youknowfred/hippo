@@ -325,9 +325,42 @@ def test_merge_degrades_to_bm25_when_a_tier_lacks_dense(tmp_path, monkeypatch):
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     B.build_index(user, B.default_index_dir(user))  # BM25-only
 
+    # PRF-4: load_index now honours HIPPO_DISABLE_DENSE, which is still set from building the
+    # user tier above. This test's subject is a tier that LACKS dense on disk, not the flag —
+    # so clear it before loading, or the project tier degrades too and the asymmetry under
+    # test disappears. (Before PRF-4 the flag was ignored here, which is the bug: it
+    # suppressed dense scoring while leaving dense MMR reranking live on a dense index.)
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     p_li, u_li = B.load_index(proj_idx), B.load_index(B.default_index_dir(user))
     assert p_li.dense_ready and not u_li.dense_ready
     merged = R._merge_loaded_indexes([(p_li, proj, "project"), (u_li, user, "user")])
     assert merged.dense_ready is False and merged.dense is None
     # BM25 still fuses both corpora correctly.
     assert {e["name"] for e in merged.entries} == {"proj-a", "user-b"}
+
+
+# --------------------------------------------------------------------------- #
+# PRF-4 — load_index honours dense_disabled()
+# --------------------------------------------------------------------------- #
+def test_disable_dense_forces_bm25_only_on_an_already_dense_index(tmp_path, monkeypatch):
+    """AC (PRF-4): HIPPO_DISABLE_DENSE=1 must mean BM25-only, as its own docstring, the
+    README, CONTRIBUTING and STABILITY.md all say.
+
+    It was enforced at exactly ONE boundary — _get_model raising — which stops every consumer
+    that must EMBED a query. recall._mmr_rerank reads the STORED matrix and needs no model,
+    so it walked past the only enforcement point and kept reranking for diversity on a dense
+    index, measurably changing result order. Its guard is `dense is None`, which load_index
+    decided without ever consulting the flag."""
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    md = str(tmp_path / "proj" / ".claude" / "memory")
+    idx = str(tmp_path / "proj" / ".claude" / ".memory-index")
+    _seed(md, {"a": "alpha about columnar storage", "b": "beta about editor keybindings"})
+    B.build_index(md, idx)  # a genuinely dense index on disk
+
+    live = B.load_index(idx)
+    assert live.dense_ready and live.dense is not None  # dense IS on disk
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    gated = B.load_index(idx)
+    assert gated.dense is None, "the flag did not reach the stored matrix"
+    assert gated.dense_ready is False, "a dense-ready index under a BM25-only flag"

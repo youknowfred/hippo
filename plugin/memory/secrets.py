@@ -46,6 +46,61 @@ REMEDIATION = (
     "full purge procedure"
 )
 
+# SEC-17 — interpolation syntaxes. A value the deploy platform substitutes AT RUNTIME is the
+# OPPOSITE of a leaked credential: it is the correct way to reference one. Covers Railway/GHA
+# `${{VAR}}`, shell/compose `${VAR}` and `$VAR`, Jinja/Helm `{{ var }}`, `<PLACEHOLDER>`,
+# python `%(name)s`, and the obvious literal stand-ins.
+_PLACEHOLDER_RE = re.compile(
+    r"^(?:"
+    r"\$\{\{[^}]*\}\}"          # ${{ VAR }}      — GitHub Actions / Railway
+    r"|\$\{[^}]*\}"             # ${VAR}          — shell / docker-compose
+    r"|\$[A-Za-z_]\w*"          # $VAR            — shell
+    r"|\{\{[^}]*\}\}"           # {{ var }}       — Jinja / Helm
+    r"|<[^>]*>"                 # <PASSWORD>      — docs
+    r"|%\([^)]*\)s"             # %(name)s        — python
+    r"|(?:REDACTED|CHANGEME|CHANGE_ME|PLACEHOLDER|TODO|xxx+|\*+|\.\.\.)"
+    r")$",
+    re.IGNORECASE,
+)
+# The credential half must be at least this long to be worth a warning. The DB-URI rule was
+# the only variable-span rule in _PATTERNS with no floor at all, against this module's own
+# stated inclusion criterion — `postgres://a:b@h` fired. (The PEM rule is legitimately
+# floorless: its literal marker IS the signal.)
+_CONNSTR_MIN_SECRET_LEN = 3
+
+
+def _is_placeholder(value: str) -> bool:
+    """True when ``value`` is an interpolation placeholder rather than a literal secret."""
+    return bool(_PLACEHOLDER_RE.match(value.strip()))
+
+
+def _connstr_is_a_real_credential(match: "re.Match") -> bool:
+    """SEC-17: does this ``user:password@`` span carry an actual secret?
+
+    The rule fires on the SHAPE `scheme://user:pass@`, which a variable-reference template
+    has too. `postgres://${{PGUSER}}:${{PGPASSWORD}}@${{PGHOST}}/${{PGDATABASE}}` contains no
+    credential at all — it is a Railway var-reference, i.e. the documented CORRECT way to
+    avoid hardcoding one — and it was reported as "possible connection string with
+    credentials detected". A memory documenting good practice got flagged for it.
+
+    Judged on the PASSWORD half only: the username is not the secret, so a TEMPLATE user with a
+    LITERAL password must still fire (a real password beside a placeholder is still a leak),
+    while `postgres://realuser:${{PW}}@h` — a literal user with a template password — must not.
+
+    No firing example is spelled out here on purpose: this file is shipped source, and hippo's
+    own SEC-8 gate scans it. An earlier draft of this docstring carried one and reded the gate —
+    correctly, which is the nicest possible proof that the rule works. The firing vectors live
+    in tests/, which the gate excludes by design.
+
+    This is not cosmetic. packs.py hard-REFUSES an install on any finding and
+    capture_triage silently DROPS the capture — these false positives fail closed.
+    """
+    cred = match.group(1)
+    _user, _, password = cred.partition(":")
+    if _is_placeholder(password):
+        return False
+    return len(password.strip()) >= _CONNSTR_MIN_SECRET_LEN
+
 # High-signal, anchored patterns → the human-readable KIND reported (never the match itself).
 # SMALL by design: each shape is one a real credential has and ordinary prose does not. Every
 # addition here is a KNOWN token PREFIX (or a structural shape like a JWT / PEM block / DB URI
@@ -78,9 +133,12 @@ _PATTERNS = [
     (re.compile(r"\bnpm_[A-Za-z0-9]{36,}\b"), "possible npm token detected"),
     # PyPI upload tokens: pypi- + a long base64 macaroon body (dash/underscore-free → not pypi-<pkg>).
     (re.compile(r"\bpypi-[A-Za-z0-9+/]{40,}"), "possible PyPI token detected"),
-    # DB connection strings carrying an inline user:password@ credential.
-    (re.compile(r"\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqps?)://[^\s:/@]+:[^\s:/@]+@"),
-     "possible connection string with credentials detected"),
+    # DB connection strings carrying an inline user:password@ credential. The credential span
+    # is captured (group 1) so SEC-17 can ask whether it is a real secret or an interpolation
+    # placeholder — see _CONNSTR_RE / _PLACEHOLDER_RE below.
+    (re.compile(r"\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqps?)://([^\s:/@]+:[^\s:/@]+)@"),
+     "possible connection string with credentials detected",
+     _connstr_is_a_real_credential),
     # PEM private-key blocks (RSA/EC/OPENSSH/PGP/plain).
     (re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"), "possible private key block detected"),
 ]
@@ -89,8 +147,8 @@ _PATTERNS = [
 # a token must be long AND draw from a mixed character class AND clear a Shannon-entropy bar AND
 # contain one long CONTIGUOUS opaque run (see _ENTROPY_CORE_MIN_LEN below for why).
 _ENTROPY_MIN_LEN = 32
-_ENTROPY_MIN_BITS = 4.0
 _ENTROPY_TOKEN_RE = re.compile(r"[A-Za-z0-9+/_=-]{%d,}" % _ENTROPY_MIN_LEN)
+
 
 # The precision gate that keeps the catch-all off structured prose (SEC precision fix). The
 # token class above spans `/ = _ -` because a real secret CAN contain them (standard base64 uses
@@ -110,19 +168,49 @@ _ENTROPY_TOKEN_RE = re.compile(r"[A-Za-z0-9+/_=-]{%d,}" % _ENTROPY_MIN_LEN)
 # genuine base64 content), so a `+`-bearing blob is still measured whole. 20 sits comfortably
 # above the ~12-char structured-segment ceiling yet below the run length a genuine ≥32-char
 # secret retains even when a lone base64/base64url separator splits it near the middle.
-_ENTROPY_CORE_MIN_LEN = 20
+# SEC-16 — 20 was measured wrong at the boundary this docstring names. "even when a LONE
+# separator splits it near the middle" is the load-bearing word, and it is not the real
+# world: `/` is standard-base64 CONTENT, and real keys carry several. AWS's OWN DOCUMENTED
+# example secret access key, wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY, splits into
+# 13/7/18 — longest run 18, under the floor — and scanned CLEAN. A 40-char secret with two
+# separators is not an edge case; it is the median case.
+#
+# 16 sits above the ~12-char structured-segment ceiling and below the 18 that AWS's key
+# retains. Measured, not guessed: over 7 must-fire and 16 must-not-fire vectors, the clean
+# region is core_min ∈ {14,16,18} × bits ∈ {3.0,3.25,3.5}. 16/3.5 is interior to it on both
+# axes rather than on an edge.
+_ENTROPY_CORE_MIN_LEN = 16
+_ENTROPY_CORE_MIN_BITS = 3.5
 _ENTROPY_SEP_RE = re.compile(r"[/=_-]+")
 _ENTROPY_MSG = "possible high-entropy secret detected"
 
 
-def _longest_core_run(token: str) -> int:
-    """Length of the longest contiguous opaque run in ``token`` (split on `/ = _ -`).
+def _core_run(token: str) -> str:
+    """The longest contiguous opaque run in ``token`` (split on `/ = _ -`); '' if none.
 
-    The discriminator behind the entropy catch-all's precision: a real secret is one long
-    high-entropy run, while a path / KEY=value / slash-list / hyphenated identifier is short
-    low-entropy segments joined by those separators. Returns 0 for an all-separator string.
+    A real secret is one long high-entropy run; a path / KEY=value / slash-list /
+    hyphenated identifier is short segments joined by those separators.
     """
-    return max((len(seg) for seg in _ENTROPY_SEP_RE.split(token)), default=0)
+    return max(_ENTROPY_SEP_RE.split(token), key=len, default="")
+
+
+def _longest_core_run(token: str) -> int:
+    """Length of ``_core_run``. Returns 0 for an all-separator string."""
+    return len(_core_run(token))
+
+
+def _has_mixed_case(s: str) -> bool:
+    """True when ``s`` contains BOTH an upper and a lower letter (SEC-16).
+
+    The replacement for ``_has_mixed_classes`` in the entropy gate. That one asked for two of
+    {lower, upper, digit}, which lowercase hex satisfies (letters + digits) — so it never
+    fired for the exact shape it was documented as excluding. Requiring both CASES is a
+    property hex cannot have at all: it is a single-case 16-symbol alphabet, while
+    base64/base64url secrets mix cases by construction.
+
+    Deliberately scored on the CORE RUN, not the whole token — see ``scan_text``.
+    """
+    return any(c.islower() for c in s) and any(c.isupper() for c in s)
 
 
 def _shannon_entropy(s: str) -> float:
@@ -136,20 +224,11 @@ def _shannon_entropy(s: str) -> float:
     return -sum((c / n) * math.log2(c / n) for c in counts.values())
 
 
-def _has_mixed_classes(s: str) -> bool:
-    """True when ``s`` mixes at least two of {lower, upper, digit} — a real-token shape.
-
-    A long all-lowercase word (or an all-hex sha, which is single-class-ish) should NOT trip
-    the entropy catch-all; requiring class mixing keeps the heuristic off ordinary text.
-    """
-    classes = 0
-    if any(c.islower() for c in s):
-        classes += 1
-    if any(c.isupper() for c in s):
-        classes += 1
-    if any(c.isdigit() for c in s):
-        classes += 1
-    return classes >= 2
+# SEC-16 removed `_has_mixed_classes` (two of {lower, upper, digit}) from this module. It was
+# documented as keeping an all-hex sha out of the entropy catch-all and could never do that:
+# lowercase hex IS letters + digits, so it returned True for every sha and the gate it was
+# credited with never fired. `_has_mixed_case` replaces it — hex is single-CASE, which is a
+# property it genuinely cannot have.
 
 
 def scan_text(text: str, *, entropy: bool = True) -> List[str]:
@@ -170,19 +249,36 @@ def scan_text(text: str, *, entropy: bool = True) -> List[str]:
     """
     try:
         found: List[str] = []
-        for pattern, message in _PATTERNS:
-            if pattern.search(text) and message not in found:
-                found.append(message)
+        for entry in _PATTERNS:
+            # SEC-17: an entry MAY carry a third element — a validator over the match. Only
+            # the DB-URI rule needs one (its shape is shared with variable-reference
+            # templates), and giving the table an optional slot keeps the one-table design
+            # rather than forking a second detector for the one rule that must look closer.
+            pattern, message = entry[0], entry[1]
+            validator = entry[2] if len(entry) > 2 else None
+            if message in found:
+                continue
+            for m in pattern.finditer(text):
+                if validator is None or validator(m):
+                    found.append(message)
+                    break
         # Entropy catch-all: only flag a long, mixed-class, high-entropy token that also holds
         # one long contiguous opaque run (so a separator-joined path/env/list/identifier whose
         # entropy comes from short segments does NOT trip) — and only if a prefix pattern above
         # didn't already flag this text (avoid a redundant second line).
         if entropy and _ENTROPY_MSG not in found:
             for token in _ENTROPY_TOKEN_RE.findall(text):
+                # SEC-16: all three predicates score the SAME string — the core run. They
+                # used to disagree: length was measured on the longest segment while
+                # entropy and class-mixing were measured on the WHOLE token, so a label
+                # could carry a payload over the bar. `content_digest=<sha>` fired while the
+                # identical bare <sha> scanned clean — the label WAS the secret, as far as
+                # the gate could tell. One string, one verdict.
+                core = _core_run(token)
                 if (
-                    _has_mixed_classes(token)
-                    and _shannon_entropy(token) >= _ENTROPY_MIN_BITS
-                    and _longest_core_run(token) >= _ENTROPY_CORE_MIN_LEN
+                    len(core) >= _ENTROPY_CORE_MIN_LEN
+                    and _has_mixed_case(core)
+                    and _shannon_entropy(core) >= _ENTROPY_CORE_MIN_BITS
                 ):
                     found.append(_ENTROPY_MSG)
                     break

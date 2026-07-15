@@ -638,3 +638,46 @@ def test_rules_source_never_raises(tmp_path):
         "entries": 0,
         "built": False,
     }
+
+
+# --------------------------------------------------------------------------- #
+# ORC-2 — one extension gate
+# --------------------------------------------------------------------------- #
+def test_rules_plane_extension_gate_is_built_from_provenance_s_list():
+    """AC (ORC-2): rules_plane's path-ref regex must be BUILT from provenance._CODE_EXTS,
+    not hand-copied from it.
+
+    The literal this replaces asserted it was "the same extension gate as
+    provenance._CITATION_RE". True only while nobody edited either list — and ORC-1 edited
+    one. Enforced here instead of asserted in a comment."""
+    from memory import provenance as P
+    from memory import rules_plane as R
+
+    assert "|".join(P._CODE_EXTS) in R._path_ref_re().pattern
+
+
+def test_rules_plane_and_provenance_agree_on_every_declared_extension():
+    """The parity the old comment CLAIMED, now measured on a shared vector set.
+
+    This failed before ORC-2 for exactly the extensions ORC-1 added: provenance derived
+    `a.mjs` while rules_plane returned None — the extractor fix half-landing, with rules-rot
+    silently ceasing to recognise .mjs refs. Note the two regexes reach the same answer by
+    different means: rules_plane is `^...$`-anchored, so `$` always supplied the end boundary
+    that provenance had to add explicitly, which is why THIS one never had the shadow bug."""
+    from memory import provenance as P
+    from memory import rules_plane as R
+
+    for ext in P._CODE_EXTS:
+        tok = f"web/app.{ext}"
+        m = R._path_ref_re().match(tok)
+        assert P.extract_citations(f"see {tok} here") == [tok], f"provenance lost {tok}"
+        assert m and m.group(1) == tok, f"rules_plane lost {tok} — the gates have diverged"
+
+
+def test_rules_plane_path_ref_still_requires_a_whole_span():
+    """Regression control: the anchoring is load-bearing and independent of the ext list —
+    `see foo/bar.py for details` inside backticks is prose, not a ref."""
+    from memory import rules_plane as R
+
+    assert R._path_ref_re().match("see foo/bar.py for details") is None
+    assert R._path_ref_re().match("plugin/memory/recall.py:42").group(1) == "plugin/memory/recall.py"
