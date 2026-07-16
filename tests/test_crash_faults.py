@@ -62,6 +62,7 @@ CRASH_CONTRACT = {
     ("dream_generate", "_set_cited_paths"): ("detected",),
     ("eval_recall", "draft_abstention_fixtures"): ("detected",),
     ("eval_recall", "confirm_hard_set_row"): ("detected",),  # both writes; each byte-complete
+    ("eval_recall", "write_baseline"): ("detected",),  # MSR-1 pin: error named, no torn baseline
     ("init_project", "_copy_if_absent"): ("detected",),  # seed copy: raises; no partial file
     ("init_project", "init_project"): ("detected",),  # fresh .format stamp
     ("interview", "_write_state"): ("detected",),  # a lost decline is NAMED, never pretended recorded
@@ -325,6 +326,25 @@ def scn_eval_confirm_detected(tmp_path, monkeypatch):
     from memory.eval_recall import load_hard_set
 
     assert [r["query"] for r in load_hard_set(fixture)] == ["q one"]  # byte-complete, parseable
+
+
+def scn_eval_write_baseline_detected(tmp_path, monkeypatch):
+    from memory.eval_recall import write_baseline
+
+    path = str(tmp_path / "recall_eval_baseline.json")
+    report = {
+        "gates": {"self_recall@10": {"value": 1.0}},
+        "by_category": {},
+        "tokens": {},
+        "count": 1,
+        "hard_set_n": 0,
+        "backend": "bm25-only",
+    }
+    before = _snap(path)
+    _arm(monkeypatch, "eval_recall", "write_baseline")
+    res = write_baseline(report, path, head="abc", fixture_fp="f", corpus_fp="c")
+    _assert_unchanged(before)  # no torn pin — an absent baseline stays absent
+    assert res.get("ok") is False and "baseline write failed" in res.get("error", "")
 
 
 def scn_init_copy_detected(tmp_path, monkeypatch):
@@ -767,6 +787,7 @@ _SCENARIOS = [
     (("dream_generate", "_set_cited_paths"), "detected", scn_dream_generate_cited_detected),
     (("eval_recall", "draft_abstention_fixtures"), "detected", scn_eval_drafts_detected),
     (("eval_recall", "confirm_hard_set_row"), "detected", scn_eval_confirm_detected),
+    (("eval_recall", "write_baseline"), "detected", scn_eval_write_baseline_detected),
     (("init_project", "_copy_if_absent"), "detected", scn_init_copy_detected),
     (("init_project", "init_project"), "detected", scn_init_project_stamp_detected),
     (("interview", "_write_state"), "detected", scn_interview_state_detected),
