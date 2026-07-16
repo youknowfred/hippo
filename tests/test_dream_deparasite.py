@@ -509,3 +509,38 @@ def test_mcp_deparasite_action(dirs, monkeypatch):
 
     out = M._tool_dream({"action": "dedup_merge", "survivor": "x"})
     assert "required" in out
+
+
+# --------------------------------------------------------------------------- #
+# QA sweep 2026-07-16 — COR-16: the dedup-merge two-write chain rolls back.
+# --------------------------------------------------------------------------- #
+def test_apply_dedup_merge_rolls_back_supersedes_when_invalidation_fails(dirs, monkeypatch):
+    """WRITE #1 (survivor gains `supersedes`) used to persist when WRITE #2 (loser's
+    `invalid_after`) failed — while the envelope reported changed=False / error, i.e.
+    'nothing happened'. The chain must leave BOTH files as they were."""
+    import memory.staleness as staleness
+
+    md, td, idx = dirs
+    _dup_corpus(md)
+    _seed_sessions(td, 5)
+    survivor_before = open(os.path.join(md, "dock-checklist-one.md"), encoding="utf-8").read()
+    loser_before = open(os.path.join(md, "dock-checklist-two.md"), encoding="utf-8").read()
+
+    real = staleness.set_invalid_after
+
+    def failing(path, *a, **k):
+        if path.endswith("dock-checklist-two.md") and not k.get("dry_run"):
+            return {"path": path, "changed": False, "invalid_after": None,
+                    "error": "disk full"}
+        return real(path, *a, **k)
+
+    monkeypatch.setattr(staleness, "set_invalid_after", failing)
+    res = dp.apply_dedup_merge(md, "dock-checklist-one", "dock-checklist-two",
+                               telemetry_dir=td, index_dir=idx)
+    assert res["error"] and "invalid_after write failed" in res["error"]
+    assert res["changed"] is False
+    after = open(os.path.join(md, "dock-checklist-one.md"), encoding="utf-8").read()
+    assert after == survivor_before, (
+        "the survivor's supersedes edge must be rolled back when the loser write fails"
+    )
+    assert open(os.path.join(md, "dock-checklist-two.md"), encoding="utf-8").read() == loser_before

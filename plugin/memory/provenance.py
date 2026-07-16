@@ -1108,6 +1108,33 @@ def _frontmatter_damage(before: str, after: str, may_change) -> Optional[str]:
 _PROVENANCE_OWNED = frozenset({"cited_paths", "source_commit", "source_commit_time"})
 
 
+def restore_file_bytes(
+    path: str, original: str, memory_dir: str, repo_root: Optional[str] = None
+) -> Optional[str]:
+    """COR-16 rollback primitive: put ``original`` back into ``path`` and re-fold the
+    consent baseline so the restored bytes are not misread as user drift.
+
+    The two-write chains (dedup-merge, demote+supersede, refines apply) each land a
+    first guarded write and then a second; when the second fails, the first must come
+    back OUT or the operation reports "refused"/"nothing changed" over a live partial
+    write. One shared implementation, like the insert/strip walks (COR-9's lesson).
+    Returns an error string when the restore itself failed — the caller reports the
+    PARTIAL state explicitly instead of pretending the rollback happened.
+    """
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(original)
+    except Exception as exc:
+        return str(exc)
+    try:
+        from .trust import record_authored_write
+
+        record_authored_write(memory_dir, path, repo_root)
+    except Exception:
+        pass
+    return None
+
+
 def _strip_provenance(text: str) -> str:
     """Remove any existing cited_paths/source_commit/source_commit_time keys (body verbatim)."""
     return strip_frontmatter_keys(text, _PROVENANCE_KEY_RE)
