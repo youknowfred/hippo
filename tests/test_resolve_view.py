@@ -121,27 +121,53 @@ def test_dismiss_rejects_self_and_empty():
 
 
 # ---- nothing auto-resolves: the module has no corpus-write path (structural pin) ----------- #
-def test_module_has_no_corpus_write_path():
-    """inv4 pinned structurally: resolve_view imports no corpus writer and calls none of the
-    corpus-mutating primitives — every such verdict routes through ordinary agent edits/
-    reconsolidate in the SKILL, outside this module."""
+def test_corpus_writers_are_confined_to_the_verdict_engine():
+    """inv4, re-pinned for INV-4 (scope ratified 2026-07-16): the LISTING half of this
+    module stays read-only — corpus-mutating primitives may be called ONLY from the
+    per-item verdict engine (``apply_resolve_verdict`` + its ``_drop_declarations``
+    chain helper), and only the SHARED ones (semantic_reverify, remove_typed_relation,
+    restore_file_bytes) — never a raw write, never a bulk shape, never from the inbox/
+    describe/proposal readers."""
+    _WRITERS = {
+        "write_memory", "semantic_reverify", "add_typed_relation",
+        "remove_typed_relation", "set_invalid_after", "restore_file_bytes",
+        "write_text_atomic", "write_json_atomic", "open",
+    }
+    _ENGINE = {"apply_resolve_verdict", "_drop_declarations"}
+    # mark_not_conflicting writes the per-clone LEDGER (not the corpus) — its one
+    # open("w") is allowlisted in the INV-2 write-discipline lint.
+    _LEDGER = {"mark_not_conflicting", "read_resolved", "_description_of", "pair_edge_state"}
+
     tree = ast.parse(inspect.getsource(RV))
-    imported, called = set(), set()
+    offenders = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            imported.add(node.module or "")
-            imported.update(a.name for a in node.names)
-        elif isinstance(node, ast.Import):
-            imported.update(a.name for a in node.names)
-        elif isinstance(node, ast.Call):
-            fn = node.func
-            if isinstance(fn, ast.Attribute):
-                called.add(fn.attr)
-            elif isinstance(fn, ast.Name):
-                called.add(fn.id)
-    assert not any("new_memory" in m or "reconsolidate" in m for m in imported)
-    for writer in ("write_memory", "semantic_reverify", "add_typed_relation", "set_invalid_after"):
-        assert writer not in called
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        called = set()
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Call):
+                fn = sub.func
+                if isinstance(fn, ast.Attribute):
+                    called.add(fn.attr)
+                elif isinstance(fn, ast.Name):
+                    called.add(fn.id)
+        hits = called & _WRITERS
+        if hits and node.name not in _ENGINE:
+            # readers may open() corpus files READ-ONLY; flag only real writers there
+            if hits == {"open"} and node.name in _LEDGER:
+                continue
+            offenders.append((node.name, sorted(hits)))
+    assert not offenders, (
+        f"corpus-writing primitives escaped the verdict engine: {offenders} — the "
+        "inbox/listing half of resolve_view must stay read-only (INV-4)"
+    )
+    # And the engine itself uses only the SHARED primitives — never a raw write.
+    engine_src = "".join(
+        inspect.getsource(getattr(RV, name)) for name in sorted(_ENGINE)
+    )
+    assert "write_text_atomic" not in engine_src and 'open(' not in engine_src.replace(
+        'open(os.path.join(memory_dir, f"{side}.md"), "r"', ""
+    ).replace('open(path, "r"', "")
 
 
 # ---- the SessionStart producer ------------------------------------------------------------- #

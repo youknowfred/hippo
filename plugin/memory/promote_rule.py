@@ -206,11 +206,13 @@ def main(argv=None) -> int:
         print(res["diff"], end="")
         return 0
 
-    # Approved apply step: this is the one and only write.
+    # Approved apply step: this is the one and only write. INV-2: the rule file is
+    # committed, always-loaded governance — a torn write would ship half a rule.
+    from .atomic import write_text_atomic
+
     abs_rule = os.path.join(repo_root, res["path"])
     os.makedirs(os.path.dirname(abs_rule), exist_ok=True)
-    with open(abs_rule, "w", encoding="utf-8") as fh:
-        fh.write(res["proposed"])
+    write_text_atomic(abs_rule, res["proposed"])
     print(f"wrote {res['path']} — commit it as a reviewable per-item rule.")
     return 0
 

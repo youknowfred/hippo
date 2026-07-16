@@ -69,6 +69,36 @@ def _umask() -> int:
     return mask
 
 
+def write_bytes_atomic(path: str, data: bytes) -> None:
+    """``write_text_atomic`` for bytes — the byte-faithful copy path (INV-2).
+
+    Exists for writers that must not round-trip an encoding (seeding a corpus file
+    byte-identical to its packaged source). Same unique-tmp + ``os.replace`` + symlink
+    + permission discipline; raises exactly like ``open(path, "wb")`` would.
+    """
+    real = os.path.realpath(path) if os.path.islink(path) else path
+    d = os.path.dirname(os.path.abspath(real)) or "."
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(real) + ".tmp.", dir=d)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        try:
+            os.chmod(tmp, os.stat(real).st_mode & 0o777)
+        except OSError:
+            pass  # new file: mkstemp's private mode is upgraded below instead
+        else:
+            os.replace(tmp, real)
+            return
+        os.chmod(tmp, 0o644 & ~_umask())
+        os.replace(tmp, real)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def write_json_atomic(path: str, doc, *, indent: int = 2, sort_keys: bool = False) -> None:
     """``json.dump`` + trailing newline, through ``write_text_atomic``.
 

@@ -844,6 +844,92 @@ _TOOLS = [
             "required": ["source_dir", "name"],
         },
     },
+    # ------------------------------------------------------------------- #
+    # INV-4 (additive per STABILITY.md; scope ratified 2026-07-16): the two
+    # nudge-routed verbs — resolve + audit — reach the second surface. The
+    # other five terminal-only verbs keep their honest preflights.
+    # ------------------------------------------------------------------- #
+    {
+        "name": "resolve",
+        "description": (
+            "Drain the contradiction inbox — /hippo:resolve's engine (the SessionStart "
+            "contradiction-inbox nudge routes here). action='inbox' (default) lists "
+            "every unresolved contradicts pair (declared frontmatter edges plus "
+            "dream-PROPOSED candidates) with each side's description. For EACH pair, "
+            "read both memory files, then render exactly ONE human verdict per call "
+            "via action='verdict': keep_one (winner=, loser=) demotes the loser "
+            "(invalid_after + the winner's supersedes edge — the shipped "
+            "demote+supersede chain) and drops the settled contradicts declaration; "
+            "scope_both (a=, b=) is rendered ONLY after you edited both bodies to name "
+            "their scopes — it drops the declaration (a proposal-only pair lands in "
+            "the dismiss ledger instead); merge (winner=survivor, loser=) is rendered "
+            "ONLY after you folded the loser's unique content into the survivor — same "
+            "demote-in-place chain, nothing deleted; not_conflicting (a=, b=) records "
+            "the one corpus-preserving verdict in this clone's ledger (files and edge "
+            "untouched). Nothing auto-picks a winner; never bulk-apply a verdict; "
+            "two-write verdicts roll back cleanly when a write refuses (COR-16)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["inbox", "verdict"],
+                    "description": "inbox = list unresolved pairs (default); "
+                    "verdict = apply ONE per-pair verdict (requires verdict=…)",
+                },
+                "verdict": {
+                    "type": "string",
+                    "enum": ["keep_one", "scope_both", "merge", "not_conflicting"],
+                    "description": "the ONE verdict for this pair",
+                },
+                "winner": {
+                    "type": "string",
+                    "description": "keep_one/merge: the side that stays current "
+                    "(merge: the survivor the content was folded into)",
+                },
+                "loser": {
+                    "type": "string",
+                    "description": "keep_one/merge: the side being demoted/superseded",
+                },
+                "a": {"type": "string", "description": "scope_both/not_conflicting: one side"},
+                "b": {"type": "string", "description": "scope_both/not_conflicting: the other side"},
+            },
+        },
+    },
+    {
+        "name": "audit",
+        "description": (
+            "The /hippo:audit report MATERIAL, read-only — the skill's Phase-1 gather "
+            "as one call (the old-invalidation SessionStart nudge routes here on this "
+            "surface). Returns the cross-referenced JSON the audit skill's Phases 2-4 "
+            "reason over: eval gates (skip_eval=true to skip the dense cluster), soak/"
+            "curation, staleness + the reconsolidation worklist, archive candidates, "
+            "link/floor lint, the joins (cascading blind spot, authority-evidence gap, "
+            "graph-isolated watch-list, staleness ages), graduation history, worklist "
+            "recurrence, link-densification suggestions, and both-direction merge "
+            "candidates. ZERO writes — it never touches corpus, registries, or even "
+            "the skill's history bookkeeping (a failed section is named in `errors`, "
+            "never dropped). Judgment stays yours via the audit skill; every apply "
+            "routes through the existing per-item tools (reconsolidate reverify, dream "
+            "dedup_merge, abstention_fixtures confirm) — this tool never auto-fixes."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "skip_eval": {
+                    "type": "boolean",
+                    "description": "skip the eval_recall cluster (fast drift/curation-"
+                    "only pass; also skips the dense-model load)",
+                },
+                "window_sessions": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "reconsolidation worklist window (default 30)",
+                },
+            },
+        },
+    },
 ]
 
 
@@ -2053,12 +2139,13 @@ def _tool_abstention_fixtures(args: Dict[str, Any]) -> str:
     return "abstention_fixtures: pass action='draft' (default) or action='confirm' (query=…, expected=[…])."
 
 
-def _pack_gate(tool: str, why: str):
-    """The SEC-1 gate for the pack tools (INT-16) — ONE definition for all five, not
-    five hand-copies (the COR-9 lesson applies to gates too). Extract copies memory
-    bodies OUT of the corpus, the plans render corpus/foreign text side by side, and
-    the item calls write corpus files — every one of them gates exactly like
-    recall/new_memory. Returns ``(refusal_text_or_None, memory_dir, repo_root)``."""
+def _corpus_gate(tool: str, why: str):
+    """The SEC-1 gate for corpus-touching verb tools — ONE definition, not hand-copies
+    (the COR-9 lesson applies to gates too; INT-16 wrote it for the five pack tools and
+    INV-4's resolve/audit gate through the same definition). Extract copies memory
+    bodies OUT of the corpus, plans/reports render corpus text, verdicts write corpus
+    files — every one gates exactly like recall/new_memory. Returns
+    ``(refusal_text_or_None, memory_dir, repo_root)``."""
     from . import trust
     from .provenance import resolve_dirs
 
@@ -2088,7 +2175,7 @@ def _tool_pack_extract(args: Dict[str, Any]) -> str:
     nothing for a caller to forget to print)."""
     from .packs import pack_extract
 
-    refusal, memory_dir, repo_root = _pack_gate(
+    refusal, memory_dir, repo_root = _corpus_gate(
         "pack_extract", "an extract copies memory bodies out of the corpus"
     )
     if refusal:
@@ -2180,7 +2267,7 @@ def _tool_pack_install_plan(args: Dict[str, Any]) -> str:
     treat it that way, exactly like the doctor consent block."""
     from .packs import pack_install_plan
 
-    refusal, memory_dir, repo_root = _pack_gate(
+    refusal, memory_dir, repo_root = _corpus_gate(
         "pack_install_plan",
         "the plan routes foreign pack text against corpus content (duplicate/conflict "
         "neighbors expose memory names)",
@@ -2243,7 +2330,7 @@ def _tool_pack_install_item(args: Dict[str, Any]) -> str:
     """INT-16 — ONE explicitly-approved install; the hard gates live in the primitive."""
     from .packs import pack_install_item
 
-    refusal, memory_dir, repo_root = _pack_gate(
+    refusal, memory_dir, repo_root = _corpus_gate(
         "pack_install_item", "an install writes a corpus file"
     )
     if refusal:
@@ -2277,7 +2364,7 @@ def _tool_pack_update_plan(args: Dict[str, Any]) -> str:
     """INT-16 — the per-item three-way review; diffs are bounded by the primitive."""
     from .packs import pack_update_plan
 
-    refusal, memory_dir, repo_root = _pack_gate(
+    refusal, memory_dir, repo_root = _corpus_gate(
         "pack_update_plan", "the per-item diffs render corpus file content"
     )
     if refusal:
@@ -2319,7 +2406,7 @@ def _tool_pack_update_item(args: Dict[str, Any]) -> str:
     """INT-16 — ONE explicitly-approved update; conflicts stay human-resolved."""
     from .packs import pack_update_item
 
-    refusal, memory_dir, repo_root = _pack_gate(
+    refusal, memory_dir, repo_root = _corpus_gate(
         "pack_update_item", "an update rewrites a corpus file"
     )
     if refusal:
@@ -2341,6 +2428,123 @@ def _tool_pack_update_item(args: Dict[str, Any]) -> str:
         f"✔ updated {name} (state: {r['state']}) → {r['path']} — lockfile base "
         "advanced to the new upstream text; consent baseline absorbed the bytes; "
         "index refreshed. Commit the updated memory + the lockfile together."
+    )
+
+
+def _tool_resolve(args: Dict[str, Any]) -> str:
+    """INV-4 — /hippo:resolve's second surface (scope ratified 2026-07-16: resolve +
+    audit only). The contradiction-inbox nudge is a HOOK — it fires on Desktop too —
+    and until this tool it routed users into INT-19's honest dead end. Mirrors the
+    reconsolidate tool's per-item shape: action='inbox' lists, action='verdict'
+    renders ONE per-pair human verdict per call; nothing auto-picks a winner, and the
+    engine (``resolve_view.apply_resolve_verdict``) carries the COR-16 rollback
+    discipline for its two-write verdicts."""
+    from .resolve_view import apply_resolve_verdict, describe
+
+    refusal, memory_dir, repo_root = _corpus_gate(
+        "resolve",
+        "the inbox exposes memory names and descriptions, and a verdict writes "
+        "corpus files",
+    )
+    if refusal:
+        return refusal
+    action = str(args.get("action") or "inbox").strip().lower()
+    if action == "inbox":
+        listing = describe(memory_dir, repo_root=repo_root)
+        return listing + (
+            "\n\nFor EACH pair: read both memory files first (descriptions are hooks, "
+            "not the full claims), then render ONE verdict per call — action='verdict' "
+            "with verdict='keep_one' (winner=…, loser=… — demotes the loser, writes the "
+            "supersedes edge, drops the settled contradicts declaration), "
+            "'scope_both' (a=…, b=… — ONLY after you edited both bodies to name their "
+            "scopes; drops the declaration), 'merge' (winner=survivor, loser=… — ONLY "
+            "after folding the loser's unique content into the survivor; same "
+            "demote-in-place chain), or 'not_conflicting' (a=…, b=… — per-clone ledger; "
+            "files and edge stay untouched). Never bulk-apply a verdict across pairs."
+            if "empty" not in listing.split("\n", 1)[0].lower()
+            else ""
+        )
+    if action == "verdict":
+        verdict = str(args.get("verdict") or "").strip().lower()
+        if verdict not in ("keep_one", "scope_both", "merge", "not_conflicting"):
+            return (
+                "resolve verdict: pass verdict='keep_one'|'scope_both'|'merge'|"
+                "'not_conflicting' (one pair per call)."
+            )
+        r = apply_resolve_verdict(
+            memory_dir,
+            repo_root,
+            verdict,
+            winner=_opt_str(args, "winner"),
+            loser=_opt_str(args, "loser"),
+            a=_opt_str(args, "a"),
+            b=_opt_str(args, "b"),
+        )
+        if r["error"]:
+            return f"✘ resolve {verdict} REFUSED — {r['error']}"
+        pair = " ⇄ ".join(r["pair"] or [])
+        lines = [f"✔ resolve {verdict} applied to {pair}:"]
+        lines += [f"  - {d}" for d in r["detail"]]
+        if verdict in ("keep_one", "merge"):
+            lines.append(
+                "  - an ordinary reviewable git change — commit it; run the build_index "
+                "tool so links.json carries the new edge for the next recall"
+            )
+        elif verdict == "scope_both":
+            lines.append(
+                "  - commit this together with your scope edits to both bodies"
+            )
+        return "\n".join(lines)
+    return "resolve: pass action='inbox' (default) or action='verdict' (verdict=…, names…)."
+
+
+def _tool_audit(args: Dict[str, Any]) -> str:
+    """INV-4 — /hippo:audit's material producer on the second surface. Read-only BY
+    CONSTRUCTION (the audit engine gathers and joins; it never writes corpus, registry,
+    or even the skill's own history bookkeeping) — judgment stays agent-driven via the
+    audit skill's Phases 2-5 on both surfaces, and every apply routes through the
+    existing per-item tools (reconsolidate, dream dedup_merge, abstention_fixtures).
+    Runs under the freshly-resolved venv python when one exists (dense eval), else
+    in-process (BM25 degrades gracefully)."""
+    from .audit_view import gather_material
+
+    refusal, memory_dir, repo_root = _corpus_gate(
+        "audit", "the report material renders memory names, descriptions, and joins"
+    )
+    if refusal:
+        return refusal
+    skip_eval = bool(args.get("skip_eval"))
+    ws = args.get("window_sessions")
+    ws = int(ws) if isinstance(ws, (int, float)) and int(ws) > 0 else 30
+    material = None
+    py = _fresh_python()
+    if py is not None:
+        try:
+            import subprocess
+
+            cmd = [py, "-m", "memory.audit_view", "--window-sessions", str(ws)]
+            if skip_eval:
+                cmd.append("--skip-eval")
+            out = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=600, env=_subprocess_env()
+            )
+            if out.returncode == 0 and out.stdout.strip():
+                material = out.stdout.strip()
+        except Exception:
+            material = None
+    if material is None:
+        material = json.dumps(
+            gather_material(
+                memory_dir, repo_root, skip_eval=skip_eval, window_sessions=ws
+            ),
+            indent=2,
+            default=str,
+        )
+    return (
+        "audit report material (read-only — zero writes; judgment is yours, per the "
+        "audit skill's Phases 2-4; every apply routes through the per-item tools: "
+        "reconsolidate action='reverify', dream action='dedup_merge', "
+        "abstention_fixtures action='confirm'):\n" + material
     )
 
 
@@ -2371,6 +2575,11 @@ _DISPATCH = {
     "pack_install_item": _tool_pack_install_item,
     "pack_update_plan": _tool_pack_update_plan,
     "pack_update_item": _tool_pack_update_item,
+    # INV-4 (scope ratified 2026-07-16): the two nudge-routed verbs' second surface —
+    # resolve + audit ONLY; the other five terminal-only verbs keep their honest
+    # preflights. Appended at the END: STABILITY.md freezes names, shapes AND positions.
+    "resolve": _tool_resolve,
+    "audit": _tool_audit,
 }
 
 

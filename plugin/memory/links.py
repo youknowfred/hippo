@@ -743,6 +743,87 @@ def add_typed_relation(path: str, relation: str, target: str, *, dry_run: bool =
     return result
 
 
+def remove_typed_relation(path: str, relation: str, target: str, *, dry_run: bool = False) -> dict:
+    """Drop ``target`` from ONE memory's ``relation:`` frontmatter list (body verbatim) —
+    ``add_typed_relation``'s inverse, and the settled-edge cleanup INV-4's resolve
+    verdicts perform (a keep-one/scope-both verdict retires the pair's ``contradicts:``
+    declaration; the supersedes edge or the scoped wording carries the story from here).
+
+    Same discipline as its sibling: refuses (no write) on missing/unparseable
+    frontmatter, idempotent when the target is not in the list (slug-normalized, the
+    ``resolve()`` equivalence), rewrites a surviving list as one canonical flow list at
+    the key's own indent, STRIPS the key entirely when the list empties (via the COR-9
+    ``strip_frontmatter_keys`` walk, so block-style values lose their continuation
+    lines too), guards with ``_frontmatter_damage``, and writes atomically with the
+    SEC-6 consent fold. Deliberately per-item; never raises.
+    """
+    result = {"path": path, "relation": relation, "target": target, "changed": False, "error": None}
+    try:
+        if relation not in TYPED_RELATIONS:
+            result["error"] = f"unknown relation: {relation!r} (must be one of {', '.join(TYPED_RELATIONS)})"
+            return result
+        if not isinstance(target, str) or not target.strip():
+            result["error"] = "empty target"
+            return result
+        target = target.strip()
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        if not text.startswith(_FENCE):
+            result["error"] = "no frontmatter -- cannot edit a typed relation"
+            return result
+        fm = parse_frontmatter(text)
+        if not fm:
+            result["error"] = "unparseable frontmatter -- refusing to write (fix the YAML)"
+            return result
+
+        existing = parse_typed_relations(fm).get(relation, [])
+        kept = [t for t in existing if normalize_slug(t) != normalize_slug(target)]
+        if len(kept) == len(existing):
+            return result  # idempotent: the edge is not declared here
+
+        from .provenance import _frontmatter_damage, strip_frontmatter_keys
+
+        key_re = re.compile(rf"^(\s*){relation}\s*:")
+        if kept:
+            # Rewrite the key in place as a flow list of the survivors (dropping any
+            # block-style continuation lines — their values are in `existing` already).
+            lines = text.split("\n")
+            close = next((i for i in range(1, len(lines)) if lines[i].strip() == _FENCE), None)
+            fm_lines = lines[1:close]
+            key_idx = next((i for i, ln in enumerate(fm_lines) if key_re.match(ln)), None)
+            if key_idx is None:
+                result["error"] = "relation key not found in frontmatter (parse/lines disagree)"
+                return result
+            indent = key_re.match(fm_lines[key_idx]).group(1)
+            end = key_idx + 1
+            while end < len(fm_lines) and re.match(r"^\s+-\s", fm_lines[end]):
+                end += 1
+            value = "[" + ", ".join(json.dumps(t) for t in kept) + "]"
+            fm2 = fm_lines[:key_idx] + [f"{indent}{relation}: {value}"] + fm_lines[end:]
+            new_text = "\n".join([lines[0]] + fm2 + lines[close:])
+        else:
+            new_text = strip_frontmatter_keys(text, key_re)
+
+        damage = _frontmatter_damage(text, new_text, {relation})
+        if damage:
+            result["error"] = f"refusing to write: {damage} — this is a hippo bug, please report it"
+            return result
+        result["changed"] = new_text != text
+        if result["changed"] and not dry_run:
+            from .atomic import write_text_atomic
+
+            write_text_atomic(path, new_text)  # COR-18: never a torn corpus file
+            try:
+                from .trust import record_authored_write
+
+                record_authored_write(os.path.dirname(path), path)
+            except Exception:
+                pass
+    except Exception as exc:
+        result["error"] = str(exc)
+    return result
+
+
 # --------------------------------------------------------------------------- #
 # GRA-6: persisted edge cache (links.json in the index dir)
 # --------------------------------------------------------------------------- #

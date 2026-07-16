@@ -724,8 +724,11 @@ def draft_abstention_fixtures(
             header_lines.append(f"generated_with_backend: {backend}")
         header_lines.append(f"generated_at: {time.strftime('%Y-%m-%d')}")
         text = "\n".join(header_lines) + "\n---\n" + rows_text
-    with open(dp, "w", encoding="utf-8") as fh:
-        fh.write(text)
+    from .atomic import write_text_atomic
+
+    # INV-2: the drafts queue accumulates human judgments that re-drafting promises to
+    # preserve verbatim — a torn rewrite would clobber exactly what it must keep.
+    write_text_atomic(dp, text)
     return summary
 
 
@@ -820,8 +823,11 @@ def confirm_hard_set_row(
             f"note: {json.dumps(created_note)}\n"
             f"generated_at: {time.strftime('%Y-%m-%d')}\n---\n" + row_text
         )
-    with open(fp, "w", encoding="utf-8") as fh:
-        fh.write(text)
+    from .atomic import write_text_atomic
+
+    # INV-2: the tracked fixture is COMMITTED calibration truth (its existing bytes are
+    # preserved verbatim above the append) — never leave it torn.
+    write_text_atomic(fp, text)
 
     removed = False
     dp = drafts_path or default_drafts_path(memory_dir)
@@ -839,8 +845,7 @@ def confirm_hard_set_row(
             parts.append(
                 yaml.safe_dump(keep, sort_keys=False, allow_unicode=True) if keep else "[]\n"
             )
-            with open(dp, "w", encoding="utf-8") as fh:
-                fh.write("".join(parts))
+            write_text_atomic(dp, "".join(parts))  # INV-2: same drafts-queue guarantee
             removed = True
     return {
         "ok": True,

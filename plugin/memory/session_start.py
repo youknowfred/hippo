@@ -97,12 +97,15 @@ _DESKTOP_SURFACE_NOTE = (
     "pack_install_item; update: pack_update_plan then per-item pack_update_item); "
     "/hippo:dream → the dream tool; /hippo:new → the new_memory tool; /hippo:recall → the "
     "recall tool (its --list-by-type and --all-projects modes are terminal-only); "
-    "/hippo:why → the why tool. "
-    # INT-19: the old text claimed resolve/audit "run as hippo skills — invoke them
-    # directly" — but both preflights hard-abort on Desktop ("re-run from a terminal"),
-    # so the note routed users into a dead end it had just promised was a path.
+    "/hippo:why → the why tool; "
+    # INV-4 (scope ratified 2026-07-16): the two nudge-routed dead ends get real routes —
+    # resolve + audit only; the other five keep their honest terminal-only preflights.
+    "/hippo:resolve → the resolve tool (action='inbox', then ONE action='verdict' per "
+    "pair); /hippo:audit → the audit skill driving the audit tool (read-only report "
+    "material; judgment and applies stay per-item in the skill). "
+    # INT-19: never promise a route that dead-ends — this list stays honest.
     "NOT available on this surface (terminal-only for now — say so, do not improvise a "
-    "workaround): resolve, audit, export-agents, import, promote, promote-rule, remove. "
+    "workaround): export-agents, import, promote, promote-rule, remove. "
     "The two corpus-repair verbs are MCP tools on BOTH surfaces, with no /hippo:* form: "
     "rederive (action='worklist'|'one'|'snapshot'|'stamp') and heal_baselines."
 )
@@ -611,10 +614,15 @@ def pending_capture_producer(
     except Exception:
         trivial = 0
     label = f" ({trivial} trivial)" if trivial else ""
+    # INV-1: the deferral must name RUNNABLE forms — the old text said `hippo capture
+    # --snooze`, a bin/hippo subcommand that does not exist (the INT-18 class; the
+    # surface-registry lint now fails on any such reference). The capture tool serves
+    # both surfaces; the terminal CLI spelling is `-m memory.capture --snooze`.
     return (
         f"📥 {n} pending capture(s){label} from a prior session await review — run "
         "/hippo:consolidate to draft them into memory (nothing is saved until you approve "
-        "each one, per item), or `hippo capture --snooze` to defer this nudge."
+        "each one, per item), or defer this nudge with the capture tool (action='snooze'; "
+        "in a terminal: `--snooze` on `python -m memory.capture`)."
     )
 
 
