@@ -297,6 +297,20 @@ def init_project(
     else:
         result["trust"] = {"status": "untrusted_needs_review"}
     result["registered"] = register_project(repo_root, memory_dir)
+    # RCH-11 prevention: a temp-rooted corpus recorded in the REAL machine registry is
+    # the exact class that left the observed junk rows (the registry outlives tmp
+    # cleanup; the corpus does not). Hermetic runs set HIPPO_PROJECTS_FILE and stay
+    # quiet here — the warning fires only on the durable file.
+    if result["registered"] and not os.environ.get("HIPPO_PROJECTS_FILE"):
+        from .registry import _under_volatile_root
+
+        if _under_volatile_root(memory_dir):
+            result["warnings"].append(
+                f"registered a corpus under a system temp root ({memory_dir}) — this "
+                "machine-registry entry will outlive the directory and go dead; "
+                "hermetic/test runs should set HIPPO_PROJECTS_FILE, and "
+                "`python -m memory.registry --prune-dead` clears such rows later"
+            )
 
     # Step 5 + 5b (git repo only): .gitignore patch + the self-ignoring private tier.
     if is_git:

@@ -32,6 +32,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -82,6 +83,7 @@ CRASH_CONTRACT = {
     ("provenance", "reverify_file"): ("detected",),
     ("registry", "register_project"): ("detected",),  # returns False
     ("registry", "deregister_project"): ("detected",),
+    ("registry", "prune_dead"): ("detected",),  # RCH-11: ok=False; prior doc intact
     ("sleep", "_write_report"): ("detected",),  # report still prints; the miss is named
     ("sleep", "_write_state"): ("detected",),  # a lost run-stamp is named on stdout
     ("staleness", "set_invalid_after"): ("detected", "rolled_back"),  # dedup-merge write #2
@@ -648,6 +650,24 @@ def scn_registry_deregister_detected(tmp_path, monkeypatch):
     assert registered_projects() == before  # old registry intact, loudly not-removed
 
 
+def scn_registry_prune_dead_detected(tmp_path, monkeypatch):
+    from memory.registry import prune_dead, projects_registry_path, register_project
+
+    # A prunable row: registered under tmp (volatile by construction), then deleted.
+    root = tmp_path / "proj"
+    md = root / ".claude" / "memory"
+    md.mkdir(parents=True)
+    assert register_project(str(root), str(md)) is True
+    shutil.rmtree(str(root))
+    with open(projects_registry_path(), "rb") as fh:
+        before = fh.read()
+    _arm(monkeypatch, "registry", "prune_dead")
+    r = prune_dead()
+    assert r["ok"] is False  # RCH-11: the failed rewrite is loud, never pretended
+    with open(projects_registry_path(), "rb") as fh:
+        assert fh.read() == before  # prior document byte-intact, never torn
+
+
 def scn_sleep_report_write_detected(tmp_path, monkeypatch, capsys):
     from memory import sleep as SL
     from memory.telemetry import default_telemetry_dir
@@ -791,6 +811,7 @@ _SCENARIOS = [
     (("provenance", "reverify_file"), "detected", scn_reverify_detected),
     (("registry", "register_project"), "detected", scn_registry_register_detected),
     (("registry", "deregister_project"), "detected", scn_registry_deregister_detected),
+    (("registry", "prune_dead"), "detected", scn_registry_prune_dead_detected),
     (("sleep", "_write_report"), "detected", scn_sleep_report_write_detected),
     (("sleep", "_write_state"), "detected", scn_sleep_state_write_detected),
     (("staleness", "set_invalid_after"), "detected", scn_invalid_after_detected),

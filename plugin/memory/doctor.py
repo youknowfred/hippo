@@ -1282,6 +1282,53 @@ def check_stale_memobot_env(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"stale-env check failed: {exc}."}
 
 
+def check_projects_registry(ctx: DoctorContext) -> Dict[str, str]:
+    """RCH-11: machine-level projects-registry hygiene — the file behind ``--all-projects``.
+
+    ``registered_projects()`` read-time-skips entries whose ``memory_dir`` vanished (RCH-4,
+    deliberately never auto-pruned), which keeps recall correct while the FILE quietly
+    accumulates junk rows — scratch/test sessions that ran a real ``init`` on tmp-dir clones
+    are the observed source. Machine-level like the bootstrap check (the registry is a
+    ``~/.claude`` sibling of the trust file, not per-corpus). Warn-only — dead rows are a
+    footgun, not a broken install — and the message names the count and the hygiene verbs.
+    """
+    try:
+        from .registry import registry_census
+
+        census = registry_census()
+        entries = census["entries"]
+        if not entries:
+            return {
+                "status": "ok",
+                "message": "projects registry: nothing registered (populated by /hippo:init).",
+            }
+        total = len(entries)
+        dead = [e for e in entries if not e["live"]]
+        if not dead:
+            return {
+                "status": "ok",
+                "message": f"projects registry: {total} live entr"
+                + ("y" if total == 1 else "ies")
+                + ", none dead.",
+            }
+        volatile = sum(1 for e in dead if e["volatile"])
+        repairable = sum(1 for e in dead if e["repairable"])
+        msg = (
+            f"projects registry: {len(dead)} dead entr"
+            + ("y" if len(dead) == 1 else "ies")
+            + f" of {total} ({volatile} temp-rooted) — report: python -m memory.registry "
+            "(then --prune-dead to clear the temp-rooted, --drop <root> for one entry)"
+        )
+        if repairable:
+            msg += (
+                f"; {repairable} of them have a live corpus at the canonical "
+                "<root>/.claude/memory — re-run /hippo:init there to re-register"
+            )
+        return {"status": "warn", "message": msg + "."}
+    except Exception as exc:
+        return {"status": "warn", "message": f"projects-registry check failed: {exc}."}
+
+
 # (label, check_fn) in a FIXED order — the source of the deterministic output. New checks append
 # here; the order is never sorted-by-name or set-derived, so the printed sequence is stable.
 _HOT_PATH_P95_BUDGET_MS = 1500.0  # KPI-3 / PRF-2: the cold per-prompt budget
@@ -1674,7 +1721,8 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("non_english_corpus", check_non_english_corpus),
     ("mcp_launch", check_mcp_launch),  # INT-8: the stdio MCP server (bin/hippo mcp) actually starts
     ("committed_usage_privacy", check_committed_usage_privacy),  # SEC-14: TEA-5 usage on a shared remote
-    ("stale_memobot_env", check_stale_memobot_env),
+    ("projects_registry", check_projects_registry),  # RCH-11: dead-row hygiene, machine-level
+    ("stale_memobot_env", check_stale_memobot_env),  # pinned last (env hygiene trails)
 ]
 
 
