@@ -760,3 +760,53 @@ def test_mcp_dream_generative_actions_smoke(dirs, monkeypatch):
     assert "prospective recall" in out
     out = M._tool_dream({"action": "archive_draft"})
     assert "required" in out
+
+
+# --------------------------------------------------------------------------- #
+# QA sweep 2026-07-16 — COR-14: the two generate-side frontmatter writers join the
+# COR-9 discipline (shared insert walk + a damage check at the write site).
+# --------------------------------------------------------------------------- #
+def test_generate_writers_survive_non_two_space_metadata(tmp_path):
+    """The insert path used to hard-code a 2-space indent, so a metadata block whose
+    children indent otherwise (a hand-reformatted draft) was rewritten into a document
+    that no longer parses — silently, with changed=True and no error. The writers must
+    either produce a still-parsing file or refuse; never manufacture a wreck."""
+    text = (
+        "---\n"
+        "name: schema-draft\n"
+        "description: a dream-generated schema draft\n"
+        "metadata:\n"
+        "    type: project\n"
+        "    origin: dream:p1\n"
+        "---\n"
+        "\n"
+        "Body stays.\n"
+    )
+
+    p1 = str(tmp_path / "conf.md")
+    with open(p1, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    r = dg._set_confidence(p1, "verified")
+    after = open(p1, encoding="utf-8").read()
+    fm = parse_frontmatter(after)
+    assert fm and fm.get("name") == "schema-draft", (
+        f"_set_confidence corrupted the file (changed={r['changed']}, error={r['error']}):\n{after}"
+    )
+    if r["changed"]:
+        meta = fm.get("metadata") or {}
+        assert (fm.get("confidence") or meta.get("confidence")) == "verified"
+        assert (meta or fm).get("type") == "project"  # keys it does not own survive
+    assert after.endswith("Body stays.\n")  # body byte-identical
+
+    p2 = str(tmp_path / "cited.md")
+    with open(p2, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    r2 = dg._set_cited_paths(p2, ["src/a.py"])
+    after2 = open(p2, encoding="utf-8").read()
+    fm2 = parse_frontmatter(after2)
+    assert fm2 and fm2.get("name") == "schema-draft", (
+        f"_set_cited_paths corrupted the file (changed={r2['changed']}, error={r2['error']}):\n{after2}"
+    )
+    if r2["changed"]:
+        meta2 = fm2.get("metadata") or {}
+        assert (fm2.get("cited_paths") or meta2.get("cited_paths")) == ["src/a.py"]
