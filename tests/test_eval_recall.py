@@ -2009,3 +2009,69 @@ def test_arms_cli_flag_renders_labeled_deltas(tmp_path, monkeypatch, capsys):
     assert "arm grep:" in out and "report-only" in out
     assert "arm mixed: skipped" in out  # hermetic run — labeled, not silently absent
     assert "Δrecall=" in out and "n=" in out
+
+
+# --------------------------------------------------------------------------- #
+# MSR-4 (eval half): the per-category miss autopsy.
+# --------------------------------------------------------------------------- #
+def test_miss_autopsy_attributes_no_signal_on_zero_overlap(tmp_path, monkeypatch):
+    md, idx, _hs = _msr1_setup(tmp_path, monkeypatch)
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    hs = [
+        {"query": "wholly unrelated zzqx phrasing", "expected": ["reranker_voyage"], "category": "multi-hop"},
+        {"query": "which reranker model runs first on search candidates", "expected": ["reranker_voyage"], "category": "single-hop"},
+    ]
+    autopsy = E.miss_autopsy(index, hs, k=10, index_dir=idx)
+    # the hit row contributes nothing; the missed row names the honest non-mechanism
+    assert set(autopsy) == {"multi-hop"}
+    row = autopsy["multi-hop"][0]
+    assert row["stem"] == "reranker_voyage"
+    assert row["reason"] == "no_signal" and row["score"] is None and row["margin"] is None
+
+
+def test_miss_autopsy_attributes_mechanism_and_margin(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    for name, desc in {
+        "strong_a": "voyage reranker cross encoder search candidates ranking pipeline",
+        "strong_b": "voyage reranker fallback circuit breaker search ranking",
+        "weak_tail": "voyage postcard from the museum shop",
+    }.items():
+        with open(os.path.join(md, f"{name}.md"), "w", encoding="utf-8") as fh:
+            fh.write(_mem(name, desc))
+    idx = str(tmp_path / ".memory-index")
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    monkeypatch.setenv("HIPPO_KNEE_RATIO", "0.999")  # trips between adjacent RRF ranks
+    hs = [{"query": "voyage reranker search ranking", "expected": ["weak_tail"], "category": "update"}]
+    autopsy = E.miss_autopsy(index, hs, k=10, index_dir=idx)
+    row = autopsy["update"][0]
+    assert row["reason"] == "knee_cliff"
+    assert isinstance(row["score"], float)
+    # margin present exactly when the mechanism carries a threshold (the tripping cut)
+    assert row["margin"] is None or row["margin"] > 0
+
+
+def test_report_carries_and_renders_miss_autopsy(tmp_path, monkeypatch, capsys):
+    md, idx, _hs = _msr1_setup(tmp_path, monkeypatch)
+    import yaml
+
+    hs_path = str(tmp_path / "hs_missing.yaml")
+    with open(hs_path, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(
+            [{"query": "wholly unrelated zzqx phrasing", "expected": ["reranker_voyage"]}], fh
+        )
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)
+    assert report["miss_autopsy"]["single-hop"][0]["stem"] == "reranker_voyage"
+    capsys.readouterr()
+    E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path])
+    out = capsys.readouterr().out
+    assert "miss single-hop: `reranker_voyage` cut by no_signal" in out
+
+
+def test_report_omits_miss_autopsy_without_hard_set(tmp_path, monkeypatch):
+    md, idx, _hs = _msr1_setup(tmp_path, monkeypatch)
+    report = E.evaluate(memory_dir=md, index_dir=idx, k=10)
+    assert "miss_autopsy" not in report

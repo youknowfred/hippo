@@ -3796,3 +3796,193 @@ def test_recall_confidence_reads_stay_confined():
                 readers[key].add(node.name)
     assert readers["confidence"] == {"recall", "format_results"}, readers["confidence"]
     assert readers["steer"] == {"recall"}, readers["steer"]
+
+
+# --------------------------------------------------------------------------- #
+# MSR-4: the drop-reason autopsy collector — recall(..., drop_log=...) records WHY
+# a candidate did not surface, off values the walk already holds. Opt-in; None is
+# byte-identical behavior.
+# --------------------------------------------------------------------------- #
+def _msr4_corpus(tmp_path, monkeypatch, corpus=None):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, corpus or _CORPUS)
+    B.build_index(md, idx)
+    return md, idx
+
+
+def test_drop_log_none_is_behavior_identical(tmp_path, monkeypatch):
+    md, idx = _msr4_corpus(tmp_path, monkeypatch)
+    q = "which reranker do we use for search results"
+    plain = R.recall(q, k=2, memory_dir=md, index_dir=idx)
+    dl: dict = {}
+    with_log = R.recall(q, k=2, memory_dir=md, index_dir=idx, drop_log=dl)
+    assert plain == with_log  # the collector observes; it never steers
+
+
+def test_drop_log_records_dangling_file(tmp_path, monkeypatch):
+    md, idx = _msr4_corpus(tmp_path, monkeypatch)
+    os.unlink(os.path.join(md, "reranker_voyage.md"))  # deleted since indexing
+    dl: dict = {}
+    res = R.recall("which reranker do we use for search results", k=5, memory_dir=md, index_dir=idx, drop_log=dl)
+    assert all(r["name"] != "reranker_voyage" for r in res)
+    dangling = [d for d in dl["drops"] if d["reason"] == "dangling_file"]
+    assert [d["name"] for d in dangling] == ["reranker_voyage"]
+    assert isinstance(dangling[0]["score"], float)
+
+
+def test_drop_log_records_knee_cliff_with_threshold(tmp_path, monkeypatch):
+    corpus = {
+        "strong_a.md": "voyage reranker cross encoder search candidates ranking pipeline",
+        "strong_b.md": "voyage reranker fallback circuit breaker search ranking",
+        "weak_tail.md": "voyage postcard from the museum shop",  # one shared token only
+    }
+    md, idx = _msr4_corpus(tmp_path, monkeypatch, corpus)
+    # RRF compresses consecutive-rank gaps to ~1.6%, so only a near-1 ratio reliably
+    # trips between adjacent bm25 ranks on this lane — the point here is the RECORD
+    # shape (reason + score + threshold), not the calibrated production ratio.
+    monkeypatch.setenv("HIPPO_KNEE_RATIO", "0.999")
+    dl: dict = {}
+    res = R.recall("voyage reranker search ranking", k=5, memory_dir=md, index_dir=idx, drop_log=dl)
+    names = {r["name"] for r in res}
+    knee = [d for d in dl["drops"] if d["reason"] == "knee_cliff"]
+    assert "weak_tail" not in names
+    assert any(d["name"] == "weak_tail" for d in knee)
+    # the TRIPPING record (whichever entry hit the cliff first) carries the exact
+    # ratio-scaled threshold it lost to; past-cliff skips carry score only
+    tripping = [d for d in knee if d.get("threshold") is not None]
+    assert tripping and all(d["threshold"] > d["score"] for d in tripping)
+
+
+def test_drop_log_pool_overflow_capped_and_watch_bypasses(tmp_path, monkeypatch):
+    corpus = {
+        f"doc_{ch}.md": f"kubernetes rollout deployment shared token {ch} variant"
+        for ch in "abcdefgh"
+    }
+    md, idx = _msr4_corpus(tmp_path, monkeypatch, corpus)
+    dl: dict = {}
+    res = R.recall(
+        "kubernetes rollout deployment shared token", k=1, memory_dir=md, index_dir=idx, drop_log=dl
+    )
+    overflow = [d for d in dl["drops"] if d["reason"] == "pool_overflow"]
+    # 8 candidates, pool_n = 2 -> 6 overflow cuts, capped at 3 records
+    assert len(overflow) == 3
+    # a watched stem past the cap is ALWAYS recorded (the eval autopsy's guarantee):
+    # pick one that neither surfaced nor got a record of ANY kind on the capped run
+    accounted = {d["name"] for d in dl["drops"]} | {r["name"] for r in res}
+    watched_stem = next(f[:-3] for f in sorted(corpus) if f[:-3] not in accounted)
+    dl2: dict = {"watch": {watched_stem}}
+    R.recall(
+        "kubernetes rollout deployment shared token", k=1, memory_dir=md, index_dir=idx, drop_log=dl2
+    )
+    assert any(d["name"] == watched_stem for d in dl2["drops"])
+
+
+def test_drop_log_mmr_displaced_names_the_pool_topk_cut(tmp_path, monkeypatch):
+    corpus = {
+        "doc_one.md": "terraform module registry pinning provider versions",
+        "doc_two.md": "terraform module registry pinning workspace state",
+        "doc_three.md": "terraform module registry pinning drift detection",
+    }
+    md, idx = _msr4_corpus(tmp_path, monkeypatch, corpus)
+    dl: dict = {}
+    res = R.recall("terraform module registry pinning", k=1, memory_dir=md, index_dir=idx, drop_log=dl)
+    assert len(res) == 1
+    displaced = [d for d in dl["drops"] if d["reason"] == "mmr_displaced"]
+    # pool admitted 2 (k*2 bound), one emitted, one displaced at the top-k cut
+    assert len(displaced) >= 1
+    assert all(d["name"] != res[0]["name"] for d in displaced)
+
+
+def test_drop_log_dense_subfloor_near_miss(monkeypatch):
+    """The floor cut's discarded cosine is finally kept: near_miss + dense_floor +
+    a dense_floor drop record, all off the sims the ranker already computed."""
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    qvec = np.zeros(8, dtype="float32"); qvec[0] = 1.0
+    near = np.zeros(8, dtype="float32"); near[0] = 0.25; near[1] = 1.0
+    near = near / np.linalg.norm(near)  # cosine vs qvec ~0.24 — under any calibrated floor
+    entries = [
+        {"name": "on_topic", "file": "on_topic.md", "row": 0, "hash": "h1",
+         "doc_text": "canary rollout", "description": "canary rollout",
+         "tokens": ["canary", "rollout"]},
+        {"name": "near_misser", "file": "near_misser.md", "row": 1, "hash": "h2",
+         "doc_text": "unrelated words entirely", "description": "unrelated words entirely",
+         "tokens": ["unrelated", "words", "entirely"]},
+    ]
+    manifest = {
+        "schema_version": B.SCHEMA_VERSION, "model": None, "dense_ready": True,
+        "dim": 8, "count": 2, "entries": entries,
+    }
+    index = B.LoadedIndex(manifest, np.stack([qvec, near]))
+    monkeypatch.setattr(R, "embed_query", lambda q, allow_download=False: qvec)
+    dl: dict = {}
+    res = R.recall("canary deploy rollout traffic", k=2, index=index, drop_log=dl)
+    assert [r["name"] for r in res] == ["on_topic"]
+    assert dl.get("dense_floor") and 0 < dl["dense_floor"] < 1
+    assert [n["name"] for n in dl["near_miss"]] == ["near_misser"]
+    assert dl["near_miss"][0]["score"] < dl["dense_floor"]
+    floor_drops = [d for d in dl["drops"] if d["reason"] == "dense_floor"]
+    assert floor_drops and floor_drops[0]["threshold"] == dl["dense_floor"]
+
+
+def test_main_ledger_event_carries_drops(tmp_path, monkeypatch, capsys):
+    corpus = {
+        f"note_{ch}.md": f"prometheus alerting rules shared token {ch} variant"
+        for ch in "abcdefg"
+    }
+    md, idx = _msr4_corpus(tmp_path, monkeypatch, corpus)
+    td = str(tmp_path / "telemetry")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    rc = R.main(["prometheus alerting rules shared token", "--memory-dir", md, "--index-dir", idx, "-k", "1"])
+    assert rc == 0
+    capsys.readouterr()
+    import json as _json
+
+    events = [
+        _json.loads(ln)
+        for ln in open(os.path.join(td, "recall_events.jsonl"), encoding="utf-8")
+        if ln.strip()
+    ]
+    assert len(events) == 1
+    drops = events[0].get("drops")
+    assert drops and all({"name", "reason", "score"} <= set(d) for d in drops)
+    assert events[0].get("near_miss") is None  # served recall: misses live in drops
+
+
+def test_main_abstention_event_carries_near_miss(tmp_path, monkeypatch, capsys):
+    """The score-less abstention arm (telemetry SIG-3 comment) finally gets scores."""
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    emb_docs, emb_query = _fake_embedder(16)
+    monkeypatch.setattr(B, "embed_documents", emb_docs)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_corpus(md, _CORPUS)
+    B.build_index(md, idx)
+    # The query vector is built NEARLY orthogonal to the whole doc matrix (crc32
+    # bucket collisions in dim=16 can chance a real fake-embedder query above the
+    # floor), leaning 5% toward row 0 so exactly one nonzero sub-floor near-miss
+    # exists — every cosine lands under the floor, deterministically.
+    index0 = B.load_index(idx)
+    basis = np.linalg.svd(index0.dense, full_matrices=True)[2]
+    qv = (basis[-1] + 0.05 * index0.dense[0]).astype("float32")
+    qv = qv / np.linalg.norm(qv)
+    monkeypatch.setattr(R, "embed_query", lambda t, allow_download=False: qv)
+    td = str(tmp_path / "telemetry")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    # No token overlap with any doc either — the RET-1 hard skip is the abstention.
+    rc = R.main(["zzqx unrelated gibberish prompt", "--memory-dir", md, "--index-dir", idx])
+    assert rc == 0
+    capsys.readouterr()
+    import json as _json
+
+    events = [
+        _json.loads(ln)
+        for ln in open(os.path.join(td, "recall_events.jsonl"), encoding="utf-8")
+        if ln.strip()
+    ]
+    assert len(events) == 1 and events[0]["backend"] == "none"
+    assert events[0].get("near_miss"), "abstention events must carry near-miss scores"
+    assert isinstance(events[0].get("dense_floor"), float)
+    for nm in events[0]["near_miss"]:
+        assert nm["score"] < events[0]["dense_floor"]

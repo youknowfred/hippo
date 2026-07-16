@@ -1013,6 +1013,61 @@ def _grep_rank(query: str, k: int, docs: List[tuple]) -> List[dict]:
     return [{"name": name} for _score, name in scored[:k]]
 
 
+# --------------------------------------------------------------------------- #
+# MSR-4 (eval half): the per-category miss autopsy. The recall pipeline threw away
+# WHY a memory did not surface; ``recall(..., drop_log=...)`` now records it, and this
+# attributes every expected-but-missed hard-set stem to the mechanism and margin that
+# cut it — the difference between "multi-hop regressed" and "multi-hop regressed
+# because the knee cut the wikilink neighbor 0.02 under the cliff threshold".
+# --------------------------------------------------------------------------- #
+def miss_autopsy(
+    index: LoadedIndex, hard_set: List[dict], k: int = 10, *, index_dir: Optional[str] = None
+) -> Dict[str, List[dict]]:
+    """``{category: [{query, stem, reason, score, margin}]}`` for every MISSED row.
+
+    A row misses when no expected stem reaches the top-``k`` (the same binary judgment
+    ``hard_set_metrics`` scores — this autopsies that exact verdict, it never re-judges).
+    Each missed row is re-run ONCE with a drop-log watching its expected stems, so the
+    cut record is exact regardless of the ledger caps. ``reason`` is the recall()
+    drop-code that cut the stem; ``no_signal`` means the stem never entered any ranking
+    at all (no BM25 token overlap, and dense unavailable or never scoring it) — on a
+    bm25-only lane that is the honest "nothing to autopsy" answer, not a mechanism.
+    ``margin`` = threshold - score where the mechanism has a threshold (dense_floor,
+    knee_cliff); None otherwise. Eval-side only — never the hot path.
+    """
+    out: Dict[str, List[dict]] = {}
+    for item in hard_set:
+        expected = [str(s) for s in item["expected"]]
+        ranked = {
+            r["name"] for r in recall(item["query"], k=k, index=index, index_dir=index_dir)
+        }
+        if ranked.intersection(expected):
+            continue  # the row HIT — nothing to autopsy
+        dl: dict = {"watch": set(expected)}
+        recall(item["query"], k=k, index=index, index_dir=index_dir, drop_log=dl)
+        by_name: Dict[str, dict] = {}
+        for d in dl.get("drops") or []:
+            if d.get("name") in expected and d["name"] not in by_name:
+                by_name[d["name"]] = d
+        for stem in expected:
+            d = by_name.get(stem)
+            margin = None
+            if d and isinstance(d.get("threshold"), (int, float)) and isinstance(
+                d.get("score"), (int, float)
+            ):
+                margin = round(d["threshold"] - d["score"], 6)
+            out.setdefault(item.get("category") or _DEFAULT_CATEGORY, []).append(
+                {
+                    "query": item["query"][:80],
+                    "stem": stem,
+                    "reason": d["reason"] if d else "no_signal",
+                    "score": d.get("score") if d else None,
+                    "margin": margin,
+                }
+            )
+    return out
+
+
 def null_hypothesis_arms(
     memory_dir: str,
     index: LoadedIndex,
@@ -1457,6 +1512,10 @@ def evaluate(
         if arms and hard_set
         else {}
     )
+    # MSR-4: every expected-but-missed stem attributed to the mechanism + margin that
+    # cut it, per category. Only missed rows are re-run (with a watched drop-log), so
+    # a healthy fixture pays ~nothing; deterministic, so it rides the pass^k view.
+    autopsy = miss_autopsy(index, hard_set, k=k, index_dir=index_dir) if hard_set else {}
     return {
         "ok": all(g["pass"] for g in gates.values() if g.get("pass") is not None),
         "dense_ready": index.dense_ready,
@@ -1464,6 +1523,7 @@ def evaluate(
         "count": len(index),
         "hard_set_n": hs["n"],
         "by_category": by_category,
+        **({"miss_autopsy": autopsy} if autopsy else {}),
         **({"null_arms": null_arms} if null_arms else {}),
         "gates": gates,
         "tokens": tok,
@@ -2131,6 +2191,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"  category {cat:11s} recall@{args.k}={m['recall']:.4f} mrr@{args.k}={m['mrr']:.4f} "
             f"n={m['n']} (RET-8)"
         )
+    # MSR-4: the per-category miss autopsy — a missed stem names the mechanism and
+    # margin that cut it, instead of just deflating a category average.
+    for cat, misses in sorted((report.get("miss_autopsy") or {}).items()):
+        for m in misses:
+            margin = f", margin {m['margin']}" if m.get("margin") is not None else ""
+            score = f" (score {m['score']}{margin})" if m.get("score") is not None else ""
+            print(
+                f"  miss {cat}: `{m['stem']}` cut by {m['reason']}{score} — "
+                f"query \"{m['query']}\" (MSR-4)"
+            )
     # MSR-2: the null-hypothesis arm deltas — every arm explicitly labeled, every
     # category's n printed, everything report-only (no arm feeds a gate).
     na = report.get("null_arms") or {}

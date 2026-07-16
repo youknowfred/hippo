@@ -788,3 +788,29 @@ def test_decision_ledger_is_self_ignoring_and_never_raises(tmp_path):
     T.log_decision("x", telemetry_dir=td, session_id="s")
     assert open(os.path.join(td, ".gitignore"), encoding="utf-8").read() == "*\n"
     assert list(T.read_decisions(str(tmp_path / "missing"))) == []
+
+
+# --------------------------------------------------------------------------- #
+# MSR-4: the additive drop-autopsy fields on recall events.
+# --------------------------------------------------------------------------- #
+def test_log_recall_event_drop_fields_are_additive(tmp_path):
+    td = str(tmp_path / "telemetry")
+    assert T.log_recall_event([], query="bare", k=5, latency_ms=1.0, telemetry_dir=td)
+    assert T.log_recall_event(
+        [],
+        query="with autopsy",
+        k=5,
+        latency_ms=1.0,
+        telemetry_dir=td,
+        drops=[{"name": "m1", "reason": "dense_floor", "score": 0.21, "threshold": 0.4}],
+        near_miss=[{"name": "m1", "score": 0.21}],
+        dense_floor=0.4,
+    )
+    events = list(T.read_events(td))
+    assert len(events) == 2
+    bare, rich = events
+    # absence-emits-nothing: the bare event's key set is exactly the pre-MSR-4 shape
+    assert "drops" not in bare and "near_miss" not in bare and "dense_floor" not in bare
+    assert rich["drops"][0]["reason"] == "dense_floor"
+    assert rich["near_miss"] == [{"name": "m1", "score": 0.21}]
+    assert rich["dense_floor"] == 0.4

@@ -216,6 +216,9 @@ def log_recall_event(
     latency_ms: float,
     telemetry_dir: Optional[str] = None,
     session_id: Optional[str] = None,
+    drops: Optional[List[dict]] = None,
+    near_miss: Optional[List[dict]] = None,
+    dense_floor: Optional[float] = None,
 ) -> bool:
     """Append ONE recall event to the ledger. Fire-and-forget: NEVER raises.
 
@@ -234,6 +237,17 @@ def log_recall_event(
     else False (a write failure degrades silently — the caller's recall is unaffected).
     LIF-4: a successful append also folds the event into ``usage_aggregates.json`` (the
     rotation-surviving per-memory summary — best-effort, never affects the return value).
+
+    MSR-4 (all three ADDITIVE — absent input emits no key, existing rows parse unchanged,
+    no schema bump per ED-4):
+      ``drops``       — the admission-walk cut records ``[{name, reason, score[, threshold]}]``
+                        the caller collected via ``recall(..., drop_log=...)``, already
+                        capped per mechanism there (this function stays a dumb appender).
+      ``near_miss``   — on an ABSTENTION (``backend == "none"``), the best sub-floor
+                        dense candidates ``[{name, score}]`` — the evidence RET-11's
+                        BM25-floor decision and the SIG-5 revisit never had.
+      ``dense_floor`` — the calibrated floor those near-miss scores missed, so the
+                        margin is readable off the row without re-deriving the constant.
     """
     try:
         td = _resolve_dir(telemetry_dir)
@@ -251,6 +265,12 @@ def log_recall_event(
             "k": int(k),
             "query_preview": (query or "")[:_QUERY_PREVIEW_CHARS],
         }
+        if drops:
+            event["drops"] = drops
+        if near_miss:
+            event["near_miss"] = near_miss
+        if dense_floor is not None:
+            event["dense_floor"] = dense_floor
         path = _ledger_path(td)
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, ensure_ascii=False) + "\n")

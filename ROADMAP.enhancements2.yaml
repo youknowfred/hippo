@@ -358,10 +358,19 @@ workstreams:
           recomputation. Does NOT absorb RET-9 (per-corpus floor sanity) — that is
           GRF-3's sole deliverable; this item supplies the abstention-side evidence only.
         implementation_notes: >-
-          Attach at recall.py's admission walk + emission loop (~2140-2230), _expand_neighbors
-          (declined-injection reasons), telemetry.log_recall_event (the dark scores/ranks
+          Attach at recall.py's admission walk + emission loop (~2140-2230),
+          telemetry.log_recall_event (the dark scores/ranks
           fields), the abstention arm (~telemetry.py:300-303), eval_recall.hard_set_metrics_by_category
-          (per-miss autopsy), doctor (aggregation line). Retell the GRA-1 story per the
+          (per-miss autopsy), doctor (aggregation line). PREMISE CORRECTED at build time
+          (T8, 2026-07-16): _expand_neighbors has no per-candidate CUTS to record — a
+          "declined injection" there keeps the entry's organic tuple and marks it
+          graph-ENDORSED (a superset the knee then exempts), so the mechanism list is
+          the walk's six (dense_floor, old_state, dangling_file, knee_cliff,
+          pool_overflow, mmr_displaced) plus main()'s session-state declines
+          (floor/cooldown collapse, display overflow); the SEC-6 drift-quarantine skip
+          is deliberately unrecorded (its loud surfaces are SessionStart+doctor, and a
+          per-query ledger row naming withheld content would recreate the trace SEC-1
+          eliminates). Retell the GRA-1 story per the
           re-measurement: the knee leg is FIXED at 4d16022 (graph_endorsed exemption +
           cliff latch); the residual is the mixed-mode MMR leg. Deferred, not dropped:
           answerable/unanswerable abstention twin rows (wait for SIG-6) and a --trace CLI

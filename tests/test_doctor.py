@@ -1148,3 +1148,50 @@ def test_mcp_launch_registered_before_the_trailing_env_check():
     labels = [label for label, _ in D.CHECKS]
     assert "mcp_launch" in labels
     assert labels[-1] == "stale_memobot_env"  # the env-hygiene check stays pinned last
+
+
+# --------------------------------------------------------------------------- #
+# MSR-4: the drop-autopsy aggregation line — one deterministic line, min-gated.
+# --------------------------------------------------------------------------- #
+def test_drop_autopsy_quiet_below_min_events(memory_dir, repo, tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", str(tmp_path / "t"))
+    r = D.check_drop_autopsy(D.DoctorContext(memory_dir, repo))
+    assert r["status"] == "ok"
+    assert "not enough evidence" in r["message"]
+    assert "\n" not in r["message"]
+
+
+def test_drop_autopsy_aggregates_reasons_deterministically(memory_dir, repo, tmp_path, monkeypatch):
+    from memory import telemetry as T
+
+    td = str(tmp_path / "t")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    for i in range(5):
+        T.log_recall_event(
+            [],
+            query=f"q{i}",
+            k=5,
+            latency_ms=1.0,
+            telemetry_dir=td,
+            drops=[
+                {"name": f"m{i}", "reason": "knee_cliff", "score": 0.01},
+                {"name": f"n{i}", "reason": "dense_floor", "score": 0.2, "threshold": 0.4},
+            ],
+            near_miss=[{"name": f"n{i}", "score": 0.2}],
+            dense_floor=0.4,
+        )
+    ctx = D.DoctorContext(memory_dir, repo)
+    r = D.check_drop_autopsy(ctx)
+    assert r["status"] == "ok"
+    m = r["message"]
+    assert "\n" not in m  # ONE line — the doctor render/line-count determinism pins
+    assert "over 5 recall event(s)" in m
+    assert "dense_floor ×5" in m and "knee_cliff ×5" in m
+    assert "median margin 0.2000 below the dense floor" in m
+    # deterministic: identical state renders byte-identical
+    assert D.check_drop_autopsy(ctx)["message"] == m
+
+
+def test_drop_autopsy_registered_after_blind_spots():
+    labels = [label for label, _fn in D.CHECKS]
+    assert labels.index("drop_autopsy") == labels.index("recall_blind_spots") + 1

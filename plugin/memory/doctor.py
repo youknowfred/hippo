@@ -1405,6 +1405,63 @@ def check_recall_blind_spots(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"recall blind-spots check failed: {exc}."}
 
 
+# MSR-4: below this many drop-carrying events the aggregation stays quiet — a couple of
+# fresh recalls are anecdote, not evidence worth a doctor line's attention.
+_DROP_AUTOPSY_MIN_EVENTS = 5
+
+
+def check_drop_autopsy(ctx: DoctorContext) -> Dict[str, str]:
+    """MSR-4: ONE deterministic aggregation line over the recall ledger's drop records.
+
+    The admission-walk cut reasons (``drops``) and the abstention near-miss scores were
+    write-only until this line: per-reason counts say WHICH mechanism eats candidates
+    (knee vs floor vs MMR vs pool), and the abstention arm's median sub-floor margin
+    says HOW CLOSE the misses run — the first measured evidence for RET-11's BM25-floor
+    decision and the SIG-5 revisit. Counts only, sorted, no timestamps (the doctor
+    determinism pin); gated on a minimum event count; informational, never a warn.
+    """
+    try:
+        from .telemetry import default_telemetry_dir, read_events
+
+        td = default_telemetry_dir(ctx.memory_dir)
+        counts: Dict[str, int] = {}
+        events_with_drops = 0
+        near_miss_margins: List[float] = []
+        for e in read_events(td):
+            drops = e.get("drops")
+            if isinstance(drops, list) and drops:
+                events_with_drops += 1
+                for d in drops:
+                    reason = d.get("reason") if isinstance(d, dict) else None
+                    if isinstance(reason, str) and reason:
+                        counts[reason] = counts.get(reason, 0) + 1
+            floor = e.get("dense_floor")
+            if isinstance(floor, (int, float)):
+                for nm in e.get("near_miss") or []:
+                    s = nm.get("score") if isinstance(nm, dict) else None
+                    if isinstance(s, (int, float)):
+                        near_miss_margins.append(float(floor) - float(s))
+        if events_with_drops < _DROP_AUTOPSY_MIN_EVENTS:
+            return {
+                "status": "ok",
+                "message": f"drop autopsy: {events_with_drops} recall event(s) carry drop "
+                f"records (aggregation starts at {_DROP_AUTOPSY_MIN_EVENTS}) — not enough "
+                "evidence yet.",
+            }
+        parts = [
+            f"{reason} ×{n}"
+            for reason, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        ]
+        line = f"drop autopsy: over {events_with_drops} recall event(s): " + ", ".join(parts)
+        if near_miss_margins:
+            near_miss_margins.sort()
+            median = near_miss_margins[len(near_miss_margins) // 2]
+            line += f" · abstention near-miss median margin {median:.4f} below the dense floor"
+        return {"status": "ok", "message": line + "."}
+    except Exception as exc:
+        return {"status": "warn", "message": f"drop autopsy check failed: {exc}."}
+
+
 def check_abstention_cold_start(ctx: DoctorContext) -> Dict[str, str]:
     """RET-11: reliable ABSTENTION (returning nothing for an off-topic prompt) is DENSE-GATED.
 
@@ -1705,6 +1762,8 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("steering", check_steering),  # GOV-2: N pinned (pre-wires the mandatory MUTE count)
     ("hot_path_latency", check_hot_path_latency),
     ("recall_blind_spots", check_recall_blind_spots),
+    ("drop_autopsy", check_drop_autopsy),  # MSR-4: which mechanism eats candidates, aggregated
+
     ("abstention_cold_start", check_abstention_cold_start),  # RET-11: abstention is dense-gated
     ("abstention_floor_sanity", check_abstention_floor_sanity),  # RET-9: per-corpus off-topic leak
     ("injection_precision", check_injection_precision),
