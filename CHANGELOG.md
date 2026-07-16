@@ -7,6 +7,84 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.19.0 — 2026-07-16 — "At the act, and beyond the session"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**,
+index schema still **7**, citation derivation still **3**. The link cache bumps
+(`links.json` 3→4, COR-20) — a derived, gitignored artifact that rebuilds itself on the next
+index refresh; no migration, no operator action. **This release completes the round-3
+train**: T14 INV and T15 SLP shipped in v1.18.0, and T16 JIT + T17 EXT land here, so
+`ROADMAP.enhancements3.yaml`'s twelve items (INV/SLP/JIT/EXT) are all on main — every one
+of the four owner decisions ratified 2026-07-16 shipped exactly as ratified.
+
+- **T16 JIT — point-of-action recall.** Every recall moment hippo had was prompt-shaped;
+  the moment a lesson matters most is the ACT. **JIT-1** adds a read-side lane to the
+  PostToolUse hook that already fires on Edit/Write: on the FIRST touch of a file cited by
+  a `steer:pin`/feedback memory, ONE line — "memory `<name>`: `<description>`" — and never
+  again that session. Ships **default-ON with the `HIPPO_DISABLE_JIT` kill switch** (the
+  ratified default; the empty-norm design carries the restraint), and the restraint is
+  bounds, not hope: ≤200 chars/line, ≤3 lines/session, once per (file, session),
+  project/reference types never remind, floor-linked memories excluded (already
+  always-loaded), and suppressed when `recall_events` shows the memory already surfaced
+  this session — it never duplicates an injection the model just saw. Derived-cache reads
+  only (a `touchmap.json` written at the same offline, trust-gated SessionStart moment as
+  `stale.json`): **measured p50 0.04ms / p95 0.25ms per touch against a stated 50ms budget**
+  on a 500-memory corpus — the measurement was the shipping gate, and it rides the scale
+  lane. The line names the memory, so `/hippo:why` can explain it (glass-box). **JIT-2**
+  records the exact (memory, file, touch) coincidence the lane sees as optional
+  touch-grain provenance on outcome rows — additive schema, session grain stays the
+  default (a sharper join can UNDER-count: evidence-plus, never evidence-instead).
+- **T17 EXT — memory beyond the session.** **EXT-1** `recall --for-diff <range> [--json]`:
+  a PR touches files, memories cite files, and nothing connected them at review time. The
+  new lane is a pure citation join — no query, no ranking, no index, no dense model, no
+  LLM, no telemetry row (nothing was injected into any model's context), pinned by a
+  read-only test — rendering pins and feedback/user lessons first, each with a **staleness
+  flag when the cited code drifted after the memory's baseline** (a stale lesson is
+  FLAGGED, never asserted fresh). Ships with a GitHub Action recipe that posts ONE sticky
+  comment, and it runs on a bare `python3` with zero pip installs. This is **the first
+  hippo surface a teammate who never runs Claude benefits from** (positioning ratified:
+  quiet dogfood here first). Honest note: this repo's own corpus is gitignored by choice,
+  so the comment stays empty here until a corpus is committed — the recipe is live and
+  portable regardless. **EXT-2** cross-project promotion mining: the projects registry
+  already knows every corpus on the machine, so a report-only sweep finds lessons learned
+  in ≥2 projects and routes each through the existing per-item `/hippo:promote` — reading
+  **only SEC-1-trusted corpora** (an untrusted corpus contributes nothing, not even names —
+  pinned by a test that plants a poisoned-name lesson and asserts it never renders) and
+  reusing the calibrated dup thresholds rather than a new similarity stack. **EXT-3** the
+  interview loop: hippo told but never asked, so consolidate gains an asks step — at most
+  3 template-rendered questions per session (zero LLM), each citing its evidence verbatim,
+  each answer routed through the existing per-item write verbs (the step itself writes
+  nothing to the corpus), and **every decline remembered forever** so nothing re-asks.
+- **COR-20 — code spans are not link surface.** `parse_wikilinks` was a bare regex, so a
+  memory that merely WROTE ABOUT the convention minted a phantom edge to a memory that
+  never existed. Found dogfooding this repo's own corpus: **four of six dangling targets
+  were prose** (`[[child]]` meaning "its children", `[[wikilink]]` naming the edge type,
+  `[[wikilinks]]` in a sentence about this very convention) — reported by the lint as
+  broken references, forever, with nothing to fix. The trap: **backticking did not help**,
+  because the regex ignored code spans, so the obvious remedy read as done and changed
+  nothing. Fenced blocks and inline spans are now stripped before matching; DRM-2's
+  fence-free `dream:links` block is unaffected (pinned).
+- **RCH-10 — `new_memory` stops minting dangling links silently.** An explicit `links=[…]`
+  list was authoritative but unchecked: the write returned clean while creating an edge the
+  corpus carries forever, surfaced only whenever someone next ran the lint (reproduced
+  live). Now warned, never blocked — a forward reference to a memory you plan to write is
+  legitimate. The **cross-tier** case gets its own sentence because it is the common cause
+  and the only one where the target genuinely exists: a user-tier memory is real, but the
+  link graph is per-corpus, so a project→user-tier edge can never resolve.
+- **SLP-2 fix — the printed launchd recipe now parses.** Found on the FIRST real schedule
+  install: `--print-schedule` emitted the shell line's `&&`/`>>` raw inside XML `<string>`,
+  so `plutil` refused the plist. XML-escaped at interpolation, with a regression test that
+  round-trips the emitted plist through `plistlib` — plist-VALID, not merely plist-shaped.
+  The crontab and scheduled-task recipes were unaffected.
+- **DOC-15 — STABILITY.md's own stated versions had rotted.** The document publishing
+  hippo's compatibility contract claimed `corpus_format` 4 (it has been **5** since
+  v1.11.0's DRM-6 bump — the one number in the frozen section a reader most needs correct)
+  and index schema 6 (it is **7**); the link cache had no stated version at all; and
+  `HIPPO_SLEEP_TIER_A` was missing from the documented operational list. Facts trued up.
+  The frozen `/hippo:*` and MCP-tool lists are deliberately untouched — they name the v1.0
+  baseline, and whether a post-1.0 verb should JOIN the frozen surface is an owner policy
+  call, not a doc fix.
+
 ## v1.18.0 — 2026-07-16 — "Checks itself, sleeps on schedule"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**, index
