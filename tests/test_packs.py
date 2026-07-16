@@ -12,6 +12,8 @@ import glob
 import json
 import os
 
+import pytest
+
 from memory.provenance import parse_frontmatter
 
 _ASSETS = os.path.abspath(
@@ -223,7 +225,9 @@ def test_extract_collects_every_problem_at_once(tmp_path):
     assert set(r["invalid"]) == {"ghost", "dead", "CONVENTIONS"}
     assert r["invalid"]["ghost"] == "not found"
     assert "retired" in r["invalid"]["dead"]
-    assert "frontmatter" in r["invalid"]["CONVENTIONS"]
+    # SEC-18: doc names now refuse at the NAME gate (the same canonical filter "all"
+    # selects through), not incidentally at the frontmatter parse.
+    assert "not a memory name" in r["invalid"]["CONVENTIONS"]
     assert "3 problem(s)" in r["error"] and "zero files written" in r["error"]
 
 
@@ -419,12 +423,17 @@ def test_install_item_is_per_item_stamped_locked_and_refuses(tmp_path):
     assert entry["source"] == "https://example.com/lessons.git"
     assert entry["installed"]["deploy_lesson"]["base"] == text  # the future 3-way base
 
-    # The hard gates: secrets refuse; an existing target refuses; per-item only.
+    # The hard gates: secrets refuse; an existing DIFFERENT target refuses; per-item
+    # only. (A byte-identical re-install ADOPTS instead — INT-17; pinned separately.)
     r2 = pack_install_item(src, "leaky", memory_dir=md, repo_root=str(tmp_path))
     assert r2["installed"] is False and "secret-lint" in r2["error"]
     assert not os.path.exists(os.path.join(md, "leaky.md"))
     r3 = pack_install_item(src, "deploy_lesson", memory_dir=md, repo_root=str(tmp_path))
-    assert r3["installed"] is False and "already exists" in r3["error"]
+    assert r3["installed"] is True and r3["adopted"] is True  # idempotent re-run
+    with open(os.path.join(md, "deploy_lesson.md"), "a", encoding="utf-8") as fh:
+        fh.write("\nlocal edit\n")
+    r3b = pack_install_item(src, "deploy_lesson", memory_dir=md, repo_root=str(tmp_path))
+    assert r3b["installed"] is False and "already exists" in r3b["error"]
     r4 = pack_install_item(src, "ghost", memory_dir=md, repo_root=str(tmp_path))
     assert "not in this pack's manifest" in r4["error"]
 
@@ -617,3 +626,163 @@ def test_update_reports_stamp_damage_per_item_without_sinking_the_plan(tmp_path,
     r = P.pack_update_item(src2, "cursed", memory_dir=md)
     assert r["updated"] is False and "hippo bug" in r["error"]
     assert P.pack_update_item(src2, "ok", memory_dir=md)["updated"] is True
+
+
+# --------------------------------------------------------------------------- #
+# QA sweep 2026-07-16 — COR-15 / SEC-18 / INT-17 / RCH-8.
+# --------------------------------------------------------------------------- #
+def test_extract_refuses_a_dest_reaching_the_corpus_through_a_symlink(tmp_path):
+    """COR-15: the inside-corpus refusal must hold under symlinks. The plugin's own
+    native-memory layout (`~/.claude/projects/<slug>/memory` -> corpus) makes a
+    symlinked route to the corpus an ordinary, reachable dest."""
+    from memory.packs import pack_extract
+
+    md = str(tmp_path / "mem")
+    _corpus_mem(md, "keeper", "a lesson")
+    link = str(tmp_path / "native-memory")
+    os.symlink(md, link)
+    r = pack_extract(
+        ["keeper"], os.path.join(link, "my-pack"), memory_dir=md, repo_root=str(tmp_path)
+    )
+    assert r["refused"] is True and "inside the corpus" in r["error"]
+    assert not os.path.exists(os.path.join(md, "my-pack"))
+
+    # And the mirror image: the corpus PATH is the symlink, dest names the real dir.
+    real = str(tmp_path / "real-corpus")
+    _corpus_mem(real, "keeper", "a lesson")
+    memlink = str(tmp_path / "corpus-link")
+    os.symlink(real, memlink)
+    r = pack_extract(
+        ["keeper"], os.path.join(real, "my-pack"), memory_dir=memlink,
+        repo_root=str(tmp_path),
+    )
+    assert r["refused"] is True and "inside the corpus" in r["error"]
+    assert not os.path.exists(os.path.join(real, "my-pack"))
+
+
+def test_extract_refuses_a_dest_differing_only_by_case(tmp_path):
+    """COR-15: on a case-insensitive filesystem (macOS APFS default) a dest spelled
+    with different case still lands inside the corpus — the check must see it."""
+    from memory.packs import pack_extract
+
+    md = str(tmp_path / "mem")
+    _corpus_mem(md, "keeper", "a lesson")
+    upper = str(tmp_path / "MEM")
+    if not os.path.isdir(upper):
+        pytest.skip("case-sensitive filesystem — the spelling cannot collide here")
+    r = pack_extract(
+        ["keeper"], os.path.join(upper, "my-pack"), memory_dir=md, repo_root=str(tmp_path)
+    )
+    assert r["refused"] is True and "inside the corpus" in r["error"]
+    assert not os.path.exists(os.path.join(md, "my-pack"))
+
+
+def test_extract_refuses_names_that_are_not_bare_memory_stems(tmp_path):
+    """SEC-18: an explicit name is a corpus-memory STEM, never a path. A separator or
+    an absolute path would read files outside the corpus into a shareable pack — and
+    the copy's write target would escape dest. Every bad name is reported in the one
+    refusal, and nothing is read or written."""
+    from memory.packs import pack_extract
+
+    md = str(tmp_path / "mem")
+    _corpus_mem(md, "good", "a lesson")
+    outside = tmp_path / "outside.md"
+    outside.write_text("---\nname: outside\ndescription: private\n---\nnot yours\n")
+    before = outside.read_text()
+    dest = str(tmp_path / "pack")
+    r = pack_extract(
+        ["good", "../outside", str(tmp_path / "outside"), "MEMORY"],
+        dest, memory_dir=md, repo_root=str(tmp_path),
+    )
+    assert r["refused"] is True
+    for bad in ("../outside", str(tmp_path / "outside"), "MEMORY"):
+        assert bad in r["invalid"], f"{bad!r} must be named in the one refusal"
+        assert "memory name" in r["invalid"][bad] or "docs" in r["invalid"][bad]
+    assert "good" not in r["invalid"]
+    assert not os.path.exists(dest)  # zero-change refusal
+    assert outside.read_text() == before  # and the outside file was never touched
+
+
+def test_install_adopts_an_identical_existing_file_and_restores_the_lockfile(tmp_path):
+    """INT-17: a crash between install's file write and its lockfile write used to
+    dead-end the verbs in a circle (update plan -> "new upstream" -> install ->
+    "already exists, route through update" -> update -> "not an installed member").
+    A byte-identical existing file now ADOPTS: the lockfile record is restored and
+    every later verb works. Different content still refuses."""
+    from memory import packs as P
+
+    md = str(tmp_path / "mem")
+    os.makedirs(md)
+    src = _pack_source(tmp_path, {
+        "alpha": ("first lesson", "body a"),
+        "beta": ("second lesson", "body b"),
+    })
+    assert P.pack_install_item(src, "alpha", memory_dir=md)["installed"]
+
+    # Simulate the crash window: the corpus file landed, the lockfile record did not.
+    raw = open(os.path.join(src, "beta.md"), encoding="utf-8").read()
+    stamped = P._ensure_pack_stamp(raw, "lessons", "1.0.0")
+    with open(os.path.join(md, "beta.md"), "w", encoding="utf-8") as fh:
+        fh.write(stamped)
+
+    r = P.pack_install_item(src, "beta", memory_dir=md)
+    assert r["installed"] is True and r.get("adopted") is True
+    lock = json.load(open(P.lockfile_path(md)))
+    assert "beta" in lock["packs"]["lessons"]["installed"]
+    plan = P.pack_update_plan(src, memory_dir=md)
+    assert plan["new_upstream"] == []  # the triangle is closed
+    states = {i["name"]: i["state"] for i in plan["items"]}
+    assert states["beta"] == "unchanged"
+
+    # An existing file with DIFFERENT content keeps the hard refusal.
+    with open(os.path.join(md, "gamma.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: gamma\ndescription: "mine"\ntype: feedback\n---\nlocal text\n')
+    src2 = _pack_source(tmp_path, {"gamma": ("theirs", "pack text")}, pack="other", version="2.0.0")
+    r2 = P.pack_install_item(src2, "gamma", memory_dir=md)
+    assert r2["installed"] is False and "already exists" in r2["error"]
+    assert "local text" in open(os.path.join(md, "gamma.md"), encoding="utf-8").read()
+
+
+def test_extract_rolls_back_the_in_flight_partial_file(tmp_path, monkeypatch):
+    """RCH-8: the rollback set must include the file being written WHEN the failure
+    hits — a disk-full mid-file used to leave that partial .md behind (and dest
+    undeletable), the exact manifest-less state RCH-7 promised away."""
+    import builtins
+
+    from memory.packs import pack_extract
+
+    md = str(tmp_path / "mem")
+    _corpus_mem(md, "aaa-fine", "one")
+    _corpus_mem(md, "zzz-cursed", "two")
+    dest = str(tmp_path / "pack")
+
+    real_open = builtins.open
+
+    class _Torn:
+        def __init__(self, fh):
+            self._fh = fh
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return self._fh.__exit__(*exc)
+
+        def write(self, s):
+            self._fh.write(s[:16])  # some bytes land, then the device fails
+            raise OSError(28, "No space left on device")
+
+    def failing_open(path, mode="r", *a, **k):
+        fh = real_open(path, mode, *a, **k)
+        if "w" in str(mode) and str(path).endswith("zzz-cursed.md"):
+            return _Torn(fh)
+        return fh
+
+    monkeypatch.setattr(builtins, "open", failing_open)
+    r = pack_extract(["aaa-fine", "zzz-cursed"], dest, memory_dir=md, repo_root=str(tmp_path))
+    monkeypatch.undo()
+    assert r["error"] and "rolled back" in r["error"]
+    assert r["extracted"] == []
+    assert not os.path.exists(dest), (
+        f"dest must be fully rolled back, found: {os.listdir(dest) if os.path.isdir(dest) else '-'}"
+    )

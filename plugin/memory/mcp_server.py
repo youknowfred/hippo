@@ -2081,7 +2081,12 @@ def _tool_pack_extract(args: Dict[str, Any]) -> str:
             "(e.g. ~/packs/<pack-name>)."
         )
     dest = os.path.expanduser(dest)
-    names: Any = "all" if args.get("all") else args.get("names")
+    all_arg = args.get("all")
+    if all_arg is not None and not isinstance(all_arg, bool):
+        # SEC-18 adjunct: `all` decides between ONE memory-list and the WHOLE corpus —
+        # a truthy string like "false" must never flip it to everything.
+        return "pack_extract: 'all' must be a boolean (true/false), not a string."
+    names: Any = "all" if all_arg else args.get("names")
     if names != "all" and not (
         isinstance(names, list) and names and all(isinstance(n, str) for n in names)
     ):
@@ -2234,8 +2239,13 @@ def _tool_pack_install_item(args: Dict[str, Any]) -> str:
     )
     if not r["installed"]:
         return f"✘ pack_install_item {name}: {r['error']}"
+    verb = (
+        "adopted (byte-identical file already present; lockfile record restored)"
+        if r.get("adopted")
+        else "installed"
+    )
     return (
-        f"✔ installed {name} → {r['path']} — pack-stamped; .packs.lock.json records "
+        f"✔ {verb} {name} → {r['path']} — pack-stamped; .packs.lock.json records "
         "source/version + the future three-way base; the SEC-6 consent baseline "
         "absorbed the bytes (the per-item approval IS the review); index refreshed. "
         "Commit the new memory + the lockfile together."

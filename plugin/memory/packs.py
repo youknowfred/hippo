@@ -93,6 +93,49 @@ _EXTRACT_OWNED = frozenset(
 _STAMP_OWNED = frozenset({"pack", "pack_version"})
 
 
+def _dest_inside_corpus(dest: str, memory_dir: str) -> bool:
+    """True when ``dest`` (which need not exist yet) is, or sits inside, the corpus.
+
+    COR-15: a lexical ``commonpath`` check is not containment. The corpus is routinely
+    REACHED through a symlink — the native-memory layout
+    (``~/.claude/projects/<slug>/memory`` -> corpus) is one hippo itself wires up — and
+    the default macOS filesystem is case-insensitive, so a differently-spelled dest can
+    land inside the corpus while comparing unequal as a string. Identity, not spelling:
+    resolve ``dest``'s nearest EXISTING ancestor and walk it to the root comparing
+    ``(st_dev, st_ino)`` against the corpus dir — inodes are immune to both symlinks
+    and case. When the corpus dir does not exist, fall back to comparing resolved
+    paths lexically (there is nothing to stat, and nothing to pollute either).
+    """
+    try:
+        target = os.stat(memory_dir)
+        target_key = (target.st_dev, target.st_ino)
+    except OSError:
+        try:
+            real_dest = os.path.realpath(dest)
+            real_mem = os.path.realpath(memory_dir)
+            return os.path.commonpath([real_dest, real_mem]) == real_mem
+        except ValueError:
+            return False
+    probe = os.path.abspath(dest)
+    while not os.path.exists(probe):
+        parent = os.path.dirname(probe)
+        if parent == probe:
+            return False
+        probe = parent
+    p = os.path.realpath(probe)
+    while True:
+        try:
+            st = os.stat(p)
+            if (st.st_dev, st.st_ino) == target_key:
+                return True
+        except OSError:
+            pass
+        parent = os.path.dirname(p)
+        if parent == p:
+            return False
+        p = parent
+
+
 def _stamp_pack(text: str, pack: str, version: str) -> str:
     """Insert ``pack``/``pack_version`` into the frontmatter — nested under a block-style
     ``metadata:`` when one exists (at that block's OWN child indent), else appended
@@ -205,13 +248,7 @@ def pack_extract(
         if not pack:
             result["error"] = "cannot derive a pack id from dest — pass pack="
             return result
-        try:
-            inside = os.path.commonpath(
-                [os.path.abspath(dest), os.path.abspath(memory_dir)]
-            ) == os.path.abspath(memory_dir)
-        except ValueError:
-            inside = False
-        if inside:
+        if _dest_inside_corpus(dest, memory_dir):
             result["refused"] = True
             result["error"] = (
                 f"dest {dest} is inside the corpus {memory_dir} — extracted pack files "
@@ -239,6 +276,23 @@ def pack_extract(
         portable_texts = {}
         entries = []
         for name in names:
+            # SEC-18: an explicit name is a corpus-memory STEM. A path separator or an
+            # absolute path would READ files outside the corpus into a shareable pack —
+            # and the copy's write target (`dest/<name>.md`) would escape dest. Doc
+            # names (MEMORY/CONVENTIONS) are refused the same canonical way "all" never
+            # selects them. Collected like every other problem: one refusal, all names.
+            if (
+                not isinstance(name, str)
+                or not name
+                or os.path.isabs(name)
+                or os.path.basename(name) != name
+                or not _is_memory_filename(f"{name}.md")
+            ):
+                (result["skipped"] if select_all else result["invalid"])[str(name)] = (
+                    "not a memory name — pass the bare stem of a corpus memory "
+                    "(no path separators, and docs like MEMORY.md are not memories)"
+                )
+                continue
             src = os.path.join(memory_dir, f"{name}.md")
             problem = None
             text = None
@@ -331,9 +385,13 @@ def pack_extract(
             os.makedirs(dest, exist_ok=True)
             for name, portable in portable_texts.items():
                 path = os.path.join(dest, f"{name}.md")
+                # RCH-8: into the rollback set BEFORE the bytes — a failure MID-write
+                # (disk full on file N) must unlink the partial file N too, not just
+                # the N-1 complete ones, or dest holds exactly the manifest-less
+                # partial state the two-phase split promises away.
+                written.append(path)
                 with open(path, "w", encoding="utf-8") as fh:
                     fh.write(portable)
-                written.append(path)
                 result["extracted"].append(f"{name}.md")
             manifest = {
                 "pack": pack,
@@ -351,9 +409,12 @@ def pack_extract(
                 json.dump(manifest, fh, indent=2, sort_keys=False)
                 fh.write("\n")
             result["manifest"] = manifest_path
-        except Exception as exc:
-            # A mid-write I/O failure must not strand a partial, manifest-less pack —
-            # the one filesystem state the two-phase split cannot rule out up front.
+        except BaseException as exc:
+            # A mid-write failure must not strand a partial, manifest-less pack — the
+            # one filesystem state the two-phase split cannot rule out up front.
+            # BaseException, not Exception: a Ctrl-C mid-loop deserves the same
+            # rollback, and then propagates (RCH-8) — only I/O-class failures are
+            # swallowed into the result envelope.
             for p in written + [manifest_path]:
                 try:
                     if os.path.isfile(p):
@@ -367,6 +428,8 @@ def pack_extract(
                     pass
             result["extracted"] = []
             result["error"] = f"write failed, partial pack rolled back: {exc}"
+            if not isinstance(exc, Exception):
+                raise
     except Exception as exc:
         result["error"] = result["error"] or f"pack extract failed: {exc}"
     return result
@@ -571,15 +634,19 @@ def pack_install_item(
 
     Hard gates (refuse, nothing written): the manifest must validate; the file must
     parse; secret-lint findings REFUSE (foreign content never gets ``write_memory``'s
-    warn-only leniency); an existing ``<name>.md`` refuses (a same-name update routes
-    through ``pack_update_item``; anything else is the agent's rename/skip decision).
+    warn-only leniency); an existing ``<name>.md`` with DIFFERENT content refuses (a
+    same-name update routes through ``pack_update_item``; anything else is the agent's
+    rename/skip decision). An existing byte-identical file ADOPTS instead (INT-17):
+    the lockfile record is restored — the escape hatch for a crash between install's
+    file write and lockfile write, and for hand-seeded copies of this pack, which
+    otherwise circle install -> update -> install with every verb refusing.
     On install: the text is pack-stamped (idempotently), written exclusively, recorded
     in the COMMITTED lockfile (source/version + the installed text as the future
     three-way base), folded into the machine-local SEC-6 consent baseline (the per-item
     approval IS the review), and the index refreshed best-effort. ``source`` labels the
     lockfile provenance (pass the git URL the skill cloned; defaults to ``source_dir``).
     """
-    result = {"installed": False, "path": None, "warnings": [], "error": None}
+    result = {"installed": False, "adopted": False, "path": None, "warnings": [], "error": None}
     try:
         from .provenance import parse_frontmatter, resolve_dirs
         from .secrets import scan_with_remediation
@@ -620,17 +687,34 @@ def pack_install_item(
             )
             return result
         target = os.path.join(memory_dir, fname)
+        adopted = False
         try:
             os.makedirs(memory_dir, exist_ok=True)
             with open(target, "x", encoding="utf-8") as fh:  # exclusive: never clobber
                 fh.write(stamped)
         except FileExistsError:
-            result["error"] = (
-                f"{fname} already exists in the corpus — updates route through "
-                "pack_update_item; anything else is a rename/skip decision"
-            )
-            return result
+            # INT-17: byte-identical content ADOPTS instead of refusing. A crash between
+            # install's file write and its lockfile write (or a hand-seeded copy of this
+            # pack) used to dead-end the verbs in a circle: update plan said "new
+            # upstream -> install", install said "route through update", update said
+            # "not an installed member". Identical bytes mean the only thing missing is
+            # the lockfile record — restore it. Different bytes keep the hard refusal.
+            try:
+                with open(target, "r", encoding="utf-8") as fh:
+                    existing = fh.read()
+            except OSError:
+                existing = None
+            if existing != stamped:
+                result["error"] = (
+                    f"{fname} already exists in the corpus with different content — "
+                    "updates route through pack_update_item; a byte-identical file "
+                    "would be adopted (its lockfile record restored); anything else "
+                    "is a rename/skip decision"
+                )
+                return result
+            adopted = True
         result["installed"] = True
+        result["adopted"] = adopted
         result["path"] = target
 
         lock = _load_lockfile(memory_dir)
@@ -674,8 +758,10 @@ def _update_states(source_dir: str, memory_dir: str) -> Tuple[Optional[dict], Op
     entry = lock["packs"].get(pack)
     if not isinstance(entry, dict) or not isinstance(entry.get("installed"), dict):
         return None, (
-            f"pack {pack!r} has no lockfile record in this corpus — nothing to update "
-            "(install first, or this pack was seeded by hand)"
+            f"pack {pack!r} has no lockfile record in this corpus — nothing to update. "
+            "Install first: pack_install_item records the lockfile base, and a "
+            "byte-identical hand-seeded file is ADOPTED (record restored) rather "
+            "than refused (INT-17)"
         )
     manifest_files = {r["file"] for r in manifest["memories"]}
     items: dict = {}
