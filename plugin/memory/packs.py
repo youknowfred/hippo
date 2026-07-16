@@ -37,9 +37,16 @@ prompt-injection threat, so the inbound path is per-item and layered:
   as provenance via ``source=``.
 
 Extraction discipline (all zero-change-on-refusal, like promote):
-  - VALIDATE EVERYTHING FIRST — every name must exist and be un-retired
-    (``invalid_after`` refuses), and the destination must be collision-free (an existing
-    ``manifest.json`` or target ``.md`` refuses the whole extract; never clobber a pack).
+  - VALIDATE EVERYTHING FIRST, WRITE LAST (RCH-7) — every name must exist, parse and be
+    un-retired (``invalid_after`` refuses), the destination must be outside the corpus
+    and collision-free (an existing ``manifest.json`` or target ``.md`` refuses; never
+    clobber a pack), and every portable rewrite is computed AND damage-checked before
+    the first byte lands. A refusal therefore reports EVERY problem at once
+    (``invalid``: name → reason) with zero filesystem change — never one error per
+    call, never a partial manifest-less dir. ``names="all"`` selects through the
+    canonical corpus-membership filter (docs like ``MEMORY.md``/``CONVENTIONS.md`` are
+    never candidates) and reports non-extractable memories in ``skipped`` instead of
+    refusing, so "pack up everything" is one call, not a glob.
   - Portability lint per file (RCH-6, the shared primitive): ``consequential_default``
     findings do not block — they become the manifest's ``confirm: "individual"`` +
     ``reason`` markers, EXACTLY the mechanism the shipped packs use to force per-item
@@ -60,7 +67,7 @@ import difflib
 import json
 import os
 import re
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 # Group 1 is the key's indent — `provenance.strip_frontmatter_keys` reads it to decide
 # which `- item` continuation lines belong to this key (COR-9).
@@ -72,27 +79,67 @@ _STEER_LINE_RE = re.compile(r"^(\s*)steer\s*:")
 # docstring for why this is not a corpus_format event.
 _LOCKFILE_NAME = ".packs.lock.json"
 _LOCK_SCHEMA = 1
-_PACK_VERSION_LINE_RE = re.compile(r'^(\s*)pack_version\s*:.*$', re.M)
+# Matched per-FRONTMATTER-line only (COR-13) — deliberately not re.M over the whole file,
+# which is how the pre-COR-13 install stamp rewrote a BODY that merely mentioned the key.
+_PACK_VERSION_LINE_RE = re.compile(r"^(\s*)pack_version\s*:")
 _MAX_PLAN_DIFF_LINES = 120  # bounded per-item diff in update plans (apply recomputes)
+
+# The frontmatter keys each pack writer owns (COR-9's may_change contract): extraction
+# strips the provenance triplet and `steer` and adds the two pack stamps; install/update
+# stamping owns the two stamps alone. Anything else surviving a rewrite changed is a bug.
+_EXTRACT_OWNED = frozenset(
+    {"cited_paths", "source_commit", "source_commit_time", "steer", "pack", "pack_version"}
+)
+_STAMP_OWNED = frozenset({"pack", "pack_version"})
 
 
 def _stamp_pack(text: str, pack: str, version: str) -> str:
-    """Insert ``pack``/``pack_version`` under ``metadata:`` (creating the block if a
-    hand-authored file lacks one). Body stays byte-identical."""
-    lines = text.split("\n")
-    if not lines or lines[0].strip() != "---":
+    """Insert ``pack``/``pack_version`` into the frontmatter — nested under a block-style
+    ``metadata:`` when one exists (at that block's OWN child indent), else appended
+    top-level (doctor's pack-drift check and the install plan read both scopes). Body
+    stays byte-identical.
+
+    COR-13: this was the FIFTH hand-copied frontmatter-insertion walk — the family
+    ``provenance.insert_frontmatter_keys`` (COR-9) consolidated — and the last one still
+    carrying the family's corruption modes. The hand-rolled walk recognized ``metadata:``
+    only as that exact line, so a flow-style ``metadata: {…}`` or a trailing comment got
+    a DUPLICATE ``metadata:`` block appended — YAML last-wins, and every original
+    metadata key (``type`` first among them) silently dropped. And its stamp indent was
+    hard-coded to two spaces, so a block whose children indent differently became a
+    mixed-indent document that no longer parses. The shared walk handles both: indent is
+    read from the block's own keys, and an unrecognized shape degrades to a top-level
+    append — never a duplicate block, never a lost key.
+    """
+    from .provenance import insert_frontmatter_keys, split_frontmatter
+
+    if split_frontmatter(text)[0] is None:
         return text
-    stamp = [f"  pack: {pack}", f'  pack_version: "{version}"']
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            return "\n".join(lines[:i] + ["metadata:"] + stamp + lines[i:])
-        if lines[i].strip() == "metadata:":
-            return "\n".join(lines[: i + 1] + stamp + lines[i + 1 :])
-    return text
+    lines = text.split("\n")
+    close = next(i for i in range(1, len(lines)) if lines[i].strip() == "---")
+    fm = insert_frontmatter_keys(
+        lines[1:close], [f"pack: {pack}", f'pack_version: "{version}"']
+    )
+    return "\n".join([lines[0]] + fm + lines[close:])
+
+
+def _stamp_damage(before: str, after: str, owned) -> Optional[str]:
+    """COR-13: the one damage question every pack writer answers BEFORE its bytes land —
+    did the rewrite touch any frontmatter key outside ``owned``, or the body at all?
+
+    ``provenance._frontmatter_damage`` is value-level over both schema scopes; the body
+    comparison closes the half it cannot see. A pack writer's body contract is
+    byte-identity, and the pre-COR-13 install stamp corrupted exactly there — in the
+    half no frontmatter check inspects.
+    """
+    from .provenance import _frontmatter_damage, split_frontmatter
+
+    if split_frontmatter(before)[1] != split_frontmatter(after)[1]:
+        return "it would rewrite the BODY (a pack stamp owns frontmatter keys only)"
+    return _frontmatter_damage(before, after, owned)
 
 
 def pack_extract(
-    names: List[str],
+    names: Union[List[str], str],
     dest: str,
     *,
     memory_dir: Optional[str] = None,
@@ -104,25 +151,41 @@ def pack_extract(
 ) -> dict:
     """Copy chosen corpus memories into ``dest`` as a reviewable pack. Never raises.
 
+    ``names`` is a list of memory names, or the string ``"all"``: every file the
+    canonical corpus-membership filter admits (``MEMORY.md`` / ``CONVENTIONS.md`` and
+    friends are docs, not memories, and are never candidates — callers must never glob
+    the corpus dir themselves), with retired/unparseable ones reported per-name in
+    ``skipped`` rather than sinking the batch. Explicit names refuse the batch instead
+    — but with EVERY problem collected into ``invalid`` (name → reason) in ONE pass,
+    never one refusal per call.
+
+    Two phases, and only the second touches the filesystem (RCH-7): every name is
+    validated AND its portable rewrite computed and damage-checked BEFORE the first
+    write, so every refusal — unknown name, non-memory file, retired memory, collision,
+    writer damage — is a zero-filesystem-change event carrying the complete reason map.
+    A mid-write I/O failure rolls the written files back: there is no state in which
+    ``dest`` holds a partial, manifest-less pack.
+
     ``pack`` defaults to ``basename(dest)`` (the shipped convention: manifest ``pack``
-    == its directory name, which the parity tests pin). Every input is validated before
-    anything is written — a refusal is a zero-filesystem-change event. Result:
-    ``{"extracted", "dest", "manifest", "findings", "refused", "error"}`` where
-    ``findings`` maps each memory name to its portability findings (``confirm``-severity
-    ones also became the manifest's individual-confirm markers).
+    == its directory name, which the parity tests pin). Result:
+    ``{"extracted", "dest", "manifest", "findings", "invalid", "skipped", "refused",
+    "error"}`` where ``findings`` maps each extracted memory to its portability findings
+    (``confirm``-severity ones also became the manifest's individual-confirm markers).
     """
     result = {
         "extracted": [],
         "dest": dest,
         "manifest": None,
         "findings": {},
+        "invalid": {},
+        "skipped": {},
         "refused": False,
         "error": None,
     }
     try:
         from .portability import scan_portability
         from .provenance import (
-            _frontmatter_damage,
+            _is_memory_filename,
             _strip_provenance,
             parse_frontmatter,
             resolve_dirs,
@@ -130,8 +193,9 @@ def pack_extract(
         )
         from .staleness import read_invalid_after, read_provenance
 
-        if not names or not isinstance(names, list):
-            result["error"] = "names must be a non-empty list of memory names"
+        select_all = names == "all"
+        if not select_all and (not names or not isinstance(names, list)):
+            result["error"] = "names must be a non-empty list of memory names, or 'all'"
             return result
         if memory_dir is None:
             md, repo = resolve_dirs()
@@ -141,51 +205,84 @@ def pack_extract(
         if not pack:
             result["error"] = "cannot derive a pack id from dest — pass pack="
             return result
-
-        # --- validate EVERYTHING before writing anything -------------------------
-        texts = {}
-        for name in names:
-            src = os.path.join(memory_dir, f"{name}.md")
-            if not os.path.isfile(src):
-                result["error"] = f"not found: {name}.md"
-                return result
-            with open(src, "r", encoding="utf-8") as fh:
-                text = fh.read()
-            if not parse_frontmatter(text):
-                result["error"] = (
-                    f"{name}.md has no parseable frontmatter — not a recall-ready memory"
-                )
-                return result
-            boundary = read_invalid_after(text)
-            if boundary is not None:
-                result["refused"] = True
-                result["error"] = (
-                    f"{name} is retired (invalid_after {boundary}) — a retired memory "
-                    "does not extract; resolve its lifecycle first"
-                )
-                return result
-            texts[name] = text
-        manifest_path = os.path.join(dest, "manifest.json")
-        if os.path.isfile(manifest_path):
+        try:
+            inside = os.path.commonpath(
+                [os.path.abspath(dest), os.path.abspath(memory_dir)]
+            ) == os.path.abspath(memory_dir)
+        except ValueError:
+            inside = False
+        if inside:
             result["refused"] = True
             result["error"] = (
-                f"{manifest_path} already exists — refusing to overwrite a pack"
+                f"dest {dest} is inside the corpus {memory_dir} — extracted pack files "
+                "would be indexed as memories; choose a directory outside the corpus"
             )
             return result
-        for name in names:
-            if os.path.isfile(os.path.join(dest, f"{name}.md")):
-                result["refused"] = True
-                result["error"] = (
-                    f"{name}.md already exists in {dest} — refusing to overwrite"
+        if select_all:
+            try:
+                names = sorted(
+                    f[:-3] for f in os.listdir(memory_dir) if _is_memory_filename(f)
                 )
+            except OSError as exc:
+                result["error"] = f"cannot list {memory_dir}: {exc}"
                 return result
+            if not names:
+                result["error"] = f"no memories found in {memory_dir}"
+                return result
+        else:
+            names = list(dict.fromkeys(names))  # de-dup, order preserved
 
-        # --- lint, strip, stamp, write -------------------------------------------
+        # --- phase 1: validate EVERYTHING, compute EVERY rewrite — zero writes -----
+        # Problems collect into `invalid` (explicit names) / `skipped` ("all" mode) in
+        # one pass: a 69-name batch with three bad names reports all three, never a
+        # probe-one-refusal-at-a-time loop.
+        portable_texts = {}
         entries = []
         for name in names:
-            text = texts[name]
+            src = os.path.join(memory_dir, f"{name}.md")
+            problem = None
+            text = None
+            if not os.path.isfile(src):
+                problem = "not found"
+            else:
+                with open(src, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+                if not parse_frontmatter(text):
+                    problem = "no parseable frontmatter — not a recall-ready memory"
+                else:
+                    boundary = read_invalid_after(text)
+                    if boundary is not None:
+                        problem = (
+                            f"retired (invalid_after {boundary}) — resolve its "
+                            "lifecycle first"
+                        )
+            if problem:
+                # "all" selected it mechanically → skip it and say why; an explicit
+                # name was ASKED for → the whole batch refuses (below), every reason
+                # named.
+                (result["skipped"] if select_all else result["invalid"])[name] = problem
+                continue
             cited, _ = read_provenance(text)
             findings = scan_portability(text, cited_paths=cited)
+            portable = _strip_provenance(text)
+            # COR-9: `steer` is scalar today, but strip it with the same continuation-aware
+            # primitive rather than a bare line filter — a pack ships to another machine,
+            # so a frontmatter break here lands in someone else's corpus.
+            portable = strip_frontmatter_keys(portable, _STEER_LINE_RE)
+            portable = _stamp_pack(portable, pack, version)
+            # COR-9/13: extraction owns the provenance triplet (stripped — a pack is
+            # portable), `steer` (stripped — project-local), and the two pack stamps it
+            # adds; the body is byte-identical. A pack ships to someone else's corpus,
+            # so damage here lands on another machine.
+            damage = _stamp_damage(text, portable, _EXTRACT_OWNED)
+            if damage:
+                # A writer bug is never skippable, even under "all" — refuse the batch
+                # loudly (still zero-change, still with every name listed) so the bug
+                # gets reported instead of shipping a silently thinner pack.
+                result["invalid"][name] = (
+                    f"{damage} — this is a hippo bug, please report it"
+                )
+                continue
             result["findings"][name] = findings
             reasons = [
                 f["detail"] for f in findings if f.get("severity") == "confirm"
@@ -195,55 +292,81 @@ def pack_extract(
                 entry["confirm"] = "individual"
                 entry["reason"] = "; ".join(reasons)
             entries.append(entry)
-            portable = _strip_provenance(text)
-            # COR-9: `steer` is scalar today, but strip it with the same continuation-aware
-            # primitive rather than a bare line filter — a pack ships to another machine,
-            # so a frontmatter break here lands in someone else's corpus.
-            portable = strip_frontmatter_keys(portable, _STEER_LINE_RE)
-            portable = _stamp_pack(portable, pack, version)
-            # COR-9: extraction owns the provenance triplet (stripped — a pack is portable),
-            # `steer` (stripped — project-local), and the two pack stamps it adds. A pack
-            # ships to someone else's corpus, so damage here lands on another machine.
-            damage = _frontmatter_damage(
-                text,
-                portable,
-                {
-                    "cited_paths",
-                    "source_commit",
-                    "source_commit_time",
-                    "steer",
-                    "pack",
-                    "pack_version",
-                },
-            )
-            if damage:
-                result["error"] = (
-                    f"refusing to extract {name}: {damage} — this is a hippo bug, "
-                    "please report it"
-                )
-                return result
-            os.makedirs(dest, exist_ok=True)
-            with open(os.path.join(dest, f"{name}.md"), "w", encoding="utf-8") as fh:
-                fh.write(portable)
-            result["extracted"].append(f"{name}.md")
+            portable_texts[name] = portable
 
-        manifest = {
-            "pack": pack,
-            "version": version,
-            "title": title or pack,
-            "description": description
-            or (
-                f"extracted from a hippo corpus — {len(names)} memories; review each "
-                "before seeding"
-            ),
-            "seed_by_default": False,
-            "memories": entries,
-        }
-        os.makedirs(dest, exist_ok=True)
-        with open(manifest_path, "w", encoding="utf-8") as fh:
-            json.dump(manifest, fh, indent=2, sort_keys=False)
-            fh.write("\n")
-        result["manifest"] = manifest_path
+        manifest_path = os.path.join(dest, "manifest.json")
+        if os.path.isfile(manifest_path):
+            result["invalid"]["manifest.json"] = (
+                f"already exists at {manifest_path} — refusing to overwrite a pack"
+            )
+        for name in portable_texts:
+            if os.path.isfile(os.path.join(dest, f"{name}.md")):
+                result["invalid"][name] = (
+                    f"{name}.md already exists in {dest} — refusing to overwrite"
+                )
+        if result["invalid"]:
+            result["refused"] = True
+            result["findings"] = {}
+            shown = list(result["invalid"].items())[:3]
+            headline = "; ".join(f"{n}: {r}" for n, r in shown)
+            more = len(result["invalid"]) - len(shown)
+            result["error"] = (
+                f"{len(result['invalid'])} problem(s) refused the extract of "
+                f"{len(names)} name(s) — zero files written; {headline}"
+                + (f" (+{more} more — 'invalid' carries every name and reason)" if more else "")
+            )
+            return result
+        if not portable_texts:
+            result["refused"] = True
+            result["error"] = (
+                "nothing to extract — every selected memory was skipped; "
+                "'skipped' carries each name and reason"
+            )
+            return result
+
+        # --- phase 2: the ONLY writes — every byte was computed and guarded above ---
+        created_dest = not os.path.isdir(dest)
+        written: List[str] = []
+        try:
+            os.makedirs(dest, exist_ok=True)
+            for name, portable in portable_texts.items():
+                path = os.path.join(dest, f"{name}.md")
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(portable)
+                written.append(path)
+                result["extracted"].append(f"{name}.md")
+            manifest = {
+                "pack": pack,
+                "version": version,
+                "title": title or pack,
+                "description": description
+                or (
+                    f"extracted from a hippo corpus — {len(portable_texts)} memories; "
+                    "review each before seeding"
+                ),
+                "seed_by_default": False,
+                "memories": entries,
+            }
+            with open(manifest_path, "w", encoding="utf-8") as fh:
+                json.dump(manifest, fh, indent=2, sort_keys=False)
+                fh.write("\n")
+            result["manifest"] = manifest_path
+        except Exception as exc:
+            # A mid-write I/O failure must not strand a partial, manifest-less pack —
+            # the one filesystem state the two-phase split cannot rule out up front.
+            for p in written + [manifest_path]:
+                try:
+                    if os.path.isfile(p):
+                        os.unlink(p)
+                except OSError:
+                    pass
+            if created_dest:
+                try:
+                    os.rmdir(dest)
+                except OSError:
+                    pass
+            result["extracted"] = []
+            result["error"] = f"write failed, partial pack rolled back: {exc}"
     except Exception as exc:
         result["error"] = result["error"] or f"pack extract failed: {exc}"
     return result
@@ -310,12 +433,28 @@ def _write_lockfile(memory_dir: str, doc: dict) -> None:
 
 
 def _ensure_pack_stamp(text: str, pack: str, version: str) -> str:
-    """``_stamp_pack`` made idempotent/version-updating: an existing ``pack_version``
-    line is rewritten to ``version`` (the update path re-versions instead of stacking a
-    second stamp); a stamp-less file gets the full insert. Keeps install and update in
-    ONE 'stamped space' so three-way merges never see the stamp as a phantom edit."""
-    if _PACK_VERSION_LINE_RE.search(text):
-        return _PACK_VERSION_LINE_RE.sub(rf'\1pack_version: "{version}"', text, count=1)
+    """``_stamp_pack`` made idempotent/version-updating: an existing FRONTMATTER
+    ``pack_version`` line is rewritten to ``version`` (the update path re-versions
+    instead of stacking a second stamp); a stamp-less file gets the full insert. Keeps
+    install and update in ONE 'stamped space' so three-way merges never see the stamp as
+    a phantom edit.
+
+    COR-13: the rewrite is scoped to the frontmatter block. It used to be a MULTILINE
+    regex over the whole file, so a BODY that merely mentioned ``pack_version:`` (notes
+    about packs, a fenced example) had its body line rewritten AND its frontmatter never
+    stamped — a writer touching text it does not own, on the one path that had no
+    damage guard to catch it.
+    """
+    from .provenance import split_frontmatter
+
+    if split_frontmatter(text)[0] is not None:
+        lines = text.split("\n")
+        close = next(i for i in range(1, len(lines)) if lines[i].strip() == "---")
+        for idx in range(1, close):
+            m = _PACK_VERSION_LINE_RE.match(lines[idx])
+            if m:
+                lines[idx] = f'{m.group(1)}pack_version: "{version}"'
+                return "\n".join(lines)
     return _stamp_pack(text, pack, version)
 
 
@@ -470,6 +609,16 @@ def pack_install_item(
             return result
         pack, version = manifest["pack"], str(manifest["version"])
         stamped = _ensure_pack_stamp(raw, pack, version)
+        # COR-13: the write-site guard install never had — the stamp rewrite owns the
+        # two pack keys and the body must be byte-identical. Foreign text a writer bug
+        # corrupted must never land in the corpus; refuse and name the bug instead.
+        damage = _stamp_damage(raw, stamped, _STAMP_OWNED)
+        if damage:
+            result["error"] = (
+                f"refusing to install {fname}: {damage} — this is a hippo bug, "
+                "please report it"
+            )
+            return result
         target = os.path.join(memory_dir, fname)
         try:
             os.makedirs(memory_dir, exist_ok=True)
@@ -543,7 +692,19 @@ def _update_states(source_dir: str, memory_dir: str) -> Tuple[Optional[dict], Op
             with open(ours_path, "r", encoding="utf-8") as fh:
                 ours = fh.read()
             with open(os.path.join(source_dir, fname), "r", encoding="utf-8") as fh:
-                theirs = _ensure_pack_stamp(fh.read(), pack, new_version)
+                theirs_raw = fh.read()
+            theirs = _ensure_pack_stamp(theirs_raw, pack, new_version)
+            # COR-13: same write-site guard as install, per item — a damaged re-stamp
+            # poisons the three-way's `theirs` side, so it refuses THIS item (state
+            # reported with the reason) without sinking the rest of the plan.
+            stamp_damage = _stamp_damage(theirs_raw, theirs, _STAMP_OWNED)
+            if stamp_damage:
+                it["state"] = "stamp-refused"
+                it["error"] = (
+                    f"{stamp_damage} — this is a hippo bug, please report it"
+                )
+                items[name] = it
+                continue
             if theirs == base:
                 it["state"] = "local-only" if ours != base else "unchanged"
             elif ours == base:
@@ -572,8 +733,11 @@ def pack_update_plan(
     ``fast-forward`` (upstream-only change) / ``merged`` (both changed, clean three-way —
     local edits preserved) / ``conflict`` (both changed the same region — a human
     resolves) / ``removed-upstream`` and ``missing-local`` (report-only; update never
-    deletes ours and never resurrects a memory you removed). ``new_upstream`` names
-    additions that route through ``pack_install_plan``/``pack_install_item`` instead.
+    deletes ours and never resurrects a memory you removed) / ``stamp-refused``
+    (COR-13: re-stamping the new upstream text would damage keys the stamp does not
+    own — a hippo bug, named in the row's ``error``; the item refuses without sinking
+    the rest of the plan). ``new_upstream`` names additions that route through
+    ``pack_install_plan``/``pack_install_item`` instead.
     """
     result = {"pack": None, "version": None, "items": [], "new_upstream": [], "error": None}
     try:
@@ -590,6 +754,8 @@ def pack_update_plan(
         result["new_upstream"] = states["new_upstream"]
         for name, it in states["items"].items():
             row = {"name": name, "state": it["state"], "conflict": it["conflict"], "diff": ""}
+            if it.get("error"):
+                row["error"] = it["error"]  # stamp-refused rows carry the COR-13 reason
             if it.get("proposed") is not None:
                 diff_lines = list(
                     difflib.unified_diff(
@@ -642,6 +808,9 @@ def pack_update_item(
             result["error"] = f"{name} is not an installed member of pack {states['pack']!r}"
             return result
         result["state"] = it["state"]
+        if it["state"] == "stamp-refused":
+            result["error"] = f"refusing to update {name}: {it['error']}"
+            return result
         if it["state"] in ("unchanged", "local-only", "removed-upstream", "missing-local"):
             result["error"] = f"nothing to apply for {name} (state: {it['state']})"
             return result

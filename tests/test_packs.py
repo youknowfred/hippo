@@ -188,16 +188,159 @@ def test_extract_refusals_are_zero_change(tmp_path):
     dest = str(tmp_path / "pack-a")
 
     r = pack_extract(["keeper", "ghost"], dest, memory_dir=md, repo_root=str(tmp_path))
-    assert r["error"] == "not found: ghost.md" and not os.path.exists(dest)
+    assert r["refused"] and r["invalid"]["ghost"] == "not found"
+    assert not os.path.exists(dest)  # "keeper" validated fine and still nothing landed
 
     r2 = pack_extract(["keeper", "dead"], dest, memory_dir=md, repo_root=str(tmp_path))
-    assert r2["refused"] and "retired" in r2["error"] and not os.path.exists(dest)
+    assert r2["refused"] and "retired" in r2["invalid"]["dead"] and not os.path.exists(dest)
 
     assert pack_extract(["keeper"], dest, memory_dir=md, repo_root=str(tmp_path))["manifest"]
     r3 = pack_extract(["keeper"], dest, memory_dir=md, repo_root=str(tmp_path))
     assert r3["refused"] and "refusing to overwrite" in r3["error"]
 
     assert pack_extract([], dest, memory_dir=md, repo_root=str(tmp_path))["error"]
+
+
+def test_extract_collects_every_problem_at_once(tmp_path):
+    """RCH-7 — the Desktop-transcript failure mode: an agent had to probe 69 names one
+    refusal at a time. Explicit names refuse as ONE batch with every reason in
+    ``invalid`` and zero filesystem change, even for the names that validated fine."""
+    from memory.packs import pack_extract
+
+    md = str(tmp_path / "mem")
+    _corpus_mem(md, "good-one", "a keeper")
+    _corpus_mem(md, "dead", "retired", extra_meta="  invalid_after: 2026-01-01\n")
+    with open(os.path.join(md, "CONVENTIONS.md"), "w", encoding="utf-8") as fh:
+        fh.write("# a reference doc in the corpus dir — no frontmatter, not a memory\n")
+    dest = str(tmp_path / "pack")
+
+    r = pack_extract(
+        ["good-one", "ghost", "dead", "CONVENTIONS"],
+        dest, memory_dir=md, repo_root=str(tmp_path),
+    )
+    assert r["refused"] is True and r["manifest"] is None
+    assert not os.path.exists(dest)
+    assert set(r["invalid"]) == {"ghost", "dead", "CONVENTIONS"}
+    assert r["invalid"]["ghost"] == "not found"
+    assert "retired" in r["invalid"]["dead"]
+    assert "frontmatter" in r["invalid"]["CONVENTIONS"]
+    assert "3 problem(s)" in r["error"] and "zero files written" in r["error"]
+
+
+def test_extract_all_selects_real_memories_and_reports_skips(tmp_path):
+    """RCH-7 — ``names="all"`` owns corpus membership: docs living in the corpus dir
+    (MEMORY.md / CONVENTIONS.md — the transcript's glob swept one into the batch) are
+    never candidates, and a retired memory is a REPORTED skip, not a batch failure."""
+    from memory.packs import pack_extract
+
+    md = str(tmp_path / "mem")
+    _corpus_mem(md, "alpha", "first lesson")
+    _corpus_mem(md, "beta", "second lesson")
+    _corpus_mem(md, "dead", "retired lesson", extra_meta="  invalid_after: 2026-01-01\n")
+    for doc in ("MEMORY.md", "MEMORY.full.md", "CONVENTIONS.md"):
+        with open(os.path.join(md, doc), "w", encoding="utf-8") as fh:
+            fh.write("# not a memory\n")
+
+    dest = str(tmp_path / "everything")
+    r = pack_extract("all", dest, memory_dir=md, repo_root=str(tmp_path))
+    assert r["error"] is None and r["manifest"]
+    assert sorted(r["extracted"]) == ["alpha.md", "beta.md"]
+    assert list(r["skipped"]) == ["dead"] and "retired" in r["skipped"]["dead"]
+    listed = {e["file"] for e in _manifest(dest)["memories"]}
+    assert listed == {"alpha.md", "beta.md"}  # manifest == disk; no docs, no retired
+
+
+def test_extract_stamp_survives_unusual_metadata_shapes(tmp_path):
+    """COR-13 — the transcript's 'would corrupt its metadata.type' refusal. Each shape
+    here defeated the pre-COR-13 hand-rolled stamp walk: an unrecognized ``metadata:``
+    line (flow style, trailing comment) got a DUPLICATE metadata block appended — YAML
+    last-wins, ``metadata.type`` silently dropped — and non-2-space children got
+    mixed-indent frontmatter that no longer parsed. Fixed, every parseable shape
+    extracts with type intact, a stamp present, and the body byte-identical; a shape
+    the active parser cannot read refuses as invalid (correct: an unparseable-to-hippo
+    memory must not extract)."""
+    from memory.packs import pack_extract
+    from memory.provenance import split_frontmatter
+
+    md = str(tmp_path / "mem")
+    os.makedirs(md)
+    shapes = {
+        "four-space": (
+            '---\nname: four-space\ndescription: "d"\nmetadata:\n'
+            "    type: feedback\n---\n\nbody\n"
+        ),
+        "flow-style": (
+            '---\nname: flow-style\ndescription: "d"\n'
+            "metadata: {type: feedback}\n---\n\nbody\n"
+        ),
+        "trailing-comment": (
+            '---\nname: trailing-comment\ndescription: "d"\n'
+            "metadata:  # machine-managed\n  type: feedback\n---\n\nbody\n"
+        ),
+        "ends-in-list": (
+            '---\nname: ends-in-list\ndescription: "d"\nmetadata:\n'
+            "  type: feedback\n  tags:\n    - one\n---\n\nbody\n"
+        ),
+    }
+    for name, text in shapes.items():
+        with open(os.path.join(md, f"{name}.md"), "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    for name, text in shapes.items():
+        dest = str(tmp_path / f"pk-{name}")
+        r = pack_extract([name], dest, memory_dir=md, repo_root=str(tmp_path))
+        if not parse_frontmatter(text):  # miniyaml lane: outside the frontmatter subset
+            assert r["refused"] and name in r["invalid"], name
+            continue
+        assert r["error"] is None, f"{name}: {r['error']}"
+        out = open(os.path.join(dest, f"{name}.md"), encoding="utf-8").read()
+        fm = parse_frontmatter(out)
+        assert fm, f"{name}: extracted copy must parse"
+        meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+        assert (fm.get("type") or meta.get("type")) == "feedback", f"{name}: type survived"
+        assert (fm.get("pack") or meta.get("pack")) == f"pk-{name}", f"{name}: stamped"
+        assert split_frontmatter(out)[1] == split_frontmatter(text)[1], f"{name}: body verbatim"
+
+
+def test_extract_writer_damage_refuses_the_batch_with_zero_change(tmp_path, monkeypatch):
+    """COR-13 architecture pin: the damage guard runs in the VALIDATE phase, so a
+    writer bug on the LAST name can no longer strand the earlier files in a partial,
+    manifest-less dir (the transcript's 39-files-no-manifest state). The refusal names
+    the file and calls itself a hippo bug."""
+    from memory import packs as P
+
+    md = str(tmp_path / "mem")
+    _corpus_mem(md, "aaa-fine", "one")
+    _corpus_mem(md, "zzz-cursed", "two")
+
+    real = P._stamp_pack
+
+    def corrupting(text, pack, version):
+        out = real(text, pack, version)
+        return out.replace("type: feedback", "type: broken") if "zzz-cursed" in text else out
+
+    monkeypatch.setattr(P, "_stamp_pack", corrupting)
+    dest = str(tmp_path / "pack")
+    r = P.pack_extract(
+        ["aaa-fine", "zzz-cursed"], dest, memory_dir=md, repo_root=str(tmp_path)
+    )
+    assert r["refused"] is True and r["manifest"] is None
+    assert not os.path.exists(dest)  # aaa-fine was computed first and still not stranded
+    assert "zzz-cursed" in r["invalid"] and "hippo bug" in r["invalid"]["zzz-cursed"]
+
+
+def test_extract_refuses_a_dest_inside_the_corpus(tmp_path):
+    """Extracted pack files landing inside the corpus dir would themselves be indexed
+    as memories on the next build — refuse before selection, zero-change."""
+    from memory.packs import pack_extract
+
+    md = str(tmp_path / "mem")
+    _corpus_mem(md, "keeper", "a lesson")
+    r = pack_extract(
+        ["keeper"], os.path.join(md, "my-pack"), memory_dir=md, repo_root=str(tmp_path)
+    )
+    assert r["refused"] is True and "inside the corpus" in r["error"]
+    assert not os.path.exists(os.path.join(md, "my-pack"))
 
 
 # --------------------------------------------------------------------------- #
@@ -398,3 +541,79 @@ def test_update_requires_a_lockfile_record(tmp_path):
     os.makedirs(md)
     src = _pack_source(tmp_path, {"lesson": ("a lesson", "b")})
     assert "no lockfile record" in pack_update_plan(src, memory_dir=md)["error"]
+
+
+# --------------------------------------------------------------------------- #
+# COR-13 — the stamp writers may never damage what they do not own, and every
+# write site guards for it (install/update had NO guard before this).
+# --------------------------------------------------------------------------- #
+def test_install_stamp_never_rewrites_a_body_that_mentions_pack_version(tmp_path):
+    """The pre-COR-13 install stamp ran a MULTILINE regex over the whole file: a body
+    that merely documented ``pack_version:`` got the BODY line rewritten and the
+    frontmatter never stamped — silent corruption of foreign text, on the one path
+    that had no damage guard to catch it."""
+    from memory.packs import pack_install_item
+    from memory.provenance import split_frontmatter
+
+    md = str(tmp_path / "mem")
+    os.makedirs(md)
+    body = 'Each file gets\npack_version: "9.9.9" stamped into its frontmatter.'
+    src = _pack_source(tmp_path, {"pack-notes": ("notes about packs", body)})
+    r = pack_install_item(src, "pack-notes", memory_dir=md, repo_root=str(tmp_path))
+    assert r["installed"] is True
+    text = open(r["path"], encoding="utf-8").read()
+    fm = parse_frontmatter(text)
+    meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+    assert str(fm.get("pack_version") or meta.get("pack_version")) == "1.0.0"
+    assert 'pack_version: "9.9.9"' in split_frontmatter(text)[1]  # body verbatim
+
+
+def test_install_refuses_when_the_stamp_rewrite_is_damaged(tmp_path, monkeypatch):
+    """Install writes FOREIGN text into the corpus — a stamp-writer bug must refuse
+    loudly and name itself, never land corrupted bytes."""
+    from memory import packs as P
+
+    md = str(tmp_path / "mem")
+    os.makedirs(md)
+    src = _pack_source(tmp_path, {"lesson": ("a lesson", "body")})
+    monkeypatch.setattr(
+        P, "_ensure_pack_stamp", lambda text, pack, version: text + "\ncorrupted tail\n"
+    )
+    r = P.pack_install_item(src, "lesson", memory_dir=md, repo_root=str(tmp_path))
+    assert r["installed"] is False and "hippo bug" in r["error"]
+    assert not os.path.exists(os.path.join(md, "lesson.md"))
+
+
+def test_update_reports_stamp_damage_per_item_without_sinking_the_plan(tmp_path, monkeypatch):
+    """A damaged re-stamp poisons ONE item's ``theirs`` side: that item refuses with
+    the reason on its row (state ``stamp-refused``), the rest of the plan proceeds,
+    and pack_update_item refuses to apply the damaged one."""
+    from memory import packs as P
+
+    md = str(tmp_path / "mem")
+    os.makedirs(md)
+    src1 = _pack_source(
+        tmp_path, {"ok": ("fine", "line"), "cursed": ("hexed", "line")}, version="1.0.0"
+    )
+    for n in ("ok", "cursed"):
+        assert P.pack_install_item(src1, n, memory_dir=md)["installed"]
+    src2 = _pack_source(
+        tmp_path, {"ok": ("fine", "line v2"), "cursed": ("hexed", "line v2")}, version="2.0.0"
+    )
+
+    real = P._ensure_pack_stamp
+
+    def corrupting(text, pack, version):
+        out = real(text, pack, version)
+        return out + "\ntail\n" if "cursed" in text else out
+
+    monkeypatch.setattr(P, "_ensure_pack_stamp", corrupting)
+    plan = P.pack_update_plan(src2, memory_dir=md)
+    rows = {i["name"]: i for i in plan["items"]}
+    assert rows["ok"]["state"] == "fast-forward"  # the plan is NOT sunk by the bad item
+    assert rows["cursed"]["state"] == "stamp-refused"
+    assert "hippo bug" in rows["cursed"]["error"]
+
+    r = P.pack_update_item(src2, "cursed", memory_dir=md)
+    assert r["updated"] is False and "hippo bug" in r["error"]
+    assert P.pack_update_item(src2, "ok", memory_dir=md)["updated"] is True
