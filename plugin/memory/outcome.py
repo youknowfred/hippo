@@ -21,6 +21,11 @@ popularity/recency proxy) to deserve measuring on its own. This module itself st
 WRITES the cache only — it does not read recall's ranking state, so the negative-capability test
 below (this module must not import recall/new_memory) still holds; only recall.py imports FROM
 outcome, never the reverse.
+
+T16 (JIT-1): the same PostToolUse spawn now also runs the jit lane — on the first touch
+of a cited file per session, ``jit.observe_touch`` hands back the bounded first-touch
+reminder that ``main --from-hook`` prints as the hook's additionalContext. It touches
+no ranking; ``HIPPO_DISABLE_JIT`` restores the pre-T16 hook byte-for-byte.
 """
 
 from __future__ import annotations
@@ -55,12 +60,20 @@ def record_from_payload(
     memory_dir: Optional[str] = None,
     repo_root: Optional[str] = None,
     telemetry_dir: Optional[str] = None,
+    context_out: Optional[list] = None,
 ) -> bool:
     """Log ONE outcome event iff the PostToolUse payload is a file-touching tool INSIDE the repo.
 
     The touched path is stored repo-relative (cited_paths are repo-relative); a touch outside the
     repo can never match a citation, so it is dropped. Never raises; returns False when nothing
     was logged.
+
+    T16 JIT-1 rides the same single Python spawn: the jit lane (``jit.observe_touch``)
+    sees the touch first and — on the first touch of a cited file per session — hands
+    back the bounded first-touch reminder, appended to ``context_out`` (caller-supplied
+    list, the ``compute_corpus`` texts_out pattern) for ``main`` to print as hook
+    additionalContext. Existing callers pass no ``context_out`` and see the exact
+    pre-T16 behavior; with ``HIPPO_DISABLE_JIT`` set the lane contributes nothing at all.
     """
     try:
         if not isinstance(payload, dict):
@@ -87,6 +100,20 @@ def record_from_payload(
         if not rel:
             return False
         td = telemetry_dir or default_telemetry_dir(memory_dir)
+        try:
+            from .jit import observe_touch
+
+            _cited_by, context = observe_touch(
+                rel,
+                memory_dir=memory_dir,
+                repo_root=repo_root,
+                telemetry_dir=td,
+                session_id=session_id,
+            )
+            if context and context_out is not None:
+                context_out.append(context)
+        except Exception:
+            pass
         return log_outcome(tool, rel, session_id=session_id, telemetry_dir=td)
     except Exception:
         return False
@@ -322,7 +349,28 @@ def main(argv: Optional[list] = None) -> int:
             except Exception:
                 payload = None
             if isinstance(payload, dict):
-                record_from_payload(payload, memory_dir=args.memory_dir, repo_root=args.repo_root)
+                context: list = []
+                record_from_payload(
+                    payload,
+                    memory_dir=args.memory_dir,
+                    repo_root=args.repo_root,
+                    context_out=context,
+                )
+                if context:
+                    # JIT-1: the first-touch reminder rides this same spawn's stdout as
+                    # the hook's ONE additionalContext JSON (the QUA-2 contract: stdout
+                    # is empty or exactly one hookSpecificOutput object).
+                    print(
+                        json.dumps(
+                            {
+                                "hookSpecificOutput": {
+                                    "hookEventName": "PostToolUse",
+                                    "additionalContext": "\n".join(context),
+                                }
+                            },
+                            ensure_ascii=False,
+                        )
+                    )
             return 0  # fire-and-forget: PostToolUse must never fail loudly
         memory_dir = args.memory_dir
         if memory_dir is None:

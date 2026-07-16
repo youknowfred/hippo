@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
-# memory_post_tool.sh — PostToolUse read-signal capture (SIG-4 / KPI-2) for agent memory.
+# memory_post_tool.sh — PostToolUse read-signal capture (SIG-4 / KPI-2) + the T16 JIT lane.
 #
 # After a file-touching tool (Read/Edit/Write/MultiEdit/NotebookEdit — scoped by the hooks.json
 # matcher), this records that the file was touched into a GITIGNORED outcome ledger. Off the hot
 # path (the read-signal for KPI-2), the ledger is later JOINED against the episode buffer's
 # injected memories + their cited_paths to measure injection precision — did an injected memory's
-# cited file actually get used? MEASUREMENT ONLY: nothing here influences ranking.
+# cited file actually get used? Nothing here influences ranking.
+#
+# T16 JIT-1 rides the SAME single Python spawn: on the FIRST touch of a file cited by a
+# steer:pin/feedback memory this session, stdout carries ONE bounded hookSpecificOutput JSON
+# ("memory <name>: <description>" as additionalContext) — derived-cache reads only, empty on
+# almost every touch, killed entirely by HIPPO_DISABLE_JIT. JIT-2 stamps the same lookup onto
+# the outcome row as optional touch-grain provenance (cited_by).
 #
 # CRITICAL CONTRACT (identical to the other memory hooks):
 #   - ALWAYS exits 0 — a read-signal failure must never disturb the tool loop.
-#   - Writes ONLY to the gitignored telemetry dir (.claude/.memory-telemetry/). Never the corpus.
+#   - stdout is EMPTY or exactly one hookSpecificOutput JSON object (QUA-2).
+#   - Writes ONLY to gitignored derived dirs (.claude/.memory-telemetry/). Never the corpus.
 #   - No network, no model download. Fire-and-forget; a single cheap Python spawn.
 #
 # Wired as a PostToolUse hook (matcher-scoped to file tools) via plugin/hooks/hooks.json.

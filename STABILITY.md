@@ -30,7 +30,9 @@ release). New *additions* alongside them are minor, non-breaking changes.
   `HIPPO_LOCAL_MEMORY_DIR`, `HIPPO_USER_MEMORY_DIR`, `HIPPO_PROJECTS_FILE`, `HIPPO_TRUST_FILE`,
   `HIPPO_DISABLE_DENSE`, `HIPPO_TRUST_ALL`, `HIPPO_TRUST_NONGIT`, `HIPPO_EMBED_MODEL`,
   `HIPPO_MCP_MAX_MESSAGE_CHARS`, `HIPPO_TEA5_OPT_IN`, `HIPPO_SALIENCE`, `HIPPO_DENSE_FLOOR`,
-  `HIPPO_DUP_THRESHOLD`. These keep their names and meanings.
+  `HIPPO_DUP_THRESHOLD`, `HIPPO_DISABLE_JIT` (added in T16 JIT: kills the default-on
+  first-touch reminder lane + its touch-grain telemetry, restoring pre-T16 PostToolUse
+  behavior byte-for-byte). These keep their names and meanings.
 - **The committed on-disk corpus format** — `.claude/memory/.format`'s `corpus_format` (currently
   **4**) and the memory-file frontmatter conventions ([CONVENTIONS.md](plugin/assets/CONVENTIONS.md)).
   The format version only ever increases, and every increase ships a documented migration
