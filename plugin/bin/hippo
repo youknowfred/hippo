@@ -39,6 +39,11 @@ case "$cmd" in
   staleness)
     exec "$PY" -m memory.staleness "$@"
     ;;
+  sleep)
+    # SLP-1/2: the headless maintenance runner (morning report; --print-schedule /
+    # --snooze). Stateless per invocation, like its siblings above.
+    exec "$PY" -m memory.sleep "$@"
+    ;;
   mcp)
     # INT-2: the stdio MCP server (mid-turn + subagent memory access). Long-lived — it owns
     # stdin/stdout for the JSON-RPC stream, so exec (no wrapping) and let it run until EOF.

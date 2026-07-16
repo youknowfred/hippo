@@ -1687,8 +1687,14 @@ def run_apply_pass(
     probe_k: Optional[int] = None,
     max_seeds: Optional[int] = None,
     repo_root: Optional[str] = None,
+    origin: Optional[str] = None,
 ) -> Tuple[int, str]:
     """The DRM-2 loop: discover → gate → apply (capped) → stamp+ledger → digest.
+
+    ``origin`` (SLP-3): optional ledger provenance for a non-interactive invoker —
+    the sleep runner stamps ``sleep:<ts>`` so the audit trail records WHO applied.
+    Additive metadata only: every gate, cap, and downstream consumer (log, undo,
+    aging, de-parasite) treats a stamped edge exactly like an interactive one.
 
     Preconditions before ANY write (all must hold; each refusal is named in the digest):
     soak bar met; corpus trusted (SEC-1 — autonomy never extends to an unreviewed corpus);
@@ -1776,6 +1782,8 @@ def run_apply_pass(
             "applied_at_distinct_count": distinct_now,
             "applied_at_ts": now_iso,
             "state": "active",
+            # SLP-3: provenance of a non-interactive apply; absent on interactive passes.
+            **({"origin": origin} if origin else {}),
         }
         # Provenance completeness is a hard precondition (DRM-2.spec.md §2): an edge with
         # a missing field is rejected pre-write.

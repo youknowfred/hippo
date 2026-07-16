@@ -44,7 +44,9 @@ TERMINAL_ONLY_MARKER = "no Desktop-safe MCP-tool equivalent yet"
 # bin/hippo's dispatching subcommands (STABILITY.md's frozen CLI surface). The lint
 # parses the script's exec-ing case arms and asserts equality, so advice naming
 # ``hippo <sub>`` can be checked against a list that cannot drift from the script.
-BIN_HIPPO_SUBCOMMANDS: Tuple[str, ...] = ("recall", "new", "build-index", "staleness", "mcp")
+BIN_HIPPO_SUBCOMMANDS: Tuple[str, ...] = (
+    "recall", "new", "build-index", "staleness", "mcp", "sleep",
+)
 
 
 @dataclass(frozen=True)

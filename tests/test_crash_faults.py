@@ -79,6 +79,8 @@ CRASH_CONTRACT = {
     ("provenance", "reverify_file"): ("detected",),
     ("registry", "register_project"): ("detected",),  # returns False
     ("registry", "deregister_project"): ("detected",),
+    ("sleep", "_write_report"): ("detected",),  # report still prints; the miss is named
+    ("sleep", "_write_state"): ("detected",),  # a lost run-stamp is named on stdout
     ("staleness", "set_invalid_after"): ("detected", "rolled_back"),  # dedup-merge write #2
     ("trust", "_write_registry_doc"): ("detected",),  # mark_trusted returns False
 }
@@ -643,6 +645,36 @@ def scn_registry_deregister_detected(tmp_path, monkeypatch):
     assert registered_projects() == before  # old registry intact, loudly not-removed
 
 
+def scn_sleep_report_write_detected(tmp_path, monkeypatch, capsys):
+    from memory import sleep as SL
+    from memory.telemetry import default_telemetry_dir
+
+    root, md = _git_repo(tmp_path)
+    _mem(md, "alpha")
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", md)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    _arm(monkeypatch, "sleep", "_write_report")
+    assert SL.main([]) == 0
+    out = capsys.readouterr().out
+    # SLP-1's RCH-9 posture: the report still PRINTS whole, and the missed persist
+    # is named — never a silent hole where the artifact should be.
+    assert "NOT persisted" in out
+    assert not os.path.exists(os.path.join(default_telemetry_dir(md), "sleep-report.md"))
+
+
+def scn_sleep_state_write_detected(tmp_path, monkeypatch, capsys):
+    from memory import sleep as SL
+
+    root, md = _git_repo(tmp_path)
+    _mem(md, "alpha")
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", md)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    _arm(monkeypatch, "sleep", "_write_state")
+    assert SL.main([]) == 0
+    out = capsys.readouterr().out
+    assert "could not write sleep-state.json" in out  # the lost stamp is named
+
+
 def scn_invalid_after_detected(tmp_path, monkeypatch):
     from memory.staleness import set_invalid_after
 
@@ -710,6 +742,8 @@ _SCENARIOS = [
     (("provenance", "reverify_file"), "detected", scn_reverify_detected),
     (("registry", "register_project"), "detected", scn_registry_register_detected),
     (("registry", "deregister_project"), "detected", scn_registry_deregister_detected),
+    (("sleep", "_write_report"), "detected", scn_sleep_report_write_detected),
+    (("sleep", "_write_state"), "detected", scn_sleep_state_write_detected),
     (("staleness", "set_invalid_after"), "detected", scn_invalid_after_detected),
     (("staleness", "set_invalid_after"), "rolled_back", scn_invalid_after_rolled_back),
     (("trust", "_write_registry_doc"), "detected", scn_trust_registry_detected),

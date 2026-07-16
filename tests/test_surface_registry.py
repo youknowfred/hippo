@@ -357,10 +357,16 @@ def test_every_named_bin_hippo_subcommand_dispatches():
 # --------------------------------------------------------------------------- #
 # Zero runtime behavior change: the registry never rides the hot path
 # --------------------------------------------------------------------------- #
+# The registry's designed OFFLINE consumers (SLP-1's morning report renders each
+# section's drain verb per surface from it). The hot path — hooks, the MCP server,
+# recall — must still never read it; only deliberate, off-session runners may.
+_REGISTRY_CONSUMERS = {"sleep"}
+
+
 def test_no_runtime_module_imports_the_registry():
     offenders = []
     for stem, src in _memory_modules().items():
-        if stem == "surfaces":
+        if stem == "surfaces" or stem in _REGISTRY_CONSUMERS:
             continue
         tree = ast.parse(src)
         for node in ast.walk(tree):
