@@ -1285,6 +1285,387 @@ def _default_abstention_set_path() -> Optional[str]:
     return _default_fixture_path("recall_abstention_set.yaml")
 
 
+# --------------------------------------------------------------------------- #
+# MSR-1: the eval run ledger + fingerprint-keyed baseline diff + pass^k probe.
+#
+# RET-8 gave hippo category-tagged eval with tracked gates, but every gate is an
+# ABSOLUTE frozen threshold — a regression that stays above it is invisible, no run
+# persists, and nothing ever proved the deterministic metrics are actually
+# deterministic. Three additions, all REPORT-ONLY (no gate constant moves, no new
+# CI-failing check — the fail ratchet is explicitly deferred behind a dated owner
+# blessing of the first baseline, never a metric-proxied gate):
+#
+#   --json / --out    serialize the full evaluate() report; --out appends it (with
+#                     git-HEAD + fixture + corpus fingerprints) to a gitignored,
+#                     byte-rotated run ledger in the derived telemetry dir (inv1).
+#   --baseline        report-only per-gate/per-category drift vs a COMMITTED baseline
+#                     file (the recall_hard_set.yaml fixture-class precedent, written
+#                     via --write-baseline). Comparability is fingerprint-KEYED:
+#                     a fixture/corpus fingerprint mismatch SKIPS with a loud note
+#                     (different inputs are not drift); a HEAD difference is the
+#                     attribution context and prints, never skips.
+#   --repeat k        the pass^k determinism probe: k FRESH processes on the hermetic
+#                     (HIPPO_DISABLE_DENSE=1) lane must produce byte-identical
+#                     deterministic metrics (epsilon=0). Latency and every other
+#                     wall-clock-derived value is excluded (see _VOLATILE_KEYS);
+#                     any nonzero delta is a bug to fix, not jitter to tolerate.
+# --------------------------------------------------------------------------- #
+_RUN_LEDGER_NAME = "eval_runs.jsonl"
+_BASELINE_FILENAME = "recall_eval_baseline.json"
+_BASELINE_SCHEMA = 1
+# Categories at/below this n are structurally too thin for their delta to mean much
+# (today's multi-hop fixture is n=2 until GRF-2 grows it) — their drift lines carry an
+# explicit low-n marker and are ALWAYS report-only, like everything else here.
+_BASELINE_N_FLOOR = 3
+
+# Report keys derived from wall-clock or ledger-external state — excluded from the
+# determinism view so the pass^k claim is about the METRICS, not the machine:
+#   latency/cold_latency + their two gate entries — timing;
+#   staleness_half_life — ages are computed against *now*;
+#   ok — folds the latency gates' pass flags in, so it inherits their volatility.
+_VOLATILE_KEYS = ("latency", "cold_latency", "staleness_half_life", "ok")
+_VOLATILE_GATES = ("recall_p95_ms", "cold_p95_ms")
+
+
+def deterministic_view(report: dict) -> dict:
+    """The report minus every wall-clock-derived value — the pass^k comparison surface.
+
+    A deep-enough copy (top level + gates) that the caller's report is never mutated.
+    """
+    view = {k: v for k, v in report.items() if k not in _VOLATILE_KEYS}
+    gates = report.get("gates")
+    if isinstance(gates, dict):
+        view["gates"] = {k: v for k, v in gates.items() if k not in _VOLATILE_GATES}
+    return view
+
+
+def canonical_json(view: dict) -> str:
+    """One canonical byte form (sorted keys, no whitespace variance) for byte-identity."""
+    return json.dumps(view, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _git_head(memory_dir: Optional[str], repo_root: Optional[str]) -> Optional[str]:
+    """The corpus repo's HEAD sha, or None (non-git corpus). CLI-only — never the hot path."""
+    from .provenance import run_git
+
+    try:
+        root = repo_root
+        if not root and memory_dir:
+            root = run_git(
+                ["rev-parse", "--show-toplevel"], os.path.dirname(os.path.abspath(memory_dir))
+            ).strip()
+        if not root:
+            return None
+        return run_git(["rev-parse", "HEAD"], root).strip() or None
+    except Exception:
+        return None
+
+
+def corpus_fingerprint(index: LoadedIndex) -> str:
+    """sha256 over exactly the compare-field lists ``build_index.refresh_index`` uses to
+    decide "corpus unchanged" (entry hashes, body-chunk hashes, invalid_after,
+    source_commit_time, steer, confidence) — one definition of corpus identity, reused,
+    so the baseline diff and the index refresh can never disagree about what "the same
+    corpus" means."""
+    import hashlib
+
+    entries = index.manifest.get("entries", []) or []
+    chunks = index.manifest.get("body_chunks", []) or []
+    material = [
+        [e.get("hash") for e in entries],
+        [c.get("hash") for c in chunks],
+        [e.get("invalid_after") for e in entries],
+        [e.get("source_commit_time") for e in entries],
+        [e.get("steer") for e in entries],
+        [e.get("confidence") for e in entries],
+    ]
+    return hashlib.sha256(canonical_json({"corpus": material}).encode("utf-8")).hexdigest()
+
+
+def fixture_fingerprint(*paths: Optional[str]) -> str:
+    """sha256 over the raw bytes of every provided fixture file, position-stable.
+
+    An absent/None path contributes a marker (not silence) so "hard set present, no
+    abstention set" and "abstention set present, no hard set" can never collide."""
+    import hashlib
+
+    h = hashlib.sha256()
+    for p in paths:
+        if p and os.path.exists(p):
+            try:
+                with open(p, "rb") as fh:
+                    h.update(hashlib.sha256(fh.read()).hexdigest().encode("ascii"))
+            except Exception:
+                h.update(b"<unreadable>")
+        else:
+            h.update(b"<absent>")
+        h.update(b"|")
+    return h.hexdigest()
+
+
+def default_run_ledger_path(memory_dir: str, telemetry_dir: Optional[str] = None) -> str:
+    """``<telemetry_dir>/eval_runs.jsonl`` — beside the recall ledger (derived, gitignored)."""
+    from .telemetry import default_telemetry_dir
+
+    return os.path.join(telemetry_dir or default_telemetry_dir(memory_dir), _RUN_LEDGER_NAME)
+
+
+def append_run_ledger(
+    report: dict,
+    memory_dir: str,
+    *,
+    telemetry_dir: Optional[str] = None,
+    head: Optional[str] = None,
+    fixture_fp: Optional[str] = None,
+    corpus_fp: Optional[str] = None,
+    out_path: Optional[str] = None,
+) -> Optional[str]:
+    """Append ONE eval run (full report + fingerprints) to the gitignored run ledger.
+
+    Same contract as the telemetry ledgers it lives beside: never raises, append-only,
+    byte-rotated (``telemetry._rotate_if_needed``), SEC-3 self-ignoring dir. Returns the
+    path written, or None on failure. inv1: derived telemetry, never a second authority.
+    """
+    from .telemetry import _rotate_if_needed
+
+    try:
+        path = out_path or default_run_ledger_path(memory_dir, telemetry_dir)
+        ensure_self_ignoring_dir(os.path.dirname(path))
+        row = {
+            "ts": round(time.time(), 3),
+            "head": head,
+            "fixture_fingerprint": fixture_fp,
+            "corpus_fingerprint": corpus_fp,
+            "report": report,
+        }
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        _rotate_if_needed(path)
+        return path
+    except Exception:
+        return None
+
+
+def _default_baseline_path() -> Optional[str]:
+    return _default_fixture_path(_BASELINE_FILENAME)
+
+
+def baseline_metrics(report: dict) -> dict:
+    """The comparable (deterministic, per-metric/per-category) subset a baseline pins."""
+    view = deterministic_view(report)
+    gates = {k: g.get("value") for k, g in (view.get("gates") or {}).items()}
+    tokens = view.get("tokens") or {}
+    return {
+        "gates": gates,
+        "by_category": view.get("by_category") or {},
+        "tokens": {k: tokens.get(k) for k in ("full", "floor", "recall_avg", "net")},
+        "body_probe": view.get("body_probe") or {},
+        "count": view.get("count"),
+        "hard_set_n": view.get("hard_set_n"),
+        "backend": view.get("backend"),
+    }
+
+
+def write_baseline(
+    report: dict,
+    path: str,
+    *,
+    head: Optional[str],
+    fixture_fp: str,
+    corpus_fp: str,
+) -> dict:
+    """Write the committed baseline file (``--write-baseline``). ``{ok, path}`` or
+    ``{ok: False, error}`` — a torn write is DETECTED (named), never a half-written pin.
+    """
+    from .atomic import write_json_atomic
+
+    doc = {
+        "schema": _BASELINE_SCHEMA,
+        "head": head,
+        "fixture_fingerprint": fixture_fp,
+        "corpus_fingerprint": corpus_fp,
+        "generated_at": time.strftime("%Y-%m-%d"),
+        "metrics": baseline_metrics(report),
+    }
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        # INV-2/INV-3: the baseline is a COMMITTED fixture-class artifact — a torn pin
+        # would silently re-key every future drift comparison, so the write is atomic.
+        write_json_atomic(path, doc, indent=2)
+        return {"ok": True, "path": path}
+    except Exception as exc:
+        return {"ok": False, "error": f"baseline write failed: {exc}"}
+
+
+def _fmt_delta(new, old) -> str:
+    try:
+        d = float(new) - float(old)
+    except (TypeError, ValueError):
+        return f"{old!r} -> {new!r}"
+    return f"{old} -> {new} ({'+' if d >= 0 else ''}{round(d, 4)})"
+
+
+def diff_baseline(
+    report: dict,
+    baseline: dict,
+    *,
+    head: Optional[str],
+    fixture_fp: str,
+    corpus_fp: str,
+) -> List[str]:
+    """Report-only drift lines vs a committed baseline. NEVER affects the exit code.
+
+    Comparability is keyed on the fixture + corpus fingerprints: a mismatch means the
+    INPUTS changed (different corpus / different fixtures), so per-metric deltas would
+    compare apples to oranges — the diff SKIPS, loudly naming which key moved. A HEAD
+    difference is the whole point (code drift between two runs of the same inputs) and
+    prints as attribution context.
+    """
+    lines: List[str] = []
+    if not isinstance(baseline, dict) or baseline.get("schema") != _BASELINE_SCHEMA:
+        return [
+            "baseline: SKIPPED — unrecognized baseline schema "
+            f"(want {_BASELINE_SCHEMA}, got {baseline.get('schema') if isinstance(baseline, dict) else type(baseline).__name__})"
+        ]
+    mismatched = [
+        key
+        for key, current in (
+            ("fixture_fingerprint", fixture_fp),
+            ("corpus_fingerprint", corpus_fp),
+        )
+        if baseline.get(key) != current
+    ]
+    if mismatched:
+        return [
+            "baseline: SKIPPED — "
+            + " and ".join(mismatched)
+            + " changed since the baseline was written; the numbers are not comparable "
+            "(different inputs, not drift). Re-pin with --write-baseline after reviewing.",
+        ]
+    b_head = baseline.get("head")
+    lines.append(
+        f"baseline: comparing HEAD {(head or 'no-git')[:12]} against baseline "
+        f"@ {(b_head or 'no-git')[:12]} (written {baseline.get('generated_at') or '?'})"
+    )
+    old = baseline.get("metrics") or {}
+    new = baseline_metrics(report)
+    drift = 0
+    old_gates = old.get("gates") or {}
+    new_gates = new.get("gates") or {}
+    for gname in sorted(set(old_gates) | set(new_gates)):
+        if old_gates.get(gname) != new_gates.get(gname):
+            drift += 1
+            lines.append(f"  gate {gname}: {_fmt_delta(new_gates.get(gname), old_gates.get(gname))}")
+    old_cat = old.get("by_category") or {}
+    new_cat = new.get("by_category") or {}
+    for cat in sorted(set(old_cat) | set(new_cat)):
+        o, n = old_cat.get(cat) or {}, new_cat.get(cat) or {}
+        if o == n:
+            continue
+        drift += 1
+        n_floor = min(x for x in (o.get("n"), n.get("n")) if isinstance(x, (int, float))) if (o.get("n") is not None or n.get("n") is not None) else 0
+        low_n = " [low n — report-only]" if (n_floor or 0) <= _BASELINE_N_FLOOR else ""
+        lines.append(
+            f"  category {cat}: recall {_fmt_delta(n.get('recall'), o.get('recall'))}, "
+            f"mrr {_fmt_delta(n.get('mrr'), o.get('mrr'))}, n {o.get('n')}->{n.get('n')}{low_n}"
+        )
+    for scalar in ("count", "hard_set_n", "backend"):
+        if old.get(scalar) != new.get(scalar):
+            drift += 1
+            lines.append(f"  {scalar}: {old.get(scalar)!r} -> {new.get(scalar)!r}")
+    if old.get("tokens") != new.get("tokens"):
+        drift += 1
+        lines.append(f"  tokens: {old.get('tokens')} -> {new.get('tokens')}")
+    if old.get("body_probe") != new.get("body_probe"):
+        drift += 1
+        lines.append(f"  body_probe: {old.get('body_probe')} -> {new.get('body_probe')}")
+    if not drift:
+        lines.append("  no drift — deterministic metrics match the committed baseline.")
+    lines.append(
+        "  (report-only: baseline drift never fails a run; the CI ratchet stays deferred "
+        "behind a dated owner blessing of the first baseline)"
+    )
+    return lines
+
+
+def _forwarded_eval_argv(args) -> List[str]:
+    """The INPUT arguments a --repeat subprocess re-runs with — never the output flags
+    (--json is added by the probe itself; --out/--baseline/--write-baseline would make
+    the probe's fresh processes write ledgers/pins as a side effect)."""
+    argv: List[str] = []
+    for flag, value in (
+        ("--memory-dir", args.memory_dir),
+        ("--index-dir", args.index_dir),
+        ("--hard-set", args.hard_set),
+        ("--relevance-set", args.relevance_set),
+        ("--abstention-set", args.abstention_set),
+        ("--repo-root", args.repo_root),
+        ("--telemetry-dir", args.telemetry_dir),
+    ):
+        if value:
+            argv.extend([flag, value])
+    if args.k != 10:
+        argv.extend(["-k", str(args.k)])
+    return argv
+
+
+def run_repeat_probe(args, repeat: int) -> int:
+    """pass^k: ``repeat`` FRESH interpreters run the same eval on the hermetic lane;
+    their deterministic metric views must be byte-identical. Exit 0 on pass, 1 on any
+    delta (a nonzero delta is a bug to fix, not jitter to tolerate) or probe failure.
+    """
+    import subprocess
+    import sys as _sys
+
+    if repeat < 2:
+        print("--repeat needs k >= 2 (one run has nothing to compare against)")
+        return 2
+    _pkg_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = {
+        **os.environ,
+        # The hermetic lane: byte-identity is only claimable where no model-load /
+        # cache-warmth variance exists. Offline flags match cold_latency's probe.
+        "HIPPO_DISABLE_DENSE": "1",
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1",
+    }
+    env["PYTHONPATH"] = _pkg_parent + (
+        os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
+    )
+    argv = [_sys.executable, "-m", "memory.eval_recall", "--json"] + _forwarded_eval_argv(args)
+    blobs: List[str] = []
+    for i in range(repeat):
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=600, env=env)
+        line = next((ln for ln in (proc.stdout or "").splitlines() if ln.strip()), "")
+        try:
+            report = json.loads(line)
+        except Exception:
+            print(
+                f"--repeat: run {i + 1}/{repeat} produced no parseable --json report "
+                f"(exit {proc.returncode}); stderr tail: {(proc.stderr or '')[-300:]}"
+            )
+            return 1
+        blobs.append(canonical_json(deterministic_view(report)))
+        print(f"  run {i + 1}/{repeat}: {len(blobs[-1])} canonical bytes")
+    if all(b == blobs[0] for b in blobs):
+        print(
+            f"pass^{repeat}: deterministic metrics byte-identical across {repeat} fresh "
+            "processes (hermetic lane; latency/staleness excluded by definition)"
+        )
+        return 0
+    first_bad = next(i for i, b in enumerate(blobs) if b != blobs[0])
+    a, b = json.loads(blobs[0]), json.loads(blobs[first_bad])
+    diverged = sorted(
+        k for k in set(a) | set(b) if a.get(k) != b.get(k)
+    )
+    print(
+        f"pass^{repeat} FAILED: run {first_bad + 1} diverged from run 1 in deterministic "
+        f"key(s): {', '.join(diverged)} — epsilon=0 is the contract; this is a bug to fix, "
+        "not jitter to tolerate."
+    )
+    return 1
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
@@ -1312,6 +1693,54 @@ def main(argv: Optional[List[str]] = None) -> int:
         "(not failed) on a bm25-only run -- without dense, cold ~= warm.",
     )
     parser.add_argument("-k", type=int, default=10)
+    # MSR-1: the run-ledger / baseline / determinism surface — ALL report-only (the CI
+    # fail ratchet is deferred behind a dated owner blessing; no gate constant moves).
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="MSR-1: print the full evaluate() report as ONE JSON line instead of the "
+        "human gate table (exit code semantics unchanged). Any --out/--baseline notes "
+        "print on later lines — machine consumers parse the first line.",
+    )
+    parser.add_argument(
+        "--out",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="PATH",
+        help="MSR-1: append this run (full report + git-HEAD/fixture/corpus fingerprints) "
+        "to the gitignored run ledger — default <telemetry-dir>/eval_runs.jsonl, or an "
+        "explicit PATH. Append-only, byte-rotated, never affects the exit code.",
+    )
+    parser.add_argument(
+        "--baseline",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="PATH",
+        help="MSR-1: report-only drift vs a committed baseline (default: this corpus's "
+        ".audit-fixtures/recall_eval_baseline.json, falling back to the repo fixture on "
+        "an ambient run). Fingerprint mismatch skips loudly; drift NEVER fails the run.",
+    )
+    parser.add_argument(
+        "--write-baseline",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="PATH",
+        help="MSR-1: pin THIS run's deterministic metrics as the committed baseline file "
+        "(atomic write). Committing it — and any CI ratchet over it — is a deliberate, "
+        "dated owner decision, never automatic.",
+    )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=None,
+        metavar="K",
+        help="MSR-1: the pass^k determinism probe — run the same eval K times in FRESH "
+        "processes on the hermetic lane (HIPPO_DISABLE_DENSE=1) and assert byte-identity "
+        "of the deterministic metrics (latency/staleness excluded). Exit 1 on any delta.",
+    )
     parser.add_argument(
         "--ab",
         default=None,
@@ -1347,6 +1776,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 2
         return _dream_ab_main((ab_extra or []) + (["-k", str(args.k)] if args.k != 10 else []))
 
+    # MSR-1: the pass^k probe is its own mode (like --calibrate) — it spawns fresh
+    # processes that each run the plain eval with --json; output flags never forward.
+    if args.repeat is not None:
+        return run_repeat_probe(args, args.repeat)
+
     if args.calibrate:
         from .calibrate_thresholds import format_report as _calibrate_report
 
@@ -1372,23 +1806,41 @@ def main(argv: Optional[List[str]] = None) -> int:
     # only explicitly-passed fixtures run; the fixtureless gates skip, exactly as a
     # fixture-less fresh project skips them.
     ambient = args.memory_dir is None
+    # MSR-1: the fixture paths are hoisted so the fingerprints below hash EXACTLY the
+    # inputs evaluate() scored — a drifted copy of this resolution would let the baseline
+    # key disagree with the run it claims to describe.
+    hard_set_path = args.hard_set or (_default_hard_set_path() if ambient else None)
+    relevance_set_path = args.relevance_set or (
+        _default_relevance_set_path() if ambient else None
+    )
+    abstention_set_path = args.abstention_set or (
+        _default_abstention_set_path() if ambient else None
+    )
     report = evaluate(
         memory_dir=args.memory_dir,
         index_dir=args.index_dir,
-        hard_set_path=args.hard_set or (_default_hard_set_path() if ambient else None),
+        hard_set_path=hard_set_path,
         k=args.k,
-        relevance_set_path=args.relevance_set
-        or (_default_relevance_set_path() if ambient else None),
+        relevance_set_path=relevance_set_path,
         repo_root=args.repo_root,
         telemetry_dir=args.telemetry_dir,
-        abstention_set_path=args.abstention_set
-        or (_default_abstention_set_path() if ambient else None),
+        abstention_set_path=abstention_set_path,
         gate_cold=args.gate_cold,
     )
     if not report.get("ok") and "error" in report:
-        print(f"eval error: {report['error']}")
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False))
+        else:
+            print(f"eval error: {report['error']}")
         return 1
 
+    # MSR-1: --json prints the full report as ONE machine-parseable line and skips the
+    # human table; --out/--baseline/--write-baseline notes (below) print on later lines.
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False))
+        return _handle_run_outputs(
+            args, report, ambient, hard_set_path, relevance_set_path, abstention_set_path
+        )
     # RET-7: `backend` is printed on the gate-header line itself (not just buried in the
     # dict) -- the whole point is that a BM25-only pass must be visibly labeled every time
     # someone actually reads the CLI output, not just discoverable by someone who thinks to
@@ -1482,7 +1934,102 @@ def main(argv: Optional[List[str]] = None) -> int:
     if report.get("backend_mismatch"):
         backend_note += " [FIXTURE/BACKEND MISMATCH]"
     print("RESULT:", ("ALL GATES PASS ✅" if report["ok"] else "GATE FAILURE ❌"), backend_note)
-    return 0 if report["ok"] else 1
+    return _handle_run_outputs(
+        args, report, ambient, hard_set_path, relevance_set_path, abstention_set_path
+    )
+
+
+def _handle_run_outputs(
+    args,
+    report: dict,
+    ambient: bool,
+    hard_set_path: Optional[str],
+    relevance_set_path: Optional[str],
+    abstention_set_path: Optional[str],
+) -> int:
+    """MSR-1: the --out / --write-baseline / --baseline tail of a ``main()`` run.
+
+    Returns the process exit code. The DEFAULT path is untouched semantics —
+    ``0 if report["ok"] else 1`` — and baseline DRIFT never changes it (report-only);
+    only a loud input/IO failure (an explicitly named baseline that is missing or
+    unparseable, a failed pin write) overrides to 1.
+    """
+    wants_ledger = args.out is not None
+    wants_baseline = args.baseline is not None
+    wants_pin = args.write_baseline is not None
+    default_exit = 0 if report["ok"] else 1
+    if not (wants_ledger or wants_baseline or wants_pin):
+        return default_exit
+
+    resolved_md = args.memory_dir
+    resolved_repo = args.repo_root
+    if resolved_md is None:
+        resolved_md, rr = resolve_dirs()
+        if resolved_repo is None:
+            resolved_repo = rr
+    resolved_idx = args.index_dir or default_index_dir(resolved_md)
+    idx = load_index(resolved_idx)
+    corpus_fp = corpus_fingerprint(idx) if idx is not None else "<no-index>"
+    fixture_fp = fixture_fingerprint(hard_set_path, relevance_set_path, abstention_set_path)
+    head = _git_head(resolved_md, resolved_repo)
+
+    if wants_ledger:
+        written = append_run_ledger(
+            report,
+            resolved_md,
+            telemetry_dir=args.telemetry_dir,
+            head=head,
+            fixture_fp=fixture_fp,
+            corpus_fp=corpus_fp,
+            out_path=args.out or None,
+        )
+        print(
+            f"run ledger: appended to {written}"
+            if written
+            else "run ledger: write failed (report unaffected)"
+        )
+
+    if wants_pin:
+        pin_path = args.write_baseline or _project_fixture_path(resolved_md, _BASELINE_FILENAME)
+        res = write_baseline(
+            report, pin_path, head=head, fixture_fp=fixture_fp, corpus_fp=corpus_fp
+        )
+        if not res.get("ok"):
+            print(f"write-baseline: {res.get('error')}")
+            return 1
+        print(
+            f"write-baseline: pinned deterministic metrics to {res['path']} — committing "
+            "it (and any CI ratchet over it) is a dated owner decision"
+        )
+
+    if wants_baseline:
+        bp = args.baseline or None
+        if bp is None:
+            candidate = _project_fixture_path(resolved_md, _BASELINE_FILENAME)
+            if os.path.exists(candidate):
+                bp = candidate
+            elif ambient:
+                bp = _default_baseline_path()
+        if bp is None:
+            # Skip-if-absent, loudly — mirrors the hard-set gates' absent-fixture skip.
+            print(
+                "baseline: none found (no committed "
+                f"{_BASELINE_FILENAME}) — pin one with --write-baseline"
+            )
+            return default_exit
+        try:
+            with open(bp, "r", encoding="utf-8") as fh:
+                baseline_doc = json.load(fh)
+        except Exception as exc:
+            # Provided-but-unreadable is the loud-fail arm (a truncated committed pin is
+            # a real problem, not a deliberately-absent input) — RET-8's exact split.
+            print(f"baseline: FAILED to read {bp}: {exc}")
+            return 1
+        for line in diff_baseline(
+            report, baseline_doc, head=head, fixture_fp=fixture_fp, corpus_fp=corpus_fp
+        ):
+            print(line)
+    return default_exit
 
 
 if __name__ == "__main__":

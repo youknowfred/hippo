@@ -1665,3 +1665,239 @@ def test_main_cli_explicit_memory_dir_never_inherits_ambient_fixtures(tmp_path, 
     assert captured["hard_set_path"] is None
     assert captured["relevance_set_path"] is None
     assert captured["abstention_set_path"] is None
+
+
+# --------------------------------------------------------------------------- #
+# MSR-1: run ledger + fingerprint-keyed baseline diff + pass^k determinism probe.
+# All report-only: gate constants byte-unchanged (pinned above), default rendering
+# untouched, baseline drift NEVER fails a run, no new CI-failing check.
+# --------------------------------------------------------------------------- #
+def _msr1_setup(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)
+    return md, idx, hs_path
+
+
+def test_json_prints_one_parseable_report_line(tmp_path, monkeypatch, capsys):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path, "--json"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    report = json.loads(out.splitlines()[0])
+    assert "gates" in report and "by_category" in report
+    # The human table is fully replaced — no gate glyph lines after the JSON.
+    assert "RESULT:" not in out
+
+
+def test_default_render_carries_no_msr1_lines(tmp_path, monkeypatch, capsys):
+    """Additive-only: a run without the new flags prints exactly the pre-MSR-1 surface."""
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "run ledger" not in out and "baseline" not in out and "pass^" not in out
+
+
+def test_out_appends_fingerprinted_run_ledger(tmp_path, monkeypatch, capsys):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    ledger = str(tmp_path / "telemetry" / "eval_runs.jsonl")
+    for _ in range(2):
+        rc = E.main(
+            ["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path, "--out", ledger]
+        )
+        assert rc == 0
+    capsys.readouterr()
+    rows = [json.loads(ln) for ln in open(ledger, encoding="utf-8") if ln.strip()]
+    assert len(rows) == 2  # append-only: the second run never clobbers the first
+    for row in rows:
+        assert row["fixture_fingerprint"] and row["corpus_fingerprint"]
+        assert row["report"]["gates"]["self_recall@10"]["value"] == 1.0
+    # SEC-3: the ledger dir self-ignores — raw run rows are never a `git add .` away.
+    assert os.path.exists(os.path.join(os.path.dirname(ledger), ".gitignore"))
+
+
+def test_out_default_path_is_the_sibling_telemetry_dir(tmp_path, monkeypatch, capsys):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path, "--out"])
+    assert rc == 0
+    capsys.readouterr()
+    expected = os.path.join(os.path.dirname(md), ".memory-telemetry", "eval_runs.jsonl")
+    assert os.path.exists(expected)
+
+
+def test_deterministic_view_excludes_exactly_the_volatile_keys():
+    report = {
+        "ok": True,
+        "gates": {
+            "self_recall@10": {"value": 1.0},
+            "recall_p95_ms": {"value": 3.2},
+            "cold_p95_ms": {"value": 900.0},
+        },
+        "latency": {"p95": 3.2},
+        "cold_latency": {"p95": 900.0},
+        "staleness_half_life": {"median_days": 4.2, "n": 3},
+        "by_category": {"single-hop": {"recall": 1.0, "mrr": 1.0, "n": 6}},
+        "count": 8,
+    }
+    view = E.deterministic_view(report)
+    assert set(view) == {"gates", "by_category", "count"}
+    assert set(view["gates"]) == {"self_recall@10"}
+    # The caller's report is never mutated (the run ledger serializes it AFTER this).
+    assert "latency" in report and "recall_p95_ms" in report["gates"]
+
+
+def test_canonical_view_is_latency_blind_but_metric_sensitive():
+    a = {"gates": {"mrr@10": {"value": 0.9}}, "latency": {"p95": 1.0}}
+    b = {"gates": {"mrr@10": {"value": 0.9}}, "latency": {"p95": 99.0}}
+    c = {"gates": {"mrr@10": {"value": 0.8}}, "latency": {"p95": 1.0}}
+    ca = E.canonical_json(E.deterministic_view(a))
+    assert ca == E.canonical_json(E.deterministic_view(b))  # latency never breaks identity
+    assert ca != E.canonical_json(E.deterministic_view(c))  # a metric delta always does
+
+
+def test_corpus_fingerprint_reuses_the_refresh_compare_fields(tmp_path, monkeypatch):
+    md, idx, _hs = _msr1_setup(tmp_path, monkeypatch)
+    B.build_index(md, idx)
+    fp1 = E.corpus_fingerprint(B.load_index(idx))
+    fp2 = E.corpus_fingerprint(B.load_index(idx))
+    assert fp1 == fp2  # same index -> same identity
+    # A content edit (entry hash moves — the first refresh_index compare field) re-keys it.
+    with open(os.path.join(md, "ducklake.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem("ducklake", "observability warehouse catalog rewritten entirely"))
+    B.build_index(md, idx)
+    assert E.corpus_fingerprint(B.load_index(idx)) != fp1
+
+
+def test_fixture_fingerprint_distinguishes_absent_from_present(tmp_path):
+    p = str(tmp_path / "f.yaml")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("- query: q\n  expected: [x]\n")
+    assert E.fixture_fingerprint(p, None) != E.fixture_fingerprint(None, p)
+    assert E.fixture_fingerprint(p) == E.fixture_fingerprint(p)
+
+
+def test_write_baseline_then_no_drift(tmp_path, monkeypatch, capsys):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    args = ["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path]
+    assert E.main(args + ["--write-baseline"]) == 0
+    pinned = os.path.join(md, ".audit-fixtures", "recall_eval_baseline.json")
+    assert os.path.exists(pinned)
+    capsys.readouterr()
+    rc = E.main(args + ["--baseline"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "no drift" in out
+    assert "report-only" in out  # the deferred-ratchet note prints every time
+
+
+def test_baseline_fingerprint_mismatch_skips_loudly(tmp_path, monkeypatch, capsys):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    args = ["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path]
+    assert E.main(args + ["--write-baseline"]) == 0
+    # A byte change that alters NO row (a YAML comment): metrics identical, key moved —
+    # exactly the "different inputs, not drift" case the skip exists for.
+    with open(hs_path, "a", encoding="utf-8") as fh:
+        fh.write("# pinned by a reviewer\n")
+    capsys.readouterr()
+    rc = E.main(args + ["--baseline"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "SKIPPED" in out and "fixture_fingerprint" in out
+    assert "gate " not in out  # no per-metric lines on an incomparable pair
+
+
+def test_baseline_drift_reports_but_never_fails(tmp_path, monkeypatch, capsys):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    args = ["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path]
+    assert E.main(args + ["--write-baseline"]) == 0
+    pinned = os.path.join(md, ".audit-fixtures", "recall_eval_baseline.json")
+    doc = json.load(open(pinned, encoding="utf-8"))
+    doc["metrics"]["gates"]["mrr@10"] = 0.25
+    doc["metrics"]["by_category"]["single-hop"]["recall"] = 0.0
+    json.dump(doc, open(pinned, "w", encoding="utf-8"))
+    capsys.readouterr()
+    rc = E.main(args + ["--baseline"])
+    out = capsys.readouterr().out
+    assert rc == 0  # drift is report-only, never an exit-code change
+    assert "gate mrr@10: 0.25 -> " in out
+    assert "category single-hop" in out
+
+
+def test_baseline_low_n_categories_are_marked(tmp_path, monkeypatch, capsys):
+    md, idx, _hs = _msr1_setup(tmp_path, monkeypatch)
+    import yaml
+
+    hs_path = str(tmp_path / "hs_low_n.yaml")
+    with open(hs_path, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(
+            [
+                {
+                    "query": "which reranker model runs first on search candidates",
+                    "expected": ["reranker_voyage"],
+                    "category": "multi-hop",
+                }
+            ],
+            fh,
+        )
+    args = ["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path]
+    assert E.main(args + ["--write-baseline"]) == 0
+    pinned = os.path.join(md, ".audit-fixtures", "recall_eval_baseline.json")
+    doc = json.load(open(pinned, encoding="utf-8"))
+    doc["metrics"]["by_category"]["multi-hop"]["mrr"] = 0.1
+    json.dump(doc, open(pinned, "w", encoding="utf-8"))
+    capsys.readouterr()
+    E.main(args + ["--baseline"])
+    out = capsys.readouterr().out
+    assert "[low n — report-only]" in out  # n=1 multi-hop can't gate anything
+
+
+def test_baseline_explicit_path_missing_fails_loud(tmp_path, monkeypatch, capsys):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    rc = E.main(
+        ["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path]
+        + ["--baseline", str(tmp_path / "nope.json")]
+    )
+    out = capsys.readouterr().out
+    assert rc == 1  # provided-but-unreadable is the loud-fail arm (RET-8's split)
+    assert "FAILED to read" in out
+
+
+def test_baseline_default_absent_skips_with_note(tmp_path, monkeypatch, capsys):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path, "--baseline"])
+    out = capsys.readouterr().out
+    assert rc == 0  # skip-if-absent mirrors the hard-set gates
+    assert "none found" in out and "--write-baseline" in out
+
+
+def test_repeat_probe_passes_on_the_hermetic_lane(tmp_path, monkeypatch, capsys):
+    """pass^2 in real fresh processes — the determinism claim, exercised end-to-end."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    import yaml
+
+    hs_path = str(tmp_path / "hs_small.yaml")
+    with open(hs_path, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(
+            [
+                {
+                    "query": "which reranker model runs first on search candidates",
+                    "expected": ["reranker_voyage"],
+                }
+            ],
+            fh,
+        )
+    rc = E.main(
+        ["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path, "--repeat", "2"]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "pass^2" in out
+
+
+def test_repeat_needs_at_least_two_runs(capsys):
+    assert E.main(["--repeat", "1"]) == 2
+    assert "--repeat needs k >= 2" in capsys.readouterr().out
