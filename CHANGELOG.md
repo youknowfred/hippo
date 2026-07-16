@@ -7,6 +7,100 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.18.0 — 2026-07-16 — "Checks itself, sleeps on schedule"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**, index
+schema still **7**, citation derivation still **3**. No migration, no operator action. This
+release ships the first two tiers of the round-3 roadmap v1.17.0 ratified: **T14 INV
+"Self-enforcing invariants"** (PR #57) — the prose rules eleven of the QA sweep's thirteen
+defects violated become build-time checks that fail loudly, and the two live dead-end nudges get
+real routes — and **T15 SLP "Scheduled sleep"** (PR #58) — the maintenance loops get a cadence
+without the human's memory in the loop, zero corpus writes by default.
+
+- **INV-1 — the verb-surface registry + parity lint (the INT-class killer).** One committed
+  registry (`memory/surfaces.py`) declares every `/hippo:*` verb's surface story — the MCP tools
+  serving it, and its Desktop route (tool / skill-driving-tools / honest terminal-only). The
+  lint (`tests/test_surface_registry.py`) holds it to reality in both directions: registry rows
+  ⇄ the skills dir and registry-claimed tools ⇄ `_DISPATCH`, exactly (a new tool with no surface
+  story fails CI naming the registry); terminal-only SKILL.md preflights must carry the honest
+  marker and routed ones must name every tool they drive; the Desktop surface note must map
+  every routed verb and list EXACTLY the terminal-only set; and every advice string that names a
+  runnable command must name a REAL one — `/hippo:<verb>`, tool names, ``module --flag``,
+  ``hippo <sub>`` all existence-checked (the INT-18 class becomes unrepresentable; the lint's
+  first run caught a live instance — the pending-capture nudge named `hippo capture --snooze`, a
+  subcommand `bin/hippo` never had). Zero runtime reads: nothing on the hot path may import the
+  registry, asserted.
+- **INV-2 — write-discipline AST lint.** `tests/test_write_discipline.py` walks every
+  `plugin/memory` AST: a write-mode `open()` outside `atomic.py` fails unless its site is in the
+  explicit per-site commented allowlist (fail-closed — a false positive costs one reviewed
+  line), and a hand-rolled frontmatter walk outside provenance (the COR-14 shape: a `metadata:`
+  probe + in-place line mutation with no COR-9 primitive) fails with an EMPTY allowlist. A
+  self-test proves the checker catches the verbatim pre-sweep COR-14 walk. Its first run found
+  the COR-18 class still alive on six committed paths the sweep's `.md`-writer fix didn't reach
+  — the `.claude/memory/.format` marker (both writers), corpus seeding (via a new byte-faithful
+  `atomic.write_bytes_atomic`), the tier-floor skeleton, the tracked hard-set fixture and the
+  drafts queue whose preserved-verbatim promise a torn rewrite would break, and promote-rule's
+  committed rule file — all now atomic.
+- **INV-3 — crash-fault harness + a published crash-safety contract.** `tests/test_crash_faults.py`
+  discovers every atomic-write call site by AST (27 across 15 modules) and requires each to
+  declare a crash class — `intact` / `detected` / `rolled-back` — then TEARS each site once
+  in-process (frame-precise, so a chain's inner writes and its own rollback keep working) and
+  asserts the class; all four COR-16 rollback chains (demote+supersede, dedup-merge, dream
+  refines, pack-update lockfile) restore byte-exact under a torn second write, and install's
+  lockfile tear proves the INT-17 byte-identical re-run adopt heals the crash window. A
+  slow-marked lane `kill -9`s `pack_extract` and `build_index` mid-write and pins the recovery
+  story. STABILITY.md gains the **Crash safety** contract section, asserted against the
+  registration so the published guarantee and the enforced one cannot drift.
+- **INV-4 — resolve + audit reach the second surface** (scope owner-ratified 2026-07-16: these
+  two nudge-routed verbs only; the other five keep their honest terminal-only preflights). The
+  `resolve` tool mirrors the reconsolidate tool's per-item shape — `action='inbox'` lists every
+  unresolved contradicts pair (declared + dream-proposed), `action='verdict'` applies exactly
+  ONE per-pair human verdict per call (`keep_one` demotes the loser via the shipped
+  demote+supersede chain and drops the settled `contradicts:` declaration through a new
+  `links.remove_typed_relation` primitive; `scope_both` and `merge` are rendered only AFTER the
+  agent's own body edits; `not_conflicting` stays the per-clone ledger) — nothing auto-picks a
+  winner, and the two-write verdicts ride the COR-16 rollback discipline. The `audit` tool
+  serves the audit skill's Phase-1 gather as ONE strictly read-only call (`memory/audit_view.py`
+  — same join keys, zero writes, a failed section named in `errors`); judgment stays with the
+  skill on both surfaces. Both gate exactly like the pack tools (`_pack_gate` generalized to
+  `_corpus_gate`), both APPEND after the frozen five (positions pinned), the Desktop surface
+  note maps both, and its terminal-only list shrinks by exactly these two.
+- **SLP-1 — the sleep runner + morning report.** One headless entrypoint (`python -m
+  memory.sleep` / `hippo sleep`) runs the EXISTING read-only producers off-session — doctor's
+  deterministic report, the CAP-2 pending-capture triage listing (queue snooze honored), the
+  LIF-1 reconsolidation worklist (the SessionStart producer VERBATIM — sections reuse producer
+  functions, never fork their text), dream discovery (its no-candidates/below-soak empty norms
+  read as nothing-to-report), and link health — into ONE morning-report artifact (markdown in
+  the derived telemetry dir, printed to stdout). ZERO corpus writes and ZERO trust-registry
+  writes, asserted byte-for-byte; per-section RCH-9 degradation (a failed producer is named in
+  the report, never dropped); empty queues render a ONE-line "nothing to do" report with the
+  plumbing state and last-run stamp folded in. Every section names its per-item drain verb PER
+  SURFACE from INV-1's registry — the registry's designed offline consumer (the hot path still
+  never reads it). Dogfooded on this repo's own live backlog.
+- **SLP-2 — scheduler recipes + report-level snooze (explicit install, never automatic).**
+  `--print-schedule` emits copy-pasteable launchd plist / crontab line / scheduled-task JSON for
+  THIS machine's interpreter and repo paths — prints only, installs nothing (bootstrap's consent
+  posture). `hippo sleep --snooze Nd` silences the report for N days and it says so exactly once
+  when it resumes. The failure modes are documented next to the recipes and each lands in the
+  NEXT report (machine asleep → the "last sleep run" stamp shows the gap; venv/repo moved → the
+  scheduled command fails before hippo starts, and the recipe names where that lands).
+  `bin/hippo` gains the `sleep` subcommand — a minor, non-breaking addition to the frozen CLI
+  list, recorded in STABILITY.md and held in lockstep by the registry lint.
+- **SLP-3 — Tier-A-in-sleep, the ratified opt-in (default OFF).** `HIPPO_SLEEP_TIER_A` (env,
+  explicit). OFF keeps SLP-1's zero-write guarantee byte-for-byte — asserted even when dream has
+  an eligible edge. ON runs the UNCHANGED DRM-2 apply contract (per-pass cap, θ/mutuality,
+  SEC-1 refusal, aging firewall, undone-pair ping-pong guard) with one additive ledger field:
+  `run_apply_pass(origin="sleep:<ts>")` stamps who applied, interactive rows stay origin-free,
+  and every downstream consumer treats a stamped edge exactly like an interactive one. When
+  anything applied overnight, the morning report's FIRST line is the undo recipe.
+
+Deliberate contract changes, owner-ratified with the merges: the pending-capture nudge's
+deferral wording now names runnable forms (the capture tool / `-m memory.capture --snooze`); six
+formerly-plain writers on committed paths are atomic (identical behavior outside crash windows);
+`test_resolve_view`'s structural pin moved from "verdicts stay outside the module" to "corpus
+writers confined to the verdict engine, shared primitives only"; and STABILITY.md's crash-safety
+section is a published, test-pinned guarantee.
+
 ## v1.17.0 — 2026-07-16 — "Old or new, never torn"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**, index
