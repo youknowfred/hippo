@@ -98,3 +98,85 @@ def test_graph_drops_the_phantom_edge_end_to_end(tmp_path):
     assert graph is not None
     assert graph.adjacency.get("prose") == {"real"}  # the phantom is gone, the real edge stays
     assert "wikilink" not in graph.raw_targets.get("prose", [])
+
+
+# --------------------------------------------------------------------------- #
+# RCH-10 — new_memory names an unresolvable link instead of minting it silently
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def repo(tmp_path, monkeypatch):
+    root = str(tmp_path / "repo")
+    md = os.path.join(root, ".claude", "memory")
+    os.makedirs(md)
+    with open(os.path.join(root, "app.py"), "w", encoding="utf-8") as fh:
+        fh.write("x = 1\n")
+    subprocess.run(["git", "init", "-q", root], check=True)
+    subprocess.run(["git", "-C", root, "add", "-A"], check=True)
+    subprocess.run(["git", "-C", root, "commit", "-qm", "seed"], check=True, env=_GIT_ENV)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    return root, md
+
+
+def _mem(md, name):
+    with open(os.path.join(md, f"{name}.md"), "w", encoding="utf-8") as fh:
+        fh.write(
+            f'---\nname: {name}\ndescription: "d {name}"\nmetadata:\n  type: project\n---\nBody.\n'
+        )
+
+
+def test_links_to_a_nonexistent_memory_warns_but_still_writes(repo):
+    """WARN, never block — a forward reference is legitimate; silence is not."""
+    root, md = repo
+    _mem(md, "real_one")
+    r = write_memory(
+        "newbie", "a new fact", "project", body="Body.",
+        memory_dir=md, repo_root=root, links=["real_one", "ghost_memory"],
+    )
+    assert not r.get("error") and os.path.exists(os.path.join(md, "newbie.md"))
+    assert r["related"] == ["real_one", "ghost_memory"]  # the write is unchanged
+    warned = " ".join(r.get("warnings") or [])
+    assert "ghost_memory" in warned, "an unresolvable link target must be NAMED (RCH-10)"
+    assert "real_one" not in warned  # the resolvable one is never mentioned
+
+
+def test_cross_tier_link_warns_and_says_why(repo, tmp_path, monkeypatch):
+    """The live repro: links=["user_role"] wrote clean and minted a dangling edge.
+    user_role is REAL — it just lives in the user tier, and the graph is per-corpus."""
+    root, md = repo
+    user_tier = str(tmp_path / "user-tier")
+    os.makedirs(user_tier)
+    _mem(user_tier, "user_role")
+    monkeypatch.setenv("HIPPO_USER_MEMORY_DIR", user_tier)
+
+    r = write_memory(
+        "feedback_thing", "a working-style fact", "feedback", body="Body.",
+        memory_dir=md, repo_root=root, links=["user_role"],
+    )
+    assert not r.get("error")
+    warned = " ".join(r.get("warnings") or [])
+    assert "user_role" in warned
+    assert "tier" in warned.lower(), "cross-tier is the common cause — say so"
+
+
+def test_resolvable_links_warn_nothing(repo):
+    """Empty-norm: the ordinary case stays silent."""
+    root, md = repo
+    _mem(md, "alpha")
+    _mem(md, "beta")
+    r = write_memory(
+        "gamma", "a fact", "project", body="Body.",
+        memory_dir=md, repo_root=root, links=["alpha", "beta"],
+    )
+    assert not [w for w in (r.get("warnings") or []) if "link" in w.lower()]
+
+
+def test_discovered_links_are_never_warned(repo):
+    """_discover_links only ever returns corpus members — it must not trip the check
+    (and a discovery-path warning would be hippo blaming the user for its own pick)."""
+    root, md = repo
+    _mem(md, "alpha")
+    r = write_memory(
+        "delta", "a fact about alpha", "project", body="Body.",
+        memory_dir=md, repo_root=root,
+    )
+    assert not [w for w in (r.get("warnings") or []) if "link" in w.lower()]
