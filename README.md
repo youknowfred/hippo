@@ -255,6 +255,17 @@ by what it's for.
   the floor, offer to delete the derived index/telemetry, and report (never delete) the shared
   venv/cache.
 
+**CI — memory for reviewers who don't run Claude:**
+- `hippo recall --for-diff <range> [--json]` — the reviewer's recall: joins a git diff's changed
+  files against the corpus's `cited_paths` and lists the citing memories (pins and feedback
+  lessons first, a ⚠ flag on any whose cited code drifted since last verify). A pure read-only
+  join — no index, no model, no telemetry — so it runs on a bare `python3` in CI. The shipped
+  recipe ([.github/workflows/memory-on-diff.yml](.github/workflows/memory-on-diff.yml)) posts the
+  result as one sticky PR comment and skips entirely when nothing matches. Disclosure boundary:
+  the comment renders only names + descriptions already committed to the repo's own
+  `.claude/memory/` corpus — nothing a reader of the repo couldn't already see. Same-repo PRs
+  only by default (fork PRs get no write token).
+
 **Which one do I want?**
 - **recall vs. doctor** — `recall` asks the *corpus* a question; `doctor` asks whether the *plugin*
   is healthy. Empty recall **and** a green doctor means you just haven't written that memory yet.

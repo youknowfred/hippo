@@ -1,0 +1,94 @@
+# EXT-1 — institutional memory on the PR diff (T17: recall for the reviewer).
+#
+# A PR touches files; memories cite files; this connects them at review time. The job
+# runs `recall --for-diff` (a pure citation join: changed paths x the corpus's
+# cited_paths — no query, no index, no dense model, no LLM, no telemetry) and posts
+# the result as ONE sticky comment, updated in place on every push. Empty result →
+# no comment at all (the empty norm).
+#
+# Disclosure boundary (stated per the EXT-1 acceptance criteria): the comment renders
+# ONLY text already committed to this repo's own corpus (.claude/memory/ names +
+# descriptions) — anyone who can read the PR can already read those files at the same
+# ref. Rendering happens inside a fenced code block, so corpus text lands as QUOTED
+# DATA (SEC-5): no markdown, no @-mention pings, no link smuggling.
+#
+# Fork posture (same-repo PRs only by default): a fork PR's GITHUB_TOKEN is read-only,
+# so the comment write would fail anyway — the `if:` guard below makes the boundary
+# explicit instead of incidental. To extend to forks, run this from `pull_request_target`
+# with a locked-down checkout — NOT recommended without reading the security caveats.
+#
+# Dogfood note (positioning RATIFIED 2026-07-16): enabled quietly on this repo first;
+# the recipe is copy-paste portable to any repo with a committed hippo corpus. It needs
+# NO pip installs: PyYAML degrades to the vendored miniyaml frontmatter parser, so a
+# bare python3 + PYTHONPATH=plugin is the whole runtime.
+name: memory-on-diff
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  recall-for-diff:
+    name: memory on the diff (EXT-1, sticky comment)
+    runs-on: ubuntu-latest
+    # Same-repo PRs only: forks get no write token; the boundary is explicit, not incidental.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: staleness baselines resolve source_commit shas via git log —
+          # a shallow clone would silently render every memory as fresh.
+          fetch-depth: 0
+
+      - name: recall --for-diff (pure join, no deps)
+        id: recall
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.sha }}
+        run: |
+          PYTHONPATH=plugin python3 -m memory.recall \
+            --for-diff "${BASE_REF}...${HEAD_REF}" --json \
+            --memory-dir .claude/memory --repo-root "$PWD" > recall-diff.json
+          echo "items=$(python3 -c 'import json;print(len(json.load(open("recall-diff.json"))["items"]))')" >> "$GITHUB_OUTPUT"
+
+      - name: post or update the sticky comment
+        # Empty result → skip entirely: no comment, no noise (items.length == 0 never posts).
+        if: steps.recall.outputs.items != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const doc = JSON.parse(fs.readFileSync('recall-diff.json', 'utf8'));
+            const marker = '<!-- hippo-memory-on-diff -->';
+            const lines = doc.items.map(r => {
+              const pin = r.steer === 'pin' ? ' [pin]' : '';
+              const stale = r.stale ? `  ⚠ stale — ${r.stale.changed} cited file(s) drifted since last verify` : '';
+              return `- ${r.name} [${r.type}]${pin} — ${r.description}  (cites: ${r.paths.join(', ')})${stale}`;
+            });
+            const more = doc.total > doc.items.length ? `\n… and ${doc.total - doc.items.length} more (see .claude/memory/)` : '';
+            // Fenced block = quoted data (SEC-5): corpus text renders inert.
+            const body = [
+              marker,
+              `**🧠 Institutional memory on this diff** — ${doc.total} memory(ies) cite ${doc.changed_paths} changed file(s). A ⚠ stale row means the cited code drifted after the lesson was last verified: weigh it, don't trust it blind.`,
+              '```text',
+              ...lines,
+              '```' + more,
+              '_Read-only: these are names + descriptions already committed to this repo\'s `.claude/memory/` corpus (nothing new is disclosed). Posted by the hippo EXT-1 recipe._',
+            ].join('\n');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, per_page: 100,
+            });
+            const mine = comments.find(c => c.body && c.body.includes(marker));
+            if (mine) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo, comment_id: mine.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body,
+              });
+            }
