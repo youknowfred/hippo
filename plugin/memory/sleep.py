@@ -311,6 +311,8 @@ def _run_report(memory_dir: str, repo_root: str, telemetry_dir: str) -> Tuple[st
 # SLP-2 — scheduler recipes (print-only, never installed by hippo)
 # --------------------------------------------------------------------------- #
 def _print_schedule(memory_dir: str, repo_root: str, telemetry_dir: str) -> str:
+    from xml.sax.saxutils import escape
+
     data = os.environ.get("CLAUDE_PLUGIN_DATA") or ""
     venv_py = os.path.join(data, "venv", "bin", "python")
     py = venv_py if data and os.access(venv_py, os.X_OK) else sys.executable
@@ -320,18 +322,21 @@ def _print_schedule(memory_dir: str, repo_root: str, telemetry_dir: str) -> str:
     log = os.path.join(telemetry_dir, "sleep.log")
     cmd = f"cd {repo_root} && PYTHONPATH={plugin_root} {py} -m memory.sleep"
     key = re.sub(r"[^a-z0-9]+", "-", os.path.basename(repo_root).lower()).strip("-") or "repo"
+    # The shell line rides inside XML <string> elements: `&&`/`>>` (and any &, <, >
+    # in the user's paths) MUST be XML-escaped or the plist does not parse — plutil
+    # refused the very first dogfood install over a raw `&&`.
     plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>com.hippo.sleep.{key}</string>
   <key>ProgramArguments</key><array>
     <string>/bin/sh</string><string>-c</string>
-    <string>{cmd} >> {log} 2>&1</string>
+    <string>{escape(f"{cmd} >> {log} 2>&1")}</string>
   </array>
   <key>StartCalendarInterval</key><dict>
     <key>Hour</key><integer>7</integer><key>Minute</key><integer>30</integer>
   </dict>
-  <key>StandardErrorPath</key><string>{log}</string>
+  <key>StandardErrorPath</key><string>{escape(log)}</string>
 </dict></plist>"""
     task = json.dumps(
         {
