@@ -133,10 +133,16 @@ def _load_registry_doc() -> dict:
 
 
 def _write_registry_doc(doc: dict) -> bool:
+    """SEC-19: atomic. This file is machine-wide (every project's trust + every SEC-6
+    baseline) and rewritten on EVERY authored corpus write — a plain truncating write
+    torn by a crash lost all of it at once, and a concurrent reader (recall's SEC-1
+    gate) landing mid-write read partial JSON as {} — deny-all, or drift quarantine
+    silently off, for that prompt."""
+    from .atomic import write_json_atomic
+
     path = trust_registry_path()
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(doc, fh, indent=2, sort_keys=True)
+    write_json_atomic(path, doc, sort_keys=True)
     return True
 
 

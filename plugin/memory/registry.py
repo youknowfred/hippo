@@ -100,8 +100,9 @@ def register_project(repo_root: str, memory_dir: str) -> bool:
             "registered_at": datetime.now(timezone.utc).isoformat(),
         }
         doc["projects"] = projects
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(doc, fh, indent=2, sort_keys=True)
+        from .atomic import write_json_atomic
+
+        write_json_atomic(path, doc, sort_keys=True)  # SEC-19: same discipline as trust
         return True
     except Exception:
         return False
@@ -121,8 +122,9 @@ def deregister_project(repo_root: str) -> bool:
             return True
         del projects[_key(repo_root)]
         doc["projects"] = projects
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(doc, fh, indent=2, sort_keys=True)
+        from .atomic import write_json_atomic
+
+        write_json_atomic(path, doc, sort_keys=True)  # SEC-19
         return True
     except Exception:
         return False
