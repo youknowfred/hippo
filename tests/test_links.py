@@ -596,7 +596,13 @@ def test_derives_from_is_a_typed_relation_with_a_version_bump(tmp_path):
     from memory.provenance import CORPUS_FORMAT_VERSION, parse_frontmatter
 
     assert "derives-from" in TYPED_RELATIONS
-    assert LINKS_SCHEMA_VERSION == 3
+    # DRM-6's invariant is that the dial MOVED PAST the pre-relation value (so a v2 cache
+    # reads as a miss) — not that it stopped at 3. links.json is a DERIVED cache, which
+    # STABILITY.md explicitly lets hippo "bump and rebuild freely", so later bumps are
+    # routine and must not break this acceptance (COR-20's v3→v4 was the first). Pinned as
+    # a floor. CORPUS_FORMAT_VERSION stays an EXACT pin on purpose: it is frozen surface,
+    # every increase ships a migration, and a bump there SHOULD stop the suite for review.
+    assert LINKS_SCHEMA_VERSION >= 3
     assert CORPUS_FORMAT_VERSION == 5
 
     md = str(tmp_path / "memory")
