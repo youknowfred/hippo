@@ -64,6 +64,8 @@ CRASH_CONTRACT = {
     ("eval_recall", "confirm_hard_set_row"): ("detected",),  # both writes; each byte-complete
     ("init_project", "_copy_if_absent"): ("detected",),  # seed copy: raises; no partial file
     ("init_project", "init_project"): ("detected",),  # fresh .format stamp
+    ("jit", "write_touch_cache"): ("detected",),  # SessionStart caller sees False, never a torn map
+    ("jit", "_write_state"): ("intact",),  # session bookkeeping: silent by design; reminder still emits
     ("links", "add_typed_relation"): ("detected", "rolled_back"),  # demote+supersede write #2
     ("links", "remove_typed_relation"): ("detected", "rolled_back"),  # resolve's declaration drop; scope_both 2-file chain
     ("new_memory", "_ensure_tier_floor"): ("intact",),  # opportunistic skeleton: silent by design
@@ -714,6 +716,38 @@ def scn_trust_registry_detected(tmp_path, monkeypatch):
     assert ok is False  # the caller must not pretend the corpus got trusted
 
 
+def scn_jit_touch_cache_detected(tmp_path, monkeypatch):
+    from memory import jit
+
+    _root, md = _git_repo(tmp_path)
+    idx = str(tmp_path / "idx")
+    assert jit.refresh_touch_cache(md, idx) is True  # a healthy prior cache on disk
+    before = _snap(jit.touch_cache_path(idx))
+    _arm(monkeypatch, "jit", "write_touch_cache")
+    ok = jit.refresh_touch_cache(md, idx)
+    _assert_unchanged(before)
+    assert ok is False  # the SessionStart caller must see the miss, never assume freshness
+
+
+def scn_jit_state_intact(tmp_path, monkeypatch):
+    from memory import jit
+
+    root, md = _git_repo(tmp_path)
+    _mem(md, "lesson", extra_meta='  steer: pin\n  cited_paths: ["app.py"]\n')
+    idx = str(tmp_path / "idx")
+    tele = str(tmp_path / "tele")
+    assert jit.refresh_touch_cache(md, idx) is True
+    _arm(monkeypatch, "jit", "_write_state")
+    _cited, ctx = jit.observe_touch(
+        "app.py", memory_dir=md, repo_root=root, telemetry_dir=tele,
+        index_dir=idx, session_id="s",
+    )
+    assert ctx and "lesson" in ctx  # the reminder is worth more than the bookkeeping
+    state_dir = os.path.join(tele, "jit")
+    leftovers = [f for f in os.listdir(state_dir)] if os.path.isdir(state_dir) else []
+    assert not [f for f in leftovers if f.endswith(".json")], "state absent, never partial"
+
+
 _SCENARIOS = [
     (("dream", "_apply_one"), "detected", scn_dream_apply_bridge_detected),
     (("dream", "_apply_one"), "rolled_back", scn_dream_apply_refines_rolled_back),
@@ -723,6 +757,8 @@ _SCENARIOS = [
     (("eval_recall", "confirm_hard_set_row"), "detected", scn_eval_confirm_detected),
     (("init_project", "_copy_if_absent"), "detected", scn_init_copy_detected),
     (("init_project", "init_project"), "detected", scn_init_project_stamp_detected),
+    (("jit", "write_touch_cache"), "detected", scn_jit_touch_cache_detected),
+    (("jit", "_write_state"), "intact", scn_jit_state_intact),
     (("links", "add_typed_relation"), "detected", scn_links_add_typed_detected),
     (("links", "add_typed_relation"), "rolled_back", scn_links_add_typed_rolled_back),
     (("links", "remove_typed_relation"), "detected", scn_links_remove_typed_detected),

@@ -174,3 +174,76 @@ def test_build_and_refresh_time_at_scale(tmp_path, monkeypatch):
         f"PRF-3 refresh time regressed: incremental refresh after a 1-memory edit took "
         f"{refresh_s:.2f}s >= budget {_REFRESH_BUDGET_S}s at {_N} memories"
     )
+
+
+# --------------------------------------------------------------------------- #
+# JIT-1 at scale: the PostToolUse first-touch lane on the same 500-memory corpus.
+# The acceptance criterion is a STATED budget for the hook-side decision — derived-
+# cache reads only (no corpus scan, no index rebuild, no model), so the per-touch
+# cost must stay flat and small even when 500 memories (60 of them cited) exist.
+# --------------------------------------------------------------------------- #
+_JIT_CITED = 60          # memories carrying cited_paths (40 remind-eligible, 20 project-only)
+_JIT_TOUCHES = 200       # mixed touch sequence: ~75% uncited (the empty norm), ~25% cited
+_JIT_OBSERVE_P95_MS = 50.0   # per-touch decision budget (the hook's incremental overhead)
+_JIT_CACHE_BUILD_BUDGET_S = 5.0  # one frontmatter pass over 500 files at SessionStart
+
+
+def _jit_scale_corpus(tmp_path):
+    from memory import jit as J
+
+    md = str(tmp_path / "memory")
+    _build_scale_corpus(md)
+    # Rewrite a slice of the corpus to carry citations: 40 remind-eligible (feedback /
+    # steer:pin) + 20 plain-project (JIT-2's full reverse index only).
+    for i in range(_JIT_CITED):
+        name = f"scale-memory-{i:04d}"
+        if i % 3 == 2:
+            head = "metadata:\n  type: project\n"
+        elif i % 2 == 0:
+            head = "metadata:\n  type: feedback\n"
+        else:
+            head = "metadata:\n  type: project\n  steer: pin\n"
+        with open(os.path.join(md, f"{name}.md"), "w", encoding="utf-8") as fh:
+            fh.write(
+                f'---\nname: {name}\ndescription: "lesson {i} about module {i}"\n'
+                f'{head}  cited_paths: ["src/module_{i:04d}.py"]\n---\nBody.\n'
+            )
+    idx = str(tmp_path / ".memory-index")
+    tele = str(tmp_path / ".memory-telemetry")
+    t0 = time.monotonic()
+    assert J.refresh_touch_cache(md, idx) is True
+    build_s = time.monotonic() - t0
+    return md, idx, tele, build_s
+
+
+def test_jit_touch_decision_under_budget_at_scale(tmp_path):
+    from memory import jit as J
+
+    md, idx, tele, build_s = _jit_scale_corpus(tmp_path)
+    assert build_s < _JIT_CACHE_BUILD_BUDGET_S, (
+        f"JIT-1 touchmap build regressed: {build_s:.2f}s >= budget "
+        f"{_JIT_CACHE_BUILD_BUDGET_S}s at {_N} memories (one SessionStart frontmatter pass)"
+    )
+    rng = random.Random(7)
+    touches = []
+    for i in range(_JIT_TOUCHES):
+        if i % 4 == 0:
+            touches.append(f"src/module_{rng.randrange(_JIT_CITED):04d}.py")  # cited
+        else:
+            touches.append(f"src/uncited_{i:04d}.py")  # the empty norm
+    times = []
+    root = str(tmp_path)
+    for rel in touches:
+        t0 = time.perf_counter()
+        J.observe_touch(
+            rel, memory_dir=md, repo_root=root, telemetry_dir=tele,
+            index_dir=idx, session_id="scale-sess",
+        )
+        times.append((time.perf_counter() - t0) * 1000.0)
+    times.sort()
+    p95 = times[int(0.95 * len(times))]
+    assert p95 < _JIT_OBSERVE_P95_MS, (
+        f"JIT-1 hook overhead regressed: per-touch decision p95 {p95:.2f}ms >= budget "
+        f"{_JIT_OBSERVE_P95_MS}ms at {_N} memories / {_JIT_CITED} cited "
+        f"(derived-cache reads only — a corpus scan or rebuild snuck onto the hook path?)"
+    )

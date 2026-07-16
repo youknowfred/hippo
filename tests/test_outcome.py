@@ -245,3 +245,119 @@ def test_bogus_dir_never_raises(tmp_path):
     bogus = str(tmp_path / "nope")
     assert O.injection_precision(bogus)["precision"] is None
     assert O.record_from_payload({"tool_name": "Read", "tool_input": {"file_path": "/x"}}, memory_dir=bogus, repo_root=bogus) is False
+
+
+# --------------------------------------------------------------------------- #
+# JIT-2: touch-grain outcome evidence — OPTIONAL provenance recorded at the touch,
+# additive on the row (session-grain consumers unchanged), computable behind a flag,
+# compared report-only. Session grain stays the default: a sharper join can UNDER-count
+# (the memory helped the plan; the edit landed elsewhere) — touch grain is evidence-PLUS.
+# --------------------------------------------------------------------------- #
+def _jit_cache(memory_dir):
+    from memory import jit as J
+    from memory.build_index import default_index_dir
+
+    assert J.refresh_touch_cache(memory_dir, default_index_dir(memory_dir)) is True
+
+
+def test_outcome_row_gains_optional_cited_by(repo, memory_dir):
+    td = default_telemetry_dir(memory_dir)
+    assert T.log_outcome("Edit", "src/app.py", session_id="s", telemetry_dir=td, cited_by=["m1"]) is True
+    assert T.log_outcome("Read", "src/other.py", session_id="s", telemetry_dir=td) is True
+    rows = list(T.read_outcomes(td))
+    assert rows[0]["cited_by"] == ["m1"]
+    assert "cited_by" not in rows[1], "the field is SPARSE — absent when nothing cites the path"
+
+
+def test_record_from_payload_threads_touch_provenance(repo, memory_dir):
+    _mem(memory_dir, "app-note", ["src/app.py"])
+    _jit_cache(memory_dir)
+    assert _touch(memory_dir, repo, "src/app.py", sid="s") is True
+    assert _touch(memory_dir, repo, "src/free.py", sid="s") is True
+    rows = list(T.read_outcomes(default_telemetry_dir(memory_dir)))
+    assert rows[0]["cited_by"] == ["app-note"]
+    assert "cited_by" not in rows[1]
+
+
+def test_record_from_payload_without_cache_is_unchanged(repo, memory_dir):
+    # No touchmap on disk (pre-JIT projects): rows keep their exact pre-T16 shape.
+    _mem(memory_dir, "app-note", ["src/app.py"])
+    assert _touch(memory_dir, repo, "src/app.py", sid="s") is True
+    rows = list(T.read_outcomes(default_telemetry_dir(memory_dir)))
+    assert set(rows[0]) == {"ts", "session_id", "tool", "path"}
+
+
+def test_injection_hits_touch_grain_counts_recorded_coincidences_only(repo, memory_dir):
+    _mem(memory_dir, "app-note", ["src/app.py"])
+    td = default_telemetry_dir(memory_dir)
+    os.makedirs(td, exist_ok=True)
+    with open(os.path.join(td, "episode_buffer.jsonl"), "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"ts": 10.0, "session_id": "s1", "recalled_names": ["app-note"]}) + "\n")
+        fh.write(json.dumps({"ts": 10.0, "session_id": "s2", "recalled_names": ["app-note"]}) + "\n")
+    with open(os.path.join(td, "outcome_events.jsonl"), "w", encoding="utf-8") as fh:
+        # s1: the touch row RECORDED the coincidence (the JIT-1 lane saw it live).
+        fh.write(json.dumps({"ts": 20.0, "session_id": "s1", "tool": "Edit",
+                             "path": "src/app.py", "cited_by": ["app-note"]}) + "\n")
+        # s2: same touch, but recorded pre-T16 (no provenance) — session grain sees it,
+        # touch grain honestly does not (the documented UNDER-count direction).
+        fh.write(json.dumps({"ts": 20.0, "session_id": "s2", "tool": "Edit",
+                             "path": "src/app.py"}) + "\n")
+
+    session = O.injection_hits(memory_dir)
+    touch = O.injection_hits(memory_dir, grain="touch")
+    assert session["app-note"]["hits"] == 2
+    assert touch["app-note"]["hits"] == 1
+    assert touch["app-note"]["sessions"] == ["s1"]
+
+
+def test_touch_grain_respects_injection_order_too(repo, memory_dir):
+    _mem(memory_dir, "app-note", ["src/app.py"])
+    td = default_telemetry_dir(memory_dir)
+    os.makedirs(td, exist_ok=True)
+    with open(os.path.join(td, "episode_buffer.jsonl"), "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"ts": 100.0, "session_id": "s", "recalled_names": ["app-note"]}) + "\n")
+    with open(os.path.join(td, "outcome_events.jsonl"), "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"ts": 50.0, "session_id": "s", "tool": "Edit",
+                             "path": "src/app.py", "cited_by": ["app-note"]}) + "\n")
+    assert O.injection_hits(memory_dir, grain="touch") == {}
+
+
+def test_touch_grain_never_exceeds_session_grain(repo, memory_dir):
+    _mem(memory_dir, "app-note", ["src/app.py"])
+    _mem(memory_dir, "db-note", ["src/db.py"])
+    _jit_cache(memory_dir)
+    td = default_telemetry_dir(memory_dir)
+    T.log_episode(["app-note", "db-note"], query="q", repo_root=repo, telemetry_dir=td, session_id="s")
+    _touch(memory_dir, repo, "src/app.py", sid="s")
+    _touch(memory_dir, repo, "src/db.py", sid="s")
+    session = O.injection_hits(memory_dir)
+    touch = O.injection_hits(memory_dir, grain="touch")
+    for name, rec in touch.items():
+        assert rec["hits"] <= session.get(name, {"hits": 0})["hits"]
+
+
+def test_touch_provenance_rows_are_capped_per_session(repo, memory_dir):
+    from memory import jit as J
+
+    _mem(memory_dir, "app-note", [f"src/f{i}.py" for i in range(J.MAX_PROVENANCE_ROWS_PER_SESSION + 5)])
+    _jit_cache(memory_dir)
+    for i in range(J.MAX_PROVENANCE_ROWS_PER_SESSION + 5):
+        assert _touch(memory_dir, repo, f"src/f{i}.py", sid="s") is True
+    rows = list(T.read_outcomes(default_telemetry_dir(memory_dir)))
+    with_prov = [r for r in rows if r.get("cited_by")]
+    assert len(rows) == J.MAX_PROVENANCE_ROWS_PER_SESSION + 5, "every touch still logs a row"
+    assert len(with_prov) == J.MAX_PROVENANCE_ROWS_PER_SESSION, (
+        "telemetry volume must stay bounded: provenance stops at the per-session cap"
+    )
+
+
+def test_touch_grain_report_compares_both_grains(repo, memory_dir, capsys):
+    _mem(memory_dir, "app-note", ["src/app.py"])
+    _jit_cache(memory_dir)
+    td = default_telemetry_dir(memory_dir)
+    T.log_episode(["app-note"], query="q", repo_root=repo, telemetry_dir=td, session_id="s")
+    _touch(memory_dir, repo, "src/app.py", sid="s")
+    assert O.main(["--touch-grain", "--memory-dir", memory_dir]) == 0
+    out = capsys.readouterr().out
+    assert "session grain" in out and "touch grain" in out
+    assert "report-only" in out.lower()

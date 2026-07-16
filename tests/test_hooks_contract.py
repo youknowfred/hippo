@@ -104,12 +104,14 @@ def _run_hook(
     sentinel: bool = False,
     sentinel_hash: str = "",
     entrypoint: str = "",
+    extra_env: dict | None = None,
 ) -> tuple[subprocess.CompletedProcess, str, str]:
     """Run one hook script in a controlled env; return (proc, project_dir, data_dir).
 
     ``entrypoint`` sets CLAUDE_CODE_ENTRYPOINT (e.g. ``"claude-desktop"``) — the harness
     surface marker the nudges key their /hippo:*-vs-MCP-tool wording on. Empty (the
-    default) models the terminal CLI, which doesn't guarantee the var.
+    default) models the terminal CLI, which doesn't guarantee the var. ``extra_env``
+    lays additional variables over the controlled base (e.g. a HIPPO_* kill switch).
     """
     project = _make_project(tmp_path, with_corpus)
     data_dir = str(tmp_path / "plugin-data")
@@ -143,6 +145,8 @@ def _run_hook(
     }
     if entrypoint:
         env["CLAUDE_CODE_ENTRYPOINT"] = entrypoint
+    if extra_env:
+        env.update(extra_env)
     proc = subprocess.run(
         ["/bin/bash", hook],
         input=stdin,
@@ -922,3 +926,99 @@ class TestPostToolUseHook:
             assert rel.startswith(
                 (".claude/memory/", ".claude/.memory-index/", ".claude/.memory-telemetry/")
             ), f"PostToolUse hook wrote outside the expected dirs: {rel}"
+
+
+# --------------------------------------------------------------------------- #
+# JIT-1: the first-touch reminder rides the SAME PostToolUse spawn — one bounded
+# hookSpecificOutput JSON on the first touch of a cited file, empty-norm otherwise.
+# Exercised through the REAL hooks end-to-end: the SessionStart hook writes the
+# derived touchmap, the PostToolUse hook reads it and emits (once).
+# --------------------------------------------------------------------------- #
+_JIT_MEMORY_MD = """---
+name: canary_first_lesson
+description: "Always run the canary lane before touching the deploy entrypoint."
+metadata:
+  type: feedback
+  cited_paths: ["src/app.py"]
+---
+
+Learned 2026-07-01: skipping the canary broke prod twice.
+"""
+
+
+class TestPostToolUseFirstTouchReminder:
+    def _seed(self, tmp_path) -> str:
+        project = _make_project(tmp_path, with_corpus=True)
+        memdir = os.path.join(project, ".claude", "memory")
+        with open(os.path.join(memdir, "canary_first_lesson.md"), "w", encoding="utf-8") as fh:
+            fh.write(_JIT_MEMORY_MD)
+        # The SessionStart hook is the touchmap writer (the same offline moment that
+        # writes stale.json) — run it for real so the wiring itself is under test.
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, json.dumps({"source": "startup"}), tmp_path,
+            venv_python=True, sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        return project
+
+    def _touch(self, tmp_path, project, sid="sess-jit", extra_env=None):
+        stdin = json.dumps(
+            {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": os.path.join(project, "src", "app.py")},
+                "session_id": sid,
+            }
+        )
+        return _run_hook(
+            _POST_TOOL_HOOK, stdin, tmp_path, venv_python=True, extra_env=extra_env
+        )
+
+    def test_first_touch_emits_one_bounded_reminder(self, tmp_path):
+        project = self._seed(tmp_path)
+        proc, _, _ = self._touch(tmp_path, project)
+        _assert_contract(proc, "PostToolUse")
+        out = proc.stdout.strip()
+        assert out, "first touch of a cited file must emit the reminder context"
+        ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+        assert ctx.startswith("memory canary_first_lesson: ")
+        assert "canary lane" in ctx
+        assert "\n" not in ctx and len(ctx) <= 200
+
+    def test_second_touch_same_session_is_silent(self, tmp_path):
+        project = self._seed(tmp_path)
+        proc1, _, _ = self._touch(tmp_path, project)
+        assert proc1.stdout.strip()
+        proc2, _, _ = self._touch(tmp_path, project)
+        _assert_contract(proc2, "PostToolUse")
+        assert proc2.stdout.strip() == "", "at most once per (file, session)"
+
+    def test_uncited_touch_stays_the_empty_norm(self, tmp_path):
+        project = self._seed(tmp_path)
+        stdin = json.dumps(
+            {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": os.path.join(project, "src", "free.py")},
+                "session_id": "sess-jit",
+            }
+        )
+        proc, _, _ = _run_hook(_POST_TOOL_HOOK, stdin, tmp_path, venv_python=True)
+        _assert_contract(proc, "PostToolUse")
+        assert proc.stdout.strip() == ""
+
+    def test_kill_switch_restores_pre_t16_silence(self, tmp_path):
+        project = self._seed(tmp_path)
+        proc, _, _ = self._touch(tmp_path, project, extra_env={"HIPPO_DISABLE_JIT": "1"})
+        _assert_contract(proc, "PostToolUse")
+        assert proc.stdout.strip() == ""
+        # ... and the measurement lane (the outcome ledger) still records the touch.
+        ledger = os.path.join(project, ".claude", ".memory-telemetry", "outcome_events.jsonl")
+        assert os.path.exists(ledger)
+
+    def test_writes_stay_inside_derived_dirs(self, tmp_path):
+        project = self._seed(tmp_path)
+        proc, _, _ = self._touch(tmp_path, project)
+        _assert_contract(proc, "PostToolUse")
+        for rel in _tree(project):
+            assert rel.startswith(
+                (".claude/memory/", ".claude/.memory-index/", ".claude/.memory-telemetry/")
+            ), f"JIT lane wrote outside the expected dirs: {rel}"
