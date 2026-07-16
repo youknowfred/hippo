@@ -181,6 +181,23 @@ def test_print_schedule_emits_recipes_and_installs_nothing(tmp_path, monkeypatch
     assert "machine" in out and "moved" in out
 
 
+def test_print_schedule_plist_actually_parses(tmp_path, monkeypatch, capsys):
+    """The launchd recipe must be VALID plist XML, not merely plist-shaped — the very
+    first dogfood install failed plutil on a raw `&&` inside <string>. Round-trip it
+    through plistlib and assert the shell line survived un-mangled."""
+    import plistlib
+
+    root, md = _repo(tmp_path, monkeypatch)
+    _mem(md, "alpha")
+    out = _run(["--print-schedule"], capsys=capsys)
+    xml = out[out.index("<?xml") : out.index("</plist>") + len("</plist>")]
+    doc = plistlib.loads(xml.encode("utf-8"))
+    assert doc["Label"].startswith("com.hippo.sleep.")
+    shell_line = doc["ProgramArguments"][2]
+    assert "&&" in shell_line and ">>" in shell_line and "-m memory.sleep" in shell_line
+    assert root in shell_line and doc["StartCalendarInterval"] == {"Hour": 7, "Minute": 30}
+
+
 def test_snooze_silences_and_resumes_with_a_note(tmp_path, monkeypatch, capsys):
     from memory.telemetry import default_telemetry_dir
 
