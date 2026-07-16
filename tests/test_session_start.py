@@ -1143,3 +1143,65 @@ def test_desktop_surface_note_is_honest_about_terminal_only_verbs():
     assert "dream" in note and "new_memory" in note and "why tool" in note
     # The old claim must be gone: resolve/audit are not 'invoke them directly' verbs.
     assert "(resolve, audit, new, recall, why) run as hippo skills" not in note
+
+
+# --------------------------------------------------------------------------- #
+# MSR-6: the injection cost out-param + the SessionStart producer ledger row.
+# --------------------------------------------------------------------------- #
+def test_build_context_producer_chars_observes_without_changing_output(monkeypatch):
+    _producers(
+        monkeypatch,
+        [
+            ("alpha", lambda md, repo, ctx=None: "ALPHA block"),
+            ("silent", lambda md, repo, ctx=None: None),
+            ("beta", lambda md, repo, ctx=None: "BETA block"),
+        ],
+    )
+    plain = S.build_context("md", "repo")
+    chars: dict = {}
+    observed = S.build_context("md", "repo", producer_chars=chars)
+    assert observed == plain  # byte-identical — the dict observes, never steers
+    assert chars == {"alpha": len("ALPHA block"), "beta": len("BETA block")}
+    # a silent producer contributes no key (absence, not a zero)
+    assert "silent" not in chars
+
+
+def test_main_logs_injection_producer_row(tmp_path, monkeypatch, capsys):
+    md = str(tmp_path / ".claude" / "memory")
+    os.makedirs(md)
+    monkeypatch.setattr(S, "resolve_dirs", lambda: (md, str(tmp_path)))
+    _producers(monkeypatch, [("alpha", lambda m, r, ctx=None: "ALPHA block")])
+    td = str(tmp_path / "telemetry")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    assert S.main([], source="startup", session_id="sess-1") == 0
+    out = capsys.readouterr().out
+    assert "ALPHA block" in out
+    rows = [
+        json.loads(ln)
+        for ln in open(os.path.join(td, "injection_producers.jsonl"), encoding="utf-8")
+        if ln.strip()
+    ]
+    assert len(rows) == 1
+    assert rows[0]["producers"] == {"alpha": len("ALPHA block")}
+    assert rows[0]["session_id"] == "sess-1"
+    assert rows[0]["cap"] == S._MAX_CONTEXT_CHARS
+    assert rows[0]["total"] >= len("ALPHA block")
+
+
+def test_main_untrusted_corpus_writes_no_producer_row(tmp_path, monkeypatch, capsys):
+    """The SEC-1 short-circuit fills no producer_chars — zero cost-ledger trace."""
+    import subprocess
+
+    repo = str(tmp_path / "proj")
+    os.makedirs(repo)
+    subprocess.run(["git", "init", "-q", repo], check=True)
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    with open(os.path.join(md, "note.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: note\ndescription: x\n---\nbody\n")
+    monkeypatch.setattr(S, "resolve_dirs", lambda: (md, repo))
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    td = str(tmp_path / "telemetry")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    assert S.main([], source="startup", session_id="sess-2") == 0
+    assert not os.path.exists(os.path.join(td, "injection_producers.jsonl"))

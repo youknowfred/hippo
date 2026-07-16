@@ -3340,6 +3340,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 drops=drop_log.get("drops") or None,
                 near_miss=(drop_log.get("near_miss") or None) if not results else None,
                 dense_floor=drop_log.get("dense_floor") if not results else None,
+                # MSR-6: the ACTUAL emitted payload length, measured at the one
+                # emission point (`out` above) — an abstention emitted nothing and
+                # writes no key (absence-emits-nothing, never a fake 0).
+                injected_chars=len(out) if out else None,
             )
             log_episode(
                 [r.get("name") for r in results if r.get("name")],

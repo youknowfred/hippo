@@ -574,6 +574,44 @@ def _scorecard_message(memory_dir: str, repo_root: str) -> Tuple[str, str]:
     except Exception:
         components = None
 
+    # MSR-6: the cost-honesty line — what hippo actually SPENT injecting, measured off
+    # the ledgers (recall events' injected_chars + the SessionStart producer rows),
+    # joined with the live KPI-2 touched-proxy. Session/producer aggregation ONLY —
+    # never a per-memory touch table (the inert-recall-noise-finder kill; the MSR-6
+    # AST pin holds this function to injection_precision's scalar aggregates).
+    cost_chars = 0
+    cost_sessions: set = set()
+    try:
+        from .telemetry import default_telemetry_dir as _dtd
+        from .telemetry import read_events as _cost_read_events
+        from .telemetry import read_injection_producers as _cost_read_producers
+
+        _cost_td = _dtd(memory_dir)
+        for e in _cost_read_events(_cost_td):
+            ic = e.get("injected_chars")
+            if isinstance(ic, int) and not isinstance(ic, bool) and ic > 0:
+                cost_chars += ic
+                if e.get("session_id"):
+                    cost_sessions.add(e["session_id"])
+        for row in _cost_read_producers(_cost_td):
+            t = row.get("total")
+            if isinstance(t, int) and not isinstance(t, bool) and t > 0:
+                cost_chars += t
+                if row.get("session_id"):
+                    cost_sessions.add(row["session_id"])
+    except Exception:
+        cost_chars = 0
+        cost_sessions = set()
+    touched_pct = "touched n/a"
+    try:
+        from .outcome import injection_precision
+
+        prec = injection_precision(memory_dir, None)
+        if prec.get("precision") is not None:
+            touched_pct = f"{round(prec['precision'] * 100)}% touched"
+    except Exception:
+        pass
+
     # GOV-4: floor/corpus changed since this clone's watermark (read-only peek — never
     # consumes the producer's surfaced-once semantics).
     floor_line = "floor/corpus delta: no watermark baseline yet"
@@ -602,6 +640,8 @@ def _scorecard_message(memory_dir: str, repo_root: str) -> Tuple[str, str]:
         f"{pinned} pinned / {muted} muted",
         f"{draft} draft",
         (f"{components} graph component(s)" if components is not None else "graph components: n/a"),
+        # MSR-6: the folded-in cost-honesty part — one part, not a new check/line.
+        f"injected ~{cost_chars} chars over {len(cost_sessions)} session(s); {touched_pct}",
         floor_line,
     ]
     status = "warn" if (contested or rule_conflicts or rot or blind or orphans) else "ok"

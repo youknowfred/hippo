@@ -400,26 +400,47 @@ def session_token_cost(
     independently re-resolving via the ambient ``resolve_dirs()`` — an explicit
     ``memory_dir`` (a hermetic test corpus, or any non-default corpus) must never silently
     read a DIFFERENT corpus's telemetry ledger.
+
+    MSR-6: events carrying ``injected_chars`` (the ledger-measured emitted payload)
+    upgrade the per-query figure from ``token_reduction``'s ESTIMATE to a measured
+    actual (chars/4, the same heuristic, over real payloads). The estimate remains the
+    fallback for a ledger predating the field; ``measured_events`` (additive) says
+    which one this report used. Report-only status and gate constants untouched.
     """
     from .telemetry import default_telemetry_dir, read_events
 
     td = telemetry_dir or default_telemetry_dir(memory_dir)
     sessions: Dict[str, int] = {}
+    measured_chars: List[int] = []
     try:
         for e in read_events(td):
             sid = e.get("session_id")
             if sid:
                 sessions[sid] = sessions.get(sid, 0) + 1
+            ic = e.get("injected_chars")
+            if isinstance(ic, int) and not isinstance(ic, bool) and ic >= 0:
+                measured_chars.append(ic)
     except Exception:
         pass
     if not sessions:
-        return {"avg_events_per_session": 0.0, "avg_session_tokens": 0.0, "n_sessions": 0}
+        return {
+            "avg_events_per_session": 0.0,
+            "avg_session_tokens": 0.0,
+            "n_sessions": 0,
+            "measured_events": 0,
+        }
     avg_events = sum(sessions.values()) / len(sessions)
-    tok = token_reduction(memory_dir, index, hard_set, k=k, index_dir=index_dir)
+    if measured_chars:
+        # chars/4 — _estimate_tokens' exact heuristic, applied to the measured mean.
+        per_query_tokens = max(0, round((sum(measured_chars) / len(measured_chars)) / 4))
+    else:
+        tok = token_reduction(memory_dir, index, hard_set, k=k, index_dir=index_dir)
+        per_query_tokens = tok["recall_avg"]
     return {
         "avg_events_per_session": round(avg_events, 2),
-        "avg_session_tokens": round(avg_events * tok["recall_avg"], 1),
+        "avg_session_tokens": round(avg_events * per_query_tokens, 1),
         "n_sessions": len(sessions),
+        "measured_events": len(measured_chars),
     }
 
 

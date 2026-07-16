@@ -668,7 +668,13 @@ def test_session_token_cost_no_sessions_returns_zeros_never_raises(tmp_path, mon
     B.build_index(md, idx)
     index = B.load_index(idx)
     sc = E.session_token_cost(md, str(tmp_path / "missing-tele"), index, _HARD_SET, k=10)
-    assert sc == {"avg_events_per_session": 0.0, "avg_session_tokens": 0.0, "n_sessions": 0}
+    # measured_events joined the shape in MSR-6 (additive) — lockstep pin update
+    assert sc == {
+        "avg_events_per_session": 0.0,
+        "avg_session_tokens": 0.0,
+        "n_sessions": 0,
+        "measured_events": 0,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -2075,3 +2081,38 @@ def test_report_omits_miss_autopsy_without_hard_set(tmp_path, monkeypatch):
     md, idx, _hs = _msr1_setup(tmp_path, monkeypatch)
     report = E.evaluate(memory_dir=md, index_dir=idx, k=10)
     assert "miss_autopsy" not in report
+
+
+# --------------------------------------------------------------------------- #
+# MSR-6: session_token_cost uses ledger-measured actuals when present.
+# --------------------------------------------------------------------------- #
+def test_session_token_cost_prefers_measured_actuals(tmp_path, monkeypatch):
+    from memory import telemetry as T
+
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    td = str(tmp_path / "telemetry")
+    # two events in one session, both carrying the measured payload length
+    for chars in (400, 800):
+        T.log_recall_event(
+            [], query="q", k=10, latency_ms=1.0, telemetry_dir=td,
+            session_id="s1", injected_chars=chars,
+        )
+    cost = E.session_token_cost(md, td, index, [], k=10, index_dir=idx)
+    assert cost["measured_events"] == 2
+    # mean 600 chars -> 150 tokens x 2 events/session = 300
+    assert cost["avg_session_tokens"] == 300.0
+
+
+def test_session_token_cost_falls_back_to_estimate(tmp_path, monkeypatch):
+    from memory import telemetry as T
+
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    td = str(tmp_path / "telemetry")
+    T.log_recall_event([], query="q", k=10, latency_ms=1.0, telemetry_dir=td, session_id="s1")
+    cost = E.session_token_cost(md, td, index, [], k=10, index_dir=idx)
+    assert cost["measured_events"] == 0  # pre-MSR-6-shaped ledger: estimate path
+    assert cost["n_sessions"] == 1

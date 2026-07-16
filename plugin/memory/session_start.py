@@ -1452,7 +1452,13 @@ def _build_run_context(memory_dir: str, repo_root: str) -> RunContext:
     )
 
 
-def build_context(memory_dir: str, repo_root: str, max_chars: int = _MAX_CONTEXT_CHARS) -> str:
+def build_context(
+    memory_dir: str,
+    repo_root: str,
+    max_chars: int = _MAX_CONTEXT_CHARS,
+    *,
+    producer_chars: Optional[dict] = None,
+) -> str:
     """Run every producer, merge their non-empty blocks, bound the total. Never raises.
 
     SEC-1 short-circuit: when this project's corpus exists but is NOT trusted, EVERY content
@@ -1461,6 +1467,13 @@ def build_context(memory_dir: str, repo_root: str, max_chars: int = _MAX_CONTEXT
 
     Both return paths route through ``_bound_with_surface_note`` so any ``/hippo:*`` advice
     (including the untrusted nudge's) names its Desktop-app equivalent on that surface.
+
+    MSR-6 ``producer_chars``: an OPT-IN out-param dict filled with each contributing
+    producer's emitted char count ``{label: len(block)}`` — the numbers this function
+    already computes to assemble the payload, measured, never estimated. The output is
+    byte-identical whether or not the dict is passed (observation only). The SEC-1
+    short-circuit deliberately fills NOTHING: an untrusted corpus's nudge must not
+    grow a ledger row (zero-trace posture), and the caller only logs a non-empty dict.
     """
     try:
         from . import trust
@@ -1484,6 +1497,8 @@ def build_context(memory_dir: str, repo_root: str, max_chars: int = _MAX_CONTEXT
             out = f"⚠ {_label} producer failed: {type(exc).__name__}: {exc}"
         if out:
             blocks.append(out.rstrip())
+            if producer_chars is not None:
+                producer_chars[_label] = len(blocks[-1])
     if not blocks:
         return ""
     return _bound_with_surface_note("\n\n".join(blocks), max_chars)
@@ -1587,7 +1602,8 @@ def main(
                     current_session_id(td)
         except Exception:
             pass
-        ctx = build_context(memory_dir, repo_root)
+        producer_chars: dict = {}
+        ctx = build_context(memory_dir, repo_root, producer_chars=producer_chars)
         if ctx:
             print(
                 json.dumps(
@@ -1599,6 +1615,25 @@ def main(
                     }
                 )
             )
+            # MSR-6: record what this SessionStart actually injected, per producer,
+            # against the char budget — fire-and-forget AFTER emission (output is
+            # byte-identical with or without it). Same corpus-existence guard as the
+            # session-token block above (SEC-3: a never-opted-in project grows no
+            # ledger); the SEC-1 untrusted path filled no producer_chars, so it
+            # writes nothing here either (zero trace).
+            try:
+                from .telemetry import default_telemetry_dir, log_injection_producers
+
+                if producer_chars and os.path.isdir(memory_dir):
+                    log_injection_producers(
+                        producer_chars,
+                        total=len(ctx),
+                        cap=_MAX_CONTEXT_CHARS,
+                        telemetry_dir=default_telemetry_dir(memory_dir),
+                        session_id=session_id,
+                    )
+            except Exception:
+                pass
     except Exception:
         pass  # SessionStart must never fail loudly
     return 0

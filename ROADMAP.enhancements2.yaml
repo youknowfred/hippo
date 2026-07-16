@@ -324,6 +324,11 @@ workstreams:
           the KPI-3 p95 gate. A measurement rider (coverage-critic miss SEC-13): the
           per-channel volume line MAY note MCP writes that hit an untrusted corpus, but
           building the SEC-13 write-gate itself belongs to ROADMAP.v1, not this item.
+          BUILD-TIME DECISION (T8, 2026-07-16): the MAY-rider was declined — counting
+          untrusted-corpus MCP writes requires persisting a trust-posture trace, which
+          is exactly the mcp-channel-flight-recorder shape not_pursuing already killed
+          (SEC-1's eliminated trace must stay eliminated); the shipped scope is the
+          per-channel volume line + the channel-tagged abstention arm only.
 
       - id: MSR-4
         title: Drop-reason autopsy ledger (near-miss scores on abstention; per-category miss autopsy)

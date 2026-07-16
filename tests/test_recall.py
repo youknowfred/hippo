@@ -3986,3 +3986,24 @@ def test_main_abstention_event_carries_near_miss(tmp_path, monkeypatch, capsys):
     assert isinstance(events[0].get("dense_floor"), float)
     for nm in events[0]["near_miss"]:
         assert nm["score"] < events[0]["dense_floor"]
+
+
+def test_main_ledger_event_measures_injected_chars(tmp_path, monkeypatch, capsys):
+    """MSR-6: injected_chars is the emitted payload's len; abstention writes no key."""
+    md, idx = _msr4_corpus(tmp_path, monkeypatch)
+    td = str(tmp_path / "telemetry")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    assert R.main(["which reranker do we use for search results", "--memory-dir", md, "--index-dir", idx]) == 0
+    printed = capsys.readouterr().out.rstrip("\n")
+    assert R.main(["wholly unrelated zzqx phrasing", "--memory-dir", md, "--index-dir", idx]) == 0
+    capsys.readouterr()
+    import json as _json
+
+    events = [
+        _json.loads(ln)
+        for ln in open(os.path.join(td, "recall_events.jsonl"), encoding="utf-8")
+        if ln.strip()
+    ]
+    assert len(events) == 2
+    assert events[0]["injected_chars"] == len(printed)  # measured at the emission point
+    assert "injected_chars" not in events[1]  # abstention emitted nothing — no fake 0

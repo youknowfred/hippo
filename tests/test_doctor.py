@@ -1239,3 +1239,27 @@ def test_recall_channels_line_counts_and_mcp_blind_spots(memory_dir, repo, tmp_p
 def test_recall_channels_registered_after_hot_path_latency():
     labels = [label for label, _fn in D.CHECKS]
     assert labels.index("recall_channels") == labels.index("hot_path_latency") + 1
+
+
+# --------------------------------------------------------------------------- #
+# MSR-6: the scorecard's folded-in cost-honesty part.
+# --------------------------------------------------------------------------- #
+def test_scorecard_cost_line_reads_measured_ledgers(memory_dir, repo, tmp_path, monkeypatch):
+    from memory import telemetry as T
+
+    td = str(tmp_path / "t")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    ctx = D.DoctorContext(memory_dir, repo)
+    zero = D.check_trust_scorecard(ctx)["message"]
+    assert "injected ~0 chars over 0 session(s); touched n/a" in zero
+    assert "\n" not in zero  # still ONE line — folded in, not a new check
+    T.log_recall_event(
+        [], query="q", k=5, latency_ms=1.0, telemetry_dir=td,
+        session_id="s1", injected_chars=1200,
+    )
+    T.log_injection_producers(
+        {"floor": 300}, total=300, cap=9000, telemetry_dir=td, session_id="s2"
+    )
+    m = D.check_trust_scorecard(ctx)["message"]
+    assert "injected ~1500 chars over 2 session(s)" in m
+    assert D.check_trust_scorecard(ctx)["message"] == m  # deterministic
