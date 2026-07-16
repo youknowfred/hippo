@@ -241,8 +241,10 @@ by what it's for.
   repo's private tier) with an origin stamp, so it recalls in every project.
 - `/hippo:promote-rule` — promote one reinforced procedural memory into a glob-scoped
   `.claude/rules/` file the harness loads only for edits under the paths it cites.
-- `/hippo:pack` — share or adopt memory *packs*: extract chosen memories into a portable pack, or
-  install one (per-item, on the trust spine).
+- `/hippo:pack` — share or adopt memory *packs*: extract chosen memories (or `all`) into a
+  portable pack, or install one (per-item, on the trust spine). On the Desktop app the same
+  flow runs through the `pack_*` MCP tools (`pack_extract`, `pack_install_plan`/`_item`,
+  `pack_update_plan`/`_item`).
 - `/hippo:export-agents` — render your memory floor as a proposed `AGENTS.md` diff for the
   cross-tool rule plane (Codex/Cursor/Copilot all read `AGENTS.md`).
 - `/hippo:import` — migration on-ramp: import existing rules/notes from other tools (Cursor

@@ -88,6 +88,14 @@ _CONSOLIDATE_TOOLS = [
 # baseline heal were CLI-only in v1.15.0, so the DRV-2 nudge (a hook — it fires on BOTH
 # surfaces) routed a Desktop user to doctor, and doctor routed them nowhere.
 _REPAIR_TOOLS = ["rederive", "heal_baselines"]
+# Additive pack tools (INT-16): /hippo:pack's five primitives, in the skill's own flow
+# order. Pre-INT-16 the pack skill's preflight ABORTED on Desktop ("re-run from a
+# terminal") and agents hand-rolled venv paths around it — the exact gap INT-13 closed
+# for consolidate.
+_PACK_TOOLS = [
+    "pack_extract", "pack_install_plan", "pack_install_item",
+    "pack_update_plan", "pack_update_item",
+]
 
 
 def test_tools_list_exposes_frozen_five_plus_setup_tools():
@@ -95,6 +103,7 @@ def test_tools_list_exposes_frozen_five_plus_setup_tools():
     names = [t["name"] for t in resp["result"]["tools"]]
     assert names == (
         _FROZEN_TOOLS + _SETUP_TOOLS + _VERB_TOOLS + _CONSOLIDATE_TOOLS + _REPAIR_TOOLS
+        + _PACK_TOOLS
     )
     for t in resp["result"]["tools"]:
         assert t["inputSchema"]["type"] == "object"  # every tool has a JSON schema
@@ -189,6 +198,85 @@ def test_serve_rejects_oversized_message_and_keeps_serving(corpus, monkeypatch):
     responses = [json.loads(ln) for ln in out.getvalue().splitlines() if ln.strip()]
     assert any(r.get("error", {}).get("message") == "message too large" for r in responses)
     assert any(r.get("id") == 2 for r in responses)  # the valid message after it still served
+
+
+# --------------------------------------------------------------------------- #
+# INT-16 — the pack tools: /hippo:pack on the surface whose Bash tool never sees
+# CLAUDE_PLUGIN_DATA. The extract text must carry the COMPLETE refusal reason map
+# (the Desktop transcript's "the reason isn't in the fields I printed" failure).
+# --------------------------------------------------------------------------- #
+def test_pack_extract_tool_extracts_all_and_reports_every_refusal_reason(corpus, tmp_path):
+    dest = str(tmp_path / "site-pack")
+    resp = _call("pack_extract", {"dest": dest, "all": True})
+    text = _text(resp)
+    assert "✔ extracted 2 memories" in text
+    assert os.path.isfile(os.path.join(dest, "manifest.json"))
+
+    # A refusal names EVERY problem in the tool text itself — nothing to forget to print.
+    resp2 = _call("pack_extract", {"dest": dest, "names": ["deploy_runbook", "ghost"]})
+    t2 = _text(resp2)
+    assert "zero files written" in t2
+    assert "ghost: not found" in t2
+    assert "deploy_runbook" in t2  # the collision with the already-extracted copy, too
+
+
+def test_pack_extract_tool_requires_dest_and_a_selection(corpus, tmp_path):
+    assert "'dest' is required" in _text(_call("pack_extract", {}))
+    resp = _call("pack_extract", {"dest": str(tmp_path / "p"), "names": []})
+    assert "never glob the corpus dir" in _text(resp)
+
+
+def test_pack_install_tools_plan_then_one_item(corpus, tmp_path):
+    src = str(tmp_path / "src-pack")
+    os.makedirs(src)
+    with open(os.path.join(src, "lesson.md"), "w") as fh:
+        fh.write(_mem("lesson", "never deploy on friday afternoons", mtype="feedback"))
+    with open(os.path.join(src, "manifest.json"), "w") as fh:
+        json.dump({
+            "pack": "lessons", "version": "1.0.0", "title": "lessons",
+            "description": "test pack", "seed_by_default": False,
+            "memories": [{"file": "lesson.md"}],
+        }, fh)
+
+    plan_text = _text(_call("pack_install_plan", {"source_dir": src}))
+    assert "UNTRUSTED DATA" in plan_text  # the SEC-5 demarcation discipline, in-band
+    assert 'will inject → "never deploy on friday afternoons"' in plan_text
+    assert "ONE pack_install_item call each" in plan_text
+    assert not os.path.exists(os.path.join(corpus, "lesson.md"))  # a plan writes NOTHING
+
+    item_text = _text(_call("pack_install_item", {"source_dir": src, "name": "lesson"}))
+    assert "✔ installed lesson" in item_text
+    assert os.path.isfile(os.path.join(corpus, "lesson.md"))
+    assert os.path.isfile(os.path.join(corpus, ".packs.lock.json"))
+
+
+def test_pack_tools_honor_the_trust_gate(corpus, monkeypatch, tmp_path):
+    """SEC-1: every pack tool is gated — extract copies memory bodies OUT of the
+    corpus, so an untrusted corpus withholds it exactly as recall is withheld."""
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    resp = _call("pack_extract", {"dest": str(tmp_path / "p"), "all": True})
+    assert "untrusted" in _text(resp) and "trust_corpus" in _text(resp)
+
+
+def test_pack_skill_preflight_maps_every_pack_tool():
+    """INT-16 mirrors INT-13's contract: the skill's guard must route Desktop to the
+    tools (not claim no path exists), and every tool it names must be served."""
+    path = os.path.join(
+        os.path.dirname(__file__), "..", "plugin", "skills", "pack", "SKILL.md"
+    )
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    assert "no Desktop-safe MCP-tool equivalent" not in text  # the pre-INT-16 claim is gone
+    for tool in _PACK_TOOLS:
+        assert tool in text, f"pack SKILL.md no longer names the {tool} tool"
+        assert tool in M._DISPATCH, f"SKILL.md names {tool} but the server does not serve it"
+
+
+def test_desktop_surface_note_maps_pack_to_the_tools():
+    from memory.session_start import _DESKTOP_SURFACE_NOTE as note
+
+    for tool in _PACK_TOOLS:
+        assert tool in note, f"the Desktop surface note no longer names {tool}"
 
 
 def test_traverse_tool_walks_the_graph(corpus):
