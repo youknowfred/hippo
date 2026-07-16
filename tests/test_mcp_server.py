@@ -587,3 +587,24 @@ def test_resources_read_scorecard_withheld_for_untrusted_corpus(repo, memory_dir
     text = _contents(_read("hippo://scorecard"))["text"]
     assert "WITHHELD" in text and "untrusted" in text
     assert "contested-unresolved" not in text  # no counts leak past the gate
+
+
+# --------------------------------------------------------------------------- #
+# MSR-3: the recall/why tools pass channel="mcp" into recall_view.describe.
+# --------------------------------------------------------------------------- #
+def test_recall_and_why_tools_tag_the_mcp_channel(monkeypatch):
+    from memory import recall_view as V
+
+    seen = []
+
+    def _spy(query, k, **kwargs):
+        seen.append((query, kwargs.get("channel"), kwargs.get("why")))
+        return "stub"
+
+    monkeypatch.setattr(V, "describe", _spy)
+    assert M._tool_recall({"query": "canary rollout"}) == "stub"
+    assert M._tool_why({"query": "canary rollout"}) == "stub"
+    assert seen == [
+        ("canary rollout", "mcp", None),
+        ("canary rollout", "mcp", True),
+    ]

@@ -1342,6 +1342,11 @@ def check_hot_path_latency(ctx: DoctorContext) -> Dict[str, str]:
     the real per-prompt cost users pay, not a warm benchmark. This surfaces the p95 so a
     regression (a heavier model, a new per-import cost) is visible, warning past the KPI-3 cold
     budget. Read-only; N/A when the ledger is empty; never raises.
+
+    MSR-3: filtered to ``channel in (hook, absent)`` — the ledger now also carries
+    MCP-channel events (the recall/why tools), and an in-process MCP recall's timing is
+    a different animal from the fresh-hook-process cost this p95 budgets. Without the
+    filter, one MCP call would corrupt the KPI-3 gate this line exists to watch.
     """
     try:
         from .telemetry import default_telemetry_dir, read_events
@@ -1351,6 +1356,7 @@ def check_hot_path_latency(ctx: DoctorContext) -> Dict[str, str]:
             float(e["latency_ms"])
             for e in read_events(td)
             if isinstance(e.get("latency_ms"), (int, float))
+            and e.get("channel") in (None, "hook")
         )
         if not lats:
             return {
@@ -1403,6 +1409,50 @@ def check_recall_blind_spots(ctx: DoctorContext) -> Dict[str, str]:
         }
     except Exception as exc:
         return {"status": "warn", "message": f"recall blind-spots check failed: {exc}."}
+
+
+def check_recall_channels(ctx: DoctorContext) -> Dict[str, str]:
+    """MSR-3: the per-channel recall volume line + the MCP abstention arm.
+
+    MCP recall/why events were telemetry-INVISIBLE (recall_view bypassed main()'s
+    logging), so the usage ledger undercounted exactly the highest-intent recalls —
+    an agent explicitly asking mid-turn. This line says how much of each surface the
+    ledger now sees, and how many recurring blind-spot clusters are MCP-specific
+    (``abstention_backlog(channel="mcp")`` — an agent asked and got nothing,
+    repeatedly). Counts only, no timestamps (the doctor determinism pin); read-only;
+    informational, never a warn. NB the deliberate asymmetry: an UNTRUSTED corpus's
+    MCP recalls leave zero ledger trace (SEC-1), so this line can never become the
+    trust-posture flight recorder the round-2 vetting killed.
+    """
+    try:
+        from .telemetry import abstention_backlog, default_telemetry_dir, read_events
+
+        td = default_telemetry_dir(ctx.memory_dir)
+        hook = mcp = 0
+        for e in read_events(td):
+            if (e.get("channel") or "hook") == "mcp":
+                mcp += 1
+            else:
+                hook += 1
+        if not (hook or mcp):
+            return {
+                "status": "ok",
+                "message": "recall channels: no recall events logged yet — nothing to count.",
+            }
+        if not mcp:
+            return {
+                "status": "ok",
+                "message": f"recall channels: all {hook} event(s) via hook — no MCP "
+                "recall/why traffic logged yet.",
+            }
+        mcp_blind = len(abstention_backlog(td, channel="mcp"))
+        return {
+            "status": "ok",
+            "message": f"recall channels: {hook} hook / {mcp} mcp event(s); "
+            f"{mcp_blind} recurring MCP blind-spot cluster(s).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"recall channels check failed: {exc}."}
 
 
 # MSR-4: below this many drop-carrying events the aggregation stays quiet — a couple of
@@ -1761,6 +1811,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("index_count", check_index_count),
     ("steering", check_steering),  # GOV-2: N pinned (pre-wires the mandatory MUTE count)
     ("hot_path_latency", check_hot_path_latency),
+    ("recall_channels", check_recall_channels),  # MSR-3: hook/mcp volume + MCP blind-spot arm
     ("recall_blind_spots", check_recall_blind_spots),
     ("drop_autopsy", check_drop_autopsy),  # MSR-4: which mechanism eats candidates, aggregated
 

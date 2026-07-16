@@ -995,7 +995,9 @@ def _tool_recall(args: Dict[str, Any]) -> str:
         return "recall: a non-empty query is required."
     k = args.get("k")
     k = int(k) if isinstance(k, (int, float)) and int(k) > 0 else 10
-    return describe(query, k)
+    # MSR-3: agent-issued recalls are channel-tagged on the recall ledger (SEC-1/SEC-3
+    # gated inside describe) — this surface was telemetry-invisible before.
+    return describe(query, k, channel="mcp")
 
 
 def _tool_new_memory(args: Dict[str, Any]) -> str:
@@ -1096,7 +1098,9 @@ def _tool_why(args: Dict[str, Any]) -> str:
         return "why: a non-empty query is required."
     k = args.get("k")
     k = int(k) if isinstance(k, (int, float)) and int(k) > 0 else 10
-    return describe(query, k, why=True)
+    # MSR-3: same channel tag as the recall tool — a why-receipt lookup is a real
+    # agent-issued recall the usage ledger must count.
+    return describe(query, k, why=True, channel="mcp")
 
 
 def _tool_traverse(args: Dict[str, Any]) -> str:

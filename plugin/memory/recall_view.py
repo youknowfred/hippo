@@ -13,15 +13,21 @@ flag (RET-6's ``stale_banner``), and its inbound/outbound graph neighbors, then 
 human-readable listing. ``--list-by-type`` dumps the whole corpus grouped by type (a map of
 what is known here), read straight off the corpus files with no query.
 
-Read-only: it never writes the corpus, the index, or the ledgers. It does NOT route through
-``recall.main()``, so a deliberate listing logs no episode/recall event (a human browsing the
-corpus is not a recall the capture pass should later replay). ``main()`` never raises — it
-degrades to a plain message, mirroring ``recall.py``'s own never-raise hook discipline.
+Read-only over the corpus/index: it never writes either, and it does NOT route through
+``recall.main()``. A HUMAN browsing (the CLI, ``channel=None``) logs no episode/recall
+event — a deliberate listing is not a recall the capture pass should later replay.
+MSR-3 carves out exactly ONE logging channel: the MCP recall/why tools pass
+``channel="mcp"`` and their events land channel-tagged on the recall ledger (same SEC-1/
+SEC-3 gates as the hook's own telemetry block; the episode buffer stays untouched) — an
+agent-issued mid-turn recall is real usage the soak/blind-spot/ED-2 ledgers were
+systematically undercounting. ``main()`` never raises — it degrades to a plain message,
+mirroring ``recall.py``'s own never-raise hook discipline.
 """
 
 from __future__ import annotations
 
 import os
+import time
 from typing import List, Optional, Set, Tuple
 
 from .build_index import default_index_dir, extract_description
@@ -174,6 +180,54 @@ def _corpora_note(res: dict) -> str:
     return "  (" + " · ".join(parts) + ")"
 
 
+def _log_channel_event(
+    hits: List[dict],
+    *,
+    query: str,
+    k: int,
+    latency_ms: float,
+    memory_dir: Optional[str],
+    repo_root: Optional[str],
+    channel: str,
+) -> None:
+    """MSR-3: the channel-tagged twin of ``recall.main()``'s telemetry block.
+
+    Fire-and-forget, never raises, and gated EXACTLY as main() gates its own logging
+    (replicated per the vetting's requirement, not shared — main()'s block is inline
+    in the hook path):
+      - SEC-1: an untrusted corpus leaves ZERO ledger trace — even an empty
+        backend="none" row is itself a trace that a foreign, unreviewed corpus was
+        queried. A non-git corpus (gate inapplicable) logs, matching recall()'s own
+        fail-open posture there.
+      - SEC-3: a project with no ``.claude/memory`` corpus must never gain a telemetry
+        ledger with prompt previews.
+    The episode buffer is deliberately NOT written: log_episode is the future
+    capture-pass replay signal for the HOOK surface; an agent's explicit mid-turn
+    lookup is not a hook injection to replay (and the MSR-3 scope pins
+    episode_buffer.jsonl consumers byte-identical).
+    """
+    try:
+        if not query or not memory_dir or not os.path.isdir(memory_dir):
+            return
+        from . import trust
+
+        gate_root = trust.gate_repo_root(memory_dir, repo_root)
+        if gate_root is not None and not trust.is_trusted(gate_root):
+            return  # SEC-1: zero trace, matching recall()'s zero-injection posture
+        from .telemetry import default_telemetry_dir, log_recall_event
+
+        log_recall_event(
+            hits,
+            query=query,
+            k=k,
+            latency_ms=latency_ms,
+            telemetry_dir=default_telemetry_dir(memory_dir),
+            channel=channel,
+        )
+    except Exception:
+        pass
+
+
 def describe(
     query: str,
     k: int = DEFAULT_K,
@@ -183,6 +237,7 @@ def describe(
     repo_root: Optional[str] = None,
     why: bool = False,
     all_projects: bool = False,
+    channel: Optional[str] = None,
 ) -> str:
     """Human-readable answer to "what do you remember about ``query``".
 
@@ -199,6 +254,18 @@ def describe(
     per-source-trust-gated local corpus — labels cross-project hits "from <repo>", and
     appends a sources trailer naming everything searched and everything skipped (inv3).
     Explicit surfaces only; the hook path never sets it.
+
+    MSR-3 ``channel``: ``"mcp"`` (the MCP recall/why tools pass it) fire-and-forget
+    logs the recall event channel-tagged, closing the "MCP recall is telemetry-
+    invisible" hole — every mid-turn and subagent recall was missing from soak, blind
+    spots, and the usage ledger the ED-2 salience revisit depends on. The log
+    REPLICATES ``recall.main()``'s gates verbatim: SEC-1 (an untrusted corpus leaves
+    ZERO ledger trace) and SEC-3 (a project that never opted in gains no telemetry
+    dir). ``None`` — the CLI and every direct caller — logs NOTHING, preserving this
+    module's deliberate "a human browsing is not a recall to replay" posture (the
+    docstring above); the episode buffer is untouched on every path (RCL-2/RCL-3/
+    co-recall/KPI-2 consumers stay byte-identical). ``all_projects`` runs never log
+    (a fused multi-corpus listing is not a project-ledger event).
     """
     if memory_dir is None:
         memory_dir, repo_root = resolve_dirs()
@@ -211,9 +278,20 @@ def describe(
         )
         hits = corpora_res["hits"]
     else:
+        _t0 = time.perf_counter() if channel == "mcp" else 0.0
         hits = recall(
             query, k, memory_dir=memory_dir, index_dir=index_dir, repo_root=repo_root
         )
+        if channel == "mcp":
+            _log_channel_event(
+                hits,
+                query=query,
+                k=k,
+                latency_ms=(time.perf_counter() - _t0) * 1000.0,
+                memory_dir=memory_dir,
+                repo_root=repo_root,
+                channel=channel,
+            )
     if not hits:
         if why and not all_projects:
             return _abstention_receipt(query, memory_dir, index_dir, repo_root)

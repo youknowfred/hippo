@@ -219,6 +219,7 @@ def log_recall_event(
     drops: Optional[List[dict]] = None,
     near_miss: Optional[List[dict]] = None,
     dense_floor: Optional[float] = None,
+    channel: Optional[str] = None,
 ) -> bool:
     """Append ONE recall event to the ledger. Fire-and-forget: NEVER raises.
 
@@ -248,6 +249,15 @@ def log_recall_event(
                         BM25-floor decision and the SIG-5 revisit never had.
       ``dense_floor`` — the calibrated floor those near-miss scores missed, so the
                         margin is readable off the row without re-deriving the constant.
+
+    MSR-3 ``channel``: which surface issued the recall — ``'hook'`` (the silent
+    UserPromptSubmit path; the ONLY writer before this field existed) or ``'mcp'``
+    (the recall/why tools, agent-issued mid-turn). ADDITIVE and absent-means-hook:
+    a hook event writes NO key at all, so every pre-MSR-3 row and every new hook row
+    parse identically (ED-4, no schema bump). Consumers that must stay hook-only
+    (doctor's KPI-3 p95) filter on ``channel in (None, 'hook')``. The CLI
+    (``recall_view.main``, a human browsing) deliberately stays UNLOGGED — see
+    that module's docstring; agent-issued MCP is the only channel added.
     """
     try:
         td = _resolve_dir(telemetry_dir)
@@ -271,6 +281,8 @@ def log_recall_event(
             event["near_miss"] = near_miss
         if dense_floor is not None:
             event["dense_floor"] = dense_floor
+        if channel and channel != "hook":
+            event["channel"] = channel
         path = _ledger_path(td)
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, ensure_ascii=False) + "\n")
@@ -355,6 +367,7 @@ def abstention_backlog(
     *,
     min_count: int = _ABSTENTION_MIN_COUNT,
     max_clusters: int = _ABSTENTION_MAX_CLUSTERS,
+    channel: Optional[str] = None,
 ) -> List[dict]:
     """Recurring abstained-query clusters — the recall blind-spot backlog.
 
@@ -363,12 +376,19 @@ def abstention_backlog(
     least ``min_count`` times, most-frequent first, as
     ``[{"count", "sample_query", "terms", "queries"}]``. One-off / diverse abstentions never
     reach ``min_count``, so they never surface. Read-only; never raises; ``[]`` on any failure.
+
+    MSR-3 ``channel``: ``None`` (every pre-MSR-3 caller) clusters ALL abstentions,
+    byte-identical to before; ``'hook'``/``'mcp'`` restricts to that surface's events
+    (absent-means-hook on the row) — the MCP arm is the highest-intent demand signal
+    (an agent explicitly asked and got nothing), surfaced by doctor's channel line.
     """
     try:
         td = _resolve_dir(telemetry_dir)
         clusters: List[dict] = []  # {"seed": set, "all": set, "count": int, "queries": [str]}
         for e in read_events(td):
             if e.get("backend") != "none":
+                continue
+            if channel is not None and (e.get("channel") or "hook") != channel:
                 continue
             q = (e.get("query_preview") or "").strip()
             if not q:

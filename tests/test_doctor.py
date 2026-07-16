@@ -1195,3 +1195,47 @@ def test_drop_autopsy_aggregates_reasons_deterministically(memory_dir, repo, tmp
 def test_drop_autopsy_registered_after_blind_spots():
     labels = [label for label, _fn in D.CHECKS]
     assert labels.index("drop_autopsy") == labels.index("recall_blind_spots") + 1
+
+
+# --------------------------------------------------------------------------- #
+# MSR-3: the hot-path p95 is channel-filtered; the channels line counts surfaces.
+# --------------------------------------------------------------------------- #
+def test_hot_path_p95_ignores_mcp_channel_events(memory_dir, repo, tmp_path, monkeypatch):
+    from memory import telemetry as T
+
+    td = str(tmp_path / "t")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    for _ in range(4):
+        T.log_recall_event([], query="q", k=5, latency_ms=10.0, telemetry_dir=td)
+    ctx = D.DoctorContext(memory_dir, repo)
+    before = D.check_hot_path_latency(ctx)["message"]
+    # an in-process MCP recall (different cost animal) must not corrupt KPI-3's p95
+    T.log_recall_event([], query="q", k=5, latency_ms=99999.0, telemetry_dir=td, channel="mcp")
+    after = D.check_hot_path_latency(ctx)["message"]
+    assert after == before  # byte-identical — the MCP event is invisible to this gate
+
+
+def test_recall_channels_line_counts_and_mcp_blind_spots(memory_dir, repo, tmp_path, monkeypatch):
+    from memory import telemetry as T
+
+    td = str(tmp_path / "t")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    ctx = D.DoctorContext(memory_dir, repo)
+    assert "no recall events logged yet" in D.check_recall_channels(ctx)["message"]
+    T.log_recall_event([], query="q", k=5, latency_ms=1.0, telemetry_dir=td)
+    assert "all 1 event(s) via hook" in D.check_recall_channels(ctx)["message"]
+    for _ in range(3):
+        T.log_recall_event(
+            [], query="what is the terraform registry", k=5, latency_ms=1.0,
+            telemetry_dir=td, channel="mcp",
+        )
+    m = D.check_recall_channels(ctx)["message"]
+    assert "1 hook / 3 mcp event(s)" in m
+    assert "1 recurring MCP blind-spot cluster(s)" in m
+    assert "\n" not in m
+    assert D.check_recall_channels(ctx)["message"] == m  # deterministic
+
+
+def test_recall_channels_registered_after_hot_path_latency():
+    labels = [label for label, _fn in D.CHECKS]
+    assert labels.index("recall_channels") == labels.index("hot_path_latency") + 1
