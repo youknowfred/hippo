@@ -114,6 +114,12 @@ def read_last_verified(text: str) -> Optional[str]:
     lv = fm.get("last_verified")
     if lv is None:
         lv = meta.get("last_verified")
+    if hasattr(lv, "isoformat"):
+        # COR-19: PyYAML types an UNQUOTED date as datetime.date/datetime — the
+        # isinstance(str) guard read a hand-authored stamp as "never verified" on
+        # the venv path while the miniyaml path returned the string. Coerce like
+        # build_index._extract_invalid_after does.
+        return lv.isoformat()
     if isinstance(lv, str) and lv.strip():
         return lv
     return None
@@ -382,7 +388,7 @@ def write_stale_cache(index_dir: str, stale: List[dict]) -> bool:
             },
         }
         path = stale_cache_path(index_dir)
-        tmp = path + ".tmp"
+        tmp = path + f".tmp.{os.getpid()}"  # COR-17: unique per writer — concurrent processes must not share a tmp
         try:
             with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh)
@@ -632,8 +638,9 @@ def set_invalid_after(path: str, ts: Optional[str] = None, *, dry_run: bool = Fa
                 return result
         result.update({"changed": changed, "invalid_after": ts})
         if changed and not dry_run:
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(new_text)
+            from .atomic import write_text_atomic
+
+            write_text_atomic(path, new_text)  # COR-18: never a torn corpus file
             # SEC-6: this per-item, agent-gated frontmatter write is a reviewed edit —
             # fold the file's new bytes into the trusted-corpus consent baseline so a
             # retire/demote verdict never quarantines the very file it just judged

@@ -94,10 +94,15 @@ _DESKTOP_SURFACE_NOTE = (
     "(capture, new_memory check:true, secrets_scan, reconsolidate, build_index, "
     "co_recall_proposals, abstention_fixtures — per item); /hippo:pack → the pack skill "
     "driving the pack_* MCP tools (pack_extract; install: pack_install_plan then per-item "
-    "pack_install_item; update: pack_update_plan then per-item pack_update_item); the "
-    "other verbs (resolve, audit, "
-    "new, recall, why) run as hippo skills — invoke them directly, or the user asks in "
-    'plain words (e.g. "consolidate memory"). '
+    "pack_install_item; update: pack_update_plan then per-item pack_update_item); "
+    "/hippo:dream → the dream tool; /hippo:new → the new_memory tool; /hippo:recall → the "
+    "recall tool (its --list-by-type and --all-projects modes are terminal-only); "
+    "/hippo:why → the why tool. "
+    # INT-19: the old text claimed resolve/audit "run as hippo skills — invoke them
+    # directly" — but both preflights hard-abort on Desktop ("re-run from a terminal"),
+    # so the note routed users into a dead end it had just promised was a path.
+    "NOT available on this surface (terminal-only for now — say so, do not improvise a "
+    "workaround): resolve, audit, export-agents, import, promote, promote-rule, remove. "
     "The two corpus-repair verbs are MCP tools on BOTH surfaces, with no /hippo:* form: "
     "rederive (action='worklist'|'one'|'snapshot'|'stamp') and heal_baselines."
 )
@@ -1450,8 +1455,11 @@ def build_context(memory_dir: str, repo_root: str, max_chars: int = _MAX_CONTEXT
     for _label, fn in PRODUCERS:
         try:
             out = fn(memory_dir, repo_root, run_ctx)
-        except Exception:
-            out = None
+        except Exception as exc:
+            # RCH-9: every producer is individually guarded, so this backstop firing
+            # means a real bug — exactly when silence is most expensive. Name it (the
+            # doctor pattern: a visible warn carrying the exception), keep the rest.
+            out = f"⚠ {_label} producer failed: {type(exc).__name__}: {exc}"
         if out:
             blocks.append(out.rstrip())
     if not blocks:

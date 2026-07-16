@@ -640,7 +640,7 @@ def test_heal_empty_baselines_heals_only_empty(repo, memory_dir):
     broken = write_file(
         repo, ".claude/memory/m_broken.md", "---\nname: m: broken: yaml\nsource_commit: \n---\nb\n"
     )
-    healed = P.heal_empty_baselines(memory_dir, repo)
+    healed, _failed = P.heal_empty_baselines(memory_dir, repo)
     assert healed == ["m_empty"]
     healed_text = open(empty, encoding="utf-8").read()
     _, sc = read_provenance(healed_text)
@@ -651,7 +651,7 @@ def test_heal_empty_baselines_heals_only_empty(repo, memory_dir):
     assert "m_broken" not in healed  # unparseable skipped (integrity producer's territory)
 
     # Idempotent: a second sweep heals nothing.
-    assert P.heal_empty_baselines(memory_dir, repo) == []
+    assert P.heal_empty_baselines(memory_dir, repo) == ([], {})
 
 
 def test_heal_empty_baselines_noop_without_head(repo, memory_dir):
@@ -660,7 +660,7 @@ def test_heal_empty_baselines_noop_without_head(repo, memory_dir):
         ".claude/memory/m.md",
         '---\nname: m\ncited_paths: []\nsource_commit: ""\n---\nbody\n',
     )
-    assert P.heal_empty_baselines(memory_dir, repo) == []  # no commits yet -> no HEAD -> no-op
+    assert P.heal_empty_baselines(memory_dir, repo) == ([], {})  # no commits yet -> no HEAD -> no-op
 
 
 # --------------------------------------------------------------------------- #
@@ -2182,3 +2182,29 @@ def test_build_repo_file_index_is_NOT_cached(repo, memory_dir):
     write_file(repo, "src/second.py", "b = 2\n")
     git_commit(repo, "second", 1_700_000_001)
     assert "src/second.py" in P.build_repo_file_index(repo)[0], "the file index went stale"
+
+
+def test_heal_empty_baselines_names_the_files_it_could_not_heal(repo, memory_dir, monkeypatch):
+    """RCH-9: a heal-write failure was silently skipped — not in the healed list, not
+    reported anywhere — so a memory could stay invisible to staleness forever while
+    the verb reported success. Failures come back as their own name→reason map."""
+    import memory.atomic as atomic
+
+    write_file(repo, "src/x.py", "x = 1\n")
+    git_commit(repo, "c1", 1_700_000_000)
+    good = '---\nname: healable\ndescription: "d"\ncited_paths: ["src/x.py"]\nsource_commit: ""\n---\nbody\n'
+    bad = '---\nname: cursed\ndescription: "d"\ncited_paths: ["src/x.py"]\nsource_commit: ""\n---\nbody\n'
+    write_file(memory_dir, "healable.md", good)
+    write_file(memory_dir, "cursed.md", bad)
+
+    real = atomic.write_text_atomic
+
+    def failing(path, text, *a, **k):
+        if path.endswith("cursed.md"):
+            raise OSError(28, "No space left on device")
+        return real(path, text, *a, **k)
+
+    monkeypatch.setattr(atomic, "write_text_atomic", failing)
+    healed, failed = P.heal_empty_baselines(memory_dir, repo)
+    assert healed == ["healable"]
+    assert set(failed) == {"cursed"} and "No space left" in failed["cursed"]

@@ -585,6 +585,11 @@ def apply_dedup_merge(
         from .links import add_typed_relation
         from .staleness import set_invalid_after
 
+        # COR-16: this is a TWO-write chain (survivor's edge, then loser's window).
+        # Capture the survivor's bytes so a failure on write #2 rolls write #1 back
+        # out — the envelope's changed=False must describe the disk, not a hope.
+        with open(s_path, "r", encoding="utf-8") as fh:
+            survivor_before = fh.read()
         rel = add_typed_relation(s_path, "supersedes", loser, dry_run=dry_run)
         if rel.get("error"):
             result["error"] = f"supersedes write failed: {rel['error']}"
@@ -594,6 +599,18 @@ def apply_dedup_merge(
         inv = set_invalid_after(l_path, dry_run=dry_run)
         if inv.get("error"):
             result["error"] = f"invalid_after write failed: {inv['error']}"
+            if rel.get("changed") and not dry_run:
+                from .provenance import restore_file_bytes
+
+                undo_err = restore_file_bytes(s_path, survivor_before, memory_dir)
+                if undo_err:
+                    result["error"] += (
+                        f" — AND the supersedes rollback failed ({undo_err}): "
+                        f"{survivor} still carries the edge; restore it from git"
+                    )
+                else:
+                    result["error"] += " — the supersedes edge was rolled back"
+                    result["supersedes"] = {"changed": False}
             return result
         result["invalid_after"] = {
             "changed": inv.get("changed", False),

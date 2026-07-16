@@ -761,7 +761,7 @@ def refresh_rules_cache(repo_root: str, index_dir: str) -> dict:
 
         ensure_self_ignoring_dir(index_dir)
         cache = {"schema": RULES_CACHE_SCHEMA, "sigs": sigs, "entries": entries}
-        tmp = cache_path + ".tmp"
+        tmp = cache_path + f".tmp.{os.getpid()}"  # COR-17: unique per writer — concurrent processes must not share a tmp
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(cache, fh, ensure_ascii=False)
         os.replace(tmp, cache_path)

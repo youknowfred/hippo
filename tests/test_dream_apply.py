@@ -591,3 +591,45 @@ def test_apply_and_undo_fold_written_files_into_trust_baseline(dirs, monkeypatch
     code, text = dream.undo_edges(md, idx)
     assert code == 0, text
     assert applied_files <= set(calls), f"unfolded restored files: {applied_files - set(calls)}"
+
+
+# --------------------------------------------------------------------------- #
+# QA sweep 2026-07-16 — COR-16: the refines two-write chain honors its own
+# per-edge-atomicity contract.
+# --------------------------------------------------------------------------- #
+def test_apply_refines_rolls_back_frontmatter_edge_when_stamp_write_fails(dirs, monkeypatch):
+    """The refines kind writes twice (frontmatter edge, then the dream:links stamp).
+    A failure on write #2 used to strand the frontmatter edge with NO ledger row: undo
+    could not see it and the idempotency guard refused every retry — a permanent,
+    untracked edge on a pass that reported 'refused'. The file must come back
+    byte-identical."""
+    md, td, idx = dirs
+    _write_memory(md, "narrow-lesson", "the narrow one", body="Body n.\n")
+    _write_memory(md, "broad-lesson", "the broad one", body="Body b.\n")
+    before = open(os.path.join(md, "narrow-lesson.md"), encoding="utf-8").read()
+
+    cand = {"kind": "refines", "source": "narrow-lesson", "target": "broad-lesson",
+            "score": 0.9}
+    import memory.atomic as atomic
+
+    real_write = atomic.write_text_atomic
+    w_count = {"n": 0}
+
+    def failing_write(path, text, *a, **k):
+        if str(path).endswith("narrow-lesson.md"):
+            w_count["n"] += 1
+            if w_count["n"] == 2:  # write #1 = the typed edge; write #2 = the stamp;
+                raise OSError(28, "No space left on device")  # write #3 = the rollback
+        return real_write(path, text, *a, **k)
+
+    monkeypatch.setattr(atomic, "write_text_atomic", failing_write)
+    ok, reason, undo = dream._apply_one(md, cand, "edge-test-1", "pass-test-1")
+    monkeypatch.undo()
+
+    assert ok is False and undo is None
+    assert "rolled back" in reason
+    after = open(os.path.join(md, "narrow-lesson.md"), encoding="utf-8").read()
+    assert after == before, (
+        "a refused refines apply must leave the source byte-identical — found a "
+        "stranded frontmatter edge"
+    )

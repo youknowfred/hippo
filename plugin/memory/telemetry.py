@@ -200,7 +200,7 @@ def _rotate_if_needed(path: str) -> None:
         nl = tail.find(b"\n")
         if nl != -1:
             tail = tail[nl + 1:]  # drop the partial leading line
-        tmp = path + ".tmp"
+        tmp = path + f".tmp.{os.getpid()}"  # COR-17: unique per writer — concurrent processes must not share a tmp
         with open(tmp, "wb") as fh:
             fh.write(tail)
         os.replace(tmp, path)

@@ -836,3 +836,71 @@ def test_unresolvable_baseline_names_empty_when_healthy(repo, memory_dir):
     write_file(memory_dir, "m_ok.md", _memory(["src/foo.py"], c1))
     assert unresolvable_baseline_names(memory_dir, repo) == []
     assert unresolvable_baseline_names(str(memory_dir) + "-missing", repo) == []
+
+
+# --------------------------------------------------------------------------- #
+# QA sweep 2026-07-16 — COR-18: corpus rewrites land atomically.
+# --------------------------------------------------------------------------- #
+def test_set_invalid_after_never_leaves_a_torn_memory_file(tmp_path, monkeypatch):
+    """The in-place open('w') this replaces truncated the committed source-of-truth
+    memory when a crash landed mid-write: broken frontmatter silently drops the file
+    from recall, and a body-level truncation still parses — a silently shortened
+    memory. After the write path fails for any reason, the file must be byte-intact
+    (old) or byte-complete (new), never torn."""
+    import builtins
+
+    from memory.provenance import parse_frontmatter
+    from memory.staleness import set_invalid_after
+
+    p = str(tmp_path / "keeper.md")
+    original = (
+        "---\nname: keeper\ndescription: a lesson\nmetadata:\n  type: project\n---\n\n"
+        "A body long enough that a torn write is visible.\n"
+    )
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write(original)
+
+    real_open = builtins.open
+
+    class _Torn:
+        def __init__(self, fh):
+            self._fh = fh
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return self._fh.__exit__(*exc)
+
+        def write(self, s):
+            self._fh.write(s[:24])
+            raise OSError(28, "No space left on device")
+
+    def failing_open(path, mode="r", *a, **k):
+        fh = real_open(path, mode, *a, **k)
+        if str(path) == p and "w" in str(mode):
+            return _Torn(fh)
+        return fh
+
+    monkeypatch.setattr(builtins, "open", failing_open)
+    r = set_invalid_after(p)
+    monkeypatch.undo()
+
+    after = open(p, encoding="utf-8").read()
+    assert after == original or (r.get("changed") and parse_frontmatter(after)), (
+        f"torn memory file after a failed write (error={r.get('error')!r}):\n{after!r}"
+    )
+
+
+def test_read_last_verified_accepts_an_unquoted_date(tmp_path):
+    """COR-19: PyYAML types an unquoted `last_verified: 2026-07-15` as datetime.date,
+    and the isinstance(str) guard read it as 'never verified' — while the miniyaml
+    fallback returned the string. Machine-written stamps are json-quoted, so this
+    bites exactly the hand-authored form; both parser paths must agree."""
+    from memory.staleness import read_last_verified
+
+    text = (
+        "---\nname: n\ndescription: d\nmetadata:\n  type: project\n"
+        "last_verified: 2026-07-15\n---\nbody\n"
+    )
+    assert read_last_verified(text) == "2026-07-15"

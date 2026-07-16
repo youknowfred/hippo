@@ -1218,3 +1218,54 @@ def test_cli_demote_superseded_by_prints_the_boundary(repo, memory_dir, capsys, 
     out = capsys.readouterr().out
     assert rc == 0
     assert "the successor's commit date" in out, "the stamped boundary is legible at the CLI"
+
+
+# --------------------------------------------------------------------------- #
+# QA sweep 2026-07-16 — COR-16: the demote+superseded_by two-write chain rolls back.
+# --------------------------------------------------------------------------- #
+def test_semantic_reverify_rolls_back_invalidation_when_edge_write_fails(repo, memory_dir, monkeypatch):
+    """WRITE #1 (loser's invalid_after) used to persist when WRITE #2 (successor's
+    supersedes edge) failed — the MCP wrapper then rendered 'refused' while the memory
+    had in fact been soft-invalidated. The verdict must be all-or-nothing."""
+    import memory.links as links
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _seed_pair(repo, memory_dir)
+    td = os.path.join(repo, "tele")
+    old_before = open(os.path.join(memory_dir, "m_old.md"), encoding="utf-8").read()
+    new_before = open(os.path.join(memory_dir, "m_new.md"), encoding="utf-8").read()
+
+    def failing(path, *a, **k):
+        return {"path": path, "changed": False, "error": "disk full"}
+
+    monkeypatch.setattr(links, "add_typed_relation", failing)
+    result = R.semantic_reverify(
+        "m_old", "demote", memory_dir, repo, telemetry_dir=td, superseded_by="m_new"
+    )
+    assert result["error"] is not None and "disk full" in result["error"]
+    assert result["invalidated"] is False, "a refused verdict must not report a live write"
+    assert result["logged"] is False
+    assert open(os.path.join(memory_dir, "m_old.md"), encoding="utf-8").read() == old_before, (
+        "m_old's invalid_after must be rolled back when the successor edge fails"
+    )
+    assert open(os.path.join(memory_dir, "m_new.md"), encoding="utf-8").read() == new_before
+
+
+def test_worklist_nudge_names_a_runnable_verb_on_both_surfaces(repo, memory_dir, monkeypatch):
+    """INT-18 (DOC-16's lesson, again): the nudge said `provenance --reverify <name>` —
+    not runnable as written (no such command; the real form is python -m
+    memory.provenance), the WRONG verb (the cross-surface reconsolidation path is the
+    reconsolidate tool / /hippo:consolidate), and with no /hippo: token the Desktop
+    surface note never attached: a Desktop user got a worklist with a terminal-only,
+    mistyped command and no working alternative."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    now = int(time.time())
+    td = _seed_stale_recalled(repo, memory_dir, ["m_keep"], when=now - 300)
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    out = R.reconsolidation_producer(memory_dir, repo) or ""
+    assert out, "worklist expected"
+    assert "`provenance --reverify" not in out, "names a command that does not exist"
+    assert "reconsolidate" in out and "tool" in out, "must name the cross-surface verb"
+    assert "/hippo:" in out, (
+        "must carry a /hippo: token so the Desktop surface note attaches"
+    )

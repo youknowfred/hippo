@@ -45,7 +45,8 @@ def test_producer_exception_is_isolated(monkeypatch):
 
     _producers(monkeypatch, [("boom", boom), ("ok", lambda md, repo, ctx=None: "still here")])
     ctx = S.build_context("md", "repo")
-    assert ctx == "still here"  # the survivor is kept, the failure swallowed
+    assert "still here" in ctx  # the survivor is kept (isolation)...
+    assert "boom" in ctx  # ...and the failure is NAMED, not swallowed (RCH-9)
 
 
 def test_output_is_bounded_under_cap(monkeypatch):
@@ -1110,3 +1111,35 @@ def test_cite_derivation_producer_is_silent_on_a_newer_corpus(tmp_path):
     md = str(tmp_path)
     assert write_cite_derivation(md, 99)
     assert cite_derivation_producer(md, md) is None
+
+
+def test_a_raising_producer_is_named_not_vanished(monkeypatch):
+    """RCH-9: every producer is individually guarded, so the backstop firing means a
+    real bug — which is exactly when silence is most expensive. The failure must be
+    NAMED in the context (the doctor pattern: visible warn with the exception), while
+    the other producers still run (isolation keeps holding)."""
+
+    def boom(md, repo, ctx=None):
+        raise RuntimeError("wired wrong")
+
+    _producers(monkeypatch, [("boom", boom), ("ok", lambda md, repo, ctx=None: "still here")])
+    ctx = S.build_context("md", "repo")
+    assert "still here" in ctx
+    assert "boom" in ctx and "wired wrong" in ctx, (
+        "a producer crash must be named in the context, not silently dropped"
+    )
+
+
+def test_desktop_surface_note_is_honest_about_terminal_only_verbs():
+    """INT-19: the note said resolve/audit 'run as hippo skills — invoke them directly'
+    — but both skills hard-abort on Desktop ('re-run from a terminal'), so the note
+    routed users into a dead end it had just promised was a path. It must name the
+    terminal-only verbs AS terminal-only, and name the tools that do exist (dream,
+    new_memory, recall, why)."""
+    note = S._DESKTOP_SURFACE_NOTE
+    assert "terminal-only for now" in note
+    for verb in ("resolve", "audit", "export-agents", "import", "promote", "remove"):
+        assert verb in note
+    assert "dream" in note and "new_memory" in note and "why tool" in note
+    # The old claim must be gone: resolve/audit are not 'invoke them directly' verbs.
+    assert "(resolve, audit, new, recall, why) run as hippo skills" not in note

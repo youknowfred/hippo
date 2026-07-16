@@ -304,3 +304,55 @@ def test_untrusted_nudge_silent_when_trusted(repo, memory_dir, tmp_path, monkeyp
     _write_corpus(memory_dir)
     T.mark_trusted(repo)
     assert S.untrusted_corpus_nudge(memory_dir, repo) is None
+
+
+# --------------------------------------------------------------------------- #
+# QA sweep 2026-07-16 — SEC-19: the machine-wide registry writes atomically.
+# --------------------------------------------------------------------------- #
+def test_registry_survives_a_crash_mid_write(repo, memory_dir, tmp_path, monkeypatch):
+    """The registry is rewritten on EVERY authored corpus write (record_authored_write)
+    and it is machine-wide: a plain truncating open('w') torn mid-write lost every
+    trusted root and every SEC-6 baseline at once. A failed write attempt must leave
+    the previous document intact."""
+    import builtins
+
+    reg = str(tmp_path / "hippo-trust.json")
+    monkeypatch.setenv("HIPPO_TRUST_FILE", reg)
+    _write_corpus(memory_dir)
+    assert T.mark_trusted(repo, memory_dir)
+    assert T.is_trusted(repo)
+
+    real_open = builtins.open
+
+    class _Torn:
+        def __init__(self, fh):
+            self._fh = fh
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return self._fh.__exit__(*exc)
+
+        def write(self, s):
+            self._fh.write(s[:12])
+            raise OSError(28, "No space left on device")
+
+    def failing_open(path, mode="r", *a, **k):
+        fh = real_open(path, mode, *a, **k)
+        if str(path) == reg and "w" in str(mode):
+            return _Torn(fh)
+        return fh
+
+    monkeypatch.setattr(builtins, "open", failing_open)
+    try:
+        T.record_authored_write(memory_dir, os.path.join(memory_dir, "budget_envelope.md"), repo)
+    except Exception:
+        pass  # a failed fold may raise or swallow; the registry must survive either way
+    monkeypatch.undo()
+    monkeypatch.setenv("HIPPO_TRUST_FILE", reg)
+
+    assert T.is_trusted(repo), (
+        "a torn registry write destroyed the machine-wide trust state — "
+        "previously consented corpora must survive a failed write attempt"
+    )

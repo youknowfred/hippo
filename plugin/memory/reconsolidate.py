@@ -529,6 +529,7 @@ def semantic_reverify(
             # to guess "no longer in the repo" for every drop.
             result["dropped_gone"] = rv["dropped_gone"]
             result["dropped_not_derived"] = rv["dropped_not_derived"]
+        demoted_before = None  # COR-16: bytes-before capture for the two-write rollback
         if outcome == "demote":
             # LIF-1: the demote verdict OWNS its terminal state — close the validity
             # window on the memory itself so recall's pre-cut penalty (the EXISTING
@@ -548,6 +549,13 @@ def semantic_reverify(
                 if successor_path is not None
                 else None
             )
+            # COR-16: with a successor named, this is write #1 of a TWO-write verdict
+            # (loser's window, then the successor's supersedes edge). Capture the bytes
+            # so a failed edge write rolls the invalidation back out — a verdict the
+            # caller renders as "refused" must not have half-landed.
+            if successor_path is not None and not dry_run:
+                with open(path, "r", encoding="utf-8") as fh:
+                    demoted_before = fh.read()
             ia = set_invalid_after(path, successor_ts, dry_run=dry_run)
             if ia["error"]:
                 result["error"] = ia["error"]
@@ -573,6 +581,28 @@ def semantic_reverify(
             )
             if edge["error"]:
                 result["error"] = edge["error"]
+                if result["invalidated"] and demoted_before is not None:
+                    from .provenance import restore_file_bytes
+
+                    undo_err = restore_file_bytes(
+                        os.path.join(memory_dir, fname), demoted_before, memory_dir, repo_root
+                    )
+                    if undo_err:
+                        result["error"] += (
+                            f" — AND the invalid_after rollback failed ({undo_err}): "
+                            f"{fname} is now soft-invalidated without its supersedes "
+                            "edge; restore it from git"
+                        )
+                    else:
+                        result["error"] += " — the invalid_after write was rolled back"
+                        result["invalidated"] = False
+                        result["invalid_after"] = None
+                        try:
+                            from .build_index import refresh_index
+
+                            refresh_index(memory_dir)
+                        except Exception:
+                            pass
                 return result
             result["edge_written"] = edge["changed"]
         result["logged"] = record_reconsolidation_outcome(
@@ -668,7 +698,13 @@ def reconsolidation_producer(
     header = (
         f"🧠 Reconsolidation worklist — {len(worklist)} recently-recalled memories cite code "
         "that has since drifted (most-recently-drifted first). Re-ground each against current "
-        "code, then `provenance --reverify <name>` once confirmed correct"
+        "code, then render the verdict per item with the reconsolidate MCP tool "
+        "(action='reverify', name=…, outcome=graduate|fix|demote) — /hippo:consolidate "
+        "Step 2 drives the same flow in a terminal"
+        # INT-18 (DOC-16's lesson): the old text said `provenance --reverify <name>` —
+        # not runnable as written (no such command), the wrong verb (the cross-surface
+        # path is reconsolidate/INT-13), and /hippo:-token-free, so the Desktop surface
+        # note never attached and Desktop users dead-ended.
     )
     if any(item.get("linked") for item in shown):
         # GRA-9: one line of legend, and ONLY when a (+N linked: …) annotation actually

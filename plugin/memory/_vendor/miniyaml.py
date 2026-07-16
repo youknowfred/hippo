@@ -25,6 +25,15 @@ import re
 from typing import Any, List, Tuple
 
 _KEY_RE = re.compile(r"^([A-Za-z0-9_.-]+)\s*:(\s|$)")
+# COR-19: YAML's comment rule — a `#` PRECEDED by whitespace ends a plain scalar
+# (`value#x` is not a comment; `value #x` is). Quoted scalars and flow lists parse
+# their own token first and then tolerate exactly a trailing comment, matching
+# PyYAML: `steer: pin # keep` is 'pin', and `description: "hello" # note` must not
+# degrade the whole frontmatter to {} on this path while the venv path reads it fine.
+_PLAIN_COMMENT_RE = re.compile(r"\s+#")
+_DQUOTED_RE = re.compile(r'^("(?:[^"\\]|\\.)*")\s*(?:#.*)?$')
+_SQUOTED_RE = re.compile(r"^('(?:[^']|'')*')\s*(?:#.*)?$")
+_FLOW_COMMENT_RE = re.compile(r"^(\[.*\])\s+#.*$")
 
 
 class MiniYamlError(ValueError):
@@ -33,19 +42,27 @@ class MiniYamlError(ValueError):
 
 def _parse_scalar(raw: str) -> Any:
     s = raw.strip()
+    if s.startswith("#"):
+        return None  # `key: # only a comment` — the value is empty (PyYAML: None)
     if s.startswith('"'):
+        m = _DQUOTED_RE.match(s)
         try:
-            return json.loads(s)
+            return json.loads(m.group(1) if m else s)
         except Exception as exc:
             raise MiniYamlError(f"bad double-quoted scalar: {s[:60]!r}") from exc
     if s.startswith("'"):
-        if len(s) < 2 or not s.endswith("'"):
+        m = _SQUOTED_RE.match(s)
+        if not m:
             raise MiniYamlError(f"bad single-quoted scalar: {s[:60]!r}")
-        return s[1:-1].replace("''", "'")
+        body = m.group(1)
+        return body[1:-1].replace("''", "'")
     if s.startswith("["):
         try:
             return json.loads(s)
         except Exception:
+            m = _FLOW_COMMENT_RE.match(s)
+            if m:
+                return _parse_scalar(m.group(1))
             if not s.endswith("]"):
                 raise MiniYamlError(f"bad flow list: {s[:60]!r}")
             inner = s[1:-1].strip()
@@ -54,6 +71,11 @@ def _parse_scalar(raw: str) -> Any:
             return [_parse_scalar(part) for part in inner.split(",")]
     if s.startswith(("|", ">")):
         raise MiniYamlError("block scalars are outside the frontmatter subset")
+    m = _PLAIN_COMMENT_RE.search(s)
+    if m:
+        s = s[: m.start()].rstrip()
+        if not s:
+            return None
     if ": " in s:
         # The known corpus hazard — PyYAML rejects unquoted values containing ': '
         # in this position; accepting it here would hide broken memories pre-bootstrap.

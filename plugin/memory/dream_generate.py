@@ -706,14 +706,15 @@ def _set_confidence(path: str, value: str, *, dry_run: bool = False) -> dict:
         key_re = re.compile(r"^(\s*)confidence\s*:")
         idx = next((i for i in range(1, close) if key_re.match(lines[i])), None)
         if idx is None:
-            # Insert (nested under metadata: when present — the write_memory convention).
-            meta_idx = next(
-                (i for i in range(1, close) if re.match(r"^metadata\s*:\s*$", lines[i])), None
+            # Insert via the ONE shared walk (COR-9/COR-14) — nested under metadata:
+            # when present, at that block's OWN child indent. This writer used to
+            # hard-code two spaces, so a hand-reformatted draft (4-space children)
+            # became a document that no longer parses.
+            from .provenance import insert_frontmatter_keys
+
+            lines[1:close] = insert_frontmatter_keys(
+                lines[1:close], [f"confidence: {value}"]
             )
-            if meta_idx is not None:
-                lines.insert(meta_idx + 1, f"  confidence: {value}")
-            else:
-                lines.insert(close, f"confidence: {value}")
         else:
             indent = key_re.match(lines[idx]).group(1)
             new_line = f"{indent}confidence: {value}"
@@ -721,10 +722,22 @@ def _set_confidence(path: str, value: str, *, dry_run: bool = False) -> dict:
                 return result  # idempotent
             lines[idx] = new_line
         new_text = "\n".join(lines)
+        # COR-14: the write-site damage check every frontmatter writer answers — did
+        # this rewrite touch any key it does not own, or stop the document parsing?
+        from .provenance import _frontmatter_damage
+
+        damage = _frontmatter_damage(text, new_text, {"confidence"})
+        if damage:
+            result["error"] = (
+                f"refusing to rewrite {os.path.basename(path)}: {damage} — "
+                "this is a hippo bug, please report it"
+            )
+            return result
         result["changed"] = new_text != text
         if result["changed"] and not dry_run:
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(new_text)
+            from .atomic import write_text_atomic
+
+            write_text_atomic(path, new_text)  # COR-18: never a torn corpus file
             try:
                 from .trust import record_authored_write
 
@@ -763,13 +776,13 @@ def _set_cited_paths(path: str, paths: List[str], *, dry_run: bool = False) -> d
         key_re = re.compile(r"^(\s*)cited_paths\s*:")
         idx = next((i for i in range(1, close) if key_re.match(lines[i])), None)
         if idx is None:
-            meta_idx = next(
-                (i for i in range(1, close) if re.match(r"^metadata\s*:\s*$", lines[i])), None
+            # COR-14: same shared insert walk as _set_confidence — indent read from
+            # the metadata block's own keys, never hard-coded.
+            from .provenance import insert_frontmatter_keys
+
+            lines[1:close] = insert_frontmatter_keys(
+                lines[1:close], [f"cited_paths: {value}"]
             )
-            if meta_idx is not None:
-                lines.insert(meta_idx + 1, f"  cited_paths: {value}")
-            else:
-                lines.insert(close, f"cited_paths: {value}")
         else:
             indent = key_re.match(lines[idx]).group(1)
             end = idx + 1
@@ -777,10 +790,20 @@ def _set_cited_paths(path: str, paths: List[str], *, dry_run: bool = False) -> d
                 end += 1
             lines[idx:end] = [f"{indent}cited_paths: {value}"]
         new_text = "\n".join(lines)
+        from .provenance import _frontmatter_damage
+
+        damage = _frontmatter_damage(text, new_text, {"cited_paths"})
+        if damage:
+            result["error"] = (
+                f"refusing to rewrite {os.path.basename(path)}: {damage} — "
+                "this is a hippo bug, please report it"
+            )
+            return result
         result["changed"] = new_text != text
         if result["changed"] and not dry_run:
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(new_text)
+            from .atomic import write_text_atomic
+
+            write_text_atomic(path, new_text)  # COR-18: never a torn corpus file
     except Exception as exc:
         result["error"] = str(exc)
     return result

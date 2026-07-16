@@ -230,3 +230,35 @@ def test_vendored_path_imports_no_numpy_or_fastembed(tmp_path, bare_python):
     assert "zebra_deploy_runbook" in data["names"]
     assert data["backend"] == "bm25"
     assert data["numpy"] is False and data["fastembed"] is False
+
+
+# --------------------------------------------------------------------------- #
+# QA sweep 2026-07-16 — COR-19: inline-comment parity with PyYAML.
+# --------------------------------------------------------------------------- #
+_COMMENT_PARITY_SAMPLES = [
+    # (frontmatter text, the value assertions run against BOTH parsers)
+    "steer: pin # keep this pinned\n",
+    "confidence: authoritative # trust me\n",
+    "type: project # kind\n",
+    'description: "hello" # note\n',
+    "description: 'single' # note\n",
+    'cited_paths: ["a.py", "b.py"] # derived\n',
+    "empty: # nothing here\n",
+    "tag: uses#hashtag-not-comment\n",
+    "url: https://example.com/page#anchor\n",
+    "metadata:\n  type: user # a person\n",
+    "items:\n  - keep # trailing\n  - also#kept\n",
+]
+
+
+def test_miniyaml_strips_inline_comments_like_pyyaml():
+    """A trailing `# comment` after a value is idiomatic YAML. miniyaml used to keep
+    it inside the value — so `steer: pin # keep` read as the string 'pin # keep' and
+    the pin boost silently vanished pre-bootstrap; worse, a comment after the
+    always-quoted description: raised, degrading the WHOLE frontmatter to {} on the
+    fallback path while the venv path read it fine."""
+    yaml = pytest.importorskip("yaml")
+    for sample in _COMMENT_PARITY_SAMPLES:
+        expected = yaml.safe_load(sample)
+        got = miniyaml.safe_load(sample)
+        assert got == expected, f"{sample!r}: pyyaml={expected!r} miniyaml={got!r}"

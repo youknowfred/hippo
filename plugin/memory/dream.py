@@ -1621,8 +1621,9 @@ def _apply_one(
             return False, "edge already present (wikilink)", None
         new_text, block_rec = _insert_block_line(text, line)
         try:
-            with open(src_path, "w", encoding="utf-8") as fh:
-                fh.write(new_text)
+            from .atomic import write_text_atomic
+
+            write_text_atomic(src_path, new_text)  # COR-18: never a torn corpus file
         except Exception as exc:
             return False, f"write failed: {exc}", None
         return True, "", {"file": os.path.basename(src_path), "block": block_rec}
@@ -1638,18 +1639,36 @@ def _apply_one(
         res = add_typed_relation(src_path, "refines", cand["target"])
         if res.get("error") or not res.get("changed"):
             return False, res.get("error") or "add_typed_relation was a no-op", None
+
+        def _roll_back(step: str, exc: Exception) -> Tuple[bool, str, None]:
+            # COR-16: write #1 (the frontmatter edge) landed; a failure anywhere before
+            # write #2 completes used to strand it — a permanent, ledger-less edge that
+            # undo cannot see and the idempotency guard refuses to ever re-complete.
+            # The docstring's per-edge atomicity means the file comes back byte-identical.
+            from .provenance import restore_file_bytes
+
+            undo_err = restore_file_bytes(src_path, text, memory_dir)
+            if undo_err:
+                return False, (
+                    f"{step}: {exc} — AND the rollback failed ({undo_err}): "
+                    f"{cand['source']} carries an untracked refines edge; restore it "
+                    "from git"
+                ), None
+            return False, f"{step}: {exc} — the frontmatter edge was rolled back", None
+
         try:
             with open(src_path, "r", encoding="utf-8") as fh:
                 after_fm_text = fh.read()
+            region_after = _frontmatter_region(after_fm_text)
+            new_text, block_rec = _insert_block_line(after_fm_text, line)
         except Exception as exc:
-            return False, f"re-read failed after frontmatter write: {exc}", None
-        region_after = _frontmatter_region(after_fm_text)
-        new_text, block_rec = _insert_block_line(after_fm_text, line)
+            return _roll_back("re-read failed after frontmatter write", exc)
         try:
-            with open(src_path, "w", encoding="utf-8") as fh:
-                fh.write(new_text)
+            from .atomic import write_text_atomic
+
+            write_text_atomic(src_path, new_text)  # COR-18
         except Exception as exc:
-            return False, f"write failed: {exc}", None
+            return _roll_back("write failed", exc)
         return True, "", {
             "file": os.path.basename(src_path),
             "block": block_rec,

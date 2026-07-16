@@ -483,3 +483,17 @@ def test_desktop_surface_note_maps_consolidate_to_the_flow_tools():
 
     for tool in _FLOW_TOOLS:
         assert tool in note, f"the Desktop surface note no longer names {tool}"
+
+
+def test_capture_list_names_corrupt_seed_files(corpus, tmp_path):
+    """RCH-9: a corrupt seed silently vanished from the listing — while the
+    SessionStart nudge (a bare file count) still counted it, so the queue said '2
+    pending' and the drain showed one. The listing must name what it cannot read."""
+    pd = str(tmp_path / "pending")
+    _seed(pd)
+    with open(os.path.join(pd, "capture-broken.json"), "w", encoding="utf-8") as fh:
+        fh.write("{ definitely not json")
+    text = _text(_call("capture", {"action": "list"}))
+    assert "session=s1" in text
+    assert "capture-broken.json" in text, "the unreadable seed must be named"
+    assert "corrupt" in text.lower()
