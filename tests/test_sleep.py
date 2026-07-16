@@ -220,3 +220,108 @@ def test_report_carries_the_last_run_stamp(tmp_path, monkeypatch, capsys):
     assert "first sleep run" in out
     out = _run(capsys=capsys)
     assert "last sleep run" in out
+
+
+# --------------------------------------------------------------------------- #
+# SLP-3 — Tier-A-in-sleep, opt-in, default OFF
+# --------------------------------------------------------------------------- #
+def test_flag_off_means_report_pass_only(tmp_path, monkeypatch, capsys):
+    """Default OFF: sleep runs dream's REPORT pass; the apply path is never touched."""
+    _root, md = _repo(tmp_path, monkeypatch)
+    _mem(md, "alpha")
+    import memory.sleep as sleep_mod
+
+    called = {"apply": 0}
+
+    def _no_apply(*a, **k):
+        called["apply"] += 1
+        return 0, "unexpected"
+
+    monkeypatch.setattr("memory.dream.run_apply_pass", _no_apply)
+    _run(capsys=capsys)
+    assert called["apply"] == 0
+
+
+def test_flag_on_applies_with_sleep_origin_and_leads_with_undo(tmp_path, monkeypatch, capsys):
+    """Opt-in ON: the apply pass runs with origin='sleep:<ts>' provenance, and when
+    edges applied, the morning report's FIRST content line is the undo recipe."""
+    _root, md = _repo(tmp_path, monkeypatch)
+    _mem(md, "alpha")
+    monkeypatch.setenv("HIPPO_SLEEP_TIER_A", "1")
+    seen = {}
+
+    def _fake_apply(memory_dir, *a, **k):
+        seen["origin"] = k.get("origin")
+        return 0, "🌙 dream pass p9 — applied 2 edge(s) (uncommitted, live in recall)"
+
+    monkeypatch.setattr("memory.dream.run_apply_pass", _fake_apply)
+    out = _run(capsys=capsys)
+    assert seen["origin"] and seen["origin"].startswith("sleep:")
+    content = [ln for ln in out.splitlines() if ln.strip() and not ln.startswith("report:")]
+    # the report LEADS with what applied + the one-line undo (owner decision 2026-07-16)
+    assert "applied" in content[0] and "undo" in content[0].lower()
+    assert "action='undo'" in out
+
+
+def test_apply_pass_origin_lands_in_the_dream_ledger(tmp_path, monkeypatch):
+    """The origin stamp is real ledger provenance, additive — downstream readers
+    (log/undo) are unaffected; the row simply carries origin='sleep:<ts>'."""
+    from memory.dream import apply_ledger_path, run_apply_pass
+
+    _root, md = _repo(tmp_path, monkeypatch)
+    _mem(md, "alpha")
+    _mem(md, "beta")
+
+    import memory.dream as D
+
+    monkeypatch.setattr(
+        D,
+        "discover",
+        lambda *a, **k: {
+            "status": "ok",
+            "pass_id": "p1",
+            "candidates": [
+                {"kind": "bridge", "source": "alpha", "target": "beta", "cofire": 0.95}
+            ],
+            "soak": {"distinct_sessions": 99, "gate_met": True},
+            "stats": {},
+        },
+    )
+    monkeypatch.setattr(D, "apply_eligible", lambda c, theta=None: True)
+    code, text = run_apply_pass(md, origin="sleep:2026-07-16T07:30:00+00:00")
+    assert code == 0 and "applied 1 edge" in text
+    rows = [
+        json.loads(ln)
+        for ln in open(apply_ledger_path(md), encoding="utf-8").read().splitlines()
+    ]
+    assert rows[-1]["origin"] == "sleep:2026-07-16T07:30:00+00:00"
+    # and an interactive pass stays origin-free (indistinguishable default)
+    assert "origin" not in json.dumps({k: v for k, v in rows[-1].items() if k != "origin"})
+
+
+def test_flag_off_zero_write_guarantee_holds_even_with_applicable_edges(
+    tmp_path, monkeypatch, capsys
+):
+    """OFF means SLP-1's zero-write guarantee holds byte-for-byte — even when dream
+    WOULD have an eligible edge to apply."""
+    _root, md = _repo(tmp_path, monkeypatch)
+    _mem(md, "alpha")
+    _mem(md, "beta")
+    import memory.dream as D
+
+    monkeypatch.setattr(
+        D,
+        "discover",
+        lambda *a, **k: {
+            "status": "ok",
+            "pass_id": "p1",
+            "candidates": [
+                {"kind": "bridge", "source": "alpha", "target": "beta", "cofire": 0.95}
+            ],
+            "soak": {"distinct_sessions": 99, "gate_met": True},
+            "stats": {},
+        },
+    )
+    before = _corpus_bytes(md)
+    _run(capsys=capsys)
+    assert _corpus_bytes(md) == before
