@@ -126,7 +126,7 @@ Each gate was re-checked against real code. Summary first, evidence below.
 | Item | Gate | Gate status (verified) | v1 verdict |
 |---|---|---|---|
 | **RET-8** category-tagged eval | RET-1 + GRA-1 landed | **CLEARED** — both live (`recall.py:594-595,840-917`) | **KEEP → v0.9.0** |
-| **GRA-8** graph observability | none (opportunistic) | n/a — genuinely unshipped | **KEEP → v0.9.0** |
+| **GRA-8** graph observability | none (opportunistic) | n/a — genuinely unshipped | **KEEP → v0.9.0** — SHIPPED at PR #27 (`--components/--degree/--export`); the remainder (one-call audit view, edge-class counts, edge ROT, `edge_origin` display) was absorbed & CLOSED by GRF-1 (`links --audit` + the doctor `edge_rot` line, 2026-07-16) |
 | **LIF-8** verbatim-evidence convention | RET-2 landed | **CLEARED — but deliverable already shipped** under DOC-6 | **RECONCILE** (mark done; residual = low-pri polish) |
 | **GRA-7** personalized PageRank | beats GRA-1 on RET-8 multi-hop | **NOT CLEARED** — un-evaluatable until RET-8 exists | **DEFER post-v1** |
 | **LIF-7** typed-memory taxonomy | CAP-2 proven across sessions | **CAP-SOAK CLEARED 2026-07-10** (owner judgment, via AskUserQuestion) — enough field soak; unblocks the memory→rule scoping refinement | **RUL-6 BUILT** (glob-scoped rule promotion); the broader typed-taxonomy schema change remains post-v1 |

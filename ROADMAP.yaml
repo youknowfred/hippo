@@ -1081,6 +1081,11 @@ workstreams:
           scorecard.
         acceptance_criteria:
           - corpus shape inspectable in one command; audit reports component count
+          # CLOSED (2026-07-16): --components/--degree/--export shipped at PR #27
+          # (v1-launch Group A); the remainder — the one-call `links --audit` view
+          # (edge classes, structure stats, edge ROT into archived/superseded/dangling
+          # targets, edge_origin display) + the doctor `edge_rot` line — shipped as
+          # GRF-1 (ROADMAP.enhancements2, T9), which absorbs & closes this item.
 
       - id: GRA-9
         title: Consolidation propagates along edges (review-adjacent worklist)
@@ -2115,7 +2120,7 @@ release_train:
     theme: "Proving-gate items — ship only when their gates clear"
     items:
       - {id: GRA-7,  gate: "beats the grown multi-hop baseline (n=10 since GRF-2 2026-07-16, incl. the mixed-mode MMR fix), not just GRA-1's n=2 era"}
-      - {id: GRA-8,  gate: "none — schedule opportunistically"}
+      - {id: GRA-8,  gate: "none — schedule opportunistically (CLOSED 2026-07-16: core shipped at PR #27, remainder absorbed by GRF-1's `links --audit` + doctor edge_rot line)"}
       - {id: RET-8,  gate: "RET-1 + GRA-1 landed"}
       - {id: LIF-7,  gate: "CAP-2 capture pipeline proven across temporally-diverse sessions"}
       - {id: LIF-8,  gate: "RET-2 body indexing landed"}

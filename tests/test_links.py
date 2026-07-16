@@ -697,3 +697,159 @@ def test_component_count_helper_guards_and_matches(tmp_path):
     _observability_corpus(md)
     assert component_count(md) == 3
     assert component_count("/no/such/dir/xyz") is None  # guarded, never raises
+
+
+# --------------------------------------------------------------------------- #
+# GRF-1: the graph-audit view — edge classes, rot (archived/superseded/dangling),
+# and the edge_origin display. Live from the corpus + archive/ state, zero
+# links.json schema change (a dedicated test pins the cache payload).
+# --------------------------------------------------------------------------- #
+def _audit_corpus(memory_dir: str) -> None:
+    """seed -> live (wikilink), retired (wikilink into a superseded stem),
+    ghost (dangling), attic (archived: file lives in archive/); successor
+    supersedes retired (the supersession marker itself is NOT rot)."""
+    os.makedirs(os.path.join(memory_dir, "archive"), exist_ok=True)
+    files = {
+        "seed.md": _mem("seed", "see [[live]] and [[retired]] and [[ghost]] and [[attic]]"),
+        "live.md": _mem("live", "body"),
+        "retired.md": _mem("retired", "body"),
+        "successor.md": (
+            "---\nname: successor\ndescription: \"d\"\nmetadata:\n  type: project\n"
+            "  supersedes: [retired]\n---\nbody\n"
+        ),
+        os.path.join("archive", "attic.md"): _mem("attic", "archived body"),
+    }
+    for fname, content in files.items():
+        with open(os.path.join(memory_dir, fname), "w", encoding="utf-8") as fh:
+            fh.write(content)
+
+
+def test_graph_audit_edge_classes_and_rot(tmp_path):
+    from memory.links import graph_audit
+
+    md = str(tmp_path / "memory")
+    _audit_corpus(md)
+    report = graph_audit(md)
+    assert report is not None
+    assert report["files"] == 4  # archive/ entries are not corpus nodes
+    assert report["edges"] == 2  # seed->live, seed->retired resolve; ghost/attic dangle
+    assert report["typed_edges"] == {"supersedes": 1}
+    rot = {(r["class"], r["src"], r["target"]) for r in report["rot"]}
+    assert rot == {
+        ("archived", "seed", "attic"),
+        ("dangling", "seed", "ghost"),
+        ("superseded", "seed", "retired"),
+    }
+    # the supersession marker itself (successor -supersedes-> retired) is not rot
+    assert not any(r["src"] == "successor" for r in report["rot"])
+
+
+def test_graph_audit_clean_corpus_has_empty_rot(tmp_path):
+    from memory.links import graph_audit
+
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    for fname, body in (("a.md", "see [[b]]"), ("b.md", "back to [[a]]")):
+        with open(os.path.join(md, fname), "w", encoding="utf-8") as fh:
+            fh.write(_mem(fname[:-3], body))
+    report = graph_audit(md)
+    assert report is not None
+    assert report["rot"] == []
+    assert report["edge_origin"] == {}  # nothing stamped -> empty, key always present
+
+
+def test_graph_audit_surfaces_edge_origin_when_present(tmp_path):
+    from memory.links import graph_audit
+
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    files = {
+        # top-level placement on one file, metadata: placement on the other — the audit
+        # reads both, mirroring parse_typed_relations' two-schema convention.
+        "a.md": (
+            "---\nname: a\ndescription: \"d\"\nedge_origin:\n  b: co-recall\n"
+            "metadata:\n  type: project\n---\nsee [[b]]\n"
+        ),
+        "b.md": (
+            "---\nname: b\ndescription: \"d\"\nmetadata:\n  type: project\n"
+            "  edge_origin:\n    a: co-recall\n---\nback [[a]]\n"
+        ),
+    }
+    for fname, content in files.items():
+        with open(os.path.join(md, fname), "w", encoding="utf-8") as fh:
+            fh.write(content)
+    report = graph_audit(md)
+    assert report["edge_origin"] == {"co-recall": 2}
+
+
+def test_edge_origin_never_enters_links_cache(tmp_path):
+    """No links.json schema change (ED-4): the cache payload for a corpus WITH
+    edge_origin stamps is IDENTICAL in shape and content to the same corpus without
+    them — the annotation lives in frontmatter (authority) and is read live by the
+    audit only."""
+    import json
+
+    from memory import build_index as B
+
+    md, md2 = str(tmp_path / "with"), str(tmp_path / "without")
+    for d, stamp in ((md, True), (md2, False)):
+        os.makedirs(d, exist_ok=True)
+        eo = "edge_origin:\n  b: co-recall\n" if stamp else ""
+        with open(os.path.join(d, "a.md"), "w", encoding="utf-8") as fh:
+            fh.write(f'---\nname: a\ndescription: "d"\n{eo}metadata:\n  type: project\n---\nsee [[b]]\n')
+        with open(os.path.join(d, "b.md"), "w", encoding="utf-8") as fh:
+            fh.write('---\nname: b\ndescription: "d"\nmetadata:\n  type: project\n---\nbody\n')
+    idx, idx2 = str(tmp_path / "i1"), str(tmp_path / "i2")
+    B.build_index(md, idx)
+    B.build_index(md2, idx2)
+    with open(os.path.join(idx, "links.json"), encoding="utf-8") as fh:
+        with_stamp = json.load(fh)
+    with open(os.path.join(idx2, "links.json"), encoding="utf-8") as fh:
+        without = json.load(fh)
+    # identical modulo the per-file stat sigs (sizes differ by the stamp bytes)
+    for payload in (with_stamp, without):
+        for rec in payload["files"].values():
+            rec.pop("sig", None)
+    assert "edge_origin" not in json.dumps(with_stamp)
+    assert with_stamp == without
+
+
+def test_graph_audit_cli_flag_prints_report(tmp_path, capsys):
+    from memory.links import main
+
+    md = str(tmp_path / "memory")
+    _audit_corpus(md)
+    assert main(["--memory-dir", md, "--audit"]) == 0
+    out = capsys.readouterr().out
+    assert "edge rot" in out
+    assert "archived" in out and "dangling" in out and "superseded" in out
+
+
+def test_no_edge_origin_corpus_round_trips_untouched(tmp_path):
+    """ED-4 pin: the edge_origin stamp is additive/absence-emits-nothing — an unstamped
+    corpus builds a manifest + links.json that never mention the key, corpus_format is
+    NOT bumped by the stamp, and doctor's edge_rot line reads clean.
+
+    (The GRF-1 acceptance text said "CORPUS_FORMAT_VERSION==4 untouched" — a snapshot
+    of the roadmap-authoring era; the tree crossed to 5 in round 3, so the live pin is
+    ==5. The invariant under test is unchanged: this feature forces no bump.)"""
+    from memory import build_index as B
+    from memory import doctor as D
+    from memory.provenance import CORPUS_FORMAT_VERSION
+
+    assert CORPUS_FORMAT_VERSION == 5  # the stamp must never force a format bump
+
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    for fname, body in (("a.md", "see [[b]]"), ("b.md", "body")):
+        with open(os.path.join(md, fname), "w", encoding="utf-8") as fh:
+            fh.write(_mem(fname[:-3], body))
+    idx = str(tmp_path / "idx")
+    B.build_index(md, idx)
+    for artifact in ("manifest.json", "links.json"):
+        p = os.path.join(idx, artifact)
+        if os.path.exists(p):
+            with open(p, encoding="utf-8") as fh:
+                assert "edge_origin" not in fh.read()
+    r = D.check_edge_rot(D.DoctorContext(md, str(tmp_path)))
+    assert r["status"] == "ok" and "edge rot: 0" in r["message"]

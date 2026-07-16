@@ -1149,6 +1149,49 @@ def check_link_density(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"link-density check failed: {exc}."}
 
 
+# GRF-1: warn once the graph carries at least this many rotten edges (edges whose target
+# is archived, superseded, or resolves to nothing). 1 — a single edge into retired
+# knowledge is already worth a look, and the audit CLI names each one; below the
+# threshold the line stays an informational ok (deterministic, no timestamps).
+_EDGE_ROT_WARN_MIN = 1
+
+
+def check_edge_rot(ctx: DoctorContext) -> Dict[str, str]:
+    """GRF-1: ONE deterministic line for edge rot — the graph-audit's headline number.
+
+    ``links.graph_audit`` classifies every edge whose target is archived (file moved to
+    ``archive/``), superseded (another memory ``supersedes`` it — pointing at retired
+    knowledge), or dangling (resolves to nothing). Same ask-when-asked posture as
+    ``check_link_density`` (SessionStart's ``lint_links.health_line`` already nags plain
+    dangling links per-session; doctor aggregates ALL rot classes on demand). Silent
+    ``ok`` when the graph cannot be built (other checks own that failure) or rot is
+    below ``_EDGE_ROT_WARN_MIN``.
+    """
+    try:
+        from .links import graph_audit
+
+        report = graph_audit(ctx.memory_dir)
+        if report is None:
+            return {"status": "ok", "message": "edge rot: N/A (could not build the link graph)."}
+        rot = report.get("rot") or []
+        by_class: Dict[str, int] = {}
+        for r in rot:
+            by_class[r["class"]] = by_class.get(r["class"], 0) + 1
+        if len(rot) < _EDGE_ROT_WARN_MIN:
+            return {
+                "status": "ok",
+                "message": f"edge rot: 0 across {report.get('edges', 0)} resolved edge(s).",
+            }
+        detail = ", ".join(f"{cls}={n}" for cls, n in sorted(by_class.items()))
+        return {
+            "status": "warn",
+            "message": f"edge rot: {len(rot)} edge(s) into retired/missing targets "
+            f"({detail}) — `python -m memory.links --audit` names each one.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"edge-rot check failed: {exc}."}
+
+
 # --------------------------------------------------------------------------- #
 # RET-3: non-English corpus served by the English default model
 # --------------------------------------------------------------------------- #
@@ -1867,6 +1910,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("fill_me", check_fill_me),
     ("secrets", check_secrets),
     ("link_density", check_link_density),
+    ("edge_rot", check_edge_rot),  # GRF-1: edges into archived/superseded/dangling targets
     ("dream_ledger", check_dream_ledger),  # DRM-2: on-disk dream stamps ↔ dream-ledger.jsonl reconcile
     ("non_english_corpus", check_non_english_corpus),
     ("mcp_launch", check_mcp_launch),  # INT-8: the stdio MCP server (bin/hippo mcp) actually starts

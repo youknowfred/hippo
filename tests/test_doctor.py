@@ -582,6 +582,33 @@ def test_link_density_ok_once_an_edge_exists(repo, memory_dir):
 
 
 # --------------------------------------------------------------------------- #
+# GRF-1: edge rot — one threshold-gated line over links.graph_audit
+# --------------------------------------------------------------------------- #
+def test_edge_rot_ok_on_clean_graph(repo, memory_dir):
+    _seed(memory_dir)
+    write_file(memory_dir, "a.md", _mem("a", "note a", body="see [[b]]"))
+    write_file(memory_dir, "b.md", _mem("b", "note b"))
+    r = D.check_edge_rot(_ctx(memory_dir, repo))
+    assert r["status"] == "ok"
+    assert "edge rot: 0" in r["message"]
+    assert "\n" not in r["message"]  # ONE line — the doctor render/line-count determinism pins
+
+
+def test_edge_rot_warns_and_names_the_audit_command(repo, memory_dir):
+    _seed(memory_dir)
+    os.makedirs(os.path.join(memory_dir, "archive"), exist_ok=True)
+    write_file(memory_dir, "a.md", _mem("a", "note a", body="see [[gone]] and [[attic]]"))
+    write_file(
+        memory_dir, os.path.join("archive", "attic.md"), _mem("attic", "archived note")
+    )
+    r = D.check_edge_rot(_ctx(memory_dir, repo))
+    assert r["status"] == "warn"
+    assert "archived=1" in r["message"] and "dangling=1" in r["message"]
+    assert "python -m memory.links --audit" in r["message"]  # runnable remedy, named
+    assert "\n" not in r["message"]  # ONE line — the doctor render/line-count determinism pins
+
+
+# --------------------------------------------------------------------------- #
 # RET-3: non-English corpus served by the English default model
 # --------------------------------------------------------------------------- #
 _JP_DESC = "東京都渋谷区の天気予報と観光案内について詳しく説明しています今日と明日の予定"
