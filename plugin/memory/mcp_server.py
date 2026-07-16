@@ -930,6 +930,46 @@ _TOOLS = [
             },
         },
     },
+    # ------------------------------------------------------------------- #
+    # EXT-3 (T17, additive per STABILITY.md): consolidate's asks step — the
+    # interview loop. hippo tells, but never asked.
+    # ------------------------------------------------------------------- #
+    {
+        "name": "interview",
+        "description": (
+            "EXT-3, the /hippo:consolidate asks step: at most THREE grounded questions "
+            "per session, template-rendered from existing gap signals — recurring "
+            "recall abstentions (SIG-3), the unresolved contradiction inbox (GOV-1), "
+            "and generated drafts at their decay horizon (DRM-6) — each citing its "
+            "evidence verbatim. action='questions' (default) lists them; ask the HUMAN, "
+            "never answer for them. Every ACCEPTED answer routes through the existing "
+            "per-item write verbs (new_memory with check:true / resolve / reconsolidate "
+            "reverify) — this tool itself writes nothing to the corpus, ever. A decline "
+            "is remembered (telemetry, not corpus) and never re-asks; a 'later' snoozes "
+            "— record either via action='respond' (qid=…, outcome='decline'|'later'). "
+            "Zero questions when the queues are empty is the designed norm."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["questions", "respond"],
+                    "description": "questions = render the (≤3) asks (default); "
+                    "respond = record ONE decline/later (requires qid + outcome)",
+                },
+                "qid": {
+                    "type": "string",
+                    "description": "the question id from the listing (abstain:/contra:/draft:…)",
+                },
+                "outcome": {
+                    "type": "string",
+                    "enum": ["decline", "later"],
+                    "description": "decline = never re-ask; later = snooze (a few days)",
+                },
+            },
+        },
+    },
 ]
 
 
@@ -2548,6 +2588,28 @@ def _tool_audit(args: Dict[str, Any]) -> str:
     )
 
 
+def _tool_interview(args: Dict[str, Any]) -> str:
+    """EXT-3 — consolidate's asks step. The tool only RENDERS questions and RECORDS
+    declines/snoozes (telemetry-only): asking the human is the skill's job, answering
+    routes through the existing per-item write verbs, and an empty listing is the
+    designed norm. Gated like every corpus-touching tool: the questions quote telemetry
+    query previews and memory names (SEC-1)."""
+    from .interview import gather_questions, render_questions, respond
+
+    refusal, memory_dir, repo_root = _corpus_gate(
+        "interview", "questions quote telemetry query previews and memory names"
+    )
+    if refusal:
+        return refusal
+    action = str(args.get("action") or "questions").strip()
+    if action == "respond":
+        r = respond(str(args.get("qid") or ""), str(args.get("outcome") or ""))
+        if not r.get("ok"):
+            return f"interview: refused — {r.get('error')}"
+        return f"interview: {r.get('status')}"
+    return render_questions(gather_questions(memory_dir, repo_root=repo_root))
+
+
 _DISPATCH = {
     "recall": _tool_recall,
     "new_memory": _tool_new_memory,
@@ -2580,6 +2642,9 @@ _DISPATCH = {
     # preflights. Appended at the END: STABILITY.md freezes names, shapes AND positions.
     "resolve": _tool_resolve,
     "audit": _tool_audit,
+    # EXT-3 (T17): consolidate's asks step — appended at the END (STABILITY.md freezes
+    # names, shapes AND positions).
+    "interview": _tool_interview,
 }
 
 

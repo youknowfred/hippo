@@ -84,8 +84,9 @@ VERBS: Tuple[VerbSurface, ...] = (
             "build_index",
             "co_recall_proposals",
             "abstention_fixtures",
+            "interview",
         ),
-        note="the skill is the doctrine on both surfaces; its steps are per-item tools (INT-13)",
+        note="the skill is the doctrine on both surfaces; its steps are per-item tools (INT-13; EXT-3 adds the asks step)",
     ),
     VerbSurface(
         "doctor",

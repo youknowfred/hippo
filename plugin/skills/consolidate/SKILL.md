@@ -279,9 +279,40 @@ a memory to make a fixture pass** (the primitive refuses stems that don't exist 
 is a verdict, not a thing to work around). Delete rows that are noise. Per item,
 agent-gated — never admit the whole queue in bulk.
 
+## Step 6 — The interview: ask up to three grounded questions (EXT-3)
+
+hippo tells, but never asked. Three gap signals are machine-detected with no encode-side
+loop — the recurring abstentions Step 5 just triaged, the contradiction inbox, and generated
+drafts at their decay horizon. Render the (at most three) questions and put each to the
+USER, verbatim — never answer one yourself:
+
+```bash
+"$PY" - <<'PYEOF'
+from memory.interview import gather_questions, render_questions
+from memory.provenance import resolve_dirs
+
+md, rr = resolve_dirs()
+print(render_questions(gather_questions(md, repo_root=rr)))
+PYEOF
+```
+
+(Desktop: the `interview` MCP tool, `action='questions'`.) Each question cites its evidence
+verbatim — the abstained query and its count, the contradicting pair, the draft stem. Route
+each answer through the EXISTING per-item verbs, exactly as the question's `route` line says:
+a written-down abstention answer goes through `new_memory` with `check:true` first (Step 1's
+discipline — author it from real knowledge, never fabricate); a contradiction verdict goes
+through `/hippo:resolve` (or the `resolve` tool); a draft verification goes through
+`reconsolidate` `action='reverify'`. The asks step itself writes nothing.
+
+A "no" is recorded so it NEVER re-asks; a "later" snoozes for a few days — per item, via the
+same `interview` tool: `action='respond'`, `qid=<from the listing>`, `outcome='decline'` or
+`'later'`. Zero questions is the designed norm, not a failure; if dogfooding ever says this
+step nags, the cap and decline memory are the dials that exist to be turned down.
+
 > A future auto-maintained map-of-content note (CAP-5) will also be refreshed here once it
 > ships; today consolidation ends at a drained queue, an addressed worklist, a current graph,
-> and a blind-spot queue that is judged rather than silently growing.
+> a blind-spot queue that is judged rather than silently growing, and at most three grounded
+> questions the human actually wanted to be asked.
 
 ## When NOT to use
 
