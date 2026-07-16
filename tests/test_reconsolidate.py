@@ -1249,3 +1249,23 @@ def test_semantic_reverify_rolls_back_invalidation_when_edge_write_fails(repo, m
         "m_old's invalid_after must be rolled back when the successor edge fails"
     )
     assert open(os.path.join(memory_dir, "m_new.md"), encoding="utf-8").read() == new_before
+
+
+def test_worklist_nudge_names_a_runnable_verb_on_both_surfaces(repo, memory_dir, monkeypatch):
+    """INT-18 (DOC-16's lesson, again): the nudge said `provenance --reverify <name>` —
+    not runnable as written (no such command; the real form is python -m
+    memory.provenance), the WRONG verb (the cross-surface reconsolidation path is the
+    reconsolidate tool / /hippo:consolidate), and with no /hippo: token the Desktop
+    surface note never attached: a Desktop user got a worklist with a terminal-only,
+    mistyped command and no working alternative."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    now = int(time.time())
+    td = _seed_stale_recalled(repo, memory_dir, ["m_keep"], when=now - 300)
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    out = R.reconsolidation_producer(memory_dir, repo) or ""
+    assert out, "worklist expected"
+    assert "`provenance --reverify" not in out, "names a command that does not exist"
+    assert "reconsolidate" in out and "tool" in out, "must name the cross-surface verb"
+    assert "/hippo:" in out, (
+        "must carry a /hippo: token so the Desktop surface note attaches"
+    )

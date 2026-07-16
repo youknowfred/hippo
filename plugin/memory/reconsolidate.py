@@ -698,7 +698,13 @@ def reconsolidation_producer(
     header = (
         f"🧠 Reconsolidation worklist — {len(worklist)} recently-recalled memories cite code "
         "that has since drifted (most-recently-drifted first). Re-ground each against current "
-        "code, then `provenance --reverify <name>` once confirmed correct"
+        "code, then render the verdict per item with the reconsolidate MCP tool "
+        "(action='reverify', name=…, outcome=graduate|fix|demote) — /hippo:consolidate "
+        "Step 2 drives the same flow in a terminal"
+        # INT-18 (DOC-16's lesson): the old text said `provenance --reverify <name>` —
+        # not runnable as written (no such command), the wrong verb (the cross-surface
+        # path is reconsolidate/INT-13), and /hippo:-token-free, so the Desktop surface
+        # note never attached and Desktop users dead-ended.
     )
     if any(item.get("linked") for item in shown):
         # GRA-9: one line of legend, and ONLY when a (+N linked: …) annotation actually

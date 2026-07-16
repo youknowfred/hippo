@@ -1128,3 +1128,18 @@ def test_a_raising_producer_is_named_not_vanished(monkeypatch):
     assert "boom" in ctx and "wired wrong" in ctx, (
         "a producer crash must be named in the context, not silently dropped"
     )
+
+
+def test_desktop_surface_note_is_honest_about_terminal_only_verbs():
+    """INT-19: the note said resolve/audit 'run as hippo skills — invoke them directly'
+    — but both skills hard-abort on Desktop ('re-run from a terminal'), so the note
+    routed users into a dead end it had just promised was a path. It must name the
+    terminal-only verbs AS terminal-only, and name the tools that do exist (dream,
+    new_memory, recall, why)."""
+    note = S._DESKTOP_SURFACE_NOTE
+    assert "terminal-only for now" in note
+    for verb in ("resolve", "audit", "export-agents", "import", "promote", "remove"):
+        assert verb in note
+    assert "dream" in note and "new_memory" in note and "why tool" in note
+    # The old claim must be gone: resolve/audit are not 'invoke them directly' verbs.
+    assert "(resolve, audit, new, recall, why) run as hippo skills" not in note
