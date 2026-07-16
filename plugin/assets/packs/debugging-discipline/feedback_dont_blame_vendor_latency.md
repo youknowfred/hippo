@@ -14,7 +14,9 @@ RECURRENCE of something already diagnosed and "fixed" that way before.
 **Why:** A diagnosis that keeps recurring after its "fixes" ship is not the real root cause.
 Blaming an external, uncontrollable factor is a convenient way to avoid finding the defect in
 your own code — and if the previous "vendor latency" fix didn't actually stop the recurrence,
-that's direct evidence the diagnosis was wrong, not that the vendor is still slow.
+that's direct evidence the diagnosis was wrong, not that the vendor is still slow. Fresh
+failing output for an already-"fixed" symptom means recurrence, never deploy lag
+([[feedback_new_logs_mean_recurrence]]).
 
 **How to apply:** Treat "it's just [vendor] latency" as a hypothesis to actively DISPROVE, not a
 default. Hunt the code-side mechanism FIRST: unbounded state/message growth, retry loops or

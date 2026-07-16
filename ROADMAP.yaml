@@ -1061,6 +1061,12 @@ workstreams:
           category (RET-8); ship only if it beats 1-hop on the fixtures.
         acceptance_criteria:
           - multi-hop eval category improves over GRA-1 baseline or the item is dropped
+          # DATED NOTE (2026-07-16, GRF-2/T9): the baseline this gate must beat is now the
+          # GROWN multi-hop category (n=10, both edge directions, condition matrix in
+          # tests/fixtures/recall_hard_set.yaml) measuring 1.0 on dense+bm25 AND bm25-only
+          # AND mixed mode — GRF-2 closed the mixed-mode MMR leg (graph-endorsed entries are
+          # exempt from the MMR diversity re-cut, the knee exemption's symmetric twin) and
+          # re-fixed the drifted dense leg. A PPR stage has to beat THAT, not the n=2 set.
         dependencies: [GRA-1, GRA-6, RET-8]
 
       - id: GRA-8
@@ -2108,7 +2114,7 @@ release_train:
   - version: exploratory
     theme: "Proving-gate items — ship only when their gates clear"
     items:
-      - {id: GRA-7,  gate: "beats GRA-1 on the RET-8 multi-hop category"}
+      - {id: GRA-7,  gate: "beats the grown multi-hop baseline (n=10 since GRF-2 2026-07-16, incl. the mixed-mode MMR fix), not just GRA-1's n=2 era"}
       - {id: GRA-8,  gate: "none — schedule opportunistically"}
       - {id: RET-8,  gate: "RET-1 + GRA-1 landed"}
       - {id: LIF-7,  gate: "CAP-2 capture pipeline proven across temporally-diverse sessions"}
