@@ -890,3 +890,17 @@ def test_set_invalid_after_never_leaves_a_torn_memory_file(tmp_path, monkeypatch
     assert after == original or (r.get("changed") and parse_frontmatter(after)), (
         f"torn memory file after a failed write (error={r.get('error')!r}):\n{after!r}"
     )
+
+
+def test_read_last_verified_accepts_an_unquoted_date(tmp_path):
+    """COR-19: PyYAML types an unquoted `last_verified: 2026-07-15` as datetime.date,
+    and the isinstance(str) guard read it as 'never verified' — while the miniyaml
+    fallback returned the string. Machine-written stamps are json-quoted, so this
+    bites exactly the hand-authored form; both parser paths must agree."""
+    from memory.staleness import read_last_verified
+
+    text = (
+        "---\nname: n\ndescription: d\nmetadata:\n  type: project\n"
+        "last_verified: 2026-07-15\n---\nbody\n"
+    )
+    assert read_last_verified(text) == "2026-07-15"

@@ -114,6 +114,12 @@ def read_last_verified(text: str) -> Optional[str]:
     lv = fm.get("last_verified")
     if lv is None:
         lv = meta.get("last_verified")
+    if hasattr(lv, "isoformat"):
+        # COR-19: PyYAML types an UNQUOTED date as datetime.date/datetime — the
+        # isinstance(str) guard read a hand-authored stamp as "never verified" on
+        # the venv path while the miniyaml path returned the string. Coerce like
+        # build_index._extract_invalid_after does.
+        return lv.isoformat()
     if isinstance(lv, str) and lv.strip():
         return lv
     return None
