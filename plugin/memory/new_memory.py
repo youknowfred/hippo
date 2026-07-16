@@ -100,15 +100,19 @@ def _ensure_tier_floor(tier_dir: str, label: str) -> None:
         if os.path.exists(floor_path):
             return
         os.makedirs(tier_dir, exist_ok=True)
-        with open(floor_path, "w", encoding="utf-8") as fh:
-            fh.write(
-                f"# Agent Memory ({label} tier)\n\n"
-                f"> {label.capitalize()}-tier user/feedback memories — recalled alongside the "
-                "project corpus and delivered each session by the SessionStart portable-floor "
-                "producer (TEA-1/TEA-3), NOT the native symlink.\n\n"
-                "## User\n\n"
-                "## Working Style & Process Feedback\n"
-            )
+        from .atomic import write_text_atomic
+
+        # INV-2: a torn skeleton would pass the exists() guard above forever and block
+        # every future floor append — the floor is corpus-class truth, write it whole.
+        write_text_atomic(
+            floor_path,
+            f"# Agent Memory ({label} tier)\n\n"
+            f"> {label.capitalize()}-tier user/feedback memories — recalled alongside the "
+            "project corpus and delivered each session by the SessionStart portable-floor "
+            "producer (TEA-1/TEA-3), NOT the native symlink.\n\n"
+            "## User\n\n"
+            "## Working Style & Process Feedback\n",
+        )
     except Exception:
         pass
 

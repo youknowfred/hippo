@@ -70,8 +70,11 @@ def _copy_if_absent(src: str, dst: str) -> Optional[str]:
         return None
     with open(src, "rb") as fh:
         data = fh.read()
-    with open(dst, "wb") as fh:
-        fh.write(data)
+    # INV-2: a torn seed would strand a partial corpus file that this function's own
+    # already_present guard then refuses to heal on re-init — byte-faithful and atomic.
+    from .atomic import write_bytes_atomic
+
+    write_bytes_atomic(dst, data)
     return "seeded"
 
 
@@ -212,16 +215,18 @@ def init_project(
                 # DRV-2: a FRESH corpus is stamped with the derivation too — its memories
                 # will be written by this plugin's extractor, so it is current by
                 # construction and must not be nudged to re-derive citations it never had.
-                with open(fmt_path, "w", encoding="utf-8") as fh:
-                    fh.write(
-                        json.dumps(
-                            {
-                                "corpus_format": CORPUS_FORMAT_VERSION,
-                                "cite_derivation": CITATION_DERIVATION_VERSION,
-                            }
-                        )
-                        + "\n"
+                from .atomic import write_text_atomic
+
+                write_text_atomic(  # INV-2: committed marker — never a torn stamp
+                    fmt_path,
+                    json.dumps(
+                        {
+                            "corpus_format": CORPUS_FORMAT_VERSION,
+                            "cite_derivation": CITATION_DERIVATION_VERSION,
+                        }
                     )
+                    + "\n",
+                )
                 result["format_marker"] = "stamped"
             else:
                 result["format_marker"] = "already_present"

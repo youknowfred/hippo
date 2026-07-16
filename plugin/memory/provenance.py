@@ -645,11 +645,13 @@ def _write_marker_keys(memory_dir: str, **keys) -> bool:
     silently erase the other one's answer.
     """
     try:
+        from .atomic import write_text_atomic
+
         data = _read_marker(memory_dir)
         data.update(keys)
-        with open(format_marker_path(memory_dir), "w", encoding="utf-8") as fh:
-            json.dump(data, fh)
-            fh.write("\n")
+        # INV-2: the marker is COMMITTED corpus truth (format + derivation axes in one
+        # file) — a torn write would have the corpus declaring garbage to every reader.
+        write_text_atomic(format_marker_path(memory_dir), json.dumps(data) + "\n")
         return True
     except Exception:
         return False
