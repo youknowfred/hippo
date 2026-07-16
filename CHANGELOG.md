@@ -7,6 +7,55 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.16.0 — 2026-07-15 — "Nothing half-written"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**, index
+schema still **7**, citation derivation still **3**. No migration. This release is a field report
+made code: a Desktop session asked for "a memory pack of everything" and hit four walls in one
+sitting — the pack skill's preflight aborted (so the agent hand-rolled venv paths around every
+guard the skill encodes), a doc file swept in by an "all `.md`" glob refused the whole batch, each
+refusal surfaced ONE reason per call (68 memories got probed one by one), and a mid-batch writer
+refusal stranded a partial pack with no manifest. Behind the last wall was the real find: a
+frontmatter writer that corrupts `metadata.type`.
+
+- **COR-13 — the pack stamp writers join the COR-9 discipline.** `_stamp_pack` was the FIFTH
+  hand-copied frontmatter-insertion walk — and the last still carrying the family's corruption
+  modes. A `metadata:` line it failed to recognize (flow-style `metadata: {…}`, a trailing
+  comment) got a DUPLICATE `metadata:` block appended; YAML last-wins, and every original
+  metadata key silently dropped — `type` first among them, the transcript's exact "would corrupt
+  its `metadata.type`" refusal. Non-2-space children got 2-space stamps: a mixed-indent document
+  that no longer parses. The writer is now `insert_frontmatter_keys` (indent read from the
+  block's own keys; unrecognized shapes degrade to a top-level append — doctor already reads both
+  scopes — never a duplicate block). Worse on the inbound side: `_ensure_pack_stamp` ran its
+  `pack_version` regex MULTILINE over the whole file, so installing a memory whose body merely
+  *mentions* `pack_version:` rewrote the BODY line and never stamped the frontmatter — and
+  install/update had NO damage guard, so that one corrupted **silently** instead of refusing. The
+  rewrite is now frontmatter-scoped, and every pack write site guards (`_stamp_damage`: the
+  COR-9 value-level check plus body byte-identity, the half no frontmatter check can see):
+  extract refuses in its validate phase, install refuses before writing, and update marks the ONE
+  poisoned item `stamp-refused` (reason on its row) without sinking the rest of the plan.
+- **RCH-7 — extract validates everything, reports everything, writes last.** `pack_extract` now
+  computes and damage-checks EVERY portable rewrite before the first byte lands, so every refusal
+  is genuinely zero-filesystem-change — the old damage check ran mid-write-loop, and a refusal on
+  file #40 left 39 files and no manifest, exactly the state the module docstring promised could
+  not exist — and every refusal carries the COMPLETE `invalid` map (name → reason): a 69-name
+  batch with three bad names reports all three in one call. `names="all"` selects through
+  `_is_memory_filename` — THE corpus-membership filter — so "pack up everything" is one call and
+  `MEMORY.md`/`CONVENTIONS.md` can never poison a batch again (agents: never glob the corpus
+  dir); non-extractable memories land in `skipped` (name → reason), reported, never silent. A
+  `dest` inside the corpus refuses up front (the extracted `.md` files would be indexed as
+  memories on the next build). A mid-write I/O failure rolls the written files back.
+- **INT-16 — the pack verbs reach the second surface.** Five MCP tools in the skill's own flow
+  order — `pack_extract`; install: `pack_install_plan` → per-item `pack_install_item`; update:
+  `pack_update_plan` → per-item `pack_update_item` — all SEC-1 trust-gated, plans rendering
+  foreign pack text as demarcated quoted data (the SEC-5 discipline), item calls per-item by
+  construction, and the extract tool's text carrying the complete `invalid`/`skipped` reason maps
+  in-band (the transcript's "the reason isn't in the fields I printed" can't recur). The pack
+  skill's preflight now routes Desktop to these tools — the pre-INT-16 text said "re-run it from
+  a terminal", and the observed agent response was to drive the python primitives by hand around
+  the preflight, with none of the skill's guardrails. The SessionStart Desktop surface note maps
+  `/hippo:pack` accordingly. The STABILITY.md frozen five keep their names, shapes and positions.
+
 ## v1.15.2 — 2026-07-15 — "The verb has a name"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**,
