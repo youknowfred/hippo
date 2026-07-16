@@ -574,6 +574,44 @@ def _scorecard_message(memory_dir: str, repo_root: str) -> Tuple[str, str]:
     except Exception:
         components = None
 
+    # MSR-6: the cost-honesty line — what hippo actually SPENT injecting, measured off
+    # the ledgers (recall events' injected_chars + the SessionStart producer rows),
+    # joined with the live KPI-2 touched-proxy. Session/producer aggregation ONLY —
+    # never a per-memory touch table (the inert-recall-noise-finder kill; the MSR-6
+    # AST pin holds this function to injection_precision's scalar aggregates).
+    cost_chars = 0
+    cost_sessions: set = set()
+    try:
+        from .telemetry import default_telemetry_dir as _dtd
+        from .telemetry import read_events as _cost_read_events
+        from .telemetry import read_injection_producers as _cost_read_producers
+
+        _cost_td = _dtd(memory_dir)
+        for e in _cost_read_events(_cost_td):
+            ic = e.get("injected_chars")
+            if isinstance(ic, int) and not isinstance(ic, bool) and ic > 0:
+                cost_chars += ic
+                if e.get("session_id"):
+                    cost_sessions.add(e["session_id"])
+        for row in _cost_read_producers(_cost_td):
+            t = row.get("total")
+            if isinstance(t, int) and not isinstance(t, bool) and t > 0:
+                cost_chars += t
+                if row.get("session_id"):
+                    cost_sessions.add(row["session_id"])
+    except Exception:
+        cost_chars = 0
+        cost_sessions = set()
+    touched_pct = "touched n/a"
+    try:
+        from .outcome import injection_precision
+
+        prec = injection_precision(memory_dir, None)
+        if prec.get("precision") is not None:
+            touched_pct = f"{round(prec['precision'] * 100)}% touched"
+    except Exception:
+        pass
+
     # GOV-4: floor/corpus changed since this clone's watermark (read-only peek — never
     # consumes the producer's surfaced-once semantics).
     floor_line = "floor/corpus delta: no watermark baseline yet"
@@ -602,6 +640,8 @@ def _scorecard_message(memory_dir: str, repo_root: str) -> Tuple[str, str]:
         f"{pinned} pinned / {muted} muted",
         f"{draft} draft",
         (f"{components} graph component(s)" if components is not None else "graph components: n/a"),
+        # MSR-6: the folded-in cost-honesty part — one part, not a new check/line.
+        f"injected ~{cost_chars} chars over {len(cost_sessions)} session(s); {touched_pct}",
         floor_line,
     ]
     status = "warn" if (contested or rule_conflicts or rot or blind or orphans) else "ok"
@@ -1342,6 +1382,11 @@ def check_hot_path_latency(ctx: DoctorContext) -> Dict[str, str]:
     the real per-prompt cost users pay, not a warm benchmark. This surfaces the p95 so a
     regression (a heavier model, a new per-import cost) is visible, warning past the KPI-3 cold
     budget. Read-only; N/A when the ledger is empty; never raises.
+
+    MSR-3: filtered to ``channel in (hook, absent)`` — the ledger now also carries
+    MCP-channel events (the recall/why tools), and an in-process MCP recall's timing is
+    a different animal from the fresh-hook-process cost this p95 budgets. Without the
+    filter, one MCP call would corrupt the KPI-3 gate this line exists to watch.
     """
     try:
         from .telemetry import default_telemetry_dir, read_events
@@ -1351,6 +1396,7 @@ def check_hot_path_latency(ctx: DoctorContext) -> Dict[str, str]:
             float(e["latency_ms"])
             for e in read_events(td)
             if isinstance(e.get("latency_ms"), (int, float))
+            and e.get("channel") in (None, "hook")
         )
         if not lats:
             return {
@@ -1403,6 +1449,107 @@ def check_recall_blind_spots(ctx: DoctorContext) -> Dict[str, str]:
         }
     except Exception as exc:
         return {"status": "warn", "message": f"recall blind-spots check failed: {exc}."}
+
+
+def check_recall_channels(ctx: DoctorContext) -> Dict[str, str]:
+    """MSR-3: the per-channel recall volume line + the MCP abstention arm.
+
+    MCP recall/why events were telemetry-INVISIBLE (recall_view bypassed main()'s
+    logging), so the usage ledger undercounted exactly the highest-intent recalls —
+    an agent explicitly asking mid-turn. This line says how much of each surface the
+    ledger now sees, and how many recurring blind-spot clusters are MCP-specific
+    (``abstention_backlog(channel="mcp")`` — an agent asked and got nothing,
+    repeatedly). Counts only, no timestamps (the doctor determinism pin); read-only;
+    informational, never a warn. NB the deliberate asymmetry: an UNTRUSTED corpus's
+    MCP recalls leave zero ledger trace (SEC-1), so this line can never become the
+    trust-posture flight recorder the round-2 vetting killed.
+    """
+    try:
+        from .telemetry import abstention_backlog, default_telemetry_dir, read_events
+
+        td = default_telemetry_dir(ctx.memory_dir)
+        hook = mcp = 0
+        for e in read_events(td):
+            if (e.get("channel") or "hook") == "mcp":
+                mcp += 1
+            else:
+                hook += 1
+        if not (hook or mcp):
+            return {
+                "status": "ok",
+                "message": "recall channels: no recall events logged yet — nothing to count.",
+            }
+        if not mcp:
+            return {
+                "status": "ok",
+                "message": f"recall channels: all {hook} event(s) via hook — no MCP "
+                "recall/why traffic logged yet.",
+            }
+        mcp_blind = len(abstention_backlog(td, channel="mcp"))
+        return {
+            "status": "ok",
+            "message": f"recall channels: {hook} hook / {mcp} mcp event(s); "
+            f"{mcp_blind} recurring MCP blind-spot cluster(s).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"recall channels check failed: {exc}."}
+
+
+# MSR-4: below this many drop-carrying events the aggregation stays quiet — a couple of
+# fresh recalls are anecdote, not evidence worth a doctor line's attention.
+_DROP_AUTOPSY_MIN_EVENTS = 5
+
+
+def check_drop_autopsy(ctx: DoctorContext) -> Dict[str, str]:
+    """MSR-4: ONE deterministic aggregation line over the recall ledger's drop records.
+
+    The admission-walk cut reasons (``drops``) and the abstention near-miss scores were
+    write-only until this line: per-reason counts say WHICH mechanism eats candidates
+    (knee vs floor vs MMR vs pool), and the abstention arm's median sub-floor margin
+    says HOW CLOSE the misses run — the first measured evidence for RET-11's BM25-floor
+    decision and the SIG-5 revisit. Counts only, sorted, no timestamps (the doctor
+    determinism pin); gated on a minimum event count; informational, never a warn.
+    """
+    try:
+        from .telemetry import default_telemetry_dir, read_events
+
+        td = default_telemetry_dir(ctx.memory_dir)
+        counts: Dict[str, int] = {}
+        events_with_drops = 0
+        near_miss_margins: List[float] = []
+        for e in read_events(td):
+            drops = e.get("drops")
+            if isinstance(drops, list) and drops:
+                events_with_drops += 1
+                for d in drops:
+                    reason = d.get("reason") if isinstance(d, dict) else None
+                    if isinstance(reason, str) and reason:
+                        counts[reason] = counts.get(reason, 0) + 1
+            floor = e.get("dense_floor")
+            if isinstance(floor, (int, float)):
+                for nm in e.get("near_miss") or []:
+                    s = nm.get("score") if isinstance(nm, dict) else None
+                    if isinstance(s, (int, float)):
+                        near_miss_margins.append(float(floor) - float(s))
+        if events_with_drops < _DROP_AUTOPSY_MIN_EVENTS:
+            return {
+                "status": "ok",
+                "message": f"drop autopsy: {events_with_drops} recall event(s) carry drop "
+                f"records (aggregation starts at {_DROP_AUTOPSY_MIN_EVENTS}) — not enough "
+                "evidence yet.",
+            }
+        parts = [
+            f"{reason} ×{n}"
+            for reason, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        ]
+        line = f"drop autopsy: over {events_with_drops} recall event(s): " + ", ".join(parts)
+        if near_miss_margins:
+            near_miss_margins.sort()
+            median = near_miss_margins[len(near_miss_margins) // 2]
+            line += f" · abstention near-miss median margin {median:.4f} below the dense floor"
+        return {"status": "ok", "message": line + "."}
+    except Exception as exc:
+        return {"status": "warn", "message": f"drop autopsy check failed: {exc}."}
 
 
 def check_abstention_cold_start(ctx: DoctorContext) -> Dict[str, str]:
@@ -1704,7 +1851,10 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("index_count", check_index_count),
     ("steering", check_steering),  # GOV-2: N pinned (pre-wires the mandatory MUTE count)
     ("hot_path_latency", check_hot_path_latency),
+    ("recall_channels", check_recall_channels),  # MSR-3: hook/mcp volume + MCP blind-spot arm
     ("recall_blind_spots", check_recall_blind_spots),
+    ("drop_autopsy", check_drop_autopsy),  # MSR-4: which mechanism eats candidates, aggregated
+
     ("abstention_cold_start", check_abstention_cold_start),  # RET-11: abstention is dense-gated
     ("abstention_floor_sanity", check_abstention_floor_sanity),  # RET-9: per-corpus off-topic leak
     ("injection_precision", check_injection_precision),

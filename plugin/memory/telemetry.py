@@ -216,6 +216,11 @@ def log_recall_event(
     latency_ms: float,
     telemetry_dir: Optional[str] = None,
     session_id: Optional[str] = None,
+    drops: Optional[List[dict]] = None,
+    near_miss: Optional[List[dict]] = None,
+    dense_floor: Optional[float] = None,
+    channel: Optional[str] = None,
+    injected_chars: Optional[int] = None,
 ) -> bool:
     """Append ONE recall event to the ledger. Fire-and-forget: NEVER raises.
 
@@ -234,6 +239,33 @@ def log_recall_event(
     else False (a write failure degrades silently — the caller's recall is unaffected).
     LIF-4: a successful append also folds the event into ``usage_aggregates.json`` (the
     rotation-surviving per-memory summary — best-effort, never affects the return value).
+
+    MSR-4 (all three ADDITIVE — absent input emits no key, existing rows parse unchanged,
+    no schema bump per ED-4):
+      ``drops``       — the admission-walk cut records ``[{name, reason, score[, threshold]}]``
+                        the caller collected via ``recall(..., drop_log=...)``, already
+                        capped per mechanism there (this function stays a dumb appender).
+      ``near_miss``   — on an ABSTENTION (``backend == "none"``), the best sub-floor
+                        dense candidates ``[{name, score}]`` — the evidence RET-11's
+                        BM25-floor decision and the SIG-5 revisit never had.
+      ``dense_floor`` — the calibrated floor those near-miss scores missed, so the
+                        margin is readable off the row without re-deriving the constant.
+
+    MSR-3 ``channel``: which surface issued the recall — ``'hook'`` (the silent
+    UserPromptSubmit path; the ONLY writer before this field existed) or ``'mcp'``
+    (the recall/why tools, agent-issued mid-turn). ADDITIVE and absent-means-hook:
+    a hook event writes NO key at all, so every pre-MSR-3 row and every new hook row
+    parse identically (ED-4, no schema bump). Consumers that must stay hook-only
+    (doctor's KPI-3 p95) filter on ``channel in (None, 'hook')``. The CLI
+    (``recall_view.main``, a human browsing) deliberately stays UNLOGGED — see
+    that module's docstring; agent-issued MCP is the only channel added.
+
+    MSR-6 ``injected_chars``: the ACTUAL emitted hook-payload length (``len`` of the
+    formatted block the hook printed into context) — measured at the emission point,
+    never re-derived. Hook + SessionStart surfaces only: an MCP recall's return goes
+    to the asking agent as a tool result, not silently into context, so MCP events
+    deliberately never carry it. Additive/absence-emits-nothing; an abstention
+    emitted nothing, so it writes no key rather than a fake 0.
     """
     try:
         td = _resolve_dir(telemetry_dir)
@@ -251,6 +283,16 @@ def log_recall_event(
             "k": int(k),
             "query_preview": (query or "")[:_QUERY_PREVIEW_CHARS],
         }
+        if drops:
+            event["drops"] = drops
+        if near_miss:
+            event["near_miss"] = near_miss
+        if dense_floor is not None:
+            event["dense_floor"] = dense_floor
+        if channel and channel != "hook":
+            event["channel"] = channel
+        if injected_chars is not None:
+            event["injected_chars"] = int(injected_chars)
         path = _ledger_path(td)
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, ensure_ascii=False) + "\n")
@@ -274,6 +316,83 @@ def read_events(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
     try:
         td = _resolve_dir(telemetry_dir)
         path = _ledger_path(td)
+        if not os.path.exists(path):
+            return
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(obj, dict):
+                    yield obj
+    except Exception:
+        return
+
+
+# --------------------------------------------------------------------------- #
+# MSR-6: the injection cost ledger — SessionStart's per-producer byte contributions.
+#
+# hippo's value is silent injection, so its COST was invisible: nothing recorded what
+# each SessionStart producer contributed against the _MAX_CONTEXT_CHARS budget, and
+# session_token_cost could only ESTIMATE. One rotating jsonl beside the recall ledger
+# (same contract: never raises, byte-rotated, gitignored, SEC-3 self-ignoring) holds
+# {ts, session_id, producers: {label: chars}, total, cap} per SessionStart emission.
+# SESSION/PRODUCER aggregation ONLY — rows carry producer LABELS, never memory names,
+# so no consumer can grow a per-memory cross-session touch table out of this file
+# (the round-1 inert-recall-noise-finder kill, enforced by the MSR-6 AST pin).
+# --------------------------------------------------------------------------- #
+_INJECTION_LEDGER_NAME = "injection_producers.jsonl"
+
+
+def _injection_ledger_path(telemetry_dir: str) -> str:
+    return os.path.join(telemetry_dir, _INJECTION_LEDGER_NAME)
+
+
+def log_injection_producers(
+    producers: Dict[str, int],
+    *,
+    total: int,
+    cap: int,
+    telemetry_dir: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> bool:
+    """Append ONE SessionStart injection-cost row. Fire-and-forget: NEVER raises.
+
+    ``producers`` maps producer LABEL -> emitted chars (pre-bound contributions);
+    ``total`` is the final bounded payload length actually injected; ``cap`` the
+    ``_MAX_CONTEXT_CHARS`` budget it was bounded against. Zero behavior change to
+    injection itself — the caller measures what it already built.
+    """
+    try:
+        if not producers:
+            return False
+        td = _resolve_dir(telemetry_dir)
+        ensure_self_ignoring_dir(td)  # derived dir: mkdir + self-ignoring .gitignore (SEC-3)
+        event = {
+            "ts": round(time.time(), 3),
+            "session_id": current_session_id(td, session_id=session_id),
+            "producers": {str(k): int(v) for k, v in producers.items()},
+            "total": int(total),
+            "cap": int(cap),
+        }
+        path = _injection_ledger_path(td)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(event, ensure_ascii=False) + "\n")
+        _rotate_if_needed(path)
+        return True
+    except Exception:
+        return False
+
+
+def read_injection_producers(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
+    """Yield parsed injection-cost rows, skipping corrupt/partial lines. Never raises."""
+    try:
+        td = _resolve_dir(telemetry_dir)
+        path = _injection_ledger_path(td)
         if not os.path.exists(path):
             return
         with open(path, "r", encoding="utf-8") as fh:
@@ -335,6 +454,7 @@ def abstention_backlog(
     *,
     min_count: int = _ABSTENTION_MIN_COUNT,
     max_clusters: int = _ABSTENTION_MAX_CLUSTERS,
+    channel: Optional[str] = None,
 ) -> List[dict]:
     """Recurring abstained-query clusters — the recall blind-spot backlog.
 
@@ -343,12 +463,19 @@ def abstention_backlog(
     least ``min_count`` times, most-frequent first, as
     ``[{"count", "sample_query", "terms", "queries"}]``. One-off / diverse abstentions never
     reach ``min_count``, so they never surface. Read-only; never raises; ``[]`` on any failure.
+
+    MSR-3 ``channel``: ``None`` (every pre-MSR-3 caller) clusters ALL abstentions,
+    byte-identical to before; ``'hook'``/``'mcp'`` restricts to that surface's events
+    (absent-means-hook on the row) — the MCP arm is the highest-intent demand signal
+    (an agent explicitly asked and got nothing), surfaced by doctor's channel line.
     """
     try:
         td = _resolve_dir(telemetry_dir)
         clusters: List[dict] = []  # {"seed": set, "all": set, "count": int, "queries": [str]}
         for e in read_events(td):
             if e.get("backend") != "none":
+                continue
+            if channel is not None and (e.get("channel") or "hook") != channel:
                 continue
             q = (e.get("query_preview") or "").strip()
             if not q:

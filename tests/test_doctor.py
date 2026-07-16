@@ -1148,3 +1148,118 @@ def test_mcp_launch_registered_before_the_trailing_env_check():
     labels = [label for label, _ in D.CHECKS]
     assert "mcp_launch" in labels
     assert labels[-1] == "stale_memobot_env"  # the env-hygiene check stays pinned last
+
+
+# --------------------------------------------------------------------------- #
+# MSR-4: the drop-autopsy aggregation line — one deterministic line, min-gated.
+# --------------------------------------------------------------------------- #
+def test_drop_autopsy_quiet_below_min_events(memory_dir, repo, tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", str(tmp_path / "t"))
+    r = D.check_drop_autopsy(D.DoctorContext(memory_dir, repo))
+    assert r["status"] == "ok"
+    assert "not enough evidence" in r["message"]
+    assert "\n" not in r["message"]
+
+
+def test_drop_autopsy_aggregates_reasons_deterministically(memory_dir, repo, tmp_path, monkeypatch):
+    from memory import telemetry as T
+
+    td = str(tmp_path / "t")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    for i in range(5):
+        T.log_recall_event(
+            [],
+            query=f"q{i}",
+            k=5,
+            latency_ms=1.0,
+            telemetry_dir=td,
+            drops=[
+                {"name": f"m{i}", "reason": "knee_cliff", "score": 0.01},
+                {"name": f"n{i}", "reason": "dense_floor", "score": 0.2, "threshold": 0.4},
+            ],
+            near_miss=[{"name": f"n{i}", "score": 0.2}],
+            dense_floor=0.4,
+        )
+    ctx = D.DoctorContext(memory_dir, repo)
+    r = D.check_drop_autopsy(ctx)
+    assert r["status"] == "ok"
+    m = r["message"]
+    assert "\n" not in m  # ONE line — the doctor render/line-count determinism pins
+    assert "over 5 recall event(s)" in m
+    assert "dense_floor ×5" in m and "knee_cliff ×5" in m
+    assert "median margin 0.2000 below the dense floor" in m
+    # deterministic: identical state renders byte-identical
+    assert D.check_drop_autopsy(ctx)["message"] == m
+
+
+def test_drop_autopsy_registered_after_blind_spots():
+    labels = [label for label, _fn in D.CHECKS]
+    assert labels.index("drop_autopsy") == labels.index("recall_blind_spots") + 1
+
+
+# --------------------------------------------------------------------------- #
+# MSR-3: the hot-path p95 is channel-filtered; the channels line counts surfaces.
+# --------------------------------------------------------------------------- #
+def test_hot_path_p95_ignores_mcp_channel_events(memory_dir, repo, tmp_path, monkeypatch):
+    from memory import telemetry as T
+
+    td = str(tmp_path / "t")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    for _ in range(4):
+        T.log_recall_event([], query="q", k=5, latency_ms=10.0, telemetry_dir=td)
+    ctx = D.DoctorContext(memory_dir, repo)
+    before = D.check_hot_path_latency(ctx)["message"]
+    # an in-process MCP recall (different cost animal) must not corrupt KPI-3's p95
+    T.log_recall_event([], query="q", k=5, latency_ms=99999.0, telemetry_dir=td, channel="mcp")
+    after = D.check_hot_path_latency(ctx)["message"]
+    assert after == before  # byte-identical — the MCP event is invisible to this gate
+
+
+def test_recall_channels_line_counts_and_mcp_blind_spots(memory_dir, repo, tmp_path, monkeypatch):
+    from memory import telemetry as T
+
+    td = str(tmp_path / "t")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    ctx = D.DoctorContext(memory_dir, repo)
+    assert "no recall events logged yet" in D.check_recall_channels(ctx)["message"]
+    T.log_recall_event([], query="q", k=5, latency_ms=1.0, telemetry_dir=td)
+    assert "all 1 event(s) via hook" in D.check_recall_channels(ctx)["message"]
+    for _ in range(3):
+        T.log_recall_event(
+            [], query="what is the terraform registry", k=5, latency_ms=1.0,
+            telemetry_dir=td, channel="mcp",
+        )
+    m = D.check_recall_channels(ctx)["message"]
+    assert "1 hook / 3 mcp event(s)" in m
+    assert "1 recurring MCP blind-spot cluster(s)" in m
+    assert "\n" not in m
+    assert D.check_recall_channels(ctx)["message"] == m  # deterministic
+
+
+def test_recall_channels_registered_after_hot_path_latency():
+    labels = [label for label, _fn in D.CHECKS]
+    assert labels.index("recall_channels") == labels.index("hot_path_latency") + 1
+
+
+# --------------------------------------------------------------------------- #
+# MSR-6: the scorecard's folded-in cost-honesty part.
+# --------------------------------------------------------------------------- #
+def test_scorecard_cost_line_reads_measured_ledgers(memory_dir, repo, tmp_path, monkeypatch):
+    from memory import telemetry as T
+
+    td = str(tmp_path / "t")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    ctx = D.DoctorContext(memory_dir, repo)
+    zero = D.check_trust_scorecard(ctx)["message"]
+    assert "injected ~0 chars over 0 session(s); touched n/a" in zero
+    assert "\n" not in zero  # still ONE line — folded in, not a new check
+    T.log_recall_event(
+        [], query="q", k=5, latency_ms=1.0, telemetry_dir=td,
+        session_id="s1", injected_chars=1200,
+    )
+    T.log_injection_producers(
+        {"floor": 300}, total=300, cap=9000, telemetry_dir=td, session_id="s2"
+    )
+    m = D.check_trust_scorecard(ctx)["message"]
+    assert "injected ~1500 chars over 2 session(s)" in m
+    assert D.check_trust_scorecard(ctx)["message"] == m  # deterministic

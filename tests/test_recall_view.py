@@ -440,3 +440,84 @@ def test_describe_tags_confidence_tier(monkeypatch, tmp_path):
     monkeypatch.setattr(V, "recall", lambda *a, **k: synthetic)
     out = V.describe("anything", memory_dir=md)
     assert "draft" in out
+
+
+# --------------------------------------------------------------------------- #
+# MSR-3: the MCP channel — describe(channel="mcp") logs a channel-tagged recall
+# event under main()'s exact SEC-1/SEC-3 gates; every other path stays unlogged.
+# --------------------------------------------------------------------------- #
+def _channel_corpus(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _seed(md, idx, {"reranker.md": _mem("reranker", "voyage reranker cross encoder search")})
+    td = str(tmp_path / "telemetry")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    return md, idx, td
+
+
+def _events(td):
+    import json as _json
+
+    path = os.path.join(td, "recall_events.jsonl")
+    if not os.path.exists(path):
+        return []
+    return [_json.loads(ln) for ln in open(path, encoding="utf-8") if ln.strip()]
+
+
+def test_describe_mcp_channel_logs_tagged_event(tmp_path, monkeypatch):
+    md, idx, td = _channel_corpus(tmp_path, monkeypatch)
+    out = V.describe("voyage reranker search", 5, memory_dir=md, index_dir=idx, channel="mcp")
+    assert "reranker" in out
+    events = _events(td)
+    assert len(events) == 1
+    assert events[0]["channel"] == "mcp"
+    assert events[0]["names"] == ["reranker"]
+    # the episode buffer is UNTOUCHED — its consumers (co-recall, KPI-2, resume card)
+    # stay byte-identical (the MSR-3 scope pin)
+    assert not os.path.exists(os.path.join(td, "episode_buffer.jsonl"))
+
+
+def test_describe_mcp_abstention_logs_backend_none(tmp_path, monkeypatch):
+    md, idx, td = _channel_corpus(tmp_path, monkeypatch)
+    V.describe("wholly unrelated zzqx", 5, memory_dir=md, index_dir=idx, channel="mcp")
+    events = _events(td)
+    assert len(events) == 1
+    assert events[0]["backend"] == "none" and events[0]["channel"] == "mcp"
+
+
+def test_describe_without_channel_logs_nothing(tmp_path, monkeypatch):
+    """The CLI (a human browsing) deliberately stays telemetry-invisible."""
+    md, idx, td = _channel_corpus(tmp_path, monkeypatch)
+    V.describe("voyage reranker search", 5, memory_dir=md, index_dir=idx)
+    assert _events(td) == []
+
+
+def test_describe_mcp_untrusted_corpus_leaves_zero_ledger_trace(repo, memory_dir, tmp_path, monkeypatch):
+    """SEC-1 replicated verbatim: even an empty row is a trace that a foreign,
+    unreviewed corpus was queried."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)  # the conftest bypass off
+    td = str(tmp_path / "telemetry")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    with open(os.path.join(memory_dir, "note.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem("note", "voyage reranker cross encoder search"))
+    out = V.describe("voyage reranker search", 5, memory_dir=memory_dir, repo_root=repo, channel="mcp")
+    assert "No memories" in out  # recall() itself denies the untrusted corpus
+    assert _events(td) == []
+    assert not os.path.exists(td)  # not even the dir — zero trace means zero
+
+
+def test_describe_mcp_no_corpus_gains_no_telemetry_dir(tmp_path, monkeypatch):
+    """SEC-3 replicated: a project that never opted in must not grow a ledger."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    td = str(tmp_path / "telemetry")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    V.describe("anything", 5, memory_dir=str(tmp_path / "nope"), channel="mcp")
+    assert not os.path.exists(td)
+
+
+def test_describe_all_projects_never_logs(tmp_path, monkeypatch):
+    md, idx, td = _channel_corpus(tmp_path, monkeypatch)
+    V.describe("voyage reranker search", 5, memory_dir=md, index_dir=idx, all_projects=True, channel="mcp")
+    assert _events(td) == []  # a fused multi-corpus listing is not a project-ledger event

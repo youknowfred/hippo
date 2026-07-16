@@ -791,7 +791,20 @@ def _bm25_rank_body(
     return out
 
 
-def _dense_rank_rows(query: str, index: LoadedIndex) -> List[int]:
+# MSR-4: per-mechanism cap on drop-record capture — the ledger row stays small (the
+# recall ledger is byte-rotated) while the nearest misses per mechanism survive. A
+# drop_log's ``watch`` set (the eval autopsy's expected stems) bypasses the cap so
+# attribution is exact where it matters; the hook never passes a watch.
+_DROP_CAP_PER_MECHANISM = 3
+
+
+def _dense_rank_rows(
+    query: str,
+    index: LoadedIndex,
+    *,
+    subfloor_out: Optional[List] = None,
+    watch_rows: Optional[set] = None,
+) -> List[int]:
     """RAW dense-matrix row indices ordered by descending cosine similarity, ABOVE the
     calibrated floor for ``index.model``, or [].
 
@@ -838,7 +851,32 @@ def _dense_rank_rows(query: str, index: LoadedIndex) -> List[int]:
         sims = index.dense @ qvec  # rows are L2-normalized -> dot == cosine
         order = np.argsort(-sims)
         floor = _dense_floor(index.model or DEFAULT_MODEL)
-        return [int(i) for i in order if float(sims[i]) >= floor]
+        # MSR-4: when a caller passes ``subfloor_out``, the SAME descending walk also
+        # keeps the best few sub-floor ``(description_row, cosine)`` pairs — plus every
+        # ``watch_rows`` member — off values already computed (zero recomputation).
+        # These are the near-miss scores the floor cut used to discard: "how close was
+        # the miss", the evidence RET-11's BM25-floor decision and the SIG-5 revisit
+        # never had. Body-chunk rows are skipped (a sub-floor chunk is not "this memory
+        # nearly surfaced"). ``None`` (every existing caller) changes nothing.
+        above: List[int] = []
+        n_desc = len(index.entries)
+        below_kept = 0
+        for i in order:
+            sim = float(sims[i])
+            if sim >= floor:
+                above.append(int(i))
+                continue
+            if subfloor_out is None:
+                break  # order is descending: every remaining row is sub-floor too
+            row = int(i)
+            if row >= n_desc:
+                continue  # body-chunk rows aren't per-memory near-misses
+            if below_kept < _DROP_CAP_PER_MECHANISM or (watch_rows and row in watch_rows):
+                subfloor_out.append((row, sim))
+                below_kept += 1
+            elif not watch_rows:
+                break  # cap reached and nothing watched: nearer misses are all recorded
+        return above
     except Exception:  # incl. DenseTimeout -> degrade to BM25, never block/crash
         return []
 
@@ -2157,6 +2195,7 @@ def recall(
     memory_dir: Optional[str] = None,
     index_dir: Optional[str] = None,
     repo_root: Optional[str] = None,
+    drop_log: Optional[dict] = None,
 ) -> List[dict]:
     """Top-``k`` memories for ``query`` as ``[{name, file, description, score, backend, via}]``.
 
@@ -2164,6 +2203,31 @@ def recall(
     gate's key — the hook entry (``main``) resolves it ONCE via ``resolve_dirs`` and threads it
     through so the hot path pays no second ``git rev-parse``; a direct caller that omits it has
     it derived (once) from ``memory_dir``'s git toplevel.
+
+    MSR-4 ``drop_log``: an OPT-IN out-param dict the caller owns — pass ``{}`` (or
+    ``{"watch": {stems}}``) and the admission walk records WHY candidates did not
+    surface, off values it already holds (zero recomputation, inv6):
+
+      ``drops``       — ``[{name, reason, score[, threshold]}]``, capped at
+                        ``_DROP_CAP_PER_MECHANISM`` per reason code; a ``watch``ed stem
+                        (the eval autopsy's expected names) is always recorded. Reason
+                        codes: ``dense_floor`` (sub-floor cosine — RET-1's cut),
+                        ``old_state`` (soft-invalidated 'old' display skip),
+                        ``dangling_file`` (deleted/renamed since indexing),
+                        ``knee_cliff`` (RET-1's score-gap cutoff, tripping entry and
+                        past-cliff organic skips alike), ``pool_overflow`` (ranked
+                        below the POOL_N admission bound), ``mmr_displaced`` (in the
+                        admissible pool but not selected for the final top-k at the
+                        MMR re-cut — a pure rank cut when MMR degrades to a no-op).
+      ``near_miss``   — ``[{name, score}]`` best sub-floor DENSE candidates
+                        (description rows only) — the abstention arm's evidence.
+      ``dense_floor`` — the calibrated floor those cosines missed (margin = floor - score).
+
+    ``None`` (every existing caller) is byte-identical behavior with zero extra work.
+    Detection only (ED-1): nothing here feeds ranking. The SEC-6 drift-quarantine skip
+    is deliberately NOT recorded — a withheld file already has its own loud surfaces
+    (the SessionStart trust-drift producer + doctor), and a per-query ledger row naming
+    withheld content would recreate the trace SEC-1 exists to avoid.
     """
     try:
         if not query or not query.strip():
@@ -2245,6 +2309,37 @@ def recall(
                     patched_entries.append(e)
             entries = patched_entries
 
+        # --- MSR-4: the drop-log collector (opt-in; None on every existing caller). ----
+        # Records land DIRECTLY in the caller's dict as the walk goes, so every early
+        # return below (the hard-skip abstention especially) leaves what was already
+        # collected in place. Capped per mechanism; a watched stem bypasses the cap.
+        _dl_watch: set = set()
+        _drop_counts: Dict[str, int] = {}
+        subfloor: Optional[List] = None
+        watch_rows: Optional[set] = None
+        if drop_log is not None:
+            _dl_watch = {str(s) for s in (drop_log.get("watch") or ()) if s}
+            drop_log["drops"] = []  # fresh per call — the collector dict is per-recall
+            subfloor = []
+            if _dl_watch:
+                watch_rows = {
+                    e.get("row")
+                    for e in entries
+                    if e.get("name") in _dl_watch and isinstance(e.get("row"), int)
+                }
+
+        def _record_drop(name, reason, score, threshold=None):
+            if drop_log is None or not name:
+                return
+            seen = _drop_counts.get(reason, 0)
+            if seen >= _DROP_CAP_PER_MECHANISM and name not in _dl_watch:
+                return
+            _drop_counts[reason] = seen + 1
+            rec = {"name": name, "reason": reason, "score": round(float(score), 6)}
+            if threshold is not None:
+                rec["threshold"] = round(float(threshold), 6)
+            drop_log["drops"].append(rec)
+
         q_tokens = tokenize(query)
         bm25 = _bm25_rank(
             q_tokens, entries, stats=idx.manifest.get("bm25"), patched_indices=patched_indices
@@ -2254,7 +2349,20 @@ def recall(
         # single raw order into a description ranking and a body ranking below -- doing this
         # twice (once per ranking) would double the per-query embed+matmul cost for no benefit,
         # which is exactly what an earlier draft of this item did and blew the p95 gate.
-        raw_dense_rows = _dense_rank_rows(query, idx)
+        raw_dense_rows = _dense_rank_rows(query, idx, subfloor_out=subfloor, watch_rows=watch_rows)
+        # MSR-4: the floor cut's near-misses — recorded IMMEDIATELY so the hard-skip
+        # abstention return below still carries them (that is the whole point: the
+        # abstention arm finally gets its "how close was the miss" evidence).
+        if drop_log is not None and subfloor:
+            floor_val = round(_dense_floor(idx.model or DEFAULT_MODEL), 6)
+            drop_log["dense_floor"] = floor_val
+            for row, sim in subfloor:
+                _record_drop(entries[row].get("name"), "dense_floor", sim, threshold=floor_val)
+            drop_log["near_miss"] = [
+                {"name": d["name"], "score": d["score"]}
+                for d in drop_log["drops"]
+                if d["reason"] == "dense_floor"
+            ]
         dense = _dense_rank(query, idx, raw_rows=raw_dense_rows)
 
         # RET-2: FOUR rank lists total. bm25_desc/dense_desc (above) are the primary,
@@ -2462,15 +2570,21 @@ def recall(
         # it; an endorsed organic-kept entry earns it only when admitted PAST the cliff
         # (below), because there the graph is the sole reason the line exists at all.
         graph_admitted: set = set(graph_injected)
-        for i, adj_score, state in penalized:
+        pool_cut_from: Optional[int] = None
+        for pos, (i, adj_score, state) in enumerate(penalized):
             if len(admissible) >= pool_n:
+                pool_cut_from = pos  # MSR-4: everything from here was pool-overflow cut
                 break
             if state == "old":
+                _record_drop(entries[i].get("name"), "old_state", adj_score)
                 continue
             if past_cliff and i not in graph_endorsed:
                 # Past the cliff only the graph channel admits (see the GRA-1 comment
                 # below) — organic and body-backstop candidates are done, exactly as the
                 # pre-GRA-1-fix `break` treated them. Cheap set check BEFORE the stat.
+                _record_drop(
+                    entries[i].get("name"), "knee_cliff", primary_relevance.get(i, adj_score)
+                )
                 continue
             e = entries[i]
             # Deleted/renamed since the index was built (COR-4): drop it from THIS
@@ -2480,6 +2594,7 @@ def recall(
             e_root = e.get("root") or memory_dir
             e_path = os.path.join(e_root, e["file"]) if e_root else None
             if e_path and not os.path.isfile(e_path):
+                _record_drop(e.get("name"), "dangling_file", adj_score)
                 continue
             # SEC-6 quarantine: a PROJECT-tier candidate whose file bytes drifted from the
             # consent-time baseline is SKIPPED — content that arrived outside hippo's own
@@ -2540,6 +2655,11 @@ def recall(
                 # Relevance fell off a cliff relative to the last ADMITTED organic entry:
                 # organic admission ends here, this entry included (the old `break`).
                 past_cliff = True
+                # MSR-4: the tripping entry records the exact gap it lost to — score is
+                # its primary relevance, threshold the ratio-scaled previous admission.
+                _record_drop(
+                    e.get("name"), "knee_cliff", relevance, threshold=knee_ratio * prev_relevance
+                )
                 continue
             if relevance is not None:
                 prev_relevance = relevance
@@ -2547,12 +2667,36 @@ def recall(
                 graph_admitted.add(i)
             admissible.append((i, adj_score, state))
 
+        # MSR-4: candidates ranked below the POOL_N admission bound — the walk never
+        # reached them at all. Recorded off the already-sorted tail (best-first, so the
+        # cap keeps the NEAREST overflow misses); the scan stops at the cap unless a
+        # watched stem still needs finding further down.
+        if drop_log is not None and pool_cut_from is not None:
+            for j, adj2, _st2 in penalized[pool_cut_from:]:
+                if (
+                    _drop_counts.get("pool_overflow", 0) >= _DROP_CAP_PER_MECHANISM
+                    and not _dl_watch
+                ):
+                    break
+                _record_drop(entries[j].get("name"), "pool_overflow", adj2)
+
         # RCL-4: MMR diversifies the (possibly larger-than-k) ADMISSIBLE pool built above --
         # every candidate here already cleared the SAME old/dangling/knee filters recall()
         # always applied, in the TRUE organic order, so MMR can only ever choose among
         # genuinely display-worthy candidates. Degrades to a no-op on a BM25-only corpus or
         # when a candidate has no dense row -- see _mmr_rerank's docstring.
         admissible = _mmr_rerank(admissible, entries, idx.dense, k)
+        # MSR-4: admitted to the pool but not selected for the final top-k at the MMR
+        # re-cut (a pure rank cut when MMR degrades to a no-op) — the last mechanism
+        # that can silently eat a display-worthy candidate.
+        if drop_log is not None:
+            for j, adj2, _st2 in admissible[k:]:
+                if (
+                    _drop_counts.get("mmr_displaced", 0) >= _DROP_CAP_PER_MECHANISM
+                    and not _dl_watch
+                ):
+                    break
+                _record_drop(entries[j].get("name"), "mmr_displaced", adj2)
 
         results: List[dict] = []
         for i, adj_score, state in admissible[:k]:
@@ -3030,8 +3174,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             already_injected.update(ep.get("recalled_names") or [])
         extra = len(floor) + len(already_injected)
         pool_k = args.k + extra if extra else args.k
+        # MSR-4: the hook passes a drop-log collector (no watch set — capped capture
+        # only), so the ledger event below can finally say WHY a candidate didn't
+        # surface. Values are read off the walk recall() already ran (inv6).
+        drop_log: dict = {}
         results = recall(
-            query, k=pool_k, memory_dir=memory_dir, index_dir=args.index_dir, repo_root=repo_root
+            query,
+            k=pool_k,
+            memory_dir=memory_dir,
+            index_dir=args.index_dir,
+            repo_root=repo_root,
+            drop_log=drop_log,
         )
         # RUL-4: rules-plane pointers are EXTRA lines, not top-k competitors — split them out
         # so the floor-dedup slice below can never cut them (nor let them displace a corpus
@@ -3059,16 +3212,37 @@ def main(argv: Optional[List[str]] = None) -> int:
         # order is preserved (a collapsed entry renders exactly where it would have ranked).
         kept = 0
         walked: List[dict] = []
+        # MSR-4: main()-owned decline reasons — the collapse walk and its overflow are
+        # session state recall() never sees. Collapsed entries still RENDER (one line,
+        # no slot — inv3's collapse-not-drop), so their reason codes carry the
+        # `_collapsed` suffix to say "declined full injection", not "vanished"; an
+        # entry past args.k after the collapse walk is the one true drop here.
+        _main_drop_counts: Dict[str, int] = {}
+
+        def _record_main_drop(r: dict, reason: str) -> None:
+            seen = _main_drop_counts.get(reason, 0)
+            if seen >= 3:  # same per-mechanism cap discipline as recall()'s collector
+                return
+            _main_drop_counts[reason] = seen + 1
+            rec = {"name": r.get("name"), "reason": reason}
+            if isinstance(r.get("score"), (int, float)):
+                rec["score"] = r["score"]
+            drop_log.setdefault("drops", []).append(rec)
+
         for r in results:
             if r["name"] in floor:
                 r["floor_collapsed"] = True
+                _record_main_drop(r, "floor_collapsed")
                 walked.append(r)
             elif r["name"] in already_injected:
                 r["cooldown_collapsed"] = True
+                _record_main_drop(r, "cooldown_collapsed")
                 walked.append(r)
             elif kept < args.k:
                 walked.append(r)
                 kept += 1
+            else:
+                _record_main_drop(r, "display_overflow")
         results = walked
         # RUL-4/T2 guard: rule pointers are EXEMPT from floor-dedup (a rule is not a floor
         # memory) but INCLUDED in the cooldown (they would otherwise re-fire every matching
@@ -3081,6 +3255,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             r["rank"] = i + 1
     else:
         results = []  # hygiene skipped recall — no model load, no junk injection
+        drop_log = {}  # nothing ran, nothing to autopsy — the ledger event stays bare
     latency_ms = (time.perf_counter() - t0) * 1000.0
 
     # SEC-1/SEC-7: resolve the trust gate ONCE here (reusing the already-resolved
@@ -3158,6 +3333,17 @@ def main(argv: Optional[List[str]] = None) -> int:
                 latency_ms=latency_ms,
                 telemetry_dir=td,
                 session_id=args.session_id or None,
+                # MSR-4: the admission-walk autopsy — additive fields, absent when
+                # nothing was cut. near_miss rides ONLY the abstention arm (results
+                # empty -> backend "none"): that is the score-less arm this item
+                # exists to light up; a served recall's misses live in `drops`.
+                drops=drop_log.get("drops") or None,
+                near_miss=(drop_log.get("near_miss") or None) if not results else None,
+                dense_floor=drop_log.get("dense_floor") if not results else None,
+                # MSR-6: the ACTUAL emitted payload length, measured at the one
+                # emission point (`out` above) — an abstention emitted nothing and
+                # writes no key (absence-emits-nothing, never a fake 0).
+                injected_chars=len(out) if out else None,
             )
             log_episode(
                 [r.get("name") for r in results if r.get("name")],

@@ -788,3 +788,70 @@ def test_decision_ledger_is_self_ignoring_and_never_raises(tmp_path):
     T.log_decision("x", telemetry_dir=td, session_id="s")
     assert open(os.path.join(td, ".gitignore"), encoding="utf-8").read() == "*\n"
     assert list(T.read_decisions(str(tmp_path / "missing"))) == []
+
+
+# --------------------------------------------------------------------------- #
+# MSR-4: the additive drop-autopsy fields on recall events.
+# --------------------------------------------------------------------------- #
+def test_log_recall_event_drop_fields_are_additive(tmp_path):
+    td = str(tmp_path / "telemetry")
+    assert T.log_recall_event([], query="bare", k=5, latency_ms=1.0, telemetry_dir=td)
+    assert T.log_recall_event(
+        [],
+        query="with autopsy",
+        k=5,
+        latency_ms=1.0,
+        telemetry_dir=td,
+        drops=[{"name": "m1", "reason": "dense_floor", "score": 0.21, "threshold": 0.4}],
+        near_miss=[{"name": "m1", "score": 0.21}],
+        dense_floor=0.4,
+    )
+    events = list(T.read_events(td))
+    assert len(events) == 2
+    bare, rich = events
+    # absence-emits-nothing: the bare event's key set is exactly the pre-MSR-4 shape
+    assert "drops" not in bare and "near_miss" not in bare and "dense_floor" not in bare
+    assert rich["drops"][0]["reason"] == "dense_floor"
+    assert rich["near_miss"] == [{"name": "m1", "score": 0.21}]
+    assert rich["dense_floor"] == 0.4
+
+
+# --------------------------------------------------------------------------- #
+# MSR-3: the additive channel field + the abstention backlog's channel arm.
+# --------------------------------------------------------------------------- #
+def test_log_recall_event_channel_is_additive_and_absent_means_hook(tmp_path):
+    td = str(tmp_path / "telemetry")
+    assert T.log_recall_event([], query="hook row", k=5, latency_ms=1.0, telemetry_dir=td)
+    assert T.log_recall_event(
+        [], query="hook row explicit", k=5, latency_ms=1.0, telemetry_dir=td, channel="hook"
+    )
+    assert T.log_recall_event(
+        [], query="mcp row", k=5, latency_ms=1.0, telemetry_dir=td, channel="mcp"
+    )
+    events = list(T.read_events(td))
+    assert "channel" not in events[0]  # absent means hook
+    assert "channel" not in events[1]  # explicit "hook" writes no key either
+    assert events[2]["channel"] == "mcp"
+
+
+def test_abstention_backlog_channel_arm_filters(tmp_path):
+    td = str(tmp_path / "telemetry")
+    for i in range(3):
+        T.log_recall_event(
+            [], query="how do we deploy the canary", k=5, latency_ms=1.0, telemetry_dir=td
+        )
+    for i in range(3):
+        T.log_recall_event(
+            [],
+            query="what is the terraform module registry",
+            k=5,
+            latency_ms=1.0,
+            telemetry_dir=td,
+            channel="mcp",
+        )
+    all_clusters = T.abstention_backlog(td)
+    assert len(all_clusters) == 2  # None = every channel, byte-compatible behavior
+    mcp = T.abstention_backlog(td, channel="mcp")
+    assert len(mcp) == 1 and "terraform" in mcp[0]["sample_query"]
+    hook = T.abstention_backlog(td, channel="hook")
+    assert len(hook) == 1 and "canary" in hook[0]["sample_query"]

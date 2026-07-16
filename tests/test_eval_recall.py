@@ -668,7 +668,13 @@ def test_session_token_cost_no_sessions_returns_zeros_never_raises(tmp_path, mon
     B.build_index(md, idx)
     index = B.load_index(idx)
     sc = E.session_token_cost(md, str(tmp_path / "missing-tele"), index, _HARD_SET, k=10)
-    assert sc == {"avg_events_per_session": 0.0, "avg_session_tokens": 0.0, "n_sessions": 0}
+    # measured_events joined the shape in MSR-6 (additive) — lockstep pin update
+    assert sc == {
+        "avg_events_per_session": 0.0,
+        "avg_session_tokens": 0.0,
+        "n_sessions": 0,
+        "measured_events": 0,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -1665,3 +1671,448 @@ def test_main_cli_explicit_memory_dir_never_inherits_ambient_fixtures(tmp_path, 
     assert captured["hard_set_path"] is None
     assert captured["relevance_set_path"] is None
     assert captured["abstention_set_path"] is None
+
+
+# --------------------------------------------------------------------------- #
+# MSR-1: run ledger + fingerprint-keyed baseline diff + pass^k determinism probe.
+# All report-only: gate constants byte-unchanged (pinned above), default rendering
+# untouched, baseline drift NEVER fails a run, no new CI-failing check.
+# --------------------------------------------------------------------------- #
+def _msr1_setup(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    hs_path = _write_hard_set(tmp_path)
+    return md, idx, hs_path
+
+
+def test_json_prints_one_parseable_report_line(tmp_path, monkeypatch, capsys):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path, "--json"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    report = json.loads(out.splitlines()[0])
+    assert "gates" in report and "by_category" in report
+    # The human table is fully replaced — no gate glyph lines after the JSON.
+    assert "RESULT:" not in out
+
+
+def test_default_render_carries_no_msr1_lines(tmp_path, monkeypatch, capsys):
+    """Additive-only: a run without the new flags prints exactly the pre-MSR-1 surface."""
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "run ledger" not in out and "baseline" not in out and "pass^" not in out
+
+
+def test_out_appends_fingerprinted_run_ledger(tmp_path, monkeypatch, capsys):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    ledger = str(tmp_path / "telemetry" / "eval_runs.jsonl")
+    for _ in range(2):
+        rc = E.main(
+            ["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path, "--out", ledger]
+        )
+        assert rc == 0
+    capsys.readouterr()
+    rows = [json.loads(ln) for ln in open(ledger, encoding="utf-8") if ln.strip()]
+    assert len(rows) == 2  # append-only: the second run never clobbers the first
+    for row in rows:
+        assert row["fixture_fingerprint"] and row["corpus_fingerprint"]
+        assert row["report"]["gates"]["self_recall@10"]["value"] == 1.0
+    # SEC-3: the ledger dir self-ignores — raw run rows are never a `git add .` away.
+    assert os.path.exists(os.path.join(os.path.dirname(ledger), ".gitignore"))
+
+
+def test_out_default_path_is_the_sibling_telemetry_dir(tmp_path, monkeypatch, capsys):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path, "--out"])
+    assert rc == 0
+    capsys.readouterr()
+    expected = os.path.join(os.path.dirname(md), ".memory-telemetry", "eval_runs.jsonl")
+    assert os.path.exists(expected)
+
+
+def test_deterministic_view_excludes_exactly_the_volatile_keys():
+    report = {
+        "ok": True,
+        "gates": {
+            "self_recall@10": {"value": 1.0},
+            "recall_p95_ms": {"value": 3.2},
+            "cold_p95_ms": {"value": 900.0},
+        },
+        "latency": {"p95": 3.2},
+        "cold_latency": {"p95": 900.0},
+        "staleness_half_life": {"median_days": 4.2, "n": 3},
+        "by_category": {"single-hop": {"recall": 1.0, "mrr": 1.0, "n": 6}},
+        "count": 8,
+    }
+    view = E.deterministic_view(report)
+    assert set(view) == {"gates", "by_category", "count"}
+    assert set(view["gates"]) == {"self_recall@10"}
+    # The caller's report is never mutated (the run ledger serializes it AFTER this).
+    assert "latency" in report and "recall_p95_ms" in report["gates"]
+
+
+def test_canonical_view_is_latency_blind_but_metric_sensitive():
+    a = {"gates": {"mrr@10": {"value": 0.9}}, "latency": {"p95": 1.0}}
+    b = {"gates": {"mrr@10": {"value": 0.9}}, "latency": {"p95": 99.0}}
+    c = {"gates": {"mrr@10": {"value": 0.8}}, "latency": {"p95": 1.0}}
+    ca = E.canonical_json(E.deterministic_view(a))
+    assert ca == E.canonical_json(E.deterministic_view(b))  # latency never breaks identity
+    assert ca != E.canonical_json(E.deterministic_view(c))  # a metric delta always does
+
+
+def test_corpus_fingerprint_reuses_the_refresh_compare_fields(tmp_path, monkeypatch):
+    md, idx, _hs = _msr1_setup(tmp_path, monkeypatch)
+    B.build_index(md, idx)
+    fp1 = E.corpus_fingerprint(B.load_index(idx))
+    fp2 = E.corpus_fingerprint(B.load_index(idx))
+    assert fp1 == fp2  # same index -> same identity
+    # A content edit (entry hash moves — the first refresh_index compare field) re-keys it.
+    with open(os.path.join(md, "ducklake.md"), "w", encoding="utf-8") as fh:
+        fh.write(_mem("ducklake", "observability warehouse catalog rewritten entirely"))
+    B.build_index(md, idx)
+    assert E.corpus_fingerprint(B.load_index(idx)) != fp1
+
+
+def test_fixture_fingerprint_distinguishes_absent_from_present(tmp_path):
+    p = str(tmp_path / "f.yaml")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("- query: q\n  expected: [x]\n")
+    assert E.fixture_fingerprint(p, None) != E.fixture_fingerprint(None, p)
+    assert E.fixture_fingerprint(p) == E.fixture_fingerprint(p)
+
+
+def test_write_baseline_then_no_drift(tmp_path, monkeypatch, capsys):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    args = ["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path]
+    assert E.main(args + ["--write-baseline"]) == 0
+    pinned = os.path.join(md, ".audit-fixtures", "recall_eval_baseline.json")
+    assert os.path.exists(pinned)
+    capsys.readouterr()
+    rc = E.main(args + ["--baseline"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "no drift" in out
+    assert "report-only" in out  # the deferred-ratchet note prints every time
+
+
+def test_baseline_fingerprint_mismatch_skips_loudly(tmp_path, monkeypatch, capsys):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    args = ["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path]
+    assert E.main(args + ["--write-baseline"]) == 0
+    # A byte change that alters NO row (a YAML comment): metrics identical, key moved —
+    # exactly the "different inputs, not drift" case the skip exists for.
+    with open(hs_path, "a", encoding="utf-8") as fh:
+        fh.write("# pinned by a reviewer\n")
+    capsys.readouterr()
+    rc = E.main(args + ["--baseline"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "SKIPPED" in out and "fixture_fingerprint" in out
+    assert "gate " not in out  # no per-metric lines on an incomparable pair
+
+
+def test_baseline_drift_reports_but_never_fails(tmp_path, monkeypatch, capsys):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    args = ["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path]
+    assert E.main(args + ["--write-baseline"]) == 0
+    pinned = os.path.join(md, ".audit-fixtures", "recall_eval_baseline.json")
+    doc = json.load(open(pinned, encoding="utf-8"))
+    doc["metrics"]["gates"]["mrr@10"] = 0.25
+    doc["metrics"]["by_category"]["single-hop"]["recall"] = 0.0
+    json.dump(doc, open(pinned, "w", encoding="utf-8"))
+    capsys.readouterr()
+    rc = E.main(args + ["--baseline"])
+    out = capsys.readouterr().out
+    assert rc == 0  # drift is report-only, never an exit-code change
+    assert "gate mrr@10: 0.25 -> " in out
+    assert "category single-hop" in out
+
+
+def test_baseline_low_n_categories_are_marked(tmp_path, monkeypatch, capsys):
+    md, idx, _hs = _msr1_setup(tmp_path, monkeypatch)
+    import yaml
+
+    hs_path = str(tmp_path / "hs_low_n.yaml")
+    with open(hs_path, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(
+            [
+                {
+                    "query": "which reranker model runs first on search candidates",
+                    "expected": ["reranker_voyage"],
+                    "category": "multi-hop",
+                }
+            ],
+            fh,
+        )
+    args = ["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path]
+    assert E.main(args + ["--write-baseline"]) == 0
+    pinned = os.path.join(md, ".audit-fixtures", "recall_eval_baseline.json")
+    doc = json.load(open(pinned, encoding="utf-8"))
+    doc["metrics"]["by_category"]["multi-hop"]["mrr"] = 0.1
+    json.dump(doc, open(pinned, "w", encoding="utf-8"))
+    capsys.readouterr()
+    E.main(args + ["--baseline"])
+    out = capsys.readouterr().out
+    assert "[low n — report-only]" in out  # n=1 multi-hop can't gate anything
+
+
+def test_baseline_explicit_path_missing_fails_loud(tmp_path, monkeypatch, capsys):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    rc = E.main(
+        ["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path]
+        + ["--baseline", str(tmp_path / "nope.json")]
+    )
+    out = capsys.readouterr().out
+    assert rc == 1  # provided-but-unreadable is the loud-fail arm (RET-8's split)
+    assert "FAILED to read" in out
+
+
+def test_baseline_default_absent_skips_with_note(tmp_path, monkeypatch, capsys):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path, "--baseline"])
+    out = capsys.readouterr().out
+    assert rc == 0  # skip-if-absent mirrors the hard-set gates
+    assert "none found" in out and "--write-baseline" in out
+
+
+def test_repeat_probe_passes_on_the_hermetic_lane(tmp_path, monkeypatch, capsys):
+    """pass^2 in real fresh processes — the determinism claim, exercised end-to-end."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / ".memory-index")
+    import yaml
+
+    hs_path = str(tmp_path / "hs_small.yaml")
+    with open(hs_path, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(
+            [
+                {
+                    "query": "which reranker model runs first on search candidates",
+                    "expected": ["reranker_voyage"],
+                }
+            ],
+            fh,
+        )
+    rc = E.main(
+        ["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path, "--repeat", "2"]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "pass^2" in out
+
+
+def test_repeat_needs_at_least_two_runs(capsys):
+    assert E.main(["--repeat", "1"]) == 2
+    assert "--repeat needs k >= 2" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# MSR-2: null-hypothesis eval arms (grep null + true bm25-only + labeled mixed).
+# Report-only; one hit-judgment code path (the parameterized ranked source); the
+# mixed condition is NEVER presented as bm25-only.
+# --------------------------------------------------------------------------- #
+def test_arms_off_by_default_and_absent_from_report(tmp_path, monkeypatch):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)
+    assert "null_arms" not in report  # absence-emits-nothing (ED-4)
+
+
+def test_arms_report_three_labeled_arms_with_deltas(tmp_path, monkeypatch):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10, arms=True)
+    na = report["null_arms"]
+    assert set(na["arms"]) == {"full", "grep", "bm25", "mixed"}
+    # grep is labeled a ranking-stack-lift measure, never an adoption threshold.
+    assert "ranking-stack-lift" in na["arms"]["grep"]["label"]
+    assert "NOT an adopt-memory-at-all threshold" in na["arms"]["grep"]["label"]
+    # bm25 on a hermetic (already-bm25) run is honestly marked degenerate.
+    assert "degenerate" in na["arms"]["bm25"].get("note", "")
+    # mixed is unreachable without a resident dense index — skipped, with the reason,
+    # and its LABEL still says what it is (never "bm25-only").
+    assert na["arms"]["mixed"].get("skipped")
+    assert "NOT bm25-only" in na["arms"]["mixed"]["label"]
+    # deltas: per-category, n printed, computed for the arms that ran.
+    assert "single-hop" in na["deltas"]["grep"]
+    assert na["deltas"]["grep"]["single-hop"]["n"] == len(_HARD_SET)
+    # bm25-arm == full pipeline here, so its delta is exactly zero (and present).
+    assert na["deltas"]["bm25"]["single-hop"]["recall"] == 0.0
+    # and NO new gate ships: the gates dict keys are exactly the pre-MSR-2 set.
+    assert set(report["gates"]) == {
+        "self_recall@10", "hard_recall@10", "mrr@10", "token_reduction",
+        "recall_p95_ms", "precision@10", "abstention_rate", "cold_p95_ms",
+    }
+
+
+def test_arms_never_write_the_real_index_dir(tmp_path, monkeypatch):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)  # build once
+    manifest = os.path.join(idx, "manifest.json")
+    before = open(manifest, "rb").read()
+    E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10, arms=True)
+    assert open(manifest, "rb").read() == before  # scratch arm never touches it
+
+
+def test_arms_scratch_dir_is_cleaned_up(tmp_path, monkeypatch):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    import tempfile as _tempfile
+
+    made = []
+    real_mkdtemp = _tempfile.mkdtemp
+
+    def _spy(*a, **k):
+        p = real_mkdtemp(*a, **k)
+        if k.get("prefix", "").startswith("hippo-bm25-arm-") or (a and str(a[0]).startswith("hippo-bm25-arm-")):
+            made.append(p)
+        return p
+
+    monkeypatch.setattr(_tempfile, "mkdtemp", _spy)
+    E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10, arms=True)
+    assert made, "the bm25 arm should have built into a scratch dir"
+    assert not any(os.path.exists(p) for p in made)
+
+
+def test_ranked_source_shares_the_hit_judgment(tmp_path, monkeypatch):
+    """The parameterized source changes WHERE ranks come from, never what a hit is."""
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    hs = E.load_hard_set(hs_path)
+    always_right = lambda q, k: [{"name": n} for row in hs if row["query"] == q for n in row["expected"]]
+    always_wrong = lambda q, k: [{"name": "definitely-not-a-memory"}]
+    right = E.hard_set_metrics_by_category(index, hs, k=10, ranked_source=always_right)
+    wrong = E.hard_set_metrics_by_category(index, hs, k=10, ranked_source=always_wrong)
+    assert right["single-hop"]["recall"] == 1.0 and right["single-hop"]["mrr"] == 1.0
+    assert wrong["single-hop"]["recall"] == 0.0 and wrong["single-hop"]["mrr"] == 0.0
+
+
+def test_grep_rank_is_deterministic_and_overlap_gated():
+    docs = [("beta", {"alpha", "shared"}), ("alpha", {"alpha", "shared"}), ("gamma", {"unrelated"})]
+    ranked = E._grep_rank("alpha shared", 10, docs)
+    # equal overlap ties break by name; zero-overlap docs never rank at all
+    assert [r["name"] for r in ranked] == ["alpha", "beta"]
+    assert E._grep_rank("", 10, docs) == []
+
+
+def test_dense_disabled_env_restores_exactly(monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "0")
+    with E._dense_disabled_env():
+        assert os.environ["HIPPO_DISABLE_DENSE"] == "1"
+    assert os.environ["HIPPO_DISABLE_DENSE"] == "0"
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE")
+    with E._dense_disabled_env():
+        assert os.environ["HIPPO_DISABLE_DENSE"] == "1"
+    assert "HIPPO_DISABLE_DENSE" not in os.environ
+
+
+def test_arms_cli_flag_renders_labeled_deltas(tmp_path, monkeypatch, capsys):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path, "--arms"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "arm grep:" in out and "report-only" in out
+    assert "arm mixed: skipped" in out  # hermetic run — labeled, not silently absent
+    assert "Δrecall=" in out and "n=" in out
+
+
+# --------------------------------------------------------------------------- #
+# MSR-4 (eval half): the per-category miss autopsy.
+# --------------------------------------------------------------------------- #
+def test_miss_autopsy_attributes_no_signal_on_zero_overlap(tmp_path, monkeypatch):
+    md, idx, _hs = _msr1_setup(tmp_path, monkeypatch)
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    hs = [
+        {"query": "wholly unrelated zzqx phrasing", "expected": ["reranker_voyage"], "category": "multi-hop"},
+        {"query": "which reranker model runs first on search candidates", "expected": ["reranker_voyage"], "category": "single-hop"},
+    ]
+    autopsy = E.miss_autopsy(index, hs, k=10, index_dir=idx)
+    # the hit row contributes nothing; the missed row names the honest non-mechanism
+    assert set(autopsy) == {"multi-hop"}
+    row = autopsy["multi-hop"][0]
+    assert row["stem"] == "reranker_voyage"
+    assert row["reason"] == "no_signal" and row["score"] is None and row["margin"] is None
+
+
+def test_miss_autopsy_attributes_mechanism_and_margin(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    os.makedirs(md)
+    for name, desc in {
+        "strong_a": "voyage reranker cross encoder search candidates ranking pipeline",
+        "strong_b": "voyage reranker fallback circuit breaker search ranking",
+        "weak_tail": "voyage postcard from the museum shop",
+    }.items():
+        with open(os.path.join(md, f"{name}.md"), "w", encoding="utf-8") as fh:
+            fh.write(_mem(name, desc))
+    idx = str(tmp_path / ".memory-index")
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    monkeypatch.setenv("HIPPO_KNEE_RATIO", "0.999")  # trips between adjacent RRF ranks
+    hs = [{"query": "voyage reranker search ranking", "expected": ["weak_tail"], "category": "update"}]
+    autopsy = E.miss_autopsy(index, hs, k=10, index_dir=idx)
+    row = autopsy["update"][0]
+    assert row["reason"] == "knee_cliff"
+    assert isinstance(row["score"], float)
+    # margin present exactly when the mechanism carries a threshold (the tripping cut)
+    assert row["margin"] is None or row["margin"] > 0
+
+
+def test_report_carries_and_renders_miss_autopsy(tmp_path, monkeypatch, capsys):
+    md, idx, _hs = _msr1_setup(tmp_path, monkeypatch)
+    import yaml
+
+    hs_path = str(tmp_path / "hs_missing.yaml")
+    with open(hs_path, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(
+            [{"query": "wholly unrelated zzqx phrasing", "expected": ["reranker_voyage"]}], fh
+        )
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)
+    assert report["miss_autopsy"]["single-hop"][0]["stem"] == "reranker_voyage"
+    capsys.readouterr()
+    E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path])
+    out = capsys.readouterr().out
+    assert "miss single-hop: `reranker_voyage` cut by no_signal" in out
+
+
+def test_report_omits_miss_autopsy_without_hard_set(tmp_path, monkeypatch):
+    md, idx, _hs = _msr1_setup(tmp_path, monkeypatch)
+    report = E.evaluate(memory_dir=md, index_dir=idx, k=10)
+    assert "miss_autopsy" not in report
+
+
+# --------------------------------------------------------------------------- #
+# MSR-6: session_token_cost uses ledger-measured actuals when present.
+# --------------------------------------------------------------------------- #
+def test_session_token_cost_prefers_measured_actuals(tmp_path, monkeypatch):
+    from memory import telemetry as T
+
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    td = str(tmp_path / "telemetry")
+    # two events in one session, both carrying the measured payload length
+    for chars in (400, 800):
+        T.log_recall_event(
+            [], query="q", k=10, latency_ms=1.0, telemetry_dir=td,
+            session_id="s1", injected_chars=chars,
+        )
+    cost = E.session_token_cost(md, td, index, [], k=10, index_dir=idx)
+    assert cost["measured_events"] == 2
+    # mean 600 chars -> 150 tokens x 2 events/session = 300
+    assert cost["avg_session_tokens"] == 300.0
+
+
+def test_session_token_cost_falls_back_to_estimate(tmp_path, monkeypatch):
+    from memory import telemetry as T
+
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    td = str(tmp_path / "telemetry")
+    T.log_recall_event([], query="q", k=10, latency_ms=1.0, telemetry_dir=td, session_id="s1")
+    cost = E.session_token_cost(md, td, index, [], k=10, index_dir=idx)
+    assert cost["measured_events"] == 0  # pre-MSR-6-shaped ledger: estimate path
+    assert cost["n_sessions"] == 1

@@ -203,7 +203,7 @@ workstreams:
         title: Eval run ledger + fingerprint-keyed baseline diff + pass^k determinism probe
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: eval-flywheel, verdict: RESHAPE, convergence: 2, landscape: [hidden-layer-2026, seeds-stddev-hygiene]}
         problem: >-
           RET-8 shipped category-tagged eval + tracked gates, but every gate is an
@@ -246,7 +246,7 @@ workstreams:
         title: Null-hypothesis eval arms (grep + true-bm25 + labeled mixed-mode)
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: eval-flywheel, verdict: RESHAPE, convergence: 1, landscape: [letta-filesystem-2025, condition-matrix]}
         problem: >-
           hippo's eval reports absolute recall but never what the ranking STACK adds
@@ -286,7 +286,7 @@ workstreams:
         title: Channel-tagged recall_events telemetry for MCP recall/why
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: eval-flywheel, verdict: RESHAPE, convergence: 3, landscape: [amemgym-iclr26, mem0-no-self-feedback-2026]}
         problem: >-
           MCP recall and why are telemetry-INVISIBLE — recall_view.describe bypasses
@@ -324,12 +324,17 @@ workstreams:
           the KPI-3 p95 gate. A measurement rider (coverage-critic miss SEC-13): the
           per-channel volume line MAY note MCP writes that hit an untrusted corpus, but
           building the SEC-13 write-gate itself belongs to ROADMAP.v1, not this item.
+          BUILD-TIME DECISION (T8, 2026-07-16): the MAY-rider was declined — counting
+          untrusted-corpus MCP writes requires persisting a trust-posture trace, which
+          is exactly the mcp-channel-flight-recorder shape not_pursuing already killed
+          (SEC-1's eliminated trace must stay eliminated); the shipped scope is the
+          per-channel volume line + the channel-tagged abstention arm only.
 
       - id: MSR-4
         title: Drop-reason autopsy ledger (near-miss scores on abstention; per-category miss autopsy)
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: graph-retrieval, verdict: RESHAPE, convergence: 3, landscape: [memsyco-2026, post-retrieval-bottleneck]}
         problem: >-
           The recall pipeline throws away WHY a memory did not surface. The
@@ -358,10 +363,19 @@ workstreams:
           recomputation. Does NOT absorb RET-9 (per-corpus floor sanity) — that is
           GRF-3's sole deliverable; this item supplies the abstention-side evidence only.
         implementation_notes: >-
-          Attach at recall.py's admission walk + emission loop (~2140-2230), _expand_neighbors
-          (declined-injection reasons), telemetry.log_recall_event (the dark scores/ranks
+          Attach at recall.py's admission walk + emission loop (~2140-2230),
+          telemetry.log_recall_event (the dark scores/ranks
           fields), the abstention arm (~telemetry.py:300-303), eval_recall.hard_set_metrics_by_category
-          (per-miss autopsy), doctor (aggregation line). Retell the GRA-1 story per the
+          (per-miss autopsy), doctor (aggregation line). PREMISE CORRECTED at build time
+          (T8, 2026-07-16): _expand_neighbors has no per-candidate CUTS to record — a
+          "declined injection" there keeps the entry's organic tuple and marks it
+          graph-ENDORSED (a superset the knee then exempts), so the mechanism list is
+          the walk's six (dense_floor, old_state, dangling_file, knee_cliff,
+          pool_overflow, mmr_displaced) plus main()'s session-state declines
+          (floor/cooldown collapse, display overflow); the SEC-6 drift-quarantine skip
+          is deliberately unrecorded (its loud surfaces are SessionStart+doctor, and a
+          per-query ledger row naming withheld content would recreate the trace SEC-1
+          eliminates). Retell the GRA-1 story per the
           re-measurement: the knee leg is FIXED at 4d16022 (graph_endorsed exemption +
           cliff latch); the residual is the mixed-mode MMR leg. Deferred, not dropped:
           answerable/unanswerable abstention twin rows (wait for SIG-6) and a --trace CLI
@@ -415,7 +429,7 @@ workstreams:
         title: Injection cost ledger (injected_chars + per-producer bytes + scorecard cost line)
         priority: P2
         effort: S
-        status: planned
+        status: done
         source: {lens: ux-legibility, verdict: RESHAPE, convergence: 2, landscape: [sandelin-2026-cost, chatgpt-dreaming-antipattern]}
         problem: >-
           hippo's value is silent injection, so its COST is invisible — memory saves
@@ -1418,9 +1432,9 @@ workstreams:
 release_train:
 
   - tier: T8
-    target_version: 1.8.0
+    target_version: 1.8.0   # STALE (authored pre-v1.8): T8 actually landed post-v1.19.0, 2026-07-16 — round 3 (T14–T17) executed first
     theme: "The measurement spine"
-    status: planned
+    status: done
     gate: "None — every T8 item's deps are shipped (RET-8/SIG-4/GOV-6). This is the foundation the rest of the round consumes; build it first."
     done_means: >-
       hippo can see its own behavior: eval runs persist and diff against a committed
