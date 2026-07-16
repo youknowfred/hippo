@@ -611,10 +611,15 @@ def pending_capture_producer(
     except Exception:
         trivial = 0
     label = f" ({trivial} trivial)" if trivial else ""
+    # INV-1: the deferral must name RUNNABLE forms — the old text said `hippo capture
+    # --snooze`, a bin/hippo subcommand that does not exist (the INT-18 class; the
+    # surface-registry lint now fails on any such reference). The capture tool serves
+    # both surfaces; the terminal CLI spelling is `-m memory.capture --snooze`.
     return (
         f"📥 {n} pending capture(s){label} from a prior session await review — run "
         "/hippo:consolidate to draft them into memory (nothing is saved until you approve "
-        "each one, per item), or `hippo capture --snooze` to defer this nudge."
+        "each one, per item), or defer this nudge with the capture tool (action='snooze'; "
+        "in a terminal: `--snooze` on `python -m memory.capture`)."
     )
 
 
