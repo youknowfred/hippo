@@ -99,7 +99,11 @@ jobs:
       - name: Dense + slow tests (network-marked; downloads the model only on a cold cache)
         run: python -m pytest -m "network or slow"
       - name: Seed a corpus from the shipped starter packs
+        # The checkout now carries the curated committed subset in .claude/memory/ — clear it
+        # first so this lane's gates run against EXACTLY the starter packs (the abstention set
+        # is calibrated to that corpus; the committed dev-history memories answer its queries).
         run: |
+          rm -rf .claude/memory
           mkdir -p .claude/memory
           find plugin/assets -name '*.md' ! -name 'MEMORY.skeleton.md' ! -name 'README.md' -exec cp {} .claude/memory/ \;
           cp plugin/assets/MEMORY.skeleton.md .claude/memory/MEMORY.md
