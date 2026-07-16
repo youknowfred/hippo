@@ -824,3 +824,28 @@ def test_corrupt_lockfile_refuses_loudly_instead_of_silently_resetting(tmp_path)
     with open(P.lockfile_path(md), "w", encoding="utf-8") as fh:
         fh.write(lock_before)
     assert P.pack_update_plan(src, memory_dir=md)["error"] is None
+
+
+def test_install_plan_names_a_failed_duplicate_check(tmp_path, monkeypatch):
+    """RCH-9: check_candidate raising used to silently downgrade the item to
+    route:'add' — presenting a possibly-near-duplicate as a clean add on the one
+    surface whose whole job is showing the reviewer what they are approving."""
+    import memory.new_memory as NM
+    from memory.packs import pack_install_plan
+
+    md = str(tmp_path / "mem")
+    os.makedirs(md)
+    src = _pack_source(tmp_path, {"deploy_lesson": ("never deploy on fridays", "body")})
+
+    def boom(*a, **k):
+        raise RuntimeError("index unreadable")
+
+    monkeypatch.setattr(NM, "check_candidate", boom)
+    plan = pack_install_plan(src, memory_dir=md, repo_root=str(tmp_path))
+    assert plan["error"] is None
+    item = plan["items"][0]
+    assert item["route"] == "add"
+    assert "index unreadable" in (item.get("route_error") or ""), (
+        "a failed duplicate check must be named on the row, not silently read as "
+        "'no duplicates'"
+    )

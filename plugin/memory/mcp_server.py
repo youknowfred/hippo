@@ -1518,6 +1518,7 @@ def _tool_capture(args: Dict[str, Any]) -> str:
     from .capture import (
         _SNOOZE_WINDOW_SESSIONS,
         _format_listing,
+        corrupt_pending,
         default_pending_dir,
         discard_pending,
         read_pending,
@@ -1530,6 +1531,14 @@ def _tool_capture(args: Dict[str, Any]) -> str:
     if action == "list":
         seeds = read_pending(memory_dir=memory_dir)
         out = [_format_listing(seeds)]
+        broken = corrupt_pending(memory_dir=memory_dir)
+        if broken:
+            # RCH-9: the nudge's bare file count includes these — the listing must
+            # name what it cannot read, or a captured session vanishes untraced.
+            out.append(
+                f"⚠ {len(broken)} corrupt seed file(s) skipped (unreadable JSON — "
+                "inspect or delete them in the queue dir): " + ", ".join(broken)
+            )
         if seeds:
             out.append("")
             out.append(
@@ -1889,14 +1898,24 @@ def _tool_heal_baselines(args: Dict[str, Any]) -> str:
             "heal_baselines: withheld — this project's memory corpus is untrusted (SEC-1: "
             "this writes corpus files). " + _UNTRUSTED_REMEDY
         )
-    healed = heal_empty_baselines(memory_dir, repo_root)
-    if not healed:
+    healed, failed = heal_empty_baselines(memory_dir, repo_root)
+    if not healed and not failed:
         return "heal_baselines: nothing to heal — no memory carries an empty staleness baseline."
-    return (
-        f"healed {len(healed)} empty baseline(s) to HEAD: {', '.join(healed)}\n"
-        "Each was invisible to staleness, reconsolidation and archive gating; they are now "
-        "tracked. This can never CLEAR a flag — an empty baseline never raised one."
-    )
+    lines = []
+    if healed:
+        lines.append(
+            f"healed {len(healed)} empty baseline(s) to HEAD: {', '.join(healed)}\n"
+            "Each was invisible to staleness, reconsolidation and archive gating; they are "
+            "now tracked. This can never CLEAR a flag — an empty baseline never raised one."
+        )
+    if failed:
+        # RCH-9: a failure is part of the result, not a silent skip.
+        lines.append(
+            f"✘ {len(failed)} baseline(s) could NOT be healed (still invisible to "
+            "staleness — fix and re-run):"
+        )
+        lines += [f"  - {n}: {reason}" for n, reason in sorted(failed.items())]
+    return "\n".join(lines)
 
 
 def _tool_build_index(args: Dict[str, Any]) -> str:
@@ -2213,6 +2232,8 @@ def _tool_pack_install_plan(args: Dict[str, Any]) -> str:
                 f"    route: {it['route']} — near-duplicates in YOUR corpus: {near}; "
                 "decide update-existing / supersede / skip, not a blind add"
             )
+        if it.get("route_error"):
+            lines.append(f"    ⚠ {it['route_error']}")
         for f in it.get("portability") or []:
             lines.append(f"    portability ({f.get('severity')}): {f.get('detail')}")
     return "\n".join(lines)

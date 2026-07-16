@@ -629,8 +629,13 @@ def pack_install_plan(
                 )
                 item["route"] = chk.get("route", "add")
                 item["neighbors"] = chk.get("neighbors", [])
-            except Exception:
-                pass
+            except Exception as exc:
+                # RCH-9: a failed dup-check must not read as "no duplicates" — the
+                # plan is the consent surface; say the check did not run.
+                item["route_error"] = (
+                    f"duplicate check failed ({exc}) — route 'add' is UNVERIFIED; "
+                    "check your corpus for near-duplicates by hand"
+                )
             item["installable"] = not item["secrets"] and not item["collision"] and not item.get("error")
             result["items"].append(item)
     except Exception as exc:

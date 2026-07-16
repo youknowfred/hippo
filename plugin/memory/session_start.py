@@ -1450,8 +1450,11 @@ def build_context(memory_dir: str, repo_root: str, max_chars: int = _MAX_CONTEXT
     for _label, fn in PRODUCERS:
         try:
             out = fn(memory_dir, repo_root, run_ctx)
-        except Exception:
-            out = None
+        except Exception as exc:
+            # RCH-9: every producer is individually guarded, so this backstop firing
+            # means a real bug — exactly when silence is most expensive. Name it (the
+            # doctor pattern: a visible warn carrying the exception), keep the rest.
+            out = f"⚠ {_label} producer failed: {type(exc).__name__}: {exc}"
         if out:
             blocks.append(out.rstrip())
     if not blocks:

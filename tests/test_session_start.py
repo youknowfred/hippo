@@ -45,7 +45,8 @@ def test_producer_exception_is_isolated(monkeypatch):
 
     _producers(monkeypatch, [("boom", boom), ("ok", lambda md, repo, ctx=None: "still here")])
     ctx = S.build_context("md", "repo")
-    assert ctx == "still here"  # the survivor is kept, the failure swallowed
+    assert "still here" in ctx  # the survivor is kept (isolation)...
+    assert "boom" in ctx  # ...and the failure is NAMED, not swallowed (RCH-9)
 
 
 def test_output_is_bounded_under_cap(monkeypatch):
@@ -1110,3 +1111,20 @@ def test_cite_derivation_producer_is_silent_on_a_newer_corpus(tmp_path):
     md = str(tmp_path)
     assert write_cite_derivation(md, 99)
     assert cite_derivation_producer(md, md) is None
+
+
+def test_a_raising_producer_is_named_not_vanished(monkeypatch):
+    """RCH-9: every producer is individually guarded, so the backstop firing means a
+    real bug — which is exactly when silence is most expensive. The failure must be
+    NAMED in the context (the doctor pattern: visible warn with the exception), while
+    the other producers still run (isolation keeps holding)."""
+
+    def boom(md, repo, ctx=None):
+        raise RuntimeError("wired wrong")
+
+    _producers(monkeypatch, [("boom", boom), ("ok", lambda md, repo, ctx=None: "still here")])
+    ctx = S.build_context("md", "repo")
+    assert "still here" in ctx
+    assert "boom" in ctx and "wired wrong" in ctx, (
+        "a producer crash must be named in the context, not silently dropped"
+    )

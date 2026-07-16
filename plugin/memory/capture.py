@@ -480,6 +480,37 @@ def read_pending(pending_dir: Optional[str] = None, *, memory_dir: Optional[str]
     return out
 
 
+def corrupt_pending(
+    pending_dir: Optional[str] = None, *, memory_dir: Optional[str] = None
+) -> List[str]:
+    """Seed FILENAMES in the queue that ``read_pending`` cannot parse. Never raises.
+
+    RCH-9: a corrupt seed silently vanished from the drain listing while the bare
+    file count (``pending_count``, the SessionStart nudge) still included it — the
+    queue said "2 pending", the listing showed one, and a captured session was lost
+    without a trace. The listing names what it cannot read; deleting or inspecting
+    the file is the human's call (the queue is gitignored ephemera).
+    """
+    out: List[str] = []
+    try:
+        pd = _resolve_pending_dir(pending_dir, memory_dir)
+        if not os.path.isdir(pd):
+            return []
+        for name in sorted(os.listdir(pd)):
+            if name.startswith(".") or not name.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(pd, name), "r", encoding="utf-8") as fh:
+                    obj = json.load(fh)
+                if not isinstance(obj, dict):
+                    out.append(name)
+            except Exception:
+                out.append(name)
+    except Exception:
+        return out
+    return out
+
+
 def pending_count(pending_dir: Optional[str] = None, *, memory_dir: Optional[str] = None) -> int:
     """Number of pending capture seeds (cheap listdir). Never raises."""
     try:

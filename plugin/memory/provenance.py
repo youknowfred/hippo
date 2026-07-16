@@ -1292,8 +1292,13 @@ def _iter_memory_files(memory_dir: str):
             yield os.path.join(memory_dir, name)
 
 
-def heal_empty_baselines(memory_dir: str, repo_root: str) -> List[str]:
-    """Set ``source_commit`` to HEAD for memories whose baseline is EMPTY. Returns healed names.
+def heal_empty_baselines(memory_dir: str, repo_root: str) -> Tuple[List[str], Dict[str, str]]:
+    """Set ``source_commit`` to HEAD for memories whose baseline is EMPTY.
+
+    Returns ``(healed_names, failed)`` where ``failed`` maps name → reason for files
+    that SHOULD have healed but whose write failed (RCH-9: a silently skipped failure
+    left the memory invisible to staleness forever while the verb reported success —
+    every problem comes back in the one result).
 
     An empty baseline (written when a memory was backfilled before its repo had any
     commits, or by a pre-COR-1 plugin in a dirty worktree) makes a memory INVISIBLE to
@@ -1306,11 +1311,13 @@ def heal_empty_baselines(memory_dir: str, repo_root: str) -> List[str]:
     Never raises; a no-op when HEAD is unresolvable (repo with no commits yet).
     """
     healed: List[str] = []
+    failed: Dict[str, str] = {}
     try:
         head = git_head(repo_root)
         if not head or not os.path.isdir(memory_dir):
-            return []
+            return [], {}
         for path in _iter_memory_files(memory_dir):
+            stem = os.path.splitext(os.path.basename(path))[0]
             try:
                 with open(path, "r", encoding="utf-8") as fh:
                     text = fh.read()
@@ -1332,16 +1339,20 @@ def heal_empty_baselines(memory_dir: str, repo_root: str) -> List[str]:
                     m = re.match(r"^(\s*source_commit\s*:\s*)(\"\"|''|)\s*$", lines[i])
                     if m:
                         lines[i] = f'{m.group(1)}"{head}"'
-                        from .atomic import write_text_atomic
+                        try:
+                            from .atomic import write_text_atomic
 
-                        write_text_atomic(path, "\n".join(lines))  # COR-18
-                        healed.append(os.path.splitext(os.path.basename(path))[0])
+                            write_text_atomic(path, "\n".join(lines))  # COR-18
+                        except Exception as exc:
+                            failed[stem] = str(exc)  # RCH-9: named, never dropped
+                            break
+                        healed.append(stem)
                         break
             except Exception:
-                continue  # never break the sweep on one file
+                continue  # unreadable file — the integrity producer owns those
     except Exception:
-        return healed
-    return healed
+        return healed, failed
+    return healed, failed
 
 
 def backfill_corpus(
@@ -1868,8 +1879,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 1
 
     if args.heal_baselines:
-        healed = heal_empty_baselines(memory_dir, repo_root)
+        healed, heal_failed = heal_empty_baselines(memory_dir, repo_root)
         print(f"healed {len(healed)} empty baseline(s)" + (f": {', '.join(healed)}" if healed else ""))
+        if heal_failed:  # RCH-9: failures are part of the result
+            print(f"FAILED to heal {len(heal_failed)} (still invisible to staleness):")
+            for n, reason in sorted(heal_failed.items()):
+                print(f"  - {n}: {reason}")
+            return 1
         return 0
 
     if args.stamp_derivation:
