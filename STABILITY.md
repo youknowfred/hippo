@@ -54,6 +54,46 @@ These may change at any release without a major bump — do not build on them:
 - **Exact recall output text and ordering** — recall is a ranker; its wording, formatting, and the
   precise order of results are tuned continuously.
 
+## Crash safety
+
+hippo's pitch is that your memory is ordinary markdown in git and it will not corrupt
+itself — so the crash behavior of every write is a stated, tested contract, not an
+implementation detail. Every irreplaceable file (corpus `.md` files and the committed
+markers/fixtures beside them, the machine-wide trust and projects registries, the packs
+lockfile, `MEMORY.md` floors, promoted rule files) is written through one atomic
+primitive family (`memory/atomic.py`: a per-call-unique tmp in the target's directory +
+`os.replace`, symlink-aware). A reader sees the old document or the new one — **never a
+torn one** — and a crash mid-write strands at worst an orphaned tmp file, never partial
+bytes at the real path.
+
+On top of that primitive, every registered write site declares one of three crash
+classes, and a fault-injection lane tears each site once to prove it:
+
+- **intact** — the target keeps its prior bytes; the operation is a documented
+  best-effort lane and may degrade silently (e.g. the opportunistic tier-floor
+  skeleton).
+- **detected** — prior bytes kept AND the failure is loud: named in the result
+  envelope, a `False` return, or a propagated error. Nothing pretends the write
+  landed (this covers the trust registry: a failed consent write reports "corpus
+  stays gated", never a silent open gate).
+- **rolled-back** — the two-write chains: when write #2 fails, write #1 is restored
+  byte-exact (`provenance.restore_file_bytes`) and the operation reports refusal over
+  a clean tree. The registered chains: **demote+supersede** (reconsolidation),
+  **dedup-merge** (de-parasite), **dream refines** (frontmatter edge + body stamp),
+  and the **pack-update lockfile** advance.
+
+Two recovery stories are additionally pinned for hard kills (`kill -9` mid-verb):
+`pack_extract` re-runs refuse a partially-written dest **by name** (delete it and
+re-run clean), and `build_index` re-runs heal the index outright. A crash between a
+pack install's file write and its lockfile record heals on re-run via the
+byte-identical adopt path.
+
+The enforcing lane is `tests/test_crash_faults.py`: it discovers every atomic-write
+call site by AST, fails if one is unregistered, tears each registered site once
+in-process, and runs the kill lane against the two long-running verbs. This section is
+asserted against that registration — the published classes and chain names above cannot
+drift from what the tests enforce.
+
 ## Support policy
 
 - **Marketplace = latest-only.** The supported version is whatever is currently published to the
