@@ -1901,3 +1901,111 @@ def test_repeat_probe_passes_on_the_hermetic_lane(tmp_path, monkeypatch, capsys)
 def test_repeat_needs_at_least_two_runs(capsys):
     assert E.main(["--repeat", "1"]) == 2
     assert "--repeat needs k >= 2" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# MSR-2: null-hypothesis eval arms (grep null + true bm25-only + labeled mixed).
+# Report-only; one hit-judgment code path (the parameterized ranked source); the
+# mixed condition is NEVER presented as bm25-only.
+# --------------------------------------------------------------------------- #
+def test_arms_off_by_default_and_absent_from_report(tmp_path, monkeypatch):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)
+    assert "null_arms" not in report  # absence-emits-nothing (ED-4)
+
+
+def test_arms_report_three_labeled_arms_with_deltas(tmp_path, monkeypatch):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    report = E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10, arms=True)
+    na = report["null_arms"]
+    assert set(na["arms"]) == {"full", "grep", "bm25", "mixed"}
+    # grep is labeled a ranking-stack-lift measure, never an adoption threshold.
+    assert "ranking-stack-lift" in na["arms"]["grep"]["label"]
+    assert "NOT an adopt-memory-at-all threshold" in na["arms"]["grep"]["label"]
+    # bm25 on a hermetic (already-bm25) run is honestly marked degenerate.
+    assert "degenerate" in na["arms"]["bm25"].get("note", "")
+    # mixed is unreachable without a resident dense index — skipped, with the reason,
+    # and its LABEL still says what it is (never "bm25-only").
+    assert na["arms"]["mixed"].get("skipped")
+    assert "NOT bm25-only" in na["arms"]["mixed"]["label"]
+    # deltas: per-category, n printed, computed for the arms that ran.
+    assert "single-hop" in na["deltas"]["grep"]
+    assert na["deltas"]["grep"]["single-hop"]["n"] == len(_HARD_SET)
+    # bm25-arm == full pipeline here, so its delta is exactly zero (and present).
+    assert na["deltas"]["bm25"]["single-hop"]["recall"] == 0.0
+    # and NO new gate ships: the gates dict keys are exactly the pre-MSR-2 set.
+    assert set(report["gates"]) == {
+        "self_recall@10", "hard_recall@10", "mrr@10", "token_reduction",
+        "recall_p95_ms", "precision@10", "abstention_rate", "cold_p95_ms",
+    }
+
+
+def test_arms_never_write_the_real_index_dir(tmp_path, monkeypatch):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10)  # build once
+    manifest = os.path.join(idx, "manifest.json")
+    before = open(manifest, "rb").read()
+    E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10, arms=True)
+    assert open(manifest, "rb").read() == before  # scratch arm never touches it
+
+
+def test_arms_scratch_dir_is_cleaned_up(tmp_path, monkeypatch):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    import tempfile as _tempfile
+
+    made = []
+    real_mkdtemp = _tempfile.mkdtemp
+
+    def _spy(*a, **k):
+        p = real_mkdtemp(*a, **k)
+        if k.get("prefix", "").startswith("hippo-bm25-arm-") or (a and str(a[0]).startswith("hippo-bm25-arm-")):
+            made.append(p)
+        return p
+
+    monkeypatch.setattr(_tempfile, "mkdtemp", _spy)
+    E.evaluate(memory_dir=md, index_dir=idx, hard_set_path=hs_path, k=10, arms=True)
+    assert made, "the bm25 arm should have built into a scratch dir"
+    assert not any(os.path.exists(p) for p in made)
+
+
+def test_ranked_source_shares_the_hit_judgment(tmp_path, monkeypatch):
+    """The parameterized source changes WHERE ranks come from, never what a hit is."""
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    B.build_index(md, idx)
+    index = B.load_index(idx)
+    hs = E.load_hard_set(hs_path)
+    always_right = lambda q, k: [{"name": n} for row in hs if row["query"] == q for n in row["expected"]]
+    always_wrong = lambda q, k: [{"name": "definitely-not-a-memory"}]
+    right = E.hard_set_metrics_by_category(index, hs, k=10, ranked_source=always_right)
+    wrong = E.hard_set_metrics_by_category(index, hs, k=10, ranked_source=always_wrong)
+    assert right["single-hop"]["recall"] == 1.0 and right["single-hop"]["mrr"] == 1.0
+    assert wrong["single-hop"]["recall"] == 0.0 and wrong["single-hop"]["mrr"] == 0.0
+
+
+def test_grep_rank_is_deterministic_and_overlap_gated():
+    docs = [("beta", {"alpha", "shared"}), ("alpha", {"alpha", "shared"}), ("gamma", {"unrelated"})]
+    ranked = E._grep_rank("alpha shared", 10, docs)
+    # equal overlap ties break by name; zero-overlap docs never rank at all
+    assert [r["name"] for r in ranked] == ["alpha", "beta"]
+    assert E._grep_rank("", 10, docs) == []
+
+
+def test_dense_disabled_env_restores_exactly(monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "0")
+    with E._dense_disabled_env():
+        assert os.environ["HIPPO_DISABLE_DENSE"] == "1"
+    assert os.environ["HIPPO_DISABLE_DENSE"] == "0"
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE")
+    with E._dense_disabled_env():
+        assert os.environ["HIPPO_DISABLE_DENSE"] == "1"
+    assert "HIPPO_DISABLE_DENSE" not in os.environ
+
+
+def test_arms_cli_flag_renders_labeled_deltas(tmp_path, monkeypatch, capsys):
+    md, idx, hs_path = _msr1_setup(tmp_path, monkeypatch)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs_path, "--arms"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "arm grep:" in out and "report-only" in out
+    assert "arm mixed: skipped" in out  # hermetic run — labeled, not silently absent
+    assert "Δrecall=" in out and "n=" in out

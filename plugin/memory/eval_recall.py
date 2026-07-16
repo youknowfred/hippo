@@ -69,6 +69,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from contextlib import contextmanager
 from typing import Dict, List, Optional
 
 from .build_index import (
@@ -858,16 +859,34 @@ def confirm_hard_set_row(
 
 
 def hard_set_metrics(
-    index: LoadedIndex, hard_set: List[dict], k: int = 10, *, index_dir: Optional[str] = None
+    index: LoadedIndex,
+    hard_set: List[dict],
+    k: int = 10,
+    *,
+    index_dir: Optional[str] = None,
+    ranked_source=None,
 ) -> Dict[str, float]:
-    """recall@k (any expected in top-k) + MRR@k (1/rank of first expected) over the set."""
+    """recall@k (any expected in top-k) + MRR@k (1/rank of first expected) over the set.
+
+    MSR-2: ``ranked_source`` parameterizes WHERE the ranked list comes from — a callable
+    ``(query, k) -> [{"name": ...}, ...]`` an eval arm supplies (the grep null, a scratch
+    bm25-only index, the mixed/degraded condition). The HIT JUDGMENT (expected ∩ ranked,
+    first-hit reciprocal rank) stays right here for every arm — no arm can reimplement
+    what counts as a hit and quietly disagree with the production gates. ``None`` (every
+    pre-MSR-2 caller) is the production ``recall()`` path, unchanged.
+    """
     if not hard_set:
         return {"recall": 0.0, "mrr": 0.0, "n": 0}
     hit = 0
     rr_sum = 0.0
     for item in hard_set:
         expected = set(item["expected"])
-        ranked = [r["name"] for r in recall(item["query"], k=k, index=index, index_dir=index_dir)]
+        rows = (
+            ranked_source(item["query"], k)
+            if ranked_source is not None
+            else recall(item["query"], k=k, index=index, index_dir=index_dir)
+        )
+        ranked = [r["name"] for r in rows]
         if expected.intersection(ranked):
             hit += 1
         rr = 0.0
@@ -881,7 +900,12 @@ def hard_set_metrics(
 
 
 def hard_set_metrics_by_category(
-    index: LoadedIndex, hard_set: List[dict], k: int = 10, *, index_dir: Optional[str] = None
+    index: LoadedIndex,
+    hard_set: List[dict],
+    k: int = 10,
+    *,
+    index_dir: Optional[str] = None,
+    ranked_source=None,
 ) -> Dict[str, Dict[str, float]]:
     """RET-8: ``hard_set_metrics`` bucketed by each row's ``category`` tag.
 
@@ -891,15 +915,205 @@ def hard_set_metrics_by_category(
     per-category numbers can never disagree with the aggregate gates about what a hit is.
     This is what makes a regression ATTRIBUTABLE: the aggregate can hide a multi-hop
     collapse behind twenty healthy single-hop rows; these buckets cannot.
+    ``ranked_source`` threads through verbatim (MSR-2's arms) — the bucketing and the
+    judgment are arm-independent by construction.
     """
     buckets: Dict[str, List[dict]] = {}
     for item in hard_set:
         cat = item.get("category") or _DEFAULT_CATEGORY
         buckets.setdefault(cat, []).append(item)
     return {
-        cat: hard_set_metrics(index, items, k=k, index_dir=index_dir)
+        cat: hard_set_metrics(index, items, k=k, index_dir=index_dir, ranked_source=ranked_source)
         for cat, items in sorted(buckets.items())
     }
+
+
+# --------------------------------------------------------------------------- #
+# MSR-2: null-hypothesis eval arms over an index-mode x query-mode condition matrix.
+#
+# The eval reported absolute recall but never what the ranking STACK adds over trivial
+# baselines, and it could not distinguish the production dense path from the
+# production-REACHABLE mixed mode (dense index resident, bm25 ranking at query time —
+# the embed-timeout / cold-cache degradation). Three report-only arms, each feeding the
+# UNMODIFIED hard_set_metrics_by_category via the parameterized ranked-list source
+# above (one hit-judgment code path — no arm can disagree about what a hit is):
+#
+#   grep   — a pure-stdlib token-overlap null. This measures RANKING-STACK LIFT over
+#            the curated corpus: how much the fusion/floor/knee/graph stack adds over
+#            the dumbest possible ranking of the same files. It is NOT the
+#            Letta/Hidden-Layer "adopt memory at all" threshold — these fixtures cannot
+#            answer that question, and no >=10-point adoption gate ships anywhere;
+#            the only gate is report-only.
+#   bm25   — TRUE bm25-only: a SECOND index built dense-disabled into a scratch
+#            index_dir (never the real index_dir, never an in-process flag flip
+#            against a resident dense matrix — that is mixed mode, not bm25-only).
+#   mixed  — the explicitly-labeled degraded condition: the RESIDENT dense index with
+#            HIPPO_DISABLE_DENSE at query time only, so dense ranking drops out while
+#            the dense matrix stays loaded (MMR diversity still runs against it).
+#            Mechanism note per the round-2 re-measurement: production dense+bm25
+#            multi-hop is FIXED (GRA-1 knee suppression, 4d16022's graph_endorsed
+#            exemption + cliff latch); the residual defect lives in exactly THIS mode,
+#            where MMR's diversity penalty can drop a wikilink neighbor (definitionally
+#            similar to its seed) — the leg GRF-2 exists to close. This arm is what
+#            makes that leg measurable.
+# --------------------------------------------------------------------------- #
+@contextmanager
+def _dense_disabled_env():
+    """Set ``HIPPO_DISABLE_DENSE=1`` for a bounded scope, restoring the prior value
+    exactly (the ``_ensure_index`` save/restore pattern). Eval-side only — never used
+    on any hook path."""
+    prev = os.environ.get("HIPPO_DISABLE_DENSE")
+    os.environ["HIPPO_DISABLE_DENSE"] = "1"
+    try:
+        yield
+    finally:
+        if prev is None:
+            os.environ.pop("HIPPO_DISABLE_DENSE", None)
+        else:
+            os.environ["HIPPO_DISABLE_DENSE"] = prev
+
+
+def _grep_baseline_docs(memory_dir: str) -> List[tuple]:
+    """``[(name, token_set)]`` over every memory file's FULL text — the null corpus.
+
+    Deliberately dumb: ``tokenize`` (the shared query-side normalization) with NO
+    stemming, no fields, no weighting — stemming and description/body structure are part
+    of the ranking stack this null exists to measure the lift OF. Read-only, stdlib.
+    """
+    from .provenance import _iter_memory_files
+
+    docs: List[tuple] = []
+    try:
+        for path in _iter_memory_files(memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+            except Exception:
+                continue
+            name = os.path.splitext(os.path.basename(path))[0]
+            docs.append((name, set(tokenize(text))))
+    except Exception:
+        return []
+    return docs
+
+
+def _grep_rank(query: str, k: int, docs: List[tuple]) -> List[dict]:
+    """Top-``k`` docs by raw query-token overlap count; zero-overlap docs never rank.
+
+    Ties break by name so the null is exactly as deterministic as the stack it
+    baselines (the pass^k probe must hold with --arms too).
+    """
+    q = set(tokenize(query))
+    if not q:
+        return []
+    scored = sorted(
+        ((len(q & toks), name) for name, toks in docs if q & toks),
+        key=lambda t: (-t[0], t[1]),
+    )
+    return [{"name": name} for _score, name in scored[:k]]
+
+
+def null_hypothesis_arms(
+    memory_dir: str,
+    index: LoadedIndex,
+    index_dir: Optional[str],
+    hard_set: List[dict],
+    k: int = 10,
+    *,
+    full_by_category: Optional[Dict[str, Dict[str, float]]] = None,
+) -> dict:
+    """The MSR-2 arm matrix: ``{"arms": {key: {label, by_category, ...}}, "deltas": ...}``.
+
+    Report-only, eval-side, stdlib+offline (inv6 untouched). ``full_by_category`` reuses
+    the report's already-computed production numbers rather than re-running them.
+    Deltas are per-category vs the full pipeline; a category with n=0 on either side is
+    SKIPPED (never zero-emitted) — a degenerate delta is no measurement at all.
+    """
+    import shutil
+    import tempfile
+
+    if not hard_set:
+        return {}
+    full = full_by_category or hard_set_metrics_by_category(
+        index, hard_set, k=k, index_dir=index_dir
+    )
+    arms: Dict[str, dict] = {
+        "full": {"label": "full pipeline (production ranking stack)", "by_category": full}
+    }
+
+    docs = _grep_baseline_docs(memory_dir)
+    arms["grep"] = {
+        "label": (
+            "grep/token-overlap null — a ranking-stack-lift measure over this curated "
+            "corpus, NOT an adopt-memory-at-all threshold"
+        ),
+        "by_category": hard_set_metrics_by_category(
+            index, hard_set, k=k, ranked_source=lambda q, kk: _grep_rank(q, kk, docs)
+        ),
+    }
+
+    # TRUE bm25-only: a second index built dense-disabled in a scratch dir. The real
+    # index_dir is never written; the resident dense matrix is never flag-flipped.
+    scratch = tempfile.mkdtemp(prefix="hippo-bm25-arm-")
+    try:
+        with _dense_disabled_env():
+            build_index(memory_dir, scratch)
+            idx2 = load_index(scratch)
+        if idx2 is not None and len(idx2):
+            arm = {
+                "label": "true bm25-only (second index built dense-disabled in a scratch index_dir)",
+                "by_category": hard_set_metrics_by_category(
+                    idx2, hard_set, k=k, index_dir=scratch
+                ),
+            }
+            if not index.dense_ready:
+                arm["note"] = (
+                    "degenerate: production is already bm25-only on this run, so this arm "
+                    "mirrors the full pipeline"
+                )
+            arms["bm25"] = arm
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+    if index.dense_ready:
+        with _dense_disabled_env():
+            arms["mixed"] = {
+                "label": (
+                    "mixed/degraded — dense index RESIDENT, bm25 ranking at query time "
+                    "(the embed-timeout/cold-cache path; NOT bm25-only: MMR still runs "
+                    "against the loaded matrix)"
+                ),
+                "by_category": hard_set_metrics_by_category(
+                    index, hard_set, k=k, index_dir=index_dir
+                ),
+            }
+    else:
+        arms["mixed"] = {
+            "label": (
+                "mixed/degraded — dense index RESIDENT, bm25 ranking at query time "
+                "(NOT bm25-only)"
+            ),
+            "skipped": "no resident dense index on this run — mixed mode is unreachable here",
+            "by_category": {},
+        }
+
+    deltas: Dict[str, dict] = {}
+    for arm_key, arm in arms.items():
+        if arm_key == "full":
+            continue
+        d: Dict[str, dict] = {}
+        for cat, m in (arm.get("by_category") or {}).items():
+            f = full.get(cat)
+            if not f or not f.get("n") or not m.get("n"):
+                continue  # degenerate: skip, never zero-emit
+            d[cat] = {
+                "recall": round(m["recall"] - f["recall"], 4),
+                "mrr": round(m["mrr"] - f["mrr"], 4),
+                "n": int(m["n"]),
+            }
+        if d:
+            deltas[arm_key] = d
+    return {"arms": arms, "deltas": deltas}
 
 
 def token_reduction(
@@ -1050,8 +1264,15 @@ def evaluate(
     telemetry_dir: Optional[str] = None,
     abstention_set_path: Optional[str] = None,
     gate_cold: bool = False,
+    arms: bool = False,
 ) -> dict:
     """Run all 5 gates; return a report dict with per-gate values + pass flags.
+
+    ``arms`` (MSR-2) opts INTO the null-hypothesis condition matrix (grep null, true
+    bm25-only in a scratch index_dir, labeled mixed/degraded) — report-only per-category
+    deltas under ``report["null_arms"]``. Default False: the key is ABSENT and the report
+    is byte-identical to before this item (absence-emits-nothing, ED-4), and no caller
+    pays the second index build unasked.
 
     ``repo_root``/``telemetry_dir`` feed REPORT-ONLY scorecard additions (staleness
     half-life, per-session token cost). ``relevance_set_path``/``abstention_set_path``
@@ -1226,6 +1447,16 @@ def evaluate(
             "pass": None,
             "skipped": True,
         }
+    # MSR-2: the opt-in null-hypothesis arms — computed LAST (they re-score the same
+    # hard set under other conditions; nothing above depends on them) and emitted only
+    # when requested, so a flag-off report stays byte-identical.
+    null_arms = (
+        null_hypothesis_arms(
+            memory_dir, index, index_dir, hard_set, k=k, full_by_category=by_category
+        )
+        if arms and hard_set
+        else {}
+    )
     return {
         "ok": all(g["pass"] for g in gates.values() if g.get("pass") is not None),
         "dense_ready": index.dense_ready,
@@ -1233,6 +1464,7 @@ def evaluate(
         "count": len(index),
         "hard_set_n": hs["n"],
         "by_category": by_category,
+        **({"null_arms": null_arms} if null_arms else {}),
         "gates": gates,
         "tokens": tok,
         "latency": lat,
@@ -1606,6 +1838,8 @@ def _forwarded_eval_argv(args) -> List[str]:
             argv.extend([flag, value])
     if args.k != 10:
         argv.extend(["-k", str(args.k)])
+    if getattr(args, "arms", False):
+        argv.append("--arms")  # shapes the report deterministically — must repeat too
     return argv
 
 
@@ -1733,6 +1967,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         "dated owner decision, never automatic.",
     )
     parser.add_argument(
+        "--arms",
+        action="store_true",
+        help="MSR-2: run the null-hypothesis condition matrix — a grep/token-overlap "
+        "null (a ranking-stack-lift measure, NOT an adoption threshold), a TRUE "
+        "bm25-only arm (second index in a scratch dir), and the explicitly-labeled "
+        "mixed/degraded arm (dense resident, bm25 at query time). Report-only "
+        "per-category deltas vs the full pipeline; no gate ships on any of them.",
+    )
+    parser.add_argument(
         "--repeat",
         type=int,
         default=None,
@@ -1826,6 +2069,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         telemetry_dir=args.telemetry_dir,
         abstention_set_path=abstention_set_path,
         gate_cold=args.gate_cold,
+        arms=args.arms,
     )
     if not report.get("ok") and "error" in report:
         if args.json:
@@ -1887,6 +2131,23 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"  category {cat:11s} recall@{args.k}={m['recall']:.4f} mrr@{args.k}={m['mrr']:.4f} "
             f"n={m['n']} (RET-8)"
         )
+    # MSR-2: the null-hypothesis arm deltas — every arm explicitly labeled, every
+    # category's n printed, everything report-only (no arm feeds a gate).
+    na = report.get("null_arms") or {}
+    for arm_key in ("grep", "bm25", "mixed"):
+        arm = (na.get("arms") or {}).get(arm_key)
+        if not arm:
+            continue
+        if arm.get("skipped"):
+            print(f"  arm {arm_key}: skipped — {arm['skipped']} (MSR-2)")
+            continue
+        note = f" [{arm['note']}]" if arm.get("note") else ""
+        print(f"  arm {arm_key}: {arm['label']}{note} (MSR-2, report-only)")
+        for cat, d in sorted((na.get("deltas") or {}).get(arm_key, {}).items()):
+            print(
+                f"    {cat}: Δrecall={d['recall']:+.4f} Δmrr={d['mrr']:+.4f} n={d['n']} "
+                "(vs full pipeline)"
+            )
     t = report["tokens"]
     print(f"  tokens: full={t['full']} floor={t['floor']} recall_avg={t['recall_avg']} net={t['net']}")
     print(f"  latency (warm): p50={report['latency']['p50']}ms p95={report['latency']['p95']}ms n={report['latency']['n']}")
