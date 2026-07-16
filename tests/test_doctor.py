@@ -1290,3 +1290,84 @@ def test_scorecard_cost_line_reads_measured_ledgers(memory_dir, repo, tmp_path, 
     m = D.check_trust_scorecard(ctx)["message"]
     assert "injected ~1500 chars over 2 session(s)" in m
     assert D.check_trust_scorecard(ctx)["message"] == m  # deterministic
+
+
+# --------------------------------------------------------------------------- #
+# GRF-3: floor calibration — configured dense floor vs the persisted sweep
+# --------------------------------------------------------------------------- #
+def _write_sweep(memory_dir, monkeypatch, tmp_path, **over):
+    import json as _json
+
+    from memory.eval_recall import _FLOOR_SWEEP_SCHEMA, default_floor_sweep_path
+
+    td = str(tmp_path / "telemetry")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    doc = {
+        "ok": True,
+        "schema": _FLOOR_SWEEP_SCHEMA,
+        "model": "BAAI/bge-small-en-v1.5",
+        "configured_floor": 0.60,
+        "corpus_fingerprint": "fp-stale",
+        "generated_at": "2026-07-16",
+        "recommended": 0.61,
+        "overlap": False,
+        "on_n": 6,
+        "off_n": 3,
+        "on_min": 0.7,
+        "off_max": 0.5,
+        "safety_delta": 0.11,
+        "leaked_off": 0,
+        "cut_on": 0,
+    }
+    doc.update(over)
+    path = default_floor_sweep_path(memory_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        _json.dump(doc, fh)
+    return doc
+
+
+def test_floor_calibration_no_sweep_names_the_command(repo, memory_dir, monkeypatch, tmp_path):
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", str(tmp_path / "telemetry"))
+    _seed(memory_dir)
+    r = D.check_floor_calibration(_ctx(memory_dir, repo))
+    assert r["status"] == "ok"
+    assert "python -m memory.eval_recall --floor-sweep" in r["message"]
+    assert "\n" not in r["message"]  # ONE line — the doctor render/line-count determinism pins
+
+
+def test_floor_calibration_ok_within_tolerance(repo, memory_dir, monkeypatch, tmp_path):
+    _seed(memory_dir)
+    write_file(memory_dir, "a.md", _mem("a", "note a"))
+    _write_sweep(memory_dir, monkeypatch, tmp_path, recommended=0.61)
+    # no index built -> the fingerprint staleness leg is skipped, numbers compare
+    r = D.check_floor_calibration(_ctx(memory_dir, repo))
+    assert r["status"] == "ok"
+    assert "0.6" in r["message"] and "0.61" in r["message"]
+
+
+def test_floor_calibration_warns_on_gap_and_never_auto_writes(
+    repo, memory_dir, monkeypatch, tmp_path
+):
+    _seed(memory_dir)
+    _write_sweep(memory_dir, monkeypatch, tmp_path, recommended=0.72)
+    r = D.check_floor_calibration(_ctx(memory_dir, repo))
+    assert r["status"] == "warn"
+    assert "0.6" in r["message"] and "0.72" in r["message"]
+    assert "nothing auto-writes" in r["message"]
+    assert "\n" not in r["message"]  # ONE line — the doctor render/line-count determinism pins
+
+
+def test_floor_calibration_stale_fingerprint_reports_stale(
+    repo, memory_dir, monkeypatch, tmp_path
+):
+    from memory import build_index as B
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _seed(memory_dir)
+    write_file(memory_dir, "a.md", _mem("a", "note a"))
+    B.build_index(memory_dir, B.default_index_dir(memory_dir))
+    _write_sweep(memory_dir, monkeypatch, tmp_path, corpus_fingerprint="fp-stale")
+    r = D.check_floor_calibration(_ctx(memory_dir, repo))
+    assert r["status"] == "ok"
+    assert "STALE" in r["message"] and "--floor-sweep" in r["message"]

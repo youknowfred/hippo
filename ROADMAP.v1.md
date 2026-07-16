@@ -385,6 +385,12 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
   bm25-only statement — this fires on the dense path too when a stranger's corpus has a
   too-permissive floor. Stretch (auto-derive from RET-7) deferred; the audit skill already
   drafts the fixture (SIG-6).
+  **FULLY CLOSED 2026-07-16 (T9/GRF-3)** — the calibration half the leak-detector's
+  "raise `HIPPO_DENSE_FLOOR`" hint always lacked a NUMBER for: `eval_recall --floor-sweep`
+  recommends a per-model/per-corpus floor from the RAW-cosine separation of on-topic
+  hard-set queries vs off-topic probes (never fused metrics), persists the report
+  (gitignored), and `doctor.check_floor_calibration` compares it to the configured
+  `recall._DENSE_FLOOR_BY_MODEL` entry — advisory only, a human edits the table.
 - **RET-11** `P1/M` — BM25-only **abstention floor** (normalized-score / IDF-mass
   threshold) *or* an explicit doctor/README statement that abstention is
   dense-gated + a warm-the-model nudge. *(KPI-1.)*

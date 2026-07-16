@@ -2116,3 +2116,159 @@ def test_session_token_cost_falls_back_to_estimate(tmp_path, monkeypatch):
     cost = E.session_token_cost(md, td, index, [], k=10, index_dir=idx)
     assert cost["measured_events"] == 0  # pre-MSR-6-shaped ledger: estimate path
     assert cost["n_sessions"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# GRF-3: the dense-floor calibration sweep (RET-9's calibration half).
+# --------------------------------------------------------------------------- #
+def test_recommend_floor_clean_separation():
+    r = E.recommend_floor([0.7, 0.8, 0.75], [0.3, 0.4])
+    assert r["overlap"] is False
+    assert r["recommended"] == 0.55  # midpoint of on-min 0.7 / off-max 0.4
+    assert r["safety_delta"] == 0.15
+    assert r["leaked_off"] == 0 and r["cut_on"] == 0
+    assert (r["on_n"], r["off_n"], r["on_min"], r["off_max"]) == (3, 2, 0.7, 0.4)
+
+
+def test_recommend_floor_overlap_reports_costs():
+    r = E.recommend_floor([0.4, 0.5, 0.6, 0.7], [0.45, 0.55])
+    assert r["overlap"] is True
+    assert r["recommended"] == 0.4  # p10 of the on-topic distribution (index 0 at n=4)
+    assert r["leaked_off"] == 2  # both off-topic probes sit at/above 0.4
+    assert r["cut_on"] == 0
+    assert r["safety_delta"] == round(0.4 - 0.55, 4)
+
+
+def test_recommend_floor_empty_side_is_none():
+    assert E.recommend_floor([], [0.3]) is None
+    assert E.recommend_floor([0.5], []) is None
+
+
+_OFF_TOPIC = [
+    "best pizza dough hydration for a home oven",
+    "marathon training plan for a first-time runner",
+    "who won the celebrity baking show last night",
+]
+
+
+def _write_abstention_set(tmp_path):
+    import yaml
+
+    p = str(tmp_path / "abstention_set.yaml")
+    with open(p, "w", encoding="utf-8") as fh:
+        yaml.safe_dump([{"query": q} for q in _OFF_TOPIC], fh)
+    return p
+
+
+def _fake_dense(monkeypatch, dim: int = 64):
+    """crc32 bag-of-tokens fake dense backend (the test_recall convention) wired into
+    BOTH the build (embed_documents) and the sweep's query path (recall.embed_query)."""
+    import zlib
+
+    import numpy as np
+
+    from memory import recall as R
+
+    def _vec(text):
+        v = np.zeros(dim, dtype="float32")
+        for tok in B.tokenize(text):
+            v[zlib.crc32(tok.encode("utf-8")) % dim] += 1.0
+        n = np.linalg.norm(v)
+        return v / n if n else v
+
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(
+        B, "embed_documents",
+        lambda texts, allow_download=True: np.vstack([_vec(t) for t in texts]).astype("float32"),
+    )
+    monkeypatch.setattr(R, "embed_query", lambda text, allow_download=False: _vec(text))
+
+
+def test_floor_sweep_end_to_end_and_persisted(tmp_path, monkeypatch):
+    _fake_dense(monkeypatch)
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / "idx")
+    td = str(tmp_path / "telemetry")
+    B.build_index(md, idx)
+    doc = E.floor_sweep(
+        memory_dir=md,
+        index_dir=idx,
+        hard_set_path=_write_hard_set(tmp_path),
+        abstention_set_path=_write_abstention_set(tmp_path),
+        telemetry_dir=td,
+    )
+    assert doc["ok"] is True
+    assert doc["schema"] == E._FLOOR_SWEEP_SCHEMA
+    assert doc["on_n"] == len(_HARD_SET) and doc["off_n"] == len(_OFF_TOPIC)
+    assert isinstance(doc["recommended"], float)
+    assert doc["configured_floor"] > 0
+    # keyed to the live corpus so doctor can tell fresh from stale
+    index = B.load_index(idx)
+    assert doc["corpus_fingerprint"] == E.corpus_fingerprint(index)
+    # persisted where doctor reads it
+    assert doc["path"] == E.default_floor_sweep_path(md, td)
+    persisted = E.read_floor_sweep(md, td)
+    assert persisted is not None and persisted["recommended"] == doc["recommended"]
+
+
+def test_floor_sweep_skips_rows_unanswerable_in_this_corpus(tmp_path, monkeypatch):
+    """A hard-set row whose expected stems are absent from the corpus must not drag the
+    on-topic distribution down — it is not on-topic FOR THIS CORPUS."""
+    import yaml
+
+    _fake_dense(monkeypatch)
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / "idx")
+    B.build_index(md, idx)
+    rows = list(_HARD_SET) + [{"query": "entirely foreign topic", "expected": ["not_here"]}]
+    hs = str(tmp_path / "hs.yaml")
+    with open(hs, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(rows, fh)
+    doc = E.floor_sweep(
+        memory_dir=md, index_dir=idx, hard_set_path=hs,
+        abstention_set_path=_write_abstention_set(tmp_path),
+        telemetry_dir=str(tmp_path / "telemetry"),
+    )
+    assert doc["ok"] is True and doc["on_n"] == len(_HARD_SET)  # the foreign row dropped
+
+
+def test_floor_sweep_bm25_only_fails_loudly(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / "idx")
+    B.build_index(md, idx)
+    doc = E.floor_sweep(
+        memory_dir=md, index_dir=idx,
+        hard_set_path=_write_hard_set(tmp_path),
+        abstention_set_path=_write_abstention_set(tmp_path),
+        telemetry_dir=str(tmp_path / "telemetry"),
+    )
+    assert doc["ok"] is False and "dense" in doc["error"]
+
+
+def test_floor_sweep_cli_prints_advisory_and_exits_zero(tmp_path, monkeypatch, capsys):
+    _fake_dense(monkeypatch)
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / "idx")
+    B.build_index(md, idx)
+    rc = E.main(
+        [
+            "--memory-dir", md, "--index-dir", idx, "--floor-sweep",
+            "--hard-set", _write_hard_set(tmp_path),
+            "--abstention-set", _write_abstention_set(tmp_path),
+            "--telemetry-dir", str(tmp_path / "telemetry"),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "recommended" in out and "advisory only" in out and "nothing auto-writes" in out
+
+
+def test_floor_sweep_cli_bm25_only_exits_nonzero(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / "idx")
+    B.build_index(md, idx)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--floor-sweep"])
+    assert rc == 1
+    assert "floor sweep:" in capsys.readouterr().out

@@ -1901,6 +1901,197 @@ def diff_baseline(
     return lines
 
 
+# --------------------------------------------------------------------------- #
+# GRF-3: the dense-floor calibration sweep — RET-9's missing calibration half.
+#
+# recall._DENSE_FLOOR_BY_MODEL is a static table calibrated on the maintainer's golden
+# corpus; doctor.check_abstention_floor_sanity (RET-9's leak-detector half, shipped
+# 2026-07-10) can SAY "the floor is too permissive for this corpus" but not what number
+# to raise it to. This sweep automates RET-1's documented cosine-separation recipe:
+# embed the corpus's own on-topic queries and off-topic probes with its configured/warm
+# model, take each query's best DESCRIPTION-row cosine — the exact value the floor
+# gates in recall._dense_rank_rows — and recommend a per-model/per-corpus floor from
+# the separation of the two distributions. RAW cosine space throughout, never fused
+# RET-8 metrics (the two logged fused-vs-cosine incommensurability corrections).
+#
+# Advisory-only by construction (inv4): the sweep recommends, one doctor line compares
+# the recommendation to the configured entry, and a HUMAN edits the table (or sets
+# HIPPO_DENSE_FLOOR). Nothing here writes a floor anywhere. The persisted report is
+# derived/gitignored telemetry (inv1), keyed to the corpus fingerprint so doctor can
+# tell a stale sweep from a fresh one. Ettin/Li-LSR reranker arms are explicitly out
+# of scope (ED-3-blocked — see the roadmap's not_pursuing).
+# --------------------------------------------------------------------------- #
+_FLOOR_SWEEP_NAME = "floor_sweep.json"
+_FLOOR_SWEEP_SCHEMA = 1
+
+
+def default_floor_sweep_path(memory_dir: str, telemetry_dir: Optional[str] = None) -> str:
+    """``<telemetry_dir>/floor_sweep.json`` — beside the run ledger (derived, gitignored)."""
+    from .telemetry import default_telemetry_dir
+
+    return os.path.join(telemetry_dir or default_telemetry_dir(memory_dir), _FLOOR_SWEEP_NAME)
+
+
+def recommend_floor(on_scores: List[float], off_scores: List[float]) -> Optional[dict]:
+    """Pure separation math over raw cosines. ``None`` when either side is empty.
+
+    Clean separation (every on-topic max above every off-topic max): recommend the
+    midpoint of the gap. Overlap: recommend the 10th-percentile on-topic score — the
+    conservative "keep ~90% of real hits admitted" point — and report the leak/cut
+    counts at that floor so the human sees exactly what the overlap costs. Either way
+    ``safety_delta`` = recommendation − best off-topic cosine: positive means every
+    off-topic probe stays below the recommended floor; negative names the leak margin.
+    """
+    if not on_scores or not off_scores:
+        return None
+    on = sorted(float(s) for s in on_scores)
+    off = sorted(float(s) for s in off_scores)
+    on_min, off_max = on[0], off[-1]
+    overlap = on_min <= off_max
+    if not overlap:
+        recommended = round((on_min + off_max) / 2.0, 4)
+    else:
+        p10 = max(0, min(len(on) - 1, int(len(on) * 0.10)))
+        recommended = round(on[p10], 4)
+    return {
+        "recommended": recommended,
+        "overlap": overlap,
+        "on_n": len(on),
+        "off_n": len(off),
+        "on_min": round(on_min, 4),
+        "off_max": round(off_max, 4),
+        "safety_delta": round(recommended - off_max, 4),
+        "leaked_off": sum(1 for s in off if s >= recommended),
+        "cut_on": sum(1 for s in on if s < recommended),
+    }
+
+
+def _raw_max_cosines(index: LoadedIndex, queries: List[str]) -> List[float]:
+    """Best DESCRIPTION-row cosine per query — the exact quantity the dense floor gates.
+
+    Embeds with the corpus's configured/warm model via ``recall.embed_query`` — resolved
+    through the module attribute so hermetic tests' fake embedders apply (offline; the
+    caller has already verified ``dense_ready``). A query that fails to embed is skipped
+    (better a smaller honest sample than a fabricated zero)."""
+    from . import recall as _recall_mod
+
+    out: List[float] = []
+    n_desc = len(index.entries)
+    for q in queries:
+        if not q:
+            continue
+        try:
+            qvec = _recall_mod.embed_query(q, allow_download=False)
+            sims = index.dense @ qvec
+            out.append(round(float(sims[:n_desc].max()), 6))
+        except Exception:
+            continue
+    return out
+
+
+def floor_sweep(
+    memory_dir: Optional[str] = None,
+    index_dir: Optional[str] = None,
+    hard_set_path: Optional[str] = None,
+    abstention_set_path: Optional[str] = None,
+    *,
+    telemetry_dir: Optional[str] = None,
+    write: bool = True,
+) -> dict:
+    """Run the calibration sweep; persist the report for doctor; return it.
+
+    On-topic queries: the hard-set rows (non-abstention categories) whose expected
+    stems actually exist in THIS corpus — a row whose answer the corpus lacks would
+    drag the on-topic minimum down with an honest-but-irrelevant low cosine. Off-topic
+    probes: the abstention set. Both resolve through the same default-fixture paths
+    ``evaluate()`` uses, so a project's ``.audit-fixtures/`` rows take precedence when
+    present. Loud, structured failure (``{"ok": False, "error": ...}``) when the dense
+    model is unavailable — a sweep cannot calibrate a floor it cannot measure.
+    """
+    if memory_dir is None:
+        memory_dir, _ = resolve_dirs()
+    if index_dir is None:
+        index_dir = default_index_dir(memory_dir)
+    index = load_index(index_dir)
+    if index is None or not len(index):
+        return {"ok": False, "error": "no index / empty corpus — build the index first"}
+    if not index.dense_ready or index.dense is None:
+        return {
+            "ok": False,
+            "error": "dense model unavailable (bm25-only run) — the floor gates raw "
+            "cosines, so the sweep needs the dense backend; run /hippo:bootstrap first",
+        }
+
+    hs_path = hard_set_path or _default_hard_set_path()
+    ab_path = abstention_set_path or _default_abstention_set_path()
+    hard_set = load_hard_set(hs_path) if hs_path else []
+    probes = load_abstention_set(ab_path) if ab_path else []
+    names = {e.get("name") for e in index.entries}
+    on_queries = [
+        row["query"]
+        for row in hard_set
+        if (row.get("category") or _DEFAULT_CATEGORY) != "abstention"
+        and any(stem in names for stem in row.get("expected") or ())
+    ]
+    if not on_queries or not probes:
+        return {
+            "ok": False,
+            "error": "need both on-topic hard-set rows resolvable against this corpus and "
+            "off-topic abstention probes — "
+            f"(on-topic {len(on_queries)}, off-topic {len(probes)}); draft fixtures via "
+            "/hippo:audit or SIG-6's abstention_fixtures flow",
+        }
+
+    from .recall import _dense_floor
+
+    on_scores = _raw_max_cosines(index, on_queries)
+    off_scores = _raw_max_cosines(index, probes)
+    rec = recommend_floor(on_scores, off_scores)
+    if rec is None:
+        return {"ok": False, "error": "embedding produced no usable scores — model failure?"}
+
+    doc = {
+        "ok": True,
+        "schema": _FLOOR_SWEEP_SCHEMA,
+        "model": index.model,
+        "configured_floor": _dense_floor(index.model),
+        "corpus_fingerprint": corpus_fingerprint(index),
+        "generated_at": time.strftime("%Y-%m-%d"),
+        **rec,
+    }
+    if write:
+        path = default_floor_sweep_path(memory_dir, telemetry_dir)
+        written = write_floor_sweep(doc, path)
+        doc["path"] = written.get("path") if written.get("ok") else None
+    return doc
+
+
+def write_floor_sweep(doc: dict, path: str) -> dict:
+    """Persist the sweep report (atomic — a torn report must never half-inform doctor).
+    ``{ok, path}`` or ``{ok: False, error}``; never raises."""
+    from .atomic import write_json_atomic
+
+    try:
+        ensure_self_ignoring_dir(os.path.dirname(path))  # SEC-3 self-ignoring pattern
+        write_json_atomic(path, doc, indent=2)
+        return {"ok": True, "path": path}
+    except Exception as exc:
+        return {"ok": False, "error": f"floor-sweep write failed: {exc}"}
+
+
+def read_floor_sweep(memory_dir: str, telemetry_dir: Optional[str] = None) -> Optional[dict]:
+    """The persisted sweep report, or None (absent/corrupt/wrong-schema). Never raises."""
+    try:
+        path = default_floor_sweep_path(memory_dir, telemetry_dir)
+        with open(path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+        if not isinstance(doc, dict) or doc.get("schema") != _FLOOR_SWEEP_SCHEMA:
+            return None
+        return doc
+    except Exception:
+        return None
+
+
 def _forwarded_eval_argv(args) -> List[str]:
     """The INPUT arguments a --repeat subprocess re-runs with — never the output flags
     (--json is added by the probe itself; --out/--baseline/--write-baseline would make
@@ -2081,6 +2272,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--memory-dir/--hard-set/--abstention-set (memory.calibrate_thresholds) instead of "
         "running the normal gate report. Report-only — never mutates recall.py's default.",
     )
+    parser.add_argument(
+        "--floor-sweep",
+        action="store_true",
+        help="GRF-3 (delivers RET-9's calibration half): recommend a per-model/per-corpus "
+        "dense floor from the RAW-cosine separation of on-topic hard-set queries vs "
+        "off-topic abstention probes (never fused metrics — complementary to --calibrate's "
+        "end-to-end grid). Persists the report for doctor's advisory comparison line. "
+        "Advisory only: a human edits recall._DENSE_FLOOR_BY_MODEL (or sets "
+        "HIPPO_DENSE_FLOOR); nothing auto-writes.",
+    )
     args, ab_extra = parser.parse_known_args(argv)
     if args.ab is None and ab_extra:
         # Extras are pass-through ONLY under --ab; the plain eval keeps strict parsing.
@@ -2118,6 +2319,40 @@ def main(argv: Optional[List[str]] = None) -> int:
                 or (_default_abstention_set_path() if ambient else None),
                 k=args.k,
             )
+        )
+        return 0
+
+    if args.floor_sweep:
+        ambient = args.memory_dir is None
+        doc = floor_sweep(
+            memory_dir=args.memory_dir,
+            index_dir=args.index_dir,
+            hard_set_path=args.hard_set or (_default_hard_set_path() if ambient else None),
+            abstention_set_path=args.abstention_set
+            or (_default_abstention_set_path() if ambient else None),
+            telemetry_dir=args.telemetry_dir,
+        )
+        if not doc.get("ok"):
+            print(f"floor sweep: {doc.get('error')}")
+            return 1
+        sep = "OVERLAPPING" if doc["overlap"] else "clean"
+        print(
+            f"floor sweep [{doc['model']}]: recommended {doc['recommended']} "
+            f"(configured {doc['configured_floor']}) — {sep} separation over "
+            f"{doc['on_n']} on-topic / {doc['off_n']} off-topic cosines "
+            f"(on-min {doc['on_min']}, off-max {doc['off_max']}, "
+            f"safety Δ {doc['safety_delta']:+})"
+        )
+        if doc["overlap"]:
+            print(
+                f"  overlap cost at the recommendation: {doc['leaked_off']} off-topic "
+                f"probe(s) would leak, {doc['cut_on']} on-topic quer(ies) would abstain"
+            )
+        if doc.get("path"):
+            print(f"  persisted for doctor: {doc['path']}")
+        print(
+            "  advisory only — edit recall._DENSE_FLOOR_BY_MODEL (or set "
+            "HIPPO_DENSE_FLOOR) yourself; nothing auto-writes (RET-9 closed by this sweep)"
         )
         return 0
 
