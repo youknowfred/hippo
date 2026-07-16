@@ -21,7 +21,8 @@ release). New *additions* alongside them are minor, non-breaking changes.
   `recall`, `why`, `doctor`, `audit`, `consolidate`, `resolve`, `promote`, `promote-rule`, `pack`,
   `export-agents`, `import`, `remove`. (New skills may be added; existing ones won't be renamed or
   removed silently.)
-- **The `bin/hippo` CLI subcommands** — `recall`, `new`, `build-index`, `staleness`, `mcp`.
+- **The `bin/hippo` CLI subcommands** — `recall`, `new`, `build-index`, `staleness`, `mcp`,
+  `sleep` (added in T15 SLP as a minor, non-breaking addition).
 - **The MCP tool names** — `recall`, `new_memory`, `traverse`, `why`, `decision_history` (served by
   `bin/hippo mcp`).
 - **The `HIPPO_*` environment-variable namespace**, and specifically these documented operational
