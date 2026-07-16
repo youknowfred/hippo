@@ -1234,7 +1234,15 @@ def _expand_neighbors(
                 | typed_in.get("refines", set())
                 | typed_in.get("derives-from", set())
             )
-            for stem in neighbor_stems:
+            # SORTED iteration (GRF-2, found by MSR-1's pass^k probe): two siblings of
+            # one seed inject at the IDENTICAL discounted score, and the emission
+            # sort is stable — so their relative rank inherits INSERTION order, which
+            # for a str-set comprehension is per-process hash order. n=2-era fixtures
+            # never saw it (both siblings were any-of expected, a swap moved nothing);
+            # the grown multi-hop set pins single stems and caught the flake. Sorting
+            # here makes tie order deterministic (seed rank, then stem name) at a cost
+            # of O(deg log deg) on a handful of neighbors.
+            for stem in sorted(neighbor_stems):
                 j = name_to_idx.get(stem)
                 if j is None:
                     continue

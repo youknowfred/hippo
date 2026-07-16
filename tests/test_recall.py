@@ -4197,3 +4197,20 @@ def test_main_ledger_event_measures_injected_chars(tmp_path, monkeypatch, capsys
     assert len(events) == 2
     assert events[0]["injected_chars"] == len(printed)  # measured at the emission point
     assert "injected_chars" not in events[1]  # abstention emitted nothing — no fake 0
+
+
+def test_expand_neighbors_sibling_tie_order_is_deterministic(monkeypatch):
+    """Two siblings injected by ONE seed tie at the identical discounted score; the
+    emission sort is stable, so their relative rank inherits insertion order — which
+    was per-process str-set hash order until MSR-1's pass^k probe caught the flake
+    (exposed by the GRF-2-grown fixture). Sorted stem iteration pins it: ties insert
+    name-sorted, every process, every time."""
+    monkeypatch.setenv("HIPPO_GRAPH_SEEDS", "1")
+    entries = [{"name": "seed"}, {"name": "zeta_sibling"}, {"name": "alpha_sibling"}]
+    penalized = [(0, 0.030, None)]  # only the seed ranks organically
+    edges = {"seed": {"out": {"zeta_sibling", "alpha_sibling"}, "in": set()}}
+    for _ in range(3):
+        out, injected, endorsed = R._expand_neighbors(penalized, entries, edges)
+        assert injected == {1, 2} and endorsed == {1, 2}
+        # both injected at 0.5 x 0.030 — the tie breaks by stem name, deterministically
+        assert [i for i, _s, _st in out] == [0, 2, 1]

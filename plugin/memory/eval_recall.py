@@ -1987,18 +1987,20 @@ def reachability_audit(
         return {"skipped": "no links.json edge list — build the index first"}
 
     def _neighbors(stem: str):
+        # Sorted iteration everywhere: a stem reachable via two edge kinds at the same
+        # depth must report a DETERMINISTIC `via` (str-set order is per-process).
         rec = edges.get(stem)
         if not rec:
             return
-        for tgt in rec.get("out", ()):
+        for tgt in sorted(rec.get("out", ())):
             yield tgt, "wikilink"
-        for tgt in rec.get("in", ()):
+        for tgt in sorted(rec.get("in", ())):
             yield tgt, "wikilink"
-        for rel, tgts in (rec.get("typed_out") or {}).items():
-            for tgt in tgts:
+        for rel in sorted(rec.get("typed_out") or {}):
+            for tgt in sorted((rec.get("typed_out") or {})[rel]):
                 yield tgt, rel
-        for rel, tgts in (rec.get("typed_in") or {}).items():
-            for tgt in tgts:
+        for rel in sorted(rec.get("typed_in") or {}):
+            for tgt in sorted((rec.get("typed_in") or {})[rel]):
                 yield tgt, rel
 
     rows: List[dict] = []
