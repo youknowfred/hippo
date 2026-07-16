@@ -1161,6 +1161,56 @@ _EDGE_ROT_WARN_MIN = 1
 # floor is measurably mis-calibrated for THIS corpus.
 _FLOOR_CAL_TOLERANCE = 0.02
 
+# MSR-5: a corpus counts as LIVED-IN — the ED-2 salience-revisit trigger — once this many
+# distinct sessions have logged recalls into usage_aggregates.json. 10: enough sessions
+# that the usage prior has a real distribution to boost from; below it a salience A/B is
+# structurally the same signal-less run SIG-5 already judged.
+_SALIENCE_LIVEDIN_MIN_SESSIONS = 10
+
+
+def check_salience_evidence(ctx: DoctorContext) -> Dict[str, str]:
+    """MSR-5: THE one automatic surface of the salience-revisit rig — a deterministic
+    nudge once the corpus crosses the lived-in threshold and no A/B evidence exists.
+
+    ED-2 is binding: this line never flips (or recommends flipping) the default — it
+    only says the EVIDENCE the revisit needs is now measurable and names the runnable
+    rig. Reads two small JSONs (usage aggregates + the recorded report); no eval runs
+    here (a multi-second dense double-run can never be on a health check). No
+    timestamps — the render/line-count determinism pins hold.
+    """
+    try:
+        from .salience_eval import read_report
+        from .telemetry import default_telemetry_dir, read_usage_aggregates
+
+        agg = read_usage_aggregates(default_telemetry_dir(ctx.memory_dir))
+        sessions = agg.get("sessions", {}).get("count") or 0
+        tracked = len(agg.get("memories") or {})
+        report = read_report(ctx.memory_dir)
+        if report is not None:
+            deltas = report.get("deltas") or {}
+            arms = "identical arms" if report.get("identical_arms") else "arms differ"
+            return {
+                "status": "ok",
+                "message": f"salience evidence: A/B recorded ({len(deltas)} categor(ies), "
+                f"{arms}) — the flip stays a dated owner decision (ED-2).",
+            }
+        if sessions < _SALIENCE_LIVEDIN_MIN_SESSIONS:
+            return {
+                "status": "ok",
+                "message": f"salience evidence: corpus not yet lived-in "
+                f"({sessions}/{_SALIENCE_LIVEDIN_MIN_SESSIONS} sessions logged) — the ED-2 "
+                "revisit rig waits.",
+            }
+        return {
+            "status": "warn",
+            "message": f"salience evidence: corpus is lived-in ({sessions} sessions, "
+            f"{tracked} usage-tracked memories) but no A/B evidence is recorded — run "
+            "`python -m memory.eval_recall --ab HIPPO_SALIENCE` (measures only; the "
+            "default stays owner-decided-OFF per ED-2).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"salience-evidence check failed: {exc}."}
+
 
 def check_floor_calibration(ctx: DoctorContext) -> Dict[str, str]:
     """GRF-3 (RET-9's calibration half): configured dense floor vs the persisted sweep.
@@ -1966,6 +2016,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("abstention_cold_start", check_abstention_cold_start),  # RET-11: abstention is dense-gated
     ("abstention_floor_sanity", check_abstention_floor_sanity),  # RET-9: per-corpus off-topic leak
     ("floor_calibration", check_floor_calibration),  # GRF-3: configured floor vs the sweep's number
+    ("salience_evidence", check_salience_evidence),  # MSR-5: the ED-2 lived-in nudge (measures only)
     ("injection_precision", check_injection_precision),
     ("rules_conflicts", check_rules_conflicts),
     ("rules_plane_rot", check_rules_plane_rot),

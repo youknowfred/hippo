@@ -1371,3 +1371,59 @@ def test_floor_calibration_stale_fingerprint_reports_stale(
     r = D.check_floor_calibration(_ctx(memory_dir, repo))
     assert r["status"] == "ok"
     assert "STALE" in r["message"] and "--floor-sweep" in r["message"]
+
+
+# --------------------------------------------------------------------------- #
+# MSR-5: the salience-evidence lived-in nudge — ED-2's one automatic surface
+# --------------------------------------------------------------------------- #
+def _seed_usage_aggregates(monkeypatch, tmp_path, sessions):
+    import json as _json
+
+    td = str(tmp_path / "telemetry")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    os.makedirs(td, exist_ok=True)
+    doc = {
+        "version": 1,
+        "sessions": {"count": sessions, "first_ts": 1.0, "last_session_id": "s"},
+        "memories": {"m0": {"first_ts": 1.0, "last_ts": 2.0, "sessions": sessions, "last_session_id": "s"}},
+    }
+    with open(os.path.join(td, "usage_aggregates.json"), "w", encoding="utf-8") as fh:
+        _json.dump(doc, fh)
+    return td
+
+
+def test_salience_evidence_quiet_below_lived_in_threshold(repo, memory_dir, monkeypatch, tmp_path):
+    _seed_usage_aggregates(monkeypatch, tmp_path, sessions=3)
+    _seed(memory_dir)
+    r = D.check_salience_evidence(_ctx(memory_dir, repo))
+    assert r["status"] == "ok" and "not yet lived-in" in r["message"]
+    assert "\n" not in r["message"]  # ONE line — the doctor render/line-count determinism pins
+
+
+def test_salience_evidence_nudges_once_lived_in(repo, memory_dir, monkeypatch, tmp_path):
+    _seed_usage_aggregates(monkeypatch, tmp_path, sessions=12)
+    _seed(memory_dir)
+    r = D.check_salience_evidence(_ctx(memory_dir, repo))
+    assert r["status"] == "warn"
+    assert "--ab HIPPO_SALIENCE" in r["message"]
+    assert "owner-decided-OFF" in r["message"]  # the nudge restates ED-2, never a flip
+    assert "\n" not in r["message"]
+
+
+def test_salience_evidence_ok_once_recorded(repo, memory_dir, monkeypatch, tmp_path):
+    import json as _json
+
+    from memory.salience_eval import _SALIENCE_AB_SCHEMA, default_report_path
+
+    td = _seed_usage_aggregates(monkeypatch, tmp_path, sessions=12)
+    _seed(memory_dir)
+    path = default_report_path(memory_dir, td)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        _json.dump(
+            {"schema": _SALIENCE_AB_SCHEMA, "deltas": {"single-hop": {}}, "identical_arms": True},
+            fh,
+        )
+    r = D.check_salience_evidence(_ctx(memory_dir, repo))
+    assert r["status"] == "ok"
+    assert "A/B recorded" in r["message"] and "dated owner decision" in r["message"]

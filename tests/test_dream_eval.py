@@ -142,13 +142,14 @@ def test_pin_mode_writes_the_baseline(tmp_path):
 # The --ab whitelist front door on eval_recall
 # --------------------------------------------------------------------------- #
 def test_eval_cli_ab_whitelist_refuses_unknown_flags(capsys):
+    """(HIPPO_SALIENCE was this test's refusal example until MSR-5 shipped its rig —
+    it now dispatches to memory.salience_eval; see tests/test_salience_eval.py.)"""
     from memory.eval_recall import main as eval_main
 
-    rc = eval_main(["--ab", "HIPPO_SALIENCE"])
+    rc = eval_main(["--ab", "HIPPO_NONSENSE"])
     out = capsys.readouterr().out
     assert rc == 2
-    assert "whitelist" in out and "HIPPO_DREAM" in out
-    assert "MSR-5" in out  # names the planned rig instead of pretending it exists
+    assert "whitelist" in out and "HIPPO_DREAM" in out and "HIPPO_SALIENCE" in out
 
 
 def test_eval_cli_ab_dispatches_to_dream_harness(capsys):

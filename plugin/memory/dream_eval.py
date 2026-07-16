@@ -50,7 +50,7 @@ import tempfile
 from math import comb
 from typing import Dict, List, Optional, Tuple
 
-AB_FLAGS = ("HIPPO_DREAM",)  # the --ab whitelist; MSR-5 extends it with HIPPO_SALIENCE
+AB_FLAGS = ("HIPPO_DREAM", "HIPPO_SALIENCE")  # the --ab whitelist (MSR-5 added HIPPO_SALIENCE — memory.salience_eval)
 
 # Harness-local dream knobs: DRM-3 proves "admitted edges raise multi-hop recall because
 # of the edges"; discovery-θ calibration on real data is DRM-1's job. The fixture's
