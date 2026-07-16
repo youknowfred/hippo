@@ -60,9 +60,10 @@ class VerbSurface:
 VERBS: Tuple[VerbSurface, ...] = (
     VerbSurface(
         "audit",
-        desktop="terminal_only",
-        mcp_tools=(),
-        note="judgment-based corpus self-audit; report-only by default (INT-19 honest preflight)",
+        desktop="skill_tools",
+        mcp_tools=("audit",),
+        note="the skill drives judgment on both surfaces; the audit tool serves the "
+        "read-only Phase-1 report material (INV-4, scope ratified 2026-07-16)",
     ),
     VerbSurface(
         "bootstrap",
@@ -158,9 +159,10 @@ VERBS: Tuple[VerbSurface, ...] = (
     ),
     VerbSurface(
         "resolve",
-        desktop="terminal_only",
-        mcp_tools=(),
-        note="drain the contradiction inbox; per-pair verdicts (INT-19 honest preflight)",
+        desktop="tool",
+        mcp_tools=("resolve",),
+        note="the contradiction inbox + ONE per-pair verdict per call — the "
+        "nudge-routed dead end closed (INV-4, scope ratified 2026-07-16)",
     ),
     VerbSurface(
         "why",

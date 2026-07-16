@@ -97,12 +97,15 @@ _DESKTOP_SURFACE_NOTE = (
     "pack_install_item; update: pack_update_plan then per-item pack_update_item); "
     "/hippo:dream → the dream tool; /hippo:new → the new_memory tool; /hippo:recall → the "
     "recall tool (its --list-by-type and --all-projects modes are terminal-only); "
-    "/hippo:why → the why tool. "
-    # INT-19: the old text claimed resolve/audit "run as hippo skills — invoke them
-    # directly" — but both preflights hard-abort on Desktop ("re-run from a terminal"),
-    # so the note routed users into a dead end it had just promised was a path.
+    "/hippo:why → the why tool; "
+    # INV-4 (scope ratified 2026-07-16): the two nudge-routed dead ends get real routes —
+    # resolve + audit only; the other five keep their honest terminal-only preflights.
+    "/hippo:resolve → the resolve tool (action='inbox', then ONE action='verdict' per "
+    "pair); /hippo:audit → the audit skill driving the audit tool (read-only report "
+    "material; judgment and applies stay per-item in the skill). "
+    # INT-19: never promise a route that dead-ends — this list stays honest.
     "NOT available on this surface (terminal-only for now — say so, do not improvise a "
-    "workaround): resolve, audit, export-agents, import, promote, promote-rule, remove. "
+    "workaround): export-agents, import, promote, promote-rule, remove. "
     "The two corpus-repair verbs are MCP tools on BOTH surfaces, with no /hippo:* form: "
     "rederive (action='worklist'|'one'|'snapshot'|'stamp') and heal_baselines."
 )

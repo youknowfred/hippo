@@ -27,8 +27,14 @@ getting injected both sides. This module gives every unresolved pair ONE standin
 The ledger is derived, per-clone state (rebuildable by re-dismissing), keyed by the same
 ``sha256(realpath(repo_root))[:16]`` scheme as the SessionStart nudge counters so two
 clones of the same repo never share verdicts through a common CLAUDE_PLUGIN_DATA. Nothing
-in recall imports this module — zero hot-path cost (inv6). Read-only over the corpus: the
-ONLY file this module ever writes is the ledger.
+in recall imports this module — zero hot-path cost (inv6).
+
+Write posture: the module's OWN only write is the ledger. INV-4's ``apply_resolve_verdict``
+(the resolve MCP tool's engine — the verb's second surface) additionally EXECUTES the
+per-pair corpus verdicts, but every corpus byte it changes goes through the shared
+primitives (``reconsolidate.semantic_reverify``, ``links.remove_typed_relation``) with the
+COR-16 rollback discipline (``provenance.restore_file_bytes``) around its two-write chains
+— never a raw write from here, and never more than ONE pair per call.
 """
 
 from __future__ import annotations
@@ -228,6 +234,207 @@ def unresolved_contradictions(
         return out
     except Exception:
         return []
+
+
+def pair_edge_state(memory_dir: str, a: str, b: str, *, repo_root: Optional[str] = None) -> dict:
+    """How this pair is currently in dispute: which side(s) DECLARE the ``contradicts``
+    edge in frontmatter (the files a corpus verdict edits), and whether a live DRM-C
+    proposal exists for it. ``{"declared_by": [stems], "proposed": bool}``. Never raises."""
+    declared_by: List[str] = []
+    try:
+        from .links import normalize_slug, parse_typed_relations
+        from .provenance import parse_frontmatter
+
+        for side, other in ((a, b), (b, a)):
+            try:
+                with open(os.path.join(memory_dir, f"{side}.md"), "r", encoding="utf-8") as fh:
+                    rels = parse_typed_relations(parse_frontmatter(fh.read()))
+                if normalize_slug(other) in {normalize_slug(t) for t in rels.get("contradicts", [])}:
+                    declared_by.append(side)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    proposed = any(
+        tuple(item["pair"]) == _canonical_pair(a, b)
+        for item in proposed_contradictions(memory_dir, repo_root=repo_root)
+    )
+    return {"declared_by": declared_by, "proposed": proposed}
+
+
+def _drop_declarations(
+    memory_dir: str, declared_by: List[str], other_of: dict, repo_root: Optional[str]
+) -> Tuple[Optional[str], Dict[str, str]]:
+    """Remove the pair's settled ``contradicts:`` declarations, capture-first.
+
+    Returns ``(error_or_None, restored_bytes_by_path)`` — on a mid-chain failure the
+    already-changed files are restored (COR-16) before the error returns; the captures
+    are returned so a LATER chain step's failure can restore them too.
+    """
+    from .links import remove_typed_relation
+    from .provenance import restore_file_bytes
+
+    captured: Dict[str, str] = {}
+    changed: List[str] = []
+    for side in declared_by:
+        path = os.path.join(memory_dir, f"{side}.md")
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                captured[path] = fh.read()
+        except Exception as exc:
+            return f"could not read {side}.md before editing it: {exc}", {}
+        r = remove_typed_relation(path, "contradicts", other_of[side])
+        if r.get("error"):
+            err = f"dropping the contradicts declaration on {side}.md failed: {r['error']}"
+            for p in changed:  # restore the earlier drop(s), byte-exact
+                undo_err = restore_file_bytes(p, captured[p], memory_dir, repo_root)
+                if undo_err:
+                    err += f" — AND restoring {os.path.basename(p)} failed ({undo_err}); restore it from git"
+                else:
+                    err += f" — {os.path.basename(p)} was rolled back"
+            return err, {}
+        if r.get("changed"):
+            changed.append(path)
+    return None, {p: captured[p] for p in changed}
+
+
+def apply_resolve_verdict(
+    memory_dir: str,
+    repo_root: Optional[str],
+    verdict: str,
+    *,
+    winner: Optional[str] = None,
+    loser: Optional[str] = None,
+    a: Optional[str] = None,
+    b: Optional[str] = None,
+    telemetry_dir: Optional[str] = None,
+) -> dict:
+    """Execute ONE per-pair human verdict — the /hippo:resolve skill's Step 2, as an
+    engine call (the resolve tool's write half). Per-item by construction: one pair,
+    one verdict, per call; nothing here ever auto-picks a winner.
+
+      - ``keep_one`` (winner=, loser=): drop the settled ``contradicts`` declaration(s),
+        then ``semantic_reverify(loser, "demote", superseded_by=winner)`` — the shipped
+        demote+supersede chain. Two-write COR-16 discipline: a refused demote rolls the
+        declaration drop back out byte-exact.
+      - ``merge`` (winner=survivor, loser=): the SAME chain, rendered AFTER the agent
+        folded the loser's unique content into the survivor (the demote-in-place merge
+        ending — the supersedes pointer stays queryable, nothing is deleted).
+      - ``scope_both`` (a=, b=): rendered AFTER the agent edited both bodies to name
+        their scopes; drops the declaration(s) (multi-file drops roll back on a partial
+        failure). A proposal-only pair has nothing to drop — the verdict lands in the
+        dismiss ledger instead (the listing's own guidance for scoped proposals).
+      - ``not_conflicting`` (a=, b=): the ONE corpus-preserving verdict — the per-clone
+        ledger via ``mark_not_conflicting``; files and edge stay untouched.
+
+    Returns ``{"verdict", "pair", "applied", "error", "detail"}``. Never raises.
+    """
+    result = {"verdict": verdict, "pair": None, "applied": False, "error": None, "detail": []}
+    try:
+        if verdict in ("keep_one", "merge"):
+            first, second = (winner or "").strip(), (loser or "").strip()
+            label = ("winner", "loser")
+        else:
+            first, second = (a or "").strip(), (b or "").strip()
+            label = ("a", "b")
+        if not first or not second:
+            result["error"] = f"verdict {verdict!r} needs both {label[0]}= and {label[1]}="
+            return result
+        if first == second:
+            result["error"] = "a memory cannot conflict with itself"
+            return result
+        result["pair"] = sorted((first, second))
+
+        if verdict == "not_conflicting":
+            r = mark_not_conflicting(first, second, repo_root or "")
+            if not r["recorded"]:
+                result["error"] = r["error"]
+                return result
+            result["applied"] = True
+            result["detail"].append(f"ledger: {r['ledger']}")
+            return result
+
+        for side in (first, second):
+            if not os.path.isfile(os.path.join(memory_dir, f"{side}.md")):
+                result["error"] = f"memory not found: {side}.md"
+                return result
+        state = pair_edge_state(memory_dir, first, second, repo_root=repo_root)
+        if not state["declared_by"] and not state["proposed"]:
+            result["error"] = (
+                "no contradicts edge is declared between these two (and no dream "
+                "proposal is live) — nothing to resolve; declare the edge or pick the "
+                "right pair from action='inbox'"
+            )
+            return result
+        other_of = {first: second, second: first}
+
+        if verdict == "scope_both":
+            if not state["declared_by"]:
+                # Proposal-only: nothing declared to drop — scoping ends in a dismiss.
+                r = mark_not_conflicting(first, second, repo_root or "")
+                if not r["recorded"]:
+                    result["error"] = r["error"]
+                    return result
+                result["applied"] = True
+                result["detail"].append(
+                    "proposal-only pair: recorded in the dismiss ledger (both stand as scoped)"
+                )
+                return result
+            err, _captures = _drop_declarations(
+                memory_dir, state["declared_by"], other_of, repo_root
+            )
+            if err:
+                result["error"] = err
+                return result
+            result["applied"] = True
+            result["detail"].append(
+                "contradicts declaration dropped on: " + ", ".join(state["declared_by"])
+            )
+            return result
+
+        # keep_one / merge — the two-write chain.
+        err, captures = _drop_declarations(memory_dir, state["declared_by"], other_of, repo_root)
+        if err:
+            result["error"] = err
+            return result
+        from .reconsolidate import semantic_reverify
+
+        rv = semantic_reverify(
+            second, "demote", memory_dir, repo_root, telemetry_dir=telemetry_dir,
+            superseded_by=first,
+        )
+        if rv.get("error"):
+            # COR-16: the declaration drop (write #1) must come back out when the
+            # demote+supersede chain (write #2, itself internally rolled back) refuses.
+            from .provenance import restore_file_bytes
+
+            result["error"] = f"demote+supersede refused: {rv['error']}"
+            for path, original in captures.items():
+                undo_err = restore_file_bytes(path, original, memory_dir, repo_root)
+                if undo_err:
+                    result["error"] += (
+                        f" — AND restoring {os.path.basename(path)} failed ({undo_err}): "
+                        "its contradicts declaration is gone without the supersede; "
+                        "restore it from git"
+                    )
+                else:
+                    result["error"] += (
+                        f" — the declaration drop on {os.path.basename(path)} was rolled back"
+                    )
+            return result
+        result["applied"] = True
+        if state["declared_by"]:
+            result["detail"].append(
+                "contradicts declaration dropped on: " + ", ".join(state["declared_by"])
+            )
+        result["detail"].append(
+            f"{second} demoted (invalid_after {rv.get('invalid_after') or 'set'}); "
+            f"{first} now supersedes it"
+        )
+        return result
+    except Exception as exc:
+        result["error"] = str(exc)
+        return result
 
 
 def _description_of(memory_dir: str, name: str) -> str:

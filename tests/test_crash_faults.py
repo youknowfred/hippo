@@ -65,6 +65,7 @@ CRASH_CONTRACT = {
     ("init_project", "_copy_if_absent"): ("detected",),  # seed copy: raises; no partial file
     ("init_project", "init_project"): ("detected",),  # fresh .format stamp
     ("links", "add_typed_relation"): ("detected", "rolled_back"),  # demote+supersede write #2
+    ("links", "remove_typed_relation"): ("detected", "rolled_back"),  # resolve's declaration drop; scope_both 2-file chain
     ("new_memory", "_ensure_tier_floor"): ("intact",),  # opportunistic skeleton: silent by design
     ("new_memory", "_append_floor_pointer"): ("detected",),  # floor outcome dict names the failure
     ("new_memory", "_remove_floor_pointer"): ("detected",),
@@ -380,6 +381,50 @@ def scn_links_add_typed_rolled_back(tmp_path, monkeypatch):
     assert not r["invalidated"] and not r["edge_written"]
 
 
+def scn_links_remove_typed_detected(tmp_path, monkeypatch):
+    from memory.links import remove_typed_relation
+
+    _root, md = _git_repo(tmp_path)
+    a = _mem(md, "alpha", extra_meta='  contradicts: ["beta"]\n')
+    _mem(md, "beta")
+    before = _snap(a)
+    _arm(monkeypatch, "links", "remove_typed_relation")
+    r = remove_typed_relation(a, "contradicts", "beta")
+    _assert_unchanged(before)
+    assert r["error"]
+
+
+def scn_links_remove_typed_rolled_back(tmp_path, monkeypatch):
+    """INV-4's scope_both verdict on a BOTH-declare pair is a two-file drop chain:
+    tearing the second file's drop must restore the first, byte-exact."""
+    from memory.resolve_view import apply_resolve_verdict
+
+    root, md = _git_repo(tmp_path)
+    a = _mem(md, "alpha", extra_meta='  contradicts: ["beta"]\n')
+    b = _mem(md, "beta", extra_meta='  contradicts: ["alpha"]\n')
+    before = _snap(a, b)
+    _arm(monkeypatch, "links", "remove_typed_relation", nth=2)
+    r = apply_resolve_verdict(md, root, "scope_both", a="alpha", b="beta")
+    _assert_unchanged(before)
+    assert r["error"] and "rolled back" in r["error"] and not r["applied"]
+
+
+def scn_invalid_after_resolve_keep_one_rolled_back(tmp_path, monkeypatch):
+    """INV-4's keep_one chain composed end-to-end: the declaration drop lands (write
+    #1), the demote tears inside semantic_reverify (write #2) — and the declaration
+    must come back, byte-exact, with the refusal naming both facts."""
+    from memory.resolve_view import apply_resolve_verdict
+
+    root, md = _git_repo(tmp_path)
+    loser = _mem(md, "use_x", extra_meta='  contradicts: ["use_y"]\n')
+    winner = _mem(md, "use_y")
+    before = _snap(loser, winner)
+    _arm(monkeypatch, "staleness", "set_invalid_after")
+    r = apply_resolve_verdict(md, root, "keep_one", winner="use_y", loser="use_x")
+    _assert_unchanged(before)
+    assert r["error"] and "rolled back" in r["error"] and not r["applied"]
+
+
 def scn_tier_floor_intact(tmp_path, monkeypatch):
     from memory.new_memory import _ensure_tier_floor
 
@@ -648,6 +693,9 @@ _SCENARIOS = [
     (("init_project", "init_project"), "detected", scn_init_project_stamp_detected),
     (("links", "add_typed_relation"), "detected", scn_links_add_typed_detected),
     (("links", "add_typed_relation"), "rolled_back", scn_links_add_typed_rolled_back),
+    (("links", "remove_typed_relation"), "detected", scn_links_remove_typed_detected),
+    (("links", "remove_typed_relation"), "rolled_back", scn_links_remove_typed_rolled_back),
+    (("staleness", "set_invalid_after"), "rolled_back", scn_invalid_after_resolve_keep_one_rolled_back),
     (("new_memory", "_ensure_tier_floor"), "intact", scn_tier_floor_intact),
     (("new_memory", "_append_floor_pointer"), "detected", scn_floor_append_detected),
     (("new_memory", "_remove_floor_pointer"), "detected", scn_floor_remove_detected),

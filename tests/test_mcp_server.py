@@ -96,6 +96,10 @@ _PACK_TOOLS = [
     "pack_extract", "pack_install_plan", "pack_install_item",
     "pack_update_plan", "pack_update_item",
 ]
+# Additive INV-4 tools: the two nudge-routed verbs' second surface (scope ratified
+# 2026-07-16 — resolve + audit ONLY; the other five terminal-only verbs keep their
+# honest preflights). Appended at the END per STABILITY.md's position freeze.
+_INV4_TOOLS = ["resolve", "audit"]
 
 
 def test_tools_list_exposes_frozen_five_plus_setup_tools():
@@ -103,7 +107,7 @@ def test_tools_list_exposes_frozen_five_plus_setup_tools():
     names = [t["name"] for t in resp["result"]["tools"]]
     assert names == (
         _FROZEN_TOOLS + _SETUP_TOOLS + _VERB_TOOLS + _CONSOLIDATE_TOOLS + _REPAIR_TOOLS
-        + _PACK_TOOLS
+        + _PACK_TOOLS + _INV4_TOOLS
     )
     for t in resp["result"]["tools"]:
         assert t["inputSchema"]["type"] == "object"  # every tool has a JSON schema
