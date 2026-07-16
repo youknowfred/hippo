@@ -203,7 +203,7 @@ workstreams:
         title: Eval run ledger + fingerprint-keyed baseline diff + pass^k determinism probe
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: eval-flywheel, verdict: RESHAPE, convergence: 2, landscape: [hidden-layer-2026, seeds-stddev-hygiene]}
         problem: >-
           RET-8 shipped category-tagged eval + tracked gates, but every gate is an
@@ -246,7 +246,7 @@ workstreams:
         title: Null-hypothesis eval arms (grep + true-bm25 + labeled mixed-mode)
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: eval-flywheel, verdict: RESHAPE, convergence: 1, landscape: [letta-filesystem-2025, condition-matrix]}
         problem: >-
           hippo's eval reports absolute recall but never what the ranking STACK adds
@@ -286,7 +286,7 @@ workstreams:
         title: Channel-tagged recall_events telemetry for MCP recall/why
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: eval-flywheel, verdict: RESHAPE, convergence: 3, landscape: [amemgym-iclr26, mem0-no-self-feedback-2026]}
         problem: >-
           MCP recall and why are telemetry-INVISIBLE — recall_view.describe bypasses
@@ -334,7 +334,7 @@ workstreams:
         title: Drop-reason autopsy ledger (near-miss scores on abstention; per-category miss autopsy)
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: graph-retrieval, verdict: RESHAPE, convergence: 3, landscape: [memsyco-2026, post-retrieval-bottleneck]}
         problem: >-
           The recall pipeline throws away WHY a memory did not surface. The
@@ -429,7 +429,7 @@ workstreams:
         title: Injection cost ledger (injected_chars + per-producer bytes + scorecard cost line)
         priority: P2
         effort: S
-        status: planned
+        status: done
         source: {lens: ux-legibility, verdict: RESHAPE, convergence: 2, landscape: [sandelin-2026-cost, chatgpt-dreaming-antipattern]}
         problem: >-
           hippo's value is silent injection, so its COST is invisible — memory saves
@@ -1432,9 +1432,9 @@ workstreams:
 release_train:
 
   - tier: T8
-    target_version: 1.8.0
+    target_version: 1.8.0   # STALE (authored pre-v1.8): T8 actually landed post-v1.19.0, 2026-07-16 — round 3 (T14–T17) executed first
     theme: "The measurement spine"
-    status: planned
+    status: done
     gate: "None — every T8 item's deps are shipped (RET-8/SIG-4/GOV-6). This is the foundation the rest of the round consumes; build it first."
     done_means: >-
       hippo can see its own behavior: eval runs persist and diff against a committed
