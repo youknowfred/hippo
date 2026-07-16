@@ -92,7 +92,7 @@ _DESKTOP_SURFACE_NOTE = (
     "/hippo:init → the init tool, /hippo:doctor → the doctor tool (trust/re-consent → the "
     "trust_corpus tool), /hippo:consolidate → the consolidate skill driving its MCP tools "
     "(capture, new_memory check:true, secrets_scan, reconsolidate, build_index, "
-    "co_recall_proposals, abstention_fixtures — per item); /hippo:pack → the pack skill "
+    "co_recall_proposals, abstention_fixtures, interview — per item); /hippo:pack → the pack skill "
     "driving the pack_* MCP tools (pack_extract; install: pack_install_plan then per-item "
     "pack_install_item; update: pack_update_plan then per-item pack_update_item); "
     "/hippo:dream → the dream tool; /hippo:new → the new_memory tool; /hippo:recall → the "

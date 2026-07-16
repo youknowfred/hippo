@@ -100,6 +100,9 @@ _PACK_TOOLS = [
 # 2026-07-16 — resolve + audit ONLY; the other five terminal-only verbs keep their
 # honest preflights). Appended at the END per STABILITY.md's position freeze.
 _INV4_TOOLS = ["resolve", "audit"]
+# Additive EXT-3 tool (T17): consolidate's asks step — the interview loop (≤3 grounded
+# questions; declines remembered in telemetry). Appended after INV-4, same freeze.
+_EXT3_TOOLS = ["interview"]
 
 
 def test_tools_list_exposes_frozen_five_plus_setup_tools():
@@ -107,7 +110,7 @@ def test_tools_list_exposes_frozen_five_plus_setup_tools():
     names = [t["name"] for t in resp["result"]["tools"]]
     assert names == (
         _FROZEN_TOOLS + _SETUP_TOOLS + _VERB_TOOLS + _CONSOLIDATE_TOOLS + _REPAIR_TOOLS
-        + _PACK_TOOLS + _INV4_TOOLS
+        + _PACK_TOOLS + _INV4_TOOLS + _EXT3_TOOLS
     )
     for t in resp["result"]["tools"]:
         assert t["inputSchema"]["type"] == "object"  # every tool has a JSON schema

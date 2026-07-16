@@ -2922,7 +2922,35 @@ def main(argv: Optional[List[str]] = None) -> int:
         "stdin and emit the hookSpecificOutput JSON directly — so the whole recall hook is ONE "
         "Python spawn (no separate prompt-parse, session-id-parse, or jq/python emission launches).",
     )
+    parser.add_argument(
+        "--for-diff",
+        default=None,
+        metavar="RANGE",
+        help="EXT-1: instead of a query, join a git diff range (A..B / A...B / ref) against "
+        "the corpus's cited_paths and render the citing memories — the reviewer's recall. "
+        "Read-only; no index, no model, no telemetry. Empty result exits 0 with no output.",
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="with --for-diff: machine-readable output"
+    )
+    parser.add_argument(
+        "--cap", type=int, default=None, help="with --for-diff: max memories rendered"
+    )
     args = parser.parse_args(argv)
+
+    # EXT-1: the reviewer lane dispatches BEFORE any query hygiene, session reads, or
+    # telemetry — it is a pure citation join, not a recall (no episode row is logged,
+    # because nothing was injected into any model's context).
+    if args.for_diff:
+        from .recall_diff import DEFAULT_CAP, run as _run_for_diff
+
+        return _run_for_diff(
+            args.for_diff,
+            memory_dir=args.memory_dir,
+            repo_root=args.repo_root,
+            cap=args.cap if args.cap is not None else DEFAULT_CAP,
+            as_json=args.json,
+        )
 
     # INT-5: in hook mode the raw prompt + session id arrive as ONE JSON object on stdin, so the
     # hook no longer pays a Python launch just to parse ".prompt" and another for ".session_id".

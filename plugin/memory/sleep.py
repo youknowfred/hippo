@@ -197,6 +197,20 @@ def _section_links(memory_dir: str, repo_root: str) -> Optional[str]:
     return lint_links_producer(memory_dir, repo_root, None)
 
 
+def _section_promote_scan(memory_dir: str, repo_root: str) -> Optional[str]:
+    """EXT-2: cross-project promotion candidates — the machine-wide, trusted-only,
+    report-only sweep (``promote_scan.scan``). Section rendered ONLY when there are
+    actual proposals; the sweep's diagnostics (untrusted counts, index notes) belong
+    to a deliberate ``python -m memory.promote_scan`` run, not the morning report's
+    empty norm."""
+    from .promote_scan import render_report, scan
+
+    result = scan()
+    if not result.get("proposals"):
+        return None
+    return render_report(result)
+
+
 # (key, title, drain verb, producer ATTR NAME — resolved at call time so a test can
 # monkeypatch a section producer on the module and the runner sees it)
 _SECTIONS = (
@@ -205,6 +219,7 @@ _SECTIONS = (
     ("reconsolidation", "Reconsolidation worklist (LIF-1)", "consolidate", "_section_reconsolidation"),
     ("dream", "Dream discovery (DRM-1)", "dream", "_section_dream"),
     ("link_health", "Link health (GRA)", "consolidate", "_section_links"),
+    ("promotion_mining", "Cross-project promotion candidates (EXT-2)", "promote", "_section_promote_scan"),
 )
 
 

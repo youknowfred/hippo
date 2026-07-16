@@ -64,6 +64,7 @@ CRASH_CONTRACT = {
     ("eval_recall", "confirm_hard_set_row"): ("detected",),  # both writes; each byte-complete
     ("init_project", "_copy_if_absent"): ("detected",),  # seed copy: raises; no partial file
     ("init_project", "init_project"): ("detected",),  # fresh .format stamp
+    ("interview", "_write_state"): ("detected",),  # a lost decline is NAMED, never pretended recorded
     ("jit", "write_touch_cache"): ("detected",),  # SessionStart caller sees False, never a torn map
     ("jit", "_write_state"): ("intact",),  # session bookkeeping: silent by design; reminder still emits
     ("links", "add_typed_relation"): ("detected", "rolled_back"),  # demote+supersede write #2
@@ -716,6 +717,17 @@ def scn_trust_registry_detected(tmp_path, monkeypatch):
     assert ok is False  # the caller must not pretend the corpus got trusted
 
 
+def scn_interview_state_detected(tmp_path, monkeypatch):
+    from memory.interview import STATE_NAME, respond
+
+    tele = str(tmp_path / "tele")
+    os.makedirs(tele, exist_ok=True)
+    _arm(monkeypatch, "interview", "_write_state")
+    r = respond("abstain:cafecafecafe", "decline", telemetry_dir=tele)
+    assert r["ok"] is False and "write failed" in r["error"]  # a lost decline is NAMED
+    assert not os.path.exists(os.path.join(tele, STATE_NAME))  # absent, never partial
+
+
 def scn_jit_touch_cache_detected(tmp_path, monkeypatch):
     from memory import jit
 
@@ -757,6 +769,7 @@ _SCENARIOS = [
     (("eval_recall", "confirm_hard_set_row"), "detected", scn_eval_confirm_detected),
     (("init_project", "_copy_if_absent"), "detected", scn_init_copy_detected),
     (("init_project", "init_project"), "detected", scn_init_project_stamp_detected),
+    (("interview", "_write_state"), "detected", scn_interview_state_detected),
     (("jit", "write_touch_cache"), "detected", scn_jit_touch_cache_detected),
     (("jit", "_write_state"), "intact", scn_jit_state_intact),
     (("links", "add_typed_relation"), "detected", scn_links_add_typed_detected),
