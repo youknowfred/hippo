@@ -1067,6 +1067,15 @@ workstreams:
           # AND mixed mode — GRF-2 closed the mixed-mode MMR leg (graph-endorsed entries are
           # exempt from the MMR diversity re-cut, the knee exemption's symmetric twin) and
           # re-fixed the drifted dense leg. A PPR stage has to beat THAT, not the n=2 set.
+          # DATED NOTE (2026-07-16, GRF-4/T9): the TYPED-2-HOP REACHABILITY baseline is now
+          # registered (`eval_recall --reachability`, a pure offline links.json walk; no
+          # hot-path depth-2 mechanism is authorized by it). Measured on the packs(22)
+          # corpus at n=10: of 12 expected stems, 2 rank as top-3 seeds themselves, 5 are
+          # graph-reachable at 1 hop, 0 need 2 hops, and 5 are graph-unreached from the
+          # top-3 (those rows hit ORGANICALLY — the ranking carries them, not the graph).
+          # A PPR stage must beat "beats typed-2-hop reachability baseline", not just
+          # GRA-1's 1-hop: today NOTHING on the fixture needs depth 2, which is itself
+          # the strongest current argument that GRA-7 stays unproven/ungated.
         dependencies: [GRA-1, GRA-6, RET-8]
 
       - id: GRA-8

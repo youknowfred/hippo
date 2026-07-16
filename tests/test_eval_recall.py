@@ -2272,3 +2272,80 @@ def test_floor_sweep_cli_bm25_only_exits_nonzero(tmp_path, monkeypatch, capsys):
     rc = E.main(["--memory-dir", md, "--index-dir", idx, "--floor-sweep"])
     assert rc == 1
     assert "floor sweep:" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# GRF-4: the typed-2-hop reachability audit (GRA-7's baseline arm)
+# --------------------------------------------------------------------------- #
+def _reach_corpus(tmp_path, monkeypatch):
+    """seed_a -> mid (wikilink) -> far (wikilink): far is exactly 2 hops from the
+    query's seed; ghost-expected rows exercise the unreachable arm."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    files = {
+        # seed_a -> m1 -> m2 -> far. Production seeds already include GRA-1's 1-hop
+        # expansion (m1 rides into the top-3), so depth here measures reach BEYOND the
+        # production stack: m2 is 1 hop past it, far is the genuine 2-hop case.
+        "seed_a.md": (
+            "alpha beta gamma delta topic",
+            "details\n\nRelated: [[m1]]\n",
+        ),
+        "m1.md": ("wholly unrelated middle waypoint", "hop\n\nRelated: [[m2]]\n"),
+        "m2.md": ("second waypoint stone", "hop\n\nRelated: [[far]]\n"),
+        "far.md": ("distant endpoint reached only by links", "body"),
+        "filler.md": ("excel parser llm header rescue for layouts", "body"),
+    }
+    for fname, (desc, body) in files.items():
+        with open(os.path.join(md, fname), "w", encoding="utf-8") as fh:
+            fh.write(f'---\nname: {fname[:-3]}\ndescription: "{desc}"\ntype: project\n---\n{body}\n')
+    idx = str(tmp_path / "idx")
+    B.build_index(md, idx)
+    return md, idx
+
+
+def _reach_rows(expected_map):
+    """10 multi-hop rows (the activation floor) sharing one seed query."""
+    return [
+        {"query": f"alpha beta gamma delta case {i}", "expected": exp, "category": "multi-hop"}
+        for i, exp in enumerate(expected_map)
+    ]
+
+
+def test_reachability_audit_depths_and_edge_kinds(tmp_path, monkeypatch):
+    md, idx = _reach_corpus(tmp_path, monkeypatch)
+    index = B.load_index(idx)
+    rows = _reach_rows([["seed_a"], ["m2"], ["far"], ["ghost"]] + [["m2"]] * 6)
+    audit = E.reachability_audit(index, rows, idx, k=10, memory_dir=md)
+    by = {(r["stem"], r["query"][-6:]): r for r in audit["rows"]}
+    assert by[("seed_a", "case 0")]["depth"] == 0  # ranked as its own seed
+    assert by[("m2", "case 1")]["depth"] == 1  # 1 hop past the production seeds
+    assert by[("far", "case 2")]["depth"] == 2  # the genuine 2-hop case
+    assert by[("far", "case 2")]["via"] == "wikilink"
+    assert by[("ghost", "case 3")]["depth"] is None  # honest unreachable arm
+    s = audit["summary"]
+    assert s["expected_stems"] == 10
+    assert s["unreachable"] == 1
+
+
+def test_reachability_audit_skips_below_grown_fixture(tmp_path, monkeypatch):
+    md, idx = _reach_corpus(tmp_path, monkeypatch)
+    index = B.load_index(idx)
+    rows = _reach_rows([["m2"], ["far"]])  # n=2 — the pre-GRF-2 vacuous size
+    audit = E.reachability_audit(index, rows, idx, k=10, memory_dir=md)
+    assert "skipped" in audit and "vacuous" in audit["skipped"]
+
+
+def test_reachability_cli_prints_baseline(tmp_path, monkeypatch, capsys):
+    import yaml
+
+    md, idx = _reach_corpus(tmp_path, monkeypatch)
+    rows = _reach_rows([["seed_a"], ["m2"], ["far"], ["ghost"]] + [["m2"]] * 6)
+    hs = str(tmp_path / "hs.yaml")
+    with open(hs, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(rows, fh)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs, "--reachability"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "typed-2-hop reachability" in out and "GRA-7" in out
+    assert "NOT a shipped depth-2 mechanism" in out

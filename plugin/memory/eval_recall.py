@@ -1939,6 +1939,112 @@ def diff_baseline(
 
 
 # --------------------------------------------------------------------------- #
+# GRF-4: the typed-2-hop reachability audit — GRA-7's measurable baseline arm.
+#
+# GRA-7 (personalized PageRank) is gated on "beats GRA-1 on multi-hop", but 1-hop
+# expansion is a special case — there was no typed-2-hop baseline to compare a PPR
+# stage against. This reports, per multi-hop hard-set row, the MINIMUM hop depth
+# (0 = the stem ranked as a seed itself, 1, 2, or unreachable) at which each expected
+# stem becomes reachable from the row's top-N recall seeds over links.json adjacency,
+# and which edge kind (wikilink / typed relation) the first-reaching hop used. A PURE
+# OFFLINE WALK over the already-persisted edge list: zero recall.py change, no env
+# flag, no telemetry schema change, nothing hot-path — and explicitly NOT authorizing
+# any shipped depth-2/PPR mechanism (see the roadmap's not_pursuing: that needs its
+# own gate). Gated skip-if-fixture-too-small: a reachability report over the old n=2
+# multi-hop set is vacuous; it activates at the GRF-2-grown n>=10.
+# --------------------------------------------------------------------------- #
+_REACHABILITY_MIN_ROWS = 10
+_REACHABILITY_SEEDS = 3  # mirrors recall._GRAPH_SEEDS — the expansion seam this baselines
+
+
+def reachability_audit(
+    index: LoadedIndex,
+    hard_set: List[dict],
+    index_dir: Optional[str],
+    k: int = 10,
+    *,
+    memory_dir: Optional[str] = None,
+) -> dict:
+    """``{"rows": [{query, stem, depth, via}], "summary": {...}}`` — or ``{"skipped"}``.
+
+    Seeds per row are the top-``_REACHABILITY_SEEDS`` of the PRODUCTION ranking (the
+    same eval-side ``recall()`` every metric here scores — the walk itself is what
+    stays pure-graph). ``depth`` 0 means the expected stem itself ranked as a seed
+    (no graph needed); ``via`` names the edge kind of the first-reaching hop
+    (``wikilink`` or the typed relation name), ``"-"`` at depth 0, ``None``
+    unreachable. Undirected traversal over out/in/typed_out/typed_in — the same
+    adjacency ``links.load_edges`` serves the hot path, read once."""
+    from .links import load_edges
+
+    multi = [r for r in hard_set if (r.get("category") or _DEFAULT_CATEGORY) == "multi-hop"]
+    if len(multi) < _REACHABILITY_MIN_ROWS:
+        return {
+            "skipped": f"multi-hop n={len(multi)} < {_REACHABILITY_MIN_ROWS} — a "
+            "reachability baseline over the ungrown fixture is vacuous (GRF-2 grows it)"
+        }
+    edges = load_edges(index_dir) if index_dir else None
+    if not edges:
+        return {"skipped": "no links.json edge list — build the index first"}
+
+    def _neighbors(stem: str):
+        rec = edges.get(stem)
+        if not rec:
+            return
+        for tgt in rec.get("out", ()):
+            yield tgt, "wikilink"
+        for tgt in rec.get("in", ()):
+            yield tgt, "wikilink"
+        for rel, tgts in (rec.get("typed_out") or {}).items():
+            for tgt in tgts:
+                yield tgt, rel
+        for rel, tgts in (rec.get("typed_in") or {}).items():
+            for tgt in tgts:
+                yield tgt, rel
+
+    rows: List[dict] = []
+    counts = {0: 0, 1: 0, 2: 0, None: 0}
+    for item in multi:
+        ranked = recall(item["query"], k=k, index=index, index_dir=index_dir, memory_dir=memory_dir)
+        seeds = [r["name"] for r in ranked[:_REACHABILITY_SEEDS]]
+        for stem in item.get("expected") or ():
+            depth: Optional[int] = None
+            via: Optional[str] = None
+            if stem in seeds:
+                depth, via = 0, "-"
+            else:
+                frontier = {s: "-" for s in seeds}
+                seen = set(seeds)
+                for d in (1, 2):
+                    nxt: Dict[str, str] = {}
+                    for node, _how in frontier.items():
+                        for tgt, kind in _neighbors(node):
+                            if tgt in seen:
+                                continue
+                            nxt.setdefault(tgt, kind)
+                    if stem in nxt:
+                        depth, via = d, nxt[stem]
+                        break
+                    seen |= set(nxt)
+                    frontier = nxt
+            counts[depth] = counts.get(depth, 0) + 1
+            rows.append(
+                {"query": item["query"][:60], "stem": stem, "depth": depth, "via": via}
+            )
+    total = len(rows)
+    return {
+        "rows": rows,
+        "summary": {
+            "expected_stems": total,
+            "seed_rank_0": counts[0],
+            "reachable_at_1": counts[1],
+            "reachable_at_2": counts[2],
+            "unreachable": counts[None],
+            "seeds_per_row": _REACHABILITY_SEEDS,
+        },
+    }
+
+
+# --------------------------------------------------------------------------- #
 # GRF-3: the dense-floor calibration sweep — RET-9's missing calibration half.
 #
 # recall._DENSE_FLOOR_BY_MODEL is a static table calibrated on the maintainer's golden
@@ -2312,6 +2418,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         "running the normal gate report. Report-only — never mutates recall.py's default.",
     )
     parser.add_argument(
+        "--reachability",
+        action="store_true",
+        help="GRF-4: the typed-2-hop reachability audit — per multi-hop row, the min "
+        "hop depth (0/1/2/unreachable) at which each expected stem is reachable from "
+        "the row's top-3 seeds over links.json, and the edge kind of the first hop. "
+        "GRA-7's PPR gate must beat THIS baseline. Pure offline walk; print-only; "
+        "skips below the grown n>=10 multi-hop fixture. Authorizes NO hot-path "
+        "depth-2 mechanism.",
+    )
+    parser.add_argument(
         "--floor-sweep",
         action="store_true",
         help="GRF-3 (delivers RET-9's calibration half): recommend a per-model/per-corpus "
@@ -2375,6 +2491,40 @@ def main(argv: Optional[List[str]] = None) -> int:
                 or (_default_abstention_set_path() if ambient else None),
                 k=args.k,
             )
+        )
+        return 0
+
+    if args.reachability:
+        ambient = args.memory_dir is None
+        hs_path = args.hard_set or (_default_hard_set_path() if ambient else None)
+        if args.memory_dir is None:
+            _md, _ = resolve_dirs()
+        else:
+            _md = args.memory_dir
+        _idx = args.index_dir or default_index_dir(_md)
+        index = load_index(_idx)
+        if index is None or not len(index):
+            print("reachability: no index / empty corpus")
+            return 1
+        hard_set = load_hard_set(hs_path) if hs_path else []
+        audit = reachability_audit(index, hard_set, _idx, k=args.k, memory_dir=_md)
+        if audit.get("skipped"):
+            print(f"reachability: SKIPPED — {audit['skipped']}")
+            return 0
+        s = audit["summary"]
+        print(
+            f"typed-2-hop reachability (GRA-7's baseline arm; seeds/row={s['seeds_per_row']}): "
+            f"{s['expected_stems']} expected stem(s) — {s['seed_rank_0']} ranked as a seed, "
+            f"{s['reachable_at_1']} reachable at 1 hop, {s['reachable_at_2']} at 2 hops, "
+            f"{s['unreachable']} unreachable"
+        )
+        for r in audit["rows"]:
+            d = "unreachable" if r["depth"] is None else f"depth {r['depth']}"
+            via = f" via {r['via']}" if r["via"] not in (None, "-") else ""
+            print(f"  {d:<12} {r['stem']}{via} — \"{r['query']}\"")
+        print(
+            "  (offline links.json walk — a baseline for GRA-7's gate, NOT a shipped "
+            "depth-2 mechanism)"
         )
         return 0
 
