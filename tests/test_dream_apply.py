@@ -603,8 +603,6 @@ def test_apply_refines_rolls_back_frontmatter_edge_when_stamp_write_fails(dirs, 
     could not see it and the idempotency guard refused every retry — a permanent,
     untracked edge on a pass that reported 'refused'. The file must come back
     byte-identical."""
-    import builtins
-
     md, td, idx = dirs
     _write_memory(md, "narrow-lesson", "the narrow one", body="Body n.\n")
     _write_memory(md, "broad-lesson", "the broad one", body="Body b.\n")
@@ -612,17 +610,19 @@ def test_apply_refines_rolls_back_frontmatter_edge_when_stamp_write_fails(dirs, 
 
     cand = {"kind": "refines", "source": "narrow-lesson", "target": "broad-lesson",
             "score": 0.9}
-    real_open = builtins.open
+    import memory.atomic as atomic
+
+    real_write = atomic.write_text_atomic
     w_count = {"n": 0}
 
-    def failing_open(path, mode="r", *a, **k):
-        if str(path).endswith("narrow-lesson.md") and "w" in str(mode):
+    def failing_write(path, text, *a, **k):
+        if str(path).endswith("narrow-lesson.md"):
             w_count["n"] += 1
             if w_count["n"] == 2:  # write #1 = the typed edge; write #2 = the stamp;
                 raise OSError(28, "No space left on device")  # write #3 = the rollback
-        return real_open(path, mode, *a, **k)
+        return real_write(path, text, *a, **k)
 
-    monkeypatch.setattr(builtins, "open", failing_open)
+    monkeypatch.setattr(atomic, "write_text_atomic", failing_write)
     ok, reason, undo = dream._apply_one(md, cand, "edge-test-1", "pass-test-1")
     monkeypatch.undo()
 

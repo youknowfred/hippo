@@ -426,7 +426,7 @@ def write_session_capture(
                     seed["llm_triage"] = enrichment
         except Exception:
             pass
-        tmp = path + ".tmp"
+        tmp = path + f".tmp.{os.getpid()}"  # COR-17: unique per writer — concurrent processes must not share a tmp
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(seed, fh, ensure_ascii=False, indent=2)
         os.replace(tmp, path)  # atomic: a reader never sees a half-written seed
@@ -561,7 +561,7 @@ def snooze_queue(
         pd = _resolve_pending_dir(pending_dir, memory_dir)
         ensure_self_ignoring_dir(pd)
         marker = _snooze_marker_path(pd)
-        tmp = marker + ".tmp"
+        tmp = marker + f".tmp.{os.getpid()}"  # COR-17: unique per writer — concurrent processes must not share a tmp
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump({"ts": round(time.time(), 3)}, fh)
         os.replace(tmp, marker)

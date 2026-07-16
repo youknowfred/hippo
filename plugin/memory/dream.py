@@ -1621,8 +1621,9 @@ def _apply_one(
             return False, "edge already present (wikilink)", None
         new_text, block_rec = _insert_block_line(text, line)
         try:
-            with open(src_path, "w", encoding="utf-8") as fh:
-                fh.write(new_text)
+            from .atomic import write_text_atomic
+
+            write_text_atomic(src_path, new_text)  # COR-18: never a torn corpus file
         except Exception as exc:
             return False, f"write failed: {exc}", None
         return True, "", {"file": os.path.basename(src_path), "block": block_rec}
@@ -1663,8 +1664,9 @@ def _apply_one(
         except Exception as exc:
             return _roll_back("re-read failed after frontmatter write", exc)
         try:
-            with open(src_path, "w", encoding="utf-8") as fh:
-                fh.write(new_text)
+            from .atomic import write_text_atomic
+
+            write_text_atomic(src_path, new_text)  # COR-18
         except Exception as exc:
             return _roll_back("write failed", exc)
         return True, "", {

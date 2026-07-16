@@ -548,8 +548,9 @@ def _append_floor_pointer(
         section = f"{section_header}\n{pointer}\n"
         new_text = f"{text}\n\n{section}" if text else section
         try:
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(new_text)
+            from .atomic import write_text_atomic
+
+            write_text_atomic(path, new_text)  # COR-18: MEMORY.md is source of truth
         except Exception as exc:
             return {"status": "skipped", "reason": f"MEMORY.md write failed: {exc}"}
         return {
@@ -592,8 +593,9 @@ def _append_floor_pointer(
 
     lines.insert(insert, pointer)
     try:
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write("\n".join(lines))
+        from .atomic import write_text_atomic
+
+        write_text_atomic(path, "\n".join(lines))  # COR-18
     except Exception as exc:
         return {"status": "skipped", "reason": f"MEMORY.md write failed: {exc}"}
     return {"status": "appended", "reason": None}
@@ -626,8 +628,9 @@ def _remove_floor_pointer(memory_dir: str, name: str) -> dict:
     if len(kept) == len(lines):
         return {"status": "skipped", "reason": "pointer not present"}
     try:
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write("\n".join(kept))
+        from .atomic import write_text_atomic
+
+        write_text_atomic(path, "\n".join(kept))  # COR-18
     except Exception as exc:
         return {"status": "skipped", "reason": f"MEMORY.md write failed: {exc}"}
     return {"status": "removed", "reason": None}

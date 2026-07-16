@@ -726,8 +726,9 @@ def add_typed_relation(path: str, relation: str, target: str, *, dry_run: bool =
             return result
         result["changed"] = new_text != text
         if result["changed"] and not dry_run:
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(new_text)
+            from .atomic import write_text_atomic
+
+            write_text_atomic(path, new_text)  # COR-18: never a torn corpus file
             # SEC-6: per-item, agent-gated typed-edge write — fold the new bytes into the
             # trusted-corpus consent baseline (review = consent; no-op on legacy
             # fingerprint-less records / ungated corpora; never fatal).
@@ -792,7 +793,7 @@ def write_links_cache(index_dir: str, graph: LinkGraph, sigs: Dict[str, List[int
             },
         }
         path = os.path.join(index_dir, _LINKS_CACHE_NAME)
-        tmp = path + ".tmp"
+        tmp = path + f".tmp.{os.getpid()}"  # COR-17: unique per writer — concurrent processes must not share a tmp
         try:
             with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh)

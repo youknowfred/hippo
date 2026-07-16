@@ -735,8 +735,9 @@ def _set_confidence(path: str, value: str, *, dry_run: bool = False) -> dict:
             return result
         result["changed"] = new_text != text
         if result["changed"] and not dry_run:
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(new_text)
+            from .atomic import write_text_atomic
+
+            write_text_atomic(path, new_text)  # COR-18: never a torn corpus file
             try:
                 from .trust import record_authored_write
 
@@ -800,8 +801,9 @@ def _set_cited_paths(path: str, paths: List[str], *, dry_run: bool = False) -> d
             return result
         result["changed"] = new_text != text
         if result["changed"] and not dry_run:
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(new_text)
+            from .atomic import write_text_atomic
+
+            write_text_atomic(path, new_text)  # COR-18: never a torn corpus file
     except Exception as exc:
         result["error"] = str(exc)
     return result

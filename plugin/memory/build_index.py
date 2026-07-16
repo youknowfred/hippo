@@ -1405,7 +1405,7 @@ def build_index(
         # old_row_by_hash can resume from here instead of re-embedding from scratch.
         import numpy as np
 
-        tmp_dense_path = dense_path + ".tmp.npy"
+        tmp_dense_path = dense_path + f".tmp.{os.getpid()}.npy"  # COR-17: unique per writer
         try:
             np.save(tmp_dense_path, dense_rows)
             os.replace(tmp_dense_path, dense_path)
@@ -1423,7 +1423,7 @@ def build_index(
             pass
 
     manifest_path = os.path.join(index_dir, _MANIFEST_NAME)
-    tmp_manifest_path = manifest_path + ".tmp"
+    tmp_manifest_path = manifest_path + f".tmp.{os.getpid()}"  # COR-17: unique per writer
     try:
         with open(tmp_manifest_path, "w", encoding="utf-8") as fh:
             json.dump(manifest, fh)

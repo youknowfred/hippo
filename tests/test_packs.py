@@ -786,3 +786,41 @@ def test_extract_rolls_back_the_in_flight_partial_file(tmp_path, monkeypatch):
     assert not os.path.exists(dest), (
         f"dest must be fully rolled back, found: {os.listdir(dest) if os.path.isdir(dest) else '-'}"
     )
+
+
+def test_corrupt_lockfile_refuses_loudly_instead_of_silently_resetting(tmp_path):
+    """COR-17: a corrupt .packs.lock.json used to read as 'no packs installed' — update
+    said 'no lockfile record', and the next install REWROTE the file from scratch,
+    silently orphaning every other pack's three-way merge base. Corruption must refuse
+    and name the git escape hatch (the lockfile is committed)."""
+    from memory import packs as P
+
+    md = str(tmp_path / "mem")
+    os.makedirs(md)
+    src = _pack_source(tmp_path, {
+        "alpha": ("first lesson", "body a"),
+        "beta": ("second lesson", "body b"),
+    })
+    assert P.pack_install_item(src, "alpha", memory_dir=md)["installed"]
+    lock_before = open(P.lockfile_path(md), encoding="utf-8").read()
+    with open(P.lockfile_path(md), "w", encoding="utf-8") as fh:
+        fh.write("{ this is not json —")
+
+    plan = P.pack_update_plan(src, memory_dir=md)
+    assert plan["error"] and "restore it from git" in plan["error"]
+
+    r = P.pack_install_item(src, "beta", memory_dir=md)
+    assert r["installed"] is False and "restore it from git" in r["error"]
+    assert not os.path.exists(os.path.join(md, "beta.md"))  # refusal wrote nothing
+    assert open(P.lockfile_path(md), encoding="utf-8").read() == "{ this is not json —", (
+        "a refusal must not rewrite the corrupt lockfile either"
+    )
+
+    # And the update-item path refuses the same way.
+    r2 = P.pack_update_item(src, "alpha", memory_dir=md)
+    assert r2["updated"] is False and "restore it from git" in r2["error"]
+
+    # Sanity: with the lockfile restored, everything works again.
+    with open(P.lockfile_path(md), "w", encoding="utf-8") as fh:
+        fh.write(lock_before)
+    assert P.pack_update_plan(src, memory_dir=md)["error"] is None

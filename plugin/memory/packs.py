@@ -478,21 +478,37 @@ def lockfile_path(memory_dir: str) -> str:
     return os.path.join(memory_dir, _LOCKFILE_NAME)
 
 
-def _load_lockfile(memory_dir: str) -> dict:
+def _load_lockfile(memory_dir: str) -> Tuple[dict, Optional[str]]:
+    """``(doc, error)``. A MISSING lockfile is a fresh start; a PRESENT-but-corrupt one
+    is an error the caller must refuse on (COR-17). It used to read as "no packs
+    installed": update said "no lockfile record", and the next install rewrote the
+    file from scratch — silently orphaning every other pack's three-way merge base.
+    The lockfile is committed, so corruption (a bad hand-edit, unresolved git conflict
+    markers) has a real escape hatch worth naming."""
+    path = lockfile_path(memory_dir)
+    if not os.path.isfile(path):
+        return {"lock_schema": _LOCK_SCHEMA, "packs": {}}, None
     try:
-        with open(lockfile_path(memory_dir), "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8") as fh:
             doc = json.load(fh)
         if isinstance(doc, dict) and isinstance(doc.get("packs"), dict):
-            return doc
-    except Exception:
-        pass
-    return {"lock_schema": _LOCK_SCHEMA, "packs": {}}
+            return doc, None
+        reason = "not the expected {lock_schema, packs} shape"
+    except Exception as exc:
+        reason = str(exc)
+    return {"lock_schema": _LOCK_SCHEMA, "packs": {}}, (
+        f"{_LOCKFILE_NAME} is unreadable ({reason}) — refusing rather than silently "
+        "resetting it (that would orphan every installed pack's merge base); it is "
+        "committed, so restore it from git, or delete it to knowingly start fresh"
+    )
 
 
 def _write_lockfile(memory_dir: str, doc: dict) -> None:
-    with open(lockfile_path(memory_dir), "w", encoding="utf-8") as fh:
-        json.dump(doc, fh, indent=2, sort_keys=True)
-        fh.write("\n")
+    from .atomic import write_json_atomic
+
+    # SEC-19/COR-17: atomic — a torn lockfile write silently wiped every pack's
+    # three-way base, surfacing only on the NEXT update attempt.
+    write_json_atomic(lockfile_path(memory_dir), doc, sort_keys=True)
 
 
 def _ensure_pack_stamp(text: str, pack: str, version: str) -> str:
@@ -686,6 +702,12 @@ def pack_install_item(
                 "please report it"
             )
             return result
+        # COR-17: the lockfile is checked BEFORE the corpus write — a corrupt lockfile
+        # refuses with zero filesystem change, never installs-then-resets.
+        lock, lock_err = _load_lockfile(memory_dir)
+        if lock_err:
+            result["error"] = lock_err
+            return result
         target = os.path.join(memory_dir, fname)
         adopted = False
         try:
@@ -717,7 +739,6 @@ def pack_install_item(
         result["adopted"] = adopted
         result["path"] = target
 
-        lock = _load_lockfile(memory_dir)
         entry = lock["packs"].setdefault(
             pack, {"source": source or source_dir, "version": version, "installed": {}}
         )
@@ -754,7 +775,9 @@ def _update_states(source_dir: str, memory_dir: str) -> Tuple[Optional[dict], Op
     if err:
         return None, err
     pack, new_version = manifest["pack"], str(manifest["version"])
-    lock = _load_lockfile(memory_dir)
+    lock, lock_err = _load_lockfile(memory_dir)
+    if lock_err:
+        return None, lock_err
     entry = lock["packs"].get(pack)
     if not isinstance(entry, dict) or not isinstance(entry.get("installed"), dict):
         return None, (
@@ -913,12 +936,30 @@ def pack_update_item(
                 f"secret-lint flagged the updated {name}.md — refusing: {'; '.join(secrets)}"
             )
             return result
-        with open(it["path"], "w", encoding="utf-8") as fh:
-            fh.write(new_text)
+        from .atomic import write_text_atomic
+
+        # COR-18: atomic — this write REPLACES a file holding the user's local edits;
+        # a torn in-place write was the one way to lose them (they exist nowhere else).
+        write_text_atomic(it["path"], new_text)
         result["updated"] = True
         result["path"] = it["path"]
 
-        lock = _load_lockfile(memory_dir)
+        lock, lock_err = _load_lockfile(memory_dir)
+        if lock_err:
+            # The lockfile went corrupt between the plan's check and now — roll the
+            # file write back (COR-16) rather than leaving an update whose base can
+            # never advance.
+            from .provenance import restore_file_bytes
+
+            undo_err = restore_file_bytes(it["path"], it["ours"], memory_dir, repo_root)
+            result["updated"] = False
+            result["error"] = lock_err + (
+                f" — AND the rollback failed ({undo_err}): {name}.md now carries the "
+                "update without a lockfile base; restore both from git"
+                if undo_err
+                else " — the file write was rolled back"
+            )
+            return result
         entry = lock["packs"][states["pack"]]
         entry["version"] = states["version"]
         from .trust import file_sha256

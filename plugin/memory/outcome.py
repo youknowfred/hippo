@@ -253,7 +253,7 @@ def write_outcome_cache(index_dir: str, hits: dict) -> bool:
             },
         }
         path = outcome_cache_path(index_dir)
-        tmp = path + ".tmp"
+        tmp = path + f".tmp.{os.getpid()}"  # COR-17: unique per writer — concurrent processes must not share a tmp
         try:
             with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh)

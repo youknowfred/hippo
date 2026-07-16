@@ -1122,8 +1122,9 @@ def restore_file_bytes(
     PARTIAL state explicitly instead of pretending the rollback happened.
     """
     try:
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write(original)
+        from .atomic import write_text_atomic
+
+        write_text_atomic(path, original)
     except Exception as exc:
         return str(exc)
     try:
@@ -1265,8 +1266,9 @@ def backfill_file(
             }
         )
         if changed and not dry_run:
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(new_text)
+            from .atomic import write_text_atomic
+
+            write_text_atomic(path, new_text)  # COR-18: never a torn corpus file
     except Exception as exc:  # never break a corpus-wide backfill on one file
         result["error"] = str(exc)
     return result
@@ -1330,8 +1332,9 @@ def heal_empty_baselines(memory_dir: str, repo_root: str) -> List[str]:
                     m = re.match(r"^(\s*source_commit\s*:\s*)(\"\"|''|)\s*$", lines[i])
                     if m:
                         lines[i] = f'{m.group(1)}"{head}"'
-                        with open(path, "w", encoding="utf-8") as fh:
-                            fh.write("\n".join(lines))
+                        from .atomic import write_text_atomic
+
+                        write_text_atomic(path, "\n".join(lines))  # COR-18
                         healed.append(os.path.splitext(os.path.basename(path))[0])
                         break
             except Exception:
@@ -1508,8 +1511,9 @@ def reverify_file(
             }
         )
         if changed and not dry_run:
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(new_text)
+            from .atomic import write_text_atomic
+
+            write_text_atomic(path, new_text)  # COR-18: never a torn corpus file
         if not dry_run:
             # SEC-6: a re-verify IS a per-item human review of this exact file — fold its
             # current bytes into the trusted-corpus consent baseline (review = consent;
