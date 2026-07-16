@@ -32,9 +32,11 @@ release). New *additions* alongside them are minor, non-breaking changes.
   `HIPPO_MCP_MAX_MESSAGE_CHARS`, `HIPPO_TEA5_OPT_IN`, `HIPPO_SALIENCE`, `HIPPO_DENSE_FLOOR`,
   `HIPPO_DUP_THRESHOLD`, `HIPPO_DISABLE_JIT` (added in T16 JIT: kills the default-on
   first-touch reminder lane + its touch-grain telemetry, restoring pre-T16 PostToolUse
-  behavior byte-for-byte). These keep their names and meanings.
+  behavior byte-for-byte), `HIPPO_SLEEP_TIER_A` (added in T15 SLP: the opt-in that lets a
+  SCHEDULED sleep pass apply capped, reversible Tier-A dream edges — default OFF, and OFF
+  keeps the runner's zero-write guarantee byte-for-byte). These keep their names and meanings.
 - **The committed on-disk corpus format** — `.claude/memory/.format`'s `corpus_format` (currently
-  **4**) and the memory-file frontmatter conventions ([CONVENTIONS.md](plugin/assets/CONVENTIONS.md)).
+  **5**) and the memory-file frontmatter conventions ([CONVENTIONS.md](plugin/assets/CONVENTIONS.md)).
   The format version only ever increases, and every increase ships a documented migration
   ([UPGRADING.md](UPGRADING.md)) — your committed markdown corpus is never silently reinterpreted.
 
@@ -42,8 +44,9 @@ release). New *additions* alongside them are minor, non-breaking changes.
 
 These may change at any release without a major bump — do not build on them:
 
-- **Derived caches and their schemas** — the recall index (`schema_version`, currently 6), the link
-  cache, the staleness cache, and the telemetry ledgers under `.claude/.memory-*`. They are
+- **Derived caches and their schemas** — the recall index (`schema_version`, currently 7), the link
+  cache (`links.json`, currently 4), the staleness cache, and the telemetry ledgers under
+  `.claude/.memory-*`. They are
   gitignored, rebuildable-from-source artifacts; hippo may bump their schema and rebuild them freely.
   (A `schema_version` bump is a re-index, not a corpus migration — the CHANGELOG's `re-bootstrap`
   flag tells you when deps or the index change.)
