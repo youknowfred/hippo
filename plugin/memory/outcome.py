@@ -22,10 +22,13 @@ WRITES the cache only — it does not read recall's ranking state, so the negati
 below (this module must not import recall/new_memory) still holds; only recall.py imports FROM
 outcome, never the reverse.
 
-T16 (JIT-1): the same PostToolUse spawn now also runs the jit lane — on the first touch
-of a cited file per session, ``jit.observe_touch`` hands back the bounded first-touch
-reminder that ``main --from-hook`` prints as the hook's additionalContext. It touches
-no ranking; ``HIPPO_DISABLE_JIT`` restores the pre-T16 hook byte-for-byte.
+T16 (JIT): the same PostToolUse spawn now also runs the jit lane — ``jit.observe_touch``
+hands back optional touch-grain provenance stamped onto the outcome row (JIT-2,
+``cited_by``; ``injection_hits(grain="touch")`` + ``--touch-grain`` consume it
+report-only) and, on the first touch of a cited file per session, the bounded
+first-touch reminder that ``main --from-hook`` prints as the hook's additionalContext
+(JIT-1). Neither half touches ranking; ``HIPPO_DISABLE_JIT`` restores the pre-T16 hook
+byte-for-byte.
 """
 
 from __future__ import annotations
@@ -68,12 +71,13 @@ def record_from_payload(
     repo can never match a citation, so it is dropped. Never raises; returns False when nothing
     was logged.
 
-    T16 JIT-1 rides the same single Python spawn: the jit lane (``jit.observe_touch``)
-    sees the touch first and — on the first touch of a cited file per session — hands
-    back the bounded first-touch reminder, appended to ``context_out`` (caller-supplied
-    list, the ``compute_corpus`` texts_out pattern) for ``main`` to print as hook
-    additionalContext. Existing callers pass no ``context_out`` and see the exact
-    pre-T16 behavior; with ``HIPPO_DISABLE_JIT`` set the lane contributes nothing at all.
+    T16 rides the same single Python spawn: the jit lane (``jit.observe_touch``) sees the
+    touch first, handing back OPTIONAL touch-grain provenance for the row (JIT-2,
+    ``cited_by``) and — on the first touch of a cited file per session — the bounded
+    first-touch reminder (JIT-1), appended to ``context_out`` (caller-supplied list, the
+    ``compute_corpus`` texts_out pattern) for ``main`` to print as hook additionalContext.
+    Existing callers pass no ``context_out`` and see the exact pre-T16 behavior; with
+    ``HIPPO_DISABLE_JIT`` set the lane contributes nothing at all.
     """
     try:
         if not isinstance(payload, dict):
@@ -100,10 +104,11 @@ def record_from_payload(
         if not rel:
             return False
         td = telemetry_dir or default_telemetry_dir(memory_dir)
+        cited_by = None
         try:
             from .jit import observe_touch
 
-            _cited_by, context = observe_touch(
+            cited_by, context = observe_touch(
                 rel,
                 memory_dir=memory_dir,
                 repo_root=repo_root,
@@ -113,8 +118,8 @@ def record_from_payload(
             if context and context_out is not None:
                 context_out.append(context)
         except Exception:
-            pass
-        return log_outcome(tool, rel, session_id=session_id, telemetry_dir=td)
+            cited_by = None
+        return log_outcome(tool, rel, session_id=session_id, telemetry_dir=td, cited_by=cited_by)
     except Exception:
         return False
 
@@ -135,14 +140,25 @@ def _cited_paths_of(memory_dir: str, name: str, cache: dict) -> set:
     return cited
 
 
-def _injection_join(memory_dir: str, telemetry_dir: Optional[str] = None) -> dict:
+def _injection_join(
+    memory_dir: str, telemetry_dir: Optional[str] = None, *, grain: str = "session"
+) -> dict:
     """The ONE episode×outcome×cited_paths join: ``{(session, name): {"cited", "hit"}}``.
 
     ``cited`` — the injected memory carries cited_paths (it has a file signal at all);
-    ``hit`` — one of those cited files was touched in the SAME session at/after the
-    memory's earliest recall ts. Both aggregates (``injection_precision``,
-    ``injection_hits``) read this so the join semantics can never fork. Never raises;
-    ``{}`` on any failure or empty ledgers.
+    ``hit`` — at the default ``"session"`` grain, one of those cited files was touched in
+    the SAME session at/after the memory's earliest recall ts. Both aggregates
+    (``injection_precision``, ``injection_hits``) read this so the join semantics can
+    never fork.
+
+    JIT-2 (T16): ``grain="touch"`` joins on the RECORDED coincidence instead — a touch
+    row whose ``cited_by`` field (stamped by the jit lane at touch time) names the
+    memory, same session, at/after injection. Sharper (robust to a memory's cited_paths
+    changing between the touch and this join) but honest about its blind spots: rows
+    recorded pre-T16, past the per-session provenance cap, or with the lane killed carry
+    no ``cited_by`` and simply do not count. Touch grain therefore UNDER-counts by
+    construction — evidence-plus, never evidence-instead; session grain stays the
+    default. Never raises; ``{}`` on any failure or empty ledgers.
     """
     try:
         td = telemetry_dir or default_telemetry_dir(memory_dir)
@@ -160,25 +176,31 @@ def _injection_join(memory_dir: str, telemetry_dir: Optional[str] = None) -> dic
                     injected[key] = ts
         if not injected:
             return {}
-        # session -> [(path, ts)]
+        # session -> [(path, ts, cited_by-or-None)]
         touches: dict = {}
         for o in read_outcomes(td):
             p = o.get("path")
             if not p:
                 continue
             ts = o.get("ts")
+            cb = o.get("cited_by")
             touches.setdefault(o.get("session_id"), []).append(
-                (p, ts if isinstance(ts, (int, float)) else 0)
+                (p, ts if isinstance(ts, (int, float)) else 0, cb if isinstance(cb, list) else None)
             )
         cache: dict = {}
         out: dict = {}
         for (sid, name), inject_ts in injected.items():
             cited = _cited_paths_of(memory_dir, name, cache)
-            out[(sid, name)] = {
-                "cited": bool(cited),
-                "hit": bool(cited)
-                and any(p in cited and t >= inject_ts for p, t in touches.get(sid, [])),
-            }
+            if grain == "touch":
+                hit = any(
+                    cb is not None and name in cb and t >= inject_ts
+                    for _p, t, cb in touches.get(sid, [])
+                )
+            else:
+                hit = bool(cited) and any(
+                    p in cited and t >= inject_ts for p, t, _cb in touches.get(sid, [])
+                )
+            out[(sid, name)] = {"cited": bool(cited), "hit": hit}
         return out
     except Exception:
         return {}
@@ -209,8 +231,16 @@ def injection_precision(memory_dir: str, telemetry_dir: Optional[str] = None) ->
         return {"injected_with_cites": 0, "hits": 0, "precision": None, "sessions": 0}
 
 
-def injection_hits(memory_dir: str, telemetry_dir: Optional[str] = None) -> dict:
+def injection_hits(
+    memory_dir: str, telemetry_dir: Optional[str] = None, *, grain: str = "session"
+) -> dict:
     """Per-MEMORY recorded-outcome evidence: ``{name: {"hits", "sessions"}}``, hits ≥ 1 only.
+
+    JIT-2 (T16): ``grain="touch"`` computes the same aggregate over the RECORDED
+    (memory, file, touch) coincidences (outcome rows carrying ``cited_by``) instead of
+    the join-time corpus×path match — see ``_injection_join``. Flag-gated and
+    report-only (``--touch-grain``); every persisted consumer (the RET-14 cache, DRM-6
+    graduation, dream's reward pass) stays on the session-grain default.
 
     The DRM-5 read surface: a memory appears here iff at least one session both injected it
     AND touched one of its cited files at/after the injection — the ledger-recorded,
@@ -227,7 +257,7 @@ def injection_hits(memory_dir: str, telemetry_dir: Optional[str] = None) -> dict
     """
     try:
         out: dict = {}
-        for (sid, name), r in _injection_join(memory_dir, telemetry_dir).items():
+        for (sid, name), r in _injection_join(memory_dir, telemetry_dir, grain=grain).items():
             if not r["hit"]:
                 continue
             rec = out.setdefault(name, {"hits": 0, "sessions": []})
@@ -316,6 +346,32 @@ def read_outcome_cache(index_dir: str) -> Optional[Dict[str, dict]]:
         return None
 
 
+def format_touch_grain_report(memory_dir: str, telemetry_dir: Optional[str] = None) -> str:
+    """JIT-2: the session-grain vs touch-grain ``injection_hits`` comparison. Report-only —
+    nothing persists, nothing changes ranking; the delta is the honest picture of how much
+    evidence the sharper join actually has (touch grain UNDER-counts by construction:
+    pre-T16 rows, capped rows, and killed-lane rows carry no provenance). Never raises."""
+    try:
+        session = injection_hits(memory_dir, telemetry_dir)
+        touch = injection_hits(memory_dir, telemetry_dir, grain="touch")
+        s_hits = sum(r["hits"] for r in session.values())
+        t_hits = sum(r["hits"] for r in touch.values())
+        only_session = sorted(set(session) - set(touch))
+        lines = [
+            "injection_hits by grain (JIT-2, report-only — session grain stays the default):",
+            f"  session grain: {len(session)} memories / {s_hits} hit-session(s) — injected AND a cited file touched that session",
+            f"  touch grain:   {len(touch)} memories / {t_hits} hit-session(s) — only recorded (memory, file, touch) coincidences",
+        ]
+        if only_session:
+            preview = ", ".join(only_session[:5]) + ("…" if len(only_session) > 5 else "")
+            lines.append(
+                f"  under-count (expected direction): {len(only_session)} memory(ies) hit at session grain only — {preview}"
+            )
+        return "\n".join(lines)
+    except Exception:
+        return "injection_hits by grain: no signal yet (report-only)."
+
+
 def format_report(memory_dir: str, telemetry_dir: Optional[str] = None) -> str:
     """One-line KPI-2 proxy report for the CLI / doctor to present. Never raises."""
     r = injection_precision(memory_dir, telemetry_dir)
@@ -339,6 +395,11 @@ def main(argv: Optional[list] = None) -> int:
         "--from-hook", action="store_true", help="read the PostToolUse JSON payload from stdin and log it"
     )
     parser.add_argument("--report", action="store_true", help="print the KPI-2 injection-precision proxy")
+    parser.add_argument(
+        "--touch-grain",
+        action="store_true",
+        help="print the touch-grain vs session-grain injection_hits comparison (JIT-2; report-only)",
+    )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--repo-root", default=None)
     args = parser.parse_args(argv)
@@ -375,6 +436,9 @@ def main(argv: Optional[list] = None) -> int:
         memory_dir = args.memory_dir
         if memory_dir is None:
             memory_dir, _ = resolve_dirs()
+        if args.touch_grain:
+            print(format_touch_grain_report(memory_dir))
+            return 0
         print(format_report(memory_dir))
         return 0
     except Exception:

@@ -894,8 +894,18 @@ def log_outcome(
     *,
     session_id: Optional[str] = None,
     telemetry_dir: Optional[str] = None,
+    cited_by: Optional[List[str]] = None,
 ) -> bool:
-    """Append ONE file-touch outcome to ``outcome_events.jsonl``. Fire-and-forget; never raises."""
+    """Append ONE file-touch outcome to ``outcome_events.jsonl``. Fire-and-forget; never raises.
+
+    ``cited_by`` (JIT-2, T16) is OPTIONAL touch-grain provenance: the memory names whose
+    cited_paths matched this touch AT TOUCH TIME (the jit lane's derived-map lookup — the
+    exact (memory, file, touch) coincidence session-grain joins can only approximate).
+    The field is SPARSE and additive: absent when nothing cites the path (most rows), so
+    existing session-grain consumers read rows exactly as before. The caller bounds the
+    volume (``jit.MAX_PROVENANCE_ROWS_PER_SESSION`` / ``MAX_CITED_PER_PATH``); this
+    function stays a dumb appender.
+    """
     try:
         td = _resolve_dir(telemetry_dir)
         ensure_self_ignoring_dir(td)  # derived dir: mkdir + self-ignoring .gitignore (SEC-3)
@@ -905,6 +915,8 @@ def log_outcome(
             "tool": tool,
             "path": path,
         }
+        if cited_by:
+            event["cited_by"] = [str(n) for n in cited_by if n]
         p = _outcome_ledger_path(td)
         with open(p, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, ensure_ascii=False) + "\n")
