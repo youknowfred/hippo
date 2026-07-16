@@ -385,7 +385,7 @@ workstreams:
         title: Salience-revisit A/B rig (lived-in-corpus, usage-prior precondition fix)
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: eval-flywheel, verdict: RESHAPE, convergence: 1, landscape: [sleep-time-2504, ed2-revisit]}
         problem: >-
           SIG-5 decided salience default-OFF because fixture corpora carry no usage/
@@ -407,7 +407,7 @@ workstreams:
           - the ON arm's usage/staleness visibility is an asserted precondition — memory_dir threaded through every internal recall(); a test fails loudly if _usage_boost_map/_staleness_penalty_map resolve empty for a non-empty usage_aggregates/stale.json
           - the OFF arm is asserted byte-identical to the pinned production result-dict both before and after; a byte-identical-arms outcome on a signal-less corpus is labeled a self-check pass, not a finding, and drops any "decision-grade" framing at low n
           - no autonomous execution path — invoked only via explicit CLI/skill; the only automatic surface is a deterministic (no-timestamp) doctor nudge line at a lived-in threshold
-        dependencies: [SIG-6, RET-8]     # SIG-6 cross-file on open PR #17 (absent from baseline); RET-8 shipped
+        dependencies: [SIG-6, RET-8]     # SIG-6 landed long ago (PR #17 merged 4dc3256, 2026-07-10); RET-8 shipped
         invariant_note: >-
           ED-2 razor is binding — measures only, never flips salience; the flip stays a
           dated owner decision regardless of deltas (the LIF-7 "don't proxy owner-gates
@@ -477,13 +477,18 @@ workstreams:
         title: GRA-8 graph-audit CLI (edge-class/degree/orphan/component/rot) + edge_origin stamp
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: graph-retrieval, verdict: RESHAPE, convergence: 1, landscape: [lazygraphrag-msr-2024]}
         problem: >-
           links.py's CLI exposes only --traverse/--hops; there is zero graph
           observability (GRA-8 unbuilt), so a tool that markets "graph-backed" cannot
           show its own graph, and edge rot (edges into archived/superseded stems) is
-          invisible.
+          invisible. PREMISE CORRECTED at build time (T9, 2026-07-16): GRA-8's core
+          (--components/--degree/--export) had ALREADY shipped at PR #27 (2026-07-10,
+          the day after authoring); the live delta this item shipped is the one-call
+          --audit view, edge-class counts, edge ROT, the edge_origin stamp, and the
+          doctor edge_rot line — GRA-8's ledgers now record shipped-at-#27 +
+          remainder-absorbed-here.
         proposal: >-
           Extend links.py into a graph-audit subcommand rendering edge-class counts,
           degree/orphan/component stats, and edge rot — computed LIVE from the existing
@@ -497,7 +502,7 @@ workstreams:
         acceptance_criteria:
           - links.py graph-audit prints edge-class counts (typed/untyped + edge_origin-tagged when present), degree/orphan/component stats, and an edge-rot list — all live from existing maps + archive/ state, no schema bump
           - doctor gains one deterministic edge-rot line against a threshold (line-count == len(CHECKS), no timestamps)
-          - consolidate skill Step 4 stamps new co-recall wikilinks with edge_origin:co-recall; a hermetic test proves a corpus with no edge_origin round-trips byte-identical through build_index + doctor (CORPUS_FORMAT_VERSION==4 untouched)
+          - consolidate skill Step 4 stamps new co-recall wikilinks with edge_origin:co-recall; a hermetic test proves a corpus with no edge_origin round-trips byte-identical through build_index + doctor (CORPUS_FORMAT_VERSION untouched — the authoring-era "==4" was stale, the tree crossed to 5 in round 3; the invariant shipped is ==5, no bump forced)
           - the open-surface ledger reflects GRA-8 as absorbed/closed by this item
         dependencies: []
         invariant_note: >-
@@ -518,7 +523,7 @@ workstreams:
         title: Multi-hop instrument growth (n>=10) + close the mixed-mode MMR leg
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: graph-retrieval, verdict: RESHAPE, convergence: 1, landscape: [graphrag-bench-iclr26, hipporag2-2502]}
         problem: >-
           The GRA-1 knee fix (4d16022) resolved production dense multi-hop (0.0->1.0),
@@ -537,7 +542,7 @@ workstreams:
         acceptance_criteria:
           - tests/fixtures/recall_hard_set.yaml multi-hop grows 2 -> >=10 rows with the condition matrix documented in the header; no tracked/pinned CI gate is added on the category until n>=10 lands (stays report-only)
           - the mixed-mode arm (MSR-2) multi-hop recovers from 0.0 by extending the graph_endorsed exemption to MMR; a hermetic test pins both production-dense (already 1.0) and mixed-mode paths, and pins that a no-link tail still admits nothing past the cliff (the 4d16022 resurrection guard)
-          - the golden(50) and packs(22) eval numbers stay byte-identical (self 0.98/hard 1.0/mrr 0.9213; hard 1.0/precision 0.1375/abstention 0.3333) — the eval-gated bar
+          - the golden(50) and packs(22) eval numbers stay byte-identical (self 0.98/hard 1.0/mrr 0.9213; hard 1.0/precision 0.1375/abstention 0.3333) — the eval-gated bar. BUILD-TIME CORRECTION (T9, 2026-07-16), those parenthetical numbers were the authoring-era snapshot and had already drifted with the tree (fixture now 24->32 rows, corpora moved): the bar MET is no-category-regresses — golden(43 live) all gates + every hard-set category byte-identical via the MSR-1 baseline diff (report-only body_probe/token_reduction composition shifts recorded); packs(22) single-hop recall stayed 1.0 with mrr IMPROVED 0.8876->0.9015 (one pack edit — a content-honest dont_blame_vendor_latency -> new_logs_mean_recurrence wikilink — restored the row the exemption's slot-squeeze exposed)
           - a dated note updates GRA-7's gate text to read "beats the grown multi-hop baseline" and records the mixed-mode fix
         dependencies: [RET-8, MSR-1]     # RET-8 cross-file shipped; MSR-1 (T8) for baseline diffing
         invariant_note: >-
@@ -545,7 +550,15 @@ workstreams:
           hot-path cost; re-verify against the live tree that 4d16022's graph_endorsed
           set is the seam (it returns a third set from _expand_neighbors). Do not
           reintroduce the "0.0 dense" framing — that is fixed; the live residual is
-          mixed-mode only (re-measured 2026-07-09).
+          mixed-mode only (re-measured 2026-07-09). BUILD-TIME CORRECTION (T9,
+          2026-07-16): by build time the dense leg had DRIFTED too (0.5, the same MMR
+          displacement, per MSR-2/MSR-4's autopsy — the packs restructure moved the
+          cluster balance), and the live mixed-mode victim was a SEED displaced from
+          organic #2, so the fix also endorses a seed that is another seed's 1-hop
+          neighbor (never injected). Both legs measured 1.0 post-fix (dense/bm25/mixed,
+          n=10); a same-seed sibling-injection TIE order flake (per-process str-set
+          hash order, GRA-1-era) was caught by MSR-1's pass^k probe on the grown
+          fixture and pinned with sorted stem iteration.
         implementation_notes: >-
           Seam: recall.py _mmr_rerank + the emission loop's graph_endorsed handling
           (added by 4d16022 — verify it returns (list, injected, endorsed)). The fix is
@@ -559,12 +572,17 @@ workstreams:
         title: Dense-floor calibration instrument (delivers RET-9)
         priority: P1
         effort: S
-        status: planned
+        status: done
         source: {lens: graph-retrieval, verdict: RESHAPE, convergence: 1, landscape: [ettin-hf-2026-cut]}
         problem: >-
           The dense floor is a static per-model table calibrated to the maintainer's
           golden corpus (recall.py _DENSE_FLOOR_BY_MODEL); nothing recalibrates
           per-install, and RET-9 (per-corpus floor sanity, ROADMAP.v1) is unbuilt.
+          PREMISE CORRECTED at build time (T9, 2026-07-16): RET-9's leak-detector half
+          (doctor.check_abstention_floor_sanity) had shipped 2026-07-10 — but its
+          "raise HIPPO_DENSE_FLOOR" hint never had a NUMBER; this item delivered the
+          missing CALIBRATION half (the sweep + the advisory comparison line), fully
+          closing RET-9.
         proposal: >-
           Automate RET-1's documented cosine-separation recipe into an offline
           eval_recall floor-sweep against the hard-set on-topic queries + off-topic
@@ -598,7 +616,7 @@ workstreams:
         title: Typed-2-hop reachability audit (GRA-7's measurable baseline arm)
         priority: P3
         effort: S
-        status: planned
+        status: done
         source: {lens: graph-retrieval, verdict: RESHAPE, convergence: 1, landscape: [hipporag-ppr-baseline]}
         problem: >-
           GRA-7 (personalized PageRank) is gated on "beats GRA-1 on multi-hop", but
@@ -631,7 +649,7 @@ workstreams:
         title: Phrase-overlap vs GRA-3 spike (does phrase co-occurrence find links GRA-3 misses?)
         priority: P3
         effort: S
-        status: planned
+        status: deferred
         source: {lens: graph-retrieval, verdict: RESHAPE, convergence: 1, landscape: [a-mem-zettelkasten, cooccurrence-no-llm]}
         problem: >-
           GRA-3's densification pass finds link candidates via recall()-fused
@@ -990,7 +1008,7 @@ workstreams:
           - a report-only 'forgetting' by_category line appears with archive-absence gold rows enumerated from an archive/*.md listing (journal used only as reversibility metadata) scored by an absence-polarity metric distinct from hard_set_metrics; rows populate via SIG-6's confirm flow with absent=skip
           - archive.restore(stem) moves one named file back, journals it, collision-checks the stem against live memories with an _inbound_referrers-style guard, refusing (not overwriting) on collision; a no-bulk-restore test pin mirrors the no-bulk-archive pin; no code path connects detector output to restore execution
           - the regret detector runs only at SessionStart-producer/doctor time (never per-prompt), surfaces matches as inert text + a logged regret event, with zero restore action attached
-        dependencies: [SIG-6, RET-8]     # SIG-6 cross-file on open PR #17 (absent from baseline); RET-8 shipped
+        dependencies: [SIG-6, RET-8]     # SIG-6 landed long ago (PR #17 merged 4dc3256, 2026-07-10); RET-8 shipped
         invariant_note: >-
           inv4 — the restore/unarchive write is per-item human/agent-invoked, journaled,
           collision-guarded, no bulk verb; the detector is evidence-only, no prefilled
@@ -1460,7 +1478,7 @@ release_train:
   - tier: T9
     target_version: 1.9.0
     theme: "Graph & retrieval truth"
-    status: planned
+    status: done
     gate: "MSR-1 (T8) supplies the baseline-diff GRF-2 needs; SIG-6 (cross-file, round 1) must land before MSR-5's A/B rig can measure a live corpus."
     done_means: >-
       The graph fix 4d16022 started is finished (the mixed-mode MMR leg closed) and
@@ -1477,6 +1495,11 @@ release_train:
       usage-prior-blind eval path (thread memory_dir) or the ON arm measures nothing,
       and its OFF arm must stay byte-identical to the pinned production result. GRF-4
       builds after GRF-2 grows the instrument (a reachability report over n=2 is vacuous).
+      BUILT 2026-07-16 (see hippo-enh-t9-graph): the re-measure found dense had
+      drifted to 0.5 (same MMR displacement — the autopsy attributed it); both legs
+      1.0 post-fix at n=10 on all three condition-matrix modes. GRF-5 DEFERRED — the
+      spike is an open-ended two-corpus empirical study, not a cheap rider; nothing
+      downstream blocks on it.
     capstone: >-
       Write hippo-enh-t9-graph: the re-measured multi-hop numbers (dense + mixed-mode
       before/after), the grown fixture n, the RET-9 floor recommendation shape, and
