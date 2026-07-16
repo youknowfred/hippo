@@ -7,6 +7,86 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.17.0 — 2026-07-16 — "Old or new, never torn"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**, index
+schema still **7**, citation derivation still **3**. No migration, no operator action. This
+release packages the 2026-07-16 first-party QA sweep (PR #54): six read-only sweep maps over the
+whole engine, then **thirteen defects — each reproduced with a failing test before it was called
+a defect — fixed** across eight id-prefixed commits (~20 new tests). Eleven of the thirteen
+violated an invariant this project had already written down; the round-3 roadmap that also lands
+here (PR #55) exists to make that stop being possible.
+
+- **COR-14 — the last two ad-hoc frontmatter walks join COR-9.** `dream_generate`'s
+  `_set_confidence`/`_set_cited_paths` were the sixth and seventh hand-copied insertion walks —
+  hard-coded 2-space indent, no damage check. A draft whose `metadata:` block indents otherwise
+  came back UNPARSEABLE (name/type/provenance lost to every reader), reported as
+  `changed=True, error=None`. Both now insert through `insert_frontmatter_keys` and answer
+  `_frontmatter_damage` at the write site.
+- **COR-15 + SEC-18 + INT-17 + RCH-8 — the pack verbs' second hardening pass.** The
+  dest-inside-corpus refusal compared SPELLING, not identity: a dest reaching the corpus through
+  a symlink (the native-memory layout hippo itself wires up is one) or a case-respelled path on
+  APFS landed pack files inside the live corpus — `_dest_inside_corpus` now walks inodes.
+  Explicit extract names traversed paths (`names=["../outside"]` read a non-corpus file into a
+  shareable pack, and the copy's write target escaped dest — reproduced clobbering the source);
+  names are bare corpus stems now, refused report-all. A crash between install's file write and
+  its lockfile write dead-ended all three verbs in a circle (update→install→update, every one
+  refusing); a byte-identical existing file now ADOPTS (lockfile record restored — also the
+  route in for hand-seeded packs). And extract's rollback missed the file in flight when the
+  failure hit mid-write, stranding exactly the manifest-less state RCH-7 promised away — the
+  in-flight path joins the rollback set, and Ctrl-C rolls back then propagates.
+- **SEC-19 + COR-17 + COR-18 — the atomicity split was inverted, and is now fixed.** Every
+  rebuildable cache already wrote tmp+`os.replace`; every IRREPLACEABLE file — the machine-wide
+  trust registry (rewritten on every authored corpus write; a torn write lost every consent
+  baseline at once, and a concurrent recall reading mid-write saw `{}`: deny-all or drift
+  quarantine silently off), the projects registry, the committed packs lockfile (a torn write
+  silently wiped every pack's three-way merge base), and all eleven in-place corpus `.md`
+  rewrites (a torn body-truncation still PARSES — a silently shortened memory) — used plain
+  truncating writes. One new primitive (`memory/atomic.py`: per-call-unique tmp + `os.replace`,
+  symlink-aware) now carries them all; a present-but-corrupt lockfile refuses loudly and names
+  the git escape hatch instead of silently resetting; and the shared caches' fixed `.tmp`
+  sibling names are per-process-unique so concurrent writers can no longer promote each other's
+  half-written bytes.
+- **COR-16 — two-write chains roll back.** Dedup-merge, demote+supersede, and the dream refines
+  apply each landed a first guarded write and had no answer when the second failed — the
+  envelope said "refused"/`changed=False` over a live partial write, and the refines case
+  stranded a PERMANENT edge no ledger row tracked and no retry could complete. One shared
+  rollback primitive (`provenance.restore_file_bytes` — restore the bytes, re-fold the SEC-6
+  baseline) applied at all three sites.
+- **COR-19 — the YAML fallback agrees with PyYAML about values.** An inline `# comment` after an
+  unquoted value stayed INSIDE the value on the bare-python3 path: `steer: pin # keep` read as
+  `'pin # keep'`, so the pin boost (and `confidence` weighting, and `invalid_after`'s
+  soft-invalidation) was silently OFF pre-bootstrap; a comment after the always-quoted
+  `description:` degraded the whole frontmatter to `{}` on that path only. miniyaml now
+  implements YAML's actual comment rule, pinned by a both-parsers parity test — and the
+  mirror-image venv-path bug (`last_verified: 2026-07-15` typed as a date object and read as
+  "never verified") is coerced like `invalid_after` always was.
+- **RCH-9 — swallowed failures get named.** Four sites where a report pretended a failed check
+  ran clean: `heal_baselines` now returns and renders the files it could NOT heal (they were
+  silently skipped — invisible to staleness forever while the verb reported success); a raising
+  SessionStart producer becomes a named ⚠ line instead of a vanished section; a failed
+  duplicate-check on the pack install plan marks the row's route UNVERIFIED instead of
+  presenting a clean add; and corrupt capture seeds are named in the drain listing instead of
+  disagreeing silently with the nudge's count.
+- **INT-18 + INT-19 — the routing texts stop pointing at dead ends.** The reconsolidation
+  worklist nudge said `provenance --reverify <name>` — not runnable as written, the wrong verb,
+  and invisible to the Desktop surface note; it now names the `reconsolidate` tool's call shape
+  and `/hippo:consolidate` Step 2. The surface note claimed resolve/audit "run as hippo skills —
+  invoke them directly" while both preflights hard-abort on Desktop; it now names the seven
+  terminal-only verbs AS terminal-only and maps the verbs that do have tools, including
+  recall's two terminal-only modes (`--list-by-type`, `--all-projects`).
+- **ED3 — the round-3 enhancement roadmap lands as docs** (`EXPLORATIONS3.md` +
+  `ROADMAP.enhancements3.yaml`, tiers T14–T17, namespaces INV/SLP/JIT/EXT, 12 items): grounded
+  in this release's own sweep, with the four §4 owner decisions ratified 2026-07-16 and recorded
+  in `meta.owner_decisions`. Proposal docs only — no engine change rides under an ED id.
+
+Deliberate contract changes, owner-ratified with the merge: a byte-identical re-install ADOPTS
+instead of refusing; doc names (`MEMORY`, `CONVENTIONS`) refuse extraction at the name gate with
+the principled reason; a crashing SessionStart producer is named, not swallowed. The
+unreproduced observations (RMW lost-update windows under the documented single-writer
+assumption, latent fallback-parser value differences with no consumer, and friends) are recorded
+as open questions in PR #54's report, deliberately unfixed.
+
 ## v1.16.0 — 2026-07-15 — "Nothing half-written"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**, index
