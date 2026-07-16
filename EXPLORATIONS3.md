@@ -129,22 +129,30 @@ depends on T14, so tiers can run in parallel if ratified together.
 - **LLM-judged memory quality scoring** — round 2's MSR thesis (deterministic
   beats judge) still holds; nothing here needs a judge.
 
-## 4. Owner decisions this round surfaces
+## 4. Owner decisions this round surfaces — **all four RATIFIED 2026-07-16**
 
 1. **SLP-3 autonomy**: may a *scheduled* pass apply reversible Tier-A dream
    edges under the existing undo/aging contract, opt-in, capped, undo-first in
    the report? (Default ships OFF either way; the decision is whether the flag
    exists.)
+   **→ RATIFIED: ship the opt-in flag** (default OFF; per-pass cap; the
+   morning report leads with the undo line).
 2. **JIT-1 default**: point-of-action reminders default-on with empty-norm +
    kill switch, or opt-in? Default-on is the recommendation (the lane is
    silent on most edits by construction), but it's a new always-armed hook
    lane and deserves an explicit yes.
+   **→ RATIFIED: default-on with an env kill switch** — the empty-norm design
+   carries the restraint.
 3. **EXT-1 positioning**: the PR comment is hippo's first surface visible to
    people who never run Claude — that's a marketing statement as much as a
    feature. Ship quietly on this repo first, or launch as the team-adoption
    wedge?
+   **→ RATIFIED: quiet dogfood on the hippo repo first**; the marketing story
+   waits for real examples.
 4. **INV-4 scope**: tools for exactly the two nudge-routed verbs now
    (recommended), or the full seven terminal-only verbs in one wave?
+   **→ RATIFIED: resolve + audit only** — the other five keep their honest
+   terminal-only preflights until field reports ask.
 
 ## 5. Ranked top moves
 

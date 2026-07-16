@@ -37,6 +37,15 @@ meta:
   status: PROPOSED — owner review pending; no item is committed work
   grounding: 2026-07-16 QA sweep (13 reproduced defects; 6 engine sweep maps)
   audience: solo-dev / small-team (the same audience rounds 1-2 optimized for)
+  # The four posture questions EXPLORATIONS3 §4 queued — RATIFIED by the owner
+  # 2026-07-16 (same day), all four on the recommended option. Item texts below
+  # carry the decisions inline; this block is the one-glance record.
+  owner_decisions:
+    ratified: 2026-07-16
+    slp3_tier_a_in_sleep: ship the opt-in flag (default OFF; cap; undo-first report)
+    jit1_default: default-on with an env kill switch (empty-norm carries the restraint)
+    ext1_positioning: quiet dogfood on the hippo repo first; marketing story decided later with real examples
+    inv4_scope: resolve + audit only (the two nudge-routed dead ends); the other five stay honest terminal-only
 
 tiers:
 
@@ -133,6 +142,8 @@ tiers:
         effort: M
         status: proposed
         rationale: >-
+          (Scope RATIFIED 2026-07-16: these two verbs only — the other five
+          keep their honest terminal-only preflights until field reports ask.)
           INT-19 made the surface note honest ("terminal-only for now") — the
           honest note still routes two LIVE nudges into a stop: the
           contradiction-inbox producer points at /hippo:resolve and the
@@ -217,6 +228,8 @@ tiers:
         effort: S
         status: proposed
         rationale: >-
+          (RATIFIED 2026-07-16: the flag ships — opt-in, default OFF, capped,
+          undo-first in the report.)
           DRM-2 ratified reversible autonomy for Tier-A edges (auto-apply +
           notify-with-undo + the aging firewall). Sleep is the natural home
           for exactly that contract — but only as an OPT-IN (flag default
@@ -261,8 +274,10 @@ tiers:
           (cited_paths -> memories) already exists in the links/stale caches,
           so the lookup is O(1) reads of derived files. This is the dynamic
           twin of promote-rule's static glob rules, for the lessons that never
-          got promoted.
+          got promoted. (Default RATIFIED 2026-07-16: ships default-ON with
+          an env kill switch — the empty-norm design carries the restraint.)
         acceptance_criteria:
+          - ships default-ON with an env kill switch (owner decision 2026-07-16); the lane is empty-norm — most edits emit nothing
           - fires at most once per (file, session); emits nothing for project/reference types; hard cap ~200 chars per line and ~3 lines per session
           - suppressed when the same memory already surfaced this session (recall_events check) — never a duplicate of an injection the model just saw
           - measured hook overhead on a corpus of 500 memories stays under a stated budget (derived-cache reads only; no index rebuild, no dense model, no LLM)
@@ -320,7 +335,9 @@ tiers:
           possible team-adoption wedge (CLB's review packet reviews corpus
           changes; this surfaces corpus knowledge on CODE changes — disjoint).
           Dogfood: enable on this repo; the QA-sweep memories would have
-          annotated this very PR.
+          annotated this very PR. (Positioning RATIFIED 2026-07-16: quiet
+          dogfood on this repo first; the marketing story waits for real
+          examples.)
         acceptance_criteria:
           - recall --for-diff resolves a git range to changed paths and returns citing memories with staleness flags, JSON and text forms; empty result -> exit 0, no comment
           - the Action recipe posts/updates ONE sticky comment (never a comment per push), caps items, and marks stale memories as such — a stale lesson is flagged, not asserted
