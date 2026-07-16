@@ -70,6 +70,26 @@ from .provenance import _is_memory_filename, _iter_memory_files, parse_frontmatt
 
 _WIKILINK_RE = re.compile(r"\[\[([^\]\[]+?)\]\]")
 
+# COR-20: code spans and fenced blocks are NOT link surface. A memory that merely
+# WRITES ABOUT the convention ("append a `[[wikilink]]` into one side") used to mint a
+# phantom edge to a memory named "wikilink" — found dogfooding this repo's own corpus,
+# where FOUR of six dangling targets were prose (`[[child]]`, `[[wikilink]]`,
+# `[[wikilinks]]`), reported as broken references forever. The trap that makes this
+# worth a comment: backticking does NOT hide a link from a bare regex, so the obvious
+# fix reads as done and changes nothing — the brackets must leave the link surface
+# entirely, which is what stripping code does. Fences are stripped before spans so a
+# ``` block containing a stray backtick can't desync the span pass.
+_FENCED_CODE_RE = re.compile(r"^(?P<fence>```+|~~~+)[^\n]*\n.*?^(?P=fence)[^\n]*$", re.M | re.S)
+_INLINE_CODE_RE = re.compile(r"(?P<ticks>`+)(?:(?!(?P=ticks)).)+?(?P=ticks)", re.S)
+
+
+def _strip_code(text: str) -> str:
+    """Blank out fenced blocks + inline code spans (COR-20). Never raises."""
+    try:
+        return _INLINE_CODE_RE.sub(" ", _FENCED_CODE_RE.sub("\n", text or ""))
+    except Exception:
+        return text or ""
+
 # links.json schema — independent of the manifest's SCHEMA_VERSION (the two files evolve
 # separately; a manifest bump must not silently invalidate a perfectly good edge cache).
 # v2 (GRA-4): per-file "typed" resolved-relation maps + top-level "typed_raw"/
@@ -77,7 +97,11 @@ _WIKILINK_RE = re.compile(r"\[\[([^\]\[]+?)\]\]")
 # v3 (DRM-6): the typed-relation set gained "derives-from" — a v2 cache's typed maps
 # predate the relation and would silently serve it as absent, so the bump forces one
 # rebuild (inv5: a clean break, never a compat shim).
-LINKS_SCHEMA_VERSION = 3
+# v4 (COR-20): the parser stopped reading code spans/fences as link surface — a v3
+# cache's adjacency was built by the OLD parser and still carries the phantom edges
+# (this repo's own corpus had four), which a reader would silently keep serving. Same
+# reasoning as v3: bump, force one rebuild, no shim.
+LINKS_SCHEMA_VERSION = 4
 _LINKS_CACHE_NAME = "links.json"
 
 # GRA-4: the closed set of typed frontmatter relations. Order is the render order every
@@ -168,10 +192,15 @@ def _strip_first_segment(stem: str) -> Optional[str]:
 
 
 def parse_wikilinks(text: str) -> List[str]:
-    """Ordered, de-duped ``[[target]]`` targets in ``text`` (``|display`` + ``#anchor`` stripped)."""
+    """Ordered, de-duped ``[[target]]`` targets in ``text`` (``|display`` + ``#anchor`` stripped).
+
+    COR-20: code spans (`` `[[x]]` ``) and fenced blocks are stripped first — they are
+    documentation ABOUT links, not links. DRM-2's machine-managed ``dream:links`` block is
+    deliberately fence-free, so its stamped edges are unaffected.
+    """
     seen: Set[str] = set()
     out: List[str] = []
-    for m in _WIKILINK_RE.finditer(text or ""):
+    for m in _WIKILINK_RE.finditer(_strip_code(text)):
         raw = m.group(1).strip()
         raw = raw.split("|", 1)[0].split("#", 1)[0].strip()
         if raw and raw not in seen:

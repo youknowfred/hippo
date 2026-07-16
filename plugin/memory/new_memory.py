@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 VALID_TYPES = ("user", "feedback", "project", "reference")
 
@@ -138,6 +138,75 @@ def _pointer_name(line: str) -> Optional[str]:
     if base in _ALLOWLIST:
         return None
     return base[:-3] if base.endswith(".md") else base
+
+
+def _unresolvable_link_warnings(related: List[str], memory_dir: str) -> List[str]:
+    """RCH-10: name every explicit link target that resolves to no memory in THIS corpus.
+
+    Returns ``[]`` (the empty norm) when everything resolves, so an ordinary write stays
+    silent. Cross-tier targets get their own sentence because they are the common cause
+    and the ONLY one where the target genuinely exists: ``user_role`` and
+    ``hippo-machine-setup`` are real user-tier memories, but ``build_graph`` is
+    per-corpus, so a project→user-tier edge can never resolve — the honest form is a
+    prose/backtick reference, not a wikilink. Matching uses ``normalize_slug``, the same
+    equivalence ``LinkGraph.resolve`` applies, so a legitimate ``[[User Role]]``-style
+    spelling never trips it. Never raises: a lookup failure yields no warning rather
+    than a false alarm.
+    """
+    try:
+        from .links import normalize_slug
+        from .provenance import _iter_memory_files
+
+        corpus = {
+            normalize_slug(os.path.splitext(os.path.basename(p))[0])
+            for p in _iter_memory_files(memory_dir)
+        }
+        unresolved = [ln for ln in related if normalize_slug(ln) not in corpus]
+        if not unresolved:
+            return []
+
+        # Which of them exist in ANOTHER tier? (the cross-tier case, named precisely)
+        elsewhere: Dict[str, str] = {}
+        try:
+            from .recall import _extra_recall_tiers
+
+            for tier_dir, _tier_index, label in _extra_recall_tiers(memory_dir):
+                if not os.path.isdir(tier_dir):
+                    continue
+                stems = {
+                    normalize_slug(os.path.splitext(os.path.basename(p))[0])
+                    for p in _iter_memory_files(tier_dir)
+                }
+                for ln in unresolved:
+                    if ln not in elsewhere and normalize_slug(ln) in stems:
+                        elsewhere[ln] = label
+        except Exception:
+            elsewhere = {}
+
+        out: List[str] = []
+        cross = [ln for ln in unresolved if ln in elsewhere]
+        unknown = [ln for ln in unresolved if ln not in elsewhere]
+        if cross:
+            shown = ", ".join(f"{ln} ({elsewhere[ln]} tier)" for ln in cross[:6])
+            out.append(
+                f"⚠ link target(s) live in another TIER, not this corpus: {shown}. The link "
+                "graph is per-corpus, so a project→other-tier [[wikilink]] can never resolve "
+                "— it reads as dangling in the link lint forever. Reference them in prose "
+                "with backticks instead (the memory still recalls: tiers fuse at recall time, "
+                "they just do not share a graph)."
+            )
+        if unknown:
+            shown = ", ".join(unknown[:6])
+            more = f" (+{len(unknown) - 6} more)" if len(unknown) > 6 else ""
+            out.append(
+                f"⚠ link target(s) resolve to no memory in this corpus: {shown}{more} — the "
+                "[[wikilink]] was still written (a forward reference to a memory you plan to "
+                "write is legitimate), but until that memory exists the link lint reports it "
+                "as dangling. Fix the name, write the target, or drop the link."
+            )
+        return out
+    except Exception:
+        return []
 
 
 def _discover_links(
@@ -863,6 +932,21 @@ def write_memory(
             ]
     except Exception:
         pass
+
+    # RCH-10: an EXPLICIT links list is AUTHORITATIVE — but authoritative is not the
+    # same as correct. A target that resolves to nothing mints a dangling edge the
+    # corpus then carries forever, surfaced only whenever someone next runs the link
+    # lint. Reproduced live on this repo (2026-07-16): a links=["user_role"] write
+    # succeeded clean and the dangle was found hours later in a sleep report.
+    # WARN, never block (RCH-9's discipline: name it, don't swallow it — and don't
+    # refuse it either, since a forward reference to a memory you intend to write next
+    # is legitimate). Discovery-path links are exempt by construction: _discover_links
+    # only ever returns corpus members, so warning there would be hippo blaming the
+    # user for its own pick.
+    if links is not None and result["related"]:
+        result["warnings"] = (result.get("warnings") or []) + _unresolvable_link_warnings(
+            result["related"], memory_dir
+        )
 
     # SEC-6: authorship is consent — fold the just-written (and just-backfilled: the
     # LAST mutation of the file in this call) bytes into the trusted-corpus consent
