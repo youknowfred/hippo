@@ -1,0 +1,378 @@
+# ============================================================================
+# hippo — Enhancement & Capability Roadmap, ROUND 3 (post-v1.16 QA sweep)
+# ============================================================================
+# The EXECUTABLE form of EXPLORATIONS3.md: the round-3 proposal catalog,
+# formalized into scoped items and work tiers. PROPOSAL-ONLY — nothing here is
+# committed work until the owner ratifies (the round-2 precedent: a draft PR
+# held for review).
+#
+# This is the THIRD enhancement train. Round-3 tiers are numbered T14-T17 and
+# use NEW namespaces (INV/SLP/JIT/EXT) so ids never collide with round 1
+# (SIG/RUL/RCL/GOV/GRW/RCH), round 2 (MSR/GRF/SEN/TMB/CLB/IOP), ROADMAP.yaml
+# (RET/GRA/LIF/CAP/INT/TEA/SEC/COR/DRM/...), or ROADMAP.v1.md.
+#
+# Grounding: the 2026-07-16 first-party QA sweep — six read-only sweep maps
+# over the whole engine (frontmatter discipline, write-path atomicity,
+# batch/except/envelope hygiene, cross-surface parity, YAML-parser parity,
+# concurrent-writer map) plus THIRTEEN reproduced-and-fixed defects
+# (COR-14..19, SEC-18/19, INT-17..19, RCH-8/9). The defect CLASSES are the
+# grounding: each tier below turns a class this sweep fixed by hand into a
+# capability that prevents, schedules, or extends what the hand-work did.
+#
+# Item shape (per the commissioning brief): id, title, rationale,
+# acceptance_criteria, risks — plus priority/effort/status for planning
+# continuity with rounds 1-2. status is uniformly `proposed`.
+#
+# Companion documents:
+#   EXPLORATIONS3.md            — the round-3 source catalog (method, cuts,
+#                                 owner decisions, ranked moves)
+#   ROADMAP.enhancements2.yaml  — round 2 (T8-T13)
+#   ROADMAP.enhancements.yaml   — round 1 (T1-T7, shipped)
+# ============================================================================
+
+meta:
+  title: hippo enhancement & capability roadmap — round 3
+  repo: youknowfred/hippo
+  authored: 2026-07-16
+  status: PROPOSED — owner review pending; no item is committed work
+  grounding: 2026-07-16 QA sweep (13 reproduced defects; 6 engine sweep maps)
+  audience: solo-dev / small-team (the same audience rounds 1-2 optimized for)
+
+tiers:
+
+  # ---------------------------------------------------------------------- #
+  # T14 — the invariants stop living in prose and start living in CI.
+  # ---------------------------------------------------------------------- #
+  - id: INV
+    tier: T14
+    name: Self-enforcing invariants
+    extends: COR-9..COR-19 + STABILITY.md + tests/
+    goal: >-
+      Eleven of the thirteen defects this round fixed violate invariants the
+      project had ALREADY stated in prose (the COR-9 one-walk rule, the
+      validate-first zero-change rule, the every-verb-on-both-surfaces rule).
+      Prose invariants decay into review-memory; this tier makes each one a
+      build-time check that fails loudly when the next module forgets.
+    items:
+
+      - id: INV-1
+        title: The verb-surface registry + parity lint (the INT-class killer)
+        priority: P1
+        effort: M
+        status: proposed
+        rationale: >-
+          INT-13, INT-14/15, INT-16, and this round's INT-17/18/19 are ONE
+          recurring bug: a verb or nudge ships terminal-first, the Desktop
+          surface dead-ends or the advice names a non-runnable command, a
+          field report arrives, an INT-id patches it. The class recurs because
+          no single artifact declares each user-facing verb's surface story.
+          Build ONE declarative registry (verb -> CLI form, MCP tool name,
+          skill routing, or explicit terminal-only-with-honest-preflight) and
+          a CI lint that cross-checks it against reality: every _DISPATCH tool,
+          every SKILL.md Desktop route, every producer/doctor nudge that names
+          a command, and the Desktop surface note itself (generated from, or
+          verified against, the registry). INT-18's `provenance --reverify`
+          and INT-19's resolve/audit lie would both have been build failures.
+        acceptance_criteria:
+          - a single committed registry (data file or module table) declares every /hippo:* verb's surface story; the lint fails when _DISPATCH, plugin/skills/*/SKILL.md routing, or the Desktop surface note disagrees with it
+          - every nudge/advice string that names a runnable command is covered by a test asserting the named form exists on the surface that renders it (the INT-18 class becomes unrepresentable)
+          - terminal-only verbs carry the honest marker in both the registry and the surface note; adding a new MCP tool without a registry row fails CI with a message naming the registry
+          - zero runtime behavior change — the registry is a build-time artifact; hooks and the server never read it on the hot path
+        risks:
+          - a hand-maintained registry can itself drift; mitigate by DERIVING the tool list from _DISPATCH and the skill list from the skills dir, keeping only per-verb surface intent as human-authored
+          - over-pinning nudge wording makes copy edits noisy; lint on named-command existence, not on prose
+
+      - id: INV-2
+        title: Write-discipline lint — corpus writes go through the atomic/COR-9 primitives, mechanically
+        priority: P1
+        effort: S
+        status: proposed
+        rationale: >-
+          COR-13 was the FIFTH hand-copied frontmatter walk; COR-14 found the
+          sixth and seventh (dream_generate), and COR-18 found eleven plain
+          open("w") corpus writers after the shared atomic primitive existed.
+          Greps found them this round; a checked-in AST/call-site lint finds
+          them forever: no `open(..., "w")` whose target is a corpus/registry
+          path outside memory/atomic.py (explicit, commented allowlist for the
+          genuinely non-corpus sites), and no new frontmatter insertion/strip
+          walk outside provenance's COR-9 primitives.
+        acceptance_criteria:
+          - a tests/ lint walks plugin/memory/ ASTs and fails on any write-mode open() call site not in the allowlist, with a message naming write_text_atomic and the COR-9/COR-18 rationale
+          - the allowlist is explicit, per-site, and commented; removing a fixed site from the allowlist keeps the suite green (proving the sites stayed clean)
+          - a fixture module reproducing the COR-14 shape (ad-hoc metadata insert) fails the lint in a self-test
+        risks:
+          - AST heuristics can false-positive on dynamic paths; keep the check allowlist-shaped (fail-closed, human adds a justified exemption) so a false positive costs one comment line, not a silent pass
+
+      - id: INV-3
+        title: Crash-fault harness + a published crash-safety contract
+        priority: P2
+        effort: M
+        status: proposed
+        rationale: >-
+          SEC-19/COR-17/COR-18 fixed torn-write windows found by hand-reasoning
+          over write sequences. The fix pattern is now uniform (unique-tmp +
+          os.replace; two-write rollbacks), so the guarantee is testable as a
+          CLASS: a parametrized fault-injection lane that tears EVERY atomic
+          call site (monkeypatched primitive) and kills subprocesses mid-verb
+          (extract/install/update/build_index), asserting the documented
+          end-state — byte-intact-or-byte-complete, rolled back, or loudly
+          detected; never silent inconsistency. Publish the resulting matrix in
+          STABILITY.md as a crash-safety contract, which is a real
+          differentiator for a tool whose pitch is "your memory is ordinary
+          markdown in git and it will not corrupt itself".
+        acceptance_criteria:
+          - an in-process fault lane iterates registered atomic-write call sites, tearing each once; every site's post-state matches its declared class (intact / rolled-back / detected) — a new unregistered writer fails the lane
+          - a small subprocess lane kill -9s pack_extract and build_index mid-write and asserts the recovery story (re-run heals or refuses with the documented message)
+          - STABILITY.md gains a crash-safety section derived from the matrix; the section is asserted against the registered classes so docs and tests cannot drift
+        risks:
+          - subprocess kill timing is inherently racy; keep the deterministic in-process tears as the gate and the kill lane as slow/marked, never a required check on timing alone
+
+      - id: INV-4
+        title: resolve + audit reach the second surface (the two live dead-end nudges)
+        priority: P2
+        effort: M
+        status: proposed
+        rationale: >-
+          INT-19 made the surface note honest ("terminal-only for now") — the
+          honest note still routes two LIVE nudges into a stop: the
+          contradiction-inbox producer points at /hippo:resolve and the
+          old-invalidation horizon at /hippo:audit, and Desktop has no path.
+          These two (not all seven terminal-only verbs) earn tools now because
+          hooks actively route users to them. resolve maps cleanly onto the
+          reconsolidate tool's per-item shape (list pairs -> per-pair verdict:
+          keep-one/scope-both/merge/not-conflicting); audit's judgment stays
+          agent-driven, so its tool is the report/material producer (the
+          consolidate-skill pattern), never an auto-fixer.
+        acceptance_criteria:
+          - a resolve tool lists unresolved contradicts pairs and applies ONE per-pair human verdict per call (per-item by construction, inv4); nothing auto-picks winners
+          - an audit tool returns the ranked report material read-only; the skill drives judgment on both surfaces
+          - both nudges name the tool on Desktop (via INV-1's registry) and the terminal form in a terminal; the surface note's terminal-only list shrinks by exactly these two
+          - SEC-1 gating identical to the pack tools (_pack_gate's one-definition pattern)
+        risks:
+          - resolve verdicts write corpus files (supersede edges, invalid_after) — reuse the COR-16 rollback discipline for its two-write verdicts rather than inventing a third chain shape
+
+  # ---------------------------------------------------------------------- #
+  # T15 — the sleep gets a schedule (maintenance stops depending on memory).
+  # ---------------------------------------------------------------------- #
+  - id: SLP
+    tier: T15
+    name: Scheduled sleep — the maintenance cadence
+    extends: consolidate + dream + doctor + capture + RCH-9
+    goal: >-
+      hippo's biomimetic story says consolidate/dream are sleep — but today
+      sleep happens only when the human remembers to invoke it, so queues
+      deepen exactly on the projects that need memory most (this repo woke to
+      21 stale memories and 11 pending captures). Give the maintenance loops a
+      cadence: one headless runner, one morning report, zero corpus writes by
+      default, per-item consent preserved by construction.
+    items:
+
+      - id: SLP-1
+        title: The sleep runner + morning report (read-only sweep, one artifact)
+        priority: P1
+        effort: M
+        status: proposed
+        rationale: >-
+          One entrypoint (python -m memory.sleep) that runs the existing
+          read-only producers off-session — doctor's quick checks, the
+          capture-queue triage listing, the reconsolidation worklist, dream
+          --dry-run discovery, link lint — and renders ONE morning-report
+          artifact (markdown in the derived telemetry dir, printable to
+          stdout) where every section names its per-item drain verb per
+          surface (via INV-1's registry). The report is a proposal queue,
+          never a write: the human drains it in their next interactive
+          session with the existing per-item verbs. Dogfood: this repo's own
+          backlog is the acceptance fixture.
+        acceptance_criteria:
+          - the runner performs ZERO corpus writes and ZERO trust-registry writes (assertable — corpus fingerprint byte-identical before/after)
+          - it runs headless from a bare venv (no CLAUDE_PLUGIN_DATA required beyond bootstrap's), degrades per-section on missing substrate, and honors RCH-9 (a failed section is named in the report, never dropped)
+          - the report deduplicates against SessionStart (shared producers, a sleep profile) so the same item never nags twice in two dialects; capture snooze is honored
+          - empty corpus / empty queues produce a one-line "nothing to do" report, not silence and not noise
+        risks:
+          - a second rendering of the same worklists can drift from SessionStart's wording; mitigate by REUSING the producer functions with a profile flag, never forking the text
+
+      - id: SLP-2
+        title: Scheduler recipes + report-level snooze (explicit install, never automatic)
+        priority: P2
+        effort: S
+        status: proposed
+        rationale: >-
+          The runner is only useful on a schedule, and scheduling is
+          machine-specific. Ship recipes (launchd/cron/Claude scheduled-task
+          templates) behind an explicit `--print-schedule` (prints, never
+          installs), plus report-level snooze so a vacation does not build a
+          guilt pile. The explicit-install posture mirrors bootstrap's
+          consent style: hippo never writes system state without the human
+          running the printed command.
+        acceptance_criteria:
+          - --print-schedule emits a copy-pasteable launchd plist / crontab line / scheduled-task JSON for THIS machine's venv and repo paths; nothing is installed by hippo itself
+          - a snoozed report (hippo sleep --snooze Nd) stays silent for N days and says so once when it resumes
+          - docs cover the failure modes (machine asleep, venv moved, repo moved) and each failure lands in the NEXT report rather than vanishing (RCH-9 discipline)
+        risks:
+          - headless environments differ wildly (PATH, keychain, sandbox); keep the runner dependency-free beyond the venv and make every recipe print-only so the human owns the install
+
+      - id: SLP-3
+        title: Tier-A-in-sleep (opt-in) — reversible dream edges may apply overnight
+        priority: P3
+        effort: S
+        status: proposed
+        rationale: >-
+          DRM-2 ratified reversible autonomy for Tier-A edges (auto-apply +
+          notify-with-undo + the aging firewall). Sleep is the natural home
+          for exactly that contract — but only as an OPT-IN (flag default
+          OFF), because unattended writes are a posture change even when
+          reversible. With the flag on, a scheduled pass may apply capped
+          Tier-A edges; the morning report LEADS with what applied and the
+          one-line undo; everything else stays proposal-only.
+        acceptance_criteria:
+          - default OFF behind an explicit env/config flag; OFF means SLP-1's zero-write guarantee holds byte-for-byte
+          - ON applies at most the existing per-pass Tier-A cap, stamps ledger provenance origin=sleep:<ts>, and the morning report's first line is the undo recipe
+          - the aging firewall and ping-pong guard apply unchanged; a sleep-applied edge is indistinguishable from an interactive Tier-A apply to every downstream consumer
+        risks:
+          - autonomy creep is the whole risk; the mitigations ARE the acceptance criteria (default off, cap, undo-first reporting), and the owner decision to ship it at all is explicitly flagged in EXPLORATIONS3
+
+  # ---------------------------------------------------------------------- #
+  # T16 — recall gains the action moment (procedural memory fires at the act).
+  # ---------------------------------------------------------------------- #
+  - id: JIT
+    tier: T16
+    name: Point-of-action recall
+    extends: SIG-1 + rules_plane + the PostToolUse outcome hook
+    goal: >-
+      Every recall moment hippo has is prompt-shaped (SessionStart context,
+      UserPromptSubmit injection). But the moment a feedback lesson matters
+      most is the ACT — the first edit to the file the lesson is about,
+      possibly an hour after injection fell out of the context window.
+      Procedural memory fires at the action; give hippo that moment, bounded
+      and boring: no LLM, no rebuild, first-touch-only.
+    items:
+
+      - id: JIT-1
+        title: First-touch reminder — one bounded line when an edit touches a cited file
+        priority: P2
+        effort: M
+        status: proposed
+        rationale: >-
+          The PostToolUse hook already fires on Edit/Write (it records
+          outcome telemetry). Add a read-side lane: on the FIRST touch of a
+          file per session, if that file is cited by a steer:pin or
+          feedback-type memory, emit one line — "memory <name>: <description>"
+          — and nothing else, ever again that session. The reverse index
+          (cited_paths -> memories) already exists in the links/stale caches,
+          so the lookup is O(1) reads of derived files. This is the dynamic
+          twin of promote-rule's static glob rules, for the lessons that never
+          got promoted.
+        acceptance_criteria:
+          - fires at most once per (file, session); emits nothing for project/reference types; hard cap ~200 chars per line and ~3 lines per session
+          - suppressed when the same memory already surfaced this session (recall_events check) — never a duplicate of an injection the model just saw
+          - measured hook overhead on a corpus of 500 memories stays under a stated budget (derived-cache reads only; no index rebuild, no dense model, no LLM)
+          - the line names the memory so /hippo:why can explain it (glass-box discipline)
+        risks:
+          - nag fatigue is the product risk; first-touch-only + type-scoping + the session cap are the mitigations, and the item ships with a kill switch env var
+          - PostToolUse latency budgets are harness-imposed; the measurement AC gates shipping
+
+      - id: JIT-2
+        title: Touch-grain outcome evidence (sharper graduation joins)
+        priority: P3
+        effort: S
+        status: proposed
+        rationale: >-
+          outcome.injection_hits joins at session grain (memory injected AND
+          some cited file touched that session) — the coarseness limits
+          DRM-6 draft graduation and RET-14's prior. The JIT-1 lane sees the
+          exact (memory, file, touch) coincidence; record it as touch-grain
+          outcome rows so graduation evidence and the outcome prior sharpen
+          without any new always-load bytes.
+        acceptance_criteria:
+          - outcome rows gain an optional touch-grain provenance field; existing session-grain consumers are unchanged (additive schema)
+          - injection_hits can be computed at touch grain behind a flag and compared against session grain on this repo's own telemetry (report-only)
+          - telemetry volume stays bounded (per-session cap on recorded touches)
+        risks:
+          - a sharper join can UNDER-count (memory helped the plan, the edit landed elsewhere); keep session-grain as the default and touch-grain as evidence-plus, never evidence-instead
+
+  # ---------------------------------------------------------------------- #
+  # T17 — memory reaches beyond the session (PRs, sibling repos, questions).
+  # ---------------------------------------------------------------------- #
+  - id: EXT
+    tier: T17
+    name: Memory beyond the session
+    extends: RCH + TEA-1 + registry.py + SIG-3
+    goal: >-
+      Everything hippo knows surfaces inside a Claude session. Three cheap,
+      read-only extensions put the same knowledge where engineering actually
+      happens — code review, the other repos on this machine, and the gaps
+      the human never thinks to write down.
+    items:
+
+      - id: EXT-1
+        title: Recall for the reviewer — memories on the PR diff (CI recipe + --for-diff)
+        priority: P1
+        effort: M
+        status: proposed
+        rationale: >-
+          A PR touches files; memories cite files; nobody connects them at
+          review time. Add `recall --for-diff <range> --json` (changed files
+          -> citing memories via the existing reverse index, feedback/steer
+          types first, bounded) and a GitHub Action recipe that posts the
+          result as ONE sticky PR comment ("institutional memory on these
+          files"). Read-only, offline, zero LLM — and the first hippo surface
+          a teammate WITHOUT Claude benefits from, which is the cheapest
+          possible team-adoption wedge (CLB's review packet reviews corpus
+          changes; this surfaces corpus knowledge on CODE changes — disjoint).
+          Dogfood: enable on this repo; the QA-sweep memories would have
+          annotated this very PR.
+        acceptance_criteria:
+          - recall --for-diff resolves a git range to changed paths and returns citing memories with staleness flags, JSON and text forms; empty result -> exit 0, no comment
+          - the Action recipe posts/updates ONE sticky comment (never a comment per push), caps items, and marks stale memories as such — a stale lesson is flagged, not asserted
+          - the lane is read-only against the corpus and runs on the vendored/BM25 path (no dense model in CI); same-repo PRs only by default (fork-token posture documented)
+          - no new disclosure surface — the comment renders only text already committed to the repo's own corpus (descriptions + names), and the recipe's docs state that boundary explicitly
+        risks:
+          - comment noise on hot files; mitigated by type-scoping, the cap, and the sticky-comment update pattern
+          - a stale memory quoted in review can mislead; the staleness flag rides every rendered row
+
+      - id: EXT-2
+        title: Cross-project promotion mining (report-only; promote stays per-item)
+        priority: P2
+        effort: M
+        status: proposed
+        rationale: >-
+          TEA-1 gave lessons a user tier and /hippo:promote lifts one memory
+          with provenance — but finding WHICH lessons deserve promotion is
+          human hunch. The projects registry already knows every corpus on
+          the machine; a report-only sweep (dream's discovery discipline,
+          across corpora) finds near-duplicate feedback/user memories
+          appearing in >=2 trusted projects and renders per-item promotion
+          proposals routed through the EXISTING promote flow. The learning
+          loop closes: a lesson learned twice is a lesson about the person,
+          not the project.
+        acceptance_criteria:
+          - the sweep reads ONLY corpora whose repos are SEC-1 trusted (untrusted corpora contribute nothing, not even names) and never writes anything anywhere
+          - proposals carry both sources with provenance (repo@sha per side) and route each acceptance through /hippo:promote unchanged (per-item, origin-stamped)
+          - near-duplicate detection reuses the existing dedup machinery (check_candidate/dream cofire), not a new similarity stack; empty-norm — most runs propose nothing
+          - dogfooded across this machine's own corpora before proposing to users
+        risks:
+          - cross-corpus reads widen the blast radius of one poisoned corpus; the trusted-only gate is load-bearing and tested, and output renders descriptions as quoted data (SEC-5 discipline)
+
+      - id: EXT-3
+        title: The interview loop — consolidate asks up to three grounded questions
+        priority: P3
+        effort: S
+        status: proposed
+        rationale: >-
+          hippo tells, but never asks. The blind-spot backlog (SIG-3), the
+          contradiction inbox, and expiring drafts are all machine-detected
+          GAPS with no encode-side loop: the human never thinks to write the
+          missing memory. Give consolidate an "asks" step: at most three
+          template-rendered questions per session, each citing its evidence
+          verbatim ("recall abstained 4x on 'how do we deploy staging' — want
+          to write that down?"), each answer routing through the existing
+          check-first new_memory / resolve flow, each decline REMEMBERED so
+          nothing re-asks. Zero LLM on the default path (templates over
+          existing signals); the optional LLM lane rides the existing
+          hippo-llm.json opt-in.
+        acceptance_criteria:
+          - at most 3 questions per consolidate session, each citing its source signal verbatim; zero questions when the queues are empty (empty-norm)
+          - a decline is persisted (telemetry, not corpus) and that question never re-renders; a "later" is a snooze
+          - every accepted answer routes through the existing per-item write verbs — the asks step itself writes nothing
+        risks:
+          - annoyance is the failure mode of every elicitation system; the hard cap, decline memory, and empty-norm posture are the design, and the item dies in review if dogfooding says it nags
