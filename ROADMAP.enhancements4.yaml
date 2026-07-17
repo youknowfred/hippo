@@ -1,0 +1,1477 @@
+# ============================================================================
+# hippo — Enhancement & Capability Roadmap, ROUND 4 (post-v1.22.0) — PROPOSAL
+# ============================================================================
+# The EXECUTABLE form of EXPLORATIONS4.md: the round-4 adversarially-vetted
+# enhancement catalog (13 items -> 13 RESHAPE, zero KILL), formalized into
+# fully-scoped, dependency-sequenced items and work tiers.
+#
+# This is the FOURTH enhancement train. Round-4 tiers are numbered T18-T21 and
+# use NEW namespaces (FLT/HYG/PUB/EVD) so ids never collide with round 1
+# (SIG/RUL/RCL/GOV/GRW/RCH), round 2 (MSR/GRF/SEN/TMB/CLB/IOP), round 3
+# (INV/SLP/JIT/EXT), ROADMAP.yaml (RET/GRA/LIF/CAP/INT/TEA/SEC/...), or
+# ROADMAP.v1.md.
+#
+# STATUS: every item and tier below is `proposed` — vetted, NOT scheduled.
+# Which tiers to build, in what order, IF ANY, is the owner's scheduling call;
+# four owner decisions (Q1-Q4) are carried PENDING (ED4R-1) and gate the
+# relevant halves. Nothing in this file resolves them.
+#
+# Continuity across sessions lives in TWO synced places (same protocol as
+# rounds 1-3):
+#   1. This file's per-item / per-tier `status:` — the durable progress LEDGER.
+#   2. A chain of CAPSTONE MEMORY files (`hippo-enh-t<N>-*`, continuing the
+#      round-1..3 chain) — the narrative HANDOFF (session_protocol below).
+#
+# Companion documents:
+#   EXPLORATIONS4.md           — the round-4 source catalog (draft 2026-07-16,
+#                                vetted 2026-07-17; its §6 records the outcome)
+#   ROADMAP.enhancements.yaml  — round-1 train (T1-T7, shipped)
+#   ROADMAP.enhancements2.yaml — round-2 train (T8-T13, shipped + released
+#                                v1.20.0-v1.22.0)
+#   ROADMAP.enhancements3.yaml — round-3 train (T14-T17, shipped + released
+#                                v1.18.0/v1.19.0)
+#   ROADMAP.yaml / ROADMAP.v1.md — the engine + launch trains
+# ============================================================================
+
+meta:
+  title: hippo enhancement & capability roadmap — round 4
+  repo: youknowfred/hippo
+  authored: 2026-07-17
+  baseline_ref: 81177ba          # origin/main = v1.22.0 "Good fences, open doors" (PR #75)
+  baseline_state: >-
+    corpus_format 5, index SCHEMA_VERSION 7, citation derivation 4 (rederive
+    lane mid-flight: this machine's corpus .format still records 3), 17 skills,
+    suite ~2,704; curated public subset = 15 committed files under
+    .claude/memory (PR #67). Rounds 1-3 ALL SHIPPED AND RELEASED: round 1
+    T1-T7; round 3 T14-T17 (v1.18.0/v1.19.0); round 2 T8-T13 executed LAST and
+    released as v1.20.0 (T10 Sentinel), v1.21.0 (T11), v1.22.0 (T12+T13). The
+    EXPLORATIONS4 draft (2026-07-16, PR #69) predates PRs #70-#75 — its
+    round-2-still-proposed framing is corrected here and in its own §6. Live
+    machine state at authoring (2026-07-17, reproducible read-only): 38-item
+    reconsolidation worklist (26-entry stale.json), 8 pending captures, 3
+    contradiction pairs, 5 merge-digest pairs; 671 reconsolidation verdicts in
+    the week's ledger; 18 of 24 ~/.claude/projects memory symlinks dangling;
+    usage_aggregates 115 sessions / 49 memories (the MSR-5 lived-in doctor
+    warn fires today); touch grain 0/0 vs session grain 29/143.
+  source: >-
+    Formalized from EXPLORATIONS4.md via the 2026-07-17 adversarial vetting at
+    81177ba: a 4-namespace read-only grounding fan-out (every claim
+    file:symbol-verified against the worktree), then 3-lens adversarial
+    skeptic panels per item (signal-existence/autonomy, user-value,
+    fit/redundancy), then judge synthesis. All 13 items survived as RESHAPE
+    (zero KILL); every reshape directive, premise correction, and severed
+    autonomous fragment is carried in-item below. The signal bar held: every
+    item's source.signal cites a PR, a capstone memory, or a report
+    reproducible read-only on this machine.
+  method: >-
+    Items carry the vetters' reshape guidance in `proposal` and the verified
+    seams in `implementation_notes`. The governing law is decisions.ED-1
+    (detection-first, carried verbatim): ship the legible detection /
+    human-in-the-loop half; every autonomous fragment is severed and deferred
+    behind a DATED OWNER DECISION, never a metric-proxied gate. Round 4 adds
+    its own spine, ED4R-2: no new standing artifact without a NAMED READER —
+    every artifact this round proposes names its consumer in the same item.
+    Four owner decisions (Q1-Q4) are PENDING (ED4R-1) and gate the relevant
+    halves; this file does NOT resolve them.
+  audits:
+    - date: 2026-07-17
+      scope: >-
+        Authored same-day from the vetting synthesis; the tree did not move
+        during authoring (baseline_ref 81177ba throughout). Premise corrections
+        baked into items rather than appended: round-2 status (shipped +
+        released, not proposed); the draft's two unsupported FLT collision
+        exhibits ("23 baselines orphaned / cost real cleanup" contradicts the
+        t16 capstone's own "cherry-picked cleanly"; "v1.19.0 nearly cut twice /
+        90 seconds" has no record anywhere) replaced with the two DOCUMENTED
+        events the draft omitted (the qa-sweep pytest pollution; the T8
+        stranding, "the 4th clone collision"); the near-empty
+        orphaned-derived-dirs class replaced by the ~/.claude/projects symlink
+        farm; touch-grain 0/0 established as MECHANICAL (5-release live-hook
+        lag + worktree path-prefix mismatch); EVD-3 premise-weak (zero declines
+        ever recorded); queue counts refreshed 20 -> 26/38. One internal
+        inconsistency in the vetting synthesis resolved here: PUB-2 and PUB-3
+        each listed the other as an in-round dependency (a cycle); per the
+        synthesis's own build order (PUB-3-view -> PUB-2-report -> PUB-1-verb),
+        PUB-3's back-reference was dropped — PUB-3 is upstream, PUB-2 consumes
+        its heals-N column. implementation_notes are BINDING but SNAPSHOT
+        guidance: verify each named symbol against the live tree before coding,
+        then follow the note unless the tree contradicts it (the repo is the
+        source of truth) and correct it in-file.
+  scoring:
+    priority:
+      P0: broken promise / unblocks a tier — do first in its tier
+      P1: core to the tier's done_means
+      P2: quality and leverage
+      P3: opportunistic or gated on a proving condition
+    effort: {S: under a day / one PR, M: one to three days, L: multi-day / multi-PR}
+  status_legend:
+    proposed: vetted RESHAPE, awaiting owner ratification of scope (ED4R-1) — nothing is scheduled
+    planned: ratified into a scheduled tier, not started
+    in_progress: an agent session is actively implementing it
+    done: acceptance_criteria met, suite green, invariants preserved
+    deferred: blocked or descoped this cycle (reason recorded in the capstone)
+
+north_star: >-
+  Rounds 1-3 are shipped and RELEASED through v1.22.0 — the engine is measured,
+  defended, team-ready, and reaches beyond the session. Living with all of it
+  for one intensive week exposed the three assumptions round 4 attacks: hippo
+  assumes ONE SESSION (the machine is multi-session — four documented
+  same-clone collisions on 2026-07-16 alone), ONE AUDIENCE (the corpus is
+  two-audience — 15 committed files ride in git while 34 memories stay local,
+  a posture with zero tooling), and WRITE-ONLY EVIDENCE (touch rows, interview
+  declines, and 671 reconsolidation verdicts a week accumulate in ledgers
+  nothing reads). Make the fleet visible, give machine state a lifecycle, give
+  the two-audience corpus a per-item publish lane, and give every write-only
+  ledger a named reader — all detection-first (ED-1), print-only wherever an
+  act would touch git or system state, gated on four PENDING owner decisions
+  (ED4R-1), bound by the anti-dark-reservoir law (ED4R-2), with fleet
+  visibility never becoming coordination (ED4R-3) — and without touching
+  default ranking (ED-2: salience stays owner-decided-OFF; EVD-4 builds only
+  its evidence).
+
+# ---------------------------------------------------------------------------
+# Invariants every item must preserve (carried VERBATIM from rounds 1-2).
+# An item that violates one is wrong, not bold. `invariant_note` names the
+# guard when an item sits in tension.
+# ---------------------------------------------------------------------------
+guiding_invariants:
+  - inv1: markdown-in-git is the single source of authority; index/telemetry/
+      graph/rules-derived caches are derived, rebuildable, gitignored.
+  - inv2: hooks always exit 0, never download, never block; recall failures
+      degrade silently at the hook boundary but become LOUD at doctor/SessionStart.
+  - inv3: degradation must be legible — every silent-fallback path gains a
+      user-visible signal (nudge/doctor/producer).
+  - inv4: destructive/corrective writes are per-item and agent-gated; no bulk
+      autonomous sweeps; writes into the rules plane are reviewable per-item diffs.
+  - inv5: one canonical name/path per concept; renames and schema changes are
+      clean breaks with a version bump, not compat shims.
+  - inv6: the UserPromptSubmit hot path stays PURE RETRIEVAL — no LLM calls, no
+      network, no consolidation work per-prompt.
+
+# ===========================================================================
+# SESSION PROTOCOL — identical discipline to rounds 1-3; the capstone chain
+# continues (hippo-enh-t18-* onward).
+# ===========================================================================
+session_protocol:
+  purpose: >-
+    Multi-session, multi-agent implementation with no loss of context. This
+    file's `status:` fields are the source of truth for WHAT is done; the
+    capstone memory chain (hippo-enh-t18-* onward, continuing the round-1..3
+    chain) is the source of truth for the STORY (decisions, gotchas, next).
+  pick_up: |
+    - LAW ZERO for round 4: confirm the tier is RATIFIED before selecting
+      items. This file ships with every status `proposed` and Q1-Q4 PENDING
+      (ED4R-1); a tier whose gate names an unresolved owner decision is not
+      startable. Ratification and each Q1-Q4 verdict are dated owner entries.
+    - Read MEMORY.md; open the most recent hippo-enh-t* capstone to learn the
+      active tier, what last shipped (with commit shas), and the next item.
+    - Read this file; select the next item whose status is planned and all of
+      whose dependencies are satisfied. A dependency id that is NOT a round-4
+      item (not in workstreams below) is CROSS-FILE — every cross-file dep
+      named in this round was verified SHIPPED at 81177ba (RCH-11 PR #65,
+      SEN-5 T10, SLP-2 T15, SEC-6 v0.8.0 spine, SEC-8 v0.8.0 tail, RCH-5,
+      CLB-1/CLB-2/CLB-3 PR #74, IOP-3 PR #75, EXT-1/EXT-3 T17, TMB-1 PR #73,
+      JIT-2 T16, MSR-5 PR #70, MSR-6 PR #68, RET-14 v1.12.0, LIF-6); re-confirm
+      on the live tree anyway.
+    - READ THE ITEM'S implementation_notes AND ITS TIER'S audit_note FIRST.
+      They cite verified seams (file:symbol) as of baseline_ref 81177ba. VERIFY
+      EACH NAMED SYMBOL STILL EXISTS (the tree WILL have moved by build time);
+      follow the note unless the live tree contradicts it, and correct it
+      in-file as part of your commit if it does.
+    - Sanity-check reality (git log, run the suite) before coding.
+  execute: |
+    - Implement ONE item (or a coherent slice) per RELEASING.md — one
+      id-prefixed commit (e.g. "FLT-1: ..."), full suite green after each.
+    - Preserve every guiding_invariant. If an item's invariant_note names a
+      guard you cannot honor, set status to deferred, record why in the
+      capstone, and stop — do not weaken an invariant to land a feature.
+    - An item half gated on Q1-Q4 must NOT be built before the dated owner
+      decision lands; record the decision on the item when it does (ED4R-1).
+    - Add tests pinning each acceptance_criterion (hermetic per-module
+      convention; negative-capability pins where an invariant forbids a
+      primitive; byte-identity pins where an additive field must not perturb
+      existing output).
+    - Flip item status planned -> in_progress -> done (or deferred).
+  verify: |
+    - Every acceptance_criteria demonstrably met; full suite green; no
+      invariant regressed; any new silent-fallback path made legible at
+      doctor/SessionStart.
+    - NO round-4 item is expected to bump corpus_format (5 at baseline) or
+      index SCHEMA_VERSION (7) — every artifact here is derived/gitignored,
+      display-only, print-only, or additive/absence-emits-nothing. If yours
+      needs a bump, re-read the item: it is probably out of scope (ED-4).
+  capstone:
+    when: >-
+      ALWAYS at the end of a session that touched this roadmap, and ALWAYS at
+      tier completion. A multi-session tier gets a progress capstone each
+      session.
+    do: |
+      - Write hippo-enh-t<N>-<slug>.md in the project memory dir
+        (capstone_template below); continue the round-1..3 chain (link the
+        previous capstone).
+      - Refresh its one-line MEMORY.md pointer (supersede the prior same-tier
+        line).
+      - Update this file's item + tier status to match what shipped.
+      - Link the new capstone to [[hippo-enh-exploration-r4]] and the prior
+        capstone.
+    rationale: >-
+      The next session may be a different agent with none of this context. The
+      capstone + status fields are the entire handoff. Under-recording is the
+      main failure mode — write the capstone even if the session shipped
+      nothing.
+  capstone_template: |
+    ---
+    name: hippo-enh-t<N>-<slug>
+    description: <tier theme> — shipped <X/Y> items; next: <next item id>
+    metadata:
+      type: project
+    ---
+    Tier T<N> (<target_version>, "<theme>") — session <YYYY-MM-DD>.
+    SHIPPED THIS SESSION: <item-id — one-liner — commit sha> (repeat).
+    TIER STATE: <n/total done>; done_means <met | not yet: what remains>.
+    ENGINE STATE: suite <green | N failing>; corpus_format <n>; index schema <n>;
+      re-bootstrap <yes/no>.
+    DECISIONS / GOTCHAS: <invariant guard applied, premise correction vs the
+      note, any dated owner decision recorded on an item (esp. Q1-Q4)>.
+    NEXT: <next unblocked item id + why>.
+    DEFERRED / BLOCKED: <item ids + reason (esp. a PENDING Q1-Q4 gate)>.
+    Related: [[hippo-enh-exploration-r4]], [[hippo-enh-t<N-1>-<slug>]].
+
+# ===========================================================================
+# WORKSTREAMS — fully-scoped enhancement items, grouped by area, sequenced into
+# tiers by the release_train below. `extends` names the shipped work each
+# builds on. `source.signal` carries the vetting's signal-bar citation.
+# ===========================================================================
+workstreams:
+
+  # ---------------------------------------------------------------- FLT ---
+  - id: FLT
+    name: The fleet lane (same-clone session visibility)
+    extends: session_start producers + the T16 JIT touch lane (outcome/PostToolUse)
+    goal: >-
+      Sessions sharing a clone become visible to each other — a bounded
+      per-session presence doc, a moved-under-me tripwire, and worktree-first
+      guidance at the first mutating act. Detection and one bounded line only:
+      no lock, no daemon, no coordination protocol (ED4R-3). The whole tier is
+      gated on owner decision Q1 (may hippo write the presence file); FLT-1 is
+      the keystone — FLT-2's baseline and FLT-3's presence read both live in
+      its per-session doc.
+    items:
+
+      - id: FLT-1
+        title: Session presence file (per-session doc — the fleet keystone, Q1-gated)
+        priority: P1
+        effort: M
+        status: proposed
+        source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "4 documented same-clone collisions on 2026-07-16: qa-sweep capstone (pytest pollution during v1.17.0 release validation), t16 capstone (branch pointer repositioned by the concurrent v1.18.0 release), PR #62 body ('the third shared-clone collision today'), t8-measurement capstone ('the 4th clone collision') + hippo-branch-cleanup-2026-07-16 Finding 2"}
+        problem: >-
+          No presence/heartbeat artifact exists at 81177ba (grep verified: only
+          the packs lockfile and unrelated prose), yet concurrent same-clone
+          sessions are the normal case on this machine and collided in FOUR
+          documented multi-session events on 2026-07-16 alone. Sessions
+          discover each other by reflog forensics (the branch-cleanup
+          capstone's explicit lesson) or luck. A SEPARATE 5-session
+          cwd-reset-trap class (T10/T12/T13 capstones) is adjacent, not
+          identical — no second session is involved there. PREMISE FIX carried
+          from vetting: the draft's other two exhibits are unsupported — "23
+          baselines orphaned / cost real cleanup" contradicts the t16
+          capstone's own "cherry-picked cleanly" text, and "v1.19.0 nearly cut
+          twice / 90 seconds" has no record in any capstone, PR body, or
+          comment. Neither may be cited as signal.
+        proposal: >-
+          New prefix-named sibling module `presence.py` (inv5: one canonical
+          concept name — this is it): write a per-session doc
+          <telemetry_dir>/presence/<safe(session_id)>.json = {session_id,
+          branch, head, ts} at SessionStart from the existing mark_session
+          block, via atomic.write_json_atomic under
+          provenance.ensure_self_ignoring_dir. Per-session docs, NOT a shared
+          file — telemetry.py documents the single-writer assumption a shared
+          file would violate; jit.py's per-session state dir is the shipped
+          multi-writer-safe pattern (mtime-TTL + count-capped oldest-first
+          prune that already deletes other sessions' expired docs;
+          fresh-defaults-on-corruption; never raises). The SessionEnd hook
+          clears the session's own doc; crashes age out via TTL. ONE new
+          producer in session_start.PRODUCERS (adjacency pins respected):
+          empty-norm — emits NOTHING when no OTHER fresh entry exists,
+          otherwise ONE bounded line naming the other session's branch and
+          age. The doc's branch/head fields double as FLT-2's baseline; its
+          presence dir is FLT-3's read. Scope stated explicitly: presence is
+          per-WORKING-TREE (default_telemetry_dir) — a worktree-opened-as-
+          project session resolves its OWN telemetry dir; spanning worktrees
+          would need a git-common-dir home and is OUT OF SCOPE v1 (all four
+          documented collisions had the main clone as project root, so
+          per-tree suffices). Q1 PENDING gates the whole tier — the honest
+          argument for "yes" is artifact-class parity with the episode buffer
+          and jit state: all three are {gitignored, bounded, self-aging,
+          absence-emits-nothing}.
+        acceptance_criteria:
+          - "presence logic lives in a NEW sibling presence.py (new-module cap 900); session_start.py and telemetry.py receive wiring only (both sit near their pinned size caps)"
+          - "per-session doc written via atomic.write_json_atomic under provenance.ensure_self_ignoring_dir; mtime-TTL + count-capped oldest-first prune (the jit.py pattern, incl. pruning other sessions' expired docs); SessionEnd clears the session's own doc; fresh-defaults-on-corruption, never raises"
+          - "ONE new producer registered in session_start.PRODUCERS respecting the adjacency pins (tests/test_session_start.py:625,979); empty-norm — no other fresh session emits NOTHING; otherwise exactly ONE bounded line naming the other session's branch and age"
+          - "MSR-6 compatibility holds automatically — the producer line lands in the injection-cost ledger as a label row; nothing aggregates per-memory anywhere (the shipped AST pin is untouched)"
+          - "presence scope is per-working-tree and DOCUMENTED as such — a worktree-opened-as-project session resolves its own telemetry dir; the git-common-dir spanning design is explicitly out of scope v1"
+          - "gated on Q1 (ED4R-1) — no presence write ships before the dated owner decision; FLT-2/FLT-3 build only after it lands"
+        dependencies: []               # none cross-file (RCH-11-adjacent); tier keystone
+        invariant_note: >-
+          inv1 — gitignored derived state, the same artifact class as the
+          episode buffer + jit state; that parity is the ground Q1 is argued
+          on. inv6 — SessionStart-only write, per-prompt hot path untouched.
+          ED4R-3 — no lock, no daemon, no mutual exclusion; a file only ever
+          read for one line of legibility.
+        implementation_notes: >-
+          Seams (verified at 81177ba): session_start.py:main mark_session
+          block (L1643-1653; _read_hook_payload L1556 supplies source +
+          session_id — COR-6 threads the harness id, so presence docs key on
+          it directly, no shared token), session_start.PRODUCERS (L1285-1311;
+          adjacency pins tests/test_session_start.py:625,979 — NB CLB-4's
+          merge_digest joined PRODUCERS after floor_change in PR #74, so the
+          registration landscape moved post-draft; re-verify), telemetry.py:
+          default_telemetry_dir (L76) + COR-6 comment (L130-136) +
+          single-writer note (L190-193), jit.py:_state_path/_write_state/
+          _prune_state_dir (L245-302) — the per-session-doc pattern to mirror
+          (MAX_STATE_FILES=32), atomic.py:write_json_atomic +
+          provenance.ensure_self_ignoring_dir (SEC-3), plugin/hooks/
+          memory_session_start.sh + memory_session_end.sh (the graceful-clear
+          seam), tests/test_module_size.py (PLUGIN_CAP=900; telemetry.py and
+          session_start.py are grandfathered near their caps — wiring only).
+          Fleet state itself rots: the stale fix-worklist-rebounce worktree
+          (two releases behind) lingering in `git worktree list` is the
+          in-house proof that TTL discipline is mandatory, not optional.
+
+      - id: FLT-2
+        title: Moved-under-me tripwire (HEAD/branch baseline vs the presence doc)
+        priority: P2
+        effort: M
+        status: proposed
+        source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "hippo-enh-t16-jit capstone (enh-t16-jit branch pointer repositioned by the concurrent v1.18.0 release) + hippo-branch-cleanup-2026-07-16 Finding 2 (the 14:21 checkout switch under the live T8 session; t8 capstone calls it 'the 4th clone collision of 2026-07-16')"}
+        problem: >-
+          Nothing detects a moved checkout or repositioned branch today — grep
+          over session_start.py + doctor_checks_* finds only the
+          _recent_merge_signals merge probes and diff-vs-HEAD changed-paths;
+          no HEAD-sha/branch-position baseline is recorded or compared
+          anywhere. The documented signatures this closes: T16 (branch pointer
+          repositioned by a concurrent release) and T8/branch-cleanup (the
+          14:21 checkout switch under a live session, which survived only
+          because MSR-2 had committed 60 seconds earlier). Do NOT lean on the
+          draft's "v1.19.0 nearly cut twice" exhibit — unverifiable, no record.
+        proposal: >-
+          Compare `git symbolic-ref --short HEAD` + `git rev-parse HEAD`
+          against the session's OWN FLT-1 presence doc {branch, head}; on
+          mismatch-without-a-matching-self-update emit ONE line, then update
+          the doc so the tripwire fires once per move. The cheap re-check
+          moment is the existing PostToolUse spawn (outcome.record_from_payload
+          already runs per file-touch with session_id; two git reads + one
+          JSON read fit the pinned 50ms budget), with next-SessionStart as the
+          fallback for touchless sessions; the per-prompt hot path stays
+          untouched (inv6). Detection-not-accusation is part of the spec:
+          hooks never see Bash-mediated git, so the session's OWN checkout or
+          commit also moves HEAD — the line is neutral, self-silencing, and
+          may quote the reflog's "checkout: moving from A to B" entry via the
+          _recent_merge_signals probe family for legibility. Recovery stays
+          human (the cherry-pick/worktree recipes the capstones already
+          teach).
+        acceptance_criteria:
+          - "SessionStart records {branch, head} in the FLT-1 presence doc; a bounded re-check on the PostToolUse spawn (next-SessionStart fallback for touchless sessions) compares live symbolic-ref + rev-parse against it"
+          - "on mismatch without a matching self-update — exactly ONE neutral line (was X@sha, now Y@sha; may quote the reflog checkout entry), then the doc updates so the tripwire fires ONCE per move"
+          - "the re-check stays inside the pinned 50ms PostToolUse budget (tests/test_scale.py:187); the UserPromptSubmit hot path gains zero new work"
+          - "phrasing is detection-not-accusation (the session's own Bash git also moves HEAD — hooks cannot see it); no lock, no block, no recovery automation — one line only (ED4R-3)"
+          - "the item's cited class is the four verified 2026-07-16 events; the unverifiable 'nearly cut twice' exhibit appears nowhere in docs or tests"
+        dependencies: [FLT-1]          # in-round: the presence doc is the baseline carrier
+        invariant_note: >-
+          inv6 — rides the existing PostToolUse spawn, no new hook,
+          budget-pinned; corroboration is already free per-prompt (every
+          episode row carries head_commit — telemetry.py:987) but the hot path
+          gains nothing new. inv3 — a moved tree becomes legible; recovery
+          stays human. ED4R-3 binds.
+        implementation_notes: >-
+          Seams: outcome.py:record_from_payload (L60-124) + _FILE_TOOLS (L49)
+          + the single hookSpecificOutput emit (L422-429; QUA-2 — at most ONE
+          per spawn), jit.py:observe_touch (L342) fast-path discipline the
+          check must match, session_start.py:_recent_merge_signals (L556) —
+          the shipped reflog/branch probe pattern to reuse when quoting the
+          move, telemetry.py:log_episode head_commit (L982-995) +
+          reconsolidate.py:_last_session_watermark (L112) — the existing
+          head-sha consumers proving the read is cheap,
+          tests/test_scale.py:_JIT_OBSERVE_P95_MS=50.0 (L187) — the budget any
+          addition to the touch path inherits. The qa-sweep capstone's
+          same-day sibling symptom (an in-tree pytest run polluted by the
+          other session's in-progress lint) shares this detector — a
+          moved/shared-tree tripwire covers both signatures.
+
+      - id: FLT-3
+        title: Worktree-first nudge at the first shared-tree mutating act
+        priority: P2
+        effort: M
+        status: proposed
+        source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "PR #62 body ('branching in place would have yanked [the T17 session's] working tree — the third shared-clone collision today'); t8/t12/t13 capstones ('START in a worktree even when the clone looks clean'; 'Worktree discipline held'); the live .claude/worktrees/<branch> convention in `git worktree list`"}
+        problem: >-
+          The worktree recipe is the proven mitigation — every tier session
+          since T8 used it, and the capstones call it "the law" — but it is
+          convention-only: nothing surfaces it at the moment a session starts
+          mutating a shared tree while another session is live. The post-draft
+          strikes are all mutations landing on the shared tree from sessions
+          that belonged elsewhere (T10's SEN-3 misfire swept 12 uncommitted
+          memory mods onto main; t12's pytest hit the main clone; t13 counts a
+          FIFTH cwd strike).
+        proposal: >-
+          In the same PostToolUse spawn: when the payload's tool_name is in
+          the mutating subset of _FILE_TOOLS ({Edit, Write, MultiEdit,
+          NotebookEdit} — Read excluded; NO MUTATING constant exists today, so
+          this item introduces the one canonical subset) AND the touched rel
+          path is inside the shared tree (worktree-prefixed paths self-exempt)
+          AND FLT-1's presence dir shows >=1 OTHER fresh session: emit ONE
+          nudge per session naming the exact recipe — `git worktree add
+          .claude/worktrees/<branch>`. It appends to JIT-1's context_out so
+          the hook still prints exactly ONE hookSpecificOutput (QUA-2), shares
+          or explicitly re-bounds JIT-1's 3-line-per-session budget, dedups
+          via a flag in the session's own presence doc, and gets its own
+          STABILITY-documented kill switch alongside HIPPO_DISABLE_JIT. HONEST
+          COVERAGE BOUNDARY, stated where the nudge is specified:
+          Bash-mediated mutations (git commit/checkout, pytest, scripts)
+          never reach PostToolUse — this covers only file-tool Edit/Write into
+          the shared tree, so the 5-session cwd-trap class is only PARTIALLY
+          covered (T10's swept memory-file mods are the covered shape; its
+          git-add misfire is not).
+        acceptance_criteria:
+          - "the nudge fires at most ONCE per session, only when (mutating file-tool) AND (shared-tree path — worktree-prefixed paths self-exempt) AND (>=1 other fresh presence doc); it names the git worktree add recipe verbatim"
+          - "it appends to the existing context_out list — the PostToolUse hook still emits exactly ONE hookSpecificOutput (QUA-2); the joint line budget with JIT-1 is shared or explicitly re-bounded, and stated"
+          - "stays inside the pinned 50ms observe budget (one scandir + tiny JSON reads); hooks always exit 0 (inv2)"
+          - "its kill switch is registered in STABILITY.md alongside HIPPO_DISABLE_JIT"
+          - "the coverage boundary is DOCUMENTED in the item's docs and skill text — Bash-mediated mutations are invisible to PostToolUse; the cwd-trap class is covered only for file-tool mutations"
+          - "no locking, no daemon, no blocking — guidance only (ED4R-3; the EXPLORATIONS4 s3 cut binds)"
+        dependencies: [FLT-1]          # in-round; couples to EVD-2 (T21) — same worktree-prefix logic, coupling only, not a build dep
+        invariant_note: >-
+          inv2/inv6 — same single spawn, exit-0, budget-pinned. ED4R-3 —
+          guidance, never mutual exclusion. MSR-6 pin re-verified compatible:
+          FLT-3 aggregates nothing per-memory. The worktree-prefix
+          self-exemption is the SAME prefix logic EVD-2 diagnoses starving the
+          touch-grain joins (848/1675 rows worktree-prefixed) — build the two
+          aware of each other; a prefix-strip change to recording belongs to
+          EVD-2's follow-up, not here.
+        implementation_notes: >-
+          Seams: plugin/hooks/hooks.json PostToolUse matcher
+          'Read|Edit|Write|MultiEdit|NotebookEdit' -> memory_post_tool.sh
+          (single spawn, exit-0 contract) -> outcome.py:record_from_payload /
+          _touched_path / _FILE_TOOLS (L49-124) + main hookSpecificOutput
+          (L422-429), jit.py:observe_touch (L342) + the per-session state doc
+          for once-per-session dedup (L245-302),
+          tests/test_scale.py:_JIT_OBSERVE_P95_MS=50.0 (L187) +
+          tests/test_jit.py bounds pattern, STABILITY.md:29-36 (the documented
+          HIPPO_* env list the kill switch joins). The recipe text is the one
+          every tier session used (PR #62, t8/t12/t13 capstones; `git
+          worktree list` shows the convention live).
+
+  # ---------------------------------------------------------------- HYG ---
+  - id: HYG
+    name: Machine-state lifecycle (the RCH-11 class, machine-wide)
+    extends: RCH-11 (registry census/prune) + SLP-2 + the SEC-5/6/7 trust spine
+    goal: >-
+      RCH-11's lifecycle discipline, machine-wide: one read-only census of the
+      machine-state classes hippo itself creates (the ~/.claude/projects
+      symlink farm is the flagship — 18 of 24 dangling on 2026-07-17, all
+      test-leaked), the ONE genuinely-new remedy (the dangling-symlink
+      remover) shipped WITH its leak-fix companion, and one doctor line that
+      sleep inherits free. Trust stays report-only pending Q2; hippo never
+      uninstalls system state (the SLP-2 posture); ~/.claude/projects is
+      HARNESS-owned — census freely, but remedies only ever touch the memory
+      symlink hippo itself creates.
+    items:
+
+      - id: HYG-1
+        title: Machine census (new sibling machine_census.py — delegate-never-fork)
+        priority: P1
+        effort: M
+        status: proposed
+        source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "PR #65 (the corrupted registry row that hid THIS corpus from --all-projects/promote_scan for two days); 18/24 dangling ~/.claude/projects memory symlinks + the ~/.claude/hippo-trust.json.pre-prune-20260716 backup (a 10->3 hand-prune) — both reproducible read-only on 2026-07-17"}
+        problem: >-
+          RCH-11 (PR #65) censused ONE machine-state class — the projects
+          registry (16 rows, 13 junk, 1 corrupted row that silently hid this
+          corpus for two days). The same rot pattern covers classes with no
+          census: the trust registry (hand-pruned 10->3 on 2026-07-16; the
+          .pre-prune backup proves accumulation), the
+          ~/.claude/projects/<encoded>/memory symlink farm (18 of 24 dangling
+          on 2026-07-17, ALL test-leaked), and installed scheduler artifacts
+          (1 launchd plist embedding the DEV venv path — one repo-move from
+          SLP-2's documented silent 07:30 failure class). PREMISE FIX: the
+          draft's "orphaned derived dirs" class is near-empty as stated —
+          derived dirs are in-repo siblings of memory_dir and die with the
+          repo; the real enumerable machine-wide orphan class is the symlink
+          farm.
+        proposal: >-
+          Read-only census in a NEW sibling `machine_census.py`, TRIMMED to
+          classes with a real existence oracle + real signal: (a) projects
+          rows — DELEGATE to registry.registry_census, never fork; (b) the
+          symlink farm — enumerate islink entries, classify
+          ok/dangling/dangling-temp-rooted by target; (c) trust rows —
+          live/dead/temp-rooted legibility rendered as consent-ledger rows
+          (REPORT-ONLY, Q2); (d) scheduler artifacts — ls
+          ~/Library/LaunchAgents/com.hippo.sleep.*.plist + crontab -l +
+          plistlib read-only parse checking the embedded repo/venv paths still
+          exist (the ED-3 file-oracle was VERIFIED LIVE 2026-07-17 — no probe
+          left to run if the item sticks to file existence + plist parse;
+          naming launchctl runtime state would need one, so it does not).
+          CUT: the orphaned-derived-dirs class (at most one delegated field on
+          class (a)'s rows). CUT/DELEGATE: the plugin-install class —
+          bootstrap.status/_sibling_installs already enumerates (inv5).
+          Output mirrors registry.main exactly: deterministic report default,
+          --json, empty-norm one-liner. NAME the test-isolation leak as the
+          step-zero companion: the 18 dangling links are 100% self-inflicted
+          test junk (tests run real init with no HOME/claude_projects_dir
+          isolation) — without HYG-2's leak fix the census measures its own
+          suite forever. Zero writes, zero LLM, zero network (the ED-1
+          detection half only).
+        acceptance_criteria:
+          - "census lives in a NEW sibling machine_census.py; provenance.py (2072/2072, zero headroom) and registry.py gain zero census logic; class (a) DELEGATES to registry.registry_census — a test pins that no second projects-census path exists"
+          - "the symlink-farm class classifies ok/dangling/dangling-temp-rooted by target and reproduces the 2026-07-17 baseline (18 dangling of 24) read-only; ~/.claude/projects is treated as HARNESS-owned — the census enumerates, only HYG-2's remover may ever act, and only on hippo's own memory symlinks"
+          - "trust rows render live/dead/temp-rooted consent-ledger legibility REPORT-ONLY (Q2 pending per ED4R-1 — the census presents rows and the pending decision; it does not prescribe untrust)"
+          - "the scheduler class uses file oracles only (LaunchAgents glob + crontab -l + plistlib parse of embedded repo/venv existence); no launchctl runtime dependency; Claude scheduled-task recipes are declared out of scope (no local oracle)"
+          - "output mirrors registry.main — deterministic report, --json, empty-norm one-liner; zero writes, zero LLM, zero network"
+          - "the test-isolation leak is named in-file as the step-zero companion (HYG-2) and the census report labels the self-inflicted class until the leak fix lands"
+        dependencies: [RCH-11, SEN-5, SLP-2, SEC-6]   # cross-file — ALL SHIPPED at 81177ba
+        invariant_note: >-
+          ED-1 — detection half only. inv5 — delegates, never forks
+          (registry_census for projects; bootstrap.status for installs).
+          inv6 — on-demand CLI only; no producer, no hot-path work. The
+          harness-owned-dir posture is load-bearing: census freely, remedy
+          only hippo's own symlinks (mirrors check_native_coexistence's
+          respect for non-hippo shapes).
+        implementation_notes: >-
+          Seams: registry.py:registry_census (L165) / _under_volatile_root
+          (L154 — registry-private today; promote it or duplicate-with-credit,
+          a named decision at build time) / main (L287-348 — the
+          report/--json/empty-norm shape to mirror); trust.py:
+          trust_registry_path (L66) + _load_registry_doc; provenance.py:
+          encode_project_dir + check_project_symlink (read-only imports; NO
+          new code in provenance.py — 2072/2072); build_index.py:
+          default_index_dir (L136) + telemetry.py:default_telemetry_dir (L76)
+          — the proof derived dirs are in-repo siblings (the draft-premise
+          correction); sleep.py:_print_schedule (L339-380 — the
+          com.hippo.sleep.<key> label formula + the documented moved-path
+          failure class); bootstrap.py:status/_sibling_installs (L95-135);
+          doctor_checks_env.py:check_projects_registry (L537 — the shipped
+          single-class pattern). Live census 2026-07-17 (reproducible
+          read-only): projects 13 rows = 3 durable-live + 10 temp-rooted-live;
+          trust 3 rows all live (0 dead post hand-prune); 18/24 symlinks
+          dangling (15 pytest-of-fredbook targets + 3 /tmp/newproj.*-class —
+          all temp-rooted); 1 launchd artifact, healthy but embedding the dev
+          venv path. hippo-llm.json (llm_client.py:68) is the third
+          ~/.claude/hippo-*.json family member — existence-only mention, no
+          class of its own in v1. Trust-census honesty (carried from the
+          skeptics): is_trusted fails CLOSED and a dead trust row cannot
+          inject — trust junk is inert-but-illegible, so the census's trust
+          value is legibility + the unmounted-volume/re-consent distinction,
+          NOT incident prevention; incident-prevention value lives in the
+          symlink farm (harness-read surface) and scheduler artifacts (silent
+          07:30 failures).
+
+      - id: HYG-2
+        title: Dangling-symlink remover + the test-isolation leak fix (the one new write)
+        priority: P2
+        effort: S
+        status: proposed
+        source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "all 18 dangling symlinks are test-leaked — targets name test_init_on_trusted_corpus_wi* / /tmp/newproj.*; tests/test_mcp_setup_tools.py:578,588 call the real init tool with no HOME/claude_projects_dir isolation; mtimes show ~15 minted in 36h (3@07-12, 12@07-16, 3@07-17)"}
+        problem: >-
+          The census's flagship class needs a drain AND a faucet fix: every
+          dangling ~/.claude/projects memory symlink on this machine is
+          test-leaked (tests run the real init with no
+          HOME/claude_projects_dir isolation; conftest lacks the guard), and
+          the existing remover cannot serve — remove_project_symlink's entry
+          point requires the live (repo_root, memory_dir) pair, so it refuses
+          this job by interface shape (the on-disk encoded dir name is not
+          invertible to the repo_root the signature requires). Without the
+          leak fix, every full-suite run re-mints the class and the census
+          becomes a treadmill.
+        proposal: >-
+          The ONE genuinely-new write = a dangling-symlink remover bounded to
+          the temp-rooted-only BATCH class, mirroring registry.prune_dead's
+          honesty grain exactly (batch ONLY for the mechanically-safe volatile
+          class, per-item everywhere else, each removal printed) + the
+          conftest/HOME-isolation LEAK-FIX companion shipped WITH the class
+          (prevention-with-the-class — the PR #65 precedent; the guard is
+          cheaper than and upstream of the remedy). Trust = REPORT-ONLY (Q2
+          PENDING): the census names untrust as the existing per-row route but
+          does NOT prescribe it — untrust deletes the row INCLUDING its SEC-6
+          fingerprint baseline, converting an unmounted-volume row from
+          "comes back trusted" into "full re-consent"; bookkeeping and
+          revocation are mechanically identical but semantically different
+          acts, which is exactly why Q2 is an owner decision. Scheduler
+          artifacts = a printed launchctl-unload + rm recipe per stale
+          artifact (SLP-2's print-only posture; hippo never uninstalls system
+          state). Venv/model-cache = report-only forever (the hippo:remove
+          posture). NOT remove_project_symlink (mirror its refusal posture,
+          do not reuse it). MAY land inside HYG-1's CLI as --prune-dangling
+          rather than standalone — the id records the scope either way.
+        acceptance_criteria:
+          - "the remover's eligible class is mechanical — islink AND target-gone AND target under a volatile root (a dangling target elsewhere could be an unmounted volume and stays per-item); batch is confined to that class with each removal printed (the prune_dead grain, cited in-code)"
+          - "the remover never touches non-symlink shapes, real files, or real dirs (native-memory shapes per check_native_coexistence); it may only ever remove the memory symlink hippo itself creates"
+          - "the LEAK FIX ships with the class — conftest/HOME (claude_projects_dir) isolation so no test can write real ~/.claude/projects symlinks; tests/test_mcp_setup_tools.py:578,588 are the live offenders; the PR #65 init-warn is the precedent pattern"
+          - "trust rows stay REPORT-ONLY pending Q2 (ED4R-1); the report presents each row and names the pending decision; no trust-write path ships"
+          - "scheduler artifacts get a printed launchctl-unload + rm recipe only (SLP-2 print-only); venv/model-cache stay report-only (the hippo:remove posture)"
+          - "any CLI flag a doctor line names must exist (the INT-18 surface lint binds); if the remover lands as HYG-1's --prune-dangling flag the item records that scope decision in-file"
+        dependencies: [HYG-1]          # in-round: the census discovers what the remover drains
+        invariant_note: >-
+          inv4 — the batch grain is confined to the one mechanically-safe
+          volatile class with per-row printing (the shipped prune_dead
+          precedent — precedent-consistent, not smuggled autonomy);
+          everything judgment-shaped stays per-item or report-only. Q2
+          (ED4R-1) gates the trust half. SEC-19's atomic whole-document
+          discipline applies only if a registry document is ever rewritten —
+          the symlink removal itself is a bare unlink and claims no more.
+        implementation_notes: >-
+          Seams: trust.py:untrust (SEN-5, L200 — the named-not-prescribed
+          per-row route; deletes the key INCLUDING the SEC-6 fingerprint
+          baseline — the semantic reason Q2 exists); registry.py:prune_dead
+          (L209-238 — the honesty-split grain to mirror) + _under_volatile_root
+          (L154); provenance.py:remove_project_symlink (L369-388 — the
+          refusal POSTURE to mirror, not reuse; NB the vetting corrected the
+          mechanism: the blocker is interface shape — encoded dir names are
+          not invertible to repo_root — not a dead-target refusal per se);
+          tests/test_surface_registry.py (the INT-18 named-command existence
+          lint); sleep.py:_print_schedule (the recipe-print posture);
+          tests/test_mcp_setup_tools.py:578,588 + tests/conftest.py (the leak
+          source — zero HOME/claude_projects_dir guards today;
+          init_project.py's claude_projects_dir override exists for hermetic
+          tests and these call sites bypass it). Day-one yield: all 18
+          current candidates are temp-rooted (the batch class is non-empty);
+          trust registry TODAY has 0 dead rows (post hand-prune) — report-only
+          costs nothing now and produces exactly the census data Q2's revisit
+          wants.
+
+      - id: HYG-3
+        title: One doctor line; sleep inherits (census surfacing)
+        priority: P2
+        effort: S
+        status: proposed
+        source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "PR #65 (census + doctor line + sleep inheritance shipped as ONE unit — the pattern); the no-spontaneous-census history: three rot classes (16-row registry, 10-row trust file, 18 symlinks) each accumulated silently until a probe or doctor line existed"}
+        problem: >-
+          Machine-state rot that lacks a doctor line demonstrably stays
+          invisible on this machine — the registry accumulated 16 rows
+          (including the 2-day-invisible corruption) before RCH-11's line;
+          the trust file grew to 10 rows before a hand prune; 18 symlinks went
+          unnoticed until this round's grounding probe. check_projects_registry
+          covers only class (a). The draft's separate sleep morning-report
+          section is already-shipped behavior and would fork producer text
+          against SLP-1's reuse rule.
+        proposal: >-
+          ONE new deterministic check in doctor_checks_env.py, appended
+          immediately before the pinned-last stale_memobot_env (the shipped
+          pins absorb it), summarizing ONLY the classes check_projects_registry
+          does not already cover: dead trust-row count, dangling-symlink
+          count, stale-path scheduler artifacts. WARN ON DEAD ONLY —
+          empty-norm parity with check_projects_registry (temp-rooted-LIVE
+          rows do not warn; the volatile split belongs in the census command's
+          own report). Sleep inherits FREE: sleep._section_doctor renders
+          doctor.render verbatim, so the draft's separate sleep section is
+          CUT (SLP-1's reuse-the-producer rule). No SessionStart producer —
+          machine rot is not per-session news. INT-18 hard sequencing: the
+          line names the census command, so this cannot ship before HYG-1
+          (the surface-existence lint would fail on a command that does not
+          exist).
+        acceptance_criteria:
+          - "exactly ONE new deterministic warn-only line in doctor_checks_env.py, appended before the pinned-last stale_memobot_env; the line-count == len(CHECKS) and last-check pins hold unchanged (tests/test_doctor.py:74,85,780)"
+          - "warns on DEAD only (dead trust rows, dangling symlinks, gone-path scheduler artifacts); temp-rooted-live rows and healthy artifacts render ok (empty-norm parity with check_projects_registry); no timestamps"
+          - "the line names the HYG-1 census command and the INT-18 surface lint passes — hard sequencing: ships only after HYG-1"
+          - "NO separate sleep section (SLP-1 reuse rule — sleep._section_doctor renders the line verbatim with zero sleep.py changes); NO SessionStart producer"
+          - "the honest-surface note is documented on the item: a moved venv/repo kills the 07:30 run before hippo starts, so the morning report cannot carry the warn for its own dead schedule — on-demand doctor is the live surface for that class"
+        dependencies: [HYG-1]          # in-round: INT-18 makes this mechanically unshippable before the census exists
+        invariant_note: >-
+          inv3 + ED4R-2 — the census gains its named reader (this line IS the
+          discovery surface; a census nobody runs is the dark-reservoir shape
+          round 4 exists to end). inv6 — a doctor check, not a producer. The
+          warn-on-DEAD-only choice is load-bearing legibility discipline: it
+          keeps the line from becoming permanent wallpaper in a doctor
+          section that already carries chronic warns.
+        implementation_notes: >-
+          Seams: doctor.py:CHECKS (append before L366 stale_memobot_env);
+          doctor_checks_env.py:check_projects_registry (L537 — the adjacent
+          sibling and the shape to mirror: per-class count + the single named
+          command + per-item verbs); tests/test_doctor.py:74,85,780 (the
+          absorbing pins); sleep.py:_section_doctor (L152-155) + the
+          warn-fold empty norm (L301-319). PR #65 body states the pattern
+          verbatim: "the sleep report inherits it through its doctor section —
+          SLP-1's reuse-the-producer rule, no forked text."
+
+  # ---------------------------------------------------------------- PUB ---
+  - id: PUB
+    name: The publish lane (per-item entry INTO the committed subset)
+    extends: EXT-1 (the decode-side diff comment) + CLB-1 (review packet / --ci) + PR #67's ratified curated-subset posture
+    goal: >-
+      The two-audience corpus gets a lane instead of hand tooling. The naming
+      triangle the docs must draw: promote = per-item lift ACROSS projects to
+      the user tier (shipped); pack = per-item share OUT of the repo
+      (shipped); publish = per-item entry INTO this repo's own committed
+      subset (NEW — no publish surface exists at 81177ba, grep clean). A
+      fourth shipped movement to distinguish: init's fresh-mode whole-dir
+      "git add .claude/memory && git commit" nudge is the share-everything
+      posture — the opposite of publish's per-item add -f under an ignored
+      dir. All read-only/print-only pending Q3; the CLB-1 memory-review CI
+      gate is the backstop on every publish PR. Membership oracle
+      single-homed: provenance.build_repo_file_index (ls-files --full-name;
+      the SHP-1 bug precedent) — PUB-1/2/3 all import it, never a fresh
+      git ls-files per item.
+    items:
+
+      - id: PUB-1
+        title: Per-item publish verb (new sibling publish.py + the 18th skill /hippo:publish — print-only pending Q3)
+        priority: P1
+        effort: M
+        status: proposed
+        source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "PR #67 (the hand ritual, the ratified per-item posture, and '~15 entropy WARNs' sitting in exactly the uncommitted release-era records future publishes will touch); PR #74 CLB-1 (the CI backstop — deterministic secrets + Tier-A only); 10 local-only candidates measured on PR #75's range"}
+        problem: >-
+          PR #67's curated-subset posture ("every future memory stays
+          local-only until deliberately reviewed in") is executed entirely by
+          hand: two scans, an eyeball, git add -f per file — and the dir stays
+          gitignored, so a new file is invisible until add -f (.gitignore:23).
+          The backlog is measured: 10 local-only candidates on PR #75's range,
+          headlined by the four uncommitted round-2 capstones whose siblings
+          are all committed. The CLB-1 CI gate is deterministic-secrets +
+          Tier-A only — the #67 entropy bar survives nowhere as a one-step
+          preflight. The publish act has occurred exactly once ever (one bulk
+          ADD), so the verb is justified by the measured queue + the ratified
+          posture, not a claimed cadence.
+        proposal: >-
+          Per-item publish verb — new sibling `publish.py` + the 18th skill
+          /hippo:publish. REFUSE only mechanical non-candidates: docs
+          (provenance._is_memory_filename) and already-tracked files (those
+          are UPDATEs riding plain git — PR #72 edited 13+ committed capstones
+          in place). DEMOTE the draft's invalid_after-expired and
+          unresolved-contradicts refusals from GATE to ADVISORY receipt
+          warnings — they encode unratified editorial policy (#67's bar was
+          secrets + eyeball only; the committed subset IS dev-history
+          including expired/contradicted records; CLB-1 keeps
+          conflicts/edges advisory precisely to not automate a human posture
+          call). Gate = REUSE review.lint_touched (it takes an in-memory
+          texts dict, so it works pre-commit) as the core; entropy=ON is the
+          ONLY delta pass — documented as a strict superset of the CI gate's
+          entropy=False (one run, never "both modes"/two runs). Act =
+          PRINT-ONLY pending Q3: print the exact git add -f + suggested
+          commit line and stop (the SLP-2 posture; mcp_tools_setup.py:284
+          already prints git-add advice; preserves the verified invariant
+          that no production path writes a user repo's git index). Consent
+          wording per the vetting: "the human executes the printed command" —
+          an explicit-confirm AC is theater under print-only; the real
+          consent moments are the printed command, the PR review, and the
+          CLB-1 CI backstop. The boundary preview and readiness receipt are
+          CROSS-REFERENCES to PUB-3/PUB-2 surfaces, not rebuilt in the verb.
+          ANTI-BULK: one name per invocation, no 'all' affordance
+          (pack_extract's names='all' must not carry over — #67's ratified
+          posture is deliberate per-item review-in).
+        acceptance_criteria:
+          - "one name per invocation; NO 'all' affordance (the ratified per-item posture; pack_extract's names='all' explicitly does not carry over)"
+          - "refusals are mechanical only — docs (provenance._is_memory_filename) and already-tracked (=UPDATE riding plain git); invalid_after-expired and unresolved-contradicts render as ADVISORY receipt warnings, never refusals"
+          - "the gate REUSES review.lint_touched on the in-memory text (local/CI parity by construction — the gate composition is never hand-rolled); the only delta is entropy=ON, documented as a superset of the CI gate's entropy=False (one run, not two)"
+          - "PRINT-ONLY pending Q3 (ED4R-1) — prints the exact git add -f + suggested commit line and stops; a test pins that publish.py never invokes git add/commit; the documented consent moments are the printed command + PR review + the CLB-1 CI backstop"
+          - "the membership oracle is provenance.build_repo_file_index (imported) — a test pins that the pub lane issues no fresh git ls-files call (the SHP-1 full-name bug precedent)"
+          - "boundary preview and readiness evidence are cross-references to PUB-3/PUB-2 (display-only, the export_receipts composition pattern); publish NEVER transforms content — byte-identical in-place file + git tracking only; if it grows a transform it has become pack_extract and must be killed"
+          - "the 18th skill self-registers via the glob-derived skills contract (tests/test_skills_contract.py — no count pin to bump) and its docs draw the promote/pack/publish naming triangle + distinguish init's whole-dir nudge"
+        dependencies: [CLB-1, SEC-8, RCH-5, IOP-3, PUB-2, PUB-3]   # CLB-1/SEC-8/RCH-5/IOP-3 cross-file SHIPPED; PUB-2/PUB-3 in-round (build order PUB-3 -> PUB-2 -> PUB-1, or PUB-1 first with previews inlined)
+        invariant_note: >-
+          inv4 — print-only preserves the verified invariant that no
+          production code path writes a user repo's git index (the only
+          in-package git add/commit is eval_recall.py:1022-1023 inside a
+          hermetic tmp fixture repo); a future Q3 flip to a --stage flag
+          would be hippo's FIRST user-repo git-index write and stays behind
+          the dated decision (see not_pursuing). ED-1 — the verb writes
+          nothing and gates nothing autonomously.
+        implementation_notes: >-
+          Seams: review.py:lint_touched (L339-407) + GATE_LINTS (L62) — the
+          reused core (scan_text + scan_tier_a gate; portability/links/
+          conflict_radar advisory); secrets.py:scan_text (entropy kwarg —
+          entropy=True is a strict superset of the CI gate's entropy=False,
+          docstring L234-247; the shipped secrets_scan MCP tool already runs
+          entropy-ON over pasted text, so the verb COMPOSES capabilities, it
+          does not resurrect one); threat_lint.py:scan_tier_a;
+          portability.py:scan_portability (advisory here — cited paths are
+          same-repo coupling, not rot); provenance.py:build_repo_file_index
+          (L775 — ls-files --full-name; its docstring records SHP-1, where a
+          non-full-name ls-files broke subdir-rooted matching: import, never
+          re-derive); provenance._is_memory_filename (L1292);
+          staleness.py:read_invalid_after (L704 — feeds the ADVISORY
+          warning); packs.py:pack_extract + _dest_inside_corpus (the
+          near-neighbor to differentiate: it refuses in-corpus dest, strips
+          provenance, stamps pack, emits manifest — publish is byte-identical
+          in-place + tracking only); sleep.py:325-364 (SLP-2 print-only) +
+          mcp_tools_setup.py:284 (the shipped printed git-add advice);
+          .github/workflows/ci.yml:146-170 (the memory-review backstop;
+          review.py:359 runs scan_text entropy=False);
+          export_receipts.py:curation_receipt (the display-only composition
+          pattern); plugin/skills/ (17 dirs today; publish = 18th, following
+          review's 17th per the T12 capstone). Receipt disclosure: the
+          mid-flight rederive lane (corpus .format cite_derivation 3 vs
+          plugin derivation 4) — the receipt discloses derivation state per
+          candidate rather than blocking on it (published files will receive
+          review-gated citation-update PRs).
+
+      - id: PUB-2
+        title: Publishable-candidates report (a --candidates flag on the recall_diff CLI — the encode-side twin of EXT-1)
+        priority: P2
+        effort: S
+        status: proposed
+        source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "PR #75's live sticky comment ('<!-- hippo-memory-on-diff --> 8 memory(ies) cite 22 changed file(s)') vs the 18-row full-corpus run on the same range — 10 local-only candidates reproduced name-for-name (the uncommitted t9/t10/t11/t13 capstones headline), read-only, zero new code"}
+        problem: >-
+          EXT-1's PR comment renders committed memories only, and the
+          full-vs-committed gap is measured and live: on PR #75's range
+          (81b95ea..81177ba), 22 changed paths yield 18 full-corpus rows vs
+          the 8 committed rows the sticky comment shows — 10 local-only
+          candidates nothing names. The candidate set materially grew the day
+          after the draft (T8-T13 shipped; four uncommitted round-2 capstones
+          now top the list). Nothing tells the owner what should be published
+          next.
+        proposal: >-
+          The bare report needs ZERO new module: recall_diff.
+          changed_paths_for_range + memories_for_paths are shipped and
+          CLI-exposed via `recall --for-diff --json`; partition those rows by
+          committed membership (the imported build_repo_file_index) — the
+          local-only rows ARE the candidates. Ship a --candidates flag on the
+          recall_diff CLI (+ an optional sleep-report section); NOT a
+          SessionStart producer (it needs a range — inv6; if a passive
+          surface is ever wanted, fold into merge_digest respecting the
+          adjacency pins). Per-candidate readiness composes shipped readers
+          display-only (the export_receipts pattern: soak evidence, staleness
+          flag, verified_by) + PUB-3's heals-N boundary column as the
+          compounding hook. DROP the draft's "PR activity" clause — it needs
+          gh/network (inv2); the honest v1 is git-range-only.
+        acceptance_criteria:
+          - "--candidates on the recall_diff CLI partitions full-corpus rows for a git range by committed membership via the imported provenance.build_repo_file_index (no fresh ls-files); local-only rows ARE the candidates; reproduces 18/8/10 name-for-name on 81b95ea..81177ba"
+          - "report-only + empty-norm (no local-only rows -> silence); git-range-only — NO gh/network dependency (the draft's PR-activity clause is dropped)"
+          - "per-candidate readiness composes shipped readers display-only (export_receipts pattern — soak/staleness/verified_by) + PUB-3's heals-N column; no new math; the MSR-6 pin is unimplicated (display-only per-memory RECALL evidence is the sanctioned lane) and stays untouched"
+          - "NOT a SessionStart producer; any passive surface is a sleep-report section or a merge_digest fold (adjacency pins respected), never per-prompt"
+        dependencies: [EXT-1, IOP-3, PUB-3]   # EXT-1/IOP-3 cross-file SHIPPED; PUB-3 in-round supplies the heals-N column
+        invariant_note: >-
+          inv2/inv6 — git-range-only, on-demand. ED-1 boundary explicit: this
+          ranks and explains candidates; only /hippo:publish (per-item,
+          human-executed) moves one.
+        implementation_notes: >-
+          Seams: recall_diff.py:changed_paths_for_range + memories_for_paths
+          (+DEFAULT_CAP=10 to reuse; rows already carry name/type/steer/
+          stale); provenance.build_repo_file_index (the single-homed
+          membership oracle per the PUB workstream goal);
+          export_receipts.py:curation_receipt + soak.py:curation_report /
+          soak_status / compute_strength_scores +
+          team_coverage.py:read_verified_by (the display-only composition);
+          sleep.py (the optional report section);
+          tests/test_injection_cost.py:_PINNED_CONSUMERS (proof the MSR-6
+          pin does not bind this — it pins 4 named cost consumers against 4
+          touch surfaces). The ~30-line pure composition was run read-only
+          during vetting and reproduced the 18/8/10 split name-for-name,
+          including the four round-2 capstones a human would have named
+          unprompted — the report's first real output IS the hand-made list.
+
+      - id: PUB-3
+        title: Subset-boundary link honesty (a VIEW over the committed subset — never a gate)
+        priority: P2
+        effort: S
+        status: proposed
+        source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "lint_links.lint over the 15-file fresh-checkout view = 20 dangling wikilinks / 9 files / 0 typed at 81177ba, vs 1 unrelated dangling on the owner's full corpus — reproducible read-only; PR #67 body predicted the class ('expected, not an error')"}
+        problem: >-
+          Committed memories wikilink local-only memories: the shipped lint
+          over the fresh-checkout view (exactly the 15 committed files)
+          reports 20 dangling wikilinks across 9 files (0 typed crossings),
+          while the same lint over the owner's full corpus reports 1
+          unrelated dangling — every stranger's clone sees rot the owner
+          cannot. CLB-1's review packet surfaces the class only on
+          memory-touching PRs and only for touched stems; the standing 20
+          are reported nowhere.
+        proposal: >-
+          A VIEW, not a detector: compute committed membership
+          (build_repo_file_index) and evaluate the existing
+          links.py/lint_links.py machinery over the committed-subset view —
+          no new parser, no new lint classes. Surface twice: ONE deterministic
+          doctor line (appended before the pinned-last stale_memobot_env) and
+          the per-candidate heals-N column feeding PUB-2's report
+          (hippo-v1-roadmap-proposal is the target of 7 of the 20 — publishing
+          it alone heals a third of the boundary). NEVER a gate — the class
+          is expected-not-error per PR #67's own words, and CLB-1 deliberately
+          keeps edge findings advisory; PUB-3 must not re-litigate that.
+          Empty-norm twice over: a repo with no committed subset emits
+          nothing, and a healed boundary emits nothing. ED-4 clean: no
+          schema, no frontmatter, no index change — a read-side join over git
+          state and the existing graph.
+        acceptance_criteria:
+          - "the boundary view reuses links.py/lint_links.py pointed at the committed-membership view (no new parser, no new lint classes); reproduces 20/9/0 at 81177ba"
+          - "ONE deterministic doctor line appended before the pinned-last stale_memobot_env (the count/last pins absorb it); empty-norm TWICE — no committed subset emits nothing, a healed boundary emits nothing"
+          - "NEVER a gate — the line and the heals-N column are honesty reporting; CLB-1's advisory-edges posture is not re-litigated; no CI job fails on boundary danglings"
+          - "the heals-N per-candidate column feeds PUB-2's report (top-target concentration measured: hippo-v1-roadmap-proposal 7 of 20)"
+          - "no schema, no frontmatter, no index change (ED-4 clean)"
+        dependencies: [EXT-1, CLB-1]   # cross-file SHIPPED. NB: the vetting synthesis listed PUB-2 here too — a cycle with PUB-2's own dep; resolved per its release_train build order (PUB-3-view -> PUB-2-report -> PUB-1-verb): PUB-3 is upstream, PUB-2 consumes its heals-N column (recorded in meta.audits)
+        invariant_note: >-
+          inv3 — the boundary class becomes legible exactly where it is
+          invisible today (every stranger's checkout). ED4R-2 — the view's
+          named readers are the doctor line and PUB-2's column; it is never a
+          standing artifact without a consumer.
+        implementation_notes: >-
+          Seams: links.py:parse_wikilinks + parse_typed_relations +
+          normalize_slug + LinkGraph; lint_links.py:lint + health_line (the
+          detector to re-point and the one-line rendering pattern);
+          doctor.py:CHECKS (append before the pinned-last check — T12 grew
+          three such one-liners the same way);
+          provenance.build_repo_file_index (membership, imported per the
+          workstream's single-homing rule); review.py:lint_touched (the
+          CI-side partial coverage today: dangling-edge ADVISORY on touched
+          stems only). Numbers at 81177ba: 20 dangling / 9 of 15 files / 0
+          typed; concentration — hippo-v1-roadmap-proposal 7, then
+          hippo-v080-sec-tail / hippo-v080-trust-spine / hippo-v1160-pack-fix
+          at 2 each; the committed r2-exploration capstone's links to
+          local-only t8/t9 capstones contribute 4 of the 20 (publishing
+          PUB-2's headline candidates heals those too — the lanes compound).
+
+  # ---------------------------------------------------------------- EVD ---
+  - id: EVD
+    name: Evidence consumers (write-only ledgers get readers)
+    extends: TMB-1/LIF-6 (baselines + evidence cards) + MSR-5/MSR-6 (the rigs) + JIT-2/EXT-3 (the lanes)
+    goal: >-
+      The write-only ledgers get readers — ED4R-2's spine applied: the
+      chronic reconsolidation queue gets a per-entry evidence brief (the
+      tier's top move and the round's single highest-value item), the
+      touch-grain lane gets an honest health/diagnosis surface, interviewing
+      gets decline-aware quieting (dormant until declines exist), and
+      salience gets the ED-2 evidence run its revisit has always named (Arm A
+      zero-code, Q4-commissioned). No autonomy change, no ranking flip;
+      verdicts stay human (LIF-1).
+    items:
+
+      - id: EVD-1
+        title: Reverify brief (new sibling reconsolidate_brief.py — evidence per worklist entry, cold path only)
+        priority: P1
+        effort: M
+        status: proposed
+        source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "reconsolidation_events.jsonl = 671 verdicts in one week (638 graduate / 33 fix / 0 demote / 0 snooze); the worklist deepened 20 (draft, 2026-07-16) -> 26 standalone / 38 with watermark (2026-07-17); mcp_schemas.py:400 — the reconsolidate tool description itself instructs 'read the memory, diff its cited paths'"}
+        problem: >-
+          The reconsolidation queue is chronic and the verdict flow runs at
+          volume — 671 verdicts logged in one week, and the worklist deepened
+          from 20 to 26/38 in a single day — yet each human verdict requires
+          hand-gathering the evidence: nothing renders baseline-to-HEAD
+          diffs of cited paths (grep verified — worklist lines show path
+          NAMES only), and the MCP tool description literally instructs the
+          hand-diff. HONESTY BOUND carried from vetting: "minutes per
+          verdict" is UNMEASURED (no timing telemetry exists) — the value
+          framing is making the 671-verdicts/week flow honest and cheaper
+          (638 one-word graduates could equally indicate rubber-stamping the
+          brief would expose), never a specific time-savings claim.
+        proposal: >-
+          New cold-path sibling `reconsolidate_brief.py` (the
+          reconsolidate_replay.py naming precedent; reconsolidate.py sits at
+          exactly 900/900). Per worklist entry: a git-mined summary from the
+          entry's OWN carried baseline (source_commit — on every entry since
+          LIF-6) to HEAD — diffstat + bounded hunk HEADERS/function context,
+          deliberately NOT raw hunk bodies unless secret-linted (the capture
+          lane's hunks_secret_flagged / _MAX_PROMPT_HUNK_CHARS discipline — a
+          display surface must not become a secret-exfil path the write
+          lanes already lint against). Compose what already rides the entry:
+          changed_paths, recency, linked neighbors, the CLB-3 evidence_drift
+          fence counts, invalid_after state. COLD-PATH ONLY: surfaced via the
+          reconsolidate MCP tool (extend the action enum with 'brief', or
+          enrich action='worklist' per-item), the CLI, and consolidate Step 2
+          — NEVER SessionStart producer lines (resolve_evidence's inv6
+          cold-path pin, AST-held in test_resolve_view.py, is the binding
+          precedent). Zero persisted state (inv1 — git history is the
+          record), zero corpus writes; the verdict vocabulary is untouched —
+          the brief renders evidence for all four human paths
+          (graduate/fix/demote/snooze), per LIF-1.
+        acceptance_criteria:
+          - "brief logic lives in a NEW sibling reconsolidate_brief.py; reconsolidate.py (900/900) and provenance.py (2072/2072) receive imports/wiring only"
+          - "per entry — diffstat + bounded hunk headers/function context from the entry's own source_commit to HEAD; raw hunk bodies render ONLY under the capture lane's secret discipline (hunks_secret_flagged / _MAX_PROMPT_HUNK_CHARS), otherwise stat/header-only"
+          - "composes what rides the entry (changed_paths, recency, linked, evidence_drift fence counts, invalid_after); zero persisted state, zero corpus writes"
+          - "cold path ONLY — the reconsolidate MCP tool (action 'brief' or enriched 'worklist') + CLI + consolidate Step 2; an AST/import pin holds SessionStart producers and the hot path to zero brief calls (the resolve_evidence precedent)"
+          - "the verdict vocabulary is untouched — evidence renders for all four human paths (graduate/fix/demote/snooze); nothing is auto-applied; LIF-1 binds"
+          - "docs carry the honest value claim (evidence per verdict for a measured 671-verdicts/week flow); no unmeasured minutes-per-verdict claim ships"
+        dependencies: [TMB-1, CLB-2, CLB-3, LIF-6]   # cross-file — ALL SHIPPED at 81177ba
+        invariant_note: >-
+          inv1 — git is the record; no persisted brief state. inv6 —
+          cold-path AST-pinned (the resolve_evidence precedent). LIF-1 — the
+          verdict stays human; the standing auto-drain kill binds (see
+          not_pursuing). ED4R-2 — the write-only reconsolidation ledger and
+          the stale worklist gain their reader.
+        implementation_notes: >-
+          Seams: reconsolidate.py:recalled_stale_worklist +
+          reconsolidation_producer (L742-746 — path NAMES only today);
+          staleness.py:find_stale (L301-303 — source_commit per entry since
+          LIF-6) + write_stale_cache (L387-407 — entry keys changed_paths/
+          linked/name/recency/source_commit; stale.json adds {changed, sha} +
+          optional evidence_drift {fences, missing, whitespace}) +
+          read_evidence_drift; provenance.py:run_git + reverify_file (+ the
+          CLB-2 _stamp_verified_by at provenance.py:1398 — the graduate
+          path's re-baseline the brief feeds); resolve_evidence.py:
+          pair_evidence + render_pair_evidence (L214-301 — the shape/posture
+          precedent: git-mined on demand, NO persisted state, cold-path AST
+          pin in tests/test_resolve_view.py ~L147, prefill never
+          auto-applied); reconsolidate_replay.py (the sibling-naming
+          precedent); mcp_schemas.py reconsolidate tool (action enum
+          worklist|reverify today; its description at L400 instructs the
+          hand-diff this item retires); mcp_tools_consolidate.py (wiring);
+          capture-lane secret discipline (hunks_secret_flagged,
+          _MAX_PROMPT_HUNK_CHARS=2000). Verdict-vocabulary precision:
+          semantic_reverify._VALID_OUTCOMES = graduate/fix/demote; snooze is
+          the MCP-level ack (mcp_schemas enum) — the brief covers all four
+          paths. EVD-1 and FLT-1 are the round's two highest-value starts and
+          share nothing.
+
+      - id: EVD-2
+        title: Touch-grain lane health/diagnosis (reframe — the lane recorded zero for mechanical reasons)
+        priority: P3
+        effort: S
+        status: proposed
+        source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "outcome_events.jsonl — 0 cited_by rows over 2682; 848 of 1675 post-07-16 rows worktree-prefixed (650 would map stripped); installed_plugins.json — hippo jumped 1.17.0 -> 1.22.0 at 2026-07-17T19:02:47Z (5 releases of live-hook lag); all reproducible read-only"}
+        problem: >-
+          Touch-grain evidence is 0/0 for MECHANICAL reasons, not merely
+          because nothing reads it — the live probes forced this reframe:
+          (1) the machine ran plugin 1.17.0 (pre-T16) until 2026-07-17T19:02Z
+          — five releases of live-hook lag, itself a HYG-class finding; the
+          cited_by recording lane went live on this machine TODAY. (2)
+          Worktree sessions record touches as .claude/worktrees/<wt>/-prefixed
+          paths relative to the MAIN root, which can never match cited_paths
+          at EITHER grain (848 of 1675 post-07-16 rows; 650 would map after
+          prefix-stripping). A trend chart over this lane would chart zeros
+          and call it insight. The draft's premise ("recording began at T16's
+          merge") was wrong for this machine.
+        proposal: >-
+          The honest first deliverable is a lane-HEALTH / diagnosis surface,
+          not a trend chart: lane volumes (total rows, rows-with-cited_by,
+          distinct sessions, worktree-prefixed share), touchmap coverage
+          (cited-map size, reminders-map size), and both grains of
+          injection_hits side by side. outcome.main --touch-grain ALREADY
+          prints a grain comparison — add diagnosis + trend, do not duplicate
+          it. ED-3 step zero is a LIVE RECORDING PROBE: touch a mapped file
+          from a main-clone session and confirm the cited_by row lands,
+          before building any surface. MSR-6 pin compliance is structural:
+          aggregation stays lane-level or positive-evidence-only
+          (injection_hits' shipped shape) — NEVER a per-memory
+          injected-but-never-touched table (the round-1
+          inert-recall-noise-finder kill), and _injection_join stays the one
+          join. COUPLES TO FLT-3 (T18): worktree-first guidance as drafted
+          would systematically starve these joins — the worktree-prefix-strip
+          fix this diagnosis motivates is the real value, and it ships as its
+          own follow-up, not smuggled in here. Premise-weak today, priced
+          accordingly (P3).
+        acceptance_criteria:
+          - "ED-3 step zero — a dated live recording probe (a main-clone session touches a mapped file; the cited_by row is confirmed) runs before any surface is built; the finding is recorded on the item"
+          - "the surface reports lane health (volumes, cited_by share, worktree-prefixed share, touchmap sizes, both grains side by side) by EXTENDING outcome.main --touch-grain; a pin proves the existing comparison output is not duplicated"
+          - "aggregation stays lane-level or positive-evidence-only; NO per-memory injected-but-never-touched table (the MSR-6 / noise-finder kill); _injection_join remains the single join and the shipped AST pin is untouched"
+          - "the worktree-prefix diagnosis names the FLT-3 coupling and the candidate strip fix; any CHANGE to touch recording is its own follow-up item, not smuggled in here"
+          - "cold path only (CLI/report); no producer, no hot-path work"
+        dependencies: [JIT-2, MSR-6]   # cross-file SHIPPED; couples to FLT-3 (T18) by shared prefix logic — a coupling, not a build dep (tiers stay independently runnable)
+        invariant_note: >-
+          ED-3 — the live probe is step zero (the lane went live on this
+          machine only today; nothing here may assume it records until
+          proven). The MSR-6 AST pin binds the aggregation shape. inv6 —
+          cold-path only. DRM-6 graduation stays session-grain (see
+          not_pursuing — the touch-grain graduation arm is severed).
+        implementation_notes: >-
+          Seams: outcome.py:injection_hits (grain param; per-memory
+          positive-evidence-only is the sanctioned shape) + _injection_join
+          (the ONE join) + main --touch-grain (the existing comparison to
+          extend); jit.py:observe_touch + build_touch_cache (reminders vs
+          cited maps; observe_touch returns early on map miss — jit.py:
+          375-376 — which is why no jit/ state dir exists on this machine);
+          telemetry.py:log_outcome (the sparse cited_by field);
+          dream_generate.py:draft_sweep_state (L842 — DRM-6 consumes
+          session-grain injection_hits, no grain arg);
+          tests/test_injection_cost.py (the binding MSR-6 pin); sleep.py (if
+          a report section is ever the surface). Live diagnosis baseline
+          2026-07-17: 0 cited_by rows over 2682 outcome rows; 1675 rows / 23
+          sessions since 07-16, 848 worktree-prefixed, 650 mappable if
+          stripped; touchmap cited=95 paths / reminders=0; the 548
+          direct-mapped rows predate today's lane activation.
+
+      - id: EVD-3
+        title: Decline-aware interviewing (defer/dormant until declines exist)
+        priority: P3
+        effort: S
+        status: proposed
+        source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "interview-state.json ABSENT from .claude/.memory-telemetry on 2026-07-17 — zero declines ever recorded since EXT-3 shipped 2026-07-16; the hippo-enh-t17-ext capstone's dogfood rendered 2 questions once"}
+        problem: >-
+          The shipped code verifiably ignores decline CLASSES —
+          interview._suppressed filters by exact qid only, and the generation
+          functions never read decline kinds — but the premise is weak TODAY:
+          interview-state.json does not exist on this machine; zero declines
+          have ever been recorded since EXT-3 shipped. There is no decline
+          distribution to shape from and no measured question-fatigue pain. A
+          threshold with no data is dead code.
+        proposal: >-
+          Template-only decline-aware generation in interview.py, GATED on
+          the proving condition: count persisted declines by qid prefix
+          (_QID_PREFIXES = abstain:/contra:/draft: — the class IS already
+          encoded in the qid); a class with >=N distinct declines (module
+          constant, no env knob — the _EVIDENCE_USAGE_MIN_SESSIONS style)
+          renders at reduced priority or is skipped with ONE legible quiet
+          line ("abstention questions quieted — N declined; ask again via
+          interview respond") — inv3, never silent. No LLM, no new state
+          (reads the existing declined map), QUESTION_CAP + the empty norm +
+          accepted-answer routing untouched; EXT-3's exact-qid dedup AC is
+          preserved (this extends suppression from exact-qid to
+          class-frequency). RECOMMENDED SCOPE per the vetting: build only
+          when the decline ledger is non-empty; if built earlier it ships
+          DORMANT — empty-norm, zero behavior change on an absent/empty
+          ledger.
+        acceptance_criteria:
+          - "GATED on the proving condition — builds only once interview-state.json holds >=1 real decline (the recommended scope); if built earlier it ships dormant with a pinned zero-behavior-change test on an absent/empty ledger"
+          - "class counting reads the existing declined map by qid prefix only (no schema change, no new state, no LLM); the threshold is a module constant, no env knob"
+          - "suppression is LEGIBLE — exactly one quiet line naming the class, the count, and the re-ask route; never silent (inv3)"
+          - "EXT-3's shipped AC is preserved — exact-qid declines still never re-render; QUESTION_CAP, the empty norm, and accepted-answer routing are untouched (byte-identity where no decline class crosses the threshold)"
+        dependencies: [EXT-3]          # cross-file SHIPPED
+        invariant_note: >-
+          inv3 — legible quieting IS the item. ED-1 — template-only, no
+          autonomy change, no new state. The deferral posture is itself the
+          vetted verdict: shipping a threshold against an empty ledger would
+          be dead code wearing a feature's name.
+        implementation_notes: >-
+          Seams: interview.py:gather_questions; _suppressed + _read_state
+          (exact-qid today — the verified gap); respond (_OUTCOMES
+          decline|later; _SNOOZE_DAYS=7 — "declines remembered forever,
+          later = 7-day snooze" per the t17 capstone, code-verified);
+          _QID_PREFIXES (L41) + QUESTION_CAP; mcp_tools_consolidate.py (the
+          interview tool wiring). Live probe 2026-07-17: interview-state.json
+          absent from .claude/.memory-telemetry — the decline ledger has
+          never had a row; re-run the probe at build time and record the
+          count on the item (the proving condition is the ledger being
+          non-empty, not a calendar date).
+
+      - id: EVD-4
+        title: Salience-revisit evidence run (SPLIT — Arm A zero-code ripe today, Q4; Arm B severed behind touch/outcome data)
+        priority: P1
+        effort: S                      # Arm A (the commissioned run); Arm B is severed at P3/M behind its own proving condition + dated decision
+        status: proposed
+        source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "doctor check_salience_evidence fires TODAY on this machine (usage_aggregates 115 sessions / 49 memories >= the lived-in threshold 10; salience_ab.json absent) naming the exact command; the MSR-5 rig shipped in PR #70; 26-entry stale.json gives the staleness penalty real input for the first time"}
+        problem: >-
+          ED-2 named a lived-in-corpus evidence run as the salience revisit
+          vehicle when salience was decided OFF (2026-07-09). The substrate
+          has since SHIPPED (MSR-5 -> salience_eval.py, eval --ab, PR #70) —
+          the draft could treat this as hypothetical; it is now literal — and
+          the corpus is lived-in for the first time: 115 sessions / 49
+          usage-tracked memories / a 26-entry stale.json mean BOTH the usage
+          boost and the staleness penalty finally have real input
+          distributions. The shipped doctor check already fires the exact
+          warn naming the command. The draft's literal "touch-grain-informed
+          prior" arm is NOT ripe: the outcome prior already shipped as RET-14
+          (HIPPO_OUTCOME_PRIOR — session-grain, flag-gated, never enabled on
+          this machine, ABSENT from AB_FLAGS) and touch grain is 0/0 (see
+          EVD-2).
+        proposal: >-
+          SPLIT the item into two honestly different arms. Arm A — ZERO new
+          code, ripe TODAY, commissioned by Q4: run the shipped
+          `python -m memory.eval_recall --ab HIPPO_SALIENCE` on this
+          lived-in corpus; the report carries the OFF-arm byte-identity
+          self-check, per-category n with low-n labels, and the dated ED-2
+          footer; it flips NOTHING. Arm B — NOT ripe, needs code, SEVERED
+          behind "when touch/outcome rows exist" AND its own dated decision:
+          the minimal delta is named (add HIPPO_OUTCOME_PRIOR to
+          dream_eval.AB_FLAGS + an eval_recall dispatch branch + a
+          generalized flag-context arm runner on the salience_eval pattern +
+          an outcome-signal precondition so a signal-less ON arm reads as a
+          self-check, not a finding). Both arms frame as measuring EXISTING
+          flags (HIPPO_SALIENCE now; HIPPO_OUTCOME_PRIOR later) — never
+          minting a new prior. Neither arm changes any default; the flip
+          remains a dated owner decision regardless of deltas (ED-2/LIF-7).
+        acceptance_criteria:
+          - "Arm A ships as a commissioned RUN, not code — the shipped rig executes on this corpus; the report carries the OFF-arm byte-identity self-check, per-category n with low-n labels, and the dated ED-2 footer; the evidence lands in the gitignored telemetry dir (never committed, never the golden/CI report)"
+          - "Arm A is gated on Q4 (ED4R-1) — owner-commissioned, never auto-run; no producer, no schedule (the shipped doctor nudge is the only standing surface, and it already exists)"
+          - "Arm B is SEVERED behind its own proving condition (nonzero touch/outcome rows) AND its own dated decision; its minimal delta is named in-file (AB_FLAGS entry + dispatch branch + generalized arm runner + outcome-signal precondition) and it measures the EXISTING RET-14 flag — no new prior is minted"
+          - "neither arm changes any default — HIPPO_SALIENCE stays OFF; the flip remains a dated owner decision regardless of deltas (ED-2; LIF-7's never-metric-proxied law)"
+        dependencies: [MSR-5, RET-14]  # cross-file — ALL SHIPPED (MSR-5 PR #70; RET-14 v1.12.0, not an open ROADMAP.yaml id — no collision)
+        invariant_note: >-
+          ED-2 is the binding law — measures only, never flips; the ED-2
+          razor held through three rounds and holds here. LIF-7 — the flip is
+          never metric-proxied. Q4 (ED4R-1) gates commissioning. inv6 —
+          CLI-only; a multi-second dense double-run can never ride a hook.
+        implementation_notes: >-
+          Seams: salience_eval.py:run_ab + _signal_inventory + _salience_flag
+          (L117-240; OFF-arm byte-identity self-check error at L164-170; the
+          ED-2 footer in every report); dream_eval.py:AB_FLAGS (L53 — today
+          ("HIPPO_DREAM", "HIPPO_SALIENCE"); HIPPO_OUTCOME_PRIOR absent = Arm
+          B's first named delta); eval_recall.py:main --ab dispatch
+          (L1570-1599); doctor_checks_recall.py:check_salience_evidence
+          (_SALIENCE_LIVEDIN_MIN_SESSIONS=10 — deterministically warning
+          today: 115 sessions, no salience_ab.json);
+          recall_salience.py:_usage_boost_map + _staleness_penalty_map +
+          _apply_outcome_prior (HIPPO_OUTCOME_PRIOR — RET-14, CHANGELOG v1.12.0);
+          session_start.py:1476-1482 (the flag-gated outcome-cache writer,
+          session grain; outcome.json absent from this machine's index dir —
+          the prior has never been enabled here, so Arm B has no cache to
+          read until a flagged SessionStart runs); outcome.py:
+          write_outcome_cache / read_outcome_cache. Arm A's evidence is the
+          first entry the ED-2 revisit file has ever had — record the dated
+          result on this item either way (the SIG-5/GRF-5 outcome-agnostic
+          pattern).
+
+# ===========================================================================
+# RELEASE TRAIN — tier sequencing. ALL tiers are `proposed`: which to build,
+# in what order, IF ANY, is the owner's scheduling call (ED4R-1). No
+# cross-TIER dependencies — all four tiers can run in parallel if ratified
+# (EVD-2's FLT-3 coupling is informational, not a build dep). EVD-1 is the
+# single highest-value item (measured chronic pain, zero autonomy change,
+# every ingredient shipped); EVD-1 + FLT-1 are the two highest-value starts
+# and share nothing. target_version is nominal — assigned at release; round 4
+# is a proposal.
+# ===========================================================================
+release_train:
+
+  - tier: T18
+    target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
+    theme: "The fleet lane"
+    status: proposed
+    gate: "Q1 (the presence artifact) gates the WHOLE tier — FLT-1 is the keystone: FLT-2's baseline and FLT-3's presence read both live in its per-session doc. No cross-file deps (RCH-11-adjacent only)."
+    done_means: >-
+      Concurrent same-clone sessions become mutually visible, a moved tree
+      trips one legible line, and the worktree recipe surfaces at the first
+      shared-tree mutating act — detection and one bounded line only; no
+      lock, no daemon, no coordination protocol (ED4R-3). The documented
+      collision classes of 2026-07-16 become detected, named events instead
+      of reflog forensics.
+    items: [FLT-1, FLT-2, FLT-3]
+    audit_note: >-
+      Q1 first — nothing in this tier builds before the dated owner decision
+      (ED4R-1). Re-verify the PRODUCERS adjacency landscape before wiring
+      FLT-1 (CLB-4's merge_digest joined after floor_change in PR #74, after
+      the draft). The premise fix binds: the draft's "23 baselines orphaned"
+      and "v1.19.0 nearly cut twice" exhibits are unsupported — cite only
+      the four verified events + the adjacent 5-session cwd-trap class, and
+      state FLT-3's Bash-invisibility coverage boundary honestly. Presence
+      is per-working-tree — say so wherever the artifact is documented;
+      spanning worktrees is out of scope v1. FLT-2/FLT-3 ride the ONE
+      PostToolUse hookSpecificOutput (QUA-2) and the pinned 50ms budget.
+    capstone: >-
+      Write hippo-enh-t18-fleet: the Q1 verdict and date, the presence-doc
+      shape + TTL/prune numbers, the tripwire's first real fire (or its
+      absence), the nudge's line-budget accounting with JIT-1, and the
+      coverage boundary as-shipped.
+
+  - tier: T19
+    target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
+    theme: "Machine-state lifecycle"
+    status: proposed
+    gate: "None cross-file — stands entirely on shipped RCH-11/SEN-5/SLP-2/SEC-6. In-round: HYG-2 and HYG-3 both depend on HYG-1 (INT-18 makes HYG-3 mechanically unshippable before the census command exists)."
+    done_means: >-
+      The machine-wide rot classes with a real oracle are censused (the
+      symlink farm is the flagship), the symlink leak is stopped at the
+      faucet (the test-isolation fix ships WITH the class), the one
+      genuinely-new remedy drains the temp-rooted batch class with per-row
+      printing, and one warn-on-dead-only doctor line surfaces it all with
+      sleep inheriting free. Trust stays report-only pending Q2; hippo never
+      uninstalls system state.
+    items: [HYG-1, HYG-2, HYG-3]
+    audit_note: >-
+      Delegate, never fork — registry_census for projects, bootstrap.status
+      for installs; the census composes shipped surfaces, it does not re-walk
+      them. The leak fix is the step-zero companion, not a footnote (without
+      it the census measures hippo's own test suite forever). Remedies touch
+      ONLY hippo's own memory symlinks in the harness-owned dir; trust rows
+      are presented, never pruned, pending Q2 (untrust is named as the
+      existing route, not prescribed — it destroys the SEC-6 baseline).
+      ED-3 status: the launchd/cron file oracles and plistlib parse were
+      verified live 2026-07-17 — no probe remains at that scope; do not
+      widen to launchctl runtime state without one.
+    capstone: >-
+      Write hippo-enh-t19-hygiene: the census's first full report (counts
+      per class), the batch drain's yield, the leak-fix mechanism, the Q2
+      posture as-recorded, and whether HYG-2 landed standalone or as
+      --prune-dangling.
+
+  - tier: T20
+    target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
+    theme: "The publish lane"
+    status: proposed
+    gate: "None cross-file — CLB-1/SEC-8/RCH-5/IOP-3/EXT-1 all shipped. In-round build order: PUB-3-view -> PUB-2-report -> PUB-1-verb, or PUB-1 first with the boundary preview + receipt inlined (the cross-refs collapse inward)."
+    done_means: >-
+      Per-item publish preflight exists (print-only pending Q3), the
+      encode-side twin of EXT-1 names what should be published next with
+      readiness evidence, and fresh-checkout link honesty is legible (one
+      doctor line + the heals-N column) — all read-only/print-only, with the
+      CLB-1 CI gate as the backstop on every publish PR. The two-audience
+      posture ratified in PR #67 stops being hand tooling.
+    items: [PUB-3, PUB-2, PUB-1]
+    audit_note: >-
+      The membership oracle is single-homed on provenance.build_repo_file_index
+      (the SHP-1 full-name precedent) — a fresh git ls-files anywhere in the
+      pub lane is a defect. The gate REUSES review.lint_touched with
+      entropy=ON as the only delta (one run — never describe it as "both
+      modes"). The expired/contradicts demotion to advisory is a vetting
+      verdict, not an oversight — do not re-gate them. No 'all' affordance
+      anywhere. PUB-3 is never a gate and its dependency on PUB-2 was
+      deliberately dropped to break the synthesis's cycle (meta.audits) —
+      PUB-2 consumes PUB-3's heals-N column, not the reverse.
+    capstone: >-
+      Write hippo-enh-t20-publish: the Q3 posture as-recorded, the first
+      real publish preflight transcript (which advisories fired), the
+      candidates report's first real top-10, the boundary count before/after
+      the first publishes, and the naming-triangle doc placement.
+
+  - tier: T21
+    target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
+    theme: "Evidence consumers"
+    status: proposed
+    gate: "None cross-file — TMB-1/CLB-2/CLB-3/JIT-2/MSR-5/MSR-6/EXT-3/RET-14/LIF-6 all shipped. EVD-3 additionally gates on its proving condition (a non-empty decline ledger); EVD-4 Arm A gates on Q4; EVD-4 Arm B is severed behind nonzero touch/outcome rows + its own dated decision."
+    done_means: >-
+      The reconsolidation queue gets cheap honest per-entry evidence (EVD-1,
+      the tier's top move and the round's highest-value item), the
+      touch-grain lane gets a health/diagnosis reader that explains its own
+      zeros, decline-aware quieting exists only if declines exist, and
+      salience gets its ED-2 evidence run (Arm A) — no autonomy change, no
+      ranking flip, every verdict still human.
+    items: [EVD-1, EVD-2, EVD-3, EVD-4]
+    audit_note: >-
+      EVD-1's cold-path pin is binding (the resolve_evidence AST precedent):
+      the brief never rides SessionStart producers or the hot path, and raw
+      hunk bodies never render un-linted. EVD-2's ED-3 live recording probe
+      is literal step zero; respect the MSR-6 pin's aggregation shape (no
+      per-memory injected-but-never-touched table) and treat the FLT-3
+      coupling as informational. EVD-3: re-probe the decline ledger at build
+      time — if still empty, defer or ship dormant with the byte-identity
+      pin. EVD-4: Arm A is a run, not code; record the dated result on the
+      item either way; Arm B stays severed until touch/outcome rows exist
+      AND its own decision lands.
+    capstone: >-
+      Write hippo-enh-t21-evidence: the brief's shape on a real worklist
+      entry, the first honest verdict-with-evidence transcript, EVD-2's
+      probe finding, the EVD-3 ledger state, the Q4 verdict, and Arm A's
+      dated A/B result (recorded, NOT acted on — the default stays OFF).
+
+# ===========================================================================
+# DECISIONS — governing choices this round rests on (owner-ratifiable).
+# ED-1..ED-5 are carried from rounds 1-2 (the decision lines verbatim; each
+# detail keeps the round-2 core with a dated round-4 note where the tree
+# moved). ED4R-* are new this round. The four Q1-Q4 owner decisions are
+# PENDING — recorded under ED4R-1, resolved by dated owner entries, never by
+# this file.
+# ===========================================================================
+decisions:
+  - id: ED-1
+    carried_from: round-1 (via round 2, verbatim)
+    decision: detection-first
+    detail: >-
+      Ship the LEGIBLE detection / human-in-the-loop half; gate any
+      autonomous ranking or corpus/rules write on proven signal density.
+      Every autonomous half in this file is severed and deferred behind a
+      DATED OWNER DECISION + measured evidence, never a metric-proxied gate.
+      Still the governing law — round 4 applies it as: census before remedy
+      (HYG), print before stage (PUB), evidence before flip (EVD), presence
+      before any coordination anything (FLT — and coordination is refused
+      outright, ED4R-3).
+  - id: ED-2
+    carried_from: round-1 (via round 2, verbatim)
+    decision: the salience keystone (SIG-5) stays owner-decided-OFF
+    detail: >-
+      SIG-5 decided salience default-OFF (owner-ratified 2026-07-09) because
+      fixture corpora carry no usage/staleness/recency signal. No round-4
+      item ships an always-on read-side ranking prior. Round-4 note: MSR-5's
+      A/B rig SHIPPED (PR #70) and the lived-in doctor nudge now fires on
+      this machine — EVD-4 Arm A is the commissioned evidence run the
+      revisit trigger has always named (Q4); the flip STILL stays a dated
+      owner decision on affirmative evidence, regardless of deltas.
+  - id: ED-3
+    carried_from: round-1 (via round 2, verbatim)
+    decision: verify a web-claimed harness/format feature with an in-harness spike before building on it
+    detail: >-
+      Carried verbatim. The round-2 dated findings recorded under this
+      decision (SEN-2 HTML-comment verbatim-delivery, IOP-2 .mdc drift, IOP-4
+      claude-mem store) live in ROADMAP.enhancements2.yaml — the record is
+      not forked here (inv5). Round-4 applications: HYG-1's scheduler class
+      sticks to file oracles (LaunchAgents glob + crontab -l + plistlib
+      parse) — VERIFIED LIVE 2026-07-17, so no probe remains at that scope,
+      and widening to launchctl runtime state would need one; EVD-2's step
+      zero is a live touch-recording probe (the lane went live on this
+      machine only today — nothing may assume it records until proven);
+      EVD-3 re-probes the decline ledger at build time. Record each dated
+      finding on the item.
+  - id: ED-4
+    carried_from: round-1 (via round 2, verbatim)
+    decision: additive fields are absence-emits-nothing; schema bumps are clean breaks, one migration each
+    detail: >-
+      Carried verbatim as law. Round-4 grounding: the baseline tree is
+      corpus_format 5 / index SCHEMA_VERSION 7 (round 2's detail said
+      "stays 4"/"stays 6" — that was its era's tree; the numbers moved in
+      round 3, the law held). NO round-4 item is expected to bump either:
+      every artifact this round is derived/gitignored (presence docs, census
+      output, briefs, A/B reports), display-only (receipts, candidates,
+      boundary view), print-only (publish, uninstall recipes), or
+      additive/absence-emits-nothing. PUB-3 explicitly ships no schema.
+      Derived-cache gates move only if a specific item needs it — none is
+      expected to.
+  - id: ED-5
+    carried_from: round-1 (via round 2, verbatim)
+    decision: this round is downstream of the shipped trains
+    detail: >-
+      Round 4 is the FOURTH enhancement train, downstream of rounds 1-3 ALL
+      shipped AND released through v1.22.0 (round 2 executed last —
+      v1.20.0-v1.22.0). Unlike round 2 (which carried SIG-6 open mid-cycle),
+      EVERY cross-file dependency named in this file was verified SHIPPED at
+      the baseline: RCH-11, SEN-5, SLP-2, SEC-6, SEC-8, RCH-5, CLB-1, CLB-2,
+      CLB-3, IOP-3, EXT-1, EXT-3, TMB-1, JIT-2, MSR-5, MSR-6, RET-14, LIF-6.
+      No tier waits on an unlanded cross-file dep; tiers wait only on
+      ratification and their Q1-Q4 gates (ED4R-1). Re-confirm each dep on
+      the live tree at build time anyway (the premise-correction law).
+  - id: ED4R-1
+    question: Four owner decisions surfaced by this round — resolved when?
+    decision: Q1-Q4 are PENDING and gate the relevant halves; this file does not resolve them
+    detail: >-
+      Contrast round 3, where the owner ratified same-day. The four, with
+      the draft's recommendations preserved as recommendations only:
+      Q1 (FLT-1) — may hippo write the per-session presence file? (rec: yes
+      — artifact-class parity with the episode buffer + jit state; gates ALL
+      of T18). Q2 (HYG-2) — may a hygiene verb remediate trust-registry
+      rows, or does the consent ledger stay report-only? (rec: report-only
+      now, revisit with census data — untrust deletes the SEC-6 baseline,
+      so bookkeeping and revocation are semantically different acts; gates
+      the trust half of HYG). Q3 (PUB-1) — may the publish verb stage via
+      git add -f, or print-only? (rec: print-only — a --stage flag would be
+      hippo's first user-repo git-index write; gates the act half of PUB-1).
+      Q4 (EVD-4) — commission the salience-revisit evidence run? (rec: yes —
+      evidence first, decision later; gates Arm A). Each resolution is a
+      dated owner entry recorded on the item and in the capstone; a metric
+      never proxies any of them (LIF-7).
+  - id: ED4R-2
+    question: What keeps round 4 from minting the next generation of dark reservoirs?
+    decision: no new standing artifact without a NAMED READER (the anti-dark-reservoir law — round 4's organizing spine)
+    detail: >-
+      Round 4 exists because write-only ledgers accumulated (EXPLORATIONS4
+      s1: touch rows, interview declines, census-less machine state, a
+      reconsolidation queue whose evidence was hand-gathered). Every new
+      artifact this round names its consumer IN THE SAME ITEM: the presence
+      doc -> the FLT-1 producer line + FLT-2's baseline + FLT-3's read; the
+      census -> HYG-3's doctor line (and sleep, free); the reverify brief ->
+      the reconsolidate tool/CLI/consolidate Step 2; the candidates
+      partition -> the recall_diff CLI (and PUB-1's receipt); the boundary
+      view -> the doctor line + PUB-2's heals-N column; the A/B report ->
+      the ED-2 revisit file. An item that adds a ledger, cache, or report
+      nothing reads is out of spec BY LAW, not by taste.
+  - id: ED4R-3
+    question: How far may the fleet lane go?
+    decision: fleet visibility never becomes coordination — no lock, no daemon, no mutual exclusion
+    detail: >-
+      Binds the EXPLORATIONS4 s3 cut permanently: hippo is files-and-git; a
+      lock service, presence daemon, or blocking handshake is a posture
+      break and a new failure mode. Presence (FLT-1), the tripwire (FLT-2),
+      and the nudge (FLT-3) are detection + one bounded line each,
+      self-silencing, kill-switched, and exit-0. Any future
+      coordination-shaped proposal starts from a new dated owner decision,
+      not from this tier's artifacts.
+
+# ===========================================================================
+# NOT PURSUING — the disciplined cuts and standing kills, recorded so their
+# absence reads as a decision (full reasoning in EXPLORATIONS4.md + the
+# vetting record).
+# ===========================================================================
+not_pursuing:
+  - {id: locking-or-coordination-daemon, reason: "REFUSED by ED4R-3 — no lock, no daemon, no mutual exclusion; the fleet lane is detection + one bounded line only. A lock service is a posture break (files-and-git) and a new failure mode nobody asked for."}
+  - {id: auto-drain-reconsolidation-queue, reason: "STANDING KILL (LIF-1) — auto-graduating when the cited diff 'looks harmless' is autonomy creep against the human-verdict contract, and grep-still-matches is the plausible-but-wrong trap. EVD-1 ships the evidence brief; the verdict stays human."}
+  - {id: llm-judged-lanes, reason: "STANDING KILL — round 2's MSR thesis (deterministic beats judge) has survived three rounds; nothing in round 4 needs a judge. Zero LLM calls anywhere in this file."}
+  - {id: stability-facts-lint, reason: "ALREADY SHIPPED — the DOC-15 prose-rot class was closed as DOC-16 (PR #66, merged 2026-07-16) while the draft was being written; cited there as evidence the lint-pinned-facts pattern generalizes. Nothing left to propose."}
+  - {id: re-proposing-round-2, reason: "MOOT — the draft carried 'executing round 2 is a scheduling decision' as a cut; T8-T13 were executed and RELEASED (v1.20.0-v1.22.0) within a day of the draft. Recorded as a premise correction, not a proposal."}
+  - {id: orphaned-derived-dirs-census-class, reason: "CUT from HYG-1 — derived dirs (.claude/.memory-index, .claude/.memory-telemetry) are in-repo siblings of memory_dir and die with the repo; the class is near-empty as drafted. The real machine-wide orphan class is the ~/.claude/projects symlink farm; derived-dir status survives only as one delegated field on the projects-row class."}
+  - {id: plugin-install-census-class, reason: "CUT/DELEGATED from HYG-1 — bootstrap.status/_sibling_installs already enumerates the ~/.claude/plugins/data sibling installs and doctor's check_bootstrap surfaces them; a second walk of the same surface violates inv5. The census composes bootstrap.status, it does not re-implement it."}
+  - {id: per-memory-injected-but-never-touched-table, reason: "STANDING KILL (round-1 inert-recall-noise-finder, enforced by the MSR-6 AST pin) — EVD-2 stays lane-level or positive-evidence-only (injection_hits' shipped shape); _injection_join stays the single join."}
+  - {id: publish-content-transform, reason: "REFUSED in PUB-1 — a publish verb that rewrites content has become pack_extract (which strips provenance, stamps pack, emits manifest, refuses in-corpus dest) and must be killed as duplication; publish's defining property is byte-identical in-place file + git tracking only."}
+  - {id: publish-hard-gate-on-staleness-or-conflict, reason: "DEMOTED in PUB-1 — refusing invalid_after-expired or unresolved-contradicts candidates encodes editorial policy the owner never ratified (#67's bar was secrets + eyeball; the committed subset IS dev-history; CLB-1 keeps conflicts/edges advisory to not automate human posture calls). Both render as ADVISORY receipt warnings."}
+  - {id: touch-grain-graduation-arm, reason: "SEVERED (EVD-2 / EVD-4 Arm B) — a touch-grain-informed graduation or ranking arm needs nonzero touch data (today 0/0, mechanically) plus its own outcome-signal precondition and dated decision; DRM-6 graduation stays on session-grain injection_hits."}
+  - {id: publish-stage-flag-git-index-write, reason: "DEFERRED behind Q3 (ED4R-1) — a --stage flag executing git add -f would be hippo's FIRST production write to a user repo's git index (the only in-package add/commit is a hermetic eval fixture); two shipped print-only precedents (SLP-2, the init nudge) argue the flip needs its own dated owner decision, which the draft itself recommends."}
+
+# ===========================================================================
+# KPIs — which measures each tier moves (existing + new round-4 EKPIs).
+# ===========================================================================
+kpis:
+  - {ref: KPI-5, name: degradation_legibility, moved_by: [FLT-2, HYG-3], note: "a moved working tree and dead machine state were silent conditions — the tripwire line and the warn-on-dead doctor line make them loud"}
+  - {ref: KPI-6, name: staleness_loop_closure, moved_by: [EVD-1, PUB-3], note: "the reverify brief closes the evidence gap on every staleness verdict; the boundary view closes link honesty at the committed-subset edge"}
+  - {id: EKPI4R-1, name: fleet_collision_legibility, definition: "documented same-clone collision classes become detected, named events (presence line, tripwire line, worktree nudge) instead of reflog forensics", target: "the 2026-07-16 four-event day is fully detectable; zero collisions discovered by forensics after T18", moved_by: [FLT-1, FLT-2, FLT-3]}
+  - {id: EKPI4R-2, name: machine_state_freshness, definition: "machine-state rot is censused with real oracles vs accumulating silently; the bar is the 2-day-invisible registry corruption never recurring in any class", target: "silent rot-days -> 0 for censused classes; the symlink leak stopped at the faucet", moved_by: [HYG-1, HYG-2, HYG-3]}
+  - {id: EKPI4R-3, name: publish_lane_cost, definition: "hand-steps per published memory (today: two scans + an eyeball + git add -f, self-assembled) and candidates discovered by tooling vs by hand", target: "one verb run + one printed command per publish; candidates named by the report, not recalled from memory", moved_by: [PUB-1, PUB-2, PUB-3]}
+  - {id: EKPI4R-4, name: verdict_evidence_cost, definition: "evidence gathered per reconsolidation verdict (today: hand-diff per the MCP tool's own instructions; 671 verdicts/week)", target: "every worklist verdict renders with a precomputed brief; zero hand-diff instructions left in tool descriptions", moved_by: [EVD-1]}
+  - {id: EKPI4R-5, name: evidence_loop_closure, definition: "write-only lanes gaining >=1 named reader (ED4R-2 made measurable): touch rows, decline ledger, salience A/B file, reconsolidation ledger", target: "every standing ledger named in EXPLORATIONS4 s1 has a shipped reader or a recorded defer decision", moved_by: [EVD-1, EVD-2, EVD-3, EVD-4]}
