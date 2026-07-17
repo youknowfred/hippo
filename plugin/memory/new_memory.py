@@ -489,25 +489,13 @@ def _fenced_blocks(body: str) -> List[str]:
 def _diff_post_image(content: str) -> Optional[str]:
     """The post-image of a unified-diff-shaped block, or None when it isn't one.
 
-    The consolidate flow fences GRW-1 hunks VERBATIM — including ``+``/``-``/context
-    prefixes — and a landed change's post-image (context + added lines, prefixes
-    stripped) is what a fresh HEAD can actually contain. Headers (``diff --git``,
-    ``index``, ``---``/``+++``, ``@@``) are dropped; a block whose remaining lines are
-    not uniformly diff-prefixed is not a diff (returns None, the raw bytes were
-    already tried).
+    Moved to ``staleness_evidence`` (CLB-3 owns diff-aware evidence matching);
+    this delegates so the write ticket and the drift detector can never disagree
+    about what a fresh tree can contain — one concept, one implementation.
     """
-    lines = content.split("\n")
-    body_lines = [
-        ln for ln in lines
-        if ln and not ln.startswith(("diff --git", "index ", "--- ", "+++ ", "@@"))
-    ]
-    if not body_lines or not any(ln[:1] in "+-" for ln in body_lines):
-        return None
-    if not all(ln[:1] in "+- " for ln in body_lines):
-        return None
-    kept = [ln[1:] for ln in body_lines if ln[:1] in "+ "]
-    post = "\n".join(kept).strip("\n")
-    return post or None
+    from .staleness_evidence import _diff_post_image as _impl
+
+    return _impl(content)
 
 
 def _fence_fidelity(body: str, repo_root: Optional[str]) -> dict:

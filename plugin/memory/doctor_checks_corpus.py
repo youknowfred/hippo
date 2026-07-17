@@ -735,3 +735,50 @@ def check_archive_regret(ctx: DoctorContext) -> Dict[str, str]:
         }
     except Exception as exc:
         return {"status": "warn", "message": f"archive-regret check failed: {exc}."}
+
+
+def check_evidence_fences(ctx: DoctorContext) -> Dict[str, str]:
+    """CLB-3: quoted-evidence coverage + drift — one line, deterministic.
+
+    Counts memories carrying MARKED evidence fences vs memories with code fences
+    but no marker (pre-marker drains — "unverifiable", out of the detector's scope
+    by contract, never backfilled), then reports live drift via the same matcher
+    the SessionStart pipeline runs (``staleness_evidence.evidence_drift_map`` —
+    one implementation, so doctor and the RET-6 banner can never disagree). A
+    corpus with no fences at all reports coverage zero and stays ``ok``; drifted
+    memories flip to ``warn`` naming the first few — routing is the existing
+    reverify gate, never a new verb.
+    """
+    try:
+        from .links import _FENCED_CODE_RE
+        from .staleness_evidence import evidence_drift_map, extract_evidence_fences
+
+        marked = unverifiable = 0
+        for path in _iter_memory_files_safe(ctx.memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+            except Exception:
+                continue
+            if not _FENCED_CODE_RE.search(text):
+                continue
+            if extract_evidence_fences(text):
+                marked += 1
+            else:
+                unverifiable += 1
+        drift = evidence_drift_map(ctx.memory_dir, ctx.repo_root)
+        base = (
+            f"quoted evidence: {marked} memory(ies) carry evidence-marked fences; "
+            f"{unverifiable} with unmarked code fences (unverifiable — pre-marker, never backfilled)"
+        )
+        if not drift:
+            return {"status": "ok", "message": f"{base}; no evidence drift."}
+        shown = ", ".join(sorted(drift)[:4])
+        more = f" (+{len(drift) - 4} more)" if len(drift) > 4 else ""
+        return {
+            "status": "warn",
+            "message": f"{base}; {len(drift)} with DRIFTED quoted evidence: {shown}{more} "
+            "— re-verify each via the reconsolidation gate (reverify graduate|fix|demote).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"evidence-fence check failed: {exc}."}

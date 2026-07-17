@@ -120,6 +120,25 @@ Seeds already flagged at capture (`⚠ secret lint flagged these hunks` in the l
 the same treatment: their hunks NEVER reach a body verbatim — summarize around the secret,
 or scrub it and lint again until the scan is clean.
 
+**Evidence-fence marker (CLB-3 — future drains only).** When you fence hunk lines into a
+body, attribute the fence machine-recognizably so the drift detector can re-verify the
+quote against the live tree at every SessionStart: put `evidence: <path>:<start>-<end>`
+at the end of the fence's info string — `<path>` is the toplevel-relative file the hunk
+came from, `<start>-<end>` the post-image line region from the hunk's `@@` header:
+
+    ```diff evidence: src/thing.py:120-138
+    @@ -118,6 +120,8 @@
+     context line
+    +added line
+    ```
+
+Keep the diff prefixes verbatim — the matcher is diff-line-class aware (context/added
+lines are checked exact-then-whitespace-normalized; removed lines are excluded), and the
+line region is an informational anchor, not the oracle: content contiguity is what gets
+matched, so upstream edits that merely shift line numbers never flag. NEVER backfill
+markers onto quotes in pre-existing bodies you did not just drain — unmarked fences are
+out of the detector's scope by contract (doctor counts them as unverifiable instead).
+
 - **route `add`** → the candidate is novel; create it, fencing the rationale into the body
   so the WHY is git-committed with the memory (not a one-time drain display):
   ```

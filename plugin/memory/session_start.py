@@ -1406,6 +1406,18 @@ def _build_run_context(memory_dir: str, repo_root: str) -> RunContext:
         wm_stale = watermark_stale_candidates(memory_dir, repo_root)
     except Exception:
         wm_stale = []
+    # CLB-3: quoted-evidence drift — extraction + matching live HERE, in the find_stale
+    # pipeline (never build_index/_ensure_index; tests/test_evidence_drift.py pins that
+    # structurally), and drifted names union into the SAME watermark lane above — the one
+    # semantic_reverify gate, no new write verb.
+    evidence_drift: Dict[str, dict] = {}
+    try:
+        from .staleness_evidence import evidence_drift_map, fold_drift_candidates
+
+        evidence_drift = evidence_drift_map(memory_dir, repo_root)
+        wm_stale = fold_drift_candidates(wm_stale, evidence_drift)
+    except Exception:
+        evidence_drift = {}
     try:
         worklist = recalled_stale_worklist(
             memory_dir, repo_root, stale=stale, watermark_stale=wm_stale
@@ -1426,7 +1438,7 @@ def _build_run_context(memory_dir: str, repo_root: str) -> RunContext:
         if os.path.isdir(memory_dir):
             from .build_index import default_index_dir
 
-            write_stale_cache(default_index_dir(memory_dir), stale)
+            write_stale_cache(default_index_dir(memory_dir), stale, evidence_drift=evidence_drift)
     except Exception:
         pass
     # T16 JIT-1: refresh the first-touch reminder map (touchmap.json) at this SAME
