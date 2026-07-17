@@ -31,7 +31,8 @@ except Exception:  # pragma: no cover - bare python3 pre-bootstrap (ONB-2)
 
 # Code/config extensions we treat as "cited code" for the staleness signal.
 # .md is intentionally EXCLUDED — memory<->memory references are [[wikilinks]] (Tier 3),
-# and doc/changelog churn is not "code drift".
+# and doc/changelog churn is not "code drift". .mdc (Cursor rules) is INCLUDED (IOP-2):
+# an imported memory cites its upstream .mdc source so drift/deletion flags via find_stale.
 #
 # ORC-1: sorted LONGEST-FIRST. This is intent-preservation, NOT the fix — the trailing
 # boundary in _CITATION_RE is what makes the alternation order irrelevant (the engine
@@ -40,7 +41,7 @@ except Exception:  # pragma: no cover - bare python3 pre-bootstrap (ONB-2)
 # thinking order is load-bearing here. Adding an entry is enough to support it: the
 # reachability test loops over this tuple, so a shadowed entry fails immediately.
 _CODE_EXTS = (
-    "tsx", "jsx", "json", "yaml", "toml", "cts", "cjs", "mts", "mjs",
+    "tsx", "jsx", "json", "yaml", "toml", "cts", "cjs", "mts", "mjs", "mdc",
     "cfg", "ini", "yml", "sh", "ts", "js", "py",
 )
 

@@ -41,7 +41,8 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
      don't copy"): usually skip, and cite the rule from an existing memory if needed.
    - `exists: true` — already imported (a re-run refuses idempotently).
    - `paths_matched` — how many concrete repo files its globs resolve to today (they
-     land in the body as an `Applies to:` line and become `cited_paths`).
+     land in the body as an `Applies to:` line and become `cited_paths`; the source
+     `.mdc`'s own path lands as a `Source:` line on the same route — see step 3).
    - `always_apply: true` — Cursor kept this rule always-in-context; if the user wants
      the same here, import it, then suggest `steer: pin` or a `feedback`-type rewrite
      via `/hippo:new` — do not silently change its type.
@@ -71,7 +72,11 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 3. **Close the loop.** After the confirmed imports: remind the user the new memories are
    ordinary markdown-in-git (commit them), and that the source `.mdc` files are now
    redundant with the corpus — deleting them is THEIR call, in their own editor, not
-   this skill's.
+   this skill's. Either way the memory stays honest: a TRACKED source `.mdc` is in the
+   imported memory's `cited_paths` (the `Source:` line), so a later upstream edit — or
+   the deletion itself — flags the memory stale at SessionStart/doctor and the RET-6
+   verify-at-use banner names it on recall; re-import stays a manual decision. (An
+   uncommitted `.mdc` can't be tracked — the fingerprint activates once it's committed.)
 
 ## Hard rules
 

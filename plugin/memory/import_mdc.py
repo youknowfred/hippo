@@ -33,6 +33,14 @@ concrete paths are therefore appended to the BODY as one ``Applies to: ...`` lin
 100% the shipped write path. Glob RESOLUTION reuses ``rules_plane``'s exact match
 pipeline (``_expand_braces`` → ``_glob_to_re`` over ``_repo_paths_for_globs``'s
 tracked∪untracked-unignored universe) — never a re-implementation.
+
+UPSTREAM FINGERPRINT (IOP-2): the source ``.mdc``'s own repo-relative path rides the same
+route — a dedicated ``Source: ...`` body line (NOT folded into ``Applies to:``, whose
+20-path cap could truncate it away), derivable because ``.mdc`` is in
+``provenance._CODE_EXTS``. A TRACKED source thus lands in ``cited_paths``, so RET-6's
+already-shipped git-log staleness scan flags upstream edits AND deletion with zero new
+machinery — no new frontmatter stamp, no new doctor check. An untracked source can't
+resolve against ``git ls-files`` and degrades to the glob targets alone.
 """
 
 from __future__ import annotations
@@ -164,12 +172,12 @@ def _applies_line(paths: List[str]) -> str:
     return "Applies to: " + ", ".join(shown) + (f" (+{extra} more)" if extra else "")
 
 
-def _candidate_body(parsed: dict, paths: List[str]) -> str:
+def _candidate_body(parsed: dict, paths: List[str], source_rel: str = "") -> str:
     body = (parsed.get("body") or "").rstrip("\n")
-    line = _applies_line(paths)
-    if not line:
-        return body
-    return f"{body}\n\n{line}" if body else line
+    for line in (_applies_line(paths), f"Source: {source_rel}" if source_rel else ""):
+        if line:
+            body = f"{body}\n\n{line}" if body else line
+    return body
 
 
 def _slug_for(path: str) -> str:
@@ -213,14 +221,15 @@ def import_candidates(
             slug = _slug_for(path)
             description = parsed["description"] or _fallback_description(parsed, slug)
             paths = resolve_globs(repo_root, parsed["globs"])
-            body = _candidate_body(parsed, paths)
+            rel = os.path.relpath(path, repo_root)
+            body = _candidate_body(parsed, paths, source_rel=rel)
             check = check_candidate(
                 slug, description, "project", body,
                 memory_dir=memory_dir, repo_root=repo_root,
             )
             out.append(
                 {
-                    "file": os.path.relpath(path, repo_root),
+                    "file": rel,
                     "slug": slug,
                     "description": description,
                     "globs": parsed["globs"],
@@ -293,8 +302,10 @@ def import_mdc_file(
         result["slug"] = slug
         description = parsed["description"] or _fallback_description(parsed, slug)
         paths = resolve_globs(repo_root, parsed["globs"])
-        body = _candidate_body(parsed, paths)
         rel = os.path.relpath(path, repo_root)
+        # IOP-2: the Source: line puts the upstream .mdc itself on the cited-paths route,
+        # so a tracked source drift/deletion flags the imported memory via find_stale.
+        body = _candidate_body(parsed, paths, source_rel=rel)
 
         candidate_text = f"{description}\n{body}"
         warnings = scan_with_remediation(candidate_text)
