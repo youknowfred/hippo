@@ -318,6 +318,15 @@ join_authority_gap = sorted(
     name for name in cited_by_governance if strength.get(name, 0.0) < 0.15
 )
 
+# --- IOP-1 foreign-dialect radar: the rule dialects hippo does NOT own (.cursor/rules
+# Cursor .mdc, .github/instructions Copilot, watch-only unratified .agents/rules) —
+# censused by glob-presence alone, divergence-vs-governance via rule_dup_candidates,
+# existence-only .mdc citation/glob rot. Report-only, and its FOREIGN_GLOBS surface
+# never merges into the GOV_GLOBS authority scan above (inv5: un-owned foreign content
+# is never hippo authority, never a recall pointer, never an import candidate here). ---
+from memory.rules_foreign import foreign_radar
+foreign_dialects = foreign_radar(str(repo_root_p))
+
 # --- Join 5: graph-isolated watch-list — LinkGraph.isolates() (zero-inbound AND
 # zero-outbound; the graph inverts adjacency once internally, never re-derive it here).
 # NEVER archive-eligible on its own — strictly weaker than
@@ -472,6 +481,7 @@ print(json.dumps({
     "link_density_suggestions": link_density_suggestions,
     "merge_candidates": merge_candidates,
     "ungrounded_prescriptions": ungrounded_prescriptions,
+    "foreign_dialects": foreign_dialects,
 }, indent=2, default=str))
 PYEOF
 ```
@@ -555,6 +565,17 @@ The joins above are already computed as plain data; this phase is about **interp
    nothing supports). Never a bulk rewrite (inv4); warn-only, never a block. A high fraction is
    a corpus-health signal (the transcription-not-synthesis discipline slipping), not a per-file
    emergency.
+
+11. **Foreign-dialect radar** (`foreign_dialects`, IOP-1) — the rule dialects hippo does NOT
+   own. Report the census honestly (all globs empty → "no other dialects found" — one line and
+   move on). Each `divergence` row is a foreign file whose substance a governance block already
+   contains: a same-rule-diverged pair in the making — the fix is a per-item human choice
+   (converge the two by hand, or delete one side; "link, don't copy"), NEVER an import proposal
+   from this pass and never an auto-edit. `mdc_citation_rot` / `mdc_dead_globs` are
+   existence-only findings on Cursor's own files (a `.mdc` has no drift baseline — that framing
+   would be dishonest); the fix is editing the named `.mdc` in the user's own editor. Un-owned
+   content never becomes hippo authority: if a diverged pair should live in the corpus, route
+   the user to `/hippo:import` (its own per-item consent flow), not through this audit.
 
 **Signal-maturity tag** — apply to every join above that depends on the recall-telemetry window
 (authority-evidence gap, staleness-half-life shape, graduation history, archive candidacy
