@@ -91,6 +91,7 @@ WRITE_OPEN_ALLOWLIST = {
     ("session_start", "_periodic_nudge_should_fire"): "nudge cadence counter; worst case re-nags once",
     ("session_start", "_persist"): "per-clone GOV-4 watermark; worst case re-surfaces once",
     ("resolve_view", "mark_not_conflicting"): "per-clone dismiss ledger; rebuildable by re-dismissing",
+    ("resolve_view", "_log_verdict"): "per-clone prefill-vs-choice record on the SAME dismiss ledger (TMB-1); derived, best-effort, never an authority",
     ("capture", "write_session_capture"): "gitignored pending seed, unique per-session filename",
     ("capture", "snooze_queue"): "queue-state marker; worst case the nudge re-fires",
     ("provenance", "ensure_self_ignoring_dir"): "derived-dir self-ignore marker; create-once, single '*' line",

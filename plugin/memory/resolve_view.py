@@ -46,6 +46,18 @@ from typing import Dict, List, Optional, Set, Tuple
 
 _LEDGER_PREFIX = ".resolve-ledger-"
 
+# TMB-1: the ONE verdict taxonomy — exactly the four names the /hippo:resolve skill and
+# the resolve MCP tool expose, plus the explicit no-suggestion token. The evidence card's
+# prefill is expressed STRICTLY in these; there is deliberately no second vocabulary.
+_VERDICT_NAMES = ("keep_one", "scope_both", "merge", "not_conflicting")
+_ABSTAIN = "abstain"
+
+# TMB-1: usage asymmetry is only evidence once the ledger has seen enough distinct
+# sessions to mean anything — below this floor the column is withheld (labeled, not
+# silently dropped). Same 5-session rhythm as soak.SOAK_GATE_SESSIONS /
+# reconsolidate._SNOOZE_WINDOW_SESSIONS; a plain module constant, no env knob.
+_EVIDENCE_USAGE_MIN_SESSIONS = 5
+
 
 def _repo_key(repo_root: str) -> str:
     """Per-clone corpus key — ``_periodic_nudge_should_fire``'s exact derivation."""
@@ -70,15 +82,28 @@ def _canonical_pair(a: str, b: str) -> Tuple[str, str]:
     return (a, b) if a <= b else (b, a)
 
 
-def read_resolved(repo_root: str) -> Set[Tuple[str, str]]:
-    """Pairs this clone marked not-conflicting; ``set()`` on no ledger/no data dir. Never raises."""
+def _read_ledger_doc(repo_root: str) -> dict:
+    """The per-clone ledger's whole JSON document, ``{}`` on absence/corruption. Never raises.
+
+    TMB-1 made the ledger two-keyed (``resolved`` + the additive ``verdicts`` log below), so
+    both writers must read-modify-write the WHOLE document — a writer that rebuilt only its
+    own key would silently drop the other's records.
+    """
     try:
         path = ledger_path(repo_root)
         if not path or not os.path.isfile(path):
-            return set()
+            return {}
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
-        pairs = data.get("resolved") if isinstance(data, dict) else None
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def read_resolved(repo_root: str) -> Set[Tuple[str, str]]:
+    """Pairs this clone marked not-conflicting; ``set()`` on no ledger/no data dir. Never raises."""
+    try:
+        pairs = _read_ledger_doc(repo_root).get("resolved")
         out: Set[Tuple[str, str]] = set()
         for p in pairs or []:
             if isinstance(p, list) and len(p) == 2 and all(isinstance(x, str) for x in p):
@@ -86,6 +111,48 @@ def read_resolved(repo_root: str) -> Set[Tuple[str, str]]:
         return out
     except Exception:
         return set()
+
+
+def read_verdict_log(repo_root: str) -> List[dict]:
+    """TMB-1's prefill-agreement records — ``[{"pair", "verdict", "prefill"}]`` in the order
+    rendered on this clone. ``[]`` on no ledger. Derived, per-clone, rebuildable exactly like
+    the dismiss records it lives beside — never an authority, never a ranking input."""
+    try:
+        rows = _read_ledger_doc(repo_root).get("verdicts")
+        return [r for r in rows or [] if isinstance(r, dict)]
+    except Exception:
+        return []
+
+
+def _log_verdict(repo_root: str, pair: Tuple[str, str], verdict: str, prefill: Optional[str]) -> bool:
+    """Record ONE rendered verdict next to the evidence card's prefill (TMB-1).
+
+    The additive ``verdicts`` key on the SAME per-clone ledger file the dismiss verdict
+    already writes — deliberately NOT a sibling ledger, NOT a reconsolidation outcome
+    (``_RECONSOLIDATION_OUTCOMES`` is untouched), and never consulted by ranking. This is
+    the capture half only: whether the human's choice agreed with the card's suggestion is
+    future-audit material; nothing reads it on any automated path, and there is no
+    accept-prefill/auto-default anywhere (gated behind a dated owner decision in the
+    roadmap). Best-effort: ``False`` (no durable home / write failure) never voids the
+    verdict itself. Never raises.
+    """
+    try:
+        path = ledger_path(repo_root)
+        if path is None:
+            return False
+        doc = _read_ledger_doc(repo_root)
+        rows = doc.get("verdicts")
+        if not isinstance(rows, list):
+            rows = []
+        rows.append({"pair": list(pair), "verdict": verdict, "prefill": prefill})
+        doc["verdicts"] = rows
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, indent=0)
+            fh.write("\n")
+        return True
+    except Exception:
+        return False
 
 
 def mark_not_conflicting(a: str, b: str, repo_root: str) -> dict:
@@ -116,9 +183,13 @@ def mark_not_conflicting(a: str, b: str, repo_root: str) -> dict:
         result["ledger"] = path
         resolved = read_resolved(repo_root)
         resolved.add(pair)
+        # TMB-1: rewrite the WHOLE document (dismissals + the verdicts log), not just this
+        # writer's key — rebuilding {"resolved": …} alone would drop the prefill records.
+        doc = _read_ledger_doc(repo_root)
+        doc["resolved"] = sorted(list(p) for p in resolved)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump({"resolved": sorted(list(p) for p in resolved)}, fh, indent=0)
+            json.dump(doc, fh, indent=0)
             fh.write("\n")
         result["recorded"] = True
         return result
@@ -262,6 +333,275 @@ def pair_edge_state(memory_dir: str, a: str, b: str, *, repo_root: Optional[str]
     return {"declared_by": declared_by, "proposed": proposed}
 
 
+# --------------------------------------------------------------------------- #
+# TMB-1: the per-pair evidence card — a deterministic, read-only adjudication aid.
+# Git-mined on demand (inv1: no new persisted state; git history IS the birth record),
+# and confined to this module's describe()/--list cold path (inv6: the SessionStart
+# contradiction producer and the recall hot path never reach these git calls — pinned).
+# Freshness comes from provenance.git_last_commit_with_time DIRECTLY: importing
+# reconsolidate here would put the demote engine one typo away from the read-only
+# listing half (the no-corpus-write AST pin's whole point).
+# --------------------------------------------------------------------------- #
+def _memory_rel_path(name: str, memory_dir: str, repo_root: str) -> Optional[str]:
+    """``<name>.md``'s repo-relative path, or ``None`` when outside the repo."""
+    try:
+        rel = os.path.relpath(
+            os.path.realpath(os.path.join(memory_dir, f"{name}.md")),
+            os.path.realpath(repo_root),
+        )
+        return None if rel.startswith("..") else rel.replace(os.sep, "/")
+    except Exception:
+        return None
+
+
+def _edge_birth_commits_ago(
+    declared_by: List[str], other_of: Dict[str, str], memory_dir: str, repo_root: str
+) -> Optional[int]:
+    """Commits since the ``contradicts`` declaration was introduced, or ``None`` (unknown).
+
+    Git-mined, zero persisted state: pickaxe (``-S<counterpart>``) finds the OLDEST commit
+    that changed the counterpart-name's occurrence count in the declaring file — the
+    commit that introduced the reference — then ``rev-list --count <sha>..HEAD`` is the
+    age in commits. An approximation by design (a body mention of the counterpart that
+    predates the edge line reads as the birth), honest for an evidence card. With BOTH
+    sides declaring, the OLDER introduction wins (the conflict has existed since the
+    first declaration). ``None`` — rendered "age unknown" — for uncommitted files,
+    shallow/rewritten history, a proposal-only pair (nothing declared), or any git
+    failure. Never raises.
+    """
+    try:
+        from .provenance import run_git
+
+        best: Optional[int] = None
+        for side in declared_by or []:
+            other = other_of.get(side)
+            rel = _memory_rel_path(side, memory_dir, repo_root)
+            if not other or not rel:
+                continue
+            log = run_git(
+                ["log", "--reverse", "--format=%H", f"-S{other}", "--", rel], repo_root
+            )
+            sha = log.split("\n")[0].strip() if log.strip() else ""
+            if not sha:
+                continue
+            count = run_git(["rev-list", "--count", f"{sha}..HEAD"], repo_root).strip()
+            try:
+                n = int(count)
+            except ValueError:
+                continue
+            best = n if best is None else max(best, n)
+        return best
+    except Exception:
+        return None
+
+
+def _git_newer_side(
+    a: str, b: str, memory_dir: str, repo_root: str
+) -> Tuple[Optional[str], Dict[str, Optional[int]]]:
+    """``(newer_side_or_None, {name: last-commit epoch})`` — the freshness leg.
+
+    ``provenance.git_last_commit_with_time`` on both ``.md`` files (their last-edit
+    moments in history) — NEVER via reconsolidate (see the section comment). ``None``
+    newer-side when either file is uncommitted/outside the repo or the epochs tie —
+    unknown stays unknown, never a coin flip. Never raises.
+    """
+    epochs: Dict[str, Optional[int]] = {a: None, b: None}
+    try:
+        from .provenance import git_last_commit_with_time
+
+        for side in (a, b):
+            rel = _memory_rel_path(side, memory_dir, repo_root)
+            if rel is None:
+                continue
+            _sha, epoch = git_last_commit_with_time(rel, repo_root)
+            epochs[side] = epoch
+        ea, eb = epochs[a], epochs[b]
+        if ea is not None and eb is not None and ea != eb:
+            return (a if ea > eb else b), epochs
+        return None, epochs
+    except Exception:
+        return None, epochs
+
+
+def _drift_evidence(a: str, b: str, memory_dir: str, index_dir: Optional[str]) -> Dict[str, int]:
+    """``{side: changed-file count}`` for sides in the stale cache — cited-code drift.
+
+    Reads ``stale.json`` (the LIF-6 cache SessionStart already refreshed) — zero git
+    calls, zero corpus reads. ``{}`` when the cache is absent (advisory, same posture as
+    every other reader of that file). Never raises.
+    """
+    try:
+        from .build_index import default_index_dir
+        from .staleness import read_stale_cache
+
+        cache = read_stale_cache(index_dir or default_index_dir(memory_dir))
+        if cache is None:
+            return {}
+        out: Dict[str, int] = {}
+        for side in (a, b):
+            rec = cache.get(side)
+            if isinstance(rec, dict):
+                try:
+                    n = int(rec.get("changed") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if n > 0:
+                    out[side] = n
+        return out
+    except Exception:
+        return {}
+
+
+def _usage_evidence(
+    a: str, b: str, telemetry_dir: Optional[str]
+) -> Tuple[Dict[str, int], bool]:
+    """``({side: distinct-session recall count}, confident)`` — the usage-asymmetry leg.
+
+    ``confident`` only once the aggregates have seen ``_EVIDENCE_USAGE_MIN_SESSIONS``
+    distinct sessions (below the floor the card labels the column withheld rather than
+    presenting two near-zero counts as signal). Read-only over the rotation-surviving
+    aggregates; never raises.
+    """
+    counts: Dict[str, int] = {a: 0, b: 0}
+    try:
+        from .telemetry import read_usage_aggregates
+
+        agg = read_usage_aggregates(telemetry_dir)
+        for side in (a, b):
+            rec = agg["memories"].get(side) or {}
+            s = rec.get("sessions")
+            if isinstance(s, int) and not isinstance(s, bool) and s >= 0:
+                counts[side] = s
+        total = agg["sessions"]["count"]
+        confident = isinstance(total, int) and total >= _EVIDENCE_USAGE_MIN_SESSIONS
+        return counts, confident
+    except Exception:
+        return counts, False
+
+
+def _suggest_verdict(
+    a: str, b: str, drift: Dict[str, int], newer: Optional[str]
+) -> Tuple[str, Optional[str], str]:
+    """``(suggested, winner_or_None, reason)`` — deterministic, evidence-only prefill.
+
+    STRICTLY the resolve skill's own verdict names plus the explicit ``abstain`` (no
+    second taxonomy). The ONE mechanical rule: when exactly one side cites drifted code
+    and git freshness does not contradict it (the clean side is the newer edit, or
+    freshness is unknown), suggest ``keep_one`` with the clean side as winner. Everything
+    else — both stale, neither stale, signals disagreeing — is ``abstain``: merge /
+    scope_both / not_conflicting are CONTENT judgments no drift/freshness arithmetic can
+    make, so the card never fakes one. A suggestion is a prefill for the human, never
+    auto-applied (accept-prefill stays gated behind a dated owner decision).
+    """
+    stale_sides = [s for s in (a, b) if s in drift]
+    if len(stale_sides) == 1:
+        loser = stale_sides[0]
+        winner = b if loser == a else a
+        if newer in (None, winner):
+            return (
+                "keep_one",
+                winner,
+                f"{loser} alone cites drifted code"
+                + (f" and {winner} is the fresher edit" if newer == winner else ""),
+            )
+        return (
+            _ABSTAIN,
+            None,
+            f"signals disagree: {loser} cites drifted code but is the fresher edit",
+        )
+    if len(stale_sides) == 2:
+        return _ABSTAIN, None, "both sides cite drifted code — re-read both"
+    return _ABSTAIN, None, "no drift asymmetry — this is a content judgment"
+
+
+def pair_evidence(
+    a: str,
+    b: str,
+    memory_dir: str,
+    repo_root: Optional[str],
+    *,
+    index_dir: Optional[str] = None,
+    telemetry_dir: Optional[str] = None,
+    declared_by: Optional[List[str]] = None,
+) -> dict:
+    """The TMB-1 evidence card for ONE pair — deterministic, read-only, zero persisted state.
+
+    ``{"age_commits", "newer", "epochs", "drift", "usage", "usage_confident",
+    "suggested", "suggested_winner", "reason"}``. Every leg degrades to an honest
+    unknown (``None``/empty) rather than guessing; with no ``repo_root`` the git legs
+    are skipped entirely. Cold path only — callers are ``describe()``/``--list`` and
+    the resolve MCP tool's inbox, never a SessionStart producer or the hot path.
+    Never raises.
+    """
+    card = {
+        "age_commits": None,
+        "newer": None,
+        "epochs": {},
+        "drift": {},
+        "usage": {},
+        "usage_confident": False,
+        "suggested": _ABSTAIN,
+        "suggested_winner": None,
+        "reason": "",
+    }
+    try:
+        if declared_by is None:
+            declared_by = pair_edge_state(memory_dir, a, b, repo_root=repo_root)["declared_by"]
+        other_of = {a: b, b: a}
+        if repo_root:
+            card["age_commits"] = _edge_birth_commits_ago(
+                declared_by, other_of, memory_dir, repo_root
+            )
+            card["newer"], card["epochs"] = _git_newer_side(a, b, memory_dir, repo_root)
+        card["drift"] = _drift_evidence(a, b, memory_dir, index_dir)
+        card["usage"], card["usage_confident"] = _usage_evidence(a, b, telemetry_dir)
+        card["suggested"], card["suggested_winner"], card["reason"] = _suggest_verdict(
+            a, b, card["drift"], card["newer"]
+        )
+        return card
+    except Exception:
+        return card
+
+
+def render_pair_evidence(a: str, b: str, card: dict) -> List[str]:
+    """The card as its two deterministic listing lines (evidence + suggested)."""
+    bits: List[str] = []
+    age = card.get("age_commits")
+    bits.append(
+        f"age: born {age} commit(s) ago"
+        if isinstance(age, int)
+        else "age: unknown (uncommitted, shallow/rewritten history, or proposal-only)"
+    )
+    newer = card.get("newer")
+    bits.append(f"git-newer: {newer}" if newer else "git-newer: unknown")
+    drift = card.get("drift") or {}
+    if drift:
+        bits.append(
+            "drift: "
+            + ", ".join(f"{s} cites {n} changed file(s)" for s, n in sorted(drift.items()))
+        )
+    else:
+        bits.append("drift: none cached")
+    usage = card.get("usage") or {}
+    if card.get("usage_confident"):
+        bits.append(
+            "usage: " + " / ".join(f"{s} {usage.get(s, 0)} session(s)" for s in sorted(usage))
+        )
+    else:
+        bits.append(
+            f"usage: withheld (fewer than {_EVIDENCE_USAGE_MIN_SESSIONS} sessions logged)"
+        )
+    lines = [f"      evidence: {' · '.join(bits)}"]
+    suggested = card.get("suggested") or _ABSTAIN
+    winner = card.get("suggested_winner")
+    verdict = f"{suggested} (winner: {winner})" if winner else suggested
+    reason = card.get("reason") or ""
+    lines.append(
+        f"      suggested: {verdict} — {reason}; a prefill for your judgment, never auto-applied"
+    )
+    return lines
+
+
 def _drop_declarations(
     memory_dir: str, declared_by: List[str], other_of: dict, repo_root: Optional[str]
 ) -> Tuple[Optional[str], Dict[str, str]]:
@@ -308,6 +648,7 @@ def apply_resolve_verdict(
     a: Optional[str] = None,
     b: Optional[str] = None,
     telemetry_dir: Optional[str] = None,
+    prefill: Optional[str] = None,
 ) -> dict:
     """Execute ONE per-pair human verdict — the /hippo:resolve skill's Step 2, as an
     engine call (the resolve tool's write half). Per-item by construction: one pair,
@@ -327,9 +668,27 @@ def apply_resolve_verdict(
       - ``not_conflicting`` (a=, b=): the ONE corpus-preserving verdict — the per-clone
         ledger via ``mark_not_conflicting``; files and edge stay untouched.
 
-    Returns ``{"verdict", "pair", "applied", "error", "detail"}``. Never raises.
+    ``prefill`` (TMB-1, optional): the evidence card's suggested verdict as the CALLER saw
+    it when rendering this judgment — one of the four verdict names or ``"abstain"``
+    (anything else records as ``None``, honest over guessed). Each of the four paths, on
+    success, appends one ``{pair, verdict, prefill}`` record to the per-clone ledger's
+    additive ``verdicts`` key (``_log_verdict`` — the same file as the dismiss records,
+    no sibling ledger, ``_RECONSOLIDATION_OUTCOMES`` untouched), so prefill-vs-choice
+    agreement is auditable later. Capture only: nothing accepts a prefill on the human's
+    behalf.
+
+    Returns ``{"verdict", "pair", "applied", "error", "detail", "prefill"}``. Never raises.
     """
-    result = {"verdict": verdict, "pair": None, "applied": False, "error": None, "detail": []}
+    valid_prefills = set(_VERDICT_NAMES) | {_ABSTAIN}
+    prefill = prefill if prefill in valid_prefills else None
+    result = {
+        "verdict": verdict,
+        "pair": None,
+        "applied": False,
+        "error": None,
+        "detail": [],
+        "prefill": prefill,
+    }
     try:
         if verdict in ("keep_one", "merge"):
             first, second = (winner or "").strip(), (loser or "").strip()
@@ -352,6 +711,7 @@ def apply_resolve_verdict(
                 return result
             result["applied"] = True
             result["detail"].append(f"ledger: {r['ledger']}")
+            _log_verdict(repo_root or "", tuple(result["pair"]), verdict, prefill)
             return result
 
         for side in (first, second):
@@ -379,6 +739,7 @@ def apply_resolve_verdict(
                 result["detail"].append(
                     "proposal-only pair: recorded in the dismiss ledger (both stand as scoped)"
                 )
+                _log_verdict(repo_root or "", tuple(result["pair"]), verdict, prefill)
                 return result
             err, _captures = _drop_declarations(
                 memory_dir, state["declared_by"], other_of, repo_root
@@ -390,6 +751,7 @@ def apply_resolve_verdict(
             result["detail"].append(
                 "contradicts declaration dropped on: " + ", ".join(state["declared_by"])
             )
+            _log_verdict(repo_root or "", tuple(result["pair"]), verdict, prefill)
             return result
 
         # keep_one / merge — the two-write chain.
@@ -431,6 +793,7 @@ def apply_resolve_verdict(
             f"{second} demoted (invalid_after {rv.get('invalid_after') or 'set'}); "
             f"{first} now supersedes it"
         )
+        _log_verdict(repo_root or "", tuple(result["pair"]), verdict, prefill)
         return result
     except Exception as exc:
         result["error"] = str(exc)
@@ -491,6 +854,14 @@ def describe(
             desc = _description_of(memory_dir, side)
             if desc:
                 lines.append(f"      {side}: {desc}")
+        # TMB-1: the evidence card — git-mined here in the cold listing, never at
+        # SessionStart (the producer renders the inbox without these lines, pinned).
+        card = pair_evidence(
+            a, b, memory_dir, repo_root,
+            index_dir=index_dir, telemetry_dir=telemetry_dir,
+            declared_by=item.get("declared_by"),
+        )
+        lines.extend(render_pair_evidence(a, b, card))
     if any_proposed:
         lines.extend(
             [
@@ -527,6 +898,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="mark the pair not-conflicting in this clone's ledger (the ONLY verdict that "
         "does not edit the corpus)",
     )
+    parser.add_argument(
+        "--prefill",
+        choices=sorted(_VERDICT_NAMES) + [_ABSTAIN],
+        default=None,
+        help="TMB-1 (with --dismiss): the evidence card's suggested verdict as you saw it, "
+        "recorded next to your choice in the per-clone ledger — capture only, never "
+        "auto-applied",
+    )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--index-dir", default=None)
     parser.add_argument("--repo-root", default=None)
@@ -543,6 +922,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.dismiss:
             res = mark_not_conflicting(args.dismiss[0], args.dismiss[1], repo_root)
             if res["recorded"]:
+                # TMB-1: the CLI dismiss is the not_conflicting verdict path — record the
+                # prefill next to the choice like the engine's other three paths do.
+                _log_verdict(repo_root, tuple(res["pair"]), "not_conflicting", args.prefill)
                 print(
                     f"recorded : {res['pair'][0]} ⇄ {res['pair'][1]} marked not-conflicting "
                     "(per-clone ledger; the corpus and the edge are untouched)"

@@ -894,6 +894,13 @@ _TOOLS = [
                 },
                 "a": {"type": "string", "description": "scope_both/not_conflicting: one side"},
                 "b": {"type": "string", "description": "scope_both/not_conflicting: the other side"},
+                "prefill": {
+                    "type": "string",
+                    "enum": ["keep_one", "scope_both", "merge", "not_conflicting", "abstain"],
+                    "description": "TMB-1 (verdict calls): the inbox evidence card's "
+                    "suggested verdict as you saw it — recorded next to your choice "
+                    "(per-clone ledger, capture only; nothing ever auto-applies it)",
+                },
             },
         },
     },
@@ -2580,6 +2587,7 @@ def _tool_resolve(args: Dict[str, Any]) -> str:
             loser=_opt_str(args, "loser"),
             a=_opt_str(args, "a"),
             b=_opt_str(args, "b"),
+            prefill=_opt_str(args, "prefill"),
         )
         if r["error"]:
             return f"✘ resolve {verdict} REFUSED — {r['error']}"
