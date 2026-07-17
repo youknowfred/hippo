@@ -1592,6 +1592,43 @@ def check_projects_registry(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"projects-registry check failed: {exc}."}
 
 
+def check_invalid_after_terminal(ctx: DoctorContext) -> Dict[str, str]:
+    """TMB-2: the corpus-wide terminal-state count — retirements the drift signal can't see.
+
+    A memory retired via supersede/merge (``invalid_after`` past recall's old horizon,
+    NO cited-code drift) never enters ``find_stale``'s set, so before this it was counted
+    NOWHERE: recall display-filters it, the staleness producer's invalid_after map is
+    stale-scoped, and archive_candidates was stale-gated 4-way. One line, ok-at-zero;
+    the fix path is the shipped flows — archive via ``python -m memory.archive`` (TMB-2's
+    admission leg lists them), reinstate per item via reconsolidate outcome=graduate|fix
+    (``reverify_file`` strips the stamp). Cold path; the corpus scan + git-log window
+    both belong here, never the hot path.
+    """
+    try:
+        from .staleness import find_stale as _find_stale
+        from .staleness import nondrift_old_invalidated
+
+        stale_names = [item["name"] for item in _find_stale(ctx.memory_dir, ctx.repo_root)]
+        retired = nondrift_old_invalidated(ctx.memory_dir, stale_names)
+        if not retired:
+            return {
+                "status": "ok",
+                "message": "invalid_after: no memories retired outside the drift signal.",
+            }
+        names = sorted(retired)
+        shown = ", ".join(names[:4]) + (f" (+{len(names) - 4} more)" if len(names) > 4 else "")
+        return {
+            "status": "warn",
+            "message": f"invalid_after: {len(names)} memor"
+            + ("y" if len(names) == 1 else "ies")
+            + f" retired past the old horizon with no code drift ({shown}) — archivable "
+            "via `python -m memory.archive`; reinstate per item via reconsolidate "
+            "outcome=graduate|fix.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"invalid_after terminal-state check failed: {exc}."}
+
+
 # (label, check_fn) in a FIXED order — the source of the deterministic output. New checks append
 # here; the order is never sorted-by-name or set-derived, so the printed sequence is stable.
 _HOT_PATH_P95_BUDGET_MS = 1500.0  # KPI-3 / PRF-2: the cold per-prompt budget
@@ -2100,6 +2137,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("mcp_launch", check_mcp_launch),  # INT-8: the stdio MCP server (bin/hippo mcp) actually starts
     ("committed_usage_privacy", check_committed_usage_privacy),  # SEC-14: TEA-5 usage on a shared remote
     ("projects_registry", check_projects_registry),  # RCH-11: dead-row hygiene, machine-level
+    ("invalid_after_terminal", check_invalid_after_terminal),  # TMB-2: non-drift retirements, corpus-wide
     ("stale_memobot_env", check_stale_memobot_env),  # pinned last (env hygiene trails)
 ]
 

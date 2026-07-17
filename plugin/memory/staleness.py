@@ -702,6 +702,65 @@ def invalid_after_map(names: List[str], memory_dir: str) -> Dict[str, str]:
     return out
 
 
+def invalid_after_all(memory_dir: str) -> Dict[str, str]:
+    """CORPUS-WIDE ``{name: invalid_after}`` — TMB-2's widening of ``invalid_after_map``.
+
+    ``invalid_after_map`` above is deliberately bounded to a caller-supplied (stale/
+    worklist) name set, which left a blind spot: a memory retired via supersede/merge — no
+    cited-code drift — never enters ``find_stale``'s set, so its terminal state was
+    visible NOWHERE (not the staleness producer, not archive_candidates). This is the one
+    corpus-wide read closing that gap, for COLD/once-per-session surfaces only (the
+    SessionStart staleness producer's retirement count, the doctor check, archive's
+    admission leg) — never the hot path, and never an input to ``find_stale`` itself
+    (drift detection stays invalid_after-blind by pinned contract). Read-only; never
+    raises; ``{}`` on any failure.
+    """
+    out: Dict[str, str] = {}
+    try:
+        for path in _iter_memory_files(memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    ia = read_invalid_after(fh.read())
+            except Exception:
+                continue
+            if ia:
+                out[os.path.splitext(os.path.basename(path))[0]] = ia
+    except Exception:
+        return out
+    return out
+
+
+def nondrift_old_invalidated(
+    memory_dir: str, stale_names, *, now: Optional[float] = None
+) -> Dict[str, str]:
+    """``{name: invalid_after}`` for memories PAST recall's old-invalidation horizon that
+    the git-drift signal does NOT flag — TMB-2's terminal-state population.
+
+    These are the supersede/merge/manual retirements ``find_stale`` can never see (no
+    cited-code drift): recall's emission loop already display-filters them ("old" state),
+    so without this count they are invisible everywhere while still sitting in the corpus.
+    Classification delegates to ``recall._invalidation_state`` (one horizon, one
+    implementation — the same 30-day boundary the display filter and the staleness
+    producer's existing in-stale line use); the lazy import keeps this module light for
+    callers that never need it. Reinstatement stays the existing per-item
+    ``semantic_reverify(name, outcome='graduate'|'fix')`` — ``reverify_file`` already
+    strips ``invalid_after``; no new verb exists here. Read-only; never raises; ``{}`` on
+    any failure (fails toward silence on a broken corpus — the other checks own that).
+    """
+    try:
+        from .recall import _invalidation_state
+
+        exclude = set(stale_names or ())
+        return {
+            name: ia
+            for name, ia in sorted(invalid_after_all(memory_dir).items())
+            if name not in exclude
+            and _invalidation_state({"invalid_after": ia}, now=now) == "old"
+        }
+    except Exception:
+        return {}
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 

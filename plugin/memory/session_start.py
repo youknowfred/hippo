@@ -68,6 +68,7 @@ from .staleness import (
     find_stale,
     find_unparseable,
     invalid_after_map,
+    nondrift_old_invalidated,
     unresolvable_baseline_names,
     write_stale_cache,
 )
@@ -397,8 +398,33 @@ def staleness_producer(
         if diagnostics.get("timed_out")
         else None
     )
+    # TMB-2: the CORPUS-WIDE terminal-state count — retirements the drift signal cannot
+    # see (invalid_after past the old horizon, NO cited-code drift: the supersede/merge
+    # case). Before this, such a memory signaled nowhere: not here (the invalid_after map
+    # below is stale-scoped), not archive_candidates (stale-gated 4-way). Cheap-at-zero:
+    # an empty result adds zero output and the producer stays byte-identical to pre-TMB-2.
+    nondrift_old = nondrift_old_invalidated(
+        memory_dir, [item["name"] for item in stale]
+    )
+    retired_line = None
+    if nondrift_old:
+        names = sorted(nondrift_old)
+        shown = ", ".join(names[:4])
+        more = f" (+{len(names) - 4} more)" if len(names) > 4 else ""
+        retired_line = (
+            f"♻ {len(names)} memor{'y' if len(names) == 1 else 'ies'} retired OUTSIDE the "
+            f"drift signal — invalid_after past the {int(_INVALIDATION_RECENT_DAYS)}-day "
+            f"horizon with no cited-code drift (supersede/merge retirements): {shown}{more} "
+            "— recall already filters them; now archivable via the /hippo:audit archive "
+            "flow (`python -m memory.archive`), reinstatable per item via reconsolidate "
+            "outcome=graduate|fix."
+        )
     if not stale:
-        return timeout_note
+        if retired_line is None:
+            return timeout_note
+        return "\n".join(
+            [retired_line] + ([timeout_note] if timeout_note else [])
+        )
     # LIF-1: a stale entry ALREADY carrying invalid_after is in demote's terminal state —
     # the verdict (or a manual --invalidate) closed its validity window and recall's
     # pre-cut penalty is already ranking it down, so a per-item "verify this" line here is
@@ -465,6 +491,8 @@ def staleness_producer(
             f"  ({len(old)} demoted past the {int(_INVALIDATION_RECENT_DAYS)}-day "
             f"old-invalidation horizon — consider the /hippo:audit archive flow: {shown}{more})"
         )
+    if retired_line:
+        lines.append(retired_line)  # TMB-2: the non-drift retirements (never in `stale`)
     if timeout_note:
         lines.append(timeout_note)
     return "\n".join(lines)

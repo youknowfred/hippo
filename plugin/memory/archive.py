@@ -282,10 +282,14 @@ def archive_candidates(
     diagnostics: Optional[dict] = None,
 ) -> List[dict]:
     """REPORT (never autonomous) — the 4-way intersection: cold ∧ stale ∧ zero-inbound ∧
-    not-cited-by-CLAUDE.md, gated by the curation-soak bar (LIF-4).
+    not-cited-by-CLAUDE.md, gated by the curation-soak bar (LIF-4) — PLUS TMB-2's
+    retirement leg: invalid_after-old ∧ no-drift ∧ zero-inbound ∧ not-cited (see the
+    in-body comment; those items carry ``invalid_after_old: True`` and an empty
+    ``changed_paths``).
 
-    Returns ``[{"name", "changed_paths", "citation_scan_unreadable"}]`` (every candidate is
-    necessarily stale, so the stale-set shape is reused), most-recently-drifted first.
+    Returns ``[{"name", "changed_paths", "citation_scan_unreadable"}]`` (a drift candidate
+    is necessarily stale, so the stale-set shape is reused), most-recently-drifted first
+    (retirements interleave by their invalid_after moment).
     ``citation_scan_unreadable`` is the list of instruction-surface paths (if any) that
     could not be read during the citation scan — attached to EVERY item regardless of
     whether that item itself survived the citation gate, so a fail-closed degradation is
@@ -353,6 +357,41 @@ def archive_candidates(
             if diagnostics is not None and excluded:
                 diagnostics["excluded_young"] = excluded
             out = [i for i in out if i["name"] not in young]
+        # TMB-2: the 5th admission leg — a memory retired via supersede/merge
+        # (invalid_after past recall's old horizon) with NO cited-code drift never enters
+        # `stale`, so the 4-way intersection above could never admit it and it lingered
+        # unarchivable. Admission reuses the SAME gates verbatim: the soak gate already
+        # gated this whole report above, zero-inbound + not-cited-by-CLAUDE.md are the
+        # exact sets computed above, and the GRA-5 inbound guard lives in archive_memory —
+        # the flow every listed candidate routes into. Deliberately NOT cold-gated (the
+        # retirement stamp is the signal; recall's display filter makes these trend cold
+        # anyway) and NOT youth-gated (youth exists to protect the cold signal's trust,
+        # which this leg does not read). Recency = the invalid_after epoch, so retirements
+        # sort into the same most-recent-first order as drift candidates.
+        from .staleness import nondrift_old_invalidated
+
+        on_report = {item["name"] for item in out}
+        stale_names = {item["name"] for item in stale}
+        for name, ia in nondrift_old_invalidated(memory_dir, stale_names).items():
+            if name in on_report or name not in zero_inbound or name in cited:
+                continue
+            try:
+                from datetime import datetime
+
+                epoch = int(
+                    datetime.fromisoformat(str(ia).replace("Z", "+00:00")).timestamp()
+                )
+            except Exception:
+                epoch = 0
+            out.append(
+                {
+                    "name": name,
+                    "changed_paths": [],
+                    "recency": epoch,
+                    "invalid_after": ia,
+                    "invalid_after_old": True,
+                }
+            )
         out.sort(key=lambda d: (-d["recency"], d["name"]))
         for item in out:
             item["citation_scan_unreadable"] = list(unreadable)
@@ -571,7 +610,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"soak window (not yet exposed to {SOAK_GATE_SESSIONS} distinct sessions): {shown}{more}"
         )
     if not candidates:
-        print("No archive candidates (4-way: cold ∧ stale ∧ zero-inbound ∧ not-CLAUDE.md-cited).")
+        print(
+            "No archive candidates (4-way: cold ∧ stale ∧ zero-inbound ∧ not-CLAUDE.md-cited; "
+            "or retired: invalid_after-old ∧ zero-inbound ∧ not-cited)."
+        )
         return 0
     print(f"{len(candidates)} archive candidate(s) — review each before archiving:")
     from .telemetry import read_committed_usage
@@ -583,7 +625,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             "--record-usage` on each clone + commit .claude/memory/.usage/ (TEA-5)."
         )
     for item in candidates:
-        print(f"  • {item['name']}: {', '.join(item['changed_paths'][:6])}")
+        if item.get("invalid_after_old"):
+            # TMB-2: a retirement, not a drift hit — say what admitted it.
+            print(
+                f"  • {item['name']}: retired (invalid_after {item.get('invalid_after')}, "
+                "no cited-code drift)"
+            )
+        else:
+            print(f"  • {item['name']}: {', '.join(item['changed_paths'][:6])}")
     return 0
 
 
