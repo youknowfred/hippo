@@ -56,6 +56,7 @@ from .recall import (
     git_recent_producer,
     portable_floor_producer,
 )
+from .merge_digest import merge_digest_producer
 from .reconsolidate import (
     recalled_stale_worklist,
     reconsolidation_producer,
@@ -1295,6 +1296,7 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("rules_rot", rules_rot_producer),  # RUL-2: citation-rot/staleness over the always-loaded rules plane itself
     ("contradiction_inbox", contradiction_inbox_producer),  # GOV-1: every unresolved contradicts pair, not just the co-surfaced/governance-cited ones
     ("floor_change", floor_change_producer),  # GOV-4: floor/corpus changed since this clone's last session (per-clone watermark; a seen change stays quiet)
+    ("merge_digest", merge_digest_producer),  # CLB-4: incoming-merge duplicate digest — GRW-3's detector over the watermark range, human-routed
     ("relevant_to_work", relevant_to_work_producer),  # SIG-1: the first POSITIVE block — memories about the files you're editing
     ("resume_card", resume_card_producer),  # SIG-2: "where was I" — replay the last session from the episode buffer
     ("git_recent", git_recent_producer),

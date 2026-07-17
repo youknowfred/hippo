@@ -77,6 +77,7 @@ from .doctor_checks_corpus import (
     check_archive_shadowing,
     check_archive_regret,
     check_evidence_fences,
+    check_merge_digest,
     _LATIN_ALPHA_RANGES,
     _NON_ENGLISH_MIN_ALPHA_SAMPLE,
     _NON_ENGLISH_ALPHA_FRACTION,
@@ -339,6 +340,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("archive_regret", check_archive_regret),  # TMB-3: abstentions matching archived bodies (evidence-only)
     ("update_eval", check_update_eval),  # TMB-4: outrank failures from the latest persisted run
     ("evidence_fences", check_evidence_fences),  # CLB-3: quoted-evidence coverage + cited-code drift
+    ("merge_digest", check_merge_digest),  # CLB-4: incoming-merge duplicate pairs, human-routed
     ("stale_memobot_env", check_stale_memobot_env),  # pinned last (env hygiene trails)
 ]
 

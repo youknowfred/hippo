@@ -782,3 +782,48 @@ def check_evidence_fences(ctx: DoctorContext) -> Dict[str, str]:
         }
     except Exception as exc:
         return {"status": "warn", "message": f"evidence-fence check failed: {exc}."}
+
+
+def check_merge_digest(ctx: DoctorContext) -> Dict[str, str]:
+    """CLB-4: incoming-merge duplicate pairs — the doctor half of the digest.
+
+    Re-derives the SAME pairs the SessionStart producer surfaces (one derivation,
+    ``merge_digest.incoming_duplicate_pairs`` — never a second detector) so a lead
+    running doctor after a merge sees them without waiting for the next session
+    start. Routing is identical and human: /hippo:resolve for declared
+    contradictions, /hippo:consolidate's GRW-3 merge tier for the rest. The
+    unreachable-watermark case renders as its own legible state.
+    """
+    try:
+        from .merge_digest import incoming_duplicate_pairs
+        from .telemetry import default_telemetry_dir
+
+        pairs, degradation, incoming = incoming_duplicate_pairs(
+            ctx.memory_dir, ctx.repo_root, default_telemetry_dir(ctx.memory_dir)
+        )
+        if degradation and not pairs:
+            return {
+                "status": "warn",
+                "message": "incoming-merge dedup: last-session watermark unreachable "
+                "(squash-merge/rewrite) — the incoming range could not be dup-checked; "
+                "self-heals next session.",
+            }
+        if not pairs:
+            return {
+                "status": "ok",
+                "message": "incoming-merge dedup: no duplicate pairs among memories "
+                "merged in since the last session.",
+            }
+        shown = "; ".join(
+            f"{p['incoming']} ⇄ {p['neighbor']} → "
+            + ("/hippo:resolve" if p["route"] == "resolve" else "/hippo:consolidate")
+            for p in pairs
+        )
+        return {
+            "status": "warn",
+            "message": f"incoming-merge dedup: {len(pairs)} duplicate-candidate pair(s) "
+            f"across {incoming} merged-in memory file(s) — {shown} (human-routed; "
+            "nothing merges automatically).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"merge-digest check failed: {exc}."}
