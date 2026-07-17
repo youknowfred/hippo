@@ -104,6 +104,7 @@ from .doctor_checks_recall import (
     _ABSTENTION_SANITY_MAX_QUERIES,
     check_abstention_floor_sanity,
     check_injection_precision,
+    check_foreign_dialects,
     check_rules_conflicts,
     check_rules_plane_rot,
     check_rules_source,
@@ -361,6 +362,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("evidence_fences", check_evidence_fences),  # CLB-3: quoted-evidence coverage + cited-code drift
     ("merge_digest", check_merge_digest),  # CLB-4: incoming-merge duplicate pairs, human-routed
     ("team_coverage", check_team_coverage),  # CLB-2: last_verified lit up + verified_by coverage (suppressed solo)
+    ("foreign_dialects", check_foreign_dialects),  # IOP-1: foreign rule dialects censused + divergence/rot (on-demand only)
     ("stale_memobot_env", check_stale_memobot_env),  # pinned last (env hygiene trails)
 ]
 

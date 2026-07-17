@@ -743,3 +743,39 @@ def check_update_eval(ctx: DoctorContext) -> Dict[str, str]:
         }
     except Exception as exc:
         return {"status": "warn", "message": f"update-eval check failed: {exc}."}
+
+
+def check_foreign_dialects(ctx: DoctorContext) -> Dict[str, str]:
+    """IOP-1: the foreign-dialect radar's one-line doctor face — census by presence,
+    cross-dialect divergence, ``.mdc`` existence-rot. On-demand only (inv6: never a
+    SessionStart producer); ``FOREIGN_GLOBS`` stays fully outside the GOV_GLOBS
+    authority paths (inv5). ok when no dialects are present, ok with counts when
+    present-and-clean; the deep per-item report lives in /hippo:audit.
+    """
+    try:
+        from .rules_foreign import foreign_radar
+
+        radar = foreign_radar(ctx.repo_root)
+        present = {d: len(fs) for d, fs in sorted((radar.get("census") or {}).items()) if fs}
+        if not present:
+            return {
+                "status": "ok",
+                "message": "foreign dialects: none present (cursor/copilot/agents-rules globs all empty).",
+            }
+        counts = ", ".join(f"{d}: {n} file(s)" for d, n in present.items())
+        diverged = len(radar.get("divergence") or [])
+        rotten = len(radar.get("mdc_citation_rot") or [])
+        dead = len(radar.get("mdc_dead_globs") or [])
+        if not (diverged or rotten or dead):
+            return {
+                "status": "ok",
+                "message": f"foreign dialects: {counts} — no cross-dialect divergence, no .mdc rot.",
+            }
+        return {
+            "status": "warn",
+            "message": f"foreign dialects: {counts} — {diverged} governance-diverged file(s), "
+            f"{rotten} .mdc with missing cited path(s), {dead} dead .mdc glob(s) — "
+            "per-item detail via /hippo:audit; fixes are hand edits of the named files.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"foreign-dialect check failed: {exc}."}

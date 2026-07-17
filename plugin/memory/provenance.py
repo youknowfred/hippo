@@ -29,9 +29,9 @@ try:
 except Exception:  # pragma: no cover - bare python3 pre-bootstrap (ONB-2)
     from ._vendor import miniyaml as yaml  # type: ignore  # frontmatter-subset fallback
 
-# Code/config extensions we treat as "cited code" for the staleness signal.
-# .md is intentionally EXCLUDED — memory<->memory references are [[wikilinks]] (Tier 3),
-# and doc/changelog churn is not "code drift".
+# Code/config extensions we treat as "cited code" for the staleness signal. .md is EXCLUDED
+# (memory<->memory refs are [[wikilinks]], Tier 3; doc/changelog churn isn't code drift); .mdc
+# (Cursor rules) IS included (IOP-2 — imported memories fingerprint their upstream source).
 #
 # ORC-1: sorted LONGEST-FIRST. This is intent-preservation, NOT the fix — the trailing
 # boundary in _CITATION_RE is what makes the alternation order irrelevant (the engine
@@ -40,7 +40,7 @@ except Exception:  # pragma: no cover - bare python3 pre-bootstrap (ONB-2)
 # thinking order is load-bearing here. Adding an entry is enough to support it: the
 # reachability test loops over this tuple, so a shadowed entry fails immediately.
 _CODE_EXTS = (
-    "tsx", "jsx", "json", "yaml", "toml", "cts", "cjs", "mts", "mjs",
+    "tsx", "jsx", "json", "yaml", "toml", "cts", "cjs", "mts", "mjs", "mdc",
     "cfg", "ini", "yml", "sh", "ts", "js", "py",
 )
 
@@ -622,11 +622,14 @@ _FORMAT_MARKER_NAME = ".format"
 #       anywhere, or a whole backtick span. A bare unmarked mid-sentence mention stays
 #       non-derivable, deliberately. resolve_citations itself is UNCHANGED — already
 #       extension-agnostic basename matching — only the extractor's vocabulary grew.
+#   4 — IOP-2: `.mdc` (Cursor rule files) joins _CODE_EXTS, so a body naming a
+#       `.cursor/rules/*.mdc` derives it as a cited path. SAME class as 3 (vocabulary grew,
+#       no shape change) — lands here, not corpus_format; a .mdc-free corpus stamps clean.
 #
 # Kept on the corpus-level marker rather than in each file's frontmatter: a per-file key
 # WOULD be a shape change (a real corpus_format v6), needs a corpus-wide rewrite just to
 # introduce, and answers a question that is not per-file anyway.
-CITATION_DERIVATION_VERSION = 3
+CITATION_DERIVATION_VERSION = 4
 
 
 def format_marker_path(memory_dir: str) -> str:

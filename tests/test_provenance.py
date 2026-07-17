@@ -2020,9 +2020,10 @@ def test_the_extractor_fix_is_not_a_corpus_format_event(tmp_path):
     unchanged") the ORC-1 fix changes VALUES, not shape, so it must not move
     CORPUS_FORMAT_VERSION. That is exactly why it felt like a regex tweak and was in fact a
     corpus-wide rewrite — the axis to say so did not exist. ORC-3 (extensionless names)
-    is the second extractor change to land on this same axis, for the same reason."""
-    assert P.CORPUS_FORMAT_VERSION == 5  # unmoved by ORC-1/DRV-1/ORC-3
-    assert P.CITATION_DERIVATION_VERSION == 3  # the axis that DID move, twice now
+    is the second extractor change to land on this same axis, for the same reason.
+    IOP-2 (.mdc joins the vocabulary) is the third — same axis, same rationale."""
+    assert P.CORPUS_FORMAT_VERSION == 5  # unmoved by ORC-1/DRV-1/ORC-3/IOP-2
+    assert P.CITATION_DERIVATION_VERSION == 4  # the axis that DID move, three times now
 
 
 # --------------------------------------------------------------------------- #

@@ -299,6 +299,11 @@ def cite_derivation_producer(
             "v2 could not see extensionless config/build filenames (`Dockerfile`, `Makefile`, "
             "`LICENSE`, etc.) at all"
         )
+    if declared < 4:
+        gaps.append(
+            "v3 could not see `.mdc` Cursor rule sources (an imported memory's upstream "
+            "fingerprint)"
+        )
     return (
         f"🧬 Citation derivation — this corpus's cited_paths were derived by extractor "
         f"v{declared}; this plugin derives v{CITATION_DERIVATION_VERSION}. {'; '.join(gaps)} "

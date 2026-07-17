@@ -222,3 +222,110 @@ def test_candidates_flag_already_imported(tmp_path, monkeypatch):
 def test_slug_sanitization():
     assert I._slug_for("/x/001-General Rules.mdc") == "001-General-Rules"
     assert I._slug_for("/x/---.mdc") == "imported-rule"
+
+
+# --------------------------------------------------------------------------- #
+# IOP-2 — upstream fingerprint: the source .mdc rides the cited-paths route, so
+# RET-6's shipped git-log staleness scan flags upstream drift AND deletion for free.
+# --------------------------------------------------------------------------- #
+_T0 = 1_700_000_000  # pinned epochs make the staleness ct-comparison deterministic
+_ALL = "2000-01-01"  # explicit find_stale window covering the pinned epochs
+
+
+def _commit(repo: str, message: str, when: int) -> None:
+    iso = f"{int(when)} +0000"
+    env = {**_GIT_ENV, "GIT_AUTHOR_DATE": iso, "GIT_COMMITTER_DATE": iso}
+    subprocess.run(["git", "-C", repo, "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", repo, "commit", "-q", "--allow-empty", "-m", message],
+        check=True, env=env,
+    )
+
+
+def _pinned_repo(tmp_path, monkeypatch):
+    """_repo's layout with EVERY commit epoch-pinned, so find_stale's `changed > base`
+    comparison is deterministic (seed at _T0, the rule commit strictly after)."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    repo = str(tmp_path / "repo")
+    os.makedirs(os.path.join(repo, "src"))
+    for rel in ("src/app.py", "src/util.py"):
+        with open(os.path.join(repo, rel), "w", encoding="utf-8") as fh:
+            fh.write("x = 1\n")
+    subprocess.run(["git", "init", "-q", repo], check=True)
+    _commit(repo, "seed", _T0)
+    rules = os.path.join(repo, ".cursor", "rules")
+    os.makedirs(rules)
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    return repo, rules, md
+
+
+def test_import_fingerprints_a_tracked_source_mdc(tmp_path, monkeypatch):
+    """AC: cited_paths includes the source .mdc's repo-relative path ALONGSIDE the
+    glob-target paths — via the shipped body-line backfill, no new frontmatter field."""
+    repo, rules, md = _pinned_repo(tmp_path, monkeypatch)
+    path = _mdc(
+        rules, "python-style.mdc",
+        "---\ndescription: python style conventions for services\nglobs: src/**/*.py\n---\n\nPrefer explicit imports over star imports.\n",
+    )
+    _commit(repo, "track the rule", _T0 + 100)  # tracked source -> resolvable citation
+    r = I.import_mdc_file(path, memory_dir=md, repo_root=repo)
+    assert r["error"] is None and r["imported"] is True
+    text = open(r["path"], encoding="utf-8").read()
+    assert "Source: .cursor/rules/python-style.mdc" in text  # the fingerprint line
+    cited, sc = read_provenance(text)
+    assert ".cursor/rules/python-style.mdc" in cited
+    assert {"src/app.py", "src/util.py"} <= set(cited)  # glob targets still there
+    assert sc
+
+
+def test_upstream_edit_flags_the_imported_memory_stale(tmp_path, monkeypatch):
+    """AC (ED-3-mirrored hermetically): editing the source .mdc post-import makes
+    find_stale flag the memory, with the .mdc named in changed_paths."""
+    from memory.staleness import find_stale
+
+    repo, rules, md = _pinned_repo(tmp_path, monkeypatch)
+    path = _mdc(rules, "r.mdc", "---\ndescription: d\nglobs: src/*.py\n---\nold body\n")
+    _commit(repo, "rule v1", _T0 + 100)
+    r = I.import_mdc_file(path, memory_dir=md, repo_root=repo)
+    assert r["imported"], r["error"]
+    assert find_stale(md, repo, since=_ALL) == []  # freshly imported: nothing stale yet
+    _mdc(rules, "r.mdc", "---\ndescription: d\nglobs: src/*.py\n---\nnew body\n")
+    _commit(repo, "rule v2 (upstream drift)", _T0 + 600)
+    stale = find_stale(md, repo, since=_ALL)
+    assert [s["name"] for s in stale] == ["r"]
+    assert stale[0]["changed_paths"] == [".cursor/rules/r.mdc"]
+
+
+def test_upstream_delete_flags_the_imported_memory_stale(tmp_path, monkeypatch):
+    """AC: deleting the source .mdc is picked up by the SAME git-log --name-only scan
+    as a changed path — no separate orphaned-detection machinery."""
+    from memory.staleness import find_stale
+
+    repo, rules, md = _pinned_repo(tmp_path, monkeypatch)
+    path = _mdc(rules, "gone.mdc", "---\ndescription: d\nglobs: src/*.py\n---\nbody\n")
+    _commit(repo, "rule lands", _T0 + 100)
+    r = I.import_mdc_file(path, memory_dir=md, repo_root=repo)
+    assert r["imported"], r["error"]
+    os.remove(path)
+    _commit(repo, "rule deleted upstream", _T0 + 600)
+    stale = find_stale(md, repo, since=_ALL)
+    assert [s["name"] for s in stale] == ["gone"]
+    assert stale[0]["changed_paths"] == [".cursor/rules/gone.mdc"]
+
+
+def test_untracked_source_degrades_to_glob_targets_only(tmp_path, monkeypatch):
+    """An UNTRACKED source .mdc can't resolve against git ls-files: the Source: line is
+    still written (documentation), but cited_paths carries only the glob targets — the
+    fingerprint quietly waits for the source to be committed."""
+    repo, rules, md = _repo(tmp_path, monkeypatch)
+    path = _mdc(
+        rules, "floating.mdc",
+        "---\ndescription: d\nglobs: src/*.py\n---\nbody\n",
+    )
+    r = I.import_mdc_file(path, memory_dir=md, repo_root=repo)  # .mdc never committed
+    assert r["imported"], r["error"]
+    text = open(r["path"], encoding="utf-8").read()
+    assert "Source: .cursor/rules/floating.mdc" in text
+    cited, _sc = read_provenance(text)
+    assert set(cited) == {"src/app.py", "src/util.py"}

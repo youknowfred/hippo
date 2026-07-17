@@ -46,13 +46,34 @@ MEMORY_DIR="$REPO_ROOT/.claude/memory"
    - the unified diff. Hand-maintained content outside the managed markers is preserved
      byte-verbatim — the export proposes a diff, it never regenerates the file.
 
-2. **Review with the user.** This is the inv4 gate: the user (or the agent with the
+2. **Show the curation receipt (read-only) — WHY each floor line earned export.** The
+   counter-story to "LLM-generated AGENTS.md hurts": this export is curated, and the
+   receipt is the evidence, per floor line — recall strength under the soak-maturity
+   gate (a thin corpus honestly reads *insufficient evidence*, never a false-clean
+   0.0), staleness from the last scan (an absent cache reads *unknown*, never
+   *fresh*), graduation stamps (type / confidence / last_verified), conflict-radar
+   hits (authority gaps, superseded/contradicted floor lines), what was excluded and
+   why, and rot already present in the prior AGENTS.md block:
+
+   ```bash
+   "$PY" -c \
+     "import sys; from memory.export_receipts import curation_receipt, describe_receipt; \
+      print(describe_receipt(curation_receipt(memory_dir=sys.argv[1], repo_root=sys.argv[2])))" \
+     "$MEMORY_DIR" "$REPO_ROOT"
+   ```
+
+   Evidence is DISPLAY-ONLY: it never selects, filters, or ranks what exports (the
+   proposed AGENTS.md is byte-identical with or without this step). A `⚑` here is a
+   reason to go fix the memory (reverify, resolve, retire) and re-run step 1 — not a
+   knob this skill turns for you.
+
+3. **Review with the user.** This is the inv4 gate: the user (or the agent with the
    user's explicit go-ahead) approves the diff as a whole, or edits memories / floor
    pins and re-runs step 1. A refusal (`✘ export-agents refused: …`) means nothing to
    decide — relay the reason (empty floor, corrupt managed block) and stop.
 
-3. **Apply only on explicit approval.** This re-renders from the current floor and
-   writes the proposed file — run it ONLY after step 2's yes:
+4. **Apply only on explicit approval.** This re-renders from the current floor and
+   writes the proposed file — run it ONLY after step 3's yes:
 
    ```bash
    "$PY" -c \
@@ -66,7 +87,7 @@ MEMORY_DIR="$REPO_ROOT/.claude/memory"
 
    Committing the file is the user's call, like any other working-tree change.
 
-4. **Tell the user what stays true afterwards.**
+5. **Tell the user what stays true afterwards.**
    - The exported file is now DRIFT-CHECKED: a cited path that later moves flags loud in
      `/hippo:doctor` and the SessionStart rules-rot card (dead `paths:` globs in the
      frontmatter; rotten backtick refs in `Applies to:` lines).
