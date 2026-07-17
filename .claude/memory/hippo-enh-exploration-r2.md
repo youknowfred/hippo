@@ -1,14 +1,14 @@
 ---
 name: hippo-enh-exploration-r2
-description: "Round-2 greenfield exploration+vetting cycle (2026-07-09) → EXPLORATIONS2.md + ROADMAP.enhancements2.yaml (29 items, workstreams MSR/GRF/SEN/TMB/CLB/IOP, tiers T8–T13). PR #20 was MERGED to main (f7e5ae9), as were its cross-file deps #17/#18/#19 — but the round-2 TIERS WERE NEVER IMPLEMENTED: execution went to round 3 (T14–T17, INV/SLP/JIT/EXT) instead, so T8–T13 remain PROPOSED (e.g. MSR-5's HIPPO_SALIENCE is still 'planned, not shipped' in eval_recall.py)."
+description: "Round-2 greenfield exploration+vetting cycle (2026-07-09) → EXPLORATIONS2.md + ROADMAP.enhancements2.yaml (29 items, workstreams MSR/GRF/SEN/TMB/CLB/IOP, tiers T8–T13). PR #20 MERGED to main (f7e5ae9), as were its cross-file deps #17/#18/#19. Execution detoured through round 3 first (T14–T17), then BEGAN 2026-07-16: T8 MSR shipped (PR #68) and T9 GRF shipped (PR #70, incl. MSR-5's HIPPO_SALIENCE rig); T10 SEN in flight — T11–T13 remain planned."
 metadata:
   node_type: memory
   type: project
   originSessionId: a5a922b1-a6ab-4fcf-96cc-bec2e048816f
   last_verified: "2026-07-16T14:39:50.641856+00:00"
-  cited_paths: ["ROADMAP.enhancements.yaml", "ROADMAP.enhancements2.yaml", "plugin/memory/telemetry.py", "ROADMAP.enhancements3.yaml", "plugin/memory/eval_recall.py", "plugin/memory/dream_eval.py"]
-  source_commit: "0489fe3996361971582d7fb157e046584c644418"
-  source_commit_time: 1784213258
+  cited_paths: ["ROADMAP.enhancements.yaml", "ROADMAP.enhancements2.yaml", "plugin/memory/telemetry.py", "ROADMAP.enhancements3.yaml", "plugin/memory/eval_recall.py", "plugin/memory/dream_eval.py", "plugin/memory/salience_eval.py"]
+  source_commit: "f99bfa89571ac19cadf0967693103b9b9bd464f1"
+  source_commit_time: 1784246873
 ---
 
 Round-2 exploration+vetting cycle — session 2026-07-09, mirroring the round-1
@@ -127,6 +127,16 @@ first round-2 capstone, continuing the chain. The only still-open
 cross-file deps are the ROADMAP.v1 launch items SEC-8 (CLB-1's CI vehicle) and SEC-14
 (CLB-2's gate) — being built NOW on the owner's `v080-sec-tail` branch (SEC-8/9/10 committed
 + WIP). No round-2 tier is blocked on the trust spine anymore.
+
+**EXECUTION BEGAN — and the "never built" paragraph above is now itself history
+(re-verified 2026-07-17):** T8 SHIPPED 2026-07-16 ([[hippo-enh-t8-measurement]], PR #68
+squash `8782ab9`) and T9 SHIPPED the same day ([[hippo-enh-t9-graph]], PR #70 squash
+`f99bfa8`) — so `eval_recall.py`'s "HIPPO_SALIENCE is MSR-5 — planned, not shipped" line
+is GONE (MSR-5's rig lives at `memory/salience_eval.py`; `dream_eval.AB_FLAGS` is now
+`("HIPPO_DREAM", "HIPPO_SALIENCE")` — the seam was extended exactly as reserved). T10 SEN
+is in flight (spawned 2026-07-16). The SEC-8/SEC-14 "still-open deps" note above also
+aged out: the whole SEC-8..14 tail merged 2026-07-10 (see [[hippo-v080-sec-tail]]) — the
+only remaining gap for CLB-1/SEN-2's CI leg is CLB-1's own `--ci` vehicle (unbuilt, T12).
 
 Related: [[hippo-enhancement-roadmap]], [[hippo-enh-t7-learned-ranking]],
 [[hippo-v1-roadmap-proposal]].

@@ -7,8 +7,8 @@ metadata:
   originSessionId: f4077387-baf8-4f74-9935-6a530806e406
   last_verified: "2026-07-13T04:49:53.161921+00:00"
   cited_paths: ["plugin/memory/session_start.py", "plugin/memory/staleness.py", "plugin/hooks/memory_post_tool.sh", "plugin/hooks/hooks.json", "plugin/memory/outcome.py", "tests/test_trust.py"]
-  source_commit: "0489fe3996361971582d7fb157e046584c644418"
-  source_commit_time: 1784213258
+  source_commit: "f99bfa89571ac19cadf0967693103b9b9bd464f1"
+  source_commit_time: 1784246873
 ---
 
 Tier T1 (v1.1.0, "Positive context & dark signals") — session 2026-07-08. **COMPLETE, 4/4,

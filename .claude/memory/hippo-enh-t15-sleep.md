@@ -5,8 +5,8 @@ metadata:
   type: project
   last_verified: "2026-07-16T13:38:02.407027+00:00"
   cited_paths: [".github/workflows/release.yml", "plugin/memory/sleep.py", "tests/test_sleep.py"]
-  source_commit: "0489fe3996361971582d7fb157e046584c644418"
-  source_commit_time: 1784213258
+  source_commit: "f99bfa89571ac19cadf0967693103b9b9bd464f1"
+  source_commit_time: 1784246873
 ---
 
 T15 SLP implemented 2026-07-16 (same session that merged T14's PR #57); **Fred ratified and squash-MERGED PR #58 the same day (46d2b5f on main, branch deleted both sides)**. 2 id-prefixed commits — SLP-1+2 share the one runner module, SLP-3 is the autonomy flag — tests-first, suite 2209 green at merge, dogfooded live on this repo's own 14-seed backlog. RELEASED same day in v1.18.0 "Checks itself, sleeps on schedule" (release PR #59, squash 5779b60, tagged, release.yml green — covers T14+T15 together; re-bootstrap: no).
