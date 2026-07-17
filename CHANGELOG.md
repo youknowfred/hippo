@@ -7,6 +7,34 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.22.1 — 2026-07-17 — "A reader for every ledger"
+
+**re-bootstrap: no** — docs-only release: zero code, `plugin/requirements.txt` byte-identical;
+corpus format still **5**, index schema still **7**, citation derivation still **4**. This
+release publishes the **round-4 enhancement roadmap** — the adversarially-vetted proposal for
+the fourth enhancement train — so the public repo carries the plan the corpus and PRs now cite.
+No runtime behavior changes.
+
+### Round 4 — proposed (nothing scheduled)
+
+- **`ROADMAP.enhancements4.yaml`** (new) — tiers **T18–T21**, namespaces **FLT/HYG/PUB/EVD**,
+  13 items, every one vetted to **RESHAPE** (zero KILL) via a 4-namespace read-only grounding
+  fan-out + 3-lens adversarial skeptic panels + judge synthesis at `81177ba` (= v1.22.0).
+  Everything is `status: proposed`; four owner decisions are carried **PENDING** and gate the
+  relevant halves (ED4R-1): Q1 the per-session presence artifact (gates all of T18), Q2
+  trust-registry remediation, Q3 publish staging (print-only vs `git add -f`), Q4 the
+  salience-A/B commissioning. New round-4 laws: **ED4R-2** — no new standing artifact without
+  a **named reader** (the anti-dark-reservoir spine); **ED4R-3** — fleet visibility never
+  becomes coordination (no lock, no daemon, no mutual exclusion).
+- **`EXPLORATIONS4.md`** — flipped DRAFT → **vetted (2026-07-17)** with a §6 vetting-outcome
+  addendum: the 13-row verdict table plus the premise corrections (round 2 shipped AND
+  released v1.20.0–v1.22.0; the `~/.claude/projects` symlink-farm rot class replaces the
+  near-empty "orphaned derived dirs"; touch-grain zeros are mechanical, not just unread; two
+  unsupported collision exhibits replaced with the documented four). The 2026-07-16 body is
+  kept intact as the historical draft; the YAML is normative.
+
+Which tiers to build, in what order, if any, remains the owner's scheduling call.
+
 ## v1.22.0 — 2026-07-17 — "Good fences, open doors"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**,
