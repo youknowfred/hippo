@@ -1,8 +1,11 @@
 # hippo — Enhancement & Capability Explorations, Round 4
 
-**Status: DRAFT idea catalog for owner review.** Round-4 addendum to
-[`EXPLORATIONS.md`](EXPLORATIONS.md) (round 1 → T1–T7, shipped),
-[`EXPLORATIONS2.md`](EXPLORATIONS2.md) (round 2 → T8–T13, still proposed), and
+**Status: VETTED 2026-07-17** (adversarial grounding + vetting at `81177ba` =
+v1.22.0; [`ROADMAP.enhancements4.yaml`](ROADMAP.enhancements4.yaml) authored —
+the normative form; owner ratification of scope PENDING — see §6). Round-4
+addendum to [`EXPLORATIONS.md`](EXPLORATIONS.md) (round 1 → T1–T7, shipped),
+[`EXPLORATIONS2.md`](EXPLORATIONS2.md) (round 2 → T8–T13, shipped and released
+through v1.22.0 — corrected 2026-07-17; the draft below said "still proposed"), and
 [`EXPLORATIONS3.md`](EXPLORATIONS3.md) (round 3 → T14–T17, shipped and released
 as v1.18.0/v1.19.0). This is **research and proposal only** — no implementation,
 no status flips on existing roadmap files. Its executable companion is
@@ -132,7 +135,9 @@ starts and share nothing.
   PROPOSED and owner-owned; round 4 deliberately avoids their territory (MSR
   measurement spine, CLB team review packets, IOP interop). Whether to execute
   T8 next is a scheduling decision for Fred, not a new proposal — re-proposing
-  it here would just fork the catalog.
+  it here would just fork the catalog. *(Corrected 2026-07-17: MOOT — round 2
+  was executed and released as v1.20.0–v1.22.0 within a day of this draft; see
+  §6.)*
 - **A STABILITY.md facts lint** — was on this round's candidate list from the
   DOC-15 experience; shipped out from under the draft as DOC-16 (PR #66,
   merged 2026-07-16) while this document was being written. Cited in §1 as
@@ -189,3 +194,80 @@ starts and share nothing.
 5. **EVD-4** (salience-revisit evidence) — cheapest honest step toward the
    one standing decided-OFF capability, on the substrate built for exactly
    this moment.
+
+## 6. Vetting outcome (2026-07-17)
+
+The draft above (2026-07-16) was vetted 2026-07-17 against `81177ba` (=
+v1.22.0, origin/main): a 4-namespace read-only **grounding fan-out** (every
+claim file:symbol-verified against the tree), then **3-lens adversarial
+skeptic panels** per item (signal-existence/autonomy, user-value,
+fit/redundancy), then **judge synthesis**. **All 13 items survived as
+RESHAPE — zero KILL.** The reshaped, dependency-sequenced, acceptance-
+criteria'd form lives in
+[`ROADMAP.enhancements4.yaml`](ROADMAP.enhancements4.yaml) — **that file is
+normative**; this document (kept intact above as the historical draft) is the
+motivation record. Scope ratification — which tiers to build, in what order,
+if any — is the owner's scheduling call; the four §4 owner decisions
+(Q1–Q4) remain **PENDING** and gate the relevant halves (ED4R-1).
+
+### Verdicts
+
+| Item | Verdict | Reshape headline |
+|---|---|---|
+| FLT-1 | RESHAPE | Per-session presence doc in new sibling `presence.py` (never a shared file — the jit state-dir pattern); per-working-tree scope stated; the draft's two unsupported collision exhibits replaced with the documented four; Q1 gates the whole tier |
+| FLT-2 | RESHAPE | Detection-not-accusation tripwire riding the existing PostToolUse spawn inside the pinned 50ms budget; fires once per move; drops the unverifiable "nearly cut twice" exhibit |
+| FLT-3 | RESHAPE | Mutating-file-tools-only nudge sharing JIT-1's single hookSpecificOutput + line budget; honest coverage boundary stated (Bash-mediated mutations are invisible to PostToolUse) |
+| HYG-1 | RESHAPE | Census trimmed to real-oracle classes in new sibling `machine_census.py`, delegate-never-fork; the symlink farm (18/24 dangling, all test-leaked) replaces the near-empty "orphaned derived dirs" class |
+| HYG-2 | RESHAPE | The one new write = temp-rooted-only dangling-symlink batch remover (the `prune_dead` grain) **plus the conftest/HOME test-isolation leak fix shipped with the class**; trust report-only pending Q2 |
+| HYG-3 | RESHAPE | ONE doctor line (warn on DEAD only) appended before the pinned-last check; sleep inherits verbatim for free; the draft's separate sleep section cut (SLP-1 reuse rule); INT-18 hard-sequences it after HYG-1 |
+| PUB-1 | RESHAPE | Gate = reuse `review.lint_touched` with entropy=ON as the only delta; expired/contradicts refusals demoted to advisory; print-only pending Q3; membership oracle single-homed on `build_repo_file_index`; no 'all' affordance |
+| PUB-2 | RESHAPE | Zero new module — a `--candidates` flag on the shipped recall_diff CLI; git-range-only (the PR-activity clause dropped, inv2); 18/8/10 reproduced name-for-name on #75's range |
+| PUB-3 | RESHAPE | A **view**, not a detector; one doctor line + the heals-N column feeding PUB-2; never a gate ("expected, not an error" per #67); 20 dangling / 9 files / 0 typed reproduced at 81177ba |
+| EVD-1 | RESHAPE | New cold-path sibling `reconsolidate_brief.py`; hunk bodies only under the capture lane's secret discipline; the unmeasured "minutes per verdict" claim dropped — the honest framing is the measured 671-verdicts/week flow |
+| EVD-2 | RESHAPE | Reframed to lane **health/diagnosis** — 0/0 is mechanical (5 releases of live-hook lag + worktree path-prefix mismatch, 848/1675 rows); ED-3 live recording probe is step zero; couples to FLT-3 |
+| EVD-3 | RESHAPE | Defer/dormant — zero declines ever recorded (interview-state.json absent); template-only class-quieting gated on real declines accruing; a threshold with no data is dead code |
+| EVD-4 | RESHAPE | Split — Arm A is a zero-code run of the shipped MSR-5 rig (ripe today, the doctor warn is live-requesting it; Q4-commissioned); Arm B (outcome/touch prior) severed behind nonzero data + its own dated decision; measures existing flags only |
+
+### Premise corrections (the draft predates PRs #70–#75)
+
+- **Round 2 (T8–T13) is SHIPPED and RELEASED** — v1.20.0 (T10 Sentinel),
+  v1.21.0 (T11), v1.22.0 (T12+T13) — within a day of the draft. The header's
+  "still proposed" and §3's "executing round 2 is a scheduling decision" are
+  moot (corrected in place above).
+- **Two of §1's collision exhibits are unsupported** and were replaced: "23
+  baselines orphaned / cost real cleanup" contradicts the t16 capstone's own
+  "cherry-picked cleanly" text, and "v1.19.0 nearly cut twice / 90 seconds"
+  has no record in any capstone, PR body, or comment. The verified inventory
+  is **four documented multi-session events** on 2026-07-16 — the qa-sweep
+  pytest pollution, the T16 branch repositioning, PR #62's avoided yank
+  ("the third shared-clone collision today"), and the T8 stranding ("the 4th
+  clone collision") — plus a **separate 5-session cwd-reset-trap class**
+  (single-session, only partially coverable by FLT).
+- **The queues deepened, not drained**: the draft's 20-item worklist / 3
+  captures / 2 contradiction pairs read 26-standalone/38-with-watermark /
+  8 / 3 (+5 merge-digest pairs, + the rederive v3→v4 lane) one day later —
+  strengthening EVD-1.
+- **MSR-5's salience A/B rig SHIPPED** (#70) — EVD-4 Arm A is zero-code-ripe,
+  and the doctor's lived-in warn fires on this machine today naming the exact
+  command.
+- **The "orphaned derived dirs" class is near-empty** — derived dirs are
+  in-repo siblings and die with the repo. The real machine-wide rot class the
+  census needed is the `~/.claude/projects` **symlink farm**: 18 of 24 memory
+  symlinks dangling, 100% test-leaked (a live test-isolation gap — the leak
+  fix ships with HYG-2).
+- **Touch-grain 0/0 is mechanical, not just unread**: the live hooks ran
+  plugin 1.17.0 until 2026-07-17T19:02Z (five releases of lag), and worktree
+  sessions record prefix-mismatched paths (848 of 1675 rows) that can never
+  match cited_paths — EVD-2 reframed from trend chart to diagnosis.
+- **CLB-1's `review --ci` memory-diff gate SHIPPED** (#74) and backstops
+  every publish PR — but it is deterministic-secrets + Tier-A only, so
+  PUB-1's local entropy=ON pass is the only place the #67 bar survives as
+  one step.
+- **Interview declines were never recorded** (interview-state.json absent) —
+  EVD-3 is premise-weak today and reshaped to defer/dormant.
+
+The four §4 owner decisions are carried **PENDING** in the YAML
+(`decisions.ED4R-1`), recommendations preserved as recommendations. Round 4's
+own laws land there too: **ED4R-2** (no new standing artifact without a named
+reader — the anti-dark-reservoir spine) and **ED4R-3** (fleet visibility
+never becomes coordination).
