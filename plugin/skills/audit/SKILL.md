@@ -376,6 +376,14 @@ if names:
                 continue  # one-way similarity is not a merge signal
             merge_candidates.append({"pair": [a, b], "score_a_to_b": s_ab, "score_b_to_a": s_ba})
 
+# --- SEN-3: ungrounded-prescription sweep. Classify each memory grounded / ungrounded-
+# prescription / observation; the ungrounded ones are agent-voiced "the user always wants X"
+# claims backed by neither a Rationale line nor a fenced hunk — the synthesized-prescription
+# shape that amplifies sycophancy. Report-only; the agent proposes per-item fixes in Phase 5
+# (transcribe the WHAT, or cite the WHY), never a bulk rewrite (inv4). ---
+from memory import prescription_lint
+ungrounded_prescriptions = prescription_lint.scan_corpus(memory_dir)
+
 # --- Join 4: per-memory staleness-baseline age (eval_recall's own metric is a corpus-wide
 # median only — this decomposes it so an outlier-driven half-life is distinguishable from
 # broad aging) ---
@@ -463,6 +471,7 @@ print(json.dumps({
     "graduation_history_for_stale": history_for_stale,
     "link_density_suggestions": link_density_suggestions,
     "merge_candidates": merge_candidates,
+    "ungrounded_prescriptions": ungrounded_prescriptions,
 }, indent=2, default=str))
 PYEOF
 ```
@@ -534,6 +543,18 @@ The joins above are already computed as plain data; this phase is about **interp
    SessionStart contradiction-inbox producer picks them up automatically) and, when a
    governance doc cites either side, light the T2 rules-conflict radar; recall annotates the
    pair with its "contradicts … — verify" note on every co-surface until resolved.
+
+10. **Ungrounded prescriptions** (`ungrounded_prescriptions`, SEN-3) — the corpus split into
+   `observation` / `grounded` / `ungrounded`, with `ungrounded_items` naming each memory that
+   asserts user intent (the `the-<subject>-always-wants-X` shape) backed by neither a
+   `Rationale:` line nor a fenced hunk overlapping the claim. This is the synthesized-prescription shape that amplifies
+   sycophancy: a fabricated standing preference, recalled forever and reinforced every session.
+   Read each flagged body before proposing anything — the fix is per item and is one of:
+   **transcribe** (rewrite the claim as the observation the evidence actually supports),
+   **ground** (add a `--rationale`/`Rationale:` citing the WHY), or **cut** (drop a preference
+   nothing supports). Never a bulk rewrite (inv4); warn-only, never a block. A high fraction is
+   a corpus-health signal (the transcription-not-synthesis discipline slipping), not a per-file
+   emergency.
 
 **Signal-maturity tag** — apply to every join above that depends on the recall-telemetry window
 (authority-evidence gap, staleness-half-life shape, graduation history, archive candidacy

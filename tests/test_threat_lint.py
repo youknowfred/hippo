@@ -276,6 +276,21 @@ def test_write_ticket_surfaces_tier_a_threat(tmp_path):
     assert "threat lint" in block
 
 
+def test_write_ticket_catches_invisible_char_in_the_description(tmp_path):
+    """The description is json-escaped in the rendered file, but unescapes to the real byte on
+    inject — so the ticket must scan the UNESCAPED description, not the rendered file text."""
+    from memory import new_memory as NM
+
+    md = str(tmp_path / "mem")
+    os.makedirs(md)
+    decision = NM.check_candidate(
+        "descpoison", "a config setting" + ZWSP + " with a hidden byte", "project",
+        "ordinary body", memory_dir=md,
+    )
+    assert decision["ticket"]["threat_warnings"] != []
+    assert any("invisible" in w.lower() for w in decision["ticket"]["threat_warnings"])
+
+
 def test_write_ticket_does_not_surface_tier_b(tmp_path):
     from memory import new_memory as NM
 

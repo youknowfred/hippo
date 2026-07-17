@@ -629,10 +629,21 @@ def build_write_ticket(
     # SURFACED classes only — Tier-B imperative grammar is measured to the dark ledger by the
     # write-plane caller (write_memory), never on this pure/side-effect-free ticket path (so a
     # dry-run check never double-counts a write's Tier-B measurement).
+    # Scan the UNESCAPED description + body — the surface that actually injects/recalls. The
+    # rendered frontmatter json-escapes the description (an invisible codepoint becomes the
+    # ASCII `\uXXXX`), but parse_frontmatter unescapes it back to the real byte before
+    # inject_description injects it, so scanning `rendered` would MISS a description-embedded
+    # invisible payload that still reaches context. (The body is written raw, so its bytes are
+    # already real.)
     try:
+        from .provenance import parse_frontmatter
         from .threat_lint import scan_tier_a
 
-        ticket["threat_warnings"] = scan_tier_a(rendered)
+        try:
+            desc_value = str(parse_frontmatter(rendered).get("description") or "")
+        except Exception:
+            desc_value = ""
+        ticket["threat_warnings"] = scan_tier_a(f"{desc_value}\n{body}")
     except Exception:
         ticket["threat_warnings"] = []
     ticket["fence_fidelity"] = _fence_fidelity(body, repo_root)
@@ -1193,6 +1204,26 @@ def write_memory(
             from .telemetry import log_threat_findings
 
             log_threat_findings(tier_b, source="write", name=name)
+    except Exception:
+        pass
+
+    # SEN-3: ungrounded-prescription lint — an agent-voiced "the user always wants X" with no
+    # captured evidence and no --rationale is the synthesized-prescription shape that amplifies
+    # sycophancy. WARN-ONLY (never blocks, never routes, never ranks — it stays OUT of
+    # check_candidate so the confidence-never-ranking pin holds). Grounding = the --rationale
+    # param OR a fenced hunk in the body overlapping the claim; only a span grounded in
+    # NEITHER is surfaced. Best-effort; never fatal.
+    try:
+        from .prescription_lint import find_ungrounded
+
+        ungrounded = find_ungrounded(f"{description}\n{body}", rationale=rationale)
+        if ungrounded:
+            result["warnings"] = (result.get("warnings") or []) + [
+                "⚠ ungrounded prescription (SEN-3): this memory asserts user intent — "
+                f"\"{'; '.join(ungrounded)}\" — grounded in neither the captured evidence nor "
+                "a --rationale. Transcribe what the diff/decision shows, or cite the WHY; a "
+                "synthesized standing preference amplifies sycophancy on every recall."
+            ]
     except Exception:
         pass
 
