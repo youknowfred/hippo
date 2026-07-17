@@ -735,3 +735,132 @@ def check_archive_regret(ctx: DoctorContext) -> Dict[str, str]:
         }
     except Exception as exc:
         return {"status": "warn", "message": f"archive-regret check failed: {exc}."}
+
+
+def check_evidence_fences(ctx: DoctorContext) -> Dict[str, str]:
+    """CLB-3: quoted-evidence coverage + drift — one line, deterministic.
+
+    Counts memories carrying MARKED evidence fences vs memories with code fences
+    but no marker (pre-marker drains — "unverifiable", out of the detector's scope
+    by contract, never backfilled), then reports live drift via the same matcher
+    the SessionStart pipeline runs (``staleness_evidence.evidence_drift_map`` —
+    one implementation, so doctor and the RET-6 banner can never disagree). A
+    corpus with no fences at all reports coverage zero and stays ``ok``; drifted
+    memories flip to ``warn`` naming the first few — routing is the existing
+    reverify gate, never a new verb.
+    """
+    try:
+        from .links import _FENCED_CODE_RE
+        from .staleness_evidence import evidence_drift_map, extract_evidence_fences
+
+        marked = unverifiable = 0
+        for path in _iter_memory_files_safe(ctx.memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+            except Exception:
+                continue
+            if not _FENCED_CODE_RE.search(text):
+                continue
+            if extract_evidence_fences(text):
+                marked += 1
+            else:
+                unverifiable += 1
+        drift = evidence_drift_map(ctx.memory_dir, ctx.repo_root)
+        base = (
+            f"quoted evidence: {marked} memory(ies) carry evidence-marked fences; "
+            f"{unverifiable} with unmarked code fences (unverifiable — pre-marker, never backfilled)"
+        )
+        if not drift:
+            return {"status": "ok", "message": f"{base}; no evidence drift."}
+        shown = ", ".join(sorted(drift)[:4])
+        more = f" (+{len(drift) - 4} more)" if len(drift) > 4 else ""
+        return {
+            "status": "warn",
+            "message": f"{base}; {len(drift)} with DRIFTED quoted evidence: {shown}{more} "
+            "— re-verify each via the reconsolidation gate (reverify graduate|fix|demote).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"evidence-fence check failed: {exc}."}
+
+
+def check_merge_digest(ctx: DoctorContext) -> Dict[str, str]:
+    """CLB-4: incoming-merge duplicate pairs — the doctor half of the digest.
+
+    Re-derives the SAME pairs the SessionStart producer surfaces (one derivation,
+    ``merge_digest.incoming_duplicate_pairs`` — never a second detector) so a lead
+    running doctor after a merge sees them without waiting for the next session
+    start. Routing is identical and human: /hippo:resolve for declared
+    contradictions, /hippo:consolidate's GRW-3 merge tier for the rest. The
+    unreachable-watermark case renders as its own legible state.
+    """
+    try:
+        from .merge_digest import incoming_duplicate_pairs
+        from .telemetry import default_telemetry_dir
+
+        pairs, degradation, incoming = incoming_duplicate_pairs(
+            ctx.memory_dir, ctx.repo_root, default_telemetry_dir(ctx.memory_dir)
+        )
+        if degradation and not pairs:
+            return {
+                "status": "warn",
+                "message": "incoming-merge dedup: last-session watermark unreachable "
+                "(squash-merge/rewrite) — the incoming range could not be dup-checked; "
+                "self-heals next session.",
+            }
+        if not pairs:
+            return {
+                "status": "ok",
+                "message": "incoming-merge dedup: no duplicate pairs among memories "
+                "merged in since the last session.",
+            }
+        shown = "; ".join(
+            f"{p['incoming']} ⇄ {p['neighbor']} → "
+            + ("/hippo:resolve" if p["route"] == "resolve" else "/hippo:consolidate")
+            for p in pairs
+        )
+        return {
+            "status": "warn",
+            "message": f"incoming-merge dedup: {len(pairs)} duplicate-candidate pair(s) "
+            f"across {incoming} merged-in memory file(s) — {shown} (human-routed; "
+            "nothing merges automatically).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"merge-digest check failed: {exc}."}
+
+
+def check_team_coverage(ctx: DoctorContext) -> Dict[str, str]:
+    """CLB-2: the last_verified + verified_by consumers — verification made legible.
+
+    The ``last_verified`` half renders for EVERY corpus (its first production
+    consumer — the field was written since RET-6 but surfaced nowhere). The
+    ``verified_by`` team half renders ONLY at ≥2 distinct git authors — at ≤1 the
+    line says "suppressed" and carries ZERO coverage numbers (solo
+    self-verification stats would only teach the reader to ignore the line).
+    Counts only, no names, no timestamps — deterministic (the doctor pin).
+    """
+    try:
+        from .team_coverage import team_coverage, verification_summary
+
+        vs = verification_summary(ctx.memory_dir)
+        base = (
+            f"verification: {vs['last_verified']} of {vs['total']} memories carry "
+            "last_verified (stamped by the reverify gate)"
+        )
+        team = team_coverage(ctx.memory_dir, ctx.repo_root)
+        if team is None:
+            return {
+                "status": "ok",
+                "message": f"{base}; team attribution suppressed (single git author).",
+            }
+        return {
+            "status": "ok",
+            "message": (
+                f"{base}; team ({team['authors']} authors): {team['stamped']} verified_by "
+                f"stamp(s), {team['non_author_verified']} non-author-verified, "
+                f"{team['never_other_verified']} never verified by a non-author, "
+                f"{team['departed']} departed-verifier stamp(s)."
+            ),
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"team-coverage check failed: {exc}."}

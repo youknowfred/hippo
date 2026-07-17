@@ -56,6 +56,7 @@ from .recall import (
     git_recent_producer,
     portable_floor_producer,
 )
+from .merge_digest import merge_digest_producer
 from .reconsolidate import (
     recalled_stale_worklist,
     reconsolidation_producer,
@@ -106,7 +107,7 @@ _DESKTOP_SURFACE_NOTE = (
     "material; judgment and applies stay per-item in the skill). "
     # INT-19: never promise a route that dead-ends — this list stays honest.
     "NOT available on this surface (terminal-only for now — say so, do not improvise a "
-    "workaround): export-agents, import, promote, promote-rule, remove. "
+    "workaround): export-agents, import, promote, promote-rule, remove, review. "
     "The corpus-repair and incident-response verbs are MCP tools on BOTH surfaces, with no "
     "/hippo:* form: rederive (action='worklist'|'one'|'snapshot'|'stamp'), heal_baselines, "
     "untrust (revoke a corpus's trust after finding it bad) and blast_radius (read-only: "
@@ -1295,6 +1296,7 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("rules_rot", rules_rot_producer),  # RUL-2: citation-rot/staleness over the always-loaded rules plane itself
     ("contradiction_inbox", contradiction_inbox_producer),  # GOV-1: every unresolved contradicts pair, not just the co-surfaced/governance-cited ones
     ("floor_change", floor_change_producer),  # GOV-4: floor/corpus changed since this clone's last session (per-clone watermark; a seen change stays quiet)
+    ("merge_digest", merge_digest_producer),  # CLB-4: incoming-merge duplicate digest — GRW-3's detector over the watermark range, human-routed
     ("relevant_to_work", relevant_to_work_producer),  # SIG-1: the first POSITIVE block — memories about the files you're editing
     ("resume_card", resume_card_producer),  # SIG-2: "where was I" — replay the last session from the episode buffer
     ("git_recent", git_recent_producer),
@@ -1406,6 +1408,18 @@ def _build_run_context(memory_dir: str, repo_root: str) -> RunContext:
         wm_stale = watermark_stale_candidates(memory_dir, repo_root)
     except Exception:
         wm_stale = []
+    # CLB-3: quoted-evidence drift — extraction + matching live HERE, in the find_stale
+    # pipeline (never build_index/_ensure_index; tests/test_evidence_drift.py pins that
+    # structurally), and drifted names union into the SAME watermark lane above — the one
+    # semantic_reverify gate, no new write verb.
+    evidence_drift: Dict[str, dict] = {}
+    try:
+        from .staleness_evidence import evidence_drift_map, fold_drift_candidates
+
+        evidence_drift = evidence_drift_map(memory_dir, repo_root)
+        wm_stale = fold_drift_candidates(wm_stale, evidence_drift)
+    except Exception:
+        evidence_drift = {}
     try:
         worklist = recalled_stale_worklist(
             memory_dir, repo_root, stale=stale, watermark_stale=wm_stale
@@ -1426,7 +1440,7 @@ def _build_run_context(memory_dir: str, repo_root: str) -> RunContext:
         if os.path.isdir(memory_dir):
             from .build_index import default_index_dir
 
-            write_stale_cache(default_index_dir(memory_dir), stale)
+            write_stale_cache(default_index_dir(memory_dir), stale, evidence_drift=evidence_drift)
     except Exception:
         pass
     # T16 JIT-1: refresh the first-touch reminder map (touchmap.json) at this SAME

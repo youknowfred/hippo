@@ -22,7 +22,8 @@ release). New *additions* alongside them are minor, non-breaking changes.
   `export-agents`, `import`, `remove`. (New skills may be added; existing ones won't be renamed or
   removed silently.)
 - **The `bin/hippo` CLI subcommands** — `recall`, `new`, `build-index`, `staleness`, `mcp`,
-  `sleep` (added in T15 SLP as a minor, non-breaking addition).
+  `sleep` (added in T15 SLP as a minor, non-breaking addition), `review` (added in T12 CLB —
+  the corpus review packet; its `--ci` mode is the single memory-diff CI gate).
 - **The MCP tool names** — `recall`, `new_memory`, `traverse`, `why`, `decision_history` (served by
   `bin/hippo mcp`).
 - **The `HIPPO_*` environment-variable namespace**, and specifically these documented operational

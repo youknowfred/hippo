@@ -180,19 +180,20 @@ def _stale_banner_map(index_dir: Optional[str]) -> Dict[str, str]:
     roadmap's own: ``"anchored to <sha>; N cited files changed since — verify before
     relying"``, pulling both ``<sha>`` and ``N`` straight from the cache's ``sha``/``changed``
     fields (LIF-6 already wrote both — no writer/schema change needed here). A record with no
-    usable ``sha`` is skipped (a blank anchor is worse than no banner). Never raises; ``{}``
-    when ``index_dir`` is falsy or the cache is missing/empty/corrupt.
+    usable ``sha`` is skipped (a blank anchor is worse than no banner). CLB-3 upgrade: names
+    in the cache's optional ``evidence_drift`` field get the match level appended (or a
+    standalone banner when only their quoted evidence — not their cited-path timeline —
+    drifted); the field's ABSENCE leaves every banner byte-identical to pre-CLB-3. Never
+    raises; ``{}`` when ``index_dir`` is falsy or the cache is missing/empty/corrupt.
     """
     if not index_dir:
         return {}
     try:
-        from .staleness import read_stale_cache
+        from .staleness import read_evidence_drift, read_stale_cache
 
         stale = read_stale_cache(index_dir)
-        if not stale:
-            return {}
         out: Dict[str, str] = {}
-        for name, rec in stale.items():
+        for name, rec in (stale or {}).items():
             if not isinstance(rec, dict):
                 continue
             sha = rec.get("sha")
@@ -204,6 +205,24 @@ def _stale_banner_map(index_dir: Optional[str]) -> Dict[str, str]:
             out[name] = (
                 f"anchored to {sha}; {changed} cited files changed since — verify before relying"
             )
+        for name, rec in sorted(read_evidence_drift(index_dir).items()):
+            missing = rec.get("missing")
+            if not isinstance(missing, int) or isinstance(missing, bool) or missing <= 0:
+                continue  # whitespace-only or malformed — deliberately NOT drift (inv3)
+            fences = rec.get("fences")
+            if not isinstance(fences, int) or isinstance(fences, bool) or fences < missing:
+                fences = missing
+            ws = rec.get("whitespace")
+            ws_note = (
+                f", {ws} more match only whitespace-normalized"
+                if isinstance(ws, int) and not isinstance(ws, bool) and ws > 0
+                else ""
+            )
+            evi = (
+                f"quoted evidence drift: {missing} of {fences} marked hunk(s) no longer "
+                f"match the tree{ws_note} — verify before reuse"
+            )
+            out[name] = f"{out[name]}; {evi}" if name in out else evi
         return out
     except Exception:
         return {}

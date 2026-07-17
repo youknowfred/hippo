@@ -1128,7 +1128,7 @@ workstreams:
         title: Corpus review packet (op-classified diff + scoped lints + local recall-impact preview; --ci = SEC-8 vehicle)
         priority: P1
         effort: L
-        status: planned
+        status: done
         source: {lens: team-substrate, verdict: RESHAPE, convergence: 1, landscape: [fountaincity-pr-review-2026, cc-team-bottleneck-38536]}
         problem: >-
           A teammate reviewing a memory PR has no tooling — no op-classified diff, no
@@ -1152,7 +1152,7 @@ workstreams:
           - lints run scoped to touched files, reusing scan_text/scan_portability/conflict_radar/edge-integrity verbatim; `--ci` exits nonzero iff a finding exists and is documented/wired as the SINGLE CI secret-scan surface (SEC-8's gate half, not a parallel one)
           - the recall-impact preview never runs under CI/HIPPO_DISABLE_DENSE=1 (grep/test-verifiable local-only), always prints the 80-char truncation bound inline, and prints an explicit "no local episodes to replay" line when episode_buffer is empty
           - no auto-approve/auto-merge/auto-post code path exists (grep-verifiable); test_skills_contract's literal skill-count pin is updated in the same PR that ships the skill
-        dependencies: [SEC-8]           # cross-file (ROADMAP.v1, open — this item is SEC-8's CI vehicle); trust spine SHIPPED
+        dependencies: [SEC-8]           # PREMISE CORRECTED at build (2026-07-17): SEC-8 was marked "ROADMAP.v1, open" but SEC-8..14 ALL shipped 2026-07-10 — INCLUDING a repo-tree secret-scan CI job (ci.yml). What remained unbuilt was the memory-DIFF gate half + SEN-2's threat-lint CI leg: CLB-1's --ci is THAT single vehicle (the new memory-review job); the repo-tree job stays as SEC-8's release-hygiene half over the shipped tree — different scope, documented in ci.yml, not a second memory scanner.
         invariant_note: >-
           inv4 — auto-approving clean memory PRs is REMOVED outright (deletes the
           review-gated-writes identity pillar; cannot be metric-gated back); only
@@ -1174,7 +1174,7 @@ workstreams:
         title: verified_by attribution (per-verification identity + team-coverage reporting, suppressed at solo)
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: team-substrate, verdict: RESHAPE, convergence: 1, landscape: [copilot-citation-scoping-2026]}
         problem: >-
           hippo records WHO authored a memory (git) but not who VERIFIED it — last_verified
@@ -1193,7 +1193,7 @@ workstreams:
           - doctor + check_trust_scorecard ship real consumers for BOTH last_verified and verified_by, with every team-coverage line omitted (not just empty) at <=1 git author — a byte-identity/no-op test for solo corpora
           - an AST pin proves verified_by is never read by any ranking-adjacent path (mirrors the confidence pin); git-log identities normalize through current_user_slug's slugification before any join
           - the verified_by stamp ships gated on/after SEC-14; the departed-verifier line is dropped or rendered in a deterministic non-timestamp bucketed form (doctor no-timestamps pin)
-        dependencies: [SEC-6, SEC-14]   # SEC-6 shipped; SEC-14 cross-file (ROADMAP.v1, open) — sequencing gate
+        dependencies: [SEC-6, SEC-14]   # PREMISE CORRECTED at build (2026-07-17): SEC-14 was marked "open" but shipped 2026-07-10 (HIPPO_TEA5_OPT_IN + public-remote warning + check_committed_usage_privacy) — the ED-5 sequencing is satisfied by LANDING AFTER it; the stamp itself stays human-gated by the reverify verdict. Also stale: the AC said "corpus_format stays 4" — the live value was already 5 pre-CLB-2; the binding invariant (NO bump) held and is now test-pinned.
         invariant_note: >-
           ED-1 — detection-half only; writes through the existing per-item human-gated
           reverify (inv4). ED-4 — additive/absence-emits-nothing, corpus_format 4. inv1 —
@@ -1212,7 +1212,7 @@ workstreams:
         title: Evidence-fence contract + cited-code drift detector (hunk staleness)
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: team-substrate, verdict: RESHAPE, convergence: 1, landscape: [copilot-jit-reverify-2026]}
         problem: >-
           GRW-1 captures verbatim hunks into drafted bodies, but once a memory quotes a
@@ -1252,7 +1252,7 @@ workstreams:
         title: Incoming-merge duplicate digest
         priority: P2
         effort: S
-        status: planned
+        status: done
         source: {lens: team-substrate, verdict: RESHAPE, convergence: 1, landscape: [obsidian-git-conflicts-803, crdt-structure-not-semantics]}
         problem: >-
           When a teammate's memories arrive via git merge, nothing surfaces that an
@@ -1599,10 +1599,10 @@ release_train:
       the restore collision-guard, and the SIG-6 dependency status at session end.
 
   - tier: T12
-    target_version: 1.12.0
+    target_version: 1.12.0   # STALE label (authored pre-round-3); T12 landed post-v1.21.0, 2026-07-17, no version bump — rides whatever release Fred cuts next
     theme: "Team collaboration substrate"
-    status: planned
-    gate: "The trust spine is shipped, so the team surface is buildable now. CLB-1 IS the SEC-8 CI-scan vehicle (SEC-8 cross-file, ROADMAP.v1). CLB-2's identity stamp is sequenced behind SEC-14 (cross-file, open)."
+    status: done
+    gate: "The trust spine is shipped, so the team surface is buildable now. PREMISES CORRECTED at build (2026-07-17): (1) the gate said CLB-2 'is sequenced behind SEC-14 (cross-file, open)' — STALE: SEC-8..14 ALL shipped 2026-07-10 (hippo-v080-sec-tail), so CLB-2 was fully unblocked and its ED-5 sequencing is satisfied by landing after. (2) 'CLB-1 IS the SEC-8 CI-scan vehicle' needed sharpening against the live tree: SEC-8 shipped WITH a repo-tree secret-scan CI job (release hygiene over the shipped tree); CLB-1's --ci is the single canonical vehicle for the MEMORY-DIFF gate half + SEN-2's threat-lint CI leg (the halves that were genuinely unbuilt), with the scope split documented in ci.yml."
     done_means: >-
       Review-gated writes become team ergonomics: a zero-LLM review packet
       (op-classified diff + scoped lints + local recall-impact preview, --ci = the SEC-8
@@ -1619,6 +1619,45 @@ release_train:
       pin. CLB-4 reuses the single merge-detector + GOV-4 ledger (no parallel), emits a
       degradation line on the squash/unreachable case, and re-verifies against the
       round-1 cross-clone-auto-harvest kill rationale.
+      BUILT 2026-07-17 (see hippo-enh-t12-team), 4/4 items in the audit_note order
+      (CLB-1,3,4,2), one session, tests-first, full suite green after each (~2,663
+      tests, ~84 new; no version bump, no schema/corpus_format move — every field
+      additive/absence-emits-nothing). Every binding held: no approval automation
+      anywhere (structural pins: zero LLM/network imports in review.py; no
+      approve/merge/post tokens; the skill states the removal); --ci exits nonzero iff
+      a GATE finding (secrets + threat Tier-A) on touched files — portability/edge/
+      conflict lints render ADVISORY by design (cited paths ARE repo coupling, and
+      gating unresolved contradictions would automate a human verdict, ED-1); the
+      recall-impact preview is guard-tested local-only (never --ci/HIPPO_DISABLE_DENSE/
+      CI env; 80-char bound disclosed; explicit no-episodes line). CLB-3's matcher
+      lives in staleness_evidence (a NEW sibling; new_memory._diff_post_image now
+      delegates there — one post-image oracle), runs only in _build_run_context (AST
+      pin holds _ensure_index/build_index/compute_corpus to zero evidence calls),
+      writes an optional evidence_drift field into stale.json (schema 1 unchanged;
+      RET-5's reader untouched), upgrades the RET-6 banner with the match level, and
+      unions drifted names into the watermark→semantic_reverify lane. CLB-4 gates on
+      _recent_merge_signals + the episode watermark (the GOV-4 pattern reused as
+      seen-state — no new ledger), runs committed_duplicate_neighbors over ≤10 incoming
+      stems, caps 5 pairs, routes contradicts→resolve / else→consolidate, and emits the
+      explicit unreachable-watermark degradation line. CLB-2 stamps verified_by inside
+      reverify_file ONLY (reconsolidate.py untouched — it sat at exactly 900/900);
+      the old byte-idempotence is deliberately sharpened (triplet+last_verified stay
+      idempotent; a repeat verdict refreshes only verified_by — test-pinned by diffing
+      stripped texts); the non-author-verified join compares against file CREATORS
+      (--diff-filter=A) because committing a verify-stamp makes the verifier a
+      committer; solo corpora render byte-identically (team_coverage returns None,
+      scorecard part spread-in only at ≥2 authors). Doctor grew THREE one-line checks
+      (evidence_fences, merge_digest, team_coverage — appended before the pinned-last
+      env check); PRODUCERS grew merge_digest (after floor_change; all adjacency pins
+      held); the review verb landed across every surface registry in lockstep
+      (17-skill pin, BIN_HIPPO_SUBCOMMANDS+bin/hippo+STABILITY.md, Desktop-note
+      terminal-only list). Honest scope notes: the op vocabulary gained an explicit
+      DELETE row for the convention-breaking hard delete (mislabeling it ARCHIVE would
+      hide a destructive change from the reviewer); review is terminal-only (no MCP
+      tool — its git-range + shadow-index work is a CLI's job; the Desktop note says
+      so); the CLB-4 producer needs merge SIGNALS (reflog/squash-subject/branch
+      --merged), so a merge arriving with none of those traces stays silent until the
+      next real merge signal.
     capstone: >-
       Write hippo-enh-t12-team: the review-packet op-classification + shadow-index
       approach, the SEC-8 --ci wiring, the verified_by/SEC-14 sequencing, and the

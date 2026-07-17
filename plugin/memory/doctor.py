@@ -76,6 +76,9 @@ from .doctor_checks_corpus import (
     check_invalid_after_terminal,
     check_archive_shadowing,
     check_archive_regret,
+    check_evidence_fences,
+    check_merge_digest,
+    check_team_coverage,
     _LATIN_ALPHA_RANGES,
     _NON_ENGLISH_MIN_ALPHA_SAMPLE,
     _NON_ENGLISH_ALPHA_FRACTION,
@@ -241,6 +244,22 @@ def _scorecard_message(memory_dir: str, repo_root: str) -> Tuple[str, str]:
     except Exception:
         pass
 
+    # CLB-2: the verified_by team part — SPREAD IN only at ≥2 distinct git authors
+    # (team_coverage returns None solo), so a single-author corpus's scorecard is
+    # byte-identical to pre-CLB-2 — the suppression rule, structurally.
+    team_part: Optional[str] = None
+    try:
+        from .team_coverage import team_coverage
+
+        team = team_coverage(memory_dir, repo_root)
+        if team is not None:
+            team_part = (
+                f"team: {team['non_author_verified']} non-author-verified / "
+                f"{team['stamped']} verified_by stamp(s) across {team['authors']} authors"
+            )
+    except Exception:
+        team_part = None
+
     # GOV-4: floor/corpus changed since this clone's watermark (read-only peek — never
     # consumes the producer's surfaced-once semantics).
     floor_line = "floor/corpus delta: no watermark baseline yet"
@@ -273,6 +292,8 @@ def _scorecard_message(memory_dir: str, repo_root: str) -> Tuple[str, str]:
         f"injected ~{cost_chars} chars over {len(cost_sessions)} session(s); {touched_pct}",
         floor_line,
     ]
+    if team_part is not None:
+        parts.append(team_part)  # CLB-2: present only on a multi-author corpus
     status = "warn" if (contested or rule_conflicts or rot or blind or orphans) else "ok"
     return status, "trust scorecard: " + " · ".join(parts) + "."
 
@@ -337,6 +358,9 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("archive_shadowing", check_archive_shadowing),  # TMB-3: archive/ stem colliding with a live one
     ("archive_regret", check_archive_regret),  # TMB-3: abstentions matching archived bodies (evidence-only)
     ("update_eval", check_update_eval),  # TMB-4: outrank failures from the latest persisted run
+    ("evidence_fences", check_evidence_fences),  # CLB-3: quoted-evidence coverage + cited-code drift
+    ("merge_digest", check_merge_digest),  # CLB-4: incoming-merge duplicate pairs, human-routed
+    ("team_coverage", check_team_coverage),  # CLB-2: last_verified lit up + verified_by coverage (suppressed solo)
     ("stale_memobot_env", check_stale_memobot_env),  # pinned last (env hygiene trails)
 ]
 
