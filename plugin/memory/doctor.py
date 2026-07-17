@@ -1761,6 +1761,51 @@ def check_archive_regret(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"archive-regret check failed: {exc}."}
 
 
+def check_update_eval(ctx: DoctorContext) -> Dict[str, str]:
+    """TMB-4: the per-project update-knowledge line — the outrank-failure count from the
+    LATEST persisted eval run (MSR-1's run ledger; ED2R-1 — doctor reads persisted eval,
+    it never re-runs one). ok-at-zero and ok-at-no-evidence; GATE_UPDATE_* promotion is
+    a dated owner decision — this line never gates anything.
+    """
+    try:
+        from .eval_recall import read_run_ledger
+        from .telemetry import default_telemetry_dir
+
+        latest = None
+        for row in read_run_ledger(ctx.memory_dir, default_telemetry_dir(ctx.memory_dir)):
+            latest = row
+        if latest is None:
+            return {
+                "status": "ok",
+                "message": "update eval: no persisted eval runs yet (eval_recall --json "
+                "records one; update rows land via --draft-update + per-item confirm).",
+            }
+        u = (latest.get("report") or {}).get("update_knowledge")
+        if not isinstance(u, dict) or not u.get("n"):
+            return {
+                "status": "ok",
+                "message": "update eval: latest persisted run carries no update-category "
+                "rows (the category has zero rows until drafted + confirmed).",
+            }
+        failures = int(u.get("outrank_failures") or 0)
+        if failures == 0:
+            return {
+                "status": "ok",
+                "message": f"update eval: {u['n']} update row(s), 0 outrank failures "
+                "(successors beat their corpses in the latest persisted run).",
+            }
+        return {
+            "status": "warn",
+            "message": f"update eval: {failures} outrank failure(s) across {u['n']} update "
+            "row(s) in the latest persisted run — a superseded memory still outranks (or "
+            "hides) its successor; enrich the successor or re-run `python -m "
+            "memory.eval_recall` after corpus fixes (report-only; GATE_UPDATE_* stays an "
+            "owner decision).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"update-eval check failed: {exc}."}
+
+
 # (label, check_fn) in a FIXED order — the source of the deterministic output. New checks append
 # here; the order is never sorted-by-name or set-derived, so the printed sequence is stable.
 _HOT_PATH_P95_BUDGET_MS = 1500.0  # KPI-3 / PRF-2: the cold per-prompt budget
@@ -2273,6 +2318,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("succession_replay", check_succession_replay),  # TMB-5: supersedes with failing/unrun replay
     ("archive_shadowing", check_archive_shadowing),  # TMB-3: archive/ stem colliding with a live one
     ("archive_regret", check_archive_regret),  # TMB-3: abstentions matching archived bodies (evidence-only)
+    ("update_eval", check_update_eval),  # TMB-4: outrank failures from the latest persisted run
     ("stale_memobot_env", check_stale_memobot_env),  # pinned last (env hygiene trails)
 ]
 

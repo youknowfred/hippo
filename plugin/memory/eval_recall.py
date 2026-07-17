@@ -557,11 +557,16 @@ def load_hard_set(path: str) -> List[dict]:
             exp = [exp]
         if isinstance(q, str) and isinstance(exp, list) and exp:
             cat = item.get("category")
+            sup = item.get("superseded")
             out.append(
                 {
                     "query": q,
                     "expected": [str(x) for x in exp],
                     "category": str(cat) if isinstance(cat, str) and cat.strip() else _DEFAULT_CATEGORY,
+                    # TMB-4: the corpse stem rides along for update_category_metrics'
+                    # stamp-state bucketing; every pre-TMB-4 consumer reads only
+                    # query/expected/category, so the extra key is purely additive.
+                    **({"superseded": str(sup)} if isinstance(sup, str) and sup.strip() else {}),
                 }
             )
     return out
@@ -877,6 +882,204 @@ def draft_forgetting_fixtures(
     return summary
 
 
+# --------------------------------------------------------------------------- #
+# TMB-4: edge-derived update / premise-resistance fixtures. A deterministic
+# synthesizer walks the supersedes chains the corpus ALREADY carries — query
+# assembly is VERBATIM-SPAN-ONLY (a literal substring of the superseded file;
+# no template, no paraphrase, zero LLM — the fabrication-kill adjacency: any
+# generative rewording collapses the derivation-only property separating this
+# from the round-1-killed demand-gap-auto-draft) and FAILS CLOSED (skip the
+# row) whenever a span, a chain tip, or a live file is missing. GATE_UPDATE_*
+# promotion is deliberately ABSENT: by_category update numbers stay report-only
+# until a dated owner decision (the LIF-7 soak_status precedent) — never an
+# automatic row-count threshold.
+# --------------------------------------------------------------------------- #
+_UPDATE_SPAN_MIN_CHARS = 30    # a shorter line is a fragment, not a claim
+_UPDATE_SPAN_MAX_CHARS = 140   # clipped at a word boundary — still a literal substring
+_UPDATE_MAX_SPANS = 2          # span 1 -> the update row; span 2 -> premise-resistance
+
+
+def _verbatim_spans(file_text: str) -> List[str]:
+    """Up to ``_UPDATE_MAX_SPANS`` literal substrings of ``file_text``'s BODY.
+
+    Candidate = a stripped body line (past the closing frontmatter fence) of at least
+    ``_UPDATE_SPAN_MIN_CHARS`` that is not a heading; long lines clip at the last word
+    boundary under ``_UPDATE_SPAN_MAX_CHARS``. Every transformation is
+    substring-preserving (strip, prefix-clip) — the literal-substring property is the
+    whole point and is pinned by test. ``[]`` when nothing qualifies (fail closed).
+    """
+    lines = file_text.split("\n")
+    body_start = 0
+    if lines and lines[0].strip() == "---":
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                body_start = i + 1
+                break
+    spans: List[str] = []
+    for line in lines[body_start:]:
+        s = line.strip()
+        if len(s) < _UPDATE_SPAN_MIN_CHARS or s.startswith("#"):
+            continue
+        if len(s) > _UPDATE_SPAN_MAX_CHARS:
+            clipped = s[:_UPDATE_SPAN_MAX_CHARS].rsplit(" ", 1)[0]
+            s = clipped if len(clipped) >= _UPDATE_SPAN_MIN_CHARS else s[:_UPDATE_SPAN_MAX_CHARS]
+        if s and s not in spans:
+            spans.append(s)
+        if len(spans) >= _UPDATE_MAX_SPANS:
+            break
+    return spans
+
+
+def _supersedes_tip(edges: dict, corpse: str, live_stems) -> Optional[str]:
+    """The corpse's LIVE chain tip via transitive ``typed_in['supersedes']`` (the
+    ``history.decision_chain`` direction convention: successors declare the edge).
+    ``None`` — skip the row, fail closed — on no successor, a fork (two successors:
+    ambiguity is not resolvable deterministically), a cycle, or a tip that left the
+    live corpus."""
+    seen = {corpse}
+    cur = corpse
+    while True:
+        succs = sorted(
+            s
+            for s in (edges.get(cur, {}).get("typed_in", {}).get("supersedes", ()) or ())
+            if s in live_stems
+        )
+        if not succs:
+            return cur if cur != corpse else None
+        if len(succs) > 1:
+            return None
+        nxt = succs[0]
+        if nxt in seen:
+            return None
+        seen.add(nxt)
+        cur = nxt
+
+
+def draft_update_fixtures(
+    memory_dir: Optional[str] = None,
+    *,
+    index_dir: Optional[str] = None,
+    drafts_path: Optional[str] = None,
+) -> dict:
+    """TMB-4: walk supersedes chains into ``category: update`` DRAFT rows.
+
+    Per superseded-but-still-live memory (``links.load_edges`` typed edges; the corpse
+    file must exist): up to two rows — the update row (first verbatim body span) and a
+    premise-resistance row (second span: the old premise's own words, which recall must
+    answer with the SUCCESSOR, not the corpse) — with ``derived_expected`` = the live
+    chain tip and ``superseded`` = the corpse, plus the corpse's CURRENT GRW-7
+    ``invalid_after`` state as draft-time info (scoring re-reads it live). Drafts only:
+    every row still requires per-item confirmation via ``confirm_hard_set_row(query,
+    [tip], category='update', superseded=corpse)``. Zero LLM, zero network, fail closed
+    throughout. ``{path, chains, added, kept, skipped}``.
+    """
+    from .links import load_edges
+
+    if memory_dir is None:
+        memory_dir, _repo = resolve_dirs()
+    dp = drafts_path or default_drafts_path(memory_dir)
+    resolved_index_dir = index_dir or default_index_dir(memory_dir)
+    edges = load_edges(resolved_index_dir) or {}
+    live_stems = {
+        os.path.splitext(f)[0]
+        for f in os.listdir(memory_dir)
+        if f.endswith(".md") and os.path.isfile(os.path.join(memory_dir, f))
+    } if os.path.isdir(memory_dir) else set()
+    corpses = sorted(
+        tgt
+        for stem, rec in edges.items()
+        for tgt in (rec.get("typed_out", {}).get("supersedes", ()) or ())
+        if tgt in live_stems
+    )
+    tracked_path = _project_fixture_path(memory_dir)
+    tracked = {row["query"] for row in load_hard_set(tracked_path)}
+    tracked |= {row["query"] for row in load_absence_rows(tracked_path)}
+    _meta, existing_rows = _load_fixture_docs(dp)
+    drafted = {(r.get("query") or "").strip() for r in existing_rows if isinstance(r, dict)}
+
+    added: List[dict] = []
+    skipped: List[str] = []
+    for corpse in dict.fromkeys(corpses):
+        tip = _supersedes_tip(edges, corpse, live_stems)
+        if tip is None:
+            skipped.append(f"{corpse} (no unambiguous live chain tip)")
+            continue
+        try:
+            with open(os.path.join(memory_dir, f"{corpse}.md"), "r", encoding="utf-8") as fh:
+                text = fh.read()
+        except Exception:
+            skipped.append(f"{corpse} (unreadable)")
+            continue
+        spans = _verbatim_spans(text)
+        if not spans:
+            skipped.append(f"{corpse} (no qualifying verbatim span)")
+            continue
+        from .staleness import read_invalid_after
+
+        ia = read_invalid_after(text)
+        try:
+            from .recall import _invalidation_state
+
+            state = _invalidation_state({"invalid_after": ia}) or "unstamped"
+        except Exception:
+            state = "unstamped"
+        for kind, span in zip(("update", "premise-resistance"), spans):
+            if span in tracked or span in drafted:
+                continue
+            added.append(
+                {
+                    "query": span,
+                    "superseded": corpse,
+                    "derived_expected": [tip],
+                    "kind": kind,
+                    "stamp_state": state,
+                }
+            )
+            drafted.add(span)
+
+    summary = {
+        "path": dp,
+        "chains": len(set(corpses)),
+        "added": [r["query"] for r in added],
+        "kept": len(existing_rows),
+        "skipped": skipped,
+    }
+    if not added:
+        return summary
+    if os.path.exists(dp) and not _parseable_yaml(dp):
+        summary["added"] = []
+        summary["error"] = (
+            "drafts file exists but is not parseable YAML — fix or delete it before "
+            "drafting more rows"
+        )
+        return summary
+    rows_text = "".join(
+        f"- query: {json.dumps(r['query'], ensure_ascii=False)}\n"
+        f"  superseded: {json.dumps(r['superseded'], ensure_ascii=False)}\n"
+        f"  derived_expected: [{json.dumps(r['derived_expected'][0], ensure_ascii=False)}]\n"
+        f"  kind: {json.dumps(r['kind'], ensure_ascii=False)}\n"
+        f"  stamp_state: {json.dumps(r['stamp_state'], ensure_ascii=False)}\n"
+        f"  expected: []\n"
+        for r in added
+    )
+    if os.path.exists(dp):
+        with open(dp, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        if text and not text.endswith("\n"):
+            text += "\n"
+        text += rows_text
+    else:
+        ensure_self_ignoring_dir(os.path.dirname(dp))
+        header_lines = ["draft: true", f"note: {json.dumps(_DRAFTS_NOTE, ensure_ascii=False)}"]
+        header_lines.append(f"generated_at: {time.strftime('%Y-%m-%d')}")
+        text = "\n".join(header_lines) + "\n---\n" + rows_text
+    from .atomic import write_text_atomic
+
+    # INV-2: the drafts queue accumulates human judgments — never leave it torn.
+    write_text_atomic(dp, text)
+    return summary
+
+
 def confirm_hard_set_row(
     query: str,
     expected: List[str],
@@ -886,6 +1089,7 @@ def confirm_hard_set_row(
     drafts_path: Optional[str] = None,
     category: str = "abstention",
     absent: Optional[List[str]] = None,
+    superseded: Optional[str] = None,
 ) -> dict:
     """Admit ONE confirmed row into the TRACKED project fixture — the SIG-6 confirm gate.
 
@@ -917,6 +1121,11 @@ def confirm_hard_set_row(
     skip). Rows default to ``category: forgetting``; the presence loader
     (``load_hard_set``) ignores them entirely — only ``load_absence_rows`` +
     ``absence_polarity_metrics`` consume them, report-only.
+
+    TMB-4 ``superseded`` (presence rows only): the CORPSE stem this update row's query
+    was verbatim-derived from — recorded on the row so ``update_category_metrics`` can
+    bucket by its live GRW-7 stamp state and check successor-vs-corpse outranking. The
+    stem must exist live in the corpus (a vanished corpse is refused — re-draft instead).
     """
     if memory_dir is None:
         memory_dir, _repo = resolve_dirs()
@@ -936,10 +1145,22 @@ def confirm_hard_set_row(
 
     stems = _norm(expected) if expected else []
     absent_stems = _norm(absent) if absent else []
+    corpse = _norm([superseded])[0] if superseded else None
     if stems and absent_stems:
         return {
             "ok": False,
             "reason": "a row is presence OR absence, not both — pass expected= or absent=",
+        }
+    if corpse and absent_stems:
+        return {
+            "ok": False,
+            "reason": "superseded= belongs to presence (update) rows, not absence rows",
+        }
+    if corpse and not os.path.exists(os.path.join(memory_dir, f"{corpse}.md")):
+        return {
+            "ok": False,
+            "reason": f"superseded names a memory that is not live in this corpus: {corpse} "
+            "— the corpse left the corpus; re-draft instead of confirming a stale row",
         }
     if not stems and not absent_stems:
         return {
@@ -998,7 +1219,8 @@ def confirm_hard_set_row(
         row_text = (
             f"- query: {json.dumps(q, ensure_ascii=False)}\n"
             f"  expected: [{', '.join(json.dumps(s, ensure_ascii=False) for s in stems)}]\n"
-            f"  category: {json.dumps(cat, ensure_ascii=False)}\n"
+            + (f"  superseded: {json.dumps(corpse, ensure_ascii=False)}\n" if corpse else "")
+            + f"  category: {json.dumps(cat, ensure_ascii=False)}\n"
         )
     if os.path.exists(fp):
         with open(fp, "r", encoding="utf-8") as fh:
@@ -1046,6 +1268,7 @@ def confirm_hard_set_row(
         "query": q,
         "expected": stems,
         **({"absent": absent_stems} if absent_stems else {}),
+        **({"superseded": corpse} if corpse else {}),
         "category": cat,
         "removed_from_drafts": removed,
     }
@@ -1097,6 +1320,83 @@ def absence_polarity_metrics(
         "held": held,
         "absence": (held / scored) if scored else 0.0,
     }
+
+
+def update_category_metrics(
+    index: LoadedIndex,
+    hard_set: List[dict],
+    memory_dir: str,
+    k: int = 10,
+    *,
+    index_dir: Optional[str] = None,
+) -> Dict[str, object]:
+    """TMB-4: the update rows' STAMP-STATE-BUCKETED scoring — report-only.
+
+    Rows: ``category == 'update'`` carrying a ``superseded`` corpse stem. Each row's
+    bucket is the corpse's CURRENT GRW-7 ``invalid_after`` state, read live at scoring
+    time (recall's own classifier — one horizon):
+
+      - ``unstamped``/``recent`` → successor-must-OUTRANK-corpse: the tip must rank in
+        the top-k AND above the corpse if the corpse ranks at all (a recent invalidation
+        only score-halves the corpse — it can legitimately still surface, but current
+        truth must beat retired truth).
+      - ``old`` (or the corpse file gone) → successor-PRESENCE-only: recall
+        display-filters old-stamped corpses, so "outrank" is vacuous — the tip ranking
+        at all is the whole test.
+
+    ``{"n", "outrank": {"n", "pass"}, "presence": {"n", "pass"}, "outrank_failures"}``
+    — ``outrank_failures`` is the number the TMB-4 doctor line names. Never a gate:
+    GATE_UPDATE_* promotion stays a dated owner decision and no such constant exists.
+    """
+    rows = [
+        r for r in hard_set if r.get("category") == "update" and r.get("superseded")
+    ]
+    out = {
+        "n": len(rows),
+        "outrank": {"n": 0, "pass": 0},
+        "presence": {"n": 0, "pass": 0},
+        "outrank_failures": 0,
+    }
+    if not rows:
+        return out
+    from .staleness import read_invalid_after
+
+    for row in rows:
+        corpse = row["superseded"]
+        state = "old"  # a vanished corpse can't rank — presence-only, the honest bucket
+        corpse_path = os.path.join(memory_dir, f"{corpse}.md")
+        if os.path.isfile(corpse_path):
+            try:
+                with open(corpse_path, "r", encoding="utf-8") as fh:
+                    ia = read_invalid_after(fh.read())
+                from .recall import _invalidation_state
+
+                state = _invalidation_state({"invalid_after": ia}) or "unstamped"
+            except Exception:
+                state = "unstamped"
+        names = [
+            r["name"]
+            for r in recall(
+                row["query"], k=k, index=index, index_dir=index_dir, memory_dir=memory_dir
+            )
+        ]
+        tips = row["expected"]
+        tip_rank = next((names.index(t) + 1 for t in tips if t in names), None)
+        corpse_rank = names.index(corpse) + 1 if corpse in names else None
+        if state in ("unstamped", "recent"):
+            out["outrank"]["n"] += 1
+            passed = tip_rank is not None and (corpse_rank is None or tip_rank < corpse_rank)
+            if passed:
+                out["outrank"]["pass"] += 1
+            else:
+                out["outrank_failures"] += 1
+        else:
+            out["presence"]["n"] += 1
+            if tip_rank is not None:
+                out["presence"]["pass"] += 1
+            # a presence miss is visible as presence.n - presence.pass; it is NOT an
+            # outrank failure (the corpse never competed) — the doctor line stays honest
+    return out
 
 
 def hard_set_metrics(
@@ -1683,6 +1983,13 @@ def evaluate(
         if absence_rows
         else {}
     )
+    # TMB-4: the update rows' stamp-state-bucketed scoring — same absence-emits-nothing
+    # discipline (only computed/emitted when superseded-carrying update rows exist).
+    update_knowledge = update_category_metrics(
+        index, hard_set, memory_dir, k=k, index_dir=index_dir
+    )
+    if not update_knowledge["n"]:
+        update_knowledge = {}
     tok = token_reduction(memory_dir, index, hard_set, k=k, index_dir=index_dir)
     lat_queries = [item["query"] for item in hard_set] or [
         derive_self_query(e) for e in index.entries[:30]
@@ -1806,6 +2113,7 @@ def evaluate(
         "hard_set_n": hs["n"],
         "by_category": by_category,
         **({"forgetting": forgetting} if forgetting else {}),
+        **({"update_knowledge": update_knowledge} if update_knowledge else {}),
         **({"miss_autopsy": autopsy} if autopsy else {}),
         **({"null_arms": null_arms} if null_arms else {}),
         "gates": gates,
@@ -2019,6 +2327,33 @@ def append_run_ledger(
         return path
     except Exception:
         return None
+
+
+def read_run_ledger(memory_dir: str, telemetry_dir: Optional[str] = None):
+    """Yield parsed eval-run rows (oldest first), skipping corrupt lines. Never raises.
+
+    The MSR-1 ledger's first read-side consumer beyond ``--baseline`` diffing: TMB-4's
+    doctor line reads the LATEST run's persisted ``update_knowledge`` block instead of
+    re-running the eval at doctor time (ED2R-1 — persisted eval is what downstream
+    surfaces consume).
+    """
+    try:
+        path = default_run_ledger_path(memory_dir, telemetry_dir)
+        if not os.path.exists(path):
+            return
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(obj, dict):
+                    yield obj
+    except Exception:
+        return
 
 
 def _default_baseline_path() -> Optional[str]:
@@ -2877,6 +3212,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         "LLM). Nothing lands in the tracked fixture from here: confirm each row per item "
         "via confirm_hard_set_row(absent=[stem], category='forgetting').",
     )
+    parser.add_argument(
+        "--draft-update",
+        action="store_true",
+        help="TMB-4: walk the corpus's supersedes chains into category:update DRAFT rows "
+        "(query = a VERBATIM span of the superseded memory's file; gold = the live chain "
+        "tip; plus a premise-resistance span) in the SIG-6 drafts queue. Zero LLM, fail "
+        "closed. Confirm each row per item via confirm_hard_set_row(query, [tip], "
+        "category='update', superseded=<corpse>).",
+    )
     args, ab_extra = parser.parse_known_args(argv)
     if args.ab is None and ab_extra:
         # Extras are pass-through ONLY under --ab; the plain eval keeps strict parsing.
@@ -3030,6 +3374,32 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         return 0
 
+    if args.draft_update:
+        # TMB-4: drafts only — every row still needs its own per-item confirm.
+        summary = draft_update_fixtures(args.memory_dir, index_dir=args.index_dir)
+        if summary.get("error"):
+            print(f"draft-update: {summary['error']}")
+            return 1
+        if not summary["chains"]:
+            print("draft-update: no live superseded memories (no supersedes chains to walk).")
+            return 0
+        print(
+            f"draft-update: {summary['chains']} superseded live memor"
+            + ("y" if summary["chains"] == 1 else "ies")
+            + f", {len(summary['added'])} new draft row(s) appended to {summary['path']} "
+            f"({summary['kept']} existing draft(s) preserved verbatim)."
+        )
+        for q in summary["added"]:
+            print(f"  drafted: \"{q}\"")
+        for s in summary["skipped"]:
+            print(f"  skipped (fail closed): {s}")
+        if summary["added"]:
+            print(
+                "  confirm each PER ITEM via eval_recall.confirm_hard_set_row(query, "
+                "[<tip>], category='update', superseded=<corpse>) — never in bulk."
+            )
+        return 0
+
     if args.draft_forgetting:
         # TMB-3: drafts only — nothing lands in the tracked fixture from this mode.
         summary = draft_forgetting_fixtures(args.memory_dir)
@@ -3154,6 +3524,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"  category {'forgetting':11s} absence@{args.k}={f['absence']:.4f} "
             f"held={f['held']}/{f['n']} skipped={f['skipped']} "
             "(TMB-3, report-only; absence POLARITY — an archived stem surfacing is the failure)"
+        )
+    # TMB-4: the stamp-state-bucketed update view — GATE_UPDATE_* promotion is a dated
+    # owner decision; no constant exists and no row count ever flips one.
+    u = report.get("update_knowledge")
+    if u:
+        print(
+            f"  update knowledge: outrank {u['outrank']['pass']}/{u['outrank']['n']} "
+            f"(unstamped/recent — successor must beat the corpse), presence "
+            f"{u['presence']['pass']}/{u['presence']['n']} (old-stamped — corpse is "
+            f"display-filtered), {u['outrank_failures']} outrank failure(s) "
+            "(TMB-4, report-only)"
         )
     # MSR-4: the per-category miss autopsy — a missed stem names the mechanism and
     # margin that cut it, instead of just deflating a category average.

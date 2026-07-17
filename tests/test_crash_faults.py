@@ -63,6 +63,7 @@ CRASH_CONTRACT = {
     ("dream_generate", "_set_cited_paths"): ("detected",),
     ("eval_recall", "draft_abstention_fixtures"): ("detected",),
     ("eval_recall", "draft_forgetting_fixtures"): ("detected",),  # TMB-3: drafts queue append
+    ("eval_recall", "draft_update_fixtures"): ("detected",),  # TMB-4: drafts queue append
     ("eval_recall", "confirm_hard_set_row"): ("detected",),  # both writes; each byte-complete
     ("eval_recall", "write_baseline"): ("detected",),  # MSR-1 pin: error named, no torn baseline
     ("eval_recall", "write_floor_sweep"): ("detected",),  # GRF-3: error named, no torn sweep report
@@ -319,6 +320,23 @@ def scn_eval_draft_forgetting_detected(tmp_path, monkeypatch):
     _arm(monkeypatch, "eval_recall", "draft_forgetting_fixtures")
     with pytest.raises(_Tear):
         draft_forgetting_fixtures(md, drafts_path=drafts)
+    _assert_unchanged(before)  # no torn drafts queue — absent stays absent
+
+
+def scn_eval_draft_update_detected(tmp_path, monkeypatch):
+    import memory.build_index as B
+    from memory.eval_recall import draft_update_fixtures
+
+    _root, md = _git_repo(tmp_path)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _mem(md, "corpse", body="The old retry policy waited a fixed three seconds always.")
+    _mem(md, "tip", top="supersedes: [corpse]\n")
+    B.build_index(md, B.default_index_dir(md))
+    drafts = str(tmp_path / "pending" / "recall_hard_set.drafts.yaml")
+    before = _snap(drafts)
+    _arm(monkeypatch, "eval_recall", "draft_update_fixtures")
+    with pytest.raises(_Tear):
+        draft_update_fixtures(md, drafts_path=drafts)
     _assert_unchanged(before)  # no torn drafts queue — absent stays absent
 
 
@@ -849,6 +867,7 @@ _SCENARIOS = [
     (("dream_generate", "_set_cited_paths"), "detected", scn_dream_generate_cited_detected),
     (("eval_recall", "draft_abstention_fixtures"), "detected", scn_eval_drafts_detected),
     (("eval_recall", "draft_forgetting_fixtures"), "detected", scn_eval_draft_forgetting_detected),
+    (("eval_recall", "draft_update_fixtures"), "detected", scn_eval_draft_update_detected),
     (("eval_recall", "confirm_hard_set_row"), "detected", scn_eval_confirm_detected),
     (("eval_recall", "write_baseline"), "detected", scn_eval_write_baseline_detected),
     (("eval_recall", "write_floor_sweep"), "detected", scn_eval_write_floor_sweep_detected),

@@ -616,6 +616,24 @@ _TOOLS = [
                     "description": "with action='confirm': the existing memory stem(s) "
                     "that genuinely answer the query",
                 },
+                "category": {
+                    "type": "string",
+                    "description": "with action='confirm': the row's category tag "
+                    "(default 'abstention'; TMB-3/TMB-4 rows use 'forgetting'/'update')",
+                },
+                "absent": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "TMB-3, with action='confirm' INSTEAD of expected: "
+                    "ARCHIVED stem(s) that must NOT surface for the query (each must "
+                    "exist in archive/; refused otherwise)",
+                },
+                "superseded": {
+                    "type": "string",
+                    "description": "TMB-4, with action='confirm' + expected: the "
+                    "still-live CORPSE stem this update row's query was verbatim-derived "
+                    "from (enables stamp-state-bucketed scoring)",
+                },
             },
         },
     },
@@ -2245,13 +2263,25 @@ def _tool_abstention_fixtures(args: Dict[str, Any]) -> str:
         query = str(args.get("query") or "").strip()
         expected = args.get("expected")
         expected = [str(x) for x in expected] if isinstance(expected, list) else []
-        if not query or not expected:
+        absent = args.get("absent")
+        absent = [str(x) for x in absent] if isinstance(absent, list) else None
+        if not query or (not expected and not absent):
             return (
                 "abstention_fixtures confirm: 'query' and a non-empty 'expected' stem list "
                 "are both required — and only after judging that those memories genuinely "
-                "answer the query (never fabricate a memory to make a fixture pass)."
+                "answer the query (never fabricate a memory to make a fixture pass). "
+                "TMB-3 forgetting rows pass absent=[archived stems] instead of expected."
             )
-        return json.dumps(confirm_hard_set_row(query, expected), indent=2)
+        kwargs: Dict[str, Any] = {}
+        cat = str(args.get("category") or "").strip()
+        if cat:
+            kwargs["category"] = cat
+        if absent:
+            kwargs["absent"] = absent
+        sup = str(args.get("superseded") or "").strip()
+        if sup:
+            kwargs["superseded"] = sup
+        return json.dumps(confirm_hard_set_row(query, expected, **kwargs), indent=2)
     return "abstention_fixtures: pass action='draft' (default) or action='confirm' (query=…, expected=[…])."
 
 
