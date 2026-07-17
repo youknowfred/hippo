@@ -354,6 +354,7 @@ def _tool_resolve(args: Dict[str, Any]) -> str:
             loser=_opt_str(args, "loser"),
             a=_opt_str(args, "a"),
             b=_opt_str(args, "b"),
+            prefill=_opt_str(args, "prefill"),
         )
         if r["error"]:
             return f"✘ resolve {verdict} REFUSED — {r['error']}"

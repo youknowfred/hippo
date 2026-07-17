@@ -507,6 +507,24 @@ _TOOLS = [
                     "description": "with action='confirm': the existing memory stem(s) "
                     "that genuinely answer the query",
                 },
+                "category": {
+                    "type": "string",
+                    "description": "with action='confirm': the row's category tag "
+                    "(default 'abstention'; TMB-3/TMB-4 rows use 'forgetting'/'update')",
+                },
+                "absent": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "TMB-3, with action='confirm' INSTEAD of expected: "
+                    "ARCHIVED stem(s) that must NOT surface for the query (each must "
+                    "exist in archive/; refused otherwise)",
+                },
+                "superseded": {
+                    "type": "string",
+                    "description": "TMB-4, with action='confirm' + expected: the "
+                    "still-live CORPSE stem this update row's query was verbatim-derived "
+                    "from (enables stamp-state-bucketed scoring)",
+                },
             },
         },
     },
@@ -785,6 +803,13 @@ _TOOLS = [
                 },
                 "a": {"type": "string", "description": "scope_both/not_conflicting: one side"},
                 "b": {"type": "string", "description": "scope_both/not_conflicting: the other side"},
+                "prefill": {
+                    "type": "string",
+                    "enum": ["keep_one", "scope_both", "merge", "not_conflicting", "abstain"],
+                    "description": "TMB-1 (verdict calls): the inbox evidence card's "
+                    "suggested verdict as you saw it — recorded next to your choice "
+                    "(per-clone ledger, capture only; nothing ever auto-applies it)",
+                },
             },
         },
     },

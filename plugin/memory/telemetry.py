@@ -1183,6 +1183,7 @@ def record_reconsolidation_outcome(
     invalidated: Optional[bool] = None,
     invalid_after: Optional[str] = None,
     superseded_by: Optional[str] = None,
+    succession_replay: Optional[dict] = None,
 ) -> bool:
     """Append ONE reconsolidation outcome to the gitignored ``reconsolidation_events.jsonl``.
 
@@ -1211,6 +1212,11 @@ def record_reconsolidation_outcome(
             event["invalid_after"] = str(invalid_after)
         if superseded_by is not None:
             event["superseded_by"] = str(superseded_by)
+        if succession_replay is not None:
+            # TMB-5: replay COUNTS only ({"harvested", "pass", "fail", "inconclusive"}) —
+            # an additive field on the SAME event (no new ledger, no new outcome value),
+            # and the no-sensitive-content contract holds: never query text.
+            event["succession_replay"] = dict(succession_replay)
         path = _reconsolidation_ledger_path(td)
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, ensure_ascii=False) + "\n")
@@ -1218,6 +1224,53 @@ def record_reconsolidation_outcome(
         return True
     except Exception:
         return False
+
+
+_ARCHIVE_REGRET_NAME = "archive_regret.jsonl"
+
+
+def _archive_regret_path(telemetry_dir: str) -> str:
+    return os.path.join(telemetry_dir, _ARCHIVE_REGRET_NAME)
+
+
+def log_archive_regret(query: str, stem: str, telemetry_dir: Optional[str] = None) -> bool:
+    """TMB-3: append ONE regret event ``{ts, query, stem}`` — evidence only.
+
+    The doctor check both writes AND reads this ledger (read-back = the dedup memory, so
+    it is never a dark reservoir); NOTHING restore-shaped ever consumes it. Fire-and-
+    forget; never raises; size-bounded.
+    """
+    try:
+        td = _resolve_dir(telemetry_dir)
+        ensure_self_ignoring_dir(td)
+        path = _archive_regret_path(td)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(
+                json.dumps(
+                    {"ts": round(time.time(), 3), "query": str(query), "stem": str(stem)},
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+        _rotate_if_needed(path)
+        return True
+    except Exception:
+        return False
+
+
+def read_archive_regret(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
+    """Yield parsed archive-regret events, skipping corrupt/partial lines. Never raises."""
+    try:
+        with open(_archive_regret_path(_resolve_dir(telemetry_dir)), "r", encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(obj, dict):
+                    yield obj
+    except Exception:
+        return
 
 
 def read_reconsolidation_events(telemetry_dir: Optional[str] = None) -> Iterator[dict]:

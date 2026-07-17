@@ -397,11 +397,16 @@ def load_hard_set(path: str) -> List[dict]:
             exp = [exp]
         if isinstance(q, str) and isinstance(exp, list) and exp:
             cat = item.get("category")
+            sup = item.get("superseded")
             out.append(
                 {
                     "query": q,
                     "expected": [str(x) for x in exp],
                     "category": str(cat) if isinstance(cat, str) and cat.strip() else _DEFAULT_CATEGORY,
+                    # TMB-4: the corpse stem rides along for update_category_metrics'
+                    # stamp-state bucketing; every pre-TMB-4 consumer reads only
+                    # query/expected/category, so the extra key is purely additive.
+                    **({"superseded": str(sup)} if isinstance(sup, str) and sup.strip() else {}),
                 }
             )
     return out
@@ -413,6 +418,185 @@ def load_hard_set_metadata(path: str) -> Dict[str, str]:
     """
     meta, _rows = _load_fixture_docs(path)
     return meta if isinstance(meta, dict) else {}
+
+
+def load_absence_rows(path: str) -> List[dict]:
+    """TMB-3: load ``[{query, absent: [stem, ...], category}]`` — the forgetting rows.
+
+    The ABSENCE-polarity sibling of ``load_hard_set``: rows whose gold is that the named
+    (archived) stems must NOT surface. They live in the SAME tracked fixture file, keyed
+    by an ``absent`` list instead of ``expected`` — ``load_hard_set`` drops them (no
+    ``expected``), so every presence metric and gate is byte-identical whether or not
+    forgetting rows exist. Category defaults to ``forgetting``. ``[]`` if missing.
+    """
+    _meta, data = _load_fixture_docs(path)
+    out: List[dict] = []
+    for item in data if isinstance(data, list) else []:
+        if not isinstance(item, dict):
+            continue
+        q = item.get("query")
+        absent = item.get("absent")
+        if isinstance(absent, str):
+            absent = [absent]
+        if isinstance(q, str) and isinstance(absent, list) and absent:
+            cat = item.get("category")
+            out.append(
+                {
+                    "query": q,
+                    "absent": [str(x) for x in absent],
+                    "category": str(cat) if isinstance(cat, str) and cat.strip() else "forgetting",
+                }
+            )
+    return out
+
+
+def absence_polarity_metrics(
+    index: LoadedIndex,
+    rows: List[dict],
+    memory_dir: str,
+    k: int = 10,
+    *,
+    index_dir: Optional[str] = None,
+) -> Dict[str, float]:
+    """TMB-3: the forgetting category's scorer — ABSENCE polarity, distinct from
+    ``hard_set_metrics``.
+
+    Presence metrics reward a stem for ranking; this one rewards it for STAYING GONE:
+    a row HOLDS when none of its still-archived ``absent`` stems surface in the top-k
+    for its query, and FAILS when one leaks (the archived-shadow / stale-index /
+    regression class the archive-exclusion contract promises can't happen). A row whose
+    targets are no longer in ``archive/`` (restored or deleted since confirm) is
+    SKIPPED, not scored — the absence expectation ended with the archival (fail-closed:
+    absent-from-archive = skip). ``{"n": scored, "skipped", "held", "absence"}`` where
+    ``absence`` = held/scored (1.0 = perfect forgetting). Report-only forever unless a
+    dated owner decision promotes a gate.
+    """
+    scored = skipped = held = 0
+    archive_dir = os.path.join(memory_dir, "archive")
+    for row in rows:
+        still_archived = [
+            s for s in row.get("absent") or []
+            if os.path.isfile(os.path.join(archive_dir, f"{s}.md"))
+        ]
+        if not still_archived:
+            skipped += 1
+            continue
+        scored += 1
+        names = {
+            r["name"]
+            for r in recall(
+                row["query"], k=k, index=index, index_dir=index_dir, memory_dir=memory_dir
+            )
+        }
+        if not (set(still_archived) & names):
+            held += 1
+    return {
+        "n": scored,
+        "skipped": skipped,
+        "held": held,
+        "absence": (held / scored) if scored else 0.0,
+    }
+
+
+def update_category_metrics(
+    index: LoadedIndex,
+    hard_set: List[dict],
+    memory_dir: str,
+    k: int = 10,
+    *,
+    index_dir: Optional[str] = None,
+) -> Dict[str, object]:
+    """TMB-4: the update rows' STAMP-STATE-BUCKETED scoring — report-only.
+
+    Rows: ``category == 'update'`` carrying a ``superseded`` corpse stem. Each row's
+    bucket is the corpse's CURRENT GRW-7 ``invalid_after`` state, read live at scoring
+    time (recall's own classifier — one horizon):
+
+      - ``unstamped``/``recent`` → successor-must-OUTRANK-corpse: the tip must rank in
+        the top-k AND above the corpse if the corpse ranks at all (a recent invalidation
+        only score-halves the corpse — it can legitimately still surface, but current
+        truth must beat retired truth).
+      - ``old`` (or the corpse file gone) → successor-PRESENCE-only: recall
+        display-filters old-stamped corpses, so "outrank" is vacuous — the tip ranking
+        at all is the whole test.
+
+    ``{"n", "outrank": {"n", "pass"}, "presence": {"n", "pass"}, "outrank_failures"}``
+    — ``outrank_failures`` is the number the TMB-4 doctor line names. Never a gate:
+    GATE_UPDATE_* promotion stays a dated owner decision and no such constant exists.
+    """
+    rows = [
+        r for r in hard_set if r.get("category") == "update" and r.get("superseded")
+    ]
+    out = {
+        "n": len(rows),
+        "outrank": {"n": 0, "pass": 0},
+        "presence": {"n": 0, "pass": 0},
+        "outrank_failures": 0,
+    }
+    if not rows:
+        return out
+    from .staleness import read_invalid_after
+
+    for row in rows:
+        corpse = row["superseded"]
+        state = "old"  # a vanished corpse can't rank — presence-only, the honest bucket
+        corpse_path = os.path.join(memory_dir, f"{corpse}.md")
+        if os.path.isfile(corpse_path):
+            try:
+                with open(corpse_path, "r", encoding="utf-8") as fh:
+                    ia = read_invalid_after(fh.read())
+                from .recall import _invalidation_state
+
+                state = _invalidation_state({"invalid_after": ia}) or "unstamped"
+            except Exception:
+                state = "unstamped"
+        names = [
+            r["name"]
+            for r in recall(
+                row["query"], k=k, index=index, index_dir=index_dir, memory_dir=memory_dir
+            )
+        ]
+        tips = row["expected"]
+        tip_rank = next((names.index(t) + 1 for t in tips if t in names), None)
+        corpse_rank = names.index(corpse) + 1 if corpse in names else None
+        if state in ("unstamped", "recent"):
+            out["outrank"]["n"] += 1
+            passed = tip_rank is not None and (corpse_rank is None or tip_rank < corpse_rank)
+            if passed:
+                out["outrank"]["pass"] += 1
+            else:
+                out["outrank_failures"] += 1
+        else:
+            out["presence"]["n"] += 1
+            if tip_rank is not None:
+                out["presence"]["pass"] += 1
+            # a presence miss is visible as presence.n - presence.pass; it is NOT an
+            # outrank failure (the corpse never competed) — the doctor line stays honest
+    return out
+
+
+def t11_category_lines(report: dict, k: int) -> List[str]:
+    """The T11 report lines (forgetting + update knowledge) — rendered here so the
+    façade's ``main`` stays a one-call print site. Empty when neither key is present
+    (absence-emits-nothing keeps flag-off output byte-identical)."""
+    lines: List[str] = []
+    f = report.get("forgetting")
+    if f:
+        lines.append(
+            f"  category {'forgetting':11s} absence@{k}={f['absence']:.4f} "
+            f"held={f['held']}/{f['n']} skipped={f['skipped']} "
+            "(TMB-3, report-only; absence POLARITY — an archived stem surfacing is the failure)"
+        )
+    u = report.get("update_knowledge")
+    if u:
+        lines.append(
+            f"  update knowledge: outrank {u['outrank']['pass']}/{u['outrank']['n']} "
+            f"(unstamped/recent — successor must beat the corpse), presence "
+            f"{u['presence']['pass']}/{u['presence']['n']} (old-stamped — corpse is "
+            f"display-filtered), {u['outrank_failures']} outrank failure(s) "
+            "(TMB-4, report-only; GATE_UPDATE_* stays a dated owner decision)"
+        )
+    return lines
 
 
 def hard_set_metrics(

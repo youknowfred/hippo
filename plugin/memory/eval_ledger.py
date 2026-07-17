@@ -141,6 +141,33 @@ def default_run_ledger_path(memory_dir: str, telemetry_dir: Optional[str] = None
     return os.path.join(telemetry_dir or default_telemetry_dir(memory_dir), _RUN_LEDGER_NAME)
 
 
+def read_run_ledger(memory_dir: str, telemetry_dir: Optional[str] = None):
+    """Yield parsed eval-run rows (oldest first), skipping corrupt lines. Never raises.
+
+    The MSR-1 ledger's first read-side consumer beyond ``--baseline`` diffing: TMB-4's
+    doctor line reads the LATEST run's persisted ``update_knowledge`` block instead of
+    re-running the eval at doctor time (ED2R-1 — persisted eval is what downstream
+    surfaces consume).
+    """
+    try:
+        path = default_run_ledger_path(memory_dir, telemetry_dir)
+        if not os.path.exists(path):
+            return
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(obj, dict):
+                    yield obj
+    except Exception:
+        return
+
+
 def baseline_metrics(report: dict) -> dict:
     """The comparable (deterministic, per-metric/per-category) subset a baseline pins."""
     view = deterministic_view(report)

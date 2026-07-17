@@ -380,6 +380,8 @@ def recalled_stale_worklist(
         return []
 
 
+from .reconsolidate_replay import succession_replay, succession_replay_lines  # TMB-5 (re-export)
+
 # --------------------------------------------------------------------------- #
 # Write primitive (per-item, verification-gated — reuses provenance.reverify_file)
 # --------------------------------------------------------------------------- #
@@ -486,6 +488,7 @@ def semantic_reverify(
         "invalidated": False,
         "invalid_after": None,
         "edge_written": False,
+        "succession_replay": None,
         "logged": False,
         "error": None,
     }
@@ -605,6 +608,16 @@ def semantic_reverify(
                             pass
                 return result
             result["edge_written"] = edge["changed"]
+            if not dry_run:
+                # TMB-5: fires only here, inside the single-item demote+superseded_by
+                # verdict (no replay_all verb); see reconsolidate_replay.
+                result["succession_replay"] = succession_replay(
+                    os.path.splitext(fname)[0],
+                    os.path.splitext(os.path.basename(successor_path))[0],
+                    memory_dir,
+                    telemetry_dir=telemetry_dir,
+                )
+        replay = result["succession_replay"]
         result["logged"] = record_reconsolidation_outcome(
             name,
             outcome,
@@ -615,6 +628,10 @@ def semantic_reverify(
             # GRW-7: the boundary + the successor make the supersession itself auditable.
             invalid_after=result["invalid_after"],
             superseded_by=superseded_by if successor_path is not None else None,
+            # TMB-5: counts only (the ledger's no-sensitive-content contract holds).
+            succession_replay=(
+                {"harvested": replay["harvested"], **replay["counts"]} if replay else None
+            ),
         )
     except Exception as exc:
         result["error"] = str(exc)
@@ -840,6 +857,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
         bits.append("logged" if r["logged"] else "not logged")
         print(f"reverify {base}: " + "; ".join(bits))
+        # TMB-5: per-query PASS/FAIL/INCONCLUSIVE lines, printed at verdict time.
+        for ln in succession_replay_lines(
+            os.path.splitext(base)[0], args.superseded_by or "", r.get("succession_replay")
+        ):
+            print(ln)
         # LIF-3: the ONE shared rot rendering (provenance.citation_rot_lines) — a graduate/fix
         # re-derivation that dropped citations must be as loud here as on the provenance CLI.
         from .provenance import citation_rot_lines

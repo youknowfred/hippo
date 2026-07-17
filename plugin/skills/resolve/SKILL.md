@@ -28,6 +28,16 @@ Every unresolved `contradicts` pair in the corpus, whether or not the two memori
 co-surfaced in a recall. `(declared by: …)` names which file carries the `contradicts:`
 frontmatter — that is the file a corpus-mutating verdict edits.
 
+Each pair carries a deterministic **evidence card** (TMB-1): conflict age in
+commits-since-declaration (git-mined; "unknown" for uncommitted/rewritten history), the
+git-newer side, cached cited-code drift per side, usage asymmetry (withheld below 5
+recorded sessions), and a `suggested:` prefill expressed strictly in the four verdict
+names below (or `abstain`). The suggestion is adjudication EVIDENCE, never a decision —
+read both files regardless, and it is never auto-applied. When you render a verdict,
+pass the suggestion you saw so agreement is auditable: `--prefill <name>` on `--dismiss`,
+or `prefill=` on the resolve MCP tool's verdict calls (it lands beside the dismiss
+records in the per-clone ledger).
+
 The inbox may also list `(PROPOSED by dream --contradictions …)` pairs — DRM-C candidates
 an LLM flagged as substantive conflicts among dream's high-cofire pairs, shown with the
 model's one-line rationale. No edge is declared yet, so there is no frontmatter to drop;

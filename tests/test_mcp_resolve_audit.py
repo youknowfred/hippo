@@ -235,3 +235,28 @@ def test_audit_returns_material_and_writes_nothing(tmp_path, monkeypatch):
     assert sorted(os.listdir(md)) == listing_before  # zero corpus writes
     assert trust.corpus_fingerprint(md).get("digest") == fp_before
     assert "read-only" in out.split("{")[0].lower()  # the header says what this is
+
+
+def test_verdict_records_the_evidence_card_prefill(tmp_path, monkeypatch):
+    """TMB-1: the tool's optional prefill= lands next to the choice in the per-clone
+    ledger's additive verdicts log — capture only, and the inbox listing itself carries
+    the evidence card (suggested: … never auto-applied)."""
+    from memory.provenance import resolve_dirs
+    from memory.resolve_view import read_verdict_log
+
+    _root, md = _repo(tmp_path, monkeypatch)
+    _mem(md, "corpse", body="Old claim.")
+    _mem(md, "tip", contradicts="corpse", body="New claim.")
+    listing = _call("resolve", {"action": "inbox"})
+    assert "suggested:" in listing and "never auto-applied" in listing
+    out = _call(
+        "resolve",
+        {"action": "verdict", "verdict": "keep_one", "winner": "tip", "loser": "corpse",
+         "prefill": "abstain"},
+    )
+    assert "✔ resolve keep_one applied" in out
+    # read via the SAME repo_root the tool resolved — the ledger is keyed per clone
+    _tool_md, tool_root = resolve_dirs()
+    assert read_verdict_log(tool_root) == [
+        {"pair": ["corpse", "tip"], "verdict": "keep_one", "prefill": "abstain"}
+    ]

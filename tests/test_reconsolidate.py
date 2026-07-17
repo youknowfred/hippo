@@ -372,6 +372,7 @@ def test_semantic_reverify_graduate_clears_flag_and_logs_outcome(repo, memory_di
         "invalidated": False,  # LIF-1's chain is demote-only — graduate never touches it
         "invalid_after": None,  # GRW-7's stamped boundary — demote-with-successor only
         "edge_written": False,
+        "succession_replay": None,  # TMB-5 fires on demote-with-successor only
         "logged": True,
         "error": None,
     }

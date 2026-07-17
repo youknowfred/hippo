@@ -228,6 +228,14 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
             )
         bits.append("logged" if r["logged"] else "not logged")
         out = [f"reverify {base}: " + "; ".join(bits)]
+        # TMB-5: the succession replay's per-query lines — the same rendering the CLI prints.
+        from .reconsolidate import succession_replay_lines
+
+        out.extend(
+            succession_replay_lines(
+                os.path.splitext(base)[0], superseded_by or "", r.get("succession_replay")
+            )
+        )
         # LIF-3: the ONE shared rot rendering — a graduate/fix re-derivation that dropped
         # citations must be as loud here as on the provenance CLI.
         from .provenance import citation_rot_lines
@@ -553,11 +561,23 @@ def _tool_abstention_fixtures(args: Dict[str, Any]) -> str:
         query = str(args.get("query") or "").strip()
         expected = args.get("expected")
         expected = [str(x) for x in expected] if isinstance(expected, list) else []
-        if not query or not expected:
+        absent = args.get("absent")
+        absent = [str(x) for x in absent] if isinstance(absent, list) else None
+        if not query or (not expected and not absent):
             return (
                 "abstention_fixtures confirm: 'query' and a non-empty 'expected' stem list "
                 "are both required — and only after judging that those memories genuinely "
-                "answer the query (never fabricate a memory to make a fixture pass)."
+                "answer the query (never fabricate a memory to make a fixture pass). "
+                "TMB-3 forgetting rows pass absent=[archived stems] instead of expected."
             )
-        return json.dumps(confirm_hard_set_row(query, expected), indent=2)
+        kwargs: Dict[str, Any] = {}
+        cat = str(args.get("category") or "").strip()
+        if cat:
+            kwargs["category"] = cat
+        if absent:
+            kwargs["absent"] = absent
+        sup = str(args.get("superseded") or "").strip()
+        if sup:
+            kwargs["superseded"] = sup
+        return json.dumps(confirm_hard_set_row(query, expected, **kwargs), indent=2)
     return "abstention_fixtures: pass action='draft' (default) or action='confirm' (query=…, expected=[…])."

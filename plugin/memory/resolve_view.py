@@ -47,6 +47,7 @@ from typing import Dict, List, Optional, Set, Tuple
 _LEDGER_PREFIX = ".resolve-ledger-"
 
 
+
 def _repo_key(repo_root: str) -> str:
     """Per-clone corpus key — ``_periodic_nudge_should_fire``'s exact derivation."""
     return hashlib.sha256(os.path.realpath(repo_root).encode("utf-8")).hexdigest()[:16]
@@ -70,15 +71,28 @@ def _canonical_pair(a: str, b: str) -> Tuple[str, str]:
     return (a, b) if a <= b else (b, a)
 
 
-def read_resolved(repo_root: str) -> Set[Tuple[str, str]]:
-    """Pairs this clone marked not-conflicting; ``set()`` on no ledger/no data dir. Never raises."""
+def _read_ledger_doc(repo_root: str) -> dict:
+    """The per-clone ledger's whole JSON document, ``{}`` on absence/corruption. Never raises.
+
+    TMB-1 made the ledger two-keyed (``resolved`` + the additive ``verdicts`` log below), so
+    both writers must read-modify-write the WHOLE document — a writer that rebuilt only its
+    own key would silently drop the other's records.
+    """
     try:
         path = ledger_path(repo_root)
         if not path or not os.path.isfile(path):
-            return set()
+            return {}
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
-        pairs = data.get("resolved") if isinstance(data, dict) else None
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def read_resolved(repo_root: str) -> Set[Tuple[str, str]]:
+    """Pairs this clone marked not-conflicting; ``set()`` on no ledger/no data dir. Never raises."""
+    try:
+        pairs = _read_ledger_doc(repo_root).get("resolved")
         out: Set[Tuple[str, str]] = set()
         for p in pairs or []:
             if isinstance(p, list) and len(p) == 2 and all(isinstance(x, str) for x in p):
@@ -86,6 +100,48 @@ def read_resolved(repo_root: str) -> Set[Tuple[str, str]]:
         return out
     except Exception:
         return set()
+
+
+def read_verdict_log(repo_root: str) -> List[dict]:
+    """TMB-1's prefill-agreement records — ``[{"pair", "verdict", "prefill"}]`` in the order
+    rendered on this clone. ``[]`` on no ledger. Derived, per-clone, rebuildable exactly like
+    the dismiss records it lives beside — never an authority, never a ranking input."""
+    try:
+        rows = _read_ledger_doc(repo_root).get("verdicts")
+        return [r for r in rows or [] if isinstance(r, dict)]
+    except Exception:
+        return []
+
+
+def _log_verdict(repo_root: str, pair: Tuple[str, str], verdict: str, prefill: Optional[str]) -> bool:
+    """Record ONE rendered verdict next to the evidence card's prefill (TMB-1).
+
+    The additive ``verdicts`` key on the SAME per-clone ledger file the dismiss verdict
+    already writes — deliberately NOT a sibling ledger, NOT a reconsolidation outcome
+    (``_RECONSOLIDATION_OUTCOMES`` is untouched), and never consulted by ranking. This is
+    the capture half only: whether the human's choice agreed with the card's suggestion is
+    future-audit material; nothing reads it on any automated path, and there is no
+    accept-prefill/auto-default anywhere (gated behind a dated owner decision in the
+    roadmap). Best-effort: ``False`` (no durable home / write failure) never voids the
+    verdict itself. Never raises.
+    """
+    try:
+        path = ledger_path(repo_root)
+        if path is None:
+            return False
+        doc = _read_ledger_doc(repo_root)
+        rows = doc.get("verdicts")
+        if not isinstance(rows, list):
+            rows = []
+        rows.append({"pair": list(pair), "verdict": verdict, "prefill": prefill})
+        doc["verdicts"] = rows
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, indent=0)
+            fh.write("\n")
+        return True
+    except Exception:
+        return False
 
 
 def mark_not_conflicting(a: str, b: str, repo_root: str) -> dict:
@@ -116,9 +172,13 @@ def mark_not_conflicting(a: str, b: str, repo_root: str) -> dict:
         result["ledger"] = path
         resolved = read_resolved(repo_root)
         resolved.add(pair)
+        # TMB-1: rewrite the WHOLE document (dismissals + the verdicts log), not just this
+        # writer's key — rebuilding {"resolved": …} alone would drop the prefill records.
+        doc = _read_ledger_doc(repo_root)
+        doc["resolved"] = sorted(list(p) for p in resolved)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump({"resolved": sorted(list(p) for p in resolved)}, fh, indent=0)
+            json.dump(doc, fh, indent=0)
             fh.write("\n")
         result["recorded"] = True
         return result
@@ -262,6 +322,34 @@ def pair_edge_state(memory_dir: str, a: str, b: str, *, repo_root: Optional[str]
     return {"declared_by": declared_by, "proposed": proposed}
 
 
+from .resolve_evidence import (  # TMB-1 card (façade re-exports; see resolve_evidence)
+    _ABSTAIN,
+    _EVIDENCE_USAGE_MIN_SESSIONS,
+    _VERDICT_NAMES,
+    _drift_evidence,
+    _edge_birth_commits_ago,
+    _git_newer_side,
+    _suggest_verdict,
+    _usage_evidence,
+    render_pair_evidence,
+)
+from .resolve_evidence import pair_evidence as _pair_evidence_core
+
+
+def pair_evidence(a, b, memory_dir, repo_root, **kwargs):
+    """``resolve_evidence.pair_evidence`` with the original defaulting contract: an
+    omitted ``declared_by`` is derived via ``pair_edge_state`` (a façade-side read the
+    sibling must not import back)."""
+    if kwargs.get("declared_by") is None:
+        try:
+            kwargs["declared_by"] = pair_edge_state(memory_dir, a, b, repo_root=repo_root)[
+                "declared_by"
+            ]
+        except Exception:
+            kwargs["declared_by"] = []
+    return _pair_evidence_core(a, b, memory_dir, repo_root, **kwargs)
+
+
 def _drop_declarations(
     memory_dir: str, declared_by: List[str], other_of: dict, repo_root: Optional[str]
 ) -> Tuple[Optional[str], Dict[str, str]]:
@@ -308,6 +396,7 @@ def apply_resolve_verdict(
     a: Optional[str] = None,
     b: Optional[str] = None,
     telemetry_dir: Optional[str] = None,
+    prefill: Optional[str] = None,
 ) -> dict:
     """Execute ONE per-pair human verdict — the /hippo:resolve skill's Step 2, as an
     engine call (the resolve tool's write half). Per-item by construction: one pair,
@@ -327,9 +416,27 @@ def apply_resolve_verdict(
       - ``not_conflicting`` (a=, b=): the ONE corpus-preserving verdict — the per-clone
         ledger via ``mark_not_conflicting``; files and edge stay untouched.
 
-    Returns ``{"verdict", "pair", "applied", "error", "detail"}``. Never raises.
+    ``prefill`` (TMB-1, optional): the evidence card's suggested verdict as the CALLER saw
+    it when rendering this judgment — one of the four verdict names or ``"abstain"``
+    (anything else records as ``None``, honest over guessed). Each of the four paths, on
+    success, appends one ``{pair, verdict, prefill}`` record to the per-clone ledger's
+    additive ``verdicts`` key (``_log_verdict`` — the same file as the dismiss records,
+    no sibling ledger, ``_RECONSOLIDATION_OUTCOMES`` untouched), so prefill-vs-choice
+    agreement is auditable later. Capture only: nothing accepts a prefill on the human's
+    behalf.
+
+    Returns ``{"verdict", "pair", "applied", "error", "detail", "prefill"}``. Never raises.
     """
-    result = {"verdict": verdict, "pair": None, "applied": False, "error": None, "detail": []}
+    valid_prefills = set(_VERDICT_NAMES) | {_ABSTAIN}
+    prefill = prefill if prefill in valid_prefills else None
+    result = {
+        "verdict": verdict,
+        "pair": None,
+        "applied": False,
+        "error": None,
+        "detail": [],
+        "prefill": prefill,
+    }
     try:
         if verdict in ("keep_one", "merge"):
             first, second = (winner or "").strip(), (loser or "").strip()
@@ -352,6 +459,7 @@ def apply_resolve_verdict(
                 return result
             result["applied"] = True
             result["detail"].append(f"ledger: {r['ledger']}")
+            _log_verdict(repo_root or "", tuple(result["pair"]), verdict, prefill)
             return result
 
         for side in (first, second):
@@ -379,6 +487,7 @@ def apply_resolve_verdict(
                 result["detail"].append(
                     "proposal-only pair: recorded in the dismiss ledger (both stand as scoped)"
                 )
+                _log_verdict(repo_root or "", tuple(result["pair"]), verdict, prefill)
                 return result
             err, _captures = _drop_declarations(
                 memory_dir, state["declared_by"], other_of, repo_root
@@ -390,6 +499,7 @@ def apply_resolve_verdict(
             result["detail"].append(
                 "contradicts declaration dropped on: " + ", ".join(state["declared_by"])
             )
+            _log_verdict(repo_root or "", tuple(result["pair"]), verdict, prefill)
             return result
 
         # keep_one / merge — the two-write chain.
@@ -431,6 +541,17 @@ def apply_resolve_verdict(
             f"{second} demoted (invalid_after {rv.get('invalid_after') or 'set'}); "
             f"{first} now supersedes it"
         )
+        replay = rv.get("succession_replay")
+        if replay:  # TMB-5 rides the same demote chain — summary only, here
+            c = replay.get("counts") or {}
+            result["detail"].append(
+                f"succession replay: {c.get('pass', 0)} pass / {c.get('fail', 0)} fail / "
+                f"{c.get('inconclusive', 0)} inconclusive over {replay.get('harvested', 0)} "
+                "historical quer(y/ies)"
+                if replay.get("harvested")
+                else "succession replay: nothing to replay (no prior recall hit for the loser)"
+            )
+        _log_verdict(repo_root or "", tuple(result["pair"]), verdict, prefill)
         return result
     except Exception as exc:
         result["error"] = str(exc)
@@ -491,6 +612,14 @@ def describe(
             desc = _description_of(memory_dir, side)
             if desc:
                 lines.append(f"      {side}: {desc}")
+        # TMB-1: the evidence card — git-mined here in the cold listing, never at
+        # SessionStart (the producer renders the inbox without these lines, pinned).
+        card = pair_evidence(
+            a, b, memory_dir, repo_root,
+            index_dir=index_dir, telemetry_dir=telemetry_dir,
+            declared_by=item.get("declared_by"),
+        )
+        lines.extend(render_pair_evidence(a, b, card))
     if any_proposed:
         lines.extend(
             [
@@ -527,6 +656,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="mark the pair not-conflicting in this clone's ledger (the ONLY verdict that "
         "does not edit the corpus)",
     )
+    parser.add_argument(
+        "--prefill",
+        choices=sorted(_VERDICT_NAMES) + [_ABSTAIN],
+        default=None,
+        help="TMB-1 (with --dismiss): the evidence card's suggested verdict as you saw it, "
+        "recorded next to your choice in the per-clone ledger — capture only, never "
+        "auto-applied",
+    )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--index-dir", default=None)
     parser.add_argument("--repo-root", default=None)
@@ -543,6 +680,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.dismiss:
             res = mark_not_conflicting(args.dismiss[0], args.dismiss[1], repo_root)
             if res["recorded"]:
+                # TMB-1: the CLI dismiss is the not_conflicting verdict path — record the
+                # prefill next to the choice like the engine's other three paths do.
+                _log_verdict(repo_root, tuple(res["pair"]), "not_conflicting", args.prefill)
                 print(
                     f"recorded : {res['pair'][0]} ⇄ {res['pair'][1]} marked not-conflicting "
                     "(per-clone ledger; the corpus and the edge are untouched)"

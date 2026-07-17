@@ -10,7 +10,7 @@ rules-plane trio (RUL-1, RUL-2, RUL-4). ``DoctorContext`` lives in ``doctor_chec
 from __future__ import annotations
 
 import os
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .doctor_checks_env import DoctorContext, _iter_memory_files_safe
 
@@ -639,3 +639,107 @@ def check_rules_source(ctx: DoctorContext) -> Dict[str, str]:
         }
     except Exception as exc:
         return {"status": "warn", "message": f"rules-source check failed: {exc}."}
+
+
+# --------------------------------------------------------------------------- #
+# TMB-5/TMB-4 (T11): succession + update-knowledge instruments
+# --------------------------------------------------------------------------- #
+def check_succession_replay(ctx: DoctorContext) -> Dict[str, str]:
+    """TMB-5: ONE line for supersedes pairs whose succession replay is failing or unrun.
+
+    A supersede whose replay FAILED left a leaking tombstone (queries that used to recall
+    the old name don't rank the successor); one with NO replay evidence (a hand-authored
+    edge, or a verdict predating TMB-5) was never verified at all. Evidence source: the
+    links.json typed edges (one cache read) joined against the reconsolidation ledger's
+    demote events — the replay itself only ever runs inside the per-item
+    ``semantic_reverify`` demote path, never from here (doctor stays read-only). Silent
+    ``ok`` when the graph is unavailable (other checks own that failure).
+    """
+    try:
+        from .build_index import default_index_dir
+        from .links import load_edges
+        from .telemetry import read_reconsolidation_events
+
+        edges = load_edges(default_index_dir(ctx.memory_dir))
+        if edges is None:
+            return {"status": "ok", "message": "succession replay: N/A (no links cache)."}
+        pairs = []  # (declarer, target)
+        for stem, rec in edges.items():
+            for tgt in rec.get("typed_out", {}).get("supersedes", ()):
+                pairs.append((stem, tgt))
+        if not pairs:
+            return {"status": "ok", "message": "succession replay: no supersedes edges."}
+        latest: Dict[tuple, Optional[dict]] = {}
+        for e in read_reconsolidation_events():
+            if e.get("outcome") == "demote" and e.get("superseded_by") and e.get("name"):
+                latest[(str(e["superseded_by"]), str(e["name"]))] = e.get("succession_replay")
+        failing, unrun = [], []
+        for declarer, tgt in sorted(pairs):
+            if (declarer, tgt) not in latest or not isinstance(latest[(declarer, tgt)], dict):
+                unrun.append(f"{declarer}→{tgt}")
+            elif int(latest[(declarer, tgt)].get("fail") or 0) > 0:
+                failing.append(f"{declarer}→{tgt}")
+        if not failing and not unrun:
+            return {
+                "status": "ok",
+                "message": f"succession replay: {len(pairs)} supersede pair(s), none failing or unreplayed.",
+            }
+        detail = "; ".join(
+            ([f"failing: {', '.join(failing[:3])}"] if failing else [])
+            + ([f"never replayed: {', '.join(unrun[:3])}"] if unrun else [])
+        )
+        return {
+            "status": "warn",
+            "message": f"succession replay: {len(failing) + len(unrun)} of {len(pairs)} "
+            f"supersede pair(s) lack a passing replay ({detail}) — a `reconsolidate "
+            "--reverify <old> --outcome demote --superseded-by <new>` verdict replays "
+            "automatically; failing pairs suggest the successor misses the old name's "
+            "recall surface.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"succession-replay check failed: {exc}."}
+
+
+def check_update_eval(ctx: DoctorContext) -> Dict[str, str]:
+    """TMB-4: the per-project update-knowledge line — the outrank-failure count from the
+    LATEST persisted eval run (MSR-1's run ledger; ED2R-1 — doctor reads persisted eval,
+    it never re-runs one). ok-at-zero and ok-at-no-evidence; GATE_UPDATE_* promotion is
+    a dated owner decision — this line never gates anything.
+    """
+    try:
+        from .eval_ledger import read_run_ledger
+        from .telemetry import default_telemetry_dir
+
+        latest = None
+        for row in read_run_ledger(ctx.memory_dir, default_telemetry_dir(ctx.memory_dir)):
+            latest = row
+        if latest is None:
+            return {
+                "status": "ok",
+                "message": "update eval: no persisted eval runs yet (eval_recall --json "
+                "records one; update rows land via --draft-update + per-item confirm).",
+            }
+        u = (latest.get("report") or {}).get("update_knowledge")
+        if not isinstance(u, dict) or not u.get("n"):
+            return {
+                "status": "ok",
+                "message": "update eval: latest persisted run carries no update-category "
+                "rows (the category has zero rows until drafted + confirmed).",
+            }
+        failures = int(u.get("outrank_failures") or 0)
+        if failures == 0:
+            return {
+                "status": "ok",
+                "message": f"update eval: {u['n']} update row(s), 0 outrank failures "
+                "(successors beat their corpses in the latest persisted run).",
+            }
+        return {
+            "status": "warn",
+            "message": f"update eval: {failures} outrank failure(s) across {u['n']} update "
+            "row(s) in the latest persisted run — a superseded memory still outranks (or "
+            "hides) its successor; enrich the successor or re-run `python -m "
+            "memory.eval_recall` after corpus fixes (report-only; GATE_UPDATE_* stays an "
+            "owner decision).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"update-eval check failed: {exc}."}

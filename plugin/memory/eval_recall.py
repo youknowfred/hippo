@@ -270,39 +270,25 @@ def session_token_cost(
 # ``_default_fixture_path`` probes only the canonical filenames, and an unfilled draft
 # row (``expected: []``) is not even loadable by ``load_hard_set``.
 # --------------------------------------------------------------------------- #
-_DRAFTS_FILENAME = "recall_hard_set.drafts.yaml"
-_DRAFTS_NOTE = (
-    "SIG-6 candidate eval fixtures drafted from recurring recall abstentions — UNCONFIRMED. "
-    "For each row: if a REAL existing memory should answer the query, put its stem in "
-    "'expected' and admit the row via eval_recall.confirm_hard_set_row (per item); if no "
-    "memory answers it, that is a capture gap — capture the memory first (never invent a "
-    "stem to make a fixture pass), or delete the row if it is noise."
+from .eval_fixtures import (  # drafts-queue plumbing + the T11 synthesizers (façade re-exports)
+    _DRAFTS_FILENAME,
+    _DRAFTS_NOTE,
+    _parseable_yaml,
+    _project_fixture_path,
+    default_drafts_path,
+    draft_forgetting_fixtures,
+    draft_update_fixtures,
+    run_draft_forgetting_cli,
+    run_draft_update_cli,
+    validate_confirm_row_kind,
 )
-
-
-def _project_fixture_path(memory_dir: str, filename: str = "recall_hard_set.yaml") -> str:
-    """The project-local TRACKED-fixture path (``.audit-fixtures/``, the RET-7 convention)."""
-    return os.path.join(memory_dir, ".audit-fixtures", filename)
-
-
-def default_drafts_path(memory_dir: str) -> str:
-    """The SIG-6 drafts-queue path — inside the gitignored pending dir (see block comment)."""
-    from .capture import default_pending_dir
-
-    return os.path.join(default_pending_dir(memory_dir), _DRAFTS_FILENAME)
-
-
-def _parseable_yaml(path: str) -> bool:
-    """False when ``path`` exists but is not loadable YAML — the append guards below refuse
-    to grow a file an agent hand-edit broke (appending after a parse error only buries it)."""
-    try:
-        import yaml
-
-        with open(path, "r", encoding="utf-8") as fh:
-            list(yaml.safe_load_all(fh))
-        return True
-    except Exception:
-        return False
+from .eval_ledger import read_run_ledger
+from .eval_metrics import (
+    absence_polarity_metrics,
+    load_absence_rows,
+    t11_category_lines,
+    update_category_metrics,
+)
 
 
 def draft_abstention_fixtures(
@@ -438,6 +424,8 @@ def confirm_hard_set_row(
     fixture_path: Optional[str] = None,
     drafts_path: Optional[str] = None,
     category: str = "abstention",
+    absent: Optional[List[str]] = None,
+    superseded: Optional[str] = None,
 ) -> dict:
     """Admit ONE confirmed row into the TRACKED project fixture — the SIG-6 confirm gate.
 
@@ -460,26 +448,43 @@ def confirm_hard_set_row(
     currently-FAILING row is legitimate signal (the fixture documents a recall gap the
     corpus should close), and whether to admit one anyway is exactly the judgment the
     human makes at confirm time.
+
+    T11 additive arms (gates in ``eval_fixtures.validate_confirm_row_kind``): ``absent``
+    (TMB-3, mutually exclusive with ``expected``) admits an ABSENCE-polarity forgetting
+    row — every named stem must actually be in ``archive/`` (fail closed; only
+    ``load_absence_rows``/``absence_polarity_metrics`` consume these, report-only);
+    ``superseded`` (TMB-4, presence rows) records the still-live corpse stem so
+    ``update_category_metrics`` can bucket by its GRW-7 stamp state.
     """
     if memory_dir is None:
         memory_dir, _repo = resolve_dirs()
     q = (query or "").strip()
     if not q:
         return {"ok": False, "reason": "empty query"}
-    stems: List[str] = []
-    for s in expected if isinstance(expected, (list, tuple)) else [expected]:
-        s = str(s or "").strip()
-        if s.endswith(".md"):
-            s = s[:-3]
-        if s and s not in stems:
-            stems.append(s)
-    if not stems:
+
+    def _norm(vals) -> List[str]:
+        out: List[str] = []
+        for s in vals if isinstance(vals, (list, tuple)) else [vals]:
+            s = str(s or "").strip()
+            if s.endswith(".md"):
+                s = s[:-3]
+            if s and s not in out:
+                out.append(s)
+        return out
+
+    stems = _norm(expected) if expected else []
+    absent_stems = _norm(absent) if absent else []
+    corpse = _norm([superseded])[0] if superseded else None
+    kind_error = validate_confirm_row_kind(memory_dir, stems, absent_stems, corpse)
+    if kind_error:
+        return {"ok": False, "reason": kind_error}
+    if not stems and not absent_stems:
         return {
             "ok": False,
             "reason": "expected is empty — a cluster no existing memory answers is a "
             "capture gap (capture the memory first), not a fixture row",
         }
-    bad = [s for s in stems if "/" in s or os.sep in s or s.startswith(".")]
+    bad = [s for s in stems + absent_stems if "/" in s or os.sep in s or s.startswith(".")]
     if bad:
         return {"ok": False, "reason": f"expected entries must be bare memory stems: {bad}"}
     missing = [s for s in stems if not os.path.exists(os.path.join(memory_dir, f"{s}.md"))]
@@ -496,15 +501,27 @@ def confirm_hard_set_row(
             "reason": "tracked fixture exists but is not parseable YAML — fix it before "
             "admitting rows",
         }
-    if any(row["query"] == q for row in load_hard_set(fp)):
+    tracked_queries = {row["query"] for row in load_hard_set(fp)}
+    tracked_queries |= {row["query"] for row in load_absence_rows(fp)}
+    if q in tracked_queries:
         return {"ok": False, "reason": "query is already a tracked fixture row"}
 
     cat = str(category or "").strip() or "abstention"
-    row_text = (
-        f"- query: {json.dumps(q, ensure_ascii=False)}\n"
-        f"  expected: [{', '.join(json.dumps(s, ensure_ascii=False) for s in stems)}]\n"
-        f"  category: {json.dumps(cat, ensure_ascii=False)}\n"
-    )
+    if absent_stems and cat == "abstention":
+        cat = "forgetting"  # the absence rows' own data-driven default tag
+    if absent_stems:
+        row_text = (
+            f"- query: {json.dumps(q, ensure_ascii=False)}\n"
+            f"  absent: [{', '.join(json.dumps(s, ensure_ascii=False) for s in absent_stems)}]\n"
+            f"  category: {json.dumps(cat, ensure_ascii=False)}\n"
+        )
+    else:
+        row_text = (
+            f"- query: {json.dumps(q, ensure_ascii=False)}\n"
+            f"  expected: [{', '.join(json.dumps(s, ensure_ascii=False) for s in stems)}]\n"
+            + (f"  superseded: {json.dumps(corpse, ensure_ascii=False)}\n" if corpse else "")
+            + f"  category: {json.dumps(cat, ensure_ascii=False)}\n"
+        )
     if os.path.exists(fp):
         with open(fp, "r", encoding="utf-8") as fh:
             text = fh.read()
@@ -550,6 +567,8 @@ def confirm_hard_set_row(
         "path": fp,
         "query": q,
         "expected": stems,
+        **({"absent": absent_stems} if absent_stems else {}),
+        **({"superseded": corpse} if corpse else {}),
         "category": cat,
         "removed_from_drafts": removed,
     }
@@ -668,6 +687,20 @@ def evaluate(
         )
         if hard_set else {}
     )
+    # T11 (TMB-3/TMB-4): absence-polarity forgetting rows + stamp-state-bucketed update
+    # scoring — both absence-emits-nothing (no rows -> no key -> reports, fingerprints
+    # and committed MSR-1 baselines stay byte-identical), both report-only forever
+    # unless a dated owner decision promotes a gate.
+    absence_rows = load_absence_rows(hard_set_path) if hard_set_path else []
+    forgetting = (
+        absence_polarity_metrics(index, absence_rows, memory_dir, k=k, index_dir=index_dir)
+        if absence_rows else {}
+    )
+    update_knowledge = update_category_metrics(
+        index, hard_set, memory_dir, k=k, index_dir=index_dir
+    )
+    if not update_knowledge["n"]:
+        update_knowledge = {}
     tok = token_reduction(memory_dir, index, hard_set, k=k, index_dir=index_dir)
     lat_queries = [item["query"] for item in hard_set] or [
         derive_self_query(e) for e in index.entries[:30]
@@ -790,6 +823,8 @@ def evaluate(
         "count": len(index),
         "hard_set_n": hs["n"],
         "by_category": by_category,
+        **({"forgetting": forgetting} if forgetting else {}),
+        **({"update_knowledge": update_knowledge} if update_knowledge else {}),
         **({"miss_autopsy": autopsy} if autopsy else {}),
         **({"null_arms": null_arms} if null_arms else {}),
         "gates": gates,
@@ -1513,6 +1548,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         "flagged it, knee/floor/MMR admitted it) by driving the shipped code — no LLM. "
         "Report-only; skips when no fixture corpus exists; never gates CI.",
     )
+    parser.add_argument(
+        "--draft-forgetting",
+        action="store_true",
+        help="TMB-3: enumerate archive/*.md into archive-absence DRAFT rows in the SIG-6 "
+        "drafts queue (zero LLM); confirm each per item via confirm_hard_set_row("
+        "absent=[stem], category='forgetting')",
+    )
+    parser.add_argument(
+        "--draft-update",
+        action="store_true",
+        help="TMB-4: walk supersedes chains into category:update DRAFT rows (verbatim "
+        "spans of the superseded file; zero LLM, fail closed); confirm each per item via "
+        "confirm_hard_set_row(query, [tip], category='update', superseded=<corpse>)",
+    )
     args, ab_extra = parser.parse_known_args(argv)
     if args.ab is None and ab_extra:
         # Extras are pass-through ONLY under --ab; the plain eval keeps strict parsing.
@@ -1638,6 +1687,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         return 0
 
+    if args.draft_forgetting:
+        return run_draft_forgetting_cli(args.memory_dir)
+    if args.draft_update:
+        return run_draft_update_cli(args.memory_dir, args.index_dir)
+
     if args.adversarial:
         rep = adversarial_report(_adversarial_fixture_dir(args.memory_dir))
         if rep.get("skipped"):
@@ -1757,6 +1811,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"  category {cat:11s} recall@{args.k}={m['recall']:.4f} mrr@{args.k}={m['mrr']:.4f} "
             f"n={m['n']} (RET-8)"
         )
+    for line in t11_category_lines(report, args.k):  # TMB-3/TMB-4, report-only
+        print(line)
     # MSR-4: the per-category miss autopsy — a missed stem names the mechanism and
     # margin that cut it, instead of just deflating a category average.
     for cat, misses in sorted((report.get("miss_autopsy") or {}).items()):

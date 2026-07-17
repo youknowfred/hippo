@@ -73,6 +73,9 @@ from .doctor_checks_corpus import (
     check_ungrounded_prescriptions,
     check_committed_usage_privacy,
     check_dream_ledger,
+    check_invalid_after_terminal,
+    check_archive_shadowing,
+    check_archive_regret,
     _LATIN_ALPHA_RANGES,
     _NON_ENGLISH_MIN_ALPHA_SAMPLE,
     _NON_ENGLISH_ALPHA_FRACTION,
@@ -101,6 +104,8 @@ from .doctor_checks_recall import (
     check_rules_conflicts,
     check_rules_plane_rot,
     check_rules_source,
+    check_succession_replay,
+    check_update_eval,
 )
 
 # One glyph per status — the deterministic line prefix. Ordered dict-free lookup.
@@ -327,6 +332,11 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("mcp_launch", check_mcp_launch),  # INT-8: the stdio MCP server (bin/hippo mcp) actually starts
     ("committed_usage_privacy", check_committed_usage_privacy),  # SEC-14: TEA-5 usage on a shared remote
     ("projects_registry", check_projects_registry),  # RCH-11: dead-row hygiene, machine-level
+    ("invalid_after_terminal", check_invalid_after_terminal),  # TMB-2: non-drift retirements, corpus-wide
+    ("succession_replay", check_succession_replay),  # TMB-5: supersedes with failing/unrun replay
+    ("archive_shadowing", check_archive_shadowing),  # TMB-3: archive/ stem colliding with a live one
+    ("archive_regret", check_archive_regret),  # TMB-3: abstentions matching archived bodies (evidence-only)
+    ("update_eval", check_update_eval),  # TMB-4: outrank failures from the latest persisted run
     ("stale_memobot_env", check_stale_memobot_env),  # pinned last (env hygiene trails)
 ]
 

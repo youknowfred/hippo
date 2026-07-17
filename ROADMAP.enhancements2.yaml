@@ -900,7 +900,7 @@ workstreams:
         title: Resolve-inbox evidence card (age + git-freshness + drift + prefill-agreement capture)
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: temporal-lifecycle, verdict: RESHAPE, convergence: 3, landscape: [zep-bitemporal-2501, memtrack-conflict]}
         problem: >-
           The contradiction inbox derives fresh every call with ZERO timestamps — no
@@ -944,7 +944,7 @@ workstreams:
         title: invalid_after terminal-state surfacing + archive-admission leg for drift-free retirements
         priority: P2
         effort: S
-        status: planned
+        status: done
         source: {lens: temporal-lifecycle, verdict: RESHAPE, convergence: 1, landscape: [forgeteval-deletion-correctness]}
         problem: >-
           invalid_after is visible only through the git-drift stale set, so a memory
@@ -985,7 +985,7 @@ workstreams:
         title: Forgetting correctness & archive reversibility (shadow check + report-only category + restore primitive + regret detector)
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: temporal-lifecycle, verdict: RESHAPE, convergence: 1, landscape: [memoryagentbench-forgetting-7pct, persistbench-leakage]}
         problem: >-
           Forgetting failures dominate production memory systems (deletion correctness
@@ -1031,7 +1031,7 @@ workstreams:
         title: Edge-derived update / premise-resistance eval fixtures (extends SIG-6)
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: eval-flywheel, verdict: RESHAPE, convergence: 2, landscape: [longmemeval-knowledge-update, stale-2605]}
         problem: >-
           The temporal/update eval categories have ZERO shipped rows (evergreen packs
@@ -1054,7 +1054,7 @@ workstreams:
           - rows are tagged category:update (never temporal, which stays zero rows) and bucketed by the superseded memory's invalid_after state (unstamped/recent scored successor-must-outrank-corpse; old-stamped scored successor-presence-only); a test verifies both scoring paths
           - every drafted row requires per-item human confirmation via SIG-6's confirm_hard_set_row before landing (inv4); a test confirms an N-row drafts file produces zero live fixtures until each is confirmed; no bulk-confirm path
           - update numbers surface report-only in eval + a per-project doctor line naming the outrank-failure count; GATE_UPDATE_* promotion is never auto-triggered by a row count — a dated owner decision is required
-        dependencies: [SIG-6, GRW-7, GRA-4]   # SIG-6 cross-file on open PR #17 (absent from baseline); GRW-7/GRA-4 shipped
+        dependencies: [SIG-6, GRW-7, GRA-4]   # ALL SHIPPED — SIG-6 merged 2026-07-10 (PR #17, 4dc3256; the old 'open PR #17' note was stale); GRW-7/GRA-4 shipped earlier
         invariant_note: >-
           inv4 — drafts-only, per-row human confirm via SIG-6's gate, no bulk autonomous
           fixture writes. inv6 — synthesis at audit/CLI time, never the hot path.
@@ -1067,15 +1067,16 @@ workstreams:
           Attach: links.load_edges (typed_out — first production consumer), history.typed_inbound
           (supersedes tip = live resolution), eval_recall._load_fixture_docs / load_hard_set,
           _default_fixture_path (.audit-fixtures sink), and SIG-6's draft/confirm surface
-          (recall_hard_set.drafts.yaml + confirm_hard_set_row) — which is
-          ABSENT from this baseline (on open PR #17): re-read SIG-6's landed schema fresh
-          before coding (T3-T7 premise-correction law).
+          (recall_hard_set.drafts.yaml + confirm_hard_set_row) — the "ABSENT from
+          this baseline (on open PR #17)" note was STALE (SIG-6 merged 2026-07-10); the
+          landed schema was re-read fresh on MAIN before coding (T3-T7 premise-correction
+          law) and extended additively (superseded= on confirm, passthrough in load_hard_set).
 
       - id: TMB-5
         title: Succession replay (verify a supersede's recall surface transfers)
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: capture-consolidation, verdict: RESHAPE, convergence: 1, landscape: [memoryagentbench-update-track]}
         problem: >-
           When a memory is superseded, nothing verifies that the queries which used to
@@ -1087,8 +1088,10 @@ workstreams:
           re-run recall() offline against the post-verdict corpus, and print PASS/FAIL/
           INCONCLUSIVE per query (successor ranks now? tombstoned name still leaks?) at
           verdict time + a doctor line for supersedes left with a failing/unrun replay.
-          Read-only, zero hot-path cost. The SIG-6-fixture-drafting half is CUT (SIG-6
-          absent from this baseline (open PR #17); re-propose only after it is verified merged and its schema re-read).
+          Read-only, zero hot-path cost. The SIG-6-fixture-drafting half is CUT — the cut
+          STANDS even though its stated rationale aged (SIG-6 merged 2026-07-10, not
+          absent as written): TMB-4 owns update-fixture drafting, and a second drafting
+          surface inside the demote verdict would be double ownership.
         acceptance_criteria:
           - given a demote/superseded_by verdict on a memory with >=1 prior recall_events hit for its name, the replay prints one line per harvested query — PASS (successor ranks), FAIL (tombstone still recalled, successor absent/low), or INCONCLUSIVE (80-char preview insufficient)
           - given zero prior hits for the predecessor name, the replay reports "nothing to replay" rather than erroring or fabricating a query
@@ -1100,7 +1103,9 @@ workstreams:
           cost. inv4 — confined to the single-item demote path already AST-pinned against
           bulk; no replay_all verb. inv1 — outcomes append to the existing gitignored
           reconsolidation_events ledger. inv5 by removal — the SIG-6-dependent
-          fixture-drafting half is CUT (SIG-6's draft surface is absent on the tree).
+          fixture-drafting half is CUT (originally "SIG-6's draft surface is absent on
+          the tree" — stale, SIG-6 merged 2026-07-10; the cut survives as single-ownership:
+          TMB-4 is the update-fixture drafter).
         implementation_notes: >-
           Attach: reconsolidate.semantic_reverify (the demote/superseded_by trigger),
           telemetry.log_recall_event ledger (names + query_preview, both LIVE — do NOT
@@ -1547,10 +1552,10 @@ release_train:
       untrust revocation-by-gate proof, and confirm the trust-spine pins held.
 
   - tier: T11
-    target_version: 1.11.0
+    target_version: 1.11.0   # STALE label (authored pre-round-3); T11 landed post-v1.20.0, 2026-07-17, no version bump — rides whatever release Fred cuts next
     theme: "Temporal truth, lifecycle & forgetting"
-    status: planned
-    gate: "SIG-6 (cross-file, round 1, on open PR #17 / enh-t7-sig6, absent from baseline) must land before TMB-3's forgetting eval category and TMB-4's update fixtures can route through its confirm flow. TMB-1/TMB-2/TMB-5 have no SIG-6 dependency and can lead the tier."
+    status: done
+    gate: "PREMISE CORRECTED at build (2026-07-17): the gate said SIG-6 was 'on open PR #17, absent from baseline' — STALE: PR #17 squash-merged to main 2026-07-10 (4dc3256), so draft_abstention_fixtures/confirm_hard_set_row were live on main the whole time and the tier was FULLY unblocked. TMB-3/TMB-4 routed through the LANDED confirm flow (re-read fresh on main), extending it additively (absent=/superseded=). TMB-1/TMB-2/TMB-5 never had a SIG-6 dependency."
     done_means: >-
       The timestamp-less resolve/lifecycle plane has a git-mined clock (conflict age +
       freshness evidence card); a supersede/merge-retired memory is finally visible and
@@ -1567,7 +1572,27 @@ release_train:
       deliberate). TMB-3's restore collision-check is load-bearing; its detector stays
       evidence-only (no prefilled restore — the demand-gap-auto-draft shape). TMB-4's
       query assembly is verbatim-span-only (fabrication-kill adjacency); GATE_UPDATE_* is
-      a dated owner decision. TMB-3/TMB-4 re-read SIG-6's landed schema fresh (it is on unmerged PR #17).
+      a dated owner decision. TMB-3/TMB-4 re-read SIG-6's landed schema fresh — NB the
+      note's "(it is on unmerged PR #17)" was STALE at build: SIG-6 merged 2026-07-10
+      (4dc3256); the schema was re-read on MAIN.
+      BUILT 2026-07-17 (see hippo-enh-t11-temporal), 5/5 items in the audit_note order
+      (TMB-1,2,5,3,4), one session, tests-first, full suite green after each (~2,575
+      tests, ~55 new; no version bump, no schema/corpus_format move — every field is
+      additive/absence-emits-nothing). Every binding held: no reconsolidate import in
+      resolve_view (pin extended), no "resurrect", worklist untouched (pinned), restore
+      collision-guard REFUSES (never overwrites; force deliberately absent), regret
+      detector evidence-only with an AST pin that restore() is reachable only from the
+      human CLI path, verbatim-span queries pinned as literal substrings with zero
+      LLM/network, no GATE_UPDATE_* constant exists (pinned). Doctor grew five one-line
+      checks (invalid_after_terminal, succession_replay, archive_shadowing,
+      archive_regret, update_eval — appended before the pinned-last env check); the
+      reconsolidation ledger gained an additive counts-only succession_replay field
+      (outcome vocabulary unchanged); the resolve ledger gained the additive verdicts
+      (prefill-vs-choice) key. One NEW gitignored evidence ledger (archive_regret.jsonl)
+      — read back by its own doctor check for dedup, so never a dark reservoir. Honest
+      scope note: forgetting/update rows confirm via confirm_hard_set_row (CLI/python +
+      the abstention_fixtures MCP tool's new optional category/absent/superseded props);
+      drafting is CLI-only (--draft-forgetting/--draft-update), not a new MCP surface.
     capstone: >-
       Write hippo-enh-t11-temporal: the resolve evidence-card fields, the invalid_after
       terminal-state count semantics, the forgetting-category absence-polarity metric,
@@ -1667,6 +1692,10 @@ decisions:
       freely-buildable round-1 T7 item and should land (merge PR #17) before those tiers.
       Any item that touches its draft/confirm surface MUST re-read the landed schema fresh
       (its working-tree form moved once already — the T3-T7 premise-correction law).
+      RESOLVED 2026-07-10: PR #17 squash-merged to main (4dc3256) the day after authoring —
+      draft_abstention_fixtures/confirm_hard_set_row have been live on main through every
+      round-2 build since; T11 re-read the landed schema on MAIN (not the PR) per this
+      decision's own law and extended confirm_hard_set_row additively (absent=/superseded=).
   - id: ED2R-3
     question: The trust spine shipped mid-cycle — what changes?
     decision: the security/reach tail is buildable now, but each foreign-format item still spikes first
