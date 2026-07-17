@@ -997,6 +997,71 @@ def check_secrets(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"secret scan failed: {exc}."}
 
 
+def check_threat_lint(ctx: DoctorContext) -> Dict[str, str]:
+    """SEN-2 corpus-wide threat sweep: Tier-A payloads per file + the Tier-B aggregate count.
+
+    Tier-A (invisible Unicode / mixed-script confusable / exfil shape / HTML comment) is the
+    SURFACED half — named per file, exactly like check_secrets. The Tier-B imperative-grammar
+    count is the DARK half: one aggregate number folded into the SAME line (never a per-file
+    listing — that would resurrect the surfaced flag the tier holds dark, inv3), the FP-rate
+    evidence a dated owner decision needs before graduating it. Single-line message (the
+    doctor line-count pin is relative — one check, one line). Never raises.
+    """
+    try:
+        from .telemetry import threat_ledger_aggregate
+        from .threat_lint import scan_corpus
+
+        findings = scan_corpus(ctx.memory_dir)
+        agg = threat_ledger_aggregate()
+        tier_b = f" Tier-B (ledger, measured-only): {agg['rows']} imperative-grammar finding(s)." if agg.get("rows") else ""
+        if not findings:
+            return {
+                "status": "ok",
+                "message": f"no Tier-A threat payloads in the corpus.{tier_b}",
+            }
+        parts = [f"{f['file']}: {'; '.join(f['warnings'])}" for f in findings]
+        return {
+            "status": "warn",
+            "message": f"{len(findings)} file(s) carry Tier-A threat payloads — {' | '.join(parts)}. "
+            f"Inspect before they re-inject on recall (HTML comments are lint-only pending the "
+            f"ED-3 owner decision).{tier_b}",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"threat scan failed: {exc}."}
+
+
+def check_ungrounded_prescriptions(ctx: DoctorContext) -> Dict[str, str]:
+    """SEN-3 corpus fraction: memories asserting user intent with no rationale/hunk grounding.
+
+    Renders the ungrounded-prescription FRACTION (the sycophancy-amplification rate made
+    legible, KPI-5) and names the offending stems so the audit sweep can propose per-item
+    fixes (inv4). No persisted per-item field — this reads the corpus each run. Single-line;
+    never raises.
+    """
+    try:
+        from .prescription_lint import scan_corpus
+
+        rep = scan_corpus(ctx.memory_dir)
+        total = rep.get("total", 0)
+        ungrounded = rep.get("ungrounded", 0)
+        if not total or not ungrounded:
+            return {
+                "status": "ok",
+                "message": f"no ungrounded prescriptions ({rep.get('grounded', 0)} grounded / "
+                f"{total} memories carry no fabricated user-intent claim).",
+            }
+        names = ", ".join(i["name"] for i in rep.get("ungrounded_items", [])[:6])
+        frac = ungrounded / total
+        return {
+            "status": "warn",
+            "message": f"ungrounded-prescription fraction {frac:.2f} — {ungrounded}/{total} "
+            f"memories assert user intent with no captured evidence or rationale ({names}). "
+            "Run the audit sweep to fix per item (transcribe the WHAT, or cite the WHY).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"ungrounded-prescription scan failed: {exc}."}
+
+
 def check_committed_usage_privacy(ctx: DoctorContext) -> Dict[str, str]:
     """SEC-14: TEA-5 committed per-user usage summaries are a privacy tradeoff on a shared remote.
 
@@ -2026,6 +2091,8 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("pack_drift", check_pack_drift),
     ("fill_me", check_fill_me),
     ("secrets", check_secrets),
+    ("threat_lint", check_threat_lint),  # SEN-2: Tier-A corpus payloads + the Tier-B dark-ledger count
+    ("ungrounded_prescriptions", check_ungrounded_prescriptions),  # SEN-3: sycophancy-amplification fraction
     ("link_density", check_link_density),
     ("edge_rot", check_edge_rot),  # GRF-1: edges into archived/superseded/dangling targets
     ("dream_ledger", check_dream_ledger),  # DRM-2: on-disk dream stamps ↔ dream-ledger.jsonl reconcile

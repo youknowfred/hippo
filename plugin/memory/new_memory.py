@@ -445,6 +445,286 @@ def committed_duplicate_neighbors(name: str, memory_dir: str, index_dir: Optiona
     return _duplicate_neighbors(name, text, memory_dir, index_dir)
 
 
+# --------------------------------------------------------------------------- #
+# SEN-1: the write ticket — a deterministic pre-write verifier riding the dry-run
+# battery. Three checks the reviewer used to do by eye (or a skill prescribed as
+# PROCEDURE — the consolidate secret gate was SKILL.md text, not code): the secret
+# lint over the rendered candidate, fenced-hunk fidelity vs a FRESH git HEAD, and
+# the archive-shadow name collision. Every check is WARN-ONLY inside
+# check_candidate's never-raise / no-autonomous-rejection contract: findings inform
+# the approval prompt; they never flip a route, never block a write, never persist
+# anywhere (no new frontmatter field, no ledger). The artifact is a "write ticket"
+# (a gate stamp) — deliberately NOT named after GOV-5's shipped recall glass-box
+# artifact (inv5: one concept, one word; SEN-1 renamed off it, and a test pins that
+# this module never uses that word).
+# --------------------------------------------------------------------------- #
+
+# Fenced blocks checked / cited paths fetched per ticket. The caps keep the verifier
+# subprocess-bounded (one `git show` per cited path, never per block×path); the
+# fidelity dict's note says when a cap truncated coverage, never a silent narrowing.
+_TICKET_MAX_BLOCKS = 8
+_TICKET_MAX_PATHS = 12
+# A fenced block shorter than this (stripped) is too weak a claim to verify — a
+# `pytest -q` command block would "mismatch" every cited file and cry wolf. High
+# precision over recall, the same doctrine secrets._PATTERNS states.
+_TICKET_MIN_BLOCK_CHARS = 24
+_TICKET_PREVIEW_CHARS = 40
+
+
+def _fenced_blocks(body: str) -> List[str]:
+    """The CONTENT of each fenced code block in ``body`` (fence lines stripped).
+
+    Reuses ``links._FENCED_CODE_RE`` — COR-20's own fence parser — so "what counts as
+    a fenced block" is the graph lint's exact notion, never a second drifting regex.
+    """
+    from .links import _FENCED_CODE_RE
+
+    out: List[str] = []
+    for m in _FENCED_CODE_RE.finditer(body or ""):
+        lines = m.group(0).split("\n")
+        out.append("\n".join(lines[1:-1]))
+    return out
+
+
+def _diff_post_image(content: str) -> Optional[str]:
+    """The post-image of a unified-diff-shaped block, or None when it isn't one.
+
+    The consolidate flow fences GRW-1 hunks VERBATIM — including ``+``/``-``/context
+    prefixes — and a landed change's post-image (context + added lines, prefixes
+    stripped) is what a fresh HEAD can actually contain. Headers (``diff --git``,
+    ``index``, ``---``/``+++``, ``@@``) are dropped; a block whose remaining lines are
+    not uniformly diff-prefixed is not a diff (returns None, the raw bytes were
+    already tried).
+    """
+    lines = content.split("\n")
+    body_lines = [
+        ln for ln in lines
+        if ln and not ln.startswith(("diff --git", "index ", "--- ", "+++ ", "@@"))
+    ]
+    if not body_lines or not any(ln[:1] in "+-" for ln in body_lines):
+        return None
+    if not all(ln[:1] in "+- " for ln in body_lines):
+        return None
+    kept = [ln[1:] for ln in body_lines if ln[:1] in "+ "]
+    post = "\n".join(kept).strip("\n")
+    return post or None
+
+
+def _fence_fidelity(body: str, repo_root: Optional[str]) -> dict:
+    """Byte-fidelity of fenced blocks vs the files the body cites, at a FRESH HEAD.
+
+    The baseline is ``git_head`` fetched AT VERIFY TIME — never parsed out of a
+    rationale string, which records HEAD at *proposal* time and can be stale or
+    attacker-worded. A block "matches" when its exact bytes (or, for a diff-shaped
+    block, its post-image) appear contiguously in some cited file at HEAD; the cited
+    set is ``cited_paths_for_body`` — provenance backfill's own resolver, so the
+    fidelity oracle and the citation oracle can never disagree. Unverifiable states
+    (no HEAD, nothing cited, unreadable files) are NOTES, not warnings — an honest
+    "could not check" is not a finding. Never raises.
+    """
+    fid: dict = {"head": None, "blocks": 0, "checked": 0, "matched": 0, "mismatched": [], "note": None}
+    try:
+        blocks = _fenced_blocks(body)
+        fid["blocks"] = len(blocks)
+        if not blocks:
+            return fid
+        if not repo_root:
+            fid["note"] = "unverifiable: no repo root, so no git HEAD to compare against"
+            return fid
+        from .provenance import build_repo_file_index, cited_paths_for_body, git_head, run_git
+
+        head = git_head(repo_root)
+        if not head:
+            fid["note"] = "unverifiable: no git HEAD at verify time (non-git or unborn repo)"
+            return fid
+        fid["head"] = head
+        repo_files, basename_index = build_repo_file_index(repo_root)
+        cited = cited_paths_for_body(body, repo_files, basename_index)
+        if not cited:
+            fid["note"] = "unverifiable: the body cites no path that resolves in the repo"
+            return fid
+        texts: List[str] = []
+        for p in cited[:_TICKET_MAX_PATHS]:
+            t = run_git(["show", f"{head}:{p}"], repo_root)
+            if t:
+                texts.append(t)
+        if not texts:
+            fid["note"] = f"unverifiable: no cited file is readable at HEAD {head[:12]}"
+            return fid
+        checkable = [b for b in blocks if len(b.strip()) >= _TICKET_MIN_BLOCK_CHARS]
+        skipped_small = len(blocks) - len(checkable)
+        for idx, content in enumerate(checkable[:_TICKET_MAX_BLOCKS]):
+            candidates = [content.strip("\n")]
+            post = _diff_post_image(content)
+            if post:
+                candidates.append(post)
+            if any(c and c in t for c in candidates for t in texts):
+                fid["matched"] += 1
+            else:
+                preview = " ".join(content.strip().split())[:_TICKET_PREVIEW_CHARS]
+                fid["mismatched"].append({"index": idx + 1, "preview": preview})
+            fid["checked"] += 1
+        notes = []
+        if skipped_small:
+            notes.append(
+                f"{skipped_small} block(s) under {_TICKET_MIN_BLOCK_CHARS} chars skipped (too small to verify)"
+            )
+        if len(checkable) > _TICKET_MAX_BLOCKS:
+            notes.append(f"only the first {_TICKET_MAX_BLOCKS} of {len(checkable)} block(s) checked")
+        if len(cited) > _TICKET_MAX_PATHS:
+            notes.append(f"only the first {_TICKET_MAX_PATHS} of {len(cited)} cited path(s) compared")
+        fid["note"] = "; ".join(notes) or None
+        return fid
+    except Exception:
+        fid["note"] = fid["note"] or "unverifiable: fidelity check failed"
+        return fid
+
+
+def _archive_shadow(name: str, memory_dir: Optional[str]) -> dict:
+    """Does ``name`` collide with an existing ``archive/<name>.md`` stem?
+
+    The write-side twin of GRA-5's archive guard (which protects the OTHER direction:
+    archiving a stem others still link to). A candidate re-using a retired stem's name
+    would give one name two lives across live+archive — the archive-shadow blind spot.
+    ``collides`` is True/False, or None when the probe itself failed (stated, not
+    silently False — the GRA-5 fail-closed posture, minus the refusal: this surface
+    is warn-only). Never raises.
+    """
+    try:
+        from .archive import _ARCHIVE_SUBDIR
+
+        p = os.path.join(memory_dir or "", _ARCHIVE_SUBDIR, f"{name}.md")
+        if os.path.isfile(p):
+            return {"collides": True, "path": p}
+        return {"collides": False, "path": None}
+    except Exception:
+        return {"collides": None, "path": None}
+
+
+def build_write_ticket(
+    name: str, rendered: str, body: str, memory_dir: Optional[str], repo_root: Optional[str]
+) -> dict:
+    """Assemble the SEN-1 write ticket over one candidate. Warn-only; never raises.
+
+    ``{"secret_warnings", "fence_fidelity", "archive_shadow", "warnings"}`` —
+    ``warnings`` is the flattened human-readable warn set (secret KINDS + remediation,
+    one fidelity line when blocks mismatched, one archive-shadow line on collision)
+    so surfaces that just print lines need no ticket-specific logic. The structured
+    fields feed ``render_write_ticket`` at the approval prompt.
+    """
+    ticket: dict = {
+        "secret_warnings": [],
+        "threat_warnings": [],
+        "fence_fidelity": {"head": None, "blocks": 0, "checked": 0, "matched": 0, "mismatched": [], "note": None},
+        "archive_shadow": {"collides": None, "path": None},
+        "warnings": [],
+    }
+    try:
+        from .secrets import scan_with_remediation
+
+        ticket["secret_warnings"] = scan_with_remediation(rendered)
+    except Exception:
+        ticket["secret_warnings"] = []
+    # SEN-2: Tier-A threat lint joins the ticket (SEN-1 is the CONTAINER SEN-2 lands inside).
+    # SURFACED classes only — Tier-B imperative grammar is measured to the dark ledger by the
+    # write-plane caller (write_memory), never on this pure/side-effect-free ticket path (so a
+    # dry-run check never double-counts a write's Tier-B measurement).
+    # Scan the UNESCAPED description + body — the surface that actually injects/recalls. The
+    # rendered frontmatter json-escapes the description (an invisible codepoint becomes the
+    # ASCII `\uXXXX`), but parse_frontmatter unescapes it back to the real byte before
+    # inject_description injects it, so scanning `rendered` would MISS a description-embedded
+    # invisible payload that still reaches context. (The body is written raw, so its bytes are
+    # already real.)
+    try:
+        from .provenance import parse_frontmatter
+        from .threat_lint import scan_tier_a
+
+        try:
+            desc_value = str(parse_frontmatter(rendered).get("description") or "")
+        except Exception:
+            desc_value = ""
+        ticket["threat_warnings"] = scan_tier_a(f"{desc_value}\n{body}")
+    except Exception:
+        ticket["threat_warnings"] = []
+    ticket["fence_fidelity"] = _fence_fidelity(body, repo_root)
+    ticket["archive_shadow"] = _archive_shadow(name, memory_dir)
+
+    warns: List[str] = list(ticket["secret_warnings"])
+    if ticket["threat_warnings"]:
+        warns.append(
+            "⚠ threat lint (SEN-2 Tier-A): " + "; ".join(ticket["threat_warnings"])
+            + " — a poisoning payload (invisible/confusable/exfil/HTML-comment) in the memory "
+            "text; inspect and scrub before this is committed and re-injected on every recall."
+        )
+    fid = ticket["fence_fidelity"]
+    if fid.get("mismatched"):
+        shown = "; ".join(f"block #{m['index']} (“{m['preview']}…”)" for m in fid["mismatched"][:3])
+        warns.append(
+            f"⚠ hunk fidelity: {len(fid['mismatched'])} of {fid['checked']} fenced block(s) "
+            f"match no cited file at HEAD {(fid.get('head') or '')[:12]} — {shown}. Quoted "
+            "evidence may be paraphrased or stale; re-quote from the live file or drop the fence."
+        )
+    shadow = ticket["archive_shadow"]
+    if shadow.get("collides"):
+        warns.append(
+            f"⚠ archive shadow: archive/{name}.md already exists — writing this name gives a "
+            "retired stem a second life (links and journal history would straddle live+archive). "
+            "Pick a new name, or deliberately restore the archived memory instead."
+        )
+    ticket["warnings"] = warns
+    return ticket
+
+
+def render_write_ticket(ticket: Optional[dict]) -> str:
+    """The verbatim-printable write-ticket block for the approval prompt. Never raises.
+
+    One line per check, ✓/⚠ prefixed, plus the unverifiable note when a check could
+    not run — rendered at the SAME step as the dup/rules-echo warnings so the human
+    approving the write sees the whole gate stamp in one place.
+    """
+    if not isinstance(ticket, dict):
+        return ""
+    try:
+        from .secrets import REMEDIATION
+
+        lines = ["write ticket (deterministic pre-write verifier — warn-only; you route):"]
+        kinds = [w for w in ticket.get("secret_warnings") or [] if w != REMEDIATION]
+        if kinds:
+            lines.append(f"  ⚠ secret lint   : {'; '.join(kinds)}")
+        else:
+            lines.append("  ✓ secret lint   : clean")
+        threats = ticket.get("threat_warnings") or []
+        if threats:
+            lines.append(f"  ⚠ threat lint   : {'; '.join(threats)}")
+        else:
+            lines.append("  ✓ threat lint   : clean")
+        fid = ticket.get("fence_fidelity") or {}
+        if not fid.get("blocks"):
+            lines.append("  ✓ hunk fidelity : no fenced blocks to verify")
+        elif fid.get("checked"):
+            mark = "⚠" if fid.get("mismatched") else "✓"
+            head = (fid.get("head") or "")[:12]
+            line = (
+                f"  {mark} hunk fidelity : {fid.get('matched', 0)}/{fid.get('checked', 0)} "
+                f"fenced block(s) verbatim in a cited file at HEAD {head}"
+            )
+            if fid.get("note"):
+                line += f" ({fid['note']})"
+            lines.append(line)
+        else:
+            lines.append(f"  ✓ hunk fidelity : skipped — {fid.get('note') or 'nothing checkable'}")
+        shadow = ticket.get("archive_shadow") or {}
+        if shadow.get("collides"):
+            lines.append("  ⚠ archive shadow: collides with a retired stem — see the warning above")
+        elif shadow.get("collides") is None:
+            lines.append("  ✓ archive shadow: unverifiable (archive probe failed) — stated, not assumed clear")
+        else:
+            lines.append("  ✓ archive shadow: clear")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
 def check_candidate(
     name: str,
     description: str,
@@ -502,12 +782,17 @@ def check_candidate(
                 baseline = git_head(repo_root)
             except Exception:
                 baseline = None
+        # SEN-1: the write ticket joins the dry-run battery. Warn-only by contract —
+        # the route above was already decided by the dup check alone, and no ticket
+        # finding ever flips it (no autonomous rejection; the approving human routes).
+        ticket = build_write_ticket(name, rendered, body, memory_dir, repo_root)
         return {
             "route": "review" if neighbors else "add",
             "neighbors": neighbors,
             "rule_neighbors": rule_neighbors,
             "baseline": baseline,
             "note": note,
+            "ticket": ticket,
         }
     except Exception as exc:
         return {
@@ -516,6 +801,7 @@ def check_candidate(
             "rule_neighbors": [],
             "baseline": None,
             "note": f"candidate check skipped: {exc}",
+            "ticket": build_write_ticket(name, "", body, memory_dir, repo_root),
         }
 
 
@@ -773,6 +1059,7 @@ def write_memory(
         "rule_neighbors": [],
         "note": None,
         "warnings": [],
+        "ticket": None,
         "error": None,
     }
     if type not in VALID_TYPES:
@@ -895,14 +1182,48 @@ def write_memory(
         result["error"] = f"write failed: {exc}"
         return result
 
-    # Secret-pattern lint (SEC-2): scan the RENDERED text (frontmatter + body) for
-    # secret-looking content. This WARNS, it does NOT block — the write already happened and
-    # is kept; the warnings ride out on the result dict so the agent decides what to do next
-    # (report-then-act, agent-gated). Never fatal — a scan failure just yields no warnings.
-    try:
-        from .secrets import scan_with_remediation
+    # SEN-1: the write ticket — the secret lint (SEC-2) plus fenced-hunk fidelity and
+    # archive-shadow, assembled over the RENDERED text exactly as the check-first dry run
+    # does, so the two surfaces can never disagree about a candidate. This WARNS, it does
+    # NOT block — the write already happened and is kept; the flattened warn lines ride
+    # out on ``warnings`` (report-then-act, agent-gated) and the structured ticket on
+    # ``ticket``. Never fatal — a broken checker just yields degraded ticket fields.
+    ticket = build_write_ticket(name, rendered, body, memory_dir, repo_root)
+    result["ticket"] = ticket
+    result["warnings"] = list(ticket["warnings"])
 
-        result["warnings"] = scan_with_remediation(rendered)
+    # SEN-2 Tier-B: measure imperative-grammar in the just-written text to the DARK ledger —
+    # never surfaced, never a HOLD, never a ticket field (inv3). This is the real write plane
+    # (not the dry run), off the hot path; a dated owner decision graduates it on a
+    # ledger-measured near-zero FP rate. Best-effort; never fatal.
+    try:
+        from .threat_lint import scan_tier_b
+
+        tier_b = scan_tier_b(rendered)
+        if tier_b:
+            from .telemetry import log_threat_findings
+
+            log_threat_findings(tier_b, source="write", name=name)
+    except Exception:
+        pass
+
+    # SEN-3: ungrounded-prescription lint — an agent-voiced "the user always wants X" with no
+    # captured evidence and no --rationale is the synthesized-prescription shape that amplifies
+    # sycophancy. WARN-ONLY (never blocks, never routes, never ranks — it stays OUT of
+    # check_candidate so the confidence-never-ranking pin holds). Grounding = the --rationale
+    # param OR a fenced hunk in the body overlapping the claim; only a span grounded in
+    # NEITHER is surfaced. Best-effort; never fatal.
+    try:
+        from .prescription_lint import find_ungrounded
+
+        ungrounded = find_ungrounded(f"{description}\n{body}", rationale=rationale)
+        if ungrounded:
+            result["warnings"] = (result.get("warnings") or []) + [
+                "⚠ ungrounded prescription (SEN-3): this memory asserts user intent — "
+                f"\"{'; '.join(ungrounded)}\" — grounded in neither the captured evidence nor "
+                "a --rationale. Transcribe what the diff/decision shows, or cite the WHY; a "
+                "synthesized standing preference amplifies sycophancy on every recall."
+            ]
     except Exception:
         pass
 
@@ -1351,6 +1672,11 @@ def main(argv=None) -> int:
             print("warning : restates the governance plane — link, don't copy:")
             for r in decision["rule_neighbors"]:
                 print(f"  • {r['file']} (overlap {r['score']:.2f}) — \"{r['preview']}\"")
+        # SEN-1: the write ticket renders verbatim at this same approval-prompt step —
+        # the gate stamp the approving human reads alongside the dup/rules-echo block.
+        ticket_block = render_write_ticket(decision.get("ticket"))
+        if ticket_block:
+            print(ticket_block)
         if decision["note"]:
             print(f"note    : {decision['note']}")
         return 0

@@ -7,6 +7,63 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.20.0 — 2026-07-16 — "Sentinel"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**,
+index schema still **7**, citation derivation still **3**. No schema or gate constant moved:
+every check in this release is warn-only / human-in-the-loop, and the two new detectors are
+pure-Python (`re` + `unicodedata`), no new dependency. **This ships round-2 tier T10 (SEN):**
+`ROADMAP.enhancements2.yaml`'s SEN workstream — the write-plane quality + memory-security
+tier — lands whole. Detection-first throughout (ED-1): every autonomous refuse-write is cut
+and deferred behind a dated owner decision.
+
+- **SEN-1 — write-ticket verifier.** The consolidate skill's secret gate was procedural
+  text, and the reviewer's other write-time checks were done by eye. `check_candidate` now
+  emits a deterministic **write ticket** (renamed off GOV-5's "receipt", inv5): a secret lint
+  (`scan_with_remediation`, the procedural gate as code, surfaced BEFORE the write now, not
+  after), **fenced-hunk fidelity** against a freshly-fetched `git HEAD` at verify time (diff
+  post-image aware; a quoted hunk that no cited file contains is flagged as paraphrased/stale),
+  and an **archive-shadow** collision check. Warn-only: a triple-flagged candidate still
+  writes — the ticket informs, the human routes. Rendered verbatim on both the CLI `--check`
+  and the MCP `check:true` surfaces.
+- **SEN-2 — write-side threat lint.** A `secrets.py` sibling (`threat_lint.py`) for
+  memory-POISONING payloads secrets is blind to, **tiered by measured precision**. **Tier-A**
+  (surfaced + import HOLD): invisible Unicode (zero-width / bidi controls per Trojan Source /
+  tag-block ASCII smuggling / PUA, with emoji-ZWJ + variation-selector carve-outs and a stated
+  RTL-control posture), mixed-script confusables, HTML comments (lint-only, see the ED-3
+  finding below), and exfil shapes scoped strictly to image-embeds / data-bearing query
+  strings — never bare URLs. **Tier-B** (imperative-injection grammar): measured to a dark
+  telemetry ledger + one aggregate doctor line, **never surfaced, never a HOLD**, until a
+  dated owner decision graduates it on a near-zero false-positive rate (hippo's own corpus is
+  about prompt injection and carries these phrases as data). Four live seams (capture, the
+  write ticket, import HOLD, doctor); the CI leg is fed, not forked — its vehicle is CLB-1
+  `--ci` (T12, not yet built), and `scan_files` ships ready for it. **ED-3 spike, dated:** hook
+  `additionalContext` reaches the model verbatim, so an HTML comment in a body survives as a
+  hidden-instruction channel — HTML comments ship lint-only; neutralization is deferred behind
+  a dated owner decision (removing body content is a mutation).
+- **SEN-3 — ungrounded-prescription lint.** A deterministic lint (`prescription_lint.py`)
+  flags agent-voiced attribution of user intent ("the user always wants X") grounded in
+  neither the captured hunk nor a `--rationale` — the synthesized-prescription shape that
+  amplifies sycophancy. **Verified zero false positives against hippo's own docstrings and
+  skill prose before defaulting on** (a test pins it permanently). Warn-only at write + an
+  audit-skill corpus sweep + a doctor fraction line; AST-pinned out of `check_candidate` and
+  recall so it can never become a ranking input.
+- **SEN-4 — adversarial eval category.** A report-only `eval_recall --adversarial` mode
+  acceptance-tests the shipped SEC-5/6/7 trust spine against poisoned-memory fixtures by
+  **driving the shipped code** (no re-implementation, no LLM). Per poisoned fixture, five
+  deterministic booleans — payload crossed into `format_results`, SEC-6 quarantine withheld a
+  drifted file (a sound two-pass check), SEC-5 consent shows it byte-equal, threat-lint flagged
+  it, knee/floor/MMR admitted it. Skip-if-no-fixture; golden(50)/packs(22) numbers stay
+  byte-identical. Worded as admission/coverage, never "injection success".
+- **SEN-5 — incident response.** After discovering a bad memory a user had no recourse.
+  **`untrust`** revokes a corpus's trust (registry-entry removal beside `mark_trusted`;
+  revocation is by-gate — `is_trusted` re-reads live on every injection path, so no cache is
+  wiped and none needs to be). **`blast-radius`** is a read-only join over the four traces a
+  memory leaves — episode buffer, the typed link graph (`links.json`'s first real consumer),
+  governance citations, and the archive journal — with an explicit coverage banner naming its
+  blind spots. Both ship as MCP tools on both surfaces; the quarantine tier is dropped (SEC-6
+  owns the word).
+
 ## v1.19.0 — 2026-07-16 — "At the act, and beyond the session"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**,

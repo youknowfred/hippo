@@ -65,6 +65,7 @@ WRITE_OPEN_ALLOWLIST = {
     #    and a torn TAIL line is skipped by every jsonl reader --
     ("telemetry", "log_recall_event"): "append-only gitignored ledger; torn tail skipped",
     ("telemetry", "log_injection_producers"): "append-only gitignored cost ledger (MSR-6); torn tail skipped",
+    ("telemetry", "log_threat_findings"): "append-only gitignored Tier-B threat ledger (SEN-2); torn tail skipped",
     ("eval_recall", "append_run_ledger"): "append-only gitignored run ledger (MSR-1); torn tail skipped",
     ("telemetry", "log_episode"): "append-only gitignored ledger; torn tail skipped",
     ("telemetry", "log_decision"): "append-only gitignored ledger; torn tail skipped",
@@ -95,6 +96,7 @@ WRITE_OPEN_ALLOWLIST = {
     ("provenance", "ensure_self_ignoring_dir"): "derived-dir self-ignore marker; create-once, single '*' line",
     ("dream_eval", "_seed_soak"): "eval-harness fixture generation (bench substrate)",
     ("dream_eval", "_body"): "eval-harness fixture generation (bench substrate)",
+    ("eval_recall", "_sec6_withheld_via_real_recall"): "SEN-4 acceptance-probe: throwaway temp-repo fixture writes (whole dir rmtree'd); a torn write just fails the probe, fail-open + honest",
     # -- machine-local provisioning state under CLAUDE_PLUGIN_DATA: a failure means
     #    re-bootstrap, never corpus/registry loss --
     ("bootstrap", "_spawn"): "bootstrap log append",

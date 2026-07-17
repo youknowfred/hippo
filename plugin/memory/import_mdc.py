@@ -197,6 +197,7 @@ def import_candidates(
         from .new_memory import check_candidate
         from .provenance import resolve_dirs
         from .secrets import scan_text
+        from .threat_lint import scan_tier_a
 
         if memory_dir is None or repo_root is None:
             md, repo = resolve_dirs()
@@ -229,6 +230,7 @@ def import_candidates(
                     "neighbors": check.get("neighbors") or [],
                     "rule_neighbors": check.get("rule_neighbors") or [],
                     "secret_warnings": scan_text(f"{description}\n{body}"),
+                    "threat_warnings": scan_tier_a(f"{description}\n{body}"),
                     "exists": os.path.isfile(os.path.join(memory_dir, f"{slug}.md")),
                 }
             )
@@ -294,13 +296,37 @@ def import_mdc_file(
         body = _candidate_body(parsed, paths)
         rel = os.path.relpath(path, repo_root)
 
-        warnings = scan_with_remediation(f"{description}\n{body}")
+        candidate_text = f"{description}\n{body}"
+        warnings = scan_with_remediation(candidate_text)
         if warnings:
             result["held"] = True
             result["warnings"] = warnings
             result["error"] = (
                 "held for review: secret-looking content in the source .mdc — clean "
                 f"{rel} first; foreign input is never written flagged"
+            )
+            return result
+
+        # SEN-2: foreign input is UNTRUSTED, so a Tier-A threat payload HOLDS the import
+        # exactly as a secret does (never written, never recallable) until the source is
+        # cleaned. Tier-B imperative grammar is MEASURED to the dark ledger only — it MUST
+        # NOT enter the HOLD set (inv3: an over-broad HOLD would block legitimate imports on
+        # a class held dark precisely because its FP rate is unmeasured).
+        from .threat_lint import scan_tier_a, scan_tier_b
+
+        try:
+            from .telemetry import log_threat_findings
+
+            log_threat_findings(scan_tier_b(candidate_text), source="import", name=slug)
+        except Exception:
+            pass
+        threats = scan_tier_a(candidate_text)
+        if threats:
+            result["held"] = True
+            result["warnings"] = threats
+            result["error"] = (
+                "held for review: threat-lint payload in the source .mdc (SEN-2 Tier-A: "
+                f"{'; '.join(threats)}) — clean {rel} first; foreign input is never written flagged"
             )
             return result
 

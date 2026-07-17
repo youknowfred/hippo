@@ -181,6 +181,8 @@ VERBS: Tuple[VerbSurface, ...] = (
 VERBLESS_TOOLS: Dict[str, str] = {
     "rederive": "MIG-1 citation re-derivation — MCP tool on both surfaces, no /hippo:* form",
     "heal_baselines": "COR-10 empty-baseline heal — MCP tool on both surfaces, no /hippo:* form",
+    "untrust": "SEN-5 incident response — revoke a corpus's trust; MCP tool on both surfaces, no /hippo:* form",
+    "blast_radius": "SEN-5 incident forensics — read-only touch report; MCP tool on both surfaces, no /hippo:* form",
 }
 
 

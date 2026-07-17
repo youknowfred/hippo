@@ -45,6 +45,7 @@ _EPISODE_LEDGER_NAME = "episode_buffer.jsonl"
 _RECONSOLIDATION_LEDGER_NAME = "reconsolidation_events.jsonl"
 _OUTCOME_LEDGER_NAME = "outcome_events.jsonl"  # SIG-4: PostToolUse read-signal (KPI-2)
 _USAGE_AGGREGATES_NAME = "usage_aggregates.json"
+_THREAT_LEDGER_NAME = "threat_findings.jsonl"  # SEN-2 Tier-B: measured, never surfaced
 _SESSION_NAME = "session"
 
 # Tier 2: the only valid reconsolidation outcomes -- "fix" is a distinct outcome (content was
@@ -109,6 +110,10 @@ def _reconsolidation_ledger_path(telemetry_dir: str) -> str:
 
 def _outcome_ledger_path(telemetry_dir: str) -> str:
     return os.path.join(telemetry_dir, _OUTCOME_LEDGER_NAME)
+
+
+def _threat_ledger_path(telemetry_dir: str) -> str:
+    return os.path.join(telemetry_dir, _THREAT_LEDGER_NAME)
 
 
 def _usage_aggregates_path(telemetry_dir: str) -> str:
@@ -408,6 +413,92 @@ def read_injection_producers(telemetry_dir: Optional[str] = None) -> Iterator[di
                     yield obj
     except Exception:
         return
+
+
+# --------------------------------------------------------------------------- #
+# SEN-2 Tier-B: the measured-only threat ledger.
+#
+# Injection-imperative grammar (ignore-previous-instructions, tool-mimicry) is HELD DARK —
+# it WILL false-positive on hippo's own corpus (which is about prompt injection), so
+# surfacing it would degrade the human-review channel (inv3). Instead it is MEASURED here:
+# each write-plane seam that finds Tier-B grammar appends one row, and doctor renders a
+# single aggregate count line. A dated owner decision graduates it to Tier-A only once this
+# ledger proves a near-zero FP rate. Append-only, gitignored, rotates — the eval-run-ledger
+# precedent (MSR-1): registered in test_write_discipline's allowlist, not CRASH_CONTRACT
+# (a torn tail is a skipped measurement, never lost corpus truth).
+# --------------------------------------------------------------------------- #
+def log_threat_findings(
+    kinds: List[str],
+    *,
+    source: str,
+    name: Optional[str] = None,
+    telemetry_dir: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> bool:
+    """Append ONE Tier-B threat row. Fire-and-forget: NEVER raises, NEVER surfaced.
+
+    ``kinds`` are the ``threat_lint.scan_tier_b`` KINDS (never the payload); ``source`` is
+    the seam ("write"/"capture"/"import"); ``name`` the memory/candidate stem when known.
+    Absence-emits-nothing: an empty ``kinds`` writes no row (a clean scan adds no ledger
+    noise), so the ledger's row count IS the Tier-B hit count for FP measurement.
+    """
+    try:
+        if not kinds:
+            return False
+        td = _resolve_dir(telemetry_dir)
+        ensure_self_ignoring_dir(td)  # derived dir: mkdir + self-ignoring .gitignore (SEC-3)
+        event = {
+            "ts": round(time.time(), 3),
+            "session_id": current_session_id(td, session_id=session_id),
+            "source": str(source),
+            "name": str(name) if name else None,
+            "kinds": [str(k) for k in kinds],
+        }
+        path = _threat_ledger_path(td)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(event, ensure_ascii=False) + "\n")
+        _rotate_if_needed(path)
+        return True
+    except Exception:
+        return False
+
+
+def read_threat_findings(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
+    """Yield parsed Tier-B threat rows, skipping corrupt/partial lines. Never raises."""
+    try:
+        td = _resolve_dir(telemetry_dir)
+        path = _threat_ledger_path(td)
+        if not os.path.exists(path):
+            return
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(obj, dict):
+                    yield obj
+    except Exception:
+        return
+
+
+def threat_ledger_aggregate(telemetry_dir: Optional[str] = None) -> dict:
+    """``{"rows": int, "kinds": {kind: count}}`` over the Tier-B ledger — doctor's one line.
+
+    Aggregate only, by design: the doctor surface is a single count, never a per-memory
+    listing (that would resurrect the surfaced-flag the tier deliberately holds dark). Never
+    raises; empty aggregate when the ledger is absent.
+    """
+    rows = 0
+    kinds: Dict[str, int] = {}
+    for row in read_threat_findings(telemetry_dir):
+        rows += 1
+        for k in row.get("kinds") or []:
+            kinds[str(k)] = kinds.get(str(k), 0) + 1
+    return {"rows": rows, "kinds": kinds}
 
 
 # --------------------------------------------------------------------------- #

@@ -694,7 +694,7 @@ workstreams:
         title: Write-ticket verifier (mechanize the secret gate + fidelity + archive-shadow in check_candidate)
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: capture-consolidation, verdict: RESHAPE, convergence: 1, landscape: [cloudflare-8check, sage-2605]}
         problem: >-
           The consolidate secret gate is PROCEDURAL skill text, not code; check_candidate
@@ -733,7 +733,7 @@ workstreams:
         title: Write-side threat lint (invisible Unicode & scoped exfil-shape detection, tiered by precision)
         priority: P1
         effort: M
-        status: planned
+        status: done
         source: {lens: trust-security, verdict: RESHAPE, convergence: 2, landscape: [pillar-invisible-unicode-2025, minja-2503, spotlighting-microsoft]}
         problem: >-
           Memory-poisoning payloads (invisible Unicode zero-width/bidi/PUA, exfil-link
@@ -754,7 +754,7 @@ workstreams:
           - Tier-B writes to a persisted findings ledger + one aggregate doctor line ONLY — no per-write flag, no seed stamp, MUST NOT enter import_mdc's HOLD set — until a dated owner decision graduates it on a ledger-measured near-zero FP rate
           - an ED-3 in-harness spike on whether Claude Code's HTML-comment stripping covers hooks' additionalContext is run and dated BEFORE any HTML-comment neutralization; until then HTML comments are lint-only
           - secrets.py's _PATTERNS/scan_text/hunks_secret_flagged are unchanged (threat patterns are a sibling reusing the plumbing, not a fork); doctor line-count pin + hermetic fixtures (escape-sequence literals only, never literal invisible codepoints — filterwarnings=error) updated in lockstep
-        dependencies: [SEN-1, SEC-8, GRA-5]   # SEN-1 same-tier (container, build first); SEC-8 cross-file (ROADMAP.v1, open); GRA-5 shipped
+        dependencies: [SEN-1, SEC-8, GRA-5]   # SEN-1 same-tier (container, build first); GRA-5 shipped. PREMISE CORRECTED 2026-07-16 (build time): SEC-8 was marked "ROADMAP.v1, open" but SEC-8..14 ALL shipped 2026-07-10 (hippo-v080-sec-tail). The four write/import/doctor seams shipped; the fifth (CI) leg is genuinely deferred — its sanctioned vehicle is CLB-1 --ci (T12, UNBUILT), so threat_lint.scan_files ships ready for it, not forked into a second CI job.
         invariant_note: >-
           inv4 — per-item flags/HOLD, no bulk sweep; Tier-B is measurement-only. inv6 —
           detection at capture/write/import/doctor/CI, never the hot path; the one
@@ -774,7 +774,7 @@ workstreams:
         title: Ungrounded-prescription lint (agent-voiced intent attribution, warn-only)
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: capture-consolidation, verdict: RESHAPE, convergence: 1, landscape: [mist-sycophancy-25x, transcription-not-synthesis]}
         problem: >-
           Capture-from-evidence is hippo's spine, but nothing flags a memory body that
@@ -810,7 +810,7 @@ workstreams:
         title: Adversarial eval category (poisoned-memory fixtures acceptance-testing the shipped trust spine)
         priority: P1
         effort: L
-        status: planned
+        status: done
         source: {lens: trust-security, verdict: RESHAPE, convergence: 1, landscape: [agentpoison-neurips24, skillcloak-2607]}
         problem: >-
           The v0.8.0 trust spine (SEC-5/6/7) shipped with no adversarial regression
@@ -853,7 +853,7 @@ workstreams:
         title: Incident response — untrust verb + blast-radius report
         priority: P1
         effort: S
-        status: planned
+        status: done
         source: {lens: trust-security, verdict: RESHAPE, convergence: 1, landscape: [mcpoison-cve-2025]}
         problem: >-
           After discovering a bad/poisoned memory a user has no recourse — there is NO
@@ -1506,10 +1506,10 @@ release_train:
       the salience A/B evidence (recorded, NOT acted on — the default stays OFF).
 
   - tier: T10
-    target_version: 1.10.0
+    target_version: 1.10.0   # STALE label (authored pre-round-3); T10 landed post-v1.19.0, 2026-07-16, no version bump — rides whatever release Fred cuts next
     theme: "Sentinel: write-side quality & memory security"
-    status: planned
-    gate: "The trust spine (SEC-5/6/7) is SHIPPED (2f960a7) — SEN-4 acceptance-tests it. SEN-2's CI leg depends on SEC-8 (ROADMAP.v1, open); ship SEN-2's non-CI seams regardless and wire the CI leg when SEC-8/CLB-1 land."
+    status: done
+    gate: "The trust spine (SEC-5/6/7) is SHIPPED (2f960a7) — SEN-4 acceptance-tests it. CI-LEG PREMISE CORRECTED at build (2026-07-16): the gate said 'SEN-2's CI leg depends on SEC-8 (ROADMAP.v1, open)' — but SEC-8..14 ALL shipped 2026-07-10 (hippo-v080-sec-tail). SEC-8's own secret-scan CI job is live; the THREAT-lint CI leg's sanctioned vehicle is CLB-1 --ci (T12, still UNBUILT), so SEN-2 shipped its four non-CI seams + threat_lint.scan_files ready for that vehicle, and deliberately did NOT fork a second CI surface."
     done_means: >-
       The just-shipped trust spine is a proven, incident-ready defense: a deterministic
       write-ticket verifier mechanizes the reviewer's eye (secret gate, hunk fidelity,
@@ -1525,6 +1525,22 @@ release_train:
       recall/trust/doctor) before writing a fixture, and CUTS the always-on spotlighting
       envelope. SEN-5 DROPS the quarantine verb (collides with shipped SEC-6). SEC-8's CI
       gate has ONE vehicle (CLB-1 --ci); SEN-2 feeds it, does not fork it.
+      BUILT 2026-07-16 (see hippo-enh-t10-sentinel), 5/5 items, one session, tests-first,
+      full suite green after each (~2,500 tests, no version bump). ED-3 spike RUN + dated:
+      hook additionalContext reaches the model VERBATIM (observed this session — the recall
+      block rendered literally), so HTML comments survive as a hidden-instruction channel ->
+      kept Tier-A LINT, neutralization deferred behind a dated owner decision (removing body
+      content is a mutation, ED-4). SEN-4 adversarial boolean report shape shipped (per row:
+      payload_crossed_raw / sec6_quarantine_withheld / sec5_consent_byte_equal /
+      threat_lint_flagged / admitted), driving the SHIPPED spine (no re-impl); golden/packs
+      byte-identical. SEN-5 untrust proved revocation-by-gate (trust->inject->untrust->
+      withhold, zero cache files touched). NB corrected in-file: SEC-8 was NOT open (shipped
+      2026-07-10); and the tree is corpus_format 5 / SCHEMA_VERSION 7 (not the 4/6 the
+      round-2 ED-4 note predicted — no SEN item needed a bump, so ED-4's spirit held even as
+      its stated numbers aged). A REAL SEN-2 gap was caught + fixed building SEN-4: the write
+      ticket scanned the RENDERED frontmatter, but json-escaping hides a description-embedded
+      invisible codepoint (\uXXXX) that unescapes back to the real byte on inject; both the
+      ticket and the adversarial report now scan the UNESCAPED description + body.
     capstone: >-
       Write hippo-enh-t10-sentinel: the ED-3 HTML-comment-stripping finding, the
       adversarial-category boolean report shape (which payloads the spine caught), the
@@ -1669,6 +1685,15 @@ decisions:
       IOP-1 (Copilot applyTo:), IOP-2 (.mdc drift/delete detection), IOP-4 (claude-mem
       store format), and any future reranker swap (fastembed loadability). Record the
       dated finding on the item.
+      SEN-2 FINDING (2026-07-16): hook additionalContext is delivered to the model as RAW
+      TEXT (the UserPromptSubmit recall block, emitted by recall --stdin-json as
+      hookSpecificOutput.additionalContext, reached the model verbatim this session with
+      punctuation/markup intact — there is no markdown render or comment-strip on that
+      channel). So an HTML comment in a memory body WOULD survive into a consuming agent's
+      context. Conclusion: HTML comments ship Tier-A LINT-ONLY (the flag is the signal);
+      neutralization (stripping comment bytes at render) is JUSTIFIED by the finding but
+      DEFERRED behind a dated owner decision, because removing content from a body is a
+      mutation (the ED-4 clean-break discipline), not a warn-time side effect.
   - id: ED-4
     carried_from: round-1
     decision: additive fields are absence-emits-nothing; schema bumps are clean breaks, one migration each
