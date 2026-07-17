@@ -1051,6 +1051,13 @@ def _tool_new_memory(args: Dict[str, Any]) -> str:
             out.append("warning : restates the governance plane — link, don't copy:")
             for r in decision["rule_neighbors"]:
                 out.append(f"  • {r['file']} (overlap {r['score']:.2f}) — \"{r['preview']}\"")
+        # SEN-1: render the write ticket verbatim at the same approval-prompt step the
+        # CLI --check does — one gate stamp, two surfaces, no drift.
+        from .new_memory import render_write_ticket
+
+        ticket_block = render_write_ticket(decision.get("ticket"))
+        if ticket_block:
+            out.append(ticket_block)
         if decision.get("note"):
             out.append(f"note: {decision['note']}")
         out.append(
