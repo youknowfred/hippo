@@ -970,6 +970,56 @@ _TOOLS = [
             },
         },
     },
+    # SEN-5 — incident response, a category of their own (like the INT-14/15 repair tools):
+    # they exist for AFTER a bad/poisoned memory is discovered. Appended at the END —
+    # STABILITY.md freezes tool names, shapes AND positions.
+    {
+        "name": "untrust",
+        "description": (
+            "SEN-5: REVOKE trust for a corpus after discovering it is bad/poisoned — the "
+            "incident-response inverse of the trust_corpus consent flow (the only recourse "
+            "was to consent; there was no un-consent). Removes exactly THIS repo's entry from "
+            "the machine-local trust registry, preserving every sibling; idempotent (an "
+            "already-untrusted corpus is a successful no-op). Revocation is BY-GATE: is_trusted "
+            "re-reads the registry live on every injection path, so the next recall withholds "
+            "the corpus immediately — NO cache is wiped (any derived index/telemetry is "
+            "stale-but-inert; the gate denies the corpus before recall consults it). Differs "
+            "from the remove tool/skill, which offboards a project but leaves trust as-is. "
+            "Defaults to THIS project's corpus; pass repo_root to untrust another."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repo_root": {
+                    "type": "string",
+                    "description": "the repo root whose corpus to untrust; omit for this project",
+                },
+            },
+        },
+    },
+    {
+        "name": "blast_radius",
+        "description": (
+            "SEN-5: read-only incident forensics for a suspect memory — after untrust (or on "
+            "spotting one poisoned memory), see what it TOUCHED. Joins four traces: the "
+            "sessions whose recall surfaced it (episode buffer), its typed+untyped link graph "
+            "adjacency (who it points at / who points at it), governance files that cite it, "
+            "and any archive-journal move of it. Writes NOTHING. Its output ALWAYS states its "
+            "coverage LIMITS: the episode buffer rotates at a byte cap (old recalls fall off) "
+            "and MCP-channel recall does not write the episode buffer today, so episode "
+            "coverage is a lower bound — link/governance/archive coverage is complete."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "the memory slug (with or without .md) to trace",
+                },
+            },
+            "required": ["name"],
+        },
+    },
 ]
 
 
@@ -2621,6 +2671,49 @@ def _tool_interview(args: Dict[str, Any]) -> str:
     return render_questions(gather_questions(memory_dir, repo_root=repo_root))
 
 
+def _tool_untrust(args: Dict[str, Any]) -> str:
+    """SEN-5 — revoke trust for a corpus (registry-entry removal beside mark_trusted).
+
+    Deliberately NOT resource-gated: untrust is a machine-local registry edit the user
+    performs to STOP trusting a corpus, so it must work precisely when the corpus is
+    already suspect. It never reads corpus content — only the trust registry.
+    """
+    from . import trust
+    from .provenance import resolve_dirs
+
+    repo_root = str(args.get("repo_root") or "").strip()
+    if not repo_root:
+        _md, repo_root = resolve_dirs()
+    if not repo_root:
+        return "untrust: could not resolve a repo root; pass repo_root explicitly."
+    ok = trust.untrust(repo_root)
+    if not ok:
+        return f"untrust: FAILED to write the registry for {repo_root} (nothing changed)."
+    return (
+        f"untrust: {repo_root} is no longer trusted (idempotent). Revocation is by-gate — the "
+        "next recall/SessionStart withholds this corpus immediately; is_trusted re-reads the "
+        "registry live, so NO cache was wiped. Any derived index/telemetry is stale-but-inert "
+        "(the gate denies the corpus before recall consults it). Re-consent via the doctor / "
+        "trust_corpus flow if you later review and trust it again."
+    )
+
+
+def _tool_blast_radius(args: Dict[str, Any]) -> str:
+    """SEN-5 — read-only blast-radius forensics. Gated like every corpus read (SEC-1): its
+    output names memory stems + governance paths, the injection surface the gate protects."""
+    from .blast_radius import blast_radius, render
+
+    refusal, memory_dir, repo_root = _corpus_gate(
+        "blast_radius", "the report names memory stems, links, and governance citations"
+    )
+    if refusal:
+        return refusal
+    name = str(args.get("name") or "").strip()
+    if not name:
+        return "blast_radius: a memory name is required."
+    return render(blast_radius(name, memory_dir=memory_dir, repo_root=repo_root))
+
+
 _DISPATCH = {
     "recall": _tool_recall,
     "new_memory": _tool_new_memory,
@@ -2656,6 +2749,10 @@ _DISPATCH = {
     # EXT-3 (T17): consolidate's asks step — appended at the END (STABILITY.md freezes
     # names, shapes AND positions).
     "interview": _tool_interview,
+    # SEN-5 (T10): incident-response verbs — untrust (revoke) + blast_radius (read-only
+    # forensics). Appended at the END, same position freeze.
+    "untrust": _tool_untrust,
+    "blast_radius": _tool_blast_radius,
 }
 
 

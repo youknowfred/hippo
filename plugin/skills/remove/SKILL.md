@@ -53,7 +53,11 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
    ```
    Trust state (`hippo-trust.json`) is deliberately left as-is — trust records the user's
    review of the CORPUS content, which removal does not un-review; re-running `/hippo:init`
-   later picks both straight back up.
+   later picks both straight back up. This is the opposite intent from SEN-5's `untrust` MCP
+   tool: **remove** = "I'm done working here" (offboard the project, keep the review), while
+   **untrust** = "I no longer trust this corpus" (revoke the review, by-gate, no cache wipe).
+   Reach for `untrust` after finding a bad/poisoned memory; reach for `remove` to offboard a
+   project you still trust.
 
 2. **Offer to delete the derived, gitignored dirs — agent-gated, never unconditional.** Ask the
    user (in this skill's own conversational turn) before deleting anything here; a "yes" to step

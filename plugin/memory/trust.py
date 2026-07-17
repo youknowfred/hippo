@@ -197,6 +197,37 @@ def mark_trusted(
         return False
 
 
+def untrust(repo_root: str) -> bool:
+    """SEN-5: REVOKE trust for ``repo_root`` — remove exactly its registry entry. Idempotent.
+
+    The incident-response inverse of ``mark_trusted``: after discovering a bad/poisoned
+    corpus a user needs recourse, and there was none (only mark_trusted existed). Removes
+    THIS corpus's key from the machine-local registry, preserving every sibling entry (the
+    same sibling-safe read-through-write ``record_authored_write`` uses). Returns True when an
+    entry was removed OR was already absent (idempotent — untrusting an already-untrusted
+    corpus is a successful no-op), False only on a write failure.
+
+    REVOCATION IS BY-GATE, so this ships ZERO cache-invalidation code (inv1): ``is_trusted``
+    re-reads the registry live on EVERY injection path (recall, SessionStart, the MCP write
+    tools), so the moment this entry is gone the next recall withholds the corpus — no derived
+    index/telemetry cache needs wiping. Any such cache is stale-but-inert: it can't inject,
+    because the gate denies the corpus before recall consults it. (This differs from
+    ``/hippo:remove``, which offboards a project but deliberately LEAVES trust as-is — see
+    remove/SKILL.md: removal is 'I'm done here', untrust is 'I no longer trust this'.)
+    """
+    try:
+        key = _corpus_key(repo_root)
+        doc = _load_registry_doc()
+        trusted = doc.get("trusted")
+        if not isinstance(trusted, dict) or key not in trusted:
+            return True  # already untrusted — idempotent success, nothing to write
+        del trusted[key]
+        doc["trusted"] = trusted
+        return _write_registry_doc(doc)
+    except Exception:
+        return False
+
+
 # --------------------------------------------------------------------------- #
 # SEC-6: content fingerprint — re-consent on material change.
 #
