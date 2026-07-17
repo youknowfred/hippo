@@ -65,6 +65,7 @@ WRITE_OPEN_ALLOWLIST = {
     #    and a torn TAIL line is skipped by every jsonl reader --
     ("telemetry", "log_recall_event"): "append-only gitignored ledger; torn tail skipped",
     ("telemetry", "log_injection_producers"): "append-only gitignored cost ledger (MSR-6); torn tail skipped",
+    ("telemetry", "log_threat_findings"): "append-only gitignored Tier-B threat ledger (SEN-2); torn tail skipped",
     ("eval_recall", "append_run_ledger"): "append-only gitignored run ledger (MSR-1); torn tail skipped",
     ("telemetry", "log_episode"): "append-only gitignored ledger; torn tail skipped",
     ("telemetry", "log_decision"): "append-only gitignored ledger; torn tail skipped",

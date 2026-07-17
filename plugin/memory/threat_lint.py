@@ -1,293 +1,343 @@
-"""Write-side threat lint (SEN-2) — deterministic detection of memory-poisoning payloads.
+"""Write-side threat lint for memory text (SEN-2) — the poisoning-payload sibling of secrets.py.
 
-``secrets.py``'s SIBLING, not an extension of it: ``secrets._PATTERNS``/``scan_text`` stay
-byte-identical (the SEC-8 CI gate and every credential surface keep their exact semantics),
-while this module owns the THREAT classes — content shapes whose purpose is to smuggle
-instructions into agent context or exfiltrate it, rather than to leak a credential. A
-memory corpus is a durable injection channel (committed once, re-injected on every recall),
-and rules files are the documented attack target (the Pillar invisible-Unicode campaign),
-so detection runs at the WRITE-SIDE seams — capture, the write ticket, import, doctor —
-never the recall hot path (inv6). The one hot-path-adjacent capability (render-time
-codepoint stripping) is deliberately NOT built.
+``secrets.py`` catches leaked CREDENTIALS. It is blind to memory-POISONING payloads: an
+invisible zero-width/bidi/PUA codepoint smuggled into a body, a mixed-script homograph, an
+HTML-comment instruction channel, an image-embed/data-query exfil shape, or
+injection-imperative grammar. Those reach the corpus through capture/import/write with no
+detection today, and a rules file is the exact Pillar-2025 attack target. This module is the
+detector for them — a ``secrets.py`` SIBLING that reuses the same design doctrine (one
+pattern set, warn-KIND-never-payload, never-raise) without touching or forking secrets.py's
+credential table.
 
-TIERED BY PRECISION (ED-1 applied one level deeper — inv3: an over-broad flag surface
-degrades the exact human-review channel it feeds):
+TIERED BY MEASURED PRECISION (ED-1's split, one level deeper — an over-broad flag surface
+degrades the human-review channel, inv3):
 
-Tier-A — deterministic, near-zero-FP classes, SURFACED (flags at every seam; the
-invisible-unicode / mixed-script / exfil classes also HOLD an import):
-  - ``invisible-unicode``: zero-width characters, bidi CONTROLS, Unicode TAG characters
-    (the invisible-instruction smuggling alphabet), and private-use-area codepoints.
-    Carve-outs keep real text clean: ZWJ inside an emoji join sequence never flags;
-    isolated variation selectors (emoji presentation, CJK ideographic variation) never
-    flag — only a RUN of them (a data-smuggling shape) does. RTL POSTURE, stated: bidi
-    control CHARACTERS are always flagged (the Trojan-Source shape); RTL SCRIPTS
-    (Hebrew/Arabic letters) are NEVER flagged — a genuinely RTL corpus stays clean
-    because prose needs no explicit direction-override controls in markdown.
-  - ``mixed-script``: a single word-token mixing ASCII Latin with Cyrillic/Greek
-    HOMOGLYPHS (the lookalike alphabet, curated below) — the spoofed-identifier shape.
-    Whole-word single-script text (a Russian or Greek memory) never flags; only the
-    Latin×lookalike mix inside ONE token does.
-  - ``exfil-link``: remote image embeds (``![...](https://...)`` — the auto-fetch beacon
-    shape) and URLs whose query string carries a long opaque data value. NEVER a bare
-    URL: an ordinary docs link, however unfamiliar, is not a finding (scope is the
-    load-bearing precision decision).
-  - ``html-comment``: LINT-ONLY — flagged (a hidden-from-render channel is worth naming
-    at review time) but it never joins the import HOLD set and is never neutralized:
-    markdown authors legitimately write ``<!-- -->`` comments, and any stripping decision
-    is ED-3-gated on an in-harness spike of whether the harness already strips them from
-    hooks' additionalContext (finding recorded on the SEN-2 roadmap item; until a dated
-    owner decision, lint-only is the whole ambition).
+  Tier-A — SURFACED + import HOLD. Deterministic codepoint/regex classes precise enough to
+    show a human and to hold a foreign import:
+      · invisible / dangerous Unicode — zero-width joins, bidi CONTROLS (Trojan Source),
+        tag-block ASCII smuggling, Private Use Area. Carve-outs: emoji ZWJ sequences and
+        variation selectors (legitimate emoji construction). RTL POSTURE (stated): the bidi
+        CONTROL codepoints are flagged (they reorder rendered text — the attack); RTL SCRIPT
+        LETTERS (Arabic/Hebrew) are never flagged (legitimate multilingual content uses
+        letters, not control codes). A genuinely RTL corpus that embeds directional marks
+        would see Tier-A noise — the multilingual mode is where that carve-out would live, a
+        deferred follow-on, not this item.
+      · mixed-script confusables — a SINGLE token drawing from Latin AND Cyrillic/Greek (the
+        homograph attack, ``pаypal``). Whole-word multilingual prose (each token one script)
+        is NOT flagged.
+      · HTML comments — LINT-ONLY, ED-3-gated (see below). Flagged, never neutralized.
+      · exfil shapes — scoped STRICTLY to image-embeds (``![](url)`` / ``<img src>``) and
+        data-bearing query strings (a long opaque ``?param=<blob>``). NEVER a bare URL: a
+        plain reference link is not an exfil shape, and flagging it would be exactly the
+        noisy-warning anti-pattern secrets.py's header warns against.
 
-Tier-B — imperative injection grammar (ignore-previous-instructions, role reassignment,
-tool/role mimicry, concealment directives): HELD DARK. Detected but LEDGER-ONLY — findings
-append to a gitignored telemetry ledger and surface as ONE aggregate doctor line; no
-per-write flag, no capture-seed stamp, and they MUST NOT enter import's HOLD set — until a
-dated owner decision graduates a pattern on a ledger-measured near-zero FP rate
-(not_pursuing: tier-b-imperative-injection-flags). English prose ABOUT injection (this
-docstring, a security memory) matches these patterns — that is the expected FP mode and
-exactly why the tier is dark: the ledger measures it instead of nagging about it.
+  Tier-B — LEDGER-ONLY. Injection-imperative grammar (ignore-previous-instructions,
+    tool-mimicry). MEASURED to a persisted ledger + one aggregate doctor line, NEVER
+    surfaced, NEVER a HOLD, until a dated owner decision graduates it on a measured near-zero
+    FP rate (``not_pursuing: tier-b-imperative-injection-flags``). hippo's OWN corpus is
+    about prompt injection and CARRIES these phrases as data, so Tier-B WILL false-positive
+    on it — which is precisely why surfacing it would degrade the review channel, and why it
+    stays dark until the ledger proves the FP rate.
 
-CI: the SEC-8 CI gate has ONE vehicle — CLB-1's ``--ci`` review packet (T12, unbuilt).
-``scan_files`` below is the FEEDER that vehicle calls when it lands; this module ships no
-second CI surface and no repo-walk gate of its own (``memory.secrets --repo`` keeps the
-credential gate; forking a second one was explicitly rejected).
+ED-3 SPIKE (HTML-comment stripping) — run + dated 2026-07-16, recorded on the ROADMAP item
+and the SEN capstone: hook ``additionalContext`` is delivered to the model as RAW TEXT (the
+UserPromptSubmit recall block, emitted by ``recall --stdin-json`` as
+``hookSpecificOutput.additionalContext``, reaches the model verbatim — observed directly
+this session, punctuation and markup intact; there is no markdown render or comment-strip on
+that channel). So an HTML comment in a memory body WOULD survive into a consuming agent's
+context: a real hidden-instruction channel. Conclusion: HTML comments stay Tier-A LINT (the
+flag gives the human the signal); NEUTRALIZATION (stripping comment bytes at render) is
+justified by the finding but DEFERRED behind a dated owner decision — removing content from a
+memory body is a mutation, the ED-4 clean-break discipline, not a warn-time side effect.
 
-Shared doctrine with secrets.py (same reasons, stated there): WARN NEVER BLOCK at hippo's
-own write surfaces (import's foreign-content HOLD is the one deliberate exception, and it
-mirrors the shipped secret-lint HOLD exactly); HIGH PRECISION OVER RECALL; NEVER ECHO the
-payload — findings name codepoints (``U+200B×2``) and pattern ids, never the matched text,
-because a finding line lands in logs/transcripts and re-emitting a smuggled payload there
-would hand it the channel it wanted. Zero LLM, zero network, pure ``re``/``ord``.
+CI leg (the fifth seam): the roadmap's sanctioned CI vehicle is CLB-1 ``--ci`` (T12,
+UNBUILT). Per "SEC-8's CI gate has ONE vehicle (CLB-1 --ci); SEN-2 feeds it, does not fork
+it," this module ships ``scan_files`` ready for that vehicle to call, and does NOT stand up a
+second CI job. (The shipped ``memory.secrets --repo`` secret-scan gate is deliberately not
+extended here — extending it would be forking a second CI surface for threats.) The four
+live seams — capture, new_memory write-ticket, import HOLD, doctor sweep — ship now.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import re
-import time
-from typing import Dict, List, Optional, Tuple
+import unicodedata
+from typing import Dict, List
 
 # --------------------------------------------------------------------------- #
-# Tier-A class 1: invisible Unicode.
+# Tier-A class 1: invisible / dangerous Unicode.
 # --------------------------------------------------------------------------- #
-
-# Zero-width characters flagged UNCONDITIONALLY (no legitimate markdown-body use):
-# ZWSP, ZWNJ, WORD JOINER, ZWNBSP/BOM-in-body. ZWJ (U+200D) is handled separately —
-# it is load-bearing inside emoji join sequences and only flags OUTSIDE one.
-_ZERO_WIDTH_ALWAYS = {0x200B, 0x200C, 0x2060, 0xFEFF}
-_ZWJ = 0x200D
-
-# Bidi CONTROL characters (Trojan-Source alphabet): embeddings/overrides + isolates +
-# the implicit direction MARKS. Controls, never scripts — see the module docstring's
-# stated RTL posture.
-_BIDI_CONTROLS = {0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069, 0x200E, 0x200F}
-
-# Variation selectors: basic (FE00-FE0F) + supplement (E0100-E01EF). Isolated use is
-# legitimate presentation; a RUN of this many is the encode-data-in-selectors shape.
-_VS_RUN_FLOOR = 4
-
-# Unicode TAG characters (U+E0000-U+E007F): a full invisible ASCII twin — the classic
-# instruction-smuggling alphabet. No carve-out; there is no legitimate memory-body use.
-def _is_tag(cp: int) -> bool:
-    return 0xE0000 <= cp <= 0xE007F
+# Zero-width joins/spaces that hide bytes in otherwise-normal text.
+_ZERO_WIDTH = frozenset(
+    {0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF, 0x2061, 0x2062, 0x2063, 0x2064}
+)
+# Bidi CONTROLS — the Trojan-Source reordering set. RTL SCRIPT LETTERS are NOT here (the
+# stated posture): only the format controls that visually reorder text are the attack.
+_BIDI_CONTROLS = frozenset(
+    {0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069, 0x200E, 0x200F, 0x061C}
+)
 
 
 def _is_pua(cp: int) -> bool:
-    """Private-use-area codepoints (BMP PUA + planes 15/16) — render as nothing/tofu."""
+    """Private Use Area (BMP + planes 15/16) — never legitimate in shared prose."""
     return 0xE000 <= cp <= 0xF8FF or 0xF0000 <= cp <= 0xFFFFD or 0x100000 <= cp <= 0x10FFFD
 
 
+def _is_tag_char(cp: int) -> bool:
+    """Unicode TAG block (U+E0000–U+E007F) — the ASCII-smuggling channel."""
+    return 0xE0000 <= cp <= 0xE007F
+
+
 def _is_variation_selector(cp: int) -> bool:
+    """VS1–16 (U+FE00–U+FE0F) + supplement (U+E0100–U+E01EF) — legitimate emoji presentation."""
     return 0xFE00 <= cp <= 0xFE0F or 0xE0100 <= cp <= 0xE01EF
 
 
-def _is_emojiish(ch: str) -> bool:
-    """Loose emoji-side test for the ZWJ carve-out: is this char plausibly an emoji part?
+def _is_emoji_ish(cp: int) -> bool:
+    """True for a codepoint that legitimately participates in an emoji ZWJ sequence.
 
-    Deliberately GENEROUS (symbols, pictographs, VS-16, regional indicators, skin-tone
-    modifiers): a generous carve-out only risks missing a ZWJ smuggled BETWEEN two emoji —
-    a channel of a few bits — while a stingy one flags real family/flag/profession emoji
-    in ordinary prose, which is the precision failure this module refuses first.
+    Deliberately broad — the point is the CARVE-OUT: a ZWJ flanked by emoji/VS is a
+    legitimate sequence (family/profession emoji), so we must NOT flag it. Covers the main
+    emoji blocks, regional indicators, VS, and skin-tone modifiers.
     """
-    if not ch:
-        return False
-    o = ord(ch)
     return (
-        o >= 0x1F000
-        or 0x2190 <= o <= 0x2BFF  # arrows, misc symbols, dingbats
-        or o == 0xFE0F  # VS-16 emoji presentation
-        or o == 0x20E3  # combining enclosing keycap
+        0x1F300 <= cp <= 0x1FAFF
+        or 0x2600 <= cp <= 0x27BF        # misc symbols + dingbats
+        or 0x1F000 <= cp <= 0x1F2FF      # mahjong/domino/enclosed
+        or 0x1F1E6 <= cp <= 0x1F1FF      # regional indicators
+        or 0x2190 <= cp <= 0x21FF        # arrows (some are emoji base)
+        or 0x2B00 <= cp <= 0x2BFF
+        or cp in (0x2122, 0x2139, 0x24C2, 0x3030, 0x303D, 0x3297, 0x3299)
+        or _is_variation_selector(cp)
     )
 
 
-def _invisible_findings(text: str) -> List[Tuple[str, int]]:
-    """``[(codepoint-label, count)]`` for every invisible-Unicode hit in ``text``.
+def _invisible_findings(text: str) -> List[str]:
+    """KINDS for invisible/dangerous codepoints — counts only, NEVER the payload bytes.
 
-    Sorted by codepoint for order-stable output. Labels are ``U+XXXX`` — the finding
-    names the ALPHABET, never re-emits the smuggled content.
+    Emitting the matched substring would re-inject the exact invisible payload into the
+    log/agent transcript this warning lands in (secrets.py's own never-echo rule, sharper
+    here: the payload is by definition unreadable). ZWJ inside an emoji sequence and any
+    variation selector are carved out.
     """
-    counts: Dict[int, int] = {}
-    vs_run = 0
+    zero = bidi = pua = tag = 0
+    n = len(text)
     for i, ch in enumerate(text):
         cp = ord(ch)
-        if _is_variation_selector(cp):
-            vs_run += 1
-            if vs_run == _VS_RUN_FLOOR:
-                counts[cp] = counts.get(cp, 0) + 1  # one finding per run, keyed on the run's edge char
+        if cp in _ZERO_WIDTH:
+            if cp == 0x200D:
+                prev_cp = ord(text[i - 1]) if i > 0 else 0
+                next_cp = ord(text[i + 1]) if i + 1 < n else 0
+                # Legitimate ONLY when emoji-flanked on BOTH sides (a real ZWJ sequence).
+                if _is_emoji_ish(prev_cp) and _is_emoji_ish(next_cp):
+                    continue
+            zero += 1
+        elif cp in _BIDI_CONTROLS:
+            bidi += 1
+        elif _is_variation_selector(cp):
             continue
-        vs_run = 0
-        if cp in _ZERO_WIDTH_ALWAYS or cp in _BIDI_CONTROLS or _is_tag(cp) or _is_pua(cp):
-            counts[cp] = counts.get(cp, 0) + 1
-        elif cp == _ZWJ:
-            prev_ch = text[i - 1] if i > 0 else ""
-            next_ch = text[i + 1] if i + 1 < len(text) else ""
-            if not (_is_emojiish(prev_ch) and _is_emojiish(next_ch)):
-                counts[cp] = counts.get(cp, 0) + 1
-    return [(f"U+{cp:04X}", n) for cp, n in sorted(counts.items())]
+        elif _is_tag_char(cp):
+            tag += 1
+        elif _is_pua(cp):
+            pua += 1
+    out: List[str] = []
+    if zero:
+        out.append(f"invisible Unicode: {zero} zero-width character(s)")
+    if bidi:
+        out.append(f"invisible Unicode: {bidi} bidi-control character(s) (text-reordering)")
+    if tag:
+        out.append(f"invisible Unicode: {tag} tag-block character(s) (ASCII smuggling)")
+    if pua:
+        out.append(f"invisible Unicode: {pua} Private-Use-Area character(s)")
+    return out
 
 
 # --------------------------------------------------------------------------- #
-# Tier-A class 2: mixed-script confusables.
+# Tier-A class 2: mixed-script confusables (within-token homographs).
 # --------------------------------------------------------------------------- #
-
-# The curated LOOKALIKE alphabets — codepoints that render (near-)identically to an
-# ASCII Latin letter. Deliberately not "any Cyrillic/Greek": a token like "kΩ" (Latin k +
-# OMEGA, no lookalike) or wholly-Cyrillic prose must never flag; "pаypal" (Cyrillic а)
-# must. Small and curated beats complete and noisy — same doctrine as secrets._PATTERNS.
-_CYRILLIC_LOOKALIKES = set("аеорсухіјѕќґЁ") | set("АВЕЗКМНОРСТУХІЈЅ")
-_GREEK_LOOKALIKES = set("οικνρτυχ") | set("ΑΒΕΖΗΙΚΜΝΟΡΤΥΧ")
-_LOOKALIKES = _CYRILLIC_LOOKALIKES | _GREEK_LOOKALIKES
-
-_WORD_TOKEN_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
+_WORD_RE = re.compile(r"[^\W\d_]{2,}", re.UNICODE)  # runs of >=2 letters (no digits/underscore)
 
 
-def _mixed_script_findings(text: str) -> int:
-    """Count of word-tokens mixing ASCII Latin letters with confusable lookalikes."""
-    hits = 0
-    for tok in _WORD_TOKEN_RE.findall(text):
-        has_latin = any("a" <= c.lower() <= "z" for c in tok if ord(c) < 128)
-        if has_latin and any(c in _LOOKALIKES for c in tok):
-            hits += 1
-    return hits
-
-
-# --------------------------------------------------------------------------- #
-# Tier-A class 3: exfil-link shapes.  Class 4: HTML comments (lint-only).
-# --------------------------------------------------------------------------- #
-
-# Remote image embed: markdown auto-render turns it into a zero-click fetch whose URL an
-# attacker controls — the beacon shape. Local/relative image paths never flag.
-_IMAGE_EMBED_RE = re.compile(r"!\[[^\]]*\]\(\s*https?://", re.IGNORECASE)
-
-# Data-bearing query string: one query-param VALUE long and opaque enough to be a payload
-# (≥24 chars of token-ish material, no dots — dots reintroduce filename/tracking-slug FPs).
-# A bare URL, a short ?tab=readme, a ?v=<11-char id> all stay clean by construction.
-_DATA_QUERY_RE = re.compile(r"https?://[^\s)\"'<>]*[?&][A-Za-z0-9_.~-]+=[A-Za-z0-9+/=_%-]{24,}")
-
-_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
-
-# --------------------------------------------------------------------------- #
-# Tier-A assembly: the one class table (mirrors secrets' one-list architecture).
-# --------------------------------------------------------------------------- #
-
-# Classes that HOLD a foreign import (import_mdc) — html-comment is deliberately absent
-# (lint-only pending ED-3; markdown comments are legitimate authoring practice).
-HOLD_CLASSES = ("invisible-unicode", "mixed-script", "exfil-link")
-LINT_ONLY_CLASSES = ("html-comment",)
-TIER_A_CLASSES = HOLD_CLASSES + LINT_ONLY_CLASSES
-
-_MAX_CODEPOINTS_NAMED = 6
-
-
-def scan_details(text: str) -> List[dict]:
-    """Structured Tier-A findings: ``[{"class", "message", "count"}]``. [] when clean.
-
-    ``message`` is the human line every warn surface prints — KIND + counts + (for
-    invisible Unicode) the codepoint labels, NEVER the matched text. Deterministic and
-    order-stable (class-table order). Never raises: a scan failure returns [] rather
-    than blocking any write (the module-header doctrine).
-    """
+def _script(cp: int) -> str:
+    """The confusable-relevant script of a codepoint: latin/cyrillic/greek/other."""
+    if 0x41 <= cp <= 0x5A or 0x61 <= cp <= 0x7A:
+        return "latin"
+    if 0x0400 <= cp <= 0x04FF or 0x0500 <= cp <= 0x052F:
+        return "cyrillic"
+    if 0x0370 <= cp <= 0x03FF or 0x1F00 <= cp <= 0x1FFF:
+        return "greek"
     try:
-        out: List[dict] = []
-        inv = _invisible_findings(text)
-        if inv:
-            shown = ", ".join(f"{label}×{n}" for label, n in inv[:_MAX_CODEPOINTS_NAMED])
-            more = f" (+{len(inv) - _MAX_CODEPOINTS_NAMED} more)" if len(inv) > _MAX_CODEPOINTS_NAMED else ""
-            total = sum(n for _, n in inv)
-            out.append(
-                {
-                    "class": "invisible-unicode",
-                    "message": f"invisible Unicode detected: {total} zero-width/bidi/tag/PUA "
-                    f"codepoint(s) ({shown}{more}) — an invisible-instruction smuggling shape",
-                    "count": total,
-                }
-            )
-        mixed = _mixed_script_findings(text)
-        if mixed:
-            out.append(
-                {
-                    "class": "mixed-script",
-                    "message": f"mixed-script confusable detected: {mixed} token(s) mix Latin "
-                    "with Cyrillic/Greek lookalike letters — a homoglyph-spoof shape",
-                    "count": mixed,
-                }
-            )
-        embeds = len(_IMAGE_EMBED_RE.findall(text))
-        data_qs = len(_DATA_QUERY_RE.findall(text))
-        if embeds or data_qs:
-            parts = []
-            if embeds:
-                parts.append(f"{embeds} remote image embed(s) (auto-fetch beacon shape)")
-            if data_qs:
-                parts.append(f"{data_qs} URL(s) with a long opaque query value (data-bearing exfil shape)")
-            out.append(
-                {
-                    "class": "exfil-link",
-                    "message": "exfil-link shape detected: " + "; ".join(parts) + " — bare URLs never flag",
-                    "count": embeds + data_qs,
-                }
-            )
-        comments = len(_HTML_COMMENT_RE.findall(text))
-        if comments:
-            out.append(
-                {
-                    "class": "html-comment",
-                    "message": f"HTML comment(s) present: {comments} — a hidden-from-render channel "
-                    "(lint-only pending the ED-3 harness-stripping spike; never a HOLD)",
-                    "count": comments,
-                }
-            )
-        return out
+        name = unicodedata.name(chr(cp), "")
+    except ValueError:
+        return "other"
+    if name.startswith("LATIN"):
+        return "latin"
+    if name.startswith("CYRILLIC"):
+        return "cyrillic"
+    if name.startswith("GREEK"):
+        return "greek"
+    return "other"
+
+
+# Only these WITHIN-TOKEN combinations are the homograph attack. Latin+Cyrillic and
+# Latin+Greek are the confusable-heavy pairs; anything else (or a token that is wholly one
+# script) is legitimate.
+_CONFUSABLE_PAIRS = (frozenset({"latin", "cyrillic"}), frozenset({"latin", "greek"}))
+
+
+def _confusable_findings(text: str) -> List[str]:
+    """One KIND when any single token mixes Latin with Cyrillic/Greek. Never the token."""
+    hits = 0
+    for m in _WORD_RE.finditer(text or ""):
+        scripts = {_script(ord(c)) for c in m.group(0)}
+        scripts.discard("other")
+        if any(pair <= scripts for pair in _CONFUSABLE_PAIRS):
+            hits += 1
+    if hits:
+        return [f"mixed-script confusable: {hits} token(s) mixing Latin with Cyrillic/Greek (homograph)"]
+    return []
+
+
+# --------------------------------------------------------------------------- #
+# Tier-A class 3: HTML comments (LINT-ONLY, ED-3-gated — see module header).
+# --------------------------------------------------------------------------- #
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+
+
+def _html_comment_findings(text: str) -> List[str]:
+    n = len(_HTML_COMMENT_RE.findall(text or ""))
+    if n:
+        return [f"HTML comment: {n} comment(s) (hidden-instruction channel; lint-only, not neutralized)"]
+    return []
+
+
+# --------------------------------------------------------------------------- #
+# Tier-A class 4: exfil shapes — image embeds + data-bearing query strings ONLY.
+# --------------------------------------------------------------------------- #
+# A markdown image embed pointing at an external http(s) host (auto-fetched on render).
+_MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(\s*(https?://[^)\s]+)\)", re.I)
+# An HTML <img> with an external http(s) src (same auto-fetch beacon shape).
+_HTML_IMG_RE = re.compile(r"<img\b[^>]*\bsrc\s*=\s*[\"']?\s*https?://", re.I)
+# A URL query parameter carrying a long opaque value — the data-bearing exfil query. The
+# >=24-char opaque run is what distinguishes ``?data=<base64 blob>`` from ``?tab=2``.
+_DATA_QUERY_RE = re.compile(r"https?://[^\s)]+\?[^\s)]*=[A-Za-z0-9+/_-]{24,}")
+
+
+def _exfil_findings(text: str) -> List[str]:
+    out: List[str] = []
+    body = text or ""
+    if _MD_IMAGE_RE.search(body) or _HTML_IMG_RE.search(body):
+        out.append("exfil shape: external image embed (auto-fetched beacon)")
+    if _DATA_QUERY_RE.search(body):
+        out.append("exfil shape: URL with a data-bearing query string")
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# Tier-B: injection-imperative grammar — LEDGER-ONLY (never surfaced, never HOLD).
+# --------------------------------------------------------------------------- #
+_TIER_B_PATTERNS = [
+    (re.compile(r"\b(?:ignore|disregard|forget)\b[^.\n]{0,40}\b(?:previous|prior|above|earlier|all)\b"
+                r"[^.\n]{0,20}\b(?:instruction|instructions|prompt|context|rules?)\b", re.I),
+     "imperative: ignore/override prior instructions"),
+    (re.compile(r"\byou\s+are\s+now\b|\bfrom\s+now\s+on\s+you\b|\bnew\s+(?:instructions|directive|rules)\s*:",
+                re.I),
+     "imperative: role/instruction reassignment"),
+    (re.compile(r"(?m)^\s*(?:system|assistant|human|user|developer)\s*:\s*\S", re.I),
+     "tool-mimicry: fake role/turn prefix"),
+    (re.compile(r"<\s*/?\s*(?:system|tool_call|function_call|assistant)\b", re.I),
+     "tool-mimicry: fake tool/role tag"),
+]
+
+
+def scan_tier_a(text) -> List[str]:
+    """Tier-A threat KINDS for ``text`` — the SURFACED classes (also the import-HOLD set).
+
+    Deterministic, zero LLM. Order-stable, deduplicated. Each entry names the KIND with a
+    count, NEVER the matched payload (echoing an invisible/homograph payload re-injects it).
+    Never raises: a scan failure returns [] rather than blocking a write (secrets.py's
+    warn-never-block posture). Tier-B grammar is deliberately absent — it is measured by
+    ``scan_tier_b``, never surfaced here (inv3).
+    """
+    if not isinstance(text, str) or not text:
+        return []
+    try:
+        out: List[str] = []
+        out.extend(_invisible_findings(text))
+        out.extend(_confusable_findings(text))
+        out.extend(_html_comment_findings(text))
+        out.extend(_exfil_findings(text))
+        # dedupe order-stable
+        seen: set = set()
+        deduped: List[str] = []
+        for k in out:
+            if k not in seen:
+                seen.add(k)
+                deduped.append(k)
+        return deduped
     except Exception:
         return []
 
 
-def scan_text(text: str) -> List[str]:
-    """Tier-A threat warnings for ``text`` — message lines only. [] when clean.
+def scan_tier_b(text) -> List[str]:
+    """Tier-B injection-imperative KINDS — MEASURED ONLY, never surfaced, never a HOLD.
 
-    The sibling of ``secrets.scan_text``: one detector, every surface (capture flag,
-    write ticket, import, doctor sweep, and — when CLB-1's ``--ci`` lands — the CI
-    feeder) calls THIS, so the class set never forks. Never raises.
+    These graduate to Tier-A only on a dated owner decision backed by a ledger-measured
+    near-zero FP rate. Deterministic, zero LLM, never the payload, never raises.
     """
-    return [d["message"] for d in scan_details(text)]
+    if not isinstance(text, str) or not text:
+        return []
+    try:
+        found: List[str] = []
+        for pattern, kind in _TIER_B_PATTERNS:
+            if kind in found:
+                continue
+            if pattern.search(text):
+                found.append(kind)
+        return found
+    except Exception:
+        return []
 
 
-def hold_findings(text: str) -> List[str]:
-    """The import-HOLD subset of Tier-A findings (never ``html-comment``, never Tier-B).
+def scan_threats(text) -> Dict[str, List[str]]:
+    """``{"tier_a": [...], "tier_b": [...]}`` — the two tiers, strictly separated.
 
-    ``import_mdc`` refuses to write foreign content while this is non-empty — exactly
-    the shipped secret-lint HOLD posture. Lint-only classes are excluded by CONSTANT
-    (``HOLD_CLASSES``), not by call-site judgment, so the boundary cannot drift.
+    The single entry point a seam calls when it wants both (e.g. capture, which flags on
+    Tier-A and measures Tier-B). The tiers never bleed: nothing in ``tier_a`` is an
+    imperative-grammar hit, and nothing in ``tier_b`` is ever surfaced by ``scan_tier_a``.
     """
-    return [d["message"] for d in scan_details(text) if d["class"] in HOLD_CLASSES]
+    return {"tier_a": scan_tier_a(text), "tier_b": scan_tier_b(text)}
+
+
+def scan_files(paths) -> List[dict]:
+    """Tier-A-only scan over ``paths`` — one ``{"file", "warnings"}`` per hit. Never raises.
+
+    The reusable file-list core the CLB-1 ``--ci`` vehicle (T12, unbuilt) will call to gate a
+    shipped tree against poisoning payloads, mirroring ``secrets.scan_files``. Tier-B is
+    deliberately excluded (it is ledger-measured, never a gate). A binary/unreadable file is
+    skipped. This module ships the function; wiring it into a CI job is CLB-1's job — SEN-2
+    does not fork a second CI surface.
+    """
+    findings: List[dict] = []
+    for path in paths:
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                text = fh.read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        warnings = scan_tier_a(text)
+        if warnings:
+            findings.append({"file": path, "warnings": warnings})
+    return findings
 
 
 def scan_corpus(memory_dir: str) -> List[dict]:
-    """Corpus-wide Tier-A sweep: ``[{"file", "warnings"}]`` — secrets.scan_corpus's twin.
+    """Corpus-wide Tier-A sweep — one ``{"file", "warnings"}`` per flagged memory file.
 
-    Backs the doctor threat check. Clean files omitted; unreadable files skipped; never
-    raises. Same walk order (``_iter_memory_files``) so output is deterministic.
+    Backs doctor's ``check_threat_lint``. Same shape/never-raise contract as
+    ``secrets.scan_corpus``; clean files are omitted, so ``[]`` means the corpus carries no
+    surfaced-tier threat payloads. Deterministic (sorted file walk via _iter_memory_files).
     """
     findings: List[dict] = []
     try:
@@ -299,120 +349,9 @@ def scan_corpus(memory_dir: str) -> List[dict]:
                     text = fh.read()
             except Exception:
                 continue
-            warnings = scan_text(text)
+            warnings = scan_tier_a(text)
             if warnings:
                 findings.append({"file": os.path.basename(path), "warnings": warnings})
     except Exception:
         return findings
     return findings
-
-
-def scan_files(paths) -> List[dict]:
-    """Tier-A scan over arbitrary files: ``[{"file", "warnings"}]`` per hit.
-
-    THE CI FEEDER: when CLB-1's ``--ci`` review packet (T12) lands, it calls this beside
-    ``secrets.scan_files`` — one vehicle, two detectors, no second CI surface here.
-    Also covers the rules-plane sweep (doctor passes the GOV files — the Pillar target).
-    Binary/unreadable files skip; never raises.
-    """
-    findings: List[dict] = []
-    for path in paths:
-        try:
-            with open(path, "r", encoding="utf-8") as fh:
-                text = fh.read()
-        except (OSError, UnicodeDecodeError):
-            continue
-        warnings = scan_text(text)
-        if warnings:
-            findings.append({"file": path, "warnings": warnings})
-    return findings
-
-
-# --------------------------------------------------------------------------- #
-# Tier-B: imperative injection grammar — HELD DARK (ledger-only).
-# --------------------------------------------------------------------------- #
-
-# Pattern ids, not messages: Tier-B findings are never rendered as warnings anywhere.
-# The id is what the ledger (and its one aggregate doctor line) carries.
-_TIER_B_PATTERNS = [
-    (
-        re.compile(
-            r"\b(?:ignore|disregard|forget)\b[^.\n]{0,40}\b(?:previous|prior|above|earlier|all)\b"
-            r"[^.\n]{0,40}\b(?:instruction|prompt|rule|direction)",
-            re.IGNORECASE,
-        ),
-        "imperative-override",
-    ),
-    (re.compile(r"\byou are now\b|\bnew instructions?\s*:", re.IGNORECASE), "role-reassignment"),
-    (
-        re.compile(
-            r"\b(?:do not|don't|never)\s+(?:tell|reveal|mention|inform)\b[^.\n]{0,40}\b(?:user|human|owner)\b",
-            re.IGNORECASE,
-        ),
-        "concealment-directive",
-    ),
-    (re.compile(r"^\s*(?:system|assistant)\s*:", re.IGNORECASE | re.MULTILINE), "role-mimicry"),
-    (re.compile(r"<\s*(?:antml:)?(?:function_calls|invoke|system|assistant)\b", re.IGNORECASE), "tool-mimicry"),
-]
-
-
-def scan_tier_b(text: str) -> List[str]:
-    """Tier-B pattern IDS matched by ``text`` (deduplicated, table order). [] when clean.
-
-    Ids only — never the matched span. This function's output goes to the ledger and
-    nowhere else: no warning line, no HOLD, no seed stamp, until a dated owner decision
-    graduates a pattern on the ledger's measured FP rate. Never raises.
-    """
-    try:
-        found: List[str] = []
-        for pattern, pid in _TIER_B_PATTERNS:
-            if pid not in found and pattern.search(text):
-                found.append(pid)
-        return found
-    except Exception:
-        return []
-
-
-# --------------------------------------------------------------------------- #
-# The Tier-B findings ledger (gitignored, append-only, telemetry-dir sibling).
-# --------------------------------------------------------------------------- #
-
-_TIER_B_LEDGER_NAME = "threat_findings.jsonl"
-
-
-def tier_b_ledger_path(telemetry_dir: str) -> str:
-    return os.path.join(telemetry_dir, _TIER_B_LEDGER_NAME)
-
-
-def append_tier_b_findings(
-    patterns: List[str], *, seam: str, name: str, memory_dir: Optional[str] = None,
-    telemetry_dir: Optional[str] = None,
-) -> bool:
-    """Append one Tier-B finding event to the dark ledger. Best-effort; never raises.
-
-    A row is ``{"ts", "seam", "name", "patterns"}`` — the pattern IDS and the seam that
-    saw them (``write`` / ``import``), never the matched text. Event-shaped on purpose:
-    the graduation decision needs an FP RATE, and the honest denominator is the flow of
-    real writes/imports, not repeated corpus re-sweeps double-counting the same file.
-    No-ops on an empty pattern list (a clean write leaves zero trace).
-    """
-    if not patterns:
-        return False
-    try:
-        from .telemetry import default_telemetry_dir
-
-        if telemetry_dir is None:
-            if memory_dir is None:
-                return False
-            telemetry_dir = default_telemetry_dir(memory_dir)
-        os.makedirs(telemetry_dir, exist_ok=True)
-        row = {"ts": time.time(), "seam": seam, "name": name, "patterns": list(patterns)}
-        with open(tier_b_ledger_path(telemetry_dir), "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(row, sort_keys=True) + "\n")
-        return True
-    except Exception:
-        return False
-
-
-def read_tier_b_summary(telemetry_dir: str) -> dict:
-    """Aggregate the dark ledger for doctor's ONE line: ``{"events", "names", "patterns"}``

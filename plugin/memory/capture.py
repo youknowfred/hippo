@@ -39,7 +39,14 @@ from typing import Dict, List, Optional
 
 from .provenance import ensure_self_ignoring_dir, resolve_dirs, run_git
 from .secrets import scan_text
-from .telemetry import abstention_backlog, default_telemetry_dir, read_decisions, read_episodes
+from .telemetry import (
+    abstention_backlog,
+    default_telemetry_dir,
+    log_threat_findings,
+    read_decisions,
+    read_episodes,
+)
+from .threat_lint import scan_threats, scan_tier_b
 
 # The gitignored pending queue — a sibling of ``.claude/memory`` and of the index/telemetry
 # dirs, following the same self-ignoring-cache convention (SEC-3). It is NOT the corpus and is
@@ -337,6 +344,12 @@ def gather_session_context(
         # queue is gitignored, same trust domain as the episode buffer) — the consolidate
         # drain refuses to fence flagged hunks into a corpus body, and write_memory's own
         # lint is the backstop behind that.
+        # SEN-2: the poisoning-payload twin. hunks_threat_flagged rides beside
+        # hunks_secret_flagged — a Tier-A hit (invisible Unicode / confusable / exfil shape /
+        # HTML comment) in the captured evidence flags the seed identically (absent when
+        # clean, ED-4). Tier-B imperative grammar is MEASURED to the dark ledger below, never
+        # a seed field. Additive fields, no _SEED_SCHEMA bump (read defensively via .get()).
+        threats = scan_threats(hunks) if hunks else {"tier_a": [], "tier_b": []}
         seed = {
             "schema": _SEED_SCHEMA,
             "kind": "session-capture",
@@ -350,6 +363,7 @@ def gather_session_context(
             "earliest_ts": episodes[0].get("ts"),
             "diff_hunks": hunks,
             "hunks_secret_flagged": bool(hunks and scan_text(hunks)),
+            "hunks_threat_flagged": bool(threats["tier_a"]),
             # GRW-4: the session's user-confirmed WHY, replayed from the in-session decision
             # ledger (memory.capture --add-decision) with the SAME session matching as the
             # episodes above — agent-recorded transcription only, never synthesized here.
@@ -430,6 +444,18 @@ def write_session_capture(
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(seed, fh, ensure_ascii=False, indent=2)
         os.replace(tmp, path)  # atomic: a reader never sees a half-written seed
+        # SEN-2 Tier-B: measure imperative-grammar in the captured evidence to the dark
+        # ledger — never a seed field, never surfaced (inv3). SessionEnd, off the hot path.
+        try:
+            hunks = seed.get("diff_hunks") or ""
+            if hunks:
+                log_threat_findings(
+                    scan_tier_b(hunks), source="capture",
+                    name=seed.get("session_id"), telemetry_dir=telemetry_dir,
+                    session_id=session_id,
+                )
+        except Exception:
+            pass
         # CAP-6: self-bound the queue so an un-drained backlog can't grow without limit. Prune
         # keeps the highest-value seeds (recency breaks ties), so a just-written seed survives
         # UNLESS the queue is already full of strictly higher-value captures — in which case a
@@ -677,6 +703,12 @@ def _format_listing(seeds: List[Dict]) -> str:
                 out.append(
                     "      ⚠ secret lint flagged these hunks — do NOT fence them into a memory "
                     "body without scrubbing (run memory.secrets.scan_with_remediation first)"
+                )
+            if s.get("hunks_threat_flagged"):
+                out.append(
+                    "      ⚠ threat lint flagged these hunks (SEN-2 Tier-A: invisible Unicode / "
+                    "confusable / exfil shape / HTML comment) — inspect before fencing into a "
+                    "body (run memory.threat_lint.scan_tier_a on the exact lines)"
                 )
         dec = s.get("decisions") or []
         if dec:

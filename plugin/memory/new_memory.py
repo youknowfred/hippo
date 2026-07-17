@@ -614,6 +614,7 @@ def build_write_ticket(
     """
     ticket: dict = {
         "secret_warnings": [],
+        "threat_warnings": [],
         "fence_fidelity": {"head": None, "blocks": 0, "checked": 0, "matched": 0, "mismatched": [], "note": None},
         "archive_shadow": {"collides": None, "path": None},
         "warnings": [],
@@ -624,10 +625,26 @@ def build_write_ticket(
         ticket["secret_warnings"] = scan_with_remediation(rendered)
     except Exception:
         ticket["secret_warnings"] = []
+    # SEN-2: Tier-A threat lint joins the ticket (SEN-1 is the CONTAINER SEN-2 lands inside).
+    # SURFACED classes only — Tier-B imperative grammar is measured to the dark ledger by the
+    # write-plane caller (write_memory), never on this pure/side-effect-free ticket path (so a
+    # dry-run check never double-counts a write's Tier-B measurement).
+    try:
+        from .threat_lint import scan_tier_a
+
+        ticket["threat_warnings"] = scan_tier_a(rendered)
+    except Exception:
+        ticket["threat_warnings"] = []
     ticket["fence_fidelity"] = _fence_fidelity(body, repo_root)
     ticket["archive_shadow"] = _archive_shadow(name, memory_dir)
 
     warns: List[str] = list(ticket["secret_warnings"])
+    if ticket["threat_warnings"]:
+        warns.append(
+            "⚠ threat lint (SEN-2 Tier-A): " + "; ".join(ticket["threat_warnings"])
+            + " — a poisoning payload (invisible/confusable/exfil/HTML-comment) in the memory "
+            "text; inspect and scrub before this is committed and re-injected on every recall."
+        )
     fid = ticket["fence_fidelity"]
     if fid.get("mismatched"):
         shown = "; ".join(f"block #{m['index']} (“{m['preview']}…”)" for m in fid["mismatched"][:3])
@@ -665,6 +682,11 @@ def render_write_ticket(ticket: Optional[dict]) -> str:
             lines.append(f"  ⚠ secret lint   : {'; '.join(kinds)}")
         else:
             lines.append("  ✓ secret lint   : clean")
+        threats = ticket.get("threat_warnings") or []
+        if threats:
+            lines.append(f"  ⚠ threat lint   : {'; '.join(threats)}")
+        else:
+            lines.append("  ✓ threat lint   : clean")
         fid = ticket.get("fence_fidelity") or {}
         if not fid.get("blocks"):
             lines.append("  ✓ hunk fidelity : no fenced blocks to verify")
@@ -1158,6 +1180,21 @@ def write_memory(
     ticket = build_write_ticket(name, rendered, body, memory_dir, repo_root)
     result["ticket"] = ticket
     result["warnings"] = list(ticket["warnings"])
+
+    # SEN-2 Tier-B: measure imperative-grammar in the just-written text to the DARK ledger —
+    # never surfaced, never a HOLD, never a ticket field (inv3). This is the real write plane
+    # (not the dry run), off the hot path; a dated owner decision graduates it on a
+    # ledger-measured near-zero FP rate. Best-effort; never fatal.
+    try:
+        from .threat_lint import scan_tier_b
+
+        tier_b = scan_tier_b(rendered)
+        if tier_b:
+            from .telemetry import log_threat_findings
+
+            log_threat_findings(tier_b, source="write", name=name)
+    except Exception:
+        pass
 
     # 1. Provenance backfill (best-effort — a new file with no code citations is fine).
     try:
