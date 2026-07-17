@@ -2116,3 +2116,236 @@ def test_session_token_cost_falls_back_to_estimate(tmp_path, monkeypatch):
     cost = E.session_token_cost(md, td, index, [], k=10, index_dir=idx)
     assert cost["measured_events"] == 0  # pre-MSR-6-shaped ledger: estimate path
     assert cost["n_sessions"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# GRF-3: the dense-floor calibration sweep (RET-9's calibration half).
+# --------------------------------------------------------------------------- #
+def test_recommend_floor_clean_separation():
+    r = E.recommend_floor([0.7, 0.8, 0.75], [0.3, 0.4])
+    assert r["overlap"] is False
+    assert r["recommended"] == 0.55  # midpoint of on-min 0.7 / off-max 0.4
+    assert r["safety_delta"] == 0.15
+    assert r["leaked_off"] == 0 and r["cut_on"] == 0
+    assert (r["on_n"], r["off_n"], r["on_min"], r["off_max"]) == (3, 2, 0.7, 0.4)
+
+
+def test_recommend_floor_overlap_reports_costs():
+    r = E.recommend_floor([0.4, 0.5, 0.6, 0.7], [0.45, 0.55])
+    assert r["overlap"] is True
+    assert r["recommended"] == 0.4  # p10 of the on-topic distribution (index 0 at n=4)
+    assert r["leaked_off"] == 2  # both off-topic probes sit at/above 0.4
+    assert r["cut_on"] == 0
+    assert r["safety_delta"] == round(0.4 - 0.55, 4)
+
+
+def test_recommend_floor_empty_side_is_none():
+    assert E.recommend_floor([], [0.3]) is None
+    assert E.recommend_floor([0.5], []) is None
+
+
+_OFF_TOPIC = [
+    "best pizza dough hydration for a home oven",
+    "marathon training plan for a first-time runner",
+    "who won the celebrity baking show last night",
+]
+
+
+def _write_abstention_set(tmp_path):
+    import yaml
+
+    p = str(tmp_path / "abstention_set.yaml")
+    with open(p, "w", encoding="utf-8") as fh:
+        yaml.safe_dump([{"query": q} for q in _OFF_TOPIC], fh)
+    return p
+
+
+def _fake_dense(monkeypatch, dim: int = 64):
+    """crc32 bag-of-tokens fake dense backend (the test_recall convention) wired into
+    BOTH the build (embed_documents) and the sweep's query path (recall.embed_query)."""
+    import zlib
+
+    import numpy as np
+
+    from memory import recall as R
+
+    def _vec(text):
+        v = np.zeros(dim, dtype="float32")
+        for tok in B.tokenize(text):
+            v[zlib.crc32(tok.encode("utf-8")) % dim] += 1.0
+        n = np.linalg.norm(v)
+        return v / n if n else v
+
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    monkeypatch.setattr(
+        B, "embed_documents",
+        lambda texts, allow_download=True: np.vstack([_vec(t) for t in texts]).astype("float32"),
+    )
+    monkeypatch.setattr(R, "embed_query", lambda text, allow_download=False: _vec(text))
+
+
+def test_floor_sweep_end_to_end_and_persisted(tmp_path, monkeypatch):
+    _fake_dense(monkeypatch)
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / "idx")
+    td = str(tmp_path / "telemetry")
+    B.build_index(md, idx)
+    doc = E.floor_sweep(
+        memory_dir=md,
+        index_dir=idx,
+        hard_set_path=_write_hard_set(tmp_path),
+        abstention_set_path=_write_abstention_set(tmp_path),
+        telemetry_dir=td,
+    )
+    assert doc["ok"] is True
+    assert doc["schema"] == E._FLOOR_SWEEP_SCHEMA
+    assert doc["on_n"] == len(_HARD_SET) and doc["off_n"] == len(_OFF_TOPIC)
+    assert isinstance(doc["recommended"], float)
+    assert doc["configured_floor"] > 0
+    # keyed to the live corpus so doctor can tell fresh from stale
+    index = B.load_index(idx)
+    assert doc["corpus_fingerprint"] == E.corpus_fingerprint(index)
+    # persisted where doctor reads it
+    assert doc["path"] == E.default_floor_sweep_path(md, td)
+    persisted = E.read_floor_sweep(md, td)
+    assert persisted is not None and persisted["recommended"] == doc["recommended"]
+
+
+def test_floor_sweep_skips_rows_unanswerable_in_this_corpus(tmp_path, monkeypatch):
+    """A hard-set row whose expected stems are absent from the corpus must not drag the
+    on-topic distribution down — it is not on-topic FOR THIS CORPUS."""
+    import yaml
+
+    _fake_dense(monkeypatch)
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / "idx")
+    B.build_index(md, idx)
+    rows = list(_HARD_SET) + [{"query": "entirely foreign topic", "expected": ["not_here"]}]
+    hs = str(tmp_path / "hs.yaml")
+    with open(hs, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(rows, fh)
+    doc = E.floor_sweep(
+        memory_dir=md, index_dir=idx, hard_set_path=hs,
+        abstention_set_path=_write_abstention_set(tmp_path),
+        telemetry_dir=str(tmp_path / "telemetry"),
+    )
+    assert doc["ok"] is True and doc["on_n"] == len(_HARD_SET)  # the foreign row dropped
+
+
+def test_floor_sweep_bm25_only_fails_loudly(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / "idx")
+    B.build_index(md, idx)
+    doc = E.floor_sweep(
+        memory_dir=md, index_dir=idx,
+        hard_set_path=_write_hard_set(tmp_path),
+        abstention_set_path=_write_abstention_set(tmp_path),
+        telemetry_dir=str(tmp_path / "telemetry"),
+    )
+    assert doc["ok"] is False and "dense" in doc["error"]
+
+
+def test_floor_sweep_cli_prints_advisory_and_exits_zero(tmp_path, monkeypatch, capsys):
+    _fake_dense(monkeypatch)
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / "idx")
+    B.build_index(md, idx)
+    rc = E.main(
+        [
+            "--memory-dir", md, "--index-dir", idx, "--floor-sweep",
+            "--hard-set", _write_hard_set(tmp_path),
+            "--abstention-set", _write_abstention_set(tmp_path),
+            "--telemetry-dir", str(tmp_path / "telemetry"),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "recommended" in out and "advisory only" in out and "nothing auto-writes" in out
+
+
+def test_floor_sweep_cli_bm25_only_exits_nonzero(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = _build_corpus(tmp_path)
+    idx = str(tmp_path / "idx")
+    B.build_index(md, idx)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--floor-sweep"])
+    assert rc == 1
+    assert "floor sweep:" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# GRF-4: the typed-2-hop reachability audit (GRA-7's baseline arm)
+# --------------------------------------------------------------------------- #
+def _reach_corpus(tmp_path, monkeypatch):
+    """seed_a -> mid (wikilink) -> far (wikilink): far is exactly 2 hops from the
+    query's seed; ghost-expected rows exercise the unreachable arm."""
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    md = str(tmp_path / "memory")
+    os.makedirs(md, exist_ok=True)
+    files = {
+        # seed_a -> m1 -> m2 -> far. Production seeds already include GRA-1's 1-hop
+        # expansion (m1 rides into the top-3), so depth here measures reach BEYOND the
+        # production stack: m2 is 1 hop past it, far is the genuine 2-hop case.
+        "seed_a.md": (
+            "alpha beta gamma delta topic",
+            "details\n\nRelated: [[m1]]\n",
+        ),
+        "m1.md": ("wholly unrelated middle waypoint", "hop\n\nRelated: [[m2]]\n"),
+        "m2.md": ("second waypoint stone", "hop\n\nRelated: [[far]]\n"),
+        "far.md": ("distant endpoint reached only by links", "body"),
+        "filler.md": ("excel parser llm header rescue for layouts", "body"),
+    }
+    for fname, (desc, body) in files.items():
+        with open(os.path.join(md, fname), "w", encoding="utf-8") as fh:
+            fh.write(f'---\nname: {fname[:-3]}\ndescription: "{desc}"\ntype: project\n---\n{body}\n')
+    idx = str(tmp_path / "idx")
+    B.build_index(md, idx)
+    return md, idx
+
+
+def _reach_rows(expected_map):
+    """10 multi-hop rows (the activation floor) sharing one seed query."""
+    return [
+        {"query": f"alpha beta gamma delta case {i}", "expected": exp, "category": "multi-hop"}
+        for i, exp in enumerate(expected_map)
+    ]
+
+
+def test_reachability_audit_depths_and_edge_kinds(tmp_path, monkeypatch):
+    md, idx = _reach_corpus(tmp_path, monkeypatch)
+    index = B.load_index(idx)
+    rows = _reach_rows([["seed_a"], ["m2"], ["far"], ["ghost"]] + [["m2"]] * 6)
+    audit = E.reachability_audit(index, rows, idx, k=10, memory_dir=md)
+    by = {(r["stem"], r["query"][-6:]): r for r in audit["rows"]}
+    assert by[("seed_a", "case 0")]["depth"] == 0  # ranked as its own seed
+    assert by[("m2", "case 1")]["depth"] == 1  # 1 hop past the production seeds
+    assert by[("far", "case 2")]["depth"] == 2  # the genuine 2-hop case
+    assert by[("far", "case 2")]["via"] == "wikilink"
+    assert by[("ghost", "case 3")]["depth"] is None  # honest unreachable arm
+    s = audit["summary"]
+    assert s["expected_stems"] == 10
+    assert s["unreachable"] == 1
+
+
+def test_reachability_audit_skips_below_grown_fixture(tmp_path, monkeypatch):
+    md, idx = _reach_corpus(tmp_path, monkeypatch)
+    index = B.load_index(idx)
+    rows = _reach_rows([["m2"], ["far"]])  # n=2 — the pre-GRF-2 vacuous size
+    audit = E.reachability_audit(index, rows, idx, k=10, memory_dir=md)
+    assert "skipped" in audit and "vacuous" in audit["skipped"]
+
+
+def test_reachability_cli_prints_baseline(tmp_path, monkeypatch, capsys):
+    import yaml
+
+    md, idx = _reach_corpus(tmp_path, monkeypatch)
+    rows = _reach_rows([["seed_a"], ["m2"], ["far"], ["ghost"]] + [["m2"]] * 6)
+    hs = str(tmp_path / "hs.yaml")
+    with open(hs, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(rows, fh)
+    rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs, "--reachability"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "typed-2-hop reachability" in out and "GRA-7" in out
+    assert "NOT a shipped depth-2 mechanism" in out

@@ -582,6 +582,33 @@ def test_link_density_ok_once_an_edge_exists(repo, memory_dir):
 
 
 # --------------------------------------------------------------------------- #
+# GRF-1: edge rot — one threshold-gated line over links.graph_audit
+# --------------------------------------------------------------------------- #
+def test_edge_rot_ok_on_clean_graph(repo, memory_dir):
+    _seed(memory_dir)
+    write_file(memory_dir, "a.md", _mem("a", "note a", body="see [[b]]"))
+    write_file(memory_dir, "b.md", _mem("b", "note b"))
+    r = D.check_edge_rot(_ctx(memory_dir, repo))
+    assert r["status"] == "ok"
+    assert "edge rot: 0" in r["message"]
+    assert "\n" not in r["message"]  # ONE line — the doctor render/line-count determinism pins
+
+
+def test_edge_rot_warns_and_names_the_audit_command(repo, memory_dir):
+    _seed(memory_dir)
+    os.makedirs(os.path.join(memory_dir, "archive"), exist_ok=True)
+    write_file(memory_dir, "a.md", _mem("a", "note a", body="see [[gone]] and [[attic]]"))
+    write_file(
+        memory_dir, os.path.join("archive", "attic.md"), _mem("attic", "archived note")
+    )
+    r = D.check_edge_rot(_ctx(memory_dir, repo))
+    assert r["status"] == "warn"
+    assert "archived=1" in r["message"] and "dangling=1" in r["message"]
+    assert "python -m memory.links --audit" in r["message"]  # runnable remedy, named
+    assert "\n" not in r["message"]  # ONE line — the doctor render/line-count determinism pins
+
+
+# --------------------------------------------------------------------------- #
 # RET-3: non-English corpus served by the English default model
 # --------------------------------------------------------------------------- #
 _JP_DESC = "東京都渋谷区の天気予報と観光案内について詳しく説明しています今日と明日の予定"
@@ -1263,3 +1290,140 @@ def test_scorecard_cost_line_reads_measured_ledgers(memory_dir, repo, tmp_path, 
     m = D.check_trust_scorecard(ctx)["message"]
     assert "injected ~1500 chars over 2 session(s)" in m
     assert D.check_trust_scorecard(ctx)["message"] == m  # deterministic
+
+
+# --------------------------------------------------------------------------- #
+# GRF-3: floor calibration — configured dense floor vs the persisted sweep
+# --------------------------------------------------------------------------- #
+def _write_sweep(memory_dir, monkeypatch, tmp_path, **over):
+    import json as _json
+
+    from memory.eval_recall import _FLOOR_SWEEP_SCHEMA, default_floor_sweep_path
+
+    td = str(tmp_path / "telemetry")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    doc = {
+        "ok": True,
+        "schema": _FLOOR_SWEEP_SCHEMA,
+        "model": "BAAI/bge-small-en-v1.5",
+        "configured_floor": 0.60,
+        "corpus_fingerprint": "fp-stale",
+        "generated_at": "2026-07-16",
+        "recommended": 0.61,
+        "overlap": False,
+        "on_n": 6,
+        "off_n": 3,
+        "on_min": 0.7,
+        "off_max": 0.5,
+        "safety_delta": 0.11,
+        "leaked_off": 0,
+        "cut_on": 0,
+    }
+    doc.update(over)
+    path = default_floor_sweep_path(memory_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        _json.dump(doc, fh)
+    return doc
+
+
+def test_floor_calibration_no_sweep_names_the_command(repo, memory_dir, monkeypatch, tmp_path):
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", str(tmp_path / "telemetry"))
+    _seed(memory_dir)
+    r = D.check_floor_calibration(_ctx(memory_dir, repo))
+    assert r["status"] == "ok"
+    assert "python -m memory.eval_recall --floor-sweep" in r["message"]
+    assert "\n" not in r["message"]  # ONE line — the doctor render/line-count determinism pins
+
+
+def test_floor_calibration_ok_within_tolerance(repo, memory_dir, monkeypatch, tmp_path):
+    _seed(memory_dir)
+    write_file(memory_dir, "a.md", _mem("a", "note a"))
+    _write_sweep(memory_dir, monkeypatch, tmp_path, recommended=0.61)
+    # no index built -> the fingerprint staleness leg is skipped, numbers compare
+    r = D.check_floor_calibration(_ctx(memory_dir, repo))
+    assert r["status"] == "ok"
+    assert "0.6" in r["message"] and "0.61" in r["message"]
+
+
+def test_floor_calibration_warns_on_gap_and_never_auto_writes(
+    repo, memory_dir, monkeypatch, tmp_path
+):
+    _seed(memory_dir)
+    _write_sweep(memory_dir, monkeypatch, tmp_path, recommended=0.72)
+    r = D.check_floor_calibration(_ctx(memory_dir, repo))
+    assert r["status"] == "warn"
+    assert "0.6" in r["message"] and "0.72" in r["message"]
+    assert "nothing auto-writes" in r["message"]
+    assert "\n" not in r["message"]  # ONE line — the doctor render/line-count determinism pins
+
+
+def test_floor_calibration_stale_fingerprint_reports_stale(
+    repo, memory_dir, monkeypatch, tmp_path
+):
+    from memory import build_index as B
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _seed(memory_dir)
+    write_file(memory_dir, "a.md", _mem("a", "note a"))
+    B.build_index(memory_dir, B.default_index_dir(memory_dir))
+    _write_sweep(memory_dir, monkeypatch, tmp_path, corpus_fingerprint="fp-stale")
+    r = D.check_floor_calibration(_ctx(memory_dir, repo))
+    assert r["status"] == "ok"
+    assert "STALE" in r["message"] and "--floor-sweep" in r["message"]
+
+
+# --------------------------------------------------------------------------- #
+# MSR-5: the salience-evidence lived-in nudge — ED-2's one automatic surface
+# --------------------------------------------------------------------------- #
+def _seed_usage_aggregates(monkeypatch, tmp_path, sessions):
+    import json as _json
+
+    td = str(tmp_path / "telemetry")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    os.makedirs(td, exist_ok=True)
+    doc = {
+        "version": 1,
+        "sessions": {"count": sessions, "first_ts": 1.0, "last_session_id": "s"},
+        "memories": {"m0": {"first_ts": 1.0, "last_ts": 2.0, "sessions": sessions, "last_session_id": "s"}},
+    }
+    with open(os.path.join(td, "usage_aggregates.json"), "w", encoding="utf-8") as fh:
+        _json.dump(doc, fh)
+    return td
+
+
+def test_salience_evidence_quiet_below_lived_in_threshold(repo, memory_dir, monkeypatch, tmp_path):
+    _seed_usage_aggregates(monkeypatch, tmp_path, sessions=3)
+    _seed(memory_dir)
+    r = D.check_salience_evidence(_ctx(memory_dir, repo))
+    assert r["status"] == "ok" and "not yet lived-in" in r["message"]
+    assert "\n" not in r["message"]  # ONE line — the doctor render/line-count determinism pins
+
+
+def test_salience_evidence_nudges_once_lived_in(repo, memory_dir, monkeypatch, tmp_path):
+    _seed_usage_aggregates(monkeypatch, tmp_path, sessions=12)
+    _seed(memory_dir)
+    r = D.check_salience_evidence(_ctx(memory_dir, repo))
+    assert r["status"] == "warn"
+    assert "--ab HIPPO_SALIENCE" in r["message"]
+    assert "owner-decided-OFF" in r["message"]  # the nudge restates ED-2, never a flip
+    assert "\n" not in r["message"]
+
+
+def test_salience_evidence_ok_once_recorded(repo, memory_dir, monkeypatch, tmp_path):
+    import json as _json
+
+    from memory.salience_eval import _SALIENCE_AB_SCHEMA, default_report_path
+
+    td = _seed_usage_aggregates(monkeypatch, tmp_path, sessions=12)
+    _seed(memory_dir)
+    path = default_report_path(memory_dir, td)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        _json.dump(
+            {"schema": _SALIENCE_AB_SCHEMA, "deltas": {"single-hop": {}}, "identical_arms": True},
+            fh,
+        )
+    r = D.check_salience_evidence(_ctx(memory_dir, repo))
+    assert r["status"] == "ok"
+    assert "A/B recorded" in r["message"] and "dated owner decision" in r["message"]

@@ -30,20 +30,47 @@
 #   - multi-hop   — the answer's own vocabulary is weak in the query; the query pulls
 #                   toward a LINKED memory, so GRA-1 neighbor expansion (or a strong
 #                   embedding) must carry the expected stem into the top-10. Cases target
-#                   the packs' two real wikilink clusters.
-#                   MEASURED AT RET-8 SHIP TIME (2026-07-09, pack corpus): bm25-only 1.0,
-#                   dense+bm25 0.0 — NOT fixture rot. Under BM25 a zero-term-overlap
-#                   neighbor has no primary rank, so GRA-1's injection rides in knee-exempt
-#                   (the designed path); under dense EVERY entry has a primary rank, so the
-#                   knee exemption never fires and expansion is structurally suppressed
-#                   (organic-or-knee-cut).
-#                   RESOLVED 2026-07-09 (later, the GRA-1 dense-knee fix): knee exemption
-#                   now keys on _expand_neighbors' graph-ENDORSED set and the cliff
-#                   latches instead of breaking — multi-hop measures 1.0 on BOTH backends
-#                   (dense mrr ~0.20: graph-discounted lines land mid-list by design).
-#                   These rows are the regression tripwire for that fix; still do not
-#                   reword the queries toward the expected stems (that just relabels
-#                   single-hop and un-measures the graph).
+#                   the packs' two real wikilink clusters (debugging-discipline:
+#                   dont_blame_vendor_latency -> {fallback_is_still_bug,
+#                   root_cause_not_symptom_handling, new_logs_mean_recurrence};
+#                   engineering-process: no_feature_flagged_refactor_rollouts ->
+#                   {no_backward_compat, no_tactical_shortcuts}), in both edge
+#                   directions (out: lean the linking seed, expect its target;
+#                   in: lean a target, expect the memory that links it).
+#
+#                   CONDITION MATRIX (index-mode x query-mode; the three production-
+#                   reachable modes eval_recall --arms measures — MSR-2):
+#                     dense+bm25  dense index resident, dense+bm25 fused query ranking
+#                                 (the healthy production path)
+#                     bm25-only   no dense index at all (HIPPO_DISABLE_DENSE at build:
+#                                 hermetic/CI lanes; MMR and the dense floor never run)
+#                     mixed       dense index RESIDENT, bm25-only ranking at query time
+#                                 (embed-timeout / cold-model-cache degradation; MMR
+#                                 still runs against the loaded matrix)
+#
+#                   MEASURED AT RET-8 SHIP TIME (2026-07-09, pack corpus, n=2):
+#                   bm25-only 1.0, dense+bm25 0.0 — NOT fixture rot. Under BM25 a
+#                   zero-term-overlap neighbor has no primary rank, so GRA-1's injection
+#                   rides in knee-exempt (the designed path); under dense EVERY entry has
+#                   a primary rank, so the knee exemption never fired and expansion was
+#                   structurally suppressed (organic-or-knee-cut).
+#                   RESOLVED 2026-07-09 (the GRA-1 dense-knee fix, 4d16022): knee
+#                   exemption keys on _expand_neighbors' graph-ENDORSED set and the
+#                   cliff latches instead of breaking — multi-hop measured 1.0 on both
+#                   backends then.
+#                   RE-MEASURED AT T9 (2026-07-16, n=2, MSR-2 arms): dense+bm25 had
+#                   DRIFTED to 0.5 and mixed scored 0.0 — both legs the MMR diversity
+#                   penalty (a wikilink neighbor is definitionally similar to its seed,
+#                   so MMR displaced exactly the entries the graph endorsed; the fused
+#                   pack corpus had shifted under the v1.16.0 packs restructure).
+#                   RESOLVED AT T9 (GRF-2): graph-endorsed entries are exempt from the
+#                   MMR re-cut (the knee exemption's symmetric twin), and a seed that is
+#                   another seed's 1-hop neighbor is endorsed too (never injected).
+#                   POST-FIX (2026-07-16, n=10): dense+bm25 1.0 / bm25-only 1.0 /
+#                   mixed 1.0 (dense mrr stays low-ish by design: graph-discounted
+#                   lines land mid-list). These rows are the regression tripwire for
+#                   both fixes; still do not reword the queries toward the expected
+#                   stems (that just relabels single-hop and un-measures the graph).
 # temporal and update rows are DELIBERATELY ABSENT: the shipped starter packs are
 # evergreen (no superseded facts, no invalid_after boundaries — nothing temporal to ask
 # about honestly), so those categories grow in each project's own
@@ -163,10 +190,45 @@
 # RET-8: multi-hop cases — the query leans on a SEED memory's situation; the expected stem
 # is the seed's [[wikilinked]] neighbor (the packs' two real link clusters), so the case
 # validates that connected knowledge surfaces (GRA-1) rather than only direct lookup.
+# GRF-2 grew this category 2 -> 10 (both edge directions per cluster; see the condition
+# matrix in the header). Keep every query leaning on the SEED's situation — the expected
+# stem's own vocabulary must stay weak in the query or the row degenerates to single-hop.
 - query: "the timeout cascade recurred after we blamed provider latency again — a safety net caught it this time, so is there anything left to fix?"
   expected: [feedback_fallback_is_still_bug]
   category: multi-hop
 
 - query: "mid-migration the plan adds a canary env flag so existing callers keep working — which of our standing principles does that violate?"
   expected: [feedback_no_backward_compat, feedback_no_tactical_shortcuts]
+  category: multi-hop
+
+- query: "the third-party API looks throttled again, same slowdown we already patched last quarter — ops wants another guard bolted around the client"
+  expected: [feedback_root_cause_not_symptom_handling]
+  category: multi-hop
+
+- query: "the retry gave up and served the cached default overnight; on-call says the upstream was just slow again and wants the ticket closed"
+  expected: [feedback_dont_blame_vendor_latency]
+  category: multi-hop
+
+- query: "the remediation plan stacks a second validation layer behind the fix just in case, since everyone assumes the platform was flaky again"
+  expected: [feedback_dont_blame_vendor_latency]
+  category: multi-hop
+
+- query: "user pasted the same stack trace again a week after my patch landed — surely it's a stale cache or the deploy hasn't promoted yet?"
+  expected: [feedback_dont_blame_vendor_latency]
+  category: multi-hop
+
+- query: "the cascade came back overnight, so the proposal is to double the budget cap and move on — the last two attempts did exactly that"
+  expected: [feedback_fallback_is_still_bug, feedback_root_cause_not_symptom_handling]
+  category: multi-hop
+
+- query: "reviewer wants the renamed helper to keep answering to its old spelling so downstream callers don't break — evaluate that request"
+  expected: [feedback_no_feature_flagged_refactor_rollouts]
+  category: multi-hop
+
+- query: "the plan implements the painless half of the consolidation now and files a ticket for the invasive rest — is that split acceptable?"
+  expected: [feedback_no_feature_flagged_refactor_rollouts]
+  category: multi-hop
+
+- query: "the unification PR leaves the retired module importable behind a default-off switch until every consumer moves over — what's wrong with that shape?"
+  expected: [feedback_no_backward_compat]
   category: multi-hop

@@ -149,7 +149,10 @@ def derive_self_query(entry: dict) -> str:
 # --------------------------------------------------------------------------- #
 # Gates
 # --------------------------------------------------------------------------- #
-def self_recall_at_k(index: LoadedIndex, k: int = 10, *, index_dir: Optional[str] = None) -> float:
+def self_recall_at_k(
+    index: LoadedIndex, k: int = 10, *, index_dir: Optional[str] = None,
+    memory_dir: Optional[str] = None,
+) -> float:
     entries = index.entries
     if not entries:
         return 0.0
@@ -160,7 +163,7 @@ def self_recall_at_k(index: LoadedIndex, k: int = 10, *, index_dir: Optional[str
         if not q:
             continue
         considered += 1
-        names = {r["name"] for r in recall(q, k=k, index=index, index_dir=index_dir)}
+        names = {r["name"] for r in recall(q, k=k, index=index, index_dir=index_dir, memory_dir=memory_dir)}
         if e["name"] in names:
             hits += 1
     return hits / considered if considered else 0.0
@@ -210,7 +213,8 @@ def derive_body_probe_query(index: LoadedIndex, entry_idx: int) -> str:
 
 
 def body_probe_recall_at_k(
-    index: LoadedIndex, k: int = 10, *, index_dir: Optional[str] = None
+    index: LoadedIndex, k: int = 10, *, index_dir: Optional[str] = None,
+    memory_dir: Optional[str] = None,
 ) -> Dict[str, float]:
     """recall@k of the PARENT entry for a body-derived probe query, over every entry that
     has a qualifying probe (see ``derive_body_probe_query``). REPORT-ONLY -- never a merge
@@ -227,7 +231,7 @@ def body_probe_recall_at_k(
         if not q:
             continue
         considered += 1
-        names = {r["name"] for r in recall(q, k=k, index=index, index_dir=index_dir)}
+        names = {r["name"] for r in recall(q, k=k, index=index, index_dir=index_dir, memory_dir=memory_dir)}
         if e["name"] in names:
             hits += 1
     return {"recall": round(hits / considered, 4) if considered else 0.0, "n": considered}
@@ -282,7 +286,8 @@ def load_abstention_set(path: str) -> List[str]:
 
 
 def abstention_rate(
-    index: LoadedIndex, abstention_set: List[str], k: int = 10, *, index_dir: Optional[str] = None
+    index: LoadedIndex, abstention_set: List[str], k: int = 10, *, index_dir: Optional[str] = None,
+    memory_dir: Optional[str] = None,
 ) -> Dict[str, float]:
     """Fraction of ``abstention_set`` queries for which recall() returned ZERO results.
 
@@ -312,14 +317,15 @@ def abstention_rate(
         return {"rate": 0.0, "n": 0}
     zero = 0
     for q in abstention_set:
-        if not recall(q, k=k, index=index, index_dir=index_dir):
+        if not recall(q, k=k, index=index, index_dir=index_dir, memory_dir=memory_dir):
             zero += 1
     n = len(abstention_set)
     return {"rate": round(zero / n, 4), "n": n}
 
 
 def precision_at_k(
-    index: LoadedIndex, relevance_set: List[dict], k: int = 10, *, index_dir: Optional[str] = None
+    index: LoadedIndex, relevance_set: List[dict], k: int = 10, *, index_dir: Optional[str] = None,
+    memory_dir: Optional[str] = None,
 ) -> Dict[str, float]:
     """precision@k = |top-k ∩ relevant| / k, averaged over a hand-judged relevance set.
 
@@ -335,7 +341,7 @@ def precision_at_k(
     total = 0.0
     for item in relevance_set:
         relevant = set(item["relevant"])
-        ranked = [r["name"] for r in recall(item["query"], k=k, index=index, index_dir=index_dir)]
+        ranked = [r["name"] for r in recall(item["query"], k=k, index=index, index_dir=index_dir, memory_dir=memory_dir)]
         total += len(relevant.intersection(ranked)) / k
     n = len(relevance_set)
     return {"precision": round(total / n, 4), "n": n}
@@ -886,6 +892,7 @@ def hard_set_metrics(
     *,
     index_dir: Optional[str] = None,
     ranked_source=None,
+    memory_dir: Optional[str] = None,
 ) -> Dict[str, float]:
     """recall@k (any expected in top-k) + MRR@k (1/rank of first expected) over the set.
 
@@ -905,7 +912,7 @@ def hard_set_metrics(
         rows = (
             ranked_source(item["query"], k)
             if ranked_source is not None
-            else recall(item["query"], k=k, index=index, index_dir=index_dir)
+            else recall(item["query"], k=k, index=index, index_dir=index_dir, memory_dir=memory_dir)
         )
         ranked = [r["name"] for r in rows]
         if expected.intersection(ranked):
@@ -927,6 +934,7 @@ def hard_set_metrics_by_category(
     *,
     index_dir: Optional[str] = None,
     ranked_source=None,
+    memory_dir: Optional[str] = None,
 ) -> Dict[str, Dict[str, float]]:
     """RET-8: ``hard_set_metrics`` bucketed by each row's ``category`` tag.
 
@@ -944,7 +952,10 @@ def hard_set_metrics_by_category(
         cat = item.get("category") or _DEFAULT_CATEGORY
         buckets.setdefault(cat, []).append(item)
     return {
-        cat: hard_set_metrics(index, items, k=k, index_dir=index_dir, ranked_source=ranked_source)
+        cat: hard_set_metrics(
+            index, items, k=k, index_dir=index_dir, ranked_source=ranked_source,
+            memory_dir=memory_dir,
+        )
         for cat, items in sorted(buckets.items())
     }
 
@@ -1042,7 +1053,8 @@ def _grep_rank(query: str, k: int, docs: List[tuple]) -> List[dict]:
 # because the knee cut the wikilink neighbor 0.02 under the cliff threshold".
 # --------------------------------------------------------------------------- #
 def miss_autopsy(
-    index: LoadedIndex, hard_set: List[dict], k: int = 10, *, index_dir: Optional[str] = None
+    index: LoadedIndex, hard_set: List[dict], k: int = 10, *, index_dir: Optional[str] = None,
+    memory_dir: Optional[str] = None,
 ) -> Dict[str, List[dict]]:
     """``{category: [{query, stem, reason, score, margin}]}`` for every MISSED row.
 
@@ -1060,12 +1072,15 @@ def miss_autopsy(
     for item in hard_set:
         expected = [str(s) for s in item["expected"]]
         ranked = {
-            r["name"] for r in recall(item["query"], k=k, index=index, index_dir=index_dir)
+            r["name"]
+            for r in recall(
+                item["query"], k=k, index=index, index_dir=index_dir, memory_dir=memory_dir
+            )
         }
         if ranked.intersection(expected):
             continue  # the row HIT — nothing to autopsy
         dl: dict = {"watch": set(expected)}
-        recall(item["query"], k=k, index=index, index_dir=index_dir, drop_log=dl)
+        recall(item["query"], k=k, index=index, index_dir=index_dir, drop_log=dl, memory_dir=memory_dir)
         by_name: Dict[str, dict] = {}
         for d in dl.get("drops") or []:
             if d.get("name") in expected and d["name"] not in by_name:
@@ -1111,7 +1126,7 @@ def null_hypothesis_arms(
     if not hard_set:
         return {}
     full = full_by_category or hard_set_metrics_by_category(
-        index, hard_set, k=k, index_dir=index_dir
+        index, hard_set, k=k, index_dir=index_dir, memory_dir=memory_dir
     )
     arms: Dict[str, dict] = {
         "full": {"label": "full pipeline (production ranking stack)", "by_category": full}
@@ -1139,7 +1154,7 @@ def null_hypothesis_arms(
             arm = {
                 "label": "true bm25-only (second index built dense-disabled in a scratch index_dir)",
                 "by_category": hard_set_metrics_by_category(
-                    idx2, hard_set, k=k, index_dir=scratch
+                    idx2, hard_set, k=k, index_dir=scratch, memory_dir=memory_dir
                 ),
             }
             if not index.dense_ready:
@@ -1160,7 +1175,7 @@ def null_hypothesis_arms(
                     "against the loaded matrix)"
                 ),
                 "by_category": hard_set_metrics_by_category(
-                    index, hard_set, k=k, index_dir=index_dir
+                    index, hard_set, k=k, index_dir=index_dir, memory_dir=memory_dir
                 ),
             }
     else:
@@ -1219,7 +1234,11 @@ def token_reduction(
 
     sample = hard_set or [{"query": derive_self_query(e)} for e in index.entries[:20]]
     inj = [
-        _estimate_tokens(format_results(recall(s["query"], k=k, index=index, index_dir=index_dir)))
+        _estimate_tokens(
+            format_results(
+                recall(s["query"], k=k, index=index, index_dir=index_dir, memory_dir=memory_dir)
+            )
+        )
         for s in sample
         if s.get("query")
     ]
@@ -1237,7 +1256,8 @@ def token_reduction(
 
 
 def latency(
-    index: LoadedIndex, queries: List[str], k: int = 10, *, index_dir: Optional[str] = None
+    index: LoadedIndex, queries: List[str], k: int = 10, *, index_dir: Optional[str] = None,
+    memory_dir: Optional[str] = None,
 ) -> Dict[str, float]:
     """Warm recall latency (index preloaded) — p50/p95 in ms over ``queries``."""
     samples: List[float] = []
@@ -1245,7 +1265,7 @@ def latency(
         if not q:
             continue
         t0 = time.perf_counter()
-        recall(q, k=k, index=index, index_dir=index_dir)
+        recall(q, k=k, index=index, index_dir=index_dir, memory_dir=memory_dir)
         samples.append((time.perf_counter() - t0) * 1000.0)
     if not samples:
         return {"p50": 0.0, "p95": 0.0, "n": 0}
@@ -1367,6 +1387,17 @@ def evaluate(
     eval scores the production ranking path; a helper called directly with a bare index
     (hermetic tests) keeps the old edge-free behavior via ``index_dir=None``.
 
+    MSR-5 (the RET-8-pattern repeat, usage-prior edition): ``memory_dir`` now threads
+    into every metric's ``recall()`` call too. Before this, eval was USAGE-PRIOR-BLIND —
+    ``_apply_salience``'s ``_usage_boost_map`` keys on recall's ``memory_dir`` argument,
+    which the supplied-index helpers never passed, so a salience-ON eval could never see
+    ``usage_aggregates.json`` and the A/B rig's ON arm would have measured nothing.
+    Because the helpers also pass ``index=``, the SEC-1/SEC-6 trust gate and the
+    user/private tier fusion stay skipped (both live inside recall()'s ``index is
+    None`` branch) — the thread adds usage visibility, the COR-4 drift patch, and the
+    dangling-file check, all no-ops on the unchanged corpora eval runs over (the
+    salience_eval OFF-arm byte-identity self-check asserts exactly this).
+
     ``gate_cold`` (PRF-2/PRF-5) opts INTO gating ``cold_latency``'s p95 against
     ``GATE_COLD_P95_MS`` -- default False so cold_latency stays the report-only honesty
     signal it always was on every hermetic/ungated caller. Even when requested, the gate is
@@ -1418,19 +1449,21 @@ def evaluate(
         fixture_meta.get("generated_with_backend") == "dense+bm25" and backend != "dense+bm25"
     )
 
-    self_recall = self_recall_at_k(index, k=k, index_dir=index_dir)
-    hs = hard_set_metrics(index, hard_set, k=k, index_dir=index_dir)
+    self_recall = self_recall_at_k(index, k=k, index_dir=index_dir, memory_dir=memory_dir)
+    hs = hard_set_metrics(index, hard_set, k=k, index_dir=index_dir, memory_dir=memory_dir)
     # RET-8: the same rows bucketed by category tag — regressions attributable to the
     # question class (multi-hop/temporal/update/...) instead of hidden in the aggregate.
     by_category = (
-        hard_set_metrics_by_category(index, hard_set, k=k, index_dir=index_dir)
+        hard_set_metrics_by_category(
+            index, hard_set, k=k, index_dir=index_dir, memory_dir=memory_dir
+        )
         if hard_set else {}
     )
     tok = token_reduction(memory_dir, index, hard_set, k=k, index_dir=index_dir)
     lat_queries = [item["query"] for item in hard_set] or [
         derive_self_query(e) for e in index.entries[:30]
     ]
-    lat = latency(index, lat_queries, k=k, index_dir=index_dir)
+    lat = latency(index, lat_queries, k=k, index_dir=index_dir, memory_dir=memory_dir)
     cold = cold_latency(memory_dir, index_dir, lat_queries, k=k)
 
     # Report-only scorecard additions (Tier 1 + Tier 2) — never feed a gate threshold above.
@@ -1441,14 +1474,14 @@ def evaluate(
     from .telemetry import default_telemetry_dir
 
     resolved_telemetry_dir = telemetry_dir or default_telemetry_dir(memory_dir)
-    precision = precision_at_k(index, relevance_set, k=k, index_dir=index_dir)
+    precision = precision_at_k(index, relevance_set, k=k, index_dir=index_dir, memory_dir=memory_dir)
     half_life = staleness_half_life(memory_dir, repo_root) if repo_root else {"median_days": 0.0, "n": 0}
     sess_cost = session_token_cost(
         memory_dir, resolved_telemetry_dir, index, hard_set, k=k, index_dir=index_dir
     )
     grad = graduation_rate(resolved_telemetry_dir)
-    body_probe = body_probe_recall_at_k(index, k=k, index_dir=index_dir)
-    abstention = abstention_rate(index, abstention_set, k=k, index_dir=index_dir)
+    body_probe = body_probe_recall_at_k(index, k=k, index_dir=index_dir, memory_dir=memory_dir)
+    abstention = abstention_rate(index, abstention_set, k=k, index_dir=index_dir, memory_dir=memory_dir)
 
     # A caller with NO hard-set fixture (hard_set_path=None — e.g. a fresh install of the
     # packaged plugin with no hand-curated calibration data yet, see /hippo:audit) is a
@@ -1536,7 +1569,11 @@ def evaluate(
     # MSR-4: every expected-but-missed stem attributed to the mechanism + margin that
     # cut it, per category. Only missed rows are re-run (with a watched drop-log), so
     # a healthy fixture pays ~nothing; deterministic, so it rides the pass^k view.
-    autopsy = miss_autopsy(index, hard_set, k=k, index_dir=index_dir) if hard_set else {}
+    autopsy = (
+        miss_autopsy(index, hard_set, k=k, index_dir=index_dir, memory_dir=memory_dir)
+        if hard_set
+        else {}
+    )
     return {
         "ok": all(g["pass"] for g in gates.values() if g.get("pass") is not None),
         "dense_ready": index.dense_ready,
@@ -1901,6 +1938,305 @@ def diff_baseline(
     return lines
 
 
+# --------------------------------------------------------------------------- #
+# GRF-4: the typed-2-hop reachability audit — GRA-7's measurable baseline arm.
+#
+# GRA-7 (personalized PageRank) is gated on "beats GRA-1 on multi-hop", but 1-hop
+# expansion is a special case — there was no typed-2-hop baseline to compare a PPR
+# stage against. This reports, per multi-hop hard-set row, the MINIMUM hop depth
+# (0 = the stem ranked as a seed itself, 1, 2, or unreachable) at which each expected
+# stem becomes reachable from the row's top-N recall seeds over links.json adjacency,
+# and which edge kind (wikilink / typed relation) the first-reaching hop used. A PURE
+# OFFLINE WALK over the already-persisted edge list: zero recall.py change, no env
+# flag, no telemetry schema change, nothing hot-path — and explicitly NOT authorizing
+# any shipped depth-2/PPR mechanism (see the roadmap's not_pursuing: that needs its
+# own gate). Gated skip-if-fixture-too-small: a reachability report over the old n=2
+# multi-hop set is vacuous; it activates at the GRF-2-grown n>=10.
+# --------------------------------------------------------------------------- #
+_REACHABILITY_MIN_ROWS = 10
+_REACHABILITY_SEEDS = 3  # mirrors recall._GRAPH_SEEDS — the expansion seam this baselines
+
+
+def reachability_audit(
+    index: LoadedIndex,
+    hard_set: List[dict],
+    index_dir: Optional[str],
+    k: int = 10,
+    *,
+    memory_dir: Optional[str] = None,
+) -> dict:
+    """``{"rows": [{query, stem, depth, via}], "summary": {...}}`` — or ``{"skipped"}``.
+
+    Seeds per row are the top-``_REACHABILITY_SEEDS`` of the PRODUCTION ranking (the
+    same eval-side ``recall()`` every metric here scores — the walk itself is what
+    stays pure-graph). ``depth`` 0 means the expected stem itself ranked as a seed
+    (no graph needed); ``via`` names the edge kind of the first-reaching hop
+    (``wikilink`` or the typed relation name), ``"-"`` at depth 0, ``None``
+    unreachable. Undirected traversal over out/in/typed_out/typed_in — the same
+    adjacency ``links.load_edges`` serves the hot path, read once."""
+    from .links import load_edges
+
+    multi = [r for r in hard_set if (r.get("category") or _DEFAULT_CATEGORY) == "multi-hop"]
+    if len(multi) < _REACHABILITY_MIN_ROWS:
+        return {
+            "skipped": f"multi-hop n={len(multi)} < {_REACHABILITY_MIN_ROWS} — a "
+            "reachability baseline over the ungrown fixture is vacuous (GRF-2 grows it)"
+        }
+    edges = load_edges(index_dir) if index_dir else None
+    if not edges:
+        return {"skipped": "no links.json edge list — build the index first"}
+
+    def _neighbors(stem: str):
+        # Sorted iteration everywhere: a stem reachable via two edge kinds at the same
+        # depth must report a DETERMINISTIC `via` (str-set order is per-process).
+        rec = edges.get(stem)
+        if not rec:
+            return
+        for tgt in sorted(rec.get("out", ())):
+            yield tgt, "wikilink"
+        for tgt in sorted(rec.get("in", ())):
+            yield tgt, "wikilink"
+        for rel in sorted(rec.get("typed_out") or {}):
+            for tgt in sorted((rec.get("typed_out") or {})[rel]):
+                yield tgt, rel
+        for rel in sorted(rec.get("typed_in") or {}):
+            for tgt in sorted((rec.get("typed_in") or {})[rel]):
+                yield tgt, rel
+
+    rows: List[dict] = []
+    counts = {0: 0, 1: 0, 2: 0, None: 0}
+    for item in multi:
+        ranked = recall(item["query"], k=k, index=index, index_dir=index_dir, memory_dir=memory_dir)
+        seeds = [r["name"] for r in ranked[:_REACHABILITY_SEEDS]]
+        for stem in item.get("expected") or ():
+            depth: Optional[int] = None
+            via: Optional[str] = None
+            if stem in seeds:
+                depth, via = 0, "-"
+            else:
+                frontier = {s: "-" for s in seeds}
+                seen = set(seeds)
+                for d in (1, 2):
+                    nxt: Dict[str, str] = {}
+                    for node, _how in frontier.items():
+                        for tgt, kind in _neighbors(node):
+                            if tgt in seen:
+                                continue
+                            nxt.setdefault(tgt, kind)
+                    if stem in nxt:
+                        depth, via = d, nxt[stem]
+                        break
+                    seen |= set(nxt)
+                    frontier = nxt
+            counts[depth] = counts.get(depth, 0) + 1
+            rows.append(
+                {"query": item["query"][:60], "stem": stem, "depth": depth, "via": via}
+            )
+    total = len(rows)
+    return {
+        "rows": rows,
+        "summary": {
+            "expected_stems": total,
+            "seed_rank_0": counts[0],
+            "reachable_at_1": counts[1],
+            "reachable_at_2": counts[2],
+            "unreachable": counts[None],
+            "seeds_per_row": _REACHABILITY_SEEDS,
+        },
+    }
+
+
+# --------------------------------------------------------------------------- #
+# GRF-3: the dense-floor calibration sweep — RET-9's missing calibration half.
+#
+# recall._DENSE_FLOOR_BY_MODEL is a static table calibrated on the maintainer's golden
+# corpus; doctor.check_abstention_floor_sanity (RET-9's leak-detector half, shipped
+# 2026-07-10) can SAY "the floor is too permissive for this corpus" but not what number
+# to raise it to. This sweep automates RET-1's documented cosine-separation recipe:
+# embed the corpus's own on-topic queries and off-topic probes with its configured/warm
+# model, take each query's best DESCRIPTION-row cosine — the exact value the floor
+# gates in recall._dense_rank_rows — and recommend a per-model/per-corpus floor from
+# the separation of the two distributions. RAW cosine space throughout, never fused
+# RET-8 metrics (the two logged fused-vs-cosine incommensurability corrections).
+#
+# Advisory-only by construction (inv4): the sweep recommends, one doctor line compares
+# the recommendation to the configured entry, and a HUMAN edits the table (or sets
+# HIPPO_DENSE_FLOOR). Nothing here writes a floor anywhere. The persisted report is
+# derived/gitignored telemetry (inv1), keyed to the corpus fingerprint so doctor can
+# tell a stale sweep from a fresh one. Ettin/Li-LSR reranker arms are explicitly out
+# of scope (ED-3-blocked — see the roadmap's not_pursuing).
+# --------------------------------------------------------------------------- #
+_FLOOR_SWEEP_NAME = "floor_sweep.json"
+_FLOOR_SWEEP_SCHEMA = 1
+
+
+def default_floor_sweep_path(memory_dir: str, telemetry_dir: Optional[str] = None) -> str:
+    """``<telemetry_dir>/floor_sweep.json`` — beside the run ledger (derived, gitignored)."""
+    from .telemetry import default_telemetry_dir
+
+    return os.path.join(telemetry_dir or default_telemetry_dir(memory_dir), _FLOOR_SWEEP_NAME)
+
+
+def recommend_floor(on_scores: List[float], off_scores: List[float]) -> Optional[dict]:
+    """Pure separation math over raw cosines. ``None`` when either side is empty.
+
+    Clean separation (every on-topic max above every off-topic max): recommend the
+    midpoint of the gap. Overlap: recommend the 10th-percentile on-topic score — the
+    conservative "keep ~90% of real hits admitted" point — and report the leak/cut
+    counts at that floor so the human sees exactly what the overlap costs. Either way
+    ``safety_delta`` = recommendation − best off-topic cosine: positive means every
+    off-topic probe stays below the recommended floor; negative names the leak margin.
+    """
+    if not on_scores or not off_scores:
+        return None
+    on = sorted(float(s) for s in on_scores)
+    off = sorted(float(s) for s in off_scores)
+    on_min, off_max = on[0], off[-1]
+    overlap = on_min <= off_max
+    if not overlap:
+        recommended = round((on_min + off_max) / 2.0, 4)
+    else:
+        p10 = max(0, min(len(on) - 1, int(len(on) * 0.10)))
+        recommended = round(on[p10], 4)
+    return {
+        "recommended": recommended,
+        "overlap": overlap,
+        "on_n": len(on),
+        "off_n": len(off),
+        "on_min": round(on_min, 4),
+        "off_max": round(off_max, 4),
+        "safety_delta": round(recommended - off_max, 4),
+        "leaked_off": sum(1 for s in off if s >= recommended),
+        "cut_on": sum(1 for s in on if s < recommended),
+    }
+
+
+def _raw_max_cosines(index: LoadedIndex, queries: List[str]) -> List[float]:
+    """Best DESCRIPTION-row cosine per query — the exact quantity the dense floor gates.
+
+    Embeds with the corpus's configured/warm model via ``recall.embed_query`` — resolved
+    through the module attribute so hermetic tests' fake embedders apply (offline; the
+    caller has already verified ``dense_ready``). A query that fails to embed is skipped
+    (better a smaller honest sample than a fabricated zero)."""
+    from . import recall as _recall_mod
+
+    out: List[float] = []
+    n_desc = len(index.entries)
+    for q in queries:
+        if not q:
+            continue
+        try:
+            qvec = _recall_mod.embed_query(q, allow_download=False)
+            sims = index.dense @ qvec
+            out.append(round(float(sims[:n_desc].max()), 6))
+        except Exception:
+            continue
+    return out
+
+
+def floor_sweep(
+    memory_dir: Optional[str] = None,
+    index_dir: Optional[str] = None,
+    hard_set_path: Optional[str] = None,
+    abstention_set_path: Optional[str] = None,
+    *,
+    telemetry_dir: Optional[str] = None,
+    write: bool = True,
+) -> dict:
+    """Run the calibration sweep; persist the report for doctor; return it.
+
+    On-topic queries: the hard-set rows (non-abstention categories) whose expected
+    stems actually exist in THIS corpus — a row whose answer the corpus lacks would
+    drag the on-topic minimum down with an honest-but-irrelevant low cosine. Off-topic
+    probes: the abstention set. Both resolve through the same default-fixture paths
+    ``evaluate()`` uses, so a project's ``.audit-fixtures/`` rows take precedence when
+    present. Loud, structured failure (``{"ok": False, "error": ...}``) when the dense
+    model is unavailable — a sweep cannot calibrate a floor it cannot measure.
+    """
+    if memory_dir is None:
+        memory_dir, _ = resolve_dirs()
+    if index_dir is None:
+        index_dir = default_index_dir(memory_dir)
+    index = load_index(index_dir)
+    if index is None or not len(index):
+        return {"ok": False, "error": "no index / empty corpus — build the index first"}
+    if not index.dense_ready or index.dense is None:
+        return {
+            "ok": False,
+            "error": "dense model unavailable (bm25-only run) — the floor gates raw "
+            "cosines, so the sweep needs the dense backend; run /hippo:bootstrap first",
+        }
+
+    hs_path = hard_set_path or _default_hard_set_path()
+    ab_path = abstention_set_path or _default_abstention_set_path()
+    hard_set = load_hard_set(hs_path) if hs_path else []
+    probes = load_abstention_set(ab_path) if ab_path else []
+    names = {e.get("name") for e in index.entries}
+    on_queries = [
+        row["query"]
+        for row in hard_set
+        if (row.get("category") or _DEFAULT_CATEGORY) != "abstention"
+        and any(stem in names for stem in row.get("expected") or ())
+    ]
+    if not on_queries or not probes:
+        return {
+            "ok": False,
+            "error": "need both on-topic hard-set rows resolvable against this corpus and "
+            "off-topic abstention probes — "
+            f"(on-topic {len(on_queries)}, off-topic {len(probes)}); draft fixtures via "
+            "/hippo:audit or SIG-6's abstention_fixtures flow",
+        }
+
+    from .recall import _dense_floor
+
+    on_scores = _raw_max_cosines(index, on_queries)
+    off_scores = _raw_max_cosines(index, probes)
+    rec = recommend_floor(on_scores, off_scores)
+    if rec is None:
+        return {"ok": False, "error": "embedding produced no usable scores — model failure?"}
+
+    doc = {
+        "ok": True,
+        "schema": _FLOOR_SWEEP_SCHEMA,
+        "model": index.model,
+        "configured_floor": _dense_floor(index.model),
+        "corpus_fingerprint": corpus_fingerprint(index),
+        "generated_at": time.strftime("%Y-%m-%d"),
+        **rec,
+    }
+    if write:
+        path = default_floor_sweep_path(memory_dir, telemetry_dir)
+        written = write_floor_sweep(doc, path)
+        doc["path"] = written.get("path") if written.get("ok") else None
+    return doc
+
+
+def write_floor_sweep(doc: dict, path: str) -> dict:
+    """Persist the sweep report (atomic — a torn report must never half-inform doctor).
+    ``{ok, path}`` or ``{ok: False, error}``; never raises."""
+    from .atomic import write_json_atomic
+
+    try:
+        ensure_self_ignoring_dir(os.path.dirname(path))  # SEC-3 self-ignoring pattern
+        write_json_atomic(path, doc, indent=2)
+        return {"ok": True, "path": path}
+    except Exception as exc:
+        return {"ok": False, "error": f"floor-sweep write failed: {exc}"}
+
+
+def read_floor_sweep(memory_dir: str, telemetry_dir: Optional[str] = None) -> Optional[dict]:
+    """The persisted sweep report, or None (absent/corrupt/wrong-schema). Never raises."""
+    try:
+        path = default_floor_sweep_path(memory_dir, telemetry_dir)
+        with open(path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+        if not isinstance(doc, dict) or doc.get("schema") != _FLOOR_SWEEP_SCHEMA:
+            return None
+        return doc
+    except Exception:
+        return None
+
+
 def _forwarded_eval_argv(args) -> List[str]:
     """The INPUT arguments a --repeat subprocess re-runs with — never the output flags
     (--json is added by the probe itself; --out/--baseline/--write-baseline would make
@@ -2069,10 +2405,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--ab",
         default=None,
         metavar="FLAG",
-        help="run a paired A/B over one frozen snapshot, toggling ONLY the named flag. "
-        "Whitelist today: HIPPO_DREAM (DRM-3 — the /dream snapshot-diff harness, "
-        "memory.dream_eval; extra args pass through, e.g. --ab HIPPO_DREAM --live). "
-        "The surface MSR-5's HIPPO_SALIENCE rig extends without a rewrite.",
+        help="run a paired A/B toggling ONLY the named flag. Whitelist: HIPPO_DREAM "
+        "(DRM-3 — the /dream snapshot-diff harness, memory.dream_eval; extra args pass "
+        "through, e.g. --ab HIPPO_DREAM --live) and HIPPO_SALIENCE (MSR-5 — the ED-2 "
+        "salience-revisit rig, memory.salience_eval: OFF/ON/OFF over the live corpus, "
+        "per-category deltas to the gitignored dir; MEASURES ONLY, the default stays "
+        "owner-decided-OFF).",
     )
     parser.add_argument(
         "--calibrate",
@@ -2080,6 +2418,26 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="RET-15: grid-search HIPPO_KNEE_RATIO/HIPPO_DENSE_FLOOR against this same "
         "--memory-dir/--hard-set/--abstention-set (memory.calibrate_thresholds) instead of "
         "running the normal gate report. Report-only — never mutates recall.py's default.",
+    )
+    parser.add_argument(
+        "--reachability",
+        action="store_true",
+        help="GRF-4: the typed-2-hop reachability audit — per multi-hop row, the min "
+        "hop depth (0/1/2/unreachable) at which each expected stem is reachable from "
+        "the row's top-3 seeds over links.json, and the edge kind of the first hop. "
+        "GRA-7's PPR gate must beat THIS baseline. Pure offline walk; print-only; "
+        "skips below the grown n>=10 multi-hop fixture. Authorizes NO hot-path "
+        "depth-2 mechanism.",
+    )
+    parser.add_argument(
+        "--floor-sweep",
+        action="store_true",
+        help="GRF-3 (delivers RET-9's calibration half): recommend a per-model/per-corpus "
+        "dense floor from the RAW-cosine separation of on-topic hard-set queries vs "
+        "off-topic abstention probes (never fused metrics — complementary to --calibrate's "
+        "end-to-end grid). Persists the report for doctor's advisory comparison line. "
+        "Advisory only: a human edits recall._DENSE_FLOOR_BY_MODEL (or sets "
+        "HIPPO_DENSE_FLOOR); nothing auto-writes.",
     )
     args, ab_extra = parser.parse_known_args(argv)
     if args.ab is None and ab_extra:
@@ -2093,11 +2451,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         from .dream_eval import main as _dream_ab_main
 
         if args.ab not in AB_FLAGS:
-            print(
-                f"eval --ab: unknown flag {args.ab!r} (whitelist: {', '.join(AB_FLAGS)}). "
-                "HIPPO_SALIENCE is MSR-5 — planned, not shipped."
-            )
+            print(f"eval --ab: unknown flag {args.ab!r} (whitelist: {', '.join(AB_FLAGS)}).")
             return 2
+        if args.ab == "HIPPO_SALIENCE":
+            # MSR-5: the ED-2 salience-revisit rig (memory.salience_eval) — measures
+            # only, never flips the default. Forward the eval-level corpus/fixture
+            # args (they are parsed HERE, so they never appear in ab_extra).
+            from .salience_eval import main as _salience_ab_main
+
+            fwd: List[str] = list(ab_extra or [])
+            ambient = args.memory_dir is None
+            if args.memory_dir:
+                fwd += ["--memory-dir", args.memory_dir]
+            if args.index_dir:
+                fwd += ["--index-dir", args.index_dir]
+            hs = args.hard_set or (_default_hard_set_path() if ambient else None)
+            if hs:
+                fwd += ["--hard-set", hs]
+            if args.telemetry_dir:
+                fwd += ["--telemetry-dir", args.telemetry_dir]
+            if args.k != 10:
+                fwd += ["-k", str(args.k)]
+            return _salience_ab_main(fwd)
         return _dream_ab_main((ab_extra or []) + (["-k", str(args.k)] if args.k != 10 else []))
 
     # MSR-1: the pass^k probe is its own mode (like --calibrate) — it spawns fresh
@@ -2118,6 +2493,74 @@ def main(argv: Optional[List[str]] = None) -> int:
                 or (_default_abstention_set_path() if ambient else None),
                 k=args.k,
             )
+        )
+        return 0
+
+    if args.reachability:
+        ambient = args.memory_dir is None
+        hs_path = args.hard_set or (_default_hard_set_path() if ambient else None)
+        if args.memory_dir is None:
+            _md, _ = resolve_dirs()
+        else:
+            _md = args.memory_dir
+        _idx = args.index_dir or default_index_dir(_md)
+        index = load_index(_idx)
+        if index is None or not len(index):
+            print("reachability: no index / empty corpus")
+            return 1
+        hard_set = load_hard_set(hs_path) if hs_path else []
+        audit = reachability_audit(index, hard_set, _idx, k=args.k, memory_dir=_md)
+        if audit.get("skipped"):
+            print(f"reachability: SKIPPED — {audit['skipped']}")
+            return 0
+        s = audit["summary"]
+        print(
+            f"typed-2-hop reachability (GRA-7's baseline arm; seeds/row={s['seeds_per_row']}): "
+            f"{s['expected_stems']} expected stem(s) — {s['seed_rank_0']} ranked as a seed, "
+            f"{s['reachable_at_1']} reachable at 1 hop, {s['reachable_at_2']} at 2 hops, "
+            f"{s['unreachable']} unreachable"
+        )
+        for r in audit["rows"]:
+            d = "unreachable" if r["depth"] is None else f"depth {r['depth']}"
+            via = f" via {r['via']}" if r["via"] not in (None, "-") else ""
+            print(f"  {d:<12} {r['stem']}{via} — \"{r['query']}\"")
+        print(
+            "  (offline links.json walk — a baseline for GRA-7's gate, NOT a shipped "
+            "depth-2 mechanism)"
+        )
+        return 0
+
+    if args.floor_sweep:
+        ambient = args.memory_dir is None
+        doc = floor_sweep(
+            memory_dir=args.memory_dir,
+            index_dir=args.index_dir,
+            hard_set_path=args.hard_set or (_default_hard_set_path() if ambient else None),
+            abstention_set_path=args.abstention_set
+            or (_default_abstention_set_path() if ambient else None),
+            telemetry_dir=args.telemetry_dir,
+        )
+        if not doc.get("ok"):
+            print(f"floor sweep: {doc.get('error')}")
+            return 1
+        sep = "OVERLAPPING" if doc["overlap"] else "clean"
+        print(
+            f"floor sweep [{doc['model']}]: recommended {doc['recommended']} "
+            f"(configured {doc['configured_floor']}) — {sep} separation over "
+            f"{doc['on_n']} on-topic / {doc['off_n']} off-topic cosines "
+            f"(on-min {doc['on_min']}, off-max {doc['off_max']}, "
+            f"safety Δ {doc['safety_delta']:+})"
+        )
+        if doc["overlap"]:
+            print(
+                f"  overlap cost at the recommendation: {doc['leaked_off']} off-topic "
+                f"probe(s) would leak, {doc['cut_on']} on-topic quer(ies) would abstain"
+            )
+        if doc.get("path"):
+            print(f"  persisted for doctor: {doc['path']}")
+        print(
+            "  advisory only — edit recall._DENSE_FLOOR_BY_MODEL (or set "
+            "HIPPO_DENSE_FLOOR) yourself; nothing auto-writes (RET-9 closed by this sweep)"
         )
         return 0
 

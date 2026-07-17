@@ -1149,6 +1149,164 @@ def check_link_density(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"link-density check failed: {exc}."}
 
 
+# GRF-1: warn once the graph carries at least this many rotten edges (edges whose target
+# is archived, superseded, or resolves to nothing). 1 — a single edge into retired
+# knowledge is already worth a look, and the audit CLI names each one; below the
+# threshold the line stays an informational ok (deterministic, no timestamps).
+_EDGE_ROT_WARN_MIN = 1
+
+# GRF-3: how far the sweep's recommended dense floor may sit from the configured table
+# entry before the advisory line escalates ok -> warn. 0.02 — inside that band the two
+# agree to within measurement noise on a small fixture set; beyond it the configured
+# floor is measurably mis-calibrated for THIS corpus.
+_FLOOR_CAL_TOLERANCE = 0.02
+
+# MSR-5: a corpus counts as LIVED-IN — the ED-2 salience-revisit trigger — once this many
+# distinct sessions have logged recalls into usage_aggregates.json. 10: enough sessions
+# that the usage prior has a real distribution to boost from; below it a salience A/B is
+# structurally the same signal-less run SIG-5 already judged.
+_SALIENCE_LIVEDIN_MIN_SESSIONS = 10
+
+
+def check_salience_evidence(ctx: DoctorContext) -> Dict[str, str]:
+    """MSR-5: THE one automatic surface of the salience-revisit rig — a deterministic
+    nudge once the corpus crosses the lived-in threshold and no A/B evidence exists.
+
+    ED-2 is binding: this line never flips (or recommends flipping) the default — it
+    only says the EVIDENCE the revisit needs is now measurable and names the runnable
+    rig. Reads two small JSONs (usage aggregates + the recorded report); no eval runs
+    here (a multi-second dense double-run can never be on a health check). No
+    timestamps — the render/line-count determinism pins hold.
+    """
+    try:
+        from .salience_eval import read_report
+        from .telemetry import default_telemetry_dir, read_usage_aggregates
+
+        agg = read_usage_aggregates(default_telemetry_dir(ctx.memory_dir))
+        sessions = agg.get("sessions", {}).get("count") or 0
+        tracked = len(agg.get("memories") or {})
+        report = read_report(ctx.memory_dir)
+        if report is not None:
+            deltas = report.get("deltas") or {}
+            arms = "identical arms" if report.get("identical_arms") else "arms differ"
+            return {
+                "status": "ok",
+                "message": f"salience evidence: A/B recorded ({len(deltas)} categor(ies), "
+                f"{arms}) — the flip stays a dated owner decision (ED-2).",
+            }
+        if sessions < _SALIENCE_LIVEDIN_MIN_SESSIONS:
+            return {
+                "status": "ok",
+                "message": f"salience evidence: corpus not yet lived-in "
+                f"({sessions}/{_SALIENCE_LIVEDIN_MIN_SESSIONS} sessions logged) — the ED-2 "
+                "revisit rig waits.",
+            }
+        return {
+            "status": "warn",
+            "message": f"salience evidence: corpus is lived-in ({sessions} sessions, "
+            f"{tracked} usage-tracked memories) but no A/B evidence is recorded — run "
+            "`python -m memory.eval_recall --ab HIPPO_SALIENCE` (measures only; the "
+            "default stays owner-decided-OFF per ED-2).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"salience-evidence check failed: {exc}."}
+
+
+def check_floor_calibration(ctx: DoctorContext) -> Dict[str, str]:
+    """GRF-3 (RET-9's calibration half): configured dense floor vs the persisted sweep.
+
+    Reads the gitignored ``floor_sweep.json`` the ``--floor-sweep`` CLI wrote — doctor
+    never runs the sweep itself (it embeds every fixture query with the dense model;
+    seconds, not a health-check budget). Advisory-only by design (inv4): the line
+    NAMES both numbers and the remedy; a human edits ``recall._DENSE_FLOOR_BY_MODEL``
+    or sets ``HIPPO_DENSE_FLOOR`` — nothing here (or anywhere) auto-writes the table.
+    A sweep keyed to a different corpus fingerprint is reported stale, not compared —
+    a floor recommendation from last month's corpus says nothing about today's.
+    """
+    try:
+        from .build_index import _load_manifest, default_index_dir, load_index
+        from .eval_recall import corpus_fingerprint, read_floor_sweep
+        from .recall import _dense_floor
+
+        sweep = read_floor_sweep(ctx.memory_dir)
+        if sweep is None:
+            return {
+                "status": "ok",
+                "message": "floor calibration: no sweep recorded — "
+                "`python -m memory.eval_recall --floor-sweep` writes one (RET-9).",
+            }
+        # Staleness leg: only when an index is actually loadable — the sweep report is
+        # self-contained (model + recommendation), so a deleted/rebuildable index cache
+        # must not silence the comparison; it just can't prove freshness.
+        index_dir = default_index_dir(ctx.memory_dir)
+        if _load_manifest(index_dir) is not None:
+            index = load_index(index_dir)
+            if index is not None and len(index):
+                if sweep.get("corpus_fingerprint") != corpus_fingerprint(index):
+                    return {
+                        "status": "ok",
+                        "message": "floor calibration: recorded sweep is STALE (corpus changed "
+                        "since) — re-run `python -m memory.eval_recall --floor-sweep`.",
+                    }
+        configured = _dense_floor(sweep.get("model"))
+        recommended = sweep.get("recommended")
+        if not isinstance(recommended, (int, float)):
+            return {"status": "ok", "message": "floor calibration: recorded sweep is unreadable."}
+        delta = round(float(recommended) - float(configured), 4)
+        overlap = " (no clean on/off-topic separation on this corpus)" if sweep.get("overlap") else ""
+        if abs(delta) <= _FLOOR_CAL_TOLERANCE:
+            return {
+                "status": "ok",
+                "message": f"floor calibration: configured {configured} ≈ recommended "
+                f"{recommended} (Δ{delta:+}){overlap}.",
+            }
+        return {
+            "status": "warn",
+            "message": f"floor calibration: configured {configured} vs sweep-recommended "
+            f"{recommended} (Δ{delta:+}, off-topic max {sweep.get('off_max')}){overlap} — "
+            "edit recall._DENSE_FLOOR_BY_MODEL or set HIPPO_DENSE_FLOOR yourself; "
+            "advisory only, nothing auto-writes.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"floor-calibration check failed: {exc}."}
+
+
+def check_edge_rot(ctx: DoctorContext) -> Dict[str, str]:
+    """GRF-1: ONE deterministic line for edge rot — the graph-audit's headline number.
+
+    ``links.graph_audit`` classifies every edge whose target is archived (file moved to
+    ``archive/``), superseded (another memory ``supersedes`` it — pointing at retired
+    knowledge), or dangling (resolves to nothing). Same ask-when-asked posture as
+    ``check_link_density`` (SessionStart's ``lint_links.health_line`` already nags plain
+    dangling links per-session; doctor aggregates ALL rot classes on demand). Silent
+    ``ok`` when the graph cannot be built (other checks own that failure) or rot is
+    below ``_EDGE_ROT_WARN_MIN``.
+    """
+    try:
+        from .links import graph_audit
+
+        report = graph_audit(ctx.memory_dir)
+        if report is None:
+            return {"status": "ok", "message": "edge rot: N/A (could not build the link graph)."}
+        rot = report.get("rot") or []
+        by_class: Dict[str, int] = {}
+        for r in rot:
+            by_class[r["class"]] = by_class.get(r["class"], 0) + 1
+        if len(rot) < _EDGE_ROT_WARN_MIN:
+            return {
+                "status": "ok",
+                "message": f"edge rot: 0 across {report.get('edges', 0)} resolved edge(s).",
+            }
+        detail = ", ".join(f"{cls}={n}" for cls, n in sorted(by_class.items()))
+        return {
+            "status": "warn",
+            "message": f"edge rot: {len(rot)} edge(s) into retired/missing targets "
+            f"({detail}) — `python -m memory.links --audit` names each one.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"edge-rot check failed: {exc}."}
+
+
 # --------------------------------------------------------------------------- #
 # RET-3: non-English corpus served by the English default model
 # --------------------------------------------------------------------------- #
@@ -1857,6 +2015,8 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
 
     ("abstention_cold_start", check_abstention_cold_start),  # RET-11: abstention is dense-gated
     ("abstention_floor_sanity", check_abstention_floor_sanity),  # RET-9: per-corpus off-topic leak
+    ("floor_calibration", check_floor_calibration),  # GRF-3: configured floor vs the sweep's number
+    ("salience_evidence", check_salience_evidence),  # MSR-5: the ED-2 lived-in nudge (measures only)
     ("injection_precision", check_injection_precision),
     ("rules_conflicts", check_rules_conflicts),
     ("rules_plane_rot", check_rules_plane_rot),
@@ -1867,6 +2027,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("fill_me", check_fill_me),
     ("secrets", check_secrets),
     ("link_density", check_link_density),
+    ("edge_rot", check_edge_rot),  # GRF-1: edges into archived/superseded/dangling targets
     ("dream_ledger", check_dream_ledger),  # DRM-2: on-disk dream stamps ↔ dream-ledger.jsonl reconcile
     ("non_english_corpus", check_non_english_corpus),
     ("mcp_launch", check_mcp_launch),  # INT-8: the stdio MCP server (bin/hippo mcp) actually starts

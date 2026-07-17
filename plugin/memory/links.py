@@ -1130,6 +1130,147 @@ def load_edges(index_dir: str) -> Optional[Dict[str, Dict[str, object]]]:
         return None
 
 
+def _edge_origin_map(memory_dir: str) -> Dict[str, Dict[str, str]]:
+    """``{src stem: {target: origin}}`` from each memory's ``edge_origin`` frontmatter.
+
+    GRF-1: the consolidate skill stamps a newly-approved co-recall wikilink with
+    ``edge_origin: {<target>: co-recall}`` (top-level or under ``metadata:`` — the same
+    two-schema read convention as ``parse_typed_relations``; the key is deliberately
+    ``edge_origin``, NOT ``origin``, which is RCH-1's memory-level provenance stamp).
+    Absence-emits-nothing: an unstamped corpus returns ``{}`` and nothing downstream
+    changes (no corpus_format bump). Read LIVE from frontmatter by the audit only —
+    the annotation never enters links.json (ED-4: no cache schema change). Pure;
+    never raises; skips unreadable/unparseable files.
+    """
+    out: Dict[str, Dict[str, str]] = {}
+    try:
+        for path in _iter_memory_files(memory_dir):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    fm = parse_frontmatter(fh.read())
+            except Exception:
+                continue
+            if not isinstance(fm, dict):
+                continue
+            meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+            eo = fm.get("edge_origin")
+            if eo is None:
+                eo = (meta or {}).get("edge_origin")
+            if not isinstance(eo, dict):
+                continue
+            tagged = {
+                str(t): str(o) for t, o in eo.items() if isinstance(t, str) and isinstance(o, str)
+            }
+            if tagged:
+                out[os.path.splitext(os.path.basename(path))[0]] = tagged
+    except Exception:
+        return {}
+    return out
+
+
+def graph_audit(memory_dir: str) -> Optional[dict]:
+    """GRF-1 (absorbs & closes GRA-8's remainder): the one-call graph-audit report.
+
+    Computed LIVE from the corpus + ``archive/`` state — a diagnostic reads the source
+    of authority directly (the ``lint_links`` CLI convention), never the links.json
+    cache, and changes no schema anywhere. Returns ``None`` only when the graph cannot
+    be built at all. Report keys:
+
+      files/edges/typed_edges  — node count, resolved untyped edge count, and a
+                                 per-relation resolved-edge count ({} when none).
+      components/orphans/isolates/max_degree — the GRA-8 structural stats.
+      edge_origin              — {origin: count} over stamped edges ({} when none) —
+                                 the consolidate co-recall stamp made visible.
+      rot                      — [{src, target, via, class}] where class is:
+          archived    the target's file lives in ``archive/`` (it WAS a memory; the
+                      edge outlived its retirement — ``lint_links`` reports it as
+                      dangling, this classifies it),
+          dangling    the target resolves to nothing anywhere (rot only in the sense
+                      that the edge points at nothing — lint_links' finding, carried
+                      here so the audit is one complete view),
+          superseded  the target IS a live memory but some other memory supersedes
+                      it — the edge points at retired knowledge. The supersession
+                      marker itself (the ``supersedes`` edge into the target) is NOT
+                      rot; every other edge kind into it is.
+
+    Cost: two corpus reads (``lint`` + ``build_graph``) + one frontmatter sweep —
+    CLI/doctor-only, never any hook path.
+    """
+    from .lint_links import lint
+
+    g = build_graph(memory_dir)
+    if g is None:
+        return None
+    report = lint(memory_dir)
+
+    typed_counts: Dict[str, int] = {}
+    for _src, rels in g.typed.items():
+        for rel, targets in rels.items():
+            if targets:
+                typed_counts[rel] = typed_counts.get(rel, 0) + len(targets)
+
+    archive_dir = os.path.join(memory_dir, "archive")
+
+    def _rot_class(target: str) -> str:
+        candidates = {target, normalize_slug(target).replace("-", "_"), normalize_slug(target)}
+        for cand in candidates:
+            if cand and os.path.isfile(os.path.join(archive_dir, cand + ".md")):
+                return "archived"
+        return "dangling"
+
+    rot: List[dict] = []
+    for item in report.get("dangling", []):
+        rot.append(
+            {
+                "src": item["file"],
+                "target": item["target"],
+                "via": "wikilink",
+                "class": _rot_class(item["target"]),
+            }
+        )
+    for item in report.get("typed_dangling", []):
+        rot.append(
+            {
+                "src": item["file"],
+                "target": item["target"],
+                "via": item["relation"],
+                "class": _rot_class(item["target"]),
+            }
+        )
+    superseded_stems = {tgt for _src, tgt in g.all_typed_edges("supersedes")}
+    if superseded_stems:
+        for src, outs in sorted(g.adjacency.items()):
+            for tgt in sorted(outs):
+                if tgt in superseded_stems:
+                    rot.append({"src": src, "target": tgt, "via": "wikilink", "class": "superseded"})
+        for rel in sorted(TYPED_RELATIONS):
+            if rel == "supersedes":
+                continue  # the supersession marker itself is the one legitimate edge in
+            for src, tgt in g.all_typed_edges(rel):
+                if tgt in superseded_stems:
+                    rot.append({"src": src, "target": tgt, "via": rel, "class": "superseded"})
+
+    origin_counts: Dict[str, int] = {}
+    for _src, tagged in _edge_origin_map(memory_dir).items():
+        for _tgt, origin in tagged.items():
+            origin_counts[origin] = origin_counts.get(origin, 0) + 1
+
+    comps = g.connected_components()
+    degrees = g.degrees()
+    return {
+        "files": len(g.files),
+        "edges": report.get("edges", 0),
+        "typed_edges": typed_counts,
+        "components": len(comps),
+        "largest_component": len(comps[0]) if comps else 0,
+        "orphans": len(g.orphans()),
+        "isolates": len(g.isolates()),
+        "max_degree": degrees[0][3] if degrees else 0,
+        "edge_origin": origin_counts,
+        "rot": rot,
+    }
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
@@ -1155,6 +1296,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=None,
         help="GRA-8: serialize the whole graph (json | Graphviz dot | mermaid)",
     )
+    parser.add_argument(
+        "--audit",
+        action="store_true",
+        help="GRF-1: the one-call graph audit — edge classes, structure stats, "
+        "edge_origin tags, and edge rot (archived/superseded/dangling targets)",
+    )
     args = parser.parse_args(argv)
 
     md, _ = resolve_dirs()
@@ -1165,6 +1312,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
     if args.export:
         print(g.export(args.export))
+        return 0
+    if args.audit:
+        report = graph_audit(md)
+        if report is None:
+            print("could not build link graph")
+            return 1
+        typed = (
+            ", ".join(f"{rel}={n}" for rel, n in sorted(report["typed_edges"].items())) or "none"
+        )
+        print(
+            f"graph audit: files={report['files']} edges={report['edges']} "
+            f"typed[{typed}] components={report['components']} "
+            f"(largest {report['largest_component']}) orphans={report['orphans']} "
+            f"isolates={report['isolates']} max_degree={report['max_degree']}"
+        )
+        if report["edge_origin"]:
+            origins = ", ".join(f"{o}={n}" for o, n in sorted(report["edge_origin"].items()))
+            print(f"edge origins (stamped): {origins}")
+        rot = report["rot"]
+        print(f"edge rot ({len(rot)}):" if rot else "edge rot (0): none")
+        for r in rot:
+            print(f"  {r['class']:<10} {r['src']} -> {r['target']} (via {r['via']})")
         return 0
     total_edges = sum(len(v) for v in g.adjacency.values())
     typed_edges = sum(len(t) for m in g.typed.values() for t in m.values())

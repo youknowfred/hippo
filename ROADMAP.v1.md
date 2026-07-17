@@ -126,7 +126,7 @@ Each gate was re-checked against real code. Summary first, evidence below.
 | Item | Gate | Gate status (verified) | v1 verdict |
 |---|---|---|---|
 | **RET-8** category-tagged eval | RET-1 + GRA-1 landed | **CLEARED** — both live (`recall.py:594-595,840-917`) | **KEEP → v0.9.0** |
-| **GRA-8** graph observability | none (opportunistic) | n/a — genuinely unshipped | **KEEP → v0.9.0** |
+| **GRA-8** graph observability | none (opportunistic) | n/a — genuinely unshipped | **KEEP → v0.9.0** — SHIPPED at PR #27 (`--components/--degree/--export`); the remainder (one-call audit view, edge-class counts, edge ROT, `edge_origin` display) was absorbed & CLOSED by GRF-1 (`links --audit` + the doctor `edge_rot` line, 2026-07-16) |
 | **LIF-8** verbatim-evidence convention | RET-2 landed | **CLEARED — but deliverable already shipped** under DOC-6 | **RECONCILE** (mark done; residual = low-pri polish) |
 | **GRA-7** personalized PageRank | beats GRA-1 on RET-8 multi-hop | **NOT CLEARED** — un-evaluatable until RET-8 exists | **DEFER post-v1** |
 | **LIF-7** typed-memory taxonomy | CAP-2 proven across sessions | **CAP-SOAK CLEARED 2026-07-10** (owner judgment, via AskUserQuestion) — enough field soak; unblocks the memory→rule scoping refinement | **RUL-6 BUILT** (glob-scoped rule promotion); the broader typed-taxonomy schema change remains post-v1 |
@@ -385,6 +385,12 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
   bm25-only statement — this fires on the dense path too when a stranger's corpus has a
   too-permissive floor. Stretch (auto-derive from RET-7) deferred; the audit skill already
   drafts the fixture (SIG-6).
+  **FULLY CLOSED 2026-07-16 (T9/GRF-3)** — the calibration half the leak-detector's
+  "raise `HIPPO_DENSE_FLOOR`" hint always lacked a NUMBER for: `eval_recall --floor-sweep`
+  recommends a per-model/per-corpus floor from the RAW-cosine separation of on-topic
+  hard-set queries vs off-topic probes (never fused metrics), persists the report
+  (gitignored), and `doctor.check_floor_calibration` compares it to the configured
+  `recall._DENSE_FLOOR_BY_MODEL` entry — advisory only, a human edits the table.
 - **RET-11** `P1/M` — BM25-only **abstention floor** (normalized-score / IDF-mass
   threshold) *or* an explicit doctor/README statement that abstention is
   dense-gated + a warm-the-model nudge. *(KPI-1.)*

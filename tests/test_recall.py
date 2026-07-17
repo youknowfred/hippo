@@ -1307,7 +1307,7 @@ def test_mmr_diversifies_near_paraphrase_block(tmp_path, monkeypatch):
 
     # Baseline (MMR bypassed): the two near-paraphrases dominate top-2 instead -- confirms
     # the fixture actually NEEDS diversification, not a coincidence of this corpus/query.
-    monkeypatch.setattr(R, "_mmr_rerank", lambda penalized, entries, dense, k: penalized)
+    monkeypatch.setattr(R, "_mmr_rerank", lambda penalized, entries, dense, k, **kw: penalized)
     baseline_names = [r["name"] for r in R.recall(query, k=2, memory_dir=md, index_dir=idx)]
     assert baseline_names == ["deploy_gate_a", "deploy_gate_b"]
 
@@ -1352,6 +1352,200 @@ def test_mmr_lambda_env_override(monkeypatch):
     assert R._mmr_lambda() == R._MMR_LAMBDA
     monkeypatch.delenv("HIPPO_MMR_LAMBDA", raising=False)
     assert R._mmr_lambda() == R._MMR_LAMBDA
+
+
+# --------------------------------------------------------------------------- #
+# GRF-2: graph-ENDORSED entries vs the MMR diversity penalty — the symmetric twin of
+# the GRA-1 knee fix above. A wikilink neighbor is DEFINITIONALLY similar to the seed
+# that endorsed it, so MMR's diversity penalty is structurally biased against exactly
+# the entries the graph vouches for; on the mixed/degraded path (dense index resident,
+# bm25 ranking at query time) this scored the multi-hop category 0.0, and on the
+# production dense path it displaced organically-admitted cluster members (the T9
+# re-measure: multi-hop 0.5 dense / 0.0 mixed, both stems cut at the MMR re-cut).
+# The fix: `graph_endorsed` entries are EXEMPT from the diversity math — they keep
+# their original slot, the same posture as entries without a dense row — and
+# `_expand_neighbors` now endorses a seed that is another seed's 1-hop neighbor (it is
+# never score-injected — a top-seed already ranks as well as it can — but the graph
+# still vouches for it, and MMR must not punish it for resembling its own cluster).
+# --------------------------------------------------------------------------- #
+# A (seed) hard-matches the query and links B; B is a near-paraphrase of A (dense-
+# similar, a genuine organic rank-2 on both backends); C is the diverse facet MMR
+# promotes when it may. Without the wikilink, MMR MUST still prefer [A, C] (the
+# diversification guarantee); with it, B is endorsed and keeps its organic slot.
+# The fillers keep BM25 IDF sane on the bm25-ranking (mixed) leg — on a 3-doc corpus
+# the cluster terms sit in 2/3 docs, Okapi idf goes NEGATIVE and the ranking inverts
+# (the _LINKED_CORPUS precedent). These tests use _fake_embedder(64): at 16 dims the
+# crc32 bucket collisions make unrelated descriptions spuriously similar, and the MMR
+# picks under test stop tracking true token overlap.
+_MMR_CLUSTER_CORPUS = {
+    "deploy_gate_a.md": (
+        "deploy pipeline manual approval gate required before production rollout ships",
+        "details\n\nRelated: [[deploy_gate_b]]\n",
+    ),
+    "deploy_gate_b.md": (
+        "deploy pipeline manual approval gate required before production rollout deploys",
+        "body",
+    ),
+    "db_migration.md": (
+        "database migration requires an approval gate from the platform team before running",
+        "body",
+    ),
+    "excel_header.md": (_CORPUS["excel_header.md"], "body"),
+    "canvas_pdf.md": (_CORPUS["canvas_pdf.md"], "body"),
+    "formula_graph.md": (_CORPUS["formula_graph.md"], "body"),
+}
+_MMR_CLUSTER_QUERY = "deploy pipeline manual approval gate rollout"
+
+
+def _env_gated(emb_query):
+    """Wrap a fake ``embed_query`` so it honors ``dense_disabled()`` by raising, exactly
+    like the real path (``_get_model`` raises RuntimeError under HIPPO_DISABLE_DENSE and
+    ``_dense_rank_rows`` degrades to []). A plain fake keeps dense ranking silently alive
+    under the flag, and a "mixed-mode" test would measure full-fused mode instead."""
+
+    def gated(text, allow_download=False):
+        if B.dense_disabled():
+            raise RuntimeError("dense disabled via HIPPO_DISABLE_DENSE")
+        return emb_query(text, allow_download)
+
+    return gated
+
+
+def test_expand_neighbors_endorses_seed_linked_seed(monkeypatch):
+    """Unit contract: a seed that is another seed's 1-hop neighbor is ENDORSED (the
+    graph vouches for it) but never injected (a seed already ranks as well as it can),
+    and the list rides through untouched."""
+    monkeypatch.setenv("HIPPO_GRAPH_SEEDS", "2")
+    entries = [{"name": "seed"}, {"name": "linked_seed"}, {"name": "other"}]
+    penalized = [(0, 0.030, None), (1, 0.020, None), (2, 0.010, None)]
+    edges = {"seed": {"out": {"linked_seed"}, "in": set()}}
+    out, injected, endorsed = R._expand_neighbors(penalized, entries, edges)
+    assert out == penalized  # no tuple moved — endorsement is not injection
+    assert injected == set()
+    assert endorsed == {1}
+
+
+def test_expand_neighbors_no_edges_still_endorses_nothing(monkeypatch):
+    """Seed-of-seed endorsement fires only on a real edge: unlinked seeds endorse
+    nothing (the no-link tail can never ride in on the new channel)."""
+    monkeypatch.setenv("HIPPO_GRAPH_SEEDS", "3")
+    entries = [{"name": "a"}, {"name": "b"}, {"name": "c"}]
+    penalized = [(0, 0.030, None), (1, 0.020, None), (2, 0.010, None)]
+    edges = {"a": {"out": set(), "in": set()}}
+    out, injected, endorsed = R._expand_neighbors(penalized, entries, edges)
+    assert (out, injected, endorsed) == (penalized, set(), set())
+
+
+def test_mmr_rerank_exempts_graph_endorsed_entries():
+    """An endorsed entry keeps its ORIGINAL slot — exempt from the diversity math the
+    same way a no-dense-row entry already is (the knee exemption's symmetric twin)."""
+    dense = np.array(
+        [[1.0, 0.0], [1.0, 0.0], [0.0, 1.0]], dtype="float32"
+    )  # 0 and 1 are identical; 2 is orthogonal
+    entries = [{"row": 0}, {"row": 1}, {"row": 2}]
+    # RRF-scale relevance (~1/60): at this scale the (1-lambda) x cosine diversity term
+    # dominates adjacent-rank relevance gaps -- the production regime, and exactly why
+    # the penalty could evict a definitionally-seed-similar endorsed neighbor.
+    penalized = [(0, 0.020, None), (1, 0.019, None), (2, 0.016, None)]
+    # Without endorsement MMR must demote the duplicate at slot 2 in favor of the
+    # orthogonal facet (this is the diversification the exemption must NOT break)…
+    plain = R._mmr_rerank(penalized, entries, dense, k=2)
+    assert [t[0] for t in plain] == [0, 2, 1]
+    # …with endorsement, entry 1 is exempt: original slot kept, order preserved.
+    exempt = R._mmr_rerank(penalized, entries, dense, k=2, endorsed={1})
+    assert [t[0] for t in exempt] == [0, 1, 2]
+
+
+def test_endorsed_neighbor_survives_mmr_dense(tmp_path, monkeypatch):
+    """Production dense path: the wikilinked near-paraphrase neighbor (endorsed, a
+    genuine organic rank-2) survives the MMR re-cut instead of losing its top-k slot
+    to the diversity penalty — the T9 re-measured dense-side displacement.
+
+    HIPPO_KNEE_RATIO=0.4: the fused cluster->facet score gap on this corpus (~0.49)
+    sits exactly on the default 0.5 knee — without the override the knee cuts the
+    diverse facet BEFORE the MMR re-cut and the displacement under test never gets a
+    candidate to displace with. The knee is not what this test pins."""
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    monkeypatch.setenv("HIPPO_KNEE_RATIO", "0.4")
+    emb_docs, emb_query = _fake_embedder(64)
+    monkeypatch.setattr(B, "embed_documents", emb_docs)
+    monkeypatch.setattr(R, "embed_query", emb_query)
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_linked_corpus(md, _MMR_CLUSTER_CORPUS)
+    B.build_index(md, idx)
+
+    names = [r["name"] for r in R.recall(_MMR_CLUSTER_QUERY, k=2, memory_dir=md, index_dir=idx)]
+    # Set-compare: the paraphrase twins' fake-embedder vectors are IDENTICAL (crc32
+    # collision), so their fused scores tie exactly and numpy argsort breaks the tie
+    # differently per platform (Linux CI ranked b first; macOS a). The property under
+    # test is that the endorsed pair SURVIVES the re-cut, not which twin leads.
+    assert set(names) == {"deploy_gate_a", "deploy_gate_b"}
+
+
+def test_endorsed_seed_survives_mmr_mixed_mode(tmp_path, monkeypatch):
+    """The mixed/degraded path (dense index RESIDENT, bm25 ranking at query time — the
+    embed-timeout/cold-cache shape, reproduced the way MSR-2's arm reproduces it: index
+    preloaded BEFORE the query-time flag): MMR still runs against the loaded matrix and,
+    pre-fix, displaced the cluster's second seed out of top-k (the leg the T9 re-measure
+    showed at 0.0). Endorsed via the seed-of-seed edge, it now keeps its organic slot.
+
+    NB a fresh ``recall(memory_dir=...)`` under HIPPO_DISABLE_DENSE loads NO matrix at
+    all (true bm25-only, MMR no-op) — the resident-matrix condition this test pins only
+    exists with a preloaded index, which is exactly what the eval arm and a mid-session
+    embed degradation hold. Fillers keep BM25 IDF sane (on a 3-doc corpus the cluster
+    terms go negative-idf and the ranking inverts — the _LINKED_CORPUS precedent).
+
+    The query-side fake honors ``dense_disabled()`` by RAISING, exactly like the real
+    ``embed_query`` path (``_get_model`` raises RuntimeError under the flag and
+    ``_dense_rank_rows`` degrades to []) — a plain fake would silently keep dense
+    ranking alive and this test would measure full-fused mode while claiming mixed."""
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    emb_docs, emb_query = _fake_embedder(64)
+    monkeypatch.setattr(B, "embed_documents", emb_docs)
+    monkeypatch.setattr(R, "embed_query", _env_gated(emb_query))
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    _write_linked_corpus(md, _MMR_CLUSTER_CORPUS)
+    B.build_index(md, idx)
+    loaded = B.load_index(idx)  # matrix resident — the eval-arm / mid-session shape
+    assert loaded is not None and loaded.dense is not None
+
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")  # query-time only: bm25 ranks, MMR still runs
+    names = [
+        r["name"]
+        for r in R.recall(_MMR_CLUSTER_QUERY, k=2, index=loaded, index_dir=idx)
+    ]
+    # Set-compare: bm25 may order the paraphrase pair either way; the property under
+    # test is that the endorsed cluster SURVIVES the re-cut, not which twin leads.
+    assert set(names) == {"deploy_gate_a", "deploy_gate_b"}
+
+
+def test_mmr_still_diversifies_unlinked_tail_mixed_mode(tmp_path, monkeypatch):
+    """The tail guard for the MMR exemption on the mixed/degraded path: WITHOUT the
+    wikilink the near-paraphrase is not endorsed and MMR still demotes it for the
+    diverse facet — endorsement is the ONLY new exemption channel, diversification is
+    intact. (The dense-path twin of this guard is
+    test_mmr_diversifies_near_paraphrase_block, unchanged by GRF-2. Mixed mode is the
+    interesting leg here: bm25's adjacent-RRF relevance gaps are ~1.6%, far inside any
+    sane knee ratio, so the whole trio reaches the MMR re-cut — on the dense leg the
+    fused-score cliff between the pair and the facet trips the knee first.)"""
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    emb_docs, emb_query = _fake_embedder(64)
+    monkeypatch.setattr(B, "embed_documents", emb_docs)
+    monkeypatch.setattr(R, "embed_query", _env_gated(emb_query))
+    md = str(tmp_path / "memory")
+    idx = str(tmp_path / ".memory-index")
+    items = dict(_MMR_CLUSTER_CORPUS)
+    items["deploy_gate_a.md"] = (_MMR_CLUSTER_CORPUS["deploy_gate_a.md"][0], "details\n")
+    _write_linked_corpus(md, items)
+    B.build_index(md, idx)
+
+    loaded = B.load_index(idx)  # resident matrix, same shape as the endorsed mixed test
+    assert loaded is not None and loaded.dense is not None
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    mixed = [r["name"] for r in R.recall(_MMR_CLUSTER_QUERY, k=2, index=loaded, index_dir=idx)]
+    assert "db_migration" in mixed  # the diverse facet still wins a top-2 slot
 
 
 # --------------------------------------------------------------------------- #
@@ -4007,3 +4201,20 @@ def test_main_ledger_event_measures_injected_chars(tmp_path, monkeypatch, capsys
     assert len(events) == 2
     assert events[0]["injected_chars"] == len(printed)  # measured at the emission point
     assert "injected_chars" not in events[1]  # abstention emitted nothing — no fake 0
+
+
+def test_expand_neighbors_sibling_tie_order_is_deterministic(monkeypatch):
+    """Two siblings injected by ONE seed tie at the identical discounted score; the
+    emission sort is stable, so their relative rank inherits insertion order — which
+    was per-process str-set hash order until MSR-1's pass^k probe caught the flake
+    (exposed by the GRF-2-grown fixture). Sorted stem iteration pins it: ties insert
+    name-sorted, every process, every time."""
+    monkeypatch.setenv("HIPPO_GRAPH_SEEDS", "1")
+    entries = [{"name": "seed"}, {"name": "zeta_sibling"}, {"name": "alpha_sibling"}]
+    penalized = [(0, 0.030, None)]  # only the seed ranks organically
+    edges = {"seed": {"out": {"zeta_sibling", "alpha_sibling"}, "in": set()}}
+    for _ in range(3):
+        out, injected, endorsed = R._expand_neighbors(penalized, entries, edges)
+        assert injected == {1, 2} and endorsed == {1, 2}
+        # both injected at 0.5 x 0.030 — the tie breaks by stem name, deterministically
+        assert [i for i, _s, _st in out] == [0, 2, 1]

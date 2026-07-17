@@ -1150,7 +1150,10 @@ def _expand_neighbors(
     they keep their own dedicated penalty/annotation handling. Injection rules, in order:
 
       - stems absent from the index are dropped (a link can outlive its target);
-      - the seeds themselves are dropped (a seed is already ranked as well as it can be);
+      - the seeds themselves are never INJECTED (a seed is already ranked as well as it
+        can be) — but a seed that is another seed's 1-hop neighbor still joins the
+        ENDORSED set (GRF-2): the graph vouches for it, so the knee and MMR exemptions
+        apply to it exactly as to a non-seed neighbor;
       - a neighbor's injected score is ``_NEIGHBOR_DISCOUNT x its BEST seed's penalized
         score`` (touching several seeds does not stack — the graph is a hint, not a vote);
       - invalidation applies IDENTICALLY to organic candidates: "recent" halves the
@@ -1190,6 +1193,7 @@ def _expand_neighbors(
         name_to_idx = {e.get("name"): j for j, e in enumerate(entries)}
         organic_score = {i: score for i, score, _state in penalized}
         injected: dict = {}  # entry idx -> best discounted seed score
+        endorsed_seeds: set = set()  # seeds that are other seeds' 1-hop neighbors (GRF-2)
         for si, sscore, _sstate in seeds:
             rec = edges.get(entries[si].get("name"))
             if not rec:
@@ -1230,16 +1234,38 @@ def _expand_neighbors(
                 | typed_in.get("refines", set())
                 | typed_in.get("derives-from", set())
             )
-            for stem in neighbor_stems:
+            # SORTED iteration (GRF-2, found by MSR-1's pass^k probe): two siblings of
+            # one seed inject at the IDENTICAL discounted score, and the emission
+            # sort is stable — so their relative rank inherits INSERTION order, which
+            # for a str-set comprehension is per-process hash order. n=2-era fixtures
+            # never saw it (both siblings were any-of expected, a swap moved nothing);
+            # the grown multi-hop set pins single stems and caught the flake. Sorting
+            # here makes tie order deterministic (seed rank, then stem name) at a cost
+            # of O(deg log deg) on a handful of neighbors.
+            for stem in sorted(neighbor_stems):
                 j = name_to_idx.get(stem)
-                if j is None or j in seed_idxs:
+                if j is None:
+                    continue
+                if j in seed_idxs:
+                    # GRF-2: a seed that is ANOTHER seed's 1-hop neighbor is ENDORSED —
+                    # the graph vouches for it exactly as it vouches for a non-seed
+                    # neighbor — but never score-injected (a top seed already ranks as
+                    # well as it can; there is no better score to give it). Endorsement
+                    # is what exempts it from the knee and the MMR diversity penalty:
+                    # two linked cluster members ranking top-of-list is the graph
+                    # AGREEING with the ranking, and MMR must not punish the pair for
+                    # resembling each other (the mixed-mode 0.0 leg the T9 re-measure
+                    # attributed to exactly this displacement).
+                    if j != si:
+                        endorsed_seeds.add(j)
                     continue
                 cand = sscore * _NEIGHBOR_DISCOUNT
                 if cand > injected.get(j, float("-inf")):
                     injected[j] = cand
-        if not injected:
+        if not injected and not endorsed_seeds:
             return penalized, set(), set()
-        endorsed = set(injected)  # every resolvable seed-neighbor, organic-kept or not
+        # Every resolvable seed-neighbor, organic-kept or not — plus seed-linked seeds.
+        endorsed = set(injected) | endorsed_seeds
         replace: dict = {}  # entry idx -> (adj_score, state)
         for j, cand in injected.items():
             state = _invalidation_state(entries[j])
@@ -1634,6 +1660,8 @@ def _mmr_rerank(
     entries: List[dict],
     dense,
     k: int,
+    *,
+    endorsed: Optional[set] = None,
 ) -> List[Tuple[int, float, Optional[str]]]:
     """Re-cut the top ``~2k`` of ``penalized`` for intra-block diversity, preserving length.
 
@@ -1644,6 +1672,18 @@ def _mmr_rerank(
     entries with no primary-relevance signal. Never touches corpus="rule" pointers -- those
     are appended after emission, hold no dense row, and are never part of ``penalized``.
     Degrades to the untouched input (never raises, never drops/reorders-wrong on failure).
+
+    GRF-2: ``endorsed`` (entry indices from ``_expand_neighbors``' graph-endorsed set)
+    get the SAME original-slot exemption. A wikilink neighbor is definitionally similar
+    to the seed that endorsed it, so the diversity penalty is structurally biased against
+    exactly the entries the graph vouches for -- on the mixed/degraded path (dense index
+    resident, bm25 ranking at query time) this scored the multi-hop category 0.0, and on
+    the production dense path it displaced organically-admitted cluster members (the T9
+    re-measure). This is the symmetric twin of the knee's ``graph_endorsed`` exemption
+    (4d16022): when a human-authored edge and an embedding-similarity heuristic disagree
+    about whether two memories belong together, the edge wins. Endorsement is the ONLY
+    exemption channel -- an unlinked near-paraphrase is still demoted (the
+    diversification guarantee is intact; a no-link tail can never ride in on this).
     """
     if dense is None or len(penalized) < 2:
         return penalized
@@ -1658,7 +1698,7 @@ def _mmr_rerank(
         exempt_positions: Dict[int, Tuple[int, float, Optional[str]]] = {}
         for pos, (i, score, state) in enumerate(pool):
             row = entries[i].get("row")
-            if row is None or row < 0 or row >= len(dense):
+            if (endorsed and i in endorsed) or row is None or row < 0 or row >= len(dense):
                 exempt_positions[pos] = (i, score, state)
             else:
                 eligible.append((pos, i, score, row, state))
@@ -2685,7 +2725,12 @@ def recall(
         # always applied, in the TRUE organic order, so MMR can only ever choose among
         # genuinely display-worthy candidates. Degrades to a no-op on a BM25-only corpus or
         # when a candidate has no dense row -- see _mmr_rerank's docstring.
-        admissible = _mmr_rerank(admissible, entries, idx.dense, k)
+        # GRF-2: graph-ENDORSED entries are exempt from the diversity re-cut (they keep
+        # their organic slot) -- the same endorsement the knee exempts above. A wikilink
+        # neighbor is definitionally similar to its seed; punishing it for that similarity
+        # is how the mixed/degraded path scored multi-hop 0.0 (and how the dense path
+        # displaced organically-admitted cluster members -- the T9 re-measure).
+        admissible = _mmr_rerank(admissible, entries, idx.dense, k, endorsed=graph_endorsed)
         # MSR-4: admitted to the pool but not selected for the final top-k at the MMR
         # re-cut (a pure rank cut when MMR degrades to a no-op) — the last mechanism
         # that can silently eat a display-worthy candidate.

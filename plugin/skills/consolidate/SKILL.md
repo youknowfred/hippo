@@ -236,7 +236,21 @@ For EACH printed pair (already-linked pairs are dropped above), read both memori
 whether the association is real — would someone recalling one genuinely need the other? If
 yes, ask for approval, then append a `[[the-other-name]]` reference into ONE side's body
 (its `Related:` line if present — an untyped wikilink, the GRA-3 convention; no new edge
-type, no schema change). Per item, agent-gated — never append the whole list in bulk. If no,
+type, no schema change). In the SAME edit, stamp the edge's provenance in that file's
+frontmatter (GRF-1 — the key is `edge_origin`, NOT `origin`, which is the memory-level
+promote stamp):
+
+```yaml
+metadata:
+  edge_origin:
+    the-other-name: co-recall
+```
+
+(merge into an existing `edge_origin:` map if one is already there). The stamp is
+absence-emits-nothing — corpora without it behave identically, nothing bumps
+`corpus_format`, and it never enters links.json; `python -m memory.links --audit`
+displays stamped-edge counts so a co-recall-proposed edge stays distinguishable from a
+hand-authored one. Per item, agent-gated — never append the whole list in bulk. If no,
 skip it; the tally will keep its count and you can dismiss it again next drain.
 
 After any approved append, re-run `"$PY" -m memory.build_index` so `links.json` carries the
