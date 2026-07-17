@@ -1183,6 +1183,7 @@ def record_reconsolidation_outcome(
     invalidated: Optional[bool] = None,
     invalid_after: Optional[str] = None,
     superseded_by: Optional[str] = None,
+    succession_replay: Optional[dict] = None,
 ) -> bool:
     """Append ONE reconsolidation outcome to the gitignored ``reconsolidation_events.jsonl``.
 
@@ -1211,6 +1212,11 @@ def record_reconsolidation_outcome(
             event["invalid_after"] = str(invalid_after)
         if superseded_by is not None:
             event["superseded_by"] = str(superseded_by)
+        if succession_replay is not None:
+            # TMB-5: replay COUNTS only ({"harvested", "pass", "fail", "inconclusive"}) —
+            # an additive field on the SAME event (no new ledger, no new outcome value),
+            # and the no-sensitive-content contract holds: never query text.
+            event["succession_replay"] = dict(succession_replay)
         path = _reconsolidation_ledger_path(td)
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, ensure_ascii=False) + "\n")

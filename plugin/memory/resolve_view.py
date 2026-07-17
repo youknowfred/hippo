@@ -793,6 +793,16 @@ def apply_resolve_verdict(
             f"{second} demoted (invalid_after {rv.get('invalid_after') or 'set'}); "
             f"{first} now supersedes it"
         )
+        replay = rv.get("succession_replay")
+        if replay:  # TMB-5 rides the same demote chain — summary only, here
+            c = replay.get("counts") or {}
+            result["detail"].append(
+                f"succession replay: {c.get('pass', 0)} pass / {c.get('fail', 0)} fail / "
+                f"{c.get('inconclusive', 0)} inconclusive over {replay.get('harvested', 0)} "
+                "historical quer(y/ies)"
+                if replay.get("harvested")
+                else "succession replay: nothing to replay (no prior recall hit for the loser)"
+            )
         _log_verdict(repo_root or "", tuple(result["pair"]), verdict, prefill)
         return result
     except Exception as exc:

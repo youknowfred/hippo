@@ -1912,6 +1912,14 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
             )
         bits.append("logged" if r["logged"] else "not logged")
         out = [f"reverify {base}: " + "; ".join(bits)]
+        # TMB-5: the succession replay's per-query lines — the same rendering the CLI prints.
+        from .reconsolidate import succession_replay_lines
+
+        out.extend(
+            succession_replay_lines(
+                os.path.splitext(base)[0], superseded_by or "", r.get("succession_replay")
+            )
+        )
         # LIF-3: the ONE shared rot rendering — a graduate/fix re-derivation that dropped
         # citations must be as loud here as on the provenance CLI.
         from .provenance import citation_rot_lines

@@ -1629,6 +1629,62 @@ def check_invalid_after_terminal(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"invalid_after terminal-state check failed: {exc}."}
 
 
+def check_succession_replay(ctx: DoctorContext) -> Dict[str, str]:
+    """TMB-5: ONE line for supersedes pairs whose succession replay is failing or unrun.
+
+    A supersede whose replay FAILED left a leaking tombstone (queries that used to recall
+    the old name don't rank the successor); one with NO replay evidence (a hand-authored
+    edge, or a verdict predating TMB-5) was never verified at all. Evidence source: the
+    links.json typed edges (one cache read) joined against the reconsolidation ledger's
+    demote events — the replay itself only ever runs inside the per-item
+    ``semantic_reverify`` demote path, never from here (doctor stays read-only). Silent
+    ``ok`` when the graph is unavailable (other checks own that).
+    """
+    try:
+        from .build_index import default_index_dir
+        from .links import load_edges
+        from .telemetry import read_reconsolidation_events
+
+        edges = load_edges(default_index_dir(ctx.memory_dir))
+        if edges is None:
+            return {"status": "ok", "message": "succession replay: N/A (no links cache)."}
+        pairs = []  # (declarer, target)
+        for stem, rec in edges.items():
+            for tgt in rec.get("typed_out", {}).get("supersedes", ()):
+                pairs.append((stem, tgt))
+        if not pairs:
+            return {"status": "ok", "message": "succession replay: no supersedes edges."}
+        latest: Dict[tuple, Optional[dict]] = {}
+        for e in read_reconsolidation_events():
+            if e.get("outcome") == "demote" and e.get("superseded_by") and e.get("name"):
+                latest[(str(e["superseded_by"]), str(e["name"]))] = e.get("succession_replay")
+        failing, unrun = [], []
+        for declarer, tgt in sorted(pairs):
+            if (declarer, tgt) not in latest or not isinstance(latest[(declarer, tgt)], dict):
+                unrun.append(f"{declarer}→{tgt}")
+            elif int(latest[(declarer, tgt)].get("fail") or 0) > 0:
+                failing.append(f"{declarer}→{tgt}")
+        if not failing and not unrun:
+            return {
+                "status": "ok",
+                "message": f"succession replay: {len(pairs)} supersede pair(s), none failing or unreplayed.",
+            }
+        detail = "; ".join(
+            ([f"failing: {', '.join(failing[:3])}"] if failing else [])
+            + ([f"never replayed: {', '.join(unrun[:3])}"] if unrun else [])
+        )
+        return {
+            "status": "warn",
+            "message": f"succession replay: {len(failing) + len(unrun)} of {len(pairs)} "
+            f"supersede pair(s) lack a passing replay ({detail}) — a `reconsolidate "
+            "--reverify <old> --outcome demote --superseded-by <new>` verdict replays "
+            "automatically; failing pairs suggest the successor misses the old name's "
+            "recall surface.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"succession-replay check failed: {exc}."}
+
+
 # (label, check_fn) in a FIXED order — the source of the deterministic output. New checks append
 # here; the order is never sorted-by-name or set-derived, so the printed sequence is stable.
 _HOT_PATH_P95_BUDGET_MS = 1500.0  # KPI-3 / PRF-2: the cold per-prompt budget
@@ -2138,6 +2194,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("committed_usage_privacy", check_committed_usage_privacy),  # SEC-14: TEA-5 usage on a shared remote
     ("projects_registry", check_projects_registry),  # RCH-11: dead-row hygiene, machine-level
     ("invalid_after_terminal", check_invalid_after_terminal),  # TMB-2: non-drift retirements, corpus-wide
+    ("succession_replay", check_succession_replay),  # TMB-5: supersedes with failing/unrun replay
     ("stale_memobot_env", check_stale_memobot_env),  # pinned last (env hygiene trails)
 ]
 
