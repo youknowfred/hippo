@@ -7,8 +7,8 @@ metadata:
   originSessionId: 9daeb989-6a8b-402f-a56e-6a67e97e47d0
   last_verified: "2026-07-16T14:40:06.953363+00:00"
   cited_paths: [".github/workflows/release.yml", "plugin/.claude-plugin/plugin.json", ".claude-plugin/marketplace.json", "plugin/memory/portability.py", "plugin/memory/registry.py"]
-  source_commit: "bf57e6c1b86d1b0ef1c0090ab281459ceb8ab286"
-  source_commit_time: 1784211707
+  source_commit: "f99bfa89571ac19cadf0967693103b9b9bd464f1"
+  source_commit_time: 1784246873
 ---
 
 Tier T5 (v1.5.0, "Knowledge that grows itself") — session 2026-07-09. **COMPLETE, 8/8,

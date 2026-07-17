@@ -7,8 +7,8 @@ metadata:
   originSessionId: 4e201da2-f0f8-458f-9214-09afef5349af
   last_verified: "2026-07-16T14:40:05.887607+00:00"
   cited_paths: ["plugin/memory/resolve_view.py", "plugin/.claude-plugin/plugin.json", "plugin/memory/capture.py"]
-  source_commit: "0489fe3996361971582d7fb157e046584c644418"
-  source_commit_time: 1784213258
+  source_commit: "f99bfa89571ac19cadf0967693103b9b9bd464f1"
+  source_commit_time: 1784246873
 ---
 
 Tier T4 (v1.4.0, "A corpus you can govern") — session 2026-07-08. **COMPLETE, 7/7, [PR

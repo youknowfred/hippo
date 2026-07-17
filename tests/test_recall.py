@@ -17,6 +17,7 @@ import pytest
 from memory import build_index as B
 from memory import outcome as O
 from memory import recall as R
+from memory import recall_rank as RR
 from memory import staleness as S
 from memory import telemetry as T
 
@@ -360,7 +361,7 @@ def test_dense_rank_skips_when_manifest_model_mismatches_configured_model(tmp_pa
     emb_docs, emb_query = _fake_embedder(16)
     monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
-    monkeypatch.setattr(R, "embed_query", emb_query)
+    monkeypatch.setattr(RR, "embed_query", emb_query)
     md = str(tmp_path / "memory")
     idx_dir = str(tmp_path / ".memory-index")
     _write_corpus(md, _CORPUS)
@@ -384,7 +385,7 @@ def test_recall_degrades_to_bm25_with_doctor_visible_reason_on_model_mismatch(
     emb_docs, emb_query = _fake_embedder(16)
     monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
-    monkeypatch.setattr(R, "embed_query", emb_query)
+    monkeypatch.setattr(RR, "embed_query", emb_query)
     md = str(tmp_path / "memory")
     idx_dir = str(tmp_path / ".memory-index")
     _write_corpus(md, _CORPUS)
@@ -824,7 +825,7 @@ def test_recall_superseded_ranks_below_successor_dense_path(tmp_path, monkeypatc
     emb_docs, emb_query = _fake_embedder(16)
     monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
-    monkeypatch.setattr(R, "embed_query", emb_query)
+    monkeypatch.setattr(RR, "embed_query", emb_query)
     md, idx = str(tmp_path / "memory"), str(tmp_path / ".memory-index")
     _typed_fm_corpus(md, edge=True)
     B.build_index(md, idx)
@@ -945,7 +946,7 @@ def test_recall_pin_cannot_beat_strong_organic_hit(monkeypatch):
     }
     index = B.LoadedIndex(manifest, np.stack([qvec, weak_vec]))
     assert index.dense_ready
-    monkeypatch.setattr(R, "embed_query", lambda q, allow_download=False: qvec)
+    monkeypatch.setattr(RR, "embed_query", lambda q, allow_download=False: qvec)
     res = R.recall("canary deploy rollout traffic", k=2, index=index)
     assert res and res[0]["name"] == "strong"  # pin never overrides genuine relevance
     if len(res) > 1:  # the weak hit may also be knee-cut entirely — either way, bounded
@@ -1281,7 +1282,7 @@ def test_mmr_diversifies_near_paraphrase_block(tmp_path, monkeypatch):
     monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     emb_docs, emb_query = _fake_embedder(16)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
-    monkeypatch.setattr(R, "embed_query", emb_query)
+    monkeypatch.setattr(RR, "embed_query", emb_query)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(
@@ -1469,7 +1470,7 @@ def test_endorsed_neighbor_survives_mmr_dense(tmp_path, monkeypatch):
     monkeypatch.setenv("HIPPO_KNEE_RATIO", "0.4")
     emb_docs, emb_query = _fake_embedder(64)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
-    monkeypatch.setattr(R, "embed_query", emb_query)
+    monkeypatch.setattr(RR, "embed_query", emb_query)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_linked_corpus(md, _MMR_CLUSTER_CORPUS)
@@ -1503,7 +1504,7 @@ def test_endorsed_seed_survives_mmr_mixed_mode(tmp_path, monkeypatch):
     monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     emb_docs, emb_query = _fake_embedder(64)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
-    monkeypatch.setattr(R, "embed_query", _env_gated(emb_query))
+    monkeypatch.setattr(RR, "embed_query", _env_gated(emb_query))
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_linked_corpus(md, _MMR_CLUSTER_CORPUS)
@@ -1533,7 +1534,7 @@ def test_mmr_still_diversifies_unlinked_tail_mixed_mode(tmp_path, monkeypatch):
     monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     emb_docs, emb_query = _fake_embedder(64)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
-    monkeypatch.setattr(R, "embed_query", _env_gated(emb_query))
+    monkeypatch.setattr(RR, "embed_query", _env_gated(emb_query))
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     items = dict(_MMR_CLUSTER_CORPUS)
@@ -1555,7 +1556,7 @@ def test_recall_fused_dense_and_bm25(tmp_path, monkeypatch):
     emb_docs, emb_query = _fake_embedder(16)
     monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
-    monkeypatch.setattr(R, "embed_query", emb_query)
+    monkeypatch.setattr(RR, "embed_query", emb_query)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _CORPUS)
@@ -1579,7 +1580,7 @@ def test_recall_falls_back_to_bm25_when_dense_query_fails(tmp_path, monkeypatch)
     def boom(text, allow_download=False):
         raise RuntimeError("offline cache miss at query time")
 
-    monkeypatch.setattr(R, "embed_query", boom)  # dense query path dies
+    monkeypatch.setattr(RR, "embed_query", boom)  # dense query path dies
     res = R.recall("phase envelope budget", k=5, memory_dir=md, index_dir=idx)
     assert res and all(r["backend"] == "bm25" for r in res)  # degraded, not crashed
 
@@ -2244,7 +2245,7 @@ def test_recall_dense_japanese_corpus_with_fake_embedder(tmp_path, monkeypatch):
     emb_docs, emb_query = _fake_embedder(16)
     monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
-    monkeypatch.setattr(R, "embed_query", emb_query)
+    monkeypatch.setattr(RR, "embed_query", emb_query)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _JAPANESE_CORPUS)
@@ -2853,7 +2854,7 @@ def test_recall_weights_route_by_query_shape_end_to_end(tmp_path, monkeypatch):
     monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     emb_docs, emb_query = _fake_embedder(16)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
-    monkeypatch.setattr(R, "embed_query", emb_query)
+    monkeypatch.setattr(RR, "embed_query", emb_query)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _CORPUS)
@@ -3005,7 +3006,7 @@ def test_dense_rank_rows_drops_candidates_below_floor(tmp_path, monkeypatch):
     emb_docs, emb_query = _fake_embedder(16)
     monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
-    monkeypatch.setattr(R, "embed_query", emb_query)
+    monkeypatch.setattr(RR, "embed_query", emb_query)
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, _RET1_CORPUS)
@@ -3045,7 +3046,7 @@ def test_hard_skip_when_dense_below_floor_and_bm25_empty(tmp_path, monkeypatch):
     emb_docs, emb_query = _fake_embedder(16)
     monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
     monkeypatch.setattr(B, "embed_documents", emb_docs)
-    monkeypatch.setattr(R, "embed_query", emb_query)
+    monkeypatch.setattr(RR, "embed_query", emb_query)
     monkeypatch.setenv("HIPPO_DENSE_FLOOR", "1.01")  # unreachable -> dense always empty
     md = str(tmp_path / "memory")
     idx = str(tmp_path / ".memory-index")
@@ -4109,7 +4110,7 @@ def test_drop_log_dense_subfloor_near_miss(monkeypatch):
         "dim": 8, "count": 2, "entries": entries,
     }
     index = B.LoadedIndex(manifest, np.stack([qvec, near]))
-    monkeypatch.setattr(R, "embed_query", lambda q, allow_download=False: qvec)
+    monkeypatch.setattr(RR, "embed_query", lambda q, allow_download=False: qvec)
     dl: dict = {}
     res = R.recall("canary deploy rollout traffic", k=2, index=index, drop_log=dl)
     assert [r["name"] for r in res] == ["on_topic"]
@@ -4161,7 +4162,7 @@ def test_main_abstention_event_carries_near_miss(tmp_path, monkeypatch, capsys):
     basis = np.linalg.svd(index0.dense, full_matrices=True)[2]
     qv = (basis[-1] + 0.05 * index0.dense[0]).astype("float32")
     qv = qv / np.linalg.norm(qv)
-    monkeypatch.setattr(R, "embed_query", lambda t, allow_download=False: qv)
+    monkeypatch.setattr(RR, "embed_query", lambda t, allow_download=False: qv)
     td = str(tmp_path / "telemetry")
     monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
     # No token overlap with any doc either — the RET-1 hard skip is the abstention.
