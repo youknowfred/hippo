@@ -15,6 +15,7 @@ import json
 import os
 
 import numpy as np
+import pytest
 
 from memory import build_index as B
 from memory import doctor as D
@@ -773,7 +774,7 @@ def test_main_prints_and_returns_zero(repo, memory_dir, monkeypatch, capsys):
     _seed(memory_dir)
     git_commit(repo, "seed", 1_700_000_000)
     monkeypatch.setattr(D, "resolve_dirs", lambda: (memory_dir, repo))
-    rc = D.main()
+    rc = D.main([])  # explicit empty argv — never pytest's own sys.argv
     assert rc == 0
     out = capsys.readouterr().out
     assert out.count("\n") == len(D.CHECKS)  # one line per check + trailing newline from print
@@ -784,11 +785,29 @@ def test_main_output_is_deterministic(repo, memory_dir, monkeypatch, capsys):
     write_file(memory_dir, "a.md", _mem("a", "alpha"))
     git_commit(repo, "seed", 1_700_000_000)
     monkeypatch.setattr(D, "resolve_dirs", lambda: (memory_dir, repo))
-    D.main()
+    D.main([])
     first = capsys.readouterr().out
-    D.main()
+    D.main([])
     second = capsys.readouterr().out
     assert first == second
+
+
+def test_main_help_prints_usage_not_report(capsys):
+    with pytest.raises(SystemExit) as exc:
+        D.main(["--help"])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert out.startswith("usage:")
+    assert not any(g in out for g in ("✔", "⚠", "✘"))
+
+
+def test_main_unknown_flag_exits_2(capsys):
+    with pytest.raises(SystemExit) as exc:
+        D.main(["--no-such-flag"])
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert "usage:" in captured.err
+    assert captured.out == ""  # rejected before any check line prints
 
 
 # --------------------------------------------------------------------------- #

@@ -86,6 +86,30 @@ item ([`ROADMAP.yaml`](ROADMAP.yaml) / [`ROADMAP.v1.md`](ROADMAP.v1.md)):
 Post-1.0, changes to the frozen compatibility surface follow [`STABILITY.md`](STABILITY.md) — a
 rename or removal there is a major-version bump or a deprecation window, not a silent break.
 
+## Code layout
+
+`plugin/memory/` is a flat package of focused modules. When a concern outgrows its module, it is
+decomposed into **prefix-named siblings**, never subpackages — `recall.py` →
+`recall_rank.py`/`recall_salience.py`/…, `doctor.py` → `doctor_checks_*.py` — and the original
+module stays as the **façade**: it keeps its `python -m memory.<name>` entry point and explicitly
+re-imports every moved name, so every existing dotted path keeps resolving. Two rules keep the
+shape stable:
+
+- **Siblings never import their façade.** The façade imports its siblings; siblings import their
+  true dependencies (other siblings included). The import graph between a façade and its siblings
+  stays one-directional.
+- **Module size is ratcheted** (`tests/test_module_size.py`): a new `plugin/memory/` module caps at
+  900 lines, a new test file at 1,200, and the files that pre-date the ratchet are pinned at their
+  recorded size so they can only shrink. If the ratchet fires, split along a section banner rather
+  than raising a pin — raising one is a deliberate, reviewed decision.
+
+Two caveats when moving code: a few functions are **AST-pinned to their file** by structural tests
+(the crash contract in `test_crash_faults.py`, the write-open allowlist in
+`test_write_discipline.py`, the `FunctionDef` pins in `test_injection_cost.py`) — those registries
+key on `(module, function)`, so a move updates the registry entry or the function stays put. And a
+test that monkeypatches a moved function must patch the module that now *calls* it (patches land on
+a namespace; a call site that moved modules looks the name up in its new home).
+
 ## Reporting bugs & security issues
 
 - **Bugs / feature requests:** open an issue — the bug form asks for your platform, corpus size, and

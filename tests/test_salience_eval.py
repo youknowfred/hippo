@@ -194,6 +194,12 @@ def test_no_autonomous_execution_path():
     hook_path_modules = (
         "recall.py", "session_start.py", "capture.py", "build_index.py",
         "telemetry.py", "new_memory.py", "mcp_server.py",
+        # decomposition siblings of the hook-path façades above (recall.py,
+        # mcp_server.py) — moved code stays under the same pin
+        "recall_query.py", "recall_rank.py", "recall_graph.py",
+        "recall_salience.py", "recall_tiers.py",
+        "mcp_schemas.py", "mcp_tools_core.py", "mcp_tools_setup.py",
+        "mcp_tools_consolidate.py", "mcp_tools_packs.py", "mcp_resources.py",
     )
     for fname in hook_path_modules:
         p = os.path.abspath(os.path.join(plugin_dir, fname))

@@ -7,8 +7,8 @@ metadata:
   originSessionId: 8290772b-b5b1-43a3-856d-416ac6e3302d
   last_verified: "2026-07-16T14:40:03.428277+00:00"
   cited_paths: ["plugin/memory/rules_plane.py", "tests/test_rules_plane.py", "plugin/.claude-plugin/plugin.json", "ROADMAP.enhancements.yaml"]
-  source_commit: "0489fe3996361971582d7fb157e046584c644418"
-  source_commit_time: 1784213258
+  source_commit: "f99bfa89571ac19cadf0967693103b9b9bd464f1"
+  source_commit_time: 1784246873
 ---
 
 Tier T2 (v1.2.0, "The rules bridge") — session 2026-07-08. **COMPLETE, 6/6,

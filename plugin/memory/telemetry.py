@@ -1233,17 +1233,12 @@ def _archive_regret_path(telemetry_dir: str) -> str:
     return os.path.join(telemetry_dir, _ARCHIVE_REGRET_NAME)
 
 
-def log_archive_regret(
-    query: str, stem: str, telemetry_dir: Optional[str] = None
-) -> bool:
-    """TMB-3: append ONE regret event — an abstention cluster matched an ARCHIVED body.
+def log_archive_regret(query: str, stem: str, telemetry_dir: Optional[str] = None) -> bool:
+    """TMB-3: append ONE regret event ``{ts, query, stem}`` — evidence only.
 
-    Evidence only: ``{ts, query, stem}`` (the recurring ask + which archived memory would
-    have answered). The doctor check both writes AND reads this ledger — read-back is the
-    dedup memory that keeps the nag from re-logging the same (query, stem) pair every
-    run — so it is never a dark reservoir. NOTHING restore-shaped ever consumes it: the
-    restore verb exists separately, target named by a human. Fire-and-forget; never
-    raises; size-bounded.
+    The doctor check both writes AND reads this ledger (read-back = the dedup memory, so
+    it is never a dark reservoir); NOTHING restore-shaped ever consumes it. Fire-and-
+    forget; never raises; size-bounded.
     """
     try:
         td = _resolve_dir(telemetry_dir)
@@ -1266,15 +1261,8 @@ def log_archive_regret(
 def read_archive_regret(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
     """Yield parsed archive-regret events, skipping corrupt/partial lines. Never raises."""
     try:
-        td = _resolve_dir(telemetry_dir)
-        path = _archive_regret_path(td)
-        if not os.path.exists(path):
-            return
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(_archive_regret_path(_resolve_dir(telemetry_dir)), "r", encoding="utf-8") as fh:
             for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
                 try:
                     obj = json.loads(line)
                 except Exception:

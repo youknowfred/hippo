@@ -17,6 +17,7 @@ import pytest
 
 from memory import build_index as B
 from memory import mcp_server as M
+from memory import mcp_tools_setup as MS
 from memory import trust as T
 from memory.build_index import default_index_dir
 from memory.provenance import resolve_dirs
@@ -483,7 +484,7 @@ def test_doctor_tool_runs_engine_under_the_fresh_interpreter(corpus, tmp_path, m
     checks describe what hooks will use on the next prompt, not this process's boot
     state (the live false-'venv is corrupt' readout)."""
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-    monkeypatch.setattr(M, "_fresh_python", lambda: python_shim)
+    monkeypatch.setattr(MS, "_fresh_python", lambda: python_shim)
     text = _text(_call("doctor", {}))
     assert "MCP server starts" in text          # real engine lines came back
     assert "trust_corpus" in text               # the MCP-surface suffix still applies
@@ -492,7 +493,7 @@ def test_doctor_tool_runs_engine_under_the_fresh_interpreter(corpus, tmp_path, m
 
 def test_doctor_tool_falls_back_in_process_with_a_caveat(corpus, tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-    monkeypatch.setattr(M, "_fresh_python", lambda: "/nonexistent/venv/python")
+    monkeypatch.setattr(MS, "_fresh_python", lambda: "/nonexistent/venv/python")
     text = _text(_call("doctor", {}))
     assert "MCP server starts" in text           # the in-process engine still reported
     assert "could not run under it" in text      # and the staleness caveat is explicit
@@ -527,7 +528,7 @@ def test_init_tool_threads_the_fresh_interpreter(fresh_project, tmp_path, monkey
         return real(claude_projects_dir=str(tmp_path / "cp"), dense_python=None)
 
     monkeypatch.setattr(IP, "init_project", spy)
-    monkeypatch.setattr(M, "_fresh_python", lambda: "/the/resolved/venv/python")
+    monkeypatch.setattr(MS, "_fresh_python", lambda: "/the/resolved/venv/python")
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     _call("init", {})
     assert seen["dense_python"] == "/the/resolved/venv/python"

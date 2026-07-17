@@ -5,9 +5,10 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 607b0701-e396-4c92-8070-0cbb31a38e60
-  cited_paths: ["ROADMAP.enhancements.yaml", "ROADMAP.yaml"]
-  source_commit: "c6669ca7ec7ac0c2c2b783605639dd3e306a7c58"
-  source_commit_time: 1783904241
+  last_verified: "2026-07-17T00:37:15.803267+00:00"
+  cited_paths: ["ROADMAP.enhancements.yaml", "ROADMAP.yaml", "ROADMAP.enhancements2.yaml"]
+  source_commit: "f99bfa89571ac19cadf0967693103b9b9bd464f1"
+  source_commit_time: 1784246873
 ---
 
 `ROADMAP.enhancements.yaml` (hippo repo root, DRAFT, created 2026-07-08) is the
@@ -50,3 +51,11 @@ for owner review; no implementation started.
 
 Companions: [[hippo-v1-roadmap-proposal]] (the v0.8→v1.0 launch plan).
 When work begins, create `hippo-enh-t1-signals` as the first capstone.
+
+**EXECUTED IN FULL (updated 2026-07-17; the "held for review / no implementation
+started" state above is the design-time record):** round 1 shipped end to end — T1–T7,
+v1.1.0→v1.7.0, capstone chain [[hippo-enh-t1-signals]] → [[hippo-enh-t7-learned-ranking]].
+The same two-ledger protocol (per-item `status:` + capstone chain) then drove round 3
+(T14–T17, all shipped, v1.18.0–v1.19.0) and now round 2 (ROADMAP.enhancements2.yaml:
+T8 + T9 shipped 2026-07-16, PRs #68/#70; T10 SEN in flight). This memory stays as the
+protocol's design record — the protocol itself is unchanged and still governs.

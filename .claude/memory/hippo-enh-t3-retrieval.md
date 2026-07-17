@@ -6,8 +6,8 @@ metadata:
   originSessionId: bf62e899-a4d7-4e40-b77c-d282f2d09f95
   last_verified: "2026-07-16T14:40:04.618669+00:00"
   cited_paths: ["plugin/.claude-plugin/plugin.json"]
-  source_commit: "0489fe3996361971582d7fb157e046584c644418"
-  source_commit_time: 1784213258
+  source_commit: "f99bfa89571ac19cadf0967693103b9b9bd464f1"
+  source_commit_time: 1784246873
 ---
 
 Tier T3 (v1.3.0, "Retrieval precision (hot-path-safe)") — session 2026-07-08. **COMPLETE,

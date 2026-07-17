@@ -17,6 +17,7 @@ import pytest
 
 from memory import build_index as B
 from memory import mcp_server as M
+from memory import mcp_tools_consolidate as MC
 from memory import telemetry as T
 from memory.build_index import default_index_dir
 
@@ -341,7 +342,7 @@ def test_build_index_tool_prefers_the_fresh_interpreter(corpus, tmp_path, monkey
     os.makedirs(shim.parent)
     shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
     os.chmod(shim, 0o755)
-    monkeypatch.setattr(M, "_fresh_python", lambda: str(shim))
+    monkeypatch.setattr(MC, "_fresh_python", lambda: str(shim))
     text = _text(_call("build_index", {}))
     assert "index dir" in text and "memories" in text  # the CLI's own report lines
 
