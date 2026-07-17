@@ -112,6 +112,8 @@ WRITE_OPEN_ALLOWLIST = {
     ("packs", "pack_install_item"): "mode 'x' corpus create; INT-17's byte-identical adopt owns the crash window",
     # -- writes OUTSIDE the corpus by construction --
     ("packs", "pack_extract"): "dest pack dir outside the corpus; RCH-8 rolls back partials",
+    ("review", "_extract_corpus_at_ref"): "CLB-1 shadow corpus under a TemporaryDirectory; throwaway preview substrate, auto-removed",
+    ("review", "_copy_worktree_corpus"): "CLB-1 shadow corpus under a TemporaryDirectory; throwaway preview substrate, auto-removed",
     ("packs", "_merge3"): "tempfile scratch for git merge-file",
     ("init_project", "_patch_gitignore"): "append to .gitignore: never truncates; a torn line is visible and inert",
 }

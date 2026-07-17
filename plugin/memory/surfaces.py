@@ -45,7 +45,7 @@ TERMINAL_ONLY_MARKER = "no Desktop-safe MCP-tool equivalent yet"
 # parses the script's exec-ing case arms and asserts equality, so advice naming
 # ``hippo <sub>`` can be checked against a list that cannot drift from the script.
 BIN_HIPPO_SUBCOMMANDS: Tuple[str, ...] = (
-    "recall", "new", "build-index", "staleness", "mcp", "sleep",
+    "recall", "new", "build-index", "staleness", "mcp", "sleep", "review",
 )
 
 
@@ -166,6 +166,13 @@ VERBS: Tuple[VerbSurface, ...] = (
         mcp_tools=("resolve",),
         note="the contradiction inbox + ONE per-pair verdict per call — the "
         "nudge-routed dead end closed (INV-4, scope ratified 2026-07-16)",
+    ),
+    VerbSurface(
+        "review",
+        desktop="terminal_only",
+        mcp_tools=(),
+        note="CLB-1: the corpus review packet (op-classified diff + scoped lints + "
+        "local recall preview); --ci is the single memory-diff CI gate",
     ),
     VerbSurface(
         "why",

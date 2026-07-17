@@ -137,8 +137,37 @@ jobs:
       # tree (git ls-files) for known credential shapes; exits 1 on any finding, reporting the
       # KIND per file, never the secret. tests/ is excluded — it ships intentional detector
       # vectors. A hit here means a release would carry a credential: rotate + purge history.
+      # Scope note (T12 CLB-1): this job is SEC-8's RELEASE-HYGIENE half (the whole shipped
+      # tree). The memory-DIFF gate half — plus SEN-2's threat-lint CI leg — is the
+      # memory-review job below, the single sanctioned memory-diff scanner.
       - name: Secret-scan the shipped/committed tree
         run: PYTHONPATH=plugin python -m memory.secrets --repo .
+
+  memory-review:
+    name: memory-review (CLB-1 — the memory-diff review gate)
+    # The SINGLE canonical CI scan for memory-file diffs: `memory review --ci` runs the
+    # touched-file lints (secrets + SEN-2 threat Tier-A are the gate; portability/edges/
+    # conflicts render as advisory) over the PR's memory-touching range and exits 1 iff a
+    # gate finding exists. Exits 0 — still green — when the PR touches no memory files.
+    # The recall-impact preview is local-only by design and never runs here (--ci omits it).
+    # No deps: the lint path is pure-stdlib; PyYAML degrades to the vendored miniyaml.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Full history: the PR base sha must resolve for the range diff.
+          fetch-depth: 0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - name: review --ci over the PR's memory diff
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.sha }}
+        run: |
+          PYTHONPATH=plugin python -m memory.review --ci "${BASE_REF}...${HEAD_REF}" \
+            --memory-dir .claude/memory --repo-root "$PWD"
 
   resolution:
     name: resolution (py${{ matrix.python }} dep bootstrap)

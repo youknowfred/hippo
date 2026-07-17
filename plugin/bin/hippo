@@ -39,6 +39,11 @@ case "$cmd" in
   staleness)
     exec "$PY" -m memory.staleness "$@"
     ;;
+  review)
+    # CLB-1: the corpus review packet (op-classified memory diff + scoped lints +
+    # local recall-impact preview). --ci is the single memory-diff CI gate.
+    exec "$PY" -m memory.review "$@"
+    ;;
   sleep)
     # SLP-1/2: the headless maintenance runner (morning report; --print-schedule /
     # --snooze). Stateless per invocation, like its siblings above.
@@ -54,7 +59,7 @@ case "$cmd" in
     exit 1
     ;;
   *)
-    echo "usage: hippo <recall|new|build-index|staleness|mcp> [args...]" >&2
+    echo "usage: hippo <recall|new|build-index|staleness|review|mcp> [args...]" >&2
     echo "  (init/bootstrap/doctor/audit are skills — use /hippo:<name>)" >&2
     exit 2
     ;;
