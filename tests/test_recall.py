@@ -1476,7 +1476,11 @@ def test_endorsed_neighbor_survives_mmr_dense(tmp_path, monkeypatch):
     B.build_index(md, idx)
 
     names = [r["name"] for r in R.recall(_MMR_CLUSTER_QUERY, k=2, memory_dir=md, index_dir=idx)]
-    assert names == ["deploy_gate_a", "deploy_gate_b"]
+    # Set-compare: the paraphrase twins' fake-embedder vectors are IDENTICAL (crc32
+    # collision), so their fused scores tie exactly and numpy argsort breaks the tie
+    # differently per platform (Linux CI ranked b first; macOS a). The property under
+    # test is that the endorsed pair SURVIVES the re-cut, not which twin leads.
+    assert set(names) == {"deploy_gate_a", "deploy_gate_b"}
 
 
 def test_endorsed_seed_survives_mmr_mixed_mode(tmp_path, monkeypatch):
