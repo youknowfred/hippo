@@ -403,11 +403,14 @@ def archive_candidates(
 _JOURNAL_NAME = ".archive_journal.jsonl"
 
 
-def _journal_untracked_move(memory_dir: str, fname: str, src: str, dest: str) -> None:
-    """Append a one-line record of an os.rename fallback move, for reversibility.
+def _journal_move(memory_dir: str, fname: str, src: str, dest: str, method: str) -> None:
+    """Append a one-line record of a move, for reversibility metadata.
 
-    Untracked files have no git history to fall back on, so this sidecar is the only trace
-    of the pre-archive path. Best-effort only — a journal write failure must never abort an
+    Originally only the ``os.rename`` fallback was journaled (an untracked file has no git
+    history to fall back on, so the sidecar was its only trace). TMB-3's ``restore`` also
+    journals EVERY restore regardless of method — the restore trail is audit metadata for
+    the forgetting instruments (never their enumeration source: those list ``archive/``
+    directly). Best-effort only — a journal write failure must never abort an
     already-successful move.
     """
     import json
@@ -422,7 +425,7 @@ def _journal_untracked_move(memory_dir: str, fname: str, src: str, dest: str) ->
                         "name": fname,
                         "from": src,
                         "to": dest,
-                        "method": "os.rename",
+                        "method": method,
                         "ts": time.time(),
                     }
                 )
@@ -512,7 +515,7 @@ def archive_memory(
             except OSError:
                 result["error"] = (proc.stderr or proc.stdout or "git mv failed").strip()
                 return result
-            _journal_untracked_move(memory_dir, fname, src, dest)
+            _journal_move(memory_dir, fname, src, dest, "os.rename")
         result["moved"] = True
         try:
             from . import build_index
@@ -525,6 +528,151 @@ def archive_memory(
     return result
 
 
+def restore(name: str, memory_dir: str, repo_root: str, *, dry_run: bool = False) -> dict:
+    """TMB-3: move ONE archived memory back into the live corpus — per-item, journaled,
+    collision-guarded. The decoupled reversibility primitive: archive stops being a
+    one-way door, and NOTHING wires into this — the regret detector is evidence-only,
+    and no code path connects its output to this function (AST-pinned).
+
+    The collision check is LOAD-BEARING: ``_first_seen_times`` deliberately skips
+    ``archive/`` precisely because an archived stem could shadow a live one — restoring
+    over a live ``<name>.md`` would silently overwrite current truth with retired truth.
+    On collision this REFUSES (machine-readable ``refused: True``, both paths named,
+    zero filesystem change) — the same GRA-5 posture as ``archive_memory``'s inbound
+    guard: refuse with the evidence, never overwrite, ``force`` deliberately absent
+    (there is no legitimate restore-over-live; resolve the live file first). Deliberately
+    NO batch/list parameter — the no-bulk pin mirrors the archive one. ``git mv`` first,
+    ``os.rename`` fallback for an untracked archive entry; EVERY successful restore is
+    journaled (both methods — the restore trail is reversibility metadata), and the index
+    refreshes best-effort so the memory is recallable this session. Never raises.
+    """
+    result = {"name": name, "restored": False, "refused": False, "error": None}
+    try:
+        fname = name if name.endswith(".md") else f"{name}.md"
+        src = os.path.join(memory_dir, _ARCHIVE_SUBDIR, fname)
+        dest = os.path.join(memory_dir, fname)
+        if not os.path.isfile(src):
+            result["error"] = f"not archived: archive/{fname} does not exist"
+            return result
+        if os.path.exists(dest):
+            result["refused"] = True
+            result["error"] = (
+                f"a LIVE memory already exists at {fname} — restoring archive/{fname} "
+                "over it would overwrite current truth with retired truth (the exact "
+                "shadowing hazard _first_seen_times skips archive/ to avoid). Refusing; "
+                "reconcile the live file first (rename it, or fold the archived content "
+                "in by hand), then re-run"
+            )
+            return result
+        if dry_run:
+            result["restored"] = True  # would-restore preview; no filesystem change
+            return result
+        proc = subprocess.run(
+            ["git", "-C", repo_root, "mv", src, dest],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if proc.returncode != 0:
+            try:
+                os.rename(src, dest)
+            except OSError:
+                result["error"] = (proc.stderr or proc.stdout or "git mv failed").strip()
+                return result
+            _journal_move(memory_dir, fname, src, dest, "restore(os.rename)")
+        else:
+            _journal_move(memory_dir, fname, src, dest, "restore(git mv)")
+        result["restored"] = True
+        try:
+            from . import build_index
+
+            build_index.refresh_index(memory_dir)
+        except Exception:
+            pass
+    except Exception as exc:
+        result["error"] = str(exc)
+    return result
+
+
+# --------------------------------------------------------------------------- #
+# TMB-3 (e): the evidence-only regret detector — recurring abstention clusters that an
+# ARCHIVED body would have answered. Inert text + a logged regret event; NO wiring to
+# restore (that would be the demand-gap-auto-draft shape round 1 killed).
+# --------------------------------------------------------------------------- #
+_REGRET_MIN_OVERLAP = 2   # distinct query terms the archived body must share — one shared
+                          # token is coincidence, not evidence
+_REGRET_MAX_MATCHES = 5   # bounded evidence, never a worklist
+
+
+def archive_regret(memory_dir: str, telemetry_dir: Optional[str] = None) -> List[dict]:
+    """Recurring abstention clusters whose best BM25 match among ARCHIVED bodies overlaps
+    on >= ``_REGRET_MIN_OVERLAP`` distinct terms — "you keep asking for something you
+    archived". EVIDENCE ONLY: ``[{"query", "count", "stem", "overlap"}]`` for a human to
+    judge; the restore verb exists separately and nothing here names, suggests, or
+    invokes it. Runs at doctor time (cold) — never per-prompt. Vendored BM25
+    (``_vendor.bm25.BM25Okapi``) over the archive listing; the journal is not consulted
+    (reversibility metadata only). Read-only; never raises; ``[]`` on any failure or an
+    absent/empty archive.
+    """
+    try:
+        from ._vendor.bm25 import BM25Okapi
+        from .build_index import bm25_terms, tokenize
+        from .telemetry import abstention_backlog
+
+        archive_dir = os.path.join(memory_dir, _ARCHIVE_SUBDIR)
+        if not os.path.isdir(archive_dir):
+            return []
+        stems: List[str] = []
+        docs: List[List[str]] = []
+        for fn in sorted(os.listdir(archive_dir)):
+            if not fn.endswith(".md"):
+                continue
+            try:
+                with open(os.path.join(archive_dir, fn), "r", encoding="utf-8") as fh:
+                    docs.append(bm25_terms(tokenize(fh.read())))
+                stems.append(fn[:-3])
+            except Exception:
+                continue
+        if not stems:
+            return []
+        clusters = abstention_backlog(telemetry_dir)
+        if not clusters:
+            return []
+        bm25 = BM25Okapi(docs)
+        term_sets = [set(d) for d in docs]
+        out: List[dict] = []
+        for c in clusters:
+            q = (c.get("sample_query") or "").strip()
+            qterms = list(dict.fromkeys(bm25_terms(tokenize(q))))
+            if not q or not qterms:
+                continue
+            # The evidence GATE is distinct-term overlap; BM25 only RANKS among the docs
+            # that clear it. (BM25 scores alone can't gate here: on a small archive the
+            # IDF of a term present in most docs goes negative — the classic single-doc
+            # pathology — so a sign test would silently blind the detector.)
+            candidates = [
+                i for i in range(len(stems))
+                if len(set(qterms) & term_sets[i]) >= _REGRET_MIN_OVERLAP
+            ]
+            if not candidates:
+                continue
+            scores = bm25.get_scores(qterms)
+            best = max(candidates, key=lambda i: (scores[i], -i))
+            out.append(
+                {
+                    "query": q,
+                    "count": int(c.get("count") or 0),
+                    "stem": stems[best],
+                    "overlap": len(set(qterms) & term_sets[best]),
+                }
+            )
+            if len(out) >= _REGRET_MAX_MATCHES:
+                break
+        return out
+    except Exception:
+        return []
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
@@ -532,7 +680,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     from .telemetry import default_telemetry_dir
 
     parser = argparse.ArgumentParser(
-        description="Archive-candidate report (read-only) + per-item git-mv archive."
+        description="Archive-candidate report (read-only) + per-item git-mv archive/restore."
     )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--repo-root", default=None)
@@ -553,11 +701,31 @@ def main(argv: Optional[List[str]] = None) -> int:
         "memories still reference it (the referrer list is printed so those links can be "
         "rewritten in the same commit)",
     )
+    parser.add_argument(
+        "--restore",
+        metavar="NAME",
+        default=None,
+        help="TMB-3: move ONE archived memory back into the live corpus (per-item, "
+        "journaled). REFUSES — never overwrites — when a live memory with the same stem "
+        "exists (the shadowing hazard). NAME is the slug, with or without .md; no bulk "
+        "form exists",
+    )
     args = parser.parse_args(argv)
 
     md, repo = resolve_dirs()
     memory_dir = args.memory_dir or md
     repo_root = args.repo_root or repo
+
+    if args.restore:
+        r = restore(args.restore, memory_dir, repo_root)
+        if r["error"]:
+            print(f"restore {args.restore}: refused — {r['error']}")
+        else:
+            print(
+                f"restore {args.restore}: moved back into the live corpus (journaled; "
+                "index refreshed) — it recalls again from this session on"
+            )
+        return 0
 
     if args.archive:
         r = archive_memory(args.archive, memory_dir, repo_root, force=args.force)

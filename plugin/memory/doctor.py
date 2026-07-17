@@ -1685,6 +1685,82 @@ def check_succession_replay(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"succession-replay check failed: {exc}."}
 
 
+def check_archive_shadowing(ctx: DoctorContext) -> Dict[str, str]:
+    """TMB-3: a stem present in BOTH ``archive/`` and the live corpus — the shadow hazard.
+
+    ``_first_seen_times`` deliberately skips ``archive/`` because an archived stem could
+    shadow a live one; ``archive.restore`` refuses collisions for the same reason. This
+    check makes an EXISTING collision visible (a hand-copied file, a merge that
+    resurrected an archived name). Read-only — the printed suggestion is a manual
+    ``git mv``; nothing here writes.
+    """
+    try:
+        archive_dir = os.path.join(ctx.memory_dir, "archive")
+        if not os.path.isdir(archive_dir):
+            return {"status": "ok", "message": "archive shadowing: no archive/ directory."}
+        archived = {
+            fn[:-3] for fn in os.listdir(archive_dir) if fn.endswith(".md")
+        }
+        from .provenance import _iter_memory_files
+
+        live = {
+            os.path.splitext(os.path.basename(p))[0]
+            for p in _iter_memory_files(ctx.memory_dir)
+        }
+        shadows = sorted(archived & live)
+        if not shadows:
+            return {
+                "status": "ok",
+                "message": f"archive shadowing: none ({len(archived)} archived stem(s) "
+                "all distinct from the live corpus).",
+            }
+        shown = ", ".join(shadows[:4]) + (f" (+{len(shadows) - 4} more)" if len(shadows) > 4 else "")
+        return {
+            "status": "warn",
+            "message": f"archive shadowing: {len(shadows)} stem(s) exist in BOTH archive/ "
+            f"and the live corpus ({shown}) — the live file wins everywhere, but restore "
+            "would refuse and provenance history is ambiguous; resolve by hand, e.g. "
+            "`git mv .claude/memory/archive/<name>.md .claude/memory/archive/<name>.superseded.md`.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"archive-shadowing check failed: {exc}."}
+
+
+def check_archive_regret(ctx: DoctorContext) -> Dict[str, str]:
+    """TMB-3 (e): the evidence-only regret detector's ONE surface — doctor time, never
+    per-prompt. Inert text + a logged regret event per NEW (query, stem) match; ZERO
+    restore action attached (no code path from here to ``archive.restore`` — pinned).
+    """
+    try:
+        from .archive import archive_regret
+        from .telemetry import default_telemetry_dir, log_archive_regret, read_archive_regret
+
+        td = default_telemetry_dir(ctx.memory_dir)  # this corpus's ledger home, not ambient
+        matches = archive_regret(ctx.memory_dir, telemetry_dir=td)
+        if not matches:
+            return {
+                "status": "ok",
+                "message": "archive regret: no recurring abstention matches an archived memory.",
+            }
+        already = {(e.get("query"), e.get("stem")) for e in read_archive_regret(td)}
+        for m in matches:
+            if (m["query"], m["stem"]) not in already:
+                log_archive_regret(m["query"], m["stem"], telemetry_dir=td)
+        shown = "; ".join(
+            f"\"{m['query']}\" (asked ×{m['count']}) ↔ archived `{m['stem']}`"
+            for m in matches[:3]
+        )
+        return {
+            "status": "warn",
+            "message": f"archive regret: {len(matches)} recurring abstention(s) match an "
+            f"ARCHIVED memory's body ({shown}) — evidence only, logged; if one is a real "
+            "regret, a human can restore it by name (`python -m memory.archive --restore "
+            "<stem>`); nothing restores automatically.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"archive-regret check failed: {exc}."}
+
+
 # (label, check_fn) in a FIXED order — the source of the deterministic output. New checks append
 # here; the order is never sorted-by-name or set-derived, so the printed sequence is stable.
 _HOT_PATH_P95_BUDGET_MS = 1500.0  # KPI-3 / PRF-2: the cold per-prompt budget
@@ -2195,6 +2271,8 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("projects_registry", check_projects_registry),  # RCH-11: dead-row hygiene, machine-level
     ("invalid_after_terminal", check_invalid_after_terminal),  # TMB-2: non-drift retirements, corpus-wide
     ("succession_replay", check_succession_replay),  # TMB-5: supersedes with failing/unrun replay
+    ("archive_shadowing", check_archive_shadowing),  # TMB-3: archive/ stem colliding with a live one
+    ("archive_regret", check_archive_regret),  # TMB-3: abstentions matching archived bodies (evidence-only)
     ("stale_memobot_env", check_stale_memobot_env),  # pinned last (env hygiene trails)
 ]
 

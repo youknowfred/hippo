@@ -62,6 +62,7 @@ CRASH_CONTRACT = {
     ("dream_generate", "_set_confidence"): ("detected",),
     ("dream_generate", "_set_cited_paths"): ("detected",),
     ("eval_recall", "draft_abstention_fixtures"): ("detected",),
+    ("eval_recall", "draft_forgetting_fixtures"): ("detected",),  # TMB-3: drafts queue append
     ("eval_recall", "confirm_hard_set_row"): ("detected",),  # both writes; each byte-complete
     ("eval_recall", "write_baseline"): ("detected",),  # MSR-1 pin: error named, no torn baseline
     ("eval_recall", "write_floor_sweep"): ("detected",),  # GRF-3: error named, no torn sweep report
@@ -303,6 +304,21 @@ def scn_eval_drafts_detected(tmp_path, monkeypatch):
     _arm(monkeypatch, "eval_recall", "draft_abstention_fixtures")
     with pytest.raises(_Tear):
         draft_abstention_fixtures(md, drafts_path=drafts, probe=False)
+    _assert_unchanged(before)  # no torn drafts queue — absent stays absent
+
+
+def scn_eval_draft_forgetting_detected(tmp_path, monkeypatch):
+    from memory.eval_recall import draft_forgetting_fixtures
+
+    _root, md = _git_repo(tmp_path)
+    os.makedirs(os.path.join(md, "archive"), exist_ok=True)
+    with open(os.path.join(md, "archive", "gone.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: gone\ndescription: "retired deploy retry policy"\n---\nB\n')
+    drafts = str(tmp_path / "pending" / "recall_hard_set.drafts.yaml")
+    before = _snap(drafts)
+    _arm(monkeypatch, "eval_recall", "draft_forgetting_fixtures")
+    with pytest.raises(_Tear):
+        draft_forgetting_fixtures(md, drafts_path=drafts)
     _assert_unchanged(before)  # no torn drafts queue — absent stays absent
 
 
@@ -832,6 +848,7 @@ _SCENARIOS = [
     (("dream_generate", "_set_confidence"), "detected", scn_dream_generate_confidence_detected),
     (("dream_generate", "_set_cited_paths"), "detected", scn_dream_generate_cited_detected),
     (("eval_recall", "draft_abstention_fixtures"), "detected", scn_eval_drafts_detected),
+    (("eval_recall", "draft_forgetting_fixtures"), "detected", scn_eval_draft_forgetting_detected),
     (("eval_recall", "confirm_hard_set_row"), "detected", scn_eval_confirm_detected),
     (("eval_recall", "write_baseline"), "detected", scn_eval_write_baseline_detected),
     (("eval_recall", "write_floor_sweep"), "detected", scn_eval_write_floor_sweep_detected),

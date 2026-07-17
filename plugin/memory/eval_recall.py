@@ -575,6 +575,36 @@ def load_hard_set_metadata(path: str) -> Dict[str, str]:
     return meta if isinstance(meta, dict) else {}
 
 
+def load_absence_rows(path: str) -> List[dict]:
+    """TMB-3: load ``[{query, absent: [stem, ...], category}]`` — the forgetting rows.
+
+    The ABSENCE-polarity sibling of ``load_hard_set``: rows whose gold is that the named
+    (archived) stems must NOT surface. They live in the SAME tracked fixture file, keyed
+    by an ``absent`` list instead of ``expected`` — ``load_hard_set`` drops them (no
+    ``expected``), so every presence metric and gate is byte-identical whether or not
+    forgetting rows exist. Category defaults to ``forgetting``. ``[]`` if missing.
+    """
+    _meta, data = _load_fixture_docs(path)
+    out: List[dict] = []
+    for item in data if isinstance(data, list) else []:
+        if not isinstance(item, dict):
+            continue
+        q = item.get("query")
+        absent = item.get("absent")
+        if isinstance(absent, str):
+            absent = [absent]
+        if isinstance(q, str) and isinstance(absent, list) and absent:
+            cat = item.get("category")
+            out.append(
+                {
+                    "query": q,
+                    "absent": [str(x) for x in absent],
+                    "category": str(cat) if isinstance(cat, str) and cat.strip() else "forgetting",
+                }
+            )
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # SIG-6: abstention → self-populating eval fixtures (KPI-4).
 #
@@ -764,6 +794,89 @@ def draft_abstention_fixtures(
     return summary
 
 
+def draft_forgetting_fixtures(
+    memory_dir: Optional[str] = None,
+    *,
+    drafts_path: Optional[str] = None,
+) -> dict:
+    """TMB-3: enumerate archive-absence candidates into the SIG-6 drafts queue.
+
+    One draft row per ``archive/*.md`` entry (the DIRECTORY LISTING is the enumeration
+    source; the journal stays reversibility metadata only): ``{query, absent: [stem],
+    expected: []}``, where ``query`` is DERIVED from the archived file's own description
+    (the ``derive_self_query`` derivation — tokenize, first N content tokens; zero LLM,
+    zero fabrication: the archived memory's own words asking for itself). Confirmation
+    stays per-item through ``confirm_hard_set_row(absent=[stem],
+    category='forgetting')`` — nothing lands in the tracked fixture from here. Skips
+    stems whose derived query is empty (fail closed), already tracked (either polarity),
+    or already drafted. Same atomic-write + refuse-on-unparseable discipline as
+    ``draft_abstention_fixtures``. ``{path, archived, added, kept}``.
+    """
+    from .build_index import extract_description
+
+    if memory_dir is None:
+        memory_dir, _repo = resolve_dirs()
+    dp = drafts_path or default_drafts_path(memory_dir)
+    archive_dir = os.path.join(memory_dir, "archive")
+    tracked_path = _project_fixture_path(memory_dir)
+    tracked = {row["query"] for row in load_hard_set(tracked_path)}
+    tracked |= {row["query"] for row in load_absence_rows(tracked_path)}
+    _meta, existing_rows = _load_fixture_docs(dp)
+    drafted = {(r.get("query") or "").strip() for r in existing_rows if isinstance(r, dict)}
+
+    added: List[dict] = []
+    archived = 0
+    if os.path.isdir(archive_dir):
+        for fn in sorted(os.listdir(archive_dir)):
+            if not fn.endswith(".md"):
+                continue
+            archived += 1
+            stem = fn[:-3]
+            try:
+                with open(os.path.join(archive_dir, fn), "r", encoding="utf-8") as fh:
+                    desc = extract_description(fh.read())
+            except Exception:
+                continue
+            q = " ".join(tokenize(desc)[:_SELF_QUERY_TOKENS])
+            if not q or q in tracked or q in drafted:
+                continue
+            added.append({"query": q, "stem": stem})
+            drafted.add(q)
+
+    summary = {"path": dp, "archived": archived, "added": [r["query"] for r in added], "kept": len(existing_rows)}
+    if not added:
+        return summary
+    if os.path.exists(dp) and not _parseable_yaml(dp):
+        summary["added"] = []
+        summary["error"] = (
+            "drafts file exists but is not parseable YAML — fix or delete it before "
+            "drafting more rows"
+        )
+        return summary
+    rows_text = "".join(
+        f"- query: {json.dumps(r['query'], ensure_ascii=False)}\n"
+        f"  absent: [{json.dumps(r['stem'], ensure_ascii=False)}]\n"
+        f"  expected: []\n"
+        for r in added
+    )
+    if os.path.exists(dp):
+        with open(dp, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        if text and not text.endswith("\n"):
+            text += "\n"
+        text += rows_text
+    else:
+        ensure_self_ignoring_dir(os.path.dirname(dp))
+        header_lines = ["draft: true", f"note: {json.dumps(_DRAFTS_NOTE, ensure_ascii=False)}"]
+        header_lines.append(f"generated_at: {time.strftime('%Y-%m-%d')}")
+        text = "\n".join(header_lines) + "\n---\n" + rows_text
+    from .atomic import write_text_atomic
+
+    # INV-2: the drafts queue accumulates human judgments — never leave it torn.
+    write_text_atomic(dp, text)
+    return summary
+
+
 def confirm_hard_set_row(
     query: str,
     expected: List[str],
@@ -772,6 +885,7 @@ def confirm_hard_set_row(
     fixture_path: Optional[str] = None,
     drafts_path: Optional[str] = None,
     category: str = "abstention",
+    absent: Optional[List[str]] = None,
 ) -> dict:
     """Admit ONE confirmed row into the TRACKED project fixture — the SIG-6 confirm gate.
 
@@ -794,35 +908,71 @@ def confirm_hard_set_row(
     currently-FAILING row is legitimate signal (the fixture documents a recall gap the
     corpus should close), and whether to admit one anyway is exactly the judgment the
     human makes at confirm time.
+
+    TMB-3 ``absent`` (mutually exclusive with ``expected``): admit an ABSENCE-polarity
+    row instead — the named stems must NOT surface for ``query`` (the forgetting
+    category's gold). Fail-closed the same way, mirrored to the archive: every ``absent``
+    stem must exist in ``archive/`` (a stem that is not actually archived is refused —
+    never fabricate a forgetting expectation; if it was restored meanwhile, that IS the
+    skip). Rows default to ``category: forgetting``; the presence loader
+    (``load_hard_set``) ignores them entirely — only ``load_absence_rows`` +
+    ``absence_polarity_metrics`` consume them, report-only.
     """
     if memory_dir is None:
         memory_dir, _repo = resolve_dirs()
     q = (query or "").strip()
     if not q:
         return {"ok": False, "reason": "empty query"}
-    stems: List[str] = []
-    for s in expected if isinstance(expected, (list, tuple)) else [expected]:
-        s = str(s or "").strip()
-        if s.endswith(".md"):
-            s = s[:-3]
-        if s and s not in stems:
-            stems.append(s)
-    if not stems:
+
+    def _norm(vals) -> List[str]:
+        out: List[str] = []
+        for s in vals if isinstance(vals, (list, tuple)) else [vals]:
+            s = str(s or "").strip()
+            if s.endswith(".md"):
+                s = s[:-3]
+            if s and s not in out:
+                out.append(s)
+        return out
+
+    stems = _norm(expected) if expected else []
+    absent_stems = _norm(absent) if absent else []
+    if stems and absent_stems:
+        return {
+            "ok": False,
+            "reason": "a row is presence OR absence, not both — pass expected= or absent=",
+        }
+    if not stems and not absent_stems:
         return {
             "ok": False,
             "reason": "expected is empty — a cluster no existing memory answers is a "
             "capture gap (capture the memory first), not a fixture row",
         }
-    bad = [s for s in stems if "/" in s or os.sep in s or s.startswith(".")]
+    bad = [s for s in stems + absent_stems if "/" in s or os.sep in s or s.startswith(".")]
     if bad:
         return {"ok": False, "reason": f"expected entries must be bare memory stems: {bad}"}
-    missing = [s for s in stems if not os.path.exists(os.path.join(memory_dir, f"{s}.md"))]
-    if missing:
-        return {
-            "ok": False,
-            "reason": f"expected cites memories that do not exist in this corpus: {missing} "
-            "— never fabricate a memory to make a fixture pass",
-        }
+    if stems:
+        missing = [s for s in stems if not os.path.exists(os.path.join(memory_dir, f"{s}.md"))]
+        if missing:
+            return {
+                "ok": False,
+                "reason": f"expected cites memories that do not exist in this corpus: {missing} "
+                "— never fabricate a memory to make a fixture pass",
+            }
+    else:
+        # TMB-3 fail-closed mirror: an absence expectation is only real while the target
+        # is actually archived (absent from archive/ = skip/refuse, never admit).
+        not_archived = [
+            s
+            for s in absent_stems
+            if not os.path.exists(os.path.join(memory_dir, "archive", f"{s}.md"))
+        ]
+        if not_archived:
+            return {
+                "ok": False,
+                "reason": f"absent names memories that are not in archive/: {not_archived} "
+                "— a forgetting row's target must actually be archived (archive it first, "
+                "or drop the row)",
+            }
     fp = fixture_path or _project_fixture_path(memory_dir)
     if os.path.exists(fp) and not _parseable_yaml(fp):
         return {
@@ -830,15 +980,26 @@ def confirm_hard_set_row(
             "reason": "tracked fixture exists but is not parseable YAML — fix it before "
             "admitting rows",
         }
-    if any(row["query"] == q for row in load_hard_set(fp)):
+    tracked_queries = {row["query"] for row in load_hard_set(fp)}
+    tracked_queries |= {row["query"] for row in load_absence_rows(fp)}
+    if q in tracked_queries:
         return {"ok": False, "reason": "query is already a tracked fixture row"}
 
     cat = str(category or "").strip() or "abstention"
-    row_text = (
-        f"- query: {json.dumps(q, ensure_ascii=False)}\n"
-        f"  expected: [{', '.join(json.dumps(s, ensure_ascii=False) for s in stems)}]\n"
-        f"  category: {json.dumps(cat, ensure_ascii=False)}\n"
-    )
+    if absent_stems and cat == "abstention":
+        cat = "forgetting"  # the absence rows' own data-driven default tag
+    if absent_stems:
+        row_text = (
+            f"- query: {json.dumps(q, ensure_ascii=False)}\n"
+            f"  absent: [{', '.join(json.dumps(s, ensure_ascii=False) for s in absent_stems)}]\n"
+            f"  category: {json.dumps(cat, ensure_ascii=False)}\n"
+        )
+    else:
+        row_text = (
+            f"- query: {json.dumps(q, ensure_ascii=False)}\n"
+            f"  expected: [{', '.join(json.dumps(s, ensure_ascii=False) for s in stems)}]\n"
+            f"  category: {json.dumps(cat, ensure_ascii=False)}\n"
+        )
     if os.path.exists(fp):
         with open(fp, "r", encoding="utf-8") as fh:
             text = fh.read()
@@ -884,8 +1045,57 @@ def confirm_hard_set_row(
         "path": fp,
         "query": q,
         "expected": stems,
+        **({"absent": absent_stems} if absent_stems else {}),
         "category": cat,
         "removed_from_drafts": removed,
+    }
+
+
+def absence_polarity_metrics(
+    index: LoadedIndex,
+    rows: List[dict],
+    memory_dir: str,
+    k: int = 10,
+    *,
+    index_dir: Optional[str] = None,
+) -> Dict[str, float]:
+    """TMB-3: the forgetting category's scorer — ABSENCE polarity, distinct from
+    ``hard_set_metrics``.
+
+    Presence metrics reward a stem for ranking; this one rewards it for STAYING GONE:
+    a row HOLDS when none of its still-archived ``absent`` stems surface in the top-k
+    for its query, and FAILS when one leaks (the archived-shadow / stale-index /
+    regression class the archive-exclusion contract promises can't happen). A row whose
+    targets are no longer in ``archive/`` (restored or deleted since confirm) is
+    SKIPPED, not scored — the absence expectation ended with the archival (fail-closed:
+    absent-from-archive = skip). ``{"n": scored, "skipped", "held", "absence"}`` where
+    ``absence`` = held/scored (1.0 = perfect forgetting). Report-only forever unless a
+    dated owner decision promotes a gate.
+    """
+    scored = skipped = held = 0
+    archive_dir = os.path.join(memory_dir, "archive")
+    for row in rows:
+        still_archived = [
+            s for s in row.get("absent") or []
+            if os.path.isfile(os.path.join(archive_dir, f"{s}.md"))
+        ]
+        if not still_archived:
+            skipped += 1
+            continue
+        scored += 1
+        names = {
+            r["name"]
+            for r in recall(
+                row["query"], k=k, index=index, index_dir=index_dir, memory_dir=memory_dir
+            )
+        }
+        if not (set(still_archived) & names):
+            held += 1
+    return {
+        "n": scored,
+        "skipped": skipped,
+        "held": held,
+        "absence": (held / scored) if scored else 0.0,
     }
 
 
@@ -1463,6 +1673,16 @@ def evaluate(
         )
         if hard_set else {}
     )
+    # TMB-3: the report-only forgetting category — absence-polarity rows from the SAME
+    # tracked fixture (load_hard_set ignores them, so every presence metric above is
+    # untouched). Absence-emits-nothing: no rows -> no key -> reports, fingerprints and
+    # committed baselines stay byte-identical for every corpus without forgetting rows.
+    absence_rows = load_absence_rows(hard_set_path) if hard_set_path else []
+    forgetting = (
+        absence_polarity_metrics(index, absence_rows, memory_dir, k=k, index_dir=index_dir)
+        if absence_rows
+        else {}
+    )
     tok = token_reduction(memory_dir, index, hard_set, k=k, index_dir=index_dir)
     lat_queries = [item["query"] for item in hard_set] or [
         derive_self_query(e) for e in index.entries[:30]
@@ -1585,6 +1805,7 @@ def evaluate(
         "count": len(index),
         "hard_set_n": hs["n"],
         "by_category": by_category,
+        **({"forgetting": forgetting} if forgetting else {}),
         **({"miss_autopsy": autopsy} if autopsy else {}),
         **({"null_arms": null_arms} if null_arms else {}),
         "gates": gates,
@@ -2648,6 +2869,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         "flagged it, knee/floor/MMR admitted it) by driving the shipped code — no LLM. "
         "Report-only; skips when no fixture corpus exists; never gates CI.",
     )
+    parser.add_argument(
+        "--draft-forgetting",
+        action="store_true",
+        help="TMB-3: enumerate archive/*.md into archive-absence DRAFT rows in the SIG-6 "
+        "drafts queue (query derived from each archived file's own description — zero "
+        "LLM). Nothing lands in the tracked fixture from here: confirm each row per item "
+        "via confirm_hard_set_row(absent=[stem], category='forgetting').",
+    )
     args, ab_extra = parser.parse_known_args(argv)
     if args.ab is None and ab_extra:
         # Extras are pass-through ONLY under --ab; the plain eval keeps strict parsing.
@@ -2801,6 +3030,30 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         return 0
 
+    if args.draft_forgetting:
+        # TMB-3: drafts only — nothing lands in the tracked fixture from this mode.
+        summary = draft_forgetting_fixtures(args.memory_dir)
+        if summary.get("error"):
+            print(f"draft-forgetting: {summary['error']}")
+            return 1
+        if not summary["archived"]:
+            print("draft-forgetting: archive/ is empty — nothing to enumerate.")
+            return 0
+        print(
+            f"draft-forgetting: {summary['archived']} archived memor"
+            + ("y" if summary["archived"] == 1 else "ies")
+            + f", {len(summary['added'])} new draft row(s) appended to {summary['path']} "
+            f"({summary['kept']} existing draft(s) preserved verbatim)."
+        )
+        for q in summary["added"]:
+            print(f"  drafted: \"{q}\"")
+        if summary["added"]:
+            print(
+                "  confirm each PER ITEM via eval_recall.confirm_hard_set_row(query, [], "
+                "absent=[<stem>], category='forgetting') — absence rows score report-only."
+            )
+        return 0
+
     # RET-8 hermeticity guard, the CLI twin of evaluate()'s memory_dir guard: the ambient
     # default fixtures (this repo's tests/fixtures, or the resolved project's
     # .audit-fixtures) calibrate the AMBIENT corpus. Scoring them against an explicitly
@@ -2891,6 +3144,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(
             f"  category {cat:11s} recall@{args.k}={m['recall']:.4f} mrr@{args.k}={m['mrr']:.4f} "
             f"n={m['n']} (RET-8)"
+        )
+    # TMB-3: the forgetting category — ABSENCE polarity (1.0 = nothing archived leaks),
+    # scored by absence_polarity_metrics, never hard_set_metrics; report-only until a
+    # dated owner decision says otherwise.
+    f = report.get("forgetting")
+    if f:
+        print(
+            f"  category {'forgetting':11s} absence@{args.k}={f['absence']:.4f} "
+            f"held={f['held']}/{f['n']} skipped={f['skipped']} "
+            "(TMB-3, report-only; absence POLARITY — an archived stem surfacing is the failure)"
         )
     # MSR-4: the per-category miss autopsy — a missed stem names the mechanism and
     # margin that cut it, instead of just deflating a category average.

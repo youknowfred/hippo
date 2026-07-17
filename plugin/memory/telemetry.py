@@ -1226,6 +1226,65 @@ def record_reconsolidation_outcome(
         return False
 
 
+_ARCHIVE_REGRET_NAME = "archive_regret.jsonl"
+
+
+def _archive_regret_path(telemetry_dir: str) -> str:
+    return os.path.join(telemetry_dir, _ARCHIVE_REGRET_NAME)
+
+
+def log_archive_regret(
+    query: str, stem: str, telemetry_dir: Optional[str] = None
+) -> bool:
+    """TMB-3: append ONE regret event — an abstention cluster matched an ARCHIVED body.
+
+    Evidence only: ``{ts, query, stem}`` (the recurring ask + which archived memory would
+    have answered). The doctor check both writes AND reads this ledger — read-back is the
+    dedup memory that keeps the nag from re-logging the same (query, stem) pair every
+    run — so it is never a dark reservoir. NOTHING restore-shaped ever consumes it: the
+    restore verb exists separately, target named by a human. Fire-and-forget; never
+    raises; size-bounded.
+    """
+    try:
+        td = _resolve_dir(telemetry_dir)
+        ensure_self_ignoring_dir(td)
+        path = _archive_regret_path(td)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(
+                json.dumps(
+                    {"ts": round(time.time(), 3), "query": str(query), "stem": str(stem)},
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+        _rotate_if_needed(path)
+        return True
+    except Exception:
+        return False
+
+
+def read_archive_regret(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
+    """Yield parsed archive-regret events, skipping corrupt/partial lines. Never raises."""
+    try:
+        td = _resolve_dir(telemetry_dir)
+        path = _archive_regret_path(td)
+        if not os.path.exists(path):
+            return
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(obj, dict):
+                    yield obj
+    except Exception:
+        return
+
+
 def read_reconsolidation_events(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
     """Yield parsed reconsolidation-outcome events, skipping corrupt/partial lines. Never raises."""
     try:
