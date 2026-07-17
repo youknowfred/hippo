@@ -1044,7 +1044,7 @@ def test_cite_derivation_producer_nudges_a_corpus_derived_by_the_old_extractor(t
     """AC (DRV-2): an OLDER derivation is a live degradation (memories watching the wrong
     file; memories staleness-EXEMPT on an empty cited_paths), so unlike an older
     corpus_format it gets a per-session line — KPI-5, never a silent degradation. A v1
-    (undeclared) corpus is behind BOTH historical fixes, so both gap clauses appear."""
+    (undeclared) corpus is behind ALL THREE historical fixes, so all gap clauses appear."""
     from memory.session_start import cite_derivation_producer
 
     md = str(tmp_path)
@@ -1052,9 +1052,10 @@ def test_cite_derivation_producer_nudges_a_corpus_derived_by_the_old_extractor(t
         fh.write("---\nname: m\n---\nbody cites src/a.py\n")
     line = cite_derivation_producer(md, md)  # undeclared == v1
     assert line and "Citation derivation" in line
-    assert "v1" in line and "v3" in line
+    assert "v1" in line and "v4" in line
     assert "package.json as package.js" in line  # ORC-1's gap (v1 -> v2)
     assert "extensionless config/build filenames" in line  # ORC-3's gap (v2 -> v3)
+    assert "`.mdc` Cursor rule sources" in line  # IOP-2's gap (v3 -> v4)
     # DOC-16: NAME the verb, on both surfaces. This used to assert "/hippo:doctor" — routing
     # to a health check that then named nothing, so the loop dead-ended: nudge -> doctor ->
     # (no command). Stating a conclusion while never naming the oracle is exactly LIF-4's
@@ -1067,8 +1068,8 @@ def test_cite_derivation_producer_nudges_a_corpus_derived_by_the_old_extractor(t
 
 def test_cite_derivation_producer_nudges_a_corpus_derived_by_v2_extractor(tmp_path):
     """AC (ORC-3): a corpus already at v2 (ORC-1 applied) is NOT behind the v1 bugs — the
-    message must not describe a defect this corpus does not have. Only the v2->v3 gap
-    (extensionless names) applies."""
+    message must not describe a defect this corpus does not have. The v2->v3 gap
+    (extensionless names) and the v3->v4 gap (.mdc) apply; the v1->v2 gap does not."""
     from memory.provenance import write_cite_derivation
     from memory.session_start import cite_derivation_producer
 
@@ -1078,9 +1079,28 @@ def test_cite_derivation_producer_nudges_a_corpus_derived_by_v2_extractor(tmp_pa
     assert write_cite_derivation(md, 2)
     line = cite_derivation_producer(md, md)
     assert line and "Citation derivation" in line
-    assert "v2" in line and "v3" in line
+    assert "v2" in line and "v4" in line
     assert "extensionless config/build filenames" in line  # ORC-3's gap — applies
     assert "package.json as package.js" not in line  # ORC-1's gap — does NOT apply to a v2 corpus
+
+
+def test_cite_derivation_producer_nudges_a_corpus_derived_by_v3_extractor(tmp_path):
+    """AC (IOP-2): a corpus at v3 (extensionless names applied) is behind ONLY the v3->v4
+    gap — the .mdc vocabulary growth — and the message must name that alone, not the
+    older fixes this corpus already has."""
+    from memory.provenance import write_cite_derivation
+    from memory.session_start import cite_derivation_producer
+
+    md = str(tmp_path)
+    with open(os.path.join(md, "m.md"), "w", encoding="utf-8") as fh:
+        fh.write("---\nname: m\n---\nbody cites src/a.py\n")
+    assert write_cite_derivation(md, 3)
+    line = cite_derivation_producer(md, md)
+    assert line and "Citation derivation" in line
+    assert "v3" in line and "v4" in line
+    assert "`.mdc` Cursor rule sources" in line  # IOP-2's gap — applies
+    assert "extensionless config/build filenames" not in line  # v2->v3 gap — already has it
+    assert "package.json as package.js" not in line  # v1->v2 gap — already has it
 
 
 def test_cite_derivation_producer_is_silent_on_an_empty_corpus(tmp_path):
