@@ -7,6 +7,60 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.21.0 — 2026-07-17 — "A clock, and a way back"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**,
+index schema still **7**, citation derivation still **3**. No gate constant moved, no new
+dependency; every new field is additive/absence-emits-nothing (ED-4) and every new check is
+detection-first / human-in-the-loop (ED-1). **This ships round-2 tier T11 (TMB):**
+`ROADMAP.enhancements2.yaml`'s temporal-truth workstream — the timestamp-less
+resolve/lifecycle plane gets a git-mined clock, retirement gets counted, forgetting gets
+measured, and the archive stops being a one-way door.
+
+- **TMB-1 — resolve-inbox evidence card.** Every `contradicts` pair in `resolve --list` /
+  the resolve MCP inbox now carries a deterministic evidence card: conflict age in
+  commits-since-declaration (git-mined pickaxe; honest "age unknown" fallback), the
+  git-newer side (`provenance.git_last_commit_with_time` — never via reconsolidate; the
+  no-corpus-write AST pin extended), cached cited-code drift per side, usage asymmetry
+  (withheld below 5 recorded sessions), and a `suggested:` prefill expressed strictly in
+  the four verdict names + explicit `abstain` — never auto-applied. All four verdict paths
+  record prefill-vs-choice on the existing per-clone ledger (additive `verdicts` key);
+  `--prefill` on the CLI dismiss, `prefill=` on the resolve tool.
+- **TMB-2 — invalid_after terminal state.** A memory retired via supersede/merge (stamp
+  past the 30-day horizon, no cited-code drift) previously signaled NOWHERE. Now: a
+  SessionStart retirement line that fires even with an empty stale set, a doctor check
+  (`invalid_after_terminal`), and a 5th admission leg into the GRA-5-guarded archive flow
+  (`archive_candidates` admits invalid_after-old ∧ zero-inbound ∧ not-cited). No new verb —
+  reinstatement stays reverify `graduate`/`fix`.
+- **TMB-5 — succession replay.** A `demote --superseded-by` verdict now replays the
+  historical queries that recalled the OLD name against the post-verdict corpus and prints
+  PASS / FAIL / INCONCLUSIVE per query ("nothing to replay" on zero hits — no fabricated
+  queries); counts-only summary rides the existing reconsolidation ledger event. Doctor
+  gains one line for supersede pairs with a failing/unrun replay.
+- **TMB-3 — forgetting correctness & archive reversibility.** `archive_shadowing` doctor
+  check (a stem in both `archive/` and the live corpus; read-only git-mv suggestion) + a
+  hermetic pin that index builds never traverse `archive/` + a report-only **forgetting**
+  eval category (absence-polarity rows through SIG-6's confirm flow — `absent=[stem]`,
+  each stem must actually be archived; an archived stem SURFACING is the failure;
+  absent-from-archive rows skip) + **`archive.restore <stem>`** (per-item, journaled,
+  collision-REFUSING — never overwrites a live same-stem file, no `force`) + an
+  evidence-only regret detector (recurring abstentions vs archived bodies, vendored BM25,
+  doctor-time; logged, deduped, ZERO auto-restore wiring — AST-pinned).
+- **TMB-4 — edge-derived update fixtures.** `eval_recall --draft-update` walks supersedes
+  chains into `category: update` + premise-resistance DRAFT rows — query = a literal
+  VERBATIM span of the superseded memory's file (test-pinned substring; zero LLM/network;
+  fail closed), gold = the live chain tip. Per-item confirm only
+  (`confirm_hard_set_row(..., superseded=corpse)`); scoring bucketed by the corpse's live
+  stamp state (unstamped/recent: successor-must-outrank-corpse; old: presence-only);
+  report-only — no `GATE_UPDATE_*` constant exists (pinned; promotion is a dated owner
+  decision). Doctor reads the outrank-failure count from the persisted run ledger.
+- **Engine layout (PR #72, riding this release).** The five largest modules (recall,
+  mcp_server, eval_recall, dream, doctor) are decomposed into re-exporting façades +
+  prefix-named siblings, ratcheted by `tests/test_module_size.py`; every dotted path keeps
+  resolving, and `doctor --help`/unknown-flag now argparse properly. T11's own additions
+  follow the convention (`resolve_evidence.py`, `reconsolidate_replay.py`,
+  `eval_fixtures.py`, checks in `doctor_checks_*.py`).
+
 ## v1.20.0 — 2026-07-16 — "Sentinel"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**,
