@@ -7,6 +7,89 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.22.0 — 2026-07-17 — "Good fences, open doors"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**,
+index schema still **7**. One version axis DID move: **citation derivation 3 → 4** (IOP-2 adds
+`.mdc` to the extractor vocabulary), which is a corpus-maintenance signal, not a re-bootstrap —
+`/hippo:doctor` names it and the consented per-item `rederive` path applies it (a corpus that
+mentions no `.mdc` file derives identically and stamps frictionlessly). No gate constant moved;
+every new field is additive/absence-emits-nothing (ED-4) and every new check is detection-first /
+human-in-the-loop (ED-1). **This release wraps the last two round-2 tiers — T12 (CLB) and T13
+(IOP) — and with them completes the round-2 release train (T8–T13).** The through-line: memory
+that ships through review, and reaches cleanly to the neighbors — your teammates, and the other
+tools in the repo. Good fences (the review gate); open doors (interop and the graduation path).
+
+### T12 — Team collaboration substrate (CLB)
+
+- **CLB-1 — the review packet + the memory-diff CI gate.** A new terminal verb `memory review`
+  / `hippo review` / **`/hippo:review`** (hippo's 17th skill) renders a zero-LLM review packet
+  for a memory diff: an op-classified change list (ADD / UPDATE / SUPERSEDE / ARCHIVE / EDGE, plus
+  an honest DELETE row for the convention-breaking hard delete — mislabeling it would hide a
+  destructive change from the reviewer), touched-file lints, and a local shadow-index recall-impact
+  preview (two throwaway indexes at base vs head, replaying recent episode queries — never under
+  `--ci`/`HIPPO_DISABLE_DENSE`/CI). **`--ci`** is the single canonical memory-diff gate — a new
+  `memory-review` CI job (pull_request only) that exits nonzero iff a SECURITY finding (secrets +
+  threat Tier-A) lands on a touched memory file; portability/edge/conflict render ADVISORY by
+  design (cited paths ARE repo coupling; gating an unresolved contradiction would automate a human
+  verdict, ED-1). Auto-approve is removed outright — review-gated writes are hippo's identity.
+- **CLB-3 — evidence-fence drift.** A memory can mark a quoted-code fence with its source span
+  (` ```diff evidence: path:start-end `, future drains only); a diff-aware detector — living in the
+  new `staleness_evidence.py` sibling and running ONLY in the SessionStart `_build_run_context`
+  pass (AST-pinned off `_ensure_index`/`build_index` — never the hot path) — flags when the quoted
+  content drifts from the cited region. Optional `evidence_drift` counts ride `stale.json` (schema
+  unchanged), and the RET-6 verify-at-use banner names the match level. A whitespace-only refactor
+  is a match, not drift.
+- **CLB-4 — incoming-merge duplicate digest.** A SessionStart producer (after `floor_change`) that,
+  when a merge lands, walks the incoming range through the single shared merge detector +
+  `committed_duplicate_neighbors` (no second detector) and surfaces up to five near-duplicate pairs,
+  routed contradicts→`/hippo:resolve` else→`/hippo:consolidate`. The advancing episode watermark IS
+  the seen-state (GOV-4 pattern, no new ledger); an unreachable watermark (squash) emits an explicit
+  degradation line that self-heals next session.
+- **CLB-2 — per-verification attribution.** `reverify` now refreshes `verified_by: "slug@own-ts"`
+  on every graduate/fix verdict (the verdict IS the human gate). The non-author-verified join
+  compares the stamp against file CREATORS (`git log --diff-filter=A`), because committing a
+  verify-stamp makes the verifier a committer; team-coverage lines are suppressed at ≤1 distinct
+  author, so a solo scorecard is byte-identical. New AST pin: `verified_by` is never a ranking input.
+
+### T13 — Interop & reach (IOP)
+
+- **IOP-2 — import upstream fingerprints.** At `.mdc` import, the source file's own repo-relative
+  path lands in the memory body as a dedicated `Source:` line (`.mdc` joins `_CODE_EXTS`), so it
+  rides the shipped cited-paths backfill and RET-6's git-log staleness scan flags upstream drift
+  AND deletion for free — no new frontmatter, no new doctor check. Tracked sources only (git is the
+  resolve oracle). This is the derivation-vocabulary growth behind the 3 → 4 bump above.
+- **IOP-3 — curated export receipts.** `/hippo:export-agents` gains a report-only curation receipt:
+  per floor line, WHY it earned export — soak strength under the maturity gate, staleness,
+  graduation stamps, conflict-radar hits, exclusions with reasons, prior-block rot on the existing
+  `AGENTS.md` — composed from shipped functions called verbatim. ZERO bytes of the proposed
+  `AGENTS.md` change; `export_agents` is byte-untouched and AST-pinned to never read an evidence
+  value (display-only, never a selection/ranking input). A thin corpus reads "insufficient
+  evidence" (inv3), never a false-clean 0.0. Counters the "LLM-generated AGENTS.md hurts" finding
+  with a curated, evidence-bearing export.
+- **IOP-1 — foreign-dialect radar.** A report-only census (doctor `foreign_dialects` + the audit
+  skill) of the rule dialects hippo does NOT own — Cursor `.cursor/rules/*.mdc`, Copilot
+  `.github/instructions/*.instructions.md`, watch-only unratified `.agents/rules/` — by
+  glob-presence alone, plus cross-dialect divergence vs the governance plane (`rule_dup_candidates`
+  reused, foreign content as the draft side) and existence-only `.mdc` citation/glob rot. All in a
+  new `FOREIGN_GLOBS` surface that NEVER merges into `GOV_GLOBS` or reaches the RUL-1/3/4 authority
+  paths (AST-pinned), and never joins the SessionStart producers — un-owned foreign content is never
+  mistaken for hippo authority.
+- **IOP-4 — claude-mem migration audit.** A `(discover, parse)` adapter for claude-mem — the
+  86K-star incumbent — into the shipped import tail, gated on an ED-3 live probe of its on-disk
+  store as literal step zero (a real store was inspected: WAL-mode SQLite; `observations` /
+  `session_summaries` / `user_prompts`; nine schema migrations). v1 is AUDIT-ONLY: `python -m
+  memory.import_mdc --from claude-mem` prints a candidate report (counts, dedupe rate via
+  `rule_dup_candidates`, secrets/portability/threat hit counts — kinds never values) with ZERO
+  writes to the corpus, rules, or the pending queue (AST-pinned), reading the store `mode=ro`
+  (WAL-safe). Raw user prompts are counted, never read. hippo becomes the tool you graduate TO.
+
+Doctor grew four one-line checks across the two tiers (`evidence_fences`, `merge_digest`,
+`team_coverage`, `foreign_dialects`), each appended before the pinned-last env check; the `review`
+verb landed across every surface registry in lockstep (17-skill list, `bin/hippo`, STABILITY.md,
+the Desktop terminal-only note). No version bump shipped with T12 or T13 individually — this release
+is their joint tag.
+
 ## v1.21.0 — 2026-07-17 — "A clock, and a way back"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**,
