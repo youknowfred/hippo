@@ -317,7 +317,10 @@ def test_reverify_rebaselines_to_head_and_clears_drift(repo, memory_dir):
     assert body_after == body_before  # body byte-identical
 
 
-def test_reverify_is_idempotent(repo, memory_dir):
+def test_reverify_is_idempotent_apart_from_the_verified_by_refresh(repo, memory_dir):
+    """CLB-2 sharpened the old byte-idempotence: the provenance triplet +
+    last_verified stay idempotent, but every verdict refreshes ``verified_by``
+    (WHO last vouched, WHEN) — so a repeat reverify changes ONLY that key."""
     write_file(repo, "src/dep.py", "v = 1\n")
     git_commit(repo, "init", 1_700_000_000)
     write_file(
@@ -327,7 +330,10 @@ def test_reverify_is_idempotent(repo, memory_dir):
     )
     git_commit(repo, "memory", 1_700_000_100)
     assert _reverify_one(memory_dir, repo, "m")["changed"] is True   # OLD -> HEAD
-    assert _reverify_one(memory_dir, repo, "m")["changed"] is False  # already HEAD -> no-op
+    text1 = open(os.path.join(memory_dir, "m.md"), encoding="utf-8").read()
+    assert _reverify_one(memory_dir, repo, "m")["changed"] is True   # verified_by refreshed
+    text2 = open(os.path.join(memory_dir, "m.md"), encoding="utf-8").read()
+    assert P._strip_verified_by(text1) == P._strip_verified_by(text2)  # nothing else moved
 
 
 # --------------------------------------------------------------------------- #
@@ -375,9 +381,9 @@ def test_reverify_never_overwrites_an_existing_last_verified_stamp(repo, memory_
     head1 = P.run_git(["rev-parse", "HEAD"], repo).strip()
     assert first["source_commit"] == head1
 
-    # Idempotent re-run right away: last_verified is preserved, changed is False.
+    # Immediate re-run: last_verified is preserved (write-once); the only moving
+    # key is CLB-2's per-verdict verified_by refresh.
     again = _reverify_one(memory_dir, repo, "m")
-    assert again["changed"] is False
     assert again["last_verified"] == first_stamp
 
     # Real drift + a SECOND genuine re-verification: source_commit moves to the new HEAD,
@@ -1507,12 +1513,15 @@ def test_reverify_of_block_style_cited_paths_preserves_every_other_key(repo, mem
 
     after = P.parse_frontmatter(open(target, encoding="utf-8").read())
     assert after, "the rewritten file must still parse"
-    # last_verified is stamped by reverify (RET-6) — compare everything else.
+    # last_verified (RET-6) + verified_by (CLB-2) are stamped by reverify — compare
+    # everything else.
     a, b = _prov_free(after), _prov_free(before)
     for d in (a, b):
         d.pop("last_verified", None)
+        d.pop("verified_by", None)
         if isinstance(d.get("metadata"), dict):
             d["metadata"].pop("last_verified", None)
+            d["metadata"].pop("verified_by", None)
     assert a == b
 
 

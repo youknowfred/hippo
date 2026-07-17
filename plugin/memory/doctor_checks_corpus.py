@@ -827,3 +827,40 @@ def check_merge_digest(ctx: DoctorContext) -> Dict[str, str]:
         }
     except Exception as exc:
         return {"status": "warn", "message": f"merge-digest check failed: {exc}."}
+
+
+def check_team_coverage(ctx: DoctorContext) -> Dict[str, str]:
+    """CLB-2: the last_verified + verified_by consumers — verification made legible.
+
+    The ``last_verified`` half renders for EVERY corpus (its first production
+    consumer — the field was written since RET-6 but surfaced nowhere). The
+    ``verified_by`` team half renders ONLY at ≥2 distinct git authors — at ≤1 the
+    line says "suppressed" and carries ZERO coverage numbers (solo
+    self-verification stats would only teach the reader to ignore the line).
+    Counts only, no names, no timestamps — deterministic (the doctor pin).
+    """
+    try:
+        from .team_coverage import team_coverage, verification_summary
+
+        vs = verification_summary(ctx.memory_dir)
+        base = (
+            f"verification: {vs['last_verified']} of {vs['total']} memories carry "
+            "last_verified (stamped by the reverify gate)"
+        )
+        team = team_coverage(ctx.memory_dir, ctx.repo_root)
+        if team is None:
+            return {
+                "status": "ok",
+                "message": f"{base}; team attribution suppressed (single git author).",
+            }
+        return {
+            "status": "ok",
+            "message": (
+                f"{base}; team ({team['authors']} authors): {team['stamped']} verified_by "
+                f"stamp(s), {team['non_author_verified']} non-author-verified, "
+                f"{team['never_other_verified']} never verified by a non-author, "
+                f"{team['departed']} departed-verifier stamp(s)."
+            ),
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"team-coverage check failed: {exc}."}

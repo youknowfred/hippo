@@ -492,14 +492,27 @@ def local_memory_dir(project_memory_dir: str) -> str:
     return os.path.join(os.path.dirname(os.path.abspath(project_memory_dir)), "memory.local")
 
 
+def slugify_identity(raw: str) -> str:
+    """The ONE identity slugification (TEA-5's rule): ``[a-z0-9_.-]``, any other char →
+    ``_``, leading/trailing separators trimmed, capped at 64, ``"unknown"`` floor.
+    Shared by ``current_user_slug`` and every git-log-identity JOIN (CLB-2's
+    verified_by consumers) so a stamped slug and a slugified ``git log`` author can
+    never disagree about the same human. Pure; never raises."""
+    try:
+        slug = re.sub(r"[^A-Za-z0-9_.-]", "_", (raw or "").lower()).strip("._-")
+        return (slug or "unknown")[:64]
+    except Exception:
+        return "unknown"
+
+
 def current_user_slug(repo_root: str) -> str:
     """A filesystem-safe slug identifying the current user, for TEA-5's committed per-user usage
-    summary (``.usage/<user>.json``).
+    summary (``.usage/<user>.json``) and CLB-2's ``verified_by`` stamp.
 
     Preference order: ``HIPPO_USAGE_USER`` override (hermetic tests) → git ``user.email`` → git
-    ``user.name`` → ``$USER``/``$LOGNAME`` → ``"unknown"``. Slugified to ``[a-z0-9_.-]`` (any
-    other char → ``_``, leading/trailing separators trimmed, capped at 64 chars). Never raises —
-    identity derivation must degrade to ``"unknown"``, never crash a curation pass."""
+    ``user.name`` → ``$USER``/``$LOGNAME`` → ``"unknown"``. Slugified via ``slugify_identity``
+    (the one shared rule). Never raises — identity derivation must degrade to ``"unknown"``,
+    never crash a curation pass."""
     try:
         raw = (os.environ.get("HIPPO_USAGE_USER") or "").strip()
         if not raw:
@@ -508,10 +521,7 @@ def current_user_slug(repo_root: str) -> str:
             raw = run_git(["config", "user.name"], repo_root).strip()
         if not raw:
             raw = (os.environ.get("USER") or os.environ.get("LOGNAME") or "").strip()
-        if not raw:
-            raw = "unknown"
-        slug = re.sub(r"[^A-Za-z0-9_.-]", "_", raw.lower()).strip("._-")
-        return (slug or "unknown")[:64]
+        return slugify_identity(raw)
     except Exception:
         return "unknown"
 
@@ -1368,10 +1378,42 @@ def backfill_corpus(
 
 
 _LAST_VERIFIED_RE = re.compile(r"\s*last_verified\s*:")
+_VERIFIED_BY_KEY_RE = re.compile(r"^(\s*)verified_by\s*:")
 
 
 def _has_last_verified(fm_lines: List[str]) -> bool:
     return any(_LAST_VERIFIED_RE.match(ln) for ln in fm_lines)
+
+
+def _strip_verified_by(text: str) -> str:
+    """Remove any existing ``verified_by`` key (body verbatim) — the refresh half of
+    CLB-2's per-verification stamp: reverify strips + re-stamps, so the file always
+    carries exactly ONE ``verified_by``, the latest verdict's."""
+    return strip_frontmatter_keys(text, _VERIFIED_BY_KEY_RE)
+
+
+def _stamp_verified_by(text: str, value: str) -> str:
+    """Insert ``verified_by: "<slug>@<own-ts>"`` — CLB-2's per-verification attribution.
+
+    UNLIKE ``_stamp_last_verified`` (write-once, the FIRST confirmation), this stamp is
+    REFRESHED on every human-gated reverify verdict: WHO last vouched for this memory
+    and WHEN, with its own timestamp decoupled from ``last_verified``. Callers strip any
+    existing key first (``_strip_verified_by``); the defensive absent-check here mirrors
+    its sibling. Additive and absence-emits-nothing: never a ranking input (AST-pinned),
+    read only by report-time consumers. The body is never touched. No-op on unfenced
+    frontmatter (the same guard every writer here uses).
+    """
+    if not text.startswith(_FENCE):
+        return text
+    lines = text.split("\n")
+    close = next((i for i in range(1, len(lines)) if lines[i].strip() == _FENCE), None)
+    if close is None:
+        return text
+    fm = lines[1:close]
+    if any(_VERIFIED_BY_KEY_RE.match(ln) for ln in fm):
+        return text
+    new_key = f"verified_by: {json.dumps(value)}"
+    return "\n".join([lines[0]] + insert_frontmatter_keys(fm, [new_key]) + lines[close:])
 
 
 def _stamp_last_verified(text: str, ts: str) -> str:
@@ -1444,6 +1486,13 @@ def reverify_file(
     ``source_commit`` itself, re-baselined to HEAD on EVERY call above, which is why a
     reinforced memory drops out of the next SessionStart's ``find_stale`` scan (and thus
     ``stale.json``) regardless of whether ``last_verified`` was already set.
+
+    CLB-2 attribution: also REFRESHES ``verified_by: "<slug>@<own-ts>"`` on every verdict
+    (strip + re-stamp — the file carries exactly one, the latest). This deliberately
+    narrows the old byte-idempotence: the provenance triplet + ``last_verified`` remain
+    idempotent, but a repeat verdict is itself a state change (WHO last vouched, WHEN),
+    so ``changed`` is True per verdict. Never a ranking input (AST-pinned); consumers
+    are report-time only (doctor/scorecard team coverage, suppressed at ≤1 git author).
     """
     result = {
         "path": path,
@@ -1455,6 +1504,7 @@ def reverify_file(
         "source_commit": None,
         "source_commit_time": None,
         "last_verified": None,
+        "verified_by": None,
         "error": None,
     }
     try:
@@ -1479,14 +1529,14 @@ def reverify_file(
         dropped = [p for p in _frontmatter_cited_paths(fm) if p not in cited]
         # LIF-4: partition where repo_files is in scope — see backfill_file.
         gone, not_derived = partition_dropped(dropped, repo_files)
-        stripped = _strip_invalid_after(_strip_provenance(text))
+        stripped = _strip_verified_by(_strip_invalid_after(_strip_provenance(text)))
         # RET-6: last_verified is write-once — a memory that already carries one keeps its
         # FIRST confirmation timestamp; only an as-yet-never-verified memory gets stamped.
         # Stamped BEFORE backfill_text re-inserts cited_paths/source_commit/source_commit_time
         # (not after) so the key lands in the SAME relative position every call — `_strip_provenance`
         # never removes it, so an append-after-backfill_text ordering would flip on the very next
         # call (the triplet always re-lands at fm's tail while last_verified sat still), breaking
-        # this function's idempotence contract on the SECOND reverify, not the first.
+        # the triplet's idempotence contract on the SECOND reverify, not the first.
         meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
         existing_lv = fm.get("last_verified")
         if existing_lv is None:
@@ -1497,14 +1547,20 @@ def reverify_file(
         else:
             lv = datetime.now(timezone.utc).isoformat()
             pre_stamp = _stamp_last_verified(stripped, lv)
+        # CLB-2: verified_by refreshes on EVERY verdict (stripped above, re-stamped here) —
+        # the latest vouch's identity + its own timestamp, decoupled from write-once
+        # last_verified. Same pre-backfill ordering rationale as the stamp above.
+        vb = f"{current_user_slug(repo_root)}@{datetime.now(timezone.utc).isoformat()}"
+        pre_stamp = _stamp_verified_by(pre_stamp, vb)
         new_text, _ = backfill_text(pre_stamp, cited, sc, sct)
-        changed = new_text != text  # idempotent: a no-op when provenance already matches
+        changed = new_text != text  # triplet+last_verified idempotent; verified_by refreshes
         # COR-9 — see backfill_file's guard. A re-verify additionally owns `invalid_after`
-        # (it strips it: a confirmation re-opens the validity window) and MAY ADD
-        # `last_verified` — but only when the file carries none. RET-6's stamp is write-once,
-        # so an EXISTING last_verified is a key this writer does not own, and saying otherwise
-        # would blind the guard to a fold INTO it (the exact damage seen in the wild).
-        owned = _PROVENANCE_OWNED | {"invalid_after"}
+        # (it strips it: a confirmation re-opens the validity window), `verified_by`
+        # (strip + re-stamp on every verdict — CLB-2), and MAY ADD `last_verified` — but
+        # only when the file carries none. RET-6's stamp is write-once, so an EXISTING
+        # last_verified is a key this writer does not own, and saying otherwise would
+        # blind the guard to a fold INTO it (the exact damage seen in the wild).
+        owned = _PROVENANCE_OWNED | {"invalid_after", "verified_by"}
         if not _has_last_verified(fm_lines):
             owned = owned | {"last_verified"}
         damage = _frontmatter_damage(text, new_text, owned) if changed else None
@@ -1520,6 +1576,7 @@ def reverify_file(
                 "source_commit": sc,
                 "source_commit_time": sct,
                 "last_verified": lv,
+                "verified_by": vb,
                 "changed": changed,
             }
         )
