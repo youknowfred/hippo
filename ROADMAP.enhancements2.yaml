@@ -1301,7 +1301,7 @@ workstreams:
         title: Foreign-dialect radar (census + cross-dialect divergence + git-drift rot)
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: interop-reach, verdict: RESHAPE, convergence: 1, landscape: [ctxlint-2026-07, scoped-frontmatter-converged-fragmented]}
         problem: >-
           A repo may carry Cursor .mdc, Copilot .instructions.md, and hippo memories that
@@ -1342,7 +1342,7 @@ workstreams:
         title: Import upstream fingerprints (hash-on-change re-review at the import plane)
         priority: P2
         effort: S
-        status: planned
+        status: done
         source: {lens: interop-reach, verdict: RESHAPE, convergence: 1, landscape: [mcpoison-hash-on-change-2025]}
         problem: >-
           A .mdc-imported memory has no link back to its source file, so when the upstream
@@ -1375,7 +1375,7 @@ workstreams:
         title: Curated export receipts (evidence ledger for AGENTS.md floor items)
         priority: P2
         effort: S
-        status: planned
+        status: done
         source: {lens: interop-reach, verdict: RESHAPE, convergence: 1, landscape: [eth-llm-agents-md-hurts-2602, progressive-disclosure-consensus]}
         problem: >-
           export_agents proposes an AGENTS.md diff but shows no evidence for WHY each
@@ -1412,7 +1412,7 @@ workstreams:
         title: claude-mem read-only migration audit (on the shipped import adapter tail)
         priority: P2
         effort: M
-        status: planned
+        status: done
         source: {lens: interop-reach, verdict: RESHAPE, convergence: 1, landscape: [claude-mem-86k-stars, letta-memfs-convergence]}
         problem: >-
           claude-mem (86.6K stars) is the incumbent hippo should be the graduation path
@@ -1664,9 +1664,9 @@ release_train:
       evidence-fence contract shape.
 
   - tier: T13
-    target_version: 1.13.0
+    target_version: 1.13.0   # STALE label (authored pre-round-3); T13 landed post-v1.21.0, 2026-07-17, no version bump — rides whatever release Fred cuts next
     theme: "Interop & reach"
-    status: planned
+    status: done
     gate: "The trust spine + RCH-5 are SHIPPED, so IOP-4's write leg is unblocked once its ED-3 probe + audit half land. Every foreign-format item runs its own ED-3 live probe before parsing."
     done_means: >-
       hippo is the git-drift hygiene layer over every rule dialect in the repo
@@ -1684,6 +1684,41 @@ release_train:
       LIF-7-gated path). IOP-4 runs the claude-mem store ED-3 probe as literal step zero,
       ships audit-only first, and reuses the shipped RCH-5 pack_install_item template
       (re-read on the tree) for any write leg.
+      BUILT 2026-07-17 (see hippo-enh-t13-reach), 4/4 items in the tier items order
+      (IOP-2,3,1,4), one session, tests-first, full suite green after each (2,703
+      tests, ~40 new; no version bump, no schema/corpus_format move — ED-4 held with
+      zero bumps). PREMISES CORRECTED at build: (1) IOP-2's assumed cited_paths route
+      did NOT exist on the tree — .mdc was not in provenance._CODE_EXTS, so the
+      Applies-to backfill could never derive a .mdc path; the extension joined the one
+      canonical list (rules_plane._path_ref_re inherits it) and the fingerprint rides a
+      dedicated 'Source:' body line, NOT the Applies-to list, whose 20-path cap could
+      truncate the fingerprint away. (2) 'import_one_candidate' (named here and in
+      import_mdc's own docstring) never shipped as a symbol — the per-item write leg is
+      import_mdc_file; docstring corrected in-file, and IOP-4's future write leg is
+      specified against that name. (3) The IOP-4 probe found a REAL claude-mem store on
+      the build machine (~/.claude-mem, ic-memobot era) — both ED-3 probes ran LIVE and
+      their dated findings live under decision ED-3. Every binding held: FOREIGN_GLOBS
+      is a separate symbol in a new rules_foreign sibling, GOV_GLOBS pinned byte-exact,
+      the radar AST-pinned to never call gov_citations/conflict_radar/load_rules_cache/
+      refresh_rules_cache/gov_files (rule_dup_candidates only, foreign content as the
+      DRAFT side), PRODUCERS untouched (grep-pinned), doctor grew ONE line
+      (foreign_dialects, after team_coverage, env check still pinned last); the IOP-3
+      receipt is a new export_receipts sibling — export_agents.py byte-untouched and
+      AST-pinned to never reference the evidence surface, strength WITHHELD below the
+      soak gate (inv3: 'insufficient evidence', never a false-clean 0.0), absent
+      stale.json renders 'unknown' never 'fresh', no doctor check/producer/hot-path
+      import (the 'zero new reporting surface' intent holds for STANDING surfaces);
+      IOP-4 shipped audit-only with the pending-queue/_SEED_SCHEMA path AST-pinned
+      absent and the store opened mode=ro (WAL-safe). Honest scope notes: IOP-1's
+      divergence leg is foreign-vs-GOVERNANCE only (foreign x foreign pairwise
+      deliberately not built — no new machinery, per the proposal's own risk cut);
+      Copilot/.agents files feed divergence as RAW text (zero foreign-frontmatter
+      parsing — ED-3 discipline, applyTo: support still deferred behind its own
+      probe); IOP-2's fingerprint activates only for TRACKED sources (git ls-files is
+      the resolve oracle — documented in the skill); IOP-3's receipt renders zero
+      proposal bytes (the diff stays describe()'s); IOP-4's dedupe rate is
+      governance-restatement (rule_dup_candidates, per the AC's own letter), not
+      corpus-neighbor cosine. T13 closes the round-2 release train (T8-T13 all done).
     capstone: >-
       Write hippo-enh-t13-reach: the foreign-dialect census + FOREIGN_GLOBS isolation,
       the import-fingerprint RET-6 reuse, the export curation-receipt composition, and
