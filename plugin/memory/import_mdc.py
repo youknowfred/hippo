@@ -8,9 +8,12 @@ each ``.mdc`` into ONE per-item-confirmed, secret-linted, dup-gated memory candi
 
 ADAPTER SHAPE (so claude-mem / Mem0 / sectioned-CLAUDE.md drop in later): an adapter is a
 (discover, parse) pair — ``mdc_rule_files`` + ``parse_mdc`` here — feeding the SHARED
-tail: ``import_candidates`` (read-only report) and ``import_one_candidate`` (one write
-through the shipped ``check_candidate`` → secret-lint → ``write_memory`` path). A future
-adapter adds its own discover/parse pair and reuses the tail unchanged.
+tail: ``import_candidates`` (read-only report) and ``import_mdc_file`` (one write through
+the shipped ``check_candidate`` → secret-lint → ``write_memory`` path; the roadmap's
+"import_one_candidate" was this function's working name — it never shipped as a separate
+symbol). IOP-4 added the first sibling adapter, ``import_claude_mem`` (AUDIT-ONLY: its
+report leg exists, its write leg deliberately does not yet), reachable via this module's
+``--from`` CLI; siblings never import this façade.
 
 TOLERANT PARSING IS THE ADAPTER'S JOB: real Cursor frontmatter is frequently NOT valid
 YAML — the dominant shape ``globs: **/*.ts`` starts a value with ``*`` (a YAML alias), so
@@ -377,3 +380,43 @@ def import_mdc_file(
     except Exception as exc:
         result["error"] = result["error"] or f"import failed: {exc}"
     return result
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    """``python -m memory.import_mdc --from {cursor,claude-mem}`` — the read-only
+    candidate/audit REPORT for one adapter, as JSON on stdout (IOP-4).
+
+    Report-only by construction: ``--from cursor`` prints ``import_candidates`` (the
+    per-item write stays ``import_mdc_file``, driven by the skill with one explicit yes
+    per file); ``--from claude-mem`` prints the audit-only migration report (its write
+    leg does not exist yet — deliberately). Exit 0 on a rendered report, 2 on bad args.
+    """
+    import argparse
+    import json as _json
+
+    parser = argparse.ArgumentParser(prog="python -m memory.import_mdc")
+    parser.add_argument(
+        "--from", dest="source", choices=("cursor", "claude-mem"), default="cursor",
+        help="which adapter's read-only report to print",
+    )
+    parser.add_argument(
+        "--store", default=None,
+        help="claude-mem store path override (default ~/.claude-mem/claude-mem.db)",
+    )
+    parser.add_argument(
+        "--project", default=None,
+        help="claude-mem only: restrict candidate scoring to one store project",
+    )
+    args = parser.parse_args(argv)
+    if args.source == "claude-mem":
+        from .import_claude_mem import audit_report
+
+        report = audit_report(args.store, project=args.project)
+    else:
+        report = import_candidates()
+    print(_json.dumps(report, indent=1, default=str))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

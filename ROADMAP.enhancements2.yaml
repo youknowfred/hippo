@@ -1762,6 +1762,30 @@ decisions:
       neutralization (stripping comment bytes at render) is JUSTIFIED by the finding but
       DEFERRED behind a dated owner decision, because removing content from a body is a
       mutation (the ED-4 clean-break discipline), not a warn-time side effect.
+      IOP-2 FINDING (2026-07-17, live probe in a real scratch repo before claiming the
+      deletion path): with .mdc in provenance._CODE_EXTS (the probe's premise correction
+      — the spec assumed the Applies-to backfill could already derive a .mdc path; it
+      could not), a tracked source .mdc lands in cited_paths at import, editing it AND
+      git-deleting it both surface through the ONE git log --name-only scan (find_stale
+      changed_paths named the .mdc in both cases), and the RET-6 'anchored to <sha>; N
+      cited files changed since — verify before relying' banner fired for both memories
+      on a live recall. Untracked sources cannot resolve (git ls-files oracle) and
+      degrade to glob targets only.
+      IOP-4 FINDING (2026-07-17, live probe of the real store on this machine — parser
+      written only after): claude-mem's store is a WAL-mode SQLite db at
+      ~/.claude-mem/claude-mem.db (plus a vector-db/ dir the adapter ignores); the
+      memory-shaped rows are `observations` (type CHECK-constrained to decision/bugfix/
+      feature/refactor/discovery/change; title/subtitle; JSON-array TEXT columns facts/
+      concepts/files_read/files_modified; free-text text/narrative; a project scope
+      column), plus session_summaries (episodic rollups) and user_prompts (RAW prompt
+      text — a privacy surface the audit counts but never reads). schema_versions
+      recorded NINE applied migrations (4..11,16) on a store two days old at capture —
+      the format moves fast, so the reader introspects defensively and every report
+      carries the store's own version list. Read posture: sqlite mode=ro URI (immutable=1
+      would skip un-checkpointed WAL rows; a plain open could checkpoint the WAL on close
+      and mutate a store the audit promised only to read). Live run over the real store
+      (copied first): 153 observations / 1 project parsed clean, 26 portability hits,
+      0 secrets, 0 threats, dedupe 0%.
   - id: ED-4
     carried_from: round-1
     decision: additive fields are absence-emits-nothing; schema bumps are clean breaks, one migration each
