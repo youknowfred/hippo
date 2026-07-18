@@ -934,7 +934,7 @@ workstreams:
         title: Reverify brief (new sibling reconsolidate_brief.py — evidence per worklist entry, cold path only)
         priority: P1
         effort: M
-        status: proposed
+        status: done           # 2026-07-17, T21 session 1 — every AC pinned in tests/test_reconsolidate_brief.py
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "reconsolidation_events.jsonl = 671 verdicts in one week (638 graduate / 33 fix / 0 demote / 0 snooze); the worklist deepened 20 (draft, 2026-07-16) -> 26 standalone / 38 with watermark (2026-07-17); mcp_schemas.py:400 — the reconsolidate tool description itself instructs 'read the memory, diff its cited paths'"}
         problem: >-
           The reconsolidation queue is chronic and the verdict flow runs at
@@ -999,12 +999,19 @@ workstreams:
           precedent); mcp_schemas.py reconsolidate tool (action enum
           worklist|reverify today; its description at L400 instructs the
           hand-diff this item retires); mcp_tools_consolidate.py (wiring);
-          capture-lane secret discipline (hunks_secret_flagged,
-          _MAX_PROMPT_HUNK_CHARS=2000). Verdict-vocabulary precision:
-          semantic_reverify._VALID_OUTCOMES = graduate/fix/demote; snooze is
-          the MCP-level ack (mcp_schemas enum) — the brief covers all four
-          paths. EVD-1 and FLT-1 are the round's two highest-value starts and
-          share nothing.
+          capture-lane secret discipline (hunks_secret_flagged — computed in
+          capture.py via secrets.scan_text + the SEN-2 Tier-A threat scan;
+          _MAX_PROMPT_HUNK_CHARS=2000 lives in capture_triage.py:77, not
+          capture.py — drift corrected at build 2026-07-17).
+          Verdict-vocabulary precision: _VALID_OUTCOMES = graduate/fix/demote
+          lives at reconsolidate.py:89 (`semantic_reverify` is a
+          reconsolidate.py FUNCTION, not a module — drift corrected at build
+          2026-07-17); snooze is the MCP-level ack (mcp_schemas enum) — the
+          brief covers all four paths. Built as specified: wiring landed in
+          mcp_tools_consolidate.py + the consolidate skill only —
+          reconsolidate.py (900/900) and provenance.py (2072/2072) took ZERO
+          lines (stronger than imports-only; a test pins it). EVD-1 and FLT-1
+          are the round's two highest-value starts and share nothing.
 
       - id: EVD-2
         title: Touch-grain lane health/diagnosis (reframe — the lane recorded zero for mechanical reasons)
@@ -1298,7 +1305,13 @@ release_train:
   - tier: T21
     target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
     theme: "Evidence consumers"
-    status: proposed
+    status: in_progress
+    ratified: >-
+      2026-07-17 — owner-directed (Fred's scheduled T21 implementation chip, naming
+      EVD-1 first and the in-tier order): T21 selected for build per LAW ZERO. The
+      chip is the dated scheduling signal ED4R-1 requires for tier ratification; the
+      Q4 owner decision stays PENDING until asked in-session (recorded on EVD-4 when
+      it lands).
     gate: "None cross-file — TMB-1/CLB-2/CLB-3/JIT-2/MSR-5/MSR-6/EXT-3/RET-14/LIF-6 all shipped. EVD-3 additionally gates on its proving condition (a non-empty decline ledger); EVD-4 Arm A gates on Q4; EVD-4 Arm B is severed behind nonzero touch/outcome rows + its own dated decision."
     done_means: >-
       The reconsolidation queue gets cheap honest per-entry evidence (EVD-1,

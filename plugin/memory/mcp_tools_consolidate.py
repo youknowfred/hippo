@@ -137,7 +137,9 @@ def _tool_secrets_scan(args: Dict[str, Any]) -> str:
 def _tool_reconsolidate(args: Dict[str, Any]) -> str:
     """LIF-1: the worklist + the ONE per-item verdict gate (``semantic_reverify``/``snooze``),
     mirroring the ``memory.reconsolidate`` CLI (watermark lane included — the tool and the
-    SessionStart producer must describe the SAME worklist)."""
+    SessionStart producer must describe the SAME worklist). EVD-1 adds action='brief': the
+    per-entry evidence card (``reconsolidate_brief``) that retires this tool's old
+    hand-diff instruction — cold-path, read-only, verdict vocabulary untouched."""
     from . import trust
     from .provenance import resolve_dirs
     from .reconsolidate import (
@@ -180,7 +182,25 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
                 f"  • {item['name']}{wm_tag}{_linked_note(item)}: "
                 + ", ".join(item["changed_paths"][:6])
             )
+        out.append(
+            "Evidence per item: action='brief' (name=…) renders the cited-path diff from "
+            "the entry's own baseline — diffstat + hunk headers, secret-linted bodies when "
+            "clean (EVD-1; no more hand-diffing)."
+        )
         return "\n".join(out)
+    if action == "brief":
+        name = str(args.get("name") or "").strip()
+        if not name:
+            return "reconsolidate brief: 'name' is required (one entry per call)."
+        from .reconsolidate_brief import brief_for_name, render_brief
+
+        brief = brief_for_name(name, memory_dir, repo_root)
+        if brief is None:
+            return (
+                f"nothing to brief: {name} is not in the current stale set "
+                "(no cited-code drift recorded, or no citation provenance)"
+            )
+        return "\n".join(render_brief(brief))
     if action == "reverify":
         name = str(args.get("name") or "").strip()
         outcome = str(args.get("outcome") or "").strip().lower()
@@ -242,7 +262,10 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
 
         out.extend(citation_rot_lines(base, r))
         return "\n".join(out)
-    return "reconsolidate: pass action='worklist' (default) or action='reverify' (name=…, outcome=…)."
+    return (
+        "reconsolidate: pass action='worklist' (default), action='brief' (name=…), or "
+        "action='reverify' (name=…, outcome=…)."
+    )
 
 
 def _tool_rederive(args: Dict[str, Any]) -> str:

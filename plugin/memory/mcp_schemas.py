@@ -398,8 +398,13 @@ _TOOLS = [
             "action='worklist' (default) lists recently-recalled memories whose cited "
             "code has since drifted (plus commit-precise [since-watermark] hits), "
             "most-recently-drifted first, with 1-hop linked neighbors as review-adjacent "
-            "hints. Re-ground EACH against current code (read the memory, diff its cited "
-            "paths), then render ONE per-item verdict via action='reverify': outcome="
+            "hints. Re-ground EACH against current code: read the memory, then "
+            "action='brief' (name=…) renders that entry's evidence — diffstat + hunk "
+            "headers from the entry's OWN source_commit baseline to HEAD, secret-linted "
+            "hunk bodies when clean, plus evidence-drift fences, invalid_after, and "
+            "linked neighbors (EVD-1 — the hand-gathered diff is retired; the brief is "
+            "read-only and applies nothing). Then render ONE per-item verdict via "
+            "action='reverify': outcome="
             "'graduate' (re-verified current — clears staleness, re-baselines "
             "source_commit to HEAD), 'fix' (you already corrected the body; re-baselines), "
             "'demote' (confirmed wrong — staleness stays set and invalid_after chains on, "
@@ -414,14 +419,15 @@ _TOOLS = [
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["worklist", "reverify"],
+                    "enum": ["worklist", "brief", "reverify"],
                     "description": "worklist = list what needs re-grounding (default); "
+                    "brief = render ONE entry's evidence (requires name; read-only); "
                     "reverify = render ONE verdict (requires name + outcome)",
                 },
                 "name": {
                     "type": "string",
-                    "description": "with action='reverify': the memory slug, with or "
-                    "without .md",
+                    "description": "with action='brief' or 'reverify': the memory slug, "
+                    "with or without .md",
                 },
                 "outcome": {
                     "type": "string",
