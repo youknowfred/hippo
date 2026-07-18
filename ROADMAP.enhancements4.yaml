@@ -726,7 +726,7 @@ workstreams:
         title: Per-item publish verb (new sibling publish.py + the 18th skill /hippo:publish — print-only pending Q3)
         priority: P1
         effort: M
-        status: planned        # ratified 2026-07-17 with T20 (see the tier block)
+        status: done           # 2026-07-17, session 2 — print-only shipped as recommended (Q3 stays PENDING); first real preflight: hippo-v1-roadmap-proposal (heals 7, soak 0.57, both advisory classes fired incl. its 2 unresolved contradicts pairs, ready block printed)
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "PR #67 (the hand ritual, the ratified per-item posture, and '~15 entropy WARNs' sitting in exactly the uncommitted release-era records future publishes will touch); PR #74 CLB-1 (the CI backstop — deterministic secrets + Tier-A only); 10 local-only candidates measured on PR #75's range"}
         problem: >-
           PR #67's curated-subset posture ("every future memory stays
@@ -774,7 +774,7 @@ workstreams:
           - "PRINT-ONLY pending Q3 (ED4R-1) — prints the exact git add -f + suggested commit line and stops; a test pins that publish.py never invokes git add/commit; the documented consent moments are the printed command + PR review + the CLB-1 CI backstop"
           - "the membership oracle is provenance.build_repo_file_index (imported) — a test pins that the pub lane issues no fresh git ls-files call (the SHP-1 full-name bug precedent)"
           - "boundary preview and readiness evidence are cross-references to PUB-3/PUB-2 (display-only, the export_receipts composition pattern); publish NEVER transforms content — byte-identical in-place file + git tracking only; if it grows a transform it has become pack_extract and must be killed"
-          - "the 18th skill self-registers via the glob-derived skills contract (tests/test_skills_contract.py — no count pin to bump) and its docs draw the promote/pack/publish naming triangle + distinguish init's whole-dir nudge"
+          - "the 18th skill self-registers via the glob-derived skills contract (tests/test_skills_contract.py; drift corrected at build 2026-07-17 — there is no COUNT pin, but test_shipped_skills_are_exactly_these carries an exact NAME list that gains 'publish') and its docs draw the promote/pack/publish naming triangle + distinguish init's whole-dir nudge"
         dependencies: [CLB-1, SEC-8, RCH-5, IOP-3, PUB-2, PUB-3]   # CLB-1/SEC-8/RCH-5/IOP-3 cross-file SHIPPED; PUB-2/PUB-3 in-round (build order PUB-3 -> PUB-2 -> PUB-1, or PUB-1 first with previews inlined)
         invariant_note: >-
           inv4 — print-only preserves the verified invariant that no
@@ -1334,7 +1334,7 @@ release_train:
   - tier: T20
     target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
     theme: "The publish lane"
-    status: in_progress    # 2026-07-17, session 2 — PUB-3 done; PUB-2 next per the tier build order
+    status: done           # 2026-07-17, one session, build order PUB-3 -> PUB-2 -> PUB-1 as gated: boundary view (20/9/0 reproduced; heals-N live), candidates report (19/8/11 on the historical range), publish verb + 18th skill (print-only as recommended; Q3 PENDING). done_means met — the #67 posture stops being hand tooling.
     ratified: >-
       2026-07-17 — owner-directed (the same T19+T20 implementation chip): T20 selected
       for build per LAW ZERO, in-tier order PUB-3 -> PUB-2 -> PUB-1 per the tier gate.

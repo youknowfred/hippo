@@ -231,6 +231,8 @@ def render_candidates(part: dict) -> str:
         marker = " [pin]" if r.get("steer") == "pin" else ""
         extra = ("  (" + "; ".join(bits) + ")") if bits else ""
         lines.append(f"- {r['name']} [{r['type']}]{marker} — {r['description']}{extra}")
+    # PUB-1 cross-reference: the per-item verb that moves ONE candidate (print-only).
+    lines.append("publish per item: python -m memory.publish <name> (or /hippo:publish)")
     return "\n".join(lines)
 
 

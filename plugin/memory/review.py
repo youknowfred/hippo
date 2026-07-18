@@ -337,7 +337,7 @@ def _edge_delta_detail(base_text: str, head_text: str) -> str:
 # Touched-file-scoped lints — the shipped detectors, reused verbatim
 # --------------------------------------------------------------------------- #
 def lint_touched(
-    texts: Dict[str, str], memory_dir: str, repo_root: str
+    texts: Dict[str, str], memory_dir: str, repo_root: str, *, entropy: bool = False
 ) -> Dict[str, List[dict]]:
     """``{"gate": [...], "advisory": [...]}`` findings over the touched stems.
 
@@ -346,6 +346,10 @@ def lint_touched(
     corpus and are filtered down to the touched stems. Each finding is
     ``{"stem", "lint", "finding"}`` — the KIND of a secret is reported, never
     the secret itself (``scan_text``'s own contract).
+
+    ``entropy`` (PUB-1): the publish preflight reuses THIS gate with ``entropy=True``
+    — a strict superset of the CI gate's default ``entropy=False`` (the #67 bar, one
+    run). The default stays False so the CI packet's behavior is byte-identical.
     """
     gate: List[dict] = []
     advisory: List[dict] = []
@@ -355,7 +359,7 @@ def lint_touched(
 
     for stem in sorted(texts):
         text = texts[stem]
-        for kind in scan_text(text, entropy=False):
+        for kind in scan_text(text, entropy=entropy):
             gate.append({"stem": stem, "lint": "secrets", "finding": kind})
         for warning in scan_tier_a(text):
             gate.append({"stem": stem, "lint": "threat", "finding": warning})
