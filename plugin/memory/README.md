@@ -132,6 +132,48 @@ comparison. Never raises.
 "$PY" -m memory.staleness
 ```
 
+### Volatile paths (VOL-1) — churn-by-design files stop arming the worklist
+
+Some cited files change on nearly every session **by design** — a living roadmap, an
+audience matrix, a migration runner, `package.json`. Memories cite them because their
+bodies *delegate* to them ("live status lives there, not here"), so the citation is right
+for recall and wrong as a staleness-**arming** trigger: whole-file drift there carries
+~zero bits about memory validity, and un-citing would both break recall surfaces and be
+undone by the next re-derivation. VOL-1 splits the two concerns at the corpus level.
+Declare the churn files once, in the committed corpus marker:
+
+```json
+{"corpus_format": 5, "cite_derivation": 4,
+ "volatile_paths": ["GROWTH-LOOP-ROADMAP.yaml", "docs/audience-matrix.yaml"]}
+```
+*(in `.claude/memory/.format`)*
+
+Entries are toplevel-relative repo paths, matched **exactly** against `cited_paths`
+(no globs); the key is hand-edited and committed — there is deliberately no writer, and
+the version-stamp writers preserve it (merge-not-clobber). Semantics
+(`staleness_policy.py`, read via `provenance.read_volatile_paths`):
+
+- **Derivation unchanged** — the extractor still derives these paths into `cited_paths`;
+  `rederive` output is byte-identical with or without the registry.
+- **Recall unchanged** — JIT point-of-action recall, `recall --for-diff`, the RET-6
+  verify-at-use banner, RET-5's ranking penalty, and `find_stale`/`stale.json` detection
+  all keep consuming the citation exactly as before.
+- **Arming changed** — a memory whose **only** drifted cited paths are volatile never
+  enters the reconsolidation worklist and never gets a `[since-watermark]` flag; one
+  non-volatile drifted path arms it exactly as today (full path listing kept). CLB-3
+  quoted-evidence drift arms regardless — a memory's own quoted span changing is
+  span-level truth even inside a volatile file.
+- **Never silent** — the SessionStart staleness note, the `reconsolidate` CLI listing,
+  and the consolidate MCP worklist each print what policy suppressed
+  (`(+N … policy-suppressed; see .format volatile_paths)`), and doctor carries one
+  always-`ok` line (`volatile paths: N declared; M … suppressed`). Deep-judgment
+  surfaces (audit's stale section, archive's admission leg, publish's preflight) stay
+  registry-blind — they exist to see everything.
+
+Absent/empty key ⇒ byte-identical behavior (ED-4); every verdict stays human, per-item —
+this routes detection only (ED-1). Tier-2 co-drift arming (volatile drift counting when a
+non-volatile sibling also drifted) is a deliberate non-feature for now.
+
 ### Citation rot (LIF-3) — a vanished cited path is loud, never a silent shrink
 
 A renamed/deleted cited file used to vanish from `cited_paths` on the next re-derivation
@@ -202,6 +244,10 @@ carrying `invalid_after` (demote's terminal state — recall is already ranking 
 down) but keeps them **counted** in a `(+N already demoted)` tail, so suppression is
 never silent disappearance; once an invalidation ages past recall's 30-day old horizon,
 the same block names it and suggests the `/hippo:audit` archive flow (report-only).
+VOL-1 extends the same discipline to volatile-path policy suppression: items whose only
+drift is a registry-listed churn file get no per-item line and no worklist entry, but
+the note always renders the count (`(+N … policy-suppressed; see .format
+volatile_paths)` — or one calm ℹ line when *everything* stale is policy-suppressed).
 
 Wired via [`../hooks/memory_session_start.sh`](../hooks/memory_session_start.sh), which
 also owns the **first-run nudge**: venv/sentinel missing → "run /hippo:bootstrap";
@@ -486,7 +532,10 @@ Two version numbers, two very different contracts (COR-7):
   (`provenance.CORPUS_FORMAT_VERSION`, currently **5**). It is committed **with** the
   corpus (it describes the corpus; it is not a rebuildable cache); `/hippo:init` stamps it
   when seeding a fresh corpus, and **a corpus with no marker reads as format 1** — every
-  pre-marker corpus is already on the baseline, nothing to backfill.
+  pre-marker corpus is already on the baseline, nothing to backfill. The marker also
+  carries the corpus's other committed axes — `cite_derivation` (DRV-2) and the
+  `volatile_paths` arming policy (VOL-1, see the staleness section) — all additive keys;
+  every reader pulls only its own, so older plugins ignore the ones they don't know.
 
   Format history: **v1** = the pre-versioning baseline. **v2** (GRA-4) = frontmatter may
   carry typed relations (`supersedes:`/`contradicts:`/`refines:` lists). **v3** (GOV-2) =

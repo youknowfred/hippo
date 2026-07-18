@@ -576,6 +576,7 @@ from .provenance_format import (  # noqa: E402,F401
     format_marker_path,
     read_cite_derivation,
     read_corpus_format,
+    read_volatile_paths,
     write_cite_derivation,
     write_corpus_format,
 )
