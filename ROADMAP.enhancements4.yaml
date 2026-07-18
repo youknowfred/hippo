@@ -1344,7 +1344,7 @@ release_train:
       the first publishes, and the naming-triangle doc placement.
 
   - tier: T21
-    target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
+    target_version: v1.23.0    # assigned at release 2026-07-17 ("Verdicts with receipts")
     theme: "Evidence consumers"
     status: done           # 2026-07-17, one session: EVD-1 done, EVD-2 done (probe first), EVD-3 deferred (empty ledger — exactly the done_means clause), EVD-4 done (Q4 yes; Arm A run; Arm B severed unchanged)
     ratified: >-

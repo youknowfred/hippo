@@ -7,6 +7,56 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.23.0 — 2026-07-17 — "Verdicts with receipts"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**,
+index schema still **7**, citation derivation still **4**. Round 4's FIRST BUILT tier:
+**T21 "Evidence consumers"** — the write-only ledgers get their readers (ED4R-2), with no
+autonomy change, no ranking flip, and every verdict still human. Ratified per LAW ZERO by a
+dated owner scheduling entry; Q4 resolved in-session (dated on the item); Q1–Q3 stay PENDING.
+
+### T21 — Evidence consumers
+
+- **EVD-1 — the reverify brief** (`memory/reconsolidate_brief.py`, new cold-path sibling) —
+  the round's named highest-value item. Per reconsolidation-worklist entry: diffstat +
+  bounded hunk headers/function context git-mined from the entry's OWN `source_commit`
+  baseline to HEAD (an unresolvable baseline — SHP-3's squash/shallow class — degrades to an
+  honest note), composed with what already rides the entry (changed paths, drift recency,
+  linked neighbors, CLB-3 evidence-drift fence counts, `invalid_after`). Raw hunk bodies
+  render ONLY under the capture lane's secret discipline (the `hunks_secret_flagged` scan
+  pair + the `_MAX_PROMPT_HUNK_CHARS` cap); otherwise stat/header-only. Surfaces: the
+  reconsolidate MCP tool's new **`action='brief'`** (its description's hand-diff instruction
+  is retired — EKPI4R-4), the module's own CLI (`python -m memory.reconsolidate_brief
+  <name>`), and /hippo:consolidate Step 2. Cold-path AND read-only are both AST/source-pinned
+  (the `resolve_evidence` precedent); the verdict vocabulary is untouched — evidence renders
+  for all four human paths (LIF-1); zero persisted state; `reconsolidate.py` (900/900) and
+  `provenance.py` (2072/2072) took **zero lines** (pinned by test).
+- **EVD-2 — touch-grain lane health/diagnosis** — the ED-3 live recording probe ran FIRST
+  and is recorded dated on the item: the lane RECORDS on this machine (8 `cited_by` rows,
+  vetting baseline 0/2682; two minted by the build session's own main-clone reads),
+  confirming the mechanical-zeros diagnosis — five releases of live-hook lag ended by the
+  2026-07-17 plugin update. `outcome.main --touch-grain` now prints **`format_lane_health`**:
+  lane-level volumes, `cited_by` share, worktree-prefixed share with the
+  would-map-if-prefix-stripped count, touchmap coverage, and the existing both-grains
+  comparison COMPOSED (pinned extended-never-duplicated). The MSR-6 kill held: aggregation
+  stays lane-level or positive-evidence-only — an injected-but-never-touched memory renders
+  nowhere (pinned behaviorally); `_injection_join` remains the single join. The FLT-3
+  worktree-prefix coupling is named in the diagnosis; any recording change stays a follow-up.
+- **EVD-3 — decline-aware interviewing: DEFERRED** on its proving condition, re-probed at
+  build time per the acceptance criteria: `interview-state.json` still absent — zero declines
+  ever recorded since EXT-3. Zero code shipped ("a threshold with no data is dead code
+  wearing a feature's name"); the dated probe is recorded on the item.
+- **EVD-4 — the ED-2 salience evidence run** — **Q4 resolved** (dated in-session owner
+  entry: Arm A commissioned) and Arm A RUN on the lived-in corpus with zero new code:
+  dense+bm25, corpus 48, hard set 32, signal inventory 50 usage-boosted / 27
+  staleness-penalized — both signal legs live for the first time. Result: recall and mrr
+  deltas **+0.0000** in both categories (low-n labels apply); OFF-arm byte-identity
+  self-check PASS; `identical_arms=false` — the blend was live yet metrically null on the
+  hard set. No affirmative evidence for a flip: `HIPPO_SALIENCE` stays owner-decided-OFF
+  (ED-2/LIF-7). The evidence file is the ED-2 revisit's first entry, and the
+  `check_salience_evidence` doctor nudge goes quiet. Arm B stays severed behind nonzero
+  touch/outcome rows + its own dated decision.
+
 ## v1.22.1 — 2026-07-17 — "A reader for every ledger"
 
 **re-bootstrap: no** — docs-only release: zero code, `plugin/requirements.txt` byte-identical;
