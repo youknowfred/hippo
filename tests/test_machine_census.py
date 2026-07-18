@@ -448,7 +448,9 @@ def test_doctor_registers_machine_state_before_the_pinned_last_check():
 
     labels = [label for label, _ in D.CHECKS]
     assert labels[-1] == "stale_memobot_env"  # the pinned-last check holds
-    assert labels[-2] == "machine_state"  # HYG-3 appended immediately before it
+    # HYG-3 and PUB-3 both append at the same insertion point (the tier note called
+    # it): machine_state landed first, subset_boundary after it, the pin still last.
+    assert labels[-3:] == ["machine_state", "subset_boundary", "stale_memobot_env"]
 
 
 def test_machine_state_ok_names_the_census_command(tmp_path, monkeypatch):

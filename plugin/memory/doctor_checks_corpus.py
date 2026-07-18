@@ -865,3 +865,35 @@ def check_team_coverage(ctx: DoctorContext) -> Dict[str, str]:
         }
     except Exception as exc:
         return {"status": "warn", "message": f"team-coverage check failed: {exc}."}
+
+
+def check_subset_boundary(ctx: DoctorContext) -> Dict[str, str]:
+    """PUB-3: committed-subset link honesty — the view a fresh checkout sees. Never a
+    gate (expected-not-error per PR #67; no CI consumer fails on it); empty norms twice
+    over (no committed subset / healed boundary both render ok). Read-only; never raises."""
+    try:
+        from .lint_links import boundary_lint
+
+        view = boundary_lint(ctx.memory_dir, ctx.repo_root)
+        if not view["ok"] or not view["files"]:
+            return {"status": "ok", "message": "subset boundary: no committed memory subset — nothing to check."}
+        findings = view["dangling"] + view["typed_dangling"]
+        if not findings:
+            return {
+                "status": "ok",
+                "message": f"subset boundary: clean — every committed link resolves inside "
+                f"the {view['files']}-file committed subset.",
+            }
+        heal = ""
+        if view["heals_by"]:
+            stem, n = sorted(view["heals_by"].items(), key=lambda kv: (-kv[1], kv[0]))[0]
+            heal = f"; publishing {stem} would heal {n}"
+        return {
+            "status": "warn",
+            "message": f"subset boundary: {len(findings)} committed link target(s) dangle in a "
+            f"fresh checkout ({len({d['file'] for d in findings})} of {view['files']} committed "
+            f"files{heal}) — expected-not-error (PR #67), never a gate; view: "
+            "python -m memory.lint_links --boundary.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"subset-boundary check failed: {exc}."}

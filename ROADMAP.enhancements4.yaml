@@ -872,7 +872,7 @@ workstreams:
         title: Subset-boundary link honesty (a VIEW over the committed subset — never a gate)
         priority: P2
         effort: S
-        status: planned        # ratified 2026-07-17 with T20 (see the tier block)
+        status: done           # 2026-07-17, session 2 — boundary_lint + --boundary CLI + doctor line; 20/9/0 REPRODUCED at 90bc481 (committed subset unchanged since 81177ba), heals-N concentration verbatim (hippo-v1-roadmap-proposal 7)
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "lint_links.lint over the 15-file fresh-checkout view = 20 dangling wikilinks / 9 files / 0 typed at 81177ba, vs 1 unrelated dangling on the owner's full corpus — reproducible read-only; PR #67 body predicted the class ('expected, not an error')"}
         problem: >-
           Committed memories wikilink local-only memories: the shipped lint
@@ -1334,7 +1334,7 @@ release_train:
   - tier: T20
     target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
     theme: "The publish lane"
-    status: planned        # 2026-07-17, session 2 — ratified with T19; builds after it on the same branch
+    status: in_progress    # 2026-07-17, session 2 — PUB-3 done; PUB-2 next per the tier build order
     ratified: >-
       2026-07-17 — owner-directed (the same T19+T20 implementation chip): T20 selected
       for build per LAW ZERO, in-tier order PUB-3 -> PUB-2 -> PUB-1 per the tier gate.
