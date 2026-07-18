@@ -7,6 +7,46 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.26.0 — 2026-07-18 — "The roadmap is allowed to move"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**, index
+schema still **7**, citation derivation still **4** (derivation is untouched by design — a pinned
+test holds rederive output byte-identical with and without the new registry). One feature,
+commissioned from an em-growth-labs corpus-agent field report and shipped as PR #82.
+
+### VOL-1 — per-path staleness policy: volatile paths derive and recall, but never arm alone
+- The observed treadmill: a fully-worked 56-item reconsolidation worklist re-flagged 23 memories
+  within the hour, every one triggered by the repo's living roadmap — a file edited by nearly
+  every session *by design*. Those memories cite it because their bodies delegate to it, so the
+  citation is right for recall and wrong as a staleness-arming trigger; de-citing would break
+  recall AND be undone by the next rederive. The defect was architectural: whole-file drift as
+  the arming trigger conflates "mentions" with "depends on".
+- The corpus now declares its churn-by-design files ONCE, in the committed marker:
+  `.claude/memory/.format` gains an optional `volatile_paths` list (exact-match,
+  toplevel-relative; read by `provenance.read_volatile_paths`; preserved by the version-stamp
+  writers; deliberately no writer — it is operator-committed corpus policy). NOT a
+  `corpus_format` bump: no memory-file shape changed — the DRV-2 additive-marker-key precedent.
+- The split (`staleness_policy.py`, one policy point): **derivation unchanged** (the extractor
+  still cites volatile paths; rederive is a no-op difference), **recall unchanged** (JIT
+  touch map, `recall --for-diff`, the RET-6 verify-at-use banner, RET-5's penalty, and
+  `find_stale`/`stale.json` detection all stay registry-blind), **arming changed** — a memory
+  whose ONLY drifted cited paths are volatile never enters the reconsolidation worklist and
+  never gets a `[since-watermark]` flag; one non-volatile drifted path arms it exactly as
+  before, full path listing kept. CLB-3 quoted-evidence drift arms regardless — a memory's own
+  quoted span changing is span-level truth even inside a volatile file.
+- Suppression is never silent: the SessionStart staleness note, the `reconsolidate` CLI
+  listing, and the consolidate MCP worklist each print what policy suppressed (one calm ℹ line
+  when *everything* stale is policy-suppressed), and doctor gains one always-`ok`
+  `volatile_paths` line. Deep-judgment surfaces (audit's stale section, archive's admission
+  leg, publish preflight) stay deliberately registry-blind. Absent/empty key ⇒ byte-identical
+  behavior; every verdict remains human, per-item. Tier-2 co-drift arming is a deliberate
+  non-feature for now.
+- Module-size ratchet fallout (mechanical): the GRW-5 watermark lane moved to a new
+  `reconsolidate_watermark.py` sibling (`reconsolidate.py` sat exactly at the 900-line cap);
+  every dotted path keeps resolving via the façade re-export. No new write paths — the crash
+  contract and write-open allowlist are untouched. 25 new tests map 1:1 to the field report's
+  six acceptance criteria.
+
 ## v1.25.0 — 2026-07-18 — "A citation outlives its prose"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**,
