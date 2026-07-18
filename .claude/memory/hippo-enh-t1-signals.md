@@ -6,9 +6,10 @@ metadata:
   type: project
   originSessionId: f4077387-baf8-4f74-9935-6a530806e406
   last_verified: "2026-07-13T04:49:53.161921+00:00"
+  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-18T23:10:44.136674+00:00"
   cited_paths: ["plugin/memory/session_start.py", "plugin/memory/staleness.py", "plugin/hooks/memory_post_tool.sh", "plugin/hooks/hooks.json", "plugin/memory/outcome.py", "tests/test_trust.py"]
-  source_commit: "f99bfa89571ac19cadf0967693103b9b9bd464f1"
-  source_commit_time: 1784246873
+  source_commit: "05b0c28349a9c3088a7870e5c0eee49859ce9bab"
+  source_commit_time: 1784415607
 ---
 
 Tier T1 (v1.1.0, "Positive context & dark signals") — session 2026-07-08. **COMPLETE, 4/4,

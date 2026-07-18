@@ -4,9 +4,10 @@ description: "Enhancement Tier T14 (round 3, \"Self-enforcing invariants\") \u20
 metadata:
   type: project
   last_verified: "2026-07-16T13:17:00.770356+00:00"
+  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-18T22:32:54.011198+00:00"
   cited_paths: [".github/workflows/release.yml", "plugin/memory/surfaces.py", "tests/test_surface_registry.py", "tests/test_write_discipline.py", "plugin/memory/atomic.py", "tests/test_crash_faults.py", "plugin/memory/audit_view.py"]
-  source_commit: "f99bfa89571ac19cadf0967693103b9b9bd464f1"
-  source_commit_time: 1784246873
+  source_commit: "d886ebf143fdb39d948e0d4cfaa187602a3cd3a3"
+  source_commit_time: 1784413853
 ---
 
 T14 INV implemented 2026-07-16 in one session per the one-tier-per-session capstone protocol; **Fred ratified and squash-MERGED PR #57 the same day (d1cf764 on main, branch deleted both sides)** — it landed on top of the v1.17.0 release (6735a7e), which a concurrent session had cut mid-T14. 4 id-prefixed commits, tests-first, suite 2194 green at merge. RELEASED same day in v1.18.0 "Checks itself, sleeps on schedule" (release PR #59, squash 5779b60, tagged, release.yml green — covers T14+T15 together; re-bootstrap: no).

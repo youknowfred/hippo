@@ -6,9 +6,10 @@ metadata:
   type: project
   originSessionId: 4e201da2-f0f8-458f-9214-09afef5349af
   last_verified: "2026-07-16T14:40:05.887607+00:00"
+  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-18T23:11:14.627504+00:00"
   cited_paths: ["plugin/memory/resolve_view.py", "plugin/.claude-plugin/plugin.json", "plugin/memory/capture.py"]
-  source_commit: "f99bfa89571ac19cadf0967693103b9b9bd464f1"
-  source_commit_time: 1784246873
+  source_commit: "05b0c28349a9c3088a7870e5c0eee49859ce9bab"
+  source_commit_time: 1784415607
 ---
 
 Tier T4 (v1.4.0, "A corpus you can govern") — session 2026-07-08. **COMPLETE, 7/7, [PR

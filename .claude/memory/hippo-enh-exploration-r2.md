@@ -6,9 +6,10 @@ metadata:
   type: project
   originSessionId: a5a922b1-a6ab-4fcf-96cc-bec2e048816f
   last_verified: "2026-07-16T14:39:50.641856+00:00"
+  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-18T06:18:40.226846+00:00"
   cited_paths: ["ROADMAP.enhancements.yaml", "ROADMAP.enhancements2.yaml", "plugin/memory/telemetry.py", "ROADMAP.enhancements3.yaml", "plugin/memory/eval_recall.py", "plugin/memory/dream_eval.py", "plugin/memory/salience_eval.py"]
-  source_commit: "f99bfa89571ac19cadf0967693103b9b9bd464f1"
-  source_commit_time: 1784246873
+  source_commit: "0477d4778fb0b40f08c5d28ba213fc864d8fcb78"
+  source_commit_time: 1784354967
 ---
 
 Round-2 exploration+vetting cycle — session 2026-07-09, mirroring the round-1

@@ -6,9 +6,10 @@ metadata:
   type: project
   originSessionId: 607b0701-e396-4c92-8070-0cbb31a38e60
   last_verified: "2026-07-17T00:37:15.803267+00:00"
+  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-18T06:19:08.950957+00:00"
   cited_paths: ["ROADMAP.enhancements.yaml", "ROADMAP.yaml", "ROADMAP.enhancements2.yaml"]
-  source_commit: "f99bfa89571ac19cadf0967693103b9b9bd464f1"
-  source_commit_time: 1784246873
+  source_commit: "0477d4778fb0b40f08c5d28ba213fc864d8fcb78"
+  source_commit_time: 1784354967
 ---
 
 `ROADMAP.enhancements.yaml` (hippo repo root, DRAFT, created 2026-07-08) is the

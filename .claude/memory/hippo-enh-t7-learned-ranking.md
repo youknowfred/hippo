@@ -6,9 +6,10 @@ metadata:
   type: project
   originSessionId: 5e683ae7-b857-47d3-a37d-daafd56e45e2
   last_verified: "2026-07-13T04:49:53.242134+00:00"
+  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-18T06:19:12.063043+00:00"
   cited_paths: ["ROADMAP.enhancements.yaml", "plugin/memory/lint_floor.py", "plugin/memory/recall.py", "plugin/memory/export_agents.py", "tests/test_export_agents.py", "ROADMAP.yaml", ".github/workflows/release.yml", "plugin/memory/eval_recall.py", "tests/test_fixture_drafts.py"]
-  source_commit: "f99bfa89571ac19cadf0967693103b9b9bd464f1"
-  source_commit_time: 1784246873
+  source_commit: "0477d4778fb0b40f08c5d28ba213fc864d8fcb78"
+  source_commit_time: 1784354967
 ---
 
 Tier T7 (v1.7.0, "Learned ranking (salience-keystone-gated)") — session 2026-07-09.

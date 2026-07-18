@@ -5,9 +5,10 @@ metadata:
   type: project
   originSessionId: bf62e899-a4d7-4e40-b77c-d282f2d09f95
   last_verified: "2026-07-16T14:40:04.618669+00:00"
+  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-18T23:11:12.602520+00:00"
   cited_paths: ["plugin/.claude-plugin/plugin.json"]
-  source_commit: "f99bfa89571ac19cadf0967693103b9b9bd464f1"
-  source_commit_time: 1784246873
+  source_commit: "05b0c28349a9c3088a7870e5c0eee49859ce9bab"
+  source_commit_time: 1784415607
 ---
 
 Tier T3 (v1.3.0, "Retrieval precision (hot-path-safe)") — session 2026-07-08. **COMPLETE,
