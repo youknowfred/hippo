@@ -7,6 +7,47 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.25.0 — 2026-07-18 — "A citation outlives its prose"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**,
+index schema still **7**, citation derivation still **4** (extraction is unchanged — only the
+refresh MERGE policy moved, so no corpus re-derivation is required by this release). Two
+citation-engine defects found in the wild by a second-corpus agent, both reproduced before
+fixing, shipped together as PR #80.
+
+### CUR-1 — a citation dies only with its file
+- Every re-derivation surface (backfill `--refresh`/`--refresh-one`, reverify, MIG-1
+  `rederive` preview+apply) treated `cited_paths` as wholly machine-derived and silently
+  dropped hand-curated entries the extractor cannot parse from prose — a bare/bold
+  `Dockerfile`, a `.dockerignore` never mentioned in the body. Those were the exact paths a
+  human had just restored. Now a stored citation whose file still EXISTS is preserved; only a
+  genuinely gone (renamed/deleted) file drops. This deliberately reverses LIF-4's
+  drop-and-report pin.
+- New `preserved_not_derived` result key on every producer (and through reconsolidate's
+  verdict passthrough); the shared renderer emits an informational `ℹ kept` line — never a ⚠,
+  nothing was lost — and the rederive worklist attributes the kept set per memory (`= keeps`),
+  so a curated corpus can now EARN its derivation stamp instead of being clobbered into one.
+- The flip side is deliberate and visible, not hidden: legacy junk citations (an old
+  resolver's inflated/fabricated entries) are now sticky until pruned by a deliberate hand
+  edit of the frontmatter — the keep-line names them every time.
+
+### COR-20 — the legacy split-empty `cited_paths` form round-trips
+- `strip_frontmatter_keys` and `dream_generate._set_cited_paths` each consumed only `- item`
+  continuation lines, so the split-empty form an OLDER hippo itself emitted (`cited_paths:`
+  with `[]` on its own indented line) left the `[]` orphaned under the preceding key — YAML
+  folds it into that scalar (`type: feedback` → `type: feedback []`) or refuses the document.
+  The COR-9 guard correctly refused the write (no corruption ever reached disk) but thereby
+  permanently blocked rederive/reverify on every memory carrying the shape.
+- Both walks now share one `provenance._value_run_end` rule: block items at the key's indent
+  or deeper, plus any non-blank deeper-indented line, are the value; a sibling key, a dedent,
+  or a blank line ends the run. The writer round-trips its own past output again.
+
+### Code layout
+- The growth tripped the module-size ratchet: the COR-7/DRV-2 format-marker family moved to
+  `plugin/memory/provenance_format.py` (pure code motion behind façade re-exports; the
+  crash-contract registry re-keyed to the writer's new file), and the new tests live in
+  `tests/test_provenance_curation.py`.
+
 ## v1.24.1 — 2026-07-18 — "Quiet on the second surface"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**,
