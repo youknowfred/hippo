@@ -209,7 +209,7 @@ def render_brief(brief: dict) -> List[str]:
     if brief.get("bodies_withheld"):
         lines.append(f"  hunk bodies: {brief['bodies_withheld']} (the capture lane's discipline)")
     elif brief.get("bodies"):
-        cap = " (truncated at the capture lane's cap)" if brief.get("bodies_truncated") else ""
+        cap = ", truncated at the capture lane's cap" if brief.get("bodies_truncated") else ""
         lines.append(f"  hunk bodies (secret-linted{cap}):")
         lines.extend("    " + ln for ln in brief["bodies"].splitlines())
     drift = brief.get("evidence_drift")
