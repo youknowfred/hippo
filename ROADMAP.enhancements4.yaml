@@ -1295,7 +1295,7 @@ release_train:
       coverage boundary as-shipped.
 
   - tier: T19
-    target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
+    target_version: v1.24.0    # assigned at release 2026-07-17 ("A clean machine, and a front door" — joint with T20)
     theme: "Machine-state lifecycle"
     status: done           # 2026-07-17, one session: HYG-1 census (first report: 19/25 dangling), HYG-2 as --prune-dangling + the conftest faucet fix (drain: 20 removed / 0 kept / 0 failed; farm 6/6 ok), HYG-3 warn-on-dead doctor line (sleep inherits free). Q2 PENDING — trust shipped report-only as recommended.
     ratified: >-
@@ -1332,7 +1332,7 @@ release_train:
       --prune-dangling.
 
   - tier: T20
-    target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
+    target_version: v1.24.0    # assigned at release 2026-07-17 ("A clean machine, and a front door" — joint with T19)
     theme: "The publish lane"
     status: done           # 2026-07-17, one session, build order PUB-3 -> PUB-2 -> PUB-1 as gated: boundary view (20/9/0 reproduced; heals-N live), candidates report (19/8/11 on the historical range), publish verb + 18th skill (print-only as recommended; Q3 PENDING). done_means met — the #67 posture stops being hand tooling.
     ratified: >-

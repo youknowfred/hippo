@@ -7,6 +7,92 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.24.0 — 2026-07-17 — "A clean machine, and a front door"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**,
+index schema still **7**, citation derivation still **4**. Round 4's second built train:
+**T19 "Machine-state lifecycle"** (the RCH-11 class, machine-wide) and **T20 "The publish
+lane"** (per-item entry INTO the committed subset), built sequentially on one branch —
+their doctor lines share an insertion point. Both tiers ratified per LAW ZERO by a dated
+owner scheduling entry; **Q2 and Q3 stay PENDING**, so the trust half ships REPORT-ONLY and
+the publish act ships PRINT-ONLY, exactly as the vetting recommended.
+
+### T19 — Machine-state lifecycle
+
+- **HYG-1 — the machine census** (`memory/machine_census.py`, new sibling) — one read-only,
+  deterministic report over the four machine-state classes hippo itself creates: projects
+  rows (DELEGATED to `registry.registry_census` — a test pins that no second census path
+  exists), the `~/.claude/projects/<encoded>/memory` symlink farm (classified
+  ok / dangling / dangling-temp-rooted, with the pytest-minted share labeled), trust rows
+  (consent-ledger legibility — live/dead/temp-rooted, origin, fingerprint presence;
+  REPORT-ONLY pending Q2, with `untrust` named-never-prescribed because it also deletes the
+  SEC-6 re-consent baseline), and installed scheduler artifacts (FILE ORACLES only:
+  LaunchAgents glob + `crontab -l` + plistlib parse of the embedded repo/venv paths — no
+  launchctl runtime probing, per ED-3). Output mirrors `registry.main`: report default,
+  `--json`, empty-norm one-liner. Zero writes, zero LLM, zero network. First real report:
+  25 symlinks — 6 ok, **19 dangling, all temp-rooted** (16 pytest-leaked + 3 newproj-class).
+- **HYG-2 — the dangling-symlink remover + the test-isolation leak fix** — the tier's one
+  genuinely-new write, landed as **`--prune-dangling`** on the census CLI. The batch is
+  confined to the mechanically-safe class (islink AND target gone AND target under a system
+  temp root — `registry.prune_dead`'s honesty grain, each removal printed; a dangling
+  target anywhere else could be an unmounted volume and is kept, named, per-item). It never
+  touches non-symlink shapes and only ever removes the `memory` symlink hippo itself
+  creates. The FAUCET fix ships with the drain: **`HIPPO_CLAUDE_PROJECTS_DIR`** (documented
+  in STABILITY.md) is resolved by `machine_census.claude_projects_root()`, honored at
+  init's single symlink-write seam, and set autouse in conftest — no test can mint a real
+  `~/.claude/projects` symlink again. First live drain: **20 removed / 0 kept / 0 failed**;
+  the follow-up suite run was the first ever to leak zero farm entries. Stale scheduler
+  artifacts get a printed `launchctl unload … && rm …` recipe only (SLP-2's print-only
+  posture — hippo never uninstalls system state).
+- **HYG-3 — one warn-on-DEAD-only doctor line** (`machine_state`) — dead trust rows,
+  dangling memory symlinks, gone-path scheduler artifacts; temp-rooted-LIVE rows never warn
+  (the volatile split belongs to the census's own report), so the line can't become
+  wallpaper. Names the census command; appended immediately before the pinned-last check
+  (the count/last pins absorb it); sleep inherits it free through its doctor section
+  (SLP-1's reuse rule — zero `sleep.py` changes); deliberately NO SessionStart producer.
+
+### T20 — The publish lane
+
+- **PUB-3 — subset-boundary link honesty** (`lint_links.boundary_lint`) — a VIEW, never a
+  gate: the existing link machinery (`lint()` refactored to share `_graph_report`; no new
+  parser, no new lint classes) evaluated over the COMMITTED-membership view — what a
+  stranger's fresh checkout sees. Membership is single-homed on the imported
+  `provenance.build_repo_file_index` (the SHP-1 precedent; a source pin holds the whole pub
+  lane to zero fresh `ls-files`). Surfaced twice: **`--boundary`** on the lint CLI
+  (findings never fail the run) and ONE doctor line (`subset_boundary`,
+  warn-with-context — "expected-not-error" per PR #67; empty-norm twice over). `heals_by`
+  counts per local-only memory how many boundary danglings its publication would repair —
+  at release the boundary stands at **20 dangling / 9 of 15 committed files / 0 typed**,
+  with `hippo-v1-roadmap-proposal` healing 7.
+- **PUB-2 — the publishable-candidates report** (**`--candidates`** on the recall_diff
+  CLI) — the encode-side twin of EXT-1's PR comment: partition the FULL-corpus rows for a
+  git range by committed membership; the local-only rows ARE the candidates, each with
+  display-only readiness composed from shipped readers (PUB-3's heals-N, soak strength,
+  `verified_by`, the row's staleness flag — no new math). Report-only + empty-norm;
+  git-range-only (no gh, no network); NOT a SessionStart producer; the MSR-6 aggregation
+  pin is untouched. On the historical range `81b95ea..81177ba`: 19 rows / 8 committed /
+  **11 candidates** (the vetting's 10 reproduce name-for-name, plus the T21 capstone
+  written after it).
+- **PUB-1 — the per-item publish verb** (`memory/publish.py`, new sibling + the **18th
+  skill `/hippo:publish`**, terminal-only) — the PR #67 hand ritual as one preflight.
+  Refusals are MECHANICAL only: docs (`provenance._is_memory_filename`) and
+  already-tracked files (an UPDATE rides plain git). `invalid_after`-expired and
+  unresolved-`contradicts` render as ADVISORY receipt warnings, never refusals (the vetted
+  verdict — the committed subset IS dev history). The gate REUSES `review.lint_touched` on
+  the in-memory text; **`entropy=ON` is the only delta** (a new kwarg defaulting False, so
+  the CLB-1 CI packet is byte-identical — one run, a strict superset, pinned by test). The
+  act is **PRINT-ONLY pending Q3**: the exact `git add -f` + suggested commit line print
+  and the verb stops — tests pin that `publish.py` never invokes git add/commit, never
+  transforms content (byte-identical in place), and offers no 'all' affordance. The receipt
+  cross-references PUB-3/PUB-2 display-only and discloses the citation-derivation state
+  (v3 corpus vs v4 plugin — disclosed, never blocking). The skill's docs draw the
+  promote / pack / publish naming triangle and distinguish init's whole-dir nudge.
+
+Drift corrected in-file along the way (the premise-correction law): `_under_volatile_root`
+was already imported cross-module (`init_project.py` — the shipped precedent followed); the
+symlink baseline re-censused 18/24 → 19/25 at build; the skills contract carries an exact
+NAME list (not a count pin); PUB-2's live partition recorded as 19/8/11.
+
 ## v1.23.0 — 2026-07-17 — "Verdicts with receipts"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**,
