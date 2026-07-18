@@ -306,6 +306,29 @@ def test_reconsolidate_reverify_requires_name_and_outcome(repo_corpus):
     assert "required" in _text(_call("reconsolidate", {"action": "reverify"}))
 
 
+def test_reconsolidate_worklist_names_the_brief_action(repo_corpus, repo):
+    _seed_events(os.path.join(repo, "tele"), [("s1", ["m_alpha"])])
+    text = _text(_call("reconsolidate", {}))
+    assert "action='brief'" in text  # EVD-1: the evidence step is named on the worklist
+
+
+def test_reconsolidate_brief_renders_evidence(repo_corpus, repo):
+    _seed_events(os.path.join(repo, "tele"), [("s1", ["m_alpha"])])
+    text = _text(_call("reconsolidate", {"action": "brief", "name": "m_alpha"}))
+    assert "m_alpha — baseline" in text and "diffstat:" in text
+    assert "verdict (yours" in text  # evidence only — the verdict stays human (LIF-1)
+
+
+def test_reconsolidate_brief_requires_name(repo_corpus):
+    assert "required" in _text(_call("reconsolidate", {"action": "brief"}))
+
+
+def test_reconsolidate_brief_unknown_name_is_legible(repo_corpus):
+    assert "nothing to brief" in _text(
+        _call("reconsolidate", {"action": "brief", "name": "no_such"})
+    )
+
+
 def test_reconsolidate_untrusted_is_withheld(corpus, monkeypatch):
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     text = _text(_call("reconsolidate", {}))

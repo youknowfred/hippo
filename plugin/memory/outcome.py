@@ -372,6 +372,89 @@ def format_touch_grain_report(memory_dir: str, telemetry_dir: Optional[str] = No
         return "injection_hits by grain: no signal yet (report-only)."
 
 
+# EVD-2: worktree sessions record touches as paths under this prefix relative to the MAIN
+# root — such rows can never match repo-relative cited_paths at either grain. One canonical
+# prefix constant; FLT-3's worktree self-exemption (T18) shares this exact logic by design.
+_WORKTREE_PREFIX = ".claude/worktrees/"
+
+
+def format_lane_health(memory_dir: str, telemetry_dir: Optional[str] = None) -> str:
+    """EVD-2: the touch-grain lane's HEALTH/diagnosis surface — it explains this lane's
+    zeros instead of charting them as insight (a trend chart over a mechanically-starved
+    lane would chart zeros and call it signal).
+
+    Lane-LEVEL volumes and shares (total rows, cited_by share, distinct sessions,
+    worktree-prefixed share with the would-map-if-stripped count), touchmap coverage
+    (cited/reminders map sizes), and the existing both-grains comparison COMPOSED via
+    ``format_touch_grain_report`` — extended, never duplicated (a test pins the
+    composition). The two verified mechanical reasons for zeros are named in-line:
+    live-hook lag (rows written by a pre-T16 installed hook can never carry
+    ``cited_by``) and worktree-prefixed paths (recorded relative to the MAIN root —
+    the FLT-3 coupling; the candidate prefix-strip fix to RECORDING is its own
+    follow-up item, deliberately not smuggled into a report surface).
+
+    Aggregation stays lane-level or positive-evidence-only (``injection_hits``'s
+    shipped shape) — NEVER a per-memory injected-but-never-touched table (the MSR-6 /
+    round-1 noise-finder kill), and ``_injection_join`` remains the single join.
+    Cold path only (CLI/report). Read-only; never raises.
+    """
+    try:
+        td = telemetry_dir or default_telemetry_dir(memory_dir)
+        rows = list(read_outcomes(td))
+        total = len(rows)
+        with_cb = sum(1 for r in rows if isinstance(r.get("cited_by"), list) and r.get("cited_by"))
+        sessions = len({r.get("session_id") for r in rows if r.get("session_id")})
+        wt_paths = [
+            str(r.get("path") or "") for r in rows if str(r.get("path") or "").startswith(_WORKTREE_PREFIX)
+        ]
+        cited_map: dict = {}
+        reminders_map: dict = {}
+        try:
+            from .build_index import default_index_dir
+            from .jit import read_touch_cache
+
+            cache = read_touch_cache(default_index_dir(memory_dir)) or {}
+            cited_map = cache.get("cited") or {}
+            reminders_map = cache.get("reminders") or {}
+        except Exception:
+            pass
+        mappable = 0
+        for p in wt_paths:
+            tail = p[len(_WORKTREE_PREFIX):].split("/", 1)
+            if len(tail) == 2 and tail[1] in cited_map:
+                mappable += 1
+        lines = [
+            "touch-grain lane health (EVD-2 — diagnosis, not trend; report-only):",
+            f"  outcome rows: {total} across {sessions} session(s); {with_cb} carry cited_by touch provenance",
+            f"  touchmap: {len(cited_map)} cited path(s) / {len(reminders_map)} reminder path(s)",
+        ]
+        if total:
+            share = 100.0 * len(wt_paths) / total
+            lines.append(
+                f"  worktree-prefixed rows: {len(wt_paths)} of {total} ({share:.0f}%) — recorded "
+                "relative to the MAIN root, these can never match cited_paths at either grain; "
+                f"{mappable} would map if prefix-stripped"
+            )
+        if total and not with_cb:
+            lines.append(
+                "  diagnosis: 0 rows carry cited_by — rows written by a pre-T16 live hook never "
+                "carry provenance (live-hook lag: the lane records only once the INSTALLED "
+                "plugin ships the jit lane and touchmap.json exists)"
+            )
+        if wt_paths:
+            lines.append(
+                "  diagnosis: worktree-prefixed touches starve the touch-grain joins — couples "
+                "to FLT-3's worktree-first guidance (T18), which would widen this class; the "
+                "candidate prefix-strip fix to recording is its own follow-up item, not this "
+                "surface"
+            )
+        lines.append("")
+        lines.append(format_touch_grain_report(memory_dir, td))
+        return "\n".join(lines)
+    except Exception:
+        return "touch-grain lane health: unreadable ledgers (report-only)."
+
+
 def format_report(memory_dir: str, telemetry_dir: Optional[str] = None) -> str:
     """One-line KPI-2 proxy report for the CLI / doctor to present. Never raises."""
     r = injection_precision(memory_dir, telemetry_dir)
@@ -398,7 +481,8 @@ def main(argv: Optional[list] = None) -> int:
     parser.add_argument(
         "--touch-grain",
         action="store_true",
-        help="print the touch-grain vs session-grain injection_hits comparison (JIT-2; report-only)",
+        help="print the touch-grain lane health/diagnosis + the touch-vs-session grain "
+        "comparison (JIT-2/EVD-2; report-only — explains the lane's zeros, changes nothing)",
     )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--repo-root", default=None)
@@ -437,7 +521,7 @@ def main(argv: Optional[list] = None) -> int:
         if memory_dir is None:
             memory_dir, _ = resolve_dirs()
         if args.touch_grain:
-            print(format_touch_grain_report(memory_dir))
+            print(format_lane_health(memory_dir))
             return 0
         print(format_report(memory_dir))
         return 0

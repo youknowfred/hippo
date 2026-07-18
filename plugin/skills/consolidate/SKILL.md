@@ -16,7 +16,7 @@ else. Nothing here is a bulk sweep.
 ## Preflight (shared across all hippo skills)
 
 ```bash
-[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell — this does NOT necessarily mean Claude Code is too old: on some surfaces (e.g. Claude Desktop) the agent's Bash tool never inherits plugin-scoped env vars even on a fully current, correctly-bootstrapped install, since only hippo's MCP server and hooks (not the general Bash tool) receive them. If this is Desktop, run this SAME flow through hippo's MCP tools instead of the bash blocks — the steps map 1:1: Step 1 the capture tool (action=list/discard/snooze/add_decision) with new_memory (check:true for the dry-run, then the real write) and the secrets_scan tool as the verbatim-hunk hard gate; Step 2 the reconsolidate tool (action=worklist, then per-item action=reverify with outcome=graduate|fix|demote|snooze); Step 3 the build_index tool; Step 4 the co_recall_proposals tool (an approved append is a per-item body edit, then build_index again); Step 5 the abstention_fixtures tool (action=draft, then per-item action=confirm) — same per-item approval gates throughout. If this IS a genuine terminal Claude Code session and you still see this, Claude Code likely is too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell — this does NOT necessarily mean Claude Code is too old: on some surfaces (e.g. Claude Desktop) the agent's Bash tool never inherits plugin-scoped env vars even on a fully current, correctly-bootstrapped install, since only hippo's MCP server and hooks (not the general Bash tool) receive them. If this is Desktop, run this SAME flow through hippo's MCP tools instead of the bash blocks — the steps map 1:1: Step 1 the capture tool (action=list/discard/snooze/add_decision) with new_memory (check:true for the dry-run, then the real write) and the secrets_scan tool as the verbatim-hunk hard gate; Step 2 the reconsolidate tool (action=worklist, then per-item action=brief for the evidence, then per-item action=reverify with outcome=graduate|fix|demote|snooze); Step 3 the build_index tool; Step 4 the co_recall_proposals tool (an approved append is a per-item body edit, then build_index again); Step 5 the abstention_fixtures tool (action=draft, then per-item action=confirm) — same per-item approval gates throughout. If this IS a genuine terminal Claude Code session and you still see this, Claude Code likely is too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
 . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
 hippo_resolve_py
 ```
@@ -180,7 +180,18 @@ command) and an ack/snooze so a deferred item stops re-nagging:
 "$PY" -m memory.reconsolidate --dry-run
 ```
 
-Then, for each memory you re-ground, render exactly one verdict (per item):
+For each item, render its evidence brief BEFORE the verdict (EVD-1 — read-only; retires
+the hand-gathered `git diff`): diffstat + bounded hunk headers from the entry's OWN
+`source_commit` baseline to HEAD, secret-linted hunk bodies when clean, plus
+evidence-drift fences, `invalid_after` state, and linked neighbors. Read the memory
+body itself alongside it — the brief carries the code-side half only:
+
+```
+"$PY" -m memory.reconsolidate_brief <name>
+```
+
+(Desktop/MCP: the `reconsolidate` tool, `action='brief'`, `name=…`.) Then, for each
+memory you re-ground, render exactly one verdict (per item):
 
 ```
 "$PY" -m memory.reconsolidate --reverify <name> --outcome {graduate|fix|demote|snooze}

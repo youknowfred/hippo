@@ -934,7 +934,7 @@ workstreams:
         title: Reverify brief (new sibling reconsolidate_brief.py — evidence per worklist entry, cold path only)
         priority: P1
         effort: M
-        status: proposed
+        status: done           # 2026-07-17, T21 session 1 — every AC pinned in tests/test_reconsolidate_brief.py
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "reconsolidation_events.jsonl = 671 verdicts in one week (638 graduate / 33 fix / 0 demote / 0 snooze); the worklist deepened 20 (draft, 2026-07-16) -> 26 standalone / 38 with watermark (2026-07-17); mcp_schemas.py:400 — the reconsolidate tool description itself instructs 'read the memory, diff its cited paths'"}
         problem: >-
           The reconsolidation queue is chronic and the verdict flow runs at
@@ -999,18 +999,36 @@ workstreams:
           precedent); mcp_schemas.py reconsolidate tool (action enum
           worklist|reverify today; its description at L400 instructs the
           hand-diff this item retires); mcp_tools_consolidate.py (wiring);
-          capture-lane secret discipline (hunks_secret_flagged,
-          _MAX_PROMPT_HUNK_CHARS=2000). Verdict-vocabulary precision:
-          semantic_reverify._VALID_OUTCOMES = graduate/fix/demote; snooze is
-          the MCP-level ack (mcp_schemas enum) — the brief covers all four
-          paths. EVD-1 and FLT-1 are the round's two highest-value starts and
-          share nothing.
+          capture-lane secret discipline (hunks_secret_flagged — computed in
+          capture.py via secrets.scan_text + the SEN-2 Tier-A threat scan;
+          _MAX_PROMPT_HUNK_CHARS=2000 lives in capture_triage.py:77, not
+          capture.py — drift corrected at build 2026-07-17).
+          Verdict-vocabulary precision: _VALID_OUTCOMES = graduate/fix/demote
+          lives at reconsolidate.py:89 (`semantic_reverify` is a
+          reconsolidate.py FUNCTION, not a module — drift corrected at build
+          2026-07-17); snooze is the MCP-level ack (mcp_schemas enum) — the
+          brief covers all four paths. Built as specified: wiring landed in
+          mcp_tools_consolidate.py + the consolidate skill only —
+          reconsolidate.py (900/900) and provenance.py (2072/2072) took ZERO
+          lines (stronger than imports-only; a test pins it). EVD-1 and FLT-1
+          are the round's two highest-value starts and share nothing.
 
       - id: EVD-2
         title: Touch-grain lane health/diagnosis (reframe — the lane recorded zero for mechanical reasons)
         priority: P3
         effort: S
-        status: proposed
+        status: done           # 2026-07-17, T21 session 1 — probe first, then the surface (tests/test_outcome.py EVD-2 block)
+        ed3_probe: >-
+          Step zero, run 2026-07-17T23:49Z BEFORE any surface code: the lane RECORDS
+          on this machine. outcome_events.jsonl held 8 cited_by rows over 2861 total
+          (vetting baseline: 0/2682) — session 5a535196 (the v1.22.1 release session)
+          stamped reads/edits of provenance.py and both plugin manifests, and the T21
+          build session itself (3b7ff303, a MAIN-CLONE session) stamped its two Reads
+          of ROADMAP.enhancements4.yaml with cited_by=[hippo-enh-exploration-r4] —
+          exactly the probe shape the AC names (mapped file, main clone, cited_by row
+          confirmed). The mechanical-zeros diagnosis is confirmed: recording began at
+          the 2026-07-17T19:02Z 1.17.0→1.22.0 installed-plugin update; live touchmap
+          cited=96 paths (95 at vetting), reminders=0.
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "outcome_events.jsonl — 0 cited_by rows over 2682; 848 of 1675 post-07-16 rows worktree-prefixed (650 would map stripped); installed_plugins.json — hippo jumped 1.17.0 -> 1.22.0 at 2026-07-17T19:02:47Z (5 releases of live-hook lag); all reproducible read-only"}
         problem: >-
           Touch-grain evidence is 0/0 for MECHANICAL reasons, not merely
@@ -1077,7 +1095,18 @@ workstreams:
         title: Decline-aware interviewing (defer/dormant until declines exist)
         priority: P3
         effort: S
-        status: proposed
+        status: deferred       # 2026-07-17, T21 session 1 — proving condition NOT met (see ed3_probe)
+        ed3_probe: >-
+          Re-probed at build time 2026-07-17 (per the AC): interview-state.json is
+          STILL ABSENT from .claude/.memory-telemetry on this machine — the decline
+          ledger has never held a row since EXT-3 shipped 2026-07-16. The proving
+          condition (>=1 real decline) fails, so the vetted recommended scope binds:
+          DEFER rather than ship a dormant threshold ("a threshold with no data is
+          dead code wearing a feature's name"). Nothing built; zero code. Re-probe at
+          the next tier touch — the proving condition is the ledger being non-empty,
+          not a calendar date. (Same probe pass confirmed the jit/ state dir now
+          exists — Jul 17 16:49, the T16 lane's first live day — corroborating
+          EVD-2's live-hook-lag finding.)
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "interview-state.json ABSENT from .claude/.memory-telemetry on 2026-07-17 — zero declines ever recorded since EXT-3 shipped 2026-07-16; the hippo-enh-t17-ext capstone's dogfood rendered 2 questions once"}
         problem: >-
           The shipped code verifiably ignores decline CLASSES —
@@ -1130,7 +1159,26 @@ workstreams:
         title: Salience-revisit evidence run (SPLIT — Arm A zero-code ripe today, Q4; Arm B severed behind touch/outcome data)
         priority: P1
         effort: S                      # Arm A (the commissioned run); Arm B is severed at P3/M behind its own proving condition + dated decision
-        status: proposed
+        status: done           # 2026-07-17, T21 session 1 — Arm A commissioned (Q4) and RUN; Arm B stays severed, unchanged
+        q4_verdict: >-
+          2026-07-17, in-session dated owner entry (ED4R-1): Fred commissioned Arm A
+          ("Yes — commission Arm A"), asked and answered during the T21 build session
+          before any run. Arms framing unchanged; no default flipped.
+        arm_a_result: >-
+          Run 2026-07-17 on the lived-in corpus (ambient resolution; the shipped rig,
+          zero new code): backend dense+bm25 (BAAI/bge-small-en-v1.5), corpus_n=48,
+          hard_set_n=32; signal inventory 50 usage-boosted / 27 staleness-penalized —
+          BOTH signal legs had real input for the first time, as this item predicted.
+          RESULT: Δrecall=+0.0000 Δmrr=+0.0000 on BOTH categories (multi-hop n=10,
+          single-hop n=22; low-n labels apply); OFF-arm byte-identity self-check PASS;
+          identical_arms=false (the flag was LIVE and perturbed the ranking view, yet
+          moved zero hard-set metric — active but metrically null). Evidence recorded
+          at .claude/.memory-telemetry/salience_ab.json (gitignored, never the
+          golden/CI report); the shipped check_salience_evidence doctor nudge goes
+          quiet now that the file exists. Read: no affirmative evidence FOR a flip;
+          HIPPO_SALIENCE stays owner-decided-OFF (ED-2/LIF-7 — the flip would need
+          its own dated decision on affirmative evidence, which this run did not
+          produce). The ED-2 revisit file has its first entry.
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "doctor check_salience_evidence fires TODAY on this machine (usage_aggregates 115 sessions / 49 memories >= the lived-in threshold 10; salience_ab.json absent) naming the exact command; the MSR-5 rig shipped in PR #70; 26-entry stale.json gives the staleness penalty real input for the first time"}
         problem: >-
           ED-2 named a lived-in-corpus evidence run as the salience revisit
@@ -1296,9 +1344,15 @@ release_train:
       the first publishes, and the naming-triangle doc placement.
 
   - tier: T21
-    target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
+    target_version: v1.23.0    # assigned at release 2026-07-17 ("Verdicts with receipts")
     theme: "Evidence consumers"
-    status: proposed
+    status: done           # 2026-07-17, one session: EVD-1 done, EVD-2 done (probe first), EVD-3 deferred (empty ledger — exactly the done_means clause), EVD-4 done (Q4 yes; Arm A run; Arm B severed unchanged)
+    ratified: >-
+      2026-07-17 — owner-directed (Fred's scheduled T21 implementation chip, naming
+      EVD-1 first and the in-tier order): T21 selected for build per LAW ZERO. The
+      chip is the dated scheduling signal ED4R-1 requires for tier ratification; the
+      Q4 owner decision stays PENDING until asked in-session (recorded on EVD-4 when
+      it lands).
     gate: "None cross-file — TMB-1/CLB-2/CLB-3/JIT-2/MSR-5/MSR-6/EXT-3/RET-14/LIF-6 all shipped. EVD-3 additionally gates on its proving condition (a non-empty decline ledger); EVD-4 Arm A gates on Q4; EVD-4 Arm B is severed behind nonzero touch/outcome rows + its own dated decision."
     done_means: >-
       The reconsolidation queue gets cheap honest per-entry evidence (EVD-1,
@@ -1417,7 +1471,9 @@ decisions:
       Q4 (EVD-4) — commission the salience-revisit evidence run? (rec: yes —
       evidence first, decision later; gates Arm A). Each resolution is a
       dated owner entry recorded on the item and in the capstone; a metric
-      never proxies any of them (LIF-7).
+      never proxies any of them (LIF-7). STATUS 2026-07-17: Q4 RESOLVED —
+      Fred commissioned Arm A in the T21 build session (dated entry +
+      result on EVD-4); Q1, Q2, Q3 remain PENDING.
   - id: ED4R-2
     question: What keeps round 4 from minting the next generation of dark reservoirs?
     decision: no new standing artifact without a NAMED READER (the anti-dark-reservoir law — round 4's organizing spine)
