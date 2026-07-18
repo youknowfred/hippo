@@ -7,6 +7,34 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.24.1 — 2026-07-18 — "Quiet on the second surface"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**,
+index schema still **7**, citation derivation still **4**. A Claude Desktop UX fix, no
+behavior change to recall or the engines. On Desktop every `/hippo:*` verb routes to its
+MCP-tool equivalent, but each skill's preflight *led* with a bash guard whose failure message
+explained *why* Bash can't run there — so the agent narrated that env-var plumbing aloud
+("I'll use the MCP tool since Bash won't inherit plugin-scoped env vars…") before every tool
+call, on every invocation. This makes the Desktop path a first-class, silent branch instead
+of a detour the agent talks its way into.
+
+### Desktop-first, silent surface routing
+- Every routed skill — the 8 tool-routed (`doctor`, `bootstrap`, `init`, `new`, `recall`,
+  `resolve`, `why`, `dream`) and the 3 skill-driven (`audit`, `consolidate`, `pack`) — now
+  opens with a `## Surface routing — decide first, then act silently` section that names the
+  MCP-tool route (and, where the skill drives several tools, the 1:1 step→tool mapping) up
+  front, and instructs the agent to call it with no preamble about typed commands, the Bash
+  tool, or plugin env vars.
+- Each preflight guard's `echo` is slimmed to a terse back-reference — the parroted
+  "Bash never inherits plugin-scoped env vars" essay is gone; the genuine "Claude Code too
+  old" terminal branch stays. The ONB-7 `CLAUDE_PLUGIN_DATA` guard token itself is unchanged.
+- The SessionStart Desktop surface note gains a one-line "route silently" directive.
+- consolidate/pack's pre-existing INT-13/INT-16 `Desktop / MCP surface` blockquotes are
+  collapsed to a pointer to the new header plus their unique operational caveats (no more two
+  Desktop mappings to keep in sync).
+- The 7 terminal-only skills are untouched — they have no tool route. The verb-surface
+  registry parity lint (INV-1) and the skills-contract guard test still hold the structure.
+
 ## v1.24.0 — 2026-07-17 — "A clean machine, and a front door"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**,
