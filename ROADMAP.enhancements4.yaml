@@ -1095,7 +1095,18 @@ workstreams:
         title: Decline-aware interviewing (defer/dormant until declines exist)
         priority: P3
         effort: S
-        status: proposed
+        status: deferred       # 2026-07-17, T21 session 1 — proving condition NOT met (see ed3_probe)
+        ed3_probe: >-
+          Re-probed at build time 2026-07-17 (per the AC): interview-state.json is
+          STILL ABSENT from .claude/.memory-telemetry on this machine — the decline
+          ledger has never held a row since EXT-3 shipped 2026-07-16. The proving
+          condition (>=1 real decline) fails, so the vetted recommended scope binds:
+          DEFER rather than ship a dormant threshold ("a threshold with no data is
+          dead code wearing a feature's name"). Nothing built; zero code. Re-probe at
+          the next tier touch — the proving condition is the ledger being non-empty,
+          not a calendar date. (Same probe pass confirmed the jit/ state dir now
+          exists — Jul 17 16:49, the T16 lane's first live day — corroborating
+          EVD-2's live-hook-lag finding.)
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "interview-state.json ABSENT from .claude/.memory-telemetry on 2026-07-17 — zero declines ever recorded since EXT-3 shipped 2026-07-16; the hippo-enh-t17-ext capstone's dogfood rendered 2 questions once"}
         problem: >-
           The shipped code verifiably ignores decline CLASSES —
