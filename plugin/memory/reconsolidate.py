@@ -476,6 +476,7 @@ def semantic_reverify(
     This function has no ``repo_files`` outside the ``reverify_file`` call, so the split
     cannot be recomputed downstream; dropping it here is what left the shared renderer
     asserting "no longer in the repo" about files that were never missing.
+    ``preserved_not_derived`` (CUR-1) rides along too — the renderer's keep-line needs it.
     """
     result = {
         "name": name,
@@ -485,6 +486,7 @@ def semantic_reverify(
         "dropped_citations": [],
         "dropped_gone": [],
         "dropped_not_derived": [],
+        "preserved_not_derived": [],
         "invalidated": False,
         "invalid_after": None,
         "edge_written": False,
@@ -525,13 +527,11 @@ def semantic_reverify(
                 result["error"] = rv["error"]
                 return result
             result["cleared"] = rv["changed"]
-            result["cited"] = rv["cited"]
-            result["dropped_citations"] = rv["dropped_citations"]
-            # LIF-4: carry the producer's partition through. This surface has no repo_files
-            # of its own to re-derive it from — dropping it here is what forced the renderer
-            # to guess "no longer in the repo" for every drop.
-            result["dropped_gone"] = rv["dropped_gone"]
-            result["dropped_not_derived"] = rv["dropped_not_derived"]
+            # LIF-4 + CUR-1: carry the producer's drop partition AND kept set through —
+            # this surface has no repo_files of its own to recompute either from.
+            for k in ("cited", "dropped_citations", "dropped_gone",
+                      "dropped_not_derived", "preserved_not_derived"):
+                result[k] = rv.get(k, [])
         demoted_before = None  # COR-16: bytes-before capture for the two-write rollback
         if outcome == "demote":
             # LIF-1: the demote verdict OWNS its terminal state — close the validity

@@ -360,15 +360,17 @@ def test_semantic_reverify_graduate_clears_flag_and_logs_outcome(repo, memory_di
         "name": "m_a",
         "outcome": "graduate",
         "cleared": True,
-        # LIF-3 pass-through from reverify_file: _mem's body cites NOTHING, so the
-        # re-derivation drops the frontmatter's src/foo.py — reported, never silent.
-        "cited": [],
-        "dropped_citations": ["src/foo.py"],
-        # LIF-4: the WHY rides along the same pass-through. src/foo.py is still committed at
-        # HEAD — the body simply never cites it — so this is `not_derived`, NOT `gone`. The
-        # pre-LIF-4 renderer announced this very file as "no longer in the repo".
+        # CUR-1 pass-through from reverify_file: _mem's body cites NOTHING, but
+        # src/foo.py is still committed at HEAD — so the citation is PRESERVED (a
+        # curated entry must survive a content re-verification), reported via
+        # preserved_not_derived, never dropped. Pre-CUR-1 this very passthrough
+        # asserted the drop; pre-LIF-4 the renderer even called the still-present
+        # file "no longer in the repo".
+        "cited": ["src/foo.py"],
+        "dropped_citations": [],
         "dropped_gone": [],
-        "dropped_not_derived": ["src/foo.py"],
+        "dropped_not_derived": [],
+        "preserved_not_derived": ["src/foo.py"],
         "invalidated": False,  # LIF-1's chain is demote-only — graduate never touches it
         "invalid_after": None,  # GRW-7's stamped boundary — demote-with-successor only
         "edge_written": False,

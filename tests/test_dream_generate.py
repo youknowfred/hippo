@@ -810,3 +810,35 @@ def test_generate_writers_survive_non_two_space_metadata(tmp_path):
     if r2["changed"]:
         meta2 = fm2.get("metadata") or {}
         assert (fm2.get("cited_paths") or meta2.get("cited_paths")) == ["src/a.py"]
+
+
+def test_set_cited_paths_replaces_the_legacy_split_empty_form_cleanly(tmp_path):
+    """AC (COR-20) on the generate-side writer: its own `- item`-only walk had the same
+    bug as strip_frontmatter_keys — replacing a bare ``cited_paths:`` key whose value is
+    ``[]`` on its own continuation line left the ``[]`` orphaned under the NEW inline
+    key, corrupting the document. Both walks now share provenance._value_run_end."""
+    text = (
+        "---\n"
+        "name: legacy-draft\n"
+        "metadata:\n"
+        "  type: feedback\n"
+        "  cited_paths:\n"
+        "    []\n"
+        '  origin: "dream:p1"\n'
+        "---\n"
+        "\n"
+        "Body stays.\n"
+    )
+    p = str(tmp_path / "legacy.md")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    r = dg._set_cited_paths(p, ["src/a.py"])
+    after = open(p, encoding="utf-8").read()
+    fm = parse_frontmatter(after)
+    assert r["error"] is None, f"guard refusal on the legacy shape: {r['error']}"
+    assert r["changed"] is True
+    assert fm and fm["metadata"]["cited_paths"] == ["src/a.py"]
+    assert fm["metadata"]["type"] == "feedback"  # adjacent scalar intact
+    assert fm["metadata"]["origin"] == "dream:p1"  # following key intact too
+    assert "[]" not in after
+    assert after.endswith("Body stays.\n")

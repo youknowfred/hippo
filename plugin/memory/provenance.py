@@ -63,8 +63,9 @@ _CODE_EXTS = (
 # against this repo's real corpus + docs (read-only): every genuine citation found there
 # was backtick-quoted (`Dockerfile`/`CODEOWNERS` in CHANGELOG.md, `.env.example` in a real
 # memory); the one bare mid-list "CODEOWNERS" mention is an accepted miss, same class as
-# the LIF-4 fixture's own bare "the Dockerfile" body text, which this deliberately leaves
-# non-derivable (test_refresh_partitions_a_real_not_derived_drop_end_to_end pins it).
+# the CUR-1 fixture's own bare "the Dockerfile" body text, which this deliberately leaves
+# non-derivable (test_refresh_preserves_a_live_not_derivable_citation_end_to_end pins the
+# non-derivability — and that CUR-1 preserves the stored citation anyway).
 # resolve_citations itself needed NO change — it is already extension-agnostic basename
 # matching, so the existing ambiguity-drop (two same-named files -> dropped) protects an
 # extensionless citation exactly as it protects a dotted one today.
@@ -560,169 +561,24 @@ def ensure_self_ignoring_dir(path: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# COR-7: corpus format versioning
+# COR-7 / DRV-2: corpus format + citation-derivation versioning — decomposed into
+# provenance_format.py (pure code motion; the module-size ratchet fired). Façade
+# re-exports: every symbol stays importable at memory.provenance.<name>, so no
+# caller or test changes its dotted path. (Sibling imports nothing from here —
+# the marker is JSON, not frontmatter — per CONTRIBUTING.md "Code layout".)
 # --------------------------------------------------------------------------- #
-# The version of the CORPUS's own on-disk conventions (frontmatter schemas, marker files,
-# floor layout) that this plugin reads and writes. Distinct from the INDEX's
-# ``build_index.SCHEMA_VERSION``: the index is a derived cache (a mismatch is healed by one
-# silent rebuild), while the corpus is the git-tracked single source of authority — a
-# format change there is a MIGRATION of user data, per-item and agent-gated, never
-# automatic (see plugin/memory/README.md, "Corpus format versioning"). Declared by a
-# ``.claude/memory/.format`` marker committed WITH the corpus (it describes the corpus; it
-# is NOT a rebuildable cache), JSON ``{"corpus_format": N}``. A corpus with NO marker reads
-# as format 1 — every pre-v0.5.0 corpus predates the marker, so absence must mean the
-# baseline, never an error. A breaking corpus change bumps this ONE constant; init's
-# seeding snippet and doctor's check follow it (a parity test pins the init skill's
-# literal to this constant so the two can't drift).
-#
-# Format history:
-#   1 — the pre-versioning baseline (frontmatter with cited_paths/source_commit/
-#       invalid_after, [[wikilink]] bodies, MEMORY.md floor).
-#   2 — GRA-4 typed edges: frontmatter may carry `supersedes:`/`contradicts:`/`refines:`
-#       lists (top-level or under `metadata:`). Purely ADDITIVE — a v1 corpus with no
-#       typed relations is read identically by a v2 plugin, so the migration is just
-#       reviewing that no frontmatter key collides and stamping the marker
-#       (`write_corpus_format`); see plugin/memory/README.md "Corpus format versioning".
-#   3 — GOV-2 steering: frontmatter may carry `steer: pin` (top-level or under
-#       `metadata:`) — the author's bounded, always-on recall lift (build_index carries it
-#       into the manifest; recall multiplies a capped _PIN_BOOST pre-cut). Purely ADDITIVE,
-#       same migration shape as v2: verify no existing frontmatter uses `steer` for
-#       something else, then stamp the marker. MUTE is deliberately NOT part of v3 — it
-#       stays gated on the salience keystone (SIG-5/T7) and will be its own convention.
-#   4 — GOV-7 confidence tier: frontmatter may carry `confidence: draft|verified|
-#       authoritative` (top-level or under `metadata:`) — the AUTHOR's trust dial,
-#       display-only at inject/recall_view, NEVER a ranking input (the popularity=
-#       correctness trap; AST-pinned in tests). Closed enum; unknown values read as
-#       unset (today's default). Purely ADDITIVE — same stamp-only migration as v2/v3.
-CORPUS_FORMAT_VERSION = 5
-_FORMAT_MARKER_NAME = ".format"
-
-# DRV-2 — the version of the DERIVATION, deliberately a separate axis from the format.
-#
-# `corpus_format` versions the SHAPE of a memory file, and its own history above says so:
-# v2/v3/v4 are each "purely ADDITIVE… the migration is just… stamping the marker". packs.py
-# states the criterion outright ("deliberately NOT a corpus_format bump — the memory-file
-# shapes are unchanged"). By that rule the ORC-1 extractor fix is NOT a format event: it
-# changes no shape, only VALUES.
-#
-# That is exactly the trap. Nothing versioned the derivation, so a corpus whose cited_paths
-# came from the shadowed regex and one derived by the fixed regex both declare
-# `{"corpus_format": 5}` and are indistinguishable. There was no question you could ask a
-# hippo corpus that meant "were these values produced by an extractor I trust?" — which is
-# why a 14-minor-version-old bug had to be found by hand, in another repo, by an agent
-# noticing a memory was watching the wrong file.
-#
-# History:
-#   1 — the shipped v1.14.0 extractor: no trailing boundary (so `package.json` derived as
-#       `package.js`, and `.tsx`/`.jsx`/`.json` were declared-but-unreachable), no
-#       mjs/cjs/mts/cts, no `./` normalisation.
-#   2 — ORC-1 + DRV-1: trailing `(?!\w|\.\w)`, the mjs family, `./` normalisation.
-#   3 — ORC-3: extensionless config/build filenames (_EXTENSIONLESS_NAMES — Dockerfile,
-#       Makefile, LICENSE, etc.) become citable in two bounded shapes: directory-qualified
-#       anywhere, or a whole backtick span. A bare unmarked mid-sentence mention stays
-#       non-derivable, deliberately. resolve_citations itself is UNCHANGED — already
-#       extension-agnostic basename matching — only the extractor's vocabulary grew.
-#   4 — IOP-2: `.mdc` (Cursor rule files) joins _CODE_EXTS, so a body naming a
-#       `.cursor/rules/*.mdc` derives it as a cited path. SAME class as 3 (vocabulary grew,
-#       no shape change) — lands here, not corpus_format; a .mdc-free corpus stamps clean.
-#
-# Kept on the corpus-level marker rather than in each file's frontmatter: a per-file key
-# WOULD be a shape change (a real corpus_format v6), needs a corpus-wide rewrite just to
-# introduce, and answers a question that is not per-file anyway.
-CITATION_DERIVATION_VERSION = 4
-
-
-def format_marker_path(memory_dir: str) -> str:
-    """``<memory_dir>/.format`` — the corpus marker's one canonical location."""
-    return os.path.join(memory_dir, _FORMAT_MARKER_NAME)
-
-
-def _read_marker(memory_dir: str) -> dict:
-    """The marker file's raw dict; ``{}`` when absent/unreadable/wrong-shape. Never raises."""
-    try:
-        p = format_marker_path(memory_dir)
-        if not os.path.isfile(p):
-            return {}
-        with open(p, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _write_marker_keys(memory_dir: str, **keys) -> bool:
-    """Merge ``keys`` into the marker, PRESERVING every key already there.
-
-    Read-modify-write, not clobber: ``corpus_format`` and ``cite_derivation`` are
-    independent axes living in one file, and a writer that rewrote the whole object would
-    silently erase the other one's answer.
-    """
-    try:
-        from .atomic import write_text_atomic
-
-        data = _read_marker(memory_dir)
-        data.update(keys)
-        # INV-2: the marker is COMMITTED corpus truth (format + derivation axes in one
-        # file) — a torn write would have the corpus declaring garbage to every reader.
-        write_text_atomic(format_marker_path(memory_dir), json.dumps(data) + "\n")
-        return True
-    except Exception:
-        return False
-
-
-def read_cite_derivation(memory_dir: str) -> int:
-    """The corpus's declared citation-derivation version; ``1`` when undeclared (DRV-2).
-
-    An undeclared corpus IS derivation 1 — every corpus written before DRV-2 was derived by
-    the pre-ORC-1 extractor, so the default is the truth rather than a guess. Same
-    never-raise, degrade-to-baseline contract as ``read_corpus_format``.
-    """
-    v = _read_marker(memory_dir).get("cite_derivation")
-    return v if isinstance(v, int) and not isinstance(v, bool) else 1
-
-
-def write_cite_derivation(memory_dir: str, version: Optional[int] = None) -> bool:
-    """Stamp the citation-derivation version (default: this plugin's).
-
-    MUST be the LAST step of a completed re-derivation, never a fix on its own: stamping
-    cite_derivation=2 over citations that were derived by extractor 1 asserts exactly the
-    thing DRV-2 exists to let you verify. Like ``write_corpus_format``, deliberately has no
-    bulk-migration counterpart — see MIG-1's per-item worklist.
-    """
-    return _write_marker_keys(
-        memory_dir,
-        cite_derivation=int(version if version is not None else CITATION_DERIVATION_VERSION),
-    )
-
-
-def read_corpus_format(memory_dir: str) -> int:
-    """The corpus's declared format version; ``1`` when undeclared. Never raises.
-
-    A missing marker IS format 1 (the pre-versioning baseline every existing corpus is
-    on), so no corpus ever needs backfilling to be readable. An unreadable/corrupt/
-    wrong-shape marker also degrades to 1 — the never-raise direction; doctor's format
-    check reports against whatever this returns, so a garbled marker at worst reads as
-    the baseline rather than blocking recall.
-    """
-    v = _read_marker(memory_dir).get("corpus_format")
-    return v if isinstance(v, int) and not isinstance(v, bool) else 1
-
-
-def write_corpus_format(memory_dir: str, version: Optional[int] = None) -> bool:
-    """Stamp the corpus format marker (default: this plugin's ``CORPUS_FORMAT_VERSION``).
-
-    Returns True on success, False on any failure (missing dir, permissions) — callers
-    surface the failure rather than pretending the corpus is stamped. Deliberately has NO
-    bulk-migration counterpart: stamping a NEWER version onto an old corpus is the final,
-    explicit step of a doctor-driven migration, never something a hook or sweep does.
-
-    DRV-2: merges rather than clobbers — ``cite_derivation`` shares this file and is an
-    independent axis; a whole-object rewrite would erase it.
-    """
-    return _write_marker_keys(
-        memory_dir,
-        corpus_format=int(version if version is not None else CORPUS_FORMAT_VERSION),
-    )
+from .provenance_format import (  # noqa: E402,F401
+    CITATION_DERIVATION_VERSION,
+    CORPUS_FORMAT_VERSION,
+    _FORMAT_MARKER_NAME,
+    _read_marker,
+    _write_marker_keys,
+    format_marker_path,
+    read_cite_derivation,
+    read_corpus_format,
+    write_cite_derivation,
+    write_corpus_format,
+)
 
 
 def split_frontmatter(text: str) -> Tuple[Optional[List[str]], str]:
@@ -968,6 +824,45 @@ def backfill_text(
 _PROVENANCE_KEY_RE = re.compile(r"^(\s*)(?:cited_paths|source_commit|source_commit_time)\s*:")
 _INVALID_AFTER_KEY_RE = re.compile(r"^(\s*)invalid_after\s*:")
 _BLOCK_ITEM_RE = re.compile(r"^(\s*)-\s")
+
+
+def _value_run_end(lines: List[str], start: int, key_indent: int) -> int:
+    """First index at/after ``start`` that is NOT part of the preceding bare key's value.
+
+    COR-20, and the ONE definition of the value-run rule — ``strip_frontmatter_keys`` and
+    ``dream_generate._set_cited_paths`` each had their own walk, both consuming ONLY
+    ``- item`` block lines. A flow value on its own continuation line —
+
+        cited_paths:
+          []
+
+    (the shape an older hippo emitted for a memory with no derivable citations) — was not
+    consumed when its key line was stripped/replaced, so the orphaned ``[]`` landed under
+    whichever key PRECEDED ``cited_paths``, where YAML folds it into that key's scalar
+    (``type: feedback`` -> ``type: feedback []``) or refuses the document outright. The
+    COR-9 damage guard caught the corruption before it reached disk — but by refusing, it
+    permanently blocked rederive/reverify on every memory carrying that legacy shape: the
+    current writer could not round-trip its own past output.
+
+    The rule, in YAML block-mapping terms: a ``- item`` line at the key's indent or deeper
+    is part of the value (a block sequence may sit at its key's own indent); ANY other
+    non-blank line strictly deeper than the key is value continuation (a flow list on its
+    own line, a nested mapping, a block-scalar body). A sibling key (same indent), a
+    dedent, or a blank line ends the run — so a frontmatter fence or the next key is never
+    consumed.
+    """
+    j = start
+    while j < len(lines):
+        ln = lines[j]
+        bm = _BLOCK_ITEM_RE.match(ln)
+        if bm and len(bm.group(1)) >= key_indent:
+            j += 1
+            continue
+        if ln.strip() and (len(ln) - len(ln.lstrip(" \t"))) > key_indent:
+            j += 1
+            continue
+        break
+    return j
 # An indented KEY line — deliberately NOT `^(\s+)\S`, which also matches a block-list item
 # (`    - keep-me`) and so reports the ITEM's indent as the block's key indent. See
 # ``insert_frontmatter_keys``.
@@ -1056,14 +951,9 @@ def strip_frontmatter_keys(text: str, key_re) -> str:
         i += 1
         if inline:
             continue  # flow style (`key: [a, b]`) — the value lives on the key line
-        # Block style (a bare `key:`): consume the `- item` lines that are its value. A
-        # sibling key ends the run (it is not a `- ` line), as does any dedent below the
-        # key's own indent — those items belong to something else.
-        while i < len(fm):
-            bm = _BLOCK_ITEM_RE.match(fm[i])
-            if not bm or len(bm.group(1)) < key_indent:
-                break
-            i += 1
+        # A bare `key:`: consume the continuation lines that ARE its value — block items,
+        # or a deeper-indented flow value on its own line (COR-20; see _value_run_end).
+        i = _value_run_end(fm, i, key_indent)
     return "\n".join([lines[0]] + out + lines[close:])
 
 
@@ -1193,9 +1083,19 @@ def backfill_file(
     yet, so nothing can be lost) and on a refusal (nothing was re-derived); callers must
     surface a non-empty list, never swallow it.
 
-    ``dropped_gone`` / ``dropped_not_derived`` (LIF-4): the same set, partitioned by CAUSE.
+    ``preserved_not_derived`` (CUR-1): stored citations whose file still EXISTS but which
+    the body no longer yields a token for — these are KEPT, not dropped. Re-derivation
+    used to treat ``cited_paths`` as wholly machine-derived and clobbered hand-curated
+    entries the extractor cannot parse from prose (a bare/bold ``Dockerfile``, a
+    ``.dockerignore`` never mentioned in the body); with CUR-1 a citation dies only with
+    its file. Callers surface the kept set (the keep-line) so deliberate pruning stays a
+    visible hand edit rather than an automatic loss.
+
+    ``dropped_gone`` / ``dropped_not_derived`` (LIF-4): the drop set, partitioned by CAUSE.
     Computed here because this is where ``repo_files`` — the only oracle that can answer
-    "is it actually missing?" — is in scope.
+    "is it actually missing?" — is in scope. Under CUR-1 this producer only ever drops
+    ``gone`` paths (``dropped_not_derived`` stays ``[]``); the key and the renderer's
+    clause for it remain for pre-CUR-1 result dicts a caller may replay.
 
     ``extracted_but_unresolved`` (DRV-1): tokens the body offered that resolved to nothing
     (untracked file, wrong path, ambiguous basename). Note this corrects the sentence above:
@@ -1211,6 +1111,7 @@ def backfill_file(
         "dropped_citations": [],
         "dropped_gone": [],
         "dropped_not_derived": [],
+        "preserved_not_derived": [],
         "extracted_but_unresolved": [],
         "source_commit": None,
         "source_commit_time": None,
@@ -1228,6 +1129,7 @@ def backfill_file(
         dropped: List[str] = []
         gone: List[str] = []
         not_derived: List[str] = []
+        preserved: List[str] = []
         if refresh and _has_cited_paths(split_frontmatter(text)[0] or []):
             fm = parse_frontmatter(text)
             if not fm:
@@ -1247,9 +1149,25 @@ def backfill_file(
                 sc, sct = git_last_commit_with_time(rel, repo_root)
                 if sc is None:
                     sc, sct = git_head_with_time(repo_root)
-            dropped = [p for p in _frontmatter_cited_paths(fm) if p not in cited]
+            before = _frontmatter_cited_paths(fm)
+            # CUR-1 (owner-ratified 2026-07-18): a re-derivation must not destroy a LIVE
+            # citation it merely cannot re-derive. cited_paths conflates machine-derived
+            # and hand-CURATED entries (a `Dockerfile` the prose names only bare/bold, a
+            # `.dockerignore` never in the body at all), and every re-derivation surface
+            # used to clobber the curated ones — the exact paths a human just restored.
+            # So: a stored path whose file still EXISTS is preserved even when the body
+            # yields no token for it; only a genuinely-gone file (renamed/deleted) drops.
+            # The flip side is deliberate too — legacy junk (an old resolver's inflated/
+            # fabricated entries) is now sticky until pruned by hand; the keep-line and
+            # the worklist's `keeps` clause make it visible, and a hand edit of the
+            # frontmatter is the pruning verb.
+            preserved = [p for p in before if p in repo_files and p not in cited]
+            cited = cited + preserved
+            dropped = [p for p in before if p not in cited]
             # LIF-4: partition HERE, where repo_files is in scope. The renderer cannot do it
-            # — reconsolidate and the MCP tool call it with no repo index in hand.
+            # — reconsolidate and the MCP tool call it with no repo index in hand. (With
+            # CUR-1 every drop this producer emits IS gone — the partition stays for the
+            # result-shape contract and for any pre-CUR-1 dict a caller replays.)
             gone, not_derived = partition_dropped(dropped, repo_files)
             text = _strip_provenance(text)  # drop old provenance; body untouched
         else:
@@ -1275,6 +1193,7 @@ def backfill_file(
                 "dropped_citations": dropped,
                 "dropped_gone": gone,
                 "dropped_not_derived": not_derived,
+                "preserved_not_derived": preserved,
                 "source_commit": sc,
                 "source_commit_time": sct,
                 "changed": changed,
@@ -1504,6 +1423,7 @@ def reverify_file(
         "dropped_citations": [],
         "dropped_gone": [],
         "dropped_not_derived": [],
+        "preserved_not_derived": [],
         "source_commit": None,
         "source_commit_time": None,
         "last_verified": None,
@@ -1529,7 +1449,12 @@ def reverify_file(
             return result
         sc, sct = git_head_with_time(repo_root)
         cited = cited_paths_for_body(body, repo_files, basename_index)
-        dropped = [p for p in _frontmatter_cited_paths(fm) if p not in cited]
+        before_paths = _frontmatter_cited_paths(fm)
+        # CUR-1: preserve live-but-not-derivable citations — see backfill_file. A human
+        # re-verifying CONTENT must not silently lose the curated citations either.
+        preserved = [p for p in before_paths if p in repo_files and p not in cited]
+        cited = cited + preserved
+        dropped = [p for p in before_paths if p not in cited]
         # LIF-4: partition where repo_files is in scope — see backfill_file.
         gone, not_derived = partition_dropped(dropped, repo_files)
         stripped = _strip_verified_by(_strip_invalid_after(_strip_provenance(text)))
@@ -1576,6 +1501,7 @@ def reverify_file(
                 "dropped_citations": dropped,
                 "dropped_gone": gone,
                 "dropped_not_derived": not_derived,
+                "preserved_not_derived": preserved,
                 "source_commit": sc,
                 "source_commit_time": sct,
                 "last_verified": lv,
@@ -1619,6 +1545,12 @@ def partition_dropped(dropped: List[str], repo_files: set) -> Tuple[List[str], L
     The distinction is not cosmetic: ``gone`` means go look at the code, ``not_derived``
     means go look at hippo or at the memory's body. Reporting the second as the first sends
     the reader hunting for a deletion that never happened.
+
+    CUR-1 note: the in-tree producers no longer DROP the ``not_derived`` class at all —
+    those paths are preserved (``preserved_not_derived``), so this partition returns an
+    empty second half for every result they emit today. The function and the renderer's
+    clause for it stay: a pre-CUR-1 result dict (an old journal, a replayed telemetry
+    record) must still render truthfully.
     """
     gone = [p for p in dropped if p not in repo_files]
     not_derived = [p for p in dropped if p in repo_files]
@@ -1651,11 +1583,30 @@ def citation_rot_lines(name: str, result: dict, *, dry_run: bool = False) -> Lis
 
     A drop to ZERO is still called out distinctly: with no cited_paths left, ``find_stale``
     has nothing to watch — the memory becomes staleness-EXEMPT, the worst rot state, not a
-    cosmetic shrink. Returns ``[]`` when nothing was dropped.
+    cosmetic shrink. Returns ``[]`` when nothing was dropped AND nothing was preserved.
+
+    CUR-1: a result carrying ``preserved_not_derived`` also gets an ``ℹ kept`` line —
+    informational, appended after any rot line — naming the citations that survived a
+    re-derivation the extractor could not reproduce, so deliberate pruning stays visible
+    and manual rather than an automatic loss.
     """
     dropped = result.get("dropped_citations") or []
+    # CUR-1: preserved-but-not-derivable citations get an INFORMATIONAL line, not a ⚠ —
+    # nothing was lost; the reader just learns the body no longer carries the token (a
+    # hand-curated entry, an extractor gap, or an edited-away mention) and that pruning
+    # is theirs to do deliberately, by editing the frontmatter.
+    preserved = result.get("preserved_not_derived") or []
+    keep_lines: List[str] = []
+    if preserved:
+        shown = ", ".join(preserved[:6])
+        more = f" (+{len(preserved) - 6} more)" if len(preserved) > 6 else ""
+        keep_lines = [
+            f"ℹ kept — {name}: {len(preserved)} cited path(s) still in the repo but not "
+            f"derivable from the body ({shown}{more}) — hand-curated or an extractor gap; "
+            "edit the memory's frontmatter to prune deliberately"
+        ]
     if not dropped:
-        return []
+        return keep_lines
     cited_after = result.get("cited") or []
     # Fall back to "all gone" only if a producer predates the partition — never re-derive it
     # here from a repo index this function does not have.
@@ -1692,8 +1643,8 @@ def citation_rot_lines(name: str, result: dict, *, dry_run: bool = False) -> Lis
         return [
             f"{head} — cited_paths {state} EMPTY, so this memory is EXEMPT from staleness "
             "tracking until its body cites current code again"
-        ]
-    return [f"{head}; {len(cited_after)} citation(s) remain"]
+        ] + keep_lines
+    return [f"{head}; {len(cited_after)} citation(s) remain"] + keep_lines
 
 
 # --------------------------------------------------------------------------- #
@@ -1702,14 +1653,16 @@ def citation_rot_lines(name: str, result: dict, *, dry_run: bool = False) -> Lis
 def rederive_preview(path: str, repo_root: str, repo_files: set, basename_index: Dict[str, List[str]]) -> dict:
     """What re-deriving ONE memory's citations WOULD change — read-only. Never raises.
 
-    ``{"name", "before", "after", "gained", "lost", "unresolved", "changed", "error"}``.
+    ``{"name", "before", "after", "gained", "lost", "kept", "unresolved", "changed",
+    "error"}``. ``kept`` (CUR-1) is the preserved set: still in the repo, not derivable
+    from the body, carried through unchanged by an apply.
     The review payload for the worklist below: the operator sees the attributed diff for
     THIS memory and approves THIS memory, which is what makes the fold that follows a
     legitimate SEC-6 consent rather than the gate consenting to itself.
     """
     out = {
         "name": os.path.basename(path)[:-3],
-        "before": [], "after": [], "gained": [], "lost": [], "unresolved": [],
+        "before": [], "after": [], "gained": [], "lost": [], "kept": [], "unresolved": [],
         "changed": False, "error": None,
     }
     try:
@@ -1721,12 +1674,19 @@ def rederive_preview(path: str, repo_root: str, repo_files: set, basename_index:
             return out
         _, body = split_frontmatter(text)
         before = _frontmatter_cited_paths(fm)
-        after = cited_paths_for_body(body, repo_files, basename_index)
+        derived = cited_paths_for_body(body, repo_files, basename_index)
+        # CUR-1: the preview MUST mirror the producers' preservation exactly — the stamp's
+        # earned-empty-worklist check compares this preview's `changed` against what
+        # `rederive_file` would write; if only one side preserved, a curated corpus could
+        # never stamp (or worse, stamp while still differing).
+        kept = [p for p in before if p in repo_files and p not in derived]
+        after = derived + kept
         out.update(
             before=before,
             after=after,
             gained=[p for p in after if p not in before],
             lost=[p for p in before if p not in after],
+            kept=kept,
             unresolved=unresolved_citations(body, repo_files, basename_index),
             changed=sorted(before) != sorted(after),
         )
@@ -1787,16 +1747,17 @@ def rederive_file(
     result = {
         "path": path, "name": os.path.basename(path)[:-3], "changed": False,
         "cited": [], "dropped_citations": [], "dropped_gone": [],
-        "dropped_not_derived": [], "error": None,
+        "dropped_not_derived": [], "preserved_not_derived": [], "error": None,
     }
     try:
         # backfill_file(refresh=True) already does exactly the derivation half correctly —
-        # it preserves source_commit, partitions the loss (LIF-4), and refuses to damage a
-        # key it does not own (COR-9). Reuse it rather than re-implement its rules.
+        # it preserves source_commit AND live curated citations (CUR-1), partitions the
+        # loss (LIF-4), and refuses to damage a key it does not own (COR-9). Reuse it
+        # rather than re-implement its rules.
         bf = backfill_file(path, repo_root, repo_files, basename_index, dry_run=dry_run, refresh=True)
         result.update({k: bf[k] for k in
                        ("changed", "cited", "dropped_citations", "dropped_gone",
-                        "dropped_not_derived", "error") if k in bf})
+                        "dropped_not_derived", "preserved_not_derived", "error") if k in bf})
         if bf.get("error"):
             return result
         if bf.get("changed") and not dry_run:
@@ -1989,6 +1950,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"      + gains  : {', '.join(w['gained'])}")
             if w["lost"]:
                 print(f"      - loses  : {', '.join(w['lost'])}")
+            if w.get("kept"):
+                print(f"      = keeps  : {', '.join(w['kept'])} (still in the repo, not "
+                      "derivable from the body — preserved, CUR-1)")
             if w["unresolved"]:
                 print(f"      ? unresolved in body: {', '.join(w['unresolved'])}")
         print("\nReview each, then approve individually: "

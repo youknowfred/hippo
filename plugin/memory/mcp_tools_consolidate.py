@@ -375,6 +375,11 @@ def _tool_rederive(args: Dict[str, Any]) -> str:
                 out.append(f"      + gains  : {', '.join(w['gained'])}")
             if w["lost"]:
                 out.append(f"      - loses  : {', '.join(w['lost'])}")
+            if w.get("kept"):
+                out.append(
+                    f"      = keeps  : {', '.join(w['kept'])} (still in the repo, not "
+                    "derivable from the body — preserved, CUR-1)"
+                )
             if w["unresolved"]:
                 out.append(f"      ? unresolved in body: {', '.join(w['unresolved'])}")
         out += [

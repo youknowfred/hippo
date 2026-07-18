@@ -754,8 +754,9 @@ def _set_cited_paths(path: str, paths: List[str], *, dry_run: bool = False) -> d
 
     Staging-time only, and only when the canonical backfill left the key missing/empty —
     the draft's outcome surface must exist for graduation evidence to ever accrue. Same
-    frontmatter discipline as ``_set_confidence``; drops block-style continuation lines
-    exactly like ``links.add_typed_relation`` (values re-rendered as one flow list).
+    frontmatter discipline as ``_set_confidence``; drops the old value's continuation
+    lines — block items OR a flow list on its own line (COR-20) — via the shared
+    ``_value_run_end`` rule (values re-rendered as one flow list).
     """
     result = {"path": path, "changed": False, "error": None}
     try:
@@ -784,10 +785,14 @@ def _set_cited_paths(path: str, paths: List[str], *, dry_run: bool = False) -> d
                 lines[1:close], [f"cited_paths: {value}"]
             )
         else:
+            from .provenance import _value_run_end
+
             indent = key_re.match(lines[idx]).group(1)
-            end = idx + 1
-            while end < close and re.match(r"^\s+-\s", lines[end]):
-                end += 1
+            # COR-20: the shared value-run rule, not a third hand-rolled walk — the old
+            # `- item`-only loop here orphaned a `[]`-on-its-own-line continuation (the
+            # legacy split-empty shape) onto the preceding key, exactly like the
+            # strip_frontmatter_keys copy of the same bug.
+            end = min(_value_run_end(lines, idx + 1, len(indent)), close)
             lines[idx:end] = [f"{indent}cited_paths: {value}"]
         new_text = "\n".join(lines)
         from .provenance import _frontmatter_damage
