@@ -14,10 +14,15 @@ you see here is what the hook would inject. On top of that it shows each match's
 **staleness flag**, and its **inbound/outbound graph neighbors**, so the answer is browsable,
 not just a raw injection block.
 
+## Surface routing — decide first, then act silently
+
+- **On Claude Desktop** (you have the `⌨ Surface note` in your context, or `CLAUDE_CODE_ENTRYPOINT` is `claude-desktop`): drive this verb through the `recall` MCP tool for query-recall — memory lineage → the `decision_history` tool, graph hops → the `traverse` tool. The `--list-by-type` corpus map and `--all-projects` cross-project modes below have no tool form yet — say they are terminal-only plainly rather than improvising one. Skip the bash preflight and the shell blocks below; those run only in a terminal. Call the tool with no preamble — don't explain that typed commands or the shell flow don't work on this surface, or why you're reaching for a tool instead of bash. That surface-plumbing narration is exactly the repeated noise this routing removes.
+- **In a terminal Claude Code session**: run the bash flow below, guard first.
+
 ## Preflight (shared across all hippo skills)
 
 ```bash
-[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell — this does NOT necessarily mean Claude Code is too old: on some surfaces (e.g. Claude Desktop) the agent's Bash tool never inherits plugin-scoped env vars even on a fully current, correctly-bootstrapped install, since only hippo's MCP server and hooks (not the general Bash tool) receive them. If this is Desktop, use the mcp__plugin_hippo_hippo__recall MCP tool instead of this skill's bash flow (query-recall only; the --list-by-type corpus map and --all-projects cross-project modes below have NO tool form yet — say they are terminal-only rather than improvising; decision history → the decision_history tool, graph hops → the traverse tool). If this IS a genuine terminal Claude Code session and you still see this, Claude Code likely is too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell. On Claude Desktop this is expected — take the MCP-tool route in 'Surface routing' above instead of this bash flow. In a genuine terminal Claude Code session it means Claude Code is likely too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
 . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
 hippo_resolve_py
 ```

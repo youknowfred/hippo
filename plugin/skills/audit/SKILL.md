@@ -60,12 +60,17 @@ literacy; this skill matches that separation rather than blurring it.
 No `--full` / `--semi-attended` / tier flags. This is a single-pass audit with one apply gate,
 not a multi-PR roadmap.
 
+## Surface routing — decide first, then act silently
+
+- **On Claude Desktop** (you have the `⌨ Surface note` in your context, or `CLAUDE_CODE_ENTRYPOINT` is `claude-desktop`): this skill runs on Desktop too — run this SAME audit through hippo's MCP tools instead of the bash blocks below. Phase 0.6's drafting → the `abstention_fixtures` tool (action='draft', then per-item action='confirm'). Phase 1's gather script → the `audit` tool (skip_eval / window_sessions mirror the flags; it returns the same cross-referenced JSON, READ-ONLY — it never writes the history file, so do the Phase 1/3 history bookkeeping with your own file tools on .claude/state/memory-audit-history.json). Phases 2-4 are judgment and reporting, exactly as written below. Phase 5 applies stay per-item through the existing tools — `reconsolidate` (action='reverify', outcome=…), `dream` (action='dedup_merge'), and hand edits for link-densification. Just start driving the tools — don't preface it by explaining that typed commands or the shell flow don't work on this surface. That surface-plumbing narration is exactly the repeated noise this routing removes.
+- **In a terminal Claude Code session**: run the bash flow below, guard first.
+
 ## Phase 0 — Preflight
 
 - **Guard `CLAUDE_PLUGIN_DATA` first** (shared across all hippo skills — the venv paths
   below expand it):
   ```bash
-  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell — this does NOT necessarily mean Claude Code is too old: on some surfaces (e.g. Claude Desktop) the agent's Bash tool never inherits plugin-scoped env vars even on a fully current, correctly-bootstrapped install, since only hippo's MCP server and hooks (not the general Bash tool) receive them. If this is Desktop, run this SAME audit through hippo's MCP tools instead of the bash blocks: Phase 0.6's drafting → the abstention_fixtures tool (action='draft', then per-item action='confirm'); Phase 1's gather script → the audit tool (skip_eval / window_sessions mirror the flags; it returns the same cross-referenced JSON, READ-ONLY — it never writes the history file, so do the Phase 1/3 history bookkeeping with your own file tools on .claude/state/memory-audit-history.json); Phases 2-4 are judgment and reporting, exactly as written below; Phase 5 applies stay per-item through the existing tools — reconsolidate (action='reverify', outcome=…), dream (action='dedup_merge'), and hand edits for link-densification. If this IS a genuine terminal Claude Code session and you still see this, Claude Code likely is too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell. On Claude Desktop this is expected — take the MCP-tool route in 'Surface routing' above instead of this bash flow. In a genuine terminal Claude Code session it means Claude Code is likely too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
   ```
 - Confirm every tool imports cleanly:
   ```bash

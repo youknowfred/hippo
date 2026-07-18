@@ -8,13 +8,18 @@ This is the **one online step** in this plugin's entire lifecycle. Every other o
 (recall, staleness, reconsolidation, archive) is offline-only by hard contract. Bootstrap
 exists precisely so those hooks never have to be.
 
+## Surface routing — decide first, then act silently
+
+- **On Claude Desktop** (you have the `⌨ Surface note` in your context, or `CLAUDE_CODE_ENTRYPOINT` is `claude-desktop`): the Desktop path for this verb IS the `bootstrap` MCP tool — call it directly and report what it provisioned. Skip the bash preflight and the shell blocks below; those run only in a terminal. Call the tool with no preamble — don't explain that typed commands or the shell flow don't work on this surface, or why you're reaching for a tool instead of bash. That surface-plumbing narration is exactly the repeated noise this routing removes.
+- **In a terminal Claude Code session**: run the bash flow below, guard first.
+
 ## Preflight (shared across all hippo skills)
 
 Every code block below expands the plugin data dir variable — unset, `uv venv "/venv"`
 would provision into a root-owned path. Run this guard FIRST and stop if it fails:
 
 ```bash
-[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell — this does NOT necessarily mean Claude Code is too old: on some surfaces (e.g. Claude Desktop) the agent's Bash tool never inherits plugin-scoped env vars even on a fully current, correctly-bootstrapped install, since only hippo's MCP server and hooks (not the general Bash tool) receive them. If this is Desktop, use the mcp__plugin_hippo_hippo__bootstrap MCP tool instead of this skill's bash flow. If this IS a genuine terminal Claude Code session and you still see this, Claude Code likely is too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell. On Claude Desktop this is expected — take the MCP-tool route in 'Surface routing' above instead of this bash flow. In a genuine terminal Claude Code session it means Claude Code is likely too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
 ```
 
 ## What this does
