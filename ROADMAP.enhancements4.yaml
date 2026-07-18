@@ -817,7 +817,7 @@ workstreams:
         title: Publishable-candidates report (a --candidates flag on the recall_diff CLI — the encode-side twin of EXT-1)
         priority: P2
         effort: S
-        status: planned        # ratified 2026-07-17 with T20 (see the tier block)
+        status: done           # 2026-07-17, session 2 — live partition on 81b95ea..81177ba: 19/8/11 (the vetting's 18/8/10 plus hippo-enh-t21-evidence, written after the vetting, citing files in the range — the 10 reproduce name-for-name inside the 11)
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "PR #75's live sticky comment ('<!-- hippo-memory-on-diff --> 8 memory(ies) cite 22 changed file(s)') vs the 18-row full-corpus run on the same range — 10 local-only candidates reproduced name-for-name (the uncommitted t9/t10/t11/t13 capstones headline), read-only, zero new code"}
         problem: >-
           EXT-1's PR comment renders committed memories only, and the
@@ -843,7 +843,7 @@ workstreams:
           compounding hook. DROP the draft's "PR activity" clause — it needs
           gh/network (inv2); the honest v1 is git-range-only.
         acceptance_criteria:
-          - "--candidates on the recall_diff CLI partitions full-corpus rows for a git range by committed membership via the imported provenance.build_repo_file_index (no fresh ls-files); local-only rows ARE the candidates; reproduces 18/8/10 name-for-name on 81b95ea..81177ba"
+          - "--candidates on the recall_diff CLI partitions full-corpus rows for a git range by committed membership via the imported provenance.build_repo_file_index (no fresh ls-files); local-only rows ARE the candidates; reproduces 18/8/10 name-for-name on 81b95ea..81177ba (AS BUILT 2026-07-17: 19/8/11 live — the corpus gained hippo-enh-t21-evidence after the vetting and it cites files in the range; the original 10 candidates reproduce name-for-name inside the 11)"
           - "report-only + empty-norm (no local-only rows -> silence); git-range-only — NO gh/network dependency (the draft's PR-activity clause is dropped)"
           - "per-candidate readiness composes shipped readers display-only (export_receipts pattern — soak/staleness/verified_by) + PUB-3's heals-N column; no new math; the MSR-6 pin is unimplicated (display-only per-memory RECALL evidence is the sanctioned lane) and stays untouched"
           - "NOT a SessionStart producer; any passive surface is a sleep-report section or a merge_digest fold (adjacency pins respected), never per-prompt"

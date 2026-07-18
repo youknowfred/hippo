@@ -123,6 +123,117 @@ def memories_for_paths(
         return []
 
 
+def candidates_for_range(
+    range_expr: str, memory_dir: str, repo_root: Optional[str]
+) -> dict:
+    """PUB-2: partition the full-corpus rows for a git range by committed membership.
+
+    The encode-side twin of EXT-1: the sticky PR comment renders committed memories
+    only, while the full-corpus join above finds more — the LOCAL-ONLY rows are the
+    publish candidates nothing names today. Membership is
+    ``provenance.build_repo_file_index`` (imported — the pub lane's single-homed
+    oracle, the SHP-1 precedent). Per-candidate readiness composes SHIPPED readers
+    display-only (the export_receipts pattern; no new math): soak strength
+    (``compute_strength_scores``), the staleness flag already on the row,
+    ``verified_by``, and PUB-3's heals-N boundary column. Git-range-only — no
+    gh/network (inv2). Read-only; never raises; empty partition on any failure.
+    """
+    empty = {
+        "range": range_expr,
+        "changed_paths": 0,
+        "total": 0,
+        "committed": [],
+        "candidates": [],
+    }
+    try:
+        paths = changed_paths_for_range(range_expr, repo_root)
+        if not paths or not repo_root:
+            return empty
+        rows = memories_for_paths(paths, memory_dir, repo_root=repo_root)
+        from .provenance import build_repo_file_index, run_git
+
+        top = run_git(["rev-parse", "--show-toplevel"], repo_root).strip() or repo_root
+        repo_files, _basenames = build_repo_file_index(repo_root)
+        mem_rel = os.path.relpath(os.path.realpath(memory_dir), os.path.realpath(top))
+
+        def _committed(name: str) -> bool:
+            rel = f"{name}.md" if mem_rel == "." else f"{mem_rel}/{name}.md"
+            return rel in repo_files
+
+        committed = [r for r in rows if _committed(r["name"])]
+        candidates = [r for r in rows if not _committed(r["name"])]
+        if candidates:
+            heals: Dict[str, int] = {}
+            try:
+                from .lint_links import boundary_lint
+
+                heals = boundary_lint(memory_dir, repo_root).get("heals_by") or {}
+            except Exception:
+                heals = {}
+            strength: Dict[str, float] = {}
+            try:
+                from .soak import compute_strength_scores
+                from .telemetry import default_telemetry_dir
+
+                strength = compute_strength_scores(default_telemetry_dir(memory_dir))
+            except Exception:
+                strength = {}
+            from .team_coverage import read_verified_by
+
+            for r in candidates:
+                vb = None
+                try:
+                    with open(
+                        os.path.join(memory_dir, r["name"] + ".md"), "r", encoding="utf-8"
+                    ) as fh:
+                        vb = read_verified_by(fh.read())
+                except Exception:
+                    vb = None
+                r["readiness"] = {
+                    "heals": heals.get(r["name"], 0),
+                    "strength": strength.get(r["name"]),
+                    "verified_by": vb[0] if vb else None,
+                }
+        return {
+            "range": range_expr,
+            "changed_paths": len(paths),
+            "total": len(rows),
+            "committed": committed,
+            "candidates": candidates,
+        }
+    except Exception:
+        return empty
+
+
+def render_candidates(part: dict) -> str:
+    """The candidates report — ``""`` when no local-only rows cite the range (the
+    empty norm: an all-committed corpus, or a range nothing cites, prints nothing)."""
+    cands = part.get("candidates") or []
+    if not cands:
+        return ""
+    lines = [
+        f"publishable candidates on this range — {len(cands)} local-only of "
+        f"{part['total']} citing memory(ies) ({len(part.get('committed') or [])} already "
+        f"committed) [{part['range']}]:"
+    ]
+    for r in cands:
+        rd = r.get("readiness") or {}
+        bits = []
+        if rd.get("heals"):
+            bits.append(f"heals {rd['heals']} boundary link(s)")
+        if rd.get("strength") is not None:
+            bits.append(f"soak {rd['strength']:.2f}")
+        if rd.get("verified_by"):
+            bits.append(f"verified_by {rd['verified_by']}")
+        stale = r.get("stale") or {}
+        if stale:
+            bits.append(f"stale: {stale['changed']} cited file(s) drifted")
+        marker = " [pin]" if r.get("steer") == "pin" else ""
+        extra = ("  (" + "; ".join(bits) + ")") if bits else ""
+        lines.append(f"- {r['name']} [{r['type']}]{marker} — {r['description']}{extra}")
+    return "\n".join(lines)
+
+
 def render_text(rows: List[dict], *, range_expr: str, changed_count: int) -> str:
     """The human/terminal form — one bounded line per memory; ``""`` when empty.
 
@@ -204,9 +315,37 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--range", required=True, help="git diff range (A..B, A...B, or a ref)")
     parser.add_argument("--json", action="store_true", help="machine-readable output (the Action recipe consumes this)")
     parser.add_argument("--cap", type=int, default=DEFAULT_CAP, help=f"max memories rendered (default {DEFAULT_CAP})")
+    parser.add_argument(
+        "--candidates",
+        action="store_true",
+        help="PUB-2: partition the full-corpus rows by committed membership — the "
+        "local-only rows are the publish candidates, with display-only readiness "
+        "(heals-N, soak, verified_by, staleness). Report-only; empty when none.",
+    )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--repo-root", default=None)
     args = parser.parse_args(argv)
+
+    if args.candidates:
+        try:
+            memory_dir, repo_root = args.memory_dir, args.repo_root
+            if memory_dir is None or repo_root is None:
+                from .provenance import resolve_dirs
+
+                md, rr = resolve_dirs()
+                memory_dir = memory_dir or md
+                repo_root = repo_root or rr
+            part = candidates_for_range(args.range, memory_dir, repo_root)
+            if args.json:
+                print(json.dumps(part, ensure_ascii=False))
+            else:
+                out = render_candidates(part)
+                if out:
+                    print(out)
+        except Exception:
+            pass  # report-only: a broken ref prints nothing and exits clean
+        return 0
+
     return run(
         args.range,
         memory_dir=args.memory_dir,

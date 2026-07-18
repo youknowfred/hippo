@@ -155,3 +155,114 @@ def test_boundary_cli_never_gates(repo, memory_dir, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "boundary-dangling=2" in out and "typed=1" in out
     assert "heals-N" in out and "loc_c" in out
+
+
+# --------------------------------------------------------------------------- #
+# PUB-2: --candidates — the encode-side twin of EXT-1
+# --------------------------------------------------------------------------- #
+def _citing_mem(name: str, cited: str, body: str = "body", extra: str = "") -> str:
+    return (
+        f"---\nname: {name}\ndescription: d for {name}\nmetadata:\n  type: project\n"
+        f'  cited_paths: ["{cited}"]\n{extra}---\n{body}\n'
+    )
+
+
+def _range_corpus(repo: str):
+    """Commit 1: src/app.py + the committed memory pub_a citing it (pub_a also links
+    [[loc_c]], so publishing loc_c heals 1 boundary dangling). Commit 2: change
+    src/app.py — the range's changed path. Local-only after both commits: loc_c
+    (cites src/app.py — the candidate) and loc_x (cites elsewhere — not a row)."""
+    write_file(repo, "src/app.py", "def handler():\n    return 1\n")
+    write_file(
+        repo,
+        ".claude/memory/pub_a.md",
+        _citing_mem("pub_a", "src/app.py", body="see [[loc_c]]"),
+    )
+    first = git_commit(repo, "base", 1_700_000_000)
+    write_file(repo, "src/app.py", "def handler():\n    return 2\n")
+    second = git_commit(repo, "change app", 1_700_000_100)
+    write_file(repo, ".claude/memory/loc_c.md", _citing_mem("loc_c", "src/app.py"))
+    write_file(repo, ".claude/memory/loc_x.md", _citing_mem("loc_x", "src/other.py"))
+    return f"{first}..{second}"
+
+
+def test_candidates_partition_by_committed_membership(repo, memory_dir):
+    from memory import recall_diff as RD
+
+    rng = _range_corpus(repo)
+    part = RD.candidates_for_range(rng, memory_dir, repo)
+    assert part["changed_paths"] == 1 and part["total"] == 2
+    assert [r["name"] for r in part["committed"]] == ["pub_a"]
+    assert [r["name"] for r in part["candidates"]] == ["loc_c"]
+    # readiness composes shipped readers display-only: heals-N from the boundary view
+    rd = part["candidates"][0]["readiness"]
+    assert rd["heals"] == 1  # pub_a's [[loc_c]] dangles at the boundary; publishing heals it
+    assert rd["strength"] is None  # no telemetry in the fixture — absent, not invented
+    assert rd["verified_by"] is None
+
+
+def test_candidates_readiness_carries_verified_by(repo, memory_dir):
+    from memory import recall_diff as RD
+
+    rng = _range_corpus(repo)
+    write_file(
+        repo,
+        ".claude/memory/loc_c.md",
+        _citing_mem("loc_c", "src/app.py", extra="verified_by: reviewer@2026-07-01T00:00:00Z\n"),
+    )
+    part = RD.candidates_for_range(rng, memory_dir, repo)
+    assert part["candidates"][0]["readiness"]["verified_by"] == "reviewer"
+
+
+def test_candidates_empty_norm_all_committed(repo, memory_dir):
+    from memory import recall_diff as RD
+
+    write_file(repo, "src/app.py", "x = 1\n")
+    write_file(repo, ".claude/memory/pub_a.md", _citing_mem("pub_a", "src/app.py"))
+    first = git_commit(repo, "base", 1_700_000_000)
+    write_file(repo, "src/app.py", "x = 2\n")
+    second = git_commit(repo, "change", 1_700_000_100)
+    part = RD.candidates_for_range(f"{first}..{second}", memory_dir, repo)
+    assert part["candidates"] == [] and len(part["committed"]) == 1
+    assert RD.render_candidates(part) == ""  # silence — the empty norm
+
+
+def test_candidates_cli_report_and_empty_norm(repo, memory_dir, monkeypatch, capsys):
+    from memory import recall_diff as RD
+
+    rng = _range_corpus(repo)
+    rc = RD.main(["--range", rng, "--memory-dir", memory_dir, "--repo-root", repo, "--candidates"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "publishable candidates on this range — 1 local-only of 2" in out
+    assert "loc_c" in out and "heals 1 boundary link(s)" in out
+    # a broken ref is report-only: prints nothing, exits 0
+    rc = RD.main(["--range", "no-such..refs", "--memory-dir", memory_dir, "--repo-root", repo, "--candidates"])
+    assert rc == 0 and capsys.readouterr().out == ""
+
+
+def test_candidates_json_carries_the_partition(repo, memory_dir, capsys):
+    import json as _json
+
+    from memory import recall_diff as RD
+
+    rng = _range_corpus(repo)
+    rc = RD.main(["--range", rng, "--memory-dir", memory_dir, "--repo-root", repo, "--candidates", "--json"])
+    assert rc == 0
+    doc = _json.loads(capsys.readouterr().out)
+    assert set(doc) == {"range", "changed_paths", "total", "committed", "candidates"}
+    assert [r["name"] for r in doc["candidates"]] == ["loc_c"]
+
+
+def test_candidates_lane_issues_no_fresh_ls_files_and_no_network():
+    """Membership stays single-homed (SHP-1) and the lane is git-range-only — the
+    draft's PR-activity clause was dropped: no gh, no urllib, no requests."""
+    import inspect
+
+    from memory import recall_diff as RD
+
+    src = inspect.getsource(RD)
+    assert "build_repo_file_index" in src
+    assert "ls-files" not in src
+    for needle in ("urllib", "requests.", "http.client", "socket"):
+        assert needle not in src
