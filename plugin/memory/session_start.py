@@ -107,7 +107,7 @@ _DESKTOP_SURFACE_NOTE = (
     "material; judgment and applies stay per-item in the skill). "
     # INT-19: never promise a route that dead-ends — this list stays honest.
     "NOT available on this surface (terminal-only for now — say so, do not improvise a "
-    "workaround): export-agents, import, promote, promote-rule, remove, review. "
+    "workaround): export-agents, import, promote, promote-rule, publish, remove, review. "
     "The corpus-repair and incident-response verbs are MCP tools on BOTH surfaces, with no "
     "/hippo:* form: rederive (action='worklist'|'one'|'snapshot'|'stamp'), heal_baselines, "
     "untrust (revoke a corpus's trust after finding it bad) and blast_radius (read-only: "

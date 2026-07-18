@@ -481,7 +481,7 @@ workstreams:
         title: Machine census (new sibling machine_census.py — delegate-never-fork)
         priority: P1
         effort: M
-        status: proposed
+        status: done           # 2026-07-17, session 2 — every AC pinned in tests/test_machine_census.py
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "PR #65 (the corrupted registry row that hid THIS corpus from --all-projects/promote_scan for two days); 18/24 dangling ~/.claude/projects memory symlinks + the ~/.claude/hippo-trust.json.pre-prune-20260716 backup (a 10->3 hand-prune) — both reproducible read-only on 2026-07-17"}
         problem: >-
           RCH-11 (PR #65) censused ONE machine-state class — the projects
@@ -537,8 +537,10 @@ workstreams:
           respect for non-hippo shapes).
         implementation_notes: >-
           Seams: registry.py:registry_census (L165) / _under_volatile_root
-          (L154 — registry-private today; promote it or duplicate-with-credit,
-          a named decision at build time) / main (L287-348 — the
+          (L154 — the vetting called it registry-private, but the live tree
+          already had init_project.py:305 importing it cross-module; the build
+          decision 2026-07-17 followed that shipped precedent — imported as-is,
+          no rename, no duplicate) / main (L287-348 — the
           report/--json/empty-norm shape to mirror); trust.py:
           trust_registry_path (L66) + _load_registry_doc; provenance.py:
           encode_project_dir + check_project_symlink (read-only imports; NO
@@ -551,10 +553,14 @@ workstreams:
           doctor_checks_env.py:check_projects_registry (L537 — the shipped
           single-class pattern). Live census 2026-07-17 (reproducible
           read-only): projects 13 rows = 3 durable-live + 10 temp-rooted-live;
-          trust 3 rows all live (0 dead post hand-prune); 18/24 symlinks
-          dangling (15 pytest-of-fredbook targets + 3 /tmp/newproj.*-class —
-          all temp-rooted); 1 launchd artifact, healthy but embedding the dev
-          venv path. hippo-llm.json (llm_client.py:68) is the third
+          trust 3 rows all live (0 dead post hand-prune); at vetting 18/24
+          symlinks dangling — re-censused at build (the first real
+          machine_census run, same day): 19/25 dangling, ALL temp-rooted (16
+          pytest-of-fredbook targets + 3 /tmp/newproj.*-class) — the suite
+          re-minted one more between vetting and build, proving the
+          treadmill; 1 launchd artifact, healthy but embedding the dev venv
+          path; the stale fix-worklist-rebounce worktree cited in FLT-1's
+          notes was pruned by T21 cleanup before this tier built. hippo-llm.json (llm_client.py:68) is the third
           ~/.claude/hippo-*.json family member — existence-only mention, no
           class of its own in v1. Trust-census honesty (carried from the
           skeptics): is_trusted fails CLOSED and a dead trust row cannot
@@ -568,7 +574,7 @@ workstreams:
         title: Dangling-symlink remover + the test-isolation leak fix (the one new write)
         priority: P2
         effort: S
-        status: proposed
+        status: done           # 2026-07-17, session 2 — landed as --prune-dangling on HYG-1's CLI (the scope decision the id records); first live drain: 20 removed, 0 kept, 0 failed
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "all 18 dangling symlinks are test-leaked — targets name test_init_on_trusted_corpus_wi* / /tmp/newproj.*; tests/test_mcp_setup_tools.py:578,588 call the real init tool with no HOME/claude_projects_dir isolation; mtimes show ~15 minted in 36h (3@07-12, 12@07-16, 3@07-17)"}
         problem: >-
           The census's flagship class needs a drain AND a faucet fix: every
@@ -631,17 +637,22 @@ workstreams:
           tests/test_mcp_setup_tools.py:578,588 + tests/conftest.py (the leak
           source — zero HOME/claude_projects_dir guards today;
           init_project.py's claude_projects_dir override exists for hermetic
-          tests and these call sites bypass it). Day-one yield: all 18
-          current candidates are temp-rooted (the batch class is non-empty);
-          trust registry TODAY has 0 dead rows (post hand-prune) — report-only
-          costs nothing now and produces exactly the census data Q2's revisit
-          wants.
+          tests and these call sites bypass it). Day-one yield AS BUILT
+          (2026-07-17): the live drain removed 20 (not the vetting's 18 — the
+          HYG-1 session's own pre-guard suite runs minted two more, incl. one
+          DURING this very tier's build), 0 kept, 0 failed; farm now 6/6 ok.
+          Leak-fix mechanism as landed: HIPPO_CLAUDE_PROJECTS_DIR (resolved by
+          machine_census.claude_projects_root, honored by init_project's one
+          write seam, set autouse in conftest, documented in STABILITY.md);
+          the 578/588 offenders verified to mint nothing post-guard. Trust
+          registry at build: 0 dead rows — report-only costs nothing now and
+          produces exactly the census data Q2's revisit wants.
 
       - id: HYG-3
         title: One doctor line; sleep inherits (census surfacing)
         priority: P2
         effort: S
-        status: proposed
+        status: done           # 2026-07-17, session 2 — check_machine_state appended before the pinned-last check; zero sleep.py changes; tests in test_machine_census.py
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "PR #65 (census + doctor line + sleep inheritance shipped as ONE unit — the pattern); the no-spontaneous-census history: three rot classes (16-row registry, 10-row trust file, 18 symlinks) each accumulated silently until a probe or doctor line existed"}
         problem: >-
           Machine-state rot that lacks a doctor line demonstrably stays
@@ -715,7 +726,7 @@ workstreams:
         title: Per-item publish verb (new sibling publish.py + the 18th skill /hippo:publish — print-only pending Q3)
         priority: P1
         effort: M
-        status: proposed
+        status: done           # 2026-07-17, session 2 — print-only shipped as recommended (Q3 stays PENDING); first real preflight: hippo-v1-roadmap-proposal (heals 7, soak 0.57, both advisory classes fired incl. its 2 unresolved contradicts pairs, ready block printed)
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "PR #67 (the hand ritual, the ratified per-item posture, and '~15 entropy WARNs' sitting in exactly the uncommitted release-era records future publishes will touch); PR #74 CLB-1 (the CI backstop — deterministic secrets + Tier-A only); 10 local-only candidates measured on PR #75's range"}
         problem: >-
           PR #67's curated-subset posture ("every future memory stays
@@ -763,7 +774,7 @@ workstreams:
           - "PRINT-ONLY pending Q3 (ED4R-1) — prints the exact git add -f + suggested commit line and stops; a test pins that publish.py never invokes git add/commit; the documented consent moments are the printed command + PR review + the CLB-1 CI backstop"
           - "the membership oracle is provenance.build_repo_file_index (imported) — a test pins that the pub lane issues no fresh git ls-files call (the SHP-1 full-name bug precedent)"
           - "boundary preview and readiness evidence are cross-references to PUB-3/PUB-2 (display-only, the export_receipts composition pattern); publish NEVER transforms content — byte-identical in-place file + git tracking only; if it grows a transform it has become pack_extract and must be killed"
-          - "the 18th skill self-registers via the glob-derived skills contract (tests/test_skills_contract.py — no count pin to bump) and its docs draw the promote/pack/publish naming triangle + distinguish init's whole-dir nudge"
+          - "the 18th skill self-registers via the glob-derived skills contract (tests/test_skills_contract.py; drift corrected at build 2026-07-17 — there is no COUNT pin, but test_shipped_skills_are_exactly_these carries an exact NAME list that gains 'publish') and its docs draw the promote/pack/publish naming triangle + distinguish init's whole-dir nudge"
         dependencies: [CLB-1, SEC-8, RCH-5, IOP-3, PUB-2, PUB-3]   # CLB-1/SEC-8/RCH-5/IOP-3 cross-file SHIPPED; PUB-2/PUB-3 in-round (build order PUB-3 -> PUB-2 -> PUB-1, or PUB-1 first with previews inlined)
         invariant_note: >-
           inv4 — print-only preserves the verified invariant that no
@@ -806,7 +817,7 @@ workstreams:
         title: Publishable-candidates report (a --candidates flag on the recall_diff CLI — the encode-side twin of EXT-1)
         priority: P2
         effort: S
-        status: proposed
+        status: done           # 2026-07-17, session 2 — live partition on 81b95ea..81177ba: 19/8/11 (the vetting's 18/8/10 plus hippo-enh-t21-evidence, written after the vetting, citing files in the range — the 10 reproduce name-for-name inside the 11)
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "PR #75's live sticky comment ('<!-- hippo-memory-on-diff --> 8 memory(ies) cite 22 changed file(s)') vs the 18-row full-corpus run on the same range — 10 local-only candidates reproduced name-for-name (the uncommitted t9/t10/t11/t13 capstones headline), read-only, zero new code"}
         problem: >-
           EXT-1's PR comment renders committed memories only, and the
@@ -832,7 +843,7 @@ workstreams:
           compounding hook. DROP the draft's "PR activity" clause — it needs
           gh/network (inv2); the honest v1 is git-range-only.
         acceptance_criteria:
-          - "--candidates on the recall_diff CLI partitions full-corpus rows for a git range by committed membership via the imported provenance.build_repo_file_index (no fresh ls-files); local-only rows ARE the candidates; reproduces 18/8/10 name-for-name on 81b95ea..81177ba"
+          - "--candidates on the recall_diff CLI partitions full-corpus rows for a git range by committed membership via the imported provenance.build_repo_file_index (no fresh ls-files); local-only rows ARE the candidates; reproduces 18/8/10 name-for-name on 81b95ea..81177ba (AS BUILT 2026-07-17: 19/8/11 live — the corpus gained hippo-enh-t21-evidence after the vetting and it cites files in the range; the original 10 candidates reproduce name-for-name inside the 11)"
           - "report-only + empty-norm (no local-only rows -> silence); git-range-only — NO gh/network dependency (the draft's PR-activity clause is dropped)"
           - "per-candidate readiness composes shipped readers display-only (export_receipts pattern — soak/staleness/verified_by) + PUB-3's heals-N column; no new math; the MSR-6 pin is unimplicated (display-only per-memory RECALL evidence is the sanctioned lane) and stays untouched"
           - "NOT a SessionStart producer; any passive surface is a sleep-report section or a merge_digest fold (adjacency pins respected), never per-prompt"
@@ -861,7 +872,7 @@ workstreams:
         title: Subset-boundary link honesty (a VIEW over the committed subset — never a gate)
         priority: P2
         effort: S
-        status: proposed
+        status: done           # 2026-07-17, session 2 — boundary_lint + --boundary CLI + doctor line; 20/9/0 REPRODUCED at 90bc481 (committed subset unchanged since 81177ba), heals-N concentration verbatim (hippo-v1-roadmap-proposal 7)
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "lint_links.lint over the 15-file fresh-checkout view = 20 dangling wikilinks / 9 files / 0 typed at 81177ba, vs 1 unrelated dangling on the owner's full corpus — reproducible read-only; PR #67 body predicted the class ('expected, not an error')"}
         problem: >-
           Committed memories wikilink local-only memories: the shipped lint
@@ -1284,10 +1295,16 @@ release_train:
       coverage boundary as-shipped.
 
   - tier: T19
-    target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
+    target_version: v1.24.0    # assigned at release 2026-07-17 ("A clean machine, and a front door" — joint with T20)
     theme: "Machine-state lifecycle"
-    status: proposed
-    gate: "None cross-file — stands entirely on shipped RCH-11/SEN-5/SLP-2/SEC-6. In-round: HYG-2 and HYG-3 both depend on HYG-1 (INT-18 makes HYG-3 mechanically unshippable before the census command exists)."
+    status: done           # 2026-07-17, one session: HYG-1 census (first report: 19/25 dangling), HYG-2 as --prune-dangling + the conftest faucet fix (drain: 20 removed / 0 kept / 0 failed; farm 6/6 ok), HYG-3 warn-on-dead doctor line (sleep inherits free). Q2 PENDING — trust shipped report-only as recommended.
+    ratified: >-
+      2026-07-17 — owner-directed (Fred's scheduled T19+T20 implementation chip, naming
+      both tiers, the HYG-1 -> HYG-2 -> HYG-3 order, and the report-only/print-only
+      postures): T19 selected for build per LAW ZERO. The chip is the dated scheduling
+      signal ED4R-1 requires; Q2 stays PENDING (the trust half ships REPORT-ONLY as
+      recommended) unless Fred volunteers a dated verdict in-session.
+    gate: "None cross-file — stands entirely on shipped RCH-11/SEN-5/SLP-2/SEC-6 (re-confirmed on the live tree at 90bc481, 2026-07-17). In-round: HYG-2 and HYG-3 both depend on HYG-1 (INT-18 makes HYG-3 mechanically unshippable before the census command exists)."
     done_means: >-
       The machine-wide rot classes with a real oracle are censused (the
       symlink farm is the flagship), the symlink leak is stopped at the
@@ -1315,10 +1332,15 @@ release_train:
       --prune-dangling.
 
   - tier: T20
-    target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
+    target_version: v1.24.0    # assigned at release 2026-07-17 ("A clean machine, and a front door" — joint with T19)
     theme: "The publish lane"
-    status: proposed
-    gate: "None cross-file — CLB-1/SEC-8/RCH-5/IOP-3/EXT-1 all shipped. In-round build order: PUB-3-view -> PUB-2-report -> PUB-1-verb, or PUB-1 first with the boundary preview + receipt inlined (the cross-refs collapse inward)."
+    status: done           # 2026-07-17, one session, build order PUB-3 -> PUB-2 -> PUB-1 as gated: boundary view (20/9/0 reproduced; heals-N live), candidates report (19/8/11 on the historical range), publish verb + 18th skill (print-only as recommended; Q3 PENDING). done_means met — the #67 posture stops being hand tooling.
+    ratified: >-
+      2026-07-17 — owner-directed (the same T19+T20 implementation chip): T20 selected
+      for build per LAW ZERO, in-tier order PUB-3 -> PUB-2 -> PUB-1 per the tier gate.
+      Q3 stays PENDING (PUB-1 ships PRINT-ONLY as recommended) unless Fred volunteers a
+      dated verdict in-session.
+    gate: "None cross-file — CLB-1/SEC-8/RCH-5/IOP-3/EXT-1 all shipped (re-confirmed on the live tree at 90bc481, 2026-07-17). In-round build order: PUB-3-view -> PUB-2-report -> PUB-1-verb, or PUB-1 first with the boundary preview + receipt inlined (the cross-refs collapse inward)."
     done_means: >-
       Per-item publish preflight exists (print-only pending Q3), the
       encode-side twin of EXT-1 names what should be published next with

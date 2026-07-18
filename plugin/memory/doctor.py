@@ -59,6 +59,7 @@ from .doctor_checks_env import (
     check_mcp_launch,
     check_stale_memobot_env,
     check_projects_registry,
+    check_machine_state,
     check_plugin_version,
 )
 from .doctor_checks_corpus import (
@@ -79,6 +80,7 @@ from .doctor_checks_corpus import (
     check_evidence_fences,
     check_merge_digest,
     check_team_coverage,
+    check_subset_boundary,
     _LATIN_ALPHA_RANGES,
     _NON_ENGLISH_MIN_ALPHA_SAMPLE,
     _NON_ENGLISH_ALPHA_FRACTION,
@@ -363,6 +365,8 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("merge_digest", check_merge_digest),  # CLB-4: incoming-merge duplicate pairs, human-routed
     ("team_coverage", check_team_coverage),  # CLB-2: last_verified lit up + verified_by coverage (suppressed solo)
     ("foreign_dialects", check_foreign_dialects),  # IOP-1: foreign rule dialects censused + divergence/rot (on-demand only)
+    ("machine_state", check_machine_state),  # HYG-3: warn-on-DEAD-only census summary; sleep inherits free
+    ("subset_boundary", check_subset_boundary),  # PUB-3: committed-subset link honesty; never a gate
     ("stale_memobot_env", check_stale_memobot_env),  # pinned last (env hygiene trails)
 ]
 

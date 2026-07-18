@@ -625,3 +625,47 @@ def check_plugin_version(ctx: DoctorContext) -> Dict[str, str]:
         }
     except Exception as exc:
         return {"status": "warn", "message": f"plugin-version check failed: {exc}."}
+
+
+def check_machine_state(ctx: DoctorContext) -> Dict[str, str]:
+    """HYG-3: machine-state rot beyond the projects registry — warn on DEAD only.
+
+    One line summarizing the census classes ``check_projects_registry`` does NOT
+    already cover: dead trust rows, dangling memory symlinks, gone-path scheduler
+    artifacts. Temp-rooted-LIVE rows never warn and the volatile split stays in the
+    census command's own report — warn-on-dead-only keeps this line from becoming
+    wallpaper in a section that already carries chronic warns. Sleep inherits the line
+    free through its doctor section (SLP-1's reuse rule — no forked text) and machine
+    rot is not per-session news, so there is deliberately NO SessionStart producer.
+    Honest-surface bound: a moved venv/repo kills the scheduled 07:30 run before hippo
+    starts, so the morning report cannot carry this warn for its own dead schedule —
+    on-demand doctor is the live surface for that class. Read-only; never raises.
+    """
+    try:
+        from .machine_census import scheduler_census, symlink_farm_census, trust_census
+
+        farm = symlink_farm_census()
+        dangling = farm["dangling"] + farm["dangling_temp_rooted"]
+        dead_trust = trust_census()["dead"]
+        stale_sched = scheduler_census()["stale"]
+        if not (dangling or dead_trust or stale_sched):
+            return {
+                "status": "ok",
+                "message": "machine state: no dead trust rows, dangling memory symlinks, "
+                "or stale scheduler artifacts (full census: python -m memory.machine_census).",
+            }
+        parts = []
+        if dangling:
+            parts.append(f"{dangling} dangling memory symlink" + ("" if dangling == 1 else "s"))
+        if dead_trust:
+            parts.append(f"{dead_trust} dead trust row" + ("" if dead_trust == 1 else "s"))
+        if stale_sched:
+            parts.append(
+                f"{stale_sched} stale scheduler artifact" + ("" if stale_sched == 1 else "s")
+            )
+        msg = "machine state: " + ", ".join(parts) + " — census: python -m memory.machine_census"
+        if farm["dangling_temp_rooted"]:
+            msg += " (then --prune-dangling for the temp-rooted batch)"
+        return {"status": "warn", "message": msg + "."}
+    except Exception as exc:
+        return {"status": "warn", "message": f"machine-state check failed: {exc}."}

@@ -249,9 +249,15 @@ def init_project(
         # partial result (idempotent re-run resumes), not a dead tool call.
         result["warnings"].append(f"seeding stopped early: {exc}")
 
-    # Step 3: the cross-machine symlink (SHP-5 encoding, ONE tested helper).
+    # Step 3: the cross-machine symlink (SHP-5 encoding, ONE tested helper). The base
+    # resolves through claude_projects_root() so HIPPO_CLAUDE_PROJECTS_DIR binds the
+    # ONE write path (HYG-2: the conftest guard sets it suite-wide — 19 of 25 farm
+    # entries on the reference machine were dangling symlinks minted by tests calling
+    # this very step with no isolation).
+    from .machine_census import claude_projects_root
+
     result["symlink"] = create_project_symlink(
-        repo_root, memory_dir, claude_projects_dir=claude_projects_dir
+        repo_root, memory_dir, claude_projects_dir=claude_projects_dir or claude_projects_root()
     )
 
     # Step 4: the recall index. allow_download=False — init is offline by contract (the

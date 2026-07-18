@@ -93,6 +93,20 @@ def _isolate_trust_registry(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_claude_projects_dir(tmp_path, monkeypatch):
+    """HYG-2: keep the harness-owned ``~/.claude/projects`` symlink base hermetic.
+
+    Every dangling ``~/.claude/projects/<encoded>/memory`` symlink on the reference
+    machine (19 of 25 on 2026-07-17) was minted by tests that ran the REAL init with no
+    isolation — the targets are dead pytest tmp trees. ``init_project`` resolves its
+    symlink base through ``machine_census.claude_projects_root()``, which honors this
+    override, so every farm write lands in tmp and dies with the test. Tests exercising
+    the farm point the var (or the explicit ``claude_projects_dir`` args) at a dir they
+    control."""
+    monkeypatch.setenv("HIPPO_CLAUDE_PROJECTS_DIR", str(tmp_path / "claude-projects-guard"))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_memory_tiers(tmp_path, monkeypatch):
     """Keep TEA-1/TEA-3 multi-corpus fusion hermetic across the whole suite.
 

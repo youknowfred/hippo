@@ -149,6 +149,13 @@ VERBS: Tuple[VerbSurface, ...] = (
         note="promote ONE memory into a scoped rule; propose-only in a terminal",
     ),
     VerbSurface(
+        "publish",
+        desktop="terminal_only",
+        mcp_tools=(),
+        note="PUB-1: per-item entry INTO the committed subset; print-only pending Q3, "
+        "per-item in a terminal (the export-agents precedent)",
+    ),
+    VerbSurface(
         "recall",
         desktop="tool",
         mcp_tools=("recall", "decision_history", "traverse"),
