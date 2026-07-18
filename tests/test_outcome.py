@@ -361,3 +361,82 @@ def test_touch_grain_report_compares_both_grains(repo, memory_dir, capsys):
     out = capsys.readouterr().out
     assert "session grain" in out and "touch grain" in out
     assert "report-only" in out.lower()
+
+
+# --------------------------------------------------------------------------- #
+# EVD-2: touch-grain lane HEALTH/diagnosis — a reader that explains this lane's zeros
+# (live-hook lag; worktree-prefixed paths) instead of charting them. Extends the
+# --touch-grain comparison by COMPOSITION; aggregation stays lane-level or
+# positive-evidence-only (the MSR-6 / round-1 noise-finder kill).
+# --------------------------------------------------------------------------- #
+def _write_rows(td, rows):
+    os.makedirs(td, exist_ok=True)
+    with open(os.path.join(td, "outcome_events.jsonl"), "w", encoding="utf-8") as fh:
+        for r in rows:
+            fh.write(json.dumps(r) + "\n")
+
+
+def test_lane_health_reports_volumes_maps_and_worktree_share(repo, memory_dir):
+    _mem(memory_dir, "app-note", ["src/app.py"])
+    _jit_cache(memory_dir)
+    _write_rows(default_telemetry_dir(memory_dir), [
+        {"ts": 10.0, "session_id": "s1", "tool": "Read", "path": "src/app.py",
+         "cited_by": ["app-note"]},
+        {"ts": 11.0, "session_id": "s1", "tool": "Read", "path": "src/free.py"},
+        # the worktree-prefixed class: recorded relative to the MAIN root; the first
+        # WOULD map to a cited path if prefix-stripped, the second would not
+        {"ts": 12.0, "session_id": "s2", "tool": "Edit",
+         "path": ".claude/worktrees/wt1/src/app.py"},
+        {"ts": 13.0, "session_id": "s2", "tool": "Edit",
+         "path": ".claude/worktrees/wt1/docs/x.md"},
+    ])
+    out = O.format_lane_health(memory_dir)
+    assert "outcome rows: 4 across 2 session(s); 1 carry cited_by" in out
+    assert "touchmap: 1 cited path(s) / 0 reminder path(s)" in out
+    assert "worktree-prefixed rows: 2 of 4 (50%)" in out
+    assert "1 would map if prefix-stripped" in out
+    assert "FLT-3" in out and "own follow-up item" in out  # coupling named, fix not smuggled
+
+
+def test_lane_health_zero_cited_by_names_live_hook_lag(repo, memory_dir):
+    _mem(memory_dir, "app-note", ["src/app.py"])
+    _write_rows(default_telemetry_dir(memory_dir), [
+        {"ts": 10.0, "session_id": "s1", "tool": "Read", "path": "src/app.py"},
+    ])
+    out = O.format_lane_health(memory_dir)
+    assert "live-hook lag" in out  # the verified mechanical reason, named
+    _write_rows(default_telemetry_dir(memory_dir), [
+        {"ts": 10.0, "session_id": "s1", "tool": "Read", "path": "src/app.py",
+         "cited_by": ["app-note"]},
+    ])
+    assert "live-hook lag" not in O.format_lane_health(memory_dir)  # recording proven -> silent
+
+
+def test_lane_health_composes_the_grain_report_never_duplicates_it(repo, memory_dir):
+    """The AC's pin: the existing --touch-grain comparison is EXTENDED by composition —
+    format_lane_health calls format_touch_grain_report and hand-renders no grain lines."""
+    src = inspect.getsource(O.format_lane_health)
+    assert "format_touch_grain_report" in src
+    assert "session grain:" not in src and "touch grain:" not in src
+    _mem(memory_dir, "app-note", ["src/app.py"])
+    out = O.format_lane_health(memory_dir)
+    assert out.count("session grain:") == 1 and out.count("touch grain:") == 1
+
+
+def test_lane_health_never_renders_a_per_memory_zero_table(repo, memory_dir):
+    """MSR-6 / the round-1 noise-finder kill, held behaviorally: a memory injected but
+    never touched appears NOWHERE in the health output — only positive evidence and
+    lane-level aggregates render."""
+    _mem(memory_dir, "ghost-note", ["src/ghost.py"])
+    _jit_cache(memory_dir)
+    td = default_telemetry_dir(memory_dir)
+    T.log_episode(["ghost-note"], query="q", repo_root=repo, telemetry_dir=td, session_id="s")
+    out = O.format_lane_health(memory_dir)
+    assert "ghost-note" not in out
+
+
+def test_touch_grain_cli_prints_lane_health_plus_comparison(repo, memory_dir, capsys):
+    _mem(memory_dir, "app-note", ["src/app.py"])
+    assert O.main(["--touch-grain", "--memory-dir", memory_dir]) == 0
+    out = capsys.readouterr().out
+    assert "lane health" in out and "session grain" in out

@@ -1017,7 +1017,18 @@ workstreams:
         title: Touch-grain lane health/diagnosis (reframe — the lane recorded zero for mechanical reasons)
         priority: P3
         effort: S
-        status: proposed
+        status: done           # 2026-07-17, T21 session 1 — probe first, then the surface (tests/test_outcome.py EVD-2 block)
+        ed3_probe: >-
+          Step zero, run 2026-07-17T23:49Z BEFORE any surface code: the lane RECORDS
+          on this machine. outcome_events.jsonl held 8 cited_by rows over 2861 total
+          (vetting baseline: 0/2682) — session 5a535196 (the v1.22.1 release session)
+          stamped reads/edits of provenance.py and both plugin manifests, and the T21
+          build session itself (3b7ff303, a MAIN-CLONE session) stamped its two Reads
+          of ROADMAP.enhancements4.yaml with cited_by=[hippo-enh-exploration-r4] —
+          exactly the probe shape the AC names (mapped file, main clone, cited_by row
+          confirmed). The mechanical-zeros diagnosis is confirmed: recording began at
+          the 2026-07-17T19:02Z 1.17.0→1.22.0 installed-plugin update; live touchmap
+          cited=96 paths (95 at vetting), reminders=0.
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "outcome_events.jsonl — 0 cited_by rows over 2682; 848 of 1675 post-07-16 rows worktree-prefixed (650 would map stripped); installed_plugins.json — hippo jumped 1.17.0 -> 1.22.0 at 2026-07-17T19:02:47Z (5 releases of live-hook lag); all reproducible read-only"}
         problem: >-
           Touch-grain evidence is 0/0 for MECHANICAL reasons, not merely
