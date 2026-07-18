@@ -1159,7 +1159,26 @@ workstreams:
         title: Salience-revisit evidence run (SPLIT — Arm A zero-code ripe today, Q4; Arm B severed behind touch/outcome data)
         priority: P1
         effort: S                      # Arm A (the commissioned run); Arm B is severed at P3/M behind its own proving condition + dated decision
-        status: proposed
+        status: done           # 2026-07-17, T21 session 1 — Arm A commissioned (Q4) and RUN; Arm B stays severed, unchanged
+        q4_verdict: >-
+          2026-07-17, in-session dated owner entry (ED4R-1): Fred commissioned Arm A
+          ("Yes — commission Arm A"), asked and answered during the T21 build session
+          before any run. Arms framing unchanged; no default flipped.
+        arm_a_result: >-
+          Run 2026-07-17 on the lived-in corpus (ambient resolution; the shipped rig,
+          zero new code): backend dense+bm25 (BAAI/bge-small-en-v1.5), corpus_n=48,
+          hard_set_n=32; signal inventory 50 usage-boosted / 27 staleness-penalized —
+          BOTH signal legs had real input for the first time, as this item predicted.
+          RESULT: Δrecall=+0.0000 Δmrr=+0.0000 on BOTH categories (multi-hop n=10,
+          single-hop n=22; low-n labels apply); OFF-arm byte-identity self-check PASS;
+          identical_arms=false (the flag was LIVE and perturbed the ranking view, yet
+          moved zero hard-set metric — active but metrically null). Evidence recorded
+          at .claude/.memory-telemetry/salience_ab.json (gitignored, never the
+          golden/CI report); the shipped check_salience_evidence doctor nudge goes
+          quiet now that the file exists. Read: no affirmative evidence FOR a flip;
+          HIPPO_SALIENCE stays owner-decided-OFF (ED-2/LIF-7 — the flip would need
+          its own dated decision on affirmative evidence, which this run did not
+          produce). The ED-2 revisit file has its first entry.
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "doctor check_salience_evidence fires TODAY on this machine (usage_aggregates 115 sessions / 49 memories >= the lived-in threshold 10; salience_ab.json absent) naming the exact command; the MSR-5 rig shipped in PR #70; 26-entry stale.json gives the staleness penalty real input for the first time"}
         problem: >-
           ED-2 named a lived-in-corpus evidence run as the salience revisit
@@ -1327,7 +1346,7 @@ release_train:
   - tier: T21
     target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
     theme: "Evidence consumers"
-    status: in_progress
+    status: done           # 2026-07-17, one session: EVD-1 done, EVD-2 done (probe first), EVD-3 deferred (empty ledger — exactly the done_means clause), EVD-4 done (Q4 yes; Arm A run; Arm B severed unchanged)
     ratified: >-
       2026-07-17 — owner-directed (Fred's scheduled T21 implementation chip, naming
       EVD-1 first and the in-tier order): T21 selected for build per LAW ZERO. The
@@ -1452,7 +1471,9 @@ decisions:
       Q4 (EVD-4) — commission the salience-revisit evidence run? (rec: yes —
       evidence first, decision later; gates Arm A). Each resolution is a
       dated owner entry recorded on the item and in the capstone; a metric
-      never proxies any of them (LIF-7).
+      never proxies any of them (LIF-7). STATUS 2026-07-17: Q4 RESOLVED —
+      Fred commissioned Arm A in the T21 build session (dated entry +
+      result on EVD-4); Q1, Q2, Q3 remain PENDING.
   - id: ED4R-2
     question: What keeps round 4 from minting the next generation of dark reservoirs?
     decision: no new standing artifact without a NAMED READER (the anti-dark-reservoir law — round 4's organizing spine)
