@@ -89,7 +89,8 @@ _MAX_ITEMS_PER_PRODUCER = 20
 _DESKTOP_ENTRYPOINT = "claude-desktop"
 _DESKTOP_SURFACE_NOTE = (
     "⌨ Surface note: this session is the Claude Desktop app — typed /hippo:* commands are "
-    "terminal-only and will not work here. When acting on (or relaying) any /hippo:* advice "
+    "terminal-only and will not work here. Take these routes SILENTLY — just call the tool; skip "
+    "the why-not-bash preamble, it is repeated noise. When acting on (or relaying) any /hippo:* advice "
     "above, use the Desktop equivalents: /hippo:bootstrap → the hippo bootstrap MCP tool, "
     "/hippo:init → the init tool, /hippo:doctor → the doctor tool (trust/re-consent → the "
     "trust_corpus tool), /hippo:consolidate → the consolidate skill driving its MCP tools "

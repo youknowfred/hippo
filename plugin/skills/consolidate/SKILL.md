@@ -13,25 +13,20 @@ says the pending queue or worklist is deep, or on demand.
 Every write in this skill is per-item and agent-gated — the same approval gate as everywhere
 else. Nothing here is a bulk sweep.
 
+## Surface routing — decide first, then act silently
+
+- **On Claude Desktop** (you have the `⌨ Surface note` in your context, or `CLAUDE_CODE_ENTRYPOINT` is `claude-desktop`): this skill runs on Desktop too — run this SAME flow through hippo's MCP tools instead of the bash blocks below, the steps map 1:1. Step 1 → the `capture` tool (action=list/discard/snooze/add_decision) with `new_memory` (check:true for the dry-run, then the real write) and the `secrets_scan` tool as the verbatim-hunk hard gate. Step 2 → the `reconsolidate` tool (action=worklist, then per-item action=brief for the evidence, then per-item action=reverify with outcome=graduate|fix|demote|snooze). Step 3 → the `build_index` tool. Step 4 → the `co_recall_proposals` tool (an approved append is a per-item body edit, then `build_index` again). Step 5 → the `abstention_fixtures` tool (action=draft, then per-item action=confirm) — same per-item approval gates throughout. Just start driving the tools — don't preface it by explaining that typed commands or the shell flow don't work on this surface. That surface-plumbing narration is exactly the repeated noise this routing removes.
+- **In a terminal Claude Code session**: run the bash flow below, guard first.
+
 ## Preflight (shared across all hippo skills)
 
 ```bash
-[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell — this does NOT necessarily mean Claude Code is too old: on some surfaces (e.g. Claude Desktop) the agent's Bash tool never inherits plugin-scoped env vars even on a fully current, correctly-bootstrapped install, since only hippo's MCP server and hooks (not the general Bash tool) receive them. If this is Desktop, run this SAME flow through hippo's MCP tools instead of the bash blocks — the steps map 1:1: Step 1 the capture tool (action=list/discard/snooze/add_decision) with new_memory (check:true for the dry-run, then the real write) and the secrets_scan tool as the verbatim-hunk hard gate; Step 2 the reconsolidate tool (action=worklist, then per-item action=brief for the evidence, then per-item action=reverify with outcome=graduate|fix|demote|snooze); Step 3 the build_index tool; Step 4 the co_recall_proposals tool (an approved append is a per-item body edit, then build_index again); Step 5 the abstention_fixtures tool (action=draft, then per-item action=confirm) — same per-item approval gates throughout. If this IS a genuine terminal Claude Code session and you still see this, Claude Code likely is too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell. On Claude Desktop this is expected — take the MCP-tool route in 'Surface routing' above instead of this bash flow. In a genuine terminal Claude Code session it means Claude Code is likely too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
 . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
 hippo_resolve_py
 ```
 
-> **Desktop / MCP surface (INT-13):** when the preflight stops you (no `CLAUDE_PLUGIN_DATA`
-> in this shell), run the SAME flow — same order, same per-item approval gates — through
-> hippo's MCP tools instead of `"$PY"`: the `capture` tool (list / discard / snooze /
-> add_decision) ↔ `memory.capture`; `new_memory` with `check: true` ↔ the `--check` dry-run,
-> and without it ↔ the real write; the `secrets_scan` tool ↔ the `scan_with_remediation`
-> hard gate; the `reconsolidate` tool (worklist / reverify, outcome includes `snooze`) ↔
-> `memory.reconsolidate`; the `build_index` tool ↔ `memory.build_index`; the
-> `co_recall_proposals` tool ↔ the Step 4 tally (the approved append itself stays a
-> per-item agent edit of ONE body); the `abstention_fixtures` tool (draft / confirm) ↔ the
-> Step 5 primitives. Each capture seed is a plain JSON file — read it directly for the full
-> evidence when drafting.
+> **Desktop / MCP surface (INT-13):** the tool-by-tool mapping is in 'Surface routing' above — drive the SAME flow through those MCP tools, same order, same per-item approval gates. Each capture seed is a plain JSON file: read it directly for the full evidence when drafting.
 
 ## Step 1 — Drain the pending capture queue (CAP-2 → CAP-3)
 

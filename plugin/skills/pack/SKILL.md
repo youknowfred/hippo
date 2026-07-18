@@ -11,26 +11,22 @@ the v0.8.0 trust spine): install a reviewed pack per-item, and update it later w
 three-way merges that preserve your local edits. A foreign pack is the public-corpus
 prompt-injection threat — every inbound step below is per-item, demarcated, and refusable.
 
+## Surface routing — decide first, then act silently
+
+- **On Claude Desktop** (you have the `⌨ Surface note` in your context, or `CLAUDE_CODE_ENTRYPOINT` is `claude-desktop`): this skill runs on Desktop too — run this SAME flow through hippo's `pack_*` MCP tools instead of the bash blocks below, the steps map 1:1. Extract → the `pack_extract` tool (names=[…] or all=true). Install → the `pack_install_plan` tool, then ONE `pack_install_item` call per explicitly-approved name. Update → the `pack_update_plan` tool, then ONE `pack_update_item` call per approved item — same per-item approval gates throughout; NEVER drive the python primitives by hand around this routing. Just start driving the tools — don't preface it by explaining that typed commands or the shell flow don't work on this surface. That surface-plumbing narration is exactly the repeated noise this routing removes.
+- **In a terminal Claude Code session**: run the bash flow below, guard first.
+
 ## Preflight (shared across all hippo skills)
 
 ```bash
-[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell — this does NOT necessarily mean Claude Code is too old: on some surfaces (e.g. Claude Desktop) the agent's Bash tool never inherits plugin-scoped env vars even on a fully current, correctly-bootstrapped install, since only hippo's MCP server and hooks (not the general Bash tool) receive them. If this is Desktop, run this SAME flow through hippo's pack_* MCP tools instead of the bash blocks — the steps map 1:1: extract → the pack_extract tool (names=[…] or all=true); install → the pack_install_plan tool, then ONE pack_install_item call per explicitly-approved name; update → the pack_update_plan tool, then ONE pack_update_item call per approved item — same per-item approval gates throughout; NEVER drive the python primitives by hand around this preflight. If this IS a genuine terminal Claude Code session and you still see this, Claude Code likely is too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell. On Claude Desktop this is expected — take the MCP-tool route in 'Surface routing' above instead of this bash flow. In a genuine terminal Claude Code session it means Claude Code is likely too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
 . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
 hippo_resolve_py
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 MEMORY_DIR="$REPO_ROOT/.claude/memory"
 ```
 
-> **Desktop / MCP surface (INT-16):** when the preflight stops you (no `CLAUDE_PLUGIN_DATA`
-> in this shell), run the SAME flow — same order, same per-item approval gates — through
-> hippo's MCP tools instead of `"$PY"`: the `pack_extract` tool ↔ `packs.pack_extract`
-> (pass `names` or `all: true`; its result text carries the complete `invalid`/`skipped`
-> reason maps); the `pack_install_plan` tool ↔ the read-only install plan; the
-> `pack_install_item` tool ↔ ONE approved install; the `pack_update_plan` /
-> `pack_update_item` tools ↔ the three-way update review and ONE approved apply
-> (`resolved_text` carries a hand-merge). The `git clone` of a hosted pack still happens
-> in your shell — only the hippo primitives need the plugin env. Never bypass a stopped
-> preflight by hand-rolling venv paths: the tools ARE the supported path there.
+> **Desktop / MCP surface (INT-16):** the tool-by-tool mapping is in 'Surface routing' above — drive the SAME flow through those `pack_*` MCP tools, same order, same per-item approval gates. The `git clone` of a hosted pack still happens in your shell; only the hippo primitives need the plugin env. Never bypass a stopped preflight by hand-rolling venv paths — the tools ARE the supported path there.
 
 ## What this does, in order
 
