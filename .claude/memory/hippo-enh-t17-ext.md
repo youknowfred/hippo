@@ -4,12 +4,13 @@ description: "Enhancement Tier T17 (round 3, \"Memory beyond the session\") \u20
 metadata:
   type: project
   last_verified: "2026-07-16T15:45:41.063446+00:00"
-  cited_paths: ["plugin/memory/recall_diff.py", ".github/workflows/memory-on-diff.yml", "plugin/memory/promote_scan.py", "plugin/memory/interview.py"]
-  source_commit: "88ed8ebcb1e739a756b272b58438192e4c0ef70f"
-  source_commit_time: 1784216675
+  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-18T06:08:27.136995+00:00"
+  cited_paths: [".github/workflows/release.yml", "plugin/memory/recall_diff.py", ".github/workflows/memory-on-diff.yml", "plugin/memory/promote_scan.py", "plugin/memory/interview.py"]
+  source_commit: "b33becbd141dd922cffef41977c2022c53bf013a"
+  source_commit_time: 1784354042
 ---
 
-T17 EXT implemented 2026-07-16 (same session that shipped T16 JIT and merged its PR #61); **PR #63 OPEN, held for Fred's review — NOT merged.** 3 id-prefixed commits (EXT-1 cbf71b9, EXT-2 463b57c, EXT-3 41f491a), tests-first, suite 2286 green at the tip plus slow+scale lanes. Round 3's full arc: T14 INV #57, T15 SLP #58, T16 JIT #61, T17 EXT #63.
+T17 EXT implemented 2026-07-16 (same session that shipped T16 JIT and merged its PR #61); **PR #63 MERGED same day (squash fc7e44a, owner-ratified) and RELEASED in v1.19.0 "At the act, and beyond the session"** (bundled with T16 JIT; release.yml green). 3 id-prefixed commits (EXT-1 cbf71b9, EXT-2 463b57c, EXT-3 41f491a), tests-first, suite 2286 green at the tip plus slow+scale lanes. Round 3's full arc: T14 INV #57, T15 SLP #58, T16 JIT #61, T17 EXT #63 — ALL shipped (v1.18.0 covers T14+T15, v1.19.0 covers T16+T17).
 
 **What shipped:**
 - EXT-1 `plugin/memory/recall_diff.py` + `recall --for-diff <range> [--json] [--cap]` + `.github/workflows/memory-on-diff.yml` + README section: the reviewer's recall — a pure citation join (changed paths × cited_paths; pins/feedback first; ⚠ staleness flag rides every drifted row; bounded; exit 0 + silence on empty; NO index/model/telemetry — read-only pinned byte-for-byte). Runs on bare python3 (function-local numpy, vendored miniyaml) so the CI recipe needs zero installs; ONE sticky comment (marker+update-or-create), fenced-block quoted-data rendering (SEC-5), fetch-depth 0, same-repo guard, skip-on-empty. NOTE: this repo's own corpus is gitignored (its dogfood exception), so the comment stays empty HERE until corpus files are committed — the recipe proves out on any repo with a committed corpus, and PR #63 itself live-exercised the empty-norm skip path.
@@ -18,6 +19,6 @@ T17 EXT implemented 2026-07-16 (same session that shipped T16 JIT and merged its
 
 **Why:** everything hippo knew surfaced only inside a Claude session at prompt-shaped moments; T17 reaches code review (the first Claude-less surface), the machine's other corpora, and the encode-side gaps nobody writes down.
 
-**How to apply:** when Fred reviews PR #63, its body lists the five deliberate contract changes (recall flags; the enabled workflow; the interview tool appended; the sleep section; interview-state.json). After merge: round 3 is COMPLETE — natural next moves are the corpus commit-vs-gitignore decision for this repo (would light up EXT-1's comment here), the registry-hygiene sweep EXT-2's dogfood surfaced, a release PR bundling T16+T17 (neither bumped versions), and the round-4 exploration when Fred calls for it. Related: [[hippo-enh-t16-jit]], [[hippo-enh-t15-sleep]], [[hippo-enh-t14-invariants]], [[hippo-enhancement-roadmap]].
+**How to apply:** PR #63's body lists the five deliberate contract changes (recall flags; the enabled workflow; the interview tool appended; the sleep section; interview-state.json) — merged as specified. Round 3 is COMPLETE — remaining follow-ups are the corpus commit-vs-gitignore decision for this repo (would light up EXT-1's comment here) and the registry-hygiene sweep EXT-2's dogfood surfaced. Related: [[hippo-enh-t16-jit]], [[hippo-enh-t15-sleep]], [[hippo-enh-t14-invariants]], [[hippo-enhancement-roadmap]].
 
 Related: [[hippo-enh-t16-jit]], [[hippo-enh-t15-sleep]], [[hippo-enh-t14-invariants]], [[hippo-enhancement-roadmap]]
