@@ -652,7 +652,7 @@ workstreams:
         title: One doctor line; sleep inherits (census surfacing)
         priority: P2
         effort: S
-        status: planned        # ratified 2026-07-17 with T19 (see the tier block)
+        status: done           # 2026-07-17, session 2 — check_machine_state appended before the pinned-last check; zero sleep.py changes; tests in test_machine_census.py
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "PR #65 (census + doctor line + sleep inheritance shipped as ONE unit — the pattern); the no-spontaneous-census history: three rot classes (16-row registry, 10-row trust file, 18 symlinks) each accumulated silently until a probe or doctor line existed"}
         problem: >-
           Machine-state rot that lacks a doctor line demonstrably stays
@@ -1297,7 +1297,7 @@ release_train:
   - tier: T19
     target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
     theme: "Machine-state lifecycle"
-    status: in_progress    # 2026-07-17, session 2 — HYG-1 first, per the ratified in-tier order
+    status: done           # 2026-07-17, one session: HYG-1 census (first report: 19/25 dangling), HYG-2 as --prune-dangling + the conftest faucet fix (drain: 20 removed / 0 kept / 0 failed; farm 6/6 ok), HYG-3 warn-on-dead doctor line (sleep inherits free). Q2 PENDING — trust shipped report-only as recommended.
     ratified: >-
       2026-07-17 — owner-directed (Fred's scheduled T19+T20 implementation chip, naming
       both tiers, the HYG-1 -> HYG-2 -> HYG-3 order, and the report-only/print-only

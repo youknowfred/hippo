@@ -430,3 +430,82 @@ def test_init_with_no_explicit_dir_lands_under_the_conftest_guard(tmp_path, monk
 def test_conftest_guard_is_set_for_every_test():
     """The autouse fixture is the class fix — its absence would re-open the faucet."""
     assert "claude-projects-guard" in os.environ.get("HIPPO_CLAUDE_PROJECTS_DIR", "")
+
+
+# --------------------------------------------------------------------------- #
+# HYG-3: the ONE doctor line — warn on DEAD only; sleep inherits free
+# --------------------------------------------------------------------------- #
+def _quiet_scheduler(monkeypatch, stale: int = 0):
+    monkeypatch.setattr(
+        MC,
+        "scheduler_census",
+        lambda *a, **k: {"entries": [], "ok": 0, "stale": stale, "unparseable": 0},
+    )
+
+
+def test_doctor_registers_machine_state_before_the_pinned_last_check():
+    from memory import doctor as D
+
+    labels = [label for label, _ in D.CHECKS]
+    assert labels[-1] == "stale_memobot_env"  # the pinned-last check holds
+    assert labels[-2] == "machine_state"  # HYG-3 appended immediately before it
+
+
+def test_machine_state_ok_names_the_census_command(tmp_path, monkeypatch):
+    from memory.doctor_checks_env import check_machine_state
+
+    _quiet_scheduler(monkeypatch)
+    r = check_machine_state(None)
+    assert r["status"] == "ok"
+    assert "python -m memory.machine_census" in r["message"]
+
+
+def test_machine_state_warns_on_dangling_and_names_the_drain(tmp_path, monkeypatch):
+    from memory.doctor_checks_env import check_machine_state
+
+    farm = _farm(tmp_path)
+    _add_symlink(farm, "-gone", str(tmp_path / "gone" / ".claude" / "memory"))
+    monkeypatch.setenv("HIPPO_CLAUDE_PROJECTS_DIR", farm)
+    _quiet_scheduler(monkeypatch)
+    r = check_machine_state(None)
+    assert r["status"] == "warn"
+    assert "1 dangling memory symlink" in r["message"]
+    assert "--prune-dangling" in r["message"]  # the batch class exists, so the drain is named
+
+
+def test_machine_state_warns_on_dead_trust_rows(tmp_path, monkeypatch):
+    from memory.doctor_checks_env import check_machine_state
+
+    assert T.mark_trusted("/nonexistent-hyg3-trust/repo")
+    _quiet_scheduler(monkeypatch)
+    r = check_machine_state(None)
+    assert r["status"] == "warn"
+    assert "1 dead trust row" in r["message"]
+    assert "python -m memory.machine_census" in r["message"]
+
+
+def test_machine_state_warns_on_stale_scheduler_artifacts(tmp_path, monkeypatch):
+    from memory.doctor_checks_env import check_machine_state
+
+    _quiet_scheduler(monkeypatch, stale=1)
+    r = check_machine_state(None)
+    assert r["status"] == "warn"
+    assert "1 stale scheduler artifact" in r["message"]
+
+
+def test_machine_state_temp_rooted_live_never_warns(tmp_path, monkeypatch):
+    """Warn on DEAD only: live-but-volatile rows (this repo's normal state) and ok
+    symlinks must render ok — the volatile split belongs to the census's own report."""
+    from memory.doctor_checks_env import check_machine_state
+
+    farm = _farm(tmp_path)
+    live_target = tmp_path / "live" / ".claude" / "memory"
+    live_target.mkdir(parents=True)
+    _add_symlink(farm, "-live", str(live_target))  # ok AND volatile (pytest tmp)
+    monkeypatch.setenv("HIPPO_CLAUDE_PROJECTS_DIR", farm)
+    live_repo = tmp_path / "live-trust-repo"
+    live_repo.mkdir()
+    assert T.mark_trusted(str(live_repo))  # live AND volatile trust row
+    _quiet_scheduler(monkeypatch)
+    r = check_machine_state(None)
+    assert r["status"] == "ok", r["message"]
