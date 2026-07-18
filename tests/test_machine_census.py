@@ -315,3 +315,118 @@ def test_main_help_exits_zero(capsys):
         MC.main(["--help"])
     assert exc.value.code == 0
     assert capsys.readouterr().out.startswith("usage:")
+
+
+# --------------------------------------------------------------------------- #
+# HYG-2: the remover — batch confined to the mechanically-safe class
+# --------------------------------------------------------------------------- #
+def _mixed_farm(tmp_path):
+    """ok + dangling-temp-rooted + dangling-kept + native shapes, in one farm."""
+    farm = _farm(tmp_path)
+    live_target = tmp_path / "live-corpus" / ".claude" / "memory"
+    live_target.mkdir(parents=True)
+    ok_link = _add_symlink(farm, "-live", str(live_target))
+    gone_link = _add_symlink(farm, "-gone-tmp", str(tmp_path / "gone" / ".claude" / "memory"))
+    kept_link = _add_symlink(farm, "-gone-volume", "/nonexistent-hyg2-volume/.claude/memory")
+    native = os.path.join(farm, "-native", "memory")
+    os.makedirs(native)
+    return farm, ok_link, gone_link, kept_link, native
+
+
+def test_prune_dangling_removes_only_the_temp_rooted_batch(tmp_path):
+    farm, ok_link, gone_link, kept_link, native = _mixed_farm(tmp_path)
+    result = MC.prune_dangling(farm)
+    assert [e["link"] for e in result["removed"]] == [gone_link]
+    assert [e["link"] for e in result["kept_dead"]] == [kept_link]
+    assert result["failed"] == []
+    assert not os.path.lexists(gone_link)  # the one removal
+    assert os.path.islink(ok_link) and os.path.islink(kept_link)  # untouched
+    assert os.path.isdir(native)  # native-memory shape never touched
+    # the harness-owned parent dir survives — only the symlink itself is hippo's
+    assert os.path.isdir(os.path.dirname(gone_link))
+
+
+def test_prune_dangling_is_idempotent_and_empty_norm(tmp_path):
+    farm = _farm(tmp_path)
+    result = MC.prune_dangling(farm)
+    assert result == {"removed": [], "kept_dead": [], "failed": []}
+
+
+def test_main_prune_dangling_prints_the_grain(tmp_path, monkeypatch, capsys):
+    farm, _ok, gone_link, kept_link, _native = _mixed_farm(tmp_path)
+    monkeypatch.setenv("HIPPO_CLAUDE_PROJECTS_DIR", farm)
+    monkeypatch.setattr(MC, "_read_crontab", lambda: "")
+    assert MC.main(["--prune-dangling"]) == 0
+    out = capsys.readouterr().out
+    assert f"removed: {gone_link}" in out
+    assert "kept (target not temp-rooted — possibly an unmounted volume)" in out
+    assert kept_link in out
+    # second run: the batch class is drained — the empty norm names it
+    assert MC.main(["--prune-dangling"]) == 0
+    assert "nothing to prune" in capsys.readouterr().out
+
+
+def test_main_json_cannot_ride_the_mutation(capsys):
+    with pytest.raises(SystemExit) as exc:
+        MC.main(["--json", "--prune-dangling"])
+    assert exc.value.code == 2
+
+
+def test_report_names_the_drain_flag_only_when_the_batch_exists(tmp_path):
+    farm = _farm(tmp_path)
+    _add_symlink(farm, "-gone-volume", "/nonexistent-hyg2-volume/.claude/memory")
+    text = "\n".join(MC._render_symlinks(MC.symlink_farm_census(farm)))
+    assert "--prune-dangling" not in text  # kept-class only: no batch to drain
+    _add_symlink(farm, "-gone-tmp", str(tmp_path / "gone" / ".claude" / "memory"))
+    text = "\n".join(MC._render_symlinks(MC.symlink_farm_census(farm)))
+    assert "python -m memory.machine_census --prune-dangling" in text
+
+
+def test_report_prints_scheduler_removal_recipe_for_stale_only(tmp_path):
+    la = str(tmp_path / "LaunchAgents")
+    repo = tmp_path / "repo"
+    plugin = repo / "plugin"
+    plugin.mkdir(parents=True)
+    python = repo / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\n")
+    good = _plist(la, "good", str(repo), str(plugin), str(python))
+    stale = _plist(la, "moved", "/nonexistent-hyg2-sched/repo", str(plugin), str(python))
+    text = "\n".join(
+        MC._render_scheduler(MC.scheduler_census(launch_agents_dir=la, crontab_text=""))
+    )
+    assert f"launchctl unload {stale} && rm {stale}" in text
+    assert f"launchctl unload {good}" not in text
+    assert "print-only — hippo never uninstalls system state" in text
+
+
+# --------------------------------------------------------------------------- #
+# HYG-2: the leak fix — the faucet, not just the drain
+# --------------------------------------------------------------------------- #
+def test_init_with_no_explicit_dir_lands_under_the_conftest_guard(tmp_path, monkeypatch):
+    """The live offender shape (test_mcp_setup_tools.py:578,588 at 81177ba): a REAL
+    init with claude_projects_dir=None. The conftest HIPPO_CLAUDE_PROJECTS_DIR guard +
+    init_project's claude_projects_root() resolution must land the symlink in tmp —
+    never the runner's real ~/.claude/projects."""
+    from memory.init_project import init_project
+
+    proj = tmp_path / "leaky-proj"
+    (proj / ".claude" / "memory").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(proj))
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    monkeypatch.delenv("HIPPO_MEMORY_DIR", raising=False)
+
+    r = init_project()  # the leak shape: no explicit claude_projects_dir
+    link = r["symlink"]["expected_path"]
+    guard = os.environ["HIPPO_CLAUDE_PROJECTS_DIR"]
+    assert link.startswith(guard + os.sep), (
+        f"init wrote {link} — outside the HIPPO_CLAUDE_PROJECTS_DIR guard {guard}; "
+        "the HYG-2 faucet fix regressed"
+    )
+    assert r["symlink"]["status"] in ("created", "already_correct")
+    assert os.path.islink(link)
+
+
+def test_conftest_guard_is_set_for_every_test():
+    """The autouse fixture is the class fix — its absence would re-open the faucet."""
+    assert "claude-projects-guard" in os.environ.get("HIPPO_CLAUDE_PROJECTS_DIR", "")

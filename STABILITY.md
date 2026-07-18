@@ -29,6 +29,9 @@ release). New *additions* alongside them are minor, non-breaking changes.
 - **The `HIPPO_*` environment-variable namespace**, and specifically these documented operational
   variables: `HIPPO_MEMORY_DIR`, `HIPPO_INDEX_DIR`, `HIPPO_TELEMETRY_DIR`, `HIPPO_PENDING_DIR`,
   `HIPPO_LOCAL_MEMORY_DIR`, `HIPPO_USER_MEMORY_DIR`, `HIPPO_PROJECTS_FILE`, `HIPPO_TRUST_FILE`,
+  `HIPPO_CLAUDE_PROJECTS_DIR` (added in T19 HYG: overrides the harness-owned
+  `~/.claude/projects` symlink base for hermetic tests/relocation — the same class as
+  `HIPPO_TRUST_FILE`),
   `HIPPO_DISABLE_DENSE`, `HIPPO_TRUST_ALL`, `HIPPO_TRUST_NONGIT`, `HIPPO_EMBED_MODEL`,
   `HIPPO_MCP_MAX_MESSAGE_CHARS`, `HIPPO_TEA5_OPT_IN`, `HIPPO_SALIENCE`, `HIPPO_DENSE_FLOOR`,
   `HIPPO_DUP_THRESHOLD`, `HIPPO_DISABLE_JIT` (added in T16 JIT: kills the default-on

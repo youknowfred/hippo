@@ -574,7 +574,7 @@ workstreams:
         title: Dangling-symlink remover + the test-isolation leak fix (the one new write)
         priority: P2
         effort: S
-        status: planned        # ratified 2026-07-17 with T19 (see the tier block)
+        status: done           # 2026-07-17, session 2 — landed as --prune-dangling on HYG-1's CLI (the scope decision the id records); first live drain: 20 removed, 0 kept, 0 failed
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "all 18 dangling symlinks are test-leaked — targets name test_init_on_trusted_corpus_wi* / /tmp/newproj.*; tests/test_mcp_setup_tools.py:578,588 call the real init tool with no HOME/claude_projects_dir isolation; mtimes show ~15 minted in 36h (3@07-12, 12@07-16, 3@07-17)"}
         problem: >-
           The census's flagship class needs a drain AND a faucet fix: every
@@ -637,11 +637,16 @@ workstreams:
           tests/test_mcp_setup_tools.py:578,588 + tests/conftest.py (the leak
           source — zero HOME/claude_projects_dir guards today;
           init_project.py's claude_projects_dir override exists for hermetic
-          tests and these call sites bypass it). Day-one yield: all 18
-          current candidates are temp-rooted (the batch class is non-empty);
-          trust registry TODAY has 0 dead rows (post hand-prune) — report-only
-          costs nothing now and produces exactly the census data Q2's revisit
-          wants.
+          tests and these call sites bypass it). Day-one yield AS BUILT
+          (2026-07-17): the live drain removed 20 (not the vetting's 18 — the
+          HYG-1 session's own pre-guard suite runs minted two more, incl. one
+          DURING this very tier's build), 0 kept, 0 failed; farm now 6/6 ok.
+          Leak-fix mechanism as landed: HIPPO_CLAUDE_PROJECTS_DIR (resolved by
+          machine_census.claude_projects_root, honored by init_project's one
+          write seam, set autouse in conftest, documented in STABILITY.md);
+          the 578/588 offenders verified to mint nothing post-guard. Trust
+          registry at build: 0 dead rows — report-only costs nothing now and
+          produces exactly the census data Q2's revisit wants.
 
       - id: HYG-3
         title: One doctor line; sleep inherits (census surfacing)

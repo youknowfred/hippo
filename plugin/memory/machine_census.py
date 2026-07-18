@@ -254,6 +254,39 @@ def _read_crontab() -> str:
 
 
 # --------------------------------------------------------------------------- #
+# HYG-2: the one genuinely-new write — the dangling-symlink remover
+# --------------------------------------------------------------------------- #
+def prune_dangling(claude_projects_dir: Optional[str] = None) -> dict:
+    """Remove every dangling memory symlink whose TARGET is temp-rooted; keep the rest.
+
+    The batch is confined to the one mechanically-safe class (``registry.prune_dead``'s
+    honesty grain, mirrored exactly): islink AND target gone AND target under a system
+    temp root — a dangling target anywhere else could be an unmounted volume and stays
+    per-item (``kept_dead``, named for a deliberate hand removal). Never touches
+    non-symlink shapes (a real ``memory`` dir/file is native-memory state and never
+    even enumerates); only ever removes the ``memory`` symlink hippo itself creates,
+    never its harness-owned parent dir. The removal is a bare unlink and claims no
+    more — no registry document is rewritten, so SEC-19's atomic-whole-document
+    discipline is not implicated. Never raises.
+    """
+    farm = symlink_farm_census(claude_projects_dir)
+    removed: List[dict] = []
+    kept_dead = [e for e in farm["entries"] if e["status"] == "dangling"]
+    failed: List[dict] = []
+    for e in farm["entries"]:
+        if e["status"] != "dangling-temp-rooted":
+            continue
+        try:
+            if not os.path.islink(e["link"]):  # re-verify at act time, not census time
+                continue
+            os.remove(e["link"])
+            removed.append(e)
+        except Exception as exc:
+            failed.append({**e, "error": str(exc)})
+    return {"removed": removed, "kept_dead": kept_dead, "failed": failed}
+
+
+# --------------------------------------------------------------------------- #
 # The composed census + report
 # --------------------------------------------------------------------------- #
 def machine_census(
@@ -297,6 +330,12 @@ def _render_symlinks(farm: dict) -> List[str]:
         lines.append(
             f"  NB: {farm['pytest_leaked']} of the dangling targets are pytest tmp trees — "
             "self-inflicted test leak (the HYG-2 conftest isolation is the faucet fix)."
+        )
+    if farm["dangling_temp_rooted"]:
+        lines.append(
+            "drain the "
+            + _n(farm["dangling_temp_rooted"], "temp-rooted entry", "temp-rooted entries")
+            + ": python -m memory.machine_census --prune-dangling"
         )
     return lines
 
@@ -344,6 +383,18 @@ def _render_scheduler(census: dict) -> List[str]:
                 f"  stale-path [{e['kind']}]: {where} — embedded path gone: {gone} "
                 "(the silent-07:30 class: the run dies before hippo starts)"
             )
+            # SLP-2's print-only posture: hippo never uninstalls system state — the
+            # recipe is printed for the human to run, exactly like install was.
+            if e["kind"] == "launchd":
+                lines.append(
+                    f"    recipe (print-only — hippo never uninstalls system state): "
+                    f"launchctl unload {e['path']} && rm {e['path']}"
+                )
+            else:
+                lines.append(
+                    "    recipe (print-only): crontab -e and delete the stale line, "
+                    "then re-run the sleep --print-schedule recipe if wanted"
+                )
         else:
             lines.append(f"  unparseable [{e['kind']}]: {where}")
     return lines
@@ -389,9 +440,34 @@ def main(argv=None) -> int:
         ),
     )
     parser.add_argument(
+        "--prune-dangling",
+        action="store_true",
+        help="remove dangling memory symlinks whose TARGET sits under a system temp "
+        "root (each removal printed); dangling targets elsewhere are kept and named "
+        "— they could be unmounted volumes",
+    )
+    parser.add_argument(
         "--json", action="store_true", help="emit the census as JSON (report mode only)"
     )
     args = parser.parse_args(argv)
+
+    if args.json and args.prune_dangling:
+        parser.error("--json shapes the report only; it cannot ride a mutation")
+
+    if args.prune_dangling:
+        result = prune_dangling()
+        for e in result["removed"]:
+            print(f"removed: {e['link']} -> {e['target']}")
+        for e in result["kept_dead"]:
+            print(
+                f"kept (target not temp-rooted — possibly an unmounted volume): "
+                f"{e['link']} -> {e['target']} — remove deliberately by hand"
+            )
+        for e in result["failed"]:
+            print(f"remove FAILED: {e['link']} ({e['error']})")
+        if not result["removed"] and not result["failed"]:
+            print("nothing to prune — no dangling temp-rooted memory symlinks.")
+        return 1 if result["failed"] else 0
 
     census = machine_census()
     print(json.dumps(census, indent=2) if args.json else render_report(census))
