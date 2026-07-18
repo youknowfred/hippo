@@ -80,7 +80,7 @@ CRASH_CONTRACT = {
     ("packs", "_write_lockfile"): ("detected", "rolled_back"),  # install: re-run adopts; update: file restored
     ("packs", "pack_update_item"): ("detected",),  # ours-replacement write
     ("promote_rule", "main"): ("detected",),
-    ("provenance", "_write_marker_keys"): ("detected",),  # returns False
+    ("provenance_format", "_write_marker_keys"): ("detected",),  # returns False
     ("provenance", "restore_file_bytes"): ("detected",),  # returns the error string
     ("provenance", "backfill_file"): ("detected",),
     ("provenance", "heal_empty_baselines"): ("detected",),  # RCH-9: named in `failed`
@@ -627,13 +627,15 @@ def scn_promote_rule_detected(tmp_path, monkeypatch, capsys):
 
 
 def scn_marker_keys_detected(tmp_path, monkeypatch):
-    from memory.provenance import _write_marker_keys, format_marker_path
+    # The writer's true home moved to provenance_format.py (ratchet split; the façade
+    # re-export in provenance still resolves) — _arm keys on the FILE the frame lives in.
+    from memory.provenance_format import _write_marker_keys, format_marker_path
 
     _root, md = _git_repo(tmp_path)
     with open(format_marker_path(md), "w", encoding="utf-8") as fh:
         fh.write('{"corpus_format": 4}\n')
     before = _snap(format_marker_path(md))
-    _arm(monkeypatch, "provenance", "_write_marker_keys")
+    _arm(monkeypatch, "provenance_format", "_write_marker_keys")
     ok = _write_marker_keys(md, cite_derivation=3)
     _assert_unchanged(before)
     assert ok is False
@@ -870,7 +872,7 @@ _SCENARIOS = [
     (("packs", "_write_lockfile"), "rolled_back", scn_pack_lockfile_update_rolled_back),
     (("packs", "pack_update_item"), "detected", scn_pack_update_write_detected),
     (("promote_rule", "main"), "detected", scn_promote_rule_detected),
-    (("provenance", "_write_marker_keys"), "detected", scn_marker_keys_detected),
+    (("provenance_format", "_write_marker_keys"), "detected", scn_marker_keys_detected),
     (("provenance", "restore_file_bytes"), "detected", scn_restore_bytes_detected),
     (("provenance", "backfill_file"), "detected", scn_backfill_detected),
     (("provenance", "heal_empty_baselines"), "detected", scn_heal_baselines_detected),

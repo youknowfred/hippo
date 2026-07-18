@@ -47,6 +47,12 @@ def test_resolve_citations_only_keeps_pinned_files():
 
 
 def test_refresh_re_derives_cited_paths_and_preserves_baseline(repo, memory_dir):
+    """CUR-1 note: this test used to pin the OPPOSITE for the two dup paths — an
+    "inflated" cited_paths (old resolver kept both candidates of an ambiguous basename)
+    was cleaned OUT by refresh. Preservation deliberately reverses that: the stored full
+    paths are live files, and refresh can no longer tell old-resolver inflation from a
+    hand-curated pin, so both survive — reported via preserved_not_derived, prunable only
+    by a deliberate hand edit. The staleness BASELINE contract is unchanged."""
     write_file(repo, "src/a/dup.py", "x = 1\n")
     write_file(repo, "src/b/dup.py", "y = 1\n")  # makes 'dup.py' ambiguous
     write_file(repo, "src/u/uniq.py", "z = 1\n")
@@ -61,14 +67,17 @@ def test_refresh_re_derives_cited_paths_and_preserves_baseline(repo, memory_dir)
     before = open(os.path.join(memory_dir, "m.md"), encoding="utf-8").read()
     _, body_before = P.split_frontmatter(before)
 
-    P.backfill_corpus(memory_dir, repo, refresh=True)
+    results = P.backfill_corpus(memory_dir, repo, refresh=True)
 
     after = open(os.path.join(memory_dir, "m.md"), encoding="utf-8").read()
     _, body_after = P.split_frontmatter(after)
     cited, sc = read_provenance(after)
     assert sc == "BASELINE123"  # staleness baseline PRESERVED across refresh
-    assert "src/u/uniq.py" in cited  # unique kept
-    assert not any("dup.py" in c for c in cited)  # ambiguous re-derived OUT
+    assert "src/u/uniq.py" in cited  # unique derived
+    # CUR-1: the ambiguous-basename paths are LIVE files → preserved, not cleaned out.
+    assert "src/a/dup.py" in cited and "src/b/dup.py" in cited
+    r = next(x for x in results if x["path"].endswith("m.md"))
+    assert set(r["preserved_not_derived"]) == {"src/a/dup.py", "src/b/dup.py"}
     assert body_after == body_before  # body still byte-identical
 
 
@@ -1599,6 +1608,13 @@ def test_every_writer_preserves_parseability_across_the_corpus_shapes(repo, memo
         "---\nbody src/keep.py\n",
         "same-indent-seq": "---\nname: M\ncited_paths:\n- src/keep.py\n---\nbody src/keep.py\n",
         "no-provenance": "---\nname: M\ntype: project\n---\nbody src/keep.py\n",
+        # COR-20: the legacy split-empty form (an older hippo emitted this for a memory
+        # with no derivable citations) — the `[]` continuation must strip WITH its key.
+        "split-empty-flow": "---\nname: M\nmetadata:\n  type: project\n  cited_paths:\n"
+        '    []\n  source_commit: "abc"\n---\nbody src/keep.py\n',
+        # ...and the populated flow-list-on-its-own-line sibling of the same shape.
+        "split-flow-list": "---\nname: M\nmetadata:\n  type: project\n  cited_paths:\n"
+        '    ["src/keep.py"]\n  source_commit: "abc"\n---\nbody src/keep.py\n',
     }
     for label, text in shapes.items():
         target = write_file(repo, f".claude/memory/{label}.md", text)
@@ -1692,33 +1708,6 @@ def test_rot_line_falls_back_to_gone_for_a_producer_without_the_partition():
     res = {"cited": ["a.py"], "dropped_citations": ["b.py"]}
     (line,) = P.citation_rot_lines("m.md", res)
     assert "no longer in the repo" in line
-
-
-def test_refresh_partitions_a_real_not_derived_drop_end_to_end(repo, memory_dir):
-    """AC (LIF-4) on the live producer: a memory whose frontmatter cites a file the
-    extractor cannot derive from the body (`Dockerfile` — no dotted extension) must report
-    it as not_derived, NOT as gone. Both files exist at HEAD throughout."""
-    write_file(repo, "Dockerfile", "FROM scratch\n")
-    write_file(repo, "src/keep.py", "k = 1\n")
-    git_commit(repo, "code", 1_700_000_000)
-    target = write_file(
-        repo,
-        ".claude/memory/m.md",
-        '---\nname: M\ncited_paths: ["Dockerfile", "src/keep.py"]\nsource_commit: "abc"\n'
-        "---\nbody cites src/keep.py and the Dockerfile\n",
-    )
-    git_commit(repo, "memory", 1_700_000_001)
-
-    repo_files, basename_index = P.build_repo_file_index(repo)
-    res = P.backfill_file(target, repo, repo_files, basename_index, refresh=True)
-    assert res["error"] is None
-    assert res["dropped_citations"] == ["Dockerfile"]
-    assert res["dropped_gone"] == [], "Dockerfile is right there — it was never deleted"
-    assert res["dropped_not_derived"] == ["Dockerfile"]
-    (line,) = P.citation_rot_lines("m.md", res)
-    assert "no longer in the repo" not in line
-
-
 # --------------------------------------------------------------------------- #
 # ORC-1 — the extractor's declared config is its contract
 # --------------------------------------------------------------------------- #
@@ -1851,8 +1840,8 @@ def test_bare_unmarked_extensionless_mention_stays_uncited():
     an extensionless name are a DELIBERATE non-match — nothing syntactically distinguishes
     "we containerised it, see the Dockerfile" (a real citation) from "the Dockerfile pattern
     is common in monorepos" (generic prose); under-flag beats cry-wolf. This is also the exact
-    body text test_refresh_partitions_a_real_not_derived_drop_end_to_end relies on staying
-    non-derivable."""
+    body text test_refresh_preserves_a_live_not_derivable_citation_end_to_end (in
+    test_provenance_curation.py) relies on staying non-derivable."""
     assert P.extract_citations("the Dockerfile mirrors the Makefile") == []
     assert P.extract_citations("we containerised it, see the Dockerfile") == []
     assert P.extract_citations("body cites src/keep.py and the Dockerfile") == ["src/keep.py"]
