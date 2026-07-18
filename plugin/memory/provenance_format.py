@@ -1,9 +1,12 @@
-"""Corpus format + citation-derivation versioning (COR-7 / DRV-2).
+"""Corpus format + citation-derivation versioning (COR-7 / DRV-2) + corpus policy keys.
 
 The ``.claude/memory/.format`` marker's one home: the two independent version axes a
 corpus declares — ``corpus_format`` (the SHAPE of a memory file) and ``cite_derivation``
 (which extractor produced the ``cited_paths`` VALUES) — with their readers, their
 merge-not-clobber writer, and the format/derivation history that explains every bump.
+VOL-1 adds the marker's first POLICY key, ``volatile_paths`` (``read_volatile_paths``):
+corpus-owned declarations that, like the version axes, must travel with the corpus
+through git rather than live in any machine-local state.
 
 Decomposed out of ``provenance.py`` as pure code motion when the module-size ratchet
 fired (CUR-1/COR-20 work); every symbol stays importable at ``memory.provenance.<name>``
@@ -182,3 +185,43 @@ def write_corpus_format(memory_dir: str, version: Optional[int] = None) -> bool:
         memory_dir,
         corpus_format=int(version if version is not None else CORPUS_FORMAT_VERSION),
     )
+
+
+def read_volatile_paths(memory_dir: str) -> list:
+    """The corpus's declared volatile paths (VOL-1); ``[]`` when undeclared. Never raises.
+
+    ``volatile_paths`` is the marker's first POLICY key: a corpus-level list of high-churn
+    coordination files (a living roadmap, a migration runner, ``package.json``) whose
+    whole-file drift carries ~zero bits about memory validity — the bodies DELEGATE to
+    them ("live status lives there"), so the citation is right for recall but wrong as a
+    staleness-ARMING trigger. Consumed only by ``staleness_policy`` (the arming split);
+    derivation, ``find_stale`` detection, and every recall surface stay registry-blind by
+    design, so an absent/empty/garbled key degrades to ``[]`` — byte-identical behavior
+    to an undeclared corpus (ED-4), the same never-raise direction as
+    ``read_corpus_format``.
+
+    Deliberately a NEW key on the existing marker rather than a sibling file or a
+    ``corpus_format`` bump: it must travel with the corpus through git exactly like the
+    version axes (committed, clone-shared, merge-not-clobber preserved by
+    ``_write_marker_keys``), and it changes no memory-file SHAPE — the packs.py
+    criterion for "not a format event". Every reader pulls only its own key, so older
+    plugins ignore it, the DRV-2 precedent. Entries are toplevel-relative repo paths,
+    matched EXACTLY against ``cited_paths`` (same SHP-1 convention; a leading ``./`` is
+    normalized off, non-strings and blanks drop, order preserved minus duplicates —
+    it's a hand-committed declaration, so declaration order is the honest render order).
+    There is deliberately NO writer: the registry is operator-committed corpus policy
+    (edit ``.claude/memory/.format`` and commit), never something a hook or sweep grows.
+    """
+    raw = _read_marker(memory_dir).get("volatile_paths")
+    if not isinstance(raw, list):
+        return []
+    out: list = []
+    for entry in raw:
+        if not isinstance(entry, str):
+            continue
+        p = entry.strip()
+        if p.startswith("./"):
+            p = p[2:]
+        if p and p not in out:
+            out.append(p)
+    return out

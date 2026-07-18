@@ -150,6 +150,7 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
         snooze,
         watermark_stale_candidates,
     )
+    from .staleness_policy import DIAG_KEY, suppressed_count_note
 
     memory_dir, repo_root = resolve_dirs()
     # SEC-1: gate like traverse (the worklist renders memory names + typed-edge neighbors)
@@ -163,13 +164,21 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
         )
     action = str(args.get("action") or "worklist").strip().lower()
     if action == "worklist":
+        # VOL-1: both lanes report suppressed names into the one diagnostics dict; the
+        # listing prints the count below — suppression is never silent on this surface.
+        diagnostics: Dict[str, Any] = {}
         worklist = recalled_stale_worklist(
             memory_dir,
             repo_root,
-            watermark_stale=watermark_stale_candidates(memory_dir, repo_root),
+            watermark_stale=watermark_stale_candidates(
+                memory_dir, repo_root, diagnostics=diagnostics
+            ),
+            diagnostics=diagnostics,
         )
+        suppressed = diagnostics.get(DIAG_KEY) or []
         if not worklist:
-            return "No recently-recalled memory is currently stale."
+            empty = "No recently-recalled memory is currently stale."
+            return empty + (f" {suppressed_count_note(len(suppressed))}" if suppressed else "")
         out = [
             f"{len(worklist)} memories need re-grounding (recently recalled + stale, or "
             "[since-watermark] commit-precise hits) — re-ground EACH against current code, "
@@ -182,6 +191,8 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
                 f"  • {item['name']}{wm_tag}{_linked_note(item)}: "
                 + ", ".join(item["changed_paths"][:6])
             )
+        if suppressed:
+            out.append("  " + suppressed_count_note(len(suppressed)))
         out.append(
             "Evidence per item: action='brief' (name=…) renders the cited-path diff from "
             "the entry's own baseline — diffstat + hunk headers, secret-linted bodies when "

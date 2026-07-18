@@ -310,6 +310,43 @@ def check_trust_scorecard(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"trust scorecard failed: {exc}."}
 
 
+def check_volatile_paths(ctx: DoctorContext) -> Dict[str, str]:
+    """VOL-1: one display line — declared volatile-path count + currently-suppressed count.
+
+    Always ``ok`` — a declared registry is committed corpus policy working as intended,
+    and an absent one is the default; neither is a defect, so this line can never become
+    a nag (HYG-3's warn-on-real-signal-only discipline). The suppressed count pays the
+    same cold-path ``find_stale`` scan the TMB-2 terminal-state check already does; both
+    belong to doctor, never the hot path. Lives in the façade (not a checks sibling)
+    because ``doctor_checks_corpus`` sits at the module-size cap — the next corpus-domain
+    check to land there splits that file instead.
+    """
+    try:
+        from .provenance import read_volatile_paths
+        from .staleness import find_stale
+        from .staleness_policy import split_volatile_only
+
+        vol = read_volatile_paths(ctx.memory_dir)
+        if not vol:
+            return {
+                "status": "ok",
+                "message": "volatile paths: none declared (optional .format "
+                "volatile_paths key — staleness-arming policy).",
+            }
+        _, suppressed = split_volatile_only(
+            find_stale(ctx.memory_dir, ctx.repo_root), set(vol)
+        )
+        n = len(suppressed)
+        return {
+            "status": "ok",
+            "message": f"volatile paths: {len(vol)} declared; {n} stale memor"
+            + ("y" if n == 1 else "ies")
+            + " currently suppressed from arming (volatile-only drift).",
+        }
+    except Exception as exc:
+        return {"status": "ok", "message": f"volatile paths: check skipped ({exc})."}
+
+
 # (label, check_fn) in a FIXED order — the source of the deterministic output. New checks append
 # here; the order is never sorted-by-name or set-derived, so the printed sequence is stable.
 CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
@@ -342,6 +379,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("rules_plane_rot", check_rules_plane_rot),
     ("rules_source", check_rules_source),
     ("format_version", check_format_version),
+    ("volatile_paths", check_volatile_paths),  # VOL-1: arming-policy state, ok-glyph always
     ("empty_baselines", check_empty_baselines),  # COR-10: the heal moved off the hook
     ("pack_drift", check_pack_drift),
     ("fill_me", check_fill_me),

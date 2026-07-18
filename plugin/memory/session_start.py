@@ -73,6 +73,7 @@ from .staleness import (
     unresolvable_baseline_names,
     write_stale_cache,
 )
+from .staleness_policy import split_volatile_only, stale_note_all_suppressed, stale_note_tail, volatile_set
 
 # Harness caps hook output at 10,000 chars; stay comfortably under it.
 _MAX_CONTEXT_CHARS = 9000
@@ -388,6 +389,10 @@ def staleness_producer(
     call, e.g. a test that stubs only ``find_stale``), it derives its own staleness view
     exactly as before LIF-6, with no worklist to exclude (there's nothing to de-duplicate
     against outside the dispatcher).
+
+    VOL-1: registry-listed volatile paths never arm this note alone — every downstream
+    count reads ARMED items only; the suppressed residue gets its own honest line (a
+    volatile-only item that also carries invalid_after counts as suppressed, not demoted).
     """
     if ctx is not None:
         stale = ctx.stale
@@ -426,12 +431,14 @@ def staleness_producer(
             "flow (`python -m memory.archive`), reinstatable per item via reconsolidate "
             "outcome=graduate|fix."
         )
+    # VOL-1: partitioned AFTER nondrift_old (suppressed items DO have drift — not retired);
+    # anything the worklist armed anyway (the CLB-3 evidence lane) renders THERE, not here.
+    stale, vol_sup = split_volatile_only(stale, volatile_set(memory_dir))
+    vol_sup = [i for i in vol_sup if i["name"] not in worklist_names]
+    vol_line = (stale_note_all_suppressed if not stale else stale_note_tail)(len(vol_sup)) if vol_sup else None
     if not stale:
-        if retired_line is None:
-            return timeout_note
-        return "\n".join(
-            [retired_line] + ([timeout_note] if timeout_note else [])
-        )
+        extra = [ln for ln in (vol_line, retired_line, timeout_note) if ln]
+        return "\n".join(extra) if extra else None
     # LIF-1: a stale entry ALREADY carrying invalid_after is in demote's terminal state —
     # the verdict (or a manual --invalidate) closed its validity window and recall's
     # pre-cut penalty is already ranking it down, so a per-item "verify this" line here is
@@ -486,6 +493,8 @@ def staleness_producer(
             f"⚠ Memory staleness — all {len(stale)} stale memories are already demoted "
             "(invalid_after set); recall already ranks them down, nothing new to verify."
         ]
+    if vol_line:
+        lines.append(vol_line)  # VOL-1: suppression is visible, never silent
     old = sorted(
         name
         for name, ia in invalidated.items()

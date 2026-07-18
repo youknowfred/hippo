@@ -117,7 +117,7 @@ ideas are the ones where it *departs* from the brain.
 |---|---|---|
 | **encode / retrieve** — `recall` | hybrid BM25 + dense retrieval, every prompt, `$0` and offline | plain information retrieval; no LLM in the loop |
 | **consolidate** — systems consolidation | a deliberate off-hot-path turn drains captures and re-verifies stale memories | one agent turn, per-item, approval-gated — not a gradual, autonomous hand-off |
-| **reconsolidate** | a recently-recalled memory whose cited code drifted goes on a re-verify worklist | recall destabilizes nothing; it's an intersection heuristic plus a human verdict |
+| **reconsolidate** | a recently-recalled memory whose cited code drifted goes on a re-verify worklist — unless its *only* drift is a file the corpus declared churn-by-design (`volatile_paths` in `.claude/memory/.format`: still cited, still recalled, just not re-flagged every session) | recall destabilizes nothing; it's an intersection heuristic plus a human verdict |
 | **forget** — decay | a memory goes stale when a cited file moved after its recorded commit | *not biological at all* — it's git-drift, not time or disuse. The departure is the feature |
 | **replay** — `/dream` | offline, recall is re-run over each memory's self-query; memories that co-fire become candidate links | "co-fire" = co-rank for one probe, not temporal sequence re-firing; report-first, capped, empty-pass-is-the-norm |
 | **reward-gated replay** | an outcome-anchored memory boosts the ranking of the lineage that earned it | ranking-only; never changes what's eligible to be written |
