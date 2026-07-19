@@ -1410,12 +1410,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.ab not in AB_FLAGS:
             print(f"eval --ab: unknown flag {args.ab!r} (whitelist: {', '.join(AB_FLAGS)}).")
             return 2
-        if args.ab == "HIPPO_SALIENCE":
-            # MSR-5: the ED-2 salience-revisit rig (memory.salience_eval) — measures
-            # only, never flips the default. Forward the eval-level corpus/fixture
-            # args (they are parsed HERE, so they never appear in ab_extra).
-            from .salience_eval import main as _salience_ab_main
 
+        def _ab_forward() -> List[str]:
+            # Forward the eval-level corpus/fixture args (they are parsed HERE, so
+            # they never appear in ab_extra) — shared by the flag-context harnesses.
             fwd: List[str] = list(ab_extra or [])
             ambient = args.memory_dir is None
             if args.memory_dir:
@@ -1429,7 +1427,20 @@ def main(argv: Optional[List[str]] = None) -> int:
                 fwd += ["--telemetry-dir", args.telemetry_dir]
             if args.k != 10:
                 fwd += ["-k", str(args.k)]
-            return _salience_ab_main(fwd)
+            return fwd
+
+        if args.ab == "HIPPO_SALIENCE":
+            # MSR-5: the ED-2 salience-revisit rig (memory.salience_eval) — measures
+            # only, never flips the default.
+            from .salience_eval import main as _salience_ab_main
+
+            return _salience_ab_main(_ab_forward())
+        if args.ab == "HIPPO_OUTCOME_PRIOR":
+            # MEA-5: the EVD-4 Arm B rig (memory.outcome_prior_eval) — measures the
+            # EXISTING RET-14 flag only; nothing flips (ED-2/LIF-7).
+            from .outcome_prior_eval import main as _outcome_ab_main
+
+            return _outcome_ab_main(_ab_forward())
         return _dream_ab_main((ab_extra or []) + (["-k", str(args.k)] if args.k != 10 else []))
 
     # MSR-1: the pass^k probe is its own mode (like --calibrate) — it spawns fresh

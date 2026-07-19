@@ -50,7 +50,11 @@ import tempfile
 from math import comb
 from typing import Dict, List, Optional, Tuple
 
-AB_FLAGS = ("HIPPO_DREAM", "HIPPO_SALIENCE")  # the --ab whitelist (MSR-5 added HIPPO_SALIENCE — memory.salience_eval)
+AB_FLAGS = (
+    "HIPPO_DREAM",
+    "HIPPO_SALIENCE",  # MSR-5 — memory.salience_eval
+    "HIPPO_OUTCOME_PRIOR",  # MEA-5 — memory.outcome_prior_eval (the EVD-4 Arm B un-sever)
+)  # the --ab whitelist: each flag owns a self-contained harness module (DRM-3)
 
 # Harness-local dream knobs: DRM-3 proves "admitted edges raise multi-hop recall because
 # of the edges"; discovery-θ calibration on real data is DRM-1's job. The fixture's

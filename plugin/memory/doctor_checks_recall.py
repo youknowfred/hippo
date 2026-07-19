@@ -162,10 +162,28 @@ def check_salience_evidence(ctx: DoctorContext) -> Dict[str, str]:
                         "through this fixture is low-sensitivity (derived from current "
                         "fixture-vs-corpus state, not re-measured from the recorded run)."
                     )
+            # MEA-5 (the reader decision recorded at build): the outcome-prior evidence
+            # file's ONE standing reader is this line's sibling sentence — no second
+            # doctor check, no ordering motion; same ED-2 posture, measures only.
+            sibling = ""
+            try:
+                from .outcome_prior_eval import read_report as _op_read
+
+                op = _op_read(ctx.memory_dir)
+                if op is not None:
+                    op_arms = "identical arms" if op.get("identical_arms") else "arms differ"
+                    sibling = (
+                        f" Sibling: outcome-prior A/B recorded "
+                        f"({len(op.get('deltas') or {})} categor(ies), {op_arms}) — same "
+                        "ED-2 posture (measures only; the flag stays default-OFF)."
+                    )
+            except Exception:
+                sibling = ""
             return {
                 "status": "ok",
                 "message": f"salience evidence: A/B recorded ({len(deltas)} categor(ies), "
-                f"{arms}) — the flip stays a dated owner decision (ED-2)." + qualification,
+                f"{arms}) — the flip stays a dated owner decision (ED-2)." + qualification
+                + sibling,
             }
         if sessions < _SALIENCE_LIVEDIN_MIN_SESSIONS:
             return {
