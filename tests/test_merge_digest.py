@@ -228,7 +228,7 @@ def test_producer_registered_once_after_floor_change():
 # --------------------------------------------------------------------------- #
 def test_doctor_merge_digest_ok_when_clean(repo, memory_dir, tmp_path, monkeypatch):
     from memory.doctor import CHECKS
-    from memory.doctor_checks_corpus import check_merge_digest
+    from memory.doctor_checks_lifecycle import check_merge_digest
     from memory.doctor_checks_env import DoctorContext
 
     _seed_with_watermark(repo, memory_dir, tmp_path, monkeypatch)
@@ -242,7 +242,7 @@ def test_doctor_merge_digest_ok_when_clean(repo, memory_dir, tmp_path, monkeypat
 
 
 def test_doctor_merge_digest_warns_with_routed_pairs(repo, memory_dir, tmp_path, monkeypatch):
-    from memory.doctor_checks_corpus import check_merge_digest
+    from memory.doctor_checks_lifecycle import check_merge_digest
     from memory.doctor_checks_env import DoctorContext
 
     _seed_with_watermark(repo, memory_dir, tmp_path, monkeypatch)

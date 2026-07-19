@@ -13,6 +13,8 @@ import json
 import os
 
 import memory.session_start as S
+import memory.session_start_health as SH
+import memory.session_start_signals as SG
 from memory.staleness import set_invalid_after
 
 from .conftest import git_commit, write_file
@@ -149,7 +151,7 @@ def test_dispatcher_calls_every_producer_with_the_shared_run_context(monkeypatch
 
 def test_staleness_producer_formats_real_output(monkeypatch):
     monkeypatch.setattr(
-        S,
+        SG,
         "find_stale",
         lambda md, repo, diagnostics=None: [
             {"name": "m_x", "changed_paths": ["src/a.py", "src/b.py"]}
@@ -176,7 +178,7 @@ def _leaf(name):
 
 def _stub_stale(monkeypatch, names):
     monkeypatch.setattr(
-        S,
+        SG,
         "find_stale",
         lambda md, repo, diagnostics=None: [
             {"name": n, "changed_paths": ["src/a.py"]} for n in names
@@ -262,13 +264,13 @@ def test_main_is_silent_when_nothing_stale(monkeypatch, capsys):
 
 
 def test_integrity_producer_formats_real_output(monkeypatch):
-    monkeypatch.setattr(S, "find_unparseable", lambda md: ["m_broken"])
+    monkeypatch.setattr(SH, "find_unparseable", lambda md: ["m_broken"])
     out = S.integrity_producer("md", "repo")
     assert out and "m_broken" in out and "UNPARSEABLE" in out
 
 
 def test_integrity_producer_silent_when_clean(monkeypatch):
-    monkeypatch.setattr(S, "find_unparseable", lambda md: [])
+    monkeypatch.setattr(SH, "find_unparseable", lambda md: [])
     assert S.integrity_producer("md", "repo") is None
 
 
@@ -640,13 +642,13 @@ def test_presence_producer_registered_once_after_trust_drift():
 # SHP-3 — unresolvable_baseline_producer (squash-merge / shallow-clone legibility)
 # --------------------------------------------------------------------------- #
 def test_unresolvable_baseline_producer_formats_real_output(monkeypatch):
-    monkeypatch.setattr(S, "count_unresolvable_baselines", lambda md, repo: 3)
+    monkeypatch.setattr(SH, "count_unresolvable_baselines", lambda md, repo: 3)
     out = S.unresolvable_baseline_producer("md", "repo")
     assert out and "3 memories" in out and "squash-merge" in out
 
 
 def test_unresolvable_baseline_producer_silent_when_zero(monkeypatch):
-    monkeypatch.setattr(S, "count_unresolvable_baselines", lambda md, repo: 0)
+    monkeypatch.setattr(SH, "count_unresolvable_baselines", lambda md, repo: 0)
     assert S.unresolvable_baseline_producer("md", "repo") is None
 
 
@@ -663,7 +665,7 @@ def test_unresolvable_baseline_producer_is_registered():
 # --------------------------------------------------------------------------- #
 def test_citation_rot_producer_formats_real_output_count_first(monkeypatch):
     monkeypatch.setattr(
-        S,
+        SH,
         "find_citation_rot",
         lambda md, repo: [{"name": "m_rot", "missing_paths": ["src/gone.py"], "cited_count": 2}],
     )
@@ -677,7 +679,7 @@ def test_citation_rot_producer_total_rot_called_out_distinctly(monkeypatch):
     """Every citation gone → a refresh would EMPTY cited_paths and the memory becomes
     staleness-exempt; the producer says so on that line, distinctly."""
     monkeypatch.setattr(
-        S,
+        SH,
         "find_citation_rot",
         lambda md, repo: [{"name": "m_total", "missing_paths": ["src/gone.py"], "cited_count": 1}],
     )
@@ -687,7 +689,7 @@ def test_citation_rot_producer_total_rot_called_out_distinctly(monkeypatch):
 
 def test_citation_rot_producer_partial_rot_not_marked_exempt(monkeypatch):
     monkeypatch.setattr(
-        S,
+        SH,
         "find_citation_rot",
         lambda md, repo: [{"name": "m_partial", "missing_paths": ["src/gone.py"], "cited_count": 3}],
     )
@@ -696,13 +698,13 @@ def test_citation_rot_producer_partial_rot_not_marked_exempt(monkeypatch):
 
 
 def test_citation_rot_producer_silent_when_clean(monkeypatch):
-    monkeypatch.setattr(S, "find_citation_rot", lambda md, repo: [])
+    monkeypatch.setattr(SH, "find_citation_rot", lambda md, repo: [])
     assert S.citation_rot_producer("md", "repo") is None
 
 
 def test_citation_rot_producer_bounds_item_count(monkeypatch):
     monkeypatch.setattr(
-        S,
+        SH,
         "find_citation_rot",
         lambda md, repo: [
             {"name": f"m_{i:03d}", "missing_paths": ["src/gone.py"], "cited_count": 2}
@@ -869,11 +871,11 @@ def test_corpus_format_producer_warns_when_corpus_is_newer(tmp_path):
 
     md = str(tmp_path / "memory")
     os.makedirs(md)
-    newer = S.CORPUS_FORMAT_VERSION + 1
+    newer = SH.CORPUS_FORMAT_VERSION + 1
     assert write_corpus_format(md, version=newer) is True
     out = S.corpus_format_producer(md, "repo")
     assert out is not None
-    assert f"v{newer}" in out and f"v{S.CORPUS_FORMAT_VERSION}" in out  # names BOTH versions
+    assert f"v{newer}" in out and f"v{SH.CORPUS_FORMAT_VERSION}" in out  # names BOTH versions
     assert "update the hippo plugin" in out.lower()  # the one-directional remediation
 
 
@@ -895,7 +897,7 @@ def test_corpus_format_producer_silent_when_corpus_is_older(tmp_path, monkeypatc
     md = str(tmp_path / "memory")
     os.makedirs(md)
     assert write_corpus_format(md, version=1) is True
-    monkeypatch.setattr(S, "CORPUS_FORMAT_VERSION", 2)  # simulate a post-bump plugin
+    monkeypatch.setattr(SH, "CORPUS_FORMAT_VERSION", 2)  # simulate a post-bump plugin
     assert S.corpus_format_producer(md, "repo") is None
 
 
@@ -956,15 +958,15 @@ def test_watermark_lane_flags_uncalled_memory_end_to_end(repo, memory_dir, monke
 # --------------------------------------------------------------------------- #
 def test_squash_heal_producer_needs_both_signals(monkeypatch):
     # Break without a merge signal → silent (the generic SHP-3 producer covers it)…
-    monkeypatch.setattr(S, "unresolvable_baseline_names", lambda md, repo: ["m_gone"])
-    monkeypatch.setattr(S, "_recent_merge_signals", lambda repo: False)
+    monkeypatch.setattr(SH, "unresolvable_baseline_names", lambda md, repo: ["m_gone"])
+    monkeypatch.setattr(SH, "_recent_merge_signals", lambda repo: False)
     assert S.squash_merge_heal_producer("md", "repo") is None
     # …merge signal without a break → silent (nothing to heal)…
-    monkeypatch.setattr(S, "unresolvable_baseline_names", lambda md, repo: [])
-    monkeypatch.setattr(S, "_recent_merge_signals", lambda repo: True)
+    monkeypatch.setattr(SH, "unresolvable_baseline_names", lambda md, repo: [])
+    monkeypatch.setattr(SH, "_recent_merge_signals", lambda repo: True)
     assert S.squash_merge_heal_producer("md", "repo") is None
     # …both → the per-item offer, naming the memory and the confirmed-graduate route.
-    monkeypatch.setattr(S, "unresolvable_baseline_names", lambda md, repo: ["m_gone"])
+    monkeypatch.setattr(SH, "unresolvable_baseline_names", lambda md, repo: ["m_gone"])
     out = S.squash_merge_heal_producer("md", "repo")
     assert out is not None
     assert "m_gone" in out
@@ -975,9 +977,9 @@ def test_squash_heal_producer_needs_both_signals(monkeypatch):
 
 def test_squash_heal_producer_caps_names(monkeypatch):
     monkeypatch.setattr(
-        S, "unresolvable_baseline_names", lambda md, repo: [f"m_{i:02d}" for i in range(9)]
+        SH, "unresolvable_baseline_names", lambda md, repo: [f"m_{i:02d}" for i in range(9)]
     )
-    monkeypatch.setattr(S, "_recent_merge_signals", lambda repo: True)
+    monkeypatch.setattr(SH, "_recent_merge_signals", lambda repo: True)
     out = S.squash_merge_heal_producer("md", "repo")
     assert "m_05" in out and "m_06" not in out
     assert "(+3 more)" in out
@@ -1031,7 +1033,7 @@ def test_squash_merge_heal_end_to_end_and_reverify_clears(repo, memory_dir, monk
     git("reflog", "expire", "--expire=now", "--all")
     git("gc", "--prune=now", "--quiet")
 
-    names = S.unresolvable_baseline_names(memory_dir, repo)
+    names = SH.unresolvable_baseline_names(memory_dir, repo)
     assert names == ["m_feature_design"], "the squash genuinely broke the baseline"
     out = S.squash_merge_heal_producer(memory_dir, repo)
     assert out is not None and "m_feature_design" in out, (
@@ -1043,7 +1045,7 @@ def test_squash_merge_heal_end_to_end_and_reverify_clears(repo, memory_dir, monk
 
     res = R.semantic_reverify("m_feature_design", "graduate", memory_dir, repo)
     assert res["error"] is None and res["cleared"] is True
-    assert S.unresolvable_baseline_names(memory_dir, repo) == []
+    assert SH.unresolvable_baseline_names(memory_dir, repo) == []
     assert S.squash_merge_heal_producer(memory_dir, repo) is None, "healed → self-cleared"
 
 

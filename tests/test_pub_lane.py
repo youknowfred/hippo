@@ -114,7 +114,7 @@ def test_pub_lane_issues_no_fresh_ls_files():
 # PUB-3: the doctor line — one warn, never a gate, empty norms render ok
 # --------------------------------------------------------------------------- #
 def test_doctor_subset_boundary_warns_with_heal_and_view_command(repo, memory_dir):
-    from memory.doctor_checks_corpus import check_subset_boundary
+    from memory.doctor_checks_lifecycle import check_subset_boundary
     from memory.doctor_checks_env import DoctorContext
 
     _two_audience_corpus(repo, memory_dir)
@@ -127,7 +127,7 @@ def test_doctor_subset_boundary_warns_with_heal_and_view_command(repo, memory_di
 
 
 def test_doctor_subset_boundary_ok_when_healed(repo, memory_dir):
-    from memory.doctor_checks_corpus import check_subset_boundary
+    from memory.doctor_checks_lifecycle import check_subset_boundary
     from memory.doctor_checks_env import DoctorContext
 
     write_file(repo, ".claude/memory/a.md", _mem("a", "see [[b]]"))
@@ -138,7 +138,7 @@ def test_doctor_subset_boundary_ok_when_healed(repo, memory_dir):
 
 
 def test_doctor_subset_boundary_ok_when_no_subset(tmp_path):
-    from memory.doctor_checks_corpus import check_subset_boundary
+    from memory.doctor_checks_lifecycle import check_subset_boundary
     from memory.doctor_checks_env import DoctorContext
 
     md = tmp_path / "plain" / ".claude" / "memory"

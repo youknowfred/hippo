@@ -308,7 +308,7 @@ workstreams:
         title: "Clear the runway: session_start.py facade split + the doctor_checks_corpus split that repatriates VOL-1's check"
         priority: P0
         effort: M
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 1 — SPLIT chosen (not re-pin): session_start.py 1705->539 facade + session_start_health.py 469 + session_start_signals.py 805; doctor_checks_corpus.py 899->663 + doctor_checks_lifecycle.py 293; check_volatile_paths repatriated; grandfather entry deleted; suite 2,885 green
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "wc -l this cycle: session_start.py 1705/1705 (pin 1645 + slack 60, tests/test_module_size.py) and doctor_checks_corpus.py 899/900 (non-grandfathered cap); hippo-enh-t18-fleet capstone ('wiring was EXACTLY 3 lines — the file now sits AT its grandfathered cap'); hippo-vol1-volatile-paths capstone ('in doctor.py the FACADE, because doctor_checks_corpus is at 899/900' — the distortion receipt); git log: session_start.py touched by 8 of the last 8 release-train merges; precedent PR #72 / 84ae688 (facade decomposition of doctor/dream/eval_recall/mcp_server/recall)"}
         problem: >-
           The two highest-traffic integration files sit AT their caps
@@ -383,6 +383,26 @@ workstreams:
           (84ae688). Process risk is merge-conflict surface with concurrent
           SessionStart work — schedule as its own small PR with the suite
           green, the same one-concern discipline every prior split used.
+          BUILT 2026-07-19 — premise corrections vs this note (live tree
+          13ddd6c): the fixed doctor check order is 54 entries, not 56 (the
+          registry's blank lines were miscounted at authoring);
+          check_trust_scorecard/_scorecard_message REMAIN in the doctor
+          facade — the MSR-6 AST pin (tests/test_injection_cost.py) keys
+          ("doctor", "_scorecard_message") and doctor.py documents that
+          location as deliberate, so the AC's "doctor.py retains no check
+          implementations" holds for every corpus-domain check EXCEPT the
+          pinned GOV-6 scorecard pair (moving it would re-key an unrelated
+          structural pin inside a code-motion PR — declined); the nudge-gate
+          cluster (_periodic_nudge_should_fire + untrusted_corpus_nudge)
+          landed in session_start_health (SEC-1 nudge beside SEC-6
+          trust_drift), so the two WRITE_OPEN_ALLOWLIST keys re-keyed to
+          DIFFERENT siblings (health gets _periodic_nudge_should_fire,
+          signals gets floor_change's _persist); test monkeypatch targets
+          moved with their code per CONTRIBUTING (test_session_start,
+          test_staleness, test_volatile_paths, test_evidence_drift,
+          test_pub_lane, test_verified_by, test_merge_digest retargeted;
+          hook-path/cold-path/receipt structural-pin module lists gained
+          the three new siblings).
 
       - id: REL-2
         title: "Release merge-gate hardening: the red-board lesson becomes RELEASING.md mechanic; surface the ripened QUA-12 ruleset decision (Q2 r5)"

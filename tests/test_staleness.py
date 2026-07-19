@@ -325,13 +325,14 @@ def test_git_log_timeout_produces_visible_diagnostic_not_silent_empty(monkeypatc
 
 def test_git_log_timeout_diagnostic_surfaces_in_session_start_producer(monkeypatch):
     import memory.session_start as S
+    import memory.session_start_signals as SG
 
     def fake_find_stale(md, repo, diagnostics=None, **kwargs):
         if diagnostics is not None:
             diagnostics["timed_out"] = True
         return []
 
-    monkeypatch.setattr(S, "find_stale", fake_find_stale)
+    monkeypatch.setattr(SG, "find_stale", fake_find_stale)
     out = S.staleness_producer("md", "repo")
     assert out and "timed out" in out.lower()
 
