@@ -408,7 +408,7 @@ workstreams:
         title: "Release merge-gate hardening: the red-board lesson becomes RELEASING.md mechanic; surface the ripened QUA-12 ruleset decision (Q2 r5)"
         priority: P1
         effort: S
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 1 — RELEASING.md steps 5-8: seven-check enumeration, the exit-status merge gate (own command, never chained after a display), tag-after-green-main-run; ci.yml ruleset comment trued to the as-applied state (live protection re-verified via gh api at build); PR #86 cited as the gate's first real catch
         q2_verdict: >-
           2026-07-19, dated owner entry (ED5R-1): Fred answered Q2(r5) "Yes —
           apply as codified"; the ruleset was APPLIED to main the same day
