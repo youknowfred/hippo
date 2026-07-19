@@ -79,6 +79,7 @@ CRASH_CONTRACT = {
     ("new_memory", "_remove_floor_pointer"): ("detected",),
     ("packs", "_write_lockfile"): ("detected", "rolled_back"),  # install: re-run adopts; update: file restored
     ("packs", "pack_update_item"): ("detected",),  # ours-replacement write
+    ("presence", "_write_doc"): ("intact",),  # T18 fleet bookkeeping: silent by design (the jit._write_state posture) — a lost write costs one stale fleet line, never a torn doc
     ("promote_rule", "main"): ("detected",),
     ("provenance_format", "_write_marker_keys"): ("detected",),  # returns False
     ("provenance", "restore_file_bytes"): ("detected",),  # returns the error string
@@ -844,6 +845,21 @@ def scn_jit_state_intact(tmp_path, monkeypatch):
     assert not [f for f in leftovers if f.endswith(".json")], "state absent, never partial"
 
 
+def scn_presence_write_doc_intact(tmp_path, monkeypatch):
+    """T18 FLT-1: a torn presence-doc write is SILENT (the jit._write_state posture) —
+    the SessionStart that carries it must not degrade, and no partial doc may land (a
+    torn doc would be a lying fleet beacon)."""
+    from memory import presence
+    from memory.telemetry import default_telemetry_dir
+
+    root, md = _git_repo(tmp_path)
+    _arm(monkeypatch, "presence", "_write_doc")
+    presence.write_presence(md, root, session_id="s1")  # must not raise
+    pd = presence._presence_dir(default_telemetry_dir(md))
+    leftovers = [f for f in os.listdir(pd) if f.endswith(".json")] if os.path.isdir(pd) else []
+    assert not leftovers, "presence doc absent, never partial"
+
+
 _SCENARIOS = [
     (("dream", "_apply_one"), "detected", scn_dream_apply_bridge_detected),
     (("dream", "_apply_one"), "rolled_back", scn_dream_apply_refines_rolled_back),
@@ -860,6 +876,7 @@ _SCENARIOS = [
     (("interview", "_write_state"), "detected", scn_interview_state_detected),
     (("jit", "write_touch_cache"), "detected", scn_jit_touch_cache_detected),
     (("jit", "_write_state"), "intact", scn_jit_state_intact),
+    (("presence", "_write_doc"), "intact", scn_presence_write_doc_intact),
     (("links", "add_typed_relation"), "detected", scn_links_add_typed_detected),
     (("links", "add_typed_relation"), "rolled_back", scn_links_add_typed_rolled_back),
     (("links", "remove_typed_relation"), "detected", scn_links_remove_typed_detected),

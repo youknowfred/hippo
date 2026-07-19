@@ -262,7 +262,13 @@ workstreams:
         title: Session presence file (per-session doc — the fleet keystone, Q1-gated)
         priority: P1
         effort: M
-        status: proposed
+        status: done           # 2026-07-18, session 3 — Q1 YES first (dated owner entry below); presence.py + 3-line session_start wiring + capture SessionEnd clear; every AC pinned in tests/test_presence.py
+        q1_verdict: >-
+          2026-07-18, in-session dated owner entry (ED4R-1): Fred answered Q1 "Yes —
+          write it", ratifying the presence write on the vetted ground — artifact-class
+          parity with the episode buffer + jit state (gitignored, bounded, self-aging,
+          absence-emits-nothing). Asked and answered as STEP ZERO of the T18 build
+          session, before any code (the T21 Q4 ask-and-answer pattern).
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "4 documented same-clone collisions on 2026-07-16: qa-sweep capstone (pytest pollution during v1.17.0 release validation), t16 capstone (branch pointer repositioned by the concurrent v1.18.0 release), PR #62 body ('the third shared-clone collision today'), t8-measurement capstone ('the 4th clone collision') + hippo-branch-cleanup-2026-07-16 Finding 2"}
         problem: >-
           No presence/heartbeat artifact exists at 81177ba (grep verified: only
@@ -1267,7 +1273,13 @@ release_train:
   - tier: T18
     target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
     theme: "The fleet lane"
-    status: proposed
+    status: in_progress    # 2026-07-18, session 3 — FLT-1 done; FLT-2 -> FLT-3 next
+    ratified: >-
+      2026-07-18 — owner-directed (Fred's scheduled T18 implementation chip, naming the
+      FLT-1 -> FLT-2 -> FLT-3 order): T18 selected for build per LAW ZERO. Q1 was asked
+      and answered in-session as STEP ZERO (the T21 Q4 pattern): YES — dated verdict
+      recorded on FLT-1 (q1_verdict) and in ED4R-1. Ship posture, owner-directed in the
+      same exchange: merge + release on green CI per RELEASING.md.
     gate: "Q1 (the presence artifact) gates the WHOLE tier — FLT-1 is the keystone: FLT-2's baseline and FLT-3's presence read both live in its per-session doc. No cross-file deps (RCH-11-adjacent only)."
     done_means: >-
       Concurrent same-clone sessions become mutually visible, a moved tree
@@ -1493,9 +1505,11 @@ decisions:
       Q4 (EVD-4) — commission the salience-revisit evidence run? (rec: yes —
       evidence first, decision later; gates Arm A). Each resolution is a
       dated owner entry recorded on the item and in the capstone; a metric
-      never proxies any of them (LIF-7). STATUS 2026-07-17: Q4 RESOLVED —
-      Fred commissioned Arm A in the T21 build session (dated entry +
-      result on EVD-4); Q1, Q2, Q3 remain PENDING.
+      never proxies any of them (LIF-7). STATUS 2026-07-18: Q1 RESOLVED —
+      Fred answered YES in the T18 build session (dated entry on FLT-1's
+      q1_verdict; presence ships on artifact-class parity). Q4 RESOLVED
+      2026-07-17 — Fred commissioned Arm A in the T21 build session (dated
+      entry + result on EVD-4). Q2, Q3 remain PENDING.
   - id: ED4R-2
     question: What keeps round 4 from minting the next generation of dark reservoirs?
     decision: no new standing artifact without a NAMED READER (the anti-dark-reservoir law — round 4's organizing spine)

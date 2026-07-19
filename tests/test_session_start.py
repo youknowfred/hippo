@@ -626,6 +626,16 @@ def test_stale_venv_producer_registered_first():
     assert S.PRODUCERS[0][1] is S.stale_venv_producer
 
 
+def test_presence_producer_registered_once_after_trust_drift():
+    """FLT-1 (T18): the fleet line sits with the environment-state signals — right after
+    trust_drift, before the staleness family."""
+    labels = [label for label, _fn in S.PRODUCERS]
+    assert labels.count("presence") == 1
+    assert labels.index("presence") == labels.index("trust_drift") + 1
+    fns = [fn for label, fn in S.PRODUCERS if label == "presence"]
+    assert fns == [S.presence_producer]
+
+
 # --------------------------------------------------------------------------- #
 # SHP-3 — unresolvable_baseline_producer (squash-merge / shallow-clone legibility)
 # --------------------------------------------------------------------------- #
