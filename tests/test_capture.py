@@ -69,28 +69,33 @@ def test_capture_module_imports_no_corpus_writer():
 
     Checks the real import graph and call graph — the docstrings deliberately NAME new_memory /
     write_memory to explain the gate, so a naive string match would false-positive on the very
-    explanation of the guarantee.
+    explanation of the guarantee. Covers the façade AND its ED5R-3 queue sibling: the firewall
+    is a property of the capture PASS, so a module split must never shrink its scope.
     """
     import ast
 
-    tree = ast.parse(inspect.getsource(C))
-    imported = set()
-    called = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            imported.add(node.module or "")
-            imported.update(a.name for a in node.names)
-        elif isinstance(node, ast.Import):
-            imported.update(a.name for a in node.names)
-        elif isinstance(node, ast.Call):
-            fn = node.func
-            if isinstance(fn, ast.Attribute):
-                called.add(fn.attr)
-            elif isinstance(fn, ast.Name):
-                called.add(fn.id)
-    assert not any("new_memory" in m for m in imported), "capture imports the corpus-writing module"
-    assert "write_memory" not in called, "capture calls the corpus writer"
-    assert not hasattr(C, "write_memory"), "capture must not expose a corpus writer in its namespace"
+    from memory import capture_queue as CQ
+
+    for mod in (C, CQ):
+        tree = ast.parse(inspect.getsource(mod))
+        imported = set()
+        called = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                imported.add(node.module or "")
+                imported.update(a.name for a in node.names)
+            elif isinstance(node, ast.Import):
+                imported.update(a.name for a in node.names)
+            elif isinstance(node, ast.Call):
+                fn = node.func
+                if isinstance(fn, ast.Attribute):
+                    called.add(fn.attr)
+                elif isinstance(fn, ast.Name):
+                    called.add(fn.id)
+        name = mod.__name__
+        assert not any("new_memory" in m for m in imported), f"{name} imports the corpus-writing module"
+        assert "write_memory" not in called, f"{name} calls the corpus writer"
+        assert not hasattr(mod, "write_memory"), f"{name} must not expose a corpus writer in its namespace"
 
 
 def test_pending_dir_is_gitignored(repo):

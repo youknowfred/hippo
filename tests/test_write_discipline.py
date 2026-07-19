@@ -94,7 +94,7 @@ WRITE_OPEN_ALLOWLIST = {
     ("resolve_view", "mark_not_conflicting"): "per-clone dismiss ledger; rebuildable by re-dismissing",
     ("resolve_view", "_log_verdict"): "per-clone prefill-vs-choice record on the SAME dismiss ledger (TMB-1); derived, best-effort, never an authority",
     ("capture", "write_session_capture"): "gitignored pending seed, unique per-session filename",
-    ("capture", "snooze_queue"): "queue-state marker; worst case the nudge re-fires",
+    ("capture_queue", "snooze_queue"): "queue-state marker; worst case the nudge re-fires",
     ("provenance", "ensure_self_ignoring_dir"): "derived-dir self-ignore marker; create-once, single '*' line",
     ("dream_eval", "_seed_soak"): "eval-harness fixture generation (bench substrate)",
     ("dream_eval", "_body"): "eval-harness fixture generation (bench substrate)",
