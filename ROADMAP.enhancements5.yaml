@@ -484,7 +484,7 @@ workstreams:
         title: RELEASING.md facts lint — the DOC-16 pattern, one document over
         priority: P1
         effort: S
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 1 — tests/test_releasing_doc.py (5 tests): required count/names/multiplier/matrix parsed from ci.yml (ruleset comment cross-checked against expanded job names; PR-only/nightly lanes excluded mechanically), backticked-path existence sweep; the stale "All six" sentence was already trued by REL-2 in this PR; all four rot classes proven to trip
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "RELEASING.md:32 live rot re-verified this cycle: 'All six CI checks must be green: hermetic x4 ..., the dense lane, and shellcheck' — omits secret-scan; the required set has been SEVEN since SEC-8 (ci.yml:29-40 + the secret-scan job at ci.yml:128); grep: zero tests reference RELEASING.md (test_docs_links.py scope excludes it); the founding class: tests/test_stability_doc.py docstring records STABILITY.md misstating frozen numbers for 8 releases before DOC-16 (PR #66, 8a21371); ROADMAP.enhancements4.yaml not_pursuing row: 'the lint-pinned-facts pattern generalizes'"}
         problem: >-
           RELEASING.md:32 has already rotted ("All six CI checks", omitting
