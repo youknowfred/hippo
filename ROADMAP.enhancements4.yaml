@@ -16,8 +16,9 @@
 # scheduling call, with four owner decisions (Q1-Q4) carried PENDING (ED4R-1).
 # ROUND 4 CLOSED 2026-07-19: all four tiers executed and released on dated
 # owner chips — T21 (v1.23.0), T19+T20 (v1.24.0), T18 (v1.27.0). Q1 and Q4
-# were resolved by dated in-session entries; Q2 and Q3 remain PENDING with
-# their report-only / print-only postures holding (see ED4R-1).
+# were resolved by dated in-session entries; Q2 and Q3 were resolved
+# 2026-07-19 in the round-5 formal-question session (see ED4R-1: Q2 =
+# remediation verb RATIFIED, build unscheduled; Q3 = print-only RATIFIED).
 #
 # Continuity across sessions lives in TWO synced places (same protocol as
 # rounds 1-3):
@@ -1561,7 +1562,17 @@ decisions:
       Fred answered YES in the T18 build session (dated entry on FLT-1's
       q1_verdict; presence ships on artifact-class parity). Q4 RESOLVED
       2026-07-17 — Fred commissioned Arm A in the T21 build session (dated
-      entry + result on EVD-4). Q2, Q3 remain PENDING.
+      entry + result on EVD-4). STATUS 2026-07-19 (round-5 formal-question
+      session, post-close): Q2 RESOLVED — Fred RATIFIED the per-item trust
+      remediation verb, OVERRIDING the report-only recommendation; RCH-11's
+      exact discipline binds the future build (per-item, dead/vanished-repo
+      rows ONLY, never bulk, never live rows), the build is UNSCHEDULED
+      (needs its own dated chip), and until it ships the census keeps
+      presenting trust rows report-only. Q3 RESOLVED — print-only RATIFIED
+      as the standing posture on round-5 usage evidence (two real publishes
+      rode larger commits with no recorded friction); the
+      publish-stage-flag-git-index-write deferral row stands; reopening
+      requires a new dated owner decision.
   - id: ED4R-2
     question: What keeps round 4 from minting the next generation of dark reservoirs?
     decision: no new standing artifact without a NAMED READER (the anti-dark-reservoir law — round 4's organizing spine)

@@ -383,6 +383,23 @@ workstreams:
         priority: P1
         effort: S
         status: proposed
+        q2_verdict: >-
+          2026-07-19, dated owner entry (ED5R-1): Fred answered Q2(r5) "Yes —
+          apply as codified"; the ruleset was APPLIED to main the same day
+          (gh api, on owner direction): the seven required checks by full
+          reported name, strict up-to-date-before-merge,
+          require-PR-before-merge, linear history, no force-push or
+          deletion; enforce_admins off (`gh pr merge --admin` stays the
+          explicit, deliberate escape hatch — plain `gh pr merge` now
+          mechanically refuses on red). ONE solo-compatibility deviation
+          from the ci.yml:29-40 text, disclosed at apply time:
+          require_code_owner_reviews OFF with 0 required approvals —
+          CODEOWNERS is '* @youknowfred' and GitHub forbids self-approval,
+          so the codified code-owner-review clause would have forced every
+          solo-authored PR through --admin (which bypasses the checks too),
+          defeating the gate's purpose. REL-2's build trues the ci.yml
+          comment to the as-applied ruleset; the RELEASING.md doc-mechanic
+          leg is unchanged and still to build.
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "hippo-enh-t18-fleet capstone MERGE/RELEASE paragraph — the 2026-07-19 v1.27.0 merge fired against a red board (hermetic macos-py3.12 hung 45m in actions/setup-python; merge was chained after a display command); remedy used: tag held until main-push run 29677420598 went fully green (verified via gh); gh this cycle: repo visibility PUBLIC, gh api branches/main/protection -> 404 'Branch not protected'; ci.yml:29-40 (the QUA-12 ruleset codified as a comment since round 1, 'apply on main once the repo can enforce it')"}
         problem: >-
           The v1.27.0 merge fired against a red board because check-display
@@ -784,6 +801,15 @@ workstreams:
         priority: P3
         effort: M
         status: proposed
+        q1_verdict: >-
+          2026-07-19, dated owner entry (ED5R-1): Fred answered Q1(r5) "Yes,
+          after MEA-1/2" in the round-5 formal-question session — Arm B is
+          COMMISSIONED, with the vetting's sequencing constraint affirmed as
+          part of the verdict: the harness + run build only after MEA-1 and
+          MEA-2 land, so the report reads through an instrument whose
+          sensitivity is known and non-trivial. LAW ZERO unchanged — the
+          build itself still waits on T23 ratification; the severance's
+          decision gate is what this resolves.
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "The severance's data condition ripened and was verified live: outcome_events.jsonl cited_by rows counted 120->132 across two same-day passes (8 on 07-17, 94 on 07-18, 18+ on 07-19 — the ledger GREW while being counted); touch-grain injection_hits 32 memories / 49 hit-sessions; ROADMAP.enhancements4.yaml EVD-4 AC names the exact minimal delta ('AB_FLAGS entry + dispatch branch + generalized arm runner + outcome-signal precondition') and :1608 keeps the graduation arm severed regardless; dream_eval.py:53 AB_FLAGS = ('HIPPO_DREAM', 'HIPPO_SALIENCE') — HIPPO_OUTCOME_PRIOR still absent; outcome.json never written on this machine (index dir ls); recall_salience.py:_apply_outcome_prior (:310) shipped RET-14, flag default-OFF, never measurable"}
         problem: >-
           Arm B was severed behind "nonzero touch/outcome rows + its own
@@ -1700,7 +1726,21 @@ decisions:
       2026-07-18 without it, riding larger commits; no friction incident
       on record). Recommendation unchanged: print-only. Each resolution
       is a dated owner entry recorded on the item and in the capstone; a
-      metric never proxies any of them (LIF-7).
+      metric never proxies any of them (LIF-7). STATUS 2026-07-19
+      (same-day formal-question session): ALL FOUR RESOLVED by dated owner
+      entries. Q1(r5) YES — commission after MEA-1/MEA-2 (recorded on
+      MEA-5's q1_verdict; LAW ZERO still gates the build on T23
+      ratification). Q2(r5) YES — apply as codified; the ruleset was
+      APPLIED to main the same day with one disclosed solo-compatibility
+      deviation (recorded on REL-2's q2_verdict). Carried Q2(r4) RESOLVED
+      — Fred RATIFIED the per-item, dead-rows-only trust-remediation verb,
+      OVERRIDING the report-only recommendation (dated entry appended to
+      ROADMAP.enhancements4.yaml ED4R-1; the build is UNSCHEDULED — it
+      needs its own chip; until it ships, the census keeps presenting
+      trust rows report-only). Carried Q3(r4) RESOLVED — print-only
+      RATIFIED as the standing posture (dated entry in ED4R-1; the
+      --stage deferral row stands unless a future dated decision reopens
+      it).
   - id: ED5R-2
     question: what keeps a measurement from being quietly meaningless?
     decision: evidence carries its instrument's sensitivity (the instrument-honesty law — round 5's organizing spine)
