@@ -11,10 +11,13 @@
 # (INV/SLP/JIT/EXT), ROADMAP.yaml (RET/GRA/LIF/CAP/INT/TEA/SEC/...), or
 # ROADMAP.v1.md.
 #
-# STATUS: every item and tier below is `proposed` — vetted, NOT scheduled.
-# Which tiers to build, in what order, IF ANY, is the owner's scheduling call;
-# four owner decisions (Q1-Q4) are carried PENDING (ED4R-1) and gate the
-# relevant halves. Nothing in this file resolves them.
+# STATUS: every item and tier below shipped as `proposed` — vetted, NOT
+# scheduled; which tiers to build, in what order, IF ANY, was the owner's
+# scheduling call, with four owner decisions (Q1-Q4) carried PENDING (ED4R-1).
+# ROUND 4 CLOSED 2026-07-19: all four tiers executed and released on dated
+# owner chips — T21 (v1.23.0), T19+T20 (v1.24.0), T18 (v1.27.0). Q1 and Q4
+# were resolved by dated in-session entries; Q2 and Q3 remain PENDING with
+# their report-only / print-only postures holding (see ED4R-1).
 #
 # Continuity across sessions lives in TWO synced places (same protocol as
 # rounds 1-3):
@@ -1309,19 +1312,18 @@ workstreams:
           pattern).
 
 # ===========================================================================
-# RELEASE TRAIN — tier sequencing. ALL tiers are `proposed`: which to build,
-# in what order, IF ANY, is the owner's scheduling call (ED4R-1). No
-# cross-TIER dependencies — all four tiers can run in parallel if ratified
-# (EVD-2's FLT-3 coupling is informational, not a build dep). EVD-1 is the
-# single highest-value item (measured chronic pain, zero autonomy change,
-# every ingredient shipped); EVD-1 + FLT-1 are the two highest-value starts
-# and share nothing. target_version is nominal — assigned at release; round 4
-# is a proposal.
+# RELEASE TRAIN — tier sequencing. All tiers shipped `proposed` (which to
+# build, in what order, IF ANY, was the owner's scheduling call — ED4R-1); no
+# cross-TIER dependencies existed (EVD-2's FLT-3 coupling was informational,
+# not a build dep). EXECUTED 2026-07-17..19 on dated owner chips, in the
+# order T21 -> T19+T20 -> T18: every tier `done`, round 4 CLOSED. EVD-1 +
+# FLT-1 were the two highest-value starts and shared nothing — both proved
+# out. target_version was assigned at each release.
 # ===========================================================================
 release_train:
 
   - tier: T18
-    target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
+    target_version: v1.27.0    # assigned at release 2026-07-19 ("The fleet sees itself" — squash 2ad3b5c, tag + release.yml four-way green)
     theme: "The fleet lane"
     status: done           # 2026-07-18, one session: FLT-1 (Q1 YES first), FLT-2, FLT-3 in order. done_means met — the 2026-07-16 collision classes are detected, named events: presence line at SessionStart, one neutral tripwire line per move, the worktree recipe at the first shared-tree mutation. ED4R-3 held throughout: no lock, no daemon, one bounded line each.
     ratified: >-
