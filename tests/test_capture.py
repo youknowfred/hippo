@@ -330,7 +330,9 @@ def test_main_from_hook_reads_stdin(repo, monkeypatch, capsys):
     rc = C.main(["--from-hook"])
     assert rc == 0
     assert C.pending_count(memory_dir=md) == 1
-    assert capsys.readouterr().out == ""  # silent on the hook path
+    captured = capsys.readouterr()
+    assert captured.out == ""  # stdout stays silent on the hook path (WRT-2: the line is stderr-only)
+    assert captured.err.startswith("captured -> ") and captured.err.count("\n") == 1
 
 
 def test_main_list(repo, monkeypatch, capsys):
@@ -535,6 +537,110 @@ def test_main_add_decision_attributed_reply_unchanged(repo, capsys):
     assert capsys.readouterr().out.strip() == (
         "decision recorded — it will ride this session's capture seed"
     )
+
+
+# --------------------------------------------------------------------------- #
+# WRT-2: a human-invoked --from-hook run names its outcome — ONE stderr line,
+# stdout untouched, exit 0 always (the wired hooks discard stderr, so live hook
+# behavior is byte-identical; the three formerly-indistinguishable silences end).
+# --------------------------------------------------------------------------- #
+def _run_from_hook(monkeypatch, argv, payload):
+    import io
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+    return C.main(argv)
+
+
+def test_from_hook_success_names_the_seed_path(repo, monkeypatch, capsys):
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    _seed_episode(md, repo, "hooked", ["m"], "q")
+    rc = _run_from_hook(
+        monkeypatch, ["--from-hook", "--memory-dir", md, "--repo-root", repo],
+        {"session_id": "hooked", "reason": "clear"},
+    )
+    captured = capsys.readouterr()
+    seeds = C.read_pending(memory_dir=md)
+    assert rc == 0 and len(seeds) == 1
+    assert captured.out == ""
+    assert captured.err == f"captured -> {seeds[0]['_path']}\n"
+
+
+def test_from_hook_foreign_sid_names_the_no_op_and_nearest_sids(repo, monkeypatch, capsys):
+    """The 2026-07-19 misattribution incident's seam: a foreign/typo'd session id is now a
+    LEGIBLE no-op — the line counts the sessions the buffer does know and names the
+    closest ids, instead of an exit-0 silence indistinguishable from success."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    _seed_episode(md, repo, "sessABC", ["m"], "q")
+    _seed_episode(md, repo, "unrelated", ["m"], "q2")
+    rc = _run_from_hook(
+        monkeypatch, ["--from-hook", "--memory-dir", md, "--repo-root", repo],
+        {"session_id": "sessABX", "reason": "clear"},
+    )
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert C.pending_count(memory_dir=md) == 0, "a no-op writes nothing"
+    assert captured.out == ""
+    assert captured.err.count("\n") == 1, "exactly one outcome line"
+    assert "no episodes in buffer for session_id=sessABX (2 sessions known)" in captured.err
+    assert "nearest: sessABC" in captured.err  # the paste-typo aid
+
+
+def test_from_hook_internal_failure_names_the_exception_class(repo, monkeypatch, capsys):
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    _seed_episode(md, repo, "boom-sess", ["m"], "q")
+
+    def _boom(*a, **kw):
+        raise RuntimeError("disk on fire")
+
+    monkeypatch.setattr(C, "_gather_session_context_raw", _boom)
+    rc = _run_from_hook(
+        monkeypatch, ["--from-hook", "--memory-dir", md, "--repo-root", repo],
+        {"session_id": "boom-sess", "reason": "clear"},
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, "inv2: exit 0 in ALL cases"
+    assert captured.out == ""
+    assert captured.err == "capture failed: RuntimeError\n"
+
+
+def test_capture_outcome_is_a_discriminated_return_not_string_matching(repo):
+    """The no-episodes vs exception distinction comes from _capture_outcome's return
+    triple — main() never string-matches, and other callers keep path-or-None via the
+    public wrapper."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    _seed_episode(md, repo, "real-sess", ["m"], "q")
+
+    outcome, path, detail = C._capture_outcome("real-sess", memory_dir=md, repo_root=repo)
+    assert (outcome, detail) == (C._OUTCOME_CAPTURED, None) and path
+
+    outcome, path, detail = C._capture_outcome("ghost", memory_dir=md, repo_root=repo)
+    assert (outcome, path) == (C._OUTCOME_NO_EPISODES, None)
+    assert detail == ["real-sess"], "detail carries the known-session paste-typo aid"
+
+    assert C.write_session_capture("ghost", memory_dir=md, repo_root=repo) is None
+
+
+def test_wired_hooks_discard_stderr_and_force_exit_zero():
+    """WRT-2's byte-identity ground, citing the exact shell lines: both wired pipelines
+    throw stderr away and force exit 0, so the new outcome line is invisible exactly
+    where it must be and hook behavior is unchanged."""
+    hooks_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(C.__file__))), "hooks"
+    )
+    for name in ("memory_session_end.sh", "memory_subagent_stop.sh"):
+        with open(os.path.join(hooks_dir, name), encoding="utf-8") as fh:
+            src = fh.read()
+        line = next(l for l in src.splitlines() if "-m memory.capture --from-hook" in l)
+        assert "2>/dev/null" in line, f"{name}: the capture invocation must discard stderr"
+        assert "|| true" in line, f"{name}: the capture invocation must force exit 0"
 
 
 def test_main_add_decision_unattributed_says_window_matched(repo, capsys):

@@ -344,90 +344,112 @@ def gather_session_context(
     empty seed is written. Never raises: any failure yields ``None``.
     """
     try:
-        if telemetry_dir is None and memory_dir is not None:
-            telemetry_dir = default_telemetry_dir(memory_dir)
-        episodes = list(read_episodes(telemetry_dir))
-        # Isolate ONE session's episodes: a real harness id matches that session; a None id
-        # (older harness / bare CLI) matches the episodes that were logged with no id. Either
-        # way we never fold the whole multi-session buffer into one seed.
-        episodes = [e for e in episodes if e.get("session_id") == session_id]
-        if not episodes:
-            return None
-
-        watermark = None
-        for e in episodes:
-            if e.get("head_commit"):
-                watermark = e["head_commit"]
-                break
-
-        names: List[str] = []
-        seen_names = set()
-        previews: List[str] = []
-        seen_previews = set()
-        for e in episodes:
-            for n in e.get("recalled_names") or []:
-                if n and n not in seen_names:
-                    seen_names.add(n)
-                    names.append(n)
-            q = (e.get("query_preview") or "").strip()
-            if q and q not in seen_previews:
-                seen_previews.add(q)
-                previews.append(q)
-
-        head_now = run_git(["rev-parse", "HEAD"], repo_root).strip() or None if repo_root else None
-        untracked = _git_untracked(repo_root)
-        hunks = (
-            _git_diff_hunks(watermark, repo_root, untracked) if include_hunks else ""
-        )
-        # MANDATORY lint (GRW-1 invariant): verbatim hunks widen the secret-exposure surface,
-        # so every hunk-bearing seed is scanned AT CAPTURE. A hit only FLAGS the seed (the
-        # queue is gitignored, same trust domain as the episode buffer) — the consolidate
-        # drain refuses to fence flagged hunks into a corpus body, and write_memory's own
-        # lint is the backstop behind that.
-        # SEN-2: the poisoning-payload twin. hunks_threat_flagged rides beside
-        # hunks_secret_flagged — a Tier-A hit (invisible Unicode / confusable / exfil shape /
-        # HTML comment) in the captured evidence flags the seed identically (absent when
-        # clean, ED-4). Tier-B imperative grammar is MEASURED to the dark ledger below, never
-        # a seed field. Additive fields, no _SEED_SCHEMA bump (read defensively via .get()).
-        threats = scan_threats(hunks) if hunks else {"tier_a": [], "tier_b": []}
-        seed = {
-            "schema": _SEED_SCHEMA,
-            "kind": "session-capture",
-            "session_id": session_id,
-            "head_commit": watermark,  # the session's starting watermark (from the buffer)
-            "head": head_now,          # HEAD at capture time — the two bound the diff range
-            "changed_paths": _git_changed_paths(watermark, repo_root, untracked),
-            "recalled_names": names[:_MAX_RECALLED_NAMES],
-            "query_previews": previews[:_MAX_QUERY_PREVIEWS],
-            "episode_count": len(episodes),
-            "earliest_ts": episodes[0].get("ts"),
-            "diff_hunks": hunks,
-            "hunks_secret_flagged": bool(hunks and scan_text(hunks)),
-            "hunks_threat_flagged": bool(threats["tier_a"]),
-            # GRW-4: the session's user-confirmed WHY, replayed from the in-session decision
-            # ledger (memory.capture --add-decision) with the SAME session matching as the
-            # episodes above — agent-recorded transcription only, never synthesized here.
-            "decisions": _session_decisions(session_id, telemetry_dir),
-        }
-        seed["salience"] = _seed_salience(seed, telemetry_dir, untracked)
-        # WRT-3: the labeled time-window fallback rides a SEPARATE additive key — absent
-        # when none matched (ED-4; queue-own shape read via .get(), no _SEED_SCHEMA bump).
-        ts_vals = [
-            float(e["ts"])
-            for e in episodes
-            if isinstance(e.get("ts"), (int, float)) and not isinstance(e.get("ts"), bool)
-        ]
-        window = _window_decisions(
+        return _gather_session_context_raw(
             session_id,
-            telemetry_dir,
-            (min(ts_vals), max(ts_vals)) if ts_vals else None,
-            seed["decisions"],
+            repo_root=repo_root,
+            telemetry_dir=telemetry_dir,
+            memory_dir=memory_dir,
+            include_hunks=include_hunks,
         )
-        if window:
-            seed["window_decisions"] = window
-        return seed
     except Exception:
         return None
+
+
+def _gather_session_context_raw(
+    session_id: Optional[str],
+    *,
+    repo_root: Optional[str] = None,
+    telemetry_dir: Optional[str] = None,
+    memory_dir: Optional[str] = None,
+    include_hunks: bool = True,
+) -> Optional[Dict]:
+    """The RAISING core of ``gather_session_context`` (WRT-2): ``None`` means exactly
+    "this session left no episodes to replay"; any real failure ESCAPES as its exception
+    so ``_capture_outcome`` can name the class instead of collapsing every trouble into
+    a silent None. Public callers keep never-raise via the wrapper above.
+    """
+    if telemetry_dir is None and memory_dir is not None:
+        telemetry_dir = default_telemetry_dir(memory_dir)
+    episodes = list(read_episodes(telemetry_dir))
+    # Isolate ONE session's episodes: a real harness id matches that session; a None id
+    # (older harness / bare CLI) matches the episodes that were logged with no id. Either
+    # way we never fold the whole multi-session buffer into one seed.
+    episodes = [e for e in episodes if e.get("session_id") == session_id]
+    if not episodes:
+        return None
+
+    watermark = None
+    for e in episodes:
+        if e.get("head_commit"):
+            watermark = e["head_commit"]
+            break
+
+    names: List[str] = []
+    seen_names = set()
+    previews: List[str] = []
+    seen_previews = set()
+    for e in episodes:
+        for n in e.get("recalled_names") or []:
+            if n and n not in seen_names:
+                seen_names.add(n)
+                names.append(n)
+        q = (e.get("query_preview") or "").strip()
+        if q and q not in seen_previews:
+            seen_previews.add(q)
+            previews.append(q)
+
+    head_now = run_git(["rev-parse", "HEAD"], repo_root).strip() or None if repo_root else None
+    untracked = _git_untracked(repo_root)
+    hunks = (
+        _git_diff_hunks(watermark, repo_root, untracked) if include_hunks else ""
+    )
+    # MANDATORY lint (GRW-1 invariant): verbatim hunks widen the secret-exposure surface,
+    # so every hunk-bearing seed is scanned AT CAPTURE. A hit only FLAGS the seed (the
+    # queue is gitignored, same trust domain as the episode buffer) — the consolidate
+    # drain refuses to fence flagged hunks into a corpus body, and write_memory's own
+    # lint is the backstop behind that.
+    # SEN-2: the poisoning-payload twin. hunks_threat_flagged rides beside
+    # hunks_secret_flagged — a Tier-A hit (invisible Unicode / confusable / exfil shape /
+    # HTML comment) in the captured evidence flags the seed identically (absent when
+    # clean, ED-4). Tier-B imperative grammar is MEASURED to the dark ledger below, never
+    # a seed field. Additive fields, no _SEED_SCHEMA bump (read defensively via .get()).
+    threats = scan_threats(hunks) if hunks else {"tier_a": [], "tier_b": []}
+    seed = {
+        "schema": _SEED_SCHEMA,
+        "kind": "session-capture",
+        "session_id": session_id,
+        "head_commit": watermark,  # the session's starting watermark (from the buffer)
+        "head": head_now,          # HEAD at capture time — the two bound the diff range
+        "changed_paths": _git_changed_paths(watermark, repo_root, untracked),
+        "recalled_names": names[:_MAX_RECALLED_NAMES],
+        "query_previews": previews[:_MAX_QUERY_PREVIEWS],
+        "episode_count": len(episodes),
+        "earliest_ts": episodes[0].get("ts"),
+        "diff_hunks": hunks,
+        "hunks_secret_flagged": bool(hunks and scan_text(hunks)),
+        "hunks_threat_flagged": bool(threats["tier_a"]),
+        # GRW-4: the session's user-confirmed WHY, replayed from the in-session decision
+        # ledger (memory.capture --add-decision) with the SAME session matching as the
+        # episodes above — agent-recorded transcription only, never synthesized here.
+        "decisions": _session_decisions(session_id, telemetry_dir),
+    }
+    seed["salience"] = _seed_salience(seed, telemetry_dir, untracked)
+    # WRT-3: the labeled time-window fallback rides a SEPARATE additive key — absent
+    # when none matched (ED-4; queue-own shape read via .get(), no _SEED_SCHEMA bump).
+    ts_vals = [
+        float(e["ts"])
+        for e in episodes
+        if isinstance(e.get("ts"), (int, float)) and not isinstance(e.get("ts"), bool)
+    ]
+    window = _window_decisions(
+        session_id,
+        telemetry_dir,
+        (min(ts_vals), max(ts_vals)) if ts_vals else None,
+        seed["decisions"],
+    )
+    if window:
+        seed["window_decisions"] = window
+    return seed
 
 
 def _seed_filename(seed: Dict) -> str:
@@ -443,6 +465,16 @@ def _seed_filename(seed: Dict) -> str:
     return f"capture-{slug}.json"
 
 
+# WRT-2: the three capture outcome classes, discriminated by RETURN VALUE — never by
+# string matching. A human-invoked --from-hook run used to have three indistinguishable
+# exit-0 silences (foreign sid / success / internal failure); the 2026-07-19 incident —
+# an operator's foreign-sid no-op credited with a seed a concurrent hook actually
+# minted — is the exhibit this closes.
+_OUTCOME_CAPTURED = "captured"
+_OUTCOME_NO_EPISODES = "no-episodes"
+_OUTCOME_FAILED = "failed"
+
+
 def write_session_capture(
     session_id: Optional[str],
     *,
@@ -456,18 +488,55 @@ def write_session_capture(
 
     Returns ``None`` (writes nothing) when the session left no episodes to replay. NEVER writes
     to the corpus — the only directory it touches is the pending queue, created self-ignoring
-    (SEC-3). Fire-and-forget; never raises.
+    (SEC-3). Fire-and-forget; never raises. (Thin public wrapper: ``_capture_outcome`` below
+    carries the discriminated WRT-2 result; this keeps the path-or-None contract for every
+    existing caller.)
+    """
+    _outcome, path, _detail = _capture_outcome(
+        session_id,
+        reason=reason,
+        memory_dir=memory_dir,
+        repo_root=repo_root,
+        telemetry_dir=telemetry_dir,
+        pending_dir=pending_dir,
+    )
+    return path
+
+
+def _capture_outcome(
+    session_id: Optional[str],
+    *,
+    reason: Optional[str] = None,
+    memory_dir: Optional[str] = None,
+    repo_root: Optional[str] = None,
+    telemetry_dir: Optional[str] = None,
+    pending_dir: Optional[str] = None,
+) -> tuple:
+    """The capture pass with a DISCRIMINATED result: ``(outcome, path, detail)``.
+
+    ``outcome`` is one of ``_OUTCOME_CAPTURED`` (``path`` = the written seed),
+    ``_OUTCOME_NO_EPISODES`` (``detail`` = the sorted session ids the buffer DOES know —
+    the paste-typo aid), or ``_OUTCOME_FAILED`` (``detail`` = the exception class name,
+    via the raising gather core). Same firewall and never-raise posture as the public
+    wrapper; the only writes target the pending queue.
     """
     try:
         if memory_dir is None or repo_root is None:
             md, rr = resolve_dirs()
             memory_dir = memory_dir or md
             repo_root = repo_root or rr
-        seed = gather_session_context(
+        seed = _gather_session_context_raw(
             session_id, repo_root=repo_root, telemetry_dir=telemetry_dir, memory_dir=memory_dir
         )
         if seed is None:
-            return None
+            # The raw core returns None ONLY for "no episodes" — real trouble raises.
+            td = telemetry_dir if telemetry_dir is not None else (
+                default_telemetry_dir(memory_dir) if memory_dir else None
+            )
+            known = sorted({
+                str(e.get("session_id")) for e in read_episodes(td) if e.get("session_id")
+            })
+            return (_OUTCOME_NO_EPISODES, None, known)
         seed["reason"] = reason
         seed["captured_at"] = round(time.time(), 3)
         pd = _resolve_pending_dir(pending_dir, memory_dir)
@@ -517,13 +586,36 @@ def write_session_capture(
         # trivial new seed yields to them. Value-first, not FIFO: the queue keeps what a drain
         # would lead with.
         prune_pending(pd, max_seeds=_MAX_PENDING_SEEDS)
-        return path
-    except Exception:
-        return None
+        return (_OUTCOME_CAPTURED, path, None)
+    except Exception as exc:
+        return (_OUTCOME_FAILED, None, type(exc).__name__)
+
+
+def _hook_outcome_line(outcome: str, path: Optional[str], detail, session_id) -> str:
+    """The ONE --from-hook stderr line naming which outcome happened (WRT-2, inv3).
+
+    The wired SessionEnd/SubagentStop pipelines discard stderr (their capture invocation
+    ends ``2>/dev/null || true`` — pinned by test), so live hook behavior is byte-identical
+    while a human running the same command finally sees the truth. The no-episodes line
+    counts the sessions the buffer DOES know and names the closest ids (paste-typo aid).
+    """
+    if outcome == _OUTCOME_CAPTURED:
+        return f"captured -> {path}"
+    if outcome == _OUTCOME_NO_EPISODES:
+        known = [str(s) for s in (detail or [])]
+        line = f"no episodes in buffer for session_id={session_id} ({len(known)} sessions known)"
+        import difflib
+
+        near = difflib.get_close_matches(str(session_id or ""), known, n=3, cutoff=0.6)
+        if near:
+            line += f"; nearest: {', '.join(near)}"
+        return line
+    return f"capture failed: {detail}"
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
+    import sys
 
     parser = argparse.ArgumentParser(
         description="Draft-capture pass (CAP-2): snapshot the session's episode buffer + diff "
@@ -616,8 +708,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
         session_id, reason = args.session_id, args.reason
         if args.from_hook:
-            import sys
-
             try:
                 payload = json.load(sys.stdin)
                 if isinstance(payload, dict):
@@ -636,12 +726,17 @@ def main(argv: Optional[List[str]] = None) -> int:
                     clear_presence(args.memory_dir, session_id=session_id)
                 except Exception:
                     pass
-        path = write_session_capture(
+        outcome, path, detail = _capture_outcome(
             session_id, reason=reason, memory_dir=args.memory_dir, repo_root=args.repo_root
         )
-        # Silent on the hook path: SessionEnd has no context consumer. A written seed surfaces
-        # NEXT session via the SessionStart pending-capture producer.
-        if path and not args.from_hook:
+        if args.from_hook:
+            # WRT-2: EXACTLY ONE outcome line, on STDERR. The wired hooks discard stderr
+            # (byte-identical live behavior — inv2's exit-0 below is untouched); a human
+            # running the same command sees which formerly-silent outcome happened.
+            # Stdout stays empty on this path: SessionEnd has no context consumer, and a
+            # written seed surfaces NEXT session via the SessionStart producer.
+            print(_hook_outcome_line(outcome, path, detail, session_id), file=sys.stderr)
+        elif path:
             print(f"captured → {path}")
         return 0
     except Exception:  # never raise out of the SessionEnd hook path
