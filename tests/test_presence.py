@@ -466,3 +466,131 @@ def test_record_from_payload_carries_the_tripwire_line(repo, memory_dir, monkeyp
     )
     assert ok is True
     assert any("fleet" in ln and "now side@" in ln for ln in context)
+
+
+# --------------------------------------------------------------------------- #
+# FLT-3: the worktree-first nudge (mutating shared-tree act + another session)
+# --------------------------------------------------------------------------- #
+def _observe_mut(memory_dir, repo, sid="sess-1", rel="src/app.py", **kw):
+    kw.setdefault("mutating", True)
+    kw.setdefault("shared_tree", True)
+    return P.observe_fleet(rel, memory_dir=memory_dir, repo_root=repo, session_id=sid, **kw)
+
+
+def test_nudge_fires_once_and_names_the_recipe_verbatim(repo, memory_dir):
+    _seed_commit(repo)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    td = default_telemetry_dir(memory_dir)
+    _plant(td, "other-sess", branch="enh-x", age_s=120)
+    out = _observe_mut(memory_dir, repo)
+    assert out is not None and len(out) == 1
+    assert "git worktree add .claude/worktrees/<branch>" in out[0]
+    assert len(out[0]) <= P._MAX_LINE_CHARS
+    # once per session — the flag persists in the doc
+    assert _observe_mut(memory_dir, repo) is None
+    with open(P._presence_path(td, "sess-1"), "r", encoding="utf-8") as fh:
+        assert json.load(fh)["nudged"] is True
+
+
+def test_nudge_requires_a_mutating_tool(repo, memory_dir):
+    _seed_commit(repo)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    _plant(default_telemetry_dir(memory_dir), "other-sess", age_s=120)
+    assert _observe_mut(memory_dir, repo, mutating=False) is None  # a Read never nudges
+
+
+def test_nudge_worktree_prefixed_paths_self_exempt(repo, memory_dir):
+    _seed_commit(repo)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    _plant(default_telemetry_dir(memory_dir), "other-sess", age_s=120)
+    assert _observe_mut(memory_dir, repo, shared_tree=False) is None
+
+
+def test_nudge_requires_another_fresh_session(repo, memory_dir):
+    _seed_commit(repo)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    assert _observe_mut(memory_dir, repo) is None  # alone: mutate freely, no nag
+    _plant(default_telemetry_dir(memory_dir), "stale", age_s=P.PRESENCE_TTL_SECONDS + 60)
+    assert _observe_mut(memory_dir, repo) is None  # an expired doc never arms it
+
+
+def test_nudge_dedup_survives_a_sessionstart_rewrite(repo, memory_dir):
+    _seed_commit(repo)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    td = default_telemetry_dir(memory_dir)
+    _plant(td, "other-sess", age_s=120)
+    assert _observe_mut(memory_dir, repo) is not None
+    P.write_presence(memory_dir, repo, session_id="sess-1")  # the resume path
+    assert _observe_mut(memory_dir, repo) is None
+
+
+def test_tripwire_and_nudge_share_one_bounded_emission(repo, memory_dir, monkeypatch):
+    """The joint budget: at most 2 fleet lines per spawn (one tripwire per move + one
+    nudge per session), riding ONE context_out (QUA-2)."""
+    _seed_commit(repo)
+    monkeypatch.setattr(P, "_RECHECK_SECONDS", 0.0)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    _plant(default_telemetry_dir(memory_dir), "other-sess", age_s=120)
+    _git(repo, "checkout", "-q", "-b", "side")
+    out = _observe_mut(memory_dir, repo)
+    assert out is not None and len(out) == 2
+    assert any("moved" in ln for ln in out) and any("worktree add" in ln for ln in out)
+
+
+def test_mutating_constant_is_the_read_exclusion():
+    """The ONE canonical subset (FLT-3): today it is exactly _FILE_TOOLS minus Read. A
+    future tool joining the matcher must make a conscious mutating-or-not call here."""
+    from memory import outcome as O
+
+    assert O.MUTATING_FILE_TOOLS == O._FILE_TOOLS - {"Read"}
+    assert "Read" not in O.MUTATING_FILE_TOOLS
+
+
+def test_record_from_payload_edit_on_shared_tree_nudges(repo, memory_dir):
+    from memory import outcome as O
+
+    _seed_commit(repo)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    _plant(default_telemetry_dir(memory_dir), "other-sess", branch="enh-x", age_s=120)
+    context: list = []
+    ok = O.record_from_payload(
+        {"tool_name": "Edit", "tool_input": {"file_path": os.path.join(repo, "src/app.py")},
+         "session_id": "sess-1"},
+        memory_dir=memory_dir, repo_root=repo, context_out=context,
+    )
+    assert ok is True
+    assert any(P.WORKTREE_RECIPE in ln for ln in context)
+
+
+def test_record_from_payload_read_never_nudges(repo, memory_dir):
+    from memory import outcome as O
+
+    _seed_commit(repo)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    _plant(default_telemetry_dir(memory_dir), "other-sess", age_s=120)
+    context: list = []
+    O.record_from_payload(
+        {"tool_name": "Read", "tool_input": {"file_path": os.path.join(repo, "src/app.py")},
+         "session_id": "sess-1"},
+        memory_dir=memory_dir, repo_root=repo, context_out=context,
+    )
+    assert not any(P.WORKTREE_RECIPE in ln for ln in context)
+
+
+def test_record_from_payload_worktree_path_self_exempts(repo, memory_dir):
+    from memory import outcome as O
+
+    _seed_commit(repo)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    _plant(default_telemetry_dir(memory_dir), "other-sess", age_s=120)
+    wt_file = os.path.join(repo, ".claude", "worktrees", "enh-y", "src", "mod.py")
+    os.makedirs(os.path.dirname(wt_file), exist_ok=True)
+    with open(wt_file, "w", encoding="utf-8") as fh:
+        fh.write("z = 3\n")
+    context: list = []
+    ok = O.record_from_payload(
+        {"tool_name": "Edit", "tool_input": {"file_path": wt_file}, "session_id": "sess-1"},
+        memory_dir=memory_dir, repo_root=repo, context_out=context,
+    )
+    assert ok is True  # the touch still logs (the outcome ledger is unchanged)
+    assert not any(P.WORKTREE_RECIPE in ln for ln in context)

@@ -48,6 +48,12 @@ from .telemetry import default_telemetry_dir, log_outcome, read_episodes, read_o
 # is the authoritative guard, so a matcher slip can never log a non-file tool).
 _FILE_TOOLS = frozenset({"Read", "Edit", "Write", "MultiEdit", "NotebookEdit"})
 
+# T18 FLT-3: the MUTATING subset — the ONE canonical "this tool changed a file" constant
+# (Read excluded; no other such subset may exist). The fleet lane's worktree-first nudge
+# keys on it; a test pins its relationship to _FILE_TOOLS so a future tool joining the
+# matcher forces a conscious mutating-or-not decision here.
+MUTATING_FILE_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
+
 
 def _touched_path(tool_input: dict) -> Optional[str]:
     """The file a file-touching tool acted on (``file_path`` for most; ``notebook_path`` for
@@ -119,10 +125,12 @@ def record_from_payload(
                 context_out.append(context)
         except Exception:
             cited_by = None
-        # T18 FLT-2: the fleet lane rides the SAME single spawn — the moved-tree
-        # tripwire (presence.observe_fleet), debounced and budget-pinned, appending to
-        # the same context_out so the hook still emits exactly ONE hookSpecificOutput
-        # (QUA-2). Killed entirely by HIPPO_DISABLE_PRESENCE.
+        # T18 FLT-2/FLT-3: the fleet lane rides the SAME single spawn — the moved-tree
+        # tripwire and the worktree-first nudge (presence.observe_fleet), debounced and
+        # budget-pinned, appending to the same context_out so the hook still emits
+        # exactly ONE hookSpecificOutput (QUA-2). The worktree-prefix self-exemption is
+        # the same prefix logic EVD-2's lane-health diagnosis names (_WORKTREE_PREFIX —
+        # built aware of each other by design). Killed entirely by HIPPO_DISABLE_PRESENCE.
         try:
             from .presence import observe_fleet
 
@@ -132,6 +140,8 @@ def record_from_payload(
                 repo_root=repo_root,
                 telemetry_dir=td,
                 session_id=session_id,
+                mutating=tool in MUTATING_FILE_TOOLS,
+                shared_tree=not rel.startswith(_WORKTREE_PREFIX),
             )
             if fleet and context_out is not None:
                 context_out.extend(fleet)

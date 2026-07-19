@@ -42,6 +42,28 @@ states facts and prescribes nothing; recovery stays human. Touchless sessions ge
 same compare at their NEXT SessionStart: ``write_presence`` stashes the line as the
 doc's ``moved_note``; the producer emits it exactly once and clears it.
 
+FLT-3, the worktree-first nudge (same spawn, same call): the FIRST time this session
+MUTATES the shared tree — the caller passes ``mutating`` (tool in
+``outcome.MUTATING_FILE_TOOLS``, the one canonical subset; Read excluded) and
+``shared_tree`` (the touched rel path is NOT under ``outcome._WORKTREE_PREFIX`` — a
+worktree-prefixed mutation is already isolated and self-exempts) — while >=1 OTHER
+fresh presence doc exists, ONE nudge names the proven recipe verbatim:
+``git worktree add .claude/worktrees/<branch>`` (every tier session since T8 used it;
+the capstones call it the law). Once per session, deduped via the doc's ``nudged`` flag
+(surviving SessionStart rewrites on resume). HONEST COVERAGE BOUNDARY: PostToolUse sees
+FILE-TOOL acts only — Bash-mediated mutations (git commit/checkout, pytest, scripts)
+never reach this hook, so the 5-session cwd-trap class is only PARTIALLY covered: a
+file-tool edit landing on the shared tree (T10's swept memory-file mods) is the covered
+shape; a git-add misfire from a wrong cwd is not. Also stated in STABILITY.md's
+``HIPPO_DISABLE_PRESENCE`` entry and memory_post_tool.sh.
+
+LINE BUDGET, stated (the QUA-2 / JIT-1 accounting): the PostToolUse surface's joint
+budget is EXPLICITLY RE-BOUNDED, not shared — JIT-1 keeps its 3 reminder lines per
+session (``jit.MAX_LINES_PER_SESSION``); this lane adds at most 2 more per spawn (one
+tripwire line per detected move + one worktree nudge per session), each ``_clip``-capped.
+Every line rides the same ``context_out``; the hook still prints exactly ONE
+hookSpecificOutput.
+
 ED4R-3 binds permanently: no lock, no daemon, no mutual exclusion — presence is a file
 only ever READ for one line of legibility; recovery stays human. SCOPE is per-WORKING-
 TREE: a worktree-opened-as-project session resolves its OWN telemetry dir and therefore
@@ -75,6 +97,8 @@ _PRESENCE_DIRNAME = "presence"
 _MAX_LINE_CHARS = 300  # hard cap per fleet line
 _MAX_FLEET_NAMES = 3  # branches named on the producer line before "(+N more)"
 _RECHECK_SECONDS = 60.0  # FLT-2 debounce: at most one live-git compare per this window
+# FLT-3: the recipe every tier session since T8 proved out — named VERBATIM in the nudge.
+WORKTREE_RECIPE = "git worktree add .claude/worktrees/<branch>"
 
 # The PRODUCERS loop calls every producer with the fixed (memory_dir, repo_root, ctx)
 # shape, which carries no harness session id — ``write_presence`` (which DOES receive it,
@@ -425,8 +449,10 @@ def observe_fleet(
     repo_root: Optional[str] = None,
     telemetry_dir: Optional[str] = None,
     session_id: Optional[str] = None,
+    mutating: bool = False,
+    shared_tree: bool = False,
 ) -> Optional[List[str]]:
-    """FLT-2: the fleet decision for ONE PostToolUse file touch — the moved tripwire.
+    """FLT-2 + FLT-3: the whole fleet decision for ONE PostToolUse file touch.
 
     Returns bounded line(s) for the caller's ``context_out`` (QUA-2: the hook still
     prints exactly ONE hookSpecificOutput), or ``None`` — the overwhelming norm. The
@@ -437,8 +463,14 @@ def observe_fleet(
     change the rc-only ancestor probe. A reportable move (branch switch / non-fast-
     forward reposition) emits ONE neutral line and updates the doc — the wire fires
     ONCE per move; a linear advance refreshes silently. A missing doc self-heals
-    silently (a session predating the lane gets its baseline on first touch). Doc
-    rewrites double as the session's liveness beacon (mtime refresh). Never raises.
+    silently (a session predating the lane gets its baseline on first touch).
+
+    The FLT-3 nudge fires at most once per SESSION (the ``nudged`` flag), only when
+    ``mutating`` (the caller checked ``outcome.MUTATING_FILE_TOOLS``) AND ``shared_tree``
+    (not worktree-prefixed — the caller checked ``outcome._WORKTREE_PREFIX``) AND >=1
+    other fresh presence doc exists; it names ``WORKTREE_RECIPE`` verbatim. Guidance
+    only — no lock, no block (ED4R-3). Doc rewrites double as the session's liveness
+    beacon (mtime refresh). Never raises.
     """
     try:
         if presence_disabled() or not os.path.isdir(memory_dir):
@@ -477,6 +509,16 @@ def observe_fleet(
                     doc["ts"] = now
                 doc["checked_ts"] = now
                 dirty = True
+        if mutating and shared_tree and not doc.get("nudged") and _fresh_others(td, sid):
+            lines.append(
+                _clip(
+                    "🚦 fleet: another session is active in this working tree and this "
+                    f"one just modified it ({rel_path}). Worktrees isolate concurrent "
+                    f"sessions: {WORKTREE_RECIPE}"
+                )
+            )
+            doc["nudged"] = True
+            dirty = True
         if dirty:
             _write_doc(td, sid, doc)
         return lines or None

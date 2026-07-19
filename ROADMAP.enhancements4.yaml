@@ -343,6 +343,23 @@ workstreams:
           Fleet state itself rots: the stale fix-worklist-rebounce worktree
           (two releases behind) lingering in `git worktree list` is the
           in-house proof that TTL discipline is mandatory, not optional.
+          AS BUILT 2026-07-18 (drift corrected vs the 81177ba snapshot): the
+          tree had moved through five more releases — session_start.py sat at
+          1702/1705 (not the brief's 1692), so the wiring landed at EXACTLY 3
+          lines (sibling import + PRODUCERS entry + write call) leaving the
+          file AT its grandfathered cap (the next change there forces a split
+          or a deliberate re-pin); telemetry.py took ZERO lines. The
+          "memory_session_end.sh graceful-clear seam" resolved to capture.py's
+          --from-hook branch (that hook's ONE Python spawn, INT-5) — gated on
+          reason != subagent-stop because memory_subagent_stop.sh rides the
+          SAME entry with the still-live parent's session_id. The producer
+          registered after trust_drift; the cited adjacency pins (:625,:979 —
+          stale_venv-first, squash-after-unresolvable) were untouched by that
+          insertion and a third pin now guards the presence slot. TTL landed
+          at 6h with the age always displayed; prune = TTL sweep (any
+          session's expired doc) then count-cap 32 oldest-first. The doc's
+          atomic writer is registered 'intact' in the crash contract
+          (tests/test_crash_faults.py) — the jit._write_state posture.
 
       - id: FLT-2
         title: Moved-under-me tripwire (HEAD/branch baseline vs the presence doc)
@@ -424,7 +441,24 @@ workstreams:
         title: Worktree-first nudge at the first shared-tree mutating act
         priority: P2
         effort: M
-        status: proposed
+        status: done           # 2026-07-18, session 3 — nudge in observe_fleet; MUTATING_FILE_TOOLS canonical constant in outcome.py; recipe named verbatim; coverage boundary documented
+        as_built: >-
+          MUTATING_FILE_TOOLS landed in outcome.py beside _FILE_TOOLS (the payload
+          domain), pinned as exactly _FILE_TOOLS minus Read so a future matcher tool
+          forces a conscious mutating-or-not call; presence.observe_fleet receives
+          booleans (mutating / shared_tree) — payload-agnostic, no import cycle. The
+          self-exemption reuses outcome._WORKTREE_PREFIX verbatim (the EVD-2 constant —
+          the named coupling; no prefix logic forked; recording changes stay EVD-2's
+          follow-up). Line budget EXPLICITLY RE-BOUNDED and stated in presence.py's
+          docstring: JIT-1 keeps its 3 reminder lines per session; the fleet lane adds
+          at most 2 per spawn (one tripwire line per move + one nudge per session) on
+          the same context_out (QUA-2 holds — one hookSpecificOutput). The kill switch
+          shipped WIDER than the item asked: HIPPO_DISABLE_PRESENCE kills the whole
+          fleet lane (write + producer + tripwire + nudge — pre-T18 behavior), mirroring
+          HIPPO_DISABLE_JIT's whole-lane semantics; registered in STABILITY.md with the
+          coverage boundary stated there, in memory_post_tool.sh, and in the module
+          docstring. No skill text documents hook lanes (the T16 precedent) — the
+          boundary lives in the three surfaces above.
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "PR #62 body ('branching in place would have yanked [the T17 session's] working tree — the third shared-clone collision today'); t8/t12/t13 capstones ('START in a worktree even when the clone looks clean'; 'Worktree discipline held'); the live .claude/worktrees/<branch> convention in `git worktree list`"}
         problem: >-
           The worktree recipe is the proven mitigation — every tier session
@@ -1289,7 +1323,7 @@ release_train:
   - tier: T18
     target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
     theme: "The fleet lane"
-    status: in_progress    # 2026-07-18, session 3 — FLT-1 done; FLT-2 -> FLT-3 next
+    status: done           # 2026-07-18, one session: FLT-1 (Q1 YES first), FLT-2, FLT-3 in order. done_means met — the 2026-07-16 collision classes are detected, named events: presence line at SessionStart, one neutral tripwire line per move, the worktree recipe at the first shared-tree mutation. ED4R-3 held throughout: no lock, no daemon, one bounded line each.
     ratified: >-
       2026-07-18 — owner-directed (Fred's scheduled T18 implementation chip, naming the
       FLT-1 -> FLT-2 -> FLT-3 order): T18 selected for build per LAW ZERO. Q1 was asked
