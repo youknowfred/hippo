@@ -25,6 +25,23 @@ ONE bounded line naming the other sessions' branches and ages. The doc's ``branc
 ``head`` fields double as FLT-2's moved-tripwire baseline; the presence dir is FLT-3's
 worktree-nudge read — both ride the PostToolUse spawn (``observe_fleet``).
 
+FLT-2, the moved-under-me tripwire (``observe_fleet``, riding the existing PostToolUse
+spawn via ``outcome.record_from_payload``): compare live ``git symbolic-ref --short
+HEAD`` + ``git rev-parse HEAD`` against the session's OWN doc, debounced to at most one
+git read pair per ``_RECHECK_SECONDS`` (each PostToolUse is a fresh short-lived process,
+so the debounce state is the doc's ``checked_ts`` — the common path is one tiny JSON
+read, ZERO subprocesses: the tests/test_scale.py budget). On a mismatch it separates the
+boring shape from the reportable one: a fast-forward advance (the old head is an
+ancestor of the new — this session's own commits landing) refreshes the doc SILENTLY;
+a branch switch or a non-fast-forward reposition — exactly the two documented collision
+signatures (the t16 branch reposition, the t8 14:21 checkout switch) — emits ONE neutral
+line, quoting the reflog's checkout entry when it matches, then updates the doc so the
+wire fires ONCE per move. Detection, not accusation: hooks cannot see Bash-mediated git,
+so this session's own checkout looks identical to a concurrent session's — the line
+states facts and prescribes nothing; recovery stays human. Touchless sessions get the
+same compare at their NEXT SessionStart: ``write_presence`` stashes the line as the
+doc's ``moved_note``; the producer emits it exactly once and clears it.
+
 ED4R-3 binds permanently: no lock, no daemon, no mutual exclusion — presence is a file
 only ever READ for one line of legibility; recovery stays human. SCOPE is per-WORKING-
 TREE: a worktree-opened-as-project session resolves its OWN telemetry dir and therefore
@@ -45,6 +62,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import time
 from typing import List, Optional, Tuple
 
@@ -56,6 +74,7 @@ MAX_PRESENCE_FILES = 32  # count-cap, oldest-first (the jit.MAX_STATE_FILES prec
 _PRESENCE_DIRNAME = "presence"
 _MAX_LINE_CHARS = 300  # hard cap per fleet line
 _MAX_FLEET_NAMES = 3  # branches named on the producer line before "(+N more)"
+_RECHECK_SECONDS = 60.0  # FLT-2 debounce: at most one live-git compare per this window
 
 # The PRODUCERS loop calls every producer with the fixed (memory_dir, repo_root, ctx)
 # shape, which carries no harness session id — ``write_presence`` (which DOES receive it,
@@ -173,6 +192,60 @@ def _git_position(repo_root: Optional[str]) -> Tuple[str, str]:
         return ("", "")
 
 
+def _is_ancestor(repo_root: Optional[str], old: str, new: str) -> bool:
+    """True iff ``old`` is an ancestor of ``new`` — a linear fast-forward advance, the
+    shape of this session's own commits landing. ``False`` on ANY failure, including a
+    vanished old sha: an unresolvable baseline is exactly a move worth naming. One
+    bounded rc-only git call, paid ONLY when the head actually changed (rare)."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", repo_root or ".", "merge-base", "--is-ancestor", old, new],
+            capture_output=True,
+            timeout=20,
+        )
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
+def _reflog_checkout_quote(repo_root: Optional[str]) -> str:
+    """The most recent reflog checkout subject ("checkout: moving from A to B"), or
+    ``""`` — the ``session_start._recent_merge_signals`` probe family, paid only on the
+    fire path."""
+    try:
+        from .provenance import run_git
+
+        for ln in run_git(["reflog", "-n", "8", "--format=%gs"], repo_root or ".").splitlines():
+            if ln.strip().startswith("checkout: moving from"):
+                return ln.strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _sha7(sha: str) -> str:
+    return (sha or "")[:7]
+
+
+def _moved_line(
+    old_branch: str, old_head: str, branch: str, head: str, repo_root: Optional[str]
+) -> str:
+    """FLT-2's ONE neutral line — detection, not accusation: this session's own
+    Bash-mediated git and a concurrent session's are indistinguishable to hooks, so the
+    line states the move and prescribes nothing. The reflog checkout entry is quoted
+    only when its destination matches where the tree actually is now."""
+    quote = _reflog_checkout_quote(repo_root)
+    if quote and branch and not quote.endswith(f" to {branch}"):
+        quote = ""
+    src = f"{old_branch or '(detached)'}@{_sha7(old_head)}"
+    dst = f"{branch or '(detached)'}@{_sha7(head)}"
+    tail = f' (reflog: "{quote}")' if quote else ""
+    return _clip(
+        f"🚦 fleet: this working tree moved — was {src}, now {dst}{tail}. A concurrent "
+        "session's git and this session's own look identical to hooks; noted once per move."
+    )
+
+
 def _age_str(seconds: float) -> str:
     """Coarse human age for the fleet line: minutes under an hour, hours under two days,
     days beyond — presence is a liveness hint, not a clock."""
@@ -202,8 +275,13 @@ def write_presence(
     the doc directly and the shared file token is never touched; without one, the file
     token (which ``mark_session`` just rotated for a genuinely-new session) is read. The
     session's own ``nudged`` dedup flag survives rewrites — a resume re-runs SessionStart
-    and must not re-arm FLT-3. Never raises; a silent no-op when the lane is killed, when
-    ``memory_dir`` is not a dir, or when ``repo_root`` has no resolvable HEAD.
+    and must not re-arm FLT-3. FLT-2's fallback for touchless sessions lives here too:
+    a reportable move since the doc was last written (branch switch or non-fast-forward
+    reposition; a linear advance is this session's own shape and stays silent) is
+    stashed as ``moved_note`` for the producer to emit ONCE and clear — an unemitted
+    note is simply superseded by the next fresh compare. Never raises; a silent no-op
+    when the lane is killed, when ``memory_dir`` is not a dir, or when ``repo_root``
+    has no resolvable HEAD.
     """
     global _SESSION_ID
     try:
@@ -221,8 +299,14 @@ def write_presence(
             return
         doc: dict = {"session_id": sid, "branch": branch, "head": head, "ts": time.time()}
         path = _presence_path(td, sid)
-        if os.path.exists(path) and _read_doc(path).get("nudged"):
-            doc["nudged"] = True
+        if os.path.exists(path):
+            old = _read_doc(path)
+            if old.get("nudged"):
+                doc["nudged"] = True
+            o_branch, o_head = old.get("branch") or "", old.get("head") or ""
+            if o_head and (o_branch != branch or o_head != head):
+                if o_branch != branch or not _is_ancestor(repo_root, o_head, head):
+                    doc["moved_note"] = _moved_line(o_branch, o_head, branch, head, repo_root)
         _write_doc(td, sid, doc)
     except Exception:
         pass
@@ -283,13 +367,15 @@ def _fresh_others(telemetry_dir: str, own_sid: Optional[str]) -> List[dict]:
 
 
 def presence_producer(memory_dir: str, repo_root: str, ctx=None) -> Optional[str]:
-    """FLT-1: the SessionStart fleet line (registered as ``"presence"``) — EMPTY-NORM.
+    """FLT-1/FLT-2: the SessionStart fleet block (registered as ``"presence"``) — EMPTY-NORM.
 
-    No other fresh session: ``None``, forever. Otherwise exactly ONE bounded line naming
-    the other sessions' branches and ages (newest first, ``_MAX_FLEET_NAMES`` named, the
-    rest counted). Detection and legibility only — the line prescribes nothing; FLT-3
-    owns the worktree recipe at the actual mutating moment. ``ctx`` (LIF-6) unused.
-    Read-only; never raises.
+    At most two bounded lines, each self-silencing: the session's own stashed
+    ``moved_note`` (FLT-2's fallback for touchless sessions — emitted exactly once, then
+    cleared from the doc) and ONE line naming the other fresh sessions' branches and ages
+    (newest first, ``_MAX_FLEET_NAMES`` named, the rest counted). No other session and no
+    note: ``None``, forever. Detection and legibility only — the fleet line prescribes
+    nothing; FLT-3 owns the worktree recipe at the actual mutating moment. ``ctx``
+    (LIF-6) unused. Read-mostly (the one write is clearing an emitted note); never raises.
     """
     try:
         if presence_disabled() or not os.path.isdir(memory_dir):
@@ -300,19 +386,99 @@ def presence_producer(memory_dir: str, repo_root: str, ctx=None) -> Optional[str
         if not os.path.isdir(_presence_dir(td)):
             return None
         sid = _SESSION_ID or current_session_id(td)
+        lines: List[str] = []
+        own_path = _presence_path(td, sid)
+        if os.path.exists(own_path):
+            own = _read_doc(own_path)
+            note = own.pop("moved_note", None)
+            if isinstance(note, str) and note.strip():
+                lines.append(_clip(note))
+                _write_doc(td, sid, own)  # emitted once — the note never renders twice
         others = _fresh_others(td, sid)
-        if not others:
+        if others:
+            shown = ", ".join(
+                f"{d['branch']} ({_age_str(d['age_s'])} ago)" for d in others[:_MAX_FLEET_NAMES]
+            )
+            more = (
+                f" (+{len(others) - _MAX_FLEET_NAMES} more)"
+                if len(others) > _MAX_FLEET_NAMES
+                else ""
+            )
+            plural = "s" if len(others) != 1 else ""
+            lines.append(
+                _clip(
+                    f"🚦 fleet: {len(others)} other session{plural} active in this working "
+                    f"tree — {shown}{more}. Presence is per-working-tree; a session that "
+                    "ended without its SessionEnd hook ages out within "
+                    f"{PRESENCE_TTL_SECONDS // 3600}h."
+                )
+            )
+        return "\n".join(lines) if lines else None
+    except Exception:
+        return None
+
+
+def observe_fleet(
+    rel_path: str,
+    *,
+    memory_dir: str,
+    repo_root: Optional[str] = None,
+    telemetry_dir: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> Optional[List[str]]:
+    """FLT-2: the fleet decision for ONE PostToolUse file touch — the moved tripwire.
+
+    Returns bounded line(s) for the caller's ``context_out`` (QUA-2: the hook still
+    prints exactly ONE hookSpecificOutput), or ``None`` — the overwhelming norm. The
+    live-git compare is debounced via the doc's ``checked_ts`` (each PostToolUse is a
+    fresh process, so the doc IS the cross-spawn state): the common path is one tiny
+    JSON read and ZERO subprocesses (the tests/test_scale.py budget); at most once per
+    ``_RECHECK_SECONDS`` it pays two bounded git reads, and only on an actual head
+    change the rc-only ancestor probe. A reportable move (branch switch / non-fast-
+    forward reposition) emits ONE neutral line and updates the doc — the wire fires
+    ONCE per move; a linear advance refreshes silently. A missing doc self-heals
+    silently (a session predating the lane gets its baseline on first touch). Doc
+    rewrites double as the session's liveness beacon (mtime refresh). Never raises.
+    """
+    try:
+        if presence_disabled() or not os.path.isdir(memory_dir):
             return None
-        shown = ", ".join(
-            f"{d['branch']} ({_age_str(d['age_s'])} ago)" for d in others[:_MAX_FLEET_NAMES]
-        )
-        more = f" (+{len(others) - _MAX_FLEET_NAMES} more)" if len(others) > _MAX_FLEET_NAMES else ""
-        plural = "s" if len(others) != 1 else ""
-        return _clip(
-            f"🚦 fleet: {len(others)} other session{plural} active in this working tree — "
-            f"{shown}{more}. Presence is per-working-tree; a session that ended without "
-            "its SessionEnd hook ages out within "
-            f"{PRESENCE_TTL_SECONDS // 3600}h."
-        )
+        from .telemetry import current_session_id, default_telemetry_dir
+
+        td = telemetry_dir or default_telemetry_dir(memory_dir)
+        sid = current_session_id(td, session_id=session_id)
+        if not sid:
+            return None
+        now = time.time()
+        path = _presence_path(td, sid)
+        lines: List[str] = []
+        dirty = False
+        if not os.path.exists(path):
+            branch, head = _git_position(repo_root)
+            if not head:
+                return None
+            doc: dict = {"session_id": sid, "branch": branch, "head": head, "ts": now}
+            dirty = True
+        else:
+            doc = _read_doc(path)
+            doc["session_id"] = sid
+            checked = doc.get("checked_ts")
+            base = checked if isinstance(checked, (int, float)) else doc.get("ts") or 0.0
+            if now - float(base) >= _RECHECK_SECONDS:
+                branch, head = _git_position(repo_root)
+                if head:
+                    o_branch, o_head = doc.get("branch") or "", doc.get("head") or ""
+                    if o_head and (o_branch != branch or o_head != head):
+                        if o_branch != branch or not _is_ancestor(repo_root, o_head, head):
+                            lines.append(_moved_line(o_branch, o_head, branch, head, repo_root))
+                        doc["branch"], doc["head"] = branch, head
+                    elif not o_head:
+                        doc["branch"], doc["head"] = branch, head
+                    doc["ts"] = now
+                doc["checked_ts"] = now
+                dirty = True
+        if dirty:
+            _write_doc(td, sid, doc)
+        return lines or None
     except Exception:
         return None

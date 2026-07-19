@@ -310,3 +310,159 @@ def test_age_rendering_grains():
     assert P._age_str(7 * 60) == "7m"
     assert P._age_str(3 * 3600 + 60) == "3h"
     assert P._age_str(3 * 86400) == "3d"
+
+
+# --------------------------------------------------------------------------- #
+# FLT-2: observe_fleet — the moved-under-me tripwire (PostToolUse re-check)
+# --------------------------------------------------------------------------- #
+def _git(repo, *args):
+    import subprocess
+
+    subprocess.run(
+        ["git", "-C", repo, *args], check=True, capture_output=True, text=True,
+        env={**os.environ, "GIT_AUTHOR_DATE": "1700000300 +0000",
+             "GIT_COMMITTER_DATE": "1700000300 +0000",
+             "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+             "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"},
+    )
+
+
+def _observe(memory_dir, repo, sid="sess-1", rel="src/app.py"):
+    return P.observe_fleet(rel, memory_dir=memory_dir, repo_root=repo, session_id=sid)
+
+
+def test_tripwire_fires_once_on_branch_switch(repo, memory_dir, monkeypatch):
+    _seed_commit(repo)
+    monkeypatch.setattr(P, "_RECHECK_SECONDS", 0.0)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    td = default_telemetry_dir(memory_dir)
+    old_branch = json.load(open(P._presence_path(td, "sess-1")))["branch"]
+    _git(repo, "checkout", "-q", "-b", "side")
+    out = _observe(memory_dir, repo)
+    assert out is not None and len(out) == 1
+    assert f"was {old_branch}@" in out[0] and "now side@" in out[0]
+    # the doc updated with the new position — the wire fires ONCE per move
+    assert _observe(memory_dir, repo) is None
+    with open(P._presence_path(td, "sess-1"), "r", encoding="utf-8") as fh:
+        assert json.load(fh)["branch"] == "side"
+
+
+def test_tripwire_silent_on_linear_advance(repo, memory_dir, monkeypatch):
+    """A fast-forward head advance is the shape of this session's own commits landing —
+    the doc refreshes SILENTLY (firing here would make the line wallpaper)."""
+    _seed_commit(repo)
+    monkeypatch.setattr(P, "_RECHECK_SECONDS", 0.0)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    write_file(repo, "src/more.py", "y = 2\n")
+    new_sha = git_commit(repo, "advance", 1_700_000_400)
+    assert _observe(memory_dir, repo) is None
+    td = default_telemetry_dir(memory_dir)
+    with open(P._presence_path(td, "sess-1"), "r", encoding="utf-8") as fh:
+        assert json.load(fh)["head"] == new_sha  # baseline refreshed, no line
+
+
+def test_tripwire_fires_on_non_fast_forward_reposition(repo, memory_dir, monkeypatch):
+    """The t16 signature: the branch pointer repositioned (reset/rebase/squash) — the
+    old head is NOT an ancestor of the new one."""
+    sha1 = _seed_commit(repo)
+    write_file(repo, "src/more.py", "y = 2\n")
+    git_commit(repo, "second", 1_700_000_400)
+    monkeypatch.setattr(P, "_RECHECK_SECONDS", 0.0)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    _git(repo, "reset", "--hard", sha1)
+    out = _observe(memory_dir, repo)
+    assert out is not None and len(out) == 1
+    assert f"now " in out[0] and sha1[:7] in out[0]
+    assert len(out[0]) <= P._MAX_LINE_CHARS
+
+
+def test_tripwire_quotes_a_matching_reflog_checkout(repo, memory_dir, monkeypatch):
+    _seed_commit(repo)
+    monkeypatch.setattr(P, "_RECHECK_SECONDS", 0.0)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    _git(repo, "checkout", "-q", "-b", "feature-z")
+    out = _observe(memory_dir, repo)
+    assert out is not None and "checkout: moving from" in out[0] and "to feature-z" in out[0]
+
+
+def test_tripwire_is_debounced(repo, memory_dir, monkeypatch):
+    """Inside the debounce window the common path runs ZERO git subprocesses — the
+    50ms PostToolUse budget is honored by construction."""
+    _seed_commit(repo)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    _git(repo, "checkout", "-q", "-b", "side")
+    calls = {"n": 0}
+
+    def _counting(*a, **k):
+        calls["n"] += 1
+        return ("", "")
+
+    monkeypatch.setattr(P, "_git_position", _counting)
+    assert _observe(memory_dir, repo) is None  # fresh doc: within _RECHECK_SECONDS
+    assert calls["n"] == 0
+
+
+def test_observe_self_heals_a_missing_doc(repo, memory_dir):
+    """A session predating the lane (or a pruned doc): the first touch recreates the
+    doc silently — no tripwire line without a baseline to compare against."""
+    sha = _seed_commit(repo)
+    assert _observe(memory_dir, repo) is None
+    td = default_telemetry_dir(memory_dir)
+    with open(P._presence_path(td, "sess-1"), "r", encoding="utf-8") as fh:
+        doc = json.load(fh)
+    assert doc["head"] == sha and doc["session_id"] == "sess-1"
+
+
+def test_observe_disabled_lane_contributes_nothing(repo, memory_dir, monkeypatch):
+    _seed_commit(repo)
+    monkeypatch.setenv("HIPPO_DISABLE_PRESENCE", "1")
+    assert _observe(memory_dir, repo) is None
+    assert not os.path.exists(P._presence_dir(default_telemetry_dir(memory_dir)))
+
+
+def test_sessionstart_fallback_stashes_note_and_producer_emits_once(repo, memory_dir):
+    """A touchless session's move is caught at the NEXT SessionStart: write_presence
+    stashes the one-line note; the producer emits it exactly once, then clears it."""
+    _seed_commit(repo)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    _git(repo, "checkout", "-q", "-b", "moved-branch")
+    P.write_presence(memory_dir, repo, session_id="sess-1")  # the next SessionStart
+    td = default_telemetry_dir(memory_dir)
+    with open(P._presence_path(td, "sess-1"), "r", encoding="utf-8") as fh:
+        assert "moved-branch" in json.load(fh)["moved_note"]
+    out = P.presence_producer(memory_dir, repo)
+    assert out is not None and "now moved-branch@" in out
+    assert P.presence_producer(memory_dir, repo) is None  # emitted once, cleared
+    with open(P._presence_path(td, "sess-1"), "r", encoding="utf-8") as fh:
+        assert "moved_note" not in json.load(fh)
+
+
+def test_sessionstart_fallback_silent_on_linear_advance(repo, memory_dir):
+    _seed_commit(repo)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    write_file(repo, "src/more.py", "y = 2\n")
+    git_commit(repo, "advance", 1_700_000_400)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    td = default_telemetry_dir(memory_dir)
+    with open(P._presence_path(td, "sess-1"), "r", encoding="utf-8") as fh:
+        assert "moved_note" not in json.load(fh)
+    assert P.presence_producer(memory_dir, repo) is None
+
+
+def test_record_from_payload_carries_the_tripwire_line(repo, memory_dir, monkeypatch):
+    """The wiring: outcome.record_from_payload rides the fleet check on the same spawn
+    and the line lands in context_out (QUA-2: one hookSpecificOutput, caller-joined)."""
+    from memory import outcome as O
+
+    _seed_commit(repo)
+    monkeypatch.setattr(P, "_RECHECK_SECONDS", 0.0)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    _git(repo, "checkout", "-q", "-b", "side")
+    context: list = []
+    ok = O.record_from_payload(
+        {"tool_name": "Read", "tool_input": {"file_path": os.path.join(repo, "src/app.py")},
+         "session_id": "sess-1"},
+        memory_dir=memory_dir, repo_root=repo, context_out=context,
+    )
+    assert ok is True
+    assert any("fleet" in ln and "now side@" in ln for ln in context)

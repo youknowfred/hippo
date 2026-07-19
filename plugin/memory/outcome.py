@@ -119,6 +119,24 @@ def record_from_payload(
                 context_out.append(context)
         except Exception:
             cited_by = None
+        # T18 FLT-2: the fleet lane rides the SAME single spawn — the moved-tree
+        # tripwire (presence.observe_fleet), debounced and budget-pinned, appending to
+        # the same context_out so the hook still emits exactly ONE hookSpecificOutput
+        # (QUA-2). Killed entirely by HIPPO_DISABLE_PRESENCE.
+        try:
+            from .presence import observe_fleet
+
+            fleet = observe_fleet(
+                rel,
+                memory_dir=memory_dir,
+                repo_root=repo_root,
+                telemetry_dir=td,
+                session_id=session_id,
+            )
+            if fleet and context_out is not None:
+                context_out.extend(fleet)
+        except Exception:
+            pass
         return log_outcome(tool, rel, session_id=session_id, telemetry_dir=td, cited_by=cited_by)
     except Exception:
         return False

@@ -13,6 +13,12 @@
 # almost every touch, killed entirely by HIPPO_DISABLE_JIT. JIT-2 stamps the same lookup onto
 # the outcome row as optional touch-grain provenance (cited_by).
 #
+# T18 FLT rides it too (killed by HIPPO_DISABLE_PRESENCE): the moved-tree tripwire compares
+# live HEAD against this session's presence doc (debounced; one neutral line, once per move)
+# and the worktree-first nudge fires at the first shared-tree mutation while another session
+# is present. Coverage is honest: PostToolUse sees FILE-TOOL acts only — Bash-mediated
+# mutations (git, pytest, scripts) are invisible to this hook.
+#
 # CRITICAL CONTRACT (identical to the other memory hooks):
 #   - ALWAYS exits 0 — a read-signal failure must never disturb the tool loop.
 #   - stdout is EMPTY or exactly one hookSpecificOutput JSON object (QUA-2).

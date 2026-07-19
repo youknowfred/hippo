@@ -348,7 +348,23 @@ workstreams:
         title: Moved-under-me tripwire (HEAD/branch baseline vs the presence doc)
         priority: P2
         effort: M
-        status: proposed
+        status: done           # 2026-07-18, session 3 — observe_fleet on the PostToolUse spawn + the write_presence/producer SessionStart fallback; budget pinned in tests/test_scale.py
+        as_built: >-
+          Two build decisions recorded per the premise-correction law. (1) "mismatch-
+          without-a-matching-self-update" is implemented as: a linear FAST-FORWARD
+          advance (old head is an ancestor of the new — the shape of this session's own
+          commits landing) refreshes the baseline SILENTLY; only a branch switch or a
+          non-fast-forward reposition fires — exactly the two documented signatures (the
+          t16 reposition, the t8 checkout switch). Firing on every own-commit would have
+          made the line wallpaper (the HYG-3 warn-on-dead legibility discipline). A
+          foreign session fast-forwarding the shared branch is therefore NOT tripwired at
+          head grain — that class is covered by the presence line + FLT-3's nudge, stated
+          honestly here. (2) Each PostToolUse is a FRESH Python spawn, so the debounce
+          state is the doc itself (checked_ts; _RECHECK_SECONDS=60): the common path is
+          one JSON read with ZERO subprocesses (pinned in tests/test_scale.py alongside
+          the JIT budget), the compare pair is paid at most once per window, and the
+          rc-only ancestor probe only on an actual head change. The reflog checkout quote
+          renders only when its destination matches the live branch.
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "hippo-enh-t16-jit capstone (enh-t16-jit branch pointer repositioned by the concurrent v1.18.0 release) + hippo-branch-cleanup-2026-07-16 Finding 2 (the 14:21 checkout switch under the live T8 session; t8 capstone calls it 'the 4th clone collision of 2026-07-16')"}
         problem: >-
           Nothing detects a moved checkout or repositioned branch today — grep
