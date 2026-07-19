@@ -323,7 +323,14 @@ def _format_listing(seeds: List[Dict]) -> str:
                 f"{'; '.join(str(d) for d in wdec[:5])}"
             )
         tri = s.get("llm_triage") or {}
-        if tri:
+        if tri.get("abstained"):
+            # WRT-1: an honest "no durable fact" is a first-class triage outcome, rendered
+            # as such — never a missing block the reviewer might mistake for a failure.
+            out.append(
+                "      triage (LLM): ABSTAINED — the model found no durable fact worth "
+                "saving (the heuristic evidence above still stands for human review)"
+            )
+        elif tri:
             out.append(
                 f"      triage (LLM suggestion — ratify or discard at drain): "
                 f"type={tri.get('suggested_type') or '?'}  name={tri.get('suggested_name') or '?'}"
@@ -344,5 +351,15 @@ def _format_listing(seeds: List[Dict]) -> str:
             if tri.get("secret_flagged"):
                 out.append(
                     "        ⚠ secret lint flagged the triage text — scrub before any corpus use"
+                )
+            ung = tri.get("ungrounded_tokens") or []
+            if ung:
+                # WRT-1: mechanical doubt — these identifiers appear NOWHERE in the
+                # evidence the triage prompt carried, so the model cannot have taken
+                # them from this session.
+                out.append(
+                    "        ⚠ ungrounded identifiers in the draft (appear nowhere in the "
+                    f"session evidence): {', '.join(str(u) for u in ung[:6])} — verify "
+                    "against the diff/queries before trusting the description"
                 )
     return "\n".join(out)

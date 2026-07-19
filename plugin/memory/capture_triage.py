@@ -220,12 +220,13 @@ def _build_prompt(seed: Dict, neighbors: List[Dict]) -> str:
         ' "description": "<one line, <=200 chars, the durable fact this session learned>",',
         ' "duplicates": ["<names from EXISTING MEMORIES that already record substantially',
         ' the same fact — empty list if none>"]}',
+        'OR, when the session shows no durable fact worth saving, exactly: {"abstain": true}',
         "",
         "Type definitions: user = who the user is (role, preferences); feedback = guidance",
         "on how the agent should work; project = ongoing project facts/constraints;",
         "reference = pointers to external resources (URLs, dashboards, tickets).",
-        "If the session shows no durable fact worth saving, still fill every field with",
-        "your best single candidate.",
+        "Abstain honestly: a routine session with nothing durable to record is common —",
+        'answer {"abstain": true} for it rather than inventing a candidate.',
         "",
         "SESSION EVIDENCE:",
     ]
@@ -254,14 +255,18 @@ def _build_prompt(seed: Dict, neighbors: List[Dict]) -> str:
 def _parse_response(raw: str, known_names: List[str]) -> Optional[Dict]:
     """Validated suggestion fields from the model's text, or ``None``.
 
-    A usable triage needs at least a non-empty description; everything else degrades
-    field-by-field (an invalid type becomes None rather than sinking the description).
-    ``duplicates`` is intersected with the names the model was actually shown — a model
-    cannot flag a memory it invented.
+    WRT-1: an explicit ``{"abstain": true}`` answer is a VALID triage — it parses into
+    ``{"abstained": True}``, never a failure (the honest opposite of the old forced-answer
+    prompt). Otherwise a usable triage needs at least a non-empty description; everything
+    else degrades field-by-field (an invalid type becomes None rather than sinking the
+    description). ``duplicates`` is intersected with the names the model was actually
+    shown — a model cannot flag a memory it invented.
     """
     obj = llm_client.extract_json(raw)
     if not isinstance(obj, dict):
         return None
+    if obj.get("abstain"):
+        return {"abstained": True}
     description = _one_line(str(obj.get("description") or ""), _MAX_DESCRIPTION_CHARS)
     if not description:
         return None
@@ -286,6 +291,64 @@ def _parse_response(raw: str, known_names: List[str]) -> Optional[Dict]:
         "draft_description": description,
         "llm_duplicate_flags": dups,
     }
+
+
+# WRT-1: the identifier classes the groundedness flag extracts from a draft description.
+# Conservative BY DESIGN — near-zero false positives is what keeps the flag's authority:
+# PR/issue refs, 7+-hex sha-likes (must contain a letter, so dates/timestamps never match),
+# URLs, and version strings; nothing looser. Each entry is (pattern, needle_group) where
+# needle_group names the group used for the evidence-membership check (0 = whole match).
+_SHA_LIKE_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
+_IDENT_PATTERNS = (
+    (re.compile(r"(?:#|\b(?:PR|pr|Pr|issue|Issue)\s+#?)(\d{1,6})\b"), 1),  # PR/issue ref
+    (_SHA_LIKE_RE, 0),                                                     # sha-like
+    (re.compile(r"https?://[^\s)\]}>'\"]+"), 0),                           # URL
+    (re.compile(r"\bv\d+(?:\.\d+)+\b|\b\d+\.\d+\.\d+\b"), 0),             # version string
+)
+
+
+def _extract_identifiers(text: str) -> List[tuple]:
+    """``(display, needle)`` pairs for every concrete identifier in ``text``.
+
+    ``display`` is the surface form for the warning line ("PR #57"); ``needle`` is the
+    lowercased core checked for evidence membership ("57"). Sha-likes without a letter
+    are skipped (an all-digit run is a date/timestamp far more often than a real sha).
+    Deterministic, deduped by needle, zero LLM. Never raises.
+    """
+    out: List[tuple] = []
+    seen = set()
+    for pat, grp in _IDENT_PATTERNS:
+        for m in pat.finditer(text or ""):
+            display = m.group(0).strip().rstrip(".,;:!?")
+            needle = (m.group(grp) if grp else display).lower()
+            if pat is _SHA_LIKE_RE and not re.search(r"[a-f]", needle):
+                continue
+            if needle and needle not in seen:
+                seen.add(needle)
+                out.append((display, needle))
+    return out
+
+
+def _ungrounded_tokens(draft: str, prompt_text: str) -> List[str]:
+    """WRT-1 groundedness: draft identifiers that appear NOWHERE in the prompt evidence.
+
+    ZERO-LLM by contract (the judged-lanes kill): deterministic extraction + substring
+    membership against the EXACT prompt text the model saw — flag and prompt read
+    identical bytes, so a flagged token is one the model cannot have taken from its
+    evidence. Membership is deliberately LENIENT (a PR number's bare digits match any
+    occurrence; case-insensitive; a version matches with or without its leading "v") —
+    leniency costs missed catches, never false alarms. Never raises.
+    """
+    try:
+        hay = (prompt_text or "").lower()
+        out: List[str] = []
+        for display, needle in _extract_identifiers(draft):
+            if needle in hay or needle.lstrip("v") in hay:
+                continue
+            out.append(display)
+        return out
+    except Exception:
+        return []
 
 
 def enrich_seed(
@@ -316,8 +379,10 @@ def enrich_seed(
         if (
             isinstance(prior_triage, dict)
             and prior_triage.get("evidence_sha") == fingerprint
-            and prior_triage.get("draft_description")
+            and (prior_triage.get("draft_description") or prior_triage.get("abstained"))
         ):
+            # An abstained prior carries over exactly like a drafted one (WRT-1) — the
+            # prompt would be byte-identical, so re-asking would re-bill for the same "no".
             carried = dict(prior_triage)
             carried["carried_over"] = True
             return carried
@@ -339,6 +404,16 @@ def enrich_seed(
         parsed = _parse_response(raw, [n["name"] for n in neighbors])
         if parsed is None:
             return None
+        if parsed.get("abstained"):
+            # WRT-1: the model said "no durable fact" — an honest, first-class outcome.
+            # No draft means no dup check, no output lint, no groundedness to compute;
+            # evidence_sha still rides so the carry-over guard spares a re-bill.
+            return {
+                "abstained": True,
+                "model": llm_client.model_name(),
+                "generated_at": round(time.time(), 3),
+                "evidence_sha": fingerprint,
+            }
 
         # The drain's own calibrated near-duplicate machinery (CAP-3 dry-run — writes
         # nothing), pre-run here so the reviewer opens the seed already knowing the route.
@@ -369,7 +444,7 @@ def enrich_seed(
                 )
             )
         )
-        return {
+        result = {
             **parsed,
             "dup_check": dup_check,
             "model": llm_client.model_name(),
@@ -377,5 +452,14 @@ def enrich_seed(
             "secret_flagged": flagged,
             "evidence_sha": fingerprint,
         }
+        # WRT-1 groundedness flag: mechanical doubt over the draft, checked against the
+        # EXACT prompt the model saw (``prompt`` here is post-belt — if the hunk excerpt
+        # was dropped above, the flag sees the same hunkless text). Additive, absent when
+        # clean (ED-4); computed at fresh-triage time only — a carried-over triage rides
+        # with whatever it was flagged (or not) when its evidence was current.
+        ungrounded = _ungrounded_tokens(parsed["draft_description"], prompt)
+        if ungrounded:
+            result["ungrounded_tokens"] = ungrounded
+        return result
     except Exception:
         return None
