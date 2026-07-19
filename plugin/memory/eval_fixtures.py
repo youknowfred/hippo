@@ -428,7 +428,11 @@ def draft_update_fixtures(
 _LIVEDIN_MAX_DRAFTS_PER_RUN = 25  # volume cap per drafting run — strongest evidence first
 # Previews that never draft: harness envelopes and slash-command invocations are session
 # mechanics, not retrieval demand. clean_query's min-content gate handles the terse rest.
-_LIVEDIN_SKIP_PREFIXES = ("<system-reminder", "/")
+# The envelope prefixes are matched EXPLICITLY (not just delegated to clean_query's
+# envelope-stripping) because query_previews are TRUNCATED at the ledger's preview budget:
+# an unclosed envelope defeats the block regex and its mined ids read as content tokens —
+# the exact shape the first live drain surfaced (23/25 task-notification rows).
+_LIVEDIN_SKIP_PREFIXES = ("<system-reminder", "<task-notification", "<command-name", "/")
 
 
 def draft_livedin_fixtures(

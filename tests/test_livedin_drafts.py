@@ -90,12 +90,15 @@ def test_noise_filters_are_deterministic(memory_dir):
     for q in (
         "/hippo:doctor please",                       # slash-command preview
         "<system-reminder>injected context</system-reminder>",  # harness envelope
+        # a TRUNCATED envelope (the ledger's preview budget cuts the closing tag, so
+        # clean_query's block-stripping regex never fires — the first live drain's catch)
+        "<task-notification>\n<task-id>abc123def</task-id>\n<tool-use-id>toolu_01XY",
         "ok",                                          # below clean_query's content gate
     ):
         _confirmed_touch(td, session="s1", query=q, name="alpha-notes", path="src/a.py")
     summary = EF.draft_livedin_fixtures(memory_dir, telemetry_dir=td)
     assert summary["added"] == []
-    assert summary["skipped_noise"] == 3
+    assert summary["skipped_noise"] == 4
     # AC4: nothing to add -> the drafts file is never created
     assert not os.path.exists(default_drafts_path(memory_dir))
 
