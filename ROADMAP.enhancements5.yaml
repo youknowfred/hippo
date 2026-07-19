@@ -1,0 +1,1854 @@
+# ============================================================================
+# hippo — Enhancement & Capability Roadmap, ROUND 5 (post-v1.27.0) — PROPOSAL
+# ============================================================================
+# The EXECUTABLE form of EXPLORATIONS5.md: the round-5 grounded-and-vetted
+# enhancement catalog (18 items -> 18 KEEP, zero KILL — see the honesty note in
+# meta.source: the kill work happened at grounding time), formalized into
+# fully-scoped, dependency-sequenced items and work tiers.
+#
+# This is the FIFTH enhancement train. Round-5 tiers are numbered T22-T26 and
+# use NEW namespaces (REL/MEA/WRT/OPS/BND) so ids never collide with round 1
+# (SIG/RUL/RCL/GOV/GRW/RCH), round 2 (MSR/GRF/SEN/TMB/CLB/IOP), round 3
+# (INV/SLP/JIT/EXT), round 4 (FLT/HYG/PUB/EVD), ROADMAP.yaml
+# (RET/GRA/LIF/CAP/INT/TEA/SEC/...), ROADMAP.v1.md (QUA/ONB/DOC/...), or
+# ROADMAP.dream.yaml (DRM). All five prefixes grep-verified collision-free at
+# 827c607. (The vetting's working ids RCH-*/QUA-* were renamed BND-*/REL-*
+# here for exactly that reason.)
+#
+# STATUS: authored with every item and tier `proposed` — vetted, NOT
+# scheduled; which tiers to build, in what order, IF ANY, was the owner's
+# scheduling call (LAW ZERO), with two NEW owner decisions (Q1/Q2 r5) and
+# round 4's carried Q2/Q3 all PENDING at authoring (ED5R-1).
+# RATIFIED 2026-07-19, same-day formal-question session: ALL FIVE tiers
+# T22-T26 ratified together in the recommended order T22->T23->T24->T25->T26
+# (dated entry on each tier's `ratified:`); item/tier statuses flipped to
+# `planned`. The four owner decisions were resolved the same day (ED5R-1
+# STATUS; MEA-5 q1_verdict; REL-2 q2_verdict — the QUA-12 ruleset is LIVE on
+# main). Builds proceed per session_protocol in future implementation
+# sessions; nothing was built in the authoring session.
+#
+# Continuity across sessions lives in TWO synced places (same protocol as
+# rounds 1-4):
+#   1. This file's per-item / per-tier `status:` — the durable progress LEDGER.
+#   2. A chain of CAPSTONE MEMORY files (`hippo-enh-t<N>-*`, continuing the
+#      round-1..4 chain) — the narrative HANDOFF (session_protocol below).
+#
+# Companion documents:
+#   EXPLORATIONS5.md           — the round-5 source catalog (authored + vetted
+#                                2026-07-19; its §6 records the vetting)
+#   ROADMAP.enhancements.yaml  — round-1 train (T1-T7, shipped)
+#   ROADMAP.enhancements2.yaml — round-2 train (T8-T13, shipped + released)
+#   ROADMAP.enhancements3.yaml — round-3 train (T14-T17, shipped + released)
+#   ROADMAP.enhancements4.yaml — round-4 train (T18-T21, shipped + released
+#                                v1.23.0-v1.27.0; round 4 CLOSED 2026-07-19)
+#   ROADMAP.yaml / ROADMAP.v1.md — the engine + launch trains
+# ============================================================================
+
+meta:
+  title: hippo enhancement & capability roadmap — round 5
+  repo: youknowfred/hippo
+  authored: 2026-07-19
+  baseline_ref: 827c607          # main = v1.27.0 "The fleet sees itself" + post-release corpus maintenance
+  baseline_state: >-
+    corpus_format 5, index SCHEMA_VERSION 7, citation derivation 4 (the
+    rederive lane CLOSED on this corpus — .format stamps 4), 18 skills, suite
+    2,885 tests; curated public subset = 17 committed files under
+    .claude/memory (two real publishes landed 2026-07-18: 38098d9, 9404b0c).
+    Rounds 1-4 ALL SHIPPED AND RELEASED: round 4 executed T21 (v1.23.0),
+    T19+T20 (v1.24.0), T18 (v1.27.0); round 4 closed 2026-07-19 with Q2/Q3
+    still PENDING. Live machine state at authoring (2026-07-19, reproducible
+    read-only): outcome ledger 3304 rows / 132 cited_by (the count GREW
+    120->132 while being measured — the lane records); recall_events 373 rows
+    / 94 with drop autopsies (dense_floor #1 at 254); reconsolidation ledger
+    824 events; episode buffer 72 sessions; usage_aggregates 154 sessions /
+    59 tracked memories; corpus 57 memories (59 .md files with MEMORY.md +
+    CONVENTIONS.md); boundary 19 dangling / 8 source files / 0 typed; trust
+    registry 3/3 live+fingerprinted with alloy WITHHOLDING 3 hippo-authored
+    files; stale.json 15 entries (8 volatile-suppressed, 7 code-drifted;
+    nag-eligible worklist 0 after the 07-19 re-verdicts); 1 pending capture;
+    3 contradiction pairs; installed plugin 1.27.0 since 15:25:48Z; presence
+    lane emitted its first real fleet line 15:42:56Z; sleep last ran
+    14:30:05Z. Runway: session_start.py 1705/1705 and doctor_checks_corpus.py
+    899/900 (AT cap), eval_recall.py 1989/1993 and telemetry.py 1295/1302
+    (near cap).
+  source: >-
+    Formalized from EXPLORATIONS5.md via the 2026-07-19 two-phase cycle at
+    827c607. Phase 1: a 5-namespace read-only grounding fan-out
+    (retrieval-and-evidence, write-side-and-lifecycle, fleet-machine-ops,
+    corpus-reach-and-team, cross-cutting-quality; ~787k tokens, 314 tool
+    calls; every claim file:symbol-verified or ledger-reproduced live).
+    Phase 2: the vetting ran INLINE as a single-session 3-lens pass
+    (signal-existence/autonomy-creep, solo-owner value,
+    fit/redundancy-vs-shipped) with spot re-verification of every
+    load-bearing claim — the round-2/4-style per-item adversarial skeptic
+    panels (a 72-agent plan) were KILLED FOR COST by owner directive, and
+    this file says so rather than borrowing the panel label. All 18 merged
+    items survived as KEEP (4 cross-agent duplicate sets merged, 4 items
+    demoted to P2, zero KILL) — the zero is honest, not complacent: the kill
+    work happened at grounding time, in each namespace's open-threads ledger
+    of probed-and-NOT-ripened classes (carried as EXPLORATIONS5 §3 cuts).
+    The signal bar held: every item's source.signal cites a PR, a committed
+    capstone memory, a code seam, or a report reproduced read-only on this
+    machine this week.
+  method: >-
+    Items carry the vetting's reshape guidance in `proposal` and the verified
+    seams in `implementation_notes`. The governing law is decisions.ED-1
+    (detection-first, carried verbatim): ship the legible detection /
+    human-in-the-loop half; every autonomous fragment is severed and deferred
+    behind a DATED OWNER DECISION, never a metric-proxied gate. Round 5 adds
+    two laws of its own: ED5R-2 (evidence carries its instrument's
+    sensitivity — the MEA-1 finding as law) and ED5R-3 (an at-cap module is
+    split or deliberately re-pinned as its own reviewed PR BEFORE a feature
+    needs the lines). Two new owner decisions (Q1/Q2 r5) are PENDING and
+    round 4's Q2/Q3 carry forward PENDING (ED5R-1); this file does NOT
+    resolve any of them.
+  audits:
+    - date: 2026-07-19
+      scope: >-
+        Authored same-day from the grounding + inline vetting; the tree did
+        not move during authoring (baseline_ref 827c607 throughout). Premise
+        corrections baked into items rather than appended: the two worktree
+        starvation denominators stated precisely (1140/3304 = 35% all-time;
+        1140/2288 = ~50% post-07-16); evaluate() re-located to
+        eval_recall.py:580 and heals_by to lint_links.py:160-170 (cosmetic
+        drift vs the grounding citations); capture silence scoped to the
+        --from-hook path (a plain CLI success DOES print); "armed worklist 0"
+        and "7 code-armed" reconciled (arming classification vs the
+        GRW-5-quieted nag-eligible worklist — both true); the cited_by count
+        stated as a range (120->132, the ledger grew while being counted).
+        Cross-agent merges recorded on the items: MEA-3 (two independent
+        co-recall repros), MEA-6 (retrieval + fleet variants — the fleet
+        mechanism adopted), OPS-1 (fleet + write-side variants), REL-2/REL-3
+        (absorb the reach namespace's RELEASING legs). implementation_notes
+        are BINDING but SNAPSHOT guidance: verify each named symbol against
+        the live tree before coding, then follow the note unless the tree
+        contradicts it (the repo is the source of truth) and correct it
+        in-file.
+  scoring:
+    priority:
+      P0: broken promise / unblocks a tier — do first in its tier
+      P1: core to the tier's done_means
+      P2: quality and leverage
+      P3: opportunistic or gated on a proving condition
+    effort: {S: under a day / one PR, M: one to three days, L: multi-day / multi-PR}
+  status_legend:
+    proposed: vetted KEEP, awaiting owner ratification of scope (ED5R-1) — nothing is scheduled
+    planned: ratified into a scheduled tier, not started
+    in_progress: an agent session is actively implementing it
+    done: acceptance_criteria met, suite green, invariants preserved
+    deferred: blocked or descoped this cycle (reason recorded in the capstone)
+
+north_star: >-
+  Rounds 1-4 are shipped and RELEASED through v1.27.0 — the engine is
+  measured, defended, team-ready, reaches beyond the session, and the fleet
+  sees itself. The first fully-lived-in week exposed the three trusts round 5
+  attacks: hippo TRUSTS ITS INSTRUMENTS (the recorded ED-2 salience evidence
+  was measured through a 1-of-32-resolvable hard set — a ~3%-sensitivity
+  instrument that rendered as a normal report), TRUSTS ITS RUNNING CODE
+  (hooks run the launch-pinned installed plugin — N releases behind the tree
+  twice this week, with a 4-verdict human re-flag pass and a sibling corpus
+  withholding 3 memories for 4-5 days as the receipts, and the class recurs
+  every release by construction), and TRUSTS ITS OWN WRITES (a consent fold
+  that fails "with nothing to say", MCP decisions that can never ride the
+  seed the tool promises, a triage prompt that ORDERS fabrication, a capture
+  CLI with three indistinguishable silent outcomes). Give every instrument a
+  sensitivity line, every skew a name, every silent write-failure a legible
+  outcome, and both sides of the publish ledger a number — detection-first
+  (ED-1), additive/absence-emits-nothing (ED-4), no new artifact without a
+  named reader (ED4R-2), no coordination (ED4R-3) — and clear the runway
+  FIRST (two at-cap modules, one architecture distortion already banked) so
+  none of it lands as a drive-by (ED5R-3). Two new owner decisions (Q1/Q2 r5)
+  plus round 4's carried Q2/Q3 are ALL PENDING (ED5R-1); default ranking is
+  untouched (ED-2: salience stays owner-decided-OFF; MEA-5 builds only Arm
+  B's evidence, gated and sequenced).
+
+# ---------------------------------------------------------------------------
+# Invariants every item must preserve (carried VERBATIM from rounds 1-2).
+# An item that violates one is wrong, not bold. `invariant_note` names the
+# guard when an item sits in tension.
+# ---------------------------------------------------------------------------
+guiding_invariants:
+  - inv1: markdown-in-git is the single source of authority; index/telemetry/
+      graph/rules-derived caches are derived, rebuildable, gitignored.
+  - inv2: hooks always exit 0, never download, never block; recall failures
+      degrade silently at the hook boundary but become LOUD at doctor/SessionStart.
+  - inv3: degradation must be legible — every silent-fallback path gains a
+      user-visible signal (nudge/doctor/producer).
+  - inv4: destructive/corrective writes are per-item and agent-gated; no bulk
+      autonomous sweeps; writes into the rules plane are reviewable per-item diffs.
+  - inv5: one canonical name/path per concept; renames and schema changes are
+      clean breaks with a version bump, not compat shims.
+  - inv6: the UserPromptSubmit hot path stays PURE RETRIEVAL — no LLM calls, no
+      network, no consolidation work per-prompt.
+
+# ===========================================================================
+# SESSION PROTOCOL — identical discipline to rounds 1-4; the capstone chain
+# continues (hippo-enh-t22-* onward).
+# ===========================================================================
+session_protocol:
+  purpose: >-
+    Multi-session, multi-agent implementation with no loss of context. This
+    file's `status:` fields are the source of truth for WHAT is done; the
+    capstone memory chain (hippo-enh-t22-* onward, continuing the round-1..4
+    chain) is the source of truth for the STORY (decisions, gotchas, next).
+  pick_up: |
+    - LAW ZERO for round 5: confirm the tier is RATIFIED before selecting
+      items. This file ships with every status `proposed`, Q1/Q2 (r5) PENDING,
+      and round-4 Q2/Q3 carried PENDING (ED5R-1); a tier whose gate names an
+      unresolved owner decision is not startable. Ratification and each Q
+      verdict are dated owner entries (chips or in-session), recorded on the
+      tier/item when they land.
+    - Read MEMORY.md; open the most recent hippo-enh-t* capstone to learn the
+      active tier, what last shipped (with commit shas), and the next item.
+    - Read this file; select the next item whose status is planned and all of
+      whose dependencies are satisfied. A dependency id that is NOT a round-5
+      item (not in workstreams below) is CROSS-FILE — every cross-file dep
+      named in this round was verified SHIPPED at 827c607 (EVD-2 outcome lane
+      + format_lane_health, JIT-2 touch provenance, FLT-1/2/3 presence lane,
+      HYG-1/3 machine census + doctor line, PUB-1/2/3 publish lane, SEC-6
+      trust spine, GRW-2 co-recall, GRW-4 decisions ledger, CAP-2/CAP-6
+      capture queue, SIG-6/TMB-3/TMB-4 fixture-draft lanes, MSR-5 A/B rig,
+      RET-14 outcome prior, DOC-16 stability lint, EXT-3 interview); re-confirm
+      on the live tree anyway.
+    - READ THE ITEM'S implementation_notes AND ITS TIER'S audit_note FIRST.
+      They cite verified seams (file:symbol) as of baseline_ref 827c607.
+      VERIFY EACH NAMED SYMBOL STILL EXISTS (the tree WILL have moved by
+      build time); follow the note unless the live tree contradicts it, and
+      correct it in-file as part of your commit if it does.
+    - Sanity-check reality (git log, run the suite) before coding. Check the
+      RUNWAY before your first edit: if your item touches session_start.py,
+      doctor_checks_corpus.py, eval_recall.py, or telemetry.py, read ED5R-3
+      and the tier audit_note's split-debt assignment first.
+  execute: |
+    - Implement ONE item (or a coherent slice) per RELEASING.md — one
+      id-prefixed commit (e.g. "MEA-1: ..."), full suite green after each.
+    - Preserve every guiding_invariant. If an item's invariant_note names a
+      guard you cannot honor, set status to deferred, record why in the
+      capstone, and stop — do not weaken an invariant to land a feature.
+    - An item half gated on an owner decision (Q1/Q2 r5, or the carried
+      round-4 Q2/Q3) must NOT be built before the dated owner decision lands;
+      record the decision on the item when it does (ED5R-1).
+    - Add tests pinning each acceptance_criterion (hermetic per-module
+      convention; negative-capability pins where an invariant forbids a
+      primitive; byte-identity pins where an additive field must not perturb
+      existing output).
+    - Flip item status planned -> in_progress -> done (or deferred).
+  verify: |
+    - Every acceptance_criteria demonstrably met; full suite green; no
+      invariant regressed; any new silent-fallback path made legible at
+      doctor/SessionStart.
+    - NO round-5 item is expected to bump corpus_format (5 at baseline) or
+      index SCHEMA_VERSION (7) — every artifact here is derived/gitignored,
+      display-only, print-only, or additive/absence-emits-nothing. If yours
+      needs a bump, re-read the item: it is probably out of scope (ED-4).
+    - Ledger-row additive fields (MEA-4 `v`, MEA-6 `tree_path`, WRT-3
+      window_decisions) are queue/ledger-own shapes read via .get() — they
+      are NOT schema bumps and must not become ones.
+  capstone:
+    when: >-
+      ALWAYS at the end of a session that touched this roadmap, and ALWAYS at
+      tier completion. A multi-session tier gets a progress capstone each
+      session.
+    do: |
+      - Write hippo-enh-t<N>-<slug>.md in the project memory dir
+        (capstone_template below); continue the round-1..4 chain (link the
+        previous capstone).
+      - Refresh its one-line MEMORY.md pointer (supersede the prior same-tier
+        line).
+      - Update this file's item + tier status to match what shipped.
+      - Link the new capstone to [[hippo-enh-exploration-r5]] and the prior
+        capstone.
+    rationale: >-
+      The next session may be a different agent with none of this context. The
+      capstone + status fields are the entire handoff. Under-recording is the
+      main failure mode — write the capstone even if the session shipped
+      nothing.
+  capstone_template: |
+    ---
+    name: hippo-enh-t<N>-<slug>
+    description: <tier theme> — shipped <X/Y> items; next: <next item id>
+    metadata:
+      type: project
+    ---
+    Tier T<N> (<target_version>, "<theme>") — session <YYYY-MM-DD>.
+    SHIPPED THIS SESSION: <item-id — one-liner — commit sha> (repeat).
+    TIER STATE: <n/total done>; done_means <met | not yet: what remains>.
+    ENGINE STATE: suite <green | N failing>; corpus_format <n>; index schema <n>;
+      re-bootstrap <yes/no>.
+    DECISIONS / GOTCHAS: <invariant guard applied, premise correction vs the
+      note, any dated owner decision recorded on an item (esp. Q1/Q2 r5)>.
+    NEXT: <next unblocked item id + why>.
+    DEFERRED / BLOCKED: <item ids + reason (esp. a PENDING owner-decision gate)>.
+    Related: [[hippo-enh-exploration-r5]], [[hippo-enh-t<N-1>-<slug>]].
+
+# ===========================================================================
+# WORKSTREAMS — fully-scoped enhancement items, grouped by area, sequenced into
+# tiers by the release_train below. `extends` names the shipped work each
+# builds on. `source.signal` carries the vetting's signal-bar citation.
+# ===========================================================================
+workstreams:
+
+  # ---------------------------------------------------------------- REL ---
+  - id: REL
+    name: The runway & the ship gate (module headroom + release protocol)
+    extends: the module-size ratchet (test_module_size.py) + the PR #72 facade decomposition pattern + DOC-16's facts-lint pattern + RELEASING.md
+    goal: >-
+      The two AT-cap integration files are split BEFORE any feature needs
+      their lines (the pressure already produced its first architecture
+      distortion — VOL-1's check landed in the doctor facade), the red-board
+      merge lesson becomes written protocol with a mechanical gate command,
+      the protocol doc's facts are lint-pinned so they cannot rot again
+      (they already have: "all six CI checks" vs the actual seven), and the
+      kill-switch documentation direction is closed. Surfaces Q2(r5): apply
+      the ripened QUA-12 branch-protection ruleset — an owner GitHub-settings
+      act, never an in-repo write.
+    items:
+
+      - id: REL-1
+        title: "Clear the runway: session_start.py facade split + the doctor_checks_corpus split that repatriates VOL-1's check"
+        priority: P0
+        effort: M
+        status: planned           # tier ratified 2026-07-19; not started
+        source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "wc -l this cycle: session_start.py 1705/1705 (pin 1645 + slack 60, tests/test_module_size.py) and doctor_checks_corpus.py 899/900 (non-grandfathered cap); hippo-enh-t18-fleet capstone ('wiring was EXACTLY 3 lines — the file now sits AT its grandfathered cap'); hippo-vol1-volatile-paths capstone ('in doctor.py the FACADE, because doctor_checks_corpus is at 899/900' — the distortion receipt); git log: session_start.py touched by 8 of the last 8 release-train merges; precedent PR #72 / 84ae688 (facade decomposition of doctor/dream/eval_recall/mcp_server/recall)"}
+        problem: >-
+          The two highest-traffic integration files sit AT their caps
+          (session_start.py 1705/1705 — zero headroom; doctor_checks_corpus.py
+          899/900 — one line), and the pressure has already produced its first
+          architecture distortion: VOL-1's check_volatile_paths was implemented
+          in the doctor.py FACADE (doctor.py:313) instead of its checks
+          sibling, solely because the sibling had no room. session_start.py is
+          touched by essentially every release (8/8 recent release merges).
+          Every round-5 tier that adds a producer or corpus check would
+          otherwise begin with an unplanned split-or-re-pin decision inside an
+          unrelated feature PR — exactly the rushed shape the ratchet's own
+          header says must be "a deliberate, reviewed decision, not a
+          drive-by" (now law as ED5R-3).
+        proposal: >-
+          One pure code-motion PR before round-5 feature tiers, on the shipped
+          PR #72 facade pattern (CONTRIBUTING.md:89-111 — facade +
+          prefix-named siblings, siblings-never-import-facade, registry-key
+          relocation rules): (1) session_start.py keeps the dispatcher
+          (PRODUCERS registry, build_context/main, _read_hook_payload,
+          _DESKTOP_SURFACE_NOTE, bounding helpers) and moves the ~1,244-line
+          producer block (lines 155-1398, ~26 producers along their existing
+          section banners) into TWO prefix siblings each under the 900
+          new-module cap — e.g. session_start_health.py (env/corpus-health
+          producers) and session_start_signals.py (staleness/positive-block
+          producers) — with facade re-exports so every monkeypatch target and
+          the parity lint's _DESKTOP_SURFACE_NOTE import keep resolving;
+          relocate the 2 WRITE_OPEN_ALLOWLIST keys; DELETE the session_start
+          grandfather pin and pin both siblings at their new sizes (the
+          dead-entry lint forces the ledger to shrink honestly). (2) Split
+          doctor_checks_corpus.py along a section banner into a sibling and
+          REPATRIATE check_volatile_paths from doctor.py:313 into the checks
+          home (inv5 — one canonical home for checks; doctor.py keeps only
+          registry/engine/CLI/re-exports; the fixed 56-check order and the
+          pinned tail are unchanged). Behavior byte-identical, pinned by the
+          existing test_session_start.py suite and doctor-order tests. The
+          HONEST ALTERNATIVE is documented for the owner: test_module_size.py's
+          header sanctions a deliberate RE-PIN "with a PR that says why" — this
+          item argues the split is the right call given the 8/8 release-touch
+          rate, but the re-pin path exists and choosing it is a valid
+          resolution of this item.
+        acceptance_criteria:
+          - "session_start.py sheds its producer block into prefix-named siblings, each new module under the 900 cap; the facade re-exports every public + monkeypatched symbol (test_surface_registry.py:33's _DESKTOP_SURFACE_NOTE import keeps resolving); hook output byte-identical, pinned by the existing test_session_start.py suite"
+          - "the 2 WRITE_OPEN_ALLOWLIST keys re-keyed to their new (module,function) homes with justifications carried; no crash-contract or injection-cost pins reference session_start (grep-verified true at 827c607 — re-verify)"
+          - "the session_start.py grandfather-ledger entry is DELETED (or re-pinned smaller), and the dead-entry lint passes — the ledger shrinks, never grows"
+          - "check_volatile_paths moves from doctor.py:313 into the corpus-checks home; doctor.py retains no check implementations; the fixed check order and pinned tail [check_machine_state, subset_boundary, stale_memobot_env] are byte-identically preserved (test_doctor.py)"
+          - "pure code motion — zero behavior change, zero new surface, suite green; the PR body records this as the ED5R-3 discharge for both files"
+          - "eval_recall.py and telemetry.py are NOT touched — their split debts ride MEA-1 and MEA-3 respectively (bundling four file-splits into one PR defeats the reviewability the ratchet protects)"
+        dependencies: []               # the tier keystone; recommended-first across the round (relief, not a gate)
+        invariant_note: >-
+          inv5 — the repatriation IS the point: one canonical home for corpus
+          checks. inv2/inv6 — refactor-only; hook contracts and the hot path
+          byte-identical. ED4R-2 — vacuously satisfied (no new artifact; the
+          named enforcement is the ratchet ledger itself). ED5R-3 — this item
+          is the law's first discharge.
+        implementation_notes: >-
+          Seams (verified at 827c607): session_start.py:155-1398 (the producer
+          block; every producer is already a uniform (memory_dir, repo_root,
+          ctx) callable), :1296-1322 (PRODUCERS registry — stays in the
+          facade; adjacency pins in tests/test_session_start.py must keep
+          passing), tests/test_write_discipline.py:92-93 (the 2 allowlist keys
+          to re-key), tests/test_surface_registry.py:33 (imports
+          session_start._DESKTOP_SURFACE_NOTE — facade re-export),
+          tests/test_reconsolidate_brief.py:228 (imports session_start as a
+          module — facade must keep symbols), tests/test_module_size.py
+          GRANDFATHERED_PLUGIN (delete/re-pin entries; PLUGIN_CAP=900 governs
+          the new siblings), doctor.py:313 (check_volatile_paths — the
+          repatriation source) + doctor.py:352-409 (CHECKS order, unchanged),
+          doctor_checks_corpus.py (899 lines — the split target),
+          CONTRIBUTING.md:89-111 (the documented split protocol incl. the
+          (module,function) registry-key relocation rule). Precedent: PR #72
+          (84ae688). Process risk is merge-conflict surface with concurrent
+          SessionStart work — schedule as its own small PR with the suite
+          green, the same one-concern discipline every prior split used.
+
+      - id: REL-2
+        title: "Release merge-gate hardening: the red-board lesson becomes RELEASING.md mechanic; surface the ripened QUA-12 ruleset decision (Q2 r5)"
+        priority: P1
+        effort: S
+        status: planned           # tier ratified 2026-07-19; not started
+        q2_verdict: >-
+          2026-07-19, dated owner entry (ED5R-1): Fred answered Q2(r5) "Yes —
+          apply as codified"; the ruleset was APPLIED to main the same day
+          (gh api, on owner direction): the seven required checks by full
+          reported name, strict up-to-date-before-merge,
+          require-PR-before-merge, linear history, no force-push or
+          deletion; enforce_admins off (`gh pr merge --admin` stays the
+          explicit, deliberate escape hatch — plain `gh pr merge` now
+          mechanically refuses on red). ONE solo-compatibility deviation
+          from the ci.yml:29-40 text, disclosed at apply time:
+          require_code_owner_reviews OFF with 0 required approvals —
+          CODEOWNERS is '* @youknowfred' and GitHub forbids self-approval,
+          so the codified code-owner-review clause would have forced every
+          solo-authored PR through --admin (which bypasses the checks too),
+          defeating the gate's purpose. REL-2's build trues the ci.yml
+          comment to the as-applied ruleset; the RELEASING.md doc-mechanic
+          leg is unchanged and still to build.
+        source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "hippo-enh-t18-fleet capstone MERGE/RELEASE paragraph — the 2026-07-19 v1.27.0 merge fired against a red board (hermetic macos-py3.12 hung 45m in actions/setup-python; merge was chained after a display command); remedy used: tag held until main-push run 29677420598 went fully green (verified via gh); gh this cycle: repo visibility PUBLIC, gh api branches/main/protection -> 404 'Branch not protected'; ci.yml:29-40 (the QUA-12 ruleset codified as a comment since round 1, 'apply on main once the repo can enforce it')"}
+        problem: >-
+          The v1.27.0 merge fired against a red board because check-display
+          and merge were chained in one compound command — the protocol relies
+          on operator sequencing that RELEASING.md never specifies (steps 6-7
+          carry no gating mechanic at all), and the corrective lesson ("gate
+          merge on gh pr checks' exit status, never chain it after a display
+          command") lives only in a local-only capstone a fresh session may
+          never recall. Meanwhile the mechanical backstop — the QUA-12
+          required-checks ruleset, codified verbatim as a ci.yml comment since
+          round 1 — was never applied because the repo was private; the repo
+          is now PUBLIC and main is still unprotected, so the enabling
+          condition has ripened while the gap stays open through ~daily
+          releases.
+        proposal: >-
+          Detection/protocol halves only, two legs. (1) RELEASING.md gains an
+          explicit merge-gate step between today's steps 5 and 6: run
+          `gh pr checks <pr> --watch --fail-fast` as its OWN command and let
+          its EXIT STATUS gate the subsequent `gh pr merge`; never chain
+          merge after a display command (the capstone lesson verbatim,
+          promoted from memory to protocol); the same discipline applies to
+          the tag — tag only after the main-push run is green (the remedy
+          t18 actually used). (2) Surface Q2(r5), a DATED OWNER DECISION:
+          apply the already-codified QUA-12 ruleset (require the seven named
+          checks + PR before merging, using each job's FULL reported name per
+          the ci.yml comment) now that gh confirms the repo is public — an
+          owner-executed GitHub settings act, after which `gh pr merge`
+          mechanically refuses on red and the whole class closes. The doc
+          edit ships regardless of the Q2(r5) verdict; only the settings act
+          waits. Cut to a note: whether the t18 capstone ALSO publishes into
+          the committed subset is an ordinary per-item owner publish call,
+          not roadmap work — the lesson's durable home is RELEASING.md
+          itself.
+        acceptance_criteria:
+          - "RELEASING.md contains an explicit merge-gate step: gh pr checks as its own command, exit-status-gated merge, the never-chain-after-display sentence, and the tag-after-green-main-run discipline — the t18 lesson verbatim as protocol"
+          - "Q2(r5) is recorded on this item when resolved — a dated owner entry; the ruleset applied is the ci.yml:29-40 text verbatim (seven checks by full reported name + PR-before-merge); hippo itself performs NO settings write (the act is the owner's, in GitHub UI/API)"
+          - "explicitly NOT built: any auto-merge, --auto flag guidance, or bot merging — the severed autonomous half; --auto only becomes safe AFTER the owner applies required checks, and adopting it stays an owner call outside this item"
+          - "no engine/code change beyond the doc (REL-3 carries the lint half)"
+        dependencies: []
+        invariant_note: >-
+          ED-1 — the human still merges; this writes down the check-exit
+          consent moment and offers the owner the mechanical gate GitHub
+          already provides. ED5R-1 — Q2(r5) is a dated owner entry, never
+          resolved by this file. No autonomy motion of any kind.
+        implementation_notes: >-
+          Seams: RELEASING.md:26-37 (steps 5-7 — insert the gate step; step 5's
+          check enumeration is REWRITTEN here and then PINNED by REL-3);
+          .github/workflows/ci.yml:29-40 (the ruleset text of record — the
+          seven full check names: hermetic x4 by matrix name, dense,
+          shellcheck, secret-scan; resolution + nightly scale intentionally
+          NOT required); the t18 remedy receipt (main-push run 29677420598
+          conclusion=success, verified via gh this cycle). Sequence REL-2
+          before REL-3 so the lint pins the rewritten text, not the rot.
+
+      - id: REL-3
+        title: RELEASING.md facts lint — the DOC-16 pattern, one document over
+        priority: P1
+        effort: S
+        status: planned           # tier ratified 2026-07-19; not started
+        source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "RELEASING.md:32 live rot re-verified this cycle: 'All six CI checks must be green: hermetic x4 ..., the dense lane, and shellcheck' — omits secret-scan; the required set has been SEVEN since SEC-8 (ci.yml:29-40 + the secret-scan job at ci.yml:128); grep: zero tests reference RELEASING.md (test_docs_links.py scope excludes it); the founding class: tests/test_stability_doc.py docstring records STABILITY.md misstating frozen numbers for 8 releases before DOC-16 (PR #66, 8a21371); ROADMAP.enhancements4.yaml not_pursuing row: 'the lint-pinned-facts pattern generalizes'"}
+        problem: >-
+          RELEASING.md:32 has already rotted ("All six CI checks", omitting
+          secret-scan — the required set has been seven since SEC-8), and no
+          test covers the document at all. The identical class let
+          STABILITY.md misstate its own FROZEN corpus_format for 8 releases
+          before DOC-16 pinned it. With ~daily releases the protocol doc is
+          read under time pressure, where a wrong check count directly
+          enables the next red-board-shaped miss.
+        proposal: >-
+          tests/test_releasing_doc.py in the exact DOC-16 shape (facts, never
+          prose): pin the stated required-check count and names against
+          ci.yml's actual job set (parse the workflow's job `name:` fields —
+          hermetic matrix x4, dense, shellcheck, secret-scan); pin the stated
+          version-manifest paths to files that exist; pin the stated tag-time
+          workflow name to .github/workflows/release.yml's existence; fix
+          RELEASING.md:32's stale sentence in the same PR (name all seven
+          checks, or state "all required checks" + the named list — on the
+          text REL-2 already rewrote). Scope rule inherited from DOC-16: a
+          claim the lint cannot see must either join the pin table or be
+          reworded to not be a bare trusted number. Named consumer: the
+          release operator + CI itself (the lint reds the board on the next
+          drift).
+        acceptance_criteria:
+          - "a hermetic tests/test_releasing_doc.py exists on the DOC-16 pattern (fact table + every-claim-asserted meta-test); it parses ci.yml job names rather than hardcoding a second copy of the list"
+          - "RELEASING.md's check enumeration is TRUE at merge (seven checks or the all-required phrasing) and the lint fails on any future drift between the doc and ci.yml"
+          - "version-manifest paths and the release workflow name stated in the doc are pinned to existence"
+          - "no runtime surface — a test file + a doc truing only"
+        dependencies: [REL-2]          # in-round: lint the rewritten text, not the rot
+        invariant_note: >-
+          inv3 in documentation form — a protocol doc that silently misstates
+          the gate is illegible degradation for the operator. Zero autonomy.
+        implementation_notes: >-
+          Seams: tests/test_stability_doc.py (the pattern to copy — _flat()
+          flattening, the claims table, the every-claim-is-asserted
+          meta-test; its docstring carries the founding 8-release-drift
+          incident); RELEASING.md:32 (the stale claim; 55-line file);
+          .github/workflows/ci.yml jobs at :54 (hermetic matrix), :76
+          (dense), :120 (shellcheck), :128 (secret-scan), :146
+          (memory-review — pull_request-only, NOT in the required set; the
+          lint must distinguish required-for-release from
+          present-on-PR-boards), :172 (resolution), :205 (scale-nightly).
+          Parse, don't duplicate: derive the expected names from the
+          workflow file at test time.
+
+      - id: REL-4
+        title: "Kill-switch reverse lint: every shipped HIPPO_DISABLE_* must appear in STABILITY.md's documented list"
+        priority: P2
+        effort: S
+        status: planned           # tier ratified 2026-07-19; not started
+        source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "tests/test_stability_doc.py:1-11 docstring — the founding DOC-15 incident includes the REVERSE-direction miss (HIPPO_SLEEP_TIER_A shipped but absent from the doc), which the shipped lint (documented->exists only) does not cover; shipped-source enumeration this cycle: exactly three HIPPO_DISABLE_* names read by plugin source (DENSE/JIT/PRESENCE) and STABILITY.md:35-39 documents all three — the lint passes green at birth"}
+        problem: >-
+          test_stability_doc.py checks documented->exists only; the reverse
+          direction is exactly how the founding DOC-15 incident happened. A
+          blanket reverse lint over all ~60 HIPPO_* names would be noise (the
+          ranking knobs are deliberately undocumented — STABILITY.md's own
+          posture), but the kill-switch class is different: an undocumented
+          kill switch is illegible degradation (inv3) — the user facing a
+          misbehaving lane cannot find the off switch the code honors. Today
+          3/3 are documented; nothing keeps the NEXT lane's switch honest.
+        proposal: >-
+          One additional test in tests/test_stability_doc.py: enumerate
+          HIPPO_DISABLE_* names read by shipped source (the existing haystack
+          walk over plugin/memory + plugin/hooks, minus _vendor) and assert
+          the set is a subset of the documented operational list the lint
+          already parses. Facts-only, zero new artifact (extends the existing
+          lint file — no new reader question). Passes green today; trips the
+          first time a round-5+ lane ships a kill switch without its
+          stability line.
+        acceptance_criteria:
+          - "the new test enumerates HIPPO_DISABLE_* from shipped source via the existing haystack walk (no hand-maintained list) and asserts subset-of-documented"
+          - "green at birth (3/3: DENSE, JIT, PRESENCE); a synthetic undocumented switch in the test's own fixture proves the trip wire"
+          - "the blanket reverse lint over all HIPPO_* names is explicitly NOT built (deliberate undocumented-knobs posture preserved)"
+        dependencies: []
+        invariant_note: >-
+          inv3 — the kill switch IS the legible-degradation affordance; this
+          pins its documentation. Zero runtime surface.
+        implementation_notes: >-
+          Seams: tests/test_stability_doc.py:115-140
+          (test_documented_env_vars_exist_in_the_shipped_source — reuse its
+          haystack walk and documented-list parse); STABILITY.md:29-45 (the
+          documented operational list; the three DISABLE entries sit at
+          :35-39). Keep the match on the DISABLE_ prefix exactly — TRUST_ALL
+          and friends are posture vars, not kill switches, and stay out of
+          scope.
+
+  # ---------------------------------------------------------------- MEA ---
+  - id: MEA
+    name: Honest instruments (measurement sensitivity + the evidence base)
+    extends: the MSR measurement spine (MSR-1..6) + the T21 EVD evidence consumers + the SIG-6/TMB fixture-draft lanes + GRW-2 co-recall + RET-14
+    goal: >-
+      Every instrument states its own sensitivity (the recorded Arm A
+      evidence was measured through a 1-of-32-resolvable hard set and
+      nothing said so), the lived-in corpus gets resolvable fixtures drafted
+      from its own outcome evidence (the missing fourth lane; 192 verified
+      candidates), the co-recall proposal surface gets a null model (20/20
+      live pairs are chance-level), evidence rows carry their producing
+      plugin version (two hand-forensics incidents in one week), the
+      worktree-starved half of the touch stream lights up (883 mappable rows
+      and growing), and — Q1(r5)-gated, sequenced last — the severed EVD-4
+      Arm B outcome-prior harness is un-severed now that its data condition
+      ripened. Detection and additive fields only; no gate semantics move;
+      no default flips (ED-2).
+    items:
+
+      - id: MEA-1
+        title: "Instrument-sensitivity accounting: hard-set resolvability reported in evaluate() and stamped on A/B evidence"
+        priority: P0
+        effort: M
+        status: planned           # tier ratified 2026-07-19; not started
+        source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "The round's headline finding, reproduced read-only this cycle: 1/32 rows of tests/fixtures/recall_hard_set.yaml (the ONLY hard set on this machine; .claude/memory/.audit-fixtures/ does not exist) have any expected stem present in .claude/memory — so the recorded EVD-4 Arm A evidence (.claude/.memory-telemetry/salience_ab.json, 2026-07-17) was measured through a ~3%-sensitivity instrument: off-arm single-hop recall 0.0455 = exactly 1/22, multi-hop 0.0 = 0/10, zero deltas arithmetically near-certain under BOTH arms; eval_metrics.py:602 hard_set_metrics has NO stem-existence check while eval_recall.py:1236 floor_sweep already filters to rows 'whose expected stems actually exist in THIS corpus' — the logic exists in one instrument and not the other"}
+        problem: >-
+          hard_set_metrics counts rows whose expected stems do not exist in
+          the measured corpus as silent misses, so a lived-in eval against
+          the engine pack fixture renders a ~3%-sensitivity run as a normal
+          report — the recorded ED-2 revisit evidence (the file that quiets
+          the doctor nudge) was produced exactly this way, and nothing in
+          the report, the A/B condition stamp, or doctor says so. Until the
+          instrument reports its own sensitivity, every lived-in eval —
+          including any future Arm B run (MEA-5) and any MSR-1 baseline pin
+          — is unlabeled evidence theater waiting to happen.
+        proposal: >-
+          Detection only (ED-1): evaluate() computes per-category
+          resolvable_n vs n by lifting floor_sweep's existing stem-existence
+          filter logic into a shared helper — REPORTED, not silently applied
+          (gate semantics untouched; the CI pack corpus is unaffected since
+          all rows resolve there); the eval report and salience_eval.run_ab's
+          condition stamp carry the counts; check_salience_evidence qualifies
+          a recorded A/B whose resolvable share was low ("evidence recorded
+          against an N%-resolvable fixture") — qualifying evidence, NEVER
+          recommending a flip. Additive report fields,
+          absence-emits-nothing (ED-4); no new artifact (ED4R-2 — the
+          readers are the existing eval report, the ED-2 revisit file's
+          stamp, and the doctor line). This is ED5R-2's reference
+          implementation.
+        acceptance_criteria:
+          - "evaluate() output carries per-category resolvable_n alongside n; the numbers are REPORT-ONLY — no row is skipped, no metric or gate constant changes value, and the CI/golden report is byte-identical where all rows resolve (pinned)"
+          - "the resolvability computation is ONE shared helper reused by evaluate() and floor_sweep (inv5 — floor_sweep's filter re-implemented nowhere)"
+          - "salience_eval.run_ab's condition stamp records resolvable_n per category; a recorded A/B whose resolvable share is below a module-constant floor renders a sensitivity qualification in check_salience_evidence's line (doctor qualifies, never recommends)"
+          - "the existing salience_ab.json (2026-07-17) is NOT rewritten — the doctor line derives the qualification for old evidence from the CURRENT fixture-vs-corpus state, stated as such"
+          - "eval_recall.py's ratchet position is handled per ED5R-3: the helper lands in eval_metrics.py (674/900 — room verified), and if evaluate()'s wiring cannot fit eval_recall.py's 4-line headroom, this item carries the eval_recall facade split (or a justified re-pin) as its OWN commit before the feature commit"
+        dependencies: []
+        invariant_note: >-
+          ED-2 — the doctor line qualifies evidence and never proposes a
+          flip; salience stays owner-decided-OFF. ED-4 — additive report
+          fields. ED5R-2 — this item IS the law's mechanism. ED5R-3 — the
+          eval_recall split-debt assignment is explicit in the AC.
+        implementation_notes: >-
+          Seams (verified at 827c607): eval_recall.py:evaluate (:580; the
+          file is at 1989/1993 — 4 lines of headroom, hence the AC's
+          split-or-shift clause); eval_metrics.py:hard_set_metrics (:602)
+          and hard_set_metrics_by_category (:644) — the miss-counting sites;
+          eval_recall.py:floor_sweep (:1236 — its docstring names the exact
+          filter to lift); salience_eval.py:run_ab condition block
+          (:188-202); doctor_checks_recall.py:check_salience_evidence (:88);
+          .claude/.memory-telemetry/salience_ab.json (the recorded evidence
+          this item retroactively qualifies — off_by_category single-hop
+          0.0455, multi-hop 0.0). The crash-contract rows pinned to
+          eval_recall (write_baseline, write_floor_sweep,
+          draft_abstention_fixtures, confirm_hard_set_row) relocate per
+          CONTRIBUTING.md:106-111 if the split happens.
+
+      - id: MEA-2
+        title: Lived-in hard-set drafting from the positive outcome join (the missing fourth draft lane)
+        priority: P1
+        effort: M
+        status: planned           # tier ratified 2026-07-19; not started
+        source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Reproduced read-only this cycle: 192 distinct (verbatim episode query -> outcome-confirmed injected memory) candidate pairs from joining episode_buffer.jsonl query_previews to session-grain _injection_join hits; eval_fixtures.py's module docstring lists exactly three draft lanes (abstention SIG-6, forgetting TMB-3, update TMB-4) — none positive; .claude/memory/.audit-fixtures/ absent (find, re-verified); every lived-in instrument (Arm A recorded, Arm B when un-severed, floor_sweep's on-topic leg, any MSR-1 pin) therefore runs against pack stems at ~3% sensitivity (MEA-1's finding)"}
+        problem: >-
+          Self-populating fixtures exist only for abstention/forgetting/
+          update; there is no path that turns real lived-in retrieval
+          successes into project-local single-hop rows, so the flagship
+          corpus's hard set does not exist and every lived-in instrument
+          measures against pack stems — while 192 verified (verbatim query,
+          outcome-confirmed memory) candidates sit unread across the
+          ledgers. MEA-1 makes the insensitivity legible; this item is the
+          only proposed path that actually raises it.
+        proposal: >-
+          A deterministic drafter on the SIG-6/TMB pattern: join episode
+          query_previews to session-grain _injection_join hits (injected AND
+          a cited file touched at/after injection), queries VERBATIM only
+          (honoring the templated-fixture-queries kill — zero rewording,
+          zero LLM), deterministic noise filters (min content tokens via the
+          existing clean_query, skip system-reminder/slash-command
+          prefixes), volume-capped per run, deduplicated against
+          already-tracked queries, appended to the SAME pending-drafts queue
+          (SEC-3 dir). Admission stays per-item confirm_hard_set_row — the
+          existing gate already refuses absent stems and duplicates (inv4,
+          no bulk path). Named consumer: the project-local fixture that
+          evaluate()/floor_sweep/salience A/B already prefer via the
+          existing default-fixture resolution. Wire as an audit/consolidate
+          cold-path step beside draft_abstention_fixtures (inv6 untouched).
+          Distinct BY CONSTRUCTION from the round-1 demand-gap-auto-draft
+          kill: that killed GENERATING memory content; this derives fixture
+          rows from recorded evidence about memories that already exist.
+        acceptance_criteria:
+          - "drafts are (verbatim query, expected stems) rows derived ONLY from ledger evidence: episode query_previews x _injection_join hits (the sanctioned single join — the MSR-6 AST pin untouched); zero LLM, zero rewording, zero templating"
+          - "draft volume is capped per run (module constant) and deduplicated against tracked queries AND queued drafts; noise filters are deterministic and tested (short/system-reminder/slash-command queries never draft)"
+          - "drafts land in the SEC-3 pending dir beside the other three lanes; NOTHING enters the tracked fixture without per-item confirm_hard_set_row (which keeps refusing absent stems — negative-capability test that no bulk-admit path exists)"
+          - "wired as a cold-path step (audit phase / consolidate step) — never a hook, never SessionStart; absence of candidates emits nothing"
+          - "after the first real drain, the project-local hard set exists and evaluate() reports its resolvable_n (MEA-1's field) — the two items' joint receipt"
+        dependencies: [MEA-1]          # in-round: the sensitivity field is how this lane's yield is measured honestly
+        invariant_note: >-
+          inv4 — per-item human admission via the existing gate; the drafter
+          only queues. inv6 — cold path only. ED-4 — new rows in a
+          gitignored pending queue; the tracked fixture grows only by
+          human-confirmed rows. The templated-fixture and demand-gap kills
+          are honored by construction (verbatim queries, evidence-derived
+          expectations).
+        implementation_notes: >-
+          Seams (verified at 827c607): outcome.py:_injection_join (:171 —
+          grain='session'; the ONE join per MSR-6),
+          telemetry.py:read_episodes (query_previews source),
+          eval_fixtures.py:default_drafts_path/_append_draft_rows (:59/:89 —
+          the shared drafts-queue plumbing; file is 443 lines, room),
+          eval_recall.py:confirm_hard_set_row (:419 — the admission gate;
+          NOT modified), eval_recall.py:draft_abstention_fixtures (:294 —
+          the wiring precedent into audit Phase 0.6 / consolidate Step 5 via
+          mcp_tools_consolidate.py + the audit skill). Repro receipt for the
+          192: session-grain join yielded 205 hit pairs -> 192 distinct
+          (query, memory) after dedup. Keep the drafter in eval_fixtures.py
+          (its home lane) — eval_recall.py has 4 lines of headroom (ED5R-3;
+          see MEA-1).
+
+      - id: MEA-3
+        title: "Co-recall null model: lift-vs-independence annotation + confound collapse on the GRW-2 proposal surface"
+        priority: P1
+        effort: M
+        status: planned           # tier ratified 2026-07-19; not started
+        source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "TWO independent read-only repros this cycle agreed: co_recall_pairs(td, exclude_names=floor) -> 20 pairs at the _CORECALL_MAX_PAIRS cap (17 fresh after build_graph adjacency drop — the 2026-07-19 incident's exact number), every pair lift 0.99-1.20 vs independence (median 1.06), members individually present in 54-68 of 72 sessions; telemetry.py:612-616 (raw distinct-session tally, min 3, cap 20, no null model); three shipped consumers ingest the pairs as behavioral evidence: mcp_tools_consolidate.py:518 (consolidate Step 4 proposals), deparasite.py:218 ('co-recalled' protection evidence), deparasite.py:301 (demote weak-link signal); design premise hippo-enh-t5-growth capstone ('below threshold -> [] — the sparse map STAYS empty') predates the corpus densifying"}
+        problem: >-
+          co_recall_pairs proposes raw distinct-session counts with no null
+          model; on this corpus that yields 20/20 chance-level pairs —
+          dev-history staples co-riding top-N because each is individually
+          recalled in 75-94% of sessions — and the -sessions sort plus the
+          20-pair cap means staple-x-staple pairs permanently crowd out any
+          genuine mid-frequency association. The consolidate Step 4 turn
+          burns reviewer time on zero signal (the 2026-07-19 incident: 17
+          proposals, zero genuine), deparasite's protection leg can wrongly
+          exonerate a parasite that co-rides staples, and the demote
+          weak-link signal inherits the same confound.
+        proposal: >-
+          Detection-first annotation, zero writes: co_recall_pairs computes
+          per-name session marginals in the same session-union pass and
+          emits observed_sessions + expected_under_independence + lift on
+          each pair (additive dict fields — existing consumers keep working
+          unchanged); the proposal turn renders lift + member frequencies
+          per pair, labels chance-level pairs ("lift ~1.0 — frequency
+          confound"), and collapses pairs below a module-constant lift floor
+          into ONE legible count line ("N chance-level pairs suppressed —
+          lift < X") instead of proposing them (inv3 — nothing silently
+          dropped). Whether deparasite's two reads also apply the lift floor
+          is decided AT BUILD with both consumers named: the protection leg
+          erring permissive (keep raw counts) is the safe default — refusing
+          to exonerate on confound evidence must not flip into demoting on
+          its absence. No cap change and no ordering change in this item —
+          measure the lift ordering on live proposals first.
+        acceptance_criteria:
+          - "each returned pair carries observed_sessions, expected_under_independence, and lift as additive fields; per-name marginals computed in the same pass (no second ledger walk); existing callers unchanged byte-for-byte when they ignore the new keys (pinned)"
+          - "the consolidate proposal render shows lift + member session-frequencies per pair and collapses sub-floor pairs into one count line — suppressed pairs are countable, never invisible (inv3)"
+          - "the deparasite decision is recorded IN THE ITEM at build time: which of its two reads (protection :218, weak-link :301) adopts the floor, with the permissive-protection default and the reasoning in the commit"
+          - "the lift floor is a module constant (no env knob); cap and sort order untouched this round — any cap/ordering motion needs the measured lift distribution from live proposals first"
+          - "telemetry.py's ratchet position handled per ED5R-3: if the marginals+lift computation cannot fit the 7-line headroom, this item carries the telemetry facade split (or justified re-pin) as its OWN commit first — the injection-cost (module,function) pins relocate per CONTRIBUTING.md:106-111"
+        dependencies: []
+        invariant_note: >-
+          ED-1 — annotation + render; the human still approves every edge
+          per-item. inv3 — the collapsed count line is mandatory, suppression
+          is never silent. inv5 — one lift computation, in co_recall_pairs
+          itself, consumed by all three readers. ED5R-3 — the telemetry
+          split-debt assignment is explicit in the AC.
+        implementation_notes: >-
+          Seams (verified at 827c607): telemetry.py:co_recall_pairs
+          (:616-661; _CORECALL_MIN_SESSIONS=3 / _CORECALL_MAX_PAIRS=20 at
+          :612-613; sort -sessions at :658; the file is 1295/1302 — hence
+          the AC's split clause); mcp_tools_consolidate.py:
+          _tool_co_recall_proposals (:518-570; floor-only exclude at
+          :537-540; file 622 lines — room for the render);
+          deparasite.py:218 (protection evidence) and :301 (weak-link) —
+          the two named non-proposal consumers; links.py:build_graph (the
+          adjacency drop producing 17-fresh from 20-raw). Lift formula per
+          the repro: lift = sessions_ab / (freq_a * freq_b / S) over the
+          same session universe S the union pass already iterates.
+
+      - id: MEA-4
+        title: Producer-version stamps on evidence-ledger rows + a rows-by-version lane-health line
+        priority: P2
+        effort: M
+        status: planned           # tier ratified 2026-07-19; not started
+        source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Row-key scans this cycle: outcome_events.jsonl rows are exactly {ts, session_id, tool, path, [cited_by]}, recall_events.jsonl {ts, session_id, names, scores, ranks, backend, latency_ms, k, query_preview, [drops], [injected_chars]}, reconsolidation_events.jsonl {ts, name, outcome} — all three version-less; both live-hook-lag diagnoses were therefore hand forensics: EVD-2's 5-release lag (hippo-enh-t21-evidence capstone, mechanical-zeros dating) and the 2026-07-19 pre-GRW-5 re-flag of 4 fresh-baselined memories (reconsolidation rows 15:18-15:25Z; installed_plugins.json caught up at 15:25:48Z); doctor_checks_env.py:584 check_plugin_version covers only installed-vs-venv"}
+        problem: >-
+          The live-hook-lag class has bitten twice in one week and both
+          diagnoses required manual forensics, because no row in the
+          outcome/recall/reconsolidation ledgers records which plugin
+          version minted it — a stale installed hook is invisible until its
+          behavioral zeros are noticed and hand-dated. OPS-1 names the skew
+          at doctor/fleet surfaces at the moment it exists; this item is the
+          forensic complement — when the next bite is noticed late, the
+          ledger itself answers "which rows did the lagged code write"
+          instead of a reconstruction from tag-containment and mtimes.
+        proposal: >-
+          ED-4-additive `v` field on NEW outcome/recall/reconsolidation rows
+          (one cached read of the running plugin's own plugin.json per
+          process; unreadable -> field omitted, absence-emits-nothing);
+          format_lane_health and one doctor line aggregate "rows by
+          producing version (running vX)" so version lag shows as data in
+          the lane the incidents already surface in. No new artifact —
+          existing gitignored ledgers, existing named readers (EVD-2's
+          lane-health surface + doctor); hook budget unchanged (the writers
+          are already fire-and-forget spawns); historical version-less rows
+          render as one "unstamped" bucket, never backfilled.
+        acceptance_criteria:
+          - "new rows in all three ledgers carry `v` when the running plugin's plugin.json is readable; the read is cached per process; unreadable -> field omitted and the writer never raises (absence-emits-nothing, exit-0 posture unchanged)"
+          - "format_lane_health gains a rows-by-producing-version line naming the running version; historical unstamped rows aggregate as one bucket; ONE doctor line surfaces the same aggregate (no new check ordering violations — tail pins respected)"
+          - "byte-identity where it matters: existing readers of all three ledgers are unchanged (fields read via .get()); the PostToolUse 50ms budget pin still passes (tests/test_scale.py)"
+          - "no behavior branches on the stamp anywhere — provenance only; the MSR-6 AST pin untouched"
+          - "telemetry.py headroom handled per ED5R-3 (see MEA-3 — whichever of the two lands second inherits an already-split or already-re-pinned file)"
+        dependencies: []
+        invariant_note: >-
+          ED-4 — additive fields on gitignored derived ledgers; explicitly
+          NOT a schema bump (queue-own shapes, .get() reads). inv2 — writers
+          stay never-raise. ED4R-2 — readers are the existing lane-health
+          surface and doctor. Complementarity with OPS-1 is stated in-item
+          so neither is built assuming the other was cut.
+        implementation_notes: >-
+          Seams (verified at 827c607): telemetry.py:log_outcome +
+          log_recall_event (the two hook-lane writers; file 1295/1302 — see
+          MEA-3's split clause); the reconsolidation ledger writer
+          (reconsolidation_events.jsonl producer — verify its module at
+          build time; the reverify/watermark lane moved in v1.26.0);
+          outcome.py:format_lane_health (:409 — the aggregate's home;
+          outcome.py is 561 lines, room); doctor_checks_env.py:
+          check_plugin_version (:584 — the version-read precedent via
+          ctx.plugin_root/.claude-plugin/plugin.json; cache the same read).
+          Version source is the RUNNING plugin root (CLAUDE_PLUGIN_ROOT
+          resolution), NOT the repo tree — that distinction is the whole
+          point (OPS-1 compares the two; this item stamps the former).
+
+      - id: MEA-5
+        title: "EVD-4 Arm B un-sever: the HIPPO_OUTCOME_PRIOR A/B harness + commissioned run (Q1 r5; after MEA-1/MEA-2)"
+        priority: P3
+        effort: M
+        status: planned           # tier ratified 2026-07-19; not started
+        q1_verdict: >-
+          2026-07-19, dated owner entry (ED5R-1): Fred answered Q1(r5) "Yes,
+          after MEA-1/2" in the round-5 formal-question session — Arm B is
+          COMMISSIONED, with the vetting's sequencing constraint affirmed as
+          part of the verdict: the harness + run build only after MEA-1 and
+          MEA-2 land, so the report reads through an instrument whose
+          sensitivity is known and non-trivial. LAW ZERO unchanged — the
+          build itself still waits on T23 ratification; the severance's
+          decision gate is what this resolves.
+        source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "The severance's data condition ripened and was verified live: outcome_events.jsonl cited_by rows counted 120->132 across two same-day passes (8 on 07-17, 94 on 07-18, 18+ on 07-19 — the ledger GREW while being counted); touch-grain injection_hits 32 memories / 49 hit-sessions; ROADMAP.enhancements4.yaml EVD-4 AC names the exact minimal delta ('AB_FLAGS entry + dispatch branch + generalized arm runner + outcome-signal precondition') and :1608 keeps the graduation arm severed regardless; dream_eval.py:53 AB_FLAGS = ('HIPPO_DREAM', 'HIPPO_SALIENCE') — HIPPO_OUTCOME_PRIOR still absent; outcome.json never written on this machine (index dir ls); recall_salience.py:_apply_outcome_prior (:310) shipped RET-14, flag default-OFF, never measurable"}
+        problem: >-
+          Arm B was severed behind "nonzero touch/outcome rows + its own
+          dated decision". The DATA half ripened this week (120-132 cited_by
+          rows live and growing), while the harness still cannot measure the
+          flag: AB_FLAGS lacks HIPPO_OUTCOME_PRIOR, eval_recall --ab has no
+          dispatch for it, and the RET-14 outcome cache has never been
+          written here — the shipped prior remains unmeasurable exactly when
+          its evidence base finally exists. The second gate (the dated owner
+          decision) is Q1(r5). And the vetting adds a third honesty
+          condition: an Arm B run through the CURRENT 1/32-resolvable
+          instrument would be evidence theater — which MEA-1's own
+          sensitivity stamp would expose on the report.
+        proposal: >-
+          Ship precisely the minimal delta EVD-4 named in-file: AB_FLAGS
+          entry + eval_recall --ab dispatch branch + a generalized
+          flag-context arm runner extracted from the salience_eval pattern
+          (each --ab flag owns a harness) + an outcome-signal precondition
+          so a signal-less ON arm reads as self-check-not-finding; report to
+          its own gitignored evidence file beside salience_ab.json, carrying
+          the ED-2-style footer AND MEA-1's resolvable_n stamp. Measures the
+          EXISTING RET-14 flag only, flips nothing (ED-2/LIF-7). The WHOLE
+          item — harness build and run alike — is GATED on Q1(r5) (the dated
+          owner decision the severance demanded; the Q4 commissioning
+          pattern) and SEQUENCED AFTER MEA-1/MEA-2 so the run happens
+          through an instrument whose sensitivity is known and non-trivial.
+          The touch-grain GRADUATION/ranking arm stays severed regardless
+          (the standing not_pursuing row) — measurement is the only thing
+          un-severed here.
+        acceptance_criteria:
+          - "gated on Q1(r5) — a dated owner entry recorded on this item before ANY code lands (the EVD-4/T21 ask-and-answer pattern); recommendation carried as recommendation only"
+          - "sequenced after MEA-1 and MEA-2: the run's report carries resolvable_n per category, and the commissioning ask names the then-current sensitivity so the owner commissions with eyes open"
+          - "the delta is exactly the EVD-4-named minimal set: AB_FLAGS entry, --ab dispatch branch, generalized arm runner on the salience_eval pattern (OFF-arm byte-identity self-check + per-category n + low-n labels + dated footer), outcome-signal precondition (signal-less ON arm reports as self-check, not finding)"
+          - "measures the EXISTING flag in-process under a restored env; NOTHING flips: HIPPO_OUTCOME_PRIOR stays default-OFF, the ranking-flip remains a separate dated owner decision on affirmative evidence (ED-2/LIF-7), and the graduation arm stays severed"
+          - "the evidence file is gitignored beside salience_ab.json with its own named reader (the ED-2 revisit file pattern + check_salience_evidence's sibling treatment decided at build)"
+        dependencies: [MEA-1, MEA-2]   # in-round; cross-file MSR-5 + RET-14 both shipped (re-confirm)
+        invariant_note: >-
+          ED-2 is the binding law — measures only, never flips; LIF-7 — the
+          flip is never metric-proxied. ED5R-1 — Q1(r5) gates the whole
+          item. ED5R-2 — the report carries its instrument's sensitivity by
+          construction. inv6 — CLI-only; a dense double-run never rides a
+          hook.
+        implementation_notes: >-
+          Seams (verified at 827c607): dream_eval.py:AB_FLAGS (:53);
+          eval_recall.py:main --ab dispatch (:1504 region; the file's
+          4-line headroom means this lands AFTER MEA-1's split-or-re-pin —
+          another reason for the sequencing); salience_eval.py:run_ab /
+          _signal_inventory / _salience_flag (:117/:76/:57 — the pattern to
+          generalize into a flag-parameterized runner rather than a second
+          copy, inv5); recall_salience.py:_outcome_prior_enabled (:276) /
+          _OUTCOME_PRIOR_CAP=0.10 + _OUTCOME_PRIOR_SATURATION=3 (:52-53) /
+          _apply_outcome_prior (:310); session_start.py:1488 (the
+          flag-gated outcome-cache writer — under flag OFF the cache does
+          not exist, so the harness must write/read the cache in-process
+          for the ON arm or run a flagged SessionStart equivalent — decide
+          at build, record on the item); outcome.py:write_outcome_cache /
+          read_outcome_cache (:314/:357).
+
+      - id: MEA-6
+        title: Worktree touch-path normalization at record time (EVD-2's named follow-up, now FLT-3-amplified)
+        priority: P1
+        effort: M
+        status: planned           # tier ratified 2026-07-19; not started
+        source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Live computation this cycle over outcome_events.jsonl: 1140 of 2288 post-07-16 rows (~50%; 1140/3304 = 35% all-time) are worktree-prefixed, 0 of 1140 carry cited_by, 883 would join the 112-path cited touchmap if prefix-stripped (grown from the roadmap-4-era 848/1675, 650 mappable); the shipped surface DEFERS the fix in its own output ('the candidate prefix-strip fix to recording is its own follow-up item, not this surface' — format_lane_health, outcome.py:420-422) and ROADMAP.enhancements4.yaml:505-509 names it EVD-2's follow-up; jit.observe_touch early-returns on the touchmap miss so JIT-1/JIT-2 are structurally dead inside worktrees; FLT-3 (shipped v1.27.0) correctly drives MORE mutation into worktrees"}
+        problem: >-
+          Half the machine's recent touch evidence is dark: worktree
+          sessions record touches main-root-relative under
+          .claude/worktrees/, which can never match repo-relative
+          cited_paths at either KPI-2 grain — structurally under-counting
+          injection precision, starving the touch grain, and keeping JIT-1
+          first-touch reminders and JIT-2 cited_by provenance dead inside
+          worktrees, exactly where FLT-3's shipped nudge sends mutating
+          work. The recording lane is proven live (132 cited_by rows from
+          non-worktree sessions), so the named follow-up's precondition is
+          met — and Arm B's evidence base (MEA-5) is exactly the stream
+          this starves.
+        proposal: >-
+          Normalize at record time, honestly: in outcome.record_from_payload,
+          derive the in-tree path once (rel starts with _WORKTREE_PREFIX ->
+          tail after '<wt>/' — the exact split format_lane_health already
+          uses); (1) hand the STRIPPED path to jit.observe_touch so the
+          touchmap join, JIT-1 reminder, and JIT-2 cited_by go live in
+          worktree sessions; (2) log_outcome keeps the RAW `path` (honest
+          record of where the touch landed) and adds an additive `tree_path`
+          field only when different (ED-4, absence-emits-nothing, no schema
+          bump — gitignored jsonl); (3) read-side consumers
+          (_injection_join — still the ONE join — injection_hits,
+          format_lane_health's mappable count) prefer tree_path when
+          present; historical rows untouched (lane health's
+          would-map-if-stripped line becomes the before/after receipt).
+          FLT-3's shared_tree exemption stays keyed on the RAW rel — a
+          worktree-prefixed mutation remains self-exempt — pinned by test so
+          the strip can never make worktree mutations look shared.
+        acceptance_criteria:
+          - "record_from_payload derives tree_path via the ONE existing prefix constant (_WORKTREE_PREFIX — no second copy, inv5); raw `path` preserved on every row; `tree_path` present only when different (ED-4)"
+          - "jit.observe_touch receives the stripped path: JIT-1 reminders and JIT-2 cited_by fire in worktree sessions — bounded by the existing MAX_LINES_PER_SESSION and killed by HIPPO_DISABLE_JIT (the ONE behavior delta, named and tested)"
+          - "FLT-3's shared_tree exemption stays RAW-keyed — negative-capability pin: a worktree-prefixed mutation NEVER renders as a shared-tree mutation post-strip"
+          - "_injection_join/injection_hits/format_lane_health prefer tree_path when present; historical rows unchanged; lane health reports the mappable count before/after as the item's own receipt; the MSR-6 AST pin and the PostToolUse 50ms budget pin both still pass"
+          - "the semantics call is pinned by test: a worktree touch of a cited tree path COUNTS as touching the citation — the equivalence the shipped lane-health diagnosis already asserts in prose"
+        dependencies: []
+        invariant_note: >-
+          Measurement-only module contract preserved — the ledger never
+          feeds ranking (RET-14's cache is flag-OFF; when MEA-5 measures
+          it, stamped rows simply widen the evidence). inv2 — the
+          PostToolUse writer stays never-raise/exit-0. ED-4 — additive
+          field, no bump. The JIT-1-in-worktrees delta is the item's one
+          behavior change: bounded, kill-switched, stated.
+        implementation_notes: >-
+          Seams (verified at 827c607): outcome.py:record_from_payload (:66;
+          rel computation :100-110; observe_touch call :117; log_outcome
+          :150; FLT-3 shared_tree exemption :137-145 — stays raw),
+          outcome.py:_WORKTREE_PREFIX (:406) + format_lane_health mappable
+          calc (:449-453), jit.py:observe_touch (touchmap lookup ~:370-378
+          — the early-return the strip revives), telemetry.py:log_outcome
+          (additive field; see MEA-3/MEA-4 for the headroom clause),
+          presence.py:observe_fleet (rides the same payload at outcome.py
+          :137-145 — keep its read raw-keyed too),
+          tests/test_outcome.py EVD-2 block + tests/test_injection_cost.py
+          (MSR-6 pin) + tests/test_scale.py (budget pin). Merge note: this
+          item unifies the retrieval-namespace and fleet-namespace variants
+          — the fleet mechanism (strip-to-observe_touch, raw+tree_path,
+          readers-prefer-tree_path) is the adopted spec.
+
+  # ---------------------------------------------------------------- WRT ---
+  - id: WRT
+    name: The write side tells the truth (capture/decision legibility)
+    extends: CAP-2/CAP-6 capture queue + CAP-LLM triage (default-OFF) + GRW-4 decisions ledger + the SessionEnd/SubagentStop hook pair
+    goal: >-
+      The capture lane stops fabricating (the triage model gains the right
+      to say nothing and a zero-LLM lint gains the right to doubt it),
+      stops whispering (a human-invoked --from-hook run states its outcome
+      on stderr while hook bytes stay identical), and stops dropping the
+      WHY (MCP-recorded decisions get an honest reply and a labeled
+      time-window fallback at the drain instead of being silent dead
+      letters). Every change is detection/legibility inside existing
+      per-item human gates; the hook contract (exit 0, silent, never-raise)
+      is untouched.
+    items:
+
+      - id: WRT-1
+        title: "Triage groundedness: an abstain lane + a mechanical ungrounded-identifier flag on CAP-LLM seeds"
+        priority: P1
+        effort: M
+        status: planned           # tier ratified 2026-07-19; not started
+        source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "capture_triage.py:227-229 verbatim ('If the session shows no durable fact worth saving, still fill every field with your best single candidate') + :265-266 (_parse_response returns None on empty description — abstention is structurally impossible); TWO fabrications in one week: the '#237 merged' draft (no hippo PR above #85 exists at 827c607) and the LIVE seed in the queue now — capture-428d7452-c9bb-4fad-9c5c-d0dfb642e848.json's llm_triage.draft_description claims this session 'merged T14 invariants' while T14 merged 2026-07-16 as PR #57 (hippo-enh-t14-invariants capstone; the 07-19 session only re-stamped it); re-verified in the queue this cycle"}
+        problem: >-
+          The capture triage prompt FORCES a fabrication when a session has
+          no durable fact — the prompt orders a best-single-candidate answer
+          and the parser rejects abstention — so the model invents, and the
+          plausible-but-wrong draft is the FIRST thing the drain reviewer
+          reads. Measured twice this week, with the second exhibit still
+          sitting live in the pending queue. A reviewer who gets burned
+          twice stops trusting the lane, which un-earns CAP-LLM's whole
+          opt-in.
+        proposal: >-
+          Two detection-half moves, both inside the existing default-OFF
+          HIPPO_CAPTURE_LLM lane: (1) ABSTAIN LANE — extend the strict-JSON
+          response shape with an explicit no-durable-fact option and parse
+          it into an honest llm_triage {"abstained": true} (or omit the
+          triage block) instead of treating emptiness as failure; the
+          forced-answer prompt sentence is replaced by the abstain
+          instruction. (2) GROUNDEDNESS FLAG — a zero-LLM post-check
+          extracting concrete identifiers from the draft (PR/issue #N,
+          7+-hex sha-likes, URLs, version strings) and flagging any that
+          appear NOWHERE in the prompt evidence as an additive
+          ungrounded_tokens list (absent when clean, ED-4);
+          capture._format_listing renders one warning line beside the
+          existing secret_flagged warning. The drain's per-item human
+          ratification is untouched; triage failures still fall back to the
+          heuristic-only seed; the flag rides the SEED (fingerprint-changed
+          re-captures rebuild it, which is why it cannot live anywhere
+          else).
+        acceptance_criteria:
+          - "the model can abstain: a no-durable-fact response parses into an honest abstained triage state (never a parse failure), and the forced-answer prompt sentence is gone; abstained seeds render as such in the drain listing"
+          - "ungrounded_tokens is computed by deterministic extraction + evidence-membership check only (zero LLM — the judged-lanes kill honored); absent when clean; one warning line in _format_listing beside secret_flagged"
+          - "both exhibits become tests: a '#N above max-PR' style draft and a wrong-tier-merge style draft each get flagged against fixture evidence; an evidence-grounded draft does not"
+          - "HIPPO_CAPTURE_LLM stays default-OFF; hooks stay exit-0 fail-open; heuristic-only seeds are byte-identical to today (pinned)"
+        dependencies: []
+        invariant_note: >-
+          ED-1 — REDUCES LLM authority (the model gains the right to say
+          nothing; a mechanical lint gains the right to doubt it); the
+          human verdict at the drain is unchanged. inv3 — the warning line
+          is the legibility. ED-4 — additive seed fields, queue-own shape.
+        implementation_notes: >-
+          Seams (verified at 827c607): capture_triage.py:_build_prompt
+          (:210-251; the forced-answer clause at :227-229),
+          _parse_response (:254-288; the not-description rejection at
+          :265-266), enrich_seed (:291-381; evidence fingerprint at
+          :314-323 — the groundedness check reuses the same prompt-evidence
+          assembly so flag and prompt see identical text);
+          capture.py:_format_listing (:716-738 — the render seam). Keep
+          extraction conservative (identifier classes listed in the AC) —
+          the flag must have near-zero false positives to keep its
+          authority.
+
+      - id: WRT-2
+        title: "Name the no-op: one legible outcome line for human-invoked capture --from-hook"
+        priority: P2
+        effort: S
+        status: planned           # tier ratified 2026-07-19; not started
+        source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Reproduced this cycle: a --from-hook invocation with a foreign session_id exits 0 with zero output and writes nothing; with a real buffer sid it writes the seed and is STILL silent (capture.py:851-856 'Silent on the hook path' — the success print is gated `if path and not args.from_hook`); write_session_capture returns None for both no-episodes and any-exception (:414, :466-467); the 2026-07-19 incident: an operator's foreign-sid run coincided with a SubagentStop hook minting capture-428d7452 for the CURRENT session, and the silence made the misattribution undetectable; hooks discard stderr (memory_session_end.sh's `2>/dev/null || true` tail), so a stderr line is free"}
+        problem: >-
+          capture --from-hook has three indistinguishable outcomes at a
+          human seam — foreign/unknown session_id, successful seed write,
+          and internal failure are all exit-0 with zero output. That is an
+          inv3 (legible degradation) gap, and it already produced a real
+          misattribution: an operator's no-op run was credited with a seed
+          a concurrent hook actually minted.
+        proposal: >-
+          Detection/legibility only, hook bytes unchanged: print ONE outcome
+          line to STDERR from main() on the --from-hook path — "captured ->
+          <path>", "no episodes in buffer for session_id=<X> (<N> sessions
+          known)", or "capture failed: <exception class>". The wired hooks
+          already discard stderr, so live hook behavior is byte-identical
+          and exit stays 0 (inv2); a human running the same command finally
+          sees the truth. write_session_capture's None gains a discriminated
+          companion (outcome enum or (path, reason) tuple) internally so
+          main() can name which no-op happened; the no-episodes line may
+          name the nearest known sids to catch paste-typos.
+        acceptance_criteria:
+          - "exactly one stderr line per --from-hook invocation naming the outcome class; stdout untouched; exit code 0 in all cases (inv2 pinned)"
+          - "hook-path byte-identity proven: the wired SessionEnd/SubagentStop shell pipelines produce identical observable behavior before/after (stderr already discarded — cite the shell lines in the test or a shellcheck-adjacent pin)"
+          - "the internal no-episodes vs exception distinction comes from a discriminated return, not string matching; the non-hook CLI path's existing 'captured -> path' print is unchanged"
+        dependencies: []
+        invariant_note: >-
+          inv2 — exit-0, never-raise preserved; the line rides stderr
+          precisely because the hooks throw it away. inv3 — this IS the
+          legibility fix. No new artifact.
+        implementation_notes: >-
+          Seams (verified at 827c607): capture.py:main (:847-857 — the
+          silent branch; the success print's `not args.from_hook` gate) +
+          write_session_capture (:391-467 — return-shape change is
+          internal; public None-compat preserved for other callers if any);
+          plugin/hooks/memory_session_end.sh + memory_subagent_stop.sh
+          (the stderr-discard contract, UNTOUCHED). Scope note baked in:
+          the plain CLI success already prints — this item is exclusively
+          the --from-hook human seam.
+
+      - id: WRT-3
+        title: "Dead-letter decisions: honest MCP reply + labeled time-window fallback at the drain (GRW-4 keying mismatch)"
+        priority: P0
+        effort: M
+        status: planned           # tier ratified 2026-07-19; not started
+        source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "The code triple verified this cycle: mcp_tools_consolidate.py:96-111 add_decision calls log_decision(text) with neither telemetry_dir nor session_id; telemetry.log_decision falls back to the shared FILE token (current_session_id fallback :154-177); capture._session_decisions matches by STRICT equality with the harness session id (:230-238) — so on any harness passing real ids (every recent session: dashed UUIDs throughout the episode buffer) the match is structurally impossible; measured: decisions.jsonl's ONLY two rows (07-13, the INT-13 ratified-shape and v1.13.0 facts — exactly GRW-4's durable-WHY class) are keyed by 32-hex file token 5e4e212a... and rode no seed; today's live seed carries decisions: []; the tool replies 'decision recorded — it will ride this session's capture seed as its durable WHY' (re-verified verbatim)"}
+        problem: >-
+          A decision recorded through the MCP capture tool can never ride
+          its capture seed, though the tool's reply text literally promises
+          it will — the MCP server never receives the harness session id,
+          log_decision keys the row on the shared file token, and seed
+          matching requires strict harness-id equality. The ledger's only
+          rows — exactly the durable-WHY class GRW-4 exists for — were
+          dropped this way. A shipped reply that states a falsehood is a
+          broken promise (P0 by the scoring rubric).
+        proposal: >-
+          Detection halves only. (1) HONEST REPLY — the MCP add_decision
+          response states the attribution mode truthfully: "recorded
+          unattributed — will surface as a window-matched decision at the
+          drain" when no harness id is available (and keeps the current
+          promise only on paths that genuinely thread one, if any exist by
+          build time). (2) WINDOW FALLBACK — at seed build,
+          _session_decisions additionally carries decisions whose sid does
+          NOT match but whose ts falls inside the session's episode span,
+          under a separate additive seed key (window_decisions, absent when
+          none — ED-4) so the drain reviewer sees them LABELED as
+          time-window-matched rather than session-proven; _format_listing
+          renders the two classes distinctly. No relaxation of the strict
+          lane; transcription-not-synthesis untouched; the reviewer still
+          ratifies per item. (A third option — threading a real id into the
+          MCP server — is out of scope: the server has no harness id to
+          thread; if the harness ever supplies one, the strict lane simply
+          starts matching and the fallback goes quiet on its own.)
+        acceptance_criteria:
+          - "the add_decision reply never claims seed-riding it cannot deliver: the unattributed path says window-matched-at-drain; wording pinned by test"
+          - "window_decisions rides the seed as a separate additive key, absent when none (ED-4); the strict session-proven decisions list is byte-identical to today (pinned)"
+          - "the window is the session's episode span (earliest..latest episode ts) — a module constant slack at most; no env knob; decisions matched by BOTH lanes appear once, in the strict lane"
+          - "_format_listing renders window-matched decisions visibly distinct (labeled) from session-proven ones; the drain's per-item ratification flow is unchanged"
+          - "the two dead 07-13 rows become the fixture: a file-token-keyed decision inside a session's span surfaces as window-matched at that session's drain"
+        dependencies: []
+        invariant_note: >-
+          ED-1 — legibility + a labeled fallback; nothing auto-merges into
+          the trusted lane. inv3 — the label IS the point: the reviewer
+          always knows which evidence class they are ratifying. ED-4 —
+          additive queue-own key. GRW-4's transcription-never-synthesis
+          contract untouched.
+        implementation_notes: >-
+          Seams (verified at 827c607): mcp_tools_consolidate.py:_tool_capture
+          add_decision branch (:96-111; the false-promise reply string);
+          telemetry.py:log_decision (signature already accepts
+          telemetry_dir/session_id — callers just don't pass them; the
+          docstring's 'keyed exactly like log_episode... so SessionEnd's
+          seed matching works identically' premise is the failed one —
+          correct it in the same commit); capture.py:_session_decisions
+          (:222-243, strict lane — extended, not relaxed) +
+          gather_session_context (:370 region — the episode-span source) +
+          _format_listing (:716-738); .claude/.memory-telemetry/
+          decisions.jsonl (the two dead rows, sid=5e4e212a...). MCP schema
+          note: the reply-text change is server-side only — no
+          mcp_schemas.py motion expected; if a schema string names the
+          promise, fix it in the same commit (file has 29 lines of
+          documented grows-with-tools headroom).
+
+  # ---------------------------------------------------------------- OPS ---
+  - id: OPS
+    name: Running-state legibility (what code runs; does the heart beat)
+    extends: DOC-7 check_plugin_version + the T18 presence lane + the T19 machine census + SLP-2's sleep state
+    goal: >-
+      The machine says which plugin version its hooks are ACTUALLY running
+      — versus the source tree it operates on and across the fleet — and
+      the 07:30 scheduler gains a dead-man freshness check from the oracle
+      that already exists with zero readers. Both are read-only detection
+      on cold paths (doctor/census) plus one additive presence field;
+      remediation (update/restart/reload) stays the human's; ED4R-3 holds
+      (visibility, never coordination).
+    items:
+
+      - id: OPS-1
+        title: "Running-vs-source plugin skew made legible: a DOC-7-sibling doctor line + presence-doc version stamps (the twice-bitten class gets a name)"
+        priority: P1
+        effort: M
+        status: planned           # tier ratified 2026-07-19; not started
+        source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Bite 1: 5 releases of live-hook lag (1.17.0->1.22.0 until 2026-07-17T19:02Z; hippo-enh-t21-evidence capstone EVD-2 block). Bite 2: commit 827c607's own message ('installed plugin 1.26.0 -> 1.27.0'; 'worklist 4/4 verdicted') + reconsolidation_events.jsonl 07-19 15:18-15:25Z (4 fresh-baselined memories re-flagged by pre-GRW-5 code; `git tag --contains 0368c47` = v1.27.0 only — re-verified) + installed_plugins.json lastUpdated 2026-07-19T15:25:48Z. Prediction: hippo-enh-t18-fleet capstone ('the EVD-2 live-hook-lag class, predicted this time instead of discovered'). Gap: doctor_checks_env.py:584-627 compares installed-vs-venv-sentinel ONLY; grep confirms NOTHING compares the running plugin to the repo's own plugin source, and nothing surfaces session launch-pinning"}
+        problem: >-
+          Hooks run the installed plugin pinned at session launch — on the
+          dogfooding machine that skew bit twice in one week (once for 5
+          releases; once re-flagging 4 fresh-baselined memories and costing
+          a 4-verdict human pass) and was predicted a third time, yet no
+          surface compares the RUNNING plugin to the SOURCE TREE it
+          operates on, and launch-pinning (a session keeping its birth
+          version after the cache updates) is invisible fleet-wide. The
+          class recurs every release by construction: every release mints
+          lag until update + restart.
+        proposal: >-
+          Detection halves only, ZERO session_start.py lines (the file is
+          at cap; DOC-7's own precedent says rot is not per-session news —
+          on-demand doctor is the surface). (i) a DOC-7-SIBLING doctor line:
+          when the current repo ships hippo plugin source
+          (plugin/.claude-plugin/plugin.json exists, name-matched to
+          CLAUDE_PLUGIN_ROOT's manifest, realpaths differing — the
+          this-repo-is-the-source shape; empty-norm everywhere else) and
+          the versions differ, emit "live hooks run vX (pinned at session
+          launch); this tree ships vY — hook-lane behavior follows vX until
+          claude plugin update + restart". (ii) write_presence stamps an
+          additive plugin_version field (one small JSON read of
+          CLAUDE_PLUGIN_ROOT's manifest at SessionStart — not the inv6 hot
+          path) and the presence producer's existing fleet line appends
+          per-session versions ONLY when they differ across fresh docs —
+          launch-pin skew becomes visible fleet-wide ("main (2m ago,
+          v1.26.0 hooks)"). Old docs lack the field and emit nothing
+          (ED-4). Kill: (ii) rides HIPPO_DISABLE_PRESENCE wholesale; (i) is
+          on-demand doctor. MEA-4 is the forensic complement (row-level
+          stamps); both items state the pairing so neither assumes the
+          other was cut.
+        acceptance_criteria:
+          - "the doctor line fires ONLY on the this-repo-is-the-source shape with differing versions (name match + realpath difference + version difference); empty-norm on non-hippo-source projects, on equality, and on unreadable manifests; insertion respects the pinned doctor tail order"
+          - "zero lines added to session_start.py (pinned by the ratchet ledger staying unchanged for it in this item's PR)"
+          - "presence docs gain plugin_version additively; the fleet line appends versions ONLY when fresh docs differ; byte-identity pin: single-version fleets render exactly as today; _MAX_LINE_CHARS clip still governs"
+          - "no remediation, no coordination: the line names facts and the update command; nothing writes, restarts, or reloads (ED4R-3)"
+          - "kill-switch inheritance verified: HIPPO_DISABLE_PRESENCE kills the presence half; the doctor half is on-demand only"
+        dependencies: []
+        invariant_note: >-
+          ED4R-3 — visibility, never coordination. ED-4 — additive presence
+          field, absence-emits-nothing. inv6 — SessionStart-only read for
+          the stamp; the per-prompt path untouched. ED5R-3 — honored by
+          construction (zero at-cap-file lines; the item was explicitly
+          shaped to avoid a session_start producer).
+        implementation_notes: >-
+          Seams (verified at 827c607): doctor_checks_env.py:
+          check_plugin_version (:584-627 — the sibling precedent AND the
+          ctx.plugin_root manifest-read pattern to reuse; file 671 lines,
+          room) + doctor.py:352-409 (CHECKS registry — insert respecting
+          the pinned tail [check_machine_state, subset_boundary,
+          stale_memobot_env]); presence.py:write_presence (:291, doc dict
+          ~:324) + _read_doc (:143 — optional-fields passthrough) +
+          presence_producer (others line ~:421-439) + _fresh_others (:365 —
+          add version to the returned dict); presence.py is 526 lines —
+          room; bootstrap.py:316-321 (the version-read precedent);
+          plugin/hooks/hooks.json (proof hooks resolve from
+          CLAUDE_PLUGIN_ROOT — the installed cache pinned at launch);
+          ~/.claude/plugins/cache/hippo/hippo/ (16 version dirs — the
+          launch-pin substrate, read-only context).
+
+      - id: OPS-2
+        title: "Scheduler dead-man freshness: a 'quiet' census status from the oracle that already exists (sleep-state.json last_run_at)"
+        priority: P2
+        effort: S
+        status: planned           # tier ratified 2026-07-19; not started
+        source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "The in-code admission: doctor_checks_env.py:640-642 ('a moved venv/repo kills the scheduled 07:30 run before hippo starts, so the morning report cannot carry this warn for its own dead schedule — on-demand doctor is the live surface'); machine_census._classify_schedule (:177-189) detects stale-PATH only; grep this cycle: ZERO readers of last_run_at/sleep-state outside sleep.py; the oracle is written every run (sleep.py:293, _STATE_NAME :61) and live (last_run_at 2026-07-19T14:30:05Z — ran this morning); a schedule that dies for ANY non-path reason (launchctl-unloaded, broken venv python, deps rot) is invisible on every surface today"}
+        problem: >-
+          The silent-07:30 scheduler-death class is detected only for
+          embedded-path rot. A loaded-but-dying schedule is invisible —
+          currently healthy, undetectable the day it stops — even though
+          the freshness oracle (sleep-state.json's last_run_at) already
+          exists, is written on every run, and has zero readers. The
+          maintenance cadence the owner leans on (worklists, censuses,
+          morning reports) fails dark exactly when it fails.
+        proposal: >-
+          Extend scheduler_census with a freshness join, FILE ORACLES ONLY
+          (the ED-3 boundary holds — no launchctl probing): for each 'ok'
+          artifact, resolve its embedded repo_root (the existing
+          _parse_schedule_command extraction) -> that repo's telemetry
+          sleep-state.json -> last_run_at; a new status 'quiet' when the
+          artifact is ok but last_run_at is absent or older than a
+          module-constant N days (~3; no env knob). Rendered by the
+          existing census report (_render_scheduler grows one branch naming
+          the age and the log path to check) and folded into HYG-3's
+          existing warn line — NAMED READERS both pre-existing (census CLI
+          + doctor check_machine_state; sleep inherits the doctor line free
+          per SLP-1). No new artifact, no write, no remediation — the
+          reload recipe stays the human's.
+        acceptance_criteria:
+          - "'quiet' fires only for artifacts that are otherwise ok with stale/absent last_run_at beyond the module-constant window; stale-path classification unchanged; absence of any schedule emits nothing"
+          - "file oracles only — negative-capability pin: no launchctl/subprocess probing anywhere in the census path (ED-3)"
+          - "the census render names the age and the log path; check_machine_state's line gains the quiet count alongside dead; doctor tail order pins pass"
+          - "cross-repo reads touch only hippo's own gitignored telemetry (consistent with scheduler_census already parsing embedded foreign-repo paths)"
+        dependencies: []
+        invariant_note: >-
+          ED-3 — the file-oracle boundary is the binding law; widening to
+          launchctl runtime state would need its own verified probe and is
+          NOT this item. inv3 — 'quiet' is exactly a legible-degradation
+          word. Cold paths only.
+        implementation_notes: >-
+          Seams (verified at 827c607): machine_census.py:scheduler_census
+          (:192) + _classify_schedule (:177) + _parse_schedule_command
+          (:161 — repo_root extraction) + _render_scheduler (:367);
+          doctor_checks_env.py:check_machine_state (:630-671 — the
+          warn-on-DEAD-only line this extends; keep the HYG-3 restraint:
+          warn adds 'quiet', it does not editorialize);
+          sleep.py:_STATE_NAME (:61) / the last_run_at write (:293);
+          telemetry.default_telemetry_dir (the repo->telemetry
+          resolution). The live oracle value at authoring
+          (2026-07-19T14:30:05Z) is the item's own healthy-case fixture
+          shape.
+
+  # ---------------------------------------------------------------- BND ---
+  - id: BND
+    name: The boundary & consent edge (publish ledger honesty + trust drift reach)
+    extends: T20 PUB lane (preflight/candidates/boundary view) + SEC-6 trust spine + T19 machine census
+    goal: >-
+      The publish ledger shows BOTH sides (each publish heals danglings and
+      introduces its own — the measured treadmill moved the boundary only
+      20 -> 19 across two real publishes), cross-project trust drift becomes
+      visible from where the owner actually works (the alloy trio sat
+      quarantined 4-5 days, machine-invisible), and authorship-is-consent
+      stops failing silently at the write moment. All three are
+      report/display-only; the publish surfaces never gain a gate; consent
+      remediation stays per-project and human (Q2 r4 posture untouched).
+    items:
+
+      - id: BND-1
+        title: "Net boundary delta: the introduces-side of heals-N on the publish surfaces"
+        priority: P2
+        effort: S
+        status: planned           # tier ratified 2026-07-19; not started
+        source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Measured treadmill this cycle: boundary was 20 dangling / 9 files at T20 ship (hippo-enh-t20-publish capstone) and is 19 / 8 / 0 typed live NOW after TWO real publishes (38098d9 added hippo-v1-roadmap-proposal — healed 7, now SOURCES 3 of the 19; 9404b0c added hippo-vol1-volatile-paths — introduced 3); live preflight for the current heals-N leader (hippo-v080-trust-spine) prints 'heals 3' while silent about the dangling its local-only [[hippo-v030-open-followups]] link will add; lint_links.boundary_lint computes heals_by (:160-170) with no introduces twin"}
+        problem: >-
+          PUB-3's heals_by and PUB-1's receipt show only the healing half of
+          a publish; the introduces half (the candidate's own outbound
+          wikilinks to still-local-only memories, each a new boundary
+          dangling the moment it lands) is invisible — so the measured
+          treadmill could not have been predicted from any shipped view,
+          and the top candidate's true net effect is hand arithmetic.
+        proposal: >-
+          Extend lint_links.boundary_lint with an introduces_by twin of
+          heals_by (per local-only stem: count of its outbound wikilink
+          targets that resolve to OTHER local-only memories), render
+          "heals N / introduces M (net)" in the --boundary heals-N block,
+          the PUB-1 receipt line, and the PUB-2 candidates rows.
+          Display-only everywhere — the number must NEVER become a refusal
+          (the publish-hard-gate kill stands; advisory/receipt vocabulary
+          only). No new artifact: fields on three existing reports whose
+          readers already exist (ED4R-2 by construction); no schema motion
+          (derived print-only output, ED-4).
+        acceptance_criteria:
+          - "introduces_by computed beside heals_by in the SAME pass (one link walk — inv5); per-stem net renders in the boundary heals-N block, the preflight receipt, and the candidates rows"
+          - "negative-capability pin: no publish code path branches on introduces/net — receipt vocabulary only, never a gate or refusal class"
+          - "the trust-spine exhibit becomes the test: a candidate with heals 3 / introduces 1 renders net -2 on all three surfaces"
+          - "byte-shape honesty: surfaces render the new numbers additively; nothing existing is dropped or reordered"
+        dependencies: []
+        invariant_note: >-
+          The publish-hard-gate-on-staleness-or-conflict kill is re-affirmed
+          IN-ITEM: introduces-M is display/advisory forever; a future gate
+          would need its own owner decision, not this field. ED-4/ED4R-2 —
+          additive fields on existing read surfaces.
+        implementation_notes: >-
+          Seams (verified at 827c607): lint_links.py:boundary_lint (heals_by
+          at :160-170; the file is 307 lines — room; add introduces_by in
+          the same walk) + the --boundary CLI render;
+          publish.py:publish_preflight receipt (:156-164) +
+          render_preflight (:219-236); recall_diff --candidates row render
+          (the PUB-2 surface). Premise correction carried: heals_by lives
+          at :160-170 (one grounding citation said :110-129 — that region
+          is the docstring/empty-shape).
+
+      - id: BND-2
+        title: "Trust drift joins the machine census: per-row withheld-file counts (the fleet sees withholding)"
+        priority: P1
+        effort: S
+        status: planned           # tier ratified 2026-07-19; not started
+        source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Live this cycle: trust.untrusted_changes('/Users/fredbook/projects/alloy', ...) = {baseline: True, added: [httpx-timeout-none-disables, macos-tahoe-legacy-icns-plate, project-unification-p7-state]} — 3 stems quarantined-from-recall since Jul 14-15 (4-5 days); project-unification-p7-state.md carries full hippo write_memory frontmatter (originSessionId, node_type, cited_paths) proving hippo AUTHORED it; the same session's machine_census renders alloy 'live [review, fingerprinted]' with ZERO drift mention (trust_census rows carry only {root, live, volatile, origin, fingerprinted} — machine_census.py:139-155); doctor's machine-state line consumes only the dead count (doctor_checks_env.py:645-666)"}
+        problem: >-
+          The re-consent flow is legible only in-project: a sibling corpus
+          silently withholding recall content appears on NO surface
+          reachable from where the owner works. "The fleet sees itself"
+          (v1.27.0) while alloy withheld 3 hippo-authored memories for 4-5
+          days — the census row said "live, fingerprinted" and nothing
+          else.
+        proposal: >-
+          Extend machine_census.trust_census to compute per-row drift for
+          live fingerprinted rows via the ONE shipped detector
+          (trust.untrusted_changes — inv5, no second differ), render
+          "WITHHOLDING n changed / m added — re-consent in that project
+          (trust_corpus / doctor)" on the census row, and let doctor's
+          machine-state one-liner gain a "k corpora withholding" clause.
+          Report-only: the row NAMES the existing per-project re-consent
+          route exactly as the Q2(r4) line names untrust; no write path, no
+          auto-re-consent (an unattended re-baseline is the gate consenting
+          to itself — trust.py's own named anti-pattern). On-demand cost
+          only (census/doctor are cold paths; hashing the ~3 live corpora
+          ~190 files).
+        acceptance_criteria:
+          - "drift computed ONLY via trust.untrusted_changes (negative-capability: no second fingerprint differ anywhere); rows without a fingerprint or not live are skipped (their existing states already say why)"
+          - "the census row and doctor's machine-state line carry the withholding counts; zero-drift fleets render exactly as today (byte-identity pin)"
+          - "report-only pinned: no re-consent, no untrust, no write of any kind from the census path; the remedy text names the in-project route"
+          - "the alloy trio (or a fixture twin) is the test: an authored-but-unfolded stem renders as withheld with the re-consent route named"
+        dependencies: []
+        invariant_note: >-
+          Q2(r4) posture untouched — this is more REPORT, not remediation;
+          the consent ledger stays append/consent-only. inv5 — one
+          detector. ED4R-3 — census visibility never becomes coordination.
+        implementation_notes: >-
+          Seams (verified at 827c607): machine_census.py:trust_census
+          (:124-155 — add the drift field) + _render_trust (:343);
+          trust.py:untrusted_changes (:400-419 — reused verbatim);
+          doctor_checks_env.py:check_machine_state (:630-671 — the
+          one-liner's home; file has room). Cost note: untrusted_changes
+          hashes a corpus — keep it lazy (only live+fingerprinted rows,
+          only on census/doctor invocation), never in any hook.
+
+      - id: BND-3
+        title: "Write-time fold-failure disclosure: authorship-is-consent stops failing silently"
+        priority: P1
+        effort: M
+        status: planned           # tier ratified 2026-07-19; not started
+        source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "trust.py:476-480 narrates the exact silence in shipped prose ('the fold extended a consent record nobody reads, so an authored write stayed quarantined forever and record_authored_write returned False with nothing to say' — COR-10's post-mortem); every call site discards the bool inside try/except-pass, verified this cycle: new_memory.py:1266-1272, packs.py:757-763 + 973-977, provenance.py:1037-1039, links.py:765-767/846-848, dream_apply.py:288-290, dream_generate.py:642-644; the live consequence: the alloy trio (BND-2's exhibit) was authored by the lagged installed plugin running pre-COR-10 fold code and quarantined with zero notice — the write moment said nothing"}
+        problem: >-
+          When record_authored_write returns False on a trusted+fingerprinted
+          corpus, the just-written memory WILL be withheld from recall at
+          the next session — yet every write primitive discards the bool, so
+          the one moment a human is present and could act (the write) says
+          nothing. The class re-instantiated in the wild this week via the
+          skew bite (OPS-1's class), and the shipped docstring already
+          narrates the failure it now gets a surface for.
+        proposal: >-
+          The detection half only: write primitives (new_memory's
+          write_memory, pack_install_item/pack_update_item, reverify_file,
+          add_typed_relation, dream apply/generate writes) check the fold
+          result and — ONLY when the corpus is trusted WITH a fingerprint
+          and the fold still returned False (the genuinely anomalous case;
+          legacy fingerprint-less no-ops stay silent BY DESIGN) — append one
+          legible line to their existing output: "this write did not join
+          the consent baseline — it will be withheld from recall until
+          re-consent (trust_corpus)". Requires a small disambiguation
+          helper, since the fold's False is currently overloaded
+          (legacy-no-op vs real failure); the helper reads existing state
+          (consented_hashes presence), changes nothing. inv3 at the write
+          moment; zero new artifact; zero behavior change to the fold
+          itself; never hooks/index builds (pinned never-consent paths stay
+          silent and unconsenting).
+        acceptance_criteria:
+          - "the disambiguation is mechanical: trusted + fingerprint present + fold False => anomalous; anything else stays silent (legacy corpora byte-identical — pinned)"
+          - "each named write verb appends at most ONE line to its existing agent-facing output; wording names the consequence (withheld until re-consent) and the route (trust_corpus)"
+          - "the fold's own behavior is untouched (extend-never-create, never-raise); negative-capability pin: no call site retries, re-consents, or marks trust in response to the line"
+          - "hooks and index builds remain out of scope by test — the never-consent pins keep passing"
+          - "the alloy shape is the fixture: an authored write against a trusted+fingerprinted corpus whose fold is forced False surfaces the line; the same write on a fingerprint-less corpus stays silent"
+        dependencies: []
+        invariant_note: >-
+          ED-1 — a printed line on agent-invoked verbs; explicitly NOT
+          auto-retry or auto-mark_trusted (the unattended re-baseline
+          anti-pattern trust.py names). inv3 — this IS the legibility.
+          BND-2 catches the same class later at census time; both state the
+          pairing so neither assumes the other shipped.
+        implementation_notes: >-
+          Seams (verified at 827c607): trust.py:record_authored_write
+          (:335-374 — return contract; the :476-480 narration is the
+          item's own spec) + consented_hashes (:400-419 region — the
+          disambiguation read); call sites to touch:
+          new_memory.py:1266-1272, packs.py:757-763 + :973-977,
+          provenance.py:1037-1039 (reverify_file), links.py:765-767 +
+          :846-848 (add_typed_relation), dream_apply.py:288-290,
+          dream_generate.py:642-644 — each verb's existing echo/describe
+          output is the consumer (ED4R-2). Keep the helper in trust.py
+          (one home, inv5); 584 lines — room.
+
+# ===========================================================================
+# RELEASE TRAIN — tier sequencing. Authored `proposed` (which to build, in
+# what order, IF ANY, was the owner's scheduling call — LAW ZERO / ED5R-1);
+# RATIFIED 2026-07-19: all five tiers, recommended order T22->T23->T24->T25
+# ->T26 (each tier's `ratified:` is the dated entry; statuses now planned).
+# target_version stays TBD, assigned at each release per RELEASING.md. NO
+# cross-tier build dependencies exist — no round-5 item needs a
+# session_start.py line — so T22 (REL-1) is first as runway relief, not a
+# gate. In-tier orders and the two split-debt assignments (MEA-1:
+# eval_recall; MEA-3: telemetry) are stated per tier.
+# ===========================================================================
+release_train:
+
+  - tier: T22
+    target_version: TBD
+    theme: "The runway & the ship gate"
+    status: planned          # ratified 2026-07-19; build not started
+    ratified: >-
+      2026-07-19 — owner-ratified in the round-5 formal-question session (the
+      dated LAW ZERO entry): all five round-5 tiers ratified together in the
+      recommended order, T22 FIRST (runway relief before any feature tier).
+      Statuses flipped to planned; builds proceed per session_protocol.
+    gate: >-
+      LAW ZERO ratification only — no cross-file deps; no owner decision
+      gates the tier's start. Q2(r5) gates ONLY the ruleset-apply leg of
+      REL-2 (the doc mechanic ships regardless). In-round order: REL-1 ->
+      REL-2 -> REL-3 (the lint pins the rewritten text) -> REL-4.
+    done_means: >-
+      Both AT-cap modules are split (or deliberately re-pinned with a PR
+      that says why) BEFORE any feature needs their lines, with VOL-1's
+      check repatriated to its canonical home; RELEASING.md carries the
+      merge-gate mechanic (check-exit-gated merge, tag-after-green-main)
+      and its facts are lint-pinned against ci.yml; the kill-switch
+      documentation direction is closed. The next red-board merge is
+      structurally harder, and the next at-cap drive-by is impossible
+      without tripping a lint.
+    items: [REL-1, REL-2, REL-3, REL-4]
+    audit_note: >-
+      REL-1 is pure code motion — behavior byte-identity is the whole
+      review; re-verify the producer-block line span and the allowlist
+      keys on the live tree before moving anything (the tree WILL have
+      drifted). The re-pin alternative is a valid owner resolution of
+      REL-1 — record whichever was chosen and why in the capstone. REL-2:
+      the doc edit never waits on Q2(r5); the settings act is the owner's
+      alone (hippo performs no GitHub write). REL-3 parses ci.yml job
+      names at test time — never a second hardcoded list — and must
+      distinguish release-required checks from PR-only boards
+      (memory-review is pull_request-only). REL-4 matches the DISABLE_
+      prefix exactly; posture vars stay out.
+    capstone: >-
+      Write hippo-enh-t22-<slug>: which of split-vs-re-pin the owner chose
+      and why, the new module map + re-pinned ledger, the Q2(r5) verdict
+      if volunteered (else PENDING), the first gh pr checks-gated merge
+      transcript, and the lint's first catch (or green birth).
+
+  - tier: T23
+    target_version: TBD
+    theme: "Honest instruments"
+    status: planned          # ratified 2026-07-19; build not started
+    ratified: >-
+      2026-07-19 — owner-ratified in the round-5 formal-question session
+      (dated LAW ZERO entry): all five tiers ratified, order T22 -> T23 ->
+      T24 -> T25 -> T26 (this tier second). Q1(r5) resolved the same day —
+      see MEA-5's q1_verdict; the in-tier MEA-5-last sequencing binds.
+    gate: >-
+      LAW ZERO ratification; Q1(r5) additionally gates MEA-5 (the WHOLE
+      item — harness and run). In-round order: MEA-1 -> MEA-2 (their joint
+      receipt is a resolvable project-local hard set with its sensitivity
+      reported), then MEA-3/MEA-4/MEA-6 in any order, then MEA-5 LAST
+      (gated + sequenced — an Arm B run before MEA-1/2 land is evidence
+      theater by this file's own finding). Split-debt assignments: MEA-1
+      carries eval_recall.py's (4-line headroom); MEA-3 carries
+      telemetry.py's (7-line headroom) — whichever of MEA-3/MEA-4 lands
+      second inherits the relieved file.
+    done_means: >-
+      Every lived-in eval and A/B report states its instrument's
+      resolvable_n (ED5R-2 live); the flagship corpus HAS a resolvable
+      hard set drafted from its own outcome evidence and admitted
+      per-item; co-recall proposals carry lift and stop proposing pure
+      confounds (legibly); evidence rows carry their producing version;
+      the worktree half of the touch stream joins the evidence base; and
+      — if Q1(r5) commissions it — the RET-14 outcome prior finally gets
+      its honest A/B, measured through an instrument whose sensitivity is
+      known.
+    items: [MEA-1, MEA-2, MEA-3, MEA-4, MEA-5, MEA-6]
+    audit_note: >-
+      The ED-2 razor governs the whole tier: qualify evidence, never
+      recommend flips; MEA-1's doctor line and MEA-5's report both carry
+      that language explicitly. The MSR-6 AST pin (no per-memory
+      injected-but-never-touched table; _injection_join stays the single
+      join) binds MEA-2/MEA-4/MEA-6 alike. MEA-3's deparasite decision is
+      made at build with the permissive-protection default and recorded
+      in-item. MEA-6's one behavior delta (JIT-1 firing in worktrees) is
+      bounded and kill-switched — state it in the CHANGELOG entry.
+      Re-probe the cited_by count at build time; it grows daily.
+    capstone: >-
+      Write hippo-enh-t23-<slug>: the resolvable_n before/after MEA-2's
+      first drain, the lift distribution on the first annotated proposal
+      run, the Q1(r5) verdict and (if commissioned) Arm B's dated result
+      recorded outcome-agnostic, the worktree mappable count before/after,
+      and both split-debt discharges.
+
+  - tier: T24
+    target_version: TBD
+    theme: "The write side tells the truth"
+    status: planned          # ratified 2026-07-19; build not started
+    ratified: >-
+      2026-07-19 — owner-ratified in the round-5 formal-question session
+      (dated LAW ZERO entry): all five tiers ratified, order T22 -> T23 ->
+      T24 -> T25 -> T26 (this tier third).
+    gate: >-
+      LAW ZERO ratification only — no cross-file deps beyond shipped
+      CAP/GRW surfaces (re-confirm live). In-round order: WRT-3 first (P0
+      — the broken promise), then WRT-1, then WRT-2.
+    done_means: >-
+      The capture lane's three dishonesty seams are closed: the triage
+      model can abstain and its identifiers are mechanically doubted; a
+      human-invoked --from-hook run names its outcome; recorded decisions
+      either ride their seed or surface LABELED at the drain — and the
+      tool's reply never promises what the plumbing cannot deliver.
+    items: [WRT-3, WRT-1, WRT-2]
+    audit_note: >-
+      Hook-path byte-identity is the tier's binding constraint — WRT-1
+      rides the default-OFF CAP-LLM lane, WRT-2's line is stderr the hooks
+      discard, WRT-3's fallback is an additive seed key; pin each. The
+      judged-lanes kill binds WRT-1's flag to zero-LLM extraction. The
+      strict decision lane is extended-never-relaxed (window matches are a
+      SEPARATE labeled class). The live fabrication exhibit
+      (capture-428d7452) may drain before build — capture its content into
+      the fixture first.
+    capstone: >-
+      Write hippo-enh-t24-<slug>: the first abstained triage in the wild
+      (or its absence), the groundedness flag's first catch, the reply-text
+      before/after, and the first window-matched decision surfaced at a
+      drain.
+
+  - tier: T25
+    target_version: TBD
+    theme: "Running-state legibility"
+    status: planned          # ratified 2026-07-19; build not started
+    ratified: >-
+      2026-07-19 — owner-ratified in the round-5 formal-question session
+      (dated LAW ZERO entry): all five tiers ratified, order T22 -> T23 ->
+      T24 -> T25 -> T26 (this tier fourth). Q2(r5) was resolved and APPLIED
+      the same day (REL-2 q2_verdict) — OPS-1's doctor line will observe the
+      protected-main era from its first fire.
+    gate: >-
+      LAW ZERO ratification only. In-round order: OPS-1 -> OPS-2. OPS-1
+      deliberately adds ZERO session_start.py lines — if the build finds
+      it cannot, stop and re-read ED5R-3 (the answer is REL-1 or a re-pin,
+      never a drive-by).
+    done_means: >-
+      The twice-bitten live-hook-lag class is named where it bites: doctor
+      states running-vs-tree skew on the dogfood shape, the fleet line
+      shows launch-pin skew across sessions, and a dying 07:30 schedule
+      surfaces as 'quiet' from the oracle that already existed — all
+      read-only, all cold-path, remediation human.
+    items: [OPS-1, OPS-2]
+    audit_note: >-
+      ED4R-3 binds: visibility, never coordination — no reload, no
+      restart, no update is ever executed by hippo. OPS-1's doctor line
+      fires ONLY on the this-repo-is-the-source shape (empty-norm
+      everywhere else — most users never see it); byte-identity for
+      single-version fleets. OPS-2 stays file-oracle (ED-3); the launchctl
+      widening remains behind its own probe requirement. MEA-4 is OPS-1's
+      forensic complement — if T23 shipped first, cite its stamps in the
+      doctor line's help text; if not, do not wait for it.
+    capstone: >-
+      Write hippo-enh-t25-<slug>: the skew line's first real fire (the
+      next release makes one ~certain), the fleet line with mixed
+      versions, and the quiet-status behavior on the live launchd
+      artifact.
+
+  - tier: T26
+    target_version: TBD
+    theme: "The boundary & consent edge"
+    status: planned          # ratified 2026-07-19; build not started
+    ratified: >-
+      2026-07-19 — owner-ratified in the round-5 formal-question session
+      (dated LAW ZERO entry): all five tiers ratified, order T22 -> T23 ->
+      T24 -> T25 -> T26 (this tier fifth). Note for the build session: the
+      carried Q2(r4) was resolved the same day as REMEDIATION RATIFIED
+      (dead-rows-only, build unscheduled behind an owner-set trigger) — BND-2
+      stays report-only regardless, per its own AC.
+    gate: >-
+      LAW ZERO ratification only — Q2(r4)/Q3(r4) stay PENDING and neither
+      gates these detection halves (BND-2 is more report, not remediation;
+      BND-1 is display on shipped print-only surfaces). In-round order:
+      BND-2 -> BND-3 (the census exhibit informs the write-moment wording)
+      -> BND-1.
+    done_means: >-
+      The publish surfaces state net boundary effect (heals/introduces/
+      net) with the gate-vocabulary kill re-affirmed; a withholding corpus
+      is visible from the machine census and doctor with the re-consent
+      route named; and an authored write that fails its consent fold says
+      so at the moment a human is present to act.
+    items: [BND-2, BND-3, BND-1]
+    audit_note: >-
+      inv5 binds BND-2 to the ONE shipped detector (untrusted_changes) —
+      a second differ is a defect. BND-3's disambiguation must keep legacy
+      fingerprint-less corpora silent BY DESIGN (the fold's False is
+      overloaded; the helper reads consented_hashes presence). BND-1's
+      introduces-M is receipt vocabulary FOREVER — the
+      publish-hard-gate kill is re-affirmed in-item; do not let a later
+      "just warn-and-refuse" slip in. The alloy trio may re-consent
+      before build — capture its shape into fixtures first.
+    capstone: >-
+      Write hippo-enh-t26-<slug>: the census's first WITHHOLDING row (or
+      its absence post-alloy-re-consent), the first write-moment
+      disclosure line in the wild, and the boundary net numbers on the
+      next real publish.
+
+# ===========================================================================
+# DECISIONS — governing choices this round rests on (owner-ratifiable).
+# ED-1..ED-5 are carried from rounds 1-2 (decision lines verbatim; each
+# detail keeps the prior core with a dated round-5 note where the tree
+# moved). ED4R-1/2/3 are carried from round 4 (ED4R-2/3 as permanent law).
+# ED5R-* are new this round. The round-5 owner decisions Q1/Q2 (r5) and the
+# carried round-4 Q2/Q3 are PENDING — recorded under ED5R-1, resolved only
+# by dated owner entries, never by this file.
+# ===========================================================================
+decisions:
+  - id: ED-1
+    carried_from: round-1 (via rounds 2-4, verbatim)
+    decision: detection-first
+    detail: >-
+      Ship the LEGIBLE detection / human-in-the-loop half; gate any
+      autonomous ranking or corpus/rules write on proven signal density.
+      Every autonomous half in this file is severed and deferred behind a
+      DATED OWNER DECISION + measured evidence, never a metric-proxied
+      gate. Still the governing law — round 5 applies it as: sensitivity
+      before measurement-trust (MEA-1 before any pin or Arm B run),
+      annotation before ordering motion (MEA-3), disclosure before any
+      remediation (BND-3, OPS-1 — update/restart/re-consent stay human),
+      and the merge-gate as an owner-applied GitHub control, never an
+      auto-merge (REL-2).
+  - id: ED-2
+    carried_from: round-1 (via rounds 2-4, verbatim)
+    decision: the salience keystone (SIG-5) stays owner-decided-OFF
+    detail: >-
+      SIG-5 decided salience default-OFF (owner-ratified 2026-07-09). No
+      round-5 item ships an always-on read-side ranking prior. Round-5
+      note: the ED-2 revisit file has its first entry (Arm A, 2026-07-17,
+      zero deltas) — and this round's headline finding RETROACTIVELY
+      QUALIFIES that evidence (measured through a 1/32-resolvable
+      instrument; MEA-1 stamps the qualification into the doctor line and
+      all future reports). The qualification NEVER becomes a flip
+      recommendation; any future revisit run should follow MEA-1/MEA-2,
+      and the flip stays a dated owner decision on affirmative evidence
+      regardless of deltas.
+  - id: ED-3
+    carried_from: round-1 (via rounds 2-4, verbatim)
+    decision: verify a web-claimed harness/format feature with an in-harness spike before building on it
+    detail: >-
+      Carried verbatim. Round-5 applications: OPS-2 sticks to FILE ORACLES
+      (the launchd/cron artifact parse verified live in T19; widening to
+      launchctl runtime state would need its own verified probe and is
+      explicitly not proposed); OPS-1 reads only manifests hippo already
+      owns (CLAUDE_PLUGIN_ROOT + the repo tree) — no harness-API
+      assumptions; MEA-5's outcome-signal precondition is itself an ED-3
+      posture (a signal-less ON arm reports as self-check, not finding).
+      Record each dated finding on the item.
+  - id: ED-4
+    carried_from: round-1 (via rounds 2-4, verbatim)
+    decision: additive fields are absence-emits-nothing; schema bumps are clean breaks, one migration each
+    detail: >-
+      Carried verbatim as law. Round-5 grounding: the baseline tree is
+      corpus_format 5 / index SCHEMA_VERSION 7 / citation derivation 4 —
+      NO round-5 item is expected to bump any of them. Every artifact this
+      round is a report field (resolvable_n, lift, introduces_by), an
+      additive gitignored-ledger field (`v`, tree_path, plugin_version,
+      window_decisions, ungrounded_tokens), a stderr/output line, a census
+      status word ('quiet', 'WITHHOLDING'), a doc edit, or a test. Ledger
+      and queue shapes are queue-own, read via .get(), and explicitly NOT
+      schema bumps.
+  - id: ED-5
+    carried_from: round-1 (via rounds 2-4, verbatim)
+    decision: this round is downstream of the shipped trains
+    detail: >-
+      Round 5 is the FIFTH enhancement train, downstream of rounds 1-4 ALL
+      shipped AND released through v1.27.0 (round 4 closed 2026-07-19).
+      Every cross-file dependency named in this file was verified SHIPPED
+      at 827c607: the EVD-2 lane + format_lane_health, JIT-2, FLT-1/2/3,
+      HYG-1/3, PUB-1/2/3, SEC-6, GRW-2, GRW-4, CAP-2/CAP-6, SIG-6, TMB-3,
+      TMB-4, MSR-5, MSR-6, RET-14, DOC-16, EXT-3. No tier waits on an
+      unlanded cross-file dep; tiers wait only on ratification and the
+      ED5R-1 gates. Re-confirm each dep on the live tree at build time
+      anyway (the premise-correction law).
+  - id: ED4R-1
+    carried_from: round-4
+    question: the four round-4 owner decisions — where do they stand entering round 5?
+    decision: Q1/Q4 (r4) RESOLVED by dated in-session entries; Q2/Q3 (r4) remain PENDING and carry forward under ED5R-1
+    detail: >-
+      Round-4 record, carried for continuity: Q1 (presence artifact)
+      resolved YES 2026-07-18 (FLT-1 q1_verdict); Q4 (Arm A commissioning)
+      resolved YES 2026-07-17 (EVD-4 q4_verdict + arm_a_result). Q2
+      (trust-registry remediation) and Q3 (publish --stage) remain PENDING
+      with their report-only / print-only postures HOLDING — round-5
+      evidence for both postures is recorded under ED5R-1. Resolution
+      remains a dated owner entry on the round-4 file's items; this file
+      never resolves them.
+  - id: ED4R-2
+    carried_from: round-4 (permanent law)
+    question: what keeps any round from minting the next generation of dark reservoirs?
+    decision: no new standing artifact without a NAMED READER (the anti-dark-reservoir law)
+    detail: >-
+      Carried verbatim as permanent law. Round-5 compliance, item by item:
+      MEA-1's fields -> the eval report / A/B stamp / doctor line; MEA-2's
+      drafts -> the pending queue's existing drain + the per-item confirm
+      gate; MEA-3's lift -> the proposal render (+ deparasite's named
+      reads); MEA-4's stamps -> lane health + doctor; MEA-6's tree_path ->
+      the shipped joins; WRT outputs -> the drain listing and the
+      operator's stderr; OPS lines -> doctor/census/fleet line; BND fields
+      -> boundary/preflight/candidates/census surfaces. REL adds no
+      standing artifact (tests + docs + code motion). An item that adds a
+      ledger, cache, or report nothing reads is out of spec BY LAW.
+  - id: ED4R-3
+    carried_from: round-4 (permanent law)
+    question: how far may fleet/machine visibility go?
+    decision: fleet visibility never becomes coordination — no lock, no daemon, no mutual exclusion
+    detail: >-
+      Carried verbatim as permanent law. Round-5 applications: OPS-1's
+      skew line and version stamps are visibility only (no reload/update
+      execution); OPS-2's 'quiet' status names a fact and a log path;
+      BND-2's census row names the in-project route and never executes
+      re-consent. Any coordination-shaped proposal starts from a new
+      dated owner decision, not from these artifacts.
+  - id: ED5R-1
+    question: Round-5 owner decisions — what gates what, and where do the carried round-4 questions stand?
+    decision: Q1/Q2 (r5) are PENDING and gate the named halves; round-4 Q2/Q3 carry PENDING with their postures re-evidenced; this file resolves nothing
+    detail: >-
+      Q1(r5) — commission the EVD-4 Arm B evidence run (gates ALL of
+      MEA-5: the harness delta and the run). The round-4 severance
+      demanded nonzero touch/outcome rows AND a dated decision; the data
+      half is verified met (120-132 cited_by rows, growing), so the
+      decision is the remaining gate. Recommendation preserved as
+      recommendation: YES, but only after MEA-1/MEA-2 land — commissioning
+      before them buys a report the round's own headline finding would
+      discredit. Q2(r5) — apply the QUA-12 branch-protection ruleset to
+      main (an owner GitHub-settings act; the text is codified verbatim at
+      ci.yml:29-40; enabling condition ripened: repo PUBLIC, main
+      unprotected, verified via gh 2026-07-19). Recommendation: YES —
+      after it, gh pr merge mechanically refuses on red. CARRIED Q2(r4) —
+      trust-registry remediation: still PENDING; round-5 census evidence
+      says the report-only holding costs nothing (3/3 rows
+      live+fingerprinted, ZERO dead — nothing for a remediation verb to
+      act on). Recommendation unchanged: report-only. CARRIED Q3(r4) —
+      publish --stage: still PENDING; round-5 usage evidence says
+      print-only is not blocking cadence (two real publishes landed
+      2026-07-18 without it, riding larger commits; no friction incident
+      on record). Recommendation unchanged: print-only. Each resolution
+      is a dated owner entry recorded on the item and in the capstone; a
+      metric never proxies any of them (LIF-7). STATUS 2026-07-19
+      (same-day formal-question session): ALL FOUR RESOLVED by dated owner
+      entries. Q1(r5) YES — commission after MEA-1/MEA-2 (recorded on
+      MEA-5's q1_verdict; LAW ZERO still gates the build on T23
+      ratification). Q2(r5) YES — apply as codified; the ruleset was
+      APPLIED to main the same day with one disclosed solo-compatibility
+      deviation (recorded on REL-2's q2_verdict). Carried Q2(r4) RESOLVED
+      — Fred RATIFIED the per-item, dead-rows-only trust-remediation verb,
+      OVERRIDING the report-only recommendation (dated entry appended to
+      ROADMAP.enhancements4.yaml ED4R-1; the build is UNSCHEDULED — it
+      needs its own chip; until it ships, the census keeps presenting
+      trust rows report-only). Carried Q3(r4) RESOLVED — print-only
+      RATIFIED as the standing posture (dated entry in ED4R-1; the
+      --stage deferral row stands unless a future dated decision reopens
+      it).
+  - id: ED5R-2
+    question: what keeps a measurement from being quietly meaningless?
+    decision: evidence carries its instrument's sensitivity (the instrument-honesty law — round 5's organizing spine)
+    detail: >-
+      Round 5 exists because the flagship measurement was near-null and
+      rendered as normal: the recorded Arm A evidence was measured through
+      a hard set with 1 of 32 rows resolvable against the lived-in corpus
+      — a ~3%-sensitivity instrument — and neither the report, the
+      condition stamp, nor doctor said so. LAW: an eval, A/B, sweep, or
+      baseline pin over a fixture corpus MUST report how much of the
+      fixture can resolve against the measured corpus (resolvable_n per
+      category), the stamp rides the evidence file, and a low-sensitivity
+      run is QUALIFIED wherever the evidence is surfaced (doctor's
+      salience-evidence line first). Qualification language only — the
+      law never turns sensitivity into an auto-gate or a flip
+      recommendation (ED-2 unchanged). MEA-1 is the reference
+      implementation; MEA-5's report complies at birth; any future MSR-1
+      baseline pin quotes its sensitivity in the pin.
+  - id: ED5R-3
+    question: what stops the module-size ratchet from producing drive-by architecture?
+    decision: an at-cap module is split or deliberately re-pinned as its OWN reviewed PR BEFORE a feature needs the lines — never mid-feature
+    detail: >-
+      The cap pressure has already distorted architecture once (VOL-1's
+      check landed in the doctor FACADE because doctor_checks_corpus sat
+      at 899/900) and session_start.py reached exactly 1705/1705 with an
+      8-for-8 release-touch rate. LAW: when an item's seams land in a
+      file within one small change of its cap, the split (CONTRIBUTING.md
+      facade protocol) or a justified re-pin happens FIRST, as its own
+      reviewed commit/PR, with registry-key relocations per
+      CONTRIBUTING.md:106-111 — a feature PR never contains an emergency
+      split, and a check/producer never lands in the wrong module because
+      the right one was full. Round-5 discharges: REL-1 (the two AT-cap
+      files, pre-emptive); MEA-1 (eval_recall, 4 lines); MEA-3
+      (telemetry, 7 lines). The re-pin alternative remains sanctioned
+      exactly as the ratchet header words it: a deliberate, reviewed
+      decision with a PR that says why.
+
+# ===========================================================================
+# NOT PURSUING — the disciplined cuts and standing kills, recorded so their
+# absence reads as a decision (full reasoning in EXPLORATIONS5.md §3 + §6).
+# ===========================================================================
+not_pursuing:
+  - {id: per-item-skeptic-panels-for-this-vetting, reason: "KILLED FOR COST by owner directive — the round-2/4-style per-item adversarial panels (a 72-agent plan) were not run; the vetting was an inline 3-lens pass with spot re-verification, and this file labels itself accordingly (meta.source). Process honesty, not a roadmap item."}
+  - {id: sessionstart-producer-for-skew-line, reason: "CUT from OPS-1 — session_start.py sits at 1705/1705 and DOC-7's own precedent ('rot is not per-session news') says on-demand doctor is the surface; the presence stamp covers the fleet view with zero session_start lines."}
+  - {id: pretooluse-bash-coverage-for-flt3, reason: "NOT PROPOSED — the cwd-trap class is real (7 documented strikes) but every strike predates the fleet lane going live on this machine (plugin updated 2026-07-19T15:25Z); a new hook surface has its own cost and needs its own dated decision. Revisit only on a post-install bite."}
+  - {id: grw5-long-session-watermark-extension, reason: "NOT RIPENED — 10.5h sessions are now normal (today's seed spans one) but no measured pain is attributable to the T5-era skip ('producers only run at SessionStart'). Leave severed."}
+  - {id: vol1-tier2-co-drift-arming, reason: "NOT RIPENED — the nag-eligible worklist is 0 right now and tier-1 (armed-iff-any-non-volatile) has produced no measured miss; staleness_policy.py's own 'possible follow-up' note stands unexercised."}
+  - {id: msr1-baseline-pin-today, reason: "SEQUENCED, not killed — a pin taken today would freeze the pack-fixture ~3%-sensitivity instrument as this corpus's baseline (the round's headline anti-pattern). Pin only after MEA-1/MEA-2, quoting resolvable_n in the pin (ED5R-2)."}
+  - {id: worktree-spanning-presence, reason: "CUT AGAIN (FLT v1 scope) — no cross-worktree collision has ever been recorded in any ledger or capstone; per-working-tree presence suffices; a git-common-dir home remains out of scope without a documented collision."}
+  - {id: blanket-reverse-env-lint, reason: "CUT from REL-4 — a reverse lint over all ~60 HIPPO_* names would fight STABILITY.md's deliberate undocumented-knobs posture; only the kill-switch class is an inv3 matter, and REL-4 scopes to exactly the DISABLE_ prefix."}
+  - {id: auto-reconsent-or-fold-retry, reason: "REFUSED — an unattended re-baseline is the gate consenting to itself, trust.py's own named anti-pattern; BND-2/BND-3 ship detection halves only, and the re-consent act stays per-project and human (Q2(r4) posture)."}
+  - {id: corecall-cap-or-ordering-motion, reason: "DEFERRED behind measurement — MEA-3 annotates and labels first; any cap raise, lift-sort, or frequency-ceiling exclusion needs the measured lift distribution from live proposals, and suppressed pairs must stay countable (inv3) regardless."}
+  - {id: publish-t18-capstone-as-item, reason: "CUT to a note in REL-2 — the red-board lesson's durable home is RELEASING.md itself; whether the capstone also publishes into the committed subset is an ordinary per-item owner publish call, not roadmap work."}
+  - {id: bulk-sweep-temp-rooted-live-registry-rows, reason: "REFUSED — the census labels the 10 temp-rooted LIVE rows and ships per-item --drop; a bulk sweep of LIVE rows is the inv4 line the census explicitly refuses to cross. Run-the-remedy chore, not an item."}
+  - {id: evd3-decline-aware-interviewing, reason: "STILL NOT RIPENED (round-4 deferral holds) — re-probed this cycle: interview-state.json has never existed; the ask half renders 3 grounded questions today, the respond half has never once been exercised. The proving condition is the ledger, not a date."}
+  - {id: locking-or-coordination-daemon, reason: "STANDING KILL (ED4R-3, permanent) — no lock, no daemon, no mutual exclusion; round-5's OPS/BND visibility items are detection + named routes only."}
+  - {id: auto-drain-reconsolidation-queue, reason: "STANDING KILL (LIF-1) — the verdict stays human; nothing in round 5 touches the queue's autonomy."}
+  - {id: llm-judged-lanes, reason: "STANDING KILL — deterministic beats judge through four rounds; WRT-1's groundedness flag is deliberately zero-LLM extraction, and the abstain lane REDUCES LLM authority rather than adding a judge."}
+  - {id: per-memory-injected-but-never-touched-table, reason: "STANDING KILL (MSR-6 AST pin) — MEA-2/MEA-4/MEA-6 all ride _injection_join as the single join and aggregate lane-level only."}
+  - {id: publish-content-transform, reason: "STANDING KILL — a transforming publish IS pack_extract; publish stays byte-identical-in-place + git tracking only. BND-1 adds display fields, never a transform."}
+  - {id: publish-hard-gate-on-staleness-or-conflict, reason: "STANDING KILL — advisory demotion stands; BND-1's introduces-M is receipt vocabulary FOREVER, re-affirmed in-item with a negative-capability pin."}
+  - {id: touch-grain-graduation-arm, reason: "STAYS SEVERED — MEA-5 un-severs Arm B's MEASUREMENT only (the harness + commissioned run); any touch-grain-informed graduation or ranking change keeps its own outcome-signal precondition + dated decision; DRM-6 graduation stays session-grain."}
+  - {id: publish-stage-flag-git-index-write, reason: "CARRIED DEFERRED behind Q3(r4) — print-only holding, now with usage evidence (two real publishes rode larger commits without friction); the flip's proving condition has not materialized."}
+
+# ===========================================================================
+# KPIs — which measures each tier moves (existing + new round-5 EKPIs).
+# ===========================================================================
+kpis:
+  - {ref: KPI-2, name: injection_precision, moved_by: [MEA-6], note: "the worktree half of the touch stream joins the KPI's denominator honestly — 883 currently-dark rows' worth of joins at authoring, growing"}
+  - {ref: KPI-5, name: degradation_legibility, moved_by: [WRT-2, WRT-3, OPS-1, OPS-2, BND-3], note: "silent no-ops, dead-letter decisions, version skew, dying schedules, and failed consent folds all become named, visible conditions"}
+  - {ref: KPI-7, name: graph_liveness, moved_by: [MEA-3], note: "the mover stops manufacturing confound proposals — lift-annotated, chance-level pairs legibly collapsed instead of burning the reviewer"}
+  - {id: EKPI5R-1, name: instrument_sensitivity_legibility, definition: "every lived-in eval/A/B/sweep/pin reports resolvable_n per category and low-sensitivity evidence is qualified wherever surfaced (ED5R-2)", target: "zero unqualified near-null reports after MEA-1; the project-local hard set's resolvable share rises from 1/32-equivalent to a usable instrument after MEA-2's first drains", moved_by: [MEA-1, MEA-2, MEA-5]}
+  - {id: EKPI5R-2, name: running_code_provenance, definition: "hook-lane evidence and surfaces can answer 'which plugin version did this' without hand forensics (tag-containment archaeology, mtime dating)", target: "the NEXT live-hook-lag bite is diagnosed from a doctor line + ledger stamps in one command; zero hand-forensics diagnoses after T25+MEA-4", moved_by: [OPS-1, MEA-4]}
+  - {id: EKPI5R-3, name: write_side_honesty, definition: "capture/decision/consent write paths state their real outcome at the moment of the act (no fabricated drafts unflagged, no silent no-ops, no false seed-riding promises, no silent fold failures)", target: "every WRT/BND-3 seam emits its one honest line; the drain reviewer's first read is never an unflagged fabrication", moved_by: [WRT-1, WRT-2, WRT-3, BND-3]}
+  - {id: EKPI5R-4, name: runway_headroom, definition: "no integration file sits AT its cap entering a feature tier; splits/re-pins happen as their own reviewed PRs (ED5R-3)", target: "session_start.py and doctor_checks_corpus.py relieved before feature tiers; eval_recall/telemetry discharged by MEA-1/MEA-3; zero mid-feature emergency splits in round 5", moved_by: [REL-1, MEA-1, MEA-3]}
+  - {id: EKPI5R-5, name: release_gate_mechanization, definition: "merges and tags are gated on check exit status by written protocol (and mechanically by GitHub once Q2(r5) is applied); the protocol doc cannot silently misstate the gate", target: "zero red-board merges after T22; RELEASING.md facts lint green and drift-proof", moved_by: [REL-2, REL-3, REL-4]}
