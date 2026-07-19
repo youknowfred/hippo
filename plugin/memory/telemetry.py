@@ -773,9 +773,11 @@ def log_decision(
     CAPTURE-FROM-EVIDENCE, enforced at the surface: this is only ever called by the agent,
     per decision, with text the user stated or confirmed — the tooling never synthesizes an
     entry (there is no automated caller anywhere). Truncated to ``_DECISION_MAX_CHARS``,
-    keyed exactly like ``log_episode`` (harness session id when given, else the file token)
-    so SessionEnd's seed matching works identically for both ledgers. Fire-and-forget:
-    True on append, False on any failure, never raises.
+    keyed like ``log_episode`` — the harness session id when given, else the shared file
+    token. Seed matching is STRICT on the harness id, so a file-token row can never ride
+    the session-proven lane; it surfaces only via capture's LABELED time-window fallback
+    (``window_decisions``, WRT-3) at the drain. Fire-and-forget: True on append, False on
+    any failure, never raises.
     """
     try:
         cleaned = (text or "").strip()

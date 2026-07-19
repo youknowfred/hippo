@@ -341,8 +341,9 @@ _TOOLS = [
             "capture isn't worth keeping). action='snooze' defers the SessionStart nudge a "
             "few sessions (seeds untouched; it re-nags). action='add_decision' (text=…) "
             "records ONE user-confirmed decision — quote or faithfully paraphrase what the "
-            "USER stated, never infer one — to ride this session's capture seed as its "
-            "durable WHY. Per-item approval throughout; never bulk-import a queue."
+            "USER stated, never infer one; recorded UNATTRIBUTED on this surface (no "
+            "harness session id), it surfaces LABELED window-matched at the drain. "
+            "Per-item approval throughout; never bulk-import a queue."
         ),
         "inputSchema": {
             "type": "object",

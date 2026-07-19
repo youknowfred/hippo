@@ -312,6 +312,16 @@ def _format_listing(seeds: List[Dict]) -> str:
         dec = s.get("decisions") or []
         if dec:
             out.append(f"      decisions: {'; '.join(str(d) for d in dec[:5])}")
+        wdec = s.get("window_decisions") or []
+        if wdec:
+            # WRT-3: visibly distinct from the session-proven line above — this class was
+            # recorded WITHOUT this session's id (MCP tool / bare --add-decision) and is
+            # matched only by its ts falling inside the session's episode span.
+            out.append(
+                "      decisions (WINDOW-MATCHED, not session-proven — recorded without "
+                f"this session's id; ts inside its episode span): "
+                f"{'; '.join(str(d) for d in wdec[:5])}"
+            )
         tri = s.get("llm_triage") or {}
         if tri:
             out.append(

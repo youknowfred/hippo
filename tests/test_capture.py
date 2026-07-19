@@ -402,6 +402,159 @@ def test_main_add_decision_records_for_next_capture(repo, capsys):
 
 
 # --------------------------------------------------------------------------- #
+# WRT-3: the dead-letter decision lanes — the strict lane stays strict; a
+# LABELED time-window fallback carries what strict matching can never reach.
+# --------------------------------------------------------------------------- #
+_FILE_TOKEN = "5e4e212ae80f432ca9eac9311d5fdc2e"  # the real dead 07-13 rows' sid shape
+
+
+def _write_rows(path, rows):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as fh:
+        for r in rows:
+            fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+
+def _episode_row(sid, ts):
+    return {"ts": ts, "session_id": sid, "query_preview": "q",
+            "recalled_names": ["m"], "head_commit": None}
+
+
+def test_window_lane_surfaces_file_token_rows_inside_the_span(repo):
+    """The WRT-3 fixture: file-token-keyed decisions (the two dead 07-13 rows' shape,
+    sid=5e4e212a…) whose ts falls inside a harness session's episode span surface under
+    the SEPARATE window_decisions key at that session's drain — while the strict
+    session-proven list stays exactly what strict matching yields (empty here)."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    td = default_telemetry_dir(md)
+    sid = "aaaa1111-2222-3333-4444-555566667777"  # dashed harness id ≠ the file token, ever
+    _write_rows(T._episode_ledger_path(td), [
+        _episode_row(sid, 1_783_961_000.0), _episode_row(sid, 1_783_962_000.0),
+    ])
+    _write_rows(T._decision_ledger_path(td), [
+        {"ts": 1_783_961_559.005, "session_id": _FILE_TOKEN,
+         "text": "INT-13 ratified shape: thin per-item MCP primitives"},
+        {"ts": 1_783_961_559.189, "session_id": _FILE_TOKEN,
+         "text": "v1.13.0 opened as PR #49; owner merges + tags"},
+    ])
+    seed = C.gather_session_context(sid, telemetry_dir=td, memory_dir=md)
+    assert seed is not None
+    assert seed["decisions"] == [], "strict lane must stay sid-equality only"
+    assert seed["window_decisions"] == [
+        "INT-13 ratified shape: thin per-item MCP primitives",
+        "v1.13.0 opened as PR #49; owner merges + tags",
+    ]
+
+
+def test_window_lane_absent_when_none_and_bounded_by_slack(repo):
+    """ED-4: no in-window foreign rows → NO window_decisions key at all. The window is
+    the episode span ± the module-constant slack (no env knob): a row at exactly
+    span+slack is in; one just past it stays dead to this seed."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    td = default_telemetry_dir(md)
+    sid = "bbbb1111-2222-3333-4444-555566667777"
+    _write_rows(T._episode_ledger_path(td), [
+        _episode_row(sid, 10_000.0), _episode_row(sid, 20_000.0),
+    ])
+    slack = C._DECISION_WINDOW_SLACK_S
+    _write_rows(T._decision_ledger_path(td), [
+        {"ts": 20_000.0 + slack + 0.001, "session_id": _FILE_TOKEN, "text": "too late"},
+        {"ts": 10_000.0 - slack - 0.001, "session_id": _FILE_TOKEN, "text": "too early"},
+    ])
+    seed = C.gather_session_context(sid, telemetry_dir=td, memory_dir=md)
+    assert "window_decisions" not in seed, "absent when none (ED-4), never an empty list"
+
+    _write_rows(T._decision_ledger_path(td), [
+        {"ts": 20_000.0 + slack, "session_id": _FILE_TOKEN, "text": "at the boundary"},
+    ])
+    seed = C.gather_session_context(sid, telemetry_dir=td, memory_dir=md)
+    assert seed["window_decisions"] == ["at the boundary"]
+
+
+def test_window_lane_dedups_both_lane_matches_into_strict(repo):
+    """A decision matched by BOTH lanes (same text recorded with the real sid AND as an
+    in-span file-token row) appears once, in the strict lane — and with nothing else to
+    window-match, the window key is absent entirely (ED-4)."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    td = default_telemetry_dir(md)
+    sid = "cccc1111-2222-3333-4444-555566667777"
+    _write_rows(T._episode_ledger_path(td), [
+        _episode_row(sid, 10_000.0), _episode_row(sid, 20_000.0),
+    ])
+    _write_rows(T._decision_ledger_path(td), [
+        {"ts": 15_000.0, "session_id": sid, "text": "ship via the canary lane"},
+        {"ts": 15_100.0, "session_id": _FILE_TOKEN, "text": "ship via the canary lane"},
+    ])
+    seed = C.gather_session_context(sid, telemetry_dir=td, memory_dir=md)
+    assert seed["decisions"] == ["ship via the canary lane"]
+    assert "window_decisions" not in seed
+
+
+def test_seed_shape_pin_no_window_rows_means_todays_exact_keys(repo):
+    """Byte-identity guard for the strict path: a capture with NO window-matched rows
+    (and triage off) produces exactly today's seed keys — the WRT-3 lane is purely
+    additive (ED-4) and the session-proven list is untouched."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    _seed_episode(md, repo, "shape-pin", ["m"], "q")
+    seed = json.load(open(C.write_session_capture("shape-pin", memory_dir=md, repo_root=repo)))
+    assert set(seed.keys()) == {
+        "schema", "kind", "session_id", "head_commit", "head", "changed_paths",
+        "recalled_names", "query_previews", "episode_count", "earliest_ts",
+        "diff_hunks", "hunks_secret_flagged", "hunks_threat_flagged", "decisions",
+        "salience", "reason", "captured_at",
+    }
+
+
+def test_listing_renders_window_decisions_visibly_distinct():
+    """The drain reviewer must always know which evidence class they are ratifying:
+    session-proven and window-matched decisions render on separate, labeled lines."""
+    listing = C._format_listing([{
+        "session_id": "s", "episode_count": 1, "_path": "/q/capture-s.json",
+        "decisions": ["proven decision"],
+        "window_decisions": ["windowed decision"],
+    }])
+    assert "decisions: proven decision" in listing
+    assert "WINDOW-MATCHED, not session-proven" in listing
+    assert "windowed decision" in listing
+    proven_line = next(l for l in listing.splitlines() if "proven decision" in l)
+    assert "windowed" not in proven_line, "the two classes must never share a line"
+
+
+def test_main_add_decision_attributed_reply_unchanged(repo, capsys):
+    """The seed-riding promise survives ONLY on the path that genuinely threads a
+    session id (strict matching then works); wording pinned byte-for-byte."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    rc = C.main(["--add-decision", "x", "--session-id", "s", "--memory-dir", md])
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == (
+        "decision recorded — it will ride this session's capture seed"
+    )
+
+
+def test_main_add_decision_unattributed_says_window_matched(repo, capsys):
+    """WRT-3 honest reply, CLI half: a bare --add-decision (no --session-id) keys the row
+    on the shared file token, which strict seed matching can never reach — the reply must
+    say so instead of promising seed-riding. Wording pinned."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    rc = C.main(["--add-decision", "x", "--memory-dir", md])
+    out = capsys.readouterr().out.strip()
+    assert rc == 0
+    assert out == (
+        "decision recorded unattributed (no --session-id) — it cannot ride the "
+        "session-proven decisions list; it will surface LABELED as a window-matched "
+        "decision at the drain"
+    )
+    assert "will ride this session's capture seed" not in out
+
+
+# --------------------------------------------------------------------------- #
 # CAP-6: the queue is bounded (prune) and the nudge is deferrable (snooze) —
 # closing the LIF-goal violation that capture nagged forever, unbounded.
 # --------------------------------------------------------------------------- #

@@ -231,6 +231,58 @@ def _session_decisions(session_id: Optional[str], telemetry_dir: Optional[str]) 
     return out
 
 
+# WRT-3: how far outside the episode span a sid-mismatched decision may still window-match.
+# A session's decisions mostly land BETWEEN its recall episodes, but the tails are real — an
+# --add-decision fired moments before the first recall, or minutes after the last one while
+# the session wound down. A module constant, deliberately NOT an env knob: the window lane is
+# a labeled fallback the drain reviewer ratifies per item, never a tunable matcher.
+_DECISION_WINDOW_SLACK_S = 900.0
+
+
+def _window_decisions(
+    session_id: Optional[str],
+    telemetry_dir: Optional[str],
+    span: Optional[tuple],
+    strict_texts: List[str],
+) -> List[str]:
+    """WRT-3 window lane: decisions strict matching can NEVER reach, surfaced LABELED.
+
+    The strict lane above matches by harness-id equality — but a decision recorded through
+    a surface that never receives the harness id (the MCP capture tool, a bare
+    ``--add-decision`` without ``--session-id``) is keyed on the shared FILE token and so
+    can never match it. Those rows used to die unseen (the ledger's only two rows, 07-13,
+    did exactly that). This ADDITIVE lane carries the rows whose ``ts`` falls inside THIS
+    session's episode span (± ``_DECISION_WINDOW_SLACK_S``), for the drain reviewer to
+    ratify per item as time-window-matched evidence — rendered visibly distinct from, and
+    deduped against, the session-proven list (a text both lanes match rides the strict
+    lane only). The strict lane is EXTENDED, never relaxed. Never raises.
+    """
+    out: List[str] = []
+    if not span:
+        return out
+    try:
+        lo = float(span[0]) - _DECISION_WINDOW_SLACK_S
+        hi = float(span[1]) + _DECISION_WINDOW_SLACK_S
+        seen = set(strict_texts)
+        for d in read_decisions(telemetry_dir):
+            if d.get("session_id") == session_id:
+                continue  # the strict lane already carries it
+            ts = d.get("ts")
+            if not isinstance(ts, (int, float)) or isinstance(ts, bool):
+                continue
+            if not (lo <= float(ts) <= hi):
+                continue
+            t = (d.get("text") or "").strip()
+            if t and t not in seen:
+                seen.add(t)
+                out.append(t)
+            if len(out) >= _MAX_DECISIONS:
+                break
+    except Exception:
+        return out
+    return out
+
+
 def _seed_salience(seed: Dict, telemetry_dir: Optional[str], untracked: List[str]) -> Dict:
     """A cheap per-seed VALUE LABEL (GRW-1) — never a gate, never an auto-prune.
 
@@ -358,6 +410,21 @@ def gather_session_context(
             "decisions": _session_decisions(session_id, telemetry_dir),
         }
         seed["salience"] = _seed_salience(seed, telemetry_dir, untracked)
+        # WRT-3: the labeled time-window fallback rides a SEPARATE additive key — absent
+        # when none matched (ED-4; queue-own shape read via .get(), no _SEED_SCHEMA bump).
+        ts_vals = [
+            float(e["ts"])
+            for e in episodes
+            if isinstance(e.get("ts"), (int, float)) and not isinstance(e.get("ts"), bool)
+        ]
+        window = _window_decisions(
+            session_id,
+            telemetry_dir,
+            (min(ts_vals), max(ts_vals)) if ts_vals else None,
+            seed["decisions"],
+        )
+        if window:
+            seed["window_decisions"] = window
         return seed
     except Exception:
         return None
@@ -496,8 +563,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=None,
         metavar="TEXT",
         help="GRW-4: record ONE user-confirmed session decision (quote or faithfully "
-        "paraphrase what the USER stated — never infer one from the diff); it lands in this "
-        "session's SessionEnd capture seed as its durable WHY",
+        "paraphrase what the USER stated — never infer one from the diff); with "
+        "--session-id it rides that session's capture seed — without it the row is "
+        "UNATTRIBUTED and surfaces window-matched at the drain (WRT-3)",
     )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--repo-root", default=None)
@@ -508,11 +576,19 @@ def main(argv: Optional[List[str]] = None) -> int:
 
             td = default_telemetry_dir(args.memory_dir) if args.memory_dir else None
             ok = log_decision(args.add_decision, telemetry_dir=td, session_id=args.session_id)
-            print(
-                "decision recorded — it will ride this session's capture seed"
-                if ok
-                else "nothing recorded (empty text or unwritable ledger)"
-            )
+            # WRT-3: the reply states the attribution mode TRUTHFULLY. Only a run that
+            # threads --session-id lands a row strict seed-matching can reach; a bare run
+            # keys the row on the shared file token, which can only window-match.
+            if not ok:
+                print("nothing recorded (empty text or unwritable ledger)")
+            elif args.session_id:
+                print("decision recorded — it will ride this session's capture seed")
+            else:
+                print(
+                    "decision recorded unattributed (no --session-id) — it cannot ride the "
+                    "session-proven decisions list; it will surface LABELED as a "
+                    "window-matched decision at the drain"
+                )
             return 0
         if args.list:
             print(_format_listing(read_pending(memory_dir=args.memory_dir)))
