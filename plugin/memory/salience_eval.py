@@ -28,17 +28,19 @@ from __future__ import annotations
 import json
 import os
 import time
-from contextlib import contextmanager
 from typing import List, Optional
 
+from .ab_runner import LOW_N_FLOOR, flag_context, run_flag_arms
 from .provenance import ensure_self_ignoring_dir, resolve_dirs
 
 _SALIENCE_AB_NAME = "salience_ab.json"
 _SALIENCE_AB_SCHEMA = 1
 
-# Categories at/below this n are labeled low-n in the report (mirrors MSR-1's
-# _BASELINE_N_FLOOR): a delta over two rows is an anecdote, not evidence.
-_LOW_N_FLOOR = 3
+# MEA-5: the OFF→ON→OFF core, self-check, deltas, low-n labels, and the MEA-1
+# sensitivity stamp all generalized into ab_runner (each --ab flag parameterizes ONE
+# runner — inv5); this module keeps what is salience's own: the signal inventory and
+# the report schema. The low-n floor's canonical home moved with the delta logic.
+_LOW_N_FLOOR = LOW_N_FLOOR
 
 _ED2_FOOTER = (
     "ED-2: measures only — salience stays owner-decided-OFF (SIG-5 ratified 2026-07-09); "
@@ -54,23 +56,11 @@ def default_report_path(memory_dir: str, telemetry_dir: Optional[str] = None) ->
     return os.path.join(telemetry_dir or default_telemetry_dir(memory_dir), _SALIENCE_AB_NAME)
 
 
-@contextmanager
 def _salience_flag(on: bool):
-    """Set/clear ``HIPPO_SALIENCE`` for one arm, restoring the prior value EXACTLY
-    (the ``_dense_disabled_env`` save/restore pattern — an A/B that leaks its flag
-    into the caller's environment poisons every later measurement)."""
-    prev = os.environ.get("HIPPO_SALIENCE")
-    if on:
-        os.environ["HIPPO_SALIENCE"] = "1"
-    else:
-        os.environ.pop("HIPPO_SALIENCE", None)
-    try:
-        yield
-    finally:
-        if prev is None:
-            os.environ.pop("HIPPO_SALIENCE", None)
-        else:
-            os.environ["HIPPO_SALIENCE"] = prev
+    """Set/clear ``HIPPO_SALIENCE`` for one arm, restoring the prior value EXACTLY.
+    Kept under its historical name; delegates to the generalized
+    ``ab_runner.flag_context`` (MEA-5 / inv5 — one save/restore implementation)."""
+    return flag_context("HIPPO_SALIENCE", on)
 
 
 def _signal_inventory(memory_dir: str, index_dir: Optional[str]) -> dict:
@@ -132,7 +122,6 @@ def run_ab(
     exclusions). Never touches gates, never writes anywhere but the gitignored dir.
     """
     from .build_index import default_index_dir
-    from .eval_recall import canonical_json, deterministic_view, evaluate
 
     if memory_dir is None:
         memory_dir, _ = resolve_dirs()
@@ -143,63 +132,32 @@ def run_ab(
     if not inventory.get("ok"):
         return inventory
 
-    def _arm(on: bool) -> dict:
-        with _salience_flag(on):
-            return evaluate(
-                memory_dir=memory_dir,
-                index_dir=index_dir,
-                hard_set_path=hard_set_path,
-                k=k,
-                telemetry_dir=telemetry_dir,
-            )
+    # MEA-5 (inv5): the OFF→ON→OFF arms, the byte-identity self-check, the per-category
+    # deltas with low-n labels, and the MEA-1 resolvable_by_category condition stamp all
+    # run in the generalized core — parameterized by flag, never copied per rig.
+    core = run_flag_arms(
+        "HIPPO_SALIENCE",
+        memory_dir=memory_dir,
+        index_dir=index_dir,
+        hard_set_path=hard_set_path,
+        k=k,
+        telemetry_dir=telemetry_dir,
+    )
+    if not core.get("ok"):
+        return core
 
-    off_1 = _arm(False)
-    if not off_1.get("ok") and "error" in off_1:
-        return {"ok": False, "error": f"OFF arm failed: {off_1['error']}"}
-    on = _arm(True)
-    off_2 = _arm(False)
-
-    off_view_1 = canonical_json(deterministic_view(off_1))
-    off_view_2 = canonical_json(deterministic_view(off_2))
-    if off_view_1 != off_view_2:
-        return {
-            "ok": False,
-            "error": "OFF-arm self-check FAILED: the two flag-off runs bracketing the ON "
-            "arm are not byte-identical — the rig (or the flag flip) leaked state, so the "
-            "paired delta is not attributable to salience. Nothing recorded.",
-        }
-
-    identical_arms = off_view_1 == canonical_json(deterministic_view(on))
-    off_cat = off_1.get("by_category") or {}
-    on_cat = on.get("by_category") or {}
-    deltas = {}
-    for cat in sorted(set(off_cat) | set(on_cat)):
-        o, n_ = off_cat.get(cat) or {}, on_cat.get(cat) or {}
-        n_rows = int(min(o.get("n") or 0, n_.get("n") or 0) or max(o.get("n") or 0, n_.get("n") or 0))
-        deltas[cat] = {
-            "recall": round((n_.get("recall") or 0.0) - (o.get("recall") or 0.0), 4),
-            "mrr": round((n_.get("mrr") or 0.0) - (o.get("mrr") or 0.0), 4),
-            "n": n_rows,
-            **({"low_n": True} if n_rows <= _LOW_N_FLOOR else {}),
-        }
-
+    identical_arms = core["identical_arms"]
     committed = inventory["committed_usage"]
-    corpus_n = int(off_1.get("count") or 0)
+    corpus_n = int(core["condition"].get("corpus_n") or 0)
     report = {
         "ok": True,
         "schema": _SALIENCE_AB_SCHEMA,
         "flag": "HIPPO_SALIENCE",
         "generated_at": time.strftime("%Y-%m-%d"),
-        # The condition stamp: index-mode x query-mode x backend. Both arms share the
-        # same resident index and the same query mode — only the flag differs.
-        "condition": {
-            "index_mode": "dense" if off_1.get("dense_ready") else "bm25-only",
-            "query_mode": "dense+bm25" if off_1.get("dense_ready") else "bm25-only",
-            "backend": off_1.get("backend"),
-            "model": off_1.get("model"),
-            "corpus_n": corpus_n,
-            "hard_set_n": off_1.get("hard_set_n"),
-        },
+        # The condition stamp: index-mode x query-mode x backend (+ the MEA-1
+        # sensitivity stamp) — assembled by the shared core; both arms share the same
+        # resident index and query mode, only the flag differs.
+        "condition": core["condition"],
         "signal": {
             "usage_boosted_n": inventory["usage_n"],
             "staleness_penalized_n": inventory["stale_n"],
@@ -218,10 +176,10 @@ def run_ab(
             if (committed.get("memories") or committed.get("sessions"))
             else {}
         ),
-        "off_by_category": off_cat,
-        "on_by_category": on_cat,
-        "deltas": deltas,
-        "off_arm_self_check": "pass — flag-off runs byte-identical before and after the ON arm",
+        "off_by_category": core["off_by_category"],
+        "on_by_category": core["on_by_category"],
+        "deltas": core["deltas"],
+        "off_arm_self_check": core["off_arm_self_check"],
         "identical_arms": identical_arms,
         **(
             {
@@ -297,6 +255,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         f"hard_set={cond['hard_set_n']} — signal: {sig['usage_boosted_n']} usage-boosted, "
         f"{sig['staleness_penalized_n']} staleness-penalized"
     )
+    resv = cond.get("resolvable_by_category") or {}
+    if resv:
+        tot_r = sum(v["resolvable_n"] for v in resv.values())
+        tot_n = sum(v["n"] for v in resv.values())
+        print(
+            f"  sensitivity (ED5R-2): {tot_r}/{tot_n} fixture row(s) resolvable against this "
+            "corpus — " + ", ".join(f"{c} {v['resolvable_n']}/{v['n']}" for c, v in resv.items())
+        )
     for cat, d in sorted(report["deltas"].items()):
         low = " [low n — report-only]" if d.get("low_n") else ""
         print(f"  {cat}: Δrecall={d['recall']:+.4f} Δmrr={d['mrr']:+.4f} n={d['n']}{low}")

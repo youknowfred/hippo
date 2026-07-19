@@ -84,6 +84,45 @@ _FLOOR_CAL_TOLERANCE = 0.02
 # structurally the same signal-less run SIG-5 already judged.
 _SALIENCE_LIVEDIN_MIN_SESSIONS = 10
 
+# MEA-1 (ED5R-2): below this resolvable share of the default hard set, a recorded A/B is
+# rendered WITH a sensitivity qualification (the round-5 founding exhibit was 1/32 ≈ 3%).
+# Qualification LANGUAGE only — the line never recommends a re-run or a flip (ED-2).
+_SENSITIVITY_QUALIFY_FLOOR = 0.5
+
+
+def _current_hard_set_resolvability(ctx: DoctorContext) -> Optional[dict]:
+    """Per-category ``{resolvable_n, n}`` of the DEFAULT hard-set fixture against the
+    CURRENT corpus index, or None when unmeasurable (no fixture, no loadable index).
+
+    Probes the same two fixture homes ``eval_recall._default_fixture_path`` does, but
+    keyed on ctx dirs (hermetic — doctor checks never re-resolve ambient state). Reads
+    one YAML + the already-built index; never runs an eval (health-check budget), never
+    raises. The RESOLVABILITY predicate is eval_metrics' shared helper (inv5).
+    """
+    try:
+        from .build_index import default_index_dir, load_index
+        from .eval_metrics import hard_set_resolvability, load_hard_set
+
+        hs_path = None
+        for cand in (
+            os.path.join(ctx.memory_dir, ".audit-fixtures", "recall_hard_set.yaml"),
+            os.path.join(ctx.repo_root, "tests", "fixtures", "recall_hard_set.yaml"),
+        ):
+            if os.path.exists(cand):
+                hs_path = cand
+                break
+        if not hs_path:
+            return None
+        rows = load_hard_set(hs_path)
+        if not rows:
+            return None
+        index = load_index(default_index_dir(ctx.memory_dir))
+        if index is None or not len(index):
+            return None
+        return hard_set_resolvability(index, rows)
+    except Exception:
+        return None
+
 
 def check_salience_evidence(ctx: DoctorContext) -> Dict[str, str]:
     """MSR-5: THE one automatic surface of the salience-revisit rig — a deterministic
@@ -91,9 +130,11 @@ def check_salience_evidence(ctx: DoctorContext) -> Dict[str, str]:
 
     ED-2 is binding: this line never flips (or recommends flipping) the default — it
     only says the EVIDENCE the revisit needs is now measurable and names the runnable
-    rig. Reads two small JSONs (usage aggregates + the recorded report); no eval runs
-    here (a multi-second dense double-run can never be on a health check). No
-    timestamps — the render/line-count determinism pins hold.
+    rig. Reads two small JSONs (usage aggregates + the recorded report) plus — MEA-1,
+    only when a report exists — one fixture YAML and the already-built index for the
+    sensitivity qualification; no eval runs here (a multi-second dense double-run can
+    never be on a health check). No timestamps — the render/line-count determinism
+    pins hold.
     """
     try:
         from .salience_eval import read_report
@@ -106,10 +147,43 @@ def check_salience_evidence(ctx: DoctorContext) -> Dict[str, str]:
         if report is not None:
             deltas = report.get("deltas") or {}
             arms = "identical arms" if report.get("identical_arms") else "arms differ"
+            # MEA-1 (ED5R-2): qualify low-sensitivity evidence. Derived from the CURRENT
+            # fixture-vs-corpus state (and stated as such) — the recorded report itself is
+            # never rewritten; absence of a measurable fixture/index emits nothing extra.
+            qualification = ""
+            resv = _current_hard_set_resolvability(ctx)
+            if resv:
+                tot_r = sum(v["resolvable_n"] for v in resv.values())
+                tot_n = sum(v["n"] for v in resv.values())
+                if tot_n and (tot_r / tot_n) < _SENSITIVITY_QUALIFY_FLOOR:
+                    qualification = (
+                        f" SENSITIVITY QUALIFICATION (ED5R-2): the default hard set resolves "
+                        f"only {tot_r}/{tot_n} row(s) against this corpus — evidence measured "
+                        "through this fixture is low-sensitivity (derived from current "
+                        "fixture-vs-corpus state, not re-measured from the recorded run)."
+                    )
+            # MEA-5 (the reader decision recorded at build): the outcome-prior evidence
+            # file's ONE standing reader is this line's sibling sentence — no second
+            # doctor check, no ordering motion; same ED-2 posture, measures only.
+            sibling = ""
+            try:
+                from .outcome_prior_eval import read_report as _op_read
+
+                op = _op_read(ctx.memory_dir)
+                if op is not None:
+                    op_arms = "identical arms" if op.get("identical_arms") else "arms differ"
+                    sibling = (
+                        f" Sibling: outcome-prior A/B recorded "
+                        f"({len(op.get('deltas') or {})} categor(ies), {op_arms}) — same "
+                        "ED-2 posture (measures only; the flag stays default-OFF)."
+                    )
+            except Exception:
+                sibling = ""
             return {
                 "status": "ok",
                 "message": f"salience evidence: A/B recorded ({len(deltas)} categor(ies), "
-                f"{arms}) — the flip stays a dated owner decision (ED-2).",
+                f"{arms}) — the flip stays a dated owner decision (ED-2)." + qualification
+                + sibling,
             }
         if sessions < _SALIENCE_LIVEDIN_MIN_SESSIONS:
             return {

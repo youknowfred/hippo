@@ -284,7 +284,8 @@ def test_record_from_payload_without_cache_is_unchanged(repo, memory_dir):
     _mem(memory_dir, "app-note", ["src/app.py"])
     assert _touch(memory_dir, repo, "src/app.py", sid="s") is True
     rows = list(T.read_outcomes(default_telemetry_dir(memory_dir)))
-    assert set(rows[0]) == {"ts", "session_id", "tool", "path"}
+    # MEA-4 adds the producer-version stamp; the pre-T16 point stands: no cited_by.
+    assert set(rows[0]) == {"ts", "session_id", "tool", "path", "v"}
 
 
 def test_injection_hits_touch_grain_counts_recorded_coincidences_only(repo, memory_dir):
@@ -394,8 +395,11 @@ def test_lane_health_reports_volumes_maps_and_worktree_share(repo, memory_dir):
     assert "outcome rows: 4 across 2 session(s); 1 carry cited_by" in out
     assert "touchmap: 1 cited path(s) / 0 reminder path(s)" in out
     assert "worktree-prefixed rows: 2 of 4 (50%)" in out
-    assert "1 would map if prefix-stripped" in out
-    assert "FLT-3" in out and "own follow-up item" in out  # coupling named, fix not smuggled
+    # MEA-6 (the named follow-up, now landed): the line splits normalized-vs-historical —
+    # these fixture rows all predate the stamp, so 0 carry tree_path and 1 would map.
+    assert "0 carry tree_path (normalized at record time, MEA-6" in out
+    assert "1 historical row(s) would map if prefix-stripped" in out
+    assert "predate MEA-6's record-time normalization" in out  # historical rows named, never rewritten
 
 
 def test_lane_health_zero_cited_by_names_live_hook_lag(repo, memory_dir):

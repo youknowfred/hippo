@@ -661,3 +661,42 @@ def check_non_english_corpus(ctx: DoctorContext) -> Dict[str, str]:
     except Exception as exc:
         return {"status": "warn", "message": f"non-English corpus check failed: {exc}."}
 
+
+
+def check_producer_versions(ctx: DoctorContext) -> Dict[str, str]:
+    """MEA-4: evidence rows by producing plugin version — the forensic complement to the
+    live-hook-lag class (bit twice in one week; both diagnoses were hand forensics).
+
+    Aggregates the outcome ledger's `v` stamps (the lane the incidents surface in) and
+    names the RUNNING version, so "which rows did the lagged code write" is a doctor
+    line instead of tag-containment archaeology. Historical version-less rows render as
+    ONE "unstamped" bucket, never backfilled. PROVENANCE ONLY — always ok, nothing
+    branches on the stamp, no remediation (update/restart stays the human's). Reads one
+    gitignored ledger; deterministic (no timestamps).
+    """
+    try:
+        from .telemetry import _producer_version, default_telemetry_dir, read_outcomes
+
+        rows = list(read_outcomes(default_telemetry_dir(ctx.memory_dir)))
+        if not rows:
+            return {
+                "status": "ok",
+                "message": "producer versions: no rows in the outcome ledger yet (MEA-4 stamps "
+                "appear as evidence accrues; provenance only).",
+            }
+        by_v: Dict[str, int] = {}
+        for r in rows:
+            key = r.get("v") if isinstance(r.get("v"), str) else "unstamped"
+            by_v[key] = by_v.get(key, 0) + 1
+        running = _producer_version() or "unknown"
+        buckets = ", ".join(
+            f"{k}: {n}" for k, n in sorted(by_v.items(), key=lambda kv: (-kv[1], kv[0]))
+        )
+        return {
+            "status": "ok",
+            "message": f"producer versions (running v{running}): {buckets} — provenance only "
+            "(MEA-4); rows stamped by an older version date the lagged-hook window from the "
+            "ledger itself, unstamped rows predate the stamp (never backfilled).",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"producer-versions check failed: {exc}."}

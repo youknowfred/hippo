@@ -594,7 +594,7 @@ workstreams:
         title: "Instrument-sensitivity accounting: hard-set resolvability reported in evaluate() and stamped on A/B evidence"
         priority: P0
         effort: M
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 2 — ED5R-3 split FIRST as its own commit (SEN-4 adversarial block -> eval_adversarial.py; eval_recall 1989->1803, re-pinned honestly); shared helper pair in eval_metrics (resolvable_row + hard_set_resolvability); evaluate() emits report["resolvability"] ONLY when some row is unresolvable (ED-4 — fully-resolvable byte-identity pinned; no row skipped, no gate moved); run_ab condition stamps resolvable_by_category unconditionally on new evidence; doctor qualification at _SENSITIVITY_QUALIFY_FLOOR=0.5 derived from CURRENT fixture-vs-corpus state (qualifies, never recommends); live grounding at build: 1/32 unchanged (single-hop 1/22, multi-hop 0/10)
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "The round's headline finding, reproduced read-only this cycle: 1/32 rows of tests/fixtures/recall_hard_set.yaml (the ONLY hard set on this machine; .claude/memory/.audit-fixtures/ does not exist) have any expected stem present in .claude/memory — so the recorded EVD-4 Arm A evidence (.claude/.memory-telemetry/salience_ab.json, 2026-07-17) was measured through a ~3%-sensitivity instrument: off-arm single-hop recall 0.0455 = exactly 1/22, multi-hop 0.0 = 0/10, zero deltas arithmetically near-certain under BOTH arms; eval_metrics.py:602 hard_set_metrics has NO stem-existence check while eval_recall.py:1236 floor_sweep already filters to rows 'whose expected stems actually exist in THIS corpus' — the logic exists in one instrument and not the other"}
         problem: >-
           hard_set_metrics counts rows whose expected stems do not exist in
@@ -651,7 +651,7 @@ workstreams:
         title: Lived-in hard-set drafting from the positive outcome join (the missing fourth draft lane)
         priority: P1
         effort: M
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 2 — draft_livedin_fixtures in eval_fixtures (verbatim queries only; clean_query + system-reminder/slash-command noise gates, tested; cap 25/run strongest-evidence-first; dedup vs tracked both polarities AND queued); wired --draft-livedin CLI + the abstention_fixtures MCP draft action (consolidate Step 5) + audit Phase 0.6 snippet; admission per-item confirm_hard_set_row(category='single-hop') unchanged, AST negative-capability pin proves no bulk-admit call; live join at build: 210 hit keys -> 1,411 distinct (query, memory) pairs over 198 queries (grew from the 192-at-authoring; the ledger records)
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Reproduced read-only this cycle: 192 distinct (verbatim episode query -> outcome-confirmed injected memory) candidate pairs from joining episode_buffer.jsonl query_previews to session-grain _injection_join hits; eval_fixtures.py's module docstring lists exactly three draft lanes (abstention SIG-6, forgetting TMB-3, update TMB-4) — none positive; .claude/memory/.audit-fixtures/ absent (find, re-verified); every lived-in instrument (Arm A recorded, Arm B when un-severed, floor_sweep's on-topic leg, any MSR-1 pin) therefore runs against pack stems at ~3% sensitivity (MEA-1's finding)"}
         problem: >-
           Self-populating fixtures exist only for abstention/forgetting/
@@ -713,7 +713,7 @@ workstreams:
         title: "Co-recall null model: lift-vs-independence annotation + confound collapse on the GRW-2 proposal surface"
         priority: P1
         effort: M
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 2 — ED5R-3 split FIRST as its own commit (substrate -> telemetry_store.py 227, SIG-3/GRW-2 mining -> telemetry_mining.py 175; telemetry 1295->978, re-pinned; mark_session/_rotate_if_needed allowlist keys relocated); co_recall_pairs emits observed_sessions/expected_under_independence/lift/member_sessions/session_universe additively in the SAME union pass; render collapses sub-floor pairs into one count line (_CORECALL_LIFT_FLOOR=1.5, module constant); DEPARASITE DECISION AT BUILD: BOTH reads (protection :218-era, weak-link) keep RAW counts — the permissive-protection default; negative-capability pin: the floor is referenced nowhere in deparasite; live distribution at build: 20/20 pairs chance-level (lift 1.02-1.21, median 1.07) — the first annotated proposal run suppresses all 20
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "TWO independent read-only repros this cycle agreed: co_recall_pairs(td, exclude_names=floor) -> 20 pairs at the _CORECALL_MAX_PAIRS cap (17 fresh after build_graph adjacency drop — the 2026-07-19 incident's exact number), every pair lift 0.99-1.20 vs independence (median 1.06), members individually present in 54-68 of 72 sessions; telemetry.py:612-616 (raw distinct-session tally, min 3, cap 20, no null model); three shipped consumers ingest the pairs as behavioral evidence: mcp_tools_consolidate.py:518 (consolidate Step 4 proposals), deparasite.py:218 ('co-recalled' protection evidence), deparasite.py:301 (demote weak-link signal); design premise hippo-enh-t5-growth capstone ('below threshold -> [] — the sparse map STAYS empty') predates the corpus densifying"}
         problem: >-
           co_recall_pairs proposes raw distinct-session counts with no null
@@ -772,7 +772,7 @@ workstreams:
         title: Producer-version stamps on evidence-ledger rows + a rows-by-version lane-health line
         priority: P2
         effort: M
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 2 — telemetry._producer_version() cached per process (CLAUDE_PLUGIN_ROOT, module-root dev fallback — the check_plugin_version/DoctorContext resolution; NEVER the operated-on repo tree); additive v on new rows from log_outcome + log_recall_event + record_reconsolidation_outcome (verified live: the reconsolidation writer IS telemetry.record_reconsolidation_outcome); unreadable -> omitted, writers never raise; format_lane_health rows-by-version line + check_producer_versions in doctor_checks_corpus (inserted before the pinned tail); no behavior branches on the stamp; 50ms budget + MSR-6 pins pass; landed second-in-tier so it inherited the already-relieved telemetry.py as the gate planned
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Row-key scans this cycle: outcome_events.jsonl rows are exactly {ts, session_id, tool, path, [cited_by]}, recall_events.jsonl {ts, session_id, names, scores, ranks, backend, latency_ms, k, query_preview, [drops], [injected_chars]}, reconsolidation_events.jsonl {ts, name, outcome} — all three version-less; both live-hook-lag diagnoses were therefore hand forensics: EVD-2's 5-release lag (hippo-enh-t21-evidence capstone, mechanical-zeros dating) and the 2026-07-19 pre-GRW-5 re-flag of 4 fresh-baselined memories (reconsolidation rows 15:18-15:25Z; installed_plugins.json caught up at 15:25:48Z); doctor_checks_env.py:584 check_plugin_version covers only installed-vs-venv"}
         problem: >-
           The live-hook-lag class has bitten twice in one week and both
@@ -826,7 +826,7 @@ workstreams:
         title: "EVD-4 Arm B un-sever: the HIPPO_OUTCOME_PRIOR A/B harness + commissioned run (Q1 r5; after MEA-1/MEA-2)"
         priority: P3
         effort: M
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 2, built LAST per the gate — the exact minimal delta: AB_FLAGS entry + --ab dispatch (shared _ab_forward) + the generalized ab_runner.flag_context/run_flag_arms core (salience_eval REFACTORED through it — not a second copy, inv5; OFF-arm byte-identity, per-category n, low-n labels, dated footer all in the core) + outcome_prior_eval.py with the outcome-signal precondition (signal-less ON arm = self-check-not-finding, ED-3). CACHE DECISION AT BUILD: the harness stages outcome.json in-process (write_outcome_cache(injection_hits(...)) — the flag-ON SessionStart computation) and restores prior state after; a flag-OFF machine keeps no cache it did not write. Evidence file outcome_prior_ab.json beside salience_ab.json; READER DECISION AT BUILD: check_salience_evidence's sibling sentence (no second doctor check). COMMISSIONED RUN HELD (dated 2026-07-19, stated to Fred): then-current sensitivity is 1/32 (~3%) — the q1_verdict's own known-AND-non-trivial clause fails until the first MEA-2 drain; run `python -m memory.eval_recall --ab HIPPO_OUTCOME_PRIOR` after admitting drafts, report is outcome-agnostic + sensitivity-stamped by construction
         q1_verdict: >-
           2026-07-19, dated owner entry (ED5R-1): Fred answered Q1(r5) "Yes,
           after MEA-1/2" in the round-5 formal-question session — Arm B is
@@ -898,7 +898,7 @@ workstreams:
         title: Worktree touch-path normalization at record time (EVD-2's named follow-up, now FLT-3-amplified)
         priority: P1
         effort: M
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 2 — record_from_payload derives tree_path once via _WORKTREE_PREFIX (no second copy, source-pinned); observe_touch receives the STRIPPED path (JIT-1 reminders + JIT-2 cited_by live in worktree sessions — the ONE behavior delta, bounded + HIPPO_DISABLE_JIT-killed; CHANGELOG statement deferred to the next release cut, no Unreleased section exists); log_outcome keeps raw path + additive tree_path when different; _injection_join prefers tree_path (a worktree touch of a cited tree path COUNTS — pinned); shared_tree + presence.observe_fleet stay RAW-keyed (spy pins); lane health splits stamped-vs-historical as the receipt; live at build: 1197/3409 prefixed, 917 mappable (grew from 883 at authoring)
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Live computation this cycle over outcome_events.jsonl: 1140 of 2288 post-07-16 rows (~50%; 1140/3304 = 35% all-time) are worktree-prefixed, 0 of 1140 carry cited_by, 883 would join the 112-path cited touchmap if prefix-stripped (grown from the roadmap-4-era 848/1675, 650 mappable); the shipped surface DEFERS the fix in its own output ('the candidate prefix-strip fix to recording is its own follow-up item, not this surface' — format_lane_health, outcome.py:420-422) and ROADMAP.enhancements4.yaml:505-509 names it EVD-2's follow-up; jit.observe_touch early-returns on the touchmap miss so JIT-1/JIT-2 are structurally dead inside worktrees; FLT-3 (shipped v1.27.0) correctly drives MORE mutation into worktrees"}
         problem: >-
           Half the machine's recent touch evidence is dark: worktree
@@ -1487,7 +1487,7 @@ release_train:
   - tier: T23
     target_version: TBD
     theme: "Honest instruments"
-    status: planned          # ratified 2026-07-19; build not started
+    status: done             # 2026-07-19, session 2 — 6/6 built in the gated order (MEA-1 -> MEA-2 -> MEA-3/MEA-4/MEA-6 -> MEA-5); both ED5R-3 split debts discharged as their OWN commits (eval_adversarial.py; telemetry_store.py + telemetry_mining.py); done_means met with ONE dated exception: the commissioned Arm B RUN is held on the instrument's own sensitivity (1/32 at session end — see MEA-5's status note); it fires after the first MEA-2 drain
     ratified: >-
       2026-07-19 — owner-ratified in the round-5 formal-question session
       (dated LAW ZERO entry): all five tiers ratified, order T22 -> T23 ->

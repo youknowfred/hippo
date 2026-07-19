@@ -109,13 +109,27 @@ def record_from_payload(
             rel = None
         if not rel:
             return False
+        # MEA-6: derive the in-tree path ONCE via the module's _WORKTREE_PREFIX (the same
+        # split lane health's would-map diagnosis already renders — no second copy, inv5).
+        # A worktree touch normalizes to its repo-relative tail so the touchmap join,
+        # JIT-1 first-touch reminders, and JIT-2 cited_by go LIVE in worktree sessions —
+        # the item's ONE behavior delta: bounded by MAX_LINES_PER_SESSION, killed by
+        # HIPPO_DISABLE_JIT. The RAW rel stays the row's `path` (honest record of where
+        # the touch landed); `tree_path` rides additively only when different (ED-4).
+        # FLT-3's shared_tree exemption and presence.observe_fleet below stay RAW-keyed —
+        # a worktree mutation must never render as a shared-tree mutation post-strip.
+        tree_rel = rel
+        if rel.startswith(_WORKTREE_PREFIX):
+            tail = rel[len(_WORKTREE_PREFIX):].split("/", 1)
+            if len(tail) == 2 and tail[1]:
+                tree_rel = tail[1]
         td = telemetry_dir or default_telemetry_dir(memory_dir)
         cited_by = None
         try:
             from .jit import observe_touch
 
             cited_by, context = observe_touch(
-                rel,
+                tree_rel,
                 memory_dir=memory_dir,
                 repo_root=repo_root,
                 telemetry_dir=td,
@@ -147,7 +161,10 @@ def record_from_payload(
                 context_out.extend(fleet)
         except Exception:
             pass
-        return log_outcome(tool, rel, session_id=session_id, telemetry_dir=td, cited_by=cited_by)
+        return log_outcome(
+            tool, rel, session_id=session_id, telemetry_dir=td, cited_by=cited_by,
+            tree_path=tree_rel if tree_rel != rel else None,
+        )
     except Exception:
         return False
 
@@ -177,7 +194,8 @@ def _injection_join(
     ``hit`` — at the default ``"session"`` grain, one of those cited files was touched in
     the SAME session at/after the memory's earliest recall ts. Both aggregates
     (``injection_precision``, ``injection_hits``) read this so the join semantics can
-    never fork.
+    never fork. MEA-6: touch paths read ``tree_path`` (the record-time worktree
+    normalization) over ``path`` when present.
 
     JIT-2 (T16): ``grain="touch"`` joins on the RECORDED coincidence instead — a touch
     row whose ``cited_by`` field (stamped by the jit lane at touch time) names the
@@ -204,10 +222,12 @@ def _injection_join(
                     injected[key] = ts
         if not injected:
             return {}
-        # session -> [(path, ts, cited_by-or-None)]
+        # session -> [(path, ts, cited_by-or-None)]. MEA-6: prefer the record-time
+        # in-tree normalization when present — a worktree touch of a cited tree path
+        # COUNTS as touching the citation; historical rows (no tree_path) read as before.
         touches: dict = {}
         for o in read_outcomes(td):
-            p = o.get("path")
+            p = o.get("tree_path") or o.get("path")
             if not p:
                 continue
             ts = o.get("ts")
@@ -412,14 +432,15 @@ def format_lane_health(memory_dir: str, telemetry_dir: Optional[str] = None) -> 
     lane would chart zeros and call it signal).
 
     Lane-LEVEL volumes and shares (total rows, cited_by share, distinct sessions,
-    worktree-prefixed share with the would-map-if-stripped count), touchmap coverage
+    worktree-prefixed share with the normalized-vs-historical counts), touchmap coverage
     (cited/reminders map sizes), and the existing both-grains comparison COMPOSED via
     ``format_touch_grain_report`` — extended, never duplicated (a test pins the
     composition). The two verified mechanical reasons for zeros are named in-line:
     live-hook lag (rows written by a pre-T16 installed hook can never carry
-    ``cited_by``) and worktree-prefixed paths (recorded relative to the MAIN root —
-    the FLT-3 coupling; the candidate prefix-strip fix to RECORDING is its own
-    follow-up item, deliberately not smuggled into a report surface).
+    ``cited_by``) and HISTORICAL worktree-prefixed paths (recorded relative to the
+    MAIN root before MEA-6's record-time normalization; new worktree rows carry
+    ``tree_path`` and join directly — the stamped-vs-would-map split is this item's
+    own before/after receipt).
 
     Aggregation stays lane-level or positive-evidence-only (``injection_hits``'s
     shipped shape) — NEVER a per-memory injected-but-never-touched table (the MSR-6 /
@@ -446,8 +467,15 @@ def format_lane_health(memory_dir: str, telemetry_dir: Optional[str] = None) -> 
             reminders_map = cache.get("reminders") or {}
         except Exception:
             pass
+        # MEA-6: stamped rows already join the evidence base at record time; the
+        # would-map count now measures ONLY the historical dark rows (the before/after
+        # receipt this item ships against its own class).
+        stamped = sum(1 for r in rows if r.get("tree_path"))
         mappable = 0
-        for p in wt_paths:
+        for r in rows:
+            p = str(r.get("path") or "")
+            if not p.startswith(_WORKTREE_PREFIX) or r.get("tree_path"):
+                continue
             tail = p[len(_WORKTREE_PREFIX):].split("/", 1)
             if len(tail) == 2 and tail[1] in cited_map:
                 mappable += 1
@@ -456,12 +484,32 @@ def format_lane_health(memory_dir: str, telemetry_dir: Optional[str] = None) -> 
             f"  outcome rows: {total} across {sessions} session(s); {with_cb} carry cited_by touch provenance",
             f"  touchmap: {len(cited_map)} cited path(s) / {len(reminders_map)} reminder path(s)",
         ]
+        # MEA-4: rows by producing version — the forensic complement to OPS-1's skew
+        # line. Historical version-less rows aggregate as ONE "unstamped" bucket, never
+        # backfilled; provenance only, nothing branches on the stamp.
+        if total:
+            from .telemetry import _producer_version
+
+            by_v: dict = {}
+            for r in rows:
+                key = r.get("v") if isinstance(r.get("v"), str) else "unstamped"
+                by_v[key] = by_v.get(key, 0) + 1
+            running = _producer_version() or "unknown"
+            buckets = ", ".join(
+                f"{k}: {n}" for k, n in sorted(by_v.items(), key=lambda kv: (-kv[1], kv[0]))
+            )
+            lines.append(
+                f"  rows by producing version (running v{running}): {buckets} — provenance "
+                "only (MEA-4); rows stamped by an older version date the lagged-hook window "
+                "from the ledger itself"
+            )
         if total:
             share = 100.0 * len(wt_paths) / total
             lines.append(
-                f"  worktree-prefixed rows: {len(wt_paths)} of {total} ({share:.0f}%) — recorded "
-                "relative to the MAIN root, these can never match cited_paths at either grain; "
-                f"{mappable} would map if prefix-stripped"
+                f"  worktree-prefixed rows: {len(wt_paths)} of {total} ({share:.0f}%) — "
+                f"{stamped} carry tree_path (normalized at record time, MEA-6 — these join "
+                f"the touch-grain evidence directly); {mappable} historical row(s) would map "
+                "if prefix-stripped (recorded before normalization; left untouched)"
             )
         if total and not with_cb:
             lines.append(
@@ -469,12 +517,11 @@ def format_lane_health(memory_dir: str, telemetry_dir: Optional[str] = None) -> 
                 "carry provenance (live-hook lag: the lane records only once the INSTALLED "
                 "plugin ships the jit lane and touchmap.json exists)"
             )
-        if wt_paths:
+        if wt_paths and not stamped:
             lines.append(
-                "  diagnosis: worktree-prefixed touches starve the touch-grain joins — couples "
-                "to FLT-3's worktree-first guidance (T18), which would widen this class; the "
-                "candidate prefix-strip fix to recording is its own follow-up item, not this "
-                "surface"
+                "  diagnosis: worktree-prefixed touches starved the touch-grain joins — these "
+                "rows predate MEA-6's record-time normalization (new worktree touches carry "
+                "tree_path and join directly); historical rows stay untouched"
             )
         lines.append("")
         lines.append(format_touch_grain_report(memory_dir, td))

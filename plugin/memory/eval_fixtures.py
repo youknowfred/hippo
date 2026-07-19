@@ -2,8 +2,9 @@
 façade keeps the SIG-6 write gates ``draft_abstention_fixtures``/``confirm_hard_set_row``
 — their crash-contract keys pin them there — plus ``evaluate``/``main``).
 
-This sibling owns the drafts-queue plumbing (paths, note text, YAML-parseability guard)
-and the two T11 deterministic fixture SYNTHESIZERS:
+This sibling owns the drafts-queue plumbing (paths, note text, YAML-parseability guard),
+the MEA-2 lived-in drafter (``draft_livedin_fixtures`` — the fourth lane, positive rows
+from the outcome join), and the two T11 deterministic fixture SYNTHESIZERS:
 
 - **TMB-3** ``draft_forgetting_fixtures`` — one archive-absence candidate per
   ``archive/*.md`` entry (the DIRECTORY LISTING is the enumeration source; the journal
@@ -28,7 +29,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .provenance import ensure_self_ignoring_dir, resolve_dirs
 
@@ -414,6 +415,147 @@ def draft_update_fixtures(
     # INV-2: the drafts queue accumulates human judgments — never leave it torn.
     _append_draft_rows(dp, rows_text)
     return summary
+
+
+# --------------------------------------------------------------------------- #
+# MEA-2: lived-in hard-set drafting — the missing FOURTH lane (positive rows
+# from the outcome join; SIG-6 abstention / TMB-3 forgetting / TMB-4 update
+# were the first three). The flagship finding this closes: every lived-in
+# instrument ran against pack stems at ~3% sensitivity (MEA-1's receipt)
+# while verified (verbatim query → outcome-confirmed memory) pairs sat
+# unread across the ledgers.
+# --------------------------------------------------------------------------- #
+_LIVEDIN_MAX_DRAFTS_PER_RUN = 25  # volume cap per drafting run — strongest evidence first
+# Previews that never draft: harness envelopes and slash-command invocations are session
+# mechanics, not retrieval demand. clean_query's min-content gate handles the terse rest.
+# The envelope prefixes are matched EXPLICITLY (not just delegated to clean_query's
+# envelope-stripping) because query_previews are TRUNCATED at the ledger's preview budget:
+# an unclosed envelope defeats the block regex and its mined ids read as content tokens —
+# the exact shape the first live drain surfaced (23/25 task-notification rows).
+_LIVEDIN_SKIP_PREFIXES = ("<system-reminder", "<task-notification", "<command-name", "/")
+
+
+def draft_livedin_fixtures(
+    memory_dir: Optional[str] = None,
+    *,
+    telemetry_dir: Optional[str] = None,
+    drafts_path: Optional[str] = None,
+) -> dict:
+    """MEA-2: queue outcome-confirmed lived-in retrievals as CANDIDATE hard-set rows.
+
+    Joins episode ``query_preview``s to session-grain ``_injection_join`` hits — a
+    (query, memory) pair drafts only when that memory was INJECTED in the session AND
+    one of its cited files was touched at/after injection (the ONE sanctioned join,
+    MSR-6; never a second join, never a per-memory table). Queries ride VERBATIM —
+    zero LLM, zero rewording, zero templating (the templated-fixture kill); the only
+    filters are deterministic noise gates (``clean_query`` min-content;
+    system-reminder/slash-command prefixes). Rows aggregate per query
+    (``derived_expected`` = every outcome-confirmed memory for it, the TMB-4
+    evidence-suggestion convention; ``expected`` always empty), capped per run at
+    ``_LIVEDIN_MAX_DRAFTS_PER_RUN`` (most distinct hit-sessions first, then query —
+    deterministic), and deduplicated against tracked queries (both polarities) AND
+    queued drafts. Admission stays per-item ``confirm_hard_set_row(query, [stems],
+    category='single-hop')`` — this function only APPENDS to the SEC-3 pending queue
+    (inv4: no bulk path). Distinct by construction from the round-1 demand-gap kill:
+    rows derive from recorded evidence about memories that already exist; nothing
+    generates memory content. ``{path, hit_pairs, added, kept, skipped_noise}``;
+    absence of candidates appends nothing (no file created).
+    """
+    from .eval_metrics import _load_fixture_docs
+    from .outcome import _injection_join
+    from .recall_query import clean_query
+    from .telemetry import default_telemetry_dir, read_episodes
+
+    if memory_dir is None:
+        memory_dir, _repo = resolve_dirs()
+    td = telemetry_dir or default_telemetry_dir(memory_dir)
+    dp = drafts_path or default_drafts_path(memory_dir)
+
+    join = _injection_join(memory_dir, td)
+    hits = {key for key, rec in join.items() if rec.get("hit")}
+    tracked = _tracked_queries(memory_dir)
+    _meta, existing_rows = _load_fixture_docs(dp)
+    drafted = {(r.get("query") or "").strip() for r in existing_rows if isinstance(r, dict)}
+
+    by_query: Dict[str, dict] = {}
+    hit_pairs = 0
+    skipped_noise = 0
+    for e in read_episodes(td):
+        sid = e.get("session_id")
+        q = (e.get("query_preview") or "").strip()
+        if not q:
+            continue
+        names = [n for n in (e.get("recalled_names") or []) if n and (sid, n) in hits]
+        if not names:
+            continue
+        hit_pairs += len(names)
+        if q.startswith(_LIVEDIN_SKIP_PREFIXES) or not clean_query(q):
+            skipped_noise += 1
+            continue
+        if q in tracked or q in drafted:
+            continue
+        rec = by_query.setdefault(q, {"stems": set(), "sessions": set()})
+        rec["stems"].update(names)
+        rec["sessions"].add(sid)
+
+    ranked = sorted(by_query.items(), key=lambda kv: (-len(kv[1]["sessions"]), kv[0]))
+    added = [
+        {"query": q, "stems": sorted(rec["stems"]), "sessions": len(rec["sessions"])}
+        for q, rec in ranked[:_LIVEDIN_MAX_DRAFTS_PER_RUN]
+    ]
+
+    summary = {
+        "path": dp,
+        "hit_pairs": hit_pairs,
+        "added": [r["query"] for r in added],
+        "kept": len(existing_rows),
+        "skipped_noise": skipped_noise,
+    }
+    if not added:
+        return summary
+    if os.path.exists(dp) and not _parseable_yaml(dp):
+        summary["added"] = []
+        summary["error"] = (
+            "drafts file exists but is not parseable YAML — fix or delete it before "
+            "drafting more rows"
+        )
+        return summary
+    rows_text = "".join(
+        f"- query: {json.dumps(r['query'], ensure_ascii=False)}\n"
+        f"  derived_expected: [{', '.join(json.dumps(s, ensure_ascii=False) for s in r['stems'])}]\n"
+        f"  kind: \"lived-in\"\n"
+        f"  sessions: {r['sessions']}\n"
+        f"  expected: []\n"
+        for r in added
+    )
+    # INV-2: the drafts queue accumulates human judgments — never leave it torn.
+    _append_draft_rows(dp, rows_text)
+    return summary
+
+
+def run_draft_livedin_cli(memory_dir: Optional[str]) -> int:
+    """The ``eval_recall --draft-livedin`` mode body (drafts only)."""
+    summary = draft_livedin_fixtures(memory_dir)
+    if summary.get("error"):
+        print(f"draft-livedin: {summary['error']}")
+        return 1
+    if not summary["hit_pairs"]:
+        print("draft-livedin: no outcome-confirmed (query, memory) pairs in the ledgers yet.")
+        return 0
+    print(
+        f"draft-livedin: {summary['hit_pairs']} outcome-confirmed pair(s), "
+        f"{len(summary['added'])} new draft row(s) appended to {summary['path']} "
+        f"({summary['kept']} existing draft(s) preserved verbatim, "
+        f"{summary['skipped_noise']} noise preview(s) skipped)."
+    )
+    for q in summary["added"]:
+        print(f"  drafted: \"{q}\"")
+    if summary["added"]:
+        print(
+            "  confirm each PER ITEM via eval_recall.confirm_hard_set_row(query, "
+            "[<stems>], category='single-hop') — judge derived_expected first; never in bulk."
+        )
+    return 0
 
 
 def run_draft_update_cli(memory_dir: Optional[str], index_dir: Optional[str]) -> int:

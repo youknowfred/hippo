@@ -672,3 +672,38 @@ def hard_set_metrics_by_category(
         )
         for cat, items in sorted(buckets.items())
     }
+
+
+def resolvable_row(names: set, row: dict) -> bool:
+    """MEA-1 (inv5): the ONE stem-existence predicate — does ANY expected stem of this
+    hard-set row exist in the measured corpus (``names`` = the index's entry names)?
+
+    Lifted from ``floor_sweep``'s on-topic filter, which now routes through here (a row
+    whose answer the corpus lacks can only score a silent miss). ``evaluate()`` REPORTS
+    the count (``resolvable_n``); ``floor_sweep`` FILTERS on it — same predicate, two
+    deliberately different uses, implemented exactly once.
+    """
+    return any(stem in names for stem in row.get("expected") or ())
+
+
+def hard_set_resolvability(index: LoadedIndex, hard_set: List[dict]) -> Dict[str, Dict[str, int]]:
+    """MEA-1 (ED5R-2): per-category ``{resolvable_n, n}`` for ``hard_set`` against THIS
+    corpus — the instrument's own sensitivity, REPORTED never applied.
+
+    ``n`` counts every row (nothing is skipped anywhere on the strength of this number);
+    ``resolvable_n`` counts rows passing ``resolvable_row``. ``{}`` on an empty set.
+    Categories sorted for a deterministic render. The round-5 founding exhibit: the
+    recorded Arm A evidence was measured through a 1-of-32-resolvable fixture (~3%
+    sensitivity) and nothing said so — this helper is what makes that legible.
+    """
+    out: Dict[str, Dict[str, int]] = {}
+    if not hard_set:
+        return out
+    names = {e.get("name") for e in index.entries}
+    for row in hard_set:
+        cat = row.get("category") or _DEFAULT_CATEGORY
+        rec = out.setdefault(cat, {"resolvable_n": 0, "n": 0})
+        rec["n"] += 1
+        if resolvable_row(names, row):
+            rec["resolvable_n"] += 1
+    return dict(sorted(out.items()))

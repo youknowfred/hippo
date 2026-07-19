@@ -64,7 +64,8 @@ computed on BM25 alone (so they run in CI without fastembed). ``main`` exits non
 any gate fails (use it as a pre-merge check).
 
 Decomposed (pure code motion): metric/fixture primitives → ``eval_metrics``; MSR-2/MSR-4
-arms, latency probes, GRF-4 → ``eval_arms``; MSR-1 fingerprints/diff → ``eval_ledger``.
+arms, latency probes, GRF-4 → ``eval_arms``; MSR-1 fingerprints/diff → ``eval_ledger``;
+SEN-4 adversarial probe → ``eval_adversarial`` (ED5R-3, split BEFORE MEA-1/MEA-5 needed lines).
 """
 
 from __future__ import annotations
@@ -277,15 +278,27 @@ from .eval_fixtures import (  # drafts-queue plumbing + the T11 synthesizers (fa
     _project_fixture_path,
     default_drafts_path,
     draft_forgetting_fixtures,
+    draft_livedin_fixtures,
     draft_update_fixtures,
     run_draft_forgetting_cli,
+    run_draft_livedin_cli,
     run_draft_update_cli,
     validate_confirm_row_kind,
+)
+from .eval_adversarial import (  # SEN-4 adversarial probe (façade re-exports; ED5R-3 split)
+    _ADVERSARIAL_DIRNAME,
+    _ADVERSARIAL_MANIFEST,
+    _adversarial_fixture_dir,
+    _render_clean_fixture,
+    _sec6_withheld_via_real_recall,
+    adversarial_report,
 )
 from .eval_ledger import read_run_ledger
 from .eval_metrics import (
     absence_polarity_metrics,
+    hard_set_resolvability,
     load_absence_rows,
+    resolvable_row,
     t11_category_lines,
     update_category_metrics,
 )
@@ -816,6 +829,13 @@ def evaluate(
         if hard_set
         else {}
     )
+    # MEA-1 (ED5R-2): the instrument states its own sensitivity — per-category
+    # resolvable_n vs n, REPORTED never applied (no row skipped, no gate moved).
+    # Absence-emits-nothing (ED-4): the key appears only when some row is UNresolvable,
+    # so a fully-resolvable run (the CI/golden pack fixtures) stays byte-identical.
+    resolvability = hard_set_resolvability(index, hard_set) if hard_set else {}
+    if all(r["resolvable_n"] == r["n"] for r in resolvability.values()):
+        resolvability = {}
     return {
         "ok": all(g["pass"] for g in gates.values() if g.get("pass") is not None),
         "dense_ready": index.dense_ready,
@@ -823,6 +843,7 @@ def evaluate(
         "count": len(index),
         "hard_set_n": hs["n"],
         "by_category": by_category,
+        **({"resolvability": resolvability} if resolvability else {}),
         **({"forgetting": forgetting} if forgetting else {}),
         **({"update_knowledge": update_knowledge} if update_knowledge else {}),
         **({"miss_autopsy": autopsy} if autopsy else {}),
@@ -948,201 +969,6 @@ def write_baseline(
         return {"ok": True, "path": path}
     except Exception as exc:
         return {"ok": False, "error": f"baseline write failed: {exc}"}
-
-
-# --------------------------------------------------------------------------- #
-# SEN-4: the adversarial coverage report — acceptance-TEST the shipped trust spine.
-#
-# The v0.8.0 spine (SEC-5/6/7) shipped with no adversarial regression harness; a defense
-# with no poisoned fixtures is unproven. This report loads a poisoned-memory fixture corpus
-# (memory .md files under .audit-fixtures/adversarial/, NOT hard_set rows) and, per poisoned
-# fixture, emits FIVE deterministic booleans BY DRIVING THE SHIPPED CODE — no re-implemented
-# spine, no LLM:
-#   payload_crossed_raw     — the payload appears verbatim in recall.format_results output
-#                             (reached context, as demarcated DATA — worded as "crossed", not
-#                             "injection success")
-#   sec6_quarantine_withheld— a post-consent drift of this file is WITHHELD by a real recall()
-#                             through the SEC-6 quarantine path (None when the fixture declares
-#                             no clean pre-poison state — that vector isn't being tested)
-#   sec5_consent_byte_equal — trust.corpus_consent_sample shows this file's injectable
-#                             description byte-equal to recall.inject_description (SEC-5 parity)
-#   threat_lint_flagged     — threat_lint.scan_tier_a (SEN-2) flags the payload
-#   admitted                — the poisoned memory was admitted (knee/floor/MMR) for its query
-#
-# Report-only, skip-if-no-fixture, never gates CI on its own. ZERO eval_recall loader change
-# (this is a standalone mode, like --floor-sweep). The always-on spotlighting envelope is CUT
-# (a per-session delimiter cannot REDUCE crossing — deferred as boundary-spoof-resistance).
-# --------------------------------------------------------------------------- #
-_ADVERSARIAL_DIRNAME = "adversarial"
-_ADVERSARIAL_MANIFEST = "manifest.json"
-
-
-def _adversarial_fixture_dir(memory_dir: Optional[str] = None) -> Optional[str]:
-    """``.audit-fixtures/adversarial/`` when it exists (with a manifest), else None (skip)."""
-    try:
-        if memory_dir is None:
-            memory_dir, _ = resolve_dirs()
-        d = os.path.join(memory_dir, ".audit-fixtures", _ADVERSARIAL_DIRNAME)
-        if os.path.isdir(d) and os.path.isfile(os.path.join(d, _ADVERSARIAL_MANIFEST)):
-            return d
-    except Exception:
-        return None
-    return None
-
-
-def _sec6_withheld_via_real_recall(name: str, clean_text: str, poisoned_text: str, query: str) -> bool:
-    """Drive the REAL SEC-6 path: consent to the clean file, drift it to poisoned, recall.
-
-    Builds a throwaway git repo carrying ONLY the clean version of ``name``, marks it trusted
-    (stamping the consent fingerprint over the clean bytes), then overwrites it with the
-    poisoned bytes. Runs a real memory_dir recall (index is None → the SEC-6 quarantine branch
-    is live) TWICE for a SOUND verdict: with quarantine OFF (HIPPO_TRUST_ALL) the drifted file
-    must be admitted (proving the query genuinely matches it), and with quarantine ON it must
-    be WITHHELD. Returns True only when both hold — so "withheld" can never mean "just didn't
-    rank." Never raises; False on any setup failure (fail-open in the REPORT is honest — it
-    means "not demonstrated," not "safe").
-    """
-    import subprocess
-    import tempfile
-
-    from . import trust
-    from .build_index import build_index
-    from .recall import recall
-
-    tmp = tempfile.mkdtemp(prefix="hippo-adv-sec6-")
-    try:
-        md = os.path.join(tmp, ".claude", "memory")
-        os.makedirs(md)
-        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@e",
-               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@e"}
-        subprocess.run(["git", "init", "-q", tmp], check=True, capture_output=True, env=env)
-        fpath = os.path.join(md, f"{name}.md")
-        with open(fpath, "w", encoding="utf-8") as fh:
-            fh.write(clean_text)
-        subprocess.run(["git", "-C", tmp, "add", "-A"], check=True, capture_output=True, env=env)
-        subprocess.run(["git", "-C", tmp, "commit", "-qm", "clean"], check=True, capture_output=True, env=env)
-        idx = os.path.join(tmp, ".claude", ".memory-index")
-        build_index(md, idx)
-        # Consent to the CLEAN corpus (stamps the per-file sha256 baseline).
-        trust.mark_trusted(tmp, memory_dir=md, origin="review")
-        # DRIFT: overwrite with the poisoned bytes (bytes now differ from the consent baseline).
-        with open(fpath, "w", encoding="utf-8") as fh:
-            fh.write(poisoned_text)
-        build_index(md, idx)
-
-        def _recalls(trust_all: bool) -> set:
-            prior = os.environ.get("HIPPO_TRUST_ALL")
-            if trust_all:
-                os.environ["HIPPO_TRUST_ALL"] = "1"
-            else:
-                os.environ.pop("HIPPO_TRUST_ALL", None)
-            try:
-                return {r.get("name") for r in recall(query, k=10, memory_dir=md, index_dir=idx, repo_root=tmp)}
-            finally:
-                if prior is None:
-                    os.environ.pop("HIPPO_TRUST_ALL", None)
-                else:
-                    os.environ["HIPPO_TRUST_ALL"] = prior
-
-        admitted_no_quarantine = name in _recalls(trust_all=True)   # quarantine OFF
-        withheld_with_quarantine = name not in _recalls(trust_all=False)  # quarantine ON
-        return admitted_no_quarantine and withheld_with_quarantine
-    except Exception:
-        return False
-    finally:
-        import shutil
-
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
-def adversarial_report(fixture_dir: Optional[str] = None) -> dict:
-    """Five-boolean coverage per poisoned fixture, by driving the shipped spine. Report-only.
-
-    ``{"skipped": reason}`` when no fixture corpus exists (absent = skip, never a failure), else
-    ``{"rows": [{name, query, payload_crossed_raw, sec6_quarantine_withheld,
-    sec5_consent_byte_equal, threat_lint_flagged, admitted}], "totals": {...}}``. Never raises.
-    """
-    from . import trust
-    from .build_index import build_index, load_index
-    from .provenance import parse_frontmatter, split_frontmatter
-    from .recall import format_results, inject_description, recall
-    from .threat_lint import scan_tier_a
-
-    d = fixture_dir or _adversarial_fixture_dir()
-    if not d:
-        return {"skipped": "no .audit-fixtures/adversarial fixture corpus"}
-    try:
-        with open(os.path.join(d, _ADVERSARIAL_MANIFEST), "r", encoding="utf-8") as fh:
-            manifest = json.load(fh)
-        fixtures = manifest.get("fixtures") if isinstance(manifest, dict) else None
-        if not isinstance(fixtures, list) or not fixtures:
-            return {"skipped": "adversarial manifest carries no fixtures"}
-        # ONE index over the poisoned corpus; supplied-index recall bypasses the trust gate
-        # (measures raw ranking behavior against the poison — the crossing/admission arms).
-        idx = os.path.join(d, ".idx")
-        build_index(d, idx)
-        index = load_index(idx)
-        rows: List[dict] = []
-        for fx in fixtures:
-            name = str(fx.get("name") or "").strip()
-            query = str(fx.get("query") or "").strip()
-            payload = str(fx.get("payload") or "")
-            clean_desc = fx.get("clean_description")
-            fpath = os.path.join(d, f"{name}.md")
-            if not name or not os.path.isfile(fpath):
-                continue
-            with open(fpath, "r", encoding="utf-8") as fh:
-                text = fh.read()
-            fm = parse_frontmatter(text)
-            desc = str(fm.get("description") or "")
-            _, body = split_frontmatter(text)
-            results = recall(query, k=10, index=index, index_dir=idx, memory_dir=d) if query else []
-            rendered = format_results(results)
-            crows = trust.corpus_consent_sample(d, stems=[name])
-            sec5 = bool(crows) and crows[0].get("description") == inject_description(desc)
-            sec6: Optional[bool] = None
-            if isinstance(clean_desc, str):
-                clean_text = _render_clean_fixture(text, desc, clean_desc)
-                sec6 = _sec6_withheld_via_real_recall(name, clean_text, text, query or desc)
-            # Scan the UNESCAPED description + body — the actual injectable/recallable surface
-            # (the file's frontmatter json-escapes an invisible codepoint to ASCII, but it
-            # unescapes back to the real byte on inject; see the SEN-2 write-ticket note).
-            rows.append({
-                "name": name,
-                "query": query,
-                "payload_crossed_raw": bool(payload) and payload in rendered,
-                "sec6_quarantine_withheld": sec6,
-                "sec5_consent_byte_equal": sec5,
-                "threat_lint_flagged": bool(scan_tier_a(f"{desc}\n{body}")),
-                "admitted": name in {r.get("name") for r in results},
-            })
-        totals = {
-            "n": len(rows),
-            "crossed": sum(1 for r in rows if r["payload_crossed_raw"]),
-            "sec6_withheld": sum(1 for r in rows if r["sec6_quarantine_withheld"] is True),
-            "sec5_byte_equal": sum(1 for r in rows if r["sec5_consent_byte_equal"]),
-            "threat_flagged": sum(1 for r in rows if r["threat_lint_flagged"]),
-            "admitted": sum(1 for r in rows if r["admitted"]),
-        }
-        return {"rows": rows, "totals": totals}
-    except Exception as exc:
-        return {"skipped": f"adversarial report error: {exc}"}
-
-
-def _render_clean_fixture(poisoned_text: str, poisoned_desc: str, clean_desc: str) -> str:
-    """The pre-poison version of a fixture: its description swapped back to the clean one.
-
-    The SEC-6 drift arm needs a clean baseline that differs from the poisoned file only in the
-    poisoned span. Swapping the JSON-quoted description line is the minimal, deterministic
-    reconstruction (the fixture author states the clean description in the manifest).
-    """
-    import json as _json
-
-    return poisoned_text.replace(
-        f"description: {_json.dumps(poisoned_desc)}",
-        f"description: {_json.dumps(clean_desc)}",
-        1,
-    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1275,7 +1101,7 @@ def floor_sweep(
         row["query"]
         for row in hard_set
         if (row.get("category") or _DEFAULT_CATEGORY) != "abstention"
-        and any(stem in names for stem in row.get("expected") or ())
+        and resolvable_row(names, row)  # MEA-1: the ONE shared predicate (inv5)
     ]
     if not on_queries or not probes:
         return {
@@ -1562,6 +1388,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         "spans of the superseded file; zero LLM, fail closed); confirm each per item via "
         "confirm_hard_set_row(query, [tip], category='update', superseded=<corpse>)",
     )
+    parser.add_argument(
+        "--draft-livedin",
+        action="store_true",
+        help="MEA-2: queue outcome-confirmed lived-in retrievals (verbatim episode query "
+        "x session-grain injection hit) as DRAFT rows — the fourth lane (zero LLM, "
+        "deterministic noise filters, volume-capped); confirm each per item via "
+        "confirm_hard_set_row(query, [stems], category='single-hop')",
+    )
     args, ab_extra = parser.parse_known_args(argv)
     if args.ab is None and ab_extra:
         # Extras are pass-through ONLY under --ab; the plain eval keeps strict parsing.
@@ -1576,12 +1410,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.ab not in AB_FLAGS:
             print(f"eval --ab: unknown flag {args.ab!r} (whitelist: {', '.join(AB_FLAGS)}).")
             return 2
-        if args.ab == "HIPPO_SALIENCE":
-            # MSR-5: the ED-2 salience-revisit rig (memory.salience_eval) — measures
-            # only, never flips the default. Forward the eval-level corpus/fixture
-            # args (they are parsed HERE, so they never appear in ab_extra).
-            from .salience_eval import main as _salience_ab_main
 
+        def _ab_forward() -> List[str]:
+            # Forward the eval-level corpus/fixture args (they are parsed HERE, so
+            # they never appear in ab_extra) — shared by the flag-context harnesses.
             fwd: List[str] = list(ab_extra or [])
             ambient = args.memory_dir is None
             if args.memory_dir:
@@ -1595,7 +1427,20 @@ def main(argv: Optional[List[str]] = None) -> int:
                 fwd += ["--telemetry-dir", args.telemetry_dir]
             if args.k != 10:
                 fwd += ["-k", str(args.k)]
-            return _salience_ab_main(fwd)
+            return fwd
+
+        if args.ab == "HIPPO_SALIENCE":
+            # MSR-5: the ED-2 salience-revisit rig (memory.salience_eval) — measures
+            # only, never flips the default.
+            from .salience_eval import main as _salience_ab_main
+
+            return _salience_ab_main(_ab_forward())
+        if args.ab == "HIPPO_OUTCOME_PRIOR":
+            # MEA-5: the EVD-4 Arm B rig (memory.outcome_prior_eval) — measures the
+            # EXISTING RET-14 flag only; nothing flips (ED-2/LIF-7).
+            from .outcome_prior_eval import main as _outcome_ab_main
+
+            return _outcome_ab_main(_ab_forward())
         return _dream_ab_main((ab_extra or []) + (["-k", str(args.k)] if args.k != 10 else []))
 
     # MSR-1: the pass^k probe is its own mode (like --calibrate) — it spawns fresh
@@ -1691,6 +1536,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_draft_forgetting_cli(args.memory_dir)
     if args.draft_update:
         return run_draft_update_cli(args.memory_dir, args.index_dir)
+    if args.draft_livedin:
+        return run_draft_livedin_cli(args.memory_dir)
 
     if args.adversarial:
         rep = adversarial_report(_adversarial_fixture_dir(args.memory_dir))
@@ -1810,6 +1657,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(
             f"  category {cat:11s} recall@{args.k}={m['recall']:.4f} mrr@{args.k}={m['mrr']:.4f} "
             f"n={m['n']} (RET-8)"
+        )
+    # MEA-1 (ED5R-2): the sensitivity line — present only when some fixture row cannot
+    # resolve against this corpus (absence-emits-nothing keeps healthy output unchanged).
+    resv = report.get("resolvability") or {}
+    if resv:
+        tot_r = sum(v["resolvable_n"] for v in resv.values())
+        tot_n = sum(v["n"] for v in resv.values())
+        cats = ", ".join(f"{c} {v['resolvable_n']}/{v['n']}" for c, v in resv.items())
+        print(
+            f"  SENSITIVITY (ED5R-2): {tot_r}/{tot_n} fixture row(s) resolvable against this "
+            f"corpus ({cats}) — unresolvable rows can only score as misses; reported, never "
+            "skipped, and no gate moves on it"
         )
     for line in t11_category_lines(report, args.k):  # TMB-3/TMB-4, report-only
         print(line)

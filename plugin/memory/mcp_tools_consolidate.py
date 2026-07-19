@@ -552,13 +552,40 @@ def _tool_co_recall_proposals(args: Dict[str, Any]) -> str:
             "no co-recall pairs above threshold — the sparse map stays empty (by design; "
             "already-linked pairs are dropped and floor names are excluded)"
         )
+    # MEA-3: the null model at the proposal surface — propose only pairs whose lift beats
+    # the floor; collapse the chance-level rest into ONE countable line (inv3: suppressed,
+    # never invisible). Deparasite's two reads keep RAW counts (permissive-protection
+    # default — recorded on the item); cap and ordering untouched this round.
+    from .telemetry import _CORECALL_LIFT_FLOOR
+
+    strong = [p for p in fresh if p.get("lift") is None or p["lift"] >= _CORECALL_LIFT_FLOOR]
+    weak = [p for p in fresh if p.get("lift") is not None and p["lift"] < _CORECALL_LIFT_FLOOR]
+    suppressed_line = (
+        f"  {len(weak)} chance-level pair(s) suppressed — lift < {_CORECALL_LIFT_FLOOR} "
+        "(observed ≈ expected from the members' own session frequencies: a frequency "
+        "confound, not an association; countable here, never invisible)"
+    )
+    if not strong:
+        return (
+            "no co-recall pairs above the lift floor — nothing proposed:\n"
+            + suppressed_line
+            + "\nRaw counts still feed deparasite's protection read unchanged (the "
+            "permissive default); no edge proposal is manufactured from a frequency confound."
+        )
     out = [
-        f"{len(fresh)} co-recall edge proposal(s) — pairs that surfaced together across "
-        "distinct sessions (already-linked pairs dropped, floor names excluded):"
+        f"{len(strong)} co-recall edge proposal(s) — pairs that surfaced together across "
+        "distinct sessions ABOVE chance (already-linked pairs dropped, floor names excluded):"
     ]
-    for p in fresh:
+    for p in strong:
         a, b = p["pair"]
-        out.append(f"  {a} <-> {b}   (co-recalled in {p['sessions']} distinct sessions)")
+        ms = p.get("member_sessions") or {}
+        uni = p.get("session_universe")
+        detail = f"lift {p['lift']} vs independence" if p.get("lift") is not None else "lift n/a"
+        if uni:
+            detail += f"; {a} in {ms.get(a)}/{uni}, {b} in {ms.get(b)}/{uni} sessions"
+        out.append(f"  {a} <-> {b}   (co-recalled in {p['sessions']} distinct sessions; {detail})")
+    if weak:
+        out.append(suppressed_line)
     out.append(
         "For EACH pair: read both memories and judge whether the association is real — "
         "would someone recalling one genuinely need the other? On explicit approval, append "
@@ -586,13 +613,19 @@ def _tool_abstention_fixtures(args: Dict[str, Any]) -> str:
         )
     action = str(args.get("action") or "draft").strip().lower()
     if action == "draft":
-        from .eval_recall import draft_abstention_fixtures
+        from .eval_recall import draft_abstention_fixtures, draft_livedin_fixtures
 
         r = draft_abstention_fixtures()
+        # MEA-2: the fourth lane refreshes in the same cold-path step — outcome-confirmed
+        # verbatim queries into the SAME pending queue; same per-item confirm gate.
+        lv = draft_livedin_fixtures()
         return (
             "abstention drafts refreshed — unconfirmed rows (expected: []) are gitignored "
             "queue state; nothing is tracked until a per-item confirm:\n"
             + json.dumps(r, indent=2)
+            + "\nlived-in drafts refreshed (MEA-2, the fourth lane — outcome-confirmed "
+            "verbatim queries; judge derived_expected, confirm with category='single-hop'):\n"
+            + json.dumps(lv, indent=2)
         )
     if action == "confirm":
         from .eval_recall import confirm_hard_set_row

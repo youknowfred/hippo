@@ -80,6 +80,7 @@ from .doctor_checks_corpus import (
     _NON_ENGLISH_ALPHA_FRACTION,
     _is_latin_alpha,
     check_non_english_corpus,
+    check_producer_versions,
 )
 from .doctor_checks_lifecycle import (
     check_invalid_after_terminal,
@@ -369,6 +370,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("merge_digest", check_merge_digest),  # CLB-4: incoming-merge duplicate pairs, human-routed
     ("team_coverage", check_team_coverage),  # CLB-2: last_verified lit up + verified_by coverage (suppressed solo)
     ("foreign_dialects", check_foreign_dialects),  # IOP-1: foreign rule dialects censused + divergence/rot (on-demand only)
+    ("producer_versions", check_producer_versions),  # MEA-4: evidence rows by producing plugin version (provenance only)
     ("machine_state", check_machine_state),  # HYG-3: warn-on-DEAD-only census summary; sleep inherits free
     ("subset_boundary", check_subset_boundary),  # PUB-3: committed-subset link honesty; never a gate
     ("stale_memobot_env", check_stale_memobot_env),  # pinned last (env hygiene trails)

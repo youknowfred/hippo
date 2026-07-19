@@ -706,7 +706,7 @@ def test_co_recall_pairs_needs_min_distinct_sessions(tmp_path):
     for sid in ("s1", "s2", "s3"):
         _co_session(td, sid, ["bug_workaround", "proxy_quirk"])
     pairs = T.co_recall_pairs(td)
-    assert pairs == [{"pair": ["bug_workaround", "proxy_quirk"], "sessions": 3}]
+    assert [(p["pair"], p["sessions"]) for p in pairs] == [(["bug_workaround", "proxy_quirk"], 3)]
 
 
 def test_co_recall_below_threshold_proposes_nothing(tmp_path):
@@ -723,7 +723,8 @@ def test_chatty_single_session_counts_once(tmp_path):
     for _ in range(5):
         _co_session(td, "one-long-session", ["a", "b"])
     assert T.co_recall_pairs(td, min_sessions=2) == []
-    assert T.co_recall_pairs(td, min_sessions=1) == [{"pair": ["a", "b"], "sessions": 1}]
+    (rec,) = T.co_recall_pairs(td, min_sessions=1)
+    assert (rec["pair"], rec["sessions"]) == (["a", "b"], 1)
 
 
 def test_co_recall_unions_names_within_a_session(tmp_path):
@@ -732,7 +733,8 @@ def test_co_recall_unions_names_within_a_session(tmp_path):
     for sid in ("s1", "s2", "s3"):
         _co_session(td, sid, ["a"])
         _co_session(td, sid, ["b"])
-    assert T.co_recall_pairs(td) == [{"pair": ["a", "b"], "sessions": 3}]
+    (rec,) = T.co_recall_pairs(td)
+    assert (rec["pair"], rec["sessions"]) == (["a", "b"], 3)
 
 
 def test_co_recall_excludes_floor_names(tmp_path):
@@ -742,7 +744,7 @@ def test_co_recall_excludes_floor_names(tmp_path):
     for sid in ("s1", "s2", "s3"):
         _co_session(td, sid, ["floor_note", "a", "b"])
     pairs = T.co_recall_pairs(td, exclude_names={"floor_note"})
-    assert pairs == [{"pair": ["a", "b"], "sessions": 3}]
+    assert [(p["pair"], p["sessions"]) for p in pairs] == [(["a", "b"], 3)]
     assert all("floor_note" not in p["pair"] for p in pairs)
 
 

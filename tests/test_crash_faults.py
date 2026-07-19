@@ -67,6 +67,7 @@ CRASH_CONTRACT = {
     ("eval_recall", "write_baseline"): ("detected",),  # MSR-1 pin: error named, no torn baseline
     ("eval_recall", "write_floor_sweep"): ("detected",),  # GRF-3: error named, no torn sweep report
     ("salience_eval", "write_report"): ("detected",),  # MSR-5: error named, no torn A/B evidence
+    ("outcome_prior_eval", "write_report"): ("detected",),  # MEA-5: error named, no torn A/B evidence
     ("init_project", "_copy_if_absent"): ("detected",),  # seed copy: raises; no partial file
     ("init_project", "init_project"): ("detected",),  # fresh .format stamp
     ("interview", "_write_state"): ("detected",),  # a lost decline is NAMED, never pretended recorded
@@ -356,6 +357,18 @@ def scn_salience_write_report_detected(tmp_path, monkeypatch):
     doc = {"ok": True, "schema": 1, "deltas": {}}
     before = _snap(path)
     _arm(monkeypatch, "salience_eval", "write_report")
+    res = write_report(doc, path)
+    _assert_unchanged(before)  # no torn evidence — an absent report stays absent
+    assert res.get("ok") is False and "report write failed" in res.get("error", "")
+
+
+def scn_outcome_prior_write_report_detected(tmp_path, monkeypatch):
+    from memory.outcome_prior_eval import write_report
+
+    path = str(tmp_path / "telemetry" / "outcome_prior_ab.json")
+    doc = {"ok": True, "schema": 1, "deltas": {}}
+    before = _snap(path)
+    _arm(monkeypatch, "outcome_prior_eval", "write_report")
     res = write_report(doc, path)
     _assert_unchanged(before)  # no torn evidence — an absent report stays absent
     assert res.get("ok") is False and "report write failed" in res.get("error", "")
@@ -871,6 +884,7 @@ _SCENARIOS = [
     (("eval_recall", "write_baseline"), "detected", scn_eval_write_baseline_detected),
     (("eval_recall", "write_floor_sweep"), "detected", scn_eval_write_floor_sweep_detected),
     (("salience_eval", "write_report"), "detected", scn_salience_write_report_detected),
+    (("outcome_prior_eval", "write_report"), "detected", scn_outcome_prior_write_report_detected),
     (("init_project", "_copy_if_absent"), "detected", scn_init_copy_detected),
     (("init_project", "init_project"), "detected", scn_init_project_stamp_detected),
     (("interview", "_write_state"), "detected", scn_interview_state_detected),
