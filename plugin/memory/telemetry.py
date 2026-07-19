@@ -835,6 +835,7 @@ def log_outcome(
     session_id: Optional[str] = None,
     telemetry_dir: Optional[str] = None,
     cited_by: Optional[List[str]] = None,
+    tree_path: Optional[str] = None,
 ) -> bool:
     """Append ONE file-touch outcome to ``outcome_events.jsonl``. Fire-and-forget; never raises.
 
@@ -845,6 +846,12 @@ def log_outcome(
     existing session-grain consumers read rows exactly as before. The caller bounds the
     volume (``jit.MAX_PROVENANCE_ROWS_PER_SESSION`` / ``MAX_CITED_PER_PATH``); this
     function stays a dumb appender.
+
+    ``tree_path`` (MEA-6) is the worktree touch's in-tree normalization — the repo-relative
+    tail the caller derived from ``outcome._WORKTREE_PREFIX``. Additive and sparse (ED-4):
+    the raw ``path`` is always preserved; the field rides only when the two differ, and
+    read-side joins prefer it when present. No schema bump — a queue-own shape read via
+    ``.get()``.
     """
     try:
         td = _resolve_dir(telemetry_dir)
@@ -857,6 +864,8 @@ def log_outcome(
         }
         if cited_by:
             event["cited_by"] = [str(n) for n in cited_by if n]
+        if tree_path and tree_path != path:
+            event["tree_path"] = tree_path
         v = _producer_version()  # MEA-4: provenance stamp, cached; omitted when unreadable
         if v:
             event["v"] = v
