@@ -391,7 +391,9 @@ def test_semantic_reverify_graduate_clears_flag_and_logs_outcome(repo, memory_di
 
     evs = list(read_reconsolidation_events(td))
     assert len(evs) == 1
-    assert evs[0] == {"ts": evs[0]["ts"], "name": "m_a", "outcome": "graduate"}
+    # MEA-4: rows carry the producer-version stamp (self-referential like ts — the
+    # stamp's own semantics are pinned in test_producer_version.py).
+    assert evs[0] == {"ts": evs[0]["ts"], "name": "m_a", "outcome": "graduate", "v": evs[0]["v"]}
 
 
 def test_semantic_reverify_fix_also_clears_flag(repo, memory_dir):
