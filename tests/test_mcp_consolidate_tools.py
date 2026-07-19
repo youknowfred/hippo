@@ -187,6 +187,21 @@ def test_capture_add_decision_requires_text(corpus):
     assert "required" in _text(_call("capture", {"action": "add_decision"}))
 
 
+def test_capture_add_decision_reply_is_honest_about_attribution(corpus, tmp_path):
+    """WRT-3: this surface never receives the harness session id, so the row is keyed on
+    the shared file token and strict seed-matching can NEVER reach it. The old reply
+    promised exactly that seed-riding — a literal falsehood for every row ever recorded
+    here (the ledger's only two rows, 07-13, died that way). Wording pinned."""
+    text = _text(_call("capture", {"action": "add_decision", "text": "why we chose X"}))
+    assert text == (
+        "decision recorded unattributed — this MCP surface receives no harness session "
+        "id, so the row cannot ride the session-proven decisions list; it will surface "
+        "LABELED as a window-matched decision at the drain of the session whose episode "
+        "span covers it"
+    )
+    assert "will ride this session's capture seed" not in text
+
+
 # --------------------------------------------------------------------------- #
 # secrets_scan — the GRW-1 hard gate as a primitive
 # --------------------------------------------------------------------------- #

@@ -421,3 +421,174 @@ def test_carry_over_reuses_triage_until_the_evidence_changes(repo, monkeypatch):
     p3 = C.write_session_capture("s-carry", memory_dir=md, repo_root=repo)
     assert len(calls) == 2, "changed evidence must re-triage"
     assert _read_seed(p3)["llm_triage"].get("carried_over") is not True
+
+
+# --------------------------------------------------------------------------- #
+# WRT-1 abstain lane — the model gains the right to say "nothing durable here"
+# --------------------------------------------------------------------------- #
+def test_abstain_answer_is_a_valid_triage_not_a_failure(repo, monkeypatch):
+    """{"abstain": true} parses into an honest llm_triage {"abstained": true} — never a
+    parse failure — and the drain listing renders the abstention as such."""
+    md = _corpus(repo)
+    _episode(md, repo, "s-abstain")
+    monkeypatch.setenv("HIPPO_CAPTURE_LLM", "1")
+    monkeypatch.setattr(
+        "memory.llm_client.complete", lambda prompt, *, timeout_s, **kw: '{"abstain": true}'
+    )
+    path = C.write_session_capture("s-abstain", memory_dir=md, repo_root=repo)
+    tri = _read_seed(path)["llm_triage"]
+    assert tri["abstained"] is True
+    assert tri["evidence_sha"] and tri["model"]
+    assert "draft_description" not in tri, "an abstention drafts nothing"
+    listing = C._format_listing([_read_seed(path) | {"_path": path}])
+    assert "ABSTAINED" in listing and "no durable fact" in listing
+    assert "type=?" not in listing, "an abstention must not render as a junk suggestion"
+
+
+def test_forced_answer_clause_replaced_by_abstain_instruction():
+    """The prompt sentence that FORCED a fabrication is gone; the abstain option is in."""
+    prompt = CT._build_prompt({"query_previews": ["q"]}, [])
+    assert "still fill every field" not in prompt
+    assert '{"abstain": true}' in prompt
+
+
+def test_abstained_triage_carries_over_without_rebilling(repo, monkeypatch):
+    """An abstained prior carries over exactly like a drafted one — SubagentStop×N then
+    SessionEnd must not re-bill the API for the same honest 'no'."""
+    md = _corpus(repo)
+    _episode(md, repo, "s-abstain-carry")
+    monkeypatch.setenv("HIPPO_CAPTURE_LLM", "1")
+    calls = []
+
+    def _fake(prompt, *, timeout_s, **kw):
+        calls.append(prompt)
+        return '{"abstain": true}'
+
+    monkeypatch.setattr("memory.llm_client.complete", _fake)
+    p1 = C.write_session_capture("s-abstain-carry", memory_dir=md, repo_root=repo)
+    p2 = C.write_session_capture("s-abstain-carry", memory_dir=md, repo_root=repo)
+    assert p1 == p2 and len(calls) == 1, "unchanged evidence must not re-bill an abstention"
+    tri = _read_seed(p2)["llm_triage"]
+    assert tri["abstained"] is True and tri.get("carried_over") is True
+
+
+# --------------------------------------------------------------------------- #
+# WRT-1 groundedness flag — mechanical doubt over the draft's identifiers
+# --------------------------------------------------------------------------- #
+def _evidence_seed(**over):
+    seed = {
+        "query_previews": ["how do we deploy the web service"],
+        "changed_paths": ["src/app.py"],
+        "recalled_names": [],
+        "decisions": [],
+        "diff_hunks": "",
+        "hunks_secret_flagged": False,
+    }
+    seed.update(over)
+    return seed
+
+
+def test_exhibit_fabricated_pr_above_max_is_flagged(monkeypatch, tmp_path):
+    """Weekly exhibit 1: the '#237 merged' class — a PR number appearing nowhere in the
+    session evidence gets flagged as ungrounded."""
+    md = str(tmp_path / "mem")
+    os.makedirs(md)
+    monkeypatch.setattr(
+        "memory.llm_client.complete",
+        lambda prompt, *, timeout_s, **kw: _good_llm_json(
+            description="PR #237 merged — the retry-budget work landed"
+        ),
+    )
+    tri = CT.enrich_seed(_evidence_seed(), md)
+    assert tri["ungrounded_tokens"] == ["PR #237"]
+
+
+def test_exhibit_wrong_tier_merge_reconstruction_is_flagged(monkeypatch, tmp_path):
+    """Weekly exhibit 2, reconstructed from capture-428d7452 (drained before build, per
+    the tier audit_note): the 07-19 re-stamp session's triage claimed it 'merged T14
+    invariants' — true history (T14 merged 2026-07-16 as PR #57) confabulated onto a
+    session whose evidence was a corpus maintenance pass. The PR ref the draft leans on
+    appears nowhere in that evidence and gets flagged."""
+    md = str(tmp_path / "mem")
+    os.makedirs(md)
+    seed = _evidence_seed(
+        query_previews=["post-v1.27.0 maintenance pass", "re-stamp the t14 graduate verdicts"],
+        changed_paths=[".claude/memory/hippo-enh-t14-invariants.md"],
+        recalled_names=["hippo-enh-t14-invariants"],
+    )
+    monkeypatch.setattr(
+        "memory.llm_client.complete",
+        lambda prompt, *, timeout_s, **kw: _good_llm_json(
+            name="t14-invariants-merged",
+            description="merged the T14 invariants tier (PR #57) into main this session",
+        ),
+    )
+    tri = CT.enrich_seed(seed, md)
+    assert tri["ungrounded_tokens"] == ["PR #57"]
+
+
+def test_grounded_draft_carries_no_ungrounded_key(monkeypatch, tmp_path):
+    """ED-4: identifiers the evidence actually contains do not flag, and a clean draft
+    has NO ungrounded_tokens key at all."""
+    md = str(tmp_path / "mem")
+    os.makedirs(md)
+    seed = _evidence_seed(decisions=["v1.13.0 opened as PR #49; owner merges + tags"])
+    monkeypatch.setattr(
+        "memory.llm_client.complete",
+        lambda prompt, *, timeout_s, **kw: _good_llm_json(
+            description="the batching work landed as PR #49 in v1.13.0"
+        ),
+    )
+    tri = CT.enrich_seed(seed, md)
+    assert "ungrounded_tokens" not in tri
+
+
+def test_identifier_extraction_is_conservative():
+    """The four AC classes extract; an all-digit run (a date/timestamp) is NOT a sha."""
+    pairs = CT._extract_identifiers(
+        "fixed in 8fb1bc0d after PR #57; see https://example.com/x and v1.13.0; dated 20260719"
+    )
+    displays = [d for d, _ in pairs]
+    assert "8fb1bc0d" in displays
+    assert "PR #57" in displays
+    assert "https://example.com/x" in displays
+    assert "v1.13.0" in displays
+    assert "20260719" not in displays, "all-digit sha-likes are dates, not shas — skipped"
+
+
+def test_membership_is_lenient_never_alarmist():
+    """Leniency costs missed catches, never false alarms: bare digits anywhere in the
+    prompt ground a PR ref; a version grounds with or without its leading v."""
+    assert CT._ungrounded_tokens("landed as PR #57", "diff @@ -57,3 +57,4 @@") == []
+    assert CT._ungrounded_tokens("landed as PR #57", "nothing relevant") == ["PR #57"]
+    assert CT._ungrounded_tokens("shipped in v1.13.0", "released 1.13.0 today") == []
+    assert CT._ungrounded_tokens("", "anything") == []
+
+
+def test_groundedness_flag_is_zero_llm_by_structure():
+    """The judged-lanes kill, held by AST: the extraction/membership functions touch no
+    llm_client surface — the flag's whole authority is that it is mechanical."""
+    tree = ast.parse(inspect.getsource(CT))
+    found = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name in (
+            "_extract_identifiers", "_ungrounded_tokens",
+        ):
+            found += 1
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Attribute) and isinstance(sub.value, ast.Name):
+                    assert sub.value.id != "llm_client", f"{node.name} touches llm_client"
+    assert found == 2, "both zero-LLM functions must exist for this pin to bind"
+
+
+def test_listing_renders_ungrounded_warning_beside_secret_flag():
+    listing = C._format_listing([{
+        "session_id": "s", "episode_count": 1, "_path": "/q/capture-s.json",
+        "llm_triage": {
+            "suggested_type": "project", "suggested_name": "x",
+            "draft_description": "merged PR #237", "llm_duplicate_flags": [],
+            "secret_flagged": True, "ungrounded_tokens": ["PR #237"],
+        },
+    }])
+    assert "secret lint flagged the triage text" in listing
+    assert "ungrounded identifiers in the draft" in listing and "PR #237" in listing

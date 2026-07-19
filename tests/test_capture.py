@@ -69,28 +69,33 @@ def test_capture_module_imports_no_corpus_writer():
 
     Checks the real import graph and call graph — the docstrings deliberately NAME new_memory /
     write_memory to explain the gate, so a naive string match would false-positive on the very
-    explanation of the guarantee.
+    explanation of the guarantee. Covers the façade AND its ED5R-3 queue sibling: the firewall
+    is a property of the capture PASS, so a module split must never shrink its scope.
     """
     import ast
 
-    tree = ast.parse(inspect.getsource(C))
-    imported = set()
-    called = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            imported.add(node.module or "")
-            imported.update(a.name for a in node.names)
-        elif isinstance(node, ast.Import):
-            imported.update(a.name for a in node.names)
-        elif isinstance(node, ast.Call):
-            fn = node.func
-            if isinstance(fn, ast.Attribute):
-                called.add(fn.attr)
-            elif isinstance(fn, ast.Name):
-                called.add(fn.id)
-    assert not any("new_memory" in m for m in imported), "capture imports the corpus-writing module"
-    assert "write_memory" not in called, "capture calls the corpus writer"
-    assert not hasattr(C, "write_memory"), "capture must not expose a corpus writer in its namespace"
+    from memory import capture_queue as CQ
+
+    for mod in (C, CQ):
+        tree = ast.parse(inspect.getsource(mod))
+        imported = set()
+        called = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                imported.add(node.module or "")
+                imported.update(a.name for a in node.names)
+            elif isinstance(node, ast.Import):
+                imported.update(a.name for a in node.names)
+            elif isinstance(node, ast.Call):
+                fn = node.func
+                if isinstance(fn, ast.Attribute):
+                    called.add(fn.attr)
+                elif isinstance(fn, ast.Name):
+                    called.add(fn.id)
+        name = mod.__name__
+        assert not any("new_memory" in m for m in imported), f"{name} imports the corpus-writing module"
+        assert "write_memory" not in called, f"{name} calls the corpus writer"
+        assert not hasattr(mod, "write_memory"), f"{name} must not expose a corpus writer in its namespace"
 
 
 def test_pending_dir_is_gitignored(repo):
@@ -325,7 +330,9 @@ def test_main_from_hook_reads_stdin(repo, monkeypatch, capsys):
     rc = C.main(["--from-hook"])
     assert rc == 0
     assert C.pending_count(memory_dir=md) == 1
-    assert capsys.readouterr().out == ""  # silent on the hook path
+    captured = capsys.readouterr()
+    assert captured.out == ""  # stdout stays silent on the hook path (WRT-2: the line is stderr-only)
+    assert captured.err.startswith("captured -> ") and captured.err.count("\n") == 1
 
 
 def test_main_list(repo, monkeypatch, capsys):
@@ -394,6 +401,263 @@ def test_main_add_decision_records_for_next_capture(repo, capsys):
     assert "decision recorded" in capsys.readouterr().out
     seed = json.load(open(C.write_session_capture("cli-sess", memory_dir=md, repo_root=repo)))
     assert seed["decisions"] == ["pin the retry budget at 3 — the user confirmed flakier is worse"]
+
+
+# --------------------------------------------------------------------------- #
+# WRT-3: the dead-letter decision lanes — the strict lane stays strict; a
+# LABELED time-window fallback carries what strict matching can never reach.
+# --------------------------------------------------------------------------- #
+_FILE_TOKEN = "5e4e212ae80f432ca9eac9311d5fdc2e"  # the real dead 07-13 rows' sid shape
+
+
+def _write_rows(path, rows):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as fh:
+        for r in rows:
+            fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+
+def _episode_row(sid, ts):
+    return {"ts": ts, "session_id": sid, "query_preview": "q",
+            "recalled_names": ["m"], "head_commit": None}
+
+
+def test_window_lane_surfaces_file_token_rows_inside_the_span(repo):
+    """The WRT-3 fixture: file-token-keyed decisions (the two dead 07-13 rows' shape,
+    sid=5e4e212a…) whose ts falls inside a harness session's episode span surface under
+    the SEPARATE window_decisions key at that session's drain — while the strict
+    session-proven list stays exactly what strict matching yields (empty here)."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    td = default_telemetry_dir(md)
+    sid = "aaaa1111-2222-3333-4444-555566667777"  # dashed harness id ≠ the file token, ever
+    _write_rows(T._episode_ledger_path(td), [
+        _episode_row(sid, 1_783_961_000.0), _episode_row(sid, 1_783_962_000.0),
+    ])
+    _write_rows(T._decision_ledger_path(td), [
+        {"ts": 1_783_961_559.005, "session_id": _FILE_TOKEN,
+         "text": "INT-13 ratified shape: thin per-item MCP primitives"},
+        {"ts": 1_783_961_559.189, "session_id": _FILE_TOKEN,
+         "text": "v1.13.0 opened as PR #49; owner merges + tags"},
+    ])
+    seed = C.gather_session_context(sid, telemetry_dir=td, memory_dir=md)
+    assert seed is not None
+    assert seed["decisions"] == [], "strict lane must stay sid-equality only"
+    assert seed["window_decisions"] == [
+        "INT-13 ratified shape: thin per-item MCP primitives",
+        "v1.13.0 opened as PR #49; owner merges + tags",
+    ]
+
+
+def test_window_lane_absent_when_none_and_bounded_by_slack(repo):
+    """ED-4: no in-window foreign rows → NO window_decisions key at all. The window is
+    the episode span ± the module-constant slack (no env knob): a row at exactly
+    span+slack is in; one just past it stays dead to this seed."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    td = default_telemetry_dir(md)
+    sid = "bbbb1111-2222-3333-4444-555566667777"
+    _write_rows(T._episode_ledger_path(td), [
+        _episode_row(sid, 10_000.0), _episode_row(sid, 20_000.0),
+    ])
+    slack = C._DECISION_WINDOW_SLACK_S
+    _write_rows(T._decision_ledger_path(td), [
+        {"ts": 20_000.0 + slack + 0.001, "session_id": _FILE_TOKEN, "text": "too late"},
+        {"ts": 10_000.0 - slack - 0.001, "session_id": _FILE_TOKEN, "text": "too early"},
+    ])
+    seed = C.gather_session_context(sid, telemetry_dir=td, memory_dir=md)
+    assert "window_decisions" not in seed, "absent when none (ED-4), never an empty list"
+
+    _write_rows(T._decision_ledger_path(td), [
+        {"ts": 20_000.0 + slack, "session_id": _FILE_TOKEN, "text": "at the boundary"},
+    ])
+    seed = C.gather_session_context(sid, telemetry_dir=td, memory_dir=md)
+    assert seed["window_decisions"] == ["at the boundary"]
+
+
+def test_window_lane_dedups_both_lane_matches_into_strict(repo):
+    """A decision matched by BOTH lanes (same text recorded with the real sid AND as an
+    in-span file-token row) appears once, in the strict lane — and with nothing else to
+    window-match, the window key is absent entirely (ED-4)."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    td = default_telemetry_dir(md)
+    sid = "cccc1111-2222-3333-4444-555566667777"
+    _write_rows(T._episode_ledger_path(td), [
+        _episode_row(sid, 10_000.0), _episode_row(sid, 20_000.0),
+    ])
+    _write_rows(T._decision_ledger_path(td), [
+        {"ts": 15_000.0, "session_id": sid, "text": "ship via the canary lane"},
+        {"ts": 15_100.0, "session_id": _FILE_TOKEN, "text": "ship via the canary lane"},
+    ])
+    seed = C.gather_session_context(sid, telemetry_dir=td, memory_dir=md)
+    assert seed["decisions"] == ["ship via the canary lane"]
+    assert "window_decisions" not in seed
+
+
+def test_seed_shape_pin_no_window_rows_means_todays_exact_keys(repo):
+    """Byte-identity guard for the strict path: a capture with NO window-matched rows
+    (and triage off) produces exactly today's seed keys — the WRT-3 lane is purely
+    additive (ED-4) and the session-proven list is untouched."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    _seed_episode(md, repo, "shape-pin", ["m"], "q")
+    seed = json.load(open(C.write_session_capture("shape-pin", memory_dir=md, repo_root=repo)))
+    assert set(seed.keys()) == {
+        "schema", "kind", "session_id", "head_commit", "head", "changed_paths",
+        "recalled_names", "query_previews", "episode_count", "earliest_ts",
+        "diff_hunks", "hunks_secret_flagged", "hunks_threat_flagged", "decisions",
+        "salience", "reason", "captured_at",
+    }
+
+
+def test_listing_renders_window_decisions_visibly_distinct():
+    """The drain reviewer must always know which evidence class they are ratifying:
+    session-proven and window-matched decisions render on separate, labeled lines."""
+    listing = C._format_listing([{
+        "session_id": "s", "episode_count": 1, "_path": "/q/capture-s.json",
+        "decisions": ["proven decision"],
+        "window_decisions": ["windowed decision"],
+    }])
+    assert "decisions: proven decision" in listing
+    assert "WINDOW-MATCHED, not session-proven" in listing
+    assert "windowed decision" in listing
+    proven_line = next(l for l in listing.splitlines() if "proven decision" in l)
+    assert "windowed" not in proven_line, "the two classes must never share a line"
+
+
+def test_main_add_decision_attributed_reply_unchanged(repo, capsys):
+    """The seed-riding promise survives ONLY on the path that genuinely threads a
+    session id (strict matching then works); wording pinned byte-for-byte."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    rc = C.main(["--add-decision", "x", "--session-id", "s", "--memory-dir", md])
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == (
+        "decision recorded — it will ride this session's capture seed"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# WRT-2: a human-invoked --from-hook run names its outcome — ONE stderr line,
+# stdout untouched, exit 0 always (the wired hooks discard stderr, so live hook
+# behavior is byte-identical; the three formerly-indistinguishable silences end).
+# --------------------------------------------------------------------------- #
+def _run_from_hook(monkeypatch, argv, payload):
+    import io
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+    return C.main(argv)
+
+
+def test_from_hook_success_names_the_seed_path(repo, monkeypatch, capsys):
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    _seed_episode(md, repo, "hooked", ["m"], "q")
+    rc = _run_from_hook(
+        monkeypatch, ["--from-hook", "--memory-dir", md, "--repo-root", repo],
+        {"session_id": "hooked", "reason": "clear"},
+    )
+    captured = capsys.readouterr()
+    seeds = C.read_pending(memory_dir=md)
+    assert rc == 0 and len(seeds) == 1
+    assert captured.out == ""
+    assert captured.err == f"captured -> {seeds[0]['_path']}\n"
+
+
+def test_from_hook_foreign_sid_names_the_no_op_and_nearest_sids(repo, monkeypatch, capsys):
+    """The 2026-07-19 misattribution incident's seam: a foreign/typo'd session id is now a
+    LEGIBLE no-op — the line counts the sessions the buffer does know and names the
+    closest ids, instead of an exit-0 silence indistinguishable from success."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    _seed_episode(md, repo, "sessABC", ["m"], "q")
+    _seed_episode(md, repo, "unrelated", ["m"], "q2")
+    rc = _run_from_hook(
+        monkeypatch, ["--from-hook", "--memory-dir", md, "--repo-root", repo],
+        {"session_id": "sessABX", "reason": "clear"},
+    )
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert C.pending_count(memory_dir=md) == 0, "a no-op writes nothing"
+    assert captured.out == ""
+    assert captured.err.count("\n") == 1, "exactly one outcome line"
+    assert "no episodes in buffer for session_id=sessABX (2 sessions known)" in captured.err
+    assert "nearest: sessABC" in captured.err  # the paste-typo aid
+
+
+def test_from_hook_internal_failure_names_the_exception_class(repo, monkeypatch, capsys):
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    _seed_episode(md, repo, "boom-sess", ["m"], "q")
+
+    def _boom(*a, **kw):
+        raise RuntimeError("disk on fire")
+
+    monkeypatch.setattr(C, "_gather_session_context_raw", _boom)
+    rc = _run_from_hook(
+        monkeypatch, ["--from-hook", "--memory-dir", md, "--repo-root", repo],
+        {"session_id": "boom-sess", "reason": "clear"},
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, "inv2: exit 0 in ALL cases"
+    assert captured.out == ""
+    assert captured.err == "capture failed: RuntimeError\n"
+
+
+def test_capture_outcome_is_a_discriminated_return_not_string_matching(repo):
+    """The no-episodes vs exception distinction comes from _capture_outcome's return
+    triple — main() never string-matches, and other callers keep path-or-None via the
+    public wrapper."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    git_commit(repo, "init", 1_700_000_000)
+    _seed_episode(md, repo, "real-sess", ["m"], "q")
+
+    outcome, path, detail = C._capture_outcome("real-sess", memory_dir=md, repo_root=repo)
+    assert (outcome, detail) == (C._OUTCOME_CAPTURED, None) and path
+
+    outcome, path, detail = C._capture_outcome("ghost", memory_dir=md, repo_root=repo)
+    assert (outcome, path) == (C._OUTCOME_NO_EPISODES, None)
+    assert detail == ["real-sess"], "detail carries the known-session paste-typo aid"
+
+    assert C.write_session_capture("ghost", memory_dir=md, repo_root=repo) is None
+
+
+def test_wired_hooks_discard_stderr_and_force_exit_zero():
+    """WRT-2's byte-identity ground, citing the exact shell lines: both wired pipelines
+    throw stderr away and force exit 0, so the new outcome line is invisible exactly
+    where it must be and hook behavior is unchanged."""
+    hooks_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(C.__file__))), "hooks"
+    )
+    for name in ("memory_session_end.sh", "memory_subagent_stop.sh"):
+        with open(os.path.join(hooks_dir, name), encoding="utf-8") as fh:
+            src = fh.read()
+        line = next(l for l in src.splitlines() if "-m memory.capture --from-hook" in l)
+        assert "2>/dev/null" in line, f"{name}: the capture invocation must discard stderr"
+        assert "|| true" in line, f"{name}: the capture invocation must force exit 0"
+
+
+def test_main_add_decision_unattributed_says_window_matched(repo, capsys):
+    """WRT-3 honest reply, CLI half: a bare --add-decision (no --session-id) keys the row
+    on the shared file token, which strict seed matching can never reach — the reply must
+    say so instead of promising seed-riding. Wording pinned."""
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    rc = C.main(["--add-decision", "x", "--memory-dir", md])
+    out = capsys.readouterr().out.strip()
+    assert rc == 0
+    assert out == (
+        "decision recorded unattributed (no --session-id) — it cannot ride the "
+        "session-proven decisions list; it will surface LABELED as a window-matched "
+        "decision at the drain"
+    )
+    assert "will ride this session's capture seed" not in out
 
 
 # --------------------------------------------------------------------------- #

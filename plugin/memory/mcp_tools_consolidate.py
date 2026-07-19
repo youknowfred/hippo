@@ -104,8 +104,16 @@ def _tool_capture(args: Dict[str, Any]) -> str:
                 "never synthesis)."
             )
         ok = log_decision(text)
+        # WRT-3: this surface never receives the harness session id, so the row is keyed on
+        # the shared file token and strict seed-matching can NEVER reach it — the old reply
+        # ("it will ride this session's capture seed") promised exactly that and was false
+        # for every row ever recorded here. The reply now states the attribution mode
+        # truthfully; the row surfaces via capture's LABELED time-window lane instead.
         return (
-            "decision recorded — it will ride this session's capture seed as its durable WHY"
+            "decision recorded unattributed — this MCP surface receives no harness session "
+            "id, so the row cannot ride the session-proven decisions list; it will surface "
+            "LABELED as a window-matched decision at the drain of the session whose episode "
+            "span covers it"
             if ok
             else "nothing recorded (empty text or unwritable ledger)"
         )

@@ -48,10 +48,35 @@ from .telemetry import (
 )
 from .threat_lint import scan_threats, scan_tier_b
 
-# The gitignored pending queue — a sibling of ``.claude/memory`` and of the index/telemetry
-# dirs, following the same self-ignoring-cache convention (SEC-3). It is NOT the corpus and is
-# NOT git-tracked: a draft here is a proposal awaiting explicit per-item approval, never memory.
-_PENDING_DIRNAME = ".memory-pending"
+# --------------------------------------------------------------------------- #
+# Façade re-exports (ED5R-3 split): the pending-QUEUE surface — where the queue
+# lives (``default_pending_dir``), reading it back, the CAP-6 bound, the snooze,
+# and the drain listing — lives in ``capture_queue.py``. Every moved name stays
+# importable (and monkeypatchable) from here; this module remains the
+# ``python -m memory.capture`` entry point and the seed BUILD side (episode
+# replay, git evidence, salience, the SessionEnd write). Siblings never import
+# this façade (CONTRIBUTING.md "Code layout").
+# --------------------------------------------------------------------------- #
+from .capture_queue import (  # noqa: F401
+    _MAX_PENDING_SEEDS,
+    _PENDING_DIRNAME,
+    _SNOOZE_MARKER,
+    _SNOOZE_WINDOW_SESSIONS,
+    _format_listing,
+    _resolve_pending_dir,
+    _seed_captured_at,
+    _seed_score,
+    _snooze_marker_path,
+    corrupt_pending,
+    default_pending_dir,
+    discard_pending,
+    pending_count,
+    prune_pending,
+    queue_snoozed,
+    read_pending,
+    snooze_queue,
+)
+
 # The QUEUE's own schema, not the corpus format: bumping it is not an ED-4 event because no
 # committed artifact changes shape — the queue is gitignored ephemera a drain consumes whole.
 # Schema 2 (GRW-1 + GRW-4, one coordinated bump): adds ``diff_hunks`` (verbatim evidence),
@@ -70,43 +95,6 @@ _MAX_DECISIONS = 20
 # the slice happens here — always on a line boundary, with a legible truncation marker, so a
 # monorepo-wide diff can never balloon a seed. Counts capture COUNTS; this one caps BYTES.
 _MAX_HUNK_BYTES = 20_000
-# CAP-6: hard bound on the pending queue. One seed lands per session that recalls anything, so
-# an un-drained queue would grow WITHOUT LIMIT — the exact "soaks forever" footgun the LIF
-# workstream goal ("nothing nags forever") already closed for reconsolidation. When a fresh
-# capture pushes the queue past this cap, the LOWEST-value then OLDEST seeds are pruned so the
-# queue keeps the sessions a drain would lead with (highest salience, most recent). Ephemera in
-# a gitignored dir: pruning a stale trivial seed loses nothing a re-capture couldn't redraft.
-_MAX_PENDING_SEEDS = 50
-# CAP-6: how many NEW recall-ledger sessions an explicit queue --snooze holds the SessionStart
-# nudge for before it re-nags. Parity with ``reconsolidate._SNOOZE_WINDOW_SESSIONS`` (same value,
-# same session-aging rhythm): a snooze is a DEFERRAL, never a dismissal — it must expire so a
-# growing backlog resurfaces. The nudge is the only thing snoozed; the seeds are untouched.
-_SNOOZE_WINDOW_SESSIONS = 5
-# The queue-snooze marker: a tiny sibling of the seeds inside the gitignored pending dir (queue
-# state lives with the queue). Dotfile so ``read_pending``/``pending_count`` (``*.json`` only)
-# never mistake it for a seed.
-_SNOOZE_MARKER = ".capture-snooze.json"
-
-
-def default_pending_dir(memory_dir: str) -> str:
-    """``.claude/.memory-pending`` — a sibling of ``.claude/memory`` (its own gitignored dir).
-
-    Mirrors ``build_index.default_index_dir`` / ``telemetry.default_telemetry_dir`` so the
-    queue lands beside the index and ledgers. ``HIPPO_PENDING_DIR`` overrides (hermetic tests).
-    """
-    override = os.environ.get("HIPPO_PENDING_DIR")
-    if override:
-        return override
-    return os.path.join(os.path.dirname(os.path.abspath(memory_dir)), _PENDING_DIRNAME)
-
-
-def _resolve_pending_dir(pending_dir: Optional[str], memory_dir: Optional[str]) -> str:
-    if pending_dir:
-        return pending_dir
-    if memory_dir:
-        return default_pending_dir(memory_dir)
-    md, _ = resolve_dirs()
-    return default_pending_dir(md)
 
 
 def _git_untracked(repo_root: Optional[str]) -> List[str]:
@@ -243,6 +231,58 @@ def _session_decisions(session_id: Optional[str], telemetry_dir: Optional[str]) 
     return out
 
 
+# WRT-3: how far outside the episode span a sid-mismatched decision may still window-match.
+# A session's decisions mostly land BETWEEN its recall episodes, but the tails are real — an
+# --add-decision fired moments before the first recall, or minutes after the last one while
+# the session wound down. A module constant, deliberately NOT an env knob: the window lane is
+# a labeled fallback the drain reviewer ratifies per item, never a tunable matcher.
+_DECISION_WINDOW_SLACK_S = 900.0
+
+
+def _window_decisions(
+    session_id: Optional[str],
+    telemetry_dir: Optional[str],
+    span: Optional[tuple],
+    strict_texts: List[str],
+) -> List[str]:
+    """WRT-3 window lane: decisions strict matching can NEVER reach, surfaced LABELED.
+
+    The strict lane above matches by harness-id equality — but a decision recorded through
+    a surface that never receives the harness id (the MCP capture tool, a bare
+    ``--add-decision`` without ``--session-id``) is keyed on the shared FILE token and so
+    can never match it. Those rows used to die unseen (the ledger's only two rows, 07-13,
+    did exactly that). This ADDITIVE lane carries the rows whose ``ts`` falls inside THIS
+    session's episode span (± ``_DECISION_WINDOW_SLACK_S``), for the drain reviewer to
+    ratify per item as time-window-matched evidence — rendered visibly distinct from, and
+    deduped against, the session-proven list (a text both lanes match rides the strict
+    lane only). The strict lane is EXTENDED, never relaxed. Never raises.
+    """
+    out: List[str] = []
+    if not span:
+        return out
+    try:
+        lo = float(span[0]) - _DECISION_WINDOW_SLACK_S
+        hi = float(span[1]) + _DECISION_WINDOW_SLACK_S
+        seen = set(strict_texts)
+        for d in read_decisions(telemetry_dir):
+            if d.get("session_id") == session_id:
+                continue  # the strict lane already carries it
+            ts = d.get("ts")
+            if not isinstance(ts, (int, float)) or isinstance(ts, bool):
+                continue
+            if not (lo <= float(ts) <= hi):
+                continue
+            t = (d.get("text") or "").strip()
+            if t and t not in seen:
+                seen.add(t)
+                out.append(t)
+            if len(out) >= _MAX_DECISIONS:
+                break
+    except Exception:
+        return out
+    return out
+
+
 def _seed_salience(seed: Dict, telemetry_dir: Optional[str], untracked: List[str]) -> Dict:
     """A cheap per-seed VALUE LABEL (GRW-1) — never a gate, never an auto-prune.
 
@@ -304,75 +344,112 @@ def gather_session_context(
     empty seed is written. Never raises: any failure yields ``None``.
     """
     try:
-        if telemetry_dir is None and memory_dir is not None:
-            telemetry_dir = default_telemetry_dir(memory_dir)
-        episodes = list(read_episodes(telemetry_dir))
-        # Isolate ONE session's episodes: a real harness id matches that session; a None id
-        # (older harness / bare CLI) matches the episodes that were logged with no id. Either
-        # way we never fold the whole multi-session buffer into one seed.
-        episodes = [e for e in episodes if e.get("session_id") == session_id]
-        if not episodes:
-            return None
-
-        watermark = None
-        for e in episodes:
-            if e.get("head_commit"):
-                watermark = e["head_commit"]
-                break
-
-        names: List[str] = []
-        seen_names = set()
-        previews: List[str] = []
-        seen_previews = set()
-        for e in episodes:
-            for n in e.get("recalled_names") or []:
-                if n and n not in seen_names:
-                    seen_names.add(n)
-                    names.append(n)
-            q = (e.get("query_preview") or "").strip()
-            if q and q not in seen_previews:
-                seen_previews.add(q)
-                previews.append(q)
-
-        head_now = run_git(["rev-parse", "HEAD"], repo_root).strip() or None if repo_root else None
-        untracked = _git_untracked(repo_root)
-        hunks = (
-            _git_diff_hunks(watermark, repo_root, untracked) if include_hunks else ""
+        return _gather_session_context_raw(
+            session_id,
+            repo_root=repo_root,
+            telemetry_dir=telemetry_dir,
+            memory_dir=memory_dir,
+            include_hunks=include_hunks,
         )
-        # MANDATORY lint (GRW-1 invariant): verbatim hunks widen the secret-exposure surface,
-        # so every hunk-bearing seed is scanned AT CAPTURE. A hit only FLAGS the seed (the
-        # queue is gitignored, same trust domain as the episode buffer) — the consolidate
-        # drain refuses to fence flagged hunks into a corpus body, and write_memory's own
-        # lint is the backstop behind that.
-        # SEN-2: the poisoning-payload twin. hunks_threat_flagged rides beside
-        # hunks_secret_flagged — a Tier-A hit (invisible Unicode / confusable / exfil shape /
-        # HTML comment) in the captured evidence flags the seed identically (absent when
-        # clean, ED-4). Tier-B imperative grammar is MEASURED to the dark ledger below, never
-        # a seed field. Additive fields, no _SEED_SCHEMA bump (read defensively via .get()).
-        threats = scan_threats(hunks) if hunks else {"tier_a": [], "tier_b": []}
-        seed = {
-            "schema": _SEED_SCHEMA,
-            "kind": "session-capture",
-            "session_id": session_id,
-            "head_commit": watermark,  # the session's starting watermark (from the buffer)
-            "head": head_now,          # HEAD at capture time — the two bound the diff range
-            "changed_paths": _git_changed_paths(watermark, repo_root, untracked),
-            "recalled_names": names[:_MAX_RECALLED_NAMES],
-            "query_previews": previews[:_MAX_QUERY_PREVIEWS],
-            "episode_count": len(episodes),
-            "earliest_ts": episodes[0].get("ts"),
-            "diff_hunks": hunks,
-            "hunks_secret_flagged": bool(hunks and scan_text(hunks)),
-            "hunks_threat_flagged": bool(threats["tier_a"]),
-            # GRW-4: the session's user-confirmed WHY, replayed from the in-session decision
-            # ledger (memory.capture --add-decision) with the SAME session matching as the
-            # episodes above — agent-recorded transcription only, never synthesized here.
-            "decisions": _session_decisions(session_id, telemetry_dir),
-        }
-        seed["salience"] = _seed_salience(seed, telemetry_dir, untracked)
-        return seed
     except Exception:
         return None
+
+
+def _gather_session_context_raw(
+    session_id: Optional[str],
+    *,
+    repo_root: Optional[str] = None,
+    telemetry_dir: Optional[str] = None,
+    memory_dir: Optional[str] = None,
+    include_hunks: bool = True,
+) -> Optional[Dict]:
+    """The RAISING core of ``gather_session_context`` (WRT-2): ``None`` means exactly
+    "this session left no episodes to replay"; any real failure ESCAPES as its exception
+    so ``_capture_outcome`` can name the class instead of collapsing every trouble into
+    a silent None. Public callers keep never-raise via the wrapper above.
+    """
+    if telemetry_dir is None and memory_dir is not None:
+        telemetry_dir = default_telemetry_dir(memory_dir)
+    episodes = list(read_episodes(telemetry_dir))
+    # Isolate ONE session's episodes: a real harness id matches that session; a None id
+    # (older harness / bare CLI) matches the episodes that were logged with no id. Either
+    # way we never fold the whole multi-session buffer into one seed.
+    episodes = [e for e in episodes if e.get("session_id") == session_id]
+    if not episodes:
+        return None
+
+    watermark = None
+    for e in episodes:
+        if e.get("head_commit"):
+            watermark = e["head_commit"]
+            break
+
+    names: List[str] = []
+    seen_names = set()
+    previews: List[str] = []
+    seen_previews = set()
+    for e in episodes:
+        for n in e.get("recalled_names") or []:
+            if n and n not in seen_names:
+                seen_names.add(n)
+                names.append(n)
+        q = (e.get("query_preview") or "").strip()
+        if q and q not in seen_previews:
+            seen_previews.add(q)
+            previews.append(q)
+
+    head_now = run_git(["rev-parse", "HEAD"], repo_root).strip() or None if repo_root else None
+    untracked = _git_untracked(repo_root)
+    hunks = (
+        _git_diff_hunks(watermark, repo_root, untracked) if include_hunks else ""
+    )
+    # MANDATORY lint (GRW-1 invariant): verbatim hunks widen the secret-exposure surface,
+    # so every hunk-bearing seed is scanned AT CAPTURE. A hit only FLAGS the seed (the
+    # queue is gitignored, same trust domain as the episode buffer) — the consolidate
+    # drain refuses to fence flagged hunks into a corpus body, and write_memory's own
+    # lint is the backstop behind that.
+    # SEN-2: the poisoning-payload twin. hunks_threat_flagged rides beside
+    # hunks_secret_flagged — a Tier-A hit (invisible Unicode / confusable / exfil shape /
+    # HTML comment) in the captured evidence flags the seed identically (absent when
+    # clean, ED-4). Tier-B imperative grammar is MEASURED to the dark ledger below, never
+    # a seed field. Additive fields, no _SEED_SCHEMA bump (read defensively via .get()).
+    threats = scan_threats(hunks) if hunks else {"tier_a": [], "tier_b": []}
+    seed = {
+        "schema": _SEED_SCHEMA,
+        "kind": "session-capture",
+        "session_id": session_id,
+        "head_commit": watermark,  # the session's starting watermark (from the buffer)
+        "head": head_now,          # HEAD at capture time — the two bound the diff range
+        "changed_paths": _git_changed_paths(watermark, repo_root, untracked),
+        "recalled_names": names[:_MAX_RECALLED_NAMES],
+        "query_previews": previews[:_MAX_QUERY_PREVIEWS],
+        "episode_count": len(episodes),
+        "earliest_ts": episodes[0].get("ts"),
+        "diff_hunks": hunks,
+        "hunks_secret_flagged": bool(hunks and scan_text(hunks)),
+        "hunks_threat_flagged": bool(threats["tier_a"]),
+        # GRW-4: the session's user-confirmed WHY, replayed from the in-session decision
+        # ledger (memory.capture --add-decision) with the SAME session matching as the
+        # episodes above — agent-recorded transcription only, never synthesized here.
+        "decisions": _session_decisions(session_id, telemetry_dir),
+    }
+    seed["salience"] = _seed_salience(seed, telemetry_dir, untracked)
+    # WRT-3: the labeled time-window fallback rides a SEPARATE additive key — absent
+    # when none matched (ED-4; queue-own shape read via .get(), no _SEED_SCHEMA bump).
+    ts_vals = [
+        float(e["ts"])
+        for e in episodes
+        if isinstance(e.get("ts"), (int, float)) and not isinstance(e.get("ts"), bool)
+    ]
+    window = _window_decisions(
+        session_id,
+        telemetry_dir,
+        (min(ts_vals), max(ts_vals)) if ts_vals else None,
+        seed["decisions"],
+    )
+    if window:
+        seed["window_decisions"] = window
+    return seed
 
 
 def _seed_filename(seed: Dict) -> str:
@@ -388,6 +465,16 @@ def _seed_filename(seed: Dict) -> str:
     return f"capture-{slug}.json"
 
 
+# WRT-2: the three capture outcome classes, discriminated by RETURN VALUE — never by
+# string matching. A human-invoked --from-hook run used to have three indistinguishable
+# exit-0 silences (foreign sid / success / internal failure); the 2026-07-19 incident —
+# an operator's foreign-sid no-op credited with a seed a concurrent hook actually
+# minted — is the exhibit this closes.
+_OUTCOME_CAPTURED = "captured"
+_OUTCOME_NO_EPISODES = "no-episodes"
+_OUTCOME_FAILED = "failed"
+
+
 def write_session_capture(
     session_id: Optional[str],
     *,
@@ -401,18 +488,55 @@ def write_session_capture(
 
     Returns ``None`` (writes nothing) when the session left no episodes to replay. NEVER writes
     to the corpus — the only directory it touches is the pending queue, created self-ignoring
-    (SEC-3). Fire-and-forget; never raises.
+    (SEC-3). Fire-and-forget; never raises. (Thin public wrapper: ``_capture_outcome`` below
+    carries the discriminated WRT-2 result; this keeps the path-or-None contract for every
+    existing caller.)
+    """
+    _outcome, path, _detail = _capture_outcome(
+        session_id,
+        reason=reason,
+        memory_dir=memory_dir,
+        repo_root=repo_root,
+        telemetry_dir=telemetry_dir,
+        pending_dir=pending_dir,
+    )
+    return path
+
+
+def _capture_outcome(
+    session_id: Optional[str],
+    *,
+    reason: Optional[str] = None,
+    memory_dir: Optional[str] = None,
+    repo_root: Optional[str] = None,
+    telemetry_dir: Optional[str] = None,
+    pending_dir: Optional[str] = None,
+) -> tuple:
+    """The capture pass with a DISCRIMINATED result: ``(outcome, path, detail)``.
+
+    ``outcome`` is one of ``_OUTCOME_CAPTURED`` (``path`` = the written seed),
+    ``_OUTCOME_NO_EPISODES`` (``detail`` = the sorted session ids the buffer DOES know —
+    the paste-typo aid), or ``_OUTCOME_FAILED`` (``detail`` = the exception class name,
+    via the raising gather core). Same firewall and never-raise posture as the public
+    wrapper; the only writes target the pending queue.
     """
     try:
         if memory_dir is None or repo_root is None:
             md, rr = resolve_dirs()
             memory_dir = memory_dir or md
             repo_root = repo_root or rr
-        seed = gather_session_context(
+        seed = _gather_session_context_raw(
             session_id, repo_root=repo_root, telemetry_dir=telemetry_dir, memory_dir=memory_dir
         )
         if seed is None:
-            return None
+            # The raw core returns None ONLY for "no episodes" — real trouble raises.
+            td = telemetry_dir if telemetry_dir is not None else (
+                default_telemetry_dir(memory_dir) if memory_dir else None
+            )
+            known = sorted({
+                str(e.get("session_id")) for e in read_episodes(td) if e.get("session_id")
+            })
+            return (_OUTCOME_NO_EPISODES, None, known)
         seed["reason"] = reason
         seed["captured_at"] = round(time.time(), 3)
         pd = _resolve_pending_dir(pending_dir, memory_dir)
@@ -462,285 +586,36 @@ def write_session_capture(
         # trivial new seed yields to them. Value-first, not FIFO: the queue keeps what a drain
         # would lead with.
         prune_pending(pd, max_seeds=_MAX_PENDING_SEEDS)
-        return path
-    except Exception:
-        return None
+        return (_OUTCOME_CAPTURED, path, None)
+    except Exception as exc:
+        return (_OUTCOME_FAILED, None, type(exc).__name__)
 
 
-def _seed_score(seed: Dict) -> int:
-    """The stored salience score of a seed; 0 for pre-GRW-1 (schema 1) seeds. Never raises."""
-    try:
-        return int((seed.get("salience") or {}).get("score", 0))
-    except Exception:
-        return 0
+def _hook_outcome_line(outcome: str, path: Optional[str], detail, session_id) -> str:
+    """The ONE --from-hook stderr line naming which outcome happened (WRT-2, inv3).
 
-
-def read_pending(pending_dir: Optional[str] = None, *, memory_dir: Optional[str] = None) -> List[Dict]:
-    """Every pending capture seed, HIGH-VALUE FIRST (GRW-1), then by filename for stability.
-
-    The salience score only ORDERS the review queue so a deep backlog leads with the sessions
-    most worth drafting — a low score never drops a seed (label, not gate). Skips corrupt
-    files. Never raises.
+    The wired SessionEnd/SubagentStop pipelines discard stderr (their capture invocation
+    ends ``2>/dev/null || true`` — pinned by test), so live hook behavior is byte-identical
+    while a human running the same command finally sees the truth. The no-episodes line
+    counts the sessions the buffer DOES know and names the closest ids (paste-typo aid).
     """
-    out: List[Dict] = []
-    try:
-        pd = _resolve_pending_dir(pending_dir, memory_dir)
-        if not os.path.isdir(pd):
-            return []
-        for name in sorted(os.listdir(pd)):
-            # Seeds are ``capture-*.json``; skip dotfiles (the ``.gitignore`` and the CAP-6
-            # ``.capture-snooze.json`` marker are queue state, never seeds).
-            if name.startswith(".") or not name.endswith(".json"):
-                continue
-            try:
-                with open(os.path.join(pd, name), "r", encoding="utf-8") as fh:
-                    obj = json.load(fh)
-                if isinstance(obj, dict):
-                    obj["_path"] = os.path.join(pd, name)
-                    out.append(obj)
-            except Exception:
-                continue
-        out.sort(key=lambda s: (-_seed_score(s), os.path.basename(s.get("_path", ""))))
-    except Exception:
-        return out
-    return out
+    if outcome == _OUTCOME_CAPTURED:
+        return f"captured -> {path}"
+    if outcome == _OUTCOME_NO_EPISODES:
+        known = [str(s) for s in (detail or [])]
+        line = f"no episodes in buffer for session_id={session_id} ({len(known)} sessions known)"
+        import difflib
 
-
-def corrupt_pending(
-    pending_dir: Optional[str] = None, *, memory_dir: Optional[str] = None
-) -> List[str]:
-    """Seed FILENAMES in the queue that ``read_pending`` cannot parse. Never raises.
-
-    RCH-9: a corrupt seed silently vanished from the drain listing while the bare
-    file count (``pending_count``, the SessionStart nudge) still included it — the
-    queue said "2 pending", the listing showed one, and a captured session was lost
-    without a trace. The listing names what it cannot read; deleting or inspecting
-    the file is the human's call (the queue is gitignored ephemera).
-    """
-    out: List[str] = []
-    try:
-        pd = _resolve_pending_dir(pending_dir, memory_dir)
-        if not os.path.isdir(pd):
-            return []
-        for name in sorted(os.listdir(pd)):
-            if name.startswith(".") or not name.endswith(".json"):
-                continue
-            try:
-                with open(os.path.join(pd, name), "r", encoding="utf-8") as fh:
-                    obj = json.load(fh)
-                if not isinstance(obj, dict):
-                    out.append(name)
-            except Exception:
-                out.append(name)
-    except Exception:
-        return out
-    return out
-
-
-def pending_count(pending_dir: Optional[str] = None, *, memory_dir: Optional[str] = None) -> int:
-    """Number of pending capture seeds (cheap listdir). Never raises."""
-    try:
-        pd = _resolve_pending_dir(pending_dir, memory_dir)
-        if not os.path.isdir(pd):
-            return 0
-        return sum(1 for n in os.listdir(pd) if n.endswith(".json") and not n.startswith("."))
-    except Exception:
-        return 0
-
-
-def discard_pending(path: str) -> bool:
-    """Remove one drained/approved/dismissed seed from the queue. True on success. Never raises."""
-    try:
-        os.remove(path)
-        return True
-    except Exception:
-        return False
-
-
-def _seed_captured_at(seed: Dict) -> float:
-    """A seed's capture timestamp for recency ordering; falls back to earliest_ts, then 0.0."""
-    for key in ("captured_at", "earliest_ts"):
-        val = seed.get(key)
-        try:
-            if isinstance(val, (int, float)) and not isinstance(val, bool):
-                return float(val)
-        except Exception:
-            pass
-    return 0.0
-
-
-def prune_pending(
-    pending_dir: Optional[str] = None,
-    *,
-    memory_dir: Optional[str] = None,
-    max_seeds: int = _MAX_PENDING_SEEDS,
-) -> int:
-    """Bound the queue at ``max_seeds`` — drop the LOWEST-value, then OLDEST, seeds past the cap.
-
-    A pending seed is gitignored ephemera awaiting review; a queue that grows one-seed-per-session
-    without limit is itself a soak the LIF goal forbids. Keeps the ``max_seeds`` a drain would
-    lead with — ranked by ``(salience score desc, captured_at desc)`` — so a just-written seed
-    (the newest ``captured_at``) always survives a same-score tie, giving a rolling window rather
-    than a hard stop that would silently swallow new captures. Returns the number pruned. A
-    label/order operation on the queue, NEVER on a seed's fate in the corpus. Never raises.
-    """
-    try:
-        pd = _resolve_pending_dir(pending_dir, memory_dir)
-        if not os.path.isdir(pd):
-            return 0
-        seeds = read_pending(pd)
-        if len(seeds) <= max_seeds:
-            return 0
-        ranked = sorted(seeds, key=lambda s: (-_seed_score(s), -_seed_captured_at(s)))
-        pruned = 0
-        for seed in ranked[max_seeds:]:
-            if discard_pending(seed.get("_path", "")):
-                pruned += 1
-        return pruned
-    except Exception:
-        return 0
-
-
-def _snooze_marker_path(pending_dir: str) -> str:
-    return os.path.join(pending_dir, _SNOOZE_MARKER)
-
-
-def snooze_queue(
-    pending_dir: Optional[str] = None, *, memory_dir: Optional[str] = None
-) -> bool:
-    """Defer the SessionStart pending-capture nudge for ``_SNOOZE_WINDOW_SESSIONS`` sessions.
-
-    Writes a timestamp marker inside the gitignored pending dir. The seeds are UNTOUCHED — this
-    quiets only the nudge, and only until it ages out (parity with the reconsolidation snooze:
-    a deferral, never a dismissal). Returns True on success. Never raises.
-    """
-    try:
-        pd = _resolve_pending_dir(pending_dir, memory_dir)
-        ensure_self_ignoring_dir(pd)
-        marker = _snooze_marker_path(pd)
-        tmp = marker + f".tmp.{os.getpid()}"  # COR-17: unique per writer — concurrent processes must not share a tmp
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({"ts": round(time.time(), 3)}, fh)
-        os.replace(tmp, marker)
-        return True
-    except Exception:
-        return False
-
-
-def queue_snoozed(
-    pending_dir: Optional[str] = None,
-    *,
-    memory_dir: Optional[str] = None,
-    telemetry_dir: Optional[str] = None,
-) -> bool:
-    """True while an explicit queue snooze is younger than ``_SNOOZE_WINDOW_SESSIONS`` sessions.
-
-    Ages by SESSIONS, not wall-clock, exactly like ``reconsolidate._snoozed_names``: each recall-
-    ledger session whose first ts-carrying event lands after the ack counts once, and the snooze
-    expires once ``_SNOOZE_WINDOW_SESSIONS`` such sessions have started. Degrades toward
-    RE-NAGGING, never silence: a missing/corrupt marker, a ts-less ack, or an unreadable ledger
-    all read as "not snoozed". Read-only; never raises.
-    """
-    try:
-        pd = _resolve_pending_dir(pending_dir, memory_dir)
-        marker = _snooze_marker_path(pd)
-        if not os.path.isfile(marker):
-            return False
-        with open(marker, "r", encoding="utf-8") as fh:
-            acked = float((json.load(fh) or {}).get("ts") or 0.0)
-        if acked <= 0:
-            return False
-        if telemetry_dir is None and memory_dir is not None:
-            telemetry_dir = default_telemetry_dir(memory_dir)
-        from .telemetry import read_events
-
-        first_ts: Dict[str, float] = {}
-        for e in read_events(telemetry_dir):
-            sid, ts = e.get("session_id"), e.get("ts")
-            if (
-                sid
-                and sid not in first_ts
-                and isinstance(ts, (int, float))
-                and not isinstance(ts, bool)
-            ):
-                first_ts[sid] = float(ts)
-        started_since = sum(1 for s in first_ts.values() if s > acked)
-        return started_since < _SNOOZE_WINDOW_SESSIONS
-    except Exception:
-        return False
-
-
-def _format_listing(seeds: List[Dict]) -> str:
-    if not seeds:
-        return "No pending captures — the queue is empty."
-    out = [f"{len(seeds)} pending capture(s) awaiting review (nothing is in the corpus yet):", ""]
-    for s in seeds:
-        sid = s.get("session_id") or "(no session id)"
-        wm = (s.get("head_commit") or "?")[:12]
-        head = (s.get("head") or "?")[:12]
-        out.append(f"  • {os.path.basename(s.get('_path', ''))}  session={sid}")
-        out.append(f"      commits: {wm}..{head}   episodes: {s.get('episode_count', 0)}")
-        sal = s.get("salience") or {}
-        if sal:
-            out.append(
-                f"      value: {sal.get('score', 0)}"
-                + (" (trivial session)" if sal.get("trivial") else "")
-            )
-        cp = s.get("changed_paths") or []
-        if cp:
-            shown = ", ".join(cp[:8]) + (f", +{len(cp) - 8} more" if len(cp) > 8 else "")
-            out.append(f"      changed: {shown}")
-        rn = s.get("recalled_names") or []
-        if rn:
-            out.append(f"      recalled: {', '.join(rn[:10])}")
-        qp = s.get("query_previews") or []
-        if qp:
-            out.append(f"      queries: {'; '.join(qp[:5])}")
-        hunks = s.get("diff_hunks") or ""
-        if hunks:
-            out.append(f"      evidence: {len(hunks.encode('utf-8'))} bytes of verbatim diff hunks")
-            if s.get("hunks_secret_flagged"):
-                out.append(
-                    "      ⚠ secret lint flagged these hunks — do NOT fence them into a memory "
-                    "body without scrubbing (run memory.secrets.scan_with_remediation first)"
-                )
-            if s.get("hunks_threat_flagged"):
-                out.append(
-                    "      ⚠ threat lint flagged these hunks (SEN-2 Tier-A: invisible Unicode / "
-                    "confusable / exfil shape / HTML comment) — inspect before fencing into a "
-                    "body (run memory.threat_lint.scan_tier_a on the exact lines)"
-                )
-        dec = s.get("decisions") or []
-        if dec:
-            out.append(f"      decisions: {'; '.join(str(d) for d in dec[:5])}")
-        tri = s.get("llm_triage") or {}
-        if tri:
-            out.append(
-                f"      triage (LLM suggestion — ratify or discard at drain): "
-                f"type={tri.get('suggested_type') or '?'}  name={tri.get('suggested_name') or '?'}"
-            )
-            if tri.get("draft_description"):
-                out.append(f"        draft description: {tri['draft_description']}")
-            dups = tri.get("llm_duplicate_flags") or []
-            if dups:
-                out.append(f"        possible duplicates (LLM 2nd opinion): {', '.join(dups[:5])}")
-            dc = tri.get("dup_check") or {}
-            if dc.get("neighbors"):
-                shown = ", ".join(
-                    f"{n.get('name')} ({n.get('score')})" for n in dc["neighbors"][:3]
-                )
-                out.append(f"        index dup check: route={dc.get('route')} — {shown}")
-            elif dc.get("route"):
-                out.append(f"        index dup check: route={dc.get('route')}")
-            if tri.get("secret_flagged"):
-                out.append(
-                    "        ⚠ secret lint flagged the triage text — scrub before any corpus use"
-                )
-    return "\n".join(out)
+        near = difflib.get_close_matches(str(session_id or ""), known, n=3, cutoff=0.6)
+        if near:
+            line += f"; nearest: {', '.join(near)}"
+        return line
+    return f"capture failed: {detail}"
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
+    import sys
 
     parser = argparse.ArgumentParser(
         description="Draft-capture pass (CAP-2): snapshot the session's episode buffer + diff "
@@ -780,8 +655,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=None,
         metavar="TEXT",
         help="GRW-4: record ONE user-confirmed session decision (quote or faithfully "
-        "paraphrase what the USER stated — never infer one from the diff); it lands in this "
-        "session's SessionEnd capture seed as its durable WHY",
+        "paraphrase what the USER stated — never infer one from the diff); with "
+        "--session-id it rides that session's capture seed — without it the row is "
+        "UNATTRIBUTED and surfaces window-matched at the drain (WRT-3)",
     )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--repo-root", default=None)
@@ -792,11 +668,19 @@ def main(argv: Optional[List[str]] = None) -> int:
 
             td = default_telemetry_dir(args.memory_dir) if args.memory_dir else None
             ok = log_decision(args.add_decision, telemetry_dir=td, session_id=args.session_id)
-            print(
-                "decision recorded — it will ride this session's capture seed"
-                if ok
-                else "nothing recorded (empty text or unwritable ledger)"
-            )
+            # WRT-3: the reply states the attribution mode TRUTHFULLY. Only a run that
+            # threads --session-id lands a row strict seed-matching can reach; a bare run
+            # keys the row on the shared file token, which can only window-match.
+            if not ok:
+                print("nothing recorded (empty text or unwritable ledger)")
+            elif args.session_id:
+                print("decision recorded — it will ride this session's capture seed")
+            else:
+                print(
+                    "decision recorded unattributed (no --session-id) — it cannot ride the "
+                    "session-proven decisions list; it will surface LABELED as a "
+                    "window-matched decision at the drain"
+                )
             return 0
         if args.list:
             print(_format_listing(read_pending(memory_dir=args.memory_dir)))
@@ -824,8 +708,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
         session_id, reason = args.session_id, args.reason
         if args.from_hook:
-            import sys
-
             try:
                 payload = json.load(sys.stdin)
                 if isinstance(payload, dict):
@@ -844,12 +726,17 @@ def main(argv: Optional[List[str]] = None) -> int:
                     clear_presence(args.memory_dir, session_id=session_id)
                 except Exception:
                     pass
-        path = write_session_capture(
+        outcome, path, detail = _capture_outcome(
             session_id, reason=reason, memory_dir=args.memory_dir, repo_root=args.repo_root
         )
-        # Silent on the hook path: SessionEnd has no context consumer. A written seed surfaces
-        # NEXT session via the SessionStart pending-capture producer.
-        if path and not args.from_hook:
+        if args.from_hook:
+            # WRT-2: EXACTLY ONE outcome line, on STDERR. The wired hooks discard stderr
+            # (byte-identical live behavior — inv2's exit-0 below is untouched); a human
+            # running the same command sees which formerly-silent outcome happened.
+            # Stdout stays empty on this path: SessionEnd has no context consumer, and a
+            # written seed surfaces NEXT session via the SessionStart producer.
+            print(_hook_outcome_line(outcome, path, detail, session_id), file=sys.stderr)
+        elif path:
             print(f"captured → {path}")
         return 0
     except Exception:  # never raise out of the SessionEnd hook path

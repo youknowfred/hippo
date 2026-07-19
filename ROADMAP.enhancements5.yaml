@@ -979,7 +979,7 @@ workstreams:
         title: "Triage groundedness: an abstain lane + a mechanical ungrounded-identifier flag on CAP-LLM seeds"
         priority: P1
         effort: M
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 3 — abstain lane ({"abstain": true} -> honest llm_triage {"abstained": true}, forced-answer clause REPLACED, carry-over never re-bills an abstention, listed as ABSTAINED) + zero-LLM ungrounded_tokens (PR/issue refs, letter-bearing sha-likes, URLs, versions vs the EXACT prompt text; additive, absent when clean; AST pin holds the judged-lanes kill); both weekly exhibits are tests (capture-428d7452 drained pre-build — reconstructed from this signal per the tier audit_note); heuristic-only seeds byte-identical
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "capture_triage.py:227-229 verbatim ('If the session shows no durable fact worth saving, still fill every field with your best single candidate') + :265-266 (_parse_response returns None on empty description — abstention is structurally impossible); TWO fabrications in one week: the '#237 merged' draft (no hippo PR above #85 exists at 827c607) and the LIVE seed in the queue now — capture-428d7452-c9bb-4fad-9c5c-d0dfb642e848.json's llm_triage.draft_description claims this session 'merged T14 invariants' while T14 merged 2026-07-16 as PR #57 (hippo-enh-t14-invariants capstone; the 07-19 session only re-stamped it); re-verified in the queue this cycle"}
         problem: >-
           The capture triage prompt FORCES a fabrication when a session has
@@ -1020,22 +1020,22 @@ workstreams:
           human verdict at the drain is unchanged. inv3 — the warning line
           is the legibility. ED-4 — additive seed fields, queue-own shape.
         implementation_notes: >-
-          Seams (verified at 827c607): capture_triage.py:_build_prompt
-          (:210-251; the forced-answer clause at :227-229),
-          _parse_response (:254-288; the not-description rejection at
-          :265-266), enrich_seed (:291-381; evidence fingerprint at
-          :314-323 — the groundedness check reuses the same prompt-evidence
-          assembly so flag and prompt see identical text);
-          capture.py:_format_listing (:716-738 — the render seam). Keep
-          extraction conservative (identifier classes listed in the AC) —
-          the flag must have near-zero false positives to keep its
+          Seams (verified at 827c607; LIVE-TREE CORRECTION at build, session
+          3: the render seam moved — capture._format_listing now lives in
+          capture_queue.py behind the facade, split commit 13a004a):
+          capture_triage.py:_build_prompt (the forced-answer clause),
+          _parse_response (the not-description rejection), enrich_seed
+          (evidence fingerprint — the groundedness check runs against the
+          EXACT post-belt prompt string so flag and prompt see identical
+          text). Keep extraction conservative (identifier classes listed in
+          the AC) — the flag must have near-zero false positives to keep its
           authority.
 
       - id: WRT-2
         title: "Name the no-op: one legible outcome line for human-invoked capture --from-hook"
         priority: P2
         effort: S
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 3 — exactly ONE stderr line per --from-hook run (captured -> path / no-episodes with N-sessions-known + nearest-sid paste-typo aid / capture failed: <class>); discriminated (outcome, path, detail) return via the new raising gather core (_gather_session_context_raw) behind the never-raise wrapper; write_session_capture stays path-or-None; hook byte-identity pinned by citing both wired pipelines' `2>/dev/null || true` lines; stdout untouched, exit 0 all cases
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Reproduced this cycle: a --from-hook invocation with a foreign session_id exits 0 with zero output and writes nothing; with a real buffer sid it writes the seed and is STILL silent (capture.py:851-856 'Silent on the hook path' — the success print is gated `if path and not args.from_hook`); write_session_capture returns None for both no-episodes and any-exception (:414, :466-467); the 2026-07-19 incident: an operator's foreign-sid run coincided with a SubagentStop hook minting capture-428d7452 for the CURRENT session, and the silence made the misattribution undetectable; hooks discard stderr (memory_session_end.sh's `2>/dev/null || true` tail), so a stderr line is free"}
         problem: >-
           capture --from-hook has three indistinguishable outcomes at a
@@ -1078,7 +1078,7 @@ workstreams:
         title: "Dead-letter decisions: honest MCP reply + labeled time-window fallback at the drain (GRW-4 keying mismatch)"
         priority: P0
         effort: M
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 3 (built FIRST per the tier gate) — honest attribution-mode replies on all four promise surfaces (MCP reply, CLI print, --add-decision help, mcp_schemas description; log_decision docstring premise corrected same commit); window_decisions additive seed key (episode span ± _DECISION_WINDOW_SLACK_S=900s module constant, no env knob; absent when none, ED-4; double-matches dedup into strict; exact-key seed-shape pin holds strict byte-identity); _format_listing renders WINDOW-MATCHED visibly distinct; the two dead 07-13 rows are the fixture; rode the ED5R-3 split commit 13a004a (capture_queue.py)
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "The code triple verified this cycle: mcp_tools_consolidate.py:96-111 add_decision calls log_decision(text) with neither telemetry_dir nor session_id; telemetry.log_decision falls back to the shared FILE token (current_session_id fallback :154-177); capture._session_decisions matches by STRICT equality with the harness session id (:230-238) — so on any harness passing real ids (every recent session: dashed UUIDs throughout the episode buffer) the match is structurally impossible; measured: decisions.jsonl's ONLY two rows (07-13, the INT-13 ratified-shape and v1.13.0 facts — exactly GRW-4's durable-WHY class) are keyed by 32-hex file token 5e4e212a... and rode no seed; today's live seed carries decisions: []; the tool replies 'decision recorded — it will ride this session's capture seed as its durable WHY' (re-verified verbatim)"}
         problem: >-
           A decision recorded through the MCP capture tool can never ride
@@ -1121,21 +1121,22 @@ workstreams:
           additive queue-own key. GRW-4's transcription-never-synthesis
           contract untouched.
         implementation_notes: >-
-          Seams (verified at 827c607): mcp_tools_consolidate.py:_tool_capture
-          add_decision branch (:96-111; the false-promise reply string);
-          telemetry.py:log_decision (signature already accepts
-          telemetry_dir/session_id — callers just don't pass them; the
-          docstring's 'keyed exactly like log_episode... so SessionEnd's
-          seed matching works identically' premise is the failed one —
-          correct it in the same commit); capture.py:_session_decisions
-          (:222-243, strict lane — extended, not relaxed) +
-          gather_session_context (:370 region — the episode-span source) +
-          _format_listing (:716-738); .claude/.memory-telemetry/
-          decisions.jsonl (the two dead rows, sid=5e4e212a...). MCP schema
-          note: the reply-text change is server-side only — no
-          mcp_schemas.py motion expected; if a schema string names the
-          promise, fix it in the same commit (file has 29 lines of
-          documented grows-with-tools headroom).
+          Seams (verified at 827c607; LIVE-TREE CORRECTIONS at build, session
+          3): mcp_tools_consolidate.py:_tool_capture add_decision branch (the
+          false-promise reply string); telemetry.py:log_decision (signature
+          already accepts telemetry_dir/session_id — callers just don't pass
+          them; the docstring's 'seed matching works identically' premise was
+          the failed one — corrected in the same commit);
+          capture.py:_session_decisions (strict lane — extended, not
+          relaxed) + gather_session_context (the episode-span source) +
+          _format_listing — which by build time lived in capture_queue.py
+          (the tier's own ED5R-3 split, 13a004a), not capture.py;
+          .claude/.memory-telemetry/decisions.jsonl (the two dead rows,
+          sid=5e4e212a...). MCP schema note CORRECTED: a schema string DID
+          name the promise (the capture tool description's 'to ride this
+          session's capture seed') — fixed in the same commit, and the CLI
+          --add-decision print + help text carried the same falsehood class
+          (both discriminated: the promise survives only with --session-id).
 
   # ---------------------------------------------------------------- OPS ---
   - id: OPS
@@ -1534,7 +1535,7 @@ release_train:
   - tier: T24
     target_version: TBD
     theme: "The write side tells the truth"
-    status: planned          # ratified 2026-07-19; build not started
+    status: done             # 2026-07-19, session 3 — 3/3 items (WRT-3 -> WRT-1 -> WRT-2, the gate's order) + the tier's own ED5R-3 discharge (capture.py 860/900 with all three items needing lines -> split 13a004a: queue surface to capture_queue.py, facade re-exports, firewall widened); done_means met: the three dishonesty seams closed, no reply promises what the plumbing cannot deliver; hook-path byte-identity pinned per audit_note
     ratified: >-
       2026-07-19 — owner-ratified in the round-5 formal-question session
       (dated LAW ZERO entry): all five tiers ratified, order T22 -> T23 ->
