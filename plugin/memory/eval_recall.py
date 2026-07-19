@@ -294,7 +294,9 @@ from .eval_adversarial import (  # SEN-4 adversarial probe (façade re-exports; 
 from .eval_ledger import read_run_ledger
 from .eval_metrics import (
     absence_polarity_metrics,
+    hard_set_resolvability,
     load_absence_rows,
+    resolvable_row,
     t11_category_lines,
     update_category_metrics,
 )
@@ -825,6 +827,13 @@ def evaluate(
         if hard_set
         else {}
     )
+    # MEA-1 (ED5R-2): the instrument states its own sensitivity — per-category
+    # resolvable_n vs n, REPORTED never applied (no row skipped, no gate moved).
+    # Absence-emits-nothing (ED-4): the key appears only when some row is UNresolvable,
+    # so a fully-resolvable run (the CI/golden pack fixtures) stays byte-identical.
+    resolvability = hard_set_resolvability(index, hard_set) if hard_set else {}
+    if all(r["resolvable_n"] == r["n"] for r in resolvability.values()):
+        resolvability = {}
     return {
         "ok": all(g["pass"] for g in gates.values() if g.get("pass") is not None),
         "dense_ready": index.dense_ready,
@@ -832,6 +841,7 @@ def evaluate(
         "count": len(index),
         "hard_set_n": hs["n"],
         "by_category": by_category,
+        **({"resolvability": resolvability} if resolvability else {}),
         **({"forgetting": forgetting} if forgetting else {}),
         **({"update_knowledge": update_knowledge} if update_knowledge else {}),
         **({"miss_autopsy": autopsy} if autopsy else {}),
@@ -1089,7 +1099,7 @@ def floor_sweep(
         row["query"]
         for row in hard_set
         if (row.get("category") or _DEFAULT_CATEGORY) != "abstention"
-        and any(stem in names for stem in row.get("expected") or ())
+        and resolvable_row(names, row)  # MEA-1: the ONE shared predicate (inv5)
     ]
     if not on_queries or not probes:
         return {
@@ -1624,6 +1634,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(
             f"  category {cat:11s} recall@{args.k}={m['recall']:.4f} mrr@{args.k}={m['mrr']:.4f} "
             f"n={m['n']} (RET-8)"
+        )
+    # MEA-1 (ED5R-2): the sensitivity line — present only when some fixture row cannot
+    # resolve against this corpus (absence-emits-nothing keeps healthy output unchanged).
+    resv = report.get("resolvability") or {}
+    if resv:
+        tot_r = sum(v["resolvable_n"] for v in resv.values())
+        tot_n = sum(v["n"] for v in resv.values())
+        cats = ", ".join(f"{c} {v['resolvable_n']}/{v['n']}" for c, v in resv.items())
+        print(
+            f"  SENSITIVITY (ED5R-2): {tot_r}/{tot_n} fixture row(s) resolvable against this "
+            f"corpus ({cats}) — unresolvable rows can only score as misses; reported, never "
+            "skipped, and no gate moves on it"
         )
     for line in t11_category_lines(report, args.k):  # TMB-3/TMB-4, report-only
         print(line)

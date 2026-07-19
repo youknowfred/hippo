@@ -143,6 +143,22 @@ def run_ab(
     if not inventory.get("ok"):
         return inventory
 
+    # MEA-1 (ED5R-2): evidence carries its instrument's sensitivity — per-category
+    # resolvable_n stamped into the condition UNCONDITIONALLY on new evidence files
+    # ({} only when there is no fixture/index to measure). The recorded 2026-07-17
+    # report predates this stamp and is never rewritten; doctor derives its
+    # qualification for old evidence from current fixture-vs-corpus state instead.
+    resolvable_by_category: dict = {}
+    try:
+        from .build_index import load_index
+        from .eval_metrics import hard_set_resolvability, load_hard_set
+
+        _idx = load_index(index_dir)
+        if _idx is not None and hard_set_path:
+            resolvable_by_category = hard_set_resolvability(_idx, load_hard_set(hard_set_path))
+    except Exception:
+        resolvable_by_category = {}
+
     def _arm(on: bool) -> dict:
         with _salience_flag(on):
             return evaluate(
@@ -199,6 +215,7 @@ def run_ab(
             "model": off_1.get("model"),
             "corpus_n": corpus_n,
             "hard_set_n": off_1.get("hard_set_n"),
+            "resolvable_by_category": resolvable_by_category,
         },
         "signal": {
             "usage_boosted_n": inventory["usage_n"],
@@ -297,6 +314,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         f"hard_set={cond['hard_set_n']} — signal: {sig['usage_boosted_n']} usage-boosted, "
         f"{sig['staleness_penalized_n']} staleness-penalized"
     )
+    resv = cond.get("resolvable_by_category") or {}
+    if resv:
+        tot_r = sum(v["resolvable_n"] for v in resv.values())
+        tot_n = sum(v["n"] for v in resv.values())
+        print(
+            f"  sensitivity (ED5R-2): {tot_r}/{tot_n} fixture row(s) resolvable against this "
+            "corpus — " + ", ".join(f"{c} {v['resolvable_n']}/{v['n']}" for c, v in resv.items())
+        )
     for cat, d in sorted(report["deltas"].items()):
         low = " [low n — report-only]" if d.get("low_n") else ""
         print(f"  {cat}: Δrecall={d['recall']:+.4f} Δmrr={d['mrr']:+.4f} n={d['n']}{low}")
