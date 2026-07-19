@@ -833,6 +833,17 @@ def main(argv: Optional[List[str]] = None) -> int:
                     reason = reason or (payload.get("reason") or None)
             except Exception:
                 pass
+            # T18 FLT-1: a genuinely ENDING session clears its own presence doc (a crash
+            # ages out via TTL instead). SubagentStop rides this same entry point with
+            # the PARENT's session_id (--reason subagent-stop) — the parent is still
+            # live, so its doc must survive.
+            if reason != "subagent-stop":
+                try:
+                    from .presence import clear_presence
+
+                    clear_presence(args.memory_dir, session_id=session_id)
+                except Exception:
+                    pass
         path = write_session_capture(
             session_id, reason=reason, memory_dir=args.memory_dir, repo_root=args.repo_root
         )

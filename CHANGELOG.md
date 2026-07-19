@@ -7,6 +7,73 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.27.0 — 2026-07-18 — "The fleet sees itself"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**, index
+schema still **7**, citation derivation still **4**. One tier: T18 "The fleet lane"
+(`ROADMAP.enhancements4.yaml` — the round-4 closer), wholly gated on owner decision Q1 and
+answered **YES** 2026-07-18 in-session (artifact-class parity with the episode buffer + jit
+state: gitignored, bounded, self-aging, absence-emits-nothing). Detection and one bounded line
+each — no lock, no daemon, no coordination protocol (ED4R-3).
+
+### FLT-1 — session presence: the per-session doc (the fleet keystone)
+- Concurrent same-clone sessions — four documented collisions on 2026-07-16 alone — become
+  visible to each other. Each session writes
+  `<telemetry_dir>/presence/<safe(session_id)>.json` = `{session_id, branch, head, ts}` at
+  SessionStart (atomic, under a self-ignoring dir), in a NEW sibling `presence.py`.
+- The `jit.py` per-session state pattern plus the TTL half its count-only prune lacks: an
+  mtime-TTL sweep (6h) deletes ANY session's expired doc — the crash-aging path — before the
+  count cap (32, oldest first). A graceful SessionEnd clears the session's own doc (wired in
+  `capture --from-hook`, with SubagentStop explicitly excluded: a subagent ending must not
+  clear its still-live parent's doc).
+- New SessionStart producer `presence` (after `trust_drift`): EMPTY-NORM — with no other fresh
+  doc it emits nothing, ever; otherwise ONE bounded line naming the other sessions' branches
+  and ages, newest first.
+- Scope stated where it matters: presence is per-WORKING-TREE (a worktree-opened-as-project
+  session resolves its own telemetry dir); git-common-dir spanning is out of scope v1.
+  `session_start.py` took exactly 3 wiring lines (it now sits AT its grandfathered size cap);
+  `telemetry.py` took zero. The doc's writer is registered `intact` in the crash contract.
+
+### FLT-2 — moved-under-me tripwire: one neutral line per move
+- The existing PostToolUse spawn compares live `git symbolic-ref --short HEAD` +
+  `git rev-parse HEAD` against the session's OWN presence doc, debounced through the doc's
+  `checked_ts` (each hook spawn is a fresh process, so the doc is the cross-spawn state): the
+  common path is one small JSON read with ZERO subprocesses — budget-pinned in the nightly
+  scale lane alongside JIT-1's 50ms envelope.
+- Fires on the two documented collision signatures only: a branch switch (the t8 14:21
+  checkout under a live session) and a non-fast-forward reposition (the t16 branch pointer
+  repositioned by a concurrent release). A linear fast-forward advance — the shape of the
+  session's own commits landing — re-baselines silently, keeping the line rare enough to mean
+  something. ONE neutral line per move (`was X@sha, now Y@sha`, quoting the reflog checkout
+  entry when it matches the live branch), then the doc updates and the wire is silent until
+  the next move. Detection, not accusation: hooks cannot see Bash-mediated git, so the
+  session's own moves and a concurrent session's look identical — the line states facts and
+  prescribes nothing; recovery stays human.
+- Touchless sessions get the same compare at their next SessionStart: `write_presence` stashes
+  the line as `moved_note`; the producer emits it exactly once and clears it.
+
+### FLT-3 — worktree-first nudge at the first shared-tree mutating act
+- `MUTATING_FILE_TOOLS` (`{Edit, Write, MultiEdit, NotebookEdit}` — Read excluded) lands in
+  `outcome.py` as the ONE canonical mutating-tool subset, pinned to `_FILE_TOOLS - {Read}` so
+  a future matcher tool forces a conscious classification. The first mutating touch of the
+  shared tree (worktree-prefixed paths self-exempt — the same `_WORKTREE_PREFIX` constant
+  EVD-2's lane-health diagnosis names) while ≥1 OTHER fresh presence doc exists earns ONE
+  nudge per session naming the proven recipe verbatim:
+  `git worktree add .claude/worktrees/<branch>`.
+- The joint PostToolUse line budget is explicitly re-bounded and stated: JIT-1 keeps its 3
+  reminder lines per session; the fleet lane adds at most 2 per spawn (one tripwire line per
+  move + one nudge per session) — all on the same `context_out`, so the hook still prints
+  exactly ONE `hookSpecificOutput` (QUA-2).
+- Kill switch: `HIPPO_DISABLE_PRESENCE` (STABILITY.md, beside `HIPPO_DISABLE_JIT`) silences
+  the whole lane. The HONEST COVERAGE BOUNDARY is documented in STABILITY.md, the hook script,
+  and the module: PostToolUse sees FILE-TOOL acts only — Bash-mediated mutations (git, pytest,
+  scripts) are invisible to it, so the shared-tree cwd-trap class is covered only for
+  file-tool mutations.
+
+T18 closes round 4: all four tiers (T21, T19, T20, T18) are shipped and released. Q2 (trust
+remediation) and Q3 (publish `--stage`) remain the round's open owner decisions — the
+report-only / print-only postures hold until dated verdicts land.
+
 ## v1.26.0 — 2026-07-18 — "The roadmap is allowed to move"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**, index

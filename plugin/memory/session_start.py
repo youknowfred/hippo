@@ -57,6 +57,7 @@ from .recall import (
     portable_floor_producer,
 )
 from .merge_digest import merge_digest_producer
+from .presence import presence_producer, write_presence
 from .reconsolidate import (
     recalled_stale_worklist,
     reconsolidation_producer,
@@ -1299,6 +1300,7 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("integrity", integrity_producer),  # a malformed memory must not hide
     ("citation_rot", citation_rot_producer),  # cited paths gone from the repo (LIF-3) — find_unparseable's rot sibling
     ("trust_drift", trust_drift_producer),  # SEC-6: trusted corpus drifted from its consent baseline — recall is withholding files
+    ("presence", presence_producer),  # FLT-1: another live session shares this working tree (fleet visibility; empty-norm)
     ("staleness", staleness_producer),
     ("reconsolidation", reconsolidation_producer),  # recall-filtered subset of staleness; silent unless a recently-recalled memory is stale
     ("pending_capture", pending_capture_producer),  # CAP-2: surface the gitignored draft-capture queue so it never soaks silently
@@ -1659,6 +1661,7 @@ def main(
                     mark_session(td)
                 else:
                     current_session_id(td)
+            write_presence(memory_dir, repo_root, session_id=session_id)  # T18 FLT-1: fleet presence doc
         except Exception:
             pass
         producer_chars: dict = {}

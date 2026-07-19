@@ -36,7 +36,13 @@ release). New *additions* alongside them are minor, non-breaking changes.
   `HIPPO_MCP_MAX_MESSAGE_CHARS`, `HIPPO_TEA5_OPT_IN`, `HIPPO_SALIENCE`, `HIPPO_DENSE_FLOOR`,
   `HIPPO_DUP_THRESHOLD`, `HIPPO_DISABLE_JIT` (added in T16 JIT: kills the default-on
   first-touch reminder lane + its touch-grain telemetry, restoring pre-T16 PostToolUse
-  behavior byte-for-byte), `HIPPO_SLEEP_TIER_A` (added in T15 SLP: the opt-in that lets a
+  behavior byte-for-byte), `HIPPO_DISABLE_PRESENCE` (added in T18 FLT: kills the whole
+  fleet lane — no per-session presence doc, no SessionStart fleet line, no moved-tree
+  tripwire, no worktree-first nudge; docs already on disk age out via their TTL. Honest
+  coverage note while ON: the lane rides PostToolUse, which sees FILE-TOOL acts only —
+  Bash-mediated mutations such as `git commit`/`checkout`, pytest runs, and scripts are
+  invisible to it, so the shared-tree cwd-trap class is covered only for file-tool
+  mutations), `HIPPO_SLEEP_TIER_A` (added in T15 SLP: the opt-in that lets a
   SCHEDULED sleep pass apply capped, reversible Tier-A dream edges — default OFF, and OFF
   keeps the runner's zero-write guarantee byte-for-byte). These keep their names and meanings.
 - **The committed on-disk corpus format** — `.claude/memory/.format`'s `corpus_format` (currently

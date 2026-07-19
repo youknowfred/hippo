@@ -247,3 +247,58 @@ def test_jit_touch_decision_under_budget_at_scale(tmp_path):
         f"{_JIT_OBSERVE_P95_MS}ms at {_N} memories / {_JIT_CITED} cited "
         f"(derived-cache reads only — a corpus scan or rebuild snuck onto the hook path?)"
     )
+
+
+# --------------------------------------------------------------------------- #
+# T18 FLT-2 at scale: the fleet check rides the same PostToolUse spawn as JIT-1,
+# so it inherits the same per-touch budget. The debounced common path must be
+# one tiny JSON read — ZERO git subprocesses; the full presence dir (count-cap
+# worth of other sessions' docs) must not bend the curve.
+# --------------------------------------------------------------------------- #
+_FLEET_TOUCHES = 200
+_FLEET_OBSERVE_P95_MS = 50.0  # same budget class as _JIT_OBSERVE_P95_MS (one spawn, one budget)
+
+
+def test_presence_observe_under_budget_at_scale(tmp_path):
+    import json as _json
+    import subprocess
+
+    from memory import presence as P
+    from memory.telemetry import default_telemetry_dir
+
+    root = str(tmp_path / "repo")
+    md = os.path.join(root, ".claude", "memory")
+    os.makedirs(md)
+    with open(os.path.join(root, "app.py"), "w", encoding="utf-8") as fh:
+        fh.write("x = 1\n")
+    env = {**os.environ, "GIT_AUTHOR_DATE": "1700000000 +0000",
+           "GIT_COMMITTER_DATE": "1700000000 +0000",
+           "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    subprocess.run(["git", "init", "-q", root], check=True)
+    subprocess.run(["git", "-C", root, "add", "-A"], check=True)
+    subprocess.run(["git", "-C", root, "commit", "-qm", "seed"], check=True, env=env)
+
+    # A full house: this session's doc plus a count-cap's worth of other sessions.
+    P.write_presence(md, root, session_id="scale-sess")
+    pd = P._presence_dir(default_telemetry_dir(md))
+    for i in range(P.MAX_PRESENCE_FILES - 2):
+        p = os.path.join(pd, f"other-{i:02d}.json")
+        with open(p, "w", encoding="utf-8") as fh:
+            _json.dump({"session_id": f"other-{i:02d}", "branch": f"b{i}",
+                        "head": "a" * 40, "ts": time.time()}, fh)
+
+    times = []
+    for i in range(_FLEET_TOUCHES):
+        t0 = time.perf_counter()
+        P.observe_fleet(
+            f"src/f{i:04d}.py", memory_dir=md, repo_root=root, session_id="scale-sess"
+        )
+        times.append((time.perf_counter() - t0) * 1000.0)
+    times.sort()
+    p95 = times[int(0.95 * len(times))]
+    assert p95 < _FLEET_OBSERVE_P95_MS, (
+        f"FLT-2 hook overhead regressed: per-touch fleet decision p95 {p95:.2f}ms >= budget "
+        f"{_FLEET_OBSERVE_P95_MS}ms with a full presence dir (the debounced path must be one "
+        f"JSON read, zero subprocesses — did a git call sneak onto the common path?)"
+    )

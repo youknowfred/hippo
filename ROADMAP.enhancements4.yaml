@@ -262,7 +262,13 @@ workstreams:
         title: Session presence file (per-session doc — the fleet keystone, Q1-gated)
         priority: P1
         effort: M
-        status: proposed
+        status: done           # 2026-07-18, session 3 — Q1 YES first (dated owner entry below); presence.py + 3-line session_start wiring + capture SessionEnd clear; every AC pinned in tests/test_presence.py
+        q1_verdict: >-
+          2026-07-18, in-session dated owner entry (ED4R-1): Fred answered Q1 "Yes —
+          write it", ratifying the presence write on the vetted ground — artifact-class
+          parity with the episode buffer + jit state (gitignored, bounded, self-aging,
+          absence-emits-nothing). Asked and answered as STEP ZERO of the T18 build
+          session, before any code (the T21 Q4 ask-and-answer pattern).
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "4 documented same-clone collisions on 2026-07-16: qa-sweep capstone (pytest pollution during v1.17.0 release validation), t16 capstone (branch pointer repositioned by the concurrent v1.18.0 release), PR #62 body ('the third shared-clone collision today'), t8-measurement capstone ('the 4th clone collision') + hippo-branch-cleanup-2026-07-16 Finding 2"}
         problem: >-
           No presence/heartbeat artifact exists at 81177ba (grep verified: only
@@ -337,12 +343,45 @@ workstreams:
           Fleet state itself rots: the stale fix-worklist-rebounce worktree
           (two releases behind) lingering in `git worktree list` is the
           in-house proof that TTL discipline is mandatory, not optional.
+          AS BUILT 2026-07-18 (drift corrected vs the 81177ba snapshot): the
+          tree had moved through five more releases — session_start.py sat at
+          1702/1705 (not the brief's 1692), so the wiring landed at EXACTLY 3
+          lines (sibling import + PRODUCERS entry + write call) leaving the
+          file AT its grandfathered cap (the next change there forces a split
+          or a deliberate re-pin); telemetry.py took ZERO lines. The
+          "memory_session_end.sh graceful-clear seam" resolved to capture.py's
+          --from-hook branch (that hook's ONE Python spawn, INT-5) — gated on
+          reason != subagent-stop because memory_subagent_stop.sh rides the
+          SAME entry with the still-live parent's session_id. The producer
+          registered after trust_drift; the cited adjacency pins (:625,:979 —
+          stale_venv-first, squash-after-unresolvable) were untouched by that
+          insertion and a third pin now guards the presence slot. TTL landed
+          at 6h with the age always displayed; prune = TTL sweep (any
+          session's expired doc) then count-cap 32 oldest-first. The doc's
+          atomic writer is registered 'intact' in the crash contract
+          (tests/test_crash_faults.py) — the jit._write_state posture.
 
       - id: FLT-2
         title: Moved-under-me tripwire (HEAD/branch baseline vs the presence doc)
         priority: P2
         effort: M
-        status: proposed
+        status: done           # 2026-07-18, session 3 — observe_fleet on the PostToolUse spawn + the write_presence/producer SessionStart fallback; budget pinned in tests/test_scale.py
+        as_built: >-
+          Two build decisions recorded per the premise-correction law. (1) "mismatch-
+          without-a-matching-self-update" is implemented as: a linear FAST-FORWARD
+          advance (old head is an ancestor of the new — the shape of this session's own
+          commits landing) refreshes the baseline SILENTLY; only a branch switch or a
+          non-fast-forward reposition fires — exactly the two documented signatures (the
+          t16 reposition, the t8 checkout switch). Firing on every own-commit would have
+          made the line wallpaper (the HYG-3 warn-on-dead legibility discipline). A
+          foreign session fast-forwarding the shared branch is therefore NOT tripwired at
+          head grain — that class is covered by the presence line + FLT-3's nudge, stated
+          honestly here. (2) Each PostToolUse is a FRESH Python spawn, so the debounce
+          state is the doc itself (checked_ts; _RECHECK_SECONDS=60): the common path is
+          one JSON read with ZERO subprocesses (pinned in tests/test_scale.py alongside
+          the JIT budget), the compare pair is paid at most once per window, and the
+          rc-only ancestor probe only on an actual head change. The reflog checkout quote
+          renders only when its destination matches the live branch.
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "hippo-enh-t16-jit capstone (enh-t16-jit branch pointer repositioned by the concurrent v1.18.0 release) + hippo-branch-cleanup-2026-07-16 Finding 2 (the 14:21 checkout switch under the live T8 session; t8 capstone calls it 'the 4th clone collision of 2026-07-16')"}
         problem: >-
           Nothing detects a moved checkout or repositioned branch today — grep
@@ -402,7 +441,24 @@ workstreams:
         title: Worktree-first nudge at the first shared-tree mutating act
         priority: P2
         effort: M
-        status: proposed
+        status: done           # 2026-07-18, session 3 — nudge in observe_fleet; MUTATING_FILE_TOOLS canonical constant in outcome.py; recipe named verbatim; coverage boundary documented
+        as_built: >-
+          MUTATING_FILE_TOOLS landed in outcome.py beside _FILE_TOOLS (the payload
+          domain), pinned as exactly _FILE_TOOLS minus Read so a future matcher tool
+          forces a conscious mutating-or-not call; presence.observe_fleet receives
+          booleans (mutating / shared_tree) — payload-agnostic, no import cycle. The
+          self-exemption reuses outcome._WORKTREE_PREFIX verbatim (the EVD-2 constant —
+          the named coupling; no prefix logic forked; recording changes stay EVD-2's
+          follow-up). Line budget EXPLICITLY RE-BOUNDED and stated in presence.py's
+          docstring: JIT-1 keeps its 3 reminder lines per session; the fleet lane adds
+          at most 2 per spawn (one tripwire line per move + one nudge per session) on
+          the same context_out (QUA-2 holds — one hookSpecificOutput). The kill switch
+          shipped WIDER than the item asked: HIPPO_DISABLE_PRESENCE kills the whole
+          fleet lane (write + producer + tripwire + nudge — pre-T18 behavior), mirroring
+          HIPPO_DISABLE_JIT's whole-lane semantics; registered in STABILITY.md with the
+          coverage boundary stated there, in memory_post_tool.sh, and in the module
+          docstring. No skill text documents hook lanes (the T16 precedent) — the
+          boundary lives in the three surfaces above.
         source: {origin: EXPLORATIONS4, verdict: RESHAPE, signal: "PR #62 body ('branching in place would have yanked [the T17 session's] working tree — the third shared-clone collision today'); t8/t12/t13 capstones ('START in a worktree even when the clone looks clean'; 'Worktree discipline held'); the live .claude/worktrees/<branch> convention in `git worktree list`"}
         problem: >-
           The worktree recipe is the proven mitigation — every tier session
@@ -1267,7 +1323,13 @@ release_train:
   - tier: T18
     target_version: TBD    # nominal — assigned at release; round 4 is a proposal (ED4R-1)
     theme: "The fleet lane"
-    status: proposed
+    status: done           # 2026-07-18, one session: FLT-1 (Q1 YES first), FLT-2, FLT-3 in order. done_means met — the 2026-07-16 collision classes are detected, named events: presence line at SessionStart, one neutral tripwire line per move, the worktree recipe at the first shared-tree mutation. ED4R-3 held throughout: no lock, no daemon, one bounded line each.
+    ratified: >-
+      2026-07-18 — owner-directed (Fred's scheduled T18 implementation chip, naming the
+      FLT-1 -> FLT-2 -> FLT-3 order): T18 selected for build per LAW ZERO. Q1 was asked
+      and answered in-session as STEP ZERO (the T21 Q4 pattern): YES — dated verdict
+      recorded on FLT-1 (q1_verdict) and in ED4R-1. Ship posture, owner-directed in the
+      same exchange: merge + release on green CI per RELEASING.md.
     gate: "Q1 (the presence artifact) gates the WHOLE tier — FLT-1 is the keystone: FLT-2's baseline and FLT-3's presence read both live in its per-session doc. No cross-file deps (RCH-11-adjacent only)."
     done_means: >-
       Concurrent same-clone sessions become mutually visible, a moved tree
@@ -1493,9 +1555,11 @@ decisions:
       Q4 (EVD-4) — commission the salience-revisit evidence run? (rec: yes —
       evidence first, decision later; gates Arm A). Each resolution is a
       dated owner entry recorded on the item and in the capstone; a metric
-      never proxies any of them (LIF-7). STATUS 2026-07-17: Q4 RESOLVED —
-      Fred commissioned Arm A in the T21 build session (dated entry +
-      result on EVD-4); Q1, Q2, Q3 remain PENDING.
+      never proxies any of them (LIF-7). STATUS 2026-07-18: Q1 RESOLVED —
+      Fred answered YES in the T18 build session (dated entry on FLT-1's
+      q1_verdict; presence ships on artifact-class parity). Q4 RESOLVED
+      2026-07-17 — Fred commissioned Arm A in the T21 build session (dated
+      entry + result on EVD-4). Q2, Q3 remain PENDING.
   - id: ED4R-2
     question: What keeps round 4 from minting the next generation of dark reservoirs?
     decision: no new standing artifact without a NAMED READER (the anti-dark-reservoir law — round 4's organizing spine)
