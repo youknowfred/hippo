@@ -96,6 +96,41 @@ _RECONSOLIDATION_OUTCOMES = frozenset({"graduate", "fix", "demote", "snooze"})
 # Privacy: store only a short prefix of the query, never the full prompt.
 _QUERY_PREVIEW_CHARS = 80
 
+# --------------------------------------------------------------------------- #
+# MEA-4: producer-version stamps. The live-hook-lag class (a stale installed hook
+# writing rows for N releases) bit twice in one week and both diagnoses were hand
+# forensics — no row said which plugin version minted it. Every NEW row in the
+# outcome / recall / reconsolidation ledgers carries an additive `v` (ED-4:
+# unreadable manifest -> field omitted; historical rows never backfilled). The
+# version is the RUNNING plugin's — CLAUDE_PLUGIN_ROOT (the launch-pinned installed
+# cache under hooks) with the module's own root as the dev fallback, the
+# check_plugin_version / DoctorContext.plugin_root resolution — NOT the repo tree
+# being operated on; that distinction is the whole point. Provenance only: nothing
+# anywhere branches on the stamp.
+# --------------------------------------------------------------------------- #
+_PRODUCER_VERSION_UNSET = object()
+_producer_version_cache = _PRODUCER_VERSION_UNSET
+
+
+def _producer_version() -> Optional[str]:
+    """Version string of the RUNNING plugin, cached once per process; None (stamp
+    omitted) when the manifest is unreadable. Never raises."""
+    global _producer_version_cache
+    if _producer_version_cache is not _PRODUCER_VERSION_UNSET:
+        return _producer_version_cache
+    v: Optional[str] = None
+    try:
+        root = os.environ.get("CLAUDE_PLUGIN_ROOT") or os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))
+        )
+        with open(os.path.join(root, ".claude-plugin", "plugin.json"), encoding="utf-8") as fh:
+            raw = json.load(fh).get("version")
+        v = raw if isinstance(raw, str) and raw.strip() else None
+    except Exception:
+        v = None
+    _producer_version_cache = v
+    return v
+
 
 
 def log_recall_event(
@@ -183,6 +218,9 @@ def log_recall_event(
             event["channel"] = channel
         if injected_chars is not None:
             event["injected_chars"] = int(injected_chars)
+        v = _producer_version()  # MEA-4: provenance stamp, cached; omitted when unreadable
+        if v:
+            event["v"] = v
         path = _ledger_path(td)
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, ensure_ascii=False) + "\n")
@@ -819,6 +857,9 @@ def log_outcome(
         }
         if cited_by:
             event["cited_by"] = [str(n) for n in cited_by if n]
+        v = _producer_version()  # MEA-4: provenance stamp, cached; omitted when unreadable
+        if v:
+            event["v"] = v
         p = _outcome_ledger_path(td)
         with open(p, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, ensure_ascii=False) + "\n")
@@ -901,6 +942,9 @@ def record_reconsolidation_outcome(
             # an additive field on the SAME event (no new ledger, no new outcome value),
             # and the no-sensitive-content contract holds: never query text.
             event["succession_replay"] = dict(succession_replay)
+        v = _producer_version()  # MEA-4: provenance stamp, cached; omitted when unreadable
+        if v:
+            event["v"] = v
         path = _reconsolidation_ledger_path(td)
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, ensure_ascii=False) + "\n")

@@ -456,6 +456,25 @@ def format_lane_health(memory_dir: str, telemetry_dir: Optional[str] = None) -> 
             f"  outcome rows: {total} across {sessions} session(s); {with_cb} carry cited_by touch provenance",
             f"  touchmap: {len(cited_map)} cited path(s) / {len(reminders_map)} reminder path(s)",
         ]
+        # MEA-4: rows by producing version — the forensic complement to OPS-1's skew
+        # line. Historical version-less rows aggregate as ONE "unstamped" bucket, never
+        # backfilled; provenance only, nothing branches on the stamp.
+        if total:
+            from .telemetry import _producer_version
+
+            by_v: dict = {}
+            for r in rows:
+                key = r.get("v") if isinstance(r.get("v"), str) else "unstamped"
+                by_v[key] = by_v.get(key, 0) + 1
+            running = _producer_version() or "unknown"
+            buckets = ", ".join(
+                f"{k}: {n}" for k, n in sorted(by_v.items(), key=lambda kv: (-kv[1], kv[0]))
+            )
+            lines.append(
+                f"  rows by producing version (running v{running}): {buckets} — provenance "
+                "only (MEA-4); rows stamped by an older version date the lagged-hook window "
+                "from the ledger itself"
+            )
         if total:
             share = 100.0 * len(wt_paths) / total
             lines.append(

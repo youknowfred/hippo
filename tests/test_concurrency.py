@@ -134,6 +134,7 @@ def test_ledger_concurrent_appenders_no_crash_no_torn_lines_across_rotation(tmp_
             "latency_ms",
             "k",
             "query_preview",
+            "v",  # MEA-4: producer-version stamp (the dev-tree manifest is always readable here)
         }
         assert obj["backend"] == "bm25"
         assert obj["k"] == 5

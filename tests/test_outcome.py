@@ -284,7 +284,8 @@ def test_record_from_payload_without_cache_is_unchanged(repo, memory_dir):
     _mem(memory_dir, "app-note", ["src/app.py"])
     assert _touch(memory_dir, repo, "src/app.py", sid="s") is True
     rows = list(T.read_outcomes(default_telemetry_dir(memory_dir)))
-    assert set(rows[0]) == {"ts", "session_id", "tool", "path"}
+    # MEA-4 adds the producer-version stamp; the pre-T16 point stands: no cited_by.
+    assert set(rows[0]) == {"ts", "session_id", "tool", "path", "v"}
 
 
 def test_injection_hits_touch_grain_counts_recorded_coincidences_only(repo, memory_dir):
