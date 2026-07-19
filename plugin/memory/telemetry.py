@@ -76,6 +76,7 @@ from .telemetry_mining import (  # noqa: F401
     _ABSTENTION_MAX_TERMS,
     _ABSTENTION_MIN_COUNT,
     _ABSTENTION_STOPWORDS,
+    _CORECALL_LIFT_FLOOR,
     _CORECALL_MAX_PAIRS,
     _CORECALL_MIN_SESSIONS,
     _abstention_content_tokens,

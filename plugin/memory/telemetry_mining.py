@@ -126,6 +126,18 @@ def abstention_backlog(
 _CORECALL_MIN_SESSIONS = 3
 _CORECALL_MAX_PAIRS = 20  # bounded output for the consolidate proposal turn
 
+# MEA-3: the null-model floor for the RENDER — pairs whose lift (observed sessions vs
+# expected under independence from the members' own session frequencies) sits below this
+# are frequency confounds, collapsed into one countable line at the proposal surface
+# instead of proposed (inv3: suppressed, never invisible). Module constant, no env knob.
+# 1.5 = observed must beat chance by half again; the flagship corpus's 20 live pairs all
+# sat at 1.02-1.21 at build (pure staple-x-staple confounds), so the first annotated run
+# proposes nothing — the designed outcome, not a failure. Deparasite's two reads
+# (protection + weak-link) deliberately keep RAW counts — the permissive-protection
+# default (refusing to exonerate on confound evidence must not flip into demoting on
+# its absence); no cap or sort-order motion this round (measure the distribution first).
+_CORECALL_LIFT_FLOOR = 1.5
+
 
 def co_recall_pairs(
     telemetry_dir: Optional[str] = None,
@@ -147,6 +159,14 @@ def co_recall_pairs(
     ``lint_floor.floor_memory_names`` so always-recalled floor memories can't dominate every
     pair). Read-only over the gitignored buffer; a TALLY, never a writer — the consumer
     (the consolidate skill) proposes each edge per-item, agent-gated. Never raises.
+
+    MEA-3 (the null model): each pair additionally carries ``observed_sessions``,
+    ``expected_under_independence`` (= freq_a * freq_b / S over the same session universe
+    the union pass already iterates), ``lift`` (= observed / expected), plus
+    ``member_sessions`` and ``session_universe`` for the render. Per-name marginals ride
+    the SAME union pass — no second ledger walk. ADDITIVE fields (ED-4): pair/sessions
+    values, ordering, threshold, and cap are byte-identical for consumers that ignore
+    the new keys.
     """
     try:
         excluded = exclude_names or set()
@@ -158,17 +178,33 @@ def co_recall_pairs(
                 continue
             by_session.setdefault(str(sid), set()).update(names)
         counts: Dict[frozenset, int] = {}
+        freq: Dict[str, int] = {}
         for names in by_session.values():
             ordered = sorted(names)
+            for n in ordered:
+                freq[n] = freq.get(n, 0) + 1
             for i, a in enumerate(ordered):
                 for b in ordered[i + 1 :]:
                     key = frozenset((a, b))
                     counts[key] = counts.get(key, 0) + 1
-        out = [
-            {"pair": sorted(pair), "sessions": n}
-            for pair, n in counts.items()
-            if n >= min_sessions
-        ]
+        universe = len(by_session)
+        out = []
+        for pair, n in counts.items():
+            if n < min_sessions:
+                continue
+            a, b = sorted(pair)
+            expected = (freq[a] * freq[b] / universe) if universe else 0.0
+            out.append(
+                {
+                    "pair": [a, b],
+                    "sessions": n,
+                    "observed_sessions": n,
+                    "expected_under_independence": round(expected, 2),
+                    "lift": round(n / expected, 2) if expected else None,
+                    "member_sessions": {a: freq[a], b: freq[b]},
+                    "session_universe": universe,
+                }
+            )
         out.sort(key=lambda p: (-p["sessions"], p["pair"]))
         return out[:_CORECALL_MAX_PAIRS]
     except Exception:

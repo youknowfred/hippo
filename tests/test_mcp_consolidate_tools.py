@@ -391,10 +391,18 @@ def test_co_recall_proposals_surfaces_a_recurring_pair(corpus, tmp_path):
         ("s1", ["deploy_runbook", "rollback_plan"]),
         ("s2", ["deploy_runbook", "rollback_plan"]),
         ("s3", ["deploy_runbook", "rollback_plan"]),
+        # MEA-3: a wider session universe so the pair's co-occurrence beats independence
+        # (members in 3/6 sessions each, together in all 3 -> lift 2.0). Without these,
+        # both members exist ONLY in shared sessions and lift is exactly 1.0 — a perfect
+        # confound the null model now correctly refuses to propose.
+        ("s4", ["other_note"]),
+        ("s5", ["other_note"]),
+        ("s6", ["other_note"]),
     ])
     text = _text(_call("co_recall_proposals", {}))
     assert "deploy_runbook <-> rollback_plan" in text
     assert "3 distinct sessions" in text
+    assert "lift 2.0" in text
     assert "ONE side's body" in text and "build_index" in text  # the per-item recipe travels
 
 
