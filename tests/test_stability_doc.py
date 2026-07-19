@@ -17,6 +17,13 @@ and its stated CLI surface against the registry.
 Scope is deliberately FACTS, not policy:
   - a stated version number must equal its constant;
   - a documented env var must exist in the shipped source;
+  - every shipped `HIPPO_DISABLE_*` kill switch must appear in the documented list (REL-4,
+    the REVERSE direction — the founding DOC-15 incident included exactly this miss:
+    `HIPPO_SLEEP_TIER_A` shipped without its doc line. Kill switches ONLY: an
+    undocumented kill switch is illegible degradation (inv3) — the user facing a
+    misbehaving lane cannot find the off switch the code honors. The blanket reverse
+    lint over all ~60 `HIPPO_*` names is deliberately NOT built — the ranking knobs are
+    undocumented on purpose, STABILITY.md's own posture);
   - the stated `bin/hippo` subcommand list must equal the registry's (INV-1 pinned the
     SCRIPT to the registry but never the published doc — the gap this closes).
 What is FROZEN (which verbs, which tools) stays a human decision: adding to that list
@@ -113,15 +120,20 @@ def test_every_version_claim_is_actually_asserted():
     )
 
 
-def test_documented_env_vars_exist_in_the_shipped_source():
-    """Every HIPPO_* the doc promises to keep stable must be a var the code actually
-    reads — a rename that misses the doc leaves users configuring a ghost."""
+def _documented_operational_vars() -> list:
+    """The `HIPPO_*` names STABILITY.md's documented operational list promises."""
     flat = _flat()
     m = re.search(r"these documented operational variables:(.+?)These keep their names", flat)
     assert m, "STABILITY.md's documented operational HIPPO_* list is gone or reworded"
     documented = sorted(set(re.findall(r"`(HIPPO_[A-Z0-9_]+)`", m.group(1))))
     assert documented, "the documented operational list parsed to zero variables"
+    return documented
 
+
+def _shipped_source() -> str:
+    """Every shipped `.py`/`.sh` under plugin/memory + plugin/hooks (minus `_vendor`),
+    concatenated — the one haystack both env-var directions read (doc→code and the
+    REL-4 kill-switch code→doc reverse)."""
     haystack = []
     for sub in ("memory", "hooks"):
         base = os.path.join(_REPO_ROOT, "plugin", sub)
@@ -132,12 +144,60 @@ def test_documented_env_vars_exist_in_the_shipped_source():
                 if fname.endswith((".py", ".sh")):
                     with open(os.path.join(root, fname), encoding="utf-8") as fh:
                         haystack.append(fh.read())
-    source = "\n".join(haystack)
+    return "\n".join(haystack)
+
+
+def _undocumented_kill_switches(source: str, documented: list) -> list:
+    """`HIPPO_DISABLE_*` names the source reads but the documented list omits — the
+    REL-4 check, factored so the fixture trip-wire test proves the SAME mechanism the
+    real lint runs. Kill-switch prefix ONLY: posture vars (`HIPPO_TRUST_ALL` and
+    friends) and ranking knobs are deliberately out of scope."""
+    shipped = sorted(set(re.findall(r"HIPPO_DISABLE_[A-Z0-9_]+", source)))
+    return [v for v in shipped if v not in documented]
+
+
+def test_documented_env_vars_exist_in_the_shipped_source():
+    """Every HIPPO_* the doc promises to keep stable must be a var the code actually
+    reads — a rename that misses the doc leaves users configuring a ghost."""
+    documented = _documented_operational_vars()
+    source = _shipped_source()
     missing = [v for v in documented if v not in source]
     assert not missing, (
         f"STABILITY.md documents env var(s) the shipped source never reads: {missing}. "
         "Either the var was renamed/removed (update the doc — it is a stability promise) "
         "or the name is a typo."
+    )
+
+
+def test_every_shipped_kill_switch_is_documented():
+    """REL-4, the reverse direction: every `HIPPO_DISABLE_*` the shipped source reads
+    must appear in STABILITY.md's documented operational list. An undocumented kill
+    switch is illegible degradation (inv3) — the user facing a misbehaving lane cannot
+    find the off switch the code honors. Green at birth (DENSE/JIT/PRESENCE, 3/3); trips
+    the first time a lane ships a kill switch without its stability line."""
+    source = _shipped_source()
+    assert re.search(r"HIPPO_DISABLE_[A-Z0-9_]+", source), (
+        "the shipped-source walk found ZERO HIPPO_DISABLE_* reads — the haystack walk "
+        "broke (a vacuous pass here would let every future kill switch ship dark)"
+    )
+    missing = _undocumented_kill_switches(source, _documented_operational_vars())
+    assert not missing, (
+        f"shipped kill switch(es) {missing} are read by plugin source but missing from "
+        "STABILITY.md's documented operational list — an undocumented off switch is "
+        "illegible degradation (inv3). Add the doc line stating what the switch kills "
+        "and what OFF restores (the HIPPO_DISABLE_JIT/PRESENCE entries are the shape)."
+    )
+
+
+def test_kill_switch_reverse_lint_trips_on_an_undocumented_switch():
+    """The trip wire, proven on a synthetic fixture: a source that reads a
+    `HIPPO_DISABLE_*` name the documented list omits must be caught by the SAME helper
+    the real lint runs — this test failing means the reverse lint went vacuous."""
+    fixture_source = 'if os.environ.get("HIPPO_DISABLE_SYNTHETIC_LANE"):\n    pass\n'
+    missing = _undocumented_kill_switches(fixture_source, _documented_operational_vars())
+    assert missing == ["HIPPO_DISABLE_SYNTHETIC_LANE"], (
+        f"the kill-switch reverse lint failed to flag a synthetic undocumented switch "
+        f"(got {missing}) — the mechanism the real lint relies on is broken"
     )
 
 

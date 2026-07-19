@@ -534,7 +534,7 @@ workstreams:
         title: "Kill-switch reverse lint: every shipped HIPPO_DISABLE_* must appear in STABILITY.md's documented list"
         priority: P2
         effort: S
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 1 — two tests in test_stability_doc.py: the subset lint (green at birth, DENSE/JIT/PRESENCE 3/3, with a zero-reads vacuity guard) + the synthetic-fixture trip wire over the SAME helper; haystack walk + documented-list parse factored into shared helpers; DISABLE_ prefix only (blanket reverse lint explicitly not built)
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "tests/test_stability_doc.py:1-11 docstring — the founding DOC-15 incident includes the REVERSE-direction miss (HIPPO_SLEEP_TIER_A shipped but absent from the doc), which the shipped lint (documented->exists only) does not cover; shipped-source enumeration this cycle: exactly three HIPPO_DISABLE_* names read by plugin source (DENSE/JIT/PRESENCE) and STABILITY.md:35-39 documents all three — the lint passes green at birth"}
         problem: >-
           test_stability_doc.py checks documented->exists only; the reverse
@@ -1443,9 +1443,9 @@ workstreams:
 release_train:
 
   - tier: T22
-    target_version: TBD
+    target_version: TBD      # stamped at release time (post-release stamp, the round-4 convention)
     theme: "The runway & the ship gate"
-    status: planned          # ratified 2026-07-19; build not started
+    status: done             # 2026-07-19, session 1 — 4/4 items (REL-1 -> REL-2 -> REL-3 -> REL-4, the ratified in-tier order); done_means met: both AT-cap modules split (split chosen over re-pin), VOL-1's check repatriated, the merge-gate mechanic + facts lint live, kill-switch direction closed
     ratified: >-
       2026-07-19 — owner-ratified in the round-5 formal-question session (the
       dated LAW ZERO entry): all five round-5 tiers ratified together in the
