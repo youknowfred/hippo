@@ -198,6 +198,7 @@ def test_no_autonomous_execution_path():
         # mcp_server.py) — moved code stays under the same pin
         "recall_query.py", "recall_rank.py", "recall_graph.py",
         "recall_salience.py", "recall_tiers.py",
+        "session_start_health.py", "session_start_signals.py",
         "mcp_schemas.py", "mcp_tools_core.py", "mcp_tools_setup.py",
         "mcp_tools_consolidate.py", "mcp_tools_packs.py", "mcp_resources.py",
     )

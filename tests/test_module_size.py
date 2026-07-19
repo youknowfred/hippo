@@ -37,7 +37,6 @@ GRANDFATHERED_PLUGIN = {
     "eval_recall.py": 1933,  # SIG-6/GRF-3/SEN-4 writers are AST-pinned to this file (crash contract)
     "new_memory.py": 1757,
     "build_index.py": 1735,
-    "session_start.py": 1645,
     "recall.py": 1637,  # recall() orchestrator + hook entry; rankers/salience/tiers already split out
     "links.py": 1363,
     "dream_generate.py": 1314,

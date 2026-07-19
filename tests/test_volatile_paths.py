@@ -20,6 +20,7 @@ import os
 
 import memory.reconsolidate as R
 import memory.session_start as S
+import memory.session_start_signals as SG
 from memory import staleness_policy as SP
 from memory.provenance_format import (
     read_volatile_paths,
@@ -248,7 +249,7 @@ def test_evidence_drift_still_arms_a_volatile_only_memory(repo, memory_dir):
 # AC3 — the SessionStart staleness note reports what policy suppressed
 # --------------------------------------------------------------------------- #
 def _stub_stale(monkeypatch, items):
-    monkeypatch.setattr(S, "find_stale", lambda md, repo, diagnostics=None: list(items))
+    monkeypatch.setattr(SG, "find_stale", lambda md, repo, diagnostics=None: list(items))
 
 
 def test_staleness_note_counts_policy_suppressed_tail(memory_dir, monkeypatch):

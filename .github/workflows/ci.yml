@@ -1,6 +1,6 @@
 # CI — the suite finally gates something (QUA-1).
 #
-# Per-PR lanes (the six required checks):
+# Per-PR lanes (the seven required checks):
 #   hermetic  — the default (network+slow+scale-deselected) pytest suite, dense disabled,
 #               across the declared support matrix {ubuntu, macos} × {py3.10, py3.12}.
 #   dense     — fastembed model restored from actions/cache; runs the network-marked
@@ -22,11 +22,14 @@
 #               output, and build/refresh time. NIGHTLY only (schedule trigger). `scale`-marked
 #               so it never runs on the hermetic or dense lanes.
 #
-# Branch protection for `main` (QUA-12 — codified here so the intended ruleset is versioned,
-# not just a memory in the GitHub UI). Apply on `main` once the repo can enforce it (a public
-# repo, or a plan with branch protection — the free private plan returns 403 on the API, so the
-# maintainer self-merges until then):
-#   - Require a pull request before merging; require review from Code Owners (.github/CODEOWNERS).
+# Branch protection for `main` (QUA-12 — the ruleset of record, versioned here). APPLIED to
+# `main` 2026-07-19 via the API, the repo now being public — Q2(r5), dated owner entry on
+# REL-2 in ROADMAP.enhancements5.yaml. As applied:
+#   - Require a pull request before merging. ONE solo-maintainer deviation from the text as
+#     originally codified: code-owner review is OFF with 0 required approvals — CODEOWNERS
+#     is `* @youknowfred` and GitHub forbids self-approval, so requiring code-owner review
+#     would force every solo-authored PR through `gh pr merge --admin`, which bypasses the
+#     required checks too and defeats the gate. Revisit if a second maintainer lands.
 #   - Require these status checks to pass (use each job's FULL reported name — the string
 #     GitHub shows is the evaluated `name:` field, not the job id):
 #         hermetic (ubuntu-latest, py3.10) · hermetic (ubuntu-latest, py3.12)
@@ -34,9 +37,13 @@
 #         dense (cached model + eval_recall CLI)
 #         shellcheck (hooks + launcher)
 #         secret-scan (SEC-8 — shipped packs + repo)
-#     (the `resolution` and nightly `scale` lanes are intentionally NOT required.)
+#     (the `resolution`, nightly `scale`, and PR-only `memory-review` lanes are
+#     intentionally NOT required.)
 #   - Require branches to be up to date before merging; require linear history.
-#   - Do not allow force pushes or deletions of `main`.
+#   - Do not allow force pushes or deletions of `main`. enforce_admins stays OFF:
+#     `gh pr merge --admin` is the explicit, deliberate escape hatch, never routine —
+#     plain `gh pr merge` now mechanically refuses on a red or missing required check
+#     (RELEASING.md's merge-gate step is the operator half of the same discipline).
 # All GitHub Actions below are pinned by commit SHA (supply-chain hardening); dependabot
 # (.github/dependabot.yml) keeps the pins current.
 

@@ -65,6 +65,7 @@ from .doctor_checks_env import (
 from .doctor_checks_corpus import (
     check_steering,
     check_format_version,
+    check_volatile_paths,
     check_pack_drift,
     check_fill_me,
     check_trust,
@@ -74,6 +75,13 @@ from .doctor_checks_corpus import (
     check_ungrounded_prescriptions,
     check_committed_usage_privacy,
     check_dream_ledger,
+    _LATIN_ALPHA_RANGES,
+    _NON_ENGLISH_MIN_ALPHA_SAMPLE,
+    _NON_ENGLISH_ALPHA_FRACTION,
+    _is_latin_alpha,
+    check_non_english_corpus,
+)
+from .doctor_checks_lifecycle import (
     check_invalid_after_terminal,
     check_archive_shadowing,
     check_archive_regret,
@@ -81,11 +89,6 @@ from .doctor_checks_corpus import (
     check_merge_digest,
     check_team_coverage,
     check_subset_boundary,
-    _LATIN_ALPHA_RANGES,
-    _NON_ENGLISH_MIN_ALPHA_SAMPLE,
-    _NON_ENGLISH_ALPHA_FRACTION,
-    _is_latin_alpha,
-    check_non_english_corpus,
 )
 from .doctor_checks_recall import (
     _LINK_DENSITY_MIN_CORPUS,
@@ -308,43 +311,6 @@ def check_trust_scorecard(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": status, "message": message}
     except Exception as exc:
         return {"status": "warn", "message": f"trust scorecard failed: {exc}."}
-
-
-def check_volatile_paths(ctx: DoctorContext) -> Dict[str, str]:
-    """VOL-1: one display line — declared volatile-path count + currently-suppressed count.
-
-    Always ``ok`` — a declared registry is committed corpus policy working as intended,
-    and an absent one is the default; neither is a defect, so this line can never become
-    a nag (HYG-3's warn-on-real-signal-only discipline). The suppressed count pays the
-    same cold-path ``find_stale`` scan the TMB-2 terminal-state check already does; both
-    belong to doctor, never the hot path. Lives in the façade (not a checks sibling)
-    because ``doctor_checks_corpus`` sits at the module-size cap — the next corpus-domain
-    check to land there splits that file instead.
-    """
-    try:
-        from .provenance import read_volatile_paths
-        from .staleness import find_stale
-        from .staleness_policy import split_volatile_only
-
-        vol = read_volatile_paths(ctx.memory_dir)
-        if not vol:
-            return {
-                "status": "ok",
-                "message": "volatile paths: none declared (optional .format "
-                "volatile_paths key — staleness-arming policy).",
-            }
-        _, suppressed = split_volatile_only(
-            find_stale(ctx.memory_dir, ctx.repo_root), set(vol)
-        )
-        n = len(suppressed)
-        return {
-            "status": "ok",
-            "message": f"volatile paths: {len(vol)} declared; {n} stale memor"
-            + ("y" if n == 1 else "ies")
-            + " currently suppressed from arming (volatile-only drift).",
-        }
-    except Exception as exc:
-        return {"status": "ok", "message": f"volatile paths: check skipped ({exc})."}
 
 
 # (label, check_fn) in a FIXED order — the source of the deterministic output. New checks append

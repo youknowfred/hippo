@@ -308,7 +308,7 @@ workstreams:
         title: "Clear the runway: session_start.py facade split + the doctor_checks_corpus split that repatriates VOL-1's check"
         priority: P0
         effort: M
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 1 — SPLIT chosen (not re-pin): session_start.py 1705->539 facade + session_start_health.py 469 + session_start_signals.py 805; doctor_checks_corpus.py 899->663 + doctor_checks_lifecycle.py 293; check_volatile_paths repatriated; grandfather entry deleted; suite 2,885 green
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "wc -l this cycle: session_start.py 1705/1705 (pin 1645 + slack 60, tests/test_module_size.py) and doctor_checks_corpus.py 899/900 (non-grandfathered cap); hippo-enh-t18-fleet capstone ('wiring was EXACTLY 3 lines — the file now sits AT its grandfathered cap'); hippo-vol1-volatile-paths capstone ('in doctor.py the FACADE, because doctor_checks_corpus is at 899/900' — the distortion receipt); git log: session_start.py touched by 8 of the last 8 release-train merges; precedent PR #72 / 84ae688 (facade decomposition of doctor/dream/eval_recall/mcp_server/recall)"}
         problem: >-
           The two highest-traffic integration files sit AT their caps
@@ -383,12 +383,32 @@ workstreams:
           (84ae688). Process risk is merge-conflict surface with concurrent
           SessionStart work — schedule as its own small PR with the suite
           green, the same one-concern discipline every prior split used.
+          BUILT 2026-07-19 — premise corrections vs this note (live tree
+          13ddd6c): the fixed doctor check order is 54 entries, not 56 (the
+          registry's blank lines were miscounted at authoring);
+          check_trust_scorecard/_scorecard_message REMAIN in the doctor
+          facade — the MSR-6 AST pin (tests/test_injection_cost.py) keys
+          ("doctor", "_scorecard_message") and doctor.py documents that
+          location as deliberate, so the AC's "doctor.py retains no check
+          implementations" holds for every corpus-domain check EXCEPT the
+          pinned GOV-6 scorecard pair (moving it would re-key an unrelated
+          structural pin inside a code-motion PR — declined); the nudge-gate
+          cluster (_periodic_nudge_should_fire + untrusted_corpus_nudge)
+          landed in session_start_health (SEC-1 nudge beside SEC-6
+          trust_drift), so the two WRITE_OPEN_ALLOWLIST keys re-keyed to
+          DIFFERENT siblings (health gets _periodic_nudge_should_fire,
+          signals gets floor_change's _persist); test monkeypatch targets
+          moved with their code per CONTRIBUTING (test_session_start,
+          test_staleness, test_volatile_paths, test_evidence_drift,
+          test_pub_lane, test_verified_by, test_merge_digest retargeted;
+          hook-path/cold-path/receipt structural-pin module lists gained
+          the three new siblings).
 
       - id: REL-2
         title: "Release merge-gate hardening: the red-board lesson becomes RELEASING.md mechanic; surface the ripened QUA-12 ruleset decision (Q2 r5)"
         priority: P1
         effort: S
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 1 — RELEASING.md steps 5-8: seven-check enumeration, the exit-status merge gate (own command, never chained after a display), tag-after-green-main-run; ci.yml ruleset comment trued to the as-applied state (live protection re-verified via gh api at build); PR #86 cited as the gate's first real catch
         q2_verdict: >-
           2026-07-19, dated owner entry (ED5R-1): Fred answered Q2(r5) "Yes —
           apply as codified"; the ruleset was APPLIED to main the same day
@@ -464,7 +484,7 @@ workstreams:
         title: RELEASING.md facts lint — the DOC-16 pattern, one document over
         priority: P1
         effort: S
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 1 — tests/test_releasing_doc.py (5 tests): required count/names/multiplier/matrix parsed from ci.yml (ruleset comment cross-checked against expanded job names; PR-only/nightly lanes excluded mechanically), backticked-path existence sweep; the stale "All six" sentence was already trued by REL-2 in this PR; all four rot classes proven to trip
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "RELEASING.md:32 live rot re-verified this cycle: 'All six CI checks must be green: hermetic x4 ..., the dense lane, and shellcheck' — omits secret-scan; the required set has been SEVEN since SEC-8 (ci.yml:29-40 + the secret-scan job at ci.yml:128); grep: zero tests reference RELEASING.md (test_docs_links.py scope excludes it); the founding class: tests/test_stability_doc.py docstring records STABILITY.md misstating frozen numbers for 8 releases before DOC-16 (PR #66, 8a21371); ROADMAP.enhancements4.yaml not_pursuing row: 'the lint-pinned-facts pattern generalizes'"}
         problem: >-
           RELEASING.md:32 has already rotted ("All six CI checks", omitting
@@ -514,7 +534,7 @@ workstreams:
         title: "Kill-switch reverse lint: every shipped HIPPO_DISABLE_* must appear in STABILITY.md's documented list"
         priority: P2
         effort: S
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 1 — two tests in test_stability_doc.py: the subset lint (green at birth, DENSE/JIT/PRESENCE 3/3, with a zero-reads vacuity guard) + the synthetic-fixture trip wire over the SAME helper; haystack walk + documented-list parse factored into shared helpers; DISABLE_ prefix only (blanket reverse lint explicitly not built)
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "tests/test_stability_doc.py:1-11 docstring — the founding DOC-15 incident includes the REVERSE-direction miss (HIPPO_SLEEP_TIER_A shipped but absent from the doc), which the shipped lint (documented->exists only) does not cover; shipped-source enumeration this cycle: exactly three HIPPO_DISABLE_* names read by plugin source (DENSE/JIT/PRESENCE) and STABILITY.md:35-39 documents all three — the lint passes green at birth"}
         problem: >-
           test_stability_doc.py checks documented->exists only; the reverse
@@ -1423,9 +1443,9 @@ workstreams:
 release_train:
 
   - tier: T22
-    target_version: TBD
+    target_version: TBD      # stamped at release time (post-release stamp, the round-4 convention)
     theme: "The runway & the ship gate"
-    status: planned          # ratified 2026-07-19; build not started
+    status: done             # 2026-07-19, session 1 — 4/4 items (REL-1 -> REL-2 -> REL-3 -> REL-4, the ratified in-tier order); done_means met: both AT-cap modules split (split chosen over re-pin), VOL-1's check repatriated, the merge-gate mechanic + facts lint live, kill-switch direction closed
     ratified: >-
       2026-07-19 — owner-ratified in the round-5 formal-question session (the
       dated LAW ZERO entry): all five round-5 tiers ratified together in the

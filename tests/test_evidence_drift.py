@@ -326,7 +326,7 @@ def test_new_memory_diff_post_image_delegates_to_evidence_module():
 # --------------------------------------------------------------------------- #
 def test_doctor_evidence_fences_ok_and_counts(repo, memory_dir):
     from memory.doctor import CHECKS
-    from memory.doctor_checks_corpus import check_evidence_fences
+    from memory.doctor_checks_lifecycle import check_evidence_fences
     from memory.doctor_checks_env import DoctorContext
 
     write_file(repo, "src/thing.py", "def hello():\n    return 42\n")
@@ -345,7 +345,7 @@ def test_doctor_evidence_fences_ok_and_counts(repo, memory_dir):
 
 
 def test_doctor_evidence_fences_warns_on_drift(repo, memory_dir):
-    from memory.doctor_checks_corpus import check_evidence_fences
+    from memory.doctor_checks_lifecycle import check_evidence_fences
     from memory.doctor_checks_env import DoctorContext
 
     write_file(repo, ".claude/memory/m-rot.md", _mem_with_fence("m-rot", "rot", _PY_FENCE))

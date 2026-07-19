@@ -223,9 +223,21 @@ def test_cold_path_source_pin_no_hook_surface_reaches_the_brief():
     import memory.outcome as outcome
     import memory.recall as recall
     import memory.session_start as session_start
+    import memory.session_start_health as session_start_health
+    import memory.session_start_signals as session_start_signals
     import memory.telemetry as telemetry
 
-    for mod in (session_start, recall, R, outcome, jit, capture, telemetry):
+    for mod in (
+        session_start,
+        session_start_health,
+        session_start_signals,
+        recall,
+        R,
+        outcome,
+        jit,
+        capture,
+        telemetry,
+    ):
         assert "reconsolidate_brief" not in inspect.getsource(mod), (
             f"{mod.__name__} references reconsolidate_brief — the brief is cold-path only "
             "(EVD-1's binding pin, the resolve_evidence precedent)"

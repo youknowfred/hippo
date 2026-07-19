@@ -221,7 +221,7 @@ def test_file_author_slugs_normalize_through_the_shared_rule(repo, memory_dir):
 # --------------------------------------------------------------------------- #
 def test_doctor_team_coverage_suppressed_solo(repo, memory_dir):
     from memory.doctor import CHECKS
-    from memory.doctor_checks_corpus import check_team_coverage
+    from memory.doctor_checks_lifecycle import check_team_coverage
     from memory.doctor_checks_env import DoctorContext
 
     write_file(repo, "src/dep.py", "v = 1\n")
@@ -238,7 +238,7 @@ def test_doctor_team_coverage_suppressed_solo(repo, memory_dir):
 
 
 def test_doctor_team_coverage_renders_on_multi_author(repo, memory_dir):
-    from memory.doctor_checks_corpus import check_team_coverage
+    from memory.doctor_checks_lifecycle import check_team_coverage
     from memory.doctor_checks_env import DoctorContext
 
     write_file(repo, "src/dep.py", "v = 1\n")

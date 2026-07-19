@@ -29,11 +29,26 @@ Gates:
 4. **CHANGELOG entry as the final commit** — a new `## vX.Y.Z — YYYY-MM-DD — "<theme>"` section
    listing every shipped item, matching the format of the previous entries, and stating the
    **re-bootstrap** flag (see below). This is the capstone commit before opening the PR.
-5. **Open ONE PR** to `main`. All six CI checks must be green: hermetic ×4
-   ({ubuntu, macos} × {py3.10, py3.12}), the dense lane, and shellcheck.
-6. **Squash-merge** with the title `vX.Y.Z — <theme> (#<PR>)` — the exact pattern of the
+5. **Open ONE PR** to `main`. All seven required CI checks must be green: hermetic ×4
+   ({ubuntu, macos} × {py3.10, py3.12}), the dense lane, shellcheck, and secret-scan.
+   (`main` is branch-protected: the required checks are enforced by GitHub per the QUA-12
+   ruleset codified in `.github/workflows/ci.yml`; the `resolution`, nightly `scale`, and
+   PR-only `memory-review` lanes are not required.)
+6. **Gate the merge on check EXIT STATUS**: run `gh pr checks <pr> --watch --fail-fast`
+   as its **own command**, and run `gh pr merge` as a **subsequent** command only after the
+   watch exits 0. Never chain a merge after a *display* command (a `gh pr view` / board
+   glance has no meaningful exit status) — the v1.27.0 merge fired against a red board
+   exactly that way. The gate works: on PR #86 the first watch exited non-zero on a real
+   red (a hermetic macos flake), and the merge waited until a rerun took the board green.
+   Branch protection backstops this mechanically — plain `gh pr merge` refuses on a red or
+   missing required check (`--admin` is the explicit, deliberate escape hatch; never
+   routine).
+7. **Squash-merge** with the title `vX.Y.Z — <theme> (#<PR>)` — the exact pattern of the
    existing merge commits on `main`.
-7. **Tag** the merge commit `vX.Y.Z` and push it. `release.yml` verifies the four-way match.
+8. **Tag only after the main-push run is green**: the squash-merge triggers a fresh CI run
+   on `main` — watch it (`gh run list --branch main`, then `gh run watch <run-id>`) and
+   push the `vX.Y.Z` tag only after that run concludes green (the remedy the v1.27.0
+   release used). `release.yml` verifies the four-way match on the tag push.
 
 ## The re-bootstrap flag
 
