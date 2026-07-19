@@ -1566,8 +1566,11 @@ decisions:
       session, post-close): Q2 RESOLVED — Fred RATIFIED the per-item trust
       remediation verb, OVERRIDING the report-only recommendation; RCH-11's
       exact discipline binds the future build (per-item, dead/vanished-repo
-      rows ONLY, never bulk, never live rows), the build is UNSCHEDULED
-      (needs its own dated chip), and until it ships the census keeps
+      rows ONLY, never bulk, never live rows), and the build is UNSCHEDULED
+      behind an owner-set trigger (2026-07-19, same formal-question session):
+      build when the census first surfaces a DEAD trust row — today's
+      registry is 3/3 live+fingerprinted with zero dead, so a verb built now
+      would have nothing to act on. Until it ships, the census keeps
       presenting trust rows report-only. Q3 RESOLVED — print-only RATIFIED
       as the standing posture on round-5 usage evidence (two real publishes
       rode larger commits with no recorded friction); the

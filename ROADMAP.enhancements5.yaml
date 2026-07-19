@@ -15,11 +15,17 @@
 # 827c607. (The vetting's working ids RCH-*/QUA-* were renamed BND-*/REL-*
 # here for exactly that reason.)
 #
-# STATUS: every item and tier below ships as `proposed` — vetted, NOT
-# scheduled; which tiers to build, in what order, IF ANY, is the owner's
-# scheduling call (LAW ZERO), with two NEW owner decisions (Q1/Q2 r5) PENDING
-# and round 4's Q2/Q3 carried PENDING (ED5R-1). Nothing here is startable
-# until a dated owner chip ratifies a tier.
+# STATUS: authored with every item and tier `proposed` — vetted, NOT
+# scheduled; which tiers to build, in what order, IF ANY, was the owner's
+# scheduling call (LAW ZERO), with two NEW owner decisions (Q1/Q2 r5) and
+# round 4's carried Q2/Q3 all PENDING at authoring (ED5R-1).
+# RATIFIED 2026-07-19, same-day formal-question session: ALL FIVE tiers
+# T22-T26 ratified together in the recommended order T22->T23->T24->T25->T26
+# (dated entry on each tier's `ratified:`); item/tier statuses flipped to
+# `planned`. The four owner decisions were resolved the same day (ED5R-1
+# STATUS; MEA-5 q1_verdict; REL-2 q2_verdict — the QUA-12 ruleset is LIVE on
+# main). Builds proceed per session_protocol in future implementation
+# sessions; nothing was built in the authoring session.
 #
 # Continuity across sessions lives in TWO synced places (same protocol as
 # rounds 1-4):
@@ -302,7 +308,7 @@ workstreams:
         title: "Clear the runway: session_start.py facade split + the doctor_checks_corpus split that repatriates VOL-1's check"
         priority: P0
         effort: M
-        status: proposed
+        status: planned           # tier ratified 2026-07-19; not started
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "wc -l this cycle: session_start.py 1705/1705 (pin 1645 + slack 60, tests/test_module_size.py) and doctor_checks_corpus.py 899/900 (non-grandfathered cap); hippo-enh-t18-fleet capstone ('wiring was EXACTLY 3 lines — the file now sits AT its grandfathered cap'); hippo-vol1-volatile-paths capstone ('in doctor.py the FACADE, because doctor_checks_corpus is at 899/900' — the distortion receipt); git log: session_start.py touched by 8 of the last 8 release-train merges; precedent PR #72 / 84ae688 (facade decomposition of doctor/dream/eval_recall/mcp_server/recall)"}
         problem: >-
           The two highest-traffic integration files sit AT their caps
@@ -382,7 +388,7 @@ workstreams:
         title: "Release merge-gate hardening: the red-board lesson becomes RELEASING.md mechanic; surface the ripened QUA-12 ruleset decision (Q2 r5)"
         priority: P1
         effort: S
-        status: proposed
+        status: planned           # tier ratified 2026-07-19; not started
         q2_verdict: >-
           2026-07-19, dated owner entry (ED5R-1): Fred answered Q2(r5) "Yes —
           apply as codified"; the ruleset was APPLIED to main the same day
@@ -458,7 +464,7 @@ workstreams:
         title: RELEASING.md facts lint — the DOC-16 pattern, one document over
         priority: P1
         effort: S
-        status: proposed
+        status: planned           # tier ratified 2026-07-19; not started
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "RELEASING.md:32 live rot re-verified this cycle: 'All six CI checks must be green: hermetic x4 ..., the dense lane, and shellcheck' — omits secret-scan; the required set has been SEVEN since SEC-8 (ci.yml:29-40 + the secret-scan job at ci.yml:128); grep: zero tests reference RELEASING.md (test_docs_links.py scope excludes it); the founding class: tests/test_stability_doc.py docstring records STABILITY.md misstating frozen numbers for 8 releases before DOC-16 (PR #66, 8a21371); ROADMAP.enhancements4.yaml not_pursuing row: 'the lint-pinned-facts pattern generalizes'"}
         problem: >-
           RELEASING.md:32 has already rotted ("All six CI checks", omitting
@@ -508,7 +514,7 @@ workstreams:
         title: "Kill-switch reverse lint: every shipped HIPPO_DISABLE_* must appear in STABILITY.md's documented list"
         priority: P2
         effort: S
-        status: proposed
+        status: planned           # tier ratified 2026-07-19; not started
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "tests/test_stability_doc.py:1-11 docstring — the founding DOC-15 incident includes the REVERSE-direction miss (HIPPO_SLEEP_TIER_A shipped but absent from the doc), which the shipped lint (documented->exists only) does not cover; shipped-source enumeration this cycle: exactly three HIPPO_DISABLE_* names read by plugin source (DENSE/JIT/PRESENCE) and STABILITY.md:35-39 documents all three — the lint passes green at birth"}
         problem: >-
           test_stability_doc.py checks documented->exists only; the reverse
@@ -568,7 +574,7 @@ workstreams:
         title: "Instrument-sensitivity accounting: hard-set resolvability reported in evaluate() and stamped on A/B evidence"
         priority: P0
         effort: M
-        status: proposed
+        status: planned           # tier ratified 2026-07-19; not started
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "The round's headline finding, reproduced read-only this cycle: 1/32 rows of tests/fixtures/recall_hard_set.yaml (the ONLY hard set on this machine; .claude/memory/.audit-fixtures/ does not exist) have any expected stem present in .claude/memory — so the recorded EVD-4 Arm A evidence (.claude/.memory-telemetry/salience_ab.json, 2026-07-17) was measured through a ~3%-sensitivity instrument: off-arm single-hop recall 0.0455 = exactly 1/22, multi-hop 0.0 = 0/10, zero deltas arithmetically near-certain under BOTH arms; eval_metrics.py:602 hard_set_metrics has NO stem-existence check while eval_recall.py:1236 floor_sweep already filters to rows 'whose expected stems actually exist in THIS corpus' — the logic exists in one instrument and not the other"}
         problem: >-
           hard_set_metrics counts rows whose expected stems do not exist in
@@ -625,7 +631,7 @@ workstreams:
         title: Lived-in hard-set drafting from the positive outcome join (the missing fourth draft lane)
         priority: P1
         effort: M
-        status: proposed
+        status: planned           # tier ratified 2026-07-19; not started
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Reproduced read-only this cycle: 192 distinct (verbatim episode query -> outcome-confirmed injected memory) candidate pairs from joining episode_buffer.jsonl query_previews to session-grain _injection_join hits; eval_fixtures.py's module docstring lists exactly three draft lanes (abstention SIG-6, forgetting TMB-3, update TMB-4) — none positive; .claude/memory/.audit-fixtures/ absent (find, re-verified); every lived-in instrument (Arm A recorded, Arm B when un-severed, floor_sweep's on-topic leg, any MSR-1 pin) therefore runs against pack stems at ~3% sensitivity (MEA-1's finding)"}
         problem: >-
           Self-populating fixtures exist only for abstention/forgetting/
@@ -687,7 +693,7 @@ workstreams:
         title: "Co-recall null model: lift-vs-independence annotation + confound collapse on the GRW-2 proposal surface"
         priority: P1
         effort: M
-        status: proposed
+        status: planned           # tier ratified 2026-07-19; not started
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "TWO independent read-only repros this cycle agreed: co_recall_pairs(td, exclude_names=floor) -> 20 pairs at the _CORECALL_MAX_PAIRS cap (17 fresh after build_graph adjacency drop — the 2026-07-19 incident's exact number), every pair lift 0.99-1.20 vs independence (median 1.06), members individually present in 54-68 of 72 sessions; telemetry.py:612-616 (raw distinct-session tally, min 3, cap 20, no null model); three shipped consumers ingest the pairs as behavioral evidence: mcp_tools_consolidate.py:518 (consolidate Step 4 proposals), deparasite.py:218 ('co-recalled' protection evidence), deparasite.py:301 (demote weak-link signal); design premise hippo-enh-t5-growth capstone ('below threshold -> [] — the sparse map STAYS empty') predates the corpus densifying"}
         problem: >-
           co_recall_pairs proposes raw distinct-session counts with no null
@@ -746,7 +752,7 @@ workstreams:
         title: Producer-version stamps on evidence-ledger rows + a rows-by-version lane-health line
         priority: P2
         effort: M
-        status: proposed
+        status: planned           # tier ratified 2026-07-19; not started
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Row-key scans this cycle: outcome_events.jsonl rows are exactly {ts, session_id, tool, path, [cited_by]}, recall_events.jsonl {ts, session_id, names, scores, ranks, backend, latency_ms, k, query_preview, [drops], [injected_chars]}, reconsolidation_events.jsonl {ts, name, outcome} — all three version-less; both live-hook-lag diagnoses were therefore hand forensics: EVD-2's 5-release lag (hippo-enh-t21-evidence capstone, mechanical-zeros dating) and the 2026-07-19 pre-GRW-5 re-flag of 4 fresh-baselined memories (reconsolidation rows 15:18-15:25Z; installed_plugins.json caught up at 15:25:48Z); doctor_checks_env.py:584 check_plugin_version covers only installed-vs-venv"}
         problem: >-
           The live-hook-lag class has bitten twice in one week and both
@@ -800,7 +806,7 @@ workstreams:
         title: "EVD-4 Arm B un-sever: the HIPPO_OUTCOME_PRIOR A/B harness + commissioned run (Q1 r5; after MEA-1/MEA-2)"
         priority: P3
         effort: M
-        status: proposed
+        status: planned           # tier ratified 2026-07-19; not started
         q1_verdict: >-
           2026-07-19, dated owner entry (ED5R-1): Fred answered Q1(r5) "Yes,
           after MEA-1/2" in the round-5 formal-question session — Arm B is
@@ -872,7 +878,7 @@ workstreams:
         title: Worktree touch-path normalization at record time (EVD-2's named follow-up, now FLT-3-amplified)
         priority: P1
         effort: M
-        status: proposed
+        status: planned           # tier ratified 2026-07-19; not started
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Live computation this cycle over outcome_events.jsonl: 1140 of 2288 post-07-16 rows (~50%; 1140/3304 = 35% all-time) are worktree-prefixed, 0 of 1140 carry cited_by, 883 would join the 112-path cited touchmap if prefix-stripped (grown from the roadmap-4-era 848/1675, 650 mappable); the shipped surface DEFERS the fix in its own output ('the candidate prefix-strip fix to recording is its own follow-up item, not this surface' — format_lane_health, outcome.py:420-422) and ROADMAP.enhancements4.yaml:505-509 names it EVD-2's follow-up; jit.observe_touch early-returns on the touchmap miss so JIT-1/JIT-2 are structurally dead inside worktrees; FLT-3 (shipped v1.27.0) correctly drives MORE mutation into worktrees"}
         problem: >-
           Half the machine's recent touch evidence is dark: worktree
@@ -953,7 +959,7 @@ workstreams:
         title: "Triage groundedness: an abstain lane + a mechanical ungrounded-identifier flag on CAP-LLM seeds"
         priority: P1
         effort: M
-        status: proposed
+        status: planned           # tier ratified 2026-07-19; not started
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "capture_triage.py:227-229 verbatim ('If the session shows no durable fact worth saving, still fill every field with your best single candidate') + :265-266 (_parse_response returns None on empty description — abstention is structurally impossible); TWO fabrications in one week: the '#237 merged' draft (no hippo PR above #85 exists at 827c607) and the LIVE seed in the queue now — capture-428d7452-c9bb-4fad-9c5c-d0dfb642e848.json's llm_triage.draft_description claims this session 'merged T14 invariants' while T14 merged 2026-07-16 as PR #57 (hippo-enh-t14-invariants capstone; the 07-19 session only re-stamped it); re-verified in the queue this cycle"}
         problem: >-
           The capture triage prompt FORCES a fabrication when a session has
@@ -1009,7 +1015,7 @@ workstreams:
         title: "Name the no-op: one legible outcome line for human-invoked capture --from-hook"
         priority: P2
         effort: S
-        status: proposed
+        status: planned           # tier ratified 2026-07-19; not started
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Reproduced this cycle: a --from-hook invocation with a foreign session_id exits 0 with zero output and writes nothing; with a real buffer sid it writes the seed and is STILL silent (capture.py:851-856 'Silent on the hook path' — the success print is gated `if path and not args.from_hook`); write_session_capture returns None for both no-episodes and any-exception (:414, :466-467); the 2026-07-19 incident: an operator's foreign-sid run coincided with a SubagentStop hook minting capture-428d7452 for the CURRENT session, and the silence made the misattribution undetectable; hooks discard stderr (memory_session_end.sh's `2>/dev/null || true` tail), so a stderr line is free"}
         problem: >-
           capture --from-hook has three indistinguishable outcomes at a
@@ -1052,7 +1058,7 @@ workstreams:
         title: "Dead-letter decisions: honest MCP reply + labeled time-window fallback at the drain (GRW-4 keying mismatch)"
         priority: P0
         effort: M
-        status: proposed
+        status: planned           # tier ratified 2026-07-19; not started
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "The code triple verified this cycle: mcp_tools_consolidate.py:96-111 add_decision calls log_decision(text) with neither telemetry_dir nor session_id; telemetry.log_decision falls back to the shared FILE token (current_session_id fallback :154-177); capture._session_decisions matches by STRICT equality with the harness session id (:230-238) — so on any harness passing real ids (every recent session: dashed UUIDs throughout the episode buffer) the match is structurally impossible; measured: decisions.jsonl's ONLY two rows (07-13, the INT-13 ratified-shape and v1.13.0 facts — exactly GRW-4's durable-WHY class) are keyed by 32-hex file token 5e4e212a... and rode no seed; today's live seed carries decisions: []; the tool replies 'decision recorded — it will ride this session's capture seed as its durable WHY' (re-verified verbatim)"}
         problem: >-
           A decision recorded through the MCP capture tool can never ride
@@ -1129,7 +1135,7 @@ workstreams:
         title: "Running-vs-source plugin skew made legible: a DOC-7-sibling doctor line + presence-doc version stamps (the twice-bitten class gets a name)"
         priority: P1
         effort: M
-        status: proposed
+        status: planned           # tier ratified 2026-07-19; not started
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Bite 1: 5 releases of live-hook lag (1.17.0->1.22.0 until 2026-07-17T19:02Z; hippo-enh-t21-evidence capstone EVD-2 block). Bite 2: commit 827c607's own message ('installed plugin 1.26.0 -> 1.27.0'; 'worklist 4/4 verdicted') + reconsolidation_events.jsonl 07-19 15:18-15:25Z (4 fresh-baselined memories re-flagged by pre-GRW-5 code; `git tag --contains 0368c47` = v1.27.0 only — re-verified) + installed_plugins.json lastUpdated 2026-07-19T15:25:48Z. Prediction: hippo-enh-t18-fleet capstone ('the EVD-2 live-hook-lag class, predicted this time instead of discovered'). Gap: doctor_checks_env.py:584-627 compares installed-vs-venv-sentinel ONLY; grep confirms NOTHING compares the running plugin to the repo's own plugin source, and nothing surfaces session launch-pinning"}
         problem: >-
           Hooks run the installed plugin pinned at session launch — on the
@@ -1195,7 +1201,7 @@ workstreams:
         title: "Scheduler dead-man freshness: a 'quiet' census status from the oracle that already exists (sleep-state.json last_run_at)"
         priority: P2
         effort: S
-        status: proposed
+        status: planned           # tier ratified 2026-07-19; not started
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "The in-code admission: doctor_checks_env.py:640-642 ('a moved venv/repo kills the scheduled 07:30 run before hippo starts, so the morning report cannot carry this warn for its own dead schedule — on-demand doctor is the live surface'); machine_census._classify_schedule (:177-189) detects stale-PATH only; grep this cycle: ZERO readers of last_run_at/sleep-state outside sleep.py; the oracle is written every run (sleep.py:293, _STATE_NAME :61) and live (last_run_at 2026-07-19T14:30:05Z — ran this morning); a schedule that dies for ANY non-path reason (launchctl-unloaded, broken venv python, deps rot) is invisible on every surface today"}
         problem: >-
           The silent-07:30 scheduler-death class is detected only for
@@ -1262,7 +1268,7 @@ workstreams:
         title: "Net boundary delta: the introduces-side of heals-N on the publish surfaces"
         priority: P2
         effort: S
-        status: proposed
+        status: planned           # tier ratified 2026-07-19; not started
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Measured treadmill this cycle: boundary was 20 dangling / 9 files at T20 ship (hippo-enh-t20-publish capstone) and is 19 / 8 / 0 typed live NOW after TWO real publishes (38098d9 added hippo-v1-roadmap-proposal — healed 7, now SOURCES 3 of the 19; 9404b0c added hippo-vol1-volatile-paths — introduced 3); live preflight for the current heals-N leader (hippo-v080-trust-spine) prints 'heals 3' while silent about the dangling its local-only [[hippo-v030-open-followups]] link will add; lint_links.boundary_lint computes heals_by (:160-170) with no introduces twin"}
         problem: >-
           PUB-3's heals_by and PUB-1's receipt show only the healing half of
@@ -1307,7 +1313,7 @@ workstreams:
         title: "Trust drift joins the machine census: per-row withheld-file counts (the fleet sees withholding)"
         priority: P1
         effort: S
-        status: proposed
+        status: planned           # tier ratified 2026-07-19; not started
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Live this cycle: trust.untrusted_changes('/Users/fredbook/projects/alloy', ...) = {baseline: True, added: [httpx-timeout-none-disables, macos-tahoe-legacy-icns-plate, project-unification-p7-state]} — 3 stems quarantined-from-recall since Jul 14-15 (4-5 days); project-unification-p7-state.md carries full hippo write_memory frontmatter (originSessionId, node_type, cited_paths) proving hippo AUTHORED it; the same session's machine_census renders alloy 'live [review, fingerprinted]' with ZERO drift mention (trust_census rows carry only {root, live, volatile, origin, fingerprinted} — machine_census.py:139-155); doctor's machine-state line consumes only the dead count (doctor_checks_env.py:645-666)"}
         problem: >-
           The re-consent flow is legible only in-project: a sibling corpus
@@ -1352,7 +1358,7 @@ workstreams:
         title: "Write-time fold-failure disclosure: authorship-is-consent stops failing silently"
         priority: P1
         effort: M
-        status: proposed
+        status: planned           # tier ratified 2026-07-19; not started
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "trust.py:476-480 narrates the exact silence in shipped prose ('the fold extended a consent record nobody reads, so an authored write stayed quarantined forever and record_authored_write returned False with nothing to say' — COR-10's post-mortem); every call site discards the bool inside try/except-pass, verified this cycle: new_memory.py:1266-1272, packs.py:757-763 + 973-977, provenance.py:1037-1039, links.py:765-767/846-848, dream_apply.py:288-290, dream_generate.py:642-644; the live consequence: the alloy trio (BND-2's exhibit) was authored by the lagged installed plugin running pre-COR-10 fold code and quarantined with zero notice — the write moment said nothing"}
         problem: >-
           When record_authored_write returns False on a trusted+fingerprinted
@@ -1404,20 +1410,27 @@ workstreams:
           (one home, inv5); 584 lines — room.
 
 # ===========================================================================
-# RELEASE TRAIN — tier sequencing. All tiers ship `proposed` (which to build,
-# in what order, IF ANY, is the owner's scheduling call — LAW ZERO / ED5R-1);
-# target_version TBD, assigned at each release per RELEASING.md. NO cross-tier
-# build dependencies exist — no round-5 item needs a session_start.py line —
-# so T22 (REL-1) is recommended-FIRST as runway relief, not a gate. In-tier
-# orders and the two split-debt assignments (MEA-1: eval_recall; MEA-3:
-# telemetry) are stated per tier.
+# RELEASE TRAIN — tier sequencing. Authored `proposed` (which to build, in
+# what order, IF ANY, was the owner's scheduling call — LAW ZERO / ED5R-1);
+# RATIFIED 2026-07-19: all five tiers, recommended order T22->T23->T24->T25
+# ->T26 (each tier's `ratified:` is the dated entry; statuses now planned).
+# target_version stays TBD, assigned at each release per RELEASING.md. NO
+# cross-tier build dependencies exist — no round-5 item needs a
+# session_start.py line — so T22 (REL-1) is first as runway relief, not a
+# gate. In-tier orders and the two split-debt assignments (MEA-1:
+# eval_recall; MEA-3: telemetry) are stated per tier.
 # ===========================================================================
 release_train:
 
   - tier: T22
     target_version: TBD
     theme: "The runway & the ship gate"
-    status: proposed
+    status: planned          # ratified 2026-07-19; build not started
+    ratified: >-
+      2026-07-19 — owner-ratified in the round-5 formal-question session (the
+      dated LAW ZERO entry): all five round-5 tiers ratified together in the
+      recommended order, T22 FIRST (runway relief before any feature tier).
+      Statuses flipped to planned; builds proceed per session_protocol.
     gate: >-
       LAW ZERO ratification only — no cross-file deps; no owner decision
       gates the tier's start. Q2(r5) gates ONLY the ruleset-apply leg of
@@ -1454,7 +1467,12 @@ release_train:
   - tier: T23
     target_version: TBD
     theme: "Honest instruments"
-    status: proposed
+    status: planned          # ratified 2026-07-19; build not started
+    ratified: >-
+      2026-07-19 — owner-ratified in the round-5 formal-question session
+      (dated LAW ZERO entry): all five tiers ratified, order T22 -> T23 ->
+      T24 -> T25 -> T26 (this tier second). Q1(r5) resolved the same day —
+      see MEA-5's q1_verdict; the in-tier MEA-5-last sequencing binds.
     gate: >-
       LAW ZERO ratification; Q1(r5) additionally gates MEA-5 (the WHOLE
       item — harness and run). In-round order: MEA-1 -> MEA-2 (their joint
@@ -1496,7 +1514,11 @@ release_train:
   - tier: T24
     target_version: TBD
     theme: "The write side tells the truth"
-    status: proposed
+    status: planned          # ratified 2026-07-19; build not started
+    ratified: >-
+      2026-07-19 — owner-ratified in the round-5 formal-question session
+      (dated LAW ZERO entry): all five tiers ratified, order T22 -> T23 ->
+      T24 -> T25 -> T26 (this tier third).
     gate: >-
       LAW ZERO ratification only — no cross-file deps beyond shipped
       CAP/GRW surfaces (re-confirm live). In-round order: WRT-3 first (P0
@@ -1526,7 +1548,13 @@ release_train:
   - tier: T25
     target_version: TBD
     theme: "Running-state legibility"
-    status: proposed
+    status: planned          # ratified 2026-07-19; build not started
+    ratified: >-
+      2026-07-19 — owner-ratified in the round-5 formal-question session
+      (dated LAW ZERO entry): all five tiers ratified, order T22 -> T23 ->
+      T24 -> T25 -> T26 (this tier fourth). Q2(r5) was resolved and APPLIED
+      the same day (REL-2 q2_verdict) — OPS-1's doctor line will observe the
+      protected-main era from its first fire.
     gate: >-
       LAW ZERO ratification only. In-round order: OPS-1 -> OPS-2. OPS-1
       deliberately adds ZERO session_start.py lines — if the build finds
@@ -1557,7 +1585,14 @@ release_train:
   - tier: T26
     target_version: TBD
     theme: "The boundary & consent edge"
-    status: proposed
+    status: planned          # ratified 2026-07-19; build not started
+    ratified: >-
+      2026-07-19 — owner-ratified in the round-5 formal-question session
+      (dated LAW ZERO entry): all five tiers ratified, order T22 -> T23 ->
+      T24 -> T25 -> T26 (this tier fifth). Note for the build session: the
+      carried Q2(r4) was resolved the same day as REMEDIATION RATIFIED
+      (dead-rows-only, build unscheduled behind an owner-set trigger) — BND-2
+      stays report-only regardless, per its own AC.
     gate: >-
       LAW ZERO ratification only — Q2(r4)/Q3(r4) stay PENDING and neither
       gates these detection halves (BND-2 is more report, not remediation;
