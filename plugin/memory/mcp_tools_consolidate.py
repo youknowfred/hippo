@@ -586,13 +586,19 @@ def _tool_abstention_fixtures(args: Dict[str, Any]) -> str:
         )
     action = str(args.get("action") or "draft").strip().lower()
     if action == "draft":
-        from .eval_recall import draft_abstention_fixtures
+        from .eval_recall import draft_abstention_fixtures, draft_livedin_fixtures
 
         r = draft_abstention_fixtures()
+        # MEA-2: the fourth lane refreshes in the same cold-path step — outcome-confirmed
+        # verbatim queries into the SAME pending queue; same per-item confirm gate.
+        lv = draft_livedin_fixtures()
         return (
             "abstention drafts refreshed — unconfirmed rows (expected: []) are gitignored "
             "queue state; nothing is tracked until a per-item confirm:\n"
             + json.dumps(r, indent=2)
+            + "\nlived-in drafts refreshed (MEA-2, the fourth lane — outcome-confirmed "
+            "verbatim queries; judge derived_expected, confirm with category='single-hop'):\n"
+            + json.dumps(lv, indent=2)
         )
     if action == "confirm":
         from .eval_recall import confirm_hard_set_row

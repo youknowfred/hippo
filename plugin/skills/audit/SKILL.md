@@ -187,10 +187,16 @@ tracked fixture is the gated act, and it is always per-item + human-approved.
 ```bash
 "$PY" - <<'PYEOF'
 import json
-from memory.eval_recall import draft_abstention_fixtures
+from memory.eval_recall import draft_abstention_fixtures, draft_livedin_fixtures
 print(json.dumps(draft_abstention_fixtures(), indent=2))
+print(json.dumps(draft_livedin_fixtures(), indent=2))
 PYEOF
 ```
+
+The second call is MEA-2's lived-in lane (the fourth): outcome-confirmed verbatim queries
+from the session ledgers, queued beside the abstention rows with `derived_expected` as
+judgment material — pure ledger reads, so it runs identically under `--skip-eval`; confirm
+per item with `category='single-hop'`.
 
 (Under `--skip-eval`, pass `draft_abstention_fixtures(probe=False)` — the recall probes are
 what would pay a cold dense-model load; without them `current_hits` stays `[]` and the header

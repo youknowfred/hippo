@@ -292,10 +292,16 @@ the gap-closing loop end to end — first refresh the drafts queue:
 ```bash
 "$PY" - <<'PYEOF'
 import json
-from memory.eval_recall import draft_abstention_fixtures
+from memory.eval_recall import draft_abstention_fixtures, draft_livedin_fixtures
 print(json.dumps(draft_abstention_fixtures(), indent=2))
+print(json.dumps(draft_livedin_fixtures(), indent=2))
 PYEOF
 ```
+
+MEA-2 refreshes the FOURTH lane in the same step: `draft_livedin_fixtures` queues
+(verbatim query → outcome-confirmed memory) candidates from the session ledgers —
+`derived_expected` names the evidence, `expected` stays empty, and admission is the same
+per-item confirm below (`category='single-hop'` for these).
 
 Each recurring abstention cluster becomes an UNCONFIRMED row (`expected: []`) in the
 gitignored drafts queue the summary's `path` names (`.claude/.memory-pending/` — queue

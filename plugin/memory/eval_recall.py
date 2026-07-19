@@ -278,8 +278,10 @@ from .eval_fixtures import (  # drafts-queue plumbing + the T11 synthesizers (fa
     _project_fixture_path,
     default_drafts_path,
     draft_forgetting_fixtures,
+    draft_livedin_fixtures,
     draft_update_fixtures,
     run_draft_forgetting_cli,
+    run_draft_livedin_cli,
     run_draft_update_cli,
     validate_confirm_row_kind,
 )
@@ -1386,6 +1388,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         "spans of the superseded file; zero LLM, fail closed); confirm each per item via "
         "confirm_hard_set_row(query, [tip], category='update', superseded=<corpse>)",
     )
+    parser.add_argument(
+        "--draft-livedin",
+        action="store_true",
+        help="MEA-2: queue outcome-confirmed lived-in retrievals (verbatim episode query "
+        "x session-grain injection hit) as DRAFT rows — the fourth lane (zero LLM, "
+        "deterministic noise filters, volume-capped); confirm each per item via "
+        "confirm_hard_set_row(query, [stems], category='single-hop')",
+    )
     args, ab_extra = parser.parse_known_args(argv)
     if args.ab is None and ab_extra:
         # Extras are pass-through ONLY under --ab; the plain eval keeps strict parsing.
@@ -1515,6 +1525,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_draft_forgetting_cli(args.memory_dir)
     if args.draft_update:
         return run_draft_update_cli(args.memory_dir, args.index_dir)
+    if args.draft_livedin:
+        return run_draft_livedin_cli(args.memory_dir)
 
     if args.adversarial:
         rep = adversarial_report(_adversarial_fixture_dir(args.memory_dir))
