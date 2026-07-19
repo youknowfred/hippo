@@ -32,21 +32,57 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import time
-import uuid
 from typing import Dict, Iterator, List, Optional
 
 from .provenance import ensure_self_ignoring_dir
 
-_TELEMETRY_DIRNAME = ".memory-telemetry"
-_LEDGER_NAME = "recall_events.jsonl"
-_EPISODE_LEDGER_NAME = "episode_buffer.jsonl"
-_RECONSOLIDATION_LEDGER_NAME = "reconsolidation_events.jsonl"
-_OUTCOME_LEDGER_NAME = "outcome_events.jsonl"  # SIG-4: PostToolUse read-signal (KPI-2)
-_USAGE_AGGREGATES_NAME = "usage_aggregates.json"
-_THREAT_LEDGER_NAME = "threat_findings.jsonl"  # SEN-2 Tier-B: measured, never surfaced
-_SESSION_NAME = "session"
+# --------------------------------------------------------------------------- #
+# ED5R-3 split (pure code motion): the ledger substrate (dir/paths/session/
+# rotation + the two sibling-needed read iterators) lives in telemetry_store;
+# the SIG-3/GRW-2 mining lives in telemetry_mining. Every moved name is
+# re-imported HERE so memory.telemetry.<name> keeps resolving and stays
+# patchable for the façade's own call sites. Siblings never import this façade.
+# --------------------------------------------------------------------------- #
+from .telemetry_store import (  # noqa: F401
+    _DEFAULT_MAX_BYTES,
+    _EPISODE_LEDGER_NAME,
+    _LEDGER_NAME,
+    _OUTCOME_LEDGER_NAME,
+    _RECONSOLIDATION_LEDGER_NAME,
+    _SESSION_NAME,
+    _TELEMETRY_DIRNAME,
+    _THREAT_LEDGER_NAME,
+    _USAGE_AGGREGATES_NAME,
+    _episode_ledger_path,
+    _ledger_path,
+    _max_bytes,
+    _outcome_ledger_path,
+    _reconsolidation_ledger_path,
+    _resolve_dir,
+    _rotate_if_needed,
+    _session_path,
+    _threat_ledger_path,
+    _usage_aggregates_path,
+    current_session_id,
+    default_telemetry_dir,
+    mark_session,
+    read_episodes,
+    read_events,
+)
+from .telemetry_mining import (  # noqa: F401
+    _ABSTENTION_JACCARD,
+    _ABSTENTION_MAX_CLUSTERS,
+    _ABSTENTION_MAX_TERMS,
+    _ABSTENTION_MIN_COUNT,
+    _ABSTENTION_STOPWORDS,
+    _CORECALL_MAX_PAIRS,
+    _CORECALL_MIN_SESSIONS,
+    _abstention_content_tokens,
+    abstention_backlog,
+    co_recall_pairs,
+)
+
 
 # Tier 2: the only valid reconsolidation outcomes -- "fix" is a distinct outcome (content was
 # wrong, then corrected) from "graduate"/"demote" (a verdict on the ORIGINALLY flagged
@@ -59,158 +95,6 @@ _RECONSOLIDATION_OUTCOMES = frozenset({"graduate", "fix", "demote", "snooze"})
 # Privacy: store only a short prefix of the query, never the full prompt.
 _QUERY_PREVIEW_CHARS = 80
 
-_DEFAULT_MAX_BYTES = 2_000_000
-
-
-def _max_bytes() -> int:
-    """Byte ceiling before the ledger rotates. Env-overridable (tests use a tiny cap)."""
-    try:
-        return max(256, int(os.environ.get("HIPPO_TELEMETRY_MAX_BYTES") or _DEFAULT_MAX_BYTES))
-    except (TypeError, ValueError):
-        return _DEFAULT_MAX_BYTES
-
-
-# --------------------------------------------------------------------------- #
-# Dir resolution (mirrors build_index.default_index_dir)
-# --------------------------------------------------------------------------- #
-def default_telemetry_dir(memory_dir: str) -> str:
-    """``.claude/.memory-telemetry`` — a sibling of ``.claude/memory`` (its own gitignored dir).
-
-    Mirrors ``build_index.default_index_dir`` so the ledger lands beside the index. It is a
-    SEPARATE dir from the index because it is append-only history, not a rebuildable cache.
-    ``HIPPO_TELEMETRY_DIR`` overrides (hermetic tests use this).
-    """
-    override = os.environ.get("HIPPO_TELEMETRY_DIR")
-    if override:
-        return override
-    return os.path.join(os.path.dirname(os.path.abspath(memory_dir)), _TELEMETRY_DIRNAME)
-
-
-def _resolve_dir(telemetry_dir: Optional[str]) -> str:
-    if telemetry_dir:
-        return telemetry_dir
-    # Lazy import: provenance is the package's dir oracle and never imports telemetry.
-    from .provenance import resolve_dirs
-
-    memory_dir, _ = resolve_dirs()
-    return default_telemetry_dir(memory_dir)
-
-
-def _ledger_path(telemetry_dir: str) -> str:
-    return os.path.join(telemetry_dir, _LEDGER_NAME)
-
-
-def _episode_ledger_path(telemetry_dir: str) -> str:
-    return os.path.join(telemetry_dir, _EPISODE_LEDGER_NAME)
-
-
-def _reconsolidation_ledger_path(telemetry_dir: str) -> str:
-    return os.path.join(telemetry_dir, _RECONSOLIDATION_LEDGER_NAME)
-
-
-def _outcome_ledger_path(telemetry_dir: str) -> str:
-    return os.path.join(telemetry_dir, _OUTCOME_LEDGER_NAME)
-
-
-def _threat_ledger_path(telemetry_dir: str) -> str:
-    return os.path.join(telemetry_dir, _THREAT_LEDGER_NAME)
-
-
-def _usage_aggregates_path(telemetry_dir: str) -> str:
-    return os.path.join(telemetry_dir, _USAGE_AGGREGATES_NAME)
-
-
-def _session_path(telemetry_dir: str) -> str:
-    return os.path.join(telemetry_dir, _SESSION_NAME)
-
-
-# --------------------------------------------------------------------------- #
-# Session token (persisted: SessionStart and UserPromptSubmit are separate processes)
-#
-# COR-6: when the harness hands us a concrete session_id (from the SessionStart /
-# UserPromptSubmit hook payload), that id is used DIRECTLY as the telemetry key instead of
-# the file-based uuid token below. The file (``<telemetry_dir>/session``) is a SHARED,
-# mutable fallback — fine for a single interactive session with no harness id (tests, bare
-# CLI invocations), but two concurrent harness sessions on the same project both writing to
-# it would clobber each other's id. Passing an explicit ``session_id`` bypasses the file
-# entirely: nothing is read or written to it, so concurrent sessions never collide.
-# --------------------------------------------------------------------------- #
-def mark_session(telemetry_dir: Optional[str] = None) -> Optional[str]:
-    """Stamp a FRESH session id (rotates the token). Called once per SessionStart.
-
-    Returns the new id, or None on failure. Never raises.
-    """
-    try:
-        td = _resolve_dir(telemetry_dir)
-        ensure_self_ignoring_dir(td)  # derived dir: mkdir + self-ignoring .gitignore (SEC-3)
-        sid = uuid.uuid4().hex
-        with open(_session_path(td), "w", encoding="utf-8") as fh:
-            fh.write(sid)
-        return sid
-    except Exception:
-        return None
-
-
-def current_session_id(
-    telemetry_dir: Optional[str] = None, *, session_id: Optional[str] = None
-) -> Optional[str]:
-    """Read the current session id, minting + persisting one if none exists.
-
-    So recall events are grouped per Claude-Code session even if a recall fires before the
-    SessionStart mark (the first read establishes the id; the next SessionStart rotates it).
-    When ``session_id`` is given (a harness-provided id), it is returned DIRECTLY — the
-    file-based token is neither read nor written, so concurrent sessions never share it.
-    Never raises.
-    """
-    if session_id:
-        return session_id
-    try:
-        td = _resolve_dir(telemetry_dir)
-        sp = _session_path(td)
-        if os.path.exists(sp):
-            with open(sp, "r", encoding="utf-8") as fh:
-                sid = fh.read().strip()
-            if sid:
-                return sid
-        return mark_session(td)
-    except Exception:
-        return None
-
-
-# --------------------------------------------------------------------------- #
-# Append (never raises, bounded, rotates)
-# --------------------------------------------------------------------------- #
-def _rotate_if_needed(path: str) -> None:
-    """Keep the ledger under the byte ceiling by retaining only the most-recent tail.
-
-    Keeps the last ``<= max_bytes // 2`` bytes, aligned to a line boundary (the partial
-    leading line is dropped). Called AFTER the new line is appended, so the newest event is
-    always retained. A failed rotation leaves the file as-is — it never breaks logging.
-
-    Single-writer assumption: interactive SessionStart/UserPromptSubmit hooks are effectively
-    serialized per session, so this read-modify-write is not cross-process locked. The
-    ``os.replace`` swap keeps each rotation atomic (no structurally-corrupt file); a rare
-    concurrent-writer race costs at most a dropped telemetry line, never a crash.
-    """
-    try:
-        if os.path.getsize(path) <= _max_bytes():
-            return
-    except OSError:
-        return
-    try:
-        target = max(256, _max_bytes() // 2)
-        with open(path, "rb") as fh:
-            data = fh.read()
-        tail = data[-target:]
-        nl = tail.find(b"\n")
-        if nl != -1:
-            tail = tail[nl + 1:]  # drop the partial leading line
-        tmp = path + f".tmp.{os.getpid()}"  # COR-17: unique per writer — concurrent processes must not share a tmp
-        with open(tmp, "wb") as fh:
-            fh.write(tail)
-        os.replace(tmp, path)
-    except Exception:
-        pass
 
 
 def log_recall_event(
@@ -313,29 +197,6 @@ def log_recall_event(
         return False
 
 
-# --------------------------------------------------------------------------- #
-# Read (for the Tier-2 soak / curation analyzer)
-# --------------------------------------------------------------------------- #
-def read_events(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
-    """Yield parsed recall events, skipping corrupt/partial lines. Read-only; never raises."""
-    try:
-        td = _resolve_dir(telemetry_dir)
-        path = _ledger_path(td)
-        if not os.path.exists(path):
-            return
-        with open(path, "r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except Exception:
-                    continue
-                if isinstance(obj, dict):
-                    yield obj
-    except Exception:
-        return
 
 
 # --------------------------------------------------------------------------- #
@@ -501,164 +362,6 @@ def threat_ledger_aggregate(telemetry_dir: Optional[str] = None) -> dict:
     return {"rows": rows, "kinds": kinds}
 
 
-# --------------------------------------------------------------------------- #
-# SIG-3: recall blind-spot mining — turn silent abstention into a curation backlog.
-#
-# RET-1 correctly injects nothing when nothing clears the floor, but that abstention was
-# invisible: the corpus never learned what it keeps being ASKED and cannot answer. Every
-# such event is already in the recall ledger as ``backend == "none"`` with a truncated
-# query preview. This clusters the RECURRING ones into a legible backlog line. Ships the
-# ``backend == "none"`` arm ONLY — sub-floor "near-miss" scores are never logged on an
-# abstention (``log_recall_event`` records scores only for SURFACED named hits), so that
-# sub-arm has no data. Read-only aggregation of the gitignored ledger; never raises.
-#
-# No time window: the ledger is a byte-bounded rotating buffer, so "recurring in the buffer"
-# already means "recently", the analysis stays deterministic (no wall-clock input, so the
-# doctor render is reproducible), and a captured blind spot self-clears — recall stops
-# abstaining on it, so its cluster stops growing and rotates out.
-# --------------------------------------------------------------------------- #
-# Question words / articles / fillers stripped before clustering so "how do I X" and "what's
-# the X" cluster on the CONTENT tokens (X), not the boilerplate. Intentionally small — a
-# too-aggressive list would merge genuinely different questions.
-_ABSTENTION_STOPWORDS = frozenset(
-    {
-        "the", "a", "an", "how", "do", "does", "did", "i", "we", "you", "to", "of", "in", "on",
-        "for", "is", "are", "was", "were", "what", "whats", "why", "when", "where", "which",
-        "who", "can", "could", "should", "would", "and", "or", "with", "my", "our", "this",
-        "that", "it", "its", "be", "get", "got", "use", "using", "there", "here", "about",
-    }
-)
-_ABSTENTION_JACCARD = 0.5   # content-token overlap for two abstained queries to share a cluster
-_ABSTENTION_MIN_COUNT = 3   # a cluster is a "recurring" blind spot only at/above this many asks
-_ABSTENTION_MAX_CLUSTERS = 5
-_ABSTENTION_MAX_TERMS = 6
-
-
-def _abstention_content_tokens(text: str) -> set:
-    """Significant (non-stopword, length>=3) lowercased word tokens of a query preview."""
-    toks = re.findall(r"[a-z0-9][a-z0-9_-]+", (text or "").lower())
-    return {t for t in toks if len(t) >= 3 and t not in _ABSTENTION_STOPWORDS}
-
-
-def abstention_backlog(
-    telemetry_dir: Optional[str] = None,
-    *,
-    min_count: int = _ABSTENTION_MIN_COUNT,
-    max_clusters: int = _ABSTENTION_MAX_CLUSTERS,
-    channel: Optional[str] = None,
-) -> List[dict]:
-    """Recurring abstained-query clusters — the recall blind-spot backlog.
-
-    Reads ``backend == "none"`` recall events, greedily clusters their query previews by
-    content-token Jaccard overlap (>= ``_ABSTENTION_JACCARD``), and returns clusters asked at
-    least ``min_count`` times, most-frequent first, as
-    ``[{"count", "sample_query", "terms", "queries"}]``. One-off / diverse abstentions never
-    reach ``min_count``, so they never surface. Read-only; never raises; ``[]`` on any failure.
-
-    MSR-3 ``channel``: ``None`` (every pre-MSR-3 caller) clusters ALL abstentions,
-    byte-identical to before; ``'hook'``/``'mcp'`` restricts to that surface's events
-    (absent-means-hook on the row) — the MCP arm is the highest-intent demand signal
-    (an agent explicitly asked and got nothing), surfaced by doctor's channel line.
-    """
-    try:
-        td = _resolve_dir(telemetry_dir)
-        clusters: List[dict] = []  # {"seed": set, "all": set, "count": int, "queries": [str]}
-        for e in read_events(td):
-            if e.get("backend") != "none":
-                continue
-            if channel is not None and (e.get("channel") or "hook") != channel:
-                continue
-            q = (e.get("query_preview") or "").strip()
-            if not q:
-                continue
-            toks = _abstention_content_tokens(q)
-            if not toks:
-                continue
-            best = None
-            best_j = 0.0
-            for c in clusters:
-                union = len(toks | c["seed"])
-                j = (len(toks & c["seed"]) / union) if union else 0.0
-                if j > best_j:
-                    best_j = j
-                    best = c
-            if best is not None and best_j >= _ABSTENTION_JACCARD:
-                best["count"] += 1
-                best["queries"].append(q)
-                best["all"].update(toks)
-            else:
-                clusters.append({"seed": set(toks), "all": set(toks), "count": 1, "queries": [q]})
-        recurring = [c for c in clusters if c["count"] >= min_count]
-        # Most-asked first; tie-break by sample query for a deterministic (DOC-4) ordering.
-        recurring.sort(key=lambda c: (-c["count"], c["queries"][0]))
-        out: List[dict] = []
-        for c in recurring[:max_clusters]:
-            out.append(
-                {
-                    "count": c["count"],
-                    "sample_query": c["queries"][0],
-                    "terms": sorted(c["all"])[:_ABSTENTION_MAX_TERMS],
-                    "queries": list(c["queries"]),
-                }
-            )
-        return out
-    except Exception:
-        return []
-
-
-# GRW-2: how many DISTINCT sessions two memories must co-surface in before the pair becomes
-# an edge proposal. Deliberately HIGH so a sparse/noisy co-recall map proposes NOTHING —
-# an empty result is the designed behavior on a young corpus, not a failure.
-_CORECALL_MIN_SESSIONS = 3
-_CORECALL_MAX_PAIRS = 20  # bounded output for the consolidate proposal turn
-
-
-def co_recall_pairs(
-    telemetry_dir: Optional[str] = None,
-    *,
-    min_sessions: int = _CORECALL_MIN_SESSIONS,
-    exclude_names: Optional[set] = None,
-) -> List[dict]:
-    """Hebbian co-recall tally (GRW-2): memory pairs that co-surface across many sessions.
-
-    GRA-3 links by write-time similarity, so it can never connect pairs that are semantically
-    DISTANT but operationally inseparable (a bug and its unrelated-looking workaround). The
-    episode buffer already records exactly that signal — which names surfaced together — and
-    nothing read it. This tallies it: per session, the recalled names are UNIONED FIRST (a
-    chatty single session counts ONCE, structurally), every unordered pair in that union is
-    credited one distinct session, and only pairs reaching ``min_sessions`` return, as
-    ``[{"pair": [a, b], "sessions": n}]`` (pair sorted, list most-sessions-first, capped at
-    ``_CORECALL_MAX_PAIRS``). Below threshold → ``[]`` — the sparse map STAYS empty rather
-    than proposing spurious edges. ``exclude_names`` drops names before pairing (pass
-    ``lint_floor.floor_memory_names`` so always-recalled floor memories can't dominate every
-    pair). Read-only over the gitignored buffer; a TALLY, never a writer — the consumer
-    (the consolidate skill) proposes each edge per-item, agent-gated. Never raises.
-    """
-    try:
-        excluded = exclude_names or set()
-        by_session: Dict[str, set] = {}
-        for e in read_episodes(telemetry_dir):
-            sid = e.get("session_id") or ""
-            names = {n for n in (e.get("recalled_names") or []) if n and n not in excluded}
-            if not names:
-                continue
-            by_session.setdefault(str(sid), set()).update(names)
-        counts: Dict[frozenset, int] = {}
-        for names in by_session.values():
-            ordered = sorted(names)
-            for i, a in enumerate(ordered):
-                for b in ordered[i + 1 :]:
-                    key = frozenset((a, b))
-                    counts[key] = counts.get(key, 0) + 1
-        out = [
-            {"pair": sorted(pair), "sessions": n}
-            for pair, n in counts.items()
-            if n >= min_sessions
-        ]
-        out.sort(key=lambda p: (-p["sessions"], p["pair"]))
-        return out[:_CORECALL_MAX_PAIRS]
-    except Exception:
-        return []
 
 
 # --------------------------------------------------------------------------- #
@@ -1003,26 +706,6 @@ def log_episode(
         return False
 
 
-def read_episodes(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
-    """Yield parsed episode-buffer entries, skipping corrupt/partial lines. Never raises."""
-    try:
-        td = _resolve_dir(telemetry_dir)
-        path = _episode_ledger_path(td)
-        if not os.path.exists(path):
-            return
-        with open(path, "r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except Exception:
-                    continue
-                if isinstance(obj, dict):
-                    yield obj
-    except Exception:
-        return
 
 
 # GRW-4: the in-session decision ledger. The WHY of a session — tradeoffs the user confirmed,
