@@ -2149,10 +2149,12 @@ def test_snapshot_refuses_to_overwrite_an_existing_one(repo, memory_dir):
 def test_git_root_is_memoized_per_start_dir(repo, monkeypatch):
     """A repo's toplevel cannot change for a given start dir inside one process. Measured:
     SessionStart spawned 5 of these and recall 3, at ~7ms each."""
-    P._GIT_ROOT_CACHE.clear()
+    import memory.provenance_env as PE  # git_root's home: the patch must land where it LOOKS
+
+    PE._GIT_ROOT_CACHE.clear()
     calls = []
-    real = P.run_git
-    monkeypatch.setattr(P, "run_git", lambda a, r: (calls.append(a), real(a, r))[1])
+    real = PE.run_git
+    monkeypatch.setattr(PE, "run_git", lambda a, r: (calls.append(a), real(a, r))[1])
     first = P.git_root(repo)
     for _ in range(4):
         assert P.git_root(repo) == first

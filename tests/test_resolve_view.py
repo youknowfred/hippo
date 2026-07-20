@@ -300,6 +300,7 @@ def test_evidence_card_drift_reads_stale_cache_with_zero_git(memory_dir, repo, m
     """The drift leg reads stale.json (the LIF-6 cache) — never a fresh git scan."""
     import memory.build_index as B
     import memory.provenance as P
+    import memory.provenance_env as PE
     from memory.staleness import write_stale_cache
 
     _conflicted_corpus(memory_dir)
@@ -307,7 +308,12 @@ def test_evidence_card_drift_reads_stale_cache_with_zero_git(memory_dir, repo, m
     write_stale_cache(idx, [
         {"name": "old-api", "changed_paths": ["app.py", "lib.py"], "recency": 5, "source_commit": "d" * 40},
     ])
-    monkeypatch.setattr(P, "run_git", lambda *a, **k: (_ for _ in ()).throw(AssertionError("git ran")))
+    # BOTH namespaces: run_git is DEFINED in provenance_env and RE-EXPORTED by the façade,
+    # so a caller in either module has its own binding. A "git never ran" pin that armed only
+    # one of them would pass vacuously the day the caller moved.
+    boom = lambda *a, **k: (_ for _ in ()).throw(AssertionError("git ran"))  # noqa: E731
+    monkeypatch.setattr(P, "run_git", boom)
+    monkeypatch.setattr(PE, "run_git", boom)
     card = RV.pair_evidence("new-api", "old-api", memory_dir, None)  # no repo_root: git legs skipped
     assert card["drift"] == {"old-api": 2}
 
@@ -433,10 +439,15 @@ def test_producer_runs_zero_git_and_renders_no_card(memory_dir, repo, monkeypatc
     git mining — zero git subprocesses during producer execution, and the card lines
     stay confined to describe()/--list."""
     import memory.provenance as P
+    import memory.provenance_env as PE
 
     _conflicted_corpus(memory_dir)
     calls = []
-    monkeypatch.setattr(P, "run_git", lambda *a, **k: calls.append(a) or "")
+    # run_git is armed in BOTH namespaces — defined in provenance_env, re-exported by the
+    # façade — so this stays a real zero-subprocess pin whichever module the caller sits in.
+    spy = lambda *a, **k: calls.append(a) or ""  # noqa: E731
+    monkeypatch.setattr(P, "run_git", spy)
+    monkeypatch.setattr(PE, "run_git", spy)
     monkeypatch.setattr(
         P, "git_last_commit_with_time", lambda *a, **k: calls.append(a) or (None, None)
     )
