@@ -7,6 +7,166 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.28.0 — 2026-07-20 — "The engine tells the truth"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.27.0 (verified at the
+cut: zero commits touched it this round); corpus format still **5**, index schema still **7**,
+citation derivation still **4**. This is the WHOLE round-5 train in one release — five tiers,
+18 items, `ROADMAP.enhancements5.yaml` T22–T26, all ratified 2026-07-19 and built across five
+sessions (PRs #87, #88, #89, #90, #91). The organizing finding: hippo's flagship measurement
+was near-null and rendered as normal — the recorded salience A/B evidence was measured through
+a hard set with **1 of 32 rows resolvable** against the lived-in corpus (~3% sensitivity) and
+neither the report, the stamp, nor doctor said so. Round 5 makes the engine state what is
+actually true: every instrument reports its own sensitivity (**ED5R-2**), every write path
+states its real outcome, every skew and dying schedule has a name, and both sides of the
+publish ledger carry a number. Detection-first throughout (ED-1) — no autonomy was added, no
+default ranking moved (ED-2), and every at-cap module was split as its own reviewed commit
+before a feature needed its lines (**ED5R-3**).
+
+### T22 — REL: the runway & the ship gate (REL-1..4)
+- **REL-1** — the two AT-cap integration files split on the PR #72 facade pattern, pre-emptively:
+  `session_start.py` 1705 → 539 (dispatcher) + `session_start_health.py` 469 +
+  `session_start_signals.py` 805; `doctor_checks_corpus.py` 899 → 663 +
+  `doctor_checks_lifecycle.py` 293. VOL-1's `check_volatile_paths` — which had landed in the
+  `doctor.py` FACADE only because its proper sibling was full — is **repatriated** to the checks
+  home (inv5). The `session_start` grandfather-ledger entry is DELETED; the ratchet ledger
+  shrinks honestly. Pure code motion, byte-identical behavior.
+- **REL-2** — the red-board merge lesson becomes protocol: `RELEASING.md` gains an explicit
+  merge gate (run `gh pr checks <pr> --watch --fail-fast` as its **own command**, let its exit
+  status gate `gh pr merge`, never chain a merge after a *display* command) and the
+  tag-after-green-main-run discipline. Owner decision **Q2 (r5) = YES**: the QUA-12
+  branch-protection ruleset codified in `ci.yml` since round 1 was **applied to `main`** — seven
+  required checks by full name, strict up-to-date, PR-before-merge, linear history, no
+  force-push or deletion. One disclosed solo-compatibility deviation: code-owner review off /
+  0 approvals, because `CODEOWNERS = '* @youknowfred'` plus GitHub's no-self-approval rule would
+  have forced `--admin` (which bypasses the checks) on every solo PR. Plain `gh pr merge` now
+  mechanically refuses on red. Explicitly NOT built: auto-merge of any kind.
+- **REL-3** — `tests/test_releasing_doc.py` on the DOC-16 facts-lint pattern: the required check
+  count and names are **parsed from `ci.yml`** (never a second hardcoded copy), backticked paths
+  are pinned to existence. `RELEASING.md` had already rotted — "All six CI checks" when the
+  required set has been seven since SEC-8 — and is trued in the same PR.
+- **REL-4** — kill-switch reverse lint: every `HIPPO_DISABLE_*` name read by shipped source must
+  appear in STABILITY.md's documented list (green at birth, 3/3, with a synthetic trip-wire
+  fixture). An undocumented kill switch is illegible degradation (inv3); the deliberate
+  undocumented-knobs posture for the ~60 other `HIPPO_*` names is preserved.
+
+### T23 — MEA: honest instruments (MEA-1..6)
+- **MEA-1 — the headline, and ED5R-2's reference implementation.** `evaluate()` now reports
+  per-category `resolvable_n` alongside `n` whenever a fixture row's expected stems do not exist
+  in the measured corpus; `salience_eval.run_ab`'s condition stamp records
+  `resolvable_by_category` on new evidence; doctor's salience-evidence line **qualifies** a
+  low-sensitivity recorded A/B ("evidence recorded against an N%-resolvable fixture"). The
+  resolvability predicate is ONE shared helper (`floor_sweep`'s existing filter, lifted — never
+  re-implemented). Report-only: no row is skipped, no gate constant moves, and a fully-resolvable
+  report is byte-identical (pinned). Doctor **qualifies evidence, never recommends a flip**
+  (ED-2 unchanged); the recorded 2026-07-17 evidence file is not rewritten — the qualification
+  is derived from current fixture-vs-corpus state.
+- **MEA-2** — the missing fourth fixture lane: `draft_livedin_fixtures` derives candidate hard-set
+  rows from the engine's own recorded evidence (episode `query_previews` × session-grain
+  `_injection_join` hits), queries **verbatim only** — zero LLM, zero rewording, zero templating —
+  with deterministic noise gates, a 25/run cap, and dedup against tracked *and* queued rows.
+  Wired to `--draft-livedin`, the `abstention_fixtures` MCP draft action, and audit. Admission
+  stays **per-item human** (`confirm_hard_set_row`); an AST pin proves no bulk-admit path exists.
+- **MEA-3** — co-recall proposals get a null model: `observed_sessions`,
+  `expected_under_independence`, and **lift** ride each pair, and sub-floor pairs collapse into
+  one countable suppressed line instead of burning the reviewer. Live at build: **20 of 20 pairs
+  were chance-level** (lift 1.02–1.21, median 1.07) — the surface now proposes nothing rather
+  than manufacturing 17 confounded proposals.
+- **MEA-4** — evidence rows carry their producer: additive `v` (from a per-process cached
+  `_producer_version`) on new outcome / recall-event / reconsolidation rows, a rows-by-version
+  lane-health line, and a doctor check. Two hand-forensics incidents in one week is the signal;
+  the next "which plugin version wrote this?" is one command.
+- **MEA-6 — behavior delta.** Worktree touch paths normalize at record time (raw `path` preserved,
+  additive `tree_path`), so **JIT-1 reminders and JIT-2 touch provenance now fire in worktree
+  sessions** — previously ~50% of post-07-16 touch rows were silently starved. Bounded by the
+  existing per-session line cap and killed wholesale by `HIPPO_DISABLE_JIT`. `_injection_join`
+  prefers `tree_path`; FLT-3's shared-tree exemption stays raw-keyed by design.
+- **MEA-5** — owner decision **Q1 (r5) = YES**: the severed EVD-4 Arm B harness is un-severed as
+  exactly its own named minimal delta — `--ab HIPPO_OUTCOME_PRIOR`, a generalized flag-arm runner
+  (salience A/B refactored through it, byte-compatible), and `outcome_prior_eval.py`. The harness
+  stages its cache in-process and restores prior state, so a flag-OFF machine keeps no cache it
+  did not write. The commissioned RUN is deliberately **held** until MEA-2's first drain makes the
+  hard set non-trivial — running it through a 1/32-resolvable instrument would be the exact
+  evidence theater this round exists to end.
+
+### T24 — WRT: the write side tells the truth (WRT-1..3)
+- **WRT-3 — reply delta.** The MCP `add_decision` reply promised "it will ride this session's
+  capture seed as its durable WHY" — structurally impossible on that surface, which receives no
+  harness session id. It now states the truth: the row is recorded unattributed and will surface
+  **labeled** as a window-matched decision. New additive `window_decisions` lane (episode span
+  ± a 900s module constant) renders "WINDOW-MATCHED, not session-proven" on its own line at the
+  drain; the strict session-proven lane stays byte-identical, and the CLI still promises
+  seed-riding only with `--session-id`.
+- **WRT-1** — the triage prompt ordered a fabrication ("never say you don't know"). Replaced with
+  an **abstention right**: `{"abstain": true}` becomes an honest `{"abstained": true}` result that
+  carries across repeat stops so an honest no is never re-billed. Alongside it, a **zero-LLM**
+  groundedness flag (`ungrounded_tokens`): PR/issue refs, letter-bearing sha-likes, URLs, and
+  versions that appear in the draft but not in the evidence text are flagged for the drain
+  reviewer. Additive, absent when clean; the judged-lanes kill stays honored.
+- **WRT-2** — `capture --from-hook` had three indistinguishable silent outcomes. It now prints
+  exactly ONE stderr line: `captured -> <path>` / `no episodes in buffer for session_id=<X>
+  (<N> sessions known); nearest: …` (close-matches, the paste-typo aid) / `capture failed:
+  <class>`. Hook pipelines are byte-identical (both wired lines already end `2>/dev/null || true`);
+  stdout untouched; exit 0 in all cases (inv2).
+
+### T25 — OPS: running-state legibility (OPS-1, OPS-2)
+- **OPS-1 — new doctor surface.** Hooks run the plugin pinned at session launch, which was N
+  releases behind the tree twice in one week with only hand forensics to show it. Doctor now
+  names it: *"running-vs-source skew: live hooks run vX (pinned at session launch); this tree
+  ships vY — hook-lane behavior follows vX until `claude plugin update` + restart."* Fires only on
+  the this-repo-is-the-source shape; every other shape emits nothing. **Note: this release arms
+  that line on dogfooding machines** until the installed plugin is updated — that is the check
+  working, not a bug.
+- **OPS-1 (fleet half)** — presence docs carry an additive `plugin_version` stamp, and the fleet
+  line appends "vX hooks" **only when fresh docs disagree** — a launch-pinned laggard becomes
+  visible from every other session in the tree, and a uniform fleet renders exactly as before
+  (byte-identity pinned). Rides `HIPPO_DISABLE_PRESENCE` wholesale.
+- **OPS-2** — the scheduler dead-man: the census and doctor gain a **"quiet"** status for an
+  artifact that parses fine and whose paths all exist, but whose `sleep-state.json` `last_run_at`
+  is absent or older than a 3-day window — the loaded-but-dying schedule the stale-path class
+  cannot see. Names the age, the stamp, and the log path; prescribes nothing (remediation stays
+  human). File oracles only — no `launchctl` probing (ED-3), AST-pinned.
+
+### T26 — BND: the boundary & consent edge (BND-1..3)
+- **BND-2** — cross-project trust drift joins the machine census. A sibling corpus silently
+  withholding recall content appeared on no surface reachable from where the owner works: three
+  hippo-authored memories sat quarantined in a sibling project for 4–5 days while its census row
+  said only "live, fingerprinted". Live fingerprinted rows now carry
+  `WITHHOLDING n changed / m added — re-consent in that project (trust_corpus / doctor)`, and
+  doctor's machine-state line gains the withholding count. Computed via the ONE shipped detector
+  (`trust.untrusted_changes` — a second differ would be a defect, token-pinned), cold path only,
+  zero-drift fleets byte-identical. Report-only: no re-consent, no `untrust`, no write of any kind
+  from the census path.
+- **BND-3** — authorship-is-consent stops failing silently. `record_authored_write` returned False
+  "with nothing to say" and every call site discarded the bool, so the one moment a human was
+  present to act said nothing while the just-written memory headed for quarantine. Write verbs now
+  disambiguate the overloaded False — **only** a trusted-with-fingerprint corpus whose fold
+  genuinely failed — and append one line: *"this write did not join the consent baseline — it will
+  be withheld from recall until re-consent (`trust_corpus`)"*. Legacy fingerprint-less corpora stay
+  silent BY DESIGN. Two false promises fixed in passing: the pack install/update replies claimed
+  "the consent baseline absorbed the bytes" and the rederive reply claimed the bytes "were folded"
+  unconditionally — both are now conditional. The fold itself is untouched; nothing retries,
+  re-consents, or marks trust (an unattended re-baseline is the gate consenting to itself), and
+  hooks and index builds remain never-consent paths.
+- **BND-1** — the publish ledger shows both sides. `heals_by` only ever showed the healing half;
+  a candidate's own outbound links to still-local-only memories — each a NEW boundary dangling the
+  moment it lands — were invisible, which is why a measured two-publish treadmill moved the
+  boundary only 20 → 19 and no shipped view could have predicted it. `boundary_lint` now computes
+  `introduces_by` in the same walk (plain + typed edges), and the `--boundary` block, the publish
+  preflight receipt, and the candidates rows render **"heals N / introduces M (net ±K)"**.
+  Display-only forever: the publish-hard-gate kill is re-affirmed in-item with a functional pin —
+  a candidate that heals 0 and introduces 9 is still ready, with its command printed.
+
+### Engine notes
+- Suite **2,885 → 3,014** hermetic tests across the round. No schema motion of any kind: every
+  round-5 artifact is a report field, an additive gitignored-ledger field read via `.get()`, an
+  output line, a census status word, a doc edit, or a test.
+- Four owner decisions were resolved by dated in-session entries: Q1 (r5) commission Arm B — YES,
+  sequenced after MEA-1/MEA-2; Q2 (r5) apply the branch-protection ruleset — YES, applied;
+  carried Q2 (r4) trust-registry remediation — RATIFIED per-item and dead-rows-only, build
+  unscheduled behind an owner trigger; carried Q3 (r4) publish `--stage` — print-only RATIFIED as
+  the standing posture.
+
 ## v1.27.0 — 2026-07-18 — "The fleet sees itself"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical; corpus format still **5**, index
