@@ -52,6 +52,68 @@ def git_commit(repo: str, message: str, when: int) -> str:
     return _run(["git", "rev-parse", "HEAD"], repo).stdout.strip()
 
 
+# --------------------------------------------------------------------------- #
+# HIPPO_* env-leak guard (a hook pair, deliberately NOT a fixture)
+# --------------------------------------------------------------------------- #
+def _hippo_env() -> dict:
+    return {k: v for k, v in os.environ.items() if k.startswith("HIPPO_")}
+
+
+_HIPPO_ENV_BASELINE: dict = {}
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    """Snapshot the ``HIPPO_*`` environment BEFORE this test's fixtures run."""
+    _HIPPO_ENV_BASELINE.clear()
+    _HIPPO_ENV_BASELINE.update(_hippo_env())
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_runtest_teardown(item, nextitem):
+    """Repair — then fail — any test that leaves a ``HIPPO_*`` env var changed behind it.
+
+    Every hippo behaviour switch is an env var, so a test that writes ``os.environ``
+    directly instead of going through ``monkeypatch`` silently reconfigures every test
+    that runs after it in the same process. The concrete instance this guard was written
+    for: the index-rebuild concurrency test toggled ``HIPPO_DISABLE_DENSE`` from a worker
+    thread and exited on the disabled half of the toggle, so every later dense-path test
+    in a full-suite run quietly became a bm25-only test — passing while asserting nothing
+    it claimed to. That is a FALSE-GREEN class, not a flake: run alone the test proves the
+    dense behaviour, run in-suite it proves nothing, and both are green.
+
+    This is a hook pair rather than an autouse fixture because a fixture CANNOT be placed
+    outside ``monkeypatch``: ``monkeypatch`` is set up before any autouse fixture that
+    doesn't request it (and before one that does), so it is always finalized LAST and
+    every legitimate ``monkeypatch.setenv("HIPPO_...")`` still looks like a leak from
+    inside a fixture's teardown. ``pytest_runtest_setup(tryfirst)`` runs before fixture
+    setup and ``pytest_runtest_teardown(trylast)`` runs after fixture finalization, so the
+    comparison brackets the whole fixture stack — monkeypatch's undo included. Those two
+    ordering markers are load-bearing.
+
+    Repair runs before the report so one leaky test can't cascade into a wall of unrelated
+    failures — the run still names exactly the test that leaked, and only that test.
+    """
+    before, after = dict(_HIPPO_ENV_BASELINE), _hippo_env()
+    for key in after.keys() - before.keys():
+        os.environ.pop(key, None)
+    for key, value in before.items():
+        if os.environ.get(key) != value:
+            os.environ[key] = value
+    leaked = sorted(
+        f"{k}: {before.get(k)!r} -> {after.get(k)!r}"
+        for k in before.keys() | after.keys()
+        if before.get(k) != after.get(k)
+    )
+    if leaked:
+        pytest.fail(
+            "test leaked HIPPO_* env state into the rest of the process (repaired here, "
+            "but fix it at the source — use monkeypatch.setenv/delenv, or restore in a "
+            "finally): " + "; ".join(leaked),
+            pytrace=False,
+        )
+
+
 @pytest.fixture(autouse=True)
 def _strip_ambient_plugin_env(monkeypatch):
     """Strip the harness-provided plugin env from every test.
