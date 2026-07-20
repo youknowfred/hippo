@@ -4,10 +4,10 @@ description: "Enhancement Tier T17 (round 3, \"Memory beyond the session\") \u20
 metadata:
   type: project
   last_verified: "2026-07-16T15:45:41.063446+00:00"
-  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-18T06:08:27.136995+00:00"
+  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-20T22:48:10.000436+00:00"
   cited_paths: [".github/workflows/release.yml", "plugin/memory/recall_diff.py", ".github/workflows/memory-on-diff.yml", "plugin/memory/promote_scan.py", "plugin/memory/interview.py"]
-  source_commit: "b33becbd141dd922cffef41977c2022c53bf013a"
-  source_commit_time: 1784354042
+  source_commit: "32ee471c7dfb5f9c5cc33e26ac2eac2151bc6c00"
+  source_commit_time: 1784580625
 ---
 
 T17 EXT implemented 2026-07-16 (same session that shipped T16 JIT and merged its PR #61); **PR #63 MERGED same day (squash fc7e44a, owner-ratified) and RELEASED in v1.19.0 "At the act, and beyond the session"** (bundled with T16 JIT; release.yml green). 3 id-prefixed commits (EXT-1 cbf71b9, EXT-2 463b57c, EXT-3 41f491a), tests-first, suite 2286 green at the tip plus slow+scale lanes. Round 3's full arc: T14 INV #57, T15 SLP #58, T16 JIT #61, T17 EXT #63 — ALL shipped (v1.18.0 covers T14+T15, v1.19.0 covers T16+T17).

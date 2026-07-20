@@ -1,6 +1,6 @@
 ---
 name: hippo-enh-t5-growth
-description: "Enhancement Tier T5 (v1.5.0, \"Knowledge that grows itself\") — shipped 8/8 items (GRW-1..8), PR #13 MERGED 2026-07-09 (squash af7d246) + TAGGED v1.5.0 (release commit 90600d7, release.yml green, first tag since v0.7.0); _SEED_SCHEMA 1→2 (queue-own, NO corpus bump); next tier T6 (Reach)"
+description: "Enhancement Tier T5 (v1.5.0, \"Knowledge that grows itself\") — shipped 8/8 items (GRW-1..8), PR #13 MERGED 2026-07-09 (squash 89d1caf) + TAGGED v1.5.0 (release commit 90600d7, release.yml green, first tag since v0.7.0); _SEED_SCHEMA 1→2 (queue-own, NO corpus bump); next tier T6 (Reach)"
 metadata: 
   node_type: memory
   type: project
@@ -13,7 +13,7 @@ metadata:
 ---
 
 Tier T5 (v1.5.0, "Knowledge that grows itself") — session 2026-07-09. **COMPLETE, 8/8,
-[PR #13](https://github.com/youknowfred/hippo/pull/13) squash-MERGED to main as `af7d246`
+[PR #13](https://github.com/youknowfred/hippo/pull/13) squash-MERGED to main as `89d1caf`
 on 2026-07-09** (all CI green: dense lane + 4-way hermetic matrix + shellcheck; owner
 directed the merge; head branch `enh-t5-growth` deleted remote+local — only `main`
 remains, local AND remote; merged-tree markers verified: _SEED_SCHEMA 2, co_recall_pairs,
@@ -37,6 +37,11 @@ that intermediate versions were internal milestones; re-bootstrap: no; corpus_fo
 90600d7, subject "v1.5.0 — Knowledge that grows itself (enhancement tiers T1–T5)".
 release.yml version-sync: SUCCESS. Future tiers: tagging = releasing = the manifest+
 CHANGELOG bump moment; tier PRs themselves stay bump-free.
+
+> **SHA note (added 2026-07-20):** the per-item commit SHAs listed below were BRANCH commits,
+> squashed away at merge and the branch deleted — they never existed on `main` and are gone by
+> design, not broken. Only the squash-merge SHA above is resolvable. Navigate by PR number or
+> commit subject. See [[pre-launch-commit-shas-are-dead-in-this-repo]].
 
 SHIPPED THIS SESSION (one id-prefixed commit each):
 - **GRW-1** `5ad5628` — verbatim diff-hunk evidence + seed salience. capture._git_diff_hunks

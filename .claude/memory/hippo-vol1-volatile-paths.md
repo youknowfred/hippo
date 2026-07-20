@@ -4,10 +4,10 @@ description: "VOL-1 volatile-paths staleness-arming policy SHIPPED 2026-07-18 (c
 metadata:
   type: project
   last_verified: "2026-07-18T22:32:15.993414+00:00"
-  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-19T00:08:02.618156+00:00"
+  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-20T22:47:47.030050+00:00"
   cited_paths: [".github/workflows/release.yml", "plugin/memory/doctor.py", "plugin/memory/reconsolidate.py", "plugin/memory/reconsolidate_watermark.py", "plugin/memory/session_start.py", "tests/test_volatile_paths.py"]
-  source_commit: "0368c47ac6c03b1c64436450c100618ca07785a5"
-  source_commit_time: 1784418713
+  source_commit: "32ee471c7dfb5f9c5cc33e26ac2eac2151bc6c00"
+  source_commit_time: 1784580625
 ---
 
 VOL-1 — per-path staleness policy, commissioned by Fred from an em-growth-labs corpus-agent field report (their v1→v4 rederive made the reconsolidation worklist a treadmill: 23/56 items re-flagged within an hour, all by GROWTH-LOOP-ROADMAP.yaml). Built + PR'd 2026-07-18, [[hippo-cur1-cor20-citation-preservation]]-adjacent (same corpus, next report). PR #82 squash-MERGED to main as d886ebf same day, owner-directed on green CI; branch deleted local+remote. RELEASED same day, owner-directed, as **v1.26.0 "The roadmap is allowed to move"** — release PR #83 (DOC-7 two-commit shape: lockstep manifest bump then CHANGELOG capstone) squash 05b0c28, tag v1.26.0 pushed, release.yml four-way sync green, GitHub Release published from the CHANGELOG section. re-bootstrap: no — requirements byte-identical, corpus format 5 / index schema 7 / derivation 4 all unchanged. The emgl corpus adopts by committing its seven tier-1 paths into its own .format volatile_paths once on ≥v1.26.0.

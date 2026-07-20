@@ -14,10 +14,15 @@ metadata:
 
 Tier T2 (v1.2.0, "The rules bridge") — session 2026-07-08. **COMPLETE, 6/6,
 [PR #10](https://github.com/youknowfred/hippo/pull/10) squash-MERGED to main as
-`fc0fc33`** (owner-approved; head branch deleted; all CI green incl. the audit commit).
+`c7873f1`** (owner-approved; head branch deleted; all CI green incl. the audit commit).
 Shipped from branch `enh-t2-rules-bridge` (9 commits on top of T1's `ed5a98a`). Same
 session also deleted the long-merged stray branch `release-v0.7.0-team-and-fleet` (tip
 = PR #8's merged head; the v0.7.0 TAG remains) — only `main` exists on the remote now.
+
+> **SHA note (added 2026-07-20):** the per-item commit SHAs listed below were BRANCH commits,
+> squashed away at merge and the branch deleted — they never existed on `main` and are gone by
+> design, not broken. Only the squash-merge SHA above is resolvable. Navigate by PR number or
+> commit subject. See [[pre-launch-commit-shas-are-dead-in-this-repo]].
 
 SHIPPED THIS SESSION (one id-prefixed commit each, suite green after each):
 - **RUL-0** `e3a78a2` — spike CONFIRMED (ED-3 resolved, dated finding in the YAML): docs
