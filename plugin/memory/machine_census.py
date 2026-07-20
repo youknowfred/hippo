@@ -15,8 +15,13 @@ Census discipline (the HYG workstream goal):
     to ``bootstrap.status``/``_sibling_installs`` and has no class of its own.
   - Read-only: zero writes, zero LLM, zero network. The scheduler class uses FILE
     ORACLES only (LaunchAgents glob + ``crontab -l`` + plistlib parse of the embedded
-    paths) — launchctl runtime state is deliberately out of scope (ED-3), as are
-    Claude scheduled-task recipes (no local oracle).
+    paths, plus OPS-2's dead-man join: each ok artifact's embedded repo resolved to
+    its own gitignored ``sleep-state.json`` ``last_run_at`` — the oracle sleep.py
+    already writes on every run, previously zero readers) — launchctl runtime state
+    is deliberately out of scope (ED-3: widening to runtime probing would need its
+    own verified probe and its own item), as are Claude scheduled-task recipes (no
+    local oracle). A loaded-but-dying schedule that stopped running surfaces as
+    ``quiet``; remediation stays the human's.
   - ``~/.claude/projects`` is HARNESS-owned: the census enumerates freely, but the only
     remedy that may ever act there is the HYG-2 remover, and only on the ``memory``
     symlink hippo itself creates.
@@ -52,6 +57,12 @@ _CLAUDE_PROJECTS_ENV = "HIPPO_CLAUDE_PROJECTS_DIR"
 
 # The SLP-2 launchd label family (sleep._print_schedule's formula).
 _LAUNCH_AGENT_GLOB = "com.hippo.sleep.*.plist"
+
+# OPS-2: the dead-man window — an otherwise-ok artifact whose repo's last recorded
+# sleep run is older than this (or absent entirely) classifies as "quiet". A module
+# constant, deliberately not an env knob: the 07:30 recipe is daily, so ~3 days
+# separates "weekend/laptop-asleep" from "this schedule stopped running".
+_QUIET_AFTER_DAYS = 3
 
 
 def claude_projects_root() -> str:
@@ -167,10 +178,12 @@ def _parse_schedule_command(cmd: str) -> dict:
     repo = re.search(r"\bcd\s+(\S+)\s+&&", cmd)
     plugin = re.search(r"\bPYTHONPATH=(\S+)", cmd)
     python = re.search(r"\bPYTHONPATH=\S+\s+(\S+)\s+-m\s+memory\.sleep\b", cmd)
+    log = re.search(r">>\s+(\S+)", cmd)
     return {
         "repo_root": repo.group(1) if repo else None,
         "plugin_root": plugin.group(1) if plugin else None,
         "python": python.group(1) if python else None,
+        "log": log.group(1) if log else None,
     }
 
 
@@ -189,6 +202,47 @@ def _classify_schedule(cmd: str) -> dict:
     return {"status": "stale-path" if missing else "ok", "missing": missing, **parsed}
 
 
+def _sleep_freshness(repo_root: str) -> dict:
+    """OPS-2: the dead-man join for one ok artifact — FILE ORACLE only.
+
+    Resolves the artifact's embedded repo to hippo's own gitignored telemetry
+    (``<repo>/.claude/memory`` -> ``telemetry.default_telemetry_dir`` -> the
+    ``sleep-state.json`` that ``sleep.py`` stamps on every run, read through
+    ``sleep._read_state`` — the ONE canonical reader, same private-import posture as
+    ``_under_volatile_root``). ``quiet`` when the stamp is absent, unparseable, or
+    older than ``_QUIET_AFTER_DAYS``: a loaded-but-dying schedule (unloaded by hand,
+    broken venv python, deps rot) is exactly the class the stale-path check cannot
+    see. Pure file reads — no runtime probing of any kind, no write (the ED-3 pin
+    scans this function's source for the forbidden tokens, which is why they are not
+    even named here); an unexpected failure reads as fresh (a census must not cry
+    wolf on its own bug). Never raises.
+    """
+    try:
+        from datetime import datetime, timezone
+
+        from .sleep import _read_state
+        from .telemetry import default_telemetry_dir
+
+        td = default_telemetry_dir(os.path.join(repo_root, ".claude", "memory"))
+        last = _read_state(td).get("last_run_at")
+        if not isinstance(last, str) or not last.strip():
+            return {"quiet": True, "last_run_at": None, "age_days": None}
+        try:
+            stamp = datetime.fromisoformat(last)
+        except ValueError:
+            return {"quiet": True, "last_run_at": last, "age_days": None}
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        age_days = (datetime.now(timezone.utc) - stamp).total_seconds() / 86400.0
+        return {
+            "quiet": age_days > _QUIET_AFTER_DAYS,
+            "last_run_at": last,
+            "age_days": max(0, int(age_days)),
+        }
+    except Exception:
+        return {"quiet": False, "last_run_at": None, "age_days": None}
+
+
 def scheduler_census(
     launch_agents_dir: Optional[str] = None, crontab_text: Optional[str] = None
 ) -> dict:
@@ -198,9 +252,12 @@ def scheduler_census(
     the embedded command; cron: ``crontab -l`` lines invoking ``-m memory.sleep``.
     ``stale-path`` = an embedded repo/plugin/venv path no longer exists — the documented
     silent-07:30 failure class (the run dies before hippo starts, so only an on-demand
-    surface can report it). No launchctl runtime probing (ED-3: widening to runtime
-    state would need its own verified probe). ``crontab_text`` injects for hermetic
-    tests. Never raises; never writes.
+    surface can report it). ``quiet`` (OPS-2) = the artifact looks ok but its repo's
+    ``sleep-state.json`` ``last_run_at`` is absent or older than ``_QUIET_AFTER_DAYS``
+    — the loaded-but-dying complement stale-path cannot see (``_sleep_freshness``).
+    No launchctl runtime probing (ED-3: widening to runtime state would need its own
+    verified probe). ``crontab_text`` injects for hermetic tests. Never raises; never
+    writes.
     """
     entries: List[dict] = []
     la_dir = launch_agents_dir or os.path.join(
@@ -231,9 +288,21 @@ def scheduler_census(
         entry.update(_classify_schedule(line))
         entries.append(entry)
 
+    # OPS-2: the dead-man join — only otherwise-ok artifacts with a resolvable
+    # embedded repo are checked (stale-path/unparseable classification unchanged;
+    # an ok artifact whose command has no cd-<repo> keeps ok — no oracle to read).
+    for entry in entries:
+        if entry.get("status") == "ok" and entry.get("repo_root"):
+            fresh = _sleep_freshness(str(entry["repo_root"]))
+            if fresh["quiet"]:
+                entry["status"] = "quiet"
+                entry["last_run_at"] = fresh["last_run_at"]
+                entry["age_days"] = fresh["age_days"]
+
     return {
         "entries": entries,
         "ok": sum(1 for e in entries if e["status"] == "ok"),
+        "quiet": sum(1 for e in entries if e["status"] == "quiet"),
         "stale": sum(1 for e in entries if e["status"] == "stale-path"),
         "unparseable": sum(1 for e in entries if e["status"] == "unparseable"),
     }
@@ -370,13 +439,29 @@ def _render_scheduler(census: dict) -> List[str]:
         return ["scheduler artifacts: none installed (launchd glob + crontab)."]
     lines = [
         f"scheduler artifacts (file oracles): {_n(len(entries), 'entry', 'entries')}: "
-        f"{census['ok']} ok, {census['stale']} stale-path, "
+        f"{census['ok']} ok, {census.get('quiet', 0)} quiet, {census['stale']} stale-path, "
         f"{census['unparseable']} unparseable"
     ]
     for e in entries:
         where = e["path"] if e["kind"] == "launchd" else f"crontab: {e.get('line', '')}"
         if e["status"] == "ok":
             lines.append(f"  ok [{e['kind']}]: {where}")
+        elif e["status"] == "quiet":
+            # OPS-2: name the age and the log to check — no recipe, no probe, no
+            # editorializing; a quiet schedule's diagnosis (unloaded? broken venv?
+            # deps rot?) is the human's, from the log the artifact already writes.
+            last, age = e.get("last_run_at"), e.get("age_days")
+            if last and age is not None:
+                seen = f"last recorded sleep run {age}d ago ({last})"
+            elif last:
+                seen = f"last recorded sleep run unparseable ({last})"
+            else:
+                seen = "no recorded sleep run"
+            log = e.get("log") or "the log path in the artifact's command"
+            lines.append(
+                f"  quiet [{e['kind']}]: {where} — artifact looks ok but {seen} "
+                f"(dead-man window: {_QUIET_AFTER_DAYS}d); check the log: {log}"
+            )
         elif e["status"] == "stale-path":
             gone = ", ".join(e.get("missing", []))
             lines.append(

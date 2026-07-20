@@ -706,9 +706,12 @@ def check_machine_state(ctx: DoctorContext) -> Dict[str, str]:
 
     One line summarizing the census classes ``check_projects_registry`` does NOT
     already cover: dead trust rows, dangling memory symlinks, gone-path scheduler
-    artifacts. Temp-rooted-LIVE rows never warn and the volatile split stays in the
-    census command's own report — warn-on-dead-only keeps this line from becoming
-    wallpaper in a section that already carries chronic warns. Sleep inherits the line
+    artifacts — and, since OPS-2, QUIET ones (artifact ok, ``sleep-state.json``
+    ``last_run_at`` absent/stale beyond the census's dead-man window: the
+    loaded-but-dying schedule the stale-path class cannot see). Temp-rooted-LIVE rows
+    never warn and the volatile split stays in the census command's own report —
+    warn-on-dead-only keeps this line from becoming wallpaper in a section that
+    already carries chronic warns. Sleep inherits the line
     free through its doctor section (SLP-1's reuse rule — no forked text) and machine
     rot is not per-session news, so there is deliberately NO SessionStart producer.
     Honest-surface bound: a moved venv/repo kills the scheduled 07:30 run before hippo
@@ -721,12 +724,14 @@ def check_machine_state(ctx: DoctorContext) -> Dict[str, str]:
         farm = symlink_farm_census()
         dangling = farm["dangling"] + farm["dangling_temp_rooted"]
         dead_trust = trust_census()["dead"]
-        stale_sched = scheduler_census()["stale"]
-        if not (dangling or dead_trust or stale_sched):
+        sched = scheduler_census()
+        stale_sched = sched["stale"]
+        quiet_sched = sched.get("quiet", 0)  # OPS-2: own-shape read — absent pre-quiet shapes count 0
+        if not (dangling or dead_trust or stale_sched or quiet_sched):
             return {
                 "status": "ok",
                 "message": "machine state: no dead trust rows, dangling memory symlinks, "
-                "or stale scheduler artifacts (full census: python -m memory.machine_census).",
+                "or stale/quiet scheduler artifacts (full census: python -m memory.machine_census).",
             }
         parts = []
         if dangling:
@@ -736,6 +741,12 @@ def check_machine_state(ctx: DoctorContext) -> Dict[str, str]:
         if stale_sched:
             parts.append(
                 f"{stale_sched} stale scheduler artifact" + ("" if stale_sched == 1 else "s")
+            )
+        if quiet_sched:
+            parts.append(
+                f"{quiet_sched} quiet scheduler artifact"
+                + ("" if quiet_sched == 1 else "s")
+                + " (no recent sleep run)"
             )
         msg = "machine state: " + ", ".join(parts) + " — census: python -m memory.machine_census"
         if farm["dangling_temp_rooted"]:

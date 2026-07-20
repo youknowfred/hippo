@@ -41,9 +41,9 @@ def _add_symlink(farm: str, name: str, target: str):
     return os.path.join(d, "memory")
 
 
-def _plist(la_dir, key: str, repo: str, plugin: str, python: str):
+def _plist(la_dir, key: str, repo: str, plugin: str, python: str, log: str = "/dev/null"):
     os.makedirs(la_dir, exist_ok=True)
-    cmd = f"cd {repo} && PYTHONPATH={plugin} {python} -m memory.sleep >> /dev/null 2>&1"
+    cmd = f"cd {repo} && PYTHONPATH={plugin} {python} -m memory.sleep >> {log} 2>&1"
     path = os.path.join(la_dir, f"com.hippo.sleep.{key}.plist")
     with open(path, "wb") as fh:
         plistlib.dump(
@@ -54,6 +54,22 @@ def _plist(la_dir, key: str, repo: str, plugin: str, python: str):
             fh,
         )
     return path
+
+
+def _sleep_state(repo, last_run_at=None, raw: str | None = None):
+    """Plant a repo's sleep-state.json where the OPS-2 join resolves it — the same
+    ``<repo>/.claude/.memory-telemetry`` shape ``telemetry.default_telemetry_dir``
+    derives from ``<repo>/.claude/memory``."""
+    td = repo / ".claude" / ".memory-telemetry"
+    td.mkdir(parents=True, exist_ok=True)
+    body = raw if raw is not None else json.dumps({"last_run_at": last_run_at})
+    (td / "sleep-state.json").write_text(body, encoding="utf-8")
+
+
+def _iso_ago(days: float) -> str:
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
 
 
 # --------------------------------------------------------------------------- #
@@ -185,11 +201,12 @@ def test_scheduler_census_launchd_ok_and_stale(tmp_path):
     python = repo / "venv" / "bin" / "python"
     python.parent.mkdir(parents=True)
     python.write_text("#!/bin/sh\n")
+    _sleep_state(repo, _iso_ago(0.1))  # ran "this morning" — ok means genuinely ok post-OPS-2
     _plist(la, "good", str(repo), str(plugin), str(python))
     _plist(la, "moved", "/nonexistent-hyg1-sched/repo", str(plugin), str(python))
 
     out = MC.scheduler_census(launch_agents_dir=la, crontab_text="")
-    assert (out["ok"], out["stale"], out["unparseable"]) == (1, 1, 0)
+    assert (out["ok"], out["quiet"], out["stale"], out["unparseable"]) == (1, 0, 1, 0)
     stale = [e for e in out["entries"] if e["status"] == "stale-path"][0]
     assert stale["missing"] == ["/nonexistent-hyg1-sched/repo"]
     assert stale["kind"] == "launchd"
@@ -207,6 +224,7 @@ def test_scheduler_census_reads_cron_lines(tmp_path):
     repo = tmp_path / "repo"
     plugin = repo / "plugin"
     plugin.mkdir(parents=True)
+    _sleep_state(repo, _iso_ago(0.1))
     cron = (
         "# a comment\n"
         f"30 7 * * 1-5 cd {repo} && PYTHONPATH={plugin} python3 -m memory.sleep >> /dev/null 2>&1\n"
@@ -511,3 +529,176 @@ def test_machine_state_temp_rooted_live_never_warns(tmp_path, monkeypatch):
     _quiet_scheduler(monkeypatch)
     r = check_machine_state(None)
     assert r["status"] == "ok", r["message"]
+
+
+# --------------------------------------------------------------------------- #
+# OPS-2: the dead-man freshness join — "quiet" from the oracle that already existed
+# --------------------------------------------------------------------------- #
+def _ok_repo(tmp_path):
+    """A repo whose scheduler artifact classifies ok (all embedded paths exist)."""
+    repo = tmp_path / "repo"
+    plugin = repo / "plugin"
+    plugin.mkdir(parents=True)
+    python = repo / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\n")
+    return repo, plugin, python
+
+
+def test_quiet_when_no_run_was_ever_recorded(tmp_path):
+    """An installed schedule with no sleep-state at all IS the dead-man alarm shape."""
+    la = str(tmp_path / "LaunchAgents")
+    repo, plugin, python = _ok_repo(tmp_path)
+    _plist(la, "silent", str(repo), str(plugin), str(python))
+    out = MC.scheduler_census(launch_agents_dir=la, crontab_text="")
+    assert (out["ok"], out["quiet"], out["stale"]) == (0, 1, 0)
+    e = [x for x in out["entries"] if x["status"] == "quiet"][0]
+    assert e["last_run_at"] is None and e["age_days"] is None
+
+
+def test_quiet_when_the_last_run_is_beyond_the_window(tmp_path):
+    la = str(tmp_path / "LaunchAgents")
+    repo, plugin, python = _ok_repo(tmp_path)
+    stamp = _iso_ago(10)
+    _sleep_state(repo, stamp)
+    _plist(la, "dying", str(repo), str(plugin), str(python))
+    out = MC.scheduler_census(launch_agents_dir=la, crontab_text="")
+    assert out["quiet"] == 1 and out["ok"] == 0
+    e = [x for x in out["entries"] if x["status"] == "quiet"][0]
+    assert e["last_run_at"] == stamp
+    assert e["age_days"] == 10
+
+
+def test_fresh_and_within_window_stay_ok(tmp_path):
+    """The healthy case AND the boundary: a 2-day-old stamp (weekend gap) is not quiet."""
+    la = str(tmp_path / "LaunchAgents")
+    repo, plugin, python = _ok_repo(tmp_path)
+    _sleep_state(repo, _iso_ago(2))
+    _plist(la, "healthy", str(repo), str(plugin), str(python))
+    out = MC.scheduler_census(launch_agents_dir=la, crontab_text="")
+    assert (out["ok"], out["quiet"]) == (1, 0)
+    assert out["entries"][0]["status"] == "ok"
+    assert "last_run_at" not in out["entries"][0]  # the fields ride only the quiet flip
+
+
+def test_unparseable_stamp_is_quiet(tmp_path):
+    la = str(tmp_path / "LaunchAgents")
+    repo, plugin, python = _ok_repo(tmp_path)
+    _sleep_state(repo, "not-a-timestamp")
+    _plist(la, "garbled", str(repo), str(plugin), str(python))
+    out = MC.scheduler_census(launch_agents_dir=la, crontab_text="")
+    e = [x for x in out["entries"] if x["status"] == "quiet"][0]
+    assert e["last_run_at"] == "not-a-timestamp" and e["age_days"] is None
+
+
+def test_stale_path_classification_is_unchanged_by_the_join(tmp_path):
+    """AC: the join runs only over otherwise-ok artifacts — a stale-path entry stays
+    stale-path even when its (gone) repo obviously has no oracle."""
+    la = str(tmp_path / "LaunchAgents")
+    repo, plugin, python = _ok_repo(tmp_path)
+    _plist(la, "moved", "/nonexistent-ops2-sched/repo", str(plugin), str(python))
+    out = MC.scheduler_census(launch_agents_dir=la, crontab_text="")
+    assert (out["quiet"], out["stale"]) == (0, 1)
+
+
+def test_ok_without_a_parsed_repo_root_stays_ok(tmp_path):
+    """No cd-<repo> in the command -> no oracle to resolve -> never quiet (honest:
+    the join claims nothing it cannot read)."""
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    cron = f"30 7 * * * PYTHONPATH={plugin} python3 -m memory.sleep >> /dev/null 2>&1\n"
+    out = MC.scheduler_census(launch_agents_dir=str(tmp_path / "la"), crontab_text=cron)
+    assert (out["ok"], out["quiet"]) == (1, 0)
+
+
+def test_absence_of_any_schedule_emits_nothing(tmp_path):
+    """AC: no artifacts -> no quiet, no entries, and the render's empty one-liner."""
+    out = MC.scheduler_census(launch_agents_dir=str(tmp_path / "la"), crontab_text="")
+    assert out["entries"] == [] and out["quiet"] == 0
+    assert MC._render_scheduler(out) == [
+        "scheduler artifacts: none installed (launchd glob + crontab)."
+    ]
+
+
+def test_render_names_the_age_and_the_log_path(tmp_path):
+    la = str(tmp_path / "LaunchAgents")
+    repo, plugin, python = _ok_repo(tmp_path)
+    stamp = _iso_ago(10)
+    _sleep_state(repo, stamp)
+    log = str(tmp_path / "logs" / "hippo-sleep.log")
+    path = _plist(la, "dying", str(repo), str(plugin), str(python), log=log)
+    text = "\n".join(
+        MC._render_scheduler(MC.scheduler_census(launch_agents_dir=la, crontab_text=""))
+    )
+    assert "1 quiet" in text
+    assert f"quiet [launchd]: {path}" in text
+    assert f"last recorded sleep run 10d ago ({stamp})" in text
+    assert f"check the log: {log}" in text
+    assert f"dead-man window: {MC._QUIET_AFTER_DAYS}d" in text
+    # no recipe, no prescription — remediation stays the human's (ED4R-3 posture)
+    assert f"launchctl unload {path}" not in text
+
+
+def test_render_quiet_without_any_recorded_run(tmp_path):
+    la = str(tmp_path / "LaunchAgents")
+    repo, plugin, python = _ok_repo(tmp_path)
+    _plist(la, "silent", str(repo), str(plugin), str(python))
+    text = "\n".join(
+        MC._render_scheduler(MC.scheduler_census(launch_agents_dir=la, crontab_text=""))
+    )
+    assert "no recorded sleep run" in text
+
+
+def test_check_machine_state_gains_the_quiet_count(monkeypatch):
+    from memory.doctor_checks_env import check_machine_state
+
+    monkeypatch.setattr(
+        MC,
+        "scheduler_census",
+        lambda *a, **k: {"entries": [], "ok": 0, "stale": 0, "unparseable": 0, "quiet": 2},
+    )
+    r = check_machine_state(None)
+    assert r["status"] == "warn"
+    assert "2 quiet scheduler artifacts (no recent sleep run)" in r["message"]
+    assert "python -m memory.machine_census" in r["message"]
+
+
+def test_check_machine_state_tolerates_the_pre_quiet_census_shape(monkeypatch):
+    """The .get() discipline (ED-4's own-shape read): a census dict without the quiet
+    key — the pre-OPS-2 shape the older tests still monkeypatch — reads as 0."""
+    from memory.doctor_checks_env import check_machine_state
+
+    _quiet_scheduler(monkeypatch)  # the legacy helper: no "quiet" key at all
+    r = check_machine_state(None)
+    assert r["status"] == "ok", r["message"]
+    assert "stale/quiet scheduler artifacts" in r["message"]
+
+
+def test_census_path_never_probes_launchctl_or_grows_subprocess(tmp_path):
+    """ED-3 negative-capability pin: the ONLY subprocess site in machine_census is
+    _read_crontab (the grandfathered crontab -l file-oracle-in-spirit), and the
+    freshness join goes through the two canonical file resolvers — no launchctl
+    anywhere but the print-only removal recipe."""
+    import ast
+    import inspect
+
+    src = inspect.getsource(MC)
+    tree = ast.parse(src)
+    offenders = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            for sub in ast.walk(node):
+                if (
+                    isinstance(sub, ast.Attribute)
+                    and isinstance(sub.value, ast.Name)
+                    and sub.value.id == "subprocess"
+                    and node.name != "_read_crontab"
+                ):
+                    offenders.append(node.name)
+    assert not offenders, f"subprocess use outside _read_crontab: {offenders}"
+    join_src = inspect.getsource(MC._sleep_freshness)
+    assert "subprocess" not in join_src and "launchctl" not in join_src
+    # the join resolves ONLY through hippo's own canonical readers (AC: cross-repo
+    # reads touch only hippo's own gitignored telemetry)
+    assert "default_telemetry_dir" in join_src and "_read_state" in join_src
+    assert "open(" not in join_src
