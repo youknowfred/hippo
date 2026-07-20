@@ -1,21 +1,21 @@
 ---
 name: hippo-enh-t7-learned-ranking
-description: "Enhancement Tier T7 (v1.7.0, \"Learned ranking\") — session 2026-07-09: RUL-7 shipped (PR #15 MERGED 5dcbc2a) + TAGGED v1.7.0 (3042cdd); then owner commissioned RET-8 (PR #16 MERGED f2d1979: category eval + tracked gates + edge-aware eval) and RATIFIED SIG-5 = salience default OFF (still the default today). The tier is COMPLETE since: SIG-6 shipped (4dc3256 — draft_abstention_fixtures/confirm_hard_set_row) and RUL-6 shipped once the owner cleared the LIF-7 CAP-soak gate (/hippo:promote-rule is live). Historical record."
+description: "Enhancement Tier T7 (v1.7.0, \"Learned ranking\") — session 2026-07-09: RUL-7 shipped (PR #15 MERGED 33aadda) + TAGGED v1.7.0 (546e5c1); then owner commissioned RET-8 (PR #16 MERGED 6a81c6e: category eval + tracked gates + edge-aware eval) and RATIFIED SIG-5 = salience default OFF (still the default today). The tier is COMPLETE since: SIG-6 shipped (14f4968 — draft_abstention_fixtures/confirm_hard_set_row) and RUL-6 shipped once the owner cleared the LIF-7 CAP-soak gate (/hippo:promote-rule is live). Historical record."
 metadata: 
   node_type: memory
   type: project
   originSessionId: 5e683ae7-b857-47d3-a37d-daafd56e45e2
   last_verified: "2026-07-13T04:49:53.242134+00:00"
-  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-18T06:19:12.063043+00:00"
+  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-20T23:40:59.387597+00:00"
   cited_paths: ["ROADMAP.enhancements.yaml", "plugin/memory/lint_floor.py", "plugin/memory/recall.py", "plugin/memory/export_agents.py", "tests/test_export_agents.py", "ROADMAP.yaml", ".github/workflows/release.yml", "plugin/memory/eval_recall.py", "tests/test_fixture_drafts.py"]
-  source_commit: "0477d4778fb0b40f08c5d28ba213fc864d8fcb78"
-  source_commit_time: 1784354967
+  source_commit: "1d15cd5b9c33838853a2a14a4e36e997cac9a936"
+  source_commit_time: 1784589679
 ---
 
 Tier T7 (v1.7.0, "Learned ranking (salience-keystone-gated)") — session 2026-07-09.
 **Partial by design: shipped RUL-7 (1 of 4 items — the only one with no external
 blocker). [PR #15](https://github.com/youknowfred/hippo/pull/15) squash-MERGED to main
-as `5dcbc2a` on 2026-07-09 (owner directed; all 6 required CI checks green: dense,
+as `33aadda` on 2026-07-09 (owner directed; all 6 required CI checks green: dense,
 4-way hermetic matrix, shellcheck). Head branch `enh-t7-rul7` deleted remote (gh api,
 avoiding the push hang) + local — only `main` remains, local AND remote. The branch's
 2 pre-squash commits `52080f7`/`ef47ae0` are now UNREACHABLE from main (T6 lesson —
@@ -45,6 +45,11 @@ four tiers stale; every claim held):
   recall.py:1771/1800, archive._SCAN_TARGETS omitted AGENTS.md as claimed,
   GOV_GLOBS included it, _rule_scoped_files was hard-coded to .claude/rules/*.md).
   **No premise correction needed this tier** — first tier since T2 where all notes held.
+
+> **SHA note (added 2026-07-20):** the per-item commit SHAs listed below were BRANCH commits,
+> squashed away at merge and the branch deleted — they never existed on `main` and are gone by
+> design, not broken. Only the squash-merge SHA above is resolvable. Navigate by PR number or
+> commit subject. See [[pre-launch-commit-shas-are-dead-in-this-repo]].
 
 SHIPPED (one id-prefixed commit each, suite green after each):
 - **RUL-7** `52080f7` — AGENTS.md fan-out. plugin/memory/export_agents.py:
@@ -113,7 +118,7 @@ renders full bodies).
 
 RET-8 ADDENDUM (same session, later): **the owner COMMISSIONED RET-8 — built and
 [PR #16](https://github.com/youknowfred/hippo/pull/16) squash-MERGED to main as
-`f2d1979` on 2026-07-09 (all 7 checks green twice — on the RET-8 head and again on
+`6a81c6e` on 2026-07-09 (all 7 checks green twice — on the RET-8 head and again on
 the SIG-5 decision head; branch deleted remote+local, only main remains; pre-squash
 commits `4c6b1c9`+`43f2ad9` unreachable from main, browsable on the PR).** Category loader (canonical set single-hop/multi-hop/temporal/update/
 abstention, absent→single-hop, unknown tags data-driven for SIG-6) + by_category
@@ -155,8 +160,8 @@ eval-gated by the new per-category instrument. Also still open from earlier tier
 spine (SEC-5/6/7; the negative-capability pin in test_packs is the tripwire), and the
 two minor v0.3.0 follow-ups. When T7's gates clear, the tier flips to done only with
 the SIG-5 decision + eval evidence recorded per its capstone spec. **TAGGED v1.7.0
-(owner-directed, same session): release commit `3042cdd` "v1.7.0: version sync +
-CHANGELOG (enhancement tiers T6–T7)" directly on main per the 90600d7/v1.5.0 precedent
+(owner-directed, same session): release commit `546e5c1` "v1.7.0: version sync +
+CHANGELOG (enhancement tiers T6–T7)" directly on main per the 581abeb/v1.5.0 precedent
 — both manifests 1.5.0→1.7.0 in lockstep, ONE `## v1.7.0` CHANGELOG entry covering
 T6+T7 (no phantom v1.6.0 heading — that version was never released; the entry states
 T7 is partial and which items remain gated), annotated tag on the release commit,
@@ -170,7 +175,7 @@ RUL-6 (LIF-7 owner gate) — all with reasons above; none forced, no evidence fa
 **ALL THREE GATES SINCE CLEARED — T7 IS DONE (re-verified 2026-07-16):** SIG-5 was ratified
 salience-default-OFF (and OFF is still the shipped default — `eval_recall.py` records
 "HIPPO_SALIENCE is MSR-5 — planned, not shipped"); **SIG-6 SHIPPED** on its own PR #17,
-squash-merged `4dc3256` (`eval_recall.draft_abstention_fixtures` + `confirm_hard_set_row`
+squash-merged `14f4968` (`eval_recall.draft_abstention_fixtures` + `confirm_hard_set_row`
 are live and drive /hippo:consolidate's Step 5); and **RUL-6 SHIPPED** once the owner cleared
 the LIF-7 CAP-soak gate in the v0.8.0 SEC-tail session ([[hippo-v080-sec-tail]]) — the
 `/hippo:promote-rule` skill and `promote_rule.promote_to_rule` are live. Also-open items this
