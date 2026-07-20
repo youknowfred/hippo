@@ -7,6 +7,90 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.29.0 — 2026-07-20 — "No false greens"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0 (verified at the
+cut: zero commits touched it); corpus format still **5**, index schema still **7**, citation
+derivation still **4**. Same-day successor to v1.28.0 and the same theme turned on the
+instruments themselves: v1.28.0 made the engine report its own sensitivity, and this release
+answers what that measurement then found. Every item below is a thing that was **green while
+measuring nothing** — a check pointing at a capability that never existed, a remediation naming
+a mechanism that cannot work, a gate calibrated on a corpus it no longer runs against, a sweep
+promising zero leakage from a matrix it wasn't scoring, and a test suite quietly demoting its
+own dense lane to BM25. No ranking behavior changes anywhere in this release.
+
+### ABS — the abstention instruments tell the truth (ABS-1..6, PRs #93, #98)
+
+The organizing measurement: hippo's own 66-memory corpus abstained on **nothing** — 0 of 11
+off-topic probes — and three independent instruments agree the two classes are not separable
+here. Per-row cosine (off-topic 0.531–0.599 vs on-topic 0.585–0.600) fully overlaps; the
+per-query margin z-score has off-topic **straddling** on-topic; `--floor-sweep` reports
+`OVERLAPPING` outright. The worst leak — *"how do I tune nginx reverse proxy timeouts"* —
+scores **more confidently than any real query in the hard set**, which is the embedding
+behaving correctly: retrieval scores measure semantic distance, and "off-topic" is a judgment
+about *answerability*. Different quantity. So the fix is scoping the instrument, not moving a
+threshold.
+
+- **ABS-1** — doctor claimed `recall_abstention_set.yaml` is "written by `/hippo:audit`". **No
+  writer has ever existed.** Root cause is a name collision worth pinning: SIG-6's
+  `draft_abstention_fixtures` drafts the abstention *backlog* — queries that DID abstain — into
+  `recall_hard_set.yaml`, the opposite polarity. The check sat inert behind an unfollowable
+  remediation for its whole life. Fixed in all four places the claim appears, plus a repo-wide
+  lint verified against the reintroduced original line.
+- **ABS-2** — both remediations named mechanisms that cannot work. `HIPPO_DENSE_FLOOR=0.95`
+  leaves the rate at 0/11 (BM25 admits independently, with no score floor of any kind), and
+  "warm the dense model and enable the abstention floor" is **inverted** — warming adds two
+  candidate lanes, so it can only make abstention *rarer*. Demonstrated hermetically: dense OFF
+  `1.0`, dense ON `0.0`.
+- **ABS-3** — `GATE_PRECISION_AT_K` and `GATE_ABSTENTION` now bind only on the pack-corpus
+  pairing they were calibrated against. A project-local fixture reports (`pass: None` +
+  `reported_only`) with its real value still printed; an explicitly supplied `--relevance-set`
+  or `--abstention-set` still gates. CI's pack-seeded lane still binds and passes at the
+  documented values (`precision@10 = 0.15`, `abstention_rate = 0.3333`).
+- **ABS-4** — `_raw_max_cosines` scored description rows only while its docstring called that
+  "the exact quantity the dense floor gates" — true when GRF-3 wrote it, false since RET-2
+  widened the matrix. It promised *"at 0.663, 0 probes would leak"* where **2 of 11 actually
+  admit**. Now scores the whole gated matrix (the matmul already covered every row), and the
+  two consumers that were overstating those numbers move with it.
+- **ABS-5** — a corpus-local relevance set (12 rows / 34 stems, all verified present). The
+  shipped set has **12 of its 13 stems absent here**, so `precision@10` could structurally never
+  exceed ~0.01. Now 0.2083, reported.
+- **ABS-6** — the suite's own false green. `test_concurrency` set `HIPPO_DISABLE_DENSE=1`
+  directly in `os.environ` from a worker thread, silently demoting **every dense-path test that
+  ran after it** to BM25-only — green alone, green in-suite, proving nothing in either case.
+  Fixed at the source and held by a `conftest.py` guard that names the leaking test, repairs the
+  variable before reporting so one leak cannot cascade, and does not flag well-behaved
+  `monkeypatch.setenv` use.
+
+### ED5R-3 — ratchet relief (PRs #94, #95, #97, #99, #100)
+
+Pure code motion; **zero behavior change, zero surface change** — nothing under
+`plugin/.claude-plugin/`, `plugin/skills/`, `plugin/hooks/`, or `plugin/commands/` is touched.
+ABS left `eval_recall.py` with **0** lines of ratchet headroom and `doctor_checks_recall.py`
+with **1**, having paid for every added line by compressing explanatory comments — the ratchet
+working as designed and the documented style losing. EKPI5R-4 says no integration file enters a
+feature tier at its cap, so each was relieved as its own reviewed PR.
+
+- `eval_recall.py` 1863 → **1644** — the GRF-3 dense-floor sweep becomes `eval_floor.py`; the
+  default-fixture resolvers move to `eval_fixtures.py` (a sibling cannot import its façade).
+- `doctor_checks_recall.py` 900 → **692** — the floor-calibration and two abstention checks
+  become `doctor_checks_abstention.py`. Registry order and check IDs unchanged, so doctor's
+  rendered output is byte-identical.
+- `telemetry.py` 1034 → **761** — the LIF-4/TEA-5 usage aggregates become `telemetry_usage.py`.
+  **Leaves the grandfather ledger entirely**; the general cap governs it now.
+- `provenance.py` 2047 → **1650** — the git/corpus-location/tier layer becomes
+  `provenance_env.py`. Seam chosen by measurement: an AST pass found it the one block with
+  **zero outbound dependencies**, because nothing in it reads, parses, or writes a memory file.
+- `mcp_schemas.py` — re-pin 914 → 946, no source change, and the ledger comment corrected. It
+  claimed the file "grows only with new tools"; measured against the pin commit it is **28 tools
+  then, 28 now**, with all +32 lines being edited `description` prose. It grows from
+  truth-maintenance, not new tools.
+
+Every split verified structurally rather than by eye: each module-level definition AST-compared
+against its pre-split original, asserting none lost, none duplicated, none changed. The ratchet
+ledger shrinks from **10 entries to 9**, and no module is now within 48 lines of its budget
+(four were within 28 at the start of the day).
+
 ## v1.28.0 — 2026-07-20 — "The engine tells the truth"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.27.0 (verified at the
