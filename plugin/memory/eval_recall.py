@@ -278,6 +278,8 @@ from .eval_fixtures import (  # drafts-queue plumbing + the T11 synthesizers (fa
     _project_fixture_path,
     default_drafts_path,
     draft_forgetting_fixtures,
+    is_project_local_fixture,
+    promoted_gate,
     draft_livedin_fixtures,
     draft_update_fixtures,
     run_draft_forgetting_cli,
@@ -774,20 +776,19 @@ def evaluate(
     # hard-set gates above: no path provided → skipped (pass=None, excluded from `ok`);
     # a provided path that loads empty → loud FAIL (a truncated/malformed fixture is a
     # real problem, not a deliberately-absent input).
-    relevance_provided = bool(relevance_set_path)
-    abstention_provided = bool(abstention_set_path)
-    gates["precision@10"] = {
-        "value": precision["precision"], "threshold": GATE_PRECISION_AT_K,
-        "pass": (precision["n"] > 0 and precision["precision"] >= GATE_PRECISION_AT_K)
-        if relevance_provided else None,
-        **({"skipped": True} if not relevance_provided else {}),
-    }
-    gates["abstention_rate"] = {
-        "value": abstention["rate"], "threshold": GATE_ABSTENTION,
-        "pass": (abstention["n"] > 0 and abstention["rate"] >= GATE_ABSTENTION)
-        if abstention_provided else None,
-        **({"skipped": True} if not abstention_provided else {}),
-    }
+    # ABS-3: both promoted gates additionally bind only on the pack-corpus pairing they were
+    # calibrated for; a project's own fixture REPORTS instead (see promoted_gate). Scoping
+    # one and not its twin would leave the same category error under another name.
+    gates["precision@10"] = promoted_gate(
+        precision["precision"], GATE_PRECISION_AT_K,
+        precision["n"] > 0 and precision["precision"] >= GATE_PRECISION_AT_K,
+        relevance_set_path, "relevance set",
+    )
+    gates["abstention_rate"] = promoted_gate(
+        abstention["rate"], GATE_ABSTENTION,
+        abstention["n"] > 0 and abstention["rate"] >= GATE_ABSTENTION,
+        abstention_set_path, "off-topic fixture",
+    )
     # PRF-2: cold_p95_ms follows the SAME skip-vs-gate shape as the hard-set/token-reduction
     # gates above (pass=None + skipped=True + a reason string, excluded from `ok`) rather than
     # a bespoke boolean -- one pattern for "this gate wasn't asked to run" across the module.
@@ -870,12 +871,10 @@ def _default_fixture_path(filename: str) -> Optional[str]:
 
     Probe order:
       1. ``.claude/memory/.audit-fixtures/<filename>`` — the project-local convention (any
-         consuming project can carry its own calibration data). ABS-1: how a file GETS there
-         differs per fixture, and this resolver deliberately does not care — /hippo:audit
-         writes ``recall_hard_set.yaml`` (Phase 0.5, plus SIG-6's per-item
-         ``confirm_hard_set_row`` admissions); ``recall_abstention_set.yaml`` has NO writer
-         anywhere and is hand-authored. Do not restate this as "the dir /hippo:audit writes
-         to" — that shorthand is exactly what put a false remediation in doctor for a release.
+         consuming project can carry its own data). ABS-1: how a file GETS there differs per
+         fixture and this resolver does not care — /hippo:audit writes ``recall_hard_set.yaml``;
+         ``recall_abstention_set.yaml`` has NO writer and is hand-authored. Never restate this
+         as "the dir /hippo:audit writes to" — that shorthand shipped a false doctor remedy.
       2. ``<repo>/tests/fixtures/<filename>`` — the engine repo's own checked-in set.
 
     ``None`` (nothing found) makes ``main()`` inherit ``evaluate()``'s skip semantics
@@ -1654,7 +1653,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         mark = "➖" if skipped else ("✅" if g["pass"] else "❌")
         extra = f" ({g['pct']*100:.1f}% reduction)" if name == "token_reduction" else ""
         if skipped:
-            extra += f" — skipped ({_SKIP_REASONS.get(name, 'input absent')}; excluded from RESULT)"
+            # ABS-3: a gate that RAN but does not bind carries its own reason — the generic
+            # table would say "no abstention-set fixture" for one that exists and just
+            # measured a real number, the opposite of what happened.
+            why = g.get("reported_only")
+            label = "reported only" if why else "skipped"
+            why = why or _SKIP_REASONS.get(name, "input absent")
+            extra += f" — {label} ({why}; excluded from RESULT)"
         print(f"  {mark} {name:18s} = {g['value']} (threshold {g['threshold']}){extra}")
     # RET-8: the per-category breakdown — the line that makes a regression attributable.
     # One line per category present in the hard set; single-category (all-default) fixtures

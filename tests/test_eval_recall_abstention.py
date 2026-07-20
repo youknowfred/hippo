@@ -112,3 +112,82 @@ def test_warming_the_dense_model_can_only_reduce_abstention(tmp_path, monkeypatc
     assert rates["off"] == 1.0, "BM25-only must abstain — the probe shares no token"
     assert rates["on"] == 0.0, "the dense lanes admit it, so warming STRICTLY reduced abstention"
     assert rates["on"] <= rates["off"]
+
+
+# --------------------------------------------------------------------------- #
+# ABS-3: the gate binds only on the corpus/fixture pair it was calibrated for
+# --------------------------------------------------------------------------- #
+def test_project_local_predicate_matches_only_the_audit_fixtures_convention(tmp_path, monkeypatch):
+    """ABS-3: only an auto-discovered .audit-fixtures/ file drops to report-only."""
+    repo = str(tmp_path / "proj")
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", md)
+
+    engine = os.path.join(repo, "tests", "fixtures", "recall_abstention_set.yaml")
+    project = os.path.join(md, ".audit-fixtures", "recall_abstention_set.yaml")
+    for p in (engine, project):
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write("- {query: q}\n")
+
+    assert E.is_project_local_fixture(engine) is False
+    assert E.is_project_local_fixture(project) is True
+    assert E.is_project_local_fixture(None) is False
+    # an EXPLICIT path outside the convention still gates (a caller asked for it)
+    assert E.is_project_local_fixture(os.path.join(md, "tmp", "x.yaml")) is False
+
+
+def _corpus_with_probe_fixture(tmp_path, monkeypatch, where):
+    """Build a one-memory corpus whose off-topic probe LEAKS, with the fixture at `where`."""
+    repo = str(tmp_path / "proj")
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", md)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    write_file(
+        md, "a.md",
+        "---\nname: alpha\ndescription: \"alpha beta gamma\"\nmetadata:\n  type: project\n---\n\nbody\n",
+    )
+    idx = str(tmp_path / "idx")
+    B.build_index(md, idx)
+    fixture = os.path.join(repo, where, "recall_abstention_set.yaml")
+    os.makedirs(os.path.dirname(fixture), exist_ok=True)
+    with open(fixture, "w", encoding="utf-8") as fh:
+        fh.write('- query: "alpha"\n')  # shares a token -> leaks -> rate 0.0
+    return md, idx, fixture
+
+
+def test_project_local_fixture_reports_instead_of_failing(tmp_path, monkeypatch):
+    """ABS-3: a leaking project-local fixture is REPORTED, never a merge-blocking failure.
+
+    The rate is a real measurement and stays in the report; what changes is that a corpus
+    is no longer failed against a threshold measured on somebody else's 22-memory corpus.
+    """
+    md, idx, fixture = _corpus_with_probe_fixture(
+        tmp_path, monkeypatch, os.path.join(".claude", "memory", ".audit-fixtures")
+    )
+    rep = E.evaluate(memory_dir=md, index_dir=idx, abstention_set_path=fixture)
+    g = rep["gates"]["abstention_rate"]
+    assert g["value"] == 0.0            # it really did leak
+    assert g["pass"] is None            # ...and it does not bind
+    assert g["skipped"] is True
+    assert "calibrated against the shipped pack corpus" in g["reported_only"]
+    assert rep["ok"] is not False or all(
+        v.get("pass") is not False for k, v in rep["gates"].items() if k == "abstention_rate"
+    )
+
+
+def test_engine_fixture_still_fails_a_leaking_corpus(tmp_path, monkeypatch):
+    """ABS-3 must not defang the regression tripwire on the pair it was calibrated for."""
+    md, idx, fixture = _corpus_with_probe_fixture(
+        tmp_path, monkeypatch, os.path.join("tests", "fixtures")
+    )
+    rep = E.evaluate(memory_dir=md, index_dir=idx, abstention_set_path=fixture)
+    g = rep["gates"]["abstention_rate"]
+    assert g["value"] == 0.0
+    assert g["pass"] is False           # still binds — CI reseeds from packs and uses this path
+    assert "reported_only" not in g
+    assert rep["ok"] is False
