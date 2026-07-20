@@ -6,20 +6,25 @@ metadata:
   type: project
   originSessionId: f4077387-baf8-4f74-9935-6a530806e406
   last_verified: "2026-07-13T04:49:53.161921+00:00"
-  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-18T23:10:44.136674+00:00"
+  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-20T23:41:17.087418+00:00"
   cited_paths: ["plugin/memory/session_start.py", "plugin/memory/staleness.py", "plugin/hooks/memory_post_tool.sh", "plugin/hooks/hooks.json", "plugin/memory/outcome.py", "tests/test_trust.py"]
-  source_commit: "05b0c28349a9c3088a7870e5c0eee49859ce9bab"
-  source_commit_time: 1784415607
+  source_commit: "1d15cd5b9c33838853a2a14a4e36e997cac9a936"
+  source_commit_time: 1784589679
 ---
 
 Tier T1 (v1.1.0, "Positive context & dark signals") — session 2026-07-08. **COMPLETE, 4/4,
 MERGED.** Shipped on branch `enh-t1-signals`, **[PR #9](https://github.com/youknowfred/hippo/pull/9)
-squash-MERGED to main as `ed5a98a`** (owner-approved; branch deleted; the 6 item commits were
-rebased onto origin/main's v0.7.0 squash `6c2f1dd` for a clean diff — 15 files, +3659/-11; all CI
+squash-MERGED to main as `ab8c6cd`** (owner-approved; branch deleted; the 6 item commits were
+rebased onto origin/main's v0.7.0 squash `837c01a` for a clean diff — 15 files, +3659/-11; all CI
 green: dense + 4× hermetic + shellcheck). main now carries T1. This is the first execution of
 [[hippo-enhancement-roadmap]]'s session protocol; the roadmap was dry-run-corrected first (see
 that memo). Started ahead of ED-5's "after v1.0.0" gate at owner's explicit direction — SIG-1..4
 have no cross-file/v1.0.0 deps, so no technical blocker.
+
+> **SHA note (added 2026-07-20):** the per-item commit SHAs listed below were BRANCH commits,
+> squashed away at merge and the branch deleted — they never existed on `main` and are gone by
+> design, not broken. Only the squash-merge SHA above is resolvable. Navigate by PR number or
+> commit subject. See [[pre-launch-commit-shas-are-dead-in-this-repo]].
 
 SHIPPED THIS SESSION (one id-prefixed commit each, suite green after each):
 - **SIG-1** `265d7a5` — first POSITIVE SessionStart producer (`relevant_to_work`, session_start.py).

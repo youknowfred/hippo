@@ -15,7 +15,7 @@ metadata:
 Tier T2 (v1.2.0, "The rules bridge") — session 2026-07-08. **COMPLETE, 6/6,
 [PR #10](https://github.com/youknowfred/hippo/pull/10) squash-MERGED to main as
 `c7873f1`** (owner-approved; head branch deleted; all CI green incl. the audit commit).
-Shipped from branch `enh-t2-rules-bridge` (9 commits on top of T1's `ed5a98a`). Same
+Shipped from branch `enh-t2-rules-bridge` (9 commits on top of T1's `ab8c6cd`). Same
 session also deleted the long-merged stray branch `release-v0.7.0-team-and-fleet` (tip
 = PR #8's merged head; the v0.7.0 TAG remains) — only `main` exists on the remote now.
 

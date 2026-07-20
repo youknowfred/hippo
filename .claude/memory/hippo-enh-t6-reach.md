@@ -18,7 +18,7 @@ Tier T6 (v1.6.0, "Reach") — session 2026-07-09. **COMPLETE, 6/6 buildable item
 shellcheck; owner directed the merge; head branch `enh-t6-reach` deleted remote+local —
 only `main` remains, local AND remote; `git diff main enh-t6-reach` was empty before
 deletion, confirming zero content loss across the squash). Build order = the tier's
-listed order (RCH-6, 1, 2, 3, 4, 5) from 7 commits on top of v1.5.0's `90600d7`; suite
+listed order (RCH-6, 1, 2, 3, 4, 5) from 7 commits on top of v1.5.0's `581abeb`; suite
 green after every commit. NO plugin.json/CHANGELOG bump (tagging = releasing is a
 separate owner step, v1.5.0 precedent) — post-merge suite re-verified directly on
 `main`: 1444 passed / 12 deselected, byte-identical to the PR's own count.

@@ -1,19 +1,19 @@
 ---
 name: hippo-enh-t4-governance
-description: "Enhancement Tier T4 (v1.4.0, \"A corpus you can govern\") — shipped 7/7 items (GOV-1..GOV-7), corpus_format 2→3→4, SCHEMA_VERSION 4→5→6; PR #12 MERGED (squash 6f4c9a3); next tier T5 (knowledge growth)"
+description: "Enhancement Tier T4 (v1.4.0, \"A corpus you can govern\") — shipped 7/7 items (GOV-1..GOV-7), corpus_format 2→3→4, SCHEMA_VERSION 4→5→6; PR #12 MERGED (squash b07a52f); next tier T5 (knowledge growth)"
 metadata: 
   node_type: memory
   type: project
   originSessionId: 4e201da2-f0f8-458f-9214-09afef5349af
   last_verified: "2026-07-16T14:40:05.887607+00:00"
-  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-18T23:11:14.627504+00:00"
+  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-20T23:41:20.815079+00:00"
   cited_paths: ["plugin/memory/resolve_view.py", "plugin/.claude-plugin/plugin.json", "plugin/memory/capture.py"]
-  source_commit: "05b0c28349a9c3088a7870e5c0eee49859ce9bab"
-  source_commit_time: 1784415607
+  source_commit: "1d15cd5b9c33838853a2a14a4e36e997cac9a936"
+  source_commit_time: 1784589679
 ---
 
 Tier T4 (v1.4.0, "A corpus you can govern") — session 2026-07-08. **COMPLETE, 7/7, [PR
-#12](https://github.com/youknowfred/hippo/pull/12) squash-MERGED to main as `6f4c9a3`
+#12](https://github.com/youknowfred/hippo/pull/12) squash-MERGED to main as `b07a52f`
 on 2026-07-09** (all CI green: dense lane + 4-way hermetic matrix + shellcheck; owner
 directed the merge, head branch `enh-t4-governance` deleted remote+local, stale
 remote-tracking ref pruned; the stray local `release-v0.7.0-team-and-fleet` leftover
@@ -21,6 +21,11 @@ from the v0.7.0 session was deleted too on owner direction — only `main` remai
 AND remote). Shipped from 7 commits on top of T3's `7b5ca5c`. Build
 order honored the audit note: GOV-6 LAST (it aggregates everything), GOV-2 before GOV-7
 (two sequential clean-break pairs).
+
+> **SHA note (added 2026-07-20):** the per-item commit SHAs listed below were BRANCH commits,
+> squashed away at merge and the branch deleted — they never existed on `main` and are gone by
+> design, not broken. Only the squash-merge SHA above is resolvable. Navigate by PR number or
+> commit subject. See [[pre-launch-commit-shas-are-dead-in-this-repo]].
 
 SHIPPED THIS SESSION (one id-prefixed commit each, suite green after each):
 - **GOV-1** `a9120d2` — contradiction inbox + /hippo:resolve. `LinkGraph.all_typed_edges

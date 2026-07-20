@@ -1,6 +1,6 @@
 ---
 name: hippo-enh-t5-growth
-description: "Enhancement Tier T5 (v1.5.0, \"Knowledge that grows itself\") — shipped 8/8 items (GRW-1..8), PR #13 MERGED 2026-07-09 (squash 89d1caf) + TAGGED v1.5.0 (release commit 90600d7, release.yml green, first tag since v0.7.0); _SEED_SCHEMA 1→2 (queue-own, NO corpus bump); next tier T6 (Reach)"
+description: "Enhancement Tier T5 (v1.5.0, \"Knowledge that grows itself\") — shipped 8/8 items (GRW-1..8), PR #13 MERGED 2026-07-09 (squash 89d1caf) + TAGGED v1.5.0 (release commit 581abeb, release.yml green, first tag since v0.7.0); _SEED_SCHEMA 1→2 (queue-own, NO corpus bump); next tier T6 (Reach)"
 metadata: 
   node_type: memory
   type: project
@@ -18,7 +18,7 @@ on 2026-07-09** (all CI green: dense lane + 4-way hermetic matrix + shellcheck; 
 directed the merge; head branch `enh-t5-growth` deleted remote+local — only `main`
 remains, local AND remote; merged-tree markers verified: _SEED_SCHEMA 2, co_recall_pairs,
 watermark_stale_candidates, squash_merge_heal_producer). Shipped from 8 item commits on
-top of T4's `6f4c9a3` + one GRW-4-prefixed shellcheck fix `6e18893`. Build order = the
+top of T4's `b07a52f` + one GRW-4-prefixed shellcheck fix `6e18893`. Build order = the
 tier's listed order (GRW-1, 2, 3, 8, 4, 5, 6, 7); suite green after every commit. CI
 note: the shellcheck lane fails on ANY finding incl. info-level — SC1003 hit GRW-4's
 `tr -d '"\\'` sanitizer; the fix is tr's own octal classes (`tr -d '\042\134'`), behavior
@@ -30,11 +30,11 @@ fetch prune-less, and `git remote set-head origin main` restores origin/HEAD aft
 **TAGGED v1.5.0 2026-07-09** — the FIRST tag since v0.7.0 (T1–T4's target_versions were
 never tagged; owner directed the release). Per RELEASING.md/DOC-7 the tag required a
 release commit first (release.yml enforces tag == plugin.json == marketplace.json ==
-newest CHANGELOG heading, all four): `90600d7` bumps both manifests 0.7.0→1.5.0 in
+newest CHANGELOG heading, all four): `581abeb` bumps both manifests 0.7.0→1.5.0 in
 lockstep + ONE CHANGELOG v1.5.0 entry covering tiers T1–T5 (per-tier sections; honest
 that intermediate versions were internal milestones; re-bootstrap: no; corpus_format 2→4
 + index schema 3→6 + seed schema 1→2 summarized as clean breaks). Annotated tag on
-90600d7, subject "v1.5.0 — Knowledge that grows itself (enhancement tiers T1–T5)".
+581abeb, subject "v1.5.0 — Knowledge that grows itself (enhancement tiers T1–T5)".
 release.yml version-sync: SUCCESS. Future tiers: tagging = releasing = the manifest+
 CHANGELOG bump moment; tier PRs themselves stay bump-free.
 

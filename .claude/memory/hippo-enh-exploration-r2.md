@@ -1,15 +1,15 @@
 ---
 name: hippo-enh-exploration-r2
-description: "Round-2 greenfield exploration+vetting cycle (2026-07-09) → EXPLORATIONS2.md + ROADMAP.enhancements2.yaml (29 items, workstreams MSR/GRF/SEN/TMB/CLB/IOP, tiers T8–T13). PR #20 MERGED to main (f7e5ae9), as were its cross-file deps #17/#18/#19. Execution detoured through round 3 first (T14–T17), then BEGAN 2026-07-16: T8 MSR shipped (PR #68) and T9 GRF shipped (PR #70, incl. MSR-5's HIPPO_SALIENCE rig); T10 SEN in flight — T11–T13 remain planned."
+description: "Round-2 greenfield exploration+vetting cycle (2026-07-09) → EXPLORATIONS2.md + ROADMAP.enhancements2.yaml (29 items, workstreams MSR/GRF/SEN/TMB/CLB/IOP, tiers T8–T13). PR #20 MERGED to main (52369c7), as were its cross-file deps #17/#18/#19. Execution detoured through round 3 first (T14–T17), then BEGAN 2026-07-16: T8 MSR shipped (PR #68) and T9 GRF shipped (PR #70, incl. MSR-5's HIPPO_SALIENCE rig); T10 SEN in flight — T11–T13 remain planned."
 metadata:
   node_type: memory
   type: project
   originSessionId: a5a922b1-a6ab-4fcf-96cc-bec2e048816f
   last_verified: "2026-07-16T14:39:50.641856+00:00"
-  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-18T06:18:40.226846+00:00"
+  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-20T23:41:06.387761+00:00"
   cited_paths: ["ROADMAP.enhancements.yaml", "ROADMAP.enhancements2.yaml", "plugin/memory/telemetry.py", "ROADMAP.enhancements3.yaml", "plugin/memory/eval_recall.py", "plugin/memory/dream_eval.py", "plugin/memory/salience_eval.py"]
-  source_commit: "0477d4778fb0b40f08c5d28ba213fc864d8fcb78"
-  source_commit_time: 1784354967
+  source_commit: "1d15cd5b9c33838853a2a14a4e36e997cac9a936"
+  source_commit_time: 1784589679
 ---
 
 Round-2 exploration+vetting cycle — session 2026-07-09, mirroring the round-1
@@ -17,14 +17,14 @@ process that produced [[hippo-enhancement-roadmap]] (EXPLORATIONS.md →
 ROADMAP.enhancements.yaml). **RESEARCH/PROPOSAL ONLY** — two additive docs, no
 code, no status flips on existing roadmap files. **[PR #20](https://github.com/youknowfred/hippo/pull/20)
 was opened as a DRAFT then — at the owner's explicit direction later the same session
-(2026-07-10) — squash-MERGED to `main` as `f7e5ae9`** (all 6 required checks green:
+(2026-07-10) — squash-MERGED to `main` as `52369c7`** (all 6 required checks green:
 dense, 4× hermetic matrix, shellcheck; head branch `explorations-r2` deleted
 remote+local, stale tracking ref pruned). So EXPLORATIONS2.md + ROADMAP.enhancements2.yaml
 now live on `main` (like round 1's docs). **FOLLOW-UP same session (owner-directed): the
 three open dev-line PRs were then squash-merged to main IN ORDER #17→#18→#19** — SIG-6
-(`4dc3256`), the GRA-1 dense-knee fix (`8128411`), and the trust spine SEC-5/6/7 + RCH-5
-(`ca36e57`) — all 6 required checks green each, all head branches deleted. So main tip is
-now `ca36e57` and **every cross-file dep the round-2 roadmap references (SIG-6, GRA-1,
+(`14f4968`), the GRA-1 dense-knee fix (`4bf8a6f`), and the trust spine SEC-5/6/7 + RCH-5
+(`ae55f19`) — all 6 required checks green each, all head branches deleted. So main tip is
+now `ae55f19` and **every cross-file dep the round-2 roadmap references (SIG-6, GRA-1,
 SEC-5/6/7, RCH-5) is now literally on main** (verified by symbol grep: draft_abstention_fixtures,
 graph_endorsed, corpus_consent_sample, untrusted_changes, pack_install_item). The stacked
 #18→#19 squash was clean (git's 3-way merge saw the shared GRA-1 commit identically on both
@@ -49,6 +49,13 @@ launch-security tier (SEC-8/9/10 committed + WIP) is now in progress on the OWNE
   adopt_from_v1, kpis). **VALIDATED**: parses; every item in exactly one tier; dep
   graph acyclic; **no forward-tier deps**; all 29 cross-file dep ids resolve to real
   prior-roadmap items.
+
+> **SHA note (added 2026-07-20):** the SHAs in the re-baseline block below (`3a4a94a`, `2f960a7`,
+> `4d16022`, `bdd3b43`, `d6ec77d`) are BRANCH-SIDE commits, observed live while `v080-trust-spine`
+> was still in flight — they were squashed away at merge, so they never existed on `main`. Dead by
+> design. The squash-merges of those same PRs are recorded (and repaired) above: #17 `14f4968`,
+> #18 `4bf8a6f`, #19 `ae55f19`. Do NOT conflate the two — `2f960a7` is the branch commit for the
+> trust spine, NOT PR #19's merge. See [[pre-launch-commit-shas-are-dead-in-this-repo]].
 
 **THE LIVE RE-BASELINE (the round-1 premise-correction law paid off immediately —
 the branch `v080-trust-spine` advanced THREE times mid-exploration):** what the
