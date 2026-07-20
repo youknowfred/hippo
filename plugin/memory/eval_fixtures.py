@@ -507,6 +507,18 @@ def draft_livedin_fixtures(
     rows derive from recorded evidence about memories that already exist; nothing
     generates memory content. ``{path, hit_pairs, added, kept, skipped_noise}``;
     absence of candidates appends nothing (no file created).
+
+    ABS-5 — ``derived_expected`` IS NOT A RELEVANCE JUDGMENT. The join behind it is
+    SESSION-grain: a pair confirms when the memory was injected in that session and one of
+    its cited files was touched later. A long implementation session therefore confirms most
+    of what it injected, whatever the query asked. Measured on hippo's own corpus, the row for
+    "bump version to v1.11.1 and tag the release" carried 17 stems including all seven
+    enhancement-tier memories and two roadmap proposals — none of which answer a version-bump
+    query. That is fine for its actual purpose (a per-item ``confirm_hard_set_row`` gate where
+    a human picks the ONE right stem) and wrong for anything that consumes the list wholesale:
+    poured into a ``recall_relevance_set.yaml`` it would build an instrument that rewards long
+    sessions and inflates precision@k, since ~17 admissible stems make almost any top-10 score.
+    The name says ``derived``, not ``judged``; keep it that way.
     """
     from .eval_metrics import _load_fixture_docs
     from .outcome import _injection_join

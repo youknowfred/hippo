@@ -254,3 +254,35 @@ def test_floor_sweep_scores_body_chunks_not_just_descriptions(tmp_path, monkeypa
     got = E._raw_max_cosines(index, [q])
     assert got == [full], "the sweep must score every row the floor gates, not just descriptions"
     assert got != [desc_only]
+
+
+def test_project_local_relevance_set_reports_instead_of_failing(tmp_path, monkeypatch):
+    """ABS-3/ABS-5: precision@10 gets the same scoping as its twin.
+
+    The shipped relevance set names starter-pack memories: 12 of its 13 stems do not exist
+    in hippo's own corpus, so precision@10 measured 0.0125 against a 0.12 threshold — the
+    metric was scoring a corpus on retrieving memories it does not contain. With a
+    corpus-local set present the number is REPORTED (and becomes meaningful) rather than
+    binding against a pack-calibrated threshold.
+    """
+    repo = str(tmp_path / "proj")
+    md = os.path.join(repo, ".claude", "memory")
+    os.makedirs(md)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    monkeypatch.setenv("HIPPO_MEMORY_DIR", md)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    write_file(
+        md, "a.md",
+        "---\nname: alpha\ndescription: \"alpha beta gamma\"\nmetadata:\n  type: project\n---\n\nbody\n",
+    )
+    idx = str(tmp_path / "idx")
+    B.build_index(md, idx)
+    fixture = os.path.join(md, ".audit-fixtures", "recall_relevance_set.yaml")
+    os.makedirs(os.path.dirname(fixture), exist_ok=True)
+    with open(fixture, "w", encoding="utf-8") as fh:
+        fh.write('- query: "alpha"\n  relevant: [alpha]\n')
+
+    rep = E.evaluate(memory_dir=md, index_dir=idx, relevance_set_path=fixture)
+    g = rep["gates"]["precision@10"]
+    assert g["pass"] is None and g["skipped"] is True
+    assert "project-local relevance set" in g["reported_only"]
