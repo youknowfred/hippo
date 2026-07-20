@@ -1475,16 +1475,19 @@ workstreams:
 # what order, IF ANY, was the owner's scheduling call — LAW ZERO / ED5R-1);
 # RATIFIED 2026-07-19: all five tiers, recommended order T22->T23->T24->T25
 # ->T26 (each tier's `ratified:` is the dated entry; statuses now planned).
-# target_version stays TBD, assigned at each release per RELEASING.md. NO
-# cross-tier build dependencies exist — no round-5 item needs a
-# session_start.py line — so T22 (REL-1) is first as runway relief, not a
+# ALL FIVE BUILT AND MERGED 2026-07-19 across five sessions (PRs #87, #88,
+# #89, #90, #91) and RELEASED TOGETHER as v1.28.0 "The engine tells the
+# truth" 2026-07-20 — target_version stamped at release time per
+# RELEASING.md, one release for the whole train (round 5 CLOSED). NO
+# cross-tier build dependencies existed — no round-5 item needed a
+# session_start.py line — so T22 (REL-1) went first as runway relief, not a
 # gate. In-tier orders and the two split-debt assignments (MEA-1:
 # eval_recall; MEA-3: telemetry) are stated per tier.
 # ===========================================================================
 release_train:
 
   - tier: T22
-    target_version: TBD      # stamped at release time (post-release stamp, the round-4 convention)
+    target_version: v1.28.0   # stamped at release time (the round-4 convention): the whole round-5 train shipped in ONE release, 2026-07-20
     theme: "The runway & the ship gate"
     status: done             # 2026-07-19, session 1 — 4/4 items (REL-1 -> REL-2 -> REL-3 -> REL-4, the ratified in-tier order); done_means met: both AT-cap modules split (split chosen over re-pin), VOL-1's check repatriated, the merge-gate mechanic + facts lint live, kill-switch direction closed
     ratified: >-
@@ -1526,7 +1529,7 @@ release_train:
       transcript, and the lint's first catch (or green birth).
 
   - tier: T23
-    target_version: TBD
+    target_version: v1.28.0   # stamped at release time (the round-4 convention): the whole round-5 train shipped in ONE release, 2026-07-20
     theme: "Honest instruments"
     status: done             # 2026-07-19, session 2 — 6/6 built in the gated order (MEA-1 -> MEA-2 -> MEA-3/MEA-4/MEA-6 -> MEA-5); both ED5R-3 split debts discharged as their OWN commits (eval_adversarial.py; telemetry_store.py + telemetry_mining.py); done_means met with ONE dated exception: the commissioned Arm B RUN is held on the instrument's own sensitivity (1/32 at session end — see MEA-5's status note); it fires after the first MEA-2 drain
     ratified: >-
@@ -1573,7 +1576,7 @@ release_train:
       and both split-debt discharges.
 
   - tier: T24
-    target_version: TBD
+    target_version: v1.28.0   # stamped at release time (the round-4 convention): the whole round-5 train shipped in ONE release, 2026-07-20
     theme: "The write side tells the truth"
     status: done             # 2026-07-19, session 3 — 3/3 items (WRT-3 -> WRT-1 -> WRT-2, the gate's order) + the tier's own ED5R-3 discharge (capture.py 860/900 with all three items needing lines -> split 13a004a: queue surface to capture_queue.py, facade re-exports, firewall widened); done_means met: the three dishonesty seams closed, no reply promises what the plumbing cannot deliver; hook-path byte-identity pinned per audit_note
     ratified: >-
@@ -1607,7 +1610,7 @@ release_train:
       drain.
 
   - tier: T25
-    target_version: TBD
+    target_version: v1.28.0   # stamped at release time (the round-4 convention): the whole round-5 train shipped in ONE release, 2026-07-20
     theme: "Running-state legibility"
     status: done             # 2026-07-19, session 4 — 2/2 items in the gated order (OPS-1 -> OPS-2); zero session_start.py lines exactly as the gate demanded (file absent from the PR diff); done_means met: doctor names running-vs-tree skew on the dogfood shape (live fire at build: "in sync" at v1.27.0=v1.27.0 — the warn arms at the next release cut), the fleet line shows launch-pin skew only when fresh docs differ, and a dying schedule surfaces as 'quiet' from last_run_at (live launchd artifact classified ok — ran 14:30Z the same morning); all read-only, cold-path, remediation human; suite 2,957 -> 2,989
     ratified: >-
@@ -1644,7 +1647,7 @@ release_train:
       artifact.
 
   - tier: T26
-    target_version: TBD
+    target_version: v1.28.0   # stamped at release time (the round-4 convention): the whole round-5 train shipped in ONE release, 2026-07-20
     theme: "The boundary & consent edge"
     status: done             # 2026-07-19, session 5 — 3/3 items (BND-2 -> BND-3 -> BND-1, the gate's order; the alloy/hippo census shapes captured into fixtures FIRST per audit_note — and the live capture found a THIRD withholding corpus, em-growth-labs 5/7); done_means met: withholding visible from census+doctor with the route named, failed folds disclose at the write moment, publish surfaces state heals/introduces/net with the gate-kill re-affirmed; suite 2,989 -> 3,014 hermetic
     ratified: >-
