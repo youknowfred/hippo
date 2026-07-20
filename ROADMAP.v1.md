@@ -391,6 +391,13 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
   hard-set queries vs off-topic probes (never fused metrics), persists the report
   (gitignored), and `doctor.check_floor_calibration` compares it to the configured
   `recall._DENSE_FLOOR_BY_MODEL` entry — advisory only, a human edits the table.
+  **CORRECTED 2026-07-20 (ABS-1)** — "`.audit-fixtures/recall_abstention_set.yaml`,
+  /hippo:audit-written" and "the audit skill already drafts the fixture (SIG-6)" above are
+  both FALSE, and this entry is where the error entered the record: SIG-6 drafts the
+  abstention *backlog* (queries that DID abstain) into `recall_hard_set.yaml` tagged
+  `category: abstention` — the opposite polarity from this file, which lists queries that
+  SHOULD abstain. Nothing has ever written `recall_abstention_set.yaml`; it is hand-authored.
+  The check therefore shipped inert behind a remediation nobody could follow.
 - **RET-11** `P1/M` — BM25-only **abstention floor** (normalized-score / IDF-mass
   threshold) *or* an explicit doctor/README statement that abstention is
   dense-gated + a warm-the-model nudge. *(KPI-1.)*

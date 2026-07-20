@@ -531,12 +531,24 @@ def check_abstention_floor_sanity(ctx: DoctorContext) -> Dict[str, str]:
 
     The dense floor (0.60 for bge) is a global default; a particular corpus can still admit
     off-topic prompts whose scores overlap its real hits. This runs the corpus-local fixture
-    (``<memory_dir>/.audit-fixtures/recall_abstention_set.yaml``, written by ``/hippo:audit``)
-    against the live index and reports how many actually abstained — the EMPIRICAL per-corpus
-    number, distinct from ``check_abstention_cold_start`` (RET-11)'s STRUCTURAL bm25-only
-    statement, and it fires on the dense path too when a corpus's own floor is too permissive.
+    (``<memory_dir>/.audit-fixtures/recall_abstention_set.yaml``) against the live index and
+    reports how many actually abstained — the EMPIRICAL per-corpus number, distinct from
+    ``check_abstention_cold_start`` (RET-11)'s STRUCTURAL bm25-only statement, and it fires on
+    the dense path too when a corpus's own floor is too permissive.
     Bounded (``_ABSTENTION_SANITY_MAX_QUERIES``), read-only, deterministic (recall() is), and
     degrades to ``ok``/``warn`` — never raises. Skips cleanly when there is no fixture or index.
+
+    ABS-1 — THE FIXTURE IS HAND-AUTHORED; NOTHING GENERATES IT. This docstring used to say it
+    was "written by ``/hippo:audit``" and the no-fixture branch below told the user to "run
+    /hippo:audit to generate one". Both were false for the whole life of the check, and the
+    cause was a NAME COLLISION worth pinning so the claim cannot come back: SIG-6's
+    ``draft_abstention_fixtures`` flow (``/hippo:audit``, ``/hippo:consolidate`` Step 5, the
+    ``abstention_fixtures`` MCP tool) drafts the ABSTENTION BACKLOG — queries recall answered
+    with NOTHING and arguably should not have — and its confirmed rows land in
+    ``recall_hard_set.yaml`` tagged ``category: abstention``. That is the OPPOSITE polarity
+    from this file, which lists queries that SHOULD abstain. Two different fixtures, one word.
+    A check whose remediation pointed at a capability that never existed sat inert instead of
+    reporting a real leak, so the pointer is now the honest one: author the rows yourself.
     """
     try:
         from .build_index import _load_manifest, default_index_dir, load_index
@@ -548,7 +560,10 @@ def check_abstention_floor_sanity(ctx: DoctorContext) -> Dict[str, str]:
             return {
                 "status": "ok",
                 "message": "abstention floor: no corpus-local off-topic fixture "
-                "(.audit-fixtures/recall_abstention_set.yaml) — run /hippo:audit to generate one.",
+                "(.audit-fixtures/recall_abstention_set.yaml) — nothing generates this file; "
+                "author it by hand as a list of `- query: \"...\"` rows this corpus should "
+                "have NO answer for. (SIG-6's abstention_fixtures flow drafts the opposite "
+                "polarity — queries that DID abstain — into recall_hard_set.yaml.)",
             }
         index_dir = default_index_dir(ctx.memory_dir)
         if _load_manifest(index_dir) is None:

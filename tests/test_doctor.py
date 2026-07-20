@@ -325,6 +325,29 @@ def test_abstention_floor_sanity_ok_when_no_fixture(repo, memory_dir, tmp_path, 
     assert r["status"] == "ok" and "no corpus-local off-topic fixture" in r["message"]
 
 
+def test_abstention_no_fixture_message_does_not_promise_a_generator(
+    repo, memory_dir, tmp_path, monkeypatch
+):
+    """ABS-1 negative-capability pin: the no-fixture branch must NOT name a generation route.
+
+    For the whole life of this check the message said "run /hippo:audit to generate one" and
+    no such writer existed anywhere — the check sat inert behind a remediation nobody could
+    follow. SIG-6's abstention_fixtures flow is the near-miss that produced the wrong text:
+    it drafts the OPPOSITE polarity (queries that DID abstain) into recall_hard_set.yaml.
+    This asserts the remediation stays honest about the file being hand-authored.
+    """
+    idx = str(tmp_path / ".memory-index")
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _seed_two_topic_corpus(memory_dir, idx)
+    msg = D.check_abstention_floor_sanity(_ctx(memory_dir, repo))["message"]
+    assert "nothing generates this file" in msg
+    assert "by hand" in msg
+    # the specific false promise, in either of its historical phrasings
+    assert "to generate one" not in msg
+    assert "written by /hippo:audit" not in msg
+
+
 def test_abstention_floor_sanity_warns_when_offtopic_leaks(repo, memory_dir, tmp_path, monkeypatch):
     # RET-9: an off-topic fixture whose queries SHARE tokens with the corpus leaks (they return
     # results instead of abstaining) → low abstention rate → warn with the per-corpus count.

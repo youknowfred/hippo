@@ -869,9 +869,13 @@ def _default_fixture_path(filename: str) -> Optional[str]:
     """Resolve a default eval fixture, or None when no fixture exists anywhere.
 
     Probe order:
-      1. ``.claude/memory/.audit-fixtures/<filename>`` — the project-local convention
-         the /hippo:audit skill writes to (any consuming project can carry its own
-         calibration data).
+      1. ``.claude/memory/.audit-fixtures/<filename>`` — the project-local convention (any
+         consuming project can carry its own calibration data). ABS-1: how a file GETS there
+         differs per fixture, and this resolver deliberately does not care — /hippo:audit
+         writes ``recall_hard_set.yaml`` (Phase 0.5, plus SIG-6's per-item
+         ``confirm_hard_set_row`` admissions); ``recall_abstention_set.yaml`` has NO writer
+         anywhere and is hand-authored. Do not restate this as "the dir /hippo:audit writes
+         to" — that shorthand is exactly what put a false remediation in doctor for a release.
       2. ``<repo>/tests/fixtures/<filename>`` — the engine repo's own checked-in set.
 
     ``None`` (nothing found) makes ``main()`` inherit ``evaluate()``'s skip semantics
@@ -1108,8 +1112,10 @@ def floor_sweep(
             "ok": False,
             "error": "need both on-topic hard-set rows resolvable against this corpus and "
             "off-topic abstention probes — "
-            f"(on-topic {len(on_queries)}, off-topic {len(probes)}); draft fixtures via "
-            "/hippo:audit or SIG-6's abstention_fixtures flow",
+            f"(on-topic {len(on_queries)}, off-topic {len(probes)}); draft the on-topic half "
+            "via /hippo:audit or SIG-6's abstention_fixtures flow (both land rows in "
+            "recall_hard_set.yaml), and HAND-AUTHOR the off-topic half — nothing generates "
+            "recall_abstention_set.yaml (ABS-1)",
         }
 
     from .recall import _dense_floor
