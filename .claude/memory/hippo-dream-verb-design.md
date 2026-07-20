@@ -5,10 +5,10 @@ metadata:
   type: project
   confidence: verified
   last_verified: "2026-07-13T00:05:04.336229+00:00"
-  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-18T22:32:49.198029+00:00"
+  verified_by: "81190215_youknowfred_users.noreply.github.com@2026-07-20T22:47:59.115585+00:00"
   cited_paths: ["plugin/memory/secrets.py", "plugin/memory/dream.py", "plugin/memory/dream_eval.py", "plugin/memory/links.py", "plugin/memory/deparasite.py", ".github/workflows/release.yml", "plugin/memory/dream_generate.py", "plugin/memory/salience_eval.py"]
-  source_commit: "d886ebf143fdb39d948e0d4cfaa187602a3cd3a3"
-  source_commit_time: 1784413853
+  source_commit: "32ee471c7dfb5f9c5cc33e26ac2eac2151bc6c00"
+  source_commit_time: 1784580625
 ---
 
 **What.** `/dream` = hippo's GENERATIVE sleep pass — the one function of sleep the housekeeping verbs don't cover. `consolidate`/`reconsolidate`/`staleness`/salience already do systems-consolidation, reconsolidation, decay. `/dream` does REPLAY that RECOMBINES existing memories into net-new structure: an offline turn that re-activates the corpus against itself, watches what co-fires, and proposes the latent graph edges the corpus is structurally missing (transitive A–B–C bridges, named-but-unlinked in a body, undeclared typed relations) — the edge class `consolidate`'s two signals (write-time similarity GRA-3 + co-recall GRW-2) structurally cannot reach. Those edges are what `recall._expand_neighbors` (GRA-1) traverses to turn a 2-hop miss into a 1-hop hit.

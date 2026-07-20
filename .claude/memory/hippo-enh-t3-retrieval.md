@@ -13,11 +13,16 @@ metadata:
 
 Tier T3 (v1.3.0, "Retrieval precision (hot-path-safe)") — session 2026-07-08. **COMPLETE,
 6/6, [PR #11](https://github.com/youknowfred/hippo/pull/11) squash-MERGED to main as
-`907f509`** (all CI green: dense lane + 4-way hermetic matrix + shellcheck; owner directed
+`7b5ca5c`** (all CI green: dense lane + 4-way hermetic matrix + shellcheck; owner directed
 the merge directly this session, then had the head branch `enh-t3-retrieval` deleted —
 remote via `--delete-branch`, local auto-cleaned by `gh pr merge`, stale remote-tracking ref
 pruned — only `main` remains). Shipped from branch `enh-t3-retrieval` (6 commits on top of
-T2's `fc0fc33`).
+T2's `c7873f1`).
+
+> **SHA note (added 2026-07-20):** the per-item commit SHAs listed below were BRANCH commits,
+> squashed away at merge and the branch deleted — they never existed on `main` and are gone by
+> design, not broken. Only the squash-merge SHA above is resolvable. Navigate by PR number or
+> commit subject. See [[pre-launch-commit-shas-are-dead-in-this-repo]].
 
 SHIPPED THIS SESSION (one id-prefixed commit each, suite green after each):
 - **RCL-1** `9db0db7` — per-query dense/lexical intent routing: a density ratio
@@ -98,7 +103,7 @@ off-hot-path cross-encoder on the explicit surfaces.
 
 EVAL BEFORE/AFTER (golden corpus: 22 memories from the shipped starter packs, `dense+bm25`
 backend, real bge-small-en-v1.5 model — this dev machine has it warm):
-- **Baseline** (T2 HEAD `fc0fc33`): self_recall@10 **1.0**, hard_recall@10 **1.0**,
+- **Baseline** (T2 HEAD `c7873f1`): self_recall@10 **1.0**, hard_recall@10 **1.0**,
   mrr@10 **0.8939**, recall_p95_ms ≈33ms.
 - **After RCL-1/2/3**: byte-identical to baseline on this fixture (RCL-2/3 only touch
   `main()`, which `eval_recall` never calls — it probes `recall()` directly by design so the

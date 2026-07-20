@@ -18,7 +18,7 @@ on 2026-07-09** (all CI green: dense lane + 4-way hermetic matrix + shellcheck; 
 directed the merge, head branch `enh-t4-governance` deleted remote+local, stale
 remote-tracking ref pruned; the stray local `release-v0.7.0-team-and-fleet` leftover
 from the v0.7.0 session was deleted too on owner direction — only `main` remains, local
-AND remote). Shipped from 7 commits on top of T3's `907f509`. Build
+AND remote). Shipped from 7 commits on top of T3's `7b5ca5c`. Build
 order honored the audit note: GOV-6 LAST (it aggregates everything), GOV-2 before GOV-7
 (two sequential clean-break pairs).
 

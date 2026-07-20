@@ -1,6 +1,6 @@
 ---
 name: hippo-enh-t6-reach
-description: "Enhancement Tier T6 (v1.6.0, \"Reach\") — shipped 6/6 buildable items (RCH-6,1,2,3,4 done + the RCH-5 extract slice), PR #14 MERGED 2026-07-09 (squash 8d31688). The RCH-5 install/update legs this tier had to leave GATED on the v0.8.0 trust spine have SINCE SHIPPED — the spine landed in v0.8.0 and pack_install_item/pack_update_item are live (INT-16 gave them MCP tools in v1.16.0); T7's own gates cleared too. Historical record."
+description: "Enhancement Tier T6 (v1.6.0, \"Reach\") — shipped 6/6 buildable items (RCH-6,1,2,3,4 done + the RCH-5 extract slice), PR #14 MERGED 2026-07-09 (squash d291c5c). The RCH-5 install/update legs this tier had to leave GATED on the v0.8.0 trust spine have SINCE SHIPPED — the spine landed in v0.8.0 and pack_install_item/pack_update_item are live (INT-16 gave them MCP tools in v1.16.0); T7's own gates cleared too. Historical record."
 metadata: 
   node_type: memory
   type: project
@@ -14,7 +14,7 @@ metadata:
 
 Tier T6 (v1.6.0, "Reach") — session 2026-07-09. **COMPLETE, 6/6 buildable items,
 [PR #14](https://github.com/youknowfred/hippo/pull/14) squash-MERGED to main as
-`8d31688` on 2026-07-09** (all 7 CI checks green: dense lane, 4-way hermetic matrix,
+`d291c5c` on 2026-07-09** (all 7 CI checks green: dense lane, 4-way hermetic matrix,
 shellcheck; owner directed the merge; head branch `enh-t6-reach` deleted remote+local —
 only `main` remains, local AND remote; `git diff main enh-t6-reach` was empty before
 deletion, confirming zero content loss across the squash). Build order = the tier's
@@ -22,6 +22,11 @@ listed order (RCH-6, 1, 2, 3, 4, 5) from 7 commits on top of v1.5.0's `90600d7`;
 green after every commit. NO plugin.json/CHANGELOG bump (tagging = releasing is a
 separate owner step, v1.5.0 precedent) — post-merge suite re-verified directly on
 `main`: 1444 passed / 12 deselected, byte-identical to the PR's own count.
+
+> **SHA note (added 2026-07-20):** the per-item commit SHAs listed below were BRANCH commits,
+> squashed away at merge and the branch deleted — they never existed on `main` and are gone by
+> design, not broken. Only the squash-merge SHA above is resolvable. Navigate by PR number or
+> commit subject. See [[pre-launch-commit-shas-are-dead-in-this-repo]].
 
 SHIPPED THIS SESSION (one id-prefixed commit each):
 - **RCH-6** `fb0cab1` — portability.py, the shared lift-time primitive.
@@ -116,7 +121,7 @@ SHIPPED THIS SESSION (one id-prefixed commit each):
   above are pre-squash SHAs — UNREACHABLE from `main` after the squash-merge + branch
   deletion, `git merge-base --is-ancestor` confirms; `git log`/`git show` against them
   will fail locally once GC'd. They remain browsable on GitHub's PR #14 "Commits" tab.
-  `main`'s own history holds ONE commit for the whole tier: `8d31688`.)
+  `main`'s own history holds ONE commit for the whole tier: `d291c5c`.)
 
 SCHEMA/FORMAT: corpus_format **4 (unchanged)**, index SCHEMA_VERSION **6 (unchanged)**,
 capture seed **2 (unchanged)** — origin/pack stamps are additive frontmatter
