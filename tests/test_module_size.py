@@ -40,7 +40,8 @@ GRANDFATHERED_PLUGIN = {
     "recall.py": 1637,  # recall() orchestrator + hook entry; rankers/salience/tiers already split out
     "links.py": 1363,
     "dream_generate.py": 1314,
-    "telemetry.py": 978,  # re-pinned at the ED5R-3 split (substrate → telemetry_store, SIG-3/GRW-2 mining → telemetry_mining)
+    # telemetry.py left this ledger at the round-6 LIF-4/TEA-5 split (usage aggregates →
+    # telemetry_usage): 761 lines, under the cap, so the general cap governs it now.
     "packs.py": 988,
     "mcp_schemas.py": 914,  # one unsplittable _TOOLS data literal; grows only with new tools
 }

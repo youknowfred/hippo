@@ -59,7 +59,7 @@ WRITE_OPEN_ALLOWLIST = {
     ("staleness", "write_stale_cache"): "own unique-tmp + os.replace (COR-17)",
     ("outcome", "write_outcome_cache"): "own unique-tmp + os.replace (COR-17)",
     ("rules_plane", "refresh_rules_cache"): "own unique-tmp + os.replace (COR-17)",
-    ("telemetry", "write_user_usage_summary"): "own unique-tmp + os.replace (committed .usage summary)",
+    ("telemetry_usage", "write_user_usage_summary"): "own unique-tmp + os.replace (committed .usage summary)",
     ("telemetry_store", "_rotate_if_needed"): "own unique-tmp + os.replace (COR-17)",
     # -- append-mode ledgers/journals (gitignored, derived): append never truncates,
     #    and a torn TAIL line is skipped by every jsonl reader --
@@ -82,7 +82,7 @@ WRITE_OPEN_ALLOWLIST = {
     # -- whole-file rewrites of DERIVED, per-clone, rebuildable state: a torn write
     #    costs a recomputation or one re-nag, never corpus/registry truth --
     ("telemetry_store", "mark_session"): "session-id token; worst case a re-minted id",
-    ("telemetry", "_update_usage_aggregates"): "gitignored aggregate cache; recomputed from the ledger",
+    ("telemetry_usage", "_update_usage_aggregates"): "gitignored aggregate cache; recomputed from the ledger",
     ("dream_ledgers", "write_boost_ledger"): "derived replay-boost cache; rebuilt by the next pass",
     ("dream_ledgers", "write_candidate_ledger"): "derived candidate cache; rebuilt by the next pass",
     ("dream_apply", "_undo_one_edge"): "derived dream ledger rewrite; corpus edge stamps stay the truth",
