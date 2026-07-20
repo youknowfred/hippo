@@ -776,9 +776,9 @@ def evaluate(
     # hard-set gates above: no path provided → skipped (pass=None, excluded from `ok`);
     # a provided path that loads empty → loud FAIL (a truncated/malformed fixture is a
     # real problem, not a deliberately-absent input).
-    # ABS-3: both promoted gates additionally bind only on the pack-corpus pairing they were
-    # calibrated for; a project's own fixture REPORTS instead (see promoted_gate). Scoping
-    # one and not its twin would leave the same category error under another name.
+    # ABS-3: both bind only on the pack-corpus pairing they were calibrated for; a project's
+    # own fixture REPORTS instead (see promoted_gate) — scoping one twin and not the other
+    # would leave the same category error live under another name.
     gates["precision@10"] = promoted_gate(
         precision["precision"], GATE_PRECISION_AT_K,
         precision["n"] > 0 and precision["precision"] >= GATE_PRECISION_AT_K,
@@ -870,11 +870,11 @@ def _default_fixture_path(filename: str) -> Optional[str]:
     """Resolve a default eval fixture, or None when no fixture exists anywhere.
 
     Probe order:
-      1. ``.claude/memory/.audit-fixtures/<filename>`` — the project-local convention (any
-         consuming project can carry its own data). ABS-1: how a file GETS there differs per
-         fixture and this resolver does not care — /hippo:audit writes ``recall_hard_set.yaml``;
-         ``recall_abstention_set.yaml`` has NO writer and is hand-authored. Never restate this
-         as "the dir /hippo:audit writes to" — that shorthand shipped a false doctor remedy.
+      1. ``.claude/memory/.audit-fixtures/<filename>`` — the project-local convention. ABS-1:
+         how a file GETS there differs per fixture and this resolver does not care.
+         /hippo:audit writes ``recall_hard_set.yaml``. There is by contrast
+         no writer anywhere for ``recall_abstention_set.yaml`` — it is hand-authored.
+         Never restate this as "the dir /hippo:audit writes to"; it shipped a false remedy.
       2. ``<repo>/tests/fixtures/<filename>`` — the engine repo's own checked-in set.
 
     ``None`` (nothing found) makes ``main()`` inherit ``evaluate()``'s skip semantics
@@ -1040,23 +1040,30 @@ def recommend_floor(on_scores: List[float], off_scores: List[float]) -> Optional
 
 
 def _raw_max_cosines(index: LoadedIndex, queries: List[str]) -> List[float]:
-    """Best DESCRIPTION-row cosine per query — the exact quantity the dense floor gates.
+    """Best cosine per query over the WHOLE dense matrix — what the floor actually gates.
 
     Embeds with the corpus's configured/warm model via ``recall.embed_query`` — resolved
     through the module attribute so hermetic tests' fake embedders apply (offline; the
     caller has already verified ``dense_ready``). A query that fails to embed is skipped
-    (better a smaller honest sample than a fabricated zero)."""
+    (better a smaller honest sample than a fabricated zero).
+
+    ABS-4 — this scored ``sims[:n_desc]`` while calling it "the exact quantity the dense floor
+    gates": true when GRF-3 wrote it, false since RET-2 widened the matrix. ``_dense_rank_rows``
+    applies the floor ONCE at row level, to description AND body-chunk rows by design ("one
+    calibrated number"), so calibrating on the narrower population made the sweep optimistic
+    about leakage — a body chunk is where an adjacent-technical query finds its best match. On
+    hippo's corpus the sweep contradicted the runtime it advises: description-only saw off-topic
+    max 0.6523 and promised "at 0.663, 0 probes would leak", but the gated matrix tops out at
+    0.7223 and 2/11 still admit. Scoring it all costs nothing — the matmul covers every row."""
     from . import recall as _recall_mod
 
     out: List[float] = []
-    n_desc = len(index.entries)
     for q in queries:
         if not q:
             continue
         try:
             qvec = _recall_mod.embed_query(q, allow_download=False)
-            sims = index.dense @ qvec
-            out.append(round(float(sims[:n_desc].max()), 6))
+            out.append(round(float((index.dense @ qvec).max()), 6))
         except Exception:
             continue
     return out
@@ -1112,9 +1119,7 @@ def floor_sweep(
             "error": "need both on-topic hard-set rows resolvable against this corpus and "
             "off-topic abstention probes — "
             f"(on-topic {len(on_queries)}, off-topic {len(probes)}); draft the on-topic half "
-            "via /hippo:audit or SIG-6's abstention_fixtures flow (both land rows in "
-            "recall_hard_set.yaml), and HAND-AUTHOR the off-topic half — nothing generates "
-            "recall_abstention_set.yaml (ABS-1)",
+            "via /hippo:audit (it writes recall_hard_set.yaml); hand-author the rest (ABS-1)",
         }
 
     from .recall import _dense_floor
@@ -1654,8 +1659,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         extra = f" ({g['pct']*100:.1f}% reduction)" if name == "token_reduction" else ""
         if skipped:
             # ABS-3: a gate that RAN but does not bind carries its own reason — the generic
-            # table would say "no abstention-set fixture" for one that exists and just
-            # measured a real number, the opposite of what happened.
+            # table would say "no ... fixture" for one that exists and measured a real number.
             why = g.get("reported_only")
             label = "reported only" if why else "skipped"
             why = why or _SKIP_REASONS.get(name, "input absent")

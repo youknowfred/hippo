@@ -251,12 +251,25 @@ def check_floor_calibration(ctx: DoctorContext) -> Dict[str, str]:
                 "message": f"floor calibration: configured {configured} ≈ recommended "
                 f"{recommended} (Δ{delta:+}){overlap}.",
             }
+        # ABS-4: on an OVERLAPPING corpus the recommendation is a trade, not a fix — name
+        # its measured cost instead of pointing at the table, or this repeats the powerless
+        # remedy ABS-2 removed one check over.
+        if sweep.get("overlap"):
+            remedy = (
+                f"adopting it would cut {sweep.get('cut_on')} real quer(ies) and still leak "
+                f"{sweep.get('leaked_off')} of {sweep.get('off_n')} probes THROUGH THE DENSE "
+                "LANE, which BM25 admits past anyway (ABS-2) — evidence, not a fix"
+            )
+        else:
+            remedy = (
+                "edit recall._DENSE_FLOOR_BY_MODEL or set HIPPO_DENSE_FLOOR yourself; "
+                "advisory only, nothing auto-writes"
+            )
         return {
             "status": "warn",
             "message": f"floor calibration: configured {configured} vs sweep-recommended "
             f"{recommended} (Δ{delta:+}, off-topic max {sweep.get('off_max')}){overlap} — "
-            "edit recall._DENSE_FLOOR_BY_MODEL or set HIPPO_DENSE_FLOOR yourself; "
-            "advisory only, nothing auto-writes.",
+            f"{remedy}.",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"floor-calibration check failed: {exc}."}
@@ -516,7 +529,8 @@ def check_abstention_cold_start(ctx: DoctorContext) -> Dict[str, str]:
         if manifest.get("dense_ready"):
             return {
                 "status": "ok",
-                "message": "abstention floor active — the dense model is warmed.",
+                "message": "dense model warmed — the semantic ranking signal is live "
+                "(this is a ranking property, not an abstention one; ABS-2).",
             }
         return {
             "status": "warn",
@@ -591,18 +605,16 @@ def check_abstention_floor_sanity(ctx: DoctorContext) -> Dict[str, str]:
             # lanes are empty, and the BM25 lanes admit on a single shared token with no
             # score floor of any kind — so on a corpus whose description+body vocabulary
             # already covers these probes, this number reports coverage, not a mis-set floor.
-            hint = (
-                "every probe shares at least one token with some memory, so no floor setting "
-                "changes this — HIPPO_DENSE_FLOOR gates only the dense lanes, and raising it "
-                "can lower the leak solely for probes with NO lexical overlap at all"
-            )
             return {
                 "status": "warn",
                 "message": f"abstention floor: only {abstained}/{n} off-topic fixture queries "
                 f"abstained on this {backend} corpus (rate {rate:.2f} < {GATE_ABSTENTION}) — "
-                f"off-topic prompts may inject. Abstention requires EVERY lane to be empty "
-                f"(dense + BM25, description + body) and BM25 has no score floor, so {hint}. "
-                f"Treat this as a measurement of what the corpus admits, not a failing knob.",
+                "off-topic prompts may inject. Recall abstains only when EVERY lane comes up "
+                "empty (dense + BM25, description + body), and the BM25 lanes admit on a single "
+                "shared token with no score floor at all, so a probe that overlaps any memory's "
+                "wording will surface something whatever the floor is set to. HIPPO_DENSE_FLOOR "
+                "gates the dense lanes only. Read this as a measurement of what the corpus "
+                "admits, not a knob that is set wrong.",
             }
         return {
             "status": "ok",

@@ -303,7 +303,10 @@ def test_abstention_cold_start_ok_when_dense_ready(repo, memory_dir, tmp_path, m
     write_file(memory_dir, "a.md", _mem("a", "alpha"))
     B.build_index(memory_dir, idx)
     r = D.check_abstention_cold_start(_ctx(memory_dir, repo))
-    assert r["status"] == "ok" and "abstention floor active" in r["message"]
+    # ABS-2: warming buys the semantic RANKING signal. The old text ("abstention floor
+    # active") named the one thing dense does not give you — adding lanes cannot abstain.
+    assert r["status"] == "ok" and "dense model warmed" in r["message"]
+    assert "abstention floor active" not in r["message"]
 
 
 def test_abstention_cold_start_ok_when_no_index(repo, memory_dir, tmp_path, monkeypatch):

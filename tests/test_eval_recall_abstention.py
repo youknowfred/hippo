@@ -191,3 +191,66 @@ def test_engine_fixture_still_fails_a_leaking_corpus(tmp_path, monkeypatch):
     assert g["pass"] is False           # still binds — CI reseeds from packs and uses this path
     assert "reported_only" not in g
     assert rep["ok"] is False
+
+
+# --------------------------------------------------------------------------- #
+# ABS-4: the floor sweep must measure the population the floor actually gates
+# --------------------------------------------------------------------------- #
+def test_floor_sweep_scores_body_chunks_not_just_descriptions(tmp_path, monkeypatch):
+    """ABS-4: _raw_max_cosines must cover the WIDENED matrix, as _dense_rank_rows does.
+
+    It used to score sims[:n_desc] while its docstring claimed to compute "the exact
+    quantity the dense floor gates" — true when written, false since RET-2 widened the
+    matrix with body-chunk rows. Calibrating on a narrower population than the floor
+    governs made the sweep optimistic about off-topic leakage, and a body chunk is exactly
+    where an adjacent-technical query finds its best match. Here the query's tokens appear
+    ONLY in a body, so a description-only sweep scores it near zero and the corrected one
+    sees the real match.
+    """
+    import numpy as np
+
+    # this test NEEDS the dense lane; another module in the suite leaves
+    # HIPPO_DISABLE_DENSE set in os.environ (not via monkeypatch), so declare it explicitly
+    # rather than inherit whatever ran first.
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+
+    memory_dir = str(tmp_path / "mem")
+    os.makedirs(memory_dir)
+    write_file(
+        memory_dir,
+        "a.md",
+        "---\nname: alpha\ndescription: \"alpha beta gamma\"\nmetadata:\n  type: project\n---\n\n"
+        + ("zeta eta theta iota kappa lambda mu nu xi omicron. " * 40),
+    )
+
+    dim = 32
+
+    def _vec(text):
+        v = np.zeros(dim, dtype="float32")
+        for tok in B.tokenize(text):
+            v[hash(tok) % dim] += 1.0
+        n = np.linalg.norm(v)
+        return v / n if n else v
+
+    monkeypatch.setattr(
+        B, "embed_documents", lambda texts, allow_download=True: np.vstack([_vec(t) for t in texts])
+    )
+    monkeypatch.setattr("memory.recall.embed_query", lambda q, allow_download=True: _vec(q))
+
+    idx = str(tmp_path / "idx")
+    B.build_index(memory_dir, idx)
+    index = B.load_index(idx)
+    assert index.dense_ready
+    n_desc = len(index.entries)
+    assert index.dense.shape[0] > n_desc, "the corpus must produce body-chunk rows to test"
+
+    q = "zeta eta theta iota kappa"  # body vocabulary only — absent from the description
+    qvec = _vec(q)
+    sims = index.dense @ qvec
+    desc_only = round(float(sims[:n_desc].max()), 6)
+    full = round(float(sims.max()), 6)
+    assert full > desc_only, "fixture must distinguish the two populations"
+
+    got = E._raw_max_cosines(index, [q])
+    assert got == [full], "the sweep must score every row the floor gates, not just descriptions"
+    assert got != [desc_only]
