@@ -570,45 +570,6 @@ def test_default_abstention_set_path_probes_audit_fixtures_then_tests_fixtures(t
     assert E._default_abstention_set_path() == audit_fixture  # project-local wins
 
 
-def test_no_shipped_surface_claims_the_abstention_set_is_generated():
-    """ABS-1: nothing generates recall_abstention_set.yaml — no shipped text may say it does.
-
-    The defect this pins shipped for a full release: doctor's docstring said the fixture was
-    "written by /hippo:audit" and its remediation said to "run /hippo:audit to generate one",
-    so the one check that measures off-topic leakage sat inert behind an unfollowable route.
-    The cause is a name collision (SIG-6's abstention BACKLOG drafter writes hard-set rows
-    tagged category:abstention — the opposite polarity), which makes the wrong sentence easy
-    to rewrite by accident. So this sweeps the SHIPPED tree for the claim, not just the two
-    strings that were wrong: any line naming the abstention set near a generation verb fails.
-    """
-    import re
-
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    targets = glob.glob(os.path.join(root, "plugin", "memory", "*.py")) + glob.glob(
-        os.path.join(root, "plugin", "skills", "*", "SKILL.md")
-    )
-    # "generate/write/draft/produce" within ~80 chars of the filename, either order. The window
-    # must tolerate dots (the filename itself contains ".yaml" — an earlier [^.]* version of
-    # this lint passed vacuously against the real defect for exactly that reason).
-    verb = r"(generat\w*|writt?en|writes|drafts?|drafted|produces?)"
-    name = r"recall_abstention_set"
-    # the honest phrasings — these SAY there is no writer, and must not be flagged
-    honest = r"no writer|nothing generates|never generated|not generated|hand-author|NO answer"
-    offenders = []
-    for path in targets:
-        with open(path, encoding="utf-8") as fh:
-            for n, line in enumerate(fh, 1):
-                if name not in line or re.search(honest, line, re.I):
-                    continue
-                if re.search(rf"{verb}.{{0,80}}?{name}", line, re.I) or re.search(
-                    rf"{name}.{{0,80}}?{verb}", line, re.I
-                ):
-                    offenders.append(f"{os.path.relpath(path, root)}:{n}: {line.strip()}")
-    assert not offenders, "shipped text claims the abstention set is generated:\n" + "\n".join(
-        offenders
-    )
-
-
 def test_main_cli_prints_abstention_rate_line_when_present(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)

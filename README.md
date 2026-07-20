@@ -418,11 +418,13 @@ sessions, permanently dismissable) instead of staying silent.
   the always-load *floor* (the `user`/`feedback` pointers) is injected every prompt;
   everything else surfaces when a prompt actually matches it. Phrase your question closer to
   the memory's own wording, or confirm it's indexed with `/hippo:doctor`.
-- **Recall surfaces something off-topic (before bootstrap).** Reliable *abstention* —
-  returning nothing for an unrelated prompt — is dense-gated: BM25-only recall (before
-  `/hippo:bootstrap` warms the dense model) can surface a weak keyword match for an off-topic
-  prompt, because no lexical rule separates a coincidental keyword overlap from a real one.
-  Warming the dense model enables the abstention floor; `/hippo:doctor` flags this state.
+- **Recall surfaces something off-topic.** Recall returns nothing only when *every* lane comes
+  up empty — dense and BM25, description and body — and BM25 admits any prompt sharing a
+  single token with any memory. So on a corpus whose vocabulary is already broad, an unrelated
+  prompt will usually surface *something*, weakly ranked. Warming the dense model with
+  `/hippo:bootstrap` buys ranking quality (no lexical rule separates a coincidental keyword
+  overlap from a real one), but it does not make recall abstain more often — it adds lanes.
+  `/hippo:doctor` reports the measured per-corpus rate when you supply an off-topic fixture.
 - **"Not a git repository" / staleness looks inactive.** Outside a git repo hippo runs in a
   degraded mode: recall, indexing, links, and the floor all work, but staleness tracking and
   provenance backfill need git — `git init` and commit to activate them.

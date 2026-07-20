@@ -398,6 +398,12 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
   `category: abstention` — the opposite polarity from this file, which lists queries that
   SHOULD abstain. Nothing has ever written `recall_abstention_set.yaml`; it is hand-authored.
   The check therefore shipped inert behind a remediation nobody could follow.
+  **ALSO CORRECTED 2026-07-20 (ABS-2)** — the backend-specific fix above ("bm25-only →
+  bootstrap/RET-11; dense → raise `HIPPO_DENSE_FLOOR`") does not work in either branch.
+  Measured on hippo's own 66-memory corpus: `HIPPO_DENSE_FLOOR=0.95` (near-max) leaves the
+  rate at exactly 0/11, because the BM25 lanes admit every probe independently and have no
+  score floor at all; and warming the dense model moves the rate the WRONG way (see RET-11's
+  correction). The check now states the mechanism instead of naming a knob.
 - **RET-11** `P1/M` — BM25-only **abstention floor** (normalized-score / IDF-mass
   threshold) *or* an explicit doctor/README statement that abstention is
   dense-gated + a warm-the-model nudge. *(KPI-1.)*
@@ -411,6 +417,15 @@ Priority `P0` (broken promise / launch blocker) · `P1` (core to launch) · `P2`
   BM25-only that abstention is dense-gated + nudges `/hippo:bootstrap`), a README
   Troubleshooting entry, and the finding recorded on `eval_recall.abstention_rate` so no one
   re-attempts a BM25 floor blind. Abstention is dense-gated *by measurement*, not assumption.
+  **CORRECTED 2026-07-20 (ABS-2)** — "abstention is dense-gated" is true of the
+  DISCRIMINATION signal (only the dense model separates a coincidental keyword overlap from a
+  real one — the IDF analysis above stands) but false of the abstention METRIC, and the
+  shipped nudge conflated them. recall abstains iff all four rankings are empty, so warming
+  the model ADDS two lanes and can only make abstention rarer. Demonstrated on a one-memory
+  corpus with a lexically disjoint probe: dense OFF abstains at 1.0, dense ON at 0.0. The
+  dense floor exists to stop the dense ranker admitting the whole corpus, not to produce
+  abstentions; the cold-start nudge now sells warming for RANKING quality, which is what it
+  actually buys. Pinned by `test_warming_the_dense_model_can_only_reduce_abstention`.
 - **RET-10** `P2/S` — **Decide RET-5 salience default-on** using RET-8 evidence
   (run eval both ways; flip if no recall@10 regression; retire flag-only debt).
   *New decision, OQ-10.*

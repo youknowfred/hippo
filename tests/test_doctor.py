@@ -276,8 +276,11 @@ def test_index_corruption_surfaces_truncated_manifest(repo, memory_dir, tmp_path
 
 
 def test_abstention_cold_start_warns_on_bm25_only(repo, memory_dir, tmp_path, monkeypatch):
-    # RET-11: a bm25-only index (no warmed dense model) → abstention is degraded; the check
-    # must NAME the dense-gating and nudge /hippo:bootstrap.
+    # RET-11: a bm25-only index (no warmed dense model) → no semantic signal to rank a
+    # coincidental keyword overlap below a real hit; the check nudges /hippo:bootstrap.
+    # ABS-2: it must sell warming for RANKING, and must NOT promise more abstention —
+    # warming adds two candidate lanes, so it can only make abstention rarer. The old
+    # assertion here pinned the inverted claim ("dense-gated" as the fix for a low rate).
     idx = str(tmp_path / ".memory-index")
     monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
@@ -286,7 +289,9 @@ def test_abstention_cold_start_warns_on_bm25_only(repo, memory_dir, tmp_path, mo
     B.build_index(memory_dir, idx)
     r = D.check_abstention_cold_start(_ctx(memory_dir, repo))
     assert r["status"] == "warn"
-    assert "/hippo:bootstrap" in r["message"] and "dense-gated" in r["message"]
+    assert "/hippo:bootstrap" in r["message"]
+    assert "will not make recall abstain MORE often" in r["message"]
+    assert "enable the abstention floor" not in r["message"]
 
 
 def test_abstention_cold_start_ok_when_dense_ready(repo, memory_dir, tmp_path, monkeypatch):
