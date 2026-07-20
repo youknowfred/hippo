@@ -1573,7 +1573,7 @@ release_train:
   - tier: T25
     target_version: TBD
     theme: "Running-state legibility"
-    status: planned          # ratified 2026-07-19; build not started
+    status: done             # 2026-07-19, session 4 — 2/2 items in the gated order (OPS-1 -> OPS-2); zero session_start.py lines exactly as the gate demanded (file absent from the PR diff); done_means met: doctor names running-vs-tree skew on the dogfood shape (live fire at build: "in sync" at v1.27.0=v1.27.0 — the warn arms at the next release cut), the fleet line shows launch-pin skew only when fresh docs differ, and a dying schedule surfaces as 'quiet' from last_run_at (live launchd artifact classified ok — ran 14:30Z the same morning); all read-only, cold-path, remediation human; suite 2,957 -> 2,989
     ratified: >-
       2026-07-19 — owner-ratified in the round-5 formal-question session
       (dated LAW ZERO entry): all five tiers ratified, order T22 -> T23 ->
