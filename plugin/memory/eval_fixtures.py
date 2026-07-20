@@ -2,9 +2,12 @@
 façade keeps the SIG-6 write gates ``draft_abstention_fixtures``/``confirm_hard_set_row``
 — their crash-contract keys pin them there — plus ``evaluate``/``main``).
 
-This sibling owns the drafts-queue plumbing (paths, note text, YAML-parseability guard),
-the MEA-2 lived-in drafter (``draft_livedin_fixtures`` — the fourth lane, positive rows
-from the outcome join), and the two T11 deterministic fixture SYNTHESIZERS:
+This sibling owns the fixture-path resolvers (``_default_fixture_path`` and the three
+canonical-filename wrappers over it — the auto-discovery half of the pair
+``is_project_local_fixture`` classifies), the drafts-queue plumbing (paths, note text,
+YAML-parseability guard), the MEA-2 lived-in drafter (``draft_livedin_fixtures`` — the
+fourth lane, positive rows from the outcome join), and the two T11 deterministic fixture
+SYNTHESIZERS:
 
 - **TMB-3** ``draft_forgetting_fixtures`` — one archive-absence candidate per
   ``archive/*.md`` entry (the DIRECTORY LISTING is the enumeration source; the journal
@@ -55,6 +58,43 @@ _DRAFTS_NOTE = (
 def _project_fixture_path(memory_dir: str, filename: str = "recall_hard_set.yaml") -> str:
     """The project-local TRACKED-fixture path (``.audit-fixtures/``, the RET-7 convention)."""
     return os.path.join(memory_dir, ".audit-fixtures", filename)
+
+
+def _default_fixture_path(filename: str) -> Optional[str]:
+    """Resolve a default eval fixture, or None when no fixture exists anywhere.
+
+    Probe order:
+      1. ``.claude/memory/.audit-fixtures/<filename>`` — the project-local convention. ABS-1:
+         how a file GETS there differs per fixture and this resolver does not care.
+         /hippo:audit writes ``recall_hard_set.yaml``. There is by contrast
+         no writer anywhere for ``recall_abstention_set.yaml`` — it is hand-authored.
+         Never restate this as "the dir /hippo:audit writes to"; it shipped a false remedy.
+      2. ``<repo>/tests/fixtures/<filename>`` — the engine repo's own checked-in set.
+
+    ``None`` (nothing found) makes ``main()`` inherit ``evaluate()``'s skip semantics
+    for the hard-set gates rather than failing them against a path that exists
+    nowhere — an absent fixture is a deliberately-absent input, not a failure.
+    """
+    memory_dir, repo = resolve_dirs()
+    for candidate in (
+        os.path.join(memory_dir, ".audit-fixtures", filename),
+        os.path.join(repo, "tests", "fixtures", filename),
+    ):
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def _default_hard_set_path() -> Optional[str]:
+    return _default_fixture_path("recall_hard_set.yaml")
+
+
+def _default_relevance_set_path() -> Optional[str]:
+    return _default_fixture_path("recall_relevance_set.yaml")
+
+
+def _default_abstention_set_path() -> Optional[str]:
+    return _default_fixture_path("recall_abstention_set.yaml")
 
 
 def is_project_local_fixture(path: Optional[str]) -> bool:

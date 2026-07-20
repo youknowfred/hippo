@@ -216,7 +216,8 @@ def check_floor_calibration(ctx: DoctorContext) -> Dict[str, str]:
     """
     try:
         from .build_index import _load_manifest, default_index_dir, load_index
-        from .eval_recall import corpus_fingerprint, read_floor_sweep
+        from .eval_floor import read_floor_sweep
+        from .eval_ledger import corpus_fingerprint
         from .recall import _dense_floor
 
         sweep = read_floor_sweep(ctx.memory_dir)
