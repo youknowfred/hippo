@@ -627,6 +627,80 @@ def check_plugin_version(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"plugin-version check failed: {exc}."}
 
 
+def check_plugin_source_skew(ctx: DoctorContext) -> Dict[str, str]:
+    """OPS-1: the plugin version the hooks RUN vs the plugin source this tree SHIPS.
+
+    DOC-7's sibling, one seam over: ``check_plugin_version`` compares installed-vs-venv-
+    sentinel; this compares the RUNNING plugin (``ctx.plugin_root`` — the
+    CLAUDE_PLUGIN_ROOT dir the harness pinned at session launch; plugin/hooks/hooks.json
+    resolves every hook from it) to the plugin source the current repo ships
+    (``plugin/.claude-plugin/plugin.json``). The twice-bitten dogfood class: every
+    release mints live-hook lag until ``claude plugin update`` + restart, and a live
+    session keeps its birth version even after the cache updates. Fires ONLY on the
+    this-repo-is-the-source shape — name-matched manifests whose realpaths genuinely
+    differ — and only on a version difference; empty-norm everywhere else (most users
+    never see anything but ok). MEA-4's producer-version stamps are the row-level
+    forensic complement: evidence rows minted during the lag window carry the stale
+    ``v``, so the two surfaces corroborate. Read-only visibility (ED4R-3): the line
+    names facts and the update command; nothing here writes, restarts, or reloads.
+    On-demand doctor only — deliberately ZERO SessionStart lines (DOC-7's precedent:
+    rot is not per-session news). Never raises.
+    """
+    try:
+        src_dir = os.path.join(ctx.repo_root, "plugin")
+        src_pj = os.path.join(src_dir, ".claude-plugin", "plugin.json")
+        if not os.path.isfile(src_pj):
+            return {
+                "status": "ok",
+                "message": "running-vs-source: this repo ships no hippo plugin source — nothing to compare.",
+            }
+        try:
+            with open(src_pj, encoding="utf-8") as fh:
+                src = json.load(fh)
+        except Exception:
+            src = None
+        try:
+            with open(os.path.join(ctx.plugin_root, ".claude-plugin", "plugin.json"), encoding="utf-8") as fh:
+                run = json.load(fh)
+        except Exception:
+            run = None
+        if not isinstance(src, dict) or not isinstance(run, dict):
+            return {
+                "status": "ok",
+                "message": "running-vs-source: a plugin manifest is unreadable — no skew comparison.",
+            }
+        if not src.get("name") or src.get("name") != run.get("name"):
+            return {
+                "status": "ok",
+                "message": "running-vs-source: this tree's plugin source is not the running plugin — nothing to compare.",
+            }
+        src_v, run_v = src.get("version"), run.get("version")
+        if os.path.realpath(src_dir) == os.path.realpath(ctx.plugin_root):
+            return {
+                "status": "ok",
+                "message": f"running-vs-source: live hooks run this tree's plugin source directly (v{src_v}).",
+            }
+        if not (isinstance(src_v, str) and src_v.strip() and isinstance(run_v, str) and run_v.strip()):
+            return {
+                "status": "ok",
+                "message": "running-vs-source: a manifest carries no version — no skew comparison.",
+            }
+        if src_v == run_v:
+            return {
+                "status": "ok",
+                "message": f"running-vs-source: live hooks run v{run_v} (pinned at session launch); "
+                f"this tree ships v{src_v} — in sync.",
+            }
+        return {
+            "status": "warn",
+            "message": f"running-vs-source skew: live hooks run v{run_v} (pinned at session launch); "
+            f"this tree ships v{src_v} — hook-lane behavior follows v{run_v} until "
+            "claude plugin update + restart.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"plugin-source-skew check failed: {exc}."}
+
+
 def check_machine_state(ctx: DoctorContext) -> Dict[str, str]:
     """HYG-3: machine-state rot beyond the projects registry — warn on DEAD only.
 
