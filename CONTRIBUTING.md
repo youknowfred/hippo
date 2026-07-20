@@ -52,6 +52,18 @@ flake it red. If it downloads the model, mark it `network`.
 The suite runs under `filterwarnings = error` (QUA-10) — a new deprecation warning from hippo's own
 code fails the build. Keep production code warning-free.
 
+### Env discipline in tests
+
+Set `HIPPO_*` env vars with `monkeypatch.setenv`/`delenv`, never by assigning `os.environ` — every
+hippo behaviour switch is an env var, so a test that leaves one set silently reconfigures every
+test after it in the same process (a `HIPPO_DISABLE_DENSE` leak turns later dense-path tests into
+bm25-only tests that still pass — green while asserting nothing). `tests/conftest.py` brackets each
+test with a hook pair that repairs any `HIPPO_*` change and then fails the test that made it, so
+the leak is reported at its source instead of surfacing as an order-dependent flake elsewhere. If a
+value genuinely has to be set outside `monkeypatch` (from a worker thread, say), restore it in a
+`finally` — and if your test needs a specific lane, declare it (`monkeypatch.delenv(
+"HIPPO_DISABLE_DENSE", raising=False)`) rather than inheriting whatever the runner exported.
+
 ## CI checks
 
 Every PR to `main` runs (`.github/workflows/ci.yml`):
