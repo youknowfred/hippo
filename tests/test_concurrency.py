@@ -249,6 +249,16 @@ def test_index_reader_never_observes_torn_manifest_dense_pair_during_rebuild(tmp
 
     monkeypatch.setattr(B, "embed_documents", fake_embed_documents)
 
+    # The writer toggles the PROCESS-GLOBAL HIPPO_DISABLE_DENSE from inside a thread, so
+    # monkeypatch (whose undo log is per-test, not per-toggle) can't express the toggle
+    # itself -- but it CAN pin the baseline the writer returns to, and restore whatever
+    # the ambient environment had (CI's hermetic lane exports HIPPO_DISABLE_DENSE=1
+    # job-wide) at teardown. Without this pairing the LAST toggle -- i=149, odd, so
+    # dense DISABLED -- leaked into every test that ran after this one in the same
+    # process, silently demoting their dense paths to bm25-only: a false-green class,
+    # not a flake.
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+
     stop = threading.Event()
     errors: list = []
     n_iterations = 150
@@ -272,6 +282,9 @@ def test_index_reader_never_observes_torn_manifest_dense_pair_during_rebuild(tmp
         except BaseException as exc:  # noqa: BLE001 -- surfaced via `errors`, not silently lost
             errors.append(f"writer crashed: {exc!r}")
         finally:
+            # Back to the monkeypatch-pinned baseline (absent) on EVERY exit path,
+            # including a mid-loop crash or an early `stop`.
+            os.environ.pop("HIPPO_DISABLE_DENSE", None)
             stop.set()
 
     checks = [0]

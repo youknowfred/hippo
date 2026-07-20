@@ -209,9 +209,11 @@ def test_floor_sweep_scores_body_chunks_not_just_descriptions(tmp_path, monkeypa
     """
     import numpy as np
 
-    # this test NEEDS the dense lane; another module in the suite leaves
-    # HIPPO_DISABLE_DENSE set in os.environ (not via monkeypatch), so declare it explicitly
-    # rather than inherit whatever ran first.
+    # Explicit delenv: this test NEEDS the dense lane, and the CI hermetic lane exports
+    # HIPPO_DISABLE_DENSE=1 job-wide (CONTRIBUTING's airplane-mode path) — declare the lane
+    # rather than inherit the ambient one. (It was ALSO papering over a real leak: the
+    # concurrency test left the var set for everything that ran after it. That is fixed at
+    # the source and held by the conftest guard now; this line stands on its own reason.)
     monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
 
     memory_dir = str(tmp_path / "mem")
