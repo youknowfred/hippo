@@ -33,7 +33,7 @@ GRANDFATHER_SLACK = 60
 # Shrink freely; to grow past pin+slack, split the file instead — or re-pin here with a
 # PR that says why.
 GRANDFATHERED_PLUGIN = {
-    "provenance.py": 2012,
+    "provenance.py": 1650,  # re-pinned at the round-6 ED5R-3 split (git/dirs/tiers → provenance_env, the zero-outbound-dependency layer); the four crash-contract writers stay AST-pinned to this file
     "eval_recall.py": 1644,  # re-pinned at the round-6 ED5R-3 split (GRF-3 sweep → eval_floor, default-fixture resolvers → eval_fixtures); SIG-6/MSR-1 writers stay AST-pinned to this file (crash contract), GRF-3's moved WITH it
     "new_memory.py": 1757,
     "build_index.py": 1735,
