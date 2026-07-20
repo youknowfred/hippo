@@ -34,7 +34,7 @@ GRANDFATHER_SLACK = 60
 # PR that says why.
 GRANDFATHERED_PLUGIN = {
     "provenance.py": 2012,
-    "eval_recall.py": 1803,  # re-pinned at the ED5R-3 split (SEN-4 probe → eval_adversarial); SIG-6/GRF-3 writers stay AST-pinned to this file (crash contract)
+    "eval_recall.py": 1644,  # re-pinned at the round-6 ED5R-3 split (GRF-3 sweep → eval_floor, default-fixture resolvers → eval_fixtures); SIG-6/MSR-1 writers stay AST-pinned to this file (crash contract), GRF-3's moved WITH it
     "new_memory.py": 1757,
     "build_index.py": 1735,
     "recall.py": 1637,  # recall() orchestrator + hook entry; rankers/salience/tiers already split out

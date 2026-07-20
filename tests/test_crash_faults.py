@@ -65,7 +65,7 @@ CRASH_CONTRACT = {
     ("eval_fixtures", "_append_draft_rows"): ("detected",),  # TMB-3/4: the ONE drafts-queue append (both synthesizers route through it)
     ("eval_recall", "confirm_hard_set_row"): ("detected",),  # both writes; each byte-complete
     ("eval_recall", "write_baseline"): ("detected",),  # MSR-1 pin: error named, no torn baseline
-    ("eval_recall", "write_floor_sweep"): ("detected",),  # GRF-3: error named, no torn sweep report
+    ("eval_floor", "write_floor_sweep"): ("detected",),  # GRF-3: error named, no torn sweep report
     ("salience_eval", "write_report"): ("detected",),  # MSR-5: error named, no torn A/B evidence
     ("outcome_prior_eval", "write_report"): ("detected",),  # MEA-5: error named, no torn A/B evidence
     ("init_project", "_copy_if_absent"): ("detected",),  # seed copy: raises; no partial file
@@ -375,12 +375,12 @@ def scn_outcome_prior_write_report_detected(tmp_path, monkeypatch):
 
 
 def scn_eval_write_floor_sweep_detected(tmp_path, monkeypatch):
-    from memory.eval_recall import write_floor_sweep
+    from memory.eval_floor import write_floor_sweep
 
     path = str(tmp_path / "telemetry" / "floor_sweep.json")
     doc = {"ok": True, "schema": 1, "model": "m", "recommended": 0.6}
     before = _snap(path)
-    _arm(monkeypatch, "eval_recall", "write_floor_sweep")
+    _arm(monkeypatch, "eval_floor", "write_floor_sweep")
     res = write_floor_sweep(doc, path)
     _assert_unchanged(before)  # no torn report — an absent sweep stays absent
     assert res.get("ok") is False and "floor-sweep write failed" in res.get("error", "")
@@ -882,7 +882,7 @@ _SCENARIOS = [
     (("eval_fixtures", "_append_draft_rows"), "detected", scn_eval_draft_forgetting_detected),
     (("eval_recall", "confirm_hard_set_row"), "detected", scn_eval_confirm_detected),
     (("eval_recall", "write_baseline"), "detected", scn_eval_write_baseline_detected),
-    (("eval_recall", "write_floor_sweep"), "detected", scn_eval_write_floor_sweep_detected),
+    (("eval_floor", "write_floor_sweep"), "detected", scn_eval_write_floor_sweep_detected),
     (("salience_eval", "write_report"), "detected", scn_salience_write_report_detected),
     (("outcome_prior_eval", "write_report"), "detected", scn_outcome_prior_write_report_detected),
     (("init_project", "_copy_if_absent"), "detected", scn_init_copy_detected),
