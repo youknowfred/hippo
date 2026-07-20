@@ -27,8 +27,9 @@ Contract (mirrors the rest of the package):
     it never writes/repairs/re-baselines anything itself (destructive writes stay agent-gated).
 
 The check implementations live in the flat siblings ``doctor_checks_env`` /
-``doctor_checks_corpus`` / ``doctor_checks_recall``; this façade keeps the ordered check
-registry, the engine, the CLI, and explicit re-exports of every check-surface name.
+``doctor_checks_corpus`` / ``doctor_checks_lifecycle`` / ``doctor_checks_recall`` /
+``doctor_checks_abstention``; this façade keeps the ordered check registry, the engine,
+the CLI, and explicit re-exports of every check-surface name.
 """
 
 from __future__ import annotations
@@ -92,14 +93,19 @@ from .doctor_checks_lifecycle import (
     check_team_coverage,
     check_subset_boundary,
 )
+from .doctor_checks_abstention import (
+    _ABSTENTION_SANITY_MAX_QUERIES,
+    _FLOOR_CAL_TOLERANCE,
+    check_abstention_cold_start,
+    check_abstention_floor_sanity,
+    check_floor_calibration,
+)
 from .doctor_checks_recall import (
     _LINK_DENSITY_MIN_CORPUS,
     check_link_density,
     _EDGE_ROT_WARN_MIN,
-    _FLOOR_CAL_TOLERANCE,
     _SALIENCE_LIVEDIN_MIN_SESSIONS,
     check_salience_evidence,
-    check_floor_calibration,
     check_edge_rot,
     _HOT_PATH_P95_BUDGET_MS,
     check_hot_path_latency,
@@ -107,9 +113,6 @@ from .doctor_checks_recall import (
     check_recall_channels,
     _DROP_AUTOPSY_MIN_EVENTS,
     check_drop_autopsy,
-    check_abstention_cold_start,
-    _ABSTENTION_SANITY_MAX_QUERIES,
-    check_abstention_floor_sanity,
     check_injection_precision,
     check_foreign_dialects,
     check_rules_conflicts,
