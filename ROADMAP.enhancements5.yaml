@@ -1293,7 +1293,7 @@ workstreams:
         title: "Net boundary delta: the introduces-side of heals-N on the publish surfaces"
         priority: P2
         effort: S
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done              # 2026-07-19, session 5 — introduces_by beside heals_by in boundary_lint's ONE walk (plain + typed targets resolving to OTHER local-only memories; self/committed excluded); "heals N / introduces M (net ±K)" on the --boundary block (introduce-only candidates get 0-heals rows — the 9404b0c shape), the preflight receipt, and the candidates rows; zero-introduces byte-identity pinned on all three; FUNCTIONAL negative-capability pin: heals 0 / introduces 9 still ok=True with the act printed. Live: the exhibit holds exactly — trust-spine heals 3 / introduces 1 (net -2)
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Measured treadmill this cycle: boundary was 20 dangling / 9 files at T20 ship (hippo-enh-t20-publish capstone) and is 19 / 8 / 0 typed live NOW after TWO real publishes (38098d9 added hippo-v1-roadmap-proposal — healed 7, now SOURCES 3 of the 19; 9404b0c added hippo-vol1-volatile-paths — introduced 3); live preflight for the current heals-N leader (hippo-v080-trust-spine) prints 'heals 3' while silent about the dangling its local-only [[hippo-v030-open-followups]] link will add; lint_links.boundary_lint computes heals_by (:160-170) with no introduces twin"}
         problem: >-
           PUB-3's heals_by and PUB-1's receipt show only the healing half of
@@ -1333,12 +1333,19 @@ workstreams:
           (the PUB-2 surface). Premise correction carried: heals_by lives
           at :160-170 (one grounding citation said :110-129 — that region
           is the docstring/empty-shape).
+          BUILT 2026-07-19 — the introduces walk counts plain + typed
+          targets (mirroring heals' two dangling classes) via
+          full.outbound + typed_outbound over TYPED_RELATIONS, one walk;
+          introduce-only candidates render 0-heals rows in the block
+          (the 9404b0c shape made visible); the candidates readiness
+          dict gained introduces beside heals; test_publish.py's
+          top-level doc-key pin is untouched (receipt is nested).
 
       - id: BND-2
         title: "Trust drift joins the machine census: per-row withheld-file counts (the fleet sees withholding)"
         priority: P1
         effort: S
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done              # 2026-07-19, session 5 — trust_census live+fingerprinted rows carry additive withholding {changed, added} via trust.untrusted_changes ONLY (inv5 token-pinned: no second-differ primitive); census row renders "WITHHOLDING n changed / m added — re-consent in that project (trust_corpus / doctor)"; check_machine_state warn set + message gain the k-withholding clause via .get() (pre-BND-2 shapes count 0); zero-drift byte-identity + report-only pinned. Live at build: ALL THREE registry rows withholding — hippo 3/1 (this session's own drift), alloy 0/3 (the exhibit), em-growth-labs 5/7 (previously invisible)
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Live this cycle: trust.untrusted_changes('/Users/fredbook/projects/alloy', ...) = {baseline: True, added: [httpx-timeout-none-disables, macos-tahoe-legacy-icns-plate, project-unification-p7-state]} — 3 stems quarantined-from-recall since Jul 14-15 (4-5 days); project-unification-p7-state.md carries full hippo write_memory frontmatter (originSessionId, node_type, cited_paths) proving hippo AUTHORED it; the same session's machine_census renders alloy 'live [review, fingerprinted]' with ZERO drift mention (trust_census rows carry only {root, live, volatile, origin, fingerprinted} — machine_census.py:139-155); doctor's machine-state line consumes only the dead count (doctor_checks_env.py:645-666)"}
         problem: >-
           The re-consent flow is legible only in-project: a sibling corpus
@@ -1378,12 +1385,24 @@ workstreams:
           one-liner's home; file has room). Cost note: untrusted_changes
           hashes a corpus — keep it lazy (only live+fingerprinted rows,
           only on census/doctor invocation), never in any hook.
+          BUILT 2026-07-19 — premise corrections vs this note (live tree
+          7768c22): seams held with cosmetic line drift only
+          (trust_census at :135, _render_trust at :412,
+          check_machine_state at :704 after the T22/T25 splits);
+          trust_census's only two callers verified cold (doctor + the
+          census report) so drift computes unconditionally in it; the
+          doctor OK text is BYTE-IDENTICAL (unlike OPS-2's quiet — the
+          zero-drift byte-identity AC binds it; the clause appears in
+          warn mode only); the conftest-wide HIPPO_TRUST_ALL bypass
+          correctly suppresses rows (no quarantine applies under it) —
+          the drift tests delenv it, and that semantic is right for real
+          trust-all machines too.
 
       - id: BND-3
         title: "Write-time fold-failure disclosure: authorship-is-consent stops failing silently"
         priority: P1
         effort: M
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done              # 2026-07-19, session 5 — trust.record_authored_write_disclosing (fold UNCHANGED + consented-baseline-presence disambiguation -> the ONE canonical line or None; never retries/re-consents, pinned; hooks/index builds never fold, pinned); wired at EVERY per-item verb fold on the live tree (the note's 827c607 site list had drifted — corrected below): write_memory (warnings channel, now CLI-printed too), pack install/update item, reverify_file, rederive_file, add/remove_typed_relation, set_invalid_after, dream _set_confidence (additive consent_note each), dream Tier-A apply + --undo (one aggregate digest line each), generate staging (additive count); reconsolidate/resolve carry the note up; the pack + rederive replies' unconditional absorbed-claims made CONDITIONAL; legacy fingerprint-less byte-identity pinned
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "trust.py:476-480 narrates the exact silence in shipped prose ('the fold extended a consent record nobody reads, so an authored write stayed quarantined forever and record_authored_write returned False with nothing to say' — COR-10's post-mortem); every call site discards the bool inside try/except-pass, verified this cycle: new_memory.py:1266-1272, packs.py:757-763 + 973-977, provenance.py:1037-1039, links.py:765-767/846-848, dream_apply.py:288-290, dream_generate.py:642-644; the live consequence: the alloy trio (BND-2's exhibit) was authored by the lagged installed plugin running pre-COR-10 fold code and quarantined with zero notice — the write moment said nothing"}
         problem: >-
           When record_authored_write returns False on a trusted+fingerprinted
@@ -1433,6 +1452,23 @@ workstreams:
           dream_generate.py:642-644 — each verb's existing echo/describe
           output is the consumer (ED4R-2). Keep the helper in trust.py
           (one home, inv5); 584 lines — room.
+          BUILT 2026-07-19 — premise corrections vs this note (live tree
+          7768c22, six merges after the snapshot): the site list had
+          drifted — provenance.py:1037-1039 is restore_file_bytes (the
+          COR-16 rollback primitive, deliberately NOT wired: not a named
+          verb, its callers already report loud errors, and the BND-2
+          census catches the residue); reverify_file's fold sits at
+          :1517-1528 and rederive_file's (unnamed here) at :1764-1775;
+          the live tree carries five MORE per-item fold sites, all
+          wired: remove_typed_relation (links :846), set_invalid_after
+          (staleness :693), dream.py Tier-A apply (:497), dream_apply
+          --undo re-fold (:287), dream_generate staging (:641) +
+          _set_confidence (:741). The helper landed as
+          trust.record_authored_write_disclosing (fold + line, one
+          home); the pack/rederive MCP replies' unconditional
+          absorbed-the-bytes claims were made conditional in the same
+          commit (a WRT-3-class false promise otherwise); write_memory's
+          CLI now prints the warnings channel it had silently dropped.
 
 # ===========================================================================
 # RELEASE TRAIN — tier sequencing. Authored `proposed` (which to build, in
@@ -1610,7 +1646,7 @@ release_train:
   - tier: T26
     target_version: TBD
     theme: "The boundary & consent edge"
-    status: planned          # ratified 2026-07-19; build not started
+    status: done             # 2026-07-19, session 5 — 3/3 items (BND-2 -> BND-3 -> BND-1, the gate's order; the alloy/hippo census shapes captured into fixtures FIRST per audit_note — and the live capture found a THIRD withholding corpus, em-growth-labs 5/7); done_means met: withholding visible from census+doctor with the route named, failed folds disclose at the write moment, publish surfaces state heals/introduces/net with the gate-kill re-affirmed; suite 2,989 -> 3,014 hermetic
     ratified: >-
       2026-07-19 — owner-ratified in the round-5 formal-question session
       (dated LAW ZERO entry): all five tiers ratified, order T22 -> T23 ->
