@@ -266,3 +266,115 @@ def test_candidates_lane_issues_no_fresh_ls_files_and_no_network():
     assert "ls-files" not in src
     for needle in ("urllib", "requests.", "http.client", "socket"):
         assert needle not in src
+
+# --------------------------------------------------------------------------- #
+# BND-1: the introduces twin + net — display-only on all three surfaces
+# --------------------------------------------------------------------------- #
+def _treadmill_corpus(repo: str):
+    """The AC exhibit: three committed memories each link [[hub]] (heals 3); hub —
+    the top candidate — links [[side]], itself local-only (introduces 1, net -2).
+    side is a leaf (introduces nothing). Mirrors the live trust-spine shape whose
+    heals-3 preflight was silent about the dangling its publish would add."""
+    for c in ("c1", "c2", "c3"):
+        write_file(repo, f".claude/memory/{c}.md", _mem(c, f"see [[hub]] from {c}"))
+    git_commit(repo, "public subset", 1_700_000_000)
+    write_file(repo, ".claude/memory/hub.md", _mem("hub", "see [[side]] and [[c1]]"))
+    write_file(repo, ".claude/memory/side.md", _mem("side", "leaf body"))
+
+
+def test_boundary_introduces_twin_computed_in_the_same_walk(repo, memory_dir):
+    """AC: introduces_by beside heals_by, one link walk; targets resolving to
+    COMMITTED memories ([[c1]]) never count; the exhibit nets -2."""
+    _treadmill_corpus(repo)
+    v = LL.boundary_lint(memory_dir, repo)
+    assert v["ok"]
+    assert v["heals_by"] == {"hub": 3}
+    assert v["introduces_by"] == {"hub": 1}  # [[side]] only — [[c1]] is committed
+
+
+def test_boundary_introduces_counts_typed_edges_like_heals_does(repo, memory_dir):
+    """heals counts plain + typed danglings; the twin mirrors it: a typed relation
+    toward a local-only memory is a boundary dangling the moment the source lands."""
+    _treadmill_corpus(repo)
+    write_file(
+        repo,
+        ".claude/memory/hub.md",
+        _mem("hub", "see [[side]]", extra_meta="refines: [side2]\n"),
+    )
+    write_file(repo, ".claude/memory/side2.md", _mem("side2", "leaf body"))
+    v = LL.boundary_lint(memory_dir, repo)
+    assert v["introduces_by"] == {"hub": 2}  # 1 plain + 1 typed
+
+
+def test_boundary_zero_introduces_renders_byte_identical(repo, memory_dir, monkeypatch, capsys):
+    """AC byte-shape honesty: a corpus whose candidates introduce nothing renders the
+    pre-BND-1 block exactly — no 'introduces' token anywhere in --boundary output."""
+    _two_audience_corpus(repo, memory_dir)  # loc bodies are plain: zero introduces
+    v = LL.boundary_lint(memory_dir, repo)
+    assert v["introduces_by"] == {}
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    rc = LL.main(["--memory-dir", memory_dir, "--boundary"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "heals-N" in out and "introduces" not in out
+
+
+def test_boundary_cli_renders_the_net_exhibit(repo, memory_dir, monkeypatch, capsys):
+    """AC: heals 3 / introduces 1 renders net -2 in the heals-N block; still exit 0
+    (never a gate)."""
+    _treadmill_corpus(repo)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    rc = LL.main(["--memory-dir", memory_dir, "--boundary"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "  3  hub   introduces 1 (net -2)" in out
+    # side heals nothing and introduces nothing — it earns no row at all
+    assert "0  side" not in out
+
+
+def test_boundary_introduce_only_candidate_gets_a_zero_heals_row(repo, memory_dir, monkeypatch, capsys):
+    """The 9404b0c shape (heals 0, introduces 3): visible in the block as a 0-heals
+    row with a positive net — the half that made the treadmill unpredictable."""
+    write_file(repo, ".claude/memory/pub_a.md", _mem("pub_a", "no local links"))
+    git_commit(repo, "public subset", 1_700_000_000)
+    write_file(
+        repo, ".claude/memory/vol.md", _mem("vol", "see [[w1]] and [[w2]] and [[w3]]")
+    )
+    for w in ("w1", "w2", "w3"):
+        write_file(repo, f".claude/memory/{w}.md", _mem(w, "leaf"))
+    v = LL.boundary_lint(memory_dir, repo)
+    assert v["heals_by"] == {} and v["introduces_by"] == {"vol": 3}
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    LL.main(["--memory-dir", memory_dir, "--boundary"])
+    out = capsys.readouterr().out
+    assert "  0  vol   introduces 3 (net +3)" in out
+
+
+def test_candidates_readiness_carries_introduces_and_renders_net(repo, memory_dir):
+    """AC: the PUB-2 candidates rows carry the twin; the render states the net."""
+    from memory import recall_diff as RD
+
+    rng = _range_corpus(repo)
+    # loc_c gains links to TWO other local-only memories: heals 1 / introduces 2.
+    write_file(
+        repo,
+        ".claude/memory/loc_c.md",
+        _citing_mem("loc_c", "src/app.py", body="see [[loc_x]] and [[loc_y]]"),
+    )
+    write_file(repo, ".claude/memory/loc_y.md", _citing_mem("loc_y", "src/other.py"))
+    part = RD.candidates_for_range(rng, memory_dir, repo)
+    rd = {r["name"]: r for r in part["candidates"]}["loc_c"]["readiness"]
+    assert rd["heals"] == 1 and rd["introduces"] == 2
+    out = RD.render_candidates(part)
+    assert "heals 1 / introduces 2 (net +1) boundary link(s)" in out
+
+
+def test_candidates_zero_introduces_row_renders_byte_identical(repo, memory_dir):
+    """AC byte-shape honesty on the candidates surface: the pre-BND-1 wording holds
+    exactly when a candidate introduces nothing."""
+    from memory import recall_diff as RD
+
+    rng = _range_corpus(repo)
+    part = RD.candidates_for_range(rng, memory_dir, repo)
+    out = RD.render_candidates(part)
+    assert "heals 1 boundary link(s)" in out and "introduces" not in out

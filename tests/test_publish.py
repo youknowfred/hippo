@@ -218,3 +218,58 @@ def test_derivation_disclosure_rides_the_receipt(repo, memory_dir):
     }
     assert "disclosed, not blocking" in P.render_preflight(r)
     assert r["ok"] is True  # disclosure never blocks
+
+# --------------------------------------------------------------------------- #
+# BND-1: the preflight receipt states the net boundary effect — display-only
+# --------------------------------------------------------------------------- #
+def _net_corpus(repo: str):
+    """heals 3 / introduces 1 for loc_c: three committed links point at it; it links
+    the local-only loc_d."""
+    for c in ("p1", "p2", "p3"):
+        write_file(repo, f".claude/memory/{c}.md", _mem(c, body=f"see [[loc_c]] {c}"))
+    git_commit(repo, "public subset", 1_700_000_000)
+    write_file(repo, ".claude/memory/loc_c.md", _mem("loc_c", body="see [[loc_d]]"))
+    write_file(repo, ".claude/memory/loc_d.md", _mem("loc_d"))
+
+
+def test_receipt_carries_introduces_and_render_states_net(repo, memory_dir):
+    """AC: heals 3 / introduces 1 renders net -2 on the preflight receipt."""
+    _net_corpus(repo)
+    r = P.publish_preflight("loc_c", memory_dir, repo)
+    assert r["refusal"] is None
+    assert r["receipt"]["heals"] == 3 and r["receipt"]["introduces"] == 1
+    text = P.render_preflight(r)
+    assert (
+        "heals 3 / introduces 1 (net -2) boundary link(s) "
+        "(see: python -m memory.lint_links --boundary)" in text
+    )
+
+
+def test_receipt_zero_introduces_renders_byte_identical(repo, memory_dir):
+    """AC byte-shape honesty: a heals-only candidate renders the pre-BND-1 receipt
+    wording exactly."""
+    _corpus(repo)
+    r = P.publish_preflight("loc_c", memory_dir, repo)
+    assert r["receipt"]["heals"] == 1 and r["receipt"]["introduces"] == 0
+    text = P.render_preflight(r)
+    assert "heals 1 boundary link(s) (see: python -m memory.lint_links --boundary)" in text
+    assert "introduces" not in text
+
+
+def test_introduces_never_gates_the_publish(repo, memory_dir):
+    """AC negative-capability, functional form: a candidate that introduces MANY new
+    danglings and heals none is still ready — introduces/net is receipt vocabulary,
+    never a refusal class (the publish-hard-gate kill re-affirmed)."""
+    write_file(repo, ".claude/memory/pub_a.md", _mem("pub_a", body="no local links"))
+    git_commit(repo, "public subset", 1_700_000_000)
+    links = " and ".join(f"[[w{i}]]" for i in range(9))
+    write_file(repo, ".claude/memory/vol.md", _mem("vol", body=f"see {links}"))
+    for i in range(9):
+        write_file(repo, f".claude/memory/w{i}.md", _mem(f"w{i}"))
+    r = P.publish_preflight("vol", memory_dir, repo)
+    assert r["refusal"] is None
+    assert r["receipt"]["introduces"] == 9 and r["receipt"]["heals"] == 0
+    assert r["ok"] is True and r["commands"]  # ready — the act still prints
+    text = P.render_preflight(r)
+    assert "heals 0 / introduces 9 (net +9) boundary link(s)" in text
+    assert "ready — PRINT-ONLY pending Q3" in text

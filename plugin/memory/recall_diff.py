@@ -164,12 +164,17 @@ def candidates_for_range(
         candidates = [r for r in rows if not _committed(r["name"])]
         if candidates:
             heals: Dict[str, int] = {}
+            intro: Dict[str, int] = {}
             try:
                 from .lint_links import boundary_lint
 
-                heals = boundary_lint(memory_dir, repo_root).get("heals_by") or {}
+                view = boundary_lint(memory_dir, repo_root)
+                heals = view.get("heals_by") or {}
+                # BND-1: the introduces twin, same one call, display-only.
+                intro = view.get("introduces_by") or {}
             except Exception:
                 heals = {}
+                intro = {}
             strength: Dict[str, float] = {}
             try:
                 from .soak import compute_strength_scores
@@ -191,6 +196,7 @@ def candidates_for_range(
                     vb = None
                 r["readiness"] = {
                     "heals": heals.get(r["name"], 0),
+                    "introduces": intro.get(r["name"], 0),
                     "strength": strength.get(r["name"]),
                     "verified_by": vb[0] if vb else None,
                 }
@@ -219,8 +225,13 @@ def render_candidates(part: dict) -> str:
     for r in cands:
         rd = r.get("readiness") or {}
         bits = []
-        if rd.get("heals"):
-            bits.append(f"heals {rd['heals']} boundary link(s)")
+        if rd.get("heals") or rd.get("introduces"):
+            # BND-1: net boundary effect; heals-only rows render byte-identically.
+            n, m = rd.get("heals") or 0, rd.get("introduces") or 0
+            if m:
+                bits.append(f"heals {n} / introduces {m} (net {m - n:+d}) boundary link(s)")
+            else:
+                bits.append(f"heals {n} boundary link(s)")
         if rd.get("strength") is not None:
             bits.append(f"soak {rd['strength']:.2f}")
         if rd.get("verified_by"):
