@@ -594,3 +594,168 @@ def test_record_from_payload_worktree_path_self_exempts(repo, memory_dir):
     )
     assert ok is True  # the touch still logs (the outcome ledger is unchanged)
     assert not any(P.WORKTREE_RECIPE in ln for ln in context)
+
+
+# --------------------------------------------------------------------------- #
+# OPS-1: the plugin_version stamp + launch-pin skew on the fleet line
+# --------------------------------------------------------------------------- #
+def _stamp_env(tmp_path, monkeypatch, version="1.30.0"):
+    """Point the ONE canonical version resolver (telemetry._producer_version) at a
+    fixture manifest, resetting its per-process cache both ways."""
+    from memory import telemetry as T
+
+    root = tmp_path / f"plugin-cache-{version}"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": "hippo", "version": version}), encoding="utf-8"
+    )
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(root))
+    monkeypatch.setattr(T, "_producer_version_cache", T._PRODUCER_VERSION_UNSET)
+
+
+@pytest.fixture()
+def _restore_version_cache():
+    from memory import telemetry as T
+
+    yield
+    T._producer_version_cache = T._PRODUCER_VERSION_UNSET
+
+
+def test_write_presence_stamps_the_running_plugin_version(
+    repo, memory_dir, tmp_path, monkeypatch, _restore_version_cache
+):
+    _seed_commit(repo)
+    _stamp_env(tmp_path, monkeypatch, version="1.30.0")
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    path = P._presence_path(default_telemetry_dir(memory_dir), "sess-1")
+    with open(path, "r", encoding="utf-8") as fh:
+        assert json.load(fh)["plugin_version"] == "1.30.0"
+
+
+def test_write_presence_omits_the_stamp_when_manifest_unreadable(
+    repo, memory_dir, tmp_path, monkeypatch, _restore_version_cache
+):
+    """ED-4: additive and absent when clean — an unreadable manifest stamps nothing."""
+    from memory import telemetry as T
+
+    _seed_commit(repo)
+    bare = tmp_path / "no-manifest-root"
+    bare.mkdir()
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(bare))
+    monkeypatch.setattr(T, "_producer_version_cache", T._PRODUCER_VERSION_UNSET)
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    path = P._presence_path(default_telemetry_dir(memory_dir), "sess-1")
+    with open(path, "r", encoding="utf-8") as fh:
+        assert "plugin_version" not in json.load(fh)
+
+
+def test_fleet_line_appends_versions_only_on_differ(
+    repo, memory_dir, tmp_path, monkeypatch, _restore_version_cache
+):
+    """Launch-pin skew visible fleet-wide: own doc v1.30.0, other pinned at v1.29.0."""
+    _seed_commit(repo)
+    _stamp_env(tmp_path, monkeypatch, version="1.30.0")
+    td = default_telemetry_dir(memory_dir)
+    _plant(td, "other-sess", branch="enh-x", age_s=7 * 60, plugin_version="1.29.0")
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    out = P.presence_producer(memory_dir, repo)
+    assert out is not None and out.count("\n") == 0  # still ONE bounded line
+    assert "enh-x (7m ago, v1.29.0 hooks)" in out
+    assert len(out) <= P._MAX_LINE_CHARS  # the clip still governs
+
+
+def test_fleet_line_byte_identical_on_a_single_version_fleet(
+    repo, memory_dir, tmp_path, monkeypatch, _restore_version_cache
+):
+    """The AC byte-identity pin: a uniform fleet renders EXACTLY as a stampless one."""
+    _seed_commit(repo)
+    _stamp_env(tmp_path, monkeypatch, version="1.30.0")
+    td = default_telemetry_dir(memory_dir)
+    _plant(td, "other-sess", branch="enh-x", age_s=7 * 60, plugin_version="1.30.0")
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    uniform = P.presence_producer(memory_dir, repo)
+    # rebuild the same fleet with NO stamps anywhere (the pre-OPS-1 world)
+    for name in os.listdir(P._presence_dir(td)):
+        os.remove(os.path.join(P._presence_dir(td), name))
+    _plant(td, "other-sess", branch="enh-x", age_s=7 * 60)
+    _plant(td, "sess-1", branch="main", age_s=1)
+    P._SESSION_ID = "sess-1"
+    stampless = P.presence_producer(memory_dir, repo)
+    assert uniform is not None and uniform == stampless
+
+
+def test_old_docs_without_the_field_render_as_before(
+    repo, memory_dir, tmp_path, monkeypatch, _restore_version_cache
+):
+    """A pre-OPS-1 doc lacks the field: it can never render a suffix, and a lone
+    stamped own doc is not 'skew' — nothing appends."""
+    _seed_commit(repo)
+    _stamp_env(tmp_path, monkeypatch, version="1.30.0")
+    td = default_telemetry_dir(memory_dir)
+    _plant(td, "other-sess", branch="enh-x", age_s=7 * 60)  # no plugin_version field
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    out = P.presence_producer(memory_dir, repo)
+    assert out is not None and "hooks" not in out
+
+
+def test_mixed_fleet_suffixes_only_the_stamped_docs(
+    repo, memory_dir, tmp_path, monkeypatch, _restore_version_cache
+):
+    """Differ across fresh docs: stamped docs gain the suffix, stampless stay bare."""
+    _seed_commit(repo)
+    _stamp_env(tmp_path, monkeypatch, version="1.30.0")
+    td = default_telemetry_dir(memory_dir)
+    _plant(td, "o-old", branch="legacy-branch", age_s=9 * 60)  # pre-OPS-1 doc
+    _plant(td, "o-new", branch="enh-x", age_s=7 * 60, plugin_version="1.29.0")
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    out = P.presence_producer(memory_dir, repo)
+    assert "enh-x (7m ago, v1.29.0 hooks)" in out
+    assert "legacy-branch (9m ago)" in out
+
+
+def test_stamp_survives_the_note_clearing_rewrite(
+    repo, memory_dir, tmp_path, monkeypatch, _restore_version_cache
+):
+    """The producer pops moved_note and rewrites the doc — the _read_doc passthrough is
+    what keeps the stamp alive through that rewrite."""
+    _seed_commit(repo)
+    td = default_telemetry_dir(memory_dir)
+    _plant(
+        td, "sess-1", branch="main", age_s=1,
+        plugin_version="1.30.0", moved_note="🚦 fleet: this working tree moved — planted",
+    )
+    P._SESSION_ID = "sess-1"
+    out = P.presence_producer(memory_dir, repo)
+    assert out is not None and "moved" in out  # the note emitted once
+    with open(P._presence_path(td, "sess-1"), "r", encoding="utf-8") as fh:
+        doc = json.load(fh)
+    assert "moved_note" not in doc  # cleared
+    assert doc["plugin_version"] == "1.30.0"  # the stamp survived the rewrite
+
+
+def test_garbage_version_field_never_breaks_the_line(
+    repo, memory_dir, tmp_path, monkeypatch, _restore_version_cache
+):
+    """A handcrafted doc with a non-str stamp degrades to no suffix, never a raise."""
+    _seed_commit(repo)
+    _stamp_env(tmp_path, monkeypatch, version="1.30.0")
+    td = default_telemetry_dir(memory_dir)
+    _plant(td, "other-sess", branch="enh-x", age_s=60, plugin_version=[1, 2, 3])
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    out = P.presence_producer(memory_dir, repo)
+    assert out is not None and "1 other session" in out and "hooks" not in out
+
+
+def test_kill_switch_covers_the_stamp_half(
+    repo, memory_dir, tmp_path, monkeypatch, _restore_version_cache
+):
+    """AC: the presence half rides HIPPO_DISABLE_PRESENCE wholesale — killed lane,
+    no doc, no stamp, no fleet line even with a mixed-version fleet on disk."""
+    _seed_commit(repo)
+    _stamp_env(tmp_path, monkeypatch, version="1.30.0")
+    monkeypatch.setenv("HIPPO_DISABLE_PRESENCE", "1")
+    td = default_telemetry_dir(memory_dir)
+    _plant(td, "other-sess", branch="enh-x", age_s=60, plugin_version="1.29.0")
+    P.write_presence(memory_dir, repo, session_id="sess-1")
+    assert not os.path.exists(P._presence_path(td, "sess-1"))
+    assert P.presence_producer(memory_dir, repo) is None

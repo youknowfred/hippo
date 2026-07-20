@@ -1156,7 +1156,7 @@ workstreams:
         title: "Running-vs-source plugin skew made legible: a DOC-7-sibling doctor line + presence-doc version stamps (the twice-bitten class gets a name)"
         priority: P1
         effort: M
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 4 — check_plugin_source_skew (doctor_checks_env) registered directly after DOC-7, pinned tail untouched; warns ONLY on name-match + realpath-difference + version-difference with the proposal's exact line; empty-norm ok on non-hippo-source repos, equality, unreadable/version-less manifests, and from-source runs (realpath-resolved); ED4R-3 negative-capability pin (check source executes nothing); presence stamp rides telemetry._producer_version (MEA-4's canonical resolver — no second manifest read), _read_doc passthrough keeps it across rewrites; fleet line appends "vX hooks" per stamped doc only when fresh docs (own included) carry >1 distinct version — byte-identity pinned for uniform fleets AND stampless docs; zero session_start.py lines (file untouched in the diff)
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "Bite 1: 5 releases of live-hook lag (1.17.0->1.22.0 until 2026-07-17T19:02Z; hippo-enh-t21-evidence capstone EVD-2 block). Bite 2: commit 827c607's own message ('installed plugin 1.26.0 -> 1.27.0'; 'worklist 4/4 verdicted') + reconsolidation_events.jsonl 07-19 15:18-15:25Z (4 fresh-baselined memories re-flagged by pre-GRW-5 code; `git tag --contains 0368c47` = v1.27.0 only — re-verified) + installed_plugins.json lastUpdated 2026-07-19T15:25:48Z. Prediction: hippo-enh-t18-fleet capstone ('the EVD-2 live-hook-lag class, predicted this time instead of discovered'). Gap: doctor_checks_env.py:584-627 compares installed-vs-venv-sentinel ONLY; grep confirms NOTHING compares the running plugin to the repo's own plugin source, and nothing surfaces session launch-pinning"}
         problem: >-
           Hooks run the installed plugin pinned at session launch — on the
@@ -1216,13 +1216,17 @@ workstreams:
           plugin/hooks/hooks.json (proof hooks resolve from
           CLAUDE_PLUGIN_ROOT — the installed cache pinned at launch);
           ~/.claude/plugins/cache/hippo/hippo/ (16 version dirs — the
-          launch-pin substrate, read-only context).
+          launch-pin substrate, read-only context). Build correction
+          (2026-07-19): the version-read precedent is telemetry._producer_version
+          — MEA-4 shipped the canonical cached resolver AFTER this note's
+          827c607 snapshot; the presence stamp reuses it (inv5) instead of the
+          bootstrap.py:316-321 pattern cited here.
 
       - id: OPS-2
         title: "Scheduler dead-man freshness: a 'quiet' census status from the oracle that already exists (sleep-state.json last_run_at)"
         priority: P2
         effort: S
-        status: planned           # tier ratified 2026-07-19; not started
+        status: done           # 2026-07-19, session 4 — _sleep_freshness join in scheduler_census (ok artifacts with a parsed repo_root only; stale-path/unparseable untouched); quiet on absent OR unparseable OR >_QUIET_AFTER_DAYS=3d-old last_run_at (module constant, no env knob); resolution via telemetry.default_telemetry_dir + sleep._read_state (the canonical readers — the join contains no open()); render names age + log path (log now extracted by _parse_schedule_command) with NO recipe; check_machine_state warn gains the quiet count via .get() (pre-quiet census shapes read 0); ED-3 negative-capability AST pin: subprocess only in _read_crontab, no launchctl outside the print-only recipe; fail-toward-fresh on unexpected join errors (census must not cry wolf on its own bug)
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "The in-code admission: doctor_checks_env.py:640-642 ('a moved venv/repo kills the scheduled 07:30 run before hippo starts, so the morning report cannot carry this warn for its own dead schedule — on-demand doctor is the live surface'); machine_census._classify_schedule (:177-189) detects stale-PATH only; grep this cycle: ZERO readers of last_run_at/sleep-state outside sleep.py; the oracle is written every run (sleep.py:293, _STATE_NAME :61) and live (last_run_at 2026-07-19T14:30:05Z — ran this morning); a schedule that dies for ANY non-path reason (launchctl-unloaded, broken venv python, deps rot) is invisible on every surface today"}
         problem: >-
           The silent-07:30 scheduler-death class is detected only for
@@ -1569,7 +1573,7 @@ release_train:
   - tier: T25
     target_version: TBD
     theme: "Running-state legibility"
-    status: planned          # ratified 2026-07-19; build not started
+    status: done             # 2026-07-19, session 4 — 2/2 items in the gated order (OPS-1 -> OPS-2); zero session_start.py lines exactly as the gate demanded (file absent from the PR diff); done_means met: doctor names running-vs-tree skew on the dogfood shape (live fire at build: "in sync" at v1.27.0=v1.27.0 — the warn arms at the next release cut), the fleet line shows launch-pin skew only when fresh docs differ, and a dying schedule surfaces as 'quiet' from last_run_at (live launchd artifact classified ok — ran 14:30Z the same morning); all read-only, cold-path, remediation human; suite 2,957 -> 2,989
     ratified: >-
       2026-07-19 — owner-ratified in the round-5 formal-question session
       (dated LAW ZERO entry): all five tiers ratified, order T22 -> T23 ->

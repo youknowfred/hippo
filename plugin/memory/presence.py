@@ -10,7 +10,12 @@ forensics. This module is the fleet keystone:
 
 Each session writes ONE per-session doc ``<telemetry_dir>/presence/<safe(session_id)>.json``
 = ``{session_id, branch, head, ts}`` at SessionStart (``write_presence``, wired in
-``session_start.main``'s telemetry block, right after the session token rotates). Docs are
+``session_start.main``'s telemetry block, right after the session token rotates), plus an
+OPTIONAL additive ``plugin_version`` (OPS-1): the RUNNING plugin's manifest version via
+``telemetry._producer_version`` — the launch-pinned hook version, stamped only when the
+manifest is readable (ED-4: absent when not, and old docs simply lack it). The producer
+renders versions ONLY when fresh docs actually differ, so launch-pin skew across sessions
+becomes visible fleet-wide while single-version fleets render byte-identically to before. Docs are
 per-session, NOT a shared file — telemetry.py documents the single-writer assumption a
 shared mutable file would violate; the shape mirrors ``jit.py``'s per-session state dir
 and adds the mtime-TTL half its count-only prune lacks: ``_prune`` deletes ANY session's
@@ -129,7 +134,9 @@ def _presence_path(telemetry_dir: str, session_id: Optional[str]) -> str:
 
 def _read_doc(path: str) -> dict:
     """One presence doc — fresh defaults on absence/corruption, never a raise. Optional
-    fields (``nudged``, ``checked_ts``, ``moved_note``) survive verbatim when present."""
+    fields (``nudged``, ``checked_ts``, ``moved_note``, ``plugin_version``) survive
+    verbatim when present — the passthrough is what keeps the OPS-1 stamp alive across
+    the producer's note-clearing rewrite and ``observe_fleet``'s doc refreshes."""
     doc: dict = {"session_id": "", "branch": "", "head": "", "ts": 0.0}
     try:
         with open(path, "r", encoding="utf-8") as fh:
@@ -140,7 +147,7 @@ def _read_doc(path: str) -> dict:
             doc["head"] = str(raw.get("head") or "")
             ts = raw.get("ts")
             doc["ts"] = float(ts) if isinstance(ts, (int, float)) else 0.0
-            for key in ("checked_ts", "nudged", "moved_note"):
+            for key in ("checked_ts", "nudged", "moved_note", "plugin_version"):
                 if key in raw:
                     doc[key] = raw[key]
     except Exception:
@@ -322,6 +329,15 @@ def write_presence(
         if not head:
             return
         doc: dict = {"session_id": sid, "branch": branch, "head": head, "ts": time.time()}
+        # OPS-1: stamp which plugin version this session's hooks ACTUALLY run — the ONE
+        # canonical resolver (MEA-4's, CLAUDE_PLUGIN_ROOT first, module root as the dev
+        # fallback, NEVER the operated-on tree). Additive and absent when unreadable
+        # (ED-4); a SessionStart-only read, not the inv6 per-prompt path.
+        from .telemetry import _producer_version
+
+        pv = _producer_version()
+        if pv:
+            doc["plugin_version"] = pv
         path = _presence_path(td, sid)
         if os.path.exists(path):
             old = _read_doc(path)
@@ -363,11 +379,13 @@ def clear_presence(memory_dir: Optional[str] = None, session_id: Optional[str] =
 
 
 def _fresh_others(telemetry_dir: str, own_sid: Optional[str]) -> List[dict]:
-    """Every OTHER session's FRESH doc, newest first: ``[{branch, age_s}]``.
+    """Every OTHER session's FRESH doc, newest first: ``[{branch, age_s, plugin_version}]``.
 
     Freshness is mtime within ``PRESENCE_TTL_SECONDS`` — the same oracle ``_prune`` uses,
-    so a doc is fresh iff it would survive a prune. Bounded work: one scandir plus one
-    tiny JSON read per fresh doc (the dir is TTL- and count-capped)."""
+    so a doc is fresh iff it would survive a prune. ``plugin_version`` is the doc's OPS-1
+    stamp when present and a str (None otherwise — old docs lack it and render exactly as
+    before). Bounded work: one scandir plus one tiny JSON read per fresh doc (the dir is
+    TTL- and count-capped)."""
     out: List[Tuple[float, dict]] = []
     try:
         own_name = os.path.basename(_presence_path(telemetry_dir, own_sid))
@@ -384,7 +402,17 @@ def _fresh_others(telemetry_dir: str, own_sid: Optional[str]) -> List[dict]:
                 if age > PRESENCE_TTL_SECONDS:
                     continue
                 doc = _read_doc(e.path)
-                out.append((mtime, {"branch": doc.get("branch") or "(detached)", "age_s": age}))
+                pv = doc.get("plugin_version")
+                out.append(
+                    (
+                        mtime,
+                        {
+                            "branch": doc.get("branch") or "(detached)",
+                            "age_s": age,
+                            "plugin_version": pv if isinstance(pv, str) and pv else None,
+                        },
+                    )
+                )
     except Exception:
         return []
     return [d for _mtime, d in sorted(out, reverse=True)]
@@ -411,17 +439,30 @@ def presence_producer(memory_dir: str, repo_root: str, ctx=None) -> Optional[str
             return None
         sid = _SESSION_ID or current_session_id(td)
         lines: List[str] = []
+        own_version: Optional[str] = None
         own_path = _presence_path(td, sid)
         if os.path.exists(own_path):
             own = _read_doc(own_path)
+            pv = own.get("plugin_version")
+            own_version = pv if isinstance(pv, str) and pv else None
             note = own.pop("moved_note", None)
             if isinstance(note, str) and note.strip():
                 lines.append(_clip(note))
                 _write_doc(td, sid, own)  # emitted once — the note never renders twice
         others = _fresh_others(td, sid)
         if others:
+            # OPS-1: launch-pin skew — append per-session hook versions ONLY when the
+            # fresh docs (own included) actually carry more than one version. A uniform
+            # fleet and any doc lacking the stamp render byte-identically to pre-OPS-1
+            # (the acceptance byte-identity pin); versions are facts, never advice.
+            versions = {d["plugin_version"] for d in others} | {own_version}
+            versions.discard(None)
+            skew = len(versions) > 1
             shown = ", ".join(
-                f"{d['branch']} ({_age_str(d['age_s'])} ago)" for d in others[:_MAX_FLEET_NAMES]
+                f"{d['branch']} ({_age_str(d['age_s'])} ago, v{d['plugin_version']} hooks)"
+                if skew and d["plugin_version"]
+                else f"{d['branch']} ({_age_str(d['age_s'])} ago)"
+                for d in others[:_MAX_FLEET_NAMES]
             )
             more = (
                 f" (+{len(others) - _MAX_FLEET_NAMES} more)"

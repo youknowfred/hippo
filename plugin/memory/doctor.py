@@ -61,6 +61,7 @@ from .doctor_checks_env import (
     check_projects_registry,
     check_machine_state,
     check_plugin_version,
+    check_plugin_source_skew,
 )
 from .doctor_checks_corpus import (
     check_steering,
@@ -319,6 +320,7 @@ def check_trust_scorecard(ctx: DoctorContext) -> Dict[str, str]:
 CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("bootstrap", check_bootstrap),
     ("plugin_version", check_plugin_version),
+    ("plugin_source_skew", check_plugin_source_skew),  # OPS-1: running hooks vs this tree's plugin source (dogfood shape only; empty-norm elsewhere)
     ("venv", check_venv),
     ("corpus", check_corpus_exists),
     ("symlink", check_symlink),
