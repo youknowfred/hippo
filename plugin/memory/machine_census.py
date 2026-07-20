@@ -139,30 +139,48 @@ def trust_census() -> dict:
     trust row cannot inject — trust junk is inert-but-illegible. The census's value here
     is legibility plus the unmounted-volume/re-consent distinction, NOT incident
     prevention. Never raises; never writes; never prescribes ``untrust`` (Q2 pending).
+
+    BND-2: live fingerprinted rows additionally carry ``withholding`` — the count of
+    stems recall is quarantining in that corpus because its content drifted from the
+    consent baseline. Computed via the ONE shipped detector (``trust.untrusted_changes``
+    — inv5: a second differ would be a defect), on this cold path only (census/doctor;
+    never a hook). Additive and absent when clean (ED-4); the exhibit is the alloy trio
+    — 3 hippo-authored memories machine-invisibly withheld for 4-5 days while this row
+    said only "live [review, fingerprinted]". Report-only: the remedy text names the
+    in-project route; nothing here re-consents (an unattended re-baseline is the gate
+    consenting to itself — trust.py's own named anti-pattern).
     """
     # Same private-import posture as _under_volatile_root: reuse trust.py's canonical
     # reader (realpath keys, never-raise) rather than parsing the file a second way.
-    from .trust import _load_registry, trust_registry_path
+    from .trust import _load_registry, trust_registry_path, untrusted_changes
 
     path = trust_registry_path()
     rows = _load_registry()
     entries: List[dict] = []
     for root in sorted(rows):
         entry = rows[root] if isinstance(rows[root], dict) else {}
-        entries.append(
-            {
-                "root": root,
-                "live": os.path.isdir(root),
-                "volatile": _under_volatile_root(root),
-                "origin": entry.get("origin"),
-                "fingerprinted": isinstance(entry.get("fingerprint"), dict),
-            }
-        )
+        row = {
+            "root": root,
+            "live": os.path.isdir(root),
+            "volatile": _under_volatile_root(root),
+            "origin": entry.get("origin"),
+            "fingerprinted": isinstance(entry.get("fingerprint"), dict),
+        }
+        # Rows without a fingerprint or not live are skipped by design — their
+        # existing states ("dead", "legacy — no baseline") already say why.
+        if row["live"] and row["fingerprinted"]:
+            drift = untrusted_changes(root, os.path.join(root, ".claude", "memory"))
+            n_changed = len(drift.get("changed") or [])
+            n_added = len(drift.get("added") or [])
+            if drift.get("baseline") and (n_changed or n_added):
+                row["withholding"] = {"changed": n_changed, "added": n_added}
+        entries.append(row)
     return {
         "path": path,
         "entries": entries,
         "live": sum(1 for e in entries if e["live"]),
         "dead": sum(1 for e in entries if not e["live"]),
+        "withholding": sum(1 for e in entries if e.get("withholding")),
     }
 
 
@@ -425,6 +443,15 @@ def _render_trust(census: dict) -> List[str]:
         else:
             state = "dead [temp-rooted]" if e["volatile"] else "dead [possibly unmounted]"
         lines.append(f"  {state} [{', '.join(tags)}]: {e['root']}")
+        # BND-2: the withholding sub-line rides its row; zero-drift rows render
+        # byte-identically to the pre-BND-2 census (pinned). Counts only — the
+        # withheld stem NAMES are the in-project doctor's surface (SEC-15).
+        w = e.get("withholding")
+        if w:
+            lines.append(
+                f"    WITHHOLDING {w['changed']} changed / {w['added']} added — "
+                "re-consent in that project (trust_corpus / doctor)"
+            )
     lines.append(
         "  rows are REPORT-ONLY pending owner decision Q2 — the per-row route is the "
         "`untrust` tool, which also deletes the row's SEC-6 fingerprint baseline "

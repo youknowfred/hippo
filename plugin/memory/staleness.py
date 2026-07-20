@@ -690,10 +690,13 @@ def set_invalid_after(path: str, ts: Optional[str] = None, *, dry_run: bool = Fa
             # fold the file's new bytes into the trusted-corpus consent baseline so a
             # retire/demote verdict never quarantines the very file it just judged
             # (no-op on legacy fingerprint-less records / ungated corpora; never fatal).
+            # BND-3: an anomalous fold failure rides the result additively.
             try:
-                from .trust import record_authored_write
+                from .trust import record_authored_write_disclosing
 
-                record_authored_write(os.path.dirname(path), path)
+                note = record_authored_write_disclosing(os.path.dirname(path), path)
+                if note:
+                    result["consent_note"] = note
             except Exception:
                 pass
     except Exception as exc:

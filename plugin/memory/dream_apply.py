@@ -276,18 +276,24 @@ def undo_edges(
 
     undone: List[dict] = []
     refused: List[Tuple[dict, str]] = []
+    fold_failures = 0  # BND-3: restored files whose consent re-fold anomalously failed
     for edge in reversed(targets):
         ok, reason = _undo_one_edge(memory_dir, edge)
         if ok:
             # SEC-6: re-fold the restored bytes (the apply fold moved the baseline to
             # the stamped content; the un-stamped restoration must move it back or the
             # file quarantines). A deleted generated file simply no-ops the fold.
+            # BND-3: an anomalous re-fold failure is counted into the message's one line.
             fname = (edge.get("undo") or {}).get("file")
             if fname:
                 try:
-                    from .trust import record_authored_write
+                    from .trust import record_authored_write_disclosing
 
-                    record_authored_write(memory_dir, os.path.join(memory_dir, fname))
+                    note = record_authored_write_disclosing(
+                        memory_dir, os.path.join(memory_dir, fname)
+                    )
+                    if note:
+                        fold_failures += 1
                 except Exception:
                     pass
         (undone if ok else refused).append((edge, reason) if not ok else edge)
@@ -329,6 +335,12 @@ def undo_edges(
         lines.append(f"  ✘ {edge.get('edge_id')}: {reason}")
     if refused:
         lines.append("  (refused edges are untouched — resolve by hand or `git checkout`.)")
+    if fold_failures:
+        # BND-3: the undo's ONE consent-disclosure line (aggregate).
+        lines.append(
+            f"  ⚠ {fold_failures} restored file(s) did not rejoin the consent baseline — "
+            "withheld from recall until re-consent (trust_corpus)"
+        )
     return (1 if refused else 0), "\n".join(lines)
 
 

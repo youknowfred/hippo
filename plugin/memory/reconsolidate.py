@@ -468,6 +468,9 @@ def semantic_reverify(
             for k in ("cited", "dropped_citations", "dropped_gone",
                       "dropped_not_derived", "preserved_not_derived"):
                 result[k] = rv.get(k, [])
+            # BND-3: the primitive's fold-failure disclosure rides through (additive).
+            if rv.get("consent_note"):
+                result["consent_note"] = rv["consent_note"]
         demoted_before = None  # COR-16: bytes-before capture for the two-write rollback
         if outcome == "demote":
             # LIF-1: the demote verdict OWNS its terminal state — close the validity
@@ -501,6 +504,9 @@ def semantic_reverify(
                 return result
             result["invalidated"] = bool(ia["changed"])
             result["invalid_after"] = ia.get("invalid_after")
+            # BND-3: same carry as the reverify leg (one canonical line either way).
+            if ia.get("consent_note"):
+                result["consent_note"] = ia["consent_note"]
             if result["invalidated"] and not dry_run:
                 # Same-session immediacy (mirrors archive_memory): the penalty reads the
                 # INDEX's invalid_after, so refresh now instead of waiting for the next
@@ -544,6 +550,9 @@ def semantic_reverify(
                             pass
                 return result
             result["edge_written"] = edge["changed"]
+            # BND-3: same carry for the successor's supersedes-edge write.
+            if edge.get("consent_note"):
+                result["consent_note"] = edge["consent_note"]
             if not dry_run:
                 # TMB-5: fires only here, inside the single-item demote+superseded_by
                 # verdict (no replay_all verb); see reconsolidate_replay.

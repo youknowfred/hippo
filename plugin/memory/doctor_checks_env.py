@@ -708,7 +708,13 @@ def check_machine_state(ctx: DoctorContext) -> Dict[str, str]:
     already cover: dead trust rows, dangling memory symlinks, gone-path scheduler
     artifacts — and, since OPS-2, QUIET ones (artifact ok, ``sleep-state.json``
     ``last_run_at`` absent/stale beyond the census's dead-man window: the
-    loaded-but-dying schedule the stale-path class cannot see). Temp-rooted-LIVE rows
+    loaded-but-dying schedule the stale-path class cannot see). Since BND-2 the line
+    also carries WITHHOLDING corpora — live fingerprinted trust rows whose content
+    drifted from the consent baseline, so recall is quarantining stems there with no
+    surface reachable from this machine's other projects (the alloy trio sat withheld
+    4-5 days exactly this way). Withholding is a live condition, not dead rot, but it
+    is the one census state where recall content is silently suppressed — it joins the
+    warn set; the remedy stays per-project and human. Temp-rooted-LIVE rows
     never warn and the volatile split stays in the census command's own report —
     warn-on-dead-only keeps this line from becoming wallpaper in a section that
     already carries chronic warns. Sleep inherits the line
@@ -723,11 +729,14 @@ def check_machine_state(ctx: DoctorContext) -> Dict[str, str]:
 
         farm = symlink_farm_census()
         dangling = farm["dangling"] + farm["dangling_temp_rooted"]
-        dead_trust = trust_census()["dead"]
+        trust = trust_census()
+        dead_trust = trust["dead"]
+        # BND-2: own-shape read — absent pre-withholding shapes count 0 (ED-4).
+        withholding = trust.get("withholding", 0)
         sched = scheduler_census()
         stale_sched = sched["stale"]
         quiet_sched = sched.get("quiet", 0)  # OPS-2: own-shape read — absent pre-quiet shapes count 0
-        if not (dangling or dead_trust or stale_sched or quiet_sched):
+        if not (dangling or dead_trust or withholding or stale_sched or quiet_sched):
             return {
                 "status": "ok",
                 "message": "machine state: no dead trust rows, dangling memory symlinks, "
@@ -738,6 +747,12 @@ def check_machine_state(ctx: DoctorContext) -> Dict[str, str]:
             parts.append(f"{dangling} dangling memory symlink" + ("" if dangling == 1 else "s"))
         if dead_trust:
             parts.append(f"{dead_trust} dead trust row" + ("" if dead_trust == 1 else "s"))
+        if withholding:
+            parts.append(
+                f"{withholding} withholding "
+                + ("corpus" if withholding == 1 else "corpora")
+                + " (trust drift — re-consent in that project)"
+            )
         if stale_sched:
             parts.append(
                 f"{stale_sched} stale scheduler artifact" + ("" if stale_sched == 1 else "s")

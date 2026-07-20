@@ -438,6 +438,7 @@ def run_apply_pass(
 
     applied: List[dict] = []
     refused: List[Tuple[dict, str]] = []
+    fold_failures = 0  # BND-3: stamped files whose consent fold anomalously failed
     ledger_lines: List[dict] = []
     now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
     for cand in eligible:
@@ -494,10 +495,13 @@ def run_apply_pass(
         # immediately". The write is gated (trusted corpus, capped, θ-barred, secret-
         # blocked), so authorship-is-consent applies the same way it does for
         # add_typed_relation's own internal fold.
+        # BND-3: an anomalous fold failure is counted into the digest's one line.
         try:
-            trust.record_authored_write(
+            note = trust.record_authored_write_disclosing(
                 memory_dir, os.path.join(memory_dir, cand["source"] + ".md"), repo_root
             )
+            if note:
+                fold_failures += 1
         except Exception:
             pass
         ledger_row["undo"] = undo_rec
@@ -538,6 +542,13 @@ def run_apply_pass(
     for cand, reason in refused:
         lines.append(
             f"  ✘ refused {cand['source']} → {cand['target']} ({cand['kind']}): {reason}"
+        )
+    if fold_failures:
+        # BND-3: the pass's ONE consent-disclosure line (aggregate, per the
+        # at-most-one-line-per-verb ceiling) — remediation stays human.
+        lines.append(
+            f"  ⚠ {fold_failures} stamped file(s) did not join the consent baseline — "
+            "withheld from recall until re-consent (trust_corpus)"
         )
     if gated:
         lines.append(

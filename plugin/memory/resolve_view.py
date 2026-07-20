@@ -541,6 +541,10 @@ def apply_resolve_verdict(
             f"{second} demoted (invalid_after {rv.get('invalid_after') or 'set'}); "
             f"{first} now supersedes it"
         )
+        # BND-3: the chain's write-moment fold-failure disclosure rides the detail
+        # (one line — whichever primitive in the demote+supersede chain hit it).
+        if rv.get("consent_note"):
+            result["detail"].append(f"⚠ {rv['consent_note']}")
         replay = rv.get("succession_replay")
         if replay:  # TMB-5 rides the same demote chain — summary only, here
             c = replay.get("counts") or {}

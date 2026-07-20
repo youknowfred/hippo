@@ -24,7 +24,7 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Optional
 
-from .links import LinkGraph, build_graph
+from .links import TYPED_RELATIONS, LinkGraph, build_graph
 from .staleness import RunContext
 
 
@@ -116,10 +116,16 @@ def boundary_lint(memory_dir: str, repo_root: str) -> dict:
     single-homed oracle, the SHP-1 precedent — never a fresh membership listing) and
     the machinery is ``LinkGraph``/``_graph_report`` over the committed files' texts.
     ``heals_by`` counts, per LOCAL-ONLY memory, how many boundary danglings publishing
-    it would heal — the per-candidate column PUB-2's report composes. NEVER a gate
-    (PR #67 called the class expected-not-error; CLB-1 keeps edge findings advisory);
-    empty norms: no git / no committed subset -> ``ok`` False and the callers render
-    their quiet line. Read-only; never raises.
+    it would heal — the per-candidate column PUB-2's report composes. ``introduces_by``
+    (BND-1) is its twin, computed in the SAME walk: per local-only memory, how many of
+    its own outbound targets (plain wikilinks + typed relations) resolve to OTHER
+    local-only memories — each a NEW boundary dangling the moment it publishes. The
+    measured treadmill (20 -> 19 across two real publishes) was invisible without this
+    half. NEVER a gate on either number (PR #67 called the class expected-not-error;
+    CLB-1 keeps edge findings advisory; the publish-hard-gate kill re-affirms
+    introduces/net as receipt vocabulary FOREVER); empty norms: no git / no committed
+    subset -> ``ok`` False and the callers render their quiet line. Read-only; never
+    raises.
     """
     empty = {
         "ok": False,
@@ -127,6 +133,7 @@ def boundary_lint(memory_dir: str, repo_root: str) -> dict:
         "dangling": [],
         "typed_dangling": [],
         "heals_by": {},
+        "introduces_by": {},
         "local_only": [],
     }
     try:
@@ -162,12 +169,29 @@ def boundary_lint(memory_dir: str, repo_root: str) -> dict:
             full_stem = full.resolve(d["target"]) if full else None
             if full_stem and full_stem not in committed_texts:
                 heals_by[full_stem] = heals_by.get(full_stem, 0) + 1
+        # BND-1: the introduces twin, same walk — a candidate's own outbound edges
+        # (plain + typed, mirroring the two dangling classes above) that resolve to
+        # OTHER local-only memories each become a boundary dangling when it lands.
+        introduces_by: Dict[str, int] = {}
+        if full:
+            for stem in local_only:
+                n = sum(
+                    1 for t in full.outbound(stem) if t != stem and t not in committed_texts
+                ) + sum(
+                    1
+                    for rel in TYPED_RELATIONS
+                    for t in full.typed_outbound(stem, rel)
+                    if t != stem and t not in committed_texts
+                )
+                if n:
+                    introduces_by[stem] = n
         return {
             "ok": True,
             "files": report["files"],
             "dangling": report["dangling"],
             "typed_dangling": report["typed_dangling"],
             "heals_by": heals_by,
+            "introduces_by": introduces_by,
             "local_only": sorted(local_only),
         }
     except Exception:
@@ -267,11 +291,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"  ✗ {d['file']} -> [[{d['target']}]]")
         for d in view["typed_dangling"]:
             print(f"  ✗ {d['file']} -> {d['relation']}: {d['target']}")
-        if view["heals_by"]:
+        heals, intro = view["heals_by"], view.get("introduces_by") or {}
+        if heals or intro:
             print("heals-N (publishing the local-only memory heals N boundary danglings):")
-            for stem, n in sorted(view["heals_by"].items(), key=lambda kv: (-kv[1], kv[0])):
-                print(f"  {n:3d}  {stem}")
-        # READ-ONLY and NEVER a gate: the boundary class is expected-not-error (PR #67).
+            # BND-1: rows carry the introduces twin + net when nonzero; a corpus with
+            # zero introduces renders byte-identically to the pre-BND-1 block (pinned).
+            for stem in sorted(set(heals) | set(intro), key=lambda s: (-heals.get(s, 0), s)):
+                n, m = heals.get(stem, 0), intro.get(stem, 0)
+                suffix = f"   introduces {m} (net {m - n:+d})" if m else ""
+                print(f"  {n:3d}  {stem}{suffix}")
+        # READ-ONLY and NEVER a gate: the boundary class is expected-not-error (PR #67);
+        # introduces/net is receipt vocabulary FOREVER (the publish-hard-gate kill).
         return 0
 
     report = lint(md)

@@ -1265,9 +1265,14 @@ def write_memory(
     # is a no-op by design); never fatal.
     if tier == "project":
         try:
-            from .trust import record_authored_write
+            from .trust import record_authored_write_disclosing
 
-            record_authored_write(memory_dir, path, repo_root)
+            # BND-3: an anomalous fold failure (quarantine-active corpus, fold False)
+            # is disclosed at the write moment via the existing warnings channel —
+            # the one time a human is present to act. Designed no-ops stay silent.
+            note = record_authored_write_disclosing(memory_dir, path, repo_root)
+            if note:
+                result["warnings"] = (result.get("warnings") or []) + [note]
         except Exception:
             pass
 
@@ -1709,6 +1714,10 @@ def main(argv=None) -> int:
             )
     if res["related"]:
         print(f"related : {', '.join(res['related'])} (curate this — keep/trim/replace, see /hippo:new)")
+    # BND-3 (+RCH-10): the result's warnings channel now prints on the CLI too — the
+    # MCP reply already rendered it; the CLI silently dropped it.
+    for w in res.get("warnings") or []:
+        print(f"warning : {w}")
     # LIF-2: the neighbor warning block. Bounded (<= _DUP_NEIGHBORS_K lines, descriptions
     # truncated at format_results' 220-char display convention) and decision-routing — the
     # tool reports, the agent decides; nothing here rejects or edits anything.

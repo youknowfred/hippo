@@ -27,7 +27,7 @@ from memory import new_memory as N
 from memory import recall as R
 from memory import session_start as S
 from memory import trust as T
-from memory.links import add_typed_relation
+from memory.links import add_typed_relation, remove_typed_relation
 from memory.provenance import build_repo_file_index, reverify_file
 from memory.staleness import set_invalid_after
 
@@ -372,3 +372,139 @@ def test_main_no_banner_for_own_or_legacy_corpus(repo, memory_dir, tmp_path, mon
     assert T.mark_trusted(repo, memory_dir=memory_dir) is True  # origin preserved (init)
     out = _main_output(capsys, memory_dir, idx)
     assert "FOREIGN" not in out
+
+
+# --------------------------------------------------------------------------- #
+# BND-3 — write-time fold-failure disclosure (authorship-is-consent stops
+# failing silently). The alloy shape: a trusted+fingerprinted corpus whose fold
+# returns False — the ONE genuinely anomalous case — surfaces one line; every
+# designed no-op (untrusted / legacy fingerprint-less / non-git / CI bypass)
+# stays silent BY DESIGN.
+# --------------------------------------------------------------------------- #
+def _force_fold_failure(monkeypatch):
+    """The genuinely anomalous shape: trusted + fingerprinted and the registry
+    write fails — ``record_authored_write`` returns False with everything else
+    real (the same observable state the lagged pre-COR-10 installed plugin
+    produced on the live alloy corpus)."""
+    monkeypatch.setattr(T, "_write_registry_doc", lambda doc: False)
+
+
+def test_disclosing_helper_speaks_only_when_quarantine_is_active(repo, memory_dir, tmp_path, monkeypatch):
+    _gate(monkeypatch, tmp_path)
+    _write_corpus(memory_dir)
+    path = os.path.join(memory_dir, "excel_header.md")
+    # untrusted: the fold's False is a designed no-op -> None
+    assert T.record_authored_write_disclosing(memory_dir, path, repo) is None
+    # legacy fingerprint-less record: None (silent BY DESIGN — the overloaded False)
+    assert T.mark_trusted(repo) is True
+    assert T.record_authored_write_disclosing(memory_dir, path, repo) is None
+    # trusted WITH fingerprint and a healthy fold: None (the fold succeeded)
+    assert T.mark_trusted(repo, memory_dir=memory_dir) is True
+    assert T.record_authored_write_disclosing(memory_dir, path, repo) is None
+    # the anomalous case: quarantine active + fold False -> the ONE canonical line
+    _force_fold_failure(monkeypatch)
+    line = T.record_authored_write_disclosing(memory_dir, path, repo)
+    assert line == T._CONSENT_FOLD_FAILURE_LINE
+    assert "withheld" in line and "re-consent" in line and "trust_corpus" in line
+
+
+def test_disclosing_helper_honors_the_ci_bypass(repo, memory_dir, tmp_path, monkeypatch):
+    """HIPPO_TRUST_ALL means no quarantine applies anywhere — a fold False under it
+    can never withhold anything, so the helper stays silent."""
+    reg = str(tmp_path / "hippo-trust.json")
+    monkeypatch.setenv("HIPPO_TRUST_FILE", reg)
+    monkeypatch.setenv("HIPPO_TRUST_ALL", "1")
+    _write_corpus(memory_dir)
+    _force_fold_failure(monkeypatch)
+    assert (
+        T.record_authored_write_disclosing(
+            memory_dir, os.path.join(memory_dir, "excel_header.md"), repo
+        )
+        is None
+    )
+
+
+def test_write_memory_discloses_on_the_warnings_channel(repo, memory_dir, tmp_path, monkeypatch):
+    """AC: the alloy fixture — an authored write against a trusted+fingerprinted
+    corpus whose fold is forced False surfaces the line on write_memory's existing
+    warnings channel (rendered by both the MCP reply and the CLI)."""
+    _trusted_corpus(repo, memory_dir, tmp_path, monkeypatch)
+    git_commit(repo, "corpus", when=1_700_000_000)
+    _force_fold_failure(monkeypatch)
+    res = N.write_memory(
+        "fold_fail_probe", "probe description for the fold failure disclosure",
+        "project", memory_dir=memory_dir, repo_root=repo, no_links=True,
+    )
+    assert res["created"] is True
+    assert T._CONSENT_FOLD_FAILURE_LINE in (res.get("warnings") or [])
+
+
+def test_write_memory_stays_silent_on_a_fingerprint_less_corpus(repo, memory_dir, tmp_path, monkeypatch):
+    """AC byte-identity: the same write on a legacy corpus carries no disclosure —
+    there the fold's False is the designed no-op, not an anomaly."""
+    _gate(monkeypatch, tmp_path)
+    _write_corpus(memory_dir)
+    assert T.mark_trusted(repo) is True  # legacy: no fingerprint baseline
+    git_commit(repo, "corpus", when=1_700_000_000)
+    _force_fold_failure(monkeypatch)  # even with the registry write failing
+    res = N.write_memory(
+        "legacy_probe", "probe description legacy corpus stays silent",
+        "project", memory_dir=memory_dir, repo_root=repo, no_links=True,
+    )
+    assert res["created"] is True
+    assert T._CONSENT_FOLD_FAILURE_LINE not in (res.get("warnings") or [])
+
+
+def test_frontmatter_primitives_carry_the_consent_note(repo, memory_dir, tmp_path, monkeypatch):
+    """add/remove_typed_relation + set_invalid_after stash the one disclosure line
+    additively on their results — absent entirely when the fold succeeds (ED-4)."""
+    _gate(monkeypatch, tmp_path)
+    _write_corpus(memory_dir)
+    assert T.mark_trusted(repo, memory_dir=memory_dir) is True
+    path = os.path.join(memory_dir, "budget_envelope.md")
+    ok = add_typed_relation(path, "refines", "excel_header")
+    assert ok["error"] is None and "consent_note" not in ok
+    _force_fold_failure(monkeypatch)
+    r = add_typed_relation(path, "refines", "reranker_voyage")
+    assert r["consent_note"] == T._CONSENT_FOLD_FAILURE_LINE
+    r = remove_typed_relation(path, "refines", "reranker_voyage")
+    assert r["consent_note"] == T._CONSENT_FOLD_FAILURE_LINE
+    r = set_invalid_after(path, "2026-01-01T00:00:00+00:00")
+    assert r["consent_note"] == T._CONSENT_FOLD_FAILURE_LINE
+
+
+def test_reverify_discloses_and_reconsolidate_carries_it(repo, memory_dir, tmp_path, monkeypatch):
+    """reverify_file stashes the note; the reconsolidate verdict flow carries it up
+    so the MCP render's one ⚠ line has a source."""
+    _trusted_corpus(repo, memory_dir, tmp_path, monkeypatch)
+    git_commit(repo, "baseline", when=1_700_000_000)
+    path = os.path.join(memory_dir, "reranker_voyage.md")
+    repo_files, basename_index = build_repo_file_index(repo)
+    from memory.provenance import backfill_file
+
+    backfill_file(path, repo, repo_files, basename_index)
+    _force_fold_failure(monkeypatch)
+    rv = reverify_file(path, repo, repo_files, basename_index)
+    assert rv["error"] is None
+    assert rv["consent_note"] == T._CONSENT_FOLD_FAILURE_LINE
+
+    from memory.reconsolidate import semantic_reverify
+
+    out = semantic_reverify("reranker_voyage", "graduate", memory_dir, repo)
+    assert out["error"] is None
+    assert out["consent_note"] == T._CONSENT_FOLD_FAILURE_LINE
+
+
+def test_disclosure_never_retries_reconsents_or_reaches_hooks():
+    """AC negative-capability: the helper never retries the fold, never marks trust;
+    hooks and index builds stay out of scope entirely (the never-consent posture) —
+    neither the fold nor its disclosing wrapper appears in their source."""
+    import inspect
+
+    src = inspect.getsource(T.record_authored_write_disclosing)
+    assert "mark_trusted" not in src
+    assert src.count("record_authored_write(") == 1  # one fold call, no retry loop
+    for mod_name in ("session_start", "build_index", "recall"):
+        mod = __import__(f"memory.{mod_name}", fromlist=["_"])
+        # substring covers both the fold and the disclosing wrapper
+        assert "record_authored_write" not in inspect.getsource(mod), mod_name

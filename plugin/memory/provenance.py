@@ -1520,10 +1520,13 @@ def reverify_file(
             # a no-op on legacy fingerprint-less records and ungated corpora). Runs on
             # the no-op path too: "I re-read it and it's correct" consents the bytes that
             # were read, whether or not the provenance lines moved.
+            # BND-3: an anomalous fold failure rides the result additively.
             try:
-                from .trust import record_authored_write
+                from .trust import record_authored_write_disclosing
 
-                record_authored_write(os.path.dirname(path), path, repo_root)
+                note = record_authored_write_disclosing(os.path.dirname(path), path, repo_root)
+                if note:
+                    result["consent_note"] = note
             except Exception:
                 pass
     except Exception as exc:
@@ -1767,10 +1770,13 @@ def rederive_file(
             # every memory it fixes. WITH it on a bulk pass it would be self-consent — which
             # is why this call lives here, behind a per-item approval, and NOT in
             # backfill_file (whose --refresh path has no reviewer).
+            # BND-3: an anomalous fold failure rides the result additively.
             try:
-                from .trust import record_authored_write
+                from .trust import record_authored_write_disclosing
 
-                record_authored_write(os.path.dirname(path), path, repo_root)
+                note = record_authored_write_disclosing(os.path.dirname(path), path, repo_root)
+                if note:
+                    result["consent_note"] = note
             except Exception:
                 pass
         return result
@@ -1973,6 +1979,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"{verb} {base}: cited_paths = {r['cited']}")
         for ln in citation_rot_lines(base, r, dry_run=args.dry_run):
             print(ln)
+        if r.get("consent_note"):  # BND-3: the one write-moment disclosure line
+            print(f"⚠ {r['consent_note']}")
         return 0
 
     if args.reverify:
@@ -1990,6 +1998,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"reverify {base}: already current (no change)")
         for ln in citation_rot_lines(base, r, dry_run=args.dry_run):
             print(ln)
+        if r.get("consent_note"):  # BND-3: the one write-moment disclosure line
+            print(f"⚠ {r['consent_note']}")
         return 0
 
     if args.refresh_one:

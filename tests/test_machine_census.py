@@ -702,3 +702,143 @@ def test_census_path_never_probes_launchctl_or_grows_subprocess(tmp_path):
     # reads touch only hippo's own gitignored telemetry)
     assert "default_telemetry_dir" in join_src and "_read_state" in join_src
     assert "open(" not in join_src
+
+
+# --------------------------------------------------------------------------- #
+# BND-2: trust drift joins the census — WITHHOLDING rows (report-only)
+# --------------------------------------------------------------------------- #
+def _fingerprinted_corpus(tmp_path, name="drift-repo"):
+    """A live trusted+fingerprinted corpus with one consented memory; returns
+    ``(root_str, memory_dir_path)``. Drift is then minted by editing/adding files
+    AFTER the consent — the exact shape the live exhibits had."""
+    root = tmp_path / name
+    md = root / ".claude" / "memory"
+    md.mkdir(parents=True)
+    (md / "consented-fact.md").write_text(
+        "---\nname: consented-fact\n---\nbody\n", encoding="utf-8"
+    )
+    assert T.mark_trusted(str(root), memory_dir=str(md), origin="review")
+    return str(root), md
+
+
+def test_trust_census_reports_withholding_for_drifted_live_rows(tmp_path, monkeypatch):
+    """AC: the alloy twin — authored-but-unfolded stems render as withheld with the
+    re-consent route named. 0 changed / 3 added mirrors the live exhibit that sat
+    machine-invisible 4-5 days."""
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)  # the conftest CI bypass suppresses quarantine
+    root, md = _fingerprinted_corpus(tmp_path)
+    for stem in ("httpx-twin", "icns-twin", "p7-twin"):
+        (md / f"{stem}.md").write_text(f"---\nname: {stem}\n---\nnew\n", encoding="utf-8")
+    out = MC.trust_census()
+    row = {e["root"]: e for e in out["entries"]}[os.path.realpath(root)]
+    assert row["withholding"] == {"changed": 0, "added": 3}
+    assert out["withholding"] == 1
+    text = "\n".join(MC._render_trust(out))
+    assert (
+        "WITHHOLDING 0 changed / 3 added — re-consent in that project "
+        "(trust_corpus / doctor)" in text
+    )
+
+
+def test_trust_census_counts_changed_and_added_separately(tmp_path, monkeypatch):
+    """The hippo-shape twin: an edited consented file counts changed, a new file
+    counts added — the two overloads of drift stay legible as separate numbers."""
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    root, md = _fingerprinted_corpus(tmp_path)
+    (md / "consented-fact.md").write_text(
+        "---\nname: consented-fact\n---\nedited\n", encoding="utf-8"
+    )
+    (md / "new-stem.md").write_text("---\nname: new-stem\n---\nnew\n", encoding="utf-8")
+    row = {e["root"]: e for e in MC.trust_census()["entries"]}[os.path.realpath(root)]
+    assert row["withholding"] == {"changed": 1, "added": 1}
+
+
+def test_trust_census_zero_drift_renders_byte_identical(tmp_path, monkeypatch):
+    """AC byte-identity pin: zero-drift fleets render exactly as today — no
+    ``withholding`` key on any row (ED-4 absence-emits-nothing), summary count 0,
+    no WITHHOLDING line. Composes with the untouched pre-BND-2 render tests above,
+    which pin the row lines' exact vocabulary. The CI bypass is cleared so the
+    clean-row path is proven live, not vacuously suppressed."""
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    _trust_rows(tmp_path)  # one live+fingerprinted (clean) row + two dead rows
+    out = MC.trust_census()
+    assert out["withholding"] == 0
+    assert all("withholding" not in e for e in out["entries"])
+    text = "\n".join(MC._render_trust(out))
+    assert "WITHHOLDING" not in text
+
+
+def test_trust_census_skips_dead_and_legacy_rows(tmp_path, monkeypatch):
+    """AC: rows without a fingerprint or not live are skipped — their existing
+    states already say why. A drifty legacy corpus mints NO withholding row."""
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    _trust_rows(tmp_path)
+    legacy = tmp_path / "legacy-repo"
+    lmd = legacy / ".claude" / "memory"
+    lmd.mkdir(parents=True)
+    assert T.mark_trusted(str(legacy))  # no memory_dir -> fingerprint-less record
+    (lmd / "anything.md").write_text("---\nname: anything\n---\nx\n", encoding="utf-8")
+    out = MC.trust_census()
+    assert out["withholding"] == 0
+    assert all("withholding" not in e for e in out["entries"])
+
+
+def test_census_drift_uses_the_one_shipped_detector_only():
+    """inv5 negative-capability pin (AC): drift is computed ONLY via
+    ``trust.untrusted_changes`` — a second fingerprint differ in the census would be
+    a defect. The forbidden names are the primitives a re-implementation would need
+    (same token-scan pattern as the projects-census delegation pin)."""
+    import inspect
+
+    src = inspect.getsource(MC)
+    assert "untrusted_changes" in src
+    for forbidden in ("corpus_fingerprint", "consented_hashes", "file_sha256", "hashlib"):
+        assert forbidden not in src, f"second-differ primitive in census source: {forbidden}"
+
+
+def test_census_withholding_is_report_only():
+    """AC: no re-consent, no untrust, no write of any kind from the census path —
+    the remedy text names the in-project route and the human runs it."""
+    import inspect
+
+    src = inspect.getsource(MC)
+    assert "mark_trusted" not in src
+    assert "untrust(" not in src  # the verb CALL; untrusted_changes is the detector read
+    assert "_write_registry" not in src
+    assert "re-consent in that project (trust_corpus / doctor)" in src
+
+
+def test_check_machine_state_gains_the_withholding_clause(monkeypatch):
+    """AC: doctor's machine-state one-liner carries the withholding count — plural
+    and singular forms — and still names the census command."""
+    from memory.doctor_checks_env import check_machine_state
+
+    _quiet_scheduler(monkeypatch)
+    monkeypatch.setattr(
+        MC, "trust_census", lambda: {"entries": [], "live": 2, "dead": 0, "withholding": 2}
+    )
+    r = check_machine_state(None)
+    assert r["status"] == "warn"
+    assert "2 withholding corpora (trust drift — re-consent in that project)" in r["message"]
+    assert "python -m memory.machine_census" in r["message"]
+    monkeypatch.setattr(
+        MC, "trust_census", lambda: {"entries": [], "live": 1, "dead": 0, "withholding": 1}
+    )
+    r = check_machine_state(None)
+    assert "1 withholding corpus (trust drift — re-consent in that project)" in r["message"]
+
+
+def test_check_machine_state_tolerates_the_pre_withholding_census_shape(monkeypatch):
+    """ED-4 own-shape read: a trust census without the ``withholding`` key — the
+    pre-BND-2 shape older tests still monkeypatch — reads as 0 and the ok message
+    stays byte-identical (the zero-drift doctor pin)."""
+    from memory.doctor_checks_env import check_machine_state
+
+    _quiet_scheduler(monkeypatch)
+    monkeypatch.setattr(MC, "trust_census", lambda: {"entries": [], "live": 1, "dead": 0})
+    r = check_machine_state(None)
+    assert r["status"] == "ok", r["message"]
+    assert (
+        "machine state: no dead trust rows, dangling memory symlinks, "
+        "or stale/quiet scheduler artifacts" in r["message"]
+    )

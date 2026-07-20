@@ -157,11 +157,13 @@ def publish_preflight(name: str, memory_dir: str, repo_root: str) -> dict:
         try:
             from .lint_links import boundary_lint
 
-            receipt["heals"] = (boundary_lint(memory_dir, repo_root).get("heals_by") or {}).get(
-                stem, 0
-            )
+            view = boundary_lint(memory_dir, repo_root)
+            receipt["heals"] = (view.get("heals_by") or {}).get(stem, 0)
+            # BND-1: the introduces twin — same one boundary_lint call, display-only.
+            receipt["introduces"] = (view.get("introduces_by") or {}).get(stem, 0)
         except Exception:
             receipt["heals"] = 0
+            receipt["introduces"] = 0
         try:
             from .soak import compute_strength_scores
             from .telemetry import default_telemetry_dir
@@ -218,8 +220,17 @@ def render_preflight(result: dict) -> str:
         lines.append(f"  ⚠ advisory [{f['lint']}]: {f['finding']}")
     r = result.get("receipt") or {}
     bits = []
-    if r.get("heals"):
-        bits.append(f"heals {r['heals']} boundary link(s) (see: python -m memory.lint_links --boundary)")
+    if r.get("heals") or r.get("introduces"):
+        # BND-1: state the net boundary effect when the candidate introduces its own
+        # danglings; a heals-only candidate renders byte-identically to pre-BND-1.
+        n, m = r.get("heals") or 0, r.get("introduces") or 0
+        if m:
+            bits.append(
+                f"heals {n} / introduces {m} (net {m - n:+d}) boundary link(s) "
+                "(see: python -m memory.lint_links --boundary)"
+            )
+        else:
+            bits.append(f"heals {n} boundary link(s) (see: python -m memory.lint_links --boundary)")
     if r.get("strength") is not None:
         bits.append(f"soak {r['strength']:.2f}")
     if r.get("verified_by"):

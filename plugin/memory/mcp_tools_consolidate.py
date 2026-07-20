@@ -267,6 +267,10 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
             )
         bits.append("logged" if r["logged"] else "not logged")
         out = [f"reverify {base}: " + "; ".join(bits)]
+        # BND-3: the write-moment fold-failure disclosure — carried up from whichever
+        # primitive (reverify / invalid_after / supersedes edge) hit it. One line.
+        if r.get("consent_note"):
+            out.append(f"⚠ {r['consent_note']}")
         # TMB-5: the succession replay's per-query lines — the same rendering the CLI prints.
         from .reconsolidate import succession_replay_lines
 
@@ -426,11 +430,19 @@ def _tool_rederive(args: Dict[str, Any]) -> str:
         lines = [f"{verb} {fname}: cited_paths = {r['cited']}"]
         lines += citation_rot_lines(fname, r, dry_run=dry)
         if not dry and r["changed"]:
-            lines.append(
-                "source_commit PRESERVED (this is not a re-verify — no staleness flag was "
-                "cleared); the reviewed bytes were folded into the consent baseline, so the "
-                "memory is not quarantined."
-            )
+            # BND-3: the folded-into-consent claim was unconditional — false whenever
+            # the fold anomalously failed. State whichever actually happened.
+            if r.get("consent_note"):
+                lines.append(
+                    "source_commit PRESERVED (this is not a re-verify — no staleness flag "
+                    f"was cleared); ⚠ {r['consent_note']}."
+                )
+            else:
+                lines.append(
+                    "source_commit PRESERVED (this is not a re-verify — no staleness flag was "
+                    "cleared); the reviewed bytes were folded into the consent baseline, so the "
+                    "memory is not quarantined."
+                )
         return "\n".join(lines)
 
     return (
