@@ -374,6 +374,40 @@ def record_authored_write(
         return False
 
 
+_CONSENT_FOLD_FAILURE_LINE = (
+    "this write did not join the consent baseline — it will be withheld "
+    "from recall until re-consent (trust_corpus)"
+)
+
+
+def record_authored_write_disclosing(
+    memory_dir: str, path: str, repo_root: Optional[str] = None
+) -> Optional[str]:
+    """BND-3: the fold, plus the write-moment disclosure its silent False deserved.
+
+    Runs ``record_authored_write`` UNCHANGED, then disambiguates a False: only when
+    this corpus's consent quarantine is ACTIVE (trusted WITH a fingerprint baseline —
+    read via ``consented_hashes``, changing nothing) does a failed fold mean the
+    just-written file WILL be withheld from recall at the next session, so the ONE
+    canonical disclosure line is returned for the calling verb to append to its own
+    agent-facing output (at most one line per verb). Every other False — untrusted,
+    legacy fingerprint-less, non-git, the CI bypass — returns None: those are
+    designed no-ops and stay silent BY DESIGN (the overloaded False the COR-10
+    post-mortem below narrates, disambiguated at last). Detection only: never
+    retries, never re-consents, never marks trust (an unattended re-baseline is the
+    gate consenting to itself). Never raises.
+    """
+    try:
+        if record_authored_write(memory_dir, path, repo_root):
+            return None
+        gate_root = gate_repo_root(memory_dir, repo_root)
+        if gate_root is None or consented_hashes(gate_root) is None:
+            return None
+        return _CONSENT_FOLD_FAILURE_LINE
+    except Exception:
+        return None
+
+
 def drift_withholding_line(drift: dict, *, max_names: int = 6) -> Optional[str]:
     """The ONE rendering of "this corpus is trusted but recall is withholding files".
 

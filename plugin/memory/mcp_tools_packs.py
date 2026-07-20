@@ -227,10 +227,16 @@ def _tool_pack_install_item(args: Dict[str, Any]) -> str:
         if r.get("adopted")
         else "installed"
     )
+    # BND-3: the absorbed-the-bytes claim must not stand over a failed fold — when
+    # the primitive disclosed an anomalous fold failure, that line replaces the claim.
+    consent = (
+        f"⚠ {r['consent_note']}"
+        if r.get("consent_note")
+        else "the SEC-6 consent baseline absorbed the bytes (the per-item approval IS the review)"
+    )
     return (
         f"✔ {verb} {name} → {r['path']} — pack-stamped; .packs.lock.json records "
-        "source/version + the future three-way base; the SEC-6 consent baseline "
-        "absorbed the bytes (the per-item approval IS the review); index refreshed. "
+        f"source/version + the future three-way base; {consent}; index refreshed. "
         "Commit the new memory + the lockfile together."
     )
 
@@ -299,9 +305,15 @@ def _tool_pack_update_item(args: Dict[str, Any]) -> str:
     )
     if not r["updated"]:
         return f"✘ pack_update_item {name} (state: {r.get('state')}): {r['error']}"
+    # BND-3: same honesty as the install reply — no absorbed claim over a failed fold.
+    consent = (
+        f"⚠ {r['consent_note']}"
+        if r.get("consent_note")
+        else "consent baseline absorbed the bytes"
+    )
     return (
         f"✔ updated {name} (state: {r['state']}) → {r['path']} — lockfile base "
-        "advanced to the new upstream text; consent baseline absorbed the bytes; "
+        f"advanced to the new upstream text; {consent}; "
         "index refreshed. Commit the updated memory + the lockfile together."
     )
 

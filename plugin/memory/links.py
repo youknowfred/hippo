@@ -761,10 +761,13 @@ def add_typed_relation(path: str, relation: str, target: str, *, dry_run: bool =
             # SEC-6: per-item, agent-gated typed-edge write — fold the new bytes into the
             # trusted-corpus consent baseline (review = consent; no-op on legacy
             # fingerprint-less records / ungated corpora; never fatal).
+            # BND-3: an anomalous fold failure rides the result additively.
             try:
-                from .trust import record_authored_write
+                from .trust import record_authored_write_disclosing
 
-                record_authored_write(os.path.dirname(path), path)
+                note = record_authored_write_disclosing(os.path.dirname(path), path)
+                if note:
+                    result["consent_note"] = note
             except Exception:
                 pass
     except Exception as exc:
@@ -842,10 +845,13 @@ def remove_typed_relation(path: str, relation: str, target: str, *, dry_run: boo
             from .atomic import write_text_atomic
 
             write_text_atomic(path, new_text)  # COR-18: never a torn corpus file
+            # BND-3: same disclosure contract as add_typed_relation.
             try:
-                from .trust import record_authored_write
+                from .trust import record_authored_write_disclosing
 
-                record_authored_write(os.path.dirname(path), path)
+                note = record_authored_write_disclosing(os.path.dirname(path), path)
+                if note:
+                    result["consent_note"] = note
             except Exception:
                 pass
     except Exception as exc:

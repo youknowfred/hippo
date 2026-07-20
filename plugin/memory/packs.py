@@ -755,10 +755,14 @@ def pack_install_item(
         _write_lockfile(memory_dir, lock)
 
         # SEC-6: the per-item approval that led here IS the review — consent the bytes.
+        # BND-3: a fold failure on a quarantine-active corpus is disclosed, not dropped
+        # (the reply's absorbed-the-bytes claim must not stand over a failed fold).
         try:
-            from .trust import record_authored_write
+            from .trust import record_authored_write_disclosing
 
-            record_authored_write(memory_dir, target, repo_root)
+            note = record_authored_write_disclosing(memory_dir, target, repo_root)
+            if note:
+                result["consent_note"] = note
         except Exception:
             pass
         try:
@@ -971,10 +975,13 @@ def pack_update_item(
 
         entry["installed"][name] = {"base": it["theirs"], "sha256": file_sha256(it["path"])}
         _write_lockfile(memory_dir, lock)
+        # BND-3: same disclosure contract as pack_install_item.
         try:
-            from .trust import record_authored_write
+            from .trust import record_authored_write_disclosing
 
-            record_authored_write(memory_dir, it["path"], repo_root)
+            note = record_authored_write_disclosing(memory_dir, it["path"], repo_root)
+            if note:
+                result["consent_note"] = note
         except Exception:
             pass
         try:

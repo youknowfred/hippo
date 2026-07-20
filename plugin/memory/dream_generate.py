@@ -638,10 +638,14 @@ def stage_generated(
         # baseline, and record that hash as the undo oracle: undo deletes the file only
         # if it is byte-identical to what staging left — a hand-edited or graduated
         # draft refuses (protect the human's/evidence's work; use git from there).
+        # BND-3: an anomalous fold failure rides the result additively (this
+        # quarantined tier's own digest is the reader when it renders).
         try:
-            from .trust import record_authored_write
+            from .trust import record_authored_write_disclosing
 
-            record_authored_write(memory_dir, path, repo_root)
+            note = record_authored_write_disclosing(memory_dir, path, repo_root)
+            if note:
+                out["consent_fold_failures"] = out.get("consent_fold_failures", 0) + 1
         except Exception:
             pass
         h = file_sha256(path)
@@ -738,10 +742,13 @@ def _set_confidence(path: str, value: str, *, dry_run: bool = False) -> dict:
             from .atomic import write_text_atomic
 
             write_text_atomic(path, new_text)  # COR-18: never a torn corpus file
+            # BND-3: an anomalous fold failure rides the result additively.
             try:
-                from .trust import record_authored_write
+                from .trust import record_authored_write_disclosing
 
-                record_authored_write(os.path.dirname(path), path)
+                note = record_authored_write_disclosing(os.path.dirname(path), path)
+                if note:
+                    result["consent_note"] = note
             except Exception:
                 pass
     except Exception as exc:
