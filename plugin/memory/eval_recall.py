@@ -278,6 +278,8 @@ from .eval_fixtures import (  # drafts-queue plumbing + the T11 synthesizers (fa
     _project_fixture_path,
     default_drafts_path,
     draft_forgetting_fixtures,
+    is_project_local_fixture,
+    promoted_gate,
     draft_livedin_fixtures,
     draft_update_fixtures,
     run_draft_forgetting_cli,
@@ -774,20 +776,19 @@ def evaluate(
     # hard-set gates above: no path provided → skipped (pass=None, excluded from `ok`);
     # a provided path that loads empty → loud FAIL (a truncated/malformed fixture is a
     # real problem, not a deliberately-absent input).
-    relevance_provided = bool(relevance_set_path)
-    abstention_provided = bool(abstention_set_path)
-    gates["precision@10"] = {
-        "value": precision["precision"], "threshold": GATE_PRECISION_AT_K,
-        "pass": (precision["n"] > 0 and precision["precision"] >= GATE_PRECISION_AT_K)
-        if relevance_provided else None,
-        **({"skipped": True} if not relevance_provided else {}),
-    }
-    gates["abstention_rate"] = {
-        "value": abstention["rate"], "threshold": GATE_ABSTENTION,
-        "pass": (abstention["n"] > 0 and abstention["rate"] >= GATE_ABSTENTION)
-        if abstention_provided else None,
-        **({"skipped": True} if not abstention_provided else {}),
-    }
+    # ABS-3: both bind only on the pack-corpus pairing they were calibrated for; a project's
+    # own fixture REPORTS instead (see promoted_gate) — scoping one twin and not the other
+    # would leave the same category error live under another name.
+    gates["precision@10"] = promoted_gate(
+        precision["precision"], GATE_PRECISION_AT_K,
+        precision["n"] > 0 and precision["precision"] >= GATE_PRECISION_AT_K,
+        relevance_set_path, "relevance set",
+    )
+    gates["abstention_rate"] = promoted_gate(
+        abstention["rate"], GATE_ABSTENTION,
+        abstention["n"] > 0 and abstention["rate"] >= GATE_ABSTENTION,
+        abstention_set_path, "off-topic fixture",
+    )
     # PRF-2: cold_p95_ms follows the SAME skip-vs-gate shape as the hard-set/token-reduction
     # gates above (pass=None + skipped=True + a reason string, excluded from `ok`) rather than
     # a bespoke boolean -- one pattern for "this gate wasn't asked to run" across the module.
@@ -869,9 +870,11 @@ def _default_fixture_path(filename: str) -> Optional[str]:
     """Resolve a default eval fixture, or None when no fixture exists anywhere.
 
     Probe order:
-      1. ``.claude/memory/.audit-fixtures/<filename>`` — the project-local convention
-         the /hippo:audit skill writes to (any consuming project can carry its own
-         calibration data).
+      1. ``.claude/memory/.audit-fixtures/<filename>`` — the project-local convention. ABS-1:
+         how a file GETS there differs per fixture and this resolver does not care.
+         /hippo:audit writes ``recall_hard_set.yaml``. There is by contrast
+         no writer anywhere for ``recall_abstention_set.yaml`` — it is hand-authored.
+         Never restate this as "the dir /hippo:audit writes to"; it shipped a false remedy.
       2. ``<repo>/tests/fixtures/<filename>`` — the engine repo's own checked-in set.
 
     ``None`` (nothing found) makes ``main()`` inherit ``evaluate()``'s skip semantics
@@ -1037,23 +1040,30 @@ def recommend_floor(on_scores: List[float], off_scores: List[float]) -> Optional
 
 
 def _raw_max_cosines(index: LoadedIndex, queries: List[str]) -> List[float]:
-    """Best DESCRIPTION-row cosine per query — the exact quantity the dense floor gates.
+    """Best cosine per query over the WHOLE dense matrix — what the floor actually gates.
 
     Embeds with the corpus's configured/warm model via ``recall.embed_query`` — resolved
     through the module attribute so hermetic tests' fake embedders apply (offline; the
     caller has already verified ``dense_ready``). A query that fails to embed is skipped
-    (better a smaller honest sample than a fabricated zero)."""
+    (better a smaller honest sample than a fabricated zero).
+
+    ABS-4 — this scored ``sims[:n_desc]`` while calling it "the exact quantity the dense floor
+    gates": true when GRF-3 wrote it, false since RET-2 widened the matrix. ``_dense_rank_rows``
+    applies the floor ONCE at row level, to description AND body-chunk rows by design ("one
+    calibrated number"), so calibrating on the narrower population made the sweep optimistic
+    about leakage — a body chunk is where an adjacent-technical query finds its best match. On
+    hippo's corpus the sweep contradicted the runtime it advises: description-only saw off-topic
+    max 0.6523 and promised "at 0.663, 0 probes would leak", but the gated matrix tops out at
+    0.7223 and 2/11 still admit. Scoring it all costs nothing — the matmul covers every row."""
     from . import recall as _recall_mod
 
     out: List[float] = []
-    n_desc = len(index.entries)
     for q in queries:
         if not q:
             continue
         try:
             qvec = _recall_mod.embed_query(q, allow_download=False)
-            sims = index.dense @ qvec
-            out.append(round(float(sims[:n_desc].max()), 6))
+            out.append(round(float((index.dense @ qvec).max()), 6))
         except Exception:
             continue
     return out
@@ -1108,8 +1118,8 @@ def floor_sweep(
             "ok": False,
             "error": "need both on-topic hard-set rows resolvable against this corpus and "
             "off-topic abstention probes — "
-            f"(on-topic {len(on_queries)}, off-topic {len(probes)}); draft fixtures via "
-            "/hippo:audit or SIG-6's abstention_fixtures flow",
+            f"(on-topic {len(on_queries)}, off-topic {len(probes)}); draft the on-topic half "
+            "via /hippo:audit (it writes recall_hard_set.yaml); hand-author the rest (ABS-1)",
         }
 
     from .recall import _dense_floor
@@ -1648,7 +1658,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         mark = "➖" if skipped else ("✅" if g["pass"] else "❌")
         extra = f" ({g['pct']*100:.1f}% reduction)" if name == "token_reduction" else ""
         if skipped:
-            extra += f" — skipped ({_SKIP_REASONS.get(name, 'input absent')}; excluded from RESULT)"
+            # ABS-3: a gate that RAN but does not bind carries its own reason — the generic
+            # table would say "no ... fixture" for one that exists and measured a real number.
+            why = g.get("reported_only")
+            label = "reported only" if why else "skipped"
+            why = why or _SKIP_REASONS.get(name, "input absent")
+            extra += f" — {label} ({why}; excluded from RESULT)"
         print(f"  {mark} {name:18s} = {g['value']} (threshold {g['threshold']}){extra}")
     # RET-8: the per-category breakdown — the line that makes a regression attributable.
     # One line per category present in the hard set; single-category (all-default) fixtures

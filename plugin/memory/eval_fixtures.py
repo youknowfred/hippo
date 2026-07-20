@@ -57,6 +57,53 @@ def _project_fixture_path(memory_dir: str, filename: str = "recall_hard_set.yaml
     return os.path.join(memory_dir, ".audit-fixtures", filename)
 
 
+def is_project_local_fixture(path: Optional[str]) -> bool:
+    """True when ``path`` is a corpus's OWN ``.audit-fixtures/`` file (the convention above).
+
+    ABS-3: the two RET-8-promoted thresholds (``GATE_PRECISION_AT_K``, ``GATE_ABSTENTION``)
+    are regression tripwires measured against the SHIPPED fixtures on the pack-seeded corpus
+    — their own constant block says so — so they bind on that pairing and report elsewhere.
+    A project-local fixture is a different instrument on a different corpus: hippo's own
+    66-memory corpus abstains 0/11 where the 22-memory pack corpus scores 0.3333, and no
+    setting closes that gap (ABS-2), so failing the gate there would only punish a corpus
+    for growing.
+
+    Deliberately narrow: this asks "was this auto-discovered under the project-local
+    convention?", NOT "is this outside the engine repo?". An EXPLICITLY supplied fixture
+    path — a caller passing ``--relevance-set``, a test handing over a tmp file — is a
+    deliberate request to gate against that data and keeps binding. Only the
+    ``.audit-fixtures/`` convention, which ``_default_fixture_path`` reaches on its own
+    without anyone asking, drops to report-only.
+    """
+    if not path:
+        return False
+    parts = os.path.normpath(path).split(os.sep)
+    return ".audit-fixtures" in parts
+
+
+def promoted_gate(value, threshold, passed: bool, path: Optional[str], kind: str) -> dict:
+    """Build a RET-8-promoted gate entry with ABS-3's three-way skip/report/bind semantics.
+
+    Shared by ``precision@10`` and ``abstention_rate`` so the two cannot drift apart:
+      * no fixture at all  -> ``pass: None`` + ``skipped`` (a deliberately-absent input)
+      * project-local      -> ``pass: None`` + ``skipped`` + ``reported_only`` (it RAN, the
+                              value is real, the pack-calibrated threshold just does not
+                              transfer to this corpus)
+      * anything else      -> binds normally, so CI's pack-seeded lane and any explicitly
+                              supplied fixture keep failing on a real regression.
+    """
+    local = is_project_local_fixture(path)
+    entry = {"value": value, "threshold": threshold, "pass": passed if (path and not local) else None}
+    if not path or local:
+        entry["skipped"] = True
+    if path and local:
+        entry["reported_only"] = (
+            f"project-local {kind} — this threshold is calibrated against the shipped pack "
+            "corpus and does not transfer (ABS-3)"
+        )
+    return entry
+
+
 def default_drafts_path(memory_dir: str) -> str:
     """The SIG-6 drafts-queue path — inside the gitignored pending dir (see block comment)."""
     from .capture import default_pending_dir
@@ -460,6 +507,18 @@ def draft_livedin_fixtures(
     rows derive from recorded evidence about memories that already exist; nothing
     generates memory content. ``{path, hit_pairs, added, kept, skipped_noise}``;
     absence of candidates appends nothing (no file created).
+
+    ABS-5 — ``derived_expected`` IS NOT A RELEVANCE JUDGMENT. The join behind it is
+    SESSION-grain: a pair confirms when the memory was injected in that session and one of
+    its cited files was touched later. A long implementation session therefore confirms most
+    of what it injected, whatever the query asked. Measured on hippo's own corpus, the row for
+    "bump version to v1.11.1 and tag the release" carried 17 stems including all seven
+    enhancement-tier memories and two roadmap proposals — none of which answer a version-bump
+    query. That is fine for its actual purpose (a per-item ``confirm_hard_set_row`` gate where
+    a human picks the ONE right stem) and wrong for anything that consumes the list wholesale:
+    poured into a ``recall_relevance_set.yaml`` it would build an instrument that rewards long
+    sessions and inflates precision@k, since ~17 admissible stems make almost any top-10 score.
+    The name says ``derived``, not ``judged``; keep it that way.
     """
     from .eval_metrics import _load_fixture_docs
     from .outcome import _injection_join

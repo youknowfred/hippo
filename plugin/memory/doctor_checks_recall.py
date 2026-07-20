@@ -251,12 +251,25 @@ def check_floor_calibration(ctx: DoctorContext) -> Dict[str, str]:
                 "message": f"floor calibration: configured {configured} ≈ recommended "
                 f"{recommended} (Δ{delta:+}){overlap}.",
             }
+        # ABS-4: on an OVERLAPPING corpus the recommendation is a trade, not a fix — name
+        # its measured cost instead of pointing at the table, or this repeats the powerless
+        # remedy ABS-2 removed one check over.
+        if sweep.get("overlap"):
+            remedy = (
+                f"adopting it would cut {sweep.get('cut_on')} real quer(ies) and still leak "
+                f"{sweep.get('leaked_off')} of {sweep.get('off_n')} probes THROUGH THE DENSE "
+                "LANE, which BM25 admits past anyway (ABS-2) — evidence, not a fix"
+            )
+        else:
+            remedy = (
+                "edit recall._DENSE_FLOOR_BY_MODEL or set HIPPO_DENSE_FLOOR yourself; "
+                "advisory only, nothing auto-writes"
+            )
         return {
             "status": "warn",
             "message": f"floor calibration: configured {configured} vs sweep-recommended "
             f"{recommended} (Δ{delta:+}, off-topic max {sweep.get('off_max')}){overlap} — "
-            "edit recall._DENSE_FLOOR_BY_MODEL or set HIPPO_DENSE_FLOOR yourself; "
-            "advisory only, nothing auto-writes.",
+            f"{remedy}.",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"floor-calibration check failed: {exc}."}
@@ -480,19 +493,29 @@ def check_drop_autopsy(ctx: DoctorContext) -> Dict[str, str]:
 
 
 def check_abstention_cold_start(ctx: DoctorContext) -> Dict[str, str]:
-    """RET-11: reliable ABSTENTION (returning nothing for an off-topic prompt) is DENSE-GATED.
+    """RET-11: on the BM25-only path there is no SEMANTIC signal to rank a coincidental
+    keyword overlap below a real hit.
 
-    Measured, not assumed. On the BM25-only cold-start path — before ``/hippo:bootstrap`` warms
-    the dense model, or whenever the model cache is cold — recall cannot reliably reject an
-    off-topic query: BM25 admits any prompt that shares even ONE keyword with a memory, and no
-    lexical threshold (summed IDF mass, matched-token count, or single-token IDF) separates that
-    coincidental overlap from a genuine single-keyword match without also dropping real hits —
-    on the golden fixture the two classes overlap in every BM25-observable signal (a real
-    "combining a keyword and an embedding ranking" query and an off-topic "classic French onion
-    soup" query each match exactly one distinctive token). Only the dense model's semantic floor
-    tells them apart. So rather than ship a false-precision BM25 floor, this check NAMES the
-    limitation when it is live and nudges the one real fix. Read-only; ``ok`` once dense is
-    serving or nothing is indexed yet; never raises.
+    Measured, not assumed. BM25 admits any prompt that shares even ONE keyword with a memory,
+    and no lexical threshold (summed IDF mass, matched-token count, or single-token IDF)
+    separates that coincidental overlap from a genuine single-keyword match without also
+    dropping real hits — on the golden fixture the two classes overlap in every
+    BM25-observable signal (a real "combining a keyword and an embedding ranking" query and an
+    off-topic "classic French onion soup" query each match exactly one distinctive token).
+    Only the dense model tells them apart, which is why no false-precision BM25 floor was
+    shipped. Read-only; ``ok`` once dense is serving or nothing is indexed yet; never raises.
+
+    ABS-2 — WHAT WARMING THE MODEL DOES AND DOES NOT DO. This check used to end "run
+    /hippo:bootstrap to warm the dense model and enable the abstention floor", which inverted
+    the actual effect on the abstention METRIC. recall() abstains iff ALL FOUR rankings are
+    empty (``recall.py``'s ``not rankings`` hard skip); warming the model ADDS two candidate
+    lanes (dense description + dense body), so it can only ever make abstention RARER, never
+    more common. Demonstrated on a one-memory corpus (a puppy-care memory, probe "kitten
+    nutrition and grooming schedule" — lexically disjoint, so both BM25 lanes are empty):
+    dense OFF abstains at rate 1.0, dense ON at 0.0. The dense floor's job is to stop the
+    dense ranker from admitting the whole corpus (cosine has no notion of "no match"), NOT to
+    produce abstentions. Warming is still the right nudge — for RANKING quality, which is what
+    this message now says.
     """
     try:
         from .build_index import _load_manifest, default_index_dir
@@ -506,15 +529,18 @@ def check_abstention_cold_start(ctx: DoctorContext) -> Dict[str, str]:
         if manifest.get("dense_ready"):
             return {
                 "status": "ok",
-                "message": "abstention floor active — the dense model is warmed.",
+                "message": "dense model warmed — the semantic ranking signal is live "
+                "(this is a ranking property, not an abstention one; ABS-2).",
             }
         return {
             "status": "warn",
-            "message": "recall is serving BM25-only (dense model not warmed), so ABSTENTION is "
-            "degraded: an off-topic prompt that shares even one keyword with a memory can still "
-            "surface a weak match. Reliable rejection of off-topic queries is dense-gated — no "
-            "lexical threshold separates a coincidental keyword overlap from a real one (RET-11) "
-            "— so run /hippo:bootstrap to warm the dense model and enable the abstention floor.",
+            "message": "recall is serving BM25-only (dense model not warmed): an off-topic "
+            "prompt that shares even one keyword with a memory surfaces a weak match, and "
+            "there is no semantic signal to rank it below a real hit — no lexical threshold "
+            "separates a coincidental overlap from a genuine one (RET-11). Run "
+            "/hippo:bootstrap to warm the dense model and get that ranking signal. Note it "
+            "will not make recall abstain MORE often: abstention needs every lane empty, and "
+            "the dense lanes only add candidates (ABS-2).",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"abstention cold-start check failed: {exc}."}
@@ -531,12 +557,24 @@ def check_abstention_floor_sanity(ctx: DoctorContext) -> Dict[str, str]:
 
     The dense floor (0.60 for bge) is a global default; a particular corpus can still admit
     off-topic prompts whose scores overlap its real hits. This runs the corpus-local fixture
-    (``<memory_dir>/.audit-fixtures/recall_abstention_set.yaml``, written by ``/hippo:audit``)
-    against the live index and reports how many actually abstained — the EMPIRICAL per-corpus
-    number, distinct from ``check_abstention_cold_start`` (RET-11)'s STRUCTURAL bm25-only
-    statement, and it fires on the dense path too when a corpus's own floor is too permissive.
+    (``<memory_dir>/.audit-fixtures/recall_abstention_set.yaml``) against the live index and
+    reports how many actually abstained — the EMPIRICAL per-corpus number, distinct from
+    ``check_abstention_cold_start`` (RET-11)'s STRUCTURAL bm25-only statement, and it fires on
+    the dense path too when a corpus's own floor is too permissive.
     Bounded (``_ABSTENTION_SANITY_MAX_QUERIES``), read-only, deterministic (recall() is), and
     degrades to ``ok``/``warn`` — never raises. Skips cleanly when there is no fixture or index.
+
+    ABS-1 — THE FIXTURE IS HAND-AUTHORED; NOTHING GENERATES IT. This docstring used to say it
+    was "written by ``/hippo:audit``" and the no-fixture branch below told the user to "run
+    /hippo:audit to generate one". Both were false for the whole life of the check, and the
+    cause was a NAME COLLISION worth pinning so the claim cannot come back: SIG-6's
+    ``draft_abstention_fixtures`` flow (``/hippo:audit``, ``/hippo:consolidate`` Step 5, the
+    ``abstention_fixtures`` MCP tool) drafts the ABSTENTION BACKLOG — queries recall answered
+    with NOTHING and arguably should not have — and its confirmed rows land in
+    ``recall_hard_set.yaml`` tagged ``category: abstention``. That is the OPPOSITE polarity
+    from this file, which lists queries that SHOULD abstain. Two different fixtures, one word.
+    A check whose remediation pointed at a capability that never existed sat inert instead of
+    reporting a real leak, so the pointer is now the honest one: author the rows yourself.
     """
     try:
         from .build_index import _load_manifest, default_index_dir, load_index
@@ -548,7 +586,10 @@ def check_abstention_floor_sanity(ctx: DoctorContext) -> Dict[str, str]:
             return {
                 "status": "ok",
                 "message": "abstention floor: no corpus-local off-topic fixture "
-                "(.audit-fixtures/recall_abstention_set.yaml) — run /hippo:audit to generate one.",
+                "(.audit-fixtures/recall_abstention_set.yaml) — nothing generates this file; "
+                "author it by hand as a list of `- query: \"...\"` rows this corpus should "
+                "have NO answer for. (SIG-6's abstention_fixtures flow drafts the opposite "
+                "polarity — queries that DID abstain — into recall_hard_set.yaml.)",
             }
         index_dir = default_index_dir(ctx.memory_dir)
         if _load_manifest(index_dir) is None:
@@ -560,17 +601,20 @@ def check_abstention_floor_sanity(ctx: DoctorContext) -> Dict[str, str]:
         abstained = round(n * rate)
         backend = "dense" if index.dense_ready else "bm25-only"
         if rate < GATE_ABSTENTION:
-            hint = (
-                "warm the dense model with /hippo:bootstrap — abstention is dense-gated (RET-11)"
-                if not index.dense_ready
-                else "the dense floor is too permissive for this corpus — consider raising "
-                "HIPPO_DENSE_FLOOR"
-            )
+            # ABS-2: state the MECHANISM, not a knob. recall abstains only when all four
+            # lanes are empty, and the BM25 lanes admit on a single shared token with no
+            # score floor of any kind — so on a corpus whose description+body vocabulary
+            # already covers these probes, this number reports coverage, not a mis-set floor.
             return {
                 "status": "warn",
                 "message": f"abstention floor: only {abstained}/{n} off-topic fixture queries "
                 f"abstained on this {backend} corpus (rate {rate:.2f} < {GATE_ABSTENTION}) — "
-                f"off-topic prompts may inject; {hint}.",
+                "off-topic prompts may inject. Recall abstains only when EVERY lane comes up "
+                "empty (dense + BM25, description + body), and the BM25 lanes admit on a single "
+                "shared token with no score floor at all, so a probe that overlaps any memory's "
+                "wording will surface something whatever the floor is set to. HIPPO_DENSE_FLOOR "
+                "gates the dense lanes only. Read this as a measurement of what the corpus "
+                "admits, not a knob that is set wrong.",
             }
         return {
             "status": "ok",

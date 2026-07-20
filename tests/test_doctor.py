@@ -276,8 +276,11 @@ def test_index_corruption_surfaces_truncated_manifest(repo, memory_dir, tmp_path
 
 
 def test_abstention_cold_start_warns_on_bm25_only(repo, memory_dir, tmp_path, monkeypatch):
-    # RET-11: a bm25-only index (no warmed dense model) → abstention is degraded; the check
-    # must NAME the dense-gating and nudge /hippo:bootstrap.
+    # RET-11: a bm25-only index (no warmed dense model) → no semantic signal to rank a
+    # coincidental keyword overlap below a real hit; the check nudges /hippo:bootstrap.
+    # ABS-2: it must sell warming for RANKING, and must NOT promise more abstention —
+    # warming adds two candidate lanes, so it can only make abstention rarer. The old
+    # assertion here pinned the inverted claim ("dense-gated" as the fix for a low rate).
     idx = str(tmp_path / ".memory-index")
     monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
@@ -286,7 +289,9 @@ def test_abstention_cold_start_warns_on_bm25_only(repo, memory_dir, tmp_path, mo
     B.build_index(memory_dir, idx)
     r = D.check_abstention_cold_start(_ctx(memory_dir, repo))
     assert r["status"] == "warn"
-    assert "/hippo:bootstrap" in r["message"] and "dense-gated" in r["message"]
+    assert "/hippo:bootstrap" in r["message"]
+    assert "will not make recall abstain MORE often" in r["message"]
+    assert "enable the abstention floor" not in r["message"]
 
 
 def test_abstention_cold_start_ok_when_dense_ready(repo, memory_dir, tmp_path, monkeypatch):
@@ -298,7 +303,10 @@ def test_abstention_cold_start_ok_when_dense_ready(repo, memory_dir, tmp_path, m
     write_file(memory_dir, "a.md", _mem("a", "alpha"))
     B.build_index(memory_dir, idx)
     r = D.check_abstention_cold_start(_ctx(memory_dir, repo))
-    assert r["status"] == "ok" and "abstention floor active" in r["message"]
+    # ABS-2: warming buys the semantic RANKING signal. The old text ("abstention floor
+    # active") named the one thing dense does not give you — adding lanes cannot abstain.
+    assert r["status"] == "ok" and "dense model warmed" in r["message"]
+    assert "abstention floor active" not in r["message"]
 
 
 def test_abstention_cold_start_ok_when_no_index(repo, memory_dir, tmp_path, monkeypatch):
@@ -323,6 +331,29 @@ def test_abstention_floor_sanity_ok_when_no_fixture(repo, memory_dir, tmp_path, 
     _seed_two_topic_corpus(memory_dir, idx)
     r = D.check_abstention_floor_sanity(_ctx(memory_dir, repo))
     assert r["status"] == "ok" and "no corpus-local off-topic fixture" in r["message"]
+
+
+def test_abstention_no_fixture_message_does_not_promise_a_generator(
+    repo, memory_dir, tmp_path, monkeypatch
+):
+    """ABS-1 negative-capability pin: the no-fixture branch must NOT name a generation route.
+
+    For the whole life of this check the message said "run /hippo:audit to generate one" and
+    no such writer existed anywhere — the check sat inert behind a remediation nobody could
+    follow. SIG-6's abstention_fixtures flow is the near-miss that produced the wrong text:
+    it drafts the OPPOSITE polarity (queries that DID abstain) into recall_hard_set.yaml.
+    This asserts the remediation stays honest about the file being hand-authored.
+    """
+    idx = str(tmp_path / ".memory-index")
+    monkeypatch.setenv("HIPPO_INDEX_DIR", idx)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    _seed_two_topic_corpus(memory_dir, idx)
+    msg = D.check_abstention_floor_sanity(_ctx(memory_dir, repo))["message"]
+    assert "nothing generates this file" in msg
+    assert "by hand" in msg
+    # the specific false promise, in either of its historical phrasings
+    assert "to generate one" not in msg
+    assert "written by /hippo:audit" not in msg
 
 
 def test_abstention_floor_sanity_warns_when_offtopic_leaks(repo, memory_dir, tmp_path, monkeypatch):
