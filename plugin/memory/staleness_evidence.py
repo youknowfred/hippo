@@ -90,15 +90,16 @@ def _diff_post_image(content: str) -> Optional[str]:
 def extract_evidence_fences(text: str) -> List[dict]:
     """``[{"path", "start", "end", "content"}]`` for every MARKED fence in ``text``.
 
-    Reuses ``links._FENCED_CODE_RE`` (COR-20's one fence parser) and inspects each
-    block's info string for the marker. Unmarked fences are skipped — they are
-    documentation, not attributed evidence. Never raises; ``[]`` on any failure.
+    Reuses ``markdown_code.FENCED_CODE_RE`` (the one fence parser — COR-20's, moved to
+    its own leaf module at COR-21 when the threat lint became its third consumer) and
+    inspects each block's info string for the marker. Unmarked fences are skipped — they
+    are documentation, not attributed evidence. Never raises; ``[]`` on any failure.
     """
     try:
-        from .links import _FENCED_CODE_RE
+        from .markdown_code import FENCED_CODE_RE
 
         out: List[dict] = []
-        for m in _FENCED_CODE_RE.finditer(text or ""):
+        for m in FENCED_CODE_RE.finditer(text or ""):
             block = m.group(0).split("\n")
             marker = _EVIDENCE_MARKER_RE.search(block[0])
             if not marker:

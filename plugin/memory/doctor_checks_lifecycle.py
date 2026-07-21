@@ -145,7 +145,7 @@ def check_evidence_fences(ctx: DoctorContext) -> Dict[str, str]:
     reverify gate, never a new verb.
     """
     try:
-        from .links import _FENCED_CODE_RE
+        from .markdown_code import FENCED_CODE_RE
         from .staleness_evidence import evidence_drift_map, extract_evidence_fences
 
         marked = unverifiable = 0
@@ -155,7 +155,7 @@ def check_evidence_fences(ctx: DoctorContext) -> Dict[str, str]:
                     text = fh.read()
             except Exception:
                 continue
-            if not _FENCED_CODE_RE.search(text):
+            if not FENCED_CODE_RE.search(text):
                 continue
             if extract_evidence_fences(text):
                 marked += 1

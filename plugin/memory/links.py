@@ -66,6 +66,7 @@ import os
 import re
 from typing import Dict, List, Optional, Set, Tuple
 
+from .markdown_code import strip_code
 from .provenance import _is_memory_filename, _iter_memory_files, parse_frontmatter
 
 _WIKILINK_RE = re.compile(r"\[\[([^\]\[]+?)\]\]")
@@ -74,21 +75,9 @@ _WIKILINK_RE = re.compile(r"\[\[([^\]\[]+?)\]\]")
 # WRITES ABOUT the convention ("append a `[[wikilink]]` into one side") used to mint a
 # phantom edge to a memory named "wikilink" — found dogfooding this repo's own corpus,
 # where FOUR of six dangling targets were prose (`[[child]]`, `[[wikilink]]`,
-# `[[wikilinks]]`), reported as broken references forever. The trap that makes this
-# worth a comment: backticking does NOT hide a link from a bare regex, so the obvious
-# fix reads as done and changes nothing — the brackets must leave the link surface
-# entirely, which is what stripping code does. Fences are stripped before spans so a
-# ``` block containing a stray backtick can't desync the span pass.
-_FENCED_CODE_RE = re.compile(r"^(?P<fence>```+|~~~+)[^\n]*\n.*?^(?P=fence)[^\n]*$", re.M | re.S)
-_INLINE_CODE_RE = re.compile(r"(?P<ticks>`+)(?:(?!(?P=ticks)).)+?(?P=ticks)", re.S)
-
-
-def _strip_code(text: str) -> str:
-    """Blank out fenced blocks + inline code spans (COR-20). Never raises."""
-    try:
-        return _INLINE_CODE_RE.sub(" ", _FENCED_CODE_RE.sub("\n", text or ""))
-    except Exception:
-        return text or ""
+# `[[wikilinks]]`), reported as broken references forever. The masker moved to
+# markdown_code.py at COR-21, when the threat lint's HTML-comment class turned out to
+# need the identical treatment; the rationale for both now lives there.
 
 # links.json schema — independent of the manifest's SCHEMA_VERSION (the two files evolve
 # separately; a manifest bump must not silently invalidate a perfectly good edge cache).
@@ -200,7 +189,7 @@ def parse_wikilinks(text: str) -> List[str]:
     """
     seen: Set[str] = set()
     out: List[str] = []
-    for m in _WIKILINK_RE.finditer(_strip_code(text)):
+    for m in _WIKILINK_RE.finditer(strip_code(text)):
         raw = m.group(1).strip()
         raw = raw.split("|", 1)[0].split("#", 1)[0].strip()
         if raw and raw not in seen:

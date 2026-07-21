@@ -474,13 +474,14 @@ _TICKET_PREVIEW_CHARS = 40
 def _fenced_blocks(body: str) -> List[str]:
     """The CONTENT of each fenced code block in ``body`` (fence lines stripped).
 
-    Reuses ``links._FENCED_CODE_RE`` — COR-20's own fence parser — so "what counts as
-    a fenced block" is the graph lint's exact notion, never a second drifting regex.
+    Reuses ``markdown_code.FENCED_CODE_RE`` — COR-20's fence parser, moved to its own
+    leaf module at COR-21 — so "what counts as a fenced block" is the exact notion every
+    other lint uses, never a second drifting regex.
     """
-    from .links import _FENCED_CODE_RE
+    from .markdown_code import FENCED_CODE_RE
 
     out: List[str] = []
-    for m in _FENCED_CODE_RE.finditer(body or ""):
+    for m in FENCED_CODE_RE.finditer(body or ""):
         lines = m.group(0).split("\n")
         out.append("\n".join(lines[1:-1]))
     return out

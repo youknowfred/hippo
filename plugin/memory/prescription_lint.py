@@ -71,10 +71,11 @@ _STOPWORDS = frozenset(
 
 
 def _fenced_re():
-    """COR-20's fenced-block parser — the ONE notion of 'fenced' the link lint already uses."""
-    from .links import _FENCED_CODE_RE
+    """The ONE notion of 'fenced' in the package (COR-20's parser, owned by markdown_code
+    since COR-21 — six call sites share it, so 'fenced' cannot mean two things)."""
+    from .markdown_code import FENCED_CODE_RE
 
-    return _FENCED_CODE_RE
+    return FENCED_CODE_RE
 
 
 def _strip_fenced(text: str) -> str:

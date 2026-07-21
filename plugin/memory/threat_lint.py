@@ -26,6 +26,9 @@ degrades the human-review channel, inv3):
         homograph attack, ``pаypal``). Whole-word multilingual prose (each token one script)
         is NOT flagged.
       · HTML comments — LINT-ONLY, ED-3-gated (see below). Flagged, never neutralized.
+        Scoped to comments OUTSIDE code spans/fences (COR-21): the class is hiddenness, and
+        a code span renders the comment as literal visible text. The ONLY masked class —
+        see ``_html_comment_findings`` for why the other three must not mask.
       · exfil shapes — scoped STRICTLY to image-embeds (``![](url)`` / ``<img src>``) and
         data-bearing query strings (a long opaque ``?param=<blob>``). NEVER a bare URL: a
         plain reference link is not an exfil shape, and flagging it would be exactly the
@@ -64,6 +67,11 @@ import os
 import re
 import unicodedata
 from typing import Dict, List
+
+# COR-21: the code-span masker COR-20 gave the link lint, shared — not a second copy.
+# A leaf module (stdlib ``re`` only), so the write-side seams that import this one keep
+# their import cost.
+from .markdown_code import strip_code
 
 # --------------------------------------------------------------------------- #
 # Tier-A class 1: invisible / dangerous Unicode.
@@ -206,7 +214,23 @@ _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 
 
 def _html_comment_findings(text: str) -> List[str]:
-    n = len(_HTML_COMMENT_RE.findall(text or ""))
+    """One KIND per body carrying a comment OUTSIDE code (COR-21 masks code first).
+
+    The class is about HIDDENNESS, not about the byte sequence: a comment is invisible to
+    a human reading rendered markdown while reaching the model verbatim (ED-3), and that
+    asymmetry is the channel. A comment inside a code span or fenced block renders as
+    literal visible text — the human sees exactly what the model sees — so it is
+    documentation ABOUT the marker, not a marker. hippo's own corpus proved it: a memory
+    writing ``(`<!-- hippo:agents-export:begin/end -->`)`` about this repo's AGENTS.md
+    block markers gated the memory-review CI lane on PR #104, a false red on correct
+    content that would have re-fired on every PR touching that file.
+
+    Deliberately the ONLY Tier-A class that masks. The other three do not turn on being
+    hidden from a renderer: a zero-width codepoint inside backticks is still invisible, a
+    Cyrillic ``а`` in a code span is still a homograph — masking those would be softening
+    the class, not correcting its scope.
+    """
+    n = len(_HTML_COMMENT_RE.findall(strip_code(text or "")))
     if n:
         return [f"HTML comment: {n} comment(s) (hidden-instruction channel; lint-only, not neutralized)"]
     return []
