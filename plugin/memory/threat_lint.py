@@ -24,7 +24,9 @@ degrades the human-review channel, inv3):
         deferred follow-on, not this item.
       · mixed-script confusables — a SINGLE token drawing from Latin AND Cyrillic/Greek (the
         homograph attack, ``pаypal``). Whole-word multilingual prose (each token one script)
-        is NOT flagged.
+        is NOT flagged, nor is a math-notation prefix (``Δrecall``) — COR-22, see
+        ``_MATH_PREFIX`` for why that carve-out cannot launder a substitution. NOT masked:
+        a homograph inside backticks is still a homograph.
       · HTML comments — LINT-ONLY, ED-3-gated (see below). Flagged, never neutralized.
         Scoped to comments OUTSIDE code spans/fences (COR-21): the class is hiddenness, and
         a code span renders the comment as literal visible text. The ONLY masked class —
@@ -193,12 +195,70 @@ def _script(cp: int) -> str:
 # script) is legitimate.
 _CONFUSABLE_PAIRS = (frozenset({"latin", "cyrillic"}), frozenset({"latin", "greek"}))
 
+# COR-22 — math/science notation is not a homograph. ``Δrecall`` means "change in recall",
+# and hippo's own corpus reports every measured delta that way. Live cost of the flag on
+# the memory carrying ``Δrecall +0.0000, Δmrr -0.1667``: a standing finding on doctor's
+# corpus threat check, and a REFUSED publish preflight — PUB-1 reuses ``lint_touched``,
+# the same gate CLB-1 ``--ci`` fails on. That memory is gitignored today, so the CI lane
+# reds once any memory writing a delta reaches the committed subset (COR-21's failure
+# mode, one detector over).
+#
+# The class catches SUBSTITUTION: a foreign codepoint standing in for the Latin letter it
+# MIMICS. Owner-sized carve-out (2026-07-20), and BOTH halves carry weight:
+#
+#   · the SET — seven symbols with no Latin lookalike, so none can stand in for anything.
+#     This half is why position is safe rather than merely narrow: the Latin-lookalike
+#     Greek letters (ο α ν ρ τ υ χ κ ι) are deliberately absent, so ``οpenai`` — a LEADING
+#     substitution, which a position-only rule would have exempted — still flags.
+#     ε was CUT from the ratified set on the same test (owner call, 2026-07-20): it is the
+#     nearest of the candidates to a Latin letter, and it earns nothing, because ε occurs
+#     standalone ("within ε") where ``_WORD_RE``'s 2-letter minimum already means it never
+#     flagged. Only symbol+word tokens ever needed carving out. So ``εbay`` still flags.
+#   · the POSITION — first character only, over a remainder that is WHOLLY Latin. Notation
+#     prefixes a word; a symbol spliced mid-word (``reΔcall``) is not notation, and an
+#     exempt prefix cannot shield a payload behind it (``Δpаypal`` still flags, because its
+#     remainder is not single-script Latin and the token then meets the ordinary test).
+#
+# Cyrillic is untouched by construction: the confusable Cyrillic set (а е о р с х) shares
+# no member with this one, so ``pаypal`` and ``аmazon`` are exactly as detectable as before.
+#
+# CODEPOINTS, never pasted glyphs — an allowlist is the one place the ambiguity bites:
+# U+03A9 GREEK CAPITAL LETTER OMEGA and U+2126 OHM SIGN are visually IDENTICAL, as are
+# U+03BC GREEK SMALL LETTER MU and U+00B5 MICRO SIGN. Only the Greek-block member of each
+# pair is reachable here at all (``_script`` names U+2126/U+00B5 "other", so they never
+# join a confusable pair and never needed carving out). A pasted glyph cannot say which one
+# it is, and this set is security-relevant enough that a reader must not have to guess.
+_MATH_PREFIX = frozenset(chr(cp) for cp in (
+    0x0394,  # GREEK CAPITAL LETTER DELTA  - "change in" (the live repro)
+    0x03B4,  # GREEK SMALL LETTER DELTA
+    0x03BC,  # GREEK SMALL LETTER MU       - micro-, mean
+    0x03C3,  # GREEK SMALL LETTER SIGMA    - standard deviation
+    0x03C0,  # GREEK SMALL LETTER PI
+    0x03BB,  # GREEK SMALL LETTER LAMDA
+    0x03A9,  # GREEK CAPITAL LETTER OMEGA  - ohms
+))                                          # NB: no epsilon - see the cut above
+
+
+def _is_math_prefixed(token: str) -> bool:
+    """True for a notation prefix on an otherwise all-Latin word (``Δrecall``).
+
+    Deliberately conservative in every direction the carve-out could widen: one leading
+    symbol (not a run), and a remainder that is Latin OUTRIGHT — an "other"-script
+    character in the tail falls through to the ordinary test rather than riding along.
+    """
+    if len(token) < 2 or token[0] not in _MATH_PREFIX:
+        return False
+    return all(_script(ord(c)) == "latin" for c in token[1:])
+
 
 def _confusable_findings(text: str) -> List[str]:
     """One KIND when any single token mixes Latin with Cyrillic/Greek. Never the token."""
     hits = 0
     for m in _WORD_RE.finditer(text or ""):
-        scripts = {_script(ord(c)) for c in m.group(0)}
+        token = m.group(0)
+        if _is_math_prefixed(token):
+            continue
+        scripts = {_script(ord(c)) for c in token}
         scripts.discard("other")
         if any(pair <= scripts for pair in _CONFUSABLE_PAIRS):
             hits += 1

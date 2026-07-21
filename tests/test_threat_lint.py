@@ -117,6 +117,93 @@ def test_separate_script_tokens_do_not_flag():
 
 
 # --------------------------------------------------------------------------- #
+# COR-22: a math-notation prefix is not a homograph
+# --------------------------------------------------------------------------- #
+# Sibling to COR-21, different Tier-A class, and masking cannot fix it: a homograph inside
+# backticks is still a homograph, so the carve-out is in the CHARACTER SET, not the text.
+#
+# The class catches SUBSTITUTION - a foreign codepoint standing in for the Latin letter it
+# mimics (the Cyrillic-a paypal above). A leading DELTA substitutes for nothing: it is a
+# visibly different glyph carrying its own meaning ("change in"), and it is how hippo's own
+# corpus reports measured deltas. Owner-sized shape, both halves load-bearing: the token's
+# FIRST character must be one of seven non-lookalike math symbols AND the entire remainder
+# must be single-script Latin. The tests below are the argument for each half.
+#
+# Same escape-literal discipline as CYR_A/GRK_O above: the eye cannot audit these glyphs.
+DELTA = "\u0394"    # GREEK CAPITAL LETTER DELTA - "change in", the live repro
+DELTA_L = "\u03b4"  # GREEK SMALL LETTER DELTA
+SIGMA = "\u03c3"    # GREEK SMALL LETTER SIGMA - standard deviation
+GRK_A = "\u03b1"    # GREEK SMALL LETTER ALPHA - an ASCII 'a' lookalike, NOT carved out
+GRK_E = "\u03b5"    # GREEK SMALL LETTER EPSILON - CUT from the set (owner call), NOT carved out
+
+
+def _confusable_kinds(text):
+    return [k for k in TL.scan_tier_a(text) if "confusab" in k.lower() or "mixed-script" in k.lower()]
+
+
+def test_delta_prefixed_measurement_prose_is_not_a_finding():
+    """The live repro: `.claude/memory/hippo-enh-t26-boundary-consent.md` line 34.
+
+    Bold PROSE, not a code span, so COR-21's masking cannot reach it. That memory is
+    local-only, so what the flag actually costs today is a standing doctor finding and a
+    REFUSED publish preflight; the CLB-1 CI lane follows the moment any memory writing a
+    delta reaches the committed subset — and hippo's corpus writes every delta this way.
+    """
+    body = "**" + DELTA + "recall +0.0000, " + DELTA + "mrr -0.1667, n=13**"
+    assert _confusable_kinds(body) == []
+
+
+def test_the_rest_of_the_math_symbol_set_is_carved_out_too():
+    assert _confusable_kinds("holding " + SIGMA + "band and " + DELTA_L + "step fixed") == []
+
+
+def test_the_classic_homograph_still_flags():
+    """The fix must not cost the detection. Cyrillic is untouched by a Greek-only set."""
+    assert _confusable_kinds("login at p" + CYR_A + "ypal.com now") != []
+    # ...including in LEADING position, where the carve-out lives: no Cyrillic is exempt.
+    assert _confusable_kinds("visit " + CYR_A + "mazon.com") != []
+
+
+def test_a_leading_greek_lookalike_still_flags():
+    """Why the ALLOWLIST half is load-bearing: position alone would exempt these.
+
+    Greek omicron/alpha/nu/rho/tau/upsilon/chi/kappa/iota are ASCII lookalikes, so a
+    LEADING one is itself the substitution attack: the Greek/Latin pair is not symmetric
+    with the Cyrillic case the way it looks.
+    """
+    assert _confusable_kinds("sign in at " + GRK_O + "penai.com") != []
+    assert _confusable_kinds("the " + GRK_A + "pple store") != []
+
+
+def test_epsilon_was_cut_from_the_set_and_still_flags():
+    """The set is a security surface, so its ONE deliberate omission gets a test.
+
+    ε was the nearest candidate to a Latin letter and it earned nothing: measurement prose
+    writes it STANDALONE ("within ε"), which `_WORD_RE`'s 2-letter minimum never flagged to
+    begin with — only symbol+word tokens ever needed carving out. Keeping it would have
+    exempted εbay for no gain, so a later "just add the rest of the Greek math letters"
+    tidy-up must fail here rather than quietly widen the surface.
+    """
+    assert _confusable_kinds("shop at " + GRK_E + "bay") != []
+    # …and the reason the cut is free: a lone symbol was never a finding either way.
+    assert _confusable_kinds("tolerance within " + GRK_E + " of target") == []
+
+
+def test_a_carved_out_symbol_inside_a_token_still_flags():
+    """Why the POSITION half is load-bearing: 'contains a delta somewhere' is weaker.
+
+    Notation prefixes a word; a symbol spliced mid-word is not notation.
+    """
+    assert _confusable_kinds("re" + DELTA + "call dropped") != []
+
+
+def test_a_math_prefix_does_not_launder_the_rest_of_the_token():
+    """The exemption cannot become the carrier: an exempt prefix must not shield a payload
+    behind it, so the whole remainder has to be single-script Latin."""
+    assert _confusable_kinds(DELTA + "p" + CYR_A + "ypal") != []
+
+
+# --------------------------------------------------------------------------- #
 # Tier-A: HTML comments (LINT-ONLY, ED-3-gated)
 # --------------------------------------------------------------------------- #
 
