@@ -826,7 +826,7 @@ workstreams:
         title: "EVD-4 Arm B un-sever: the HIPPO_OUTCOME_PRIOR A/B harness + commissioned run (Q1 r5; after MEA-1/MEA-2)"
         priority: P3
         effort: M
-        status: done           # 2026-07-19, session 2, built LAST per the gate — the exact minimal delta: AB_FLAGS entry + --ab dispatch (shared _ab_forward) + the generalized ab_runner.flag_context/run_flag_arms core (salience_eval REFACTORED through it — not a second copy, inv5; OFF-arm byte-identity, per-category n, low-n labels, dated footer all in the core) + outcome_prior_eval.py with the outcome-signal precondition (signal-less ON arm = self-check-not-finding, ED-3). CACHE DECISION AT BUILD: the harness stages outcome.json in-process (write_outcome_cache(injection_hits(...)) — the flag-ON SessionStart computation) and restores prior state after; a flag-OFF machine keeps no cache it did not write. Evidence file outcome_prior_ab.json beside salience_ab.json; READER DECISION AT BUILD: check_salience_evidence's sibling sentence (no second doctor check). COMMISSIONED RUN HELD (dated 2026-07-19, stated to Fred): then-current sensitivity is 1/32 (~3%) — the q1_verdict's own known-AND-non-trivial clause fails until the first MEA-2 drain; run `python -m memory.eval_recall --ab HIPPO_OUTCOME_PRIOR` after admitting drafts, report is outcome-agnostic + sensitivity-stamped by construction
+        status: done           # 2026-07-19, session 2, built LAST per the gate — the exact minimal delta: AB_FLAGS entry + --ab dispatch (shared _ab_forward) + the generalized ab_runner.flag_context/run_flag_arms core (salience_eval REFACTORED through it — not a second copy, inv5; OFF-arm byte-identity, per-category n, low-n labels, dated footer all in the core) + outcome_prior_eval.py with the outcome-signal precondition (signal-less ON arm = self-check-not-finding, ED-3). CACHE DECISION AT BUILD: the harness stages outcome.json in-process (write_outcome_cache(injection_hits(...)) — the flag-ON SessionStart computation) and restores prior state after; a flag-OFF machine keeps no cache it did not write. Evidence file outcome_prior_ab.json beside salience_ab.json; READER DECISION AT BUILD: check_salience_evidence's sibling sentence (no second doctor check). COMMISSIONED RUN HELD (dated 2026-07-19, stated to Fred): then-current sensitivity is 1/32 (~3%) — the q1_verdict's own known-AND-non-trivial clause fails until the first MEA-2 drain; run `python -m memory.eval_recall --ab HIPPO_OUTCOME_PRIOR` after admitting drafts, report is outcome-agnostic + sensitivity-stamped by construction. HELD RUN FIRED 2026-07-20 post-drain — see arm_b_result below (Δmrr negative; flag stays OFF)
         q1_verdict: >-
           2026-07-19, dated owner entry (ED5R-1): Fred answered Q1(r5) "Yes,
           after MEA-1/2" in the round-5 formal-question session — Arm B is
@@ -836,6 +836,26 @@ workstreams:
           sensitivity is known and non-trivial. LAW ZERO unchanged — the
           build itself still waits on T23 ratification; the severance's
           decision gate is what this resolves.
+        arm_b_result: >-
+          Run 2026-07-20 (evidence generated_at), through exactly the
+          instrument the sequencing demanded — post-MEA-2-drain: backend
+          dense+bm25 (BAAI/bge-small-en-v1.5), corpus_n=65, hard_set_n=13,
+          resolvable 13/13 single-hop (the 1/32 hold condition CLEARED —
+          the q1_verdict's known-AND-non-trivial clause satisfied); outcome
+          signal present (48 outcome-confirmed memories; the ON-arm cache
+          staged in-process and removed after, as built). RESULT:
+          Δrecall=+0.0000, Δmrr=-0.1667 (single-hop, n=13); OFF-arm
+          byte-identity self-check PASS; identical_arms=false — the prior
+          was LIVE and actively HURT ranking on the one measurable
+          category. Evidence at
+          .claude/.memory-telemetry/outcome_prior_ab.json (gitignored,
+          beside salience_ab.json). Read: no affirmative evidence FOR a
+          flip — the only signed delta is negative — so HIPPO_OUTCOME_PRIOR
+          stays default-OFF (ED-2/LIF-7; the RET-14 posture unchanged; the
+          touch-grain graduation arm stays severed), and T23 done_means'
+          one dated exception is CLOSED. Any future flip requires a new
+          dated owner decision on affirmative evidence. Closing entry
+          recorded 2026-07-31, owner-directed.
         source: {origin: EXPLORATIONS5, verdict: KEEP, signal: "The severance's data condition ripened and was verified live: outcome_events.jsonl cited_by rows counted 120->132 across two same-day passes (8 on 07-17, 94 on 07-18, 18+ on 07-19 — the ledger GREW while being counted); touch-grain injection_hits 32 memories / 49 hit-sessions; ROADMAP.enhancements4.yaml EVD-4 AC names the exact minimal delta ('AB_FLAGS entry + dispatch branch + generalized arm runner + outcome-signal precondition') and :1608 keeps the graduation arm severed regardless; dream_eval.py:53 AB_FLAGS = ('HIPPO_DREAM', 'HIPPO_SALIENCE') — HIPPO_OUTCOME_PRIOR still absent; outcome.json never written on this machine (index dir ls); recall_salience.py:_apply_outcome_prior (:310) shipped RET-14, flag default-OFF, never measurable"}
         problem: >-
           Arm B was severed behind "nonzero touch/outcome rows + its own
@@ -1531,7 +1551,7 @@ release_train:
   - tier: T23
     target_version: v1.28.0   # stamped at release time (the round-4 convention): the whole round-5 train shipped in ONE release, 2026-07-20
     theme: "Honest instruments"
-    status: done             # 2026-07-19, session 2 — 6/6 built in the gated order (MEA-1 -> MEA-2 -> MEA-3/MEA-4/MEA-6 -> MEA-5); both ED5R-3 split debts discharged as their OWN commits (eval_adversarial.py; telemetry_store.py + telemetry_mining.py); done_means met with ONE dated exception: the commissioned Arm B RUN is held on the instrument's own sensitivity (1/32 at session end — see MEA-5's status note); it fires after the first MEA-2 drain
+    status: done             # 2026-07-19, session 2 — 6/6 built in the gated order (MEA-1 -> MEA-2 -> MEA-3/MEA-4/MEA-6 -> MEA-5); both ED5R-3 split debts discharged as their OWN commits (eval_adversarial.py; telemetry_store.py + telemetry_mining.py); done_means met with ONE dated exception: the commissioned Arm B RUN is held on the instrument's own sensitivity (1/32 at session end — see MEA-5's status note); it fires after the first MEA-2 drain — FIRED 2026-07-20 post-drain (13/13 resolvable): Δrecall +0.0000 / Δmrr -0.1667, flag stays OFF (see MEA-5 arm_b_result); the exception is CLOSED, dated entry 2026-07-31
     ratified: >-
       2026-07-19 — owner-ratified in the round-5 formal-question session
       (dated LAW ZERO entry): all five tiers ratified, order T22 -> T23 ->

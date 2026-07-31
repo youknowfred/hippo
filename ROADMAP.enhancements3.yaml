@@ -6,6 +6,14 @@
 # committed work until the owner ratifies (the round-2 precedent: a draft PR
 # held for review).
 #
+# ROUND 3 CLOSED 2026-07-16: the owner ratified same day (the owner_decisions
+# block below) and all four tiers were built and squash-merged the SAME DAY —
+# T14 PR #57 (d1cf764), T15 PR #58 (46d2b5f), T16 PR #61 (0489fe3),
+# T17 PR #63 (fc7e44a) — released through v1.19.0 "At the act, and beyond the
+# session". Item statuses below were trued to `done` 2026-07-31
+# (owner-directed): until then, completion was recorded only in the tier
+# capstone memories and the CHANGELOG, and this file still read as pending.
+#
 # This is the THIRD enhancement train. Round-3 tiers are numbered T14-T17 and
 # use NEW namespaces (INV/SLP/JIT/EXT) so ids never collide with round 1
 # (SIG/RUL/RCL/GOV/GRW/RCH), round 2 (MSR/GRF/SEN/TMB/CLB/IOP), ROADMAP.yaml
@@ -21,7 +29,8 @@
 #
 # Item shape (per the commissioning brief): id, title, rationale,
 # acceptance_criteria, risks — plus priority/effort/status for planning
-# continuity with rounds 1-2. status is uniformly `proposed`.
+# continuity with rounds 1-2. status was uniformly `proposed` at authoring;
+# trued to `done` 2026-07-31 (see the ROUND 3 CLOSED note above).
 #
 # Companion documents:
 #   EXPLORATIONS3.md            — the round-3 source catalog (method, cuts,
@@ -34,7 +43,7 @@ meta:
   title: hippo enhancement & capability roadmap — round 3
   repo: youknowfred/hippo
   authored: 2026-07-16
-  status: PROPOSED — owner review pending; no item is committed work
+  status: EXECUTED — ratified, built, and merged 2026-07-16; released through v1.19.0 (authored as PROPOSED; statuses trued 2026-07-31)
   grounding: 2026-07-16 QA sweep (13 reproduced defects; 6 engine sweep maps)
   audience: solo-dev / small-team (the same audience rounds 1-2 optimized for)
   # The four posture questions EXPLORATIONS3 §4 queued — RATIFIED by the owner
@@ -68,7 +77,7 @@ tiers:
         title: The verb-surface registry + parity lint (the INT-class killer)
         priority: P1
         effort: M
-        status: proposed
+        status: done           # 2026-07-16 — T14 PR #57 (squash d1cf764); registry + parity lint shipped (tests/test_surface_registry.py — the INT-18 named-command class is now a CI failure)
         rationale: >-
           INT-13, INT-14/15, INT-16, and this round's INT-17/18/19 are ONE
           recurring bug: a verb or nudge ships terminal-first, the Desktop
@@ -95,7 +104,7 @@ tiers:
         title: Write-discipline lint — corpus writes go through the atomic/COR-9 primitives, mechanically
         priority: P1
         effort: S
-        status: proposed
+        status: done           # 2026-07-16 — T14 PR #57 (squash d1cf764); AST write-discipline lint shipped (tests/test_write_discipline.py, allowlist-shaped)
         rationale: >-
           COR-13 was the FIFTH hand-copied frontmatter walk; COR-14 found the
           sixth and seventh (dream_generate), and COR-18 found eleven plain
@@ -116,7 +125,7 @@ tiers:
         title: Crash-fault harness + a published crash-safety contract
         priority: P2
         effort: M
-        status: proposed
+        status: done           # 2026-07-16 — T14 PR #57 (squash d1cf764); fault lane shipped (tests/test_crash_faults.py) + the STABILITY.md crash-safety contract
         rationale: >-
           SEC-19/COR-17/COR-18 fixed torn-write windows found by hand-reasoning
           over write sequences. The fix pattern is now uniform (unique-tmp +
@@ -140,7 +149,7 @@ tiers:
         title: resolve + audit reach the second surface (the two live dead-end nudges)
         priority: P2
         effort: M
-        status: proposed
+        status: done           # 2026-07-16 — T14 PR #57 (squash d1cf764); resolve (per-pair verdicts) + audit (report material only) MCP tools; terminal-only list shrank by exactly these two
         rationale: >-
           (Scope RATIFIED 2026-07-16: these two verbs only — the other five
           keep their honest terminal-only preflights until field reports ask.)
@@ -182,7 +191,7 @@ tiers:
         title: The sleep runner + morning report (read-only sweep, one artifact)
         priority: P1
         effort: M
-        status: proposed
+        status: done           # 2026-07-16 — T15 PR #58 (squash 46d2b5f); headless runner + morning report, zero corpus writes, registry-driven per-item drain verbs
         rationale: >-
           One entrypoint (python -m memory.sleep) that runs the existing
           read-only producers off-session — doctor's quick checks, the
@@ -206,7 +215,7 @@ tiers:
         title: Scheduler recipes + report-level snooze (explicit install, never automatic)
         priority: P2
         effort: S
-        status: proposed
+        status: done           # 2026-07-16 — T15 PR #58 (squash 46d2b5f); print-only --print-schedule recipes + report snooze + the hippo sleep subcommand
         rationale: >-
           The runner is only useful on a schedule, and scheduling is
           machine-specific. Ship recipes (launchd/cron/Claude scheduled-task
@@ -226,7 +235,7 @@ tiers:
         title: Tier-A-in-sleep (opt-in) — reversible dream edges may apply overnight
         priority: P3
         effort: S
-        status: proposed
+        status: done           # 2026-07-16 — T15 PR #58 (squash 46d2b5f); the ratified opt-in flag HIPPO_SLEEP_TIER_A (default OFF, origin=sleep ledger stamp, undo-first report)
         rationale: >-
           (RATIFIED 2026-07-16: the flag ships — opt-in, default OFF, capped,
           undo-first in the report.)
@@ -264,7 +273,7 @@ tiers:
         title: First-touch reminder — one bounded line when an edit touches a cited file
         priority: P2
         effort: M
-        status: proposed
+        status: done           # 2026-07-16 — T16 PR #61 (squash 0489fe3); default-ON as ratified, HIPPO_DISABLE_JIT kill switch; measured p95 0.25ms vs the stated 50ms budget
         rationale: >-
           The PostToolUse hook already fires on Edit/Write (it records
           outcome telemetry). Add a read-side lane: on the FIRST touch of a
@@ -290,7 +299,7 @@ tiers:
         title: Touch-grain outcome evidence (sharper graduation joins)
         priority: P3
         effort: S
-        status: proposed
+        status: done           # 2026-07-16 — T16 PR #61 (squash 0489fe3); sparse cited_by rows + injection_hits grain="touch" (--touch-grain report-only; session grain stays the default)
         rationale: >-
           outcome.injection_hits joins at session grain (memory injected AND
           some cited file touched that session) — the coarseness limits
@@ -323,7 +332,7 @@ tiers:
         title: Recall for the reviewer — memories on the PR diff (CI recipe + --for-diff)
         priority: P1
         effort: M
-        status: proposed
+        status: done           # 2026-07-16 — T17 PR #63 (squash fc7e44a); recall --for-diff + the memory-on-diff.yml sticky-comment recipe (pure citation join, bare-python3 — the first Claude-less surface)
         rationale: >-
           A PR touches files; memories cite files; nobody connects them at
           review time. Add `recall --for-diff <range> --json` (changed files
@@ -351,7 +360,7 @@ tiers:
         title: Cross-project promotion mining (report-only; promote stays per-item)
         priority: P2
         effort: M
-        status: proposed
+        status: done           # 2026-07-16 — T17 PR #63 (squash fc7e44a); promote_scan (trusted-only, report-only, reuses _duplicate_neighbors) + a sleep report section; acceptance stays per-item via promote
         rationale: >-
           TEA-1 gave lessons a user tier and /hippo:promote lifts one memory
           with provenance — but finding WHICH lessons deserve promotion is
@@ -374,7 +383,7 @@ tiers:
         title: The interview loop — consolidate asks up to three grounded questions
         priority: P3
         effort: S
-        status: proposed
+        status: done           # 2026-07-16 — T17 PR #63 (squash fc7e44a); the interview MCP tool + consolidate Step 6 (at most 3 grounded questions, declines remembered in telemetry); released v1.19.0 same day — the round-3 closer
         rationale: >-
           hippo tells, but never asks. The blind-spot backlog (SIG-3), the
           contradiction inbox, and expiring drafts are all machine-detected
