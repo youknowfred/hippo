@@ -123,7 +123,7 @@ from .session_start_signals import (
 
 # Harness caps hook output at 10,000 chars; stay comfortably under it.
 _MAX_CONTEXT_CHARS = 9000
-_MAX_ITEMS_PER_PRODUCER = 20
+_MAX_ITEMS_PER_PRODUCER = 5
 
 # Typed /hippo:* commands exist only in the Claude Code terminal CLI. The Claude Desktop
 # app (CLAUDE_CODE_ENTRYPOINT=claude-desktop, present in the hook env) runs the same
@@ -208,6 +208,14 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("citation_rot", citation_rot_producer),  # cited paths gone from the repo (LIF-3) — find_unparseable's rot sibling
     ("trust_drift", trust_drift_producer),  # SEC-6: trusted corpus drifted from its consent baseline — recall is withholding files
     ("presence", presence_producer),  # FLT-1: another live session shares this working tree (fleet visibility; empty-norm)
+    # Positive signal blocks ride AHEAD of the warning lists: the fixed order is also the
+    # truncation order (_bound_with_surface_note cuts the tail), and the measured
+    # warnings-first ordering starved these three structurally — portable_floor was
+    # discarded in 100% of over-budget sessions, resume_card in 35%+, and
+    # relevant_to_work (the one precision block) rarely survived to context at all.
+    ("relevant_to_work", relevant_to_work_producer),  # SIG-1: the first POSITIVE block — memories about the files you're editing
+    ("resume_card", resume_card_producer),  # SIG-2: "where was I" — replay the last session from the episode buffer
+    ("portable_floor", portable_floor_producer),  # TEA-1: deliver the user/private-tier floor (no native channel)
     ("staleness", staleness_producer),
     ("reconsolidation", reconsolidation_producer),  # recall-filtered subset of staleness; silent unless a recently-recalled memory is stale
     ("pending_capture", pending_capture_producer),  # CAP-2: surface the gitignored draft-capture queue so it never soaks silently
@@ -221,12 +229,9 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("contradiction_inbox", contradiction_inbox_producer),  # GOV-1: every unresolved contradicts pair, not just the co-surfaced/governance-cited ones
     ("floor_change", floor_change_producer),  # GOV-4: floor/corpus changed since this clone's last session (per-clone watermark; a seen change stays quiet)
     ("merge_digest", merge_digest_producer),  # CLB-4: incoming-merge duplicate digest — GRW-3's detector over the watermark range, human-routed
-    ("relevant_to_work", relevant_to_work_producer),  # SIG-1: the first POSITIVE block — memories about the files you're editing
-    ("resume_card", resume_card_producer),  # SIG-2: "where was I" — replay the last session from the episode buffer
     ("git_recent", git_recent_producer),
     ("link_health", lint_links_producer),
     ("floor", floor_producer),  # silent unless project/reference links re-bloat the MEMORY.md floor
-    ("portable_floor", portable_floor_producer),  # TEA-1: deliver the user/private-tier floor (no native channel)
 ]
 
 

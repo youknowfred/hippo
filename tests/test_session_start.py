@@ -713,7 +713,9 @@ def test_citation_rot_producer_bounds_item_count(monkeypatch):
     )
     out = S.citation_rot_producer("md", "repo")
     assert "30 memories" in out  # the count stays honest…
-    assert "…and 10 more." in out  # …while the per-item lines respect the budget
+    # …while the per-item lines respect the budget (computed from the constant so the
+    # bound can move without re-breaking this pin)
+    assert f"…and {30 - SH._MAX_ITEMS_PER_PRODUCER} more." in out
 
 
 def test_citation_rot_producer_registered_once_after_integrity():

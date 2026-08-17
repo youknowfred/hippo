@@ -1870,8 +1870,13 @@ def test_main_floor_dedup_collapses_always_loaded_members_and_tops_off(tmp_path,
     lines = out.splitlines()
     floor_line = next(l for l in lines if "feedback_no_backward_compat" in l)
     voyage_line = next(l for l in lines if "reranker_voyage" in l)
-    assert "(already in floor)" in floor_line
-    assert "(already in floor)" not in voyage_line
+    # The floor member renders on the one-line collapse SUMMARY (its name stays visible;
+    # no full pointer line — the floor already carries the pointer verbatim); the
+    # non-floor memory renders as a full bullet.
+    assert "already in floor (MEMORY.md):" in floor_line
+    assert floor_line.lstrip().startswith("⤷")
+    assert voyage_line.lstrip().startswith("•")
+    assert "already in floor" not in voyage_line
 
 
 def test_main_cli_double_dash_separator_handles_leading_dash_query(tmp_path, monkeypatch, capsys):
@@ -1909,8 +1914,8 @@ def test_main_floor_dedup_widens_with_claude_md_citations(repo, memory_dir, tmp_
     )
     assert rc == 0
     out = capsys.readouterr().out
-    assert "deploy_runbook" in out
-    assert "(already in floor)" in out
+    assert "deploy_runbook" in out  # name visible on the collapse summary line
+    assert "already in floor (MEMORY.md):" in out
 
 
 def test_main_floor_widen_degrades_silently_without_repo_root(tmp_path, monkeypatch, capsys):
@@ -1951,8 +1956,8 @@ def test_main_cooldown_collapses_repeat_pointer_same_session_thread(
 
     assert R.main(common) == 0
     out2 = capsys.readouterr().out
-    assert "deploy_runbook" in out2
-    assert "(already surfaced this thread)" in out2
+    assert "deploy_runbook" in out2  # name visible on the collapse summary line
+    assert "already surfaced this thread:" in out2
 
     other_session = common[:-1] + ["sess-2"]
     assert R.main(other_session) == 0
