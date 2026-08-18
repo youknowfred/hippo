@@ -1010,7 +1010,7 @@ def test_watermark_candidates_flag_commit_precise_hits(repo, memory_dir):
     git_commit(repo, "c2", 1_700_000_100)      # a commit since the watermark touches foo
 
     cands = R.watermark_stale_candidates(memory_dir, repo, telemetry_dir=td)
-    assert cands == [{"name": "m_alpha", "changed_paths": ["src/foo.py"], "watermark": True}]
+    assert cands == [{"name": "m_alpha", "changed_paths": ["src/foo.py"], "watermark": True, "type": None}]
 
 
 def test_watermark_candidates_use_most_recent_sessions_earliest_head(repo, memory_dir):

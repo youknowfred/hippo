@@ -41,6 +41,22 @@ path counting when a non-volatile sibling also drifted) is a possible follow-up;
 ships never-arm-alone, which the armed-iff-any-non-volatile rule already approximates
 from the suppression side.
 
+TYPE-1 (2026-08-17, the em-growth-labs memory×Linear audit's option A, owner-picked):
+``type: project`` memories are additionally exempt from the SAME three arming surfaces.
+The measurement that earned it: 70/79 worklist items were ``type: project``; 83% of all
+past reverify verdicts were "graduate"; 60/66 graduated memories re-armed — on a living
+repo the project-memory staleness queue meters REPO VELOCITY, not truth-risk, and the
+per-item human verdict it demands is almost always "still fine". The split is the same
+shape as VOL-1: ARMING only — detection, ``stale.json``, RET-5/RET-6, JIT, ``--for-diff``,
+derivation, and the deep-judgment surfaces stay type-blind; suppression is counted on
+every surface it happens on (``DIAG_TYPE_KEY``, the note/worklist tails). Partition order
+is VOL then TYPE, so each suppressed name lands in exactly one bucket and VOL-1's counts
+keep their historical meaning. An item with NO ``type`` field ARMS (fail-open: only an
+explicit type ever exempts — which also keeps typeless fixtures and older corpora
+byte-identical). The exempt set ships as ``{"project"}``; ``HIPPO_ARMING_EXEMPT_TYPES``
+(comma-list; set EMPTY to arm everything) is the reversible override — ED-1 holds, every
+verdict stays human, per-item.
+
 Pure functions over caller-supplied data + one tiny marker read; no writes anywhere.
 Sibling of ``staleness.py`` (never imports it); reads the registry via
 ``provenance_format`` directly (the ``staleness_evidence`` precedent). Never raises.
@@ -48,6 +64,7 @@ Sibling of ``staleness.py`` (never imports it); reads the registry via
 
 from __future__ import annotations
 
+import os
 from typing import Iterable, List, Optional, Set, Tuple
 
 from .provenance_format import read_volatile_paths
@@ -56,6 +73,14 @@ from .provenance_format import read_volatile_paths
 # out-parameter pattern as find_stale's "timed_out" (a producer must never lose its
 # primary return shape to carry a side-channel count).
 DIAG_KEY = "volatile_suppressed"
+
+# TYPE-1's own bucket — kept separate from DIAG_KEY so each surface can report the two
+# policies' counts distinctly (and the VOL-1 numbers keep their historical meaning).
+DIAG_TYPE_KEY = "type_exempt_suppressed"
+
+# TYPE-1: the shipped arming-exempt type set and its reversible env override.
+_DEFAULT_ARMING_EXEMPT_TYPES = frozenset({"project"})
+_EXEMPT_TYPES_ENV = "HIPPO_ARMING_EXEMPT_TYPES"
 
 
 def volatile_set(memory_dir: str) -> Set[str]:
@@ -93,17 +118,56 @@ def split_volatile_only(
     return armed, suppressed
 
 
-def note_suppressed(diagnostics: Optional[dict], names: Iterable[str]) -> None:
-    """Union ``names`` into ``diagnostics[DIAG_KEY]`` (sorted, deduped). No-op on ``None``.
+def arming_exempt_types() -> frozenset:
+    """The TYPE-1 exempt set — ``{"project"}`` shipped, ``HIPPO_ARMING_EXEMPT_TYPES``
+    overriding (comma-list, case-insensitive; set EMPTY to arm every type). Never raises.
+    """
+    try:
+        raw = os.environ.get(_EXEMPT_TYPES_ENV)
+        if raw is None:
+            return _DEFAULT_ARMING_EXEMPT_TYPES
+        return frozenset(t.strip().lower() for t in raw.split(",") if t.strip())
+    except Exception:
+        return _DEFAULT_ARMING_EXEMPT_TYPES
+
+
+def split_type_exempt(
+    items: Iterable[dict], exempt: frozenset
+) -> Tuple[List[dict], List[dict]]:
+    """Partition stale/watermark-shaped items into ``(armed, suppressed)`` by ``type``.
+
+    ``suppressed`` = items whose carried ``type`` field (read at detection time,
+    ``staleness.read_memory_type``) is in ``exempt``. An item with NO usable type ARMS —
+    fail-open, so only an explicit type ever exempts. Items pass through untouched, order
+    preserved on both sides; an empty ``exempt`` is the identity split, so the override's
+    arm-everything setting is byte-identical to pre-TYPE-1 behavior. Never raises.
+    """
+    armed: List[dict] = []
+    suppressed: List[dict] = []
+    try:
+        for item in items:
+            t = item.get("type")
+            if exempt and isinstance(t, str) and t in exempt:
+                suppressed.append(item)
+            else:
+                armed.append(item)
+    except Exception:
+        return list(items), []
+    return armed, suppressed
+
+
+def note_suppressed(diagnostics: Optional[dict], names: Iterable[str], key: str = DIAG_KEY) -> None:
+    """Union ``names`` into ``diagnostics[key]`` (sorted, deduped). No-op on ``None``.
 
     One merge implementation so the stale lane and the watermark lane can both report
-    into the SAME caller-owned dict without either clobbering the other. Never raises.
+    into the SAME caller-owned dict without either clobbering the other — and (TYPE-1)
+    so both policies share it, each under its own key. Never raises.
     """
     if diagnostics is None:
         return
     try:
-        have = diagnostics.get(DIAG_KEY) or []
-        diagnostics[DIAG_KEY] = sorted(set(have) | set(names))
+        have = diagnostics.get(key) or []
+        diagnostics[key] = sorted(set(have) | set(names))
     except Exception:
         return
 
@@ -134,4 +198,33 @@ def stale_note_all_suppressed(count: int) -> str:
         f"ℹ Memory staleness — {count} stale memor{'y' if count == 1 else 'ies'} whose "
         "only drift is volatile-path (policy-suppressed; see .format volatile_paths); "
         "nothing to verify."
+    )
+
+
+def type_exempt_count_note(count: int) -> str:
+    """The worklist listings' TYPE-1 honesty tail (CLI + MCP render it verbatim)."""
+    return (
+        f"({count} memor{'y' if count == 1 else 'ies'} arming-exempt by type — project-"
+        "memory staleness meters repo velocity, not truth-risk (TYPE-1); detection/recall "
+        f"unaffected; override via {_EXEMPT_TYPES_ENV})"
+    )
+
+
+def type_note_tail(count: int) -> str:
+    """The SessionStart staleness note's TYPE-1 suppressed-count tail (armed items exist)."""
+    return (
+        f"  (+{count} type-exempt from arming — TYPE-1 policy on project memories; "
+        f"detection unaffected; override via {_EXEMPT_TYPES_ENV})"
+    )
+
+
+def type_note_all_suppressed(count: int) -> str:
+    """The whole-note replacement when EVERY stale memory is TYPE-1-exempt.
+
+    Same calm register as ``stale_note_all_suppressed`` — policy state, not an alarm.
+    """
+    return (
+        f"ℹ Memory staleness — {count} stale memor{'y' if count == 1 else 'ies'}, all "
+        "arming-exempt by type (TYPE-1: project-memory staleness meters repo velocity, "
+        f"not truth-risk); detection/recall unaffected; override via {_EXEMPT_TYPES_ENV}."
     )

@@ -158,7 +158,7 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
         snooze,
         watermark_stale_candidates,
     )
-    from .staleness_policy import DIAG_KEY, suppressed_count_note
+    from .staleness_policy import DIAG_KEY, DIAG_TYPE_KEY, suppressed_count_note, type_exempt_count_note
 
     memory_dir, repo_root = resolve_dirs()
     # SEC-1: gate like traverse (the worklist renders memory names + typed-edge neighbors)
@@ -184,9 +184,14 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
             diagnostics=diagnostics,
         )
         suppressed = diagnostics.get(DIAG_KEY) or []
+        type_exempt = diagnostics.get(DIAG_TYPE_KEY) or []
         if not worklist:
             empty = "No recently-recalled memory is currently stale."
-            return empty + (f" {suppressed_count_note(len(suppressed))}" if suppressed else "")
+            if suppressed:
+                empty += f" {suppressed_count_note(len(suppressed))}"
+            if type_exempt:
+                empty += f" {type_exempt_count_note(len(type_exempt))}"
+            return empty
         out = [
             f"{len(worklist)} memories need re-grounding (recently recalled + stale, or "
             "[since-watermark] commit-precise hits) — re-ground EACH against current code, "
@@ -201,6 +206,8 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
             )
         if suppressed:
             out.append("  " + suppressed_count_note(len(suppressed)))
+        if type_exempt:
+            out.append("  " + type_exempt_count_note(len(type_exempt)))
         out.append(
             "Evidence per item: action='brief' (name=…) renders the cited-path diff from "
             "the entry's own baseline — diffstat + hunk headers, secret-linted bodies when "

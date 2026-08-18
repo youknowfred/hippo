@@ -70,6 +70,19 @@ def read_provenance(text: str) -> tuple[List[str], Optional[str]]:
     return cited, sc
 
 
+def read_memory_type(text: str) -> Optional[str]:
+    """The memory's ``type`` (top-level or ``metadata:``-nested), lowercased; ``None`` when
+    absent/blank/non-string. TYPE-1's arming split keys on this and fail-opens ``None`` to
+    ARMED — only an explicit type ever exempts. Same dual-schema read as ``read_provenance``.
+    """
+    fm = parse_frontmatter(text)
+    if not fm:
+        return None
+    meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+    t = fm.get("type") if fm.get("type") is not None else meta.get("type")
+    return t.strip().lower() if isinstance(t, str) and t.strip() else None
+
+
 def read_source_commit_time(text: str) -> Optional[int]:
     """Return the memory's stored ``source_commit_time`` (committer epoch), if any.
 
@@ -296,10 +309,12 @@ def find_stale(
                 recency = max(path_times.get(p, 0) for p in changed)
                 # LIF-6: carry the resolved baseline sha along -- write_stale_cache's "sha"
                 # field (a short-form anchor for RET-6's future banner) reads this rather
-                # than re-deriving it; every existing consumer only reads "name"/
-                # "changed_paths" so this extra key is purely additive.
+                # than re-deriving it; consumers read "name"/"changed_paths" so both extra
+                # keys are additive. "type" (TYPE-1): detection stays type-BLIND — carried
+                # so the ARMING surfaces can partition without a re-read.
                 stale.append(
-                    {"name": name, "changed_paths": changed, "recency": recency, "source_commit": sc}
+                    {"name": name, "changed_paths": changed, "recency": recency,
+                     "source_commit": sc, "type": read_memory_type(text)}
                 )
         # Most-recently-drifted first (then name) so the SessionStart note surfaces what matters.
         stale.sort(key=lambda d: (-d["recency"], d["name"]))

@@ -24,9 +24,13 @@ from .staleness import (
     nondrift_old_invalidated,
 )
 from .staleness_policy import (
+    arming_exempt_types,
+    split_type_exempt,
     split_volatile_only,
     stale_note_all_suppressed,
     stale_note_tail,
+    type_note_all_suppressed,
+    type_note_tail,
     volatile_set,
 )
 
@@ -86,9 +90,14 @@ def staleness_producer(
     # anything the worklist armed anyway (the CLB-3 evidence lane) renders THERE, not here.
     stale, vol_sup = split_volatile_only(stale, volatile_set(memory_dir))
     vol_sup = [i for i in vol_sup if i["name"] not in worklist_names]
+    # TYPE-1: the type exemption partitions the VOL-1 remainder (order VOL then TYPE, the
+    # worklist's order) — same worklist-armed exclusion so nothing double-reports.
+    stale, type_sup = split_type_exempt(stale, arming_exempt_types())
+    type_sup = [i for i in type_sup if i["name"] not in worklist_names]
     vol_line = (stale_note_all_suppressed if not stale else stale_note_tail)(len(vol_sup)) if vol_sup else None
+    type_line = (type_note_all_suppressed if not stale else type_note_tail)(len(type_sup)) if type_sup else None
     if not stale:
-        extra = [ln for ln in (vol_line, retired_line, timeout_note) if ln]
+        extra = [ln for ln in (type_line, vol_line, retired_line, timeout_note) if ln]
         return "\n".join(extra) if extra else None
     # LIF-1: a stale entry ALREADY carrying invalid_after is in demote's terminal state —
     # the verdict (or a manual --invalidate) closed its validity window and recall's
@@ -146,6 +155,8 @@ def staleness_producer(
         ]
     if vol_line:
         lines.append(vol_line)  # VOL-1: suppression is visible, never silent
+    if type_line:
+        lines.append(type_line)  # TYPE-1: same honesty rule, its own bucket
     old = sorted(
         name
         for name, ia in invalidated.items()

@@ -30,10 +30,18 @@ from .staleness import (
     _CHANGE_MARKER,
     _chunk_paths,
     _commit_times,
+    read_memory_type,
     read_provenance,
     read_source_commit_time,
 )
-from .staleness_policy import note_suppressed, split_volatile_only, volatile_set
+from .staleness_policy import (
+    DIAG_TYPE_KEY,
+    arming_exempt_types,
+    note_suppressed,
+    split_type_exempt,
+    split_volatile_only,
+    volatile_set,
+)
 from .telemetry import read_episodes
 
 # GRW-5: bound on the since-watermark diff read — the same cap discipline as
@@ -179,9 +187,17 @@ def watermark_stale_candidates(
             if base is not None:
                 hits = [p for p in hits if p not in hit_times or hit_times[p] > base]
             if hits:
-                out.append({"name": name, "changed_paths": hits, "watermark": True})
+                out.append(
+                    # "type" rides the TYPE-1 additive contract (same as find_stale's items).
+                    {"name": name, "changed_paths": hits, "watermark": True, "type": read_memory_type(text)}
+                )
         out, suppressed = split_volatile_only(out, volatile_set(memory_dir))
         note_suppressed(diagnostics, [item["name"] for item in suppressed])
+        # TYPE-1: same order as the worklist's stale lane (VOL then TYPE). The CLB-3
+        # evidence fold runs AFTER this producer, so span-level evidence drift still
+        # re-arms an exempted memory — policy filters whole-file churn only.
+        out, type_suppressed = split_type_exempt(out, arming_exempt_types())
+        note_suppressed(diagnostics, [item["name"] for item in type_suppressed], key=DIAG_TYPE_KEY)
         return out
     except Exception:
         return []

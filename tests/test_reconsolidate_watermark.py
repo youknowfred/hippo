@@ -101,7 +101,7 @@ def test_unreverified_sibling_still_flags(repo, memory_dir):
     write_file(memory_dir, "m_done.md", _mem("m_done", ["src/foo.py"], c3))
     write_file(memory_dir, "m_todo.md", _mem("m_todo", ["src/foo.py"], c1))
     cands = R.watermark_stale_candidates(memory_dir, repo, telemetry_dir=td)
-    assert cands == [{"name": "m_todo", "changed_paths": ["src/foo.py"], "watermark": True}]
+    assert cands == [{"name": "m_todo", "changed_paths": ["src/foo.py"], "watermark": True, "type": None}]
 
 
 # --------------------------------------------------------------------------- #
@@ -116,7 +116,7 @@ def test_partial_coverage_keeps_only_post_baseline_paths(repo, memory_dir):
     git_commit(repo, "c4", 1_700_000_300)  # bar drifts AFTER the re-baseline
     write_file(memory_dir, "m_mix.md", _mem("m_mix", ["src/bar.py", "src/foo.py"], c3))
     cands = R.watermark_stale_candidates(memory_dir, repo, telemetry_dir=td)
-    assert cands == [{"name": "m_mix", "changed_paths": ["src/bar.py"], "watermark": True}]
+    assert cands == [{"name": "m_mix", "changed_paths": ["src/bar.py"], "watermark": True, "type": None}]
 
 
 # --------------------------------------------------------------------------- #

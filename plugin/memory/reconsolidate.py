@@ -66,7 +66,16 @@ from .provenance import (
     run_git,  # unused here since the watermark-lane move; kept importable (tests reach it as R.run_git)
 )
 from .staleness import RunContext, find_stale, invalid_after_map, read_provenance, set_invalid_after
-from .staleness_policy import note_suppressed, split_volatile_only, suppressed_count_note, volatile_set
+from .staleness_policy import (
+    DIAG_TYPE_KEY,
+    arming_exempt_types,
+    note_suppressed,
+    split_type_exempt,
+    split_volatile_only,
+    suppressed_count_note,
+    type_exempt_count_note,
+    volatile_set,
+)
 
 # GRW-5 (re-export): the commit-precise [since-watermark] lane moved to its sibling when
 # VOL-1 tripped the module-size ratchet — every dotted path (`memory.reconsolidate.<name>`)
@@ -295,6 +304,10 @@ def recalled_stale_worklist(
             worklist = [dict(item) for item in stale if item["name"] in recent]
             worklist, vol_suppressed = split_volatile_only(worklist, volatile_set(memory_dir))
             note_suppressed(diagnostics, [item["name"] for item in vol_suppressed])
+            # TYPE-1: the type-based exemption partitions the VOL-1 remainder (order VOL
+            # then TYPE — each suppressed name lands in exactly one diagnostics bucket).
+            worklist, type_suppressed = split_type_exempt(worklist, arming_exempt_types())
+            note_suppressed(diagnostics, [item["name"] for item in type_suppressed], key=DIAG_TYPE_KEY)
         if watermark_stale:
             on_worklist = {item["name"] for item in worklist}
             for item in watermark_stale:
@@ -831,13 +844,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
         diagnostics=diagnostics,
     )
-    # VOL-1: what policy suppressed is printed with the listing it was suppressed FROM —
-    # both lanes report into the one diagnostics dict; suppression is never silent.
+    # VOL-1 + TYPE-1: what policy suppressed is printed with the listing it was suppressed
+    # FROM — both lanes report into the one diagnostics dict; suppression is never silent.
     suppressed = diagnostics.get("volatile_suppressed") or []
+    type_exempt = diagnostics.get(DIAG_TYPE_KEY) or []
     if not worklist:
         print("No recently-recalled memory is currently stale.")
         if suppressed:
             print(suppressed_count_note(len(suppressed)))
+        if type_exempt:
+            print(type_exempt_count_note(len(type_exempt)))
         return 0
     print(
         f"{len(worklist)} memories need re-grounding (recently recalled + stale, or "
@@ -850,6 +866,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"  • {item['name']}{wm_tag}{_linked_note(item)}: {', '.join(item['changed_paths'][:6])}")
     if suppressed:
         print("  " + suppressed_count_note(len(suppressed)))
+    if type_exempt:
+        print("  " + type_exempt_count_note(len(type_exempt)))
     return 0
 
 
