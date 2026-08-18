@@ -83,7 +83,10 @@ from .telemetry import (
 )
 
 _DEFAULT_WINDOW_SESSIONS = 10
-_MAX_WORKLIST_ITEMS = 20
+# 5, not 20: the worklist is a drain-deliberately queue, and its 20-item annotated render
+# was measured at 5,125 chars — 57% of session_start's whole budget — while the items past
+# the fold never survived truncation anyway; `…and N more.` keeps the true depth visible.
+_MAX_WORKLIST_ITEMS = 5
 # LIF-1: how many NEW ledger sessions an explicit --snooze ack holds for. A snooze is a
 # DEFERRAL, not a verdict — it must expire and re-nag (only demote's chained invalid_after
 # is terminal). A plain module constant like _DEFAULT_WINDOW_SESSIONS above (no env knob —

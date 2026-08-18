@@ -27,8 +27,11 @@ from .staleness import (
 )
 
 # Per-producer listing bound (the dispatcher's overall char budget stays with it in
-# ``session_start``). Shared with the signals sibling.
-_MAX_ITEMS_PER_PRODUCER = 20
+# ``session_start``). Shared with the signals sibling. 5, not 20: the staleness/worklist
+# producers are pointers into a queue the session drains deliberately, not reading
+# material — 20-item renders were measured eating 75% of the shared budget and starving
+# every producer listed after them; the `…and N more.` tail keeps the full count honest.
+_MAX_ITEMS_PER_PRODUCER = 5
 
 
 def bootstrap_state(

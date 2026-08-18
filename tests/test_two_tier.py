@@ -233,13 +233,21 @@ def test_portable_floor_producer_silent_without_user_tier(tmp_path, monkeypatch)
     assert R.portable_floor_producer(proj, proj) is None
 
 
-def test_portable_floor_producer_registered_after_native_floor():
+def test_portable_floor_producer_rides_the_positive_block_before_the_warning_lists():
     from memory import session_start as SS
 
     labels = [label for label, _fn in SS.PRODUCERS]
     assert "portable_floor" in labels
-    # native floor lint precedes the portable-tier delivery
-    assert labels.index("floor") < labels.index("portable_floor")
+    # TEA-1 delivery rides the positive-signal block AHEAD of the warning lists: the fixed
+    # order is also the truncation order, and trailing the list meant portable_floor was
+    # discarded in 100% of over-budget sessions (measured over 200 real SessionStarts) —
+    # the user/private-tier floor has NO native always-load channel, so a discarded
+    # delivery is a silently missing floor.
+    assert labels.index("presence") < labels.index("relevant_to_work")
+    assert labels.index("relevant_to_work") < labels.index("resume_card")
+    assert labels.index("resume_card") < labels.index("portable_floor")
+    assert labels.index("portable_floor") < labels.index("staleness")
+    assert labels.index("staleness") < labels.index("reconsolidation")
 
 
 # --------------------------------------------------------------------------- #
