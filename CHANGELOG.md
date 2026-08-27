@@ -7,6 +7,96 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.32.0 — 2026-08-27 — "The floor governs itself"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0 (verified at the
+cut); corpus format still **5**, index schema still **7**, citation derivation still **4**.
+Commissioned, like v1.30.0/v1.31.0 before it, from the em-growth-labs field corpus — this time
+from the 2026-08-27 growing-pains audit, whose headline measurement was governance-shaped: the
+always-loaded MEMORY.md floor sawtoothed over the harness's 17,500-byte warn line in **87% of
+228 commits** and past the 25,000-byte read cap in **9** — silently truncating its own tail out
+of every session's context — while the one lint that existed (a repo-side CI script) had
+structurally never run. And this release train itself supplied the second finding: two releases
+shipped with no tag and no CHANGELOG entry, because the only notes gate lived in the
+tag-triggered workflow that the missing tag never fired.
+
+- **FLR-1 — floor governance: the lint lives where the edits happen.** One measurement
+  (`lint_floor.floor_governance`), one phrasing (`format_governance_summary`), three surfaces
+  that can never disagree about the same bytes: the SessionStart `floor` producer (was:
+  link-placement + link-rot only), a new doctor line (`floor_governance` — warn on a real
+  signal only: the read-cap breach is active data loss and leads the message), and a
+  once-per-session PostToolUse nag that fires at the actual editing moment when a mutating
+  file tool leaves the corpus's own MEMORY.md over the line (rides `record_from_payload`'s ONE
+  `hookSpecificOutput`, QUA-2; SEC-1 parity at fire time via the JIT lane's trust re-check;
+  killed by `HIPPO_DISABLE_FLOOR_NAG`, documented in STABILITY.md per REL-4). The SIZE halves
+  always run — the harness read window (25,000-byte cap, 17,500-byte advisory warn) is
+  hard-coded harness-side and applies to every corpus using the native floor; the constants
+  live in `provenance_format.HARNESS_FLOOR_*` with their field-verified provenance. The LINE
+  halves are the corpus's own policy, opt-in by declaration: `.format` gains its second POLICY
+  key after VOL-1's `volatile_paths` — `floor_lint` (`banned_re` for status-vocabulary rot,
+  `max_line`, and downward-only `warn_bytes`/`cap_bytes` overrides; an uncompilable regex or
+  garbled declaration degrades to not-declared, ED-4; deliberately NO writer — operator-
+  committed policy only, `read_floor_lint`). The empty norm holds everywhere: a lean, clean
+  floor renders nothing on any surface.
+- **REL-5 — the CHANGELOG gate moves to PR time.** DOC-7 split the gates on the assumption
+  every release gets a tag; the tag was the one unenforced step, so v1.30.0 and v1.31.0 merged
+  version bumps with no notes and no tag ever fired the four-way check.
+  `tests/test_version_sync.py` now asserts the newest CHANGELOG heading equals the manifest
+  version at PR time (same regex as `release.yml`'s), making notes and version inseparable in
+  the same change — tag or no tag. The tag-time four-way match stays as the outer gate.
+- **Backfill** — v1.30.0 and v1.31.0 receive their CHANGELOG entries below, written 2026-08-27
+  from their commit inventories and marked as backfilled. Those two versions remain untagged by
+  owner decision (roll-forward): this release is the first tag after the gap, and
+  reconstructing either older tree is `git checkout f37bd83` / `git checkout 73b7bea` — the
+  SHAs their entries record.
+
+## v1.31.0 — 2026-08-17 — "The queue meters truth, not velocity" *(entry backfilled 2026-08-27; shipped untagged as `73b7bea`)*
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **4**. Shipped the same day as
+v1.30.0, from the same em-growth-labs memory×Linear audit; this entry was written at the
+2026-08-27 backfill (REL-5 above is why it will not happen again).
+
+- **TYPE-1 — type-aware staleness arming** (`staleness_policy`): `type: project` memories are
+  exempt from the three ARMING surfaces (reconsolidation worklist, SessionStart staleness note,
+  watermark flag) — the owner-picked option A of the audit's slate, on the measurement that
+  70/79 worklist items were `type: project`, 83% of past reverify verdicts were "graduate", and
+  60/66 graduated items re-armed: on a living repo the project-memory staleness queue meters
+  repo VELOCITY, not truth-risk. Detection, `stale.json`, RET-5/RET-6, JIT, `--for-diff`,
+  derivation, and the deep-judgment surfaces stay type-blind; suppression is counted on every
+  surface it happens on (`DIAG_TYPE_KEY`, partition order VOL then TYPE so VOL-1's counts keep
+  their meaning); a typeless memory ARMS (fail-open — only an explicit type exempts);
+  `HIPPO_ARMING_EXEMPT_TYPES` (comma-list; empty arms everything) is the reversible override.
+- **COR-21** — a code span is not a hidden-instruction channel (#105): threat-lint precision —
+  backtick-fenced spans no longer trip the invisible-payload heuristics.
+- **COR-22** — a math-notation prefix is not a homograph (#106): mixed-script confusable
+  detection stops flagging legitimate mathematical notation.
+- Committed-subset memory repairs (#103, #104): 19 pre-launch merge SHAs + reverify stamps
+  corrected in `.claude/memory/` — corpus data, no plugin behavior change.
+
+## v1.30.0 — 2026-08-17 — "Context budget" *(entry backfilled 2026-08-27; shipped untagged as `f37bd83`)*
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **4**. Commissioned from the
+em-growth-labs memory×Linear context audit (13-agent workflow + census telemetry over 1,300+
+SessionStart firings); this entry was written at the 2026-08-27 backfill.
+
+- **Producer reorder** (`session_start.PRODUCERS`): positive signal blocks
+  (`relevant_to_work`, `resume_card`, `portable_floor`) now ride AHEAD of the warning lists —
+  the fixed order is also the truncation order, and the measured warnings-first ordering
+  starved them structurally (portable_floor discarded in 100% of over-budget sessions,
+  resume_card in 35%+, relevant_to_work rarely surviving to context).
+- **Item caps 20→5** (`_MAX_WORKLIST_ITEMS` / `_MAX_ITEMS_PER_PRODUCER`): each list producer
+  bounds itself before the shared budget cuts blindly.
+- **Collapse-summary render**: over-cap lists collapse to a counted one-liner instead of a
+  mid-item truncation (rules-plane exempt).
+- **`HIPPO_COOLDOWN_TURNS`** (default 3): bounds the recall cooldown set's monotonic growth
+  (measured 29 names at turn 0 → ~98 by turn 9 before the bound).
+- Field note recorded at the backfill, from the same audit's follow-up measurement: the reorder
+  and caps changed injection COMPOSITION, not volume — SessionStart still saturates its
+  9,000-char bound in ~100% of firings on the commissioning corpus. The volume lever is a
+  different, future change; this entry states the shipped scope honestly.
+
 ## v1.29.0 — 2026-07-20 — "No false greens"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0 (verified at the
