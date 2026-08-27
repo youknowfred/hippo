@@ -225,3 +225,70 @@ def read_volatile_paths(memory_dir: str) -> list:
         if p and p not in out:
             out.append(p)
     return out
+
+
+# --------------------------------------------------------------------------- #
+# FLR-1: the floor-lint POLICY key — the marker's second policy key after VOL-1
+# --------------------------------------------------------------------------- #
+# The harness loads MEMORY.md into EVERY session's context through a hard-coded read
+# window: 25,000 bytes (past it the floor's TAIL is silently truncated in-context) with
+# an advisory nag near 70% (17,500 bytes). Neither number is configurable harness-side
+# (no settings key, env var, or hook — field-verified 2026-08-24 against the settings
+# schema + docs), so they are constants HERE, not policy: every corpus using the native
+# MEMORY.md floor is subject to them whether or not it declares anything.
+HARNESS_FLOOR_READ_CAP_BYTES = 25000
+HARNESS_FLOOR_WARN_BYTES = 17500
+
+
+def read_floor_lint(memory_dir: str) -> dict:
+    """The corpus's declared floor-lint policy (FLR-1); defaults when undeclared. Never raises.
+
+    ``floor_lint`` is the marker's second POLICY key (VOL-1's ``volatile_paths`` set the
+    pattern: corpus-owned, committed, travels through git, deliberately NO writer —
+    operator-committed policy only). The field defect it mechanizes (em-growth-labs,
+    2026-08): the always-loaded floor sawtoothed over the harness warn line in 87% of 228
+    commits and past the read cap in 9 — silently truncating its own tail — while the one
+    lint that existed lived in a CI lane that never ran. The check must live where the
+    edits happen; the POLICY (what tokens are banned, how long a line may run) stays the
+    corpus's own declaration.
+
+    Returns ``{"banned_re", "max_line", "warn_bytes", "cap_bytes"}``:
+
+    - ``banned_re`` — OPT-IN: a regex (string) whose match on a MEMORY.md line flags it
+      (the linear-memory-boundary class: status vocabulary, PR refs, SHAs, chip ids).
+      ``None`` when undeclared/non-string/uncompilable — an invalid pattern degrades to
+      "not declared", never a raise (ED-4).
+    - ``max_line`` — OPT-IN: max chars per floor line (pointer + hook, not prose).
+      ``None`` when undeclared/invalid; must be a positive int.
+    - ``warn_bytes`` / ``cap_bytes`` — ALWAYS present: the harness constants above,
+      overridable only DOWNWARD by declaration (a corpus may hold itself leaner than the
+      harness's window; declaring a laxer cap than the harness enforces would just
+      un-warn real truncation, so larger values are ignored). Non-positive/invalid
+      declarations fall back to the constants.
+    """
+    raw = _read_marker(memory_dir).get("floor_lint")
+    out = {
+        "banned_re": None,
+        "max_line": None,
+        "warn_bytes": HARNESS_FLOOR_WARN_BYTES,
+        "cap_bytes": HARNESS_FLOOR_READ_CAP_BYTES,
+    }
+    if not isinstance(raw, dict):
+        return out
+    pat = raw.get("banned_re")
+    if isinstance(pat, str) and pat.strip():
+        try:
+            import re as _re
+
+            _re.compile(pat)
+            out["banned_re"] = pat
+        except Exception:
+            out["banned_re"] = None
+    ml = raw.get("max_line")
+    if isinstance(ml, int) and not isinstance(ml, bool) and ml > 0:
+        out["max_line"] = ml
+    for key, ceiling in (("warn_bytes", HARNESS_FLOOR_WARN_BYTES), ("cap_bytes", HARNESS_FLOOR_READ_CAP_BYTES)):
+        v = raw.get(key)
+        if isinstance(v, int) and not isinstance(v, bool) and 0 < v <= ceiling:
+            out[key] = v
+    return out

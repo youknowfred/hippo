@@ -73,6 +73,7 @@ CRASH_CONTRACT = {
     ("interview", "_write_state"): ("detected",),  # a lost decline is NAMED, never pretended recorded
     ("jit", "write_touch_cache"): ("detected",),  # SessionStart caller sees False, never a torn map
     ("jit", "_write_state"): ("intact",),  # session bookkeeping: silent by design; reminder still emits
+    ("lint_floor", "observe_floor_edit"): ("intact",),  # FLR-1 nag sentinel: content-free session bookkeeping (the jit._write_state posture) — a lost write costs one repeat nag, never a torn file
     ("links", "add_typed_relation"): ("detected", "rolled_back"),  # demote+supersede write #2
     ("links", "remove_typed_relation"): ("detected", "rolled_back"),  # resolve's declaration drop; scope_both 2-file chain
     ("new_memory", "_ensure_tier_floor"): ("intact",),  # opportunistic skeleton: silent by design
@@ -873,6 +874,27 @@ def scn_presence_write_doc_intact(tmp_path, monkeypatch):
     assert not leftovers, "presence doc absent, never partial"
 
 
+def scn_floor_nag_sentinel_intact(tmp_path, monkeypatch):
+    """FLR-1: a torn nag-sentinel write is SILENT (the jit._write_state posture) — the
+    nag line still emits (the warning is worth more than the bookkeeping; dedup degrades
+    to per-call), and no partial sentinel may land."""
+    from memory import lint_floor
+
+    root, md = _git_repo(tmp_path)
+    floor = os.path.join(md, "MEMORY.md")
+    with open(floor, "w", encoding="utf-8") as fh:
+        fh.write("# Memory index\n\n## User\n\n" + ("- filler line\n" * 1400))
+    _arm(monkeypatch, "lint_floor", "observe_floor_edit")
+    nag = lint_floor.observe_floor_edit(
+        floor, memory_dir=md, repo_root=root,
+        telemetry_dir=str(tmp_path / "tele"), session_id="s",
+    )
+    assert nag and "warn line" in nag  # the nag outlives its own bookkeeping
+    nag_dir = os.path.join(str(tmp_path / "tele"), "floor_nag")
+    leftovers = [f for f in os.listdir(nag_dir)] if os.path.isdir(nag_dir) else []
+    assert not leftovers, "sentinel absent, never partial"
+
+
 _SCENARIOS = [
     (("dream", "_apply_one"), "detected", scn_dream_apply_bridge_detected),
     (("dream", "_apply_one"), "rolled_back", scn_dream_apply_refines_rolled_back),
@@ -891,6 +913,7 @@ _SCENARIOS = [
     (("jit", "write_touch_cache"), "detected", scn_jit_touch_cache_detected),
     (("jit", "_write_state"), "intact", scn_jit_state_intact),
     (("presence", "_write_doc"), "intact", scn_presence_write_doc_intact),
+    (("lint_floor", "observe_floor_edit"), "intact", scn_floor_nag_sentinel_intact),
     (("links", "add_typed_relation"), "detected", scn_links_add_typed_detected),
     (("links", "add_typed_relation"), "rolled_back", scn_links_add_typed_rolled_back),
     (("links", "remove_typed_relation"), "detected", scn_links_remove_typed_detected),

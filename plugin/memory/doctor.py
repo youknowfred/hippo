@@ -68,6 +68,7 @@ from .doctor_checks_corpus import (
     check_steering,
     check_format_version,
     check_volatile_paths,
+    check_floor_governance,
     check_pack_drift,
     check_fill_me,
     check_trust,
@@ -352,6 +353,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("rules_source", check_rules_source),
     ("format_version", check_format_version),
     ("volatile_paths", check_volatile_paths),  # VOL-1: arming-policy state, ok-glyph always
+    ("floor_governance", check_floor_governance),  # FLR-1: floor vs the harness read window + declared floor_lint policy
     ("empty_baselines", check_empty_baselines),  # COR-10: the heal moved off the hook
     ("pack_drift", check_pack_drift),
     ("fill_me", check_fill_me),
