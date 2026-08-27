@@ -161,6 +161,26 @@ def record_from_payload(
                 context_out.extend(fleet)
         except Exception:
             pass
+        # FLR-1: the floor-governance nag rides the SAME single spawn — after a MUTATING
+        # tool touched the corpus's own MEMORY.md, one bounded line (once per session,
+        # killed by HIPPO_DISABLE_FLOOR_NAG) appended to the same context_out, so the
+        # hook still emits exactly ONE hookSpecificOutput (QUA-2). Non-floor paths cost
+        # one abspath compare inside observe_floor_edit — no file read, the empty norm.
+        if tool in MUTATING_FILE_TOOLS:
+            try:
+                from .lint_floor import observe_floor_edit
+
+                nag = observe_floor_edit(
+                    raw,
+                    memory_dir=memory_dir,
+                    repo_root=repo_root,
+                    telemetry_dir=td,
+                    session_id=session_id,
+                )
+                if nag and context_out is not None:
+                    context_out.append(nag)
+            except Exception:
+                pass
         return log_outcome(
             tool, rel, session_id=session_id, telemetry_dir=td, cited_by=cited_by,
             tree_path=tree_rel if tree_rel != rel else None,

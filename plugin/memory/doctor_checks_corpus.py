@@ -180,6 +180,35 @@ def check_volatile_paths(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "ok", "message": f"volatile paths: check skipped ({exc})."}
 
 
+def check_floor_governance(ctx: DoctorContext) -> Dict[str, str]:
+    """FLR-1: the floor measured against the harness read window + declared policy.
+
+    ``warn`` on a real signal only (HYG-3): past the 25,000-byte read cap the floor's
+    tail is ALREADY being truncated out of every session's context (active data loss —
+    the strongest warn this check owns); over the 17,500-byte advisory line, or with
+    declared-policy hits (``.format`` ``floor_lint`` — banned tokens / long lines), the
+    floor is drifting toward it. A lean floor — or a corpus with no MEMORY.md at all —
+    is one ok glyph. Same one-measurement/one-phrasing pair as the SessionStart
+    producer and the edit-time nag (``floor_governance`` / ``format_governance_summary``)
+    so the three surfaces can never disagree about the same bytes.
+    """
+    try:
+        from .lint_floor import floor_governance, format_governance_summary
+
+        gov = floor_governance(ctx.memory_dir)
+        line = format_governance_summary(gov)
+        if line is None:
+            declared = " (floor_lint policy declared)" if gov.get("policy_declared") else ""
+            return {
+                "status": "ok",
+                "message": f"floor governance: MEMORY.md {gov['bytes']:,}B — under the "
+                f"{gov['warn_bytes']:,}B warn line{declared}.",
+            }
+        return {"status": "warn", "message": f"floor governance: {line}"}
+    except Exception as exc:
+        return {"status": "ok", "message": f"floor governance: check skipped ({exc})."}
+
+
 def check_pack_drift(ctx: DoctorContext) -> Dict[str, str]:
     """Corpus pack memories whose ``pack_version`` lags the shipped pack manifest's ``version``.
 

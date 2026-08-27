@@ -36,7 +36,10 @@ release). New *additions* alongside them are minor, non-breaking changes.
   `HIPPO_MCP_MAX_MESSAGE_CHARS`, `HIPPO_TEA5_OPT_IN`, `HIPPO_SALIENCE`, `HIPPO_DENSE_FLOOR`,
   `HIPPO_DUP_THRESHOLD`, `HIPPO_DISABLE_JIT` (added in T16 JIT: kills the default-on
   first-touch reminder lane + its touch-grain telemetry, restoring pre-T16 PostToolUse
-  behavior byte-for-byte), `HIPPO_DISABLE_PRESENCE` (added in T18 FLT: kills the whole
+  behavior byte-for-byte), `HIPPO_DISABLE_FLOOR_NAG` (added in FLR-1: kills the
+  once-per-session PostToolUse floor-governance nag on MEMORY.md edits; the SessionStart
+  floor line and the doctor check are state reports, not interjections, and stay on),
+  `HIPPO_DISABLE_PRESENCE` (added in T18 FLT: kills the whole
   fleet lane — no per-session presence doc, no SessionStart fleet line, no moved-tree
   tripwire, no worktree-first nudge; docs already on disk age out via their TTL. Honest
   coverage note while ON: the lane rides PostToolUse, which sees FILE-TOOL acts only —
