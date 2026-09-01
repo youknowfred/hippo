@@ -108,15 +108,78 @@ def test_entropy_gate_scores_one_string_not_two():
         assert S.scan_text(f"{label}{sha}") == [], f"the label {label!r} changed the verdict"
 
 
-def test_camelcase_identifier_false_positive_is_known_and_unfixed():
-    """Honest scope pin — SEC-16 does NOT claim to fix precision generally.
+def test_camelcase_identifier_no_longer_false_positives():
+    """SEC-20 closes the scope SEC-16 pinned open. The old pin said separating a camelCase
+    identifier from a real key "needs a different signal (dictionary-word structure), not a
+    tuned bar" — `_word_shaped` IS that signal (case-run structure: letters-only, lowercase
+    majority, word-length lowercase runs), so the identifier that was pinned as a known
+    false positive now scans clean while every SEC-16 must-fire vector still fires."""
+    assert S.scan_text("the handler is getUserAuthenticationTokenFromCache in the cache") == []
 
-    A long camelCase identifier still trips the catch-all, and no entropy threshold can fix
-    it: measured, `getUserAuthenticationTokenFromCache` scores 4.01 bits while AWS's real
-    secret key core scores 3.68. The identifier is MORE 'random' by this metric than the
-    secret. Separating them needs a different signal (dictionary-word structure), not a
-    tuned bar. Pinned so the limitation is visible rather than folklore."""
-    assert S.scan_text("the handler is getUserAuthenticationTokenFromCache in the cache") != []
+
+# The 2026-09-01 live calibration corpus (em-growth-labs, 505 memories): the entropy
+# catch-all flagged 23 files — every distinct triggering core a camelCase/PascalCase
+# identifier (or a +-joined list of them) in ordinary technical prose, zero real
+# credentials. A ~100%-false-positive scanner trains users to ignore it — the security
+# regression SEC-20 exists to prevent. Each core below must scan CLEAN, verbatim.
+_LIVE_IDENTIFIER_CORES = [
+    "ActionTrackerName",
+    "AsyncPostgresSaver+AsyncPostgresStore",
+    "adsGraduationBlock",
+    "restartPolicyType",
+    "buildFromTemplateParams",
+    "projectId+serviceId+environmentId",
+    "assetPolicySummaryApproval",
+    "creativeDownloadUrl",
+    "matrix+isPrivileged+csrfOk",
+    "authoringModeProvisioned",
+    "getBoundingClientRect",
+    "setNotFoundHandler",
+    "ProvisioningCallout",
+    "ExperimentalWarning",
+    "CompleteRegistration",
+    "Bearer+DeveloperToken+CustomerId+CustomerAccountId",
+    "PeopleInOrSearchingForOrViewingPages",
+    "GscIndexStatusOut",
+    "IllegalDimensionMetricCombinationException",
+    "createCreatives+createLibraryAds",
+    "saQueue+recs+agent+insightRun+laneHealth",
+    "productFaviconSvg",
+    "DurableSandboxSet",
+    "classifyRouteTier",
+    "DnsVerificationCode",
+    "example+OPTIONAL_VARS+_SCRIPT_KEYS",
+]
+
+
+def test_sec20_live_calibration_cores_all_scan_clean():
+    for core in _LIVE_IDENTIFIER_CORES:
+        assert S.scan_text(f"the code path touches {core} during the round") == [], (
+            f"live-corpus identifier still false-positives: {core!r}"
+        )
+
+
+def test_sec20_word_shape_cannot_be_forged_with_digits():
+    """One digit anywhere in the core keeps full suspicion — a random base64 run carries
+    digits with overwhelming probability at these lengths, so the letters-only requirement
+    is the cheap half of the discriminator."""
+    assert S.scan_text("token getUserAuth3nticationT0kenFromCache here") != []
+
+
+def test_sec20_acronym_soup_still_fires():
+    """The AWS example core's shape — sparse lowercase between caps runs — fails the
+    lowercase-majority and run-length tests; word-casing cannot be faked by an opaque
+    blob without destroying its entropy."""
+    assert S.scan_text("blob bPxRfiCYEXAMPLEKEYQWZXbTkQpNmVwX embedded in prose") != []
+
+
+def test_sec20_known_accepted_miss_camelcase_passphrase():
+    """Honest scope pin (the SEC-16 tradition): a camelCase-JOINED passphrase is
+    word-shaped by construction and scans clean. Accepted 2026-09-01: its space-joined
+    diceware form never fired anyway (whitespace breaks the token), and the alternative —
+    a catch-all with a measured ~100% live false-positive rate — is the worse regression.
+    Pinned so the limitation stays visible rather than folklore."""
+    assert S.scan_text("correctHorseBatteryStapleExtra") == []
 
 
 def test_scan_text_never_echoes_the_secret():
