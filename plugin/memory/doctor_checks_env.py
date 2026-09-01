@@ -600,7 +600,44 @@ def check_plugin_version(ctx: DoctorContext) -> Dict[str, str]:
         if not installed:
             return {"status": "warn", "message": "plugin version unreadable (plugin.json missing or unparseable)."}
         if not ctx.plugin_data:
-            return {"status": "ok", "message": f"plugin v{installed} installed (bootstrap state unknown — CLAUDE_PLUGIN_DATA unset)."}
+            # The env-unset degradation must never report "ok" for a check that DID NOT
+            # RUN: on the live machine it hid a 21-version venv drift for ~7 weeks
+            # (sentinel: v1.10.2 under a v1.31.0 install, 2026-09-01). The sentinel is
+            # plain JSON readable without the venv, so probe the documented data-dir
+            # convention (INFERRED — every ``<name>-*`` sentinel dir is a candidate),
+            # surface any delta, and otherwise say plainly the real check was skipped.
+            from .bootstrap import data_dir_candidates
+
+            rows = []
+            for d in data_dir_candidates(ctx.plugin_root):
+                try:
+                    with open(os.path.join(d, ".bootstrap-sentinel"), encoding="utf-8") as fh:
+                        v = json.load(fh).get("plugin_version")
+                except Exception:
+                    v = None
+                rows.append((os.path.basename(d), v))
+            stale = [(b, v) for b, v in rows if v and v != installed]
+            if stale:
+                detail = ", ".join(f"{b}: v{v or 'unreadable'}" for b, v in rows)
+                return {
+                    "status": "warn",
+                    "message": f"plugin v{installed} installed but at least one venv looks "
+                    f"STALE — inferred sentinel probe (CLAUDE_PLUGIN_DATA unset): {detail}. "
+                    "Run /hippo:bootstrap on the stale surface(s); set CLAUDE_PLUGIN_DATA "
+                    "or run via the harness to pin which one applies here.",
+                }
+            if rows and all(v == installed for _b, v in rows):
+                names = ", ".join(b for b, _v in rows)
+                return {
+                    "status": "ok",
+                    "message": f"plugin v{installed} installed; CLAUDE_PLUGIN_DATA unset — "
+                    f"every inferred sentinel matches ({names}).",
+                }
+            return {
+                "status": "warn",
+                "message": f"plugin v{installed} installed — version-drift check SKIPPED "
+                "(CLAUDE_PLUGIN_DATA unset; no readable sentinel to infer from).",
+            }
         sentinel = os.path.join(ctx.plugin_data, ".bootstrap-sentinel")
         if not os.path.exists(sentinel):
             return {"status": "ok", "message": f"plugin v{installed} installed — not bootstrapped yet (see the bootstrap check)."}
@@ -728,7 +765,11 @@ def check_machine_state(ctx: DoctorContext) -> Dict[str, str]:
         from .machine_census import scheduler_census, symlink_farm_census, trust_census
 
         farm = symlink_farm_census()
-        dangling = farm["dangling"] + farm["dangling_temp_rooted"]
+        dangling = (
+            farm["dangling"]
+            + farm["dangling_temp_rooted"]
+            + farm.get("dangling_worktree_retired", 0)
+        )
         trust = trust_census()
         dead_trust = trust["dead"]
         # BND-2: own-shape read — absent pre-withholding shapes count 0 (ED-4).

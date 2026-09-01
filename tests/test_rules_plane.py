@@ -297,6 +297,79 @@ def test_symbol_ref_rot_flags_vanished_symbol_in_resolved_module(repo, memory_di
     ]
 
 
+def test_dotted_ref_resolving_in_yaml_mapping_is_not_rot(repo, memory_dir):
+    """Live 2026-09-01 false positive: CLAUDE.md cited `meta.mechanisms` — a YAML path
+    under ``meta:`` in docs/audience-matrix.yaml — while the repo also had exactly one
+    (unrelated) ``meta.py``; the module leg matched it and flagged the "symbol" as gone.
+    A dotted ref that resolves as a nested mapping path in ANY tracked data file is
+    alive. A null VALUE still counts as present (sentinel lookup, not truthiness)."""
+    write_file(repo, "ingest/desks/meta.py", "def unrelated():\n    pass\n")
+    write_file(
+        repo,
+        "docs/audience-matrix.yaml",
+        "audiences:\n  - buyers\nmeta:\n  version: 3\n  mechanisms:\n    - seo\n  empty_leaf: null\n",
+    )
+    git_commit(repo, "matrix + meta desk", 1_700_000_000)
+    write_file(
+        repo,
+        "CLAUDE.md",
+        "Pick mechanisms from the matrix's `meta.mechanisms`; `meta.empty_leaf` too. "
+        "But `meta.vanished` is genuinely gone.",
+    )
+    rot = RP.rules_rot(repo)
+    assert rot["code_ref_rot"] == [
+        {"file": "CLAUDE.md", "ref": "meta.vanished", "kind": "symbol"}
+    ]
+
+
+def test_dotted_ref_resolving_in_json_is_not_rot(repo, memory_dir):
+    write_file(repo, "cfgmod.py", "def unrelated():\n    pass\n")
+    write_file(repo, "conf/settings.json", '{"cfgmod": {"retries": 3}}\n')
+    git_commit(repo, "configs", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "Honor `cfgmod.retries` from config.")
+    assert RP.rules_rot(repo)["code_ref_rot"] == []
+
+
+def test_dotted_ref_toml_resolution_needs_tomllib(repo, memory_dir):
+    """``tomllib`` is stdlib only since 3.11, and 3.9/3.10 sit inside the supported
+    ``_PY_WINDOW`` — so the TOML leg resolves where the module exists and degrades to
+    the pre-fix verdict (flag) where it does not, never a crash. Both arms pinned; the
+    first PR run caught exactly this on the py3.10 hermetic lanes."""
+    import sys
+
+    write_file(repo, "conf/tool.toml", "[toolcfg]\ntimeout = 5\n")
+    write_file(repo, "toolcfg.py", "def also_unrelated():\n    pass\n")
+    git_commit(repo, "toml config", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "Honor `toolcfg.timeout` from config.")
+    rot = RP.rules_rot(repo)["code_ref_rot"]
+    if sys.version_info >= (3, 11):
+        assert rot == []
+    else:
+        assert rot == [{"file": "CLAUDE.md", "ref": "toolcfg.timeout", "kind": "symbol"}]
+
+
+def test_dotted_ref_data_lookup_never_shadows_a_defined_python_symbol(repo, memory_dir):
+    """Control: the module leg still wins when the symbol IS defined — the data sweep only
+    runs for a ref about to flag, so a healthy `util.kept` costs zero data parses."""
+    write_file(repo, "plugin/util.py", "def kept(a):\n    return a\n")
+    write_file(repo, "data.yaml", "util:\n  vanished: covered-by-data\n")
+    git_commit(repo, "util + data", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "Call `util.kept`; `util.vanished` is in data.yaml.")
+    assert RP.rules_rot(repo)["code_ref_rot"] == []  # kept: defined; vanished: data-alive
+
+
+def test_dotted_ref_data_lookup_skips_oversized_files_gracefully(repo, memory_dir, monkeypatch):
+    """Above the parse cap the data sweep degrades to the pre-fix verdict (flag) — never a
+    crash. The cap itself is sized by the motivating live file (1.7MB matrix; cap 8MB)."""
+    monkeypatch.setattr(RP, "_DATA_DOC_MAX_BYTES", 10)
+    write_file(repo, "bigmod.py", "def unrelated():\n    pass\n")
+    write_file(repo, "big.yaml", "bigmod:\n  key: present-but-file-oversized\n")
+    git_commit(repo, "big", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "Uses `bigmod.key` from big.yaml.")
+    rot = RP.rules_rot(repo)
+    assert rot["code_ref_rot"] == [{"file": "CLAUDE.md", "ref": "bigmod.key", "kind": "symbol"}]
+
+
 def test_symbol_ref_unresolvable_or_ambiguous_module_is_silence(repo, memory_dir):
     write_file(repo, "a/dup.py", "def f():\n    pass\n")
     write_file(repo, "b/dup.py", "def g():\n    pass\n")

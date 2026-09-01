@@ -1180,6 +1180,47 @@ def test_check_candidate_routes_duplicate_to_review(tmp_path, monkeypatch):
     assert not os.path.exists(os.path.join(md, "deploy_pipeline_recap.md"))
 
 
+def test_check_candidate_hard_checks_filename_collision(tmp_path, monkeypatch):
+    """CAP-3 regression (live 2026-09-01): a candidate whose NAME already exists on disk
+    but whose description has drifted below the similarity threshold returned
+    ``route: "add"`` — the own-name index exclusion GUARANTEED the twin never surfaced —
+    inviting the overwrite ``write_memory`` then refuses. An on-disk collision must route
+    to review regardless of similarity, carrying the LIVE file's description."""
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)
+    _seed_dup_corpus(NM, md, tmp_path)
+    before = _corpus_files(md)
+
+    decision = NM.check_candidate(
+        "railway_deploy_pipeline",
+        "heirloom tomato rotation beds for the community garden almanac",
+        "project",
+        memory_dir=md,
+    )
+    assert decision["route"] == "review"
+    twin = decision["neighbors"][0]
+    assert twin["name"] == "railway_deploy_pipeline"
+    assert twin.get("collision") is True and twin["score"] == 1.0
+    assert twin["description"]  # the LIVE file's description, surfaced for the router
+    assert "filename collision" in (decision["note"] or "")
+    assert _corpus_files(md) == before  # still a dry run
+
+
+def test_check_candidate_collision_survives_missing_index(tmp_path, monkeypatch):
+    """The collision hard check must not depend on the similarity machinery: with no
+    index at all (note says the dup check was skipped), an existing name still reviews."""
+    from memory import new_memory as NM
+
+    md = _nm_env(tmp_path, monkeypatch)  # floor only — no index built
+    with open(os.path.join(md, "first_ever.md"), "w", encoding="utf-8") as fh:
+        fh.write('---\nname: first_ever\ndescription: "already here"\n---\nbody\n')
+    decision = NM.check_candidate("first_ever", "something else entirely", "project", memory_dir=md)
+    assert decision["route"] == "review"
+    assert decision["neighbors"][0].get("collision") is True
+    assert "filename collision" in (decision["note"] or "")
+
+
 def test_check_candidate_routes_novel_to_add(tmp_path, monkeypatch):
     from memory import new_memory as NM
 

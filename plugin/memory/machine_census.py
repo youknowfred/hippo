@@ -47,7 +47,7 @@ from typing import Dict, List, Optional
 
 # init_project.py already imports this cross-module (the shipped precedent); the census
 # reuses the ONE volatile-root classifier rather than duplicating it (inv5).
-from .registry import _under_volatile_root, registry_census
+from .registry import _retired_worktree, _under_volatile_root, registry_census
 
 # Hermetic-test / relocation override for the harness-owned symlink base. Resolved HERE
 # (not in provenance.py, which is size-pinned) and honored by init_project's symlink
@@ -110,6 +110,11 @@ def symlink_farm_census(claude_projects_dir: Optional[str] = None) -> dict:
                 status = "ok"
             elif _under_volatile_root(target):
                 status = "dangling-temp-rooted"
+            elif _retired_worktree(target):
+                # The worktrees PARENT is mounted and readable while the worktree dir is
+                # gone: definitively a retired worktree (registry._retired_worktree), the
+                # second mechanically-safe batch class — never "possibly unmounted".
+                status = "dangling-worktree-retired"
             else:
                 status = "dangling"
             entries.append({"link": link, "target": target, "status": status})
@@ -122,6 +127,9 @@ def symlink_farm_census(claude_projects_dir: Optional[str] = None) -> dict:
         "dangling": sum(1 for e in entries if e["status"] == "dangling"),
         "dangling_temp_rooted": sum(
             1 for e in entries if e["status"] == "dangling-temp-rooted"
+        ),
+        "dangling_worktree_retired": sum(
+            1 for e in entries if e["status"] == "dangling-worktree-retired"
         ),
         "pytest_leaked": sum(
             1 for e in entries if e["status"] != "ok" and "pytest-of-" in e["target"]
@@ -361,7 +369,7 @@ def prune_dangling(claude_projects_dir: Optional[str] = None) -> dict:
     kept_dead = [e for e in farm["entries"] if e["status"] == "dangling"]
     failed: List[dict] = []
     for e in farm["entries"]:
-        if e["status"] != "dangling-temp-rooted":
+        if e["status"] not in ("dangling-temp-rooted", "dangling-worktree-retired"):
             continue
         try:
             if not os.path.islink(e["link"]):  # re-verify at act time, not census time
@@ -402,26 +410,29 @@ def _render_symlinks(farm: dict) -> List[str]:
         f"memory symlinks: {farm['path']} "
         f"({_n(len(entries), 'entry', 'entries')}: {farm['ok']} ok, "
         f"{farm['dangling_temp_rooted']} dangling temp-rooted, "
+        f"{farm.get('dangling_worktree_retired', 0)} dangling worktree-retired, "
         f"{farm['dangling']} dangling kept)"
     ]
     for e in entries:
         if e["status"] == "ok":
             continue
-        note = (
-            " [temp-rooted — the mechanically-safe batch class]"
-            if e["status"] == "dangling-temp-rooted"
-            else " [kept — possibly an unmounted volume; per-item only]"
-        )
+        if e["status"] == "dangling-temp-rooted":
+            note = " [temp-rooted — the mechanically-safe batch class]"
+        elif e["status"] == "dangling-worktree-retired":
+            note = " [retired worktree — parent mounted, worktree gone; batch-safe]"
+        else:
+            note = " [kept — possibly an unmounted volume; per-item only]"
         lines.append(f"  dangling{note}: {e['link']} -> {e['target']}")
     if farm["pytest_leaked"]:
         lines.append(
             f"  NB: {farm['pytest_leaked']} of the dangling targets are pytest tmp trees — "
             "self-inflicted test leak (the HYG-2 conftest isolation is the faucet fix)."
         )
-    if farm["dangling_temp_rooted"]:
+    n_batch = farm["dangling_temp_rooted"] + farm.get("dangling_worktree_retired", 0)
+    if n_batch:
         lines.append(
             "drain the "
-            + _n(farm["dangling_temp_rooted"], "temp-rooted entry", "temp-rooted entries")
+            + _n(n_batch, "batch-safe entry", "batch-safe entries")
             + ": python -m memory.machine_census --prune-dangling"
         )
     return lines

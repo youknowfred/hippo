@@ -44,10 +44,50 @@ def lint(memory_dir: str, index_dir: Optional[str] = None) -> dict:
             "ambiguous": [],
             "slug_mismatch": [],
             "typed_dangling": [],
+            "cross_tier": [],
+            "cross_tier_typed": [],
             "orphans": [],
             "files": 0,
         }
-    return _graph_report(g)
+    return _classify_cross_tier(memory_dir, _graph_report(g))
+
+
+def _classify_cross_tier(memory_dir: str, report: dict) -> dict:
+    """Split tier-resolvable targets OUT of the dangling classes (GRF-1 tier awareness).
+
+    The link graph audits the PROJECT corpus; recall fuses three (project, TEA-3 private,
+    user). A ``[[wikilink]]`` to a PROMOTED memory therefore resolves at recall time while
+    reading as dangling here — 21 of the live corpus's 24 "edge rot" findings (2026-09-01)
+    were exactly that, forever. Such targets move to ``cross_tier``/``cross_tier_typed``
+    (each entry gains its ``tier`` label): resolvable-not-rot, so ``health_line`` stops
+    nagging them per-session and doctor's rot count means what it says. A target that
+    resolves NOWHERE stays in ``dangling`` — genuinely-absent targets and the supported
+    deliberate-forward-reference idiom alike, advisory by contract (CLB-1: edge findings
+    never gate). Deliberately applied in ``lint()`` only — ``boundary_lint`` keeps the
+    fresh-checkout view, where a stranger's clone genuinely lacks these tiers (PR #67's
+    expected-not-error contract is untouched). Never raises."""
+    try:
+        from .links import extra_tier_stems, resolve_cross_tier
+
+        tier_stems = extra_tier_stems(memory_dir)
+    except Exception:
+        tier_stems = {}
+    cross: List[dict] = []
+    cross_typed: List[dict] = []
+    if tier_stems:
+        keep: List[dict] = []
+        for d in report["dangling"]:
+            tier = resolve_cross_tier(d["target"], tier_stems)
+            (cross.append({**d, "tier": tier}) if tier else keep.append(d))
+        report["dangling"] = keep
+        keep_typed: List[dict] = []
+        for d in report["typed_dangling"]:
+            tier = resolve_cross_tier(d["target"], tier_stems)
+            (cross_typed.append({**d, "tier": tier}) if tier else keep_typed.append(d))
+        report["typed_dangling"] = keep_typed
+    report["cross_tier"] = cross
+    report["cross_tier_typed"] = cross_typed
+    return report
 
 
 def _graph_report(g: LinkGraph) -> dict:
@@ -325,6 +365,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         # Ambiguous typed targets carry claimants (disambiguate); genuinely-dangling don't.
         who = f" (claimed by {', '.join(d['claimants'])})" if d.get("claimants") else ""
         print(f"  ✗ {d['file']} -> {d['relation']}: {d['target']}{who}")
+    n_cross = len(report.get("cross_tier", [])) + len(report.get("cross_tier_typed", []))
+    if n_cross:
+        print(f"cross-tier links : {n_cross} (resolve in another recall tier — not rot)")
+        for d in report.get("cross_tier", []):
+            print(f"  = {d['file']} -> [[{d['target']}]] ({d['tier']} tier)")
+        for d in report.get("cross_tier_typed", []):
+            print(f"  = {d['file']} -> {d['relation']}: {d['target']} ({d['tier']} tier)")
     print(f"orphans (no outbound links): {len(report['orphans'])}")
     if args.show_orphans:
         for o in report["orphans"]:

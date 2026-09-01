@@ -219,19 +219,26 @@ def check_edge_rot(ctx: DoctorContext) -> Dict[str, str]:
         if report is None:
             return {"status": "ok", "message": "edge rot: N/A (could not build the link graph)."}
         rot = report.get("rot") or []
+        cross = report.get("cross_tier") or []
+        cross_note = (
+            f" ({len(cross)} cross-tier link(s) resolve in other recall tiers — not rot)"
+            if cross
+            else ""
+        )
         by_class: Dict[str, int] = {}
         for r in rot:
             by_class[r["class"]] = by_class.get(r["class"], 0) + 1
         if len(rot) < _EDGE_ROT_WARN_MIN:
             return {
                 "status": "ok",
-                "message": f"edge rot: 0 across {report.get('edges', 0)} resolved edge(s).",
+                "message": f"edge rot: 0 across {report.get('edges', 0)} resolved edge(s)."
+                + cross_note,
             }
         detail = ", ".join(f"{cls}={n}" for cls, n in sorted(by_class.items()))
         return {
             "status": "warn",
             "message": f"edge rot: {len(rot)} edge(s) into retired/missing targets "
-            f"({detail}) — `python -m memory.links --audit` names each one.",
+            f"({detail}) — `python -m memory.links --audit` names each one." + cross_note,
         }
     except Exception as exc:
         return {"status": "warn", "message": f"edge-rot check failed: {exc}."}

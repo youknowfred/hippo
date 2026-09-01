@@ -1057,6 +1057,13 @@ def archive_draft(
             f"refused — inbound referrers: {', '.join(res.get('referrers') or [])}"
         )
         return result
+    if row.get("edge_id") in (res.get("dream_edges_retired") or []):
+        # archive_memory now retires every active row stamped in the moved file itself
+        # (undo.file match) — this row included. Appending a second superseding line
+        # would be harmless (append-only, same state) but noisy; keep ONE audit line.
+        _refresh_index_quiet(memory_dir, index_dir)
+        result["archived"] = True
+        return result
     try:
         with open(apply_ledger_path(memory_dir), "a", encoding="utf-8") as fh:
             fh.write(

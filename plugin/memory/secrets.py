@@ -213,6 +213,50 @@ def _has_mixed_case(s: str) -> bool:
     return any(c.islower() for c in s) and any(c.isupper() for c in s)
 
 
+# SEC-20 — the "different signal (dictionary-word structure)" the SEC-16 scope pin named.
+# No entropy threshold separates a long camelCase identifier from a real key (measured
+# there: `getUserAuthenticationTokenFromCache` scores 4.01 bits; AWS's real example core
+# 3.68 — the identifier is MORE random by that metric), so the discriminator is CASE-RUN
+# STRUCTURE instead: in word-shaped text, lowercase letters arrive in word-length RUNS and
+# dominate the string; in a random blob, case flips constantly and digits appear freely.
+# A core piece is word-shaped iff (a) letters only — one digit keeps full suspicion, and a
+# 16+-char DIGIT-FREE random base64 run is already rare; (b) lowercase letters are the
+# majority — kills the acronym-soup tail of real keys (`bPxRfiCYEXAMPLEKEY`: 5/18 lower,
+# STILL FIRES); (c) the mean lowercase run is >= 2 chars (word syllables, not isolated
+# letters between caps). `+`-joined identifier lists (`projectId+serviceId`) are judged
+# per piece because `+` is base64 content the token class must keep. Calibrated 2026-09-01
+# against the live em-growth-labs corpus: all 26 distinct false-positive cores (23 files —
+# every one a camelCase/PascalCase identifier in prose) classify word-shaped, while every
+# SEC-16 must-fire vector still fires; the vectors are pinned in test_secret_lint.py.
+# KNOWN, ACCEPTED miss: a camelCase-joined passphrase (`correctHorseBatteryStaple`) is
+# word-shaped by construction and now scans clean — its space-joined diceware form never
+# fired anyway (whitespace breaks the token), and a ~100%-false-positive catch-all trains
+# humans to ignore the warning, which is the worse security regression.
+_WORD_LOWER_RUN_RE = re.compile(r"[a-z]+")
+
+
+def _word_shaped(core: str) -> bool:
+    """True when ``core`` reads as camelCase/PascalCase word structure (see SEC-20 above)."""
+    for piece in core.split("+"):
+        if not piece:
+            continue
+        if not piece.isascii() or not piece.isalpha():
+            return False
+        if piece.isupper() or piece.islower():
+            # A single-case alpha piece (an ALL-CAPS word riding a +-join, e.g. the live
+            # `example+OPTIONAL` from ".env.example+OPTIONAL_VARS"): letters-only is enough
+            # — standing alone it can never reach this gate at all (the mixed-case bar),
+            # so the case-run tests below have nothing to measure and would misread it.
+            continue
+        lowers = _WORD_LOWER_RUN_RE.findall(piece)
+        n_lower = sum(len(r) for r in lowers)
+        if n_lower * 2 < len(piece):
+            return False
+        if lowers and n_lower / len(lowers) < 2.0:
+            return False
+    return True
+
+
 def _shannon_entropy(s: str) -> float:
     """Shannon entropy (bits/char) of ``s``. 0.0 for empty. Never raises."""
     if not s:
@@ -279,6 +323,7 @@ def scan_text(text: str, *, entropy: bool = True) -> List[str]:
                     len(core) >= _ENTROPY_CORE_MIN_LEN
                     and _has_mixed_case(core)
                     and _shannon_entropy(core) >= _ENTROPY_CORE_MIN_BITS
+                    and not _word_shaped(core)  # SEC-20: identifiers are prose, not blobs
                 ):
                     found.append(_ENTROPY_MSG)
                     break

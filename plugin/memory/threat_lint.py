@@ -28,6 +28,8 @@ degrades the human-review channel, inv3):
         ``_MATH_PREFIX`` for why that carve-out cannot launder a substitution. NOT masked:
         a homograph inside backticks is still a homograph.
       · HTML comments — LINT-ONLY, ED-3-gated (see below). Flagged, never neutralized.
+        hippo's OWN dream provenance grammar (block markers + stamps, byte-exact — COR-23)
+        is machine bookkeeping, not a hidden channel, and is exempt.
         Scoped to comments OUTSIDE code spans/fences (COR-21): the class is hiddenness, and
         a code span renders the comment as literal visible text. The ONLY masked class —
         see ``_html_comment_findings`` for why the other three must not mask.
@@ -233,6 +235,13 @@ _MATH_PREFIX = frozenset(chr(cp) for cp in (
     0x03B4,  # GREEK SMALL LETTER DELTA
     0x03BC,  # GREEK SMALL LETTER MU       - micro-, mean
     0x03C3,  # GREEK SMALL LETTER SIGMA    - standard deviation
+    0x03A3,  # GREEK CAPITAL LETTER SIGMA  - summation. Added 2026-09-01 on live evidence:
+             # four Σ-prefixed tokens (Σlanes, Σmin, Σtheir, Σcoverage) across three
+             # em-growth-labs memories were the ONLY homograph findings that survived
+             # COR-22 — the set had the small sigma but not the summation capital, the
+             # more common notation. Passes the set's own admission test: Σ has no Latin
+             # lookalike it could substitute for (the E-alike is capital epsilon Ε, which
+             # stays absent), and the position rule still applies — ``Σpаypal`` flags.
     0x03C0,  # GREEK SMALL LETTER PI
     0x03BB,  # GREEK SMALL LETTER LAMDA
     0x03A9,  # GREEK CAPITAL LETTER OMEGA  - ohms
@@ -272,6 +281,39 @@ def _confusable_findings(text: str) -> List[str]:
 # --------------------------------------------------------------------------- #
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 
+# COR-23 — hippo's OWN machine-written dream provenance is not a hidden-instruction
+# channel. /dream stamps applied edges as HTML comments inside the delimited dream:links
+# block (links.py owns the ONE canonical grammar; dream_apply._stamp_line emits it), so
+# every dream-stamped corpus carried a standing Tier-A finding — the plugin linting its
+# own output (live 2026-09-01: 5 of 7 flagged files held ONLY dream artifacts) — and,
+# worse than noise, Tier-A is the pack-import HOLD set and rides PUB-1's publish
+# preflight, so a machine stamp made its memory unpublishable. Exemption is by EXACT
+# GRAMMAR, never by prefix: the two block markers byte-equal, and a stamp line must
+# fullmatch the emitted shape (kind from the closed Tier-A set, ``pass=p`` + 14 digits,
+# bounded edge id, 2-decimal cofire, and the optional q= slot capped at 60 quote/newline
+# free chars — the sanitizer's own bounds). Forgery is contained by layers this lint
+# does not carry: a hand-crafted stamp whose edge id has no ACTIVE ledger row is exactly
+# what ``check_dream_ledger`` fails loudly as an orphan stamp, and the residual channel —
+# the q= slot's 60 constrained chars inside a comment that must look like machine
+# bookkeeping — is narrower than the standing-false-positive alternative that trains
+# humans to ignore the class. ED-3's 2026-07-16 spike decision (comments stay LINT-only,
+# never neutralized) is untouched: this narrows the class's SCOPE to comments the machine
+# did not author; foreign comments flag exactly as before.
+_DREAM_STAMP_RE = re.compile(
+    r"<!--\s*dream:\s*(?:refines\s+[\w-]{1,80}|completion|bridge)"
+    r"\s*·\s*pass=p\d{14}\s*·\s*edge=[\w-]{1,80}\s*·\s*cofire=\d+\.\d{2}"
+    r"(?:\s*·\s*q=\"[^\"\n]{0,60}\")?\s*-->"
+)
+
+
+def _is_dream_artifact_comment(comment: str) -> bool:
+    """True for the byte-exact machine grammar only — markers or a fullmatched stamp."""
+    from .links import DREAM_BLOCK_CLOSE, DREAM_BLOCK_OPEN
+
+    if comment in (DREAM_BLOCK_OPEN, DREAM_BLOCK_CLOSE):
+        return True
+    return bool(_DREAM_STAMP_RE.fullmatch(comment))
+
 
 def _html_comment_findings(text: str) -> List[str]:
     """One KIND per body carrying a comment OUTSIDE code (COR-21 masks code first).
@@ -290,7 +332,8 @@ def _html_comment_findings(text: str) -> List[str]:
     Cyrillic ``а`` in a code span is still a homograph — masking those would be softening
     the class, not correcting its scope.
     """
-    n = len(_HTML_COMMENT_RE.findall(strip_code(text or "")))
+    comments = _HTML_COMMENT_RE.findall(strip_code(text or ""))
+    n = sum(1 for c in comments if not _is_dream_artifact_comment(c))
     if n:
         return [f"HTML comment: {n} comment(s) (hidden-instruction channel; lint-only, not neutralized)"]
     return []

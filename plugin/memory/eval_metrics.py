@@ -151,17 +151,12 @@ def load_relevance_set(path: str) -> List[dict]:
 
     Unlike ``load_hard_set``'s ``expected`` (any ONE counts as a binary hit), ``relevant``
     lists EVERY memory stem judged relevant to the query, feeding the graded ``precision_at_k``
-    metric below. Mirrors ``load_hard_set``'s loader shape exactly.
+    metric below. Mirrors ``load_hard_set``'s loader shape exactly — including
+    ``_load_fixture_docs``, so an optional RET-7 provenance header loads as tolerated
+    metadata rather than failing a single-document parse and silently emptying the set
+    (precision@k reporting n=0 against a perfectly valid fixture).
     """
-    if not path or not os.path.exists(path):
-        return []
-    try:
-        import yaml
-
-        with open(path, "r", encoding="utf-8") as fh:
-            data = yaml.safe_load(fh) or []
-    except Exception:
-        return []
+    _meta, data = _load_fixture_docs(path)
     out: List[dict] = []
     for item in data if isinstance(data, list) else []:
         if not isinstance(item, dict):

@@ -1163,6 +1163,47 @@ def _edge_origin_map(memory_dir: str) -> Dict[str, Dict[str, str]]:
     return out
 
 
+def extra_tier_stems(memory_dir: str) -> Dict[str, str]:
+    """Stem → tier label over the NON-project recall tiers (TEA-3 private first, then the
+    machine-local user tier) — the SAME tier set recall fuses (``recall_tiers``), read via
+    the low-level dir helpers so the link plane stays import-cycle-free. First-wins on a
+    cross-tier stem collision, mirroring the fusion merge's precedence. A promoted memory
+    (project → user tier) is the canonical resident: recall resolves a ``[[wikilink]]`` to
+    it every session, so the link plane must not report that link as rot forever. ``{}``
+    when no extra tier exists (an unconfigured machine pays nothing). Never raises."""
+    out: Dict[str, str] = {}
+    try:
+        from .provenance_env import local_memory_dir, user_memory_dir
+
+        project_abs = os.path.abspath(memory_dir)
+        for tier_dir, label in (
+            (local_memory_dir(memory_dir), "private"),
+            (user_memory_dir(), "user"),
+        ):
+            try:
+                if not tier_dir or os.path.abspath(tier_dir) == project_abs:
+                    continue
+                if not os.path.isdir(tier_dir):
+                    continue
+                for name in sorted(os.listdir(tier_dir)):
+                    if _is_memory_filename(name):
+                        out.setdefault(name[:-3], label)
+            except Exception:
+                continue
+    except Exception:
+        return out
+    return out
+
+
+def resolve_cross_tier(target: str, tier_stems: Dict[str, str]) -> Optional[str]:
+    """The tier label ``target`` resolves to OUTSIDE the project corpus, else None — the
+    same candidate normalization ``graph_audit``'s archive classifier applies."""
+    for cand in (target, normalize_slug(target), normalize_slug(target).replace("-", "_")):
+        if cand and cand in tier_stems:
+            return tier_stems[cand]
+    return None
+
+
 def graph_audit(memory_dir: str) -> Optional[dict]:
     """GRF-1 (absorbs & closes GRA-8's remainder): the one-call graph-audit report.
 
@@ -1182,11 +1223,20 @@ def graph_audit(memory_dir: str) -> Optional[dict]:
                       dangling, this classifies it),
           dangling    the target resolves to nothing anywhere (rot only in the sense
                       that the edge points at nothing — lint_links' finding, carried
-                      here so the audit is one complete view),
+                      here so the audit is one complete view; a DELIBERATE forward
+                      reference to a not-yet-written memory lands here too, advisory
+                      by contract — the class never gates),
           superseded  the target IS a live memory but some other memory supersedes
                       it — the edge points at retired knowledge. The supersession
                       marker itself (the ``supersedes`` edge into the target) is NOT
                       rot; every other edge kind into it is.
+      cross_tier               — [{src, target, via, tier}] — targets that resolve in
+                                 ANOTHER recall tier (promoted → user, or TEA-3 private).
+                                 A DISTINCT NON-ROT category: recall serves these links
+                                 every session, so counting them as rot made doctor's
+                                 headline number a standing lie (21 of 24 in the live
+                                 2026-09-01 finding). ``lint()`` classifies; this report
+                                 carries them beside ``rot``, never inside it.
 
     Cost: two corpus reads (``lint`` + ``build_graph``) + one frontmatter sweep —
     CLI/doctor-only, never any hook path.
@@ -1212,6 +1262,14 @@ def graph_audit(memory_dir: str) -> Optional[dict]:
             if cand and os.path.isfile(os.path.join(archive_dir, cand + ".md")):
                 return "archived"
         return "dangling"
+
+    cross_tier: List[dict] = [
+        {"src": i["file"], "target": i["target"], "via": "wikilink", "tier": i["tier"]}
+        for i in report.get("cross_tier", [])
+    ] + [
+        {"src": i["file"], "target": i["target"], "via": i["relation"], "tier": i["tier"]}
+        for i in report.get("cross_tier_typed", [])
+    ]
 
     rot: List[dict] = []
     for item in report.get("dangling", []):
@@ -1263,6 +1321,7 @@ def graph_audit(memory_dir: str) -> Optional[dict]:
         "max_degree": degrees[0][3] if degrees else 0,
         "edge_origin": origin_counts,
         "rot": rot,
+        "cross_tier": cross_tier,
     }
 
 
@@ -1329,6 +1388,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"edge rot ({len(rot)}):" if rot else "edge rot (0): none")
         for r in rot:
             print(f"  {r['class']:<10} {r['src']} -> {r['target']} (via {r['via']})")
+        cross = report.get("cross_tier") or []
+        if cross:
+            print(f"cross-tier links ({len(cross)}) — resolve in another recall tier, NOT rot:")
+            for r in cross:
+                print(f"  {r['tier']:<10} {r['src']} -> {r['target']} (via {r['via']})")
         return 0
     total_edges = sum(len(v) for v in g.adjacency.values())
     typed_edges = sum(len(t) for m in g.typed.values() for t in m.values())

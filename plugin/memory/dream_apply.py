@@ -178,6 +178,16 @@ def _undo_one_edge(memory_dir: str, edge: dict) -> Tuple[bool, str]:
     if not fname or not inserted:
         return False, "ledger row carries no undo record"
     path = os.path.join(memory_dir, fname)
+    if not os.path.isfile(path):
+        # The stamped source may have been moved into ``archive/`` with the edge left
+        # ACTIVE — the legacy trap (pre-fix archives never retired their edges) or a hand
+        # ``git mv`` outside the tooling. The stamp bytes ride the move unchanged, so the
+        # byte-exact undo (and its refuse-on-drift) applies verbatim to the archived copy;
+        # without this fallback the DOCUMENTED remedy (``dream --undo <edge-id>``) refuses
+        # with "unreadable" and the mismatch is unfixable by any supported command.
+        archived = os.path.join(memory_dir, "archive", fname)
+        if os.path.isfile(archived):
+            path = archived
     try:
         with open(path, "r", encoding="utf-8") as fh:
             text = fh.read()

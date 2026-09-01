@@ -364,6 +364,34 @@ def test_prune_dangling_removes_only_the_temp_rooted_batch(tmp_path):
     assert os.path.isdir(os.path.dirname(gone_link))
 
 
+def test_symlink_farm_and_prune_handle_retired_worktrees(tmp_path, monkeypatch):
+    """A dangling symlink whose target's ``.claude/worktrees`` parent is mounted while
+    the worktree dir is gone is the second batch-safe class (2026-09-01 carve-out); a
+    genuinely unknown dead root stays kept per-item."""
+    monkeypatch.setattr(MC, "_under_volatile_root", lambda p: False)
+    farm = _farm(tmp_path)
+    repo = tmp_path / "repo"
+    wt = repo / ".claude" / "worktrees" / "retired-wt"
+    (wt / ".claude" / "memory").mkdir(parents=True)
+    wt_target = str(wt / ".claude" / "memory")
+    import shutil
+
+    shutil.rmtree(wt)
+    _add_symlink(farm, "-repo-wt", wt_target)
+    _add_symlink(farm, "-Volumes-gone", "/nonexistent-hyg-wt-volume/.claude/memory")
+
+    out = MC.symlink_farm_census(farm)
+    assert (out["dangling_worktree_retired"], out["dangling"]) == (1, 1)
+    by_status = {e["status"]: e for e in out["entries"]}
+    assert by_status["dangling-worktree-retired"]["target"] == wt_target
+
+    result = MC.prune_dangling(farm)
+    assert [e["target"] for e in result["removed"]] == [wt_target]
+    assert [e["target"] for e in result["kept_dead"]] == [
+        "/nonexistent-hyg-wt-volume/.claude/memory"
+    ]
+
+
 def test_prune_dangling_is_idempotent_and_empty_norm(tmp_path):
     farm = _farm(tmp_path)
     result = MC.prune_dangling(farm)

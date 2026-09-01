@@ -351,7 +351,16 @@ def import_mdc_file(
         result["neighbors"] = check.get("neighbors") or []
         result["rule_neighbors"] = check.get("rule_neighbors") or []
         result["note"] = check.get("note")
-        if result["route"] == "review" and not allow_duplicate:
+        # CAP-3's filename-collision hard check routes an EXACT-slug re-import to
+        # "review" too — but for this path that case is the documented idempotence
+        # contract, not a similarity judgment: fall through so write_memory's
+        # exclusive-create refusal answers it ("already imported — idempotent"), and
+        # hold only genuine near-duplicates under a DIFFERENT name.
+        collision = any(
+            n.get("collision") and n.get("name") == slug
+            for n in (check.get("neighbors") or [])
+        )
+        if result["route"] == "review" and not allow_duplicate and not collision:
             result["held"] = True
             result["error"] = (
                 "held for review: near-duplicate of an existing memory — review the "

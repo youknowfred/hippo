@@ -1184,6 +1184,39 @@ def test_load_hard_set_metadata_bm25_only_header_is_not_dense_claim(tmp_path):
     assert meta["generated_with_backend"] == "bm25-only"
 
 
+def test_load_relevance_set_tolerates_provenance_header_doc(tmp_path):
+    """The RET-7 comment promises a hard-set OR relevance-set fixture may carry the
+    leading provenance document. Before this pin the relevance loader still ran a
+    single-document ``yaml.safe_load``, so a header-carrying fixture raised inside its
+    swallowing try and the whole set silently loaded as [] — precision@k reporting n=0
+    against a perfectly valid fixture. (Absent-file [] stays pinned by
+    ``test_load_relevance_set_missing_file_is_empty``.)"""
+    p = str(tmp_path / "relevance_with_header.yaml")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write(
+            "generated_with_backend: dense+bm25\n"
+            "generated_at: '2026-08-17'\n"
+            "---\n"
+            "- query: q1\n"
+            "  relevant: [a, b]\n"
+        )
+    assert E.load_relevance_set(p) == [{"query": "q1", "relevant": ["a", "b"]}]
+
+
+def test_load_relevance_set_comment_only_header_still_loads(tmp_path):
+    """A fixture whose provenance rides in ``#`` comments (the field workaround for the
+    pre-fix loader) is still one YAML document and keeps loading unchanged."""
+    p = str(tmp_path / "relevance_commented.yaml")
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write(
+            "# hand-judged relevance set\n"
+            "# generated 2026-08-17\n"
+            "- query: q1\n"
+            "  relevant: [a]\n"
+        )
+    assert E.load_relevance_set(p) == [{"query": "q1", "relevant": ["a"]}]
+
+
 # --------------------------------------------------------------------------- #
 # RET-7: backend_mismatch fires ONLY on dense-generated fixture + bm25-served run
 # --------------------------------------------------------------------------- #
