@@ -7,6 +7,78 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.33.0 — 2026-09-01 — "Doctor, heal thyself"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0 (verified at the
+cut); corpus format still **5**, index schema still **7**, citation derivation still **4**.
+Commissioned, like the three releases before it, from the em-growth-labs field corpus — this
+time by a 2026-09-01 live repair pass against the 505-memory corpus, with every finding
+reproduced against the installed v1.31.0 before a line changed. The headline is that hippo's
+own instruments were the defects: the pass's only hard doctor ✘ was a trap the plugin built
+for itself, and four detector surfaces measured at or near a **100% live false-positive
+rate** — the kind of scanner that trains its operator to ignore it, which is itself a security
+regression. Side-by-side fixture doctor runs (installed 1.31.0 vs this tree) reproduce and
+clear every finding. Shipped as the nine-commit PR #114 (merge `d39ec95`), plus the relanded
+round-3 roadmap truing (#115).
+
+- **DRM-2×TMB-3 — an archived memory keeps no live dream edges.** Archiving a dream-stamped
+  source used to orphan its ledger rows: doctor's flat scan read every edge as a ghost (a
+  permanent ✘) and the documented remedy refused, because `--undo` resolved only the corpus
+  root. `archive_memory` now retires each row stamped in the moved file with a superseding
+  `state: "archived"` line (the `archive_draft` idiom — append-only, no byte edit, the move
+  stays one clean R100 rename); `restore()` reactivates exactly those rows; `--undo` falls
+  back to `archive/<file>` byte-exactly with refuse-on-drift intact; and `check_dream_ledger`
+  classifies the legacy trap (active row, stamp intact under `archive/`) as an inert-edge WARN
+  naming the now-working remedy, while a true ghost stays a loud fail. The regret detector
+  moved to `archive_regret.py` when `archive.py` crossed the size ratchet.
+- **GRF-1 — the link plane learns the recall tiers.** 21 of the live corpus's 24 "edge rot"
+  findings pointed at memories PROMOTED to the user tier — resolvable at recall every session,
+  reported as rot forever. `lint()`/`graph_audit` now classify targets that resolve in the
+  user or TEA-3 private tier into a distinct `cross_tier` non-rot class; SessionStart stops
+  nagging them and doctor's rot count means what it says. `boundary_lint` stays deliberately
+  tier-blind (PR #67's expected-not-error contract, pinned by test), and deliberate forward
+  references stay advisory `dangling` per CLB-1.
+- **CAP-3 — an existing filename can no longer dry-run as novel.** The own-name index
+  exclusion (the stale-index self-match guard) GUARANTEED an exact-name twin never surfaced,
+  so `check_candidate` cleared a committed 5,962-byte file as `route: "add"`. An on-disk
+  collision now hard-routes to review ahead of the similarity heuristic, carrying the live
+  file's description; `import_mdc` keeps its documented idempotence (a same-slug re-import
+  still rides the exclusive-create refusal).
+- **RUL-2 — a dotted ref can live in a YAML mapping, not just a `.py` module.** CLAUDE.md
+  citing `meta.mechanisms` (a path under `meta:` in a 1.7MB data file) read as rot because the
+  repo also had exactly one unrelated `meta.py`. An about-to-flag ref is now tried as a nested
+  mapping path against tracked YAML/JSON/TOML (lazy, cached, 8MB cap sized by the motivating
+  live file). `tomllib` is stdlib only since 3.11: on 3.9/3.10 the TOML leg degrades to the
+  pre-fix verdict, pinned both ways after the first PR run caught exactly that.
+- **SEC-20 — dictionary-word structure, the signal the SEC-16 scope pin named.** The entropy
+  catch-all flagged 23 of 505 files; every distinct triggering core was a camelCase identifier
+  in prose, zero real credentials. A case-run classifier (letters-only, lowercase-majority,
+  word-length lowercase runs; `+`-joined lists judged per piece) takes the live count to **0**
+  while every SEC-16 must-fire vector still fires — all 26 live cores are pinned as a
+  calibration battery, and the one accepted miss (a camelCase-joined passphrase) is pinned
+  honestly.
+- **COR-23 — machine dream provenance is not a threat payload.** All five comment-flagged
+  files held only the plugin's own `dream:links` grammar — and Tier-A is the pack-import HOLD
+  plus publish-preflight set, so a machine stamp made its memory unpublishable. Exemption is
+  byte-exact grammar, never prefix (every near-miss still flags; a forged stamp is caught by
+  `check_dream_ledger` as an orphan); ED-3's lint-only decision is untouched. Capital Σ joins
+  the COR-22 math set on live evidence (Σlanes/Σmin/Σtheir/Σcoverage were the only surviving
+  homograph findings) — it passes the set's own no-Latin-lookalike admission test.
+- **DOC-7 — the degraded doctor stops hiding drift.** With `CLAUDE_PLUGIN_DATA` unset the
+  version check said "ok" and hid a real 21-version sentinel drift for ~7 weeks. It now probes
+  the documented plugins/data convention (every `<name>-*` sentinel dir a candidate, labeled
+  INFERRED), surfaces any delta as a warn, and otherwise says plainly the check was SKIPPED —
+  never "ok" for a check that did not run.
+- **HYG-2 — a retired worktree is mechanically decidable.** A dead target under a
+  `.claude/worktrees` parent that is mounted and readable while the worktree dir is gone is
+  definitively retired, never "possibly an unmounted volume" — registry prune and the symlink
+  farm batch it; every other dead root keeps the conservative per-item default.
+- **RET-7 — the relevance-set loader tolerates the provenance header.** Recovered verbatim
+  from the marketplace clone's uncommitted working tree (authored in an earlier session,
+  never committed — one plugin update from being lost). A header-bearing relevance fixture
+  silently loaded as `[]`, precision@k reporting n=0 against a valid fixture; it now rides
+  `_load_fixture_docs` exactly like `load_hard_set`, both header forms pinned.
+
 ## v1.32.0 — 2026-08-27 — "The floor governs itself"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0 (verified at the
