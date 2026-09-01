@@ -272,6 +272,15 @@ beats any soft claim). `lint_links` flags **dangling** targets, **ambiguous** ta
 **orphans** — read-only, never edits a memory; its one-line summary is the `link_health`
 producer.
 
+**Deliberate forward references (GRF-6).** A source may declare `planned: [name]` in
+frontmatter (top-level or under `metadata:`; bare string tolerated) — a dangling wikilink
+matching a declaration on its OWN source reclassifies to the informational `planned` class:
+silent at SessionStart and out of doctor's rot count (noted, never counted), still listed
+by the CLI and `memory.links --audit`. Declarations round-trip through `links.json`
+(schema v5), so the cached producer path stays zero-read. Archived, superseded, and
+cross-tier targets are never maskable; `--audit` flags a declaration whose target now
+exists as a stale planned marker.
+
 **Typed edges (GRA-4, corpus format 2).** Frontmatter may declare
 `supersedes: [name]`, `contradicts: [name]`, `refines: [name]` (each a list of memory
 names/stems, top-level or under `metadata:` — the `cited_paths` read convention);

@@ -344,7 +344,10 @@ def test_masking_is_shared_with_the_link_lint_not_re_implemented():
     (whose ``except Exception: return []`` turned the move into a silent empty result
     until the suite caught it — the reason the regexes are public here).
     """
-    from memory import links as L
+    # The link lint's parse core (parse_wikilinks and its masker import) moved to
+    # links_graph at the GRF-6 ratchet split — the pin follows the module that now
+    # CALLS the masker (the CONTRIBUTING "Code layout" caveat).
+    from memory import links_graph as L
     from memory import staleness_evidence as SE
     from memory.markdown_code import FENCED_CODE_RE, strip_code
 

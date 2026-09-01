@@ -38,7 +38,9 @@ GRANDFATHERED_PLUGIN = {
     "new_memory.py": 1757,
     "build_index.py": 1735,
     "recall.py": 1637,  # recall() orchestrator + hook entry; rankers/salience/tiers already split out
-    "links.py": 1363,
+    # links.py left this ledger at the GRF-6 split (parse/resolve core → links_graph,
+    # persisted cache → links_cache): 642 lines, under the cap, so the general cap
+    # governs it now.
     "dream_generate.py": 1314,
     # telemetry.py left this ledger at the round-6 LIF-4/TEA-5 split (usage aggregates →
     # telemetry_usage): 761 lines, under the cap, so the general cap governs it now.

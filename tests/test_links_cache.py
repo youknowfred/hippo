@@ -20,6 +20,7 @@ import json
 import os
 
 import memory.links as LK
+import memory.links_graph as LKG
 from memory import build_index as B
 from memory import lint_links as L
 from memory.links import LinkGraph, build_graph, load_edges
@@ -39,11 +40,16 @@ def _corpus(md: str) -> None:
     """Same shape as test_links's census corpus: full-stem + soft-alias + dangling +
     an ambiguous soft collision, so every persisted field is non-trivially exercised.
     GRA-4: beta also carries typed relations (a resolved supersedes + a dangling one)
-    so the typed round-trip is exercised by every cold-vs-cached comparison below."""
+    so the typed round-trip is exercised by every cold-vs-cached comparison below.
+    GRF-6: alpha declares its dangling [[ship-roadmap]] as ``planned:`` so the planned
+    map round-trips too — and the SessionStart zero-read pin below now also proves the
+    cached path classifies a deliberate forward reference without a single file read."""
     _write(
         md,
         "alpha.md",
-        _mem("alpha", "see [[beta]] and [[gamma-thing]] and [[ship-roadmap]] and [[api-keys]]"),
+        '---\nname: alpha\ndescription: "d for alpha"\ntype: project\n'
+        "planned: [ship-roadmap]\n---\n"
+        "see [[beta]] and [[gamma-thing]] and [[ship-roadmap]] and [[api-keys]]\n",
     )
     _write(
         md,
@@ -80,6 +86,8 @@ def _graph_state(g: LinkGraph) -> tuple:
         {s: {r: list(v) for r, v in m.items()} for s, m in g.typed_raw.items()},
         {s: {r: list(v) for r, v in m.items()} for s, m in g.typed_unresolved.items()},
         {s: {r: set(v) for r, v in m.items()} for s, m in g._typed_inbound.items()},
+        # GRF-6: planned declarations round-trip too (v5)
+        {s: list(v) for s, v in g.planned_raw.items()},
     )
 
 
@@ -92,6 +100,10 @@ def _poison_corpus_reads(monkeypatch):
         raise AssertionError("cached path must not iterate memory files")
 
     monkeypatch.setattr(LK, "_iter_memory_files", boom)
+    # The graph builder's corpus read moved with LinkGraph to links_graph at the GRF-6
+    # split — patch the module that now CALLS it (the CONTRIBUTING "Code layout" caveat);
+    # the façade's audit-side readers stay patched above.
+    monkeypatch.setattr(LKG, "_iter_memory_files", boom)
 
 
 # --------------------------------------------------------------------------- #
@@ -122,6 +134,8 @@ def test_build_index_persists_links_cache(tmp_path, monkeypatch):
     assert payload["files"]["alpha"]["typed"] == {}
     assert payload["typed_raw"]["beta"] == {"supersedes": ["delta", "vanished-memory"]}
     assert payload["typed_unresolved"]["beta"] == {"supersedes": ["vanished-memory"]}
+    # GRF-6: planned declarations persist (v5) — the cached lint path reads them, never the corpus
+    assert payload["planned"] == {"alpha": ["ship-roadmap"]}
 
 
 def test_cache_hit_reproduces_identical_graph(tmp_path, monkeypatch):
