@@ -162,6 +162,30 @@ def _under_volatile_root(path: str) -> bool:
     return any(real == root or real.startswith(root + os.sep) for root in roots)
 
 
+def _retired_worktree(path: str) -> bool:
+    """True when ``path`` is under a ``.claude/worktrees/`` parent that IS currently
+    mounted and readable while the worktree dir itself is gone — DEFINITIVELY a retired
+    worktree, never an unmounted volume: the parent being listable proves the volume is
+    there, and worktree dirs are removed wholesale when a worktree retires. The narrow
+    HYG carve-out from the "possibly an unmounted volume" hedge (owner-reviewed shape,
+    2026-09-01); any other dead target keeps the conservative per-item default — an
+    absent parent proves nothing and stays kept. Never raises."""
+    try:
+        parts = os.path.normpath(path).split(os.sep)
+        for i in range(len(parts) - 2):
+            if parts[i] == ".claude" and parts[i + 1] == "worktrees":
+                parent = os.sep.join(parts[: i + 2]) or os.sep
+                wt_dir = os.sep.join(parts[: i + 3])
+                return (
+                    os.path.isdir(parent)
+                    and os.access(parent, os.R_OK)
+                    and not os.path.exists(wt_dir)
+                )
+        return False
+    except Exception:
+        return False
+
+
 def registry_census() -> dict:
     """Read-only classification of every registry entry, malformed rows included.
 
@@ -192,6 +216,7 @@ def registry_census() -> dict:
                     "registered_at": entry.get("registered_at"),
                     "live": live,
                     "volatile": _under_volatile_root(mdir) if mdir else False,
+                    "retired_worktree": (not live) and bool(mdir) and _retired_worktree(mdir),
                     "repairable": (not live)
                     and os.path.isdir(os.path.join(root, ".claude", "memory")),
                 }
@@ -207,19 +232,28 @@ def registry_census() -> dict:
 
 
 def prune_dead() -> dict:
-    """Remove every dead entry whose ``memory_dir`` is temp-rooted; keep the rest.
+    """Remove every dead entry whose ``memory_dir`` is temp-rooted OR a retired
+    worktree; keep the rest.
 
-    The batch is restricted to the one mechanically-safe class (see the module
-    comment); every other dead entry is returned in ``kept_dead`` for the per-item
-    drop. Nothing to remove -> the file is not rewritten. Whole-document
+    The batch covers exactly the mechanically-safe classes (see the module comment and
+    ``_retired_worktree``); every other dead entry is returned in ``kept_dead`` for the
+    per-item drop. Nothing to remove -> the file is not rewritten. Whole-document
     read-modify-write preserving sibling keys, atomic replace. ``ok`` False = the
     rewrite failed loudly and the prior document is intact (crash class: detected).
     Never raises.
     """
     try:
         census = registry_census()
-        removed = [e for e in census["entries"] if not e["live"] and e["volatile"]]
-        kept_dead = [e for e in census["entries"] if not e["live"] and not e["volatile"]]
+        removed = [
+            e
+            for e in census["entries"]
+            if not e["live"] and (e["volatile"] or e.get("retired_worktree"))
+        ]
+        kept_dead = [
+            e
+            for e in census["entries"]
+            if not e["live"] and not (e["volatile"] or e.get("retired_worktree"))
+        ]
         if not removed:
             return {"ok": True, "removed": [], "kept_dead": kept_dead}
         path = projects_registry_path()
@@ -270,6 +304,12 @@ def _render_report(census: dict) -> str:
                 f"  dead [temp-rooted — prunable]: {e['root']} -> {e['memory_dir']}"
                 + _repair_note(e)
             )
+        elif e.get("retired_worktree"):
+            prunable += 1
+            lines.append(
+                f"  dead [retired worktree — prunable]: {e['root']} -> {e['memory_dir']}"
+                + _repair_note(e)
+            )
         else:
             lines.append(
                 f"  dead [kept — possibly an unmounted checkout]: {e['root']} -> "
@@ -277,7 +317,7 @@ def _render_report(census: dict) -> str:
             )
     if prunable:
         lines.append(
-            f"prune the {_n(prunable, 'temp-rooted dead entry', 'temp-rooted dead entries')}: "
+            f"prune the {_n(prunable, 'mechanically-safe dead entry', 'mechanically-safe dead entries')}: "
             "python -m memory.registry --prune-dead"
         )
     lines.append("drop any single entry: python -m memory.registry --drop <root>")
@@ -336,11 +376,12 @@ def main(argv=None) -> int:
             print(f"removed: {e['root']} -> {e['memory_dir']}" + _repair_note(e))
         for e in result["kept_dead"]:
             print(
-                f"kept (not temp-rooted — possibly an unmounted checkout): {e['root']} — "
+                f"kept (not temp-rooted or retired-worktree — possibly an unmounted "
+                f"checkout): {e['root']} — "
                 f"drop deliberately: python -m memory.registry --drop {e['root']}"
             )
         if not result["removed"]:
-            print("nothing to prune — no dead entries under system temp roots.")
+            print("nothing to prune — no dead entries in a mechanically-safe class.")
         return 0
 
     census = registry_census()

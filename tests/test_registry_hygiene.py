@@ -161,6 +161,54 @@ def test_prune_dead_removes_only_temp_rooted_dead(tmp_path):
     assert os.path.realpath(live_root) in R.registered_projects()
 
 
+def _dead_retired_worktree_entry(tmp_path, name: str):
+    """A registered corpus inside ``.claude/worktrees/<wt>`` whose worktree dir was
+    removed while the worktrees PARENT stays mounted and readable — the mechanically
+    decidable retired-worktree class (HYG carve-out, 2026-09-01)."""
+    repo = tmp_path / name
+    wt = repo / ".claude" / "worktrees" / "fervent-fixture-0000"
+    md = wt / ".claude" / "memory"
+    md.mkdir(parents=True)
+    assert R.register_project(str(wt), str(md)) is True
+    shutil.rmtree(wt)  # the worktree retires; .claude/worktrees itself remains
+    assert (repo / ".claude" / "worktrees").is_dir()
+    return os.path.realpath(str(wt)), str(md)
+
+
+def test_retired_worktree_truth_table(tmp_path):
+    repo = tmp_path / "proj"
+    wt = repo / ".claude" / "worktrees" / "gone-wt"
+    md = wt / ".claude" / "memory"
+    md.mkdir(parents=True)
+    assert R._retired_worktree(str(md)) is False          # worktree still present
+    shutil.rmtree(wt)
+    assert R._retired_worktree(str(md)) is True           # parent mounted, worktree gone
+    assert R._retired_worktree("/nonexistent-vol/.claude/worktrees/x/.claude/memory") is False
+    assert R._retired_worktree("/nonexistent-vol/proj/.claude/memory") is False  # no segment
+    assert R._retired_worktree(str(tmp_path / "plain" / "dir")) is False
+
+
+def test_census_labels_and_prune_removes_retired_worktree_entries(tmp_path, monkeypatch):
+    """The narrow rule must not over-reach: a retired worktree is batch-prunable, while a
+    dead root that is neither temp-rooted nor worktree-shaped stays kept per-item."""
+    # Force the non-volatile arm — tmp_path itself sits under the pytest temp root, and
+    # this test is about the OTHER (mounted, non-temp) classification order.
+    monkeypatch.setattr(R, "_under_volatile_root", lambda p: False)
+    wt_root, _md = _dead_retired_worktree_entry(tmp_path, "repo-a")
+    unknown_root, _md2 = _dead_nonvolatile_entry("maybe-unmounted")
+
+    census = R.registry_census()
+    assert _entry(census, wt_root)["retired_worktree"] is True
+    assert _entry(census, unknown_root)["retired_worktree"] is False
+
+    result = R.prune_dead()
+    assert result["ok"] is True
+    assert [e["root"] for e in result["removed"]] == [wt_root]
+    assert [e["root"] for e in result["kept_dead"]] == [unknown_root]
+    left = json.load(open(R.projects_registry_path()))["projects"]
+    assert unknown_root in left and wt_root not in left
+
+
 def test_prune_dead_is_a_noop_without_candidates(tmp_path):
     """No prunable rows -> the file is not rewritten (mtime/bytes identical), and a
     missing file stays missing — prune never manufactures registry state."""

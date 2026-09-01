@@ -57,6 +57,38 @@ def _plugin_root() -> str:
     )
 
 
+def data_dir_candidates(plugin_root: Optional[str] = None) -> List[str]:
+    """Best-effort plugin-data dirs for THIS plugin when ``CLAUDE_PLUGIN_DATA`` is unset.
+
+    A bare ``python -m memory.doctor`` shell has no harness env, and ``_data_dir()``
+    honestly returns "" — but the terminal convention is documented
+    (``~/.claude/plugins/data/<plugin>-<marketplace>``) and a bootstrap sentinel is plain
+    JSON, readable with no venv at all. The plugin's NAME comes from its own
+    ``plugin.json``; the marketplace half is unknowable here, so every ``<name>-*`` dir
+    holding a ``.bootstrap-sentinel`` is a CANDIDATE — the caller must label the probe
+    INFERRED, never authoritative (a plugin literally named ``<name>-x`` from another
+    marketplace could alias in). Returns sorted absolute paths; [] on any failure."""
+    try:
+        import json as _json
+
+        root = plugin_root or _plugin_root()
+        with open(os.path.join(root, ".claude-plugin", "plugin.json"), encoding="utf-8") as fh:
+            name = str(_json.load(fh).get("name") or "").strip()
+        if not name:
+            return []
+        data_root = os.path.join(os.path.expanduser("~"), ".claude", "plugins", "data")
+        out: List[str] = []
+        for entry in sorted(os.listdir(data_root)):
+            if not entry.startswith(name + "-"):
+                continue
+            full = os.path.join(data_root, entry)
+            if os.path.isfile(os.path.join(full, _SENTINEL)):
+                out.append(full)
+        return out
+    except Exception:
+        return []
+
+
 def _venv_python(data_dir: str) -> str:
     return os.path.join(data_dir, "venv", "bin", "python")
 
