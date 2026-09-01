@@ -206,7 +206,9 @@ def check_edge_rot(ctx: DoctorContext) -> Dict[str, str]:
 
     ``links.graph_audit`` classifies every edge whose target is archived (file moved to
     ``archive/``), superseded (another memory ``supersedes`` it — pointing at retired
-    knowledge), or dangling (resolves to nothing). Same ask-when-asked posture as
+    knowledge), or dangling (resolves to nothing; a ``planned:``-declared forward
+    reference rides its own non-rot class — GRF-6 — noted in the line, never counted).
+    Same ask-when-asked posture as
     ``check_link_density`` (SessionStart's ``lint_links.health_line`` already nags plain
     dangling links per-session; doctor aggregates ALL rot classes on demand). Silent
     ``ok`` when the graph cannot be built (other checks own that failure) or rot is
@@ -225,6 +227,12 @@ def check_edge_rot(ctx: DoctorContext) -> Dict[str, str]:
             if cross
             else ""
         )
+        planned = report.get("planned") or []
+        planned_note = (
+            f" ({len(planned)} planned forward reference(s) — declared deliberate, not rot)"
+            if planned
+            else ""
+        )
         by_class: Dict[str, int] = {}
         for r in rot:
             by_class[r["class"]] = by_class.get(r["class"], 0) + 1
@@ -232,13 +240,16 @@ def check_edge_rot(ctx: DoctorContext) -> Dict[str, str]:
             return {
                 "status": "ok",
                 "message": f"edge rot: 0 across {report.get('edges', 0)} resolved edge(s)."
-                + cross_note,
+                + cross_note
+                + planned_note,
             }
         detail = ", ".join(f"{cls}={n}" for cls, n in sorted(by_class.items()))
         return {
             "status": "warn",
             "message": f"edge rot: {len(rot)} edge(s) into retired/missing targets "
-            f"({detail}) — `python -m memory.links --audit` names each one." + cross_note,
+            f"({detail}) — `python -m memory.links --audit` names each one."
+            + cross_note
+            + planned_note,
         }
     except Exception as exc:
         return {"status": "warn", "message": f"edge-rot check failed: {exc}."}

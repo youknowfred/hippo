@@ -84,7 +84,7 @@ _VERSION_CLAIMS = (
         "link cache (links.json)",
         r"`links\.json`,\s*currently\s*(\d+)",
         lambda: LINKS_SCHEMA_VERSION,
-        "memory/links.py::LINKS_SCHEMA_VERSION",
+        "memory/links_cache.py::LINKS_SCHEMA_VERSION",
     ),
 )
 

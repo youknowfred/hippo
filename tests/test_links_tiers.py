@@ -8,8 +8,11 @@ link to a promoted memory was rot forever. Pinned here:
   - a target resolving in the user tier / TEA-3 private tier is classified ``cross_tier``
     (a distinct NON-rot category), out of ``dangling`` and out of doctor's rot count;
   - a target resolving in the PROJECT corpus was never dangling (control);
-  - a genuinely absent target — and the supported deliberate-forward-reference idiom —
-    stays in the advisory ``dangling`` class (never escalated, never a doctor fail);
+  - a genuinely absent UNMARKED target stays in the advisory ``dangling`` class (never
+    escalated, never a doctor fail); the DECLARED deliberate-forward-reference idiom
+    (GRF-6 ``planned:`` frontmatter, ratified 2026-09-01) splits to the informational
+    ``planned`` class instead — the pins below were updated deliberately with GRF-6, and
+    tests/test_links_planned.py owns the idiom's own matrix;
   - ``boundary_lint`` (PR #67: expected-not-error, never a gate) keeps the fresh-checkout
     view: a committed memory's link to a user-tier stem still dangles THERE.
 """
@@ -44,14 +47,14 @@ def corpus(tmp_path, monkeypatch):
     monkeypatch.setenv("HIPPO_LOCAL_MEMORY_DIR", private)
     write_file(user, "promoted-lesson.md", _mem("promoted-lesson", "lifted to user tier"))
     write_file(private, "private-note.md", _mem("private-note", "TEA-3 private"))
+    # hub DECLARES its forward ref (GRF-6): [[future-plan]] is planned, [[genuinely-gone]]
+    # is the unmarked control that must stay advisory dangling.
     write_file(
         md,
         "hub.md",
-        _mem(
-            "hub",
-            "Links: [[local-target]], [[promoted-lesson]], [[private-note]], "
-            "[[genuinely-gone]], and a deliberate forward ref [[future-plan]].",
-        ),
+        '---\nname: hub\ndescription: "hub description"\nmetadata:\n  planned: [future-plan]\n---\n'
+        "Links: [[local-target]], [[promoted-lesson]], [[private-note]], "
+        "[[genuinely-gone]], and a deliberate forward ref [[future-plan]].\n",
     )
     write_file(md, "local-target.md", _mem("local-target", "lives in the project"))
     return md, user, private
@@ -71,17 +74,20 @@ def test_lint_classifies_cross_tier_out_of_dangling(corpus):
     assert ("promoted-lesson", "user") in cross
     assert ("private-note", "private") in cross
     assert "promoted-lesson" not in dangling and "private-note" not in dangling
-    # Genuinely absent + the deliberate forward reference: both stay ADVISORY dangling —
-    # the supported idiom is never escalated and never reclassified.
-    assert {"genuinely-gone", "future-plan"} <= dangling
+    # Deliberately updated pin (GRF-6): the unmarked absent target stays ADVISORY
+    # dangling; the DECLARED forward reference splits to the informational planned class.
+    assert "genuinely-gone" in dangling
+    assert "future-plan" not in dangling
+    assert [d["target"] for d in report["planned"]] == ["future-plan"]
     assert "local-target" not in dangling  # project-resolved control
 
 
 def test_health_line_stops_nagging_promoted_targets(corpus):
     md, _user, _private = corpus
     line = health_line(lint(md))
-    assert line is not None  # the two real danglings still nag (legible degradation)
+    assert line is not None  # the unmarked dangling still nags (legible degradation)
     assert "promoted-lesson" not in line and "private-note" not in line
+    assert "future-plan" not in line  # the declared forward ref (GRF-6) stops nagging
 
 
 def test_graph_audit_reports_cross_tier_beside_rot(corpus):
@@ -91,18 +97,24 @@ def test_graph_audit_reports_cross_tier_beside_rot(corpus):
     cross = {(r["target"], r["tier"]) for r in report["cross_tier"]}
     assert ("promoted-lesson", "user") in cross and ("private-note", "private") in cross
     assert "promoted-lesson" not in rot_targets and "private-note" not in rot_targets
-    assert {"genuinely-gone", "future-plan"} <= rot_targets
+    # Deliberately updated pin (GRF-6): unmarked absent stays rot; the declared forward
+    # reference is carried beside it in the planned class, never inside rot.
+    assert "genuinely-gone" in rot_targets and "future-plan" not in rot_targets
+    assert [p["target"] for p in report["planned"]] == ["future-plan"]
     for r in report["rot"]:
-        if r["target"] in ("genuinely-gone", "future-plan"):
+        if r["target"] == "genuinely-gone":
             assert r["class"] == "dangling"  # never archived/cross-tier/superseded
 
 
 def test_check_edge_rot_counts_only_true_rot(corpus):
     md, _user, _private = corpus
     verdict = check_edge_rot(DoctorContext(md, os.path.dirname(md)))
-    assert verdict["status"] == "warn"  # the two real danglings — advisory, never fail
-    assert "edge rot: 2" in verdict["message"]
+    assert verdict["status"] == "warn"  # the one unmarked dangling — advisory, never fail
+    # Deliberately updated pin (GRF-6): was "edge rot: 2" while the declared forward ref
+    # still counted as rot; it now rides the noted-not-counted planned class.
+    assert "edge rot: 1" in verdict["message"]
     assert "cross-tier" in verdict["message"]
+    assert "1 planned forward reference" in verdict["message"]
 
 
 def test_clean_when_only_cross_tier_links_remain(tmp_path, monkeypatch):

@@ -220,6 +220,16 @@ mechanically. Follow it by hand until it is.
   claimants so the fix (link the full stem of the one you meant) is unambiguous. A dangling
   target (nobody claims it) and an ambiguous one (two files claim it) are different findings
   with different fixes.
+- **Deliberate forward references — `planned:` (GRF-6).** A `[[link]]` to a memory you
+  intend to write later dangles until it lands, and the lint nags it as advisory rot.
+  Declare the intent on the SAME memory's frontmatter — `planned: [not-yet-written-name]`
+  (top-level or under `metadata:`; a bare string works for one target) — and that link
+  reclassifies to the informational `planned` class: silent at SessionStart, still listed
+  by `memory.lint_links` and `memory.links --audit`. The declaration is per-source (your
+  marker never quiets someone else's link) and cannot mask real rot — an archived,
+  superseded, or cross-tier target classifies as itself regardless. When the target is
+  finally written the link resolves on its own; the audit then flags the leftover
+  declaration as a stale planned marker — delete the line.
 - **When to use a typed relation instead of `[[wikilink]]`**: only when you mean the specific
   `supersedes`/`contradicts`/`refines` consequence described above. If you just mean "these
   two are related, worth reading together," that's an untyped `[[wikilink]]` — a typed

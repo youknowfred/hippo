@@ -55,7 +55,7 @@ WRITE_OPEN_ALLOWLIST = {
     # -- sites that already carry their own COR-17 unique-tmp + os.replace: the open()
     #    targets the TMP file; the swap is atomic at the real path --
     ("build_index", "build_index"): "manifest write: own unique-tmp + os.replace (COR-12/COR-17)",
-    ("links", "write_links_cache"): "own unique-tmp + os.replace (COR-12/COR-17)",
+    ("links_cache", "write_links_cache"): "own unique-tmp + os.replace (COR-12/COR-17)",
     ("staleness", "write_stale_cache"): "own unique-tmp + os.replace (COR-17)",
     ("outcome", "write_outcome_cache"): "own unique-tmp + os.replace (COR-17)",
     ("rules_plane", "refresh_rules_cache"): "own unique-tmp + os.replace (COR-17)",
