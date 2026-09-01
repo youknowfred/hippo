@@ -751,6 +751,37 @@ def check_candidate(
             repo_root = repo_root or repo
         rendered = _render_frontmatter(name, description, type, body)
         neighbors, note = _duplicate_neighbors(name, rendered, memory_dir)
+        # CAP-3 filename-collision HARD CHECK, ahead of the similarity heuristic: the
+        # similarity pass deliberately EXCLUDES a same-named index entry (the stale-index
+        # self-match guard), so an existing ``<name>.md`` could clear the dry run as
+        # "novel" precisely BECAUSE it already exists — a live corpus produced
+        # ``route: "add"`` for a committed 5,962-byte file (2026-09-01), inviting the
+        # overwrite ``write_memory`` would then refuse. An on-disk collision always
+        # routes to review, surfaced as a score-1.0 neighbor carrying the LIVE file's
+        # description so the agent can choose update-existing / supersede / skip.
+        existing_path = os.path.join(memory_dir, f"{name}.md")
+        if os.path.isfile(existing_path):
+            live_desc = ""
+            try:
+                from .provenance import parse_frontmatter
+
+                with open(existing_path, "r", encoding="utf-8") as fh:
+                    live_desc = str(parse_frontmatter(fh.read()).get("description") or "")
+            except Exception:
+                live_desc = ""
+            neighbors = [
+                {
+                    "name": name,
+                    "score": 1.0,
+                    "description": live_desc.strip(),
+                    "collision": True,
+                }
+            ] + [n for n in neighbors if n.get("name") != name]
+            note = (
+                f"filename collision: {name}.md already exists on disk — route to "
+                "update-existing/supersede, never add"
+                + (f" ({note})" if note else "")
+            )
         rule_neighbors: List[dict] = []
         if repo_root:
             try:
