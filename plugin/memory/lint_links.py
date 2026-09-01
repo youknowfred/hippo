@@ -3,6 +3,10 @@
 Reports five classes of link rot the corpus census found, READ-ONLY and idempotent —
 it NEVER edits a memory file:
   - dangling      : a ``[[target]]`` that resolves to NO file (after slug normalization).
+                    A dangling target its OWN source declares in ``planned:`` frontmatter
+                    (GRF-6) splits to the informational ``planned`` class instead — a
+                    deliberate forward reference stops nagging, an unmarked absent target
+                    (typo or undeclared ref) stays advisory here.
   - ambiguous     : a ``[[target]]`` whose soft alias is claimed by TWO OR MORE files
                     (COR-9) — resolve() refuses it rather than guess, and the lint line
                     names every claimant so the fix (link the full stem) is obvious.
@@ -46,10 +50,11 @@ def lint(memory_dir: str, index_dir: Optional[str] = None) -> dict:
             "typed_dangling": [],
             "cross_tier": [],
             "cross_tier_typed": [],
+            "planned": [],
             "orphans": [],
             "files": 0,
         }
-    return _classify_cross_tier(memory_dir, _graph_report(g))
+    return _classify_planned(memory_dir, _classify_cross_tier(memory_dir, _graph_report(g)), g)
 
 
 def _classify_cross_tier(memory_dir: str, report: dict) -> dict:
@@ -61,9 +66,10 @@ def _classify_cross_tier(memory_dir: str, report: dict) -> dict:
     were exactly that, forever. Such targets move to ``cross_tier``/``cross_tier_typed``
     (each entry gains its ``tier`` label): resolvable-not-rot, so ``health_line`` stops
     nagging them per-session and doctor's rot count means what it says. A target that
-    resolves NOWHERE stays in ``dangling`` — genuinely-absent targets and the supported
-    deliberate-forward-reference idiom alike, advisory by contract (CLB-1: edge findings
-    never gate). Deliberately applied in ``lint()`` only — ``boundary_lint`` keeps the
+    resolves NOWHERE stays in ``dangling`` — advisory by contract (CLB-1: edge findings
+    never gate) — unless its OWN source declares it ``planned:``, in which case
+    ``_classify_planned`` (GRF-6, applied after this split) moves it to the informational
+    ``planned`` class. Deliberately applied in ``lint()`` only — ``boundary_lint`` keeps the
     fresh-checkout view, where a stranger's clone genuinely lacks these tiers (PR #67's
     expected-not-error contract is untouched). Never raises."""
     try:
@@ -87,6 +93,52 @@ def _classify_cross_tier(memory_dir: str, report: dict) -> dict:
         report["typed_dangling"] = keep_typed
     report["cross_tier"] = cross
     report["cross_tier_typed"] = cross_typed
+    return report
+
+
+def _classify_planned(memory_dir: str, report: dict, g: LinkGraph) -> dict:
+    """Split DECLARED deliberate forward references out of ``dangling`` (GRF-6).
+
+    A source memory declares ``planned: [not-yet-written]`` in frontmatter
+    (``links_graph.parse_planned``); a dangling wikilink whose target matches a
+    declaration ON ITS OWN SOURCE moves to the informational ``planned`` class —
+    reclassified, never dropped, so the CLI and ``graph_audit`` still name it while
+    ``health_line`` and doctor's rot count stop nagging what the author said is
+    deliberate. Guards, in order: the cross-tier split has ALREADY run (a
+    tier-resolvable target never consults markers); targets match slug-normalized and
+    per-source (B's marker cannot quiet A's link); an ARCHIVED target is never
+    maskable — that edge outlived a real retirement, exactly the rot the class exists
+    to report (a superseded target resolves, so it never reaches ``dangling`` and its
+    marker is inert). Zero file reads: declarations ride the graph and links.json
+    (schema v5), keeping GRA-6's zero-read producer path intact. Typed relations are
+    deliberately out of scope — a forward-declared ``supersedes`` is a defect, not an
+    idiom, so ``typed_dangling`` stays loud. On any failure the entry stays advisory
+    dangling (degrades toward visibility, never toward hidden rot). Never raises.
+    """
+    report["planned"] = []
+    danglings = report.get("dangling") or []
+    declared_raw = getattr(g, "planned_raw", None) or {}
+    if not danglings or not declared_raw:
+        return report
+    try:
+        from .links import archived_target, normalize_slug
+
+        declared = {
+            stem: {normalize_slug(t) for t in targets}
+            for stem, targets in declared_raw.items()
+        }
+        keep: List[dict] = []
+        planned: List[dict] = []
+        for d in danglings:
+            marked = normalize_slug(d["target"]) in declared.get(d["file"], set())
+            if marked and not archived_target(memory_dir, d["target"]):
+                planned.append(d)
+            else:
+                keep.append(d)
+        report["dangling"] = keep
+        report["planned"] = planned
+    except Exception:
+        report["planned"] = []
     return report
 
 
@@ -372,6 +424,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"  = {d['file']} -> [[{d['target']}]] ({d['tier']} tier)")
         for d in report.get("cross_tier_typed", []):
             print(f"  = {d['file']} -> {d['relation']}: {d['target']} ({d['tier']} tier)")
+    planned = report.get("planned") or []
+    if planned:
+        print(f"planned forward refs: {len(planned)} (declared deliberate — not rot)")
+        for d in planned:
+            print(f"  » {d['file']} -> [[{d['target']}]] (planned)")
     print(f"orphans (no outbound links): {len(report['orphans'])}")
     if args.show_orphans:
         for o in report["orphans"]:

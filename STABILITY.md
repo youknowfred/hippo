@@ -58,7 +58,7 @@ release). New *additions* alongside them are minor, non-breaking changes.
 These may change at any release without a major bump — do not build on them:
 
 - **Derived caches and their schemas** — the recall index (`schema_version`, currently 7), the link
-  cache (`links.json`, currently 4), the staleness cache, and the telemetry ledgers under
+  cache (`links.json`, currently 5), the staleness cache, and the telemetry ledgers under
   `.claude/.memory-*`. They are
   gitignored, rebuildable-from-source artifacts; hippo may bump their schema and rebuild them freely.
   (A `schema_version` bump is a re-index, not a corpus migration — the CHANGELOG's `re-bootstrap`
