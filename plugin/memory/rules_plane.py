@@ -436,6 +436,77 @@ def derive_paths_globs(cited_paths: List[str], universe: Set[str]) -> tuple:
         return [], [{"kind": "no_oracle"}]
 
 
+# Data-document extensions the dotted-ref resolver consults before calling a symbol rotten.
+_DATA_DOC_EXTS = (".yaml", ".yml", ".json", ".toml")
+# Parse cap: rules_rot is a doctor-lane diagnostic; a pathological data file must not turn
+# it into a bulk-parse. Files above the cap are skipped (silence — under-flag beats cry-wolf).
+# Sized 8MB by the motivating live file: em-growth-labs' audience-matrix.yaml is 1.7MB, and
+# a 1MB cap silently re-created the exact false positive this resolver exists to prevent.
+_DATA_DOC_MAX_BYTES = 8_000_000
+
+
+def _data_docs(repo_root: str, rel_path: str, cache: Dict[str, list]) -> list:
+    """Parsed document roots for one tracked data file, cached per ``rules_rot`` call.
+
+    YAML may be multi-document (``safe_load_all``); JSON and TOML yield one root each.
+    Unparseable/oversized/unreadable files contribute ``[]`` — silence, never a finding.
+    """
+    if rel_path in cache:
+        return cache[rel_path]
+    docs: list = []
+    full = os.path.join(repo_root, rel_path)
+    try:
+        if os.path.getsize(full) <= _DATA_DOC_MAX_BYTES:
+            if rel_path.endswith((".yaml", ".yml")):
+                import yaml
+
+                with open(full, "r", encoding="utf-8") as fh:
+                    docs = [d for d in yaml.safe_load_all(fh) if d is not None]
+            elif rel_path.endswith(".json"):
+                import json as _json
+
+                with open(full, "r", encoding="utf-8") as fh:
+                    docs = [_json.load(fh)]
+            elif rel_path.endswith(".toml"):
+                import tomllib
+
+                with open(full, "rb") as fh:
+                    docs = [tomllib.load(fh)]
+    except Exception:
+        docs = []
+    cache[rel_path] = docs
+    return docs
+
+
+def _dotted_ref_in_data_files(
+    parts: List[str], repo_root: str, repo_files: set, cache: Dict[str, list]
+) -> bool:
+    """True when ``a.b.c`` resolves as a nested MAPPING path from the root of any tracked
+    YAML/JSON/TOML document — ``meta.mechanisms`` living under ``meta:`` in
+    ``docs/audience-matrix.yaml`` is a live citation, not a rotten Python symbol (the
+    2026-09-01 false positive: the repo also had exactly one unrelated ``meta.py``, so the
+    module-leg matched it and flagged the missing "symbol"). A key whose VALUE is null
+    still counts as present (sentinel lookup, not truthiness). Consulted only for a ref
+    the module leg is ABOUT to flag, so the happy path never parses a data file at all.
+    """
+    _MISSING = object()
+    for rel_path in sorted(repo_files):
+        if not rel_path.endswith(_DATA_DOC_EXTS):
+            continue
+        for doc in _data_docs(repo_root, rel_path, cache):
+            node = doc
+            for part in parts:
+                if not isinstance(node, dict):
+                    node = _MISSING
+                    break
+                node = node.get(part, _MISSING)
+                if node is _MISSING:
+                    break
+            if node is not _MISSING:
+                return True
+    return False
+
+
 def rules_rot(repo_root: str) -> dict:
     """RUL-2: citation rot + staleness applied to the rules plane itself.
 
@@ -450,8 +521,12 @@ def rules_rot(repo_root: str) -> dict:
     target left the tree — a path-like ref (code extension, optional ``:line`` stripped)
     absent from ``git ls-files`` (bare basenames resolve through the basename index), or a
     dotted ``module.symbol`` ref whose module resolves to exactly one ``.py`` file that no
-    longer defines the symbol (``def``/``class``/module-level assignment). Unresolvable
-    modules and ambiguous basenames are SILENCE, not findings — under-flag beats cry-wolf.
+    longer defines the symbol (``def``/``class``/module-level assignment). Before flagging,
+    the dotted path is also tried as a nested MAPPING path against every tracked
+    YAML/JSON/TOML document (``meta.mechanisms`` under ``meta:`` in a data file is a live
+    citation, not a Python symbol) — parsed lazily, only for a ref about to flag.
+    Unresolvable modules and ambiguous basenames are SILENCE, not findings — under-flag
+    beats cry-wolf.
 
     PATHS-GLOB leg (RUL-0-gated, confirmed 2026-07-08): a ``.claude/rules`` file whose
     frontmatter ``paths:`` globs match NOTHING in the tree (tracked ∪ untracked-unignored)
@@ -471,6 +546,7 @@ def rules_rot(repo_root: str) -> dict:
 
         code_rot: List[dict] = []
         module_text_cache: Dict[str, Optional[str]] = {}
+        data_doc_cache: Dict[str, list] = {}
         for path in gov_files(repo_root):
             try:
                 with open(path, "r", encoding="utf-8") as fh:
@@ -520,6 +596,8 @@ def rules_rot(repo_root: str) -> dict:
                         mod_text,
                     )
                     if not defined:
+                        if _dotted_ref_in_data_files(parts, repo_root, repo_files, data_doc_cache):
+                            continue  # a data-mapping path (YAML/JSON/TOML) — alive, not rot
                         seen_refs.add(span)
                         code_rot.append({"file": rel, "ref": span, "kind": "symbol"})
 
