@@ -453,8 +453,8 @@ def check_threat_lint(ctx: DoctorContext) -> Dict[str, str]:
         return {
             "status": "warn",
             "message": f"{len(findings)} file(s) carry Tier-A threat payloads — {' | '.join(parts)}. "
-            f"Inspect before they re-inject on recall (HTML comments are lint-only pending the "
-            f"ED-3 owner decision).{tier_b}",
+            f"Inspect before they re-inject on recall (HTML comments are lint-only by the "
+            f"dated ED-3 spike decision, 2026-07-16).{tier_b}",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"threat scan failed: {exc}."}
@@ -538,10 +538,19 @@ def check_dream_ledger(ctx: DoctorContext) -> Dict[str, str]:
 
     Every auto-applied dream edge leaves BOTH an inline stamp and an ACTIVE
     ``dream-ledger.jsonl`` line — grep-reconcilable by design. A stamp with no active
-    ledger line (hand-copied? ledger truncated?) or an active line with no stamp (stamp
-    hand-deleted instead of ``dream --undo``) means the audit record and the corpus
+    ledger line (hand-copied? ledger truncated?) or an active line with no stamp anywhere
+    (stamp hand-deleted instead of ``dream --undo``) means the audit record and the corpus
     disagree — a loud ``fail``, per the roadmap's acceptance criterion (a silent mismatch
     would defeat the reversibility story). Quiet ok when /dream has never applied here.
+
+    ARCHIVE-AWARE: ``_iter_memory_files`` deliberately never descends into ``archive/``,
+    so an edge whose SOURCE memory was archived used to read as a ghost — permanently,
+    with a documented remedy (``--undo``) that refused because the file was gone from the
+    corpus root. ``archive_memory`` now retires those rows to ``state: "archived"``
+    (restore reactivates them), so the steady state reconciles; a LEGACY row still ACTIVE
+    while its stamp sits intact under ``archive/`` (a pre-fix archive, or a hand
+    ``git mv``) is classified separately — an inert-edge WARN naming the archive-aware
+    ``--undo`` that now actually works — never a corruption-grade ghost fail.
     """
     try:
         import re as _re
@@ -549,17 +558,26 @@ def check_dream_ledger(ctx: DoctorContext) -> Dict[str, str]:
         from .dream import read_apply_ledger
         from .provenance import _iter_memory_files
 
-        on_disk: set = set()
-        for path in _iter_memory_files(ctx.memory_dir):
+        def _stamped_edges(path: str, into: set) -> None:
             try:
                 with open(path, "r", encoding="utf-8") as fh:
                     for line in fh:
                         if "<!-- dream:" in line:
                             m = _re.search(r"edge=([\w-]+)", line)
                             if m:
-                                on_disk.add(m.group(1))
+                                into.add(m.group(1))
             except Exception:
-                continue
+                pass
+
+        on_disk: set = set()
+        for path in _iter_memory_files(ctx.memory_dir):
+            _stamped_edges(path, on_disk)
+        archived_on_disk: set = set()
+        archive_dir = os.path.join(ctx.memory_dir, "archive")
+        if os.path.isdir(archive_dir):
+            for name in sorted(os.listdir(archive_dir)):
+                if name.endswith(".md"):
+                    _stamped_edges(os.path.join(archive_dir, name), archived_on_disk)
         active = {
             e.get("edge_id")
             for e in read_apply_ledger(ctx.memory_dir)
@@ -568,8 +586,18 @@ def check_dream_ledger(ctx: DoctorContext) -> Dict[str, str]:
         if not on_disk and not active:
             return {"status": "ok", "message": "no dream edges applied (nothing to reconcile)."}
         orphans = sorted(on_disk - active)
-        ghosts = sorted(active - on_disk)
+        inert = sorted((active - on_disk) & archived_on_disk)
+        ghosts = sorted(active - on_disk - archived_on_disk)
         if not orphans and not ghosts:
+            if inert:
+                return {
+                    "status": "warn",
+                    "message": f"{len(inert)} ACTIVE dream edge(s) whose source memory is "
+                    f"archived (stamp intact under archive/): {', '.join(inert[:5])} — inert "
+                    "by definition, not corruption. Retire each with `python -m memory.dream "
+                    "--undo <edge-id>` (archive-aware); archives made by archive_memory now "
+                    "retire their edges automatically.",
+                }
             return {
                 "status": "ok",
                 "message": f"{len(active)} dream edge stamp(s) reconcile with dream-ledger.jsonl.",
@@ -582,6 +610,10 @@ def check_dream_ledger(ctx: DoctorContext) -> Dict[str, str]:
         if ghosts:
             parts.append(
                 f"{len(ghosts)} active ledger edge(s) with no on-disk stamp: {', '.join(ghosts[:5])}"
+            )
+        if inert:
+            parts.append(
+                f"{len(inert)} inert edge(s) with an archived source (see the warn remedy)"
             )
         return {
             "status": "fail",

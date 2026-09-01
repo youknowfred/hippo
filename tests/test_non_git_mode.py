@@ -135,7 +135,14 @@ def test_archive_memory_falls_back_to_rename_with_no_git_repo_at_all(tmp_path):
         fh.write("---\nname: m\ndescription: \"m\"\n---\nbody\n")
 
     result = A.archive_memory("m", memory_dir, d)
-    assert result == {"name": "m", "moved": True, "refused": False, "referrers": [], "error": None}
+    assert result == {
+        "name": "m",
+        "moved": True,
+        "refused": False,
+        "referrers": [],
+        "dream_edges_retired": [],
+        "error": None,
+    }
     assert os.path.exists(os.path.join(memory_dir, "archive", "m.md"))
     assert not os.path.exists(os.path.join(memory_dir, "m.md"))
 

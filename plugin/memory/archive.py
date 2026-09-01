@@ -435,6 +435,56 @@ def _journal_move(memory_dir: str, fname: str, src: str, dest: str, method: str)
         pass
 
 
+def _active_dream_rows_stamped_in(memory_dir: str, fname: str) -> List[dict]:
+    """ACTIVE dream-ledger rows whose applied bytes live INSIDE ``fname`` (``undo.file``) —
+    the stamped bridge/completion/refines edges plus DRM-6 generated rows a move of
+    ``fname`` carries along. Read-only; ``[]`` on any failure (a broken ledger must never
+    block an archive — the move is the primary act, the ledger line is bookkeeping)."""
+    try:
+        from .dream_ledgers import read_apply_ledger
+
+        return [
+            e
+            for e in read_apply_ledger(memory_dir)
+            if e.get("state") == "active" and (e.get("undo") or {}).get("file") == fname
+        ]
+    except Exception:
+        return []
+
+
+def _mark_dream_rows(memory_dir: str, rows: List[dict], state: str, **extra) -> Optional[str]:
+    """Append one superseding ledger line per row (APPEND-ONLY — ``read_apply_ledger``
+    merges last-line-per-edge_id, history intact; the ``archive_draft`` idiom). Never a
+    byte edit to any memory file, so an archive stays one clean git rename (R100) and a
+    restore reverses it exactly. Returns an error string or None; never raises."""
+    if not rows:
+        return None
+    import json
+    from datetime import datetime, timezone
+
+    try:
+        from .dream_ledgers import apply_ledger_path
+
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with open(apply_ledger_path(memory_dir), "a", encoding="utf-8") as fh:
+            for row in rows:
+                fh.write(
+                    json.dumps(
+                        {
+                            "edge_id": row.get("edge_id"),
+                            "pass": row.get("pass"),
+                            "state": state,
+                            **{k: (stamp if v is None else v) for k, v in extra.items()},
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        return None
+    except Exception as exc:
+        return f"the move succeeded but the dream-ledger append failed: {exc}"
+
+
 def archive_memory(
     name: str, memory_dir: str, repo_root: str, *, dry_run: bool = False, force: bool = False
 ) -> dict:
@@ -465,7 +515,14 @@ def archive_memory(
     ever succeed — without it, every just-written memory would be unarchivable until some
     unrelated later commit happened to stage it.
     """
-    result = {"name": name, "moved": False, "refused": False, "referrers": [], "error": None}
+    result = {
+        "name": name,
+        "moved": False,
+        "refused": False,
+        "referrers": [],
+        "dream_edges_retired": [],
+        "error": None,
+    }
     try:
         fname = name if name.endswith(".md") else f"{name}.md"
         src = os.path.join(memory_dir, fname)
@@ -495,8 +552,17 @@ def archive_memory(
                 "pointer — or re-run with --force (force=True) to move it anyway"
             )
             return result
+        # An archived memory's dream edges are INERT BY DEFINITION: the stamp bytes ride
+        # along into archive/ untouched (never a pre-move byte edit — the move must stay a
+        # single clean git rename), and the ledger rows flip to a superseding
+        # ``state: "archived"`` line so no surface — doctor's stamp/ledger reconciler, the
+        # aging firewall's pair subtraction, the SessionStart producer, --undo targeting —
+        # keeps treating them as live. ``restore()`` reactivates the same rows, so the
+        # archive⟷restore round-trip is lossless for the dream graph too.
+        dream_rows = _active_dream_rows_stamped_in(memory_dir, fname)
         if dry_run:
             result["moved"] = True  # would-move (report-only preview); no filesystem change
+            result["dream_edges_retired"] = [r.get("edge_id") for r in dream_rows]
             return result
         archive_dir = os.path.join(memory_dir, _ARCHIVE_SUBDIR)
         os.makedirs(archive_dir, exist_ok=True)
@@ -517,6 +583,12 @@ def archive_memory(
                 return result
             _journal_move(memory_dir, fname, src, dest, "os.rename")
         result["moved"] = True
+        retire_err = _mark_dream_rows(
+            memory_dir, dream_rows, "archived", archived_at_ts=None, archived_by="archive"
+        )
+        result["dream_edges_retired"] = [r.get("edge_id") for r in dream_rows]
+        if retire_err:
+            result["error"] = retire_err
         try:
             from . import build_index
 
@@ -546,7 +618,13 @@ def restore(name: str, memory_dir: str, repo_root: str, *, dry_run: bool = False
     journaled (both methods — the restore trail is reversibility metadata), and the index
     refreshes best-effort so the memory is recallable this session. Never raises.
     """
-    result = {"name": name, "restored": False, "refused": False, "error": None}
+    result = {
+        "name": name,
+        "restored": False,
+        "refused": False,
+        "dream_edges_reactivated": [],
+        "error": None,
+    }
     try:
         fname = name if name.endswith(".md") else f"{name}.md"
         src = os.path.join(memory_dir, _ARCHIVE_SUBDIR, fname)
@@ -583,6 +661,26 @@ def restore(name: str, memory_dir: str, repo_root: str, *, dry_run: bool = False
         else:
             _journal_move(memory_dir, fname, src, dest, "restore(git mv)")
         result["restored"] = True
+        # The reverse of archive's edge retirement: rows this file's archive flipped to
+        # ``state: "archived"`` come back ACTIVE (their stamps just returned to the live
+        # scan — without this, every restore would manufacture orphan stamps). Rows undone
+        # while archived stay undone; provenance (applied_at_*) rides the merge.
+        try:
+            from .dream_ledgers import read_apply_ledger
+
+            archived_rows = [
+                e
+                for e in read_apply_ledger(memory_dir)
+                if e.get("state") == "archived" and (e.get("undo") or {}).get("file") == fname
+            ]
+        except Exception:
+            archived_rows = []
+        react_err = _mark_dream_rows(
+            memory_dir, archived_rows, "active", restored_at_ts=None, restored_by="restore"
+        )
+        result["dream_edges_reactivated"] = [r.get("edge_id") for r in archived_rows]
+        if react_err:
+            result["error"] = react_err
         try:
             from . import build_index
 
@@ -594,84 +692,14 @@ def restore(name: str, memory_dir: str, repo_root: str, *, dry_run: bool = False
     return result
 
 
-# --------------------------------------------------------------------------- #
-# TMB-3 (e): the evidence-only regret detector — recurring abstention clusters that an
-# ARCHIVED body would have answered. Inert text + a logged regret event; NO wiring to
-# restore (that would be the demand-gap-auto-draft shape round 1 killed).
-# --------------------------------------------------------------------------- #
-_REGRET_MIN_OVERLAP = 2   # distinct query terms the archived body must share — one shared
-                          # token is coincidence, not evidence
-_REGRET_MAX_MATCHES = 5   # bounded evidence, never a worklist
-
-
-def archive_regret(memory_dir: str, telemetry_dir: Optional[str] = None) -> List[dict]:
-    """Recurring abstention clusters whose best BM25 match among ARCHIVED bodies overlaps
-    on >= ``_REGRET_MIN_OVERLAP`` distinct terms — "you keep asking for something you
-    archived". EVIDENCE ONLY: ``[{"query", "count", "stem", "overlap"}]`` for a human to
-    judge; the restore verb exists separately and nothing here names, suggests, or
-    invokes it. Runs at doctor time (cold) — never per-prompt. Vendored BM25
-    (``_vendor.bm25.BM25Okapi``) over the archive listing; the journal is not consulted
-    (reversibility metadata only). Read-only; never raises; ``[]`` on any failure or an
-    absent/empty archive.
-    """
-    try:
-        from ._vendor.bm25 import BM25Okapi
-        from .build_index import bm25_terms, tokenize
-        from .telemetry import abstention_backlog
-
-        archive_dir = os.path.join(memory_dir, _ARCHIVE_SUBDIR)
-        if not os.path.isdir(archive_dir):
-            return []
-        stems: List[str] = []
-        docs: List[List[str]] = []
-        for fn in sorted(os.listdir(archive_dir)):
-            if not fn.endswith(".md"):
-                continue
-            try:
-                with open(os.path.join(archive_dir, fn), "r", encoding="utf-8") as fh:
-                    docs.append(bm25_terms(tokenize(fh.read())))
-                stems.append(fn[:-3])
-            except Exception:
-                continue
-        if not stems:
-            return []
-        clusters = abstention_backlog(telemetry_dir)
-        if not clusters:
-            return []
-        bm25 = BM25Okapi(docs)
-        term_sets = [set(d) for d in docs]
-        out: List[dict] = []
-        for c in clusters:
-            q = (c.get("sample_query") or "").strip()
-            qterms = list(dict.fromkeys(bm25_terms(tokenize(q))))
-            if not q or not qterms:
-                continue
-            # The evidence GATE is distinct-term overlap; BM25 only RANKS among the docs
-            # that clear it. (BM25 scores alone can't gate here: on a small archive the
-            # IDF of a term present in most docs goes negative — the classic single-doc
-            # pathology — so a sign test would silently blind the detector.)
-            candidates = [
-                i for i in range(len(stems))
-                if len(set(qterms) & term_sets[i]) >= _REGRET_MIN_OVERLAP
-            ]
-            if not candidates:
-                continue
-            scores = bm25.get_scores(qterms)
-            best = max(candidates, key=lambda i: (scores[i], -i))
-            out.append(
-                {
-                    "query": q,
-                    "count": int(c.get("count") or 0),
-                    "stem": stems[best],
-                    "overlap": len(set(qterms) & term_sets[best]),
-                }
-            )
-            if len(out) >= _REGRET_MAX_MATCHES:
-                break
-        return out
-    except Exception:
-        return []
-
+# TMB-3 (e) — the evidence-only regret detector lives in ``archive_regret.py`` (split
+# along its section banner when this module crossed the size ratchet); re-exported here
+# so ``from .archive import archive_regret`` keeps working for every existing consumer.
+from .archive_regret import (  # noqa: E402  (re-export)
+    _REGRET_MAX_MATCHES,
+    _REGRET_MIN_OVERLAP,
+    archive_regret,
+)
 
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse

@@ -405,7 +405,14 @@ def test_archive_memory_git_mvs_into_archive_subdir(repo, memory_dir):
     git_commit(repo, "add memory", 1_700_000_000)
 
     result = A.archive_memory("m_a", memory_dir, repo)
-    assert result == {"name": "m_a", "moved": True, "refused": False, "referrers": [], "error": None}
+    assert result == {
+        "name": "m_a",
+        "moved": True,
+        "refused": False,
+        "referrers": [],
+        "dream_edges_retired": [],
+        "error": None,
+    }
 
     archived_path = os.path.join(memory_dir, "archive", "m_a.md")
     assert os.path.exists(archived_path)
@@ -495,7 +502,14 @@ def test_archive_memory_falls_back_to_rename_for_untracked_file(repo, memory_dir
     write_file(memory_dir, "m_a.md", _mem("m_a", [], None))
 
     result = A.archive_memory("m_a", memory_dir, repo)
-    assert result == {"name": "m_a", "moved": True, "refused": False, "referrers": [], "error": None}
+    assert result == {
+        "name": "m_a",
+        "moved": True,
+        "refused": False,
+        "referrers": [],
+        "dream_edges_retired": [],
+        "error": None,
+    }
 
     archived_path = os.path.join(memory_dir, "archive", "m_a.md")
     assert os.path.exists(archived_path)
@@ -609,7 +623,8 @@ def test_archive_memory_zero_inbound_moves_without_force_even_with_outbound_link
 
     result = A.archive_memory("m_source", memory_dir, repo)
     assert result == {
-        "name": "m_source", "moved": True, "refused": False, "referrers": [], "error": None,
+        "name": "m_source", "moved": True, "refused": False, "referrers": [],
+        "dream_edges_retired": [], "error": None,
     }
     assert os.path.exists(os.path.join(memory_dir, "archive", "m_source.md"))
 
