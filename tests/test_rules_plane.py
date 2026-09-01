@@ -322,14 +322,30 @@ def test_dotted_ref_resolving_in_yaml_mapping_is_not_rot(repo, memory_dir):
     ]
 
 
-def test_dotted_ref_resolving_in_json_and_toml_is_not_rot(repo, memory_dir):
+def test_dotted_ref_resolving_in_json_is_not_rot(repo, memory_dir):
     write_file(repo, "cfgmod.py", "def unrelated():\n    pass\n")
     write_file(repo, "conf/settings.json", '{"cfgmod": {"retries": 3}}\n')
+    git_commit(repo, "configs", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "Honor `cfgmod.retries` from config.")
+    assert RP.rules_rot(repo)["code_ref_rot"] == []
+
+
+def test_dotted_ref_toml_resolution_needs_tomllib(repo, memory_dir):
+    """``tomllib`` is stdlib only since 3.11, and 3.9/3.10 sit inside the supported
+    ``_PY_WINDOW`` — so the TOML leg resolves where the module exists and degrades to
+    the pre-fix verdict (flag) where it does not, never a crash. Both arms pinned; the
+    first PR run caught exactly this on the py3.10 hermetic lanes."""
+    import sys
+
     write_file(repo, "conf/tool.toml", "[toolcfg]\ntimeout = 5\n")
     write_file(repo, "toolcfg.py", "def also_unrelated():\n    pass\n")
-    git_commit(repo, "configs", 1_700_000_000)
-    write_file(repo, "CLAUDE.md", "Honor `cfgmod.retries` and `toolcfg.timeout` from config.")
-    assert RP.rules_rot(repo)["code_ref_rot"] == []
+    git_commit(repo, "toml config", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "Honor `toolcfg.timeout` from config.")
+    rot = RP.rules_rot(repo)["code_ref_rot"]
+    if sys.version_info >= (3, 11):
+        assert rot == []
+    else:
+        assert rot == [{"file": "CLAUDE.md", "ref": "toolcfg.timeout", "kind": "symbol"}]
 
 
 def test_dotted_ref_data_lookup_never_shadows_a_defined_python_symbol(repo, memory_dir):

@@ -450,6 +450,10 @@ def _data_docs(repo_root: str, rel_path: str, cache: Dict[str, list]) -> list:
 
     YAML may be multi-document (``safe_load_all``); JSON and TOML yield one root each.
     Unparseable/oversized/unreadable files contribute ``[]`` — silence, never a finding.
+    ``tomllib`` is stdlib only since 3.11 while 3.9/3.10 sit inside the supported
+    ``_PY_WINDOW``: there the import lands in this catch, TOML files contribute ``[]``,
+    and a TOML-backed dotted ref degrades to the pre-fix verdict (flag) — pinned by
+    ``test_dotted_ref_toml_resolution_needs_tomllib``.
     """
     if rel_path in cache:
         return cache[rel_path]
