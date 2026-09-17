@@ -707,8 +707,11 @@ def _set_confidence(path: str, value: str, *, dry_run: bool = False) -> dict:
         if close is None:
             result["error"] = "no frontmatter"
             return result
+        from .provenance import _own_scope_key_lines
+
         key_re = re.compile(r"^(\s*)confidence\s*:")
-        idx = next((i for i in range(1, close) if key_re.match(lines[i])), None)
+        # COR-24: own-scope keys only — never a nested map's same-named child.
+        idx = next((i + 1 for i in _own_scope_key_lines(lines[1:close], key_re)), None)
         if idx is None:
             # Insert via the ONE shared walk (COR-9/COR-14) — nested under metadata:
             # when present, at that block's OWN child indent. This writer used to
@@ -781,8 +784,11 @@ def _set_cited_paths(path: str, paths: List[str], *, dry_run: bool = False) -> d
             result["error"] = "no frontmatter"
             return result
         value = "[" + ", ".join(json.dumps(p) for p in paths) + "]"
+        from .provenance import _own_scope_key_lines
+
         key_re = re.compile(r"^(\s*)cited_paths\s*:")
-        idx = next((i for i in range(1, close) if key_re.match(lines[i])), None)
+        # COR-24: own-scope keys only — never a nested map's same-named child.
+        idx = next((i + 1 for i in _own_scope_key_lines(lines[1:close], key_re)), None)
         if idx is None:
             # COR-14: same shared insert walk as _set_confidence — indent read from
             # the metadata block's own keys, never hard-coded.

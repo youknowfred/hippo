@@ -88,7 +88,8 @@ _MAX_PLAN_DIFF_LINES = 120  # bounded per-item diff in update plans (apply recom
 # strips the provenance triplet and `steer` and adds the two pack stamps; install/update
 # stamping owns the two stamps alone. Anything else surviving a rewrite changed is a bug.
 _EXTRACT_OWNED = frozenset(
-    {"cited_paths", "source_commit", "source_commit_time", "steer", "pack", "pack_version"}
+    {"cited_paths", "cited_paths_exclude", "source_commit", "source_commit_time", "steer",
+     "pack", "pack_version"}
 )
 _STAMP_OWNED = frozenset({"pack", "pack_version"})
 
@@ -228,6 +229,7 @@ def pack_extract(
     try:
         from .portability import scan_portability
         from .provenance import (
+            _EXCLUDE_KEY_RE,
             _is_memory_filename,
             _strip_provenance,
             parse_frontmatter,
@@ -323,6 +325,9 @@ def pack_extract(
             # primitive rather than a bare line filter — a pack ships to another machine,
             # so a frontmatter break here lands in someone else's corpus.
             portable = strip_frontmatter_keys(portable, _STEER_LINE_RE)
+            # CUR-2: the exclusion names THIS repo's paths — as project-local as the
+            # citations it prunes, so it leaves with them.
+            portable = strip_frontmatter_keys(portable, _EXCLUDE_KEY_RE)
             portable = _stamp_pack(portable, pack, version)
             # COR-9/13: extraction owns the provenance triplet (stripped — a pack is
             # portable), `steer` (stripped — project-local), and the two pack stamps it

@@ -189,6 +189,11 @@ def cite_derivation_producer(
             "v3 could not see `.mdc` Cursor rule sources (an imported memory's upstream "
             "fingerprint)"
         )
+    if declared < 5:
+        gaps.append(
+            "v4 resolved a directory-qualified path by its basename ALONE (another repo's "
+            "`apps/api/admin.py` bound the memory to this repo's only `admin.py`)"
+        )
     return (
         f"🧬 Citation derivation — this corpus's cited_paths were derived by extractor "
         f"v{declared}; this plugin derives v{CITATION_DERIVATION_VERSION}. {'; '.join(gaps)} "

@@ -232,8 +232,12 @@ _TOOLS = [
             "in recall immediately — present the returned digest verbatim, it carries the "
             "undo handles. apply=false runs report-only (zero writes). action='undo' "
             "reverts the latest pass (or edge_id for one edge), byte-exact, refusing on "
-            "manual drift. action='log' lists every dream edge (active / aged-in / "
-            "undone). action='deparasite' runs the DRM-4 counterweight: reports "
+            "manual drift. action='retire_ghost' (edge_id=…, optional reason=…) retires ONE "
+            "ACTIVE ledger edge whose stamp is provably gone — its source memory was "
+            "deleted outside archive/, or the stamped line never survived a rewrite — by "
+            "appending the superseding undone line; it refuses while the stamp is on disk "
+            "anywhere (use undo) and has no bulk form. action='log' lists every dream edge "
+            "(active / aged-in / undone). action='deparasite' runs the DRM-4 counterweight: reports "
             "per-memory out-degree, flags hubs over DREAM_MAX_OUT_DEGREE, and PROPOSES "
             "retractions (dream's own un-aged edges — executed only with retract=true) "
             "vs per-item GATED demotions and non-lossy dedup-merges (never auto; "
@@ -259,6 +263,7 @@ _TOOLS = [
                     "enum": [
                         "pass",
                         "undo",
+                        "retire_ghost",
                         "log",
                         "deparasite",
                         "dedup_merge",
@@ -268,7 +273,8 @@ _TOOLS = [
                         "prospective",
                     ],
                     "description": "pass = run a dream pass (default); undo = revert; "
-                    "log = list edges; deparasite = DRM-4 counterweight report; "
+                    "retire_ghost = close one active ledger edge whose stamp is provably "
+                    "gone; log = list edges; deparasite = DRM-4 counterweight report; "
                     "dedup_merge = execute one ratified merge; generate = DRM-6 "
                     "schema/hypothesis proposals (stage=true stages drafts); "
                     "sweep_drafts = DRM-6 decay sweep; archive_draft = execute one "
@@ -283,7 +289,13 @@ _TOOLS = [
                 },
                 "edge_id": {
                     "type": "string",
-                    "description": "with action='undo': revert exactly this edge (e.g. p7-e2)",
+                    "description": "with action='undo': revert exactly this edge (e.g. "
+                    "p7-e2); with action='retire_ghost': the ONE ghost edge to retire",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "with action='retire_ghost': why the stamp is gone — "
+                    "recorded on the ledger line as retire_reason",
                 },
                 "undo_since": {
                     "type": "string",

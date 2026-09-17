@@ -81,6 +81,7 @@ from .dream_apply import (
     apply_mode_default,
     dream_applied_producer,
     render_log,
+    retire_ghost_edge,
     undo_edges,
 )
 from .dream_config import (
@@ -676,6 +677,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--log", action="store_true", help="list every dream edge (active / aged-in / undone)"
     )
     parser.add_argument(
+        "--retire-ghost", default=None, metavar="EDGE_ID",
+        help="DRM-7: retire ONE active ledger edge whose stamp is provably gone (source "
+        "deleted outside archive/, or the stamped line lost before a commit) — appends the "
+        "superseding undone line; refuses while the stamp is on disk anywhere. Per edge.",
+    )
+    parser.add_argument("--reason", default=None, help="with --retire-ghost: why (recorded)")
+    parser.add_argument(
         "--deparasite",
         action="store_true",
         help="DRM-4: the de-parasiting counterweight — report per-memory out-degree, flag "
@@ -794,6 +802,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             "remain on disk; commit stays yours."
         )
         return 0
+    if args.retire_ghost:
+        code, text = retire_ghost_edge(memory_dir, args.retire_ghost, reason=args.reason)
+        print(text)
+        return code
     if args.undo is not None or args.undo_since:
         code, text = undo_edges(
             memory_dir,

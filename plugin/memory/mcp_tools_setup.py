@@ -434,6 +434,16 @@ def _tool_dream(args: Dict[str, Any]) -> str:
             since = str(args.get("undo_since") or "").strip() or None
             _code, text = undo_edges(memory_dir, edge_id=edge_id, since=since)
             return text
+        if action == "retire_ghost":
+            # DRM-7: per-edge by construction — one edge_id, never a list.
+            from .dream import retire_ghost_edge
+
+            _code, text = retire_ghost_edge(
+                memory_dir,
+                str(args.get("edge_id") or ""),
+                reason=str(args.get("reason") or "").strip() or None,
+            )
+            return text
         if action == "generate":
             from .dream_generate import run_generative_pass
 

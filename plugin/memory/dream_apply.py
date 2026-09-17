@@ -1,7 +1,8 @@
 """DRM-2 apply/undo mechanics + the notify surface (decomposed out of ``dream.py``).
 
 Tier routing, the apply-mode default, stamp/block/frontmatter edit helpers, byte-exact
-undo with refuse-on-drift, ``--log``, and the SessionStart producer. The orchestrating
+undo with refuse-on-drift, the DRM-7 ghost-edge retirement, ``--log``, and the
+SessionStart producer. The orchestrating
 ``run_apply_pass`` + ``_apply_one`` stay in the façade (the crash-contract and
 monkeypatch surfaces pin them there). Every name re-exports via the ``dream`` façade.
 """
@@ -352,6 +353,145 @@ def undo_edges(
             "withheld from recall until re-consent (trust_corpus)"
         )
     return (1 if refused else 0), "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
+# DRM-7 — retire a GHOST edge (an ACTIVE ledger row whose stamp is provably gone)
+# --------------------------------------------------------------------------- #
+_EDGE_STAMP_RE = re.compile(r"edge=([\w-]+)")
+
+
+def edge_source_location(memory_dir: str, edge: dict) -> Tuple[Optional[str], str]:
+    """``(file, where)`` for the memory an edge's applied bytes were written into —
+    ``where`` is ``"corpus"``, ``"archive"`` or ``"gone"`` (in neither place: the memory was
+    deleted or folded away OUTSIDE ``archive_memory``, which would have retired its rows).
+    Shared by ``retire_ghost_edge`` and doctor's ledger check so the two name one cause."""
+    fname = (edge.get("undo") or {}).get("file")
+    if not fname and isinstance(edge.get("source") or edge.get("memory"), str):
+        fname = f"{edge.get('source') or edge.get('memory')}.md"
+    if not fname:
+        return None, "gone"
+    if os.path.isfile(os.path.join(memory_dir, fname)):
+        return fname, "corpus"
+    if os.path.isfile(os.path.join(memory_dir, "archive", fname)):
+        return fname, "archive"
+    return fname, "gone"
+
+
+def _files_stamping_edge(memory_dir: str, edge_id: str) -> Tuple[List[str], List[str]]:
+    """``(holders, unreadable)`` over every ``*.md`` in the corpus root AND ``archive/`` —
+    the exact surface doctor reconciles. A holder carries a ``<!-- dream: … edge=<id>``
+    line; an unreadable file can hide one, so it is never counted as absence."""
+    holders: List[str] = []
+    unreadable: List[str] = []
+    for sub in ("", "archive"):
+        d = os.path.join(memory_dir, sub) if sub else memory_dir
+        try:
+            names = sorted(n for n in os.listdir(d) if n.endswith(".md"))
+        except FileNotFoundError:
+            continue
+        except Exception:
+            unreadable.append(sub or ".")
+            continue
+        for name in names:
+            rel = os.path.join(sub, name) if sub else name
+            try:
+                with open(os.path.join(d, name), "r", encoding="utf-8") as fh:
+                    for line in fh:
+                        if "<!-- dream:" in line and edge_id in _EDGE_STAMP_RE.findall(line):
+                            holders.append(rel)
+                            break
+            except Exception:
+                unreadable.append(rel)
+    return holders, unreadable
+
+
+def retire_ghost_edge(
+    memory_dir: str, edge_id: str, *, reason: Optional[str] = None
+) -> Tuple[int, str]:
+    """``--retire-ghost <edge-id>``: close ONE active ledger row whose stamp no longer exists.
+
+    The gap this fills: doctor's ghost fail named two reconcile routes and both could be
+    shut. ``--undo`` is byte-exact and refuses when the stamped line is missing or the
+    source file is gone (correctly — it has nothing to reverse), and git history only helps
+    if the stamp ever reached a commit. A memory deleted outside ``archive_memory``, or a
+    stamped block lost to a hand rewrite before it was committed, left a permanent ✘ that
+    no supported verb could clear — and hand-editing the ledger is the one thing the
+    ledger's own contract forbids.
+
+    Writes NOTHING but one superseding ``state: "undone"`` ledger line (append-only,
+    history intact, the ``archive_draft`` idiom), and only after PROVING the ghost: the row
+    is ACTIVE, and no readable ``*.md`` in the corpus root or ``archive/`` carries its
+    ``edge=`` stamp — the same surface doctor reconciles, so the verb retires exactly what
+    doctor calls a ghost and nothing else. A stamp found anywhere refuses toward ``--undo``
+    (which reverses real bytes); an unreadable file refuses too (it could hide the stamp).
+    Per-edge by signature — there is deliberately no list/``--all`` form: each ghost is a
+    separate claim that bytes are gone.
+    """
+    edge_id = (edge_id or "").strip()
+    if not edge_id:
+        return 1, "🌙 dream --retire-ghost: an edge id is required (see dream --log)."
+    edge = next((e for e in read_apply_ledger(memory_dir) if e.get("edge_id") == edge_id), None)
+    if edge is None:
+        return 1, f"🌙 dream --retire-ghost: no ledger edge {edge_id!r} (see dream --log)."
+    if edge.get("state") != "active":
+        return 1, (
+            f"🌙 dream --retire-ghost: {edge_id} is already {edge.get('state')!r} — only an "
+            "ACTIVE row can be a ghost."
+        )
+    holders, unreadable = _files_stamping_edge(memory_dir, edge_id)
+    if holders:
+        return 1, (
+            f"🌙 dream --retire-ghost REFUSED: {edge_id} is not a ghost — its stamp is on disk "
+            f"in {', '.join(holders)}. Reverse real bytes with `python -m memory.dream --undo "
+            f"{edge_id}` (archive-aware); nothing was written."
+        )
+    if unreadable:
+        return 1, (
+            f"🌙 dream --retire-ghost REFUSED: could not read {', '.join(unreadable[:5])} — an "
+            "unreadable file can hide the stamp, so absence is unproven; nothing was written."
+        )
+    fname, where = edge_source_location(memory_dir, edge)
+    if where == "gone":
+        cause = "source-deleted"
+        detail = f"source {fname or '(unrecorded)'} exists in neither the corpus nor archive/"
+    else:
+        cause = "stamp-missing"
+        detail = f"{fname} is in the {where} but carries no stamp for this edge"
+    from .archive import _mark_dream_rows
+
+    err = _mark_dream_rows(
+        memory_dir,
+        [edge],
+        "undone",
+        undone_at_ts=None,
+        retired_ghost=True,
+        retire_cause=cause,
+        retire_reason=(reason or "").strip() or detail,
+    )
+    if err:
+        return 1, (
+            "🌙 dream --retire-ghost: the dream-ledger append failed "
+            f"({err.rsplit(': ', 1)[-1]}); nothing was retired."
+        )
+    what = (
+        f"generated {edge.get('kind')} {edge.get('memory')}"
+        if edge.get("kind") in _GENERATED_KINDS
+        else f"{edge.get('source')} → {edge.get('target')} ({edge.get('kind')})"
+    )
+    lines = [
+        f"🌙 dream --retire-ghost: retired {edge_id}  {what} — {detail}.",
+        "  One superseding `state: \"undone\"` line was appended to dream-ledger.jsonl "
+        "(append-only; no memory file was touched). The ledger is committed — the commit "
+        "stays yours.",
+        "  An undone pair is a standing verdict: /dream will not auto re-apply it.",
+    ]
+    if "fm_before" in (edge.get("undo") or {}) and where != "gone":
+        lines.append(
+            f"  This was a `refines` edge: any `refines:` entry still in {fname}'s "
+            "frontmatter is left as it is — an ordinary hand-owned relation now."
+        )
+    return 0, "\n".join(lines)
 
 
 def render_log(memory_dir: str) -> str:

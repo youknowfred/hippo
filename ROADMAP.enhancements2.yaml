@@ -680,6 +680,51 @@ workstreams:
           pattern). Attach if it survives: audit SKILL.md link_density_suggestions loop;
           _vendor for pure-python phrase extraction (beside vendored BM25/miniyaml).
 
+      - id: GRF-7
+        title: Folded-section awareness — a [[slug]] that survives as a `### slug` heading in a digest is not edge rot
+        priority: P2
+        effort: M
+        status: deferred               # 2026-09-17 — scoped out of v1.35.0 (the GRO-1745 field
+                                       # round) WITH its evidence, rather than half-built: done
+                                       # right it rides links.json (a LINKS_SCHEMA_VERSION bump)
+                                       # to keep GRA-6's zero-read producer path.
+        source: {lens: graph-retrieval, verdict: FIELD, convergence: 1, landscape: [em-growth-labs-gro-1745]}
+        problem: >-
+          On the em-growth-labs corpus (579 memories, 2026-09-17) 478 of 499 "dangling"
+          wikilink edges point at a slug that survives as a `###` heading inside a digest
+          memory — a deliberate fold (idle lanes folded into six folded-*-rounds digests).
+          links.py resolves a wikilink to a FILE STEM only (full stem · first-segment-
+          stripped stem · frontmatter name: slug), so doctor's edge-rot line and
+          lint_links report 499 where 21 are real — the GRF-1 "21 of 24 were cross-tier"
+          defect again, one class over: a detector that is ~96% noise trains its operator
+          to ignore it. The field memory hippo-fold-ritual-orphans-edges-and-stamps records
+          why the obvious repair (rewrite the 478 links onto the digests) is WRONG: ~80
+          inbound edges on each of six large low-specificity files makes them the graph's
+          dominant hubs.
+        proposal: >-
+          A CLASSIFICATION, never an edge. A third lint layer beside _classify_cross_tier
+          (GRF-1) and _classify_planned (GRF-6): a dangling target whose normalized slug
+          matches a markdown heading inside a live corpus memory moves to an informational
+          `folded` class (entry gains the holding file), leaving `dangling` = the real
+          rot. health_line / doctor's rot count / graph_audit stop counting `folded`; the
+          CLI still names every one. Recall expansion is UNCHANGED — a folded target is
+          deliberately not traversable (no hub creation; _expand_neighbors already drops
+          absent stems). Heading slugs ride the LinkGraph + links.json (schema bump) so
+          the SessionStart producer keeps zero file reads. Archived targets are never
+          maskable (GRF-6's rule). Typed relations stay out of scope — a supersedes into
+          a heading is a defect, not an idiom.
+        acceptance_criteria:
+          - a dangling [[slug]] matching a `#{1,6} slug` heading in a LIVE memory lints as `folded` (with the holding file), not `dangling`; on the field fixture shape 478→folded, 21→dangling
+          - recall._expand_neighbors and the link graph's edge set are byte-identical with and without the feature (classification only — asserted)
+          - the SessionStart lint producer performs zero memory-file reads on a fresh cache (GRA-6 pin extended to the new field)
+          - boundary_lint stays heading-blind (PR #67's fresh-checkout contract), exactly as it stays tier-blind
+        dependencies: [GRF-1, GRF-6]
+        invariant_note: >-
+          inv1 — headings are read from markdown (authority), cached in the derived
+          links.json. inv6 — no hot-path read: the class is computed at lint time from
+          the cache. The anti-goal is explicit: resolving the link as a graph EDGE would
+          manufacture digest hubs, the failure the field memory documents.
+
   # ---------------------------------------------------------------- SEN ---
   - id: SEN
     name: Write-side quality & memory security (Sentinel)

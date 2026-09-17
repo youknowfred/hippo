@@ -115,7 +115,23 @@ are handled.
 ```
 
 - `cited_paths` — repo-relative code files the memory talks about (a bare basename keeps
-  only an UNambiguous `git ls-files` resolution; ambiguous basenames are dropped).
+  only an UNambiguous `git ls-files` resolution; ambiguous basenames are dropped). A
+  **directory-qualified** token that is not itself a tracked path resolves only to a file
+  whose path ENDS WITH it (ORC-4) and whose basename is unique: `../views-kit.js` resolves
+  by its tail, and `apps/api/routes/admin.py`
+  — a file in another repo the memory is about — resolves to nothing rather than to this
+  repo's only `admin.py`. The extractor, the `git ls-files` oracle, the one resolver and
+  the one merge policy live in `provenance_citations.py` (re-exported by the façade).
+- `cited_paths_exclude` (CUR-2) — an optional, **human-owned** list of repo paths that are
+  NOT this memory's citations, however the body reads. Every derivation honours it
+  (initial backfill, `--refresh`/`--refresh-one`, `--reverify`, the `rederive` preview and
+  apply — one shared `derive_citations`), none ever writes it, and the COR-9 damage guard
+  treats it as a key no writer owns. It is how a deliberate prune of a *derivable* path
+  holds — without it the path returns as a `+ gains` on the next preview and the
+  derivation stamp can never be earned — and the only fix for a generic basename
+  (`plan.json`, `ci.yml`, `.env.example`) that is unique in this repo inside a memory
+  plainly about another one. Held-out paths are reported (`ℹ excluded`, the worklist's
+  `⊘ excludes`), never silent. Pack extraction strips it with the citations it prunes.
 - `source_commit` — the file's own last-edit commit, else **HEAD** ("reflects code as of
   now") when the file has no commit history yet — memories are born staleness-tracked
   even in a dirty worktree. A residual empty baseline (pre-0.2.0 files, or a corpus
@@ -209,6 +225,15 @@ record anything was lost. Two surfaces close that hole:
 - `--refresh-one NAME` — re-derives `cited_paths` for one memory (e.g. after hand-editing
   its body), `source_commit` untouched. The corpus-wide `--refresh` does the same for
   every already-backfilled memory.
+
+A `metadata:` block may END in a nested mapping (hippo's own `edge_origin:` stamp is one):
+every frontmatter writer inserts at the block's FIRST-level key indent and claims only
+top-level / direct-`metadata:` keys (COR-24), so that shape round-trips through all of
+them. `rederive` reports what it did rather than what it usually does (MIG-2): the
+baseline sentence distinguishes *preserved* from *assigned* (a memory that had no
+`source_commit` has nothing to preserve), a `gained:`/`lost:` line is computed at call time
+against the stored frontmatter so an index that moved since the worklist read is loud, and
+a file with no `---` block is reported as **no frontmatter**, not as a YAML error.
 
 ### Verify-at-use banner + reinforcement (RET-6)
 
