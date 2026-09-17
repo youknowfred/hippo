@@ -7,6 +7,36 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.36.0 — 2026-09-17 — "The directory you wrote"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**; citation derivation **5 → 6** (ORC-5 — the resolver
+moved, an extractor-class change on the DRV-2 axis). **Operator action: one**, for a corpus
+stamped v5: doctor and SessionStart name the older derivation and route to the per-item,
+consent-gated `rederive` worklist (MIG-1); nothing migrates automatically. This is the
+"own measured round" v1.35.0 promised, run the same day on the same field corpus
+(em-growth-labs, 579 memories, Linear GRO-1745) once that corpus was v5-clean.
+
+- **ORC-5 — among several same-named files, the token's directories may pick one.** v5
+  dropped every directory-qualified token whose basename was ambiguous (`account/http.js`
+  among 59 `http.js`), pinned as the accepted miss. `resolve_citations` now keeps such a
+  token when its tail pins exactly ONE tracked file — the ORC-4 discipline (the token's
+  directories must be the path's tail) applied to the multi-match case, not a relaxation of
+  it: a tail matching two files still drops, another repo's `apps/api/http.js` still drops,
+  a bare ambiguous basename never gains, and `count/http.js` is not `account/http.js`. One
+  resolver, so `unresolved_citations`, `backfill_file`, `reverify_file` and
+  `rederive_preview` all move together; `legacy_basename_repoints` is untouched (v4 never
+  bound an ambiguous basename, so ORC-5 adds nothing to its report). **Measured before it
+  shipped:** on the v5-clean field corpus the rule binds 133 citations in 71 memories onto
+  76 files, every one the file the body names by its short directory form (a surface's
+  `views.js` / `http.js` / `db.js`, an ingest package's `tests.py`); 4 tail-ambiguous tokens
+  stay dropped; the one wrong binding is a memory that quotes `account/http.js` as an
+  example, which `cited_paths_exclude` pins. That review — 66 memories returning to the
+  worklist at once (five of the 71 already carried the path) — is the reason this is its
+  own derivation version and its own release
+  rather than a clause inside ORC-4's. `CITATION_DERIVATION_VERSION` 5 → 6 with its
+  history entry; the doctor nudge names the v4 and v5 gaps in words.
+
 ## v1.35.0 — 2026-09-17 — "A derivation you can finish"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format

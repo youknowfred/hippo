@@ -194,6 +194,12 @@ def cite_derivation_producer(
             "v4 resolved a directory-qualified path by its basename ALONE (another repo's "
             "`apps/api/admin.py` bound the memory to this repo's only `admin.py`)"
         )
+    if declared < 6:
+        gaps.append(
+            "v5 dropped a directory-qualified path whose basename several files share "
+            "(`account/http.js` among many `http.js`) instead of letting its directories "
+            "pick the one"
+        )
     return (
         f"🧬 Citation derivation — this corpus's cited_paths were derived by extractor "
         f"v{declared}; this plugin derives v{CITATION_DERIVATION_VERSION}. {'; '.join(gaps)} "

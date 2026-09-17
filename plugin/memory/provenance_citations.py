@@ -200,9 +200,20 @@ def resolve_citations(
       outcome. A ``../``-relative token is matched by its tail and must still pin exactly
       one file. The accepted miss: a slash-joined PAIR (``patterns.json/vocabulary.ts``)
       no longer resolves its last half — under-flag, the side of the trade this function
-      already chose. (Deliberately NOT done here: letting a suffix pick one file among
-      several same-named ones — right in principle, but on the field corpus it turned a
-      21-memory worklist into 98; it needs its own measured round.)
+      already chose.
+    - A DIRECTORY-QUALIFIED token whose basename is AMBIGUOUS resolves when its tail pins
+      exactly ONE of the same-named files (ORC-5): ``account/http.js`` among 59 ``http.js``
+      is ``server/surfaces/account/http.js`` and nothing else. The directories the author
+      wrote are the disambiguator, so this is the ORC-4 discipline applied to the
+      multi-match case, not a relaxation of it: a tail that matches two files still drops,
+      and a bare basename never gains. Measured on the field corpus (v5-clean, 579
+      memories): 133 bindings in 71 memories onto 76 files, every one the file the body
+      names (the surface's ``views.js`` / ``http.js`` / ``db.js``, an ingest package's
+      ``tests.py``), one wrong — a memory whose prose quotes ``account/http.js`` as an
+      example — which ``cited_paths_exclude`` pins; 4 tail-ambiguous tokens stayed dropped.
+      The cost is the review: 66 of those memories return to the rederive worklist at once
+      (five already carried the path), which is why this shipped as its own derivation
+      version rather than inside ORC-4's.
     - Unresolvable tokens (not in the repo) are dropped.
     """
     out: List[str] = []
@@ -213,9 +224,14 @@ def resolve_citations(
             cands = [norm]
         else:
             matches = basename_index.get(norm.rsplit("/", 1)[-1], [])
-            cands = matches if len(matches) == 1 else []  # drop ambiguous bare basenames
-            if cands and "/" in norm and not (cands[0] == norm or cands[0].endswith("/" + norm)):
-                cands = []  # ORC-4: the token's directories name a DIFFERENT path
+            if "/" in norm:
+                # ORC-4: the token's directories must be the path's tail. ORC-5: among
+                # several same-named files, the tail may pick exactly one.
+                cands = [m for m in matches if m == norm or m.endswith("/" + norm)]
+                if len(cands) != 1:
+                    cands = []
+            else:
+                cands = matches if len(matches) == 1 else []  # drop ambiguous bare basenames
         for c in cands:
             if c not in seen:
                 seen.add(c)

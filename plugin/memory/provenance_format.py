@@ -100,11 +100,21 @@ _FORMAT_MARKER_NAME = ".format"
 #       prune stable: a per-memory `cited_paths_exclude` list every derivation honours —
 #       additive, optional, human-owned, so NOT a corpus_format event (the CLB-2
 #       `verified_by` precedent), but part of what "derived by v5" asserts.
+#   6 — ORC-5 (v1.36.0): the resolver moved again. A directory-qualified token whose
+#       basename is AMBIGUOUS now resolves when its tail pins exactly ONE of the same-named
+#       files (`account/http.js` among 59 `http.js`). v5 dropped every such token — the
+#       "under-flag" side, pinned as the accepted miss — so a v5 corpus re-derived under v6
+#       GAINS citations, all of them files the body names by their short directory form.
+#       Deliberately its own version: measured on the field corpus it returns 66 of 579
+#       memories to the worklist at once (133 bindings in 71 memories onto 76 files, five
+#       of which already carried the path; one wrong — a memory quoting `account/http.js`
+#       as an example, which `cited_paths_exclude` pins), a review that must be announced
+#       as such, not folded into v5's.
 #
 # Kept on the corpus-level marker rather than in each file's frontmatter: a per-file key
 # WOULD be a shape change (a real corpus_format v6), needs a corpus-wide rewrite just to
 # introduce, and answers a question that is not per-file anyway.
-CITATION_DERIVATION_VERSION = 5
+CITATION_DERIVATION_VERSION = 6
 
 
 def format_marker_path(memory_dir: str) -> str:
