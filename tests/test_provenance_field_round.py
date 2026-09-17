@@ -167,8 +167,8 @@ def test_the_right_half_of_the_field_measurement_still_resolves():
     # a relative import names a file by its TAIL
     assert P.resolve_citations(["../views-kit.js"], rf, bi) == ["dash/lib/views-kit.js"]
     assert P.resolve_citations(["../../lib/views-kit.js"], rf, bi) == ["dash/lib/views-kit.js"]
-    # an AMBIGUOUS basename still drops, qualified or bare — suffix-disambiguation is a
-    # separate, unshipped question (it quadrupled the field worklist when tried)
+    # an AMBIGUOUS basename still drops when BARE, or when no tail pins one file
+    # (suffix-disambiguation, ORC-5, its own measured round, is pinned below)
     assert P.resolve_citations(["ads/write_exec.py"], rf, bi) == ["ads/write_exec.py"]  # exact
     assert P.resolve_citations(["exec/../write_exec.py", "write_exec.py"], rf, bi) == []
     assert P.resolve_citations(["./src/a.py", "a.py"], rf, bi) == ["src/a.py"]  # ORC-1 intact
@@ -195,6 +195,46 @@ def test_legacy_basename_repoints_names_exactly_what_v4_would_have_bound():
     rf, bi = _index(["ingest/nightly_steps/admin.py", "ads/write_exec.py", "src/a.py"])
     tokens = ["apps/api/routes/admin.py", "ads/write_exec.py", "a.py", "nope/missing.py"]
     assert P.legacy_basename_repoints(tokens, rf, bi) == {
+        "ingest/nightly_steps/admin.py": "apps/api/routes/admin.py"
+    }
+
+
+# --------------------------------------------------------------------------- #
+# ORC-5 — among several same-named files, the token's directories may pick one
+# --------------------------------------------------------------------------- #
+def test_a_qualified_token_resolves_when_its_tail_pins_exactly_one_of_many():
+    """The field case: 59 `http.js`, and `account/http.js` names exactly one of them."""
+    rf, bi = _index(["server/surfaces/account/http.js", "server/surfaces/vendors/http.js",
+                     "server/pdf/http.js", "go-worker/src/http.js"])
+    assert P.resolve_citations(["account/http.js"], rf, bi) == ["server/surfaces/account/http.js"]
+    assert P.resolve_citations(["surfaces/account/http.js"], rf, bi) == [
+        "server/surfaces/account/http.js"
+    ]
+    # ONE resolver: the receipt agrees — the token is no longer "unresolved"
+    assert P.unresolved_citations("see `account/http.js`", rf, bi) == []
+
+
+def test_orc5_is_orc4_applied_to_the_multi_match_case_not_a_relaxation():
+    rf, bi = _index(["server/surfaces/account/http.js", "server/surfaces/vendors/http.js",
+                     "x/lib/http.js", "y/lib/http.js"])
+    # a tail that matches TWO files still drops — the directories did not pick one
+    assert P.resolve_citations(["lib/http.js"], rf, bi) == []
+    # a tail that matches NONE still drops (another repo's file — ORC-4)
+    assert P.resolve_citations(["apps/api/http.js"], rf, bi) == []
+    # a BARE ambiguous basename never gains
+    assert P.resolve_citations(["http.js"], rf, bi) == []
+    # a partial directory name is not a tail: `count/http.js` is not `account/http.js`
+    assert P.resolve_citations(["count/http.js"], rf, bi) == []
+
+
+def test_orc5_leaves_the_v4_repoint_report_alone():
+    """A stored path the v4 fallback bound by basename alone is still named as such —
+    ORC-5 only ever binds a path whose tail IS the token, which v4's report excludes, and
+    v4 never bound an AMBIGUOUS basename at all."""
+    rf, bi = _index(["ingest/nightly_steps/admin.py", "apps/other/admin.py"])
+    assert P.legacy_basename_repoints(["apps/api/routes/admin.py"], rf, bi) == {}
+    rf, bi = _index(["ingest/nightly_steps/admin.py"])
+    assert P.legacy_basename_repoints(["apps/api/routes/admin.py"], rf, bi) == {
         "ingest/nightly_steps/admin.py": "apps/api/routes/admin.py"
     }
 

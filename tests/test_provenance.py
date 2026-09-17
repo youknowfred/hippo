@@ -2047,9 +2047,10 @@ def test_the_extractor_fix_is_not_a_corpus_format_event(tmp_path):
     IOP-2 (.mdc joins the vocabulary) is the third — same axis, same rationale. ORC-4 +
     CUR-2 is the fourth, and the first where the RESOLVER moved rather than the vocabulary
     (a directory-qualified token must suffix-match; `cited_paths_exclude` binds every
-    derivation) — still values, still not a shape."""
-    assert P.CORPUS_FORMAT_VERSION == 5  # unmoved by ORC-1/DRV-1/ORC-3/IOP-2/ORC-4/CUR-2
-    assert P.CITATION_DERIVATION_VERSION == 5  # the axis that DID move, four times now
+    derivation) — still values, still not a shape. ORC-5 is the fifth: the resolver lets a
+    token's directories pick one file among several same-named ones — values again."""
+    assert P.CORPUS_FORMAT_VERSION == 5  # unmoved by ORC-1/DRV-1/ORC-3/IOP-2/ORC-4/CUR-2/ORC-5
+    assert P.CITATION_DERIVATION_VERSION == 6  # the axis that DID move, five times now
 
 
 # --------------------------------------------------------------------------- #
