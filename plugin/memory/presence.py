@@ -134,9 +134,10 @@ def _presence_path(telemetry_dir: str, session_id: Optional[str]) -> str:
 
 def _read_doc(path: str) -> dict:
     """One presence doc — fresh defaults on absence/corruption, never a raise. Optional
-    fields (``nudged``, ``checked_ts``, ``moved_note``, ``plugin_version``) survive
-    verbatim when present — the passthrough is what keeps the OPS-1 stamp alive across
-    the producer's note-clearing rewrite and ``observe_fleet``'s doc refreshes."""
+    fields (``nudged``, ``checked_ts``, ``moved_note``, ``plugin_version``, SHP-7's
+    ``tree``) survive verbatim when present — the passthrough is what keeps the OPS-1
+    stamp (and the working-tree scope) alive across the producer's note-clearing rewrite
+    and ``observe_fleet``'s doc refreshes."""
     doc: dict = {"session_id": "", "branch": "", "head": "", "ts": 0.0}
     try:
         with open(path, "r", encoding="utf-8") as fh:
@@ -147,7 +148,7 @@ def _read_doc(path: str) -> dict:
             doc["head"] = str(raw.get("head") or "")
             ts = raw.get("ts")
             doc["ts"] = float(ts) if isinstance(ts, (int, float)) else 0.0
-            for key in ("checked_ts", "nudged", "moved_note", "plugin_version"):
+            for key in ("checked_ts", "nudged", "moved_note", "plugin_version", "tree"):
                 if key in raw:
                     doc[key] = raw[key]
     except Exception:
@@ -329,6 +330,14 @@ def write_presence(
         if not head:
             return
         doc: dict = {"session_id": sid, "branch": branch, "head": head, "ts": time.time()}
+        # SHP-7: presence docs of every linked worktree now share the main tree's telemetry
+        # dir (the corpus and its derived dirs move together), so each doc names the working
+        # tree it was written from and ``_fresh_others`` keeps the documented per-working-
+        # tree scope by filtering on it. Absent on docs from older hooks (they count as
+        # same-tree, exactly as before).
+        tree = _tree_key(repo_root)
+        if tree:
+            doc["tree"] = tree
         # OPS-1: stamp which plugin version this session's hooks ACTUALLY run — the ONE
         # canonical resolver (MEA-4's, CLAUDE_PLUGIN_ROOT first, module root as the dev
         # fallback, NEVER the operated-on tree). Additive and absent when unreadable
@@ -378,14 +387,28 @@ def clear_presence(memory_dir: Optional[str] = None, session_id: Optional[str] =
         pass
 
 
-def _fresh_others(telemetry_dir: str, own_sid: Optional[str]) -> List[dict]:
+def _tree_key(repo_root: Optional[str]) -> Optional[str]:
+    """The working-tree identity a presence doc is scoped to: the real path of ``repo_root``
+    (the launch tree — ``provenance.launch_root``), or None when unknown."""
+    try:
+        return os.path.realpath(repo_root) if repo_root else None
+    except Exception:
+        return None
+
+
+def _fresh_others(
+    telemetry_dir: str, own_sid: Optional[str], tree: Optional[str] = None
+) -> List[dict]:
     """Every OTHER session's FRESH doc, newest first: ``[{branch, age_s, plugin_version}]``.
 
     Freshness is mtime within ``PRESENCE_TTL_SECONDS`` — the same oracle ``_prune`` uses,
     so a doc is fresh iff it would survive a prune. ``plugin_version`` is the doc's OPS-1
     stamp when present and a str (None otherwise — old docs lack it and render exactly as
-    before). Bounded work: one scandir plus one tiny JSON read per fresh doc (the dir is
-    TTL- and count-capped)."""
+    before). ``tree`` (SHP-7) keeps presence per-WORKING-TREE now that linked worktrees
+    share one telemetry dir: a doc stamped with a DIFFERENT ``tree`` is another worktree's
+    session, not a same-tree one, and is skipped; an unstamped doc counts as same-tree.
+    Bounded work: one scandir plus one tiny JSON read per fresh doc (the dir is TTL- and
+    count-capped)."""
     out: List[Tuple[float, dict]] = []
     try:
         own_name = os.path.basename(_presence_path(telemetry_dir, own_sid))
@@ -402,6 +425,8 @@ def _fresh_others(telemetry_dir: str, own_sid: Optional[str]) -> List[dict]:
                 if age > PRESENCE_TTL_SECONDS:
                     continue
                 doc = _read_doc(e.path)
+                if tree and doc.get("tree") and doc.get("tree") != tree:
+                    continue  # another worktree's session (SHP-7): not "this working tree"
                 pv = doc.get("plugin_version")
                 out.append(
                     (
@@ -449,7 +474,7 @@ def presence_producer(memory_dir: str, repo_root: str, ctx=None) -> Optional[str
             if isinstance(note, str) and note.strip():
                 lines.append(_clip(note))
                 _write_doc(td, sid, own)  # emitted once — the note never renders twice
-        others = _fresh_others(td, sid)
+        others = _fresh_others(td, sid, _tree_key(repo_root))
         if others:
             # OPS-1: launch-pin skew — append per-session hook versions ONLY when the
             # fresh docs (own included) actually carry more than one version. A uniform
@@ -526,11 +551,14 @@ def observe_fleet(
         path = _presence_path(td, sid)
         lines: List[str] = []
         dirty = False
+        tree = _tree_key(repo_root)
         if not os.path.exists(path):
             branch, head = _git_position(repo_root)
             if not head:
                 return None
             doc: dict = {"session_id": sid, "branch": branch, "head": head, "ts": now}
+            if tree:
+                doc["tree"] = tree
             dirty = True
         else:
             doc = _read_doc(path)
@@ -550,7 +578,7 @@ def observe_fleet(
                     doc["ts"] = now
                 doc["checked_ts"] = now
                 dirty = True
-        if mutating and shared_tree and not doc.get("nudged") and _fresh_others(td, sid):
+        if mutating and shared_tree and not doc.get("nudged") and _fresh_others(td, sid, tree):
             lines.append(
                 _clip(
                     "🚦 fleet: another session is active in this working tree and this "

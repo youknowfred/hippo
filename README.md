@@ -209,8 +209,9 @@ by what it's for.
 **Setup (you run these):**
 - `/hippo:bootstrap` — once per machine. Builds the plugin's venv and warms the offline embedding
   model; the one online step in hippo's whole lifecycle.
-- `/hippo:init` — once per project (also safe on a teammate's clone, a new worktree, or a second
-  machine). Seeds `.claude/memory/`, wires the native-memory symlink, builds the recall index.
+- `/hippo:init` — once per project (also safe on a teammate's clone or a second machine). Seeds
+  `.claude/memory/`, wires the native-memory symlink, builds the recall index. A linked `git
+  worktree` needs nothing: it resolves the main checkout's corpus (see below).
 
 **Everyday:**
 - `/hippo:new` — save one memory the right way (correct frontmatter, provenance backfill, index
@@ -342,6 +343,29 @@ That symlink is the **only** native behavior hippo depends on. The full contract
 assumption, how it can drift, and how `/hippo:doctor` detects a break — is documented in
 [`plugin/memory/NATIVE_MEMORY.md`](plugin/memory/NATIVE_MEMORY.md).
 
+### Git worktrees
+
+A session launched inside a **linked worktree** (`git worktree add …`, including the
+`.claude/worktrees/<name>/` trees Claude Code creates) resolves the **main checkout's** corpus,
+not the worktree's own git-checked-out copy of `.claude/memory/`. That copy is the branch's
+committed snapshot — a different file with a different inode — and everything derived from the
+corpus moves with it: the recall index, the telemetry ledgers, and the capture queue all live
+beside the main checkout's `.claude/memory/`, so a capture from a worktree session lands where
+the next session (in any tree) will find it, and nothing vanishes when the worktree is retired.
+This matches Claude Code's own native memory, which keys a worktree session's project on the
+main checkout. Trust is keyed the same way — trusting the repo once trusts it from every
+worktree.
+
+Session-local facts stay session-local: the session-end capture diffs the **worktree** you
+edited in, and the fleet-presence doc records the **worktree's** branch and HEAD.
+
+Two escape hatches, both `HIPPO_*` env vars: `HIPPO_CORPUS_ROOT=<dir>` pins where resolution
+starts (and disables the redirect — point it at the worktree to get the old behavior, or at any
+other checkout), and `HIPPO_MEMORY_DIR` still names a corpus dir outright. A main checkout that
+carries **no** corpus leaves a worktree's branch-only corpus alone. `/hippo:doctor` prints which
+tree it resolved in one line (`tree: MAIN working tree … (redirected from linked worktree …)`)
+and names any dead `.claude/.memory-*` copies a worktree still carries from before this behavior.
+
 ## Repo layout
 
 This repo is both a **plugin marketplace** and the **plugin itself**:
@@ -425,6 +449,15 @@ sessions, permanently dismissable) instead of staying silent.
   `/hippo:bootstrap` buys ranking quality (no lexical rule separates a coincidental keyword
   overlap from a real one), but it does not make recall abstain more often — it adds lanes.
   `/hippo:doctor` reports the measured per-corpus rate when you supply an off-topic fixture.
+- **I'm in a git worktree and doctor / recall / capture seem to be looking at the wrong corpus.**
+  They aren't, since v1.34.0: a linked worktree resolves the main checkout's live corpus, and
+  the `resolved corpus:` doctor line says which tree it used. If that line reads `tree: LINKED
+  worktree …`, the main checkout has no `.claude/memory/` (a branch-only corpus — expected). If
+  it reads `tree: OVERRIDE via HIPPO_CORPUS_ROOT=…`, an env var is pinning it. A `worktree
+  copies:` warning means the worktree still carries a dead `.claude/.memory-pending/` queue from
+  before v1.34.0 — nothing drains it; delete the copy or retire the worktree. An `APPLY REFUSED
+  — corpus untrusted` from a worktree on a repo you already trusted was the same bug (trust rows
+  key on the repo root) and no longer happens; do not "fix" it by trusting the worktree.
 - **"Not a git repository" / staleness looks inactive.** Outside a git repo hippo runs in a
   degraded mode: recall, indexing, links, and the floor all work, but staleness tracking and
   provenance backfill need git — `git init` and commit to activate them.

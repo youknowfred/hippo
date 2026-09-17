@@ -31,7 +31,9 @@ SID="$(printf '%s' "$PAYLOAD" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]
 # Only nudge in a project that has opted into hippo memory — a corpus present means /hippo:new
 # has somewhere to write. In a never-opted-in repo (COR-10) the nudge would dead-end at a
 # missing bootstrap/init, so stay silent, consistent with the other hooks' corpus guard.
-[ -d ".claude/memory" ] || exit 0
+# shellcheck disable=SC1091  # dynamic path via CLAUDE_PLUGIN_ROOT; see hooks/_resolve_py.sh
+. "${CLAUDE_PLUGIN_ROOT:-.}/hooks/_resolve_py.sh"
+hippo_corpus_present || exit 0  # SHP-7: a linked worktree whose MAIN tree has the corpus passes
 
 # Static, self-contained message — no double quotes or backslashes, so it embeds into the JSON
 # string verbatim with no escaping (no jq/Python dependency on this path).

@@ -25,14 +25,14 @@ cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" 
 
 # COR-10: a never-opted-in repo has no corpus — nothing to capture for, and nowhere the agent
 # would approve into. Bail before the Python spawn (consistent with the other hooks' guard).
-[ -d ".claude/memory" ] || exit 0
+# shellcheck disable=SC1091  # dynamic path via CLAUDE_PLUGIN_ROOT; see hooks/_resolve_py.sh
+. "${CLAUDE_PLUGIN_ROOT:-.}/hooks/_resolve_py.sh"
+hippo_corpus_present || exit 0  # SHP-7: a linked worktree whose MAIN tree has the corpus passes
 
 # SessionEnd delivers the event as JSON on stdin ({session_id, reason, ...}); parse it INSIDE
 # the capture module (one Python spawn, INT-5 discipline) rather than with a separate launch.
 PAYLOAD="$(cat 2>/dev/null || true)"
 
-# shellcheck disable=SC1091  # dynamic path via CLAUDE_PLUGIN_ROOT; see hooks/_resolve_py.sh
-. "${CLAUDE_PLUGIN_ROOT:-.}/hooks/_resolve_py.sh"
 hippo_resolve_py
 
 printf '%s' "$PAYLOAD" | "$PY" -m memory.capture --from-hook 2>/dev/null || true

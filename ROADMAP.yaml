@@ -599,6 +599,53 @@ workstreams:
           - scan cost proportional to cited-path set, not repo history
           - timeout produces a visible diagnostic, never a silent []
 
+      - id: SHP-7
+        title: A linked git worktree resolves the MAIN checkout's corpus
+        priority: P0
+        effort: M
+        status: shipped (v1.34.0)
+        provenance: {dimension: skills-dx, severity: high, verdict: confirmed}
+        problem: >-
+          resolve_dirs preferred the nested .claude/memory of whatever tree
+          the session launched in. A session in a linked `git worktree`
+          (every session in the em-growth-labs repo, whose rule launches
+          them under <primary>/.claude/worktrees/<name>/) therefore resolved
+          the worktree's git-checked-out COPY of the corpus: doctor reported
+          a healthy corpus that was the branch's stale snapshot, the
+          .claude/.memory-pending queue was a dead copy with different
+          inodes, captures / reconsolidation / index builds landed in files
+          that vanished with the worktree while the live corpus never
+          changed, and SEC-1 refused applies as "untrusted" because trust
+          rows key on the repo root (2026-08-19, 09-09, 09-16). The manual
+          workaround (CLAUDE_PROJECT_DIR=<primary> + drive the CLI) was a
+          session habit, not a fix.
+        decision: >-
+          Option A of three weighed (A: walk to the git common dir; B: the
+          ~/.claude/projects symlink as source of truth with A as fallback;
+          C: refuse + explain). B needs A's derivation to even find the
+          slug and adds a machine-local failure mode (a re-pointed link);
+          C is a floor, not a fix. A, with doctor naming the tree.
+        proposal: >-
+          resolve_corpus_start: when the launch dir's toplevel is a LINKED
+          worktree (its .git is a file naming <common>/worktrees/<name>),
+          start resolution from the main working tree (the common dir's
+          parent; bare/custom layouts ask `git worktree list`) when it
+          carries a corpus — a subdir launch is mirrored so nested-wins
+          still applies. repo_root moves with it, so trust, the symlink
+          check, and every derived sibling dir key on one tree; launch_root
+          keeps session-local git facts (capture's diff, presence's
+          branch/head) on the worktree. HIPPO_CORPUS_ROOT pins the start and
+          disables the redirect; HIPPO_MEMORY_DIR is never redirected. The
+          hooks' bash guard consults the main tree for a worktree without
+          its own copy. Doctor prints WHICH tree resolved and names a
+          worktree's dead .memory-* copies (a dead queue with seeds warns).
+        acceptance_criteria:
+          - "hermetic test: temp repo + linked worktree, resolution from inside the worktree (cwd and CLAUDE_PROJECT_DIR) chooses the main tree's corpus and MEMORY.md's inode matches the main tree's, not the worktree copy's"
+          - "pending queue, index, and telemetry dirs derive beside the resolved (main-tree) corpus; the trust gate keys on the main tree"
+          - "single checkouts, submodules, bare-repo worktrees, HIPPO_MEMORY_DIR, and a main tree without a corpus are byte-identical to before"
+          - "doctor's resolution line names the tree (main / this checkout / linked / override) and a worktree_copies check names a stale .memory-pending copy"
+          - "documented in README, the engine README, the init and doctor skills, and the CHANGELOG"
+
   # ==========================================================================
   # OSP — OS & Environment Portability
   # ==========================================================================

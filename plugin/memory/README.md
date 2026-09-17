@@ -635,8 +635,16 @@ re-billed.
 
 ## Environment overrides
 
-- `HIPPO_MEMORY_DIR` — point the tooling at a different memory dir (hermetic tests).
-- `CLAUDE_PROJECT_DIR` — repo root override (set by the harness); else derived from git.
+- `HIPPO_MEMORY_DIR` — point the tooling at a different memory dir (hermetic tests). Used
+  as-is: never walked up, never redirected.
+- `CLAUDE_PROJECT_DIR` — the launch dir (set by the harness); else cwd. Resolution starts
+  there — except that a launch inside a **linked git worktree** starts from the MAIN working
+  tree when it carries a corpus (SHP-7, `provenance_env.resolve_corpus_start`): the corpus,
+  `repo_root`, and every derived sibling dir (`.memory-pending`, `.memory-index`,
+  `.memory-telemetry`) move together, while `provenance.launch_root()` keeps naming the
+  worktree for session-local git facts (capture's diff, the presence doc's branch/head).
+- `HIPPO_CORPUS_ROOT` — pin the resolution start dir explicitly; disables the worktree
+  redirect (an explicit root is honored as-is, whichever tree it names).
 - `HIPPO_INDEX_DIR` — override the index location (default `.claude/.memory-index/`).
 - `HIPPO_EMBED_MODEL` — dense model name (default `BAAI/bge-small-en-v1.5`).
 - `HIPPO_DISABLE_DENSE=1` — force BM25-only (hermetic tests, CI).

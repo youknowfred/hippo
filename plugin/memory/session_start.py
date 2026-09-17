@@ -54,7 +54,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from .dream import dream_applied_producer
 from .lint_floor import floor_producer
 from .lint_links import lint_links_producer
-from .provenance import resolve_dirs
+from .provenance import launch_root, resolve_dirs
 from .recall import git_recent_producer, portable_floor_producer
 from .merge_digest import merge_digest_producer
 from .presence import presence_producer, write_presence
@@ -500,7 +500,9 @@ def main(
                     mark_session(td)
                 else:
                     current_session_id(td)
-            write_presence(memory_dir, repo_root, session_id=session_id)  # T18 FLT-1: fleet presence doc
+            # T18 FLT-1: fleet presence doc — branch/head of the LAUNCH tree (SHP-7: the tree
+            # this session works in, not the corpus's main tree when a worktree redirected).
+            write_presence(memory_dir, launch_root(), session_id=session_id)
         except Exception:
             pass
         producer_chars: dict = {}

@@ -13,10 +13,12 @@ Three groups:
   failure), the PRF-3-memoized ``git_root``, and SEC-14's ``git_remote_info`` /
   ``_PUBLIC_GIT_HOSTS`` public-host classification.
 - **corpus location** — ``walk_up_for_memory_dir`` / ``resolve_dirs`` (the ambient
-  ``(memory_dir, repo_root)`` pair the whole package resolves through), plus
-  ``encode_project_dir`` and the ``check`` / ``create`` / ``remove_project_symlink`` trio
-  that wires a project into ``~/.claude/projects`` — including the legacy encoding it
-  still recognizes.
+  ``(memory_dir, repo_root)`` pair the whole package resolves through), SHP-7's
+  ``main_worktree_root`` / ``resolve_corpus_start`` / ``launch_root`` (a session launched
+  in a LINKED git worktree resolves the MAIN working tree's corpus, so every derived dir —
+  pending queue, index, telemetry — moves with it), plus ``encode_project_dir`` and the
+  ``check`` / ``create`` / ``remove_project_symlink`` trio that wires a project into
+  ``~/.claude/projects`` — including the legacy encoding it still recognizes.
 - **TEA-1 tiers** — ``user_memory_dir`` / ``local_memory_dir`` / ``tier_index_dir`` and the
   identity slug the committed-usage summaries and reverify stamps key on.
 
@@ -336,21 +338,181 @@ def walk_up_for_memory_dir(start: str) -> Tuple[str, str]:
     return "", "none-found"
 
 
+# --------------------------------------------------------------------------- #
+# SHP-7: linked git worktrees resolve the MAIN working tree's corpus.
+#
+# A session launched inside `git worktree add`'s linked tree carries its own git-checked-
+# out COPY of `.claude/memory` — a committed snapshot, not the live corpus the
+# `~/.claude/projects/<slug>/memory` symlink (and Claude Code's own native memory, which
+# keys the project slug on the main checkout) resolve to. Resolving "nested wins" there
+# made doctor report a healthy corpus that was stale, drained `.claude/.memory-pending`
+# queues that were dead copies with different inodes, and landed captures / index
+# builds / reconsolidation in files that vanished when the worktree was retired — while
+# the live corpus never changed. A SEC-1 "APPLY REFUSED — corpus untrusted" from a
+# worktree was the same bug wearing a trust-registry hat (rows are keyed by repo root).
+#
+# The rule: when the launch dir's git toplevel is a LINKED worktree, corpus resolution
+# STARTS from the main working tree (the parent of `--git-common-dir`; a subdir launch is
+# mirrored so SHP-2's nested-wins still applies), provided that tree carries a corpus.
+# `repo_root` moves with it — the trust registry, the projects-dir symlink check, and
+# every derived sibling dir (`.memory-pending`, `.memory-index`, `.memory-telemetry`)
+# all key on the SAME tree, which is the whole point: a corpus in one tree with an index
+# in another is exactly the class of lie this closes. Session-LOCAL git facts (the
+# session-end capture's diff, the presence doc's branch/head) keep reading the launch
+# tree via ``launch_root``. ``HIPPO_CORPUS_ROOT=<dir>`` pins the resolution start
+# explicitly and disables the redirect (an explicit root is honored as-is); an explicit
+# ``HIPPO_MEMORY_DIR`` is likewise never redirected. Single checkouts: byte-identical
+# behavior — the linked-worktree probe is one `.git` stat and reads a file only when
+# `.git` IS a file (the linked-worktree / submodule signature); never a subprocess on
+# the common path.
+# --------------------------------------------------------------------------- #
+_MAIN_TREE_CACHE: Dict[str, Optional[str]] = {}
+
+
+def _main_tree_via_git(start: str) -> Optional[str]:
+    """The main working tree per ``git worktree list --porcelain`` (listed first), or None
+    when the repo is bare (no main working tree) or git is unavailable. Only consulted
+    for layouts where the common dir is not a plain ``.git`` (bare repos, custom GIT_DIR)."""
+    try:
+        first = run_git(["worktree", "list", "--porcelain"], start).split("\n\n", 1)[0]
+        lines = [ln.strip() for ln in first.splitlines() if ln.strip()]
+        if not lines or any(ln == "bare" for ln in lines):
+            return None
+        if lines[0].startswith("worktree "):
+            return lines[0][len("worktree "):].strip() or None
+        return None
+    except Exception:
+        return None
+
+
+def main_worktree_root(toplevel: Optional[str]) -> Optional[str]:
+    """The MAIN working tree's root when ``toplevel`` is a LINKED git worktree; else None.
+
+    Subprocess-free on every common path and memoized per toplevel (process-constant, like
+    ``git_root``): a linked worktree's ``.git`` is a FILE naming ``gitdir: <common>/worktrees/
+    <name>`` (absolute, or relative under git's ``--relative-paths``), so the common dir is
+    that path's grandparent and the main tree is the common dir's parent when it is a plain
+    ``.git``. A submodule's ``.git`` file points at ``<super>/.git/modules/<name>`` — no
+    ``worktrees`` component — and is deliberately NOT a linked worktree: a submodule's corpus
+    is its own. A bare/custom common dir falls back to one ``git worktree list`` read. Never
+    raises; None means "not a linked worktree (or undeterminable)", which leaves today's
+    behavior untouched.
+    """
+    if not toplevel:
+        return None
+    key = os.path.abspath(toplevel)
+    if key in _MAIN_TREE_CACHE:
+        return _MAIN_TREE_CACHE[key]
+    result: Optional[str] = None
+    try:
+        dot_git = os.path.join(key, ".git")
+        if os.path.isfile(dot_git):
+            with open(dot_git, "r", encoding="utf-8") as fh:
+                line = fh.read(4096).strip()
+            if line.startswith("gitdir:"):
+                gd = line[len("gitdir:"):].strip()
+                if not os.path.isabs(gd):
+                    gd = os.path.normpath(os.path.join(key, gd))
+                if os.path.basename(os.path.dirname(gd)) == "worktrees":
+                    common = os.path.dirname(os.path.dirname(gd))
+                    cand = os.path.dirname(common) if os.path.basename(common) == ".git" else _main_tree_via_git(key)
+                    if cand and os.path.isdir(cand) and os.path.realpath(cand) != os.path.realpath(key):
+                        result = os.path.abspath(cand)
+    except Exception:
+        result = None
+    _MAIN_TREE_CACHE[key] = result
+    return result
+
+
+def _launch_dir() -> str:
+    """The dir a session was launched against: ``CLAUDE_PROJECT_DIR`` (set by the harness)
+    else cwd (the MCP server and a bare CLI). ``HIPPO_CORPUS_ROOT`` overrides both."""
+    return (
+        os.environ.get("HIPPO_CORPUS_ROOT")
+        or os.environ.get("CLAUDE_PROJECT_DIR")
+        or os.getcwd()
+    )
+
+
+def resolve_corpus_start() -> Dict[str, Optional[str]]:
+    """Where corpus resolution STARTS, and why — the one SHP-7 decision, made in one place.
+
+    Returns a dict: ``launch`` (the launch dir), ``start`` (the dir ``resolve_dirs`` walks
+    from), ``tree`` — one of ``"checkout"`` (not a linked worktree; today's behavior),
+    ``"main-tree"`` (launched in a linked worktree, redirected to the main working tree),
+    ``"linked-worktree"`` (a linked worktree whose main tree carries NO corpus, so this
+    tree's own is used — the branch-only-corpus case, not an error), or ``"override"``
+    (``HIPPO_CORPUS_ROOT`` / ``HIPPO_MEMORY_DIR`` pinned it; no redirect) — plus
+    ``linked_worktree`` / ``main_tree`` (the two roots when the launch tree is linked) and
+    ``override`` (the env var's name when one applied). Doctor renders this verbatim so a
+    wrong root is visible in one line. Never raises.
+    """
+    launch = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    info: Dict[str, Optional[str]] = {
+        "launch": launch, "start": launch, "tree": "checkout",
+        "linked_worktree": None, "main_tree": None, "override": None,
+    }
+    try:
+        pinned = os.environ.get("HIPPO_CORPUS_ROOT")
+        if pinned:
+            info.update(start=pinned, tree="override", override="HIPPO_CORPUS_ROOT")
+            return info
+        if os.environ.get("HIPPO_MEMORY_DIR"):
+            info.update(tree="override", override="HIPPO_MEMORY_DIR")
+            return info
+        toplevel = git_root(launch)
+        main = main_worktree_root(toplevel)
+        if not main or not toplevel:
+            return info
+        info.update(linked_worktree=toplevel, main_tree=main)
+        # Mirror a subdir launch (a monorepo package opened inside the worktree) into the
+        # main tree so SHP-2's nested-wins rule applies THERE; a branch-only subdir that
+        # does not exist in the main tree falls back to the main tree's root.
+        rel = os.path.relpath(os.path.realpath(launch), os.path.realpath(toplevel))
+        cand = main if rel in (".", "") or rel.startswith("..") else os.path.join(main, rel)
+        if not os.path.isdir(cand):
+            cand = main
+        found, _reason = walk_up_for_memory_dir(cand)
+        if found:
+            info.update(start=cand, tree="main-tree")
+        else:
+            info["tree"] = "linked-worktree"
+        return info
+    except Exception:
+        return info
+
+
+def launch_root() -> str:
+    """The git toplevel of the LAUNCH dir — the tree this session actually works in — else
+    the launch dir itself. Equals ``resolve_dirs()``'s ``repo_root`` in a single checkout;
+    differs only when SHP-7 redirected the corpus to the main tree. Session-local git facts
+    (the session-end capture's ``git diff`` / untracked / HEAD, the presence doc's
+    branch+head) read HERE: a worktree session's work is in the worktree, even though its
+    memory is the main tree's. ``HIPPO_CORPUS_ROOT`` pins this too — an explicit root is
+    the whole session's root."""
+    launch = _launch_dir()
+    return git_root(launch) or launch
+
+
 def resolve_dirs() -> Tuple[str, str]:
     """Return ``(memory_dir, repo_root)``.
 
     Honors ``HIPPO_MEMORY_DIR`` (used by hermetic tests) explicitly — that path is
     used as-is, no walk-up. Otherwise (OQ-1, SHP-2): a per-package corpus at
-    ``<CLAUDE_PROJECT_DIR-or-cwd>/.claude/memory`` wins when present (nested wins);
-    else ascend toward the git toplevel looking for a corpus (root-fallthrough) — a
-    subdirectory launch (``claude`` started from ``packages/web`` in a monorepo) must
-    still recall the repo-root corpus instead of silently no-op'ing. If no corpus
-    exists anywhere in the walk, fall back to today's behavior (the raw
-    ``CLAUDE_PROJECT_DIR``-derived path) so ``/hippo:init`` still has somewhere to seed.
-    ``repo_root`` reuses ``git_root()`` (the actual toplevel) when resolvable — more
-    correct for git-command purposes than a subdir ``CLAUDE_PROJECT_DIR``.
+    ``<start>/.claude/memory`` wins when present (nested wins); else ascend toward the
+    git toplevel looking for a corpus (root-fallthrough) — a subdirectory launch
+    (``claude`` started from ``packages/web`` in a monorepo) must still recall the
+    repo-root corpus instead of silently no-op'ing. If no corpus exists anywhere in the
+    walk, fall back to today's behavior (the raw ``start``-derived path) so ``/hippo:init``
+    still has somewhere to seed. ``start`` is ``CLAUDE_PROJECT_DIR``-or-cwd — except that
+    a session launched in a LINKED git worktree starts from the MAIN working tree when it
+    carries a corpus (SHP-7, ``resolve_corpus_start``), and ``HIPPO_CORPUS_ROOT`` pins it
+    outright. ``repo_root`` reuses ``git_root()`` (the actual toplevel of ``start``) when
+    resolvable — more correct for git-command purposes than a subdir ``CLAUDE_PROJECT_DIR``,
+    and the SAME tree as the corpus (trust rows, the projects-dir symlink, and every
+    derived sibling dir key on it).
     """
-    start = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    start = resolve_corpus_start()["start"] or os.getcwd()
     repo_root = git_root(start) or start
 
     explicit = os.environ.get("HIPPO_MEMORY_DIR")

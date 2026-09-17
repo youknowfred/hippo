@@ -142,6 +142,7 @@ _FENCE = "---"
 # --------------------------------------------------------------------------- #
 from .provenance_env import (  # noqa: E402,F401
     _GIT_ROOT_CACHE,
+    _MAIN_TREE_CACHE,
     _PUBLIC_GIT_HOSTS,
     _candidate_memory_dir,
     _git_url_host,
@@ -153,8 +154,11 @@ from .provenance_env import (  # noqa: E402,F401
     ensure_self_ignoring_dir,
     git_remote_info,
     git_root,
+    launch_root,
     local_memory_dir,
+    main_worktree_root,
     remove_project_symlink,
+    resolve_corpus_start,
     resolve_dirs,
     run_git,
     slugify_identity,

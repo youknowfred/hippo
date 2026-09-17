@@ -13,7 +13,12 @@ import json
 import os
 from typing import Dict, List, Optional, Tuple
 
-from .provenance import check_project_symlink, git_root, walk_up_for_memory_dir
+from .provenance import (
+    check_project_symlink,
+    git_root,
+    resolve_corpus_start,
+    walk_up_for_memory_dir,
+)
 
 
 # The venv deps whose import must resolve for recall to run at full fidelity (SKILL.md's
@@ -265,33 +270,60 @@ def check_native_coexistence(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"native-coexistence check failed: {exc}."}
 
 
+def _resolution_tree_phrase(info: Dict[str, Optional[str]]) -> str:
+    """One clause naming WHICH tree resolution started from (SHP-7) — so a wrong root reads
+    in a single doctor line: the main working tree (redirected from a linked worktree), a
+    linked worktree kept because the main tree has no corpus, an env override, or plainly
+    this checkout."""
+    tree = info.get("tree")
+    if tree == "override":
+        var = info.get("override") or "override"
+        return f"tree: OVERRIDE via {var}={os.environ.get(var, '')} (no worktree redirect)"
+    if tree == "main-tree":
+        return (
+            f"tree: MAIN working tree {info.get('main_tree')} (redirected from linked "
+            f"worktree {info.get('linked_worktree')})"
+        )
+    if tree == "linked-worktree":
+        return (
+            f"tree: LINKED worktree {info.get('linked_worktree')} (its main tree "
+            f"{info.get('main_tree')} carries no corpus, so this tree's own is used)"
+        )
+    launch = info.get("launch") or ""
+    return f"tree: this checkout {git_root(launch) or launch} (not a linked worktree)"
+
+
 def check_corpus_resolution(ctx: DoctorContext) -> Dict[str, str]:
-    """Which corpus resolved and WHY (monorepo nested-vs-root walk-up, SHP-2 / OQ-1).
+    """Which corpus resolved, from WHICH tree, and WHY (SHP-2 walk-up + SHP-7 worktrees).
 
     A subdir session that silently fell through to the repo-root corpus looks identical to a
-    healthy nested one; naming the resolution ``reason`` surfaces the fallthrough as the correct
-    (but worth-knowing) behavior it is. Reads ``walk_up_for_memory_dir`` — the same walk
-    ``resolve_dirs`` uses — so doctor reports exactly what recall will do.
+    healthy nested one, and a linked-worktree session that resolved its own committed
+    snapshot instead of the live main-tree corpus looked healthier still — naming the
+    resolution ``reason`` AND the tree surfaces both. Reads ``resolve_corpus_start`` and
+    ``walk_up_for_memory_dir`` — the same decisions ``resolve_dirs`` makes — so doctor
+    reports exactly what recall will do.
     """
     try:
-        start = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
-        _found, reason = walk_up_for_memory_dir(start)
+        info = resolve_corpus_start()
+        _found, reason = walk_up_for_memory_dir(info.get("start") or os.getcwd())
+        tree = _resolution_tree_phrase(info)
         if reason == "nested":
             return {
                 "status": "ok",
-                "message": f"resolved corpus: {ctx.memory_dir} (nested — found at the launch dir).",
+                "message": f"resolved corpus: {ctx.memory_dir} — {tree}; nested (found at the "
+                "resolution start).",
             }
         if reason == "root-fallthrough":
             return {
                 "status": "ok",
-                "message": f"resolved corpus: {ctx.memory_dir} (root-fallthrough — no nested "
-                "corpus at the launch dir, so the walk ascended to it; correct, but your edits "
-                "land in this corpus, not a per-package one).",
+                "message": f"resolved corpus: {ctx.memory_dir} — {tree}; root-fallthrough (no "
+                "nested corpus at the start dir, so the walk ascended to it; correct, but your "
+                "edits land in this corpus, not a per-package one).",
             }
         return {
             "status": "warn",
-            "message": f"resolved corpus: {ctx.memory_dir} (none found in the walk — this is the "
-            "CLAUDE_PROJECT_DIR default; run /hippo:init here or at the repo root).",
+            "message": f"resolved corpus: {ctx.memory_dir} — {tree}; none found in the walk (this "
+            "is the start-dir default; run /hippo:init here or at the repo root).",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"corpus-resolution check failed: {exc}."}

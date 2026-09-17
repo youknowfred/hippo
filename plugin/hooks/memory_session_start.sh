@@ -50,12 +50,12 @@ if [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ ! -f "${CLAUDE_PLUGIN_DATA}/.nudge-dism
   if [ "${CLAUDE_CODE_ENTRYPOINT:-}" = "claude-desktop" ]; then
     if [ ! -x "${CLAUDE_PLUGIN_DATA}/venv/bin/python" ] || [ ! -f "${CLAUDE_PLUGIN_DATA}/.bootstrap-sentinel" ]; then
       NUDGE="hippo memory is installed but not bootstrapped — recall is inert. Set it up via the hippo MCP setup tools: run bootstrap once per machine, then init once per project (just ask for it — typed /hippo:* commands are terminal-only and do not work in this app). ${SILENCE}"
-    elif [ ! -f ".claude/memory/MEMORY.md" ]; then
+    elif ! hippo_floor_present; then
       NUDGE="hippo memory is bootstrapped but this project has no memory corpus — run the hippo init MCP tool to seed .claude/memory/ (just ask for it — typed /hippo:* commands are terminal-only and do not work in this app). ${SILENCE}"
     fi
   elif [ ! -x "${CLAUDE_PLUGIN_DATA}/venv/bin/python" ] || [ ! -f "${CLAUDE_PLUGIN_DATA}/.bootstrap-sentinel" ]; then
     NUDGE="hippo memory is installed but not bootstrapped — recall is inert. Run /hippo:bootstrap once per machine, then /hippo:init once per project. ${SILENCE}"
-  elif [ ! -f ".claude/memory/MEMORY.md" ]; then
+  elif ! hippo_floor_present; then
     NUDGE="hippo memory is bootstrapped but this project has no memory corpus — run /hippo:init to seed .claude/memory/. ${SILENCE}"
   fi
   if [ -n "$NUDGE" ]; then
@@ -79,7 +79,7 @@ fi
 # via build_index.refresh_index even though there's no corpus to index. The nudge
 # block above still fires (and exits) in this exact case until dismissed; this
 # guard only matters once it's been silenced.
-[ -d ".claude/memory" ] || exit 0
+hippo_corpus_present || exit 0  # SHP-7: a linked worktree whose MAIN tree has the corpus passes
 
 # Pin fastembed's ONNX model cache to a durable dir. UNSET, fastembed uses
 # $TMPDIR/fastembed_cache (macOS /var/folders, purged on a schedule) — the OFFLINE
