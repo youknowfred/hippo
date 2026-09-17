@@ -13,7 +13,7 @@ one-line "which one do I want?" guide for recall-vs-doctor, doctor-vs-audit, con
 | Skill | Run when |
 |---|---|
 | `/hippo:bootstrap` | Once per machine — builds the shared venv + warms the offline model cache |
-| `/hippo:init` | Once per new project (or a fresh clone/worktree) — seeds `.claude/memory/` + the cross-machine symlink + index |
+| `/hippo:init` | Once per new project (or a fresh clone) — seeds `.claude/memory/` + the cross-machine symlink + index; a linked git worktree needs nothing (it resolves the main checkout's corpus) |
 | `/hippo:new` | Whenever the agent decides to save something to memory |
 | `/hippo:recall` | Deliberately recall the corpus — "what do you remember about X", or list it by type |
 | `/hippo:why` | The glass-box recall receipt — why a memory surfaced (or didn't) for a query |

@@ -40,7 +40,7 @@ import sys
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
-from .provenance import resolve_dirs
+from .provenance import launch_root, resolve_dirs
 from .telemetry import default_telemetry_dir, log_outcome, read_episodes, read_outcomes
 
 # The tools whose invocation means the agent READ or EDITED a file — the "used it" signal. Kept
@@ -95,6 +95,10 @@ def record_from_payload(
         if not raw:
             return False
         session_id = payload.get("session_id") or None
+        # SHP-7: the fleet lane's branch/head belong to the tree the session WORKS in — a
+        # caller-supplied repo_root as given, else the launch tree (which differs from the
+        # resolved corpus root only when a linked worktree redirected to the main tree).
+        tree_root = repo_root if repo_root is not None else launch_root()
         if memory_dir is None or repo_root is None:
             md, rr = resolve_dirs()
             memory_dir = memory_dir or md
@@ -102,9 +106,15 @@ def record_from_payload(
         rel = None
         try:
             ap = os.path.abspath(raw)
-            base = os.path.abspath(repo_root)
-            if ap == base or ap.startswith(base + os.sep):
-                rel = os.path.relpath(ap, base)
+            # SHP-7: ``repo_root`` is the CORPUS root (the main tree when a linked worktree
+            # redirected). A worktree nested under it (the _WORKTREE_PREFIX layout) still
+            # yields a main-root-relative path — the raw row MEA-6 strips below — while a
+            # worktree living elsewhere resolves against the launch tree instead, so JIT
+            # and the fleet lane stay live there too (rel is then already tree-relative).
+            for base in (os.path.abspath(repo_root), os.path.abspath(tree_root)):
+                if ap == base or ap.startswith(base + os.sep):
+                    rel = os.path.relpath(ap, base)
+                    break
         except Exception:
             rel = None
         if not rel:
@@ -151,7 +161,7 @@ def record_from_payload(
             fleet = observe_fleet(
                 rel,
                 memory_dir=memory_dir,
-                repo_root=repo_root,
+                repo_root=tree_root,  # SHP-7: the session's OWN tree's branch/head
                 telemetry_dir=td,
                 session_id=session_id,
                 mutating=tool in MUTATING_FILE_TOOLS,

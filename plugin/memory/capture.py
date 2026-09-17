@@ -37,7 +37,7 @@ import re
 import time
 from typing import Dict, List, Optional
 
-from .provenance import ensure_self_ignoring_dir, resolve_dirs, run_git
+from .provenance import ensure_self_ignoring_dir, launch_root, resolve_dirs, run_git
 from .secrets import scan_text
 from .telemetry import (
     abstention_backlog,
@@ -521,10 +521,14 @@ def _capture_outcome(
     wrapper; the only writes target the pending queue.
     """
     try:
-        if memory_dir is None or repo_root is None:
-            md, rr = resolve_dirs()
-            memory_dir = memory_dir or md
-            repo_root = repo_root or rr
+        if memory_dir is None:
+            memory_dir, _rr = resolve_dirs()
+        if repo_root is None:
+            # SHP-7: the seed's diff / untracked / HEAD watermark describe the tree the
+            # session WORKED in — the launch tree — even when the corpus (and this queue)
+            # resolved to the main working tree from a linked worktree. In a single
+            # checkout the two are the same dir.
+            repo_root = launch_root()
         seed = _gather_session_context_raw(
             session_id, repo_root=repo_root, telemetry_dir=telemetry_dir, memory_dir=memory_dir
         )

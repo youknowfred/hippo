@@ -41,7 +41,13 @@ resolves the corpus/repo the same way recall does (`resolve_dirs`) and runs, in 
 bootstrap state, installed-vs-bootstrapped plugin version (DOC-7), venv imports, corpus
 existence, project symlink (SHP-5/ONB-5), native-memory
 coexistence (INT-4: symlink-target drift + native-layout change), corpus
-resolution (SHP-2 nested-vs-root walk-up), git degraded-mode (SHP-4), corpus trust (SEC-1),
+resolution (SHP-2 nested-vs-root walk-up, naming WHICH tree it resolved — SHP-7: a linked git
+worktree resolves the MAIN checkout's corpus, and the line says `tree: MAIN working tree …
+(redirected from linked worktree …)`, `tree: this checkout …`, `tree: LINKED worktree …` when
+the main tree has no corpus, or `tree: OVERRIDE via HIPPO_CORPUS_ROOT=…`), worktree copies
+(SHP-7: a worktree's own dead `.claude/.memory-pending` / `.memory-index` / `.memory-telemetry`
+dirs from before the redirect — a dead queue WITH seeds warns; nothing drains it from there),
+git degraded-mode (SHP-4), corpus trust (SEC-1),
 frontmatter integrity, index corruption (QUA-5), index count vs corpus, hot-path p95 latency
 (INT-5), index format version, pack drift, `<FILL-ME` templates, and the corpus-wide secret
 scan (SEC-2). Each line already

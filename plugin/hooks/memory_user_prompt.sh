@@ -24,16 +24,18 @@ set -uo pipefail
 
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" 2>/dev/null || exit 0
 
+# shellcheck disable=SC1091  # dynamic path via CLAUDE_PLUGIN_ROOT; see hooks/_resolve_py.sh
+. "${CLAUDE_PLUGIN_ROOT:-.}/hooks/_resolve_py.sh"
+
 # COR-10: a never-opted-in repo has no .claude/memory at all — bail before paying
 # for stdin capture or a Python spawn. A stat is ~free; recall.py's own SEC-3
 # guard would return the same nothing, but only after the interpreter+import cost.
-[ -d ".claude/memory" ] || exit 0
+# SHP-7: a linked worktree whose MAIN tree carries the corpus passes (hippo_corpus_present).
+hippo_corpus_present || exit 0
 
 # UserPromptSubmit delivers the event as JSON on stdin; ".prompt" is the user's text.
 PAYLOAD="$(cat 2>/dev/null || true)"
 
-# shellcheck disable=SC1091  # dynamic path via CLAUDE_PLUGIN_ROOT; see hooks/_resolve_py.sh
-. "${CLAUDE_PLUGIN_ROOT:-.}/hooks/_resolve_py.sh"
 hippo_resolve_py
 
 # Force the dense model OFFLINE for the hook path (belt — recall.py also guards this).

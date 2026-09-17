@@ -22,8 +22,8 @@ symlink Claude Code's native memory system reads from.
 - **If `.claude/memory/MEMORY.md` already exists (ONB-5), this is an EXISTING CORPUS, not a
   fresh project** — the flagship case here is a teammate cloning the repo, or opening a new
   `git worktree` of a repo already using hippo: the corpus is already in git, but THIS machine
-  (or this worktree's `~/.claude/projects/<encoded>` entry) has never had its symlink or index
-  built. Do **NOT** hard-stop and do **NOT** touch any existing memory file. Instead, **skip
+  has never had its symlink or index built (a linked worktree itself needs neither — SHP-7
+  resolves it to the main checkout, whose symlink and index are the ones that count). Do **NOT** hard-stop and do **NOT** touch any existing memory file. Instead, **skip
   steps 1-2b** (starter-pack selection, `MEMORY.md` skeleton, format marker — there is
   nothing to seed, and stamping a format marker onto an unmigrated corpus is doctor's call,
   not init's) and run
@@ -50,10 +50,15 @@ symlink Claude Code's native memory system reads from.
   this machine's `~/.claude/projects/<encoded>/memory` symlink and `.claude/.memory-index/`
   don't exist yet (both are gitignored, so cloning never brings them along). Preflight detects
   the existing corpus and runs steps 2c-5 only.
-- **New worktree of an existing repo.** `git worktree add` gives the worktree its own working
-  directory (and its own `${CLAUDE_PROJECT_DIR}`), so it needs its OWN symlink and index even
-  though `.claude/memory/` is the same tracked content as the main worktree. Same preflight
-  path as the teammate-clone case: steps 2c-5 only.
+- **New worktree of an existing repo.** Needs NOTHING (SHP-7, v1.34.0): a session launched in
+  a linked `git worktree` resolves the MAIN checkout's corpus, symlink, index, telemetry, and
+  capture queue — the worktree's own git-checked-out `.claude/memory/` is the branch's
+  committed snapshot and is never read. Running init from a worktree therefore acts on the
+  main checkout (`resolve_dirs` already points there); it will report the existing corpus and
+  take the steps 2c-5 path against the MAIN tree. Do NOT create a symlink or index under the
+  worktree's own `~/.claude/projects/<encoded>` entry — Claude Code keys a worktree session's
+  native memory on the main checkout too. Only a main checkout WITHOUT a corpus (a branch-only
+  corpus) keeps the worktree-local one.
 - **Second machine, same repo.** Identical shape to the teammate-clone case — the corpus
   travels via git, the symlink and index are machine-local and never do.
 
