@@ -7,6 +7,48 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.34.0 — 2026-09-16 — "The tree you're standing in"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **4**. One item, commissioned
+from the em-growth-labs field corpus by a bug that bit three separate sessions (2026-08-19,
+09-09, 09-16) and had a documented *habit* instead of a fix.
+
+- **SHP-7 — a linked git worktree resolves the MAIN checkout's corpus.** Every session in a
+  repo whose rule launches them under `<primary>/.claude/worktrees/<name>/` used to resolve
+  that worktree's git-checked-out **copy** of `.claude/memory/`: doctor reported a healthy
+  corpus that was the branch's stale snapshot, the `.claude/.memory-pending` queue was a dead
+  copy with different inodes, captures / reconsolidation / index builds landed in files that
+  vanished with the worktree while the live corpus never changed, and SEC-1 refused applies as
+  "corpus untrusted" because trust rows key on the repo root. `resolve_dirs` now starts from
+  the main working tree when the launch dir's toplevel is a linked worktree (its `.git` is a
+  file naming `<common>/worktrees/<name>`; the main tree is the common dir's parent, or
+  `git worktree list`'s first entry for bare/custom layouts) **and** that tree carries a
+  corpus — a subdir launch is mirrored into the main tree so SHP-2's nested-wins still
+  applies. `repo_root` moves with it, so the trust gate, the projects-dir symlink check, and
+  every derived sibling dir (`.memory-pending`, `.memory-index`, `.memory-telemetry`) key on
+  ONE tree — a corpus in one tree with an index in another is exactly the class of lie this
+  closes. This matches Claude Code's own native memory, which keys a worktree session's
+  project slug on the main checkout. Session-local git facts stay on the worktree through the
+  new `provenance.launch_root()`: the session-end capture still diffs the tree you edited,
+  and the presence doc records the worktree's branch/HEAD (docs now carry a `tree` stamp and
+  `_fresh_others` filters on it, so FLT-1/FLT-3 keep their documented per-working-tree scope
+  although linked worktrees now share one telemetry dir). Escape hatches: `HIPPO_CORPUS_ROOT
+  =<dir>` pins the start and disables the redirect; `HIPPO_MEMORY_DIR` is never redirected.
+  Single checkouts, submodules (a `.git/modules/…` pointer is not a worktree), bare-repo
+  worktrees, and a main tree without a corpus (a branch-only corpus stays local) are
+  byte-identical to before — the probe is one `.git` stat on the common path, never a
+  subprocess. The hooks' pre-Python guard (`hippo_corpus_present` / `hippo_floor_present` in
+  `_resolve_py.sh`) consults the main tree for a worktree whose checkout carries no copy, so
+  an uncommitted main-tree corpus still recalls from a worktree. **Doctor** now prints WHICH
+  tree it resolved in the `resolved corpus:` line (`tree: MAIN working tree … (redirected from
+  linked worktree …)` / `this checkout …` / `LINKED worktree …` / `OVERRIDE via …`), and a new
+  `worktree_copies` check (`doctor_checks_worktree.py`) names a worktree's dead `.memory-*`
+  copies from before this release — a dead pending queue WITH seeds warns, since nothing will
+  ever drain it from there. 28 new tests in `tests/test_worktree_resolution.py` (a temp repo
+  plus a linked worktree; the MEMORY.md inode pin; every override and non-redirect case; the
+  doctor lines; the bash guard).
+
 ## v1.33.0 — 2026-09-01 — "Doctor, heal thyself"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0 (verified at the
