@@ -31,105 +31,6 @@ try:
 except Exception:  # pragma: no cover - bare python3 pre-bootstrap (ONB-2)
     from ._vendor import miniyaml as yaml  # type: ignore  # frontmatter-subset fallback
 
-# Code/config extensions we treat as "cited code" for the staleness signal. .md is EXCLUDED
-# (memory<->memory refs are [[wikilinks]], Tier 3; doc/changelog churn isn't code drift); .mdc
-# (Cursor rules) IS included (IOP-2 — imported memories fingerprint their upstream source).
-#
-# ORC-1: sorted LONGEST-FIRST. This is intent-preservation, NOT the fix — the trailing
-# boundary in _CITATION_RE is what makes the alternation order irrelevant (the engine
-# backtracks into it and finds the longer branch itself). Kept sorted anyway so the
-# declared order matches the intended precedence and a future reader is not misled into
-# thinking order is load-bearing here. Adding an entry is enough to support it: the
-# reachability test loops over this tuple, so a shadowed entry fails immediately.
-_CODE_EXTS = (
-    "tsx", "jsx", "json", "yaml", "toml", "cts", "cjs", "mts", "mjs", "mdc",
-    "cfg", "ini", "yml", "sh", "ts", "js", "py",
-)
-
-# ORC-3 — extensionless config/build filenames the extractor also recognizes. A bounded
-# allowlist, not "any dotless capitalized word": most of these names are ALSO ordinary
-# English vocabulary ("the Dockerfile pattern is common in monorepos" is not a citation),
-# so unlike _CODE_EXTS a dotted extension can't do the disambiguating work here — something
-# else has to. Recognized in exactly two shapes (see _CITATION_RE):
-#
-#   directory-qualified, anywhere — `docker/Dockerfile` — the same leniency a dotted file
-#     already gets bare (a sentence does not spontaneously produce "word/Dockerfile").
-#   a WHOLE backtick span, nothing else — `` `Dockerfile` `` — mirrors
-#     rules_plane._path_ref_re()'s own whole-span anchor (ORC-2's precedent, reused rather
-#     than reinvented): a human who backtick-quotes a bare word is asserting "this is a
-#     literal token", the same deliberate signal a dotted extension supplies structurally.
-#
-# A bare, UNMARKED mid-sentence mention ("see the Dockerfile") is a deliberate non-match:
-# nothing syntactically distinguishes it from "the Dockerfile pattern is common in
-# monorepos", and resolve_citations' own rule is under-flag beats cry-wolf. Measured
-# against this repo's real corpus + docs (read-only): every genuine citation found there
-# was backtick-quoted (`Dockerfile`/`CODEOWNERS` in CHANGELOG.md, `.env.example` in a real
-# memory); the one bare mid-list "CODEOWNERS" mention is an accepted miss, same class as
-# the CUR-1 fixture's own bare "the Dockerfile" body text, which this deliberately leaves
-# non-derivable (test_refresh_preserves_a_live_not_derivable_citation_end_to_end pins the
-# non-derivability — and that CUR-1 preserves the stored citation anyway).
-# resolve_citations itself needed NO change — it is already extension-agnostic basename
-# matching, so the existing ambiguity-drop (two same-named files -> dropped) protects an
-# extensionless citation exactly as it protects a dotted one today.
-_EXTENSIONLESS_NAMES = (
-    "Dockerfile", "Makefile", "Procfile", "Justfile", "Rakefile", "Gemfile",
-    "Vagrantfile", "CODEOWNERS", "LICENSE", ".env.example", ".nvmrc", ".python-version",
-)
-
-# A path-like token: optional dir segments + filename + a code extension, with an
-# optional :line or :line-range suffix (which we drop — we track files, not lines).
-#
-# ORC-1 — the `(?![\w])` after the extension group is load-bearing, and its absence was
-# the single defect behind two whole families of wrong citations:
-#
-#   prefix shadow  — with no boundary, `js` matched inside `package.json` and the pattern
-#                    completed, so the token became `package.js`. Same for App.tsx -> App.ts
-#                    and App.jsx -> App.js. .tsx/.jsx/.json were DECLARED in _CODE_EXTS and
-#                    structurally unreachable: config that the regex could not deliver.
-#   truncation     — `build.pyc` -> `build.py`, `data.jsonl` -> `data.js`, `x.tsv` -> `x.ts`,
-#                    `notes.shtml` -> `notes.sh`. These FABRICATE a path that was never
-#                    written; when the fabrication happens to name a real sibling file,
-#                    resolve_citations keeps it and the memory is silently bound to the
-#                    wrong file (DRV-1's extension check is the permanent net for that).
-#
-# The tail is `(?!\w|\.\w)`, and each half earns its place (DRV-1):
-#
-#   (?!\w)   kills the shadow + truncation families above.
-#   (?!\.\w) kills the residual: `test.py.bak` -> `test.py`. A dotted SUFFIX after a
-#            complete extension means the token was never this file — citing `test.py`
-#            from a mention of `test.py.bak` binds the memory to the wrong real file,
-#            silently, which is the worst outcome in this module.
-#
-# Deliberately NOT `(?![\w./-])` mirroring the lookbehind: the symmetric form reads right
-# and regresses prose — "the bug is in foo.py." (end of sentence) stops matching, because
-# it cannot tell a suffix from a full stop. `(?!\.\w)` can: it requires a word character
-# AFTER the dot, so a sentence-ending period still matches and `.bak` does not.
-# Also NOT `(?![\w.]\w)`, which looks equivalent and is strictly worse — measured, it
-# re-fabricates `foo.pyx -> foo.py` and `data.jsonl -> data.json`.
-#
-# ORC-3 adds two more alternatives, both reusing this same leading lookbehind + trailing
-# `(?!\w|\.\w)` boundary rather than inventing new ones — so `Gemfile.lock` cannot truncate
-# to `Gemfile` for exactly the reason `test.py.bak` cannot truncate to `test.py`:
-#
-#   directory-qualified extensionless — `(?:[\w.-]+/)+(?:Dockerfile|...)` — note the `+`,
-#     not the dotted branch's `*`: at least one dir segment is REQUIRED here, because
-#     without a directory a bare `Dockerfile` is also just an English word (see
-#     _EXTENSIONLESS_NAMES). A dotted file needs no such gate — its extension already
-#     supplies the signal a directory supplies here.
-#   bare-in-a-whole-backtick-span — `(?<=\`)(?:Dockerfile|...)(?::\d+(?:-\d+)?)?(?=\`)` — a
-#     SEPARATE top-level alternative (its own lookaround, not the shared lookbehind/tail
-#     above): the backtick must sit immediately either side of the name-plus-optional-line,
-#     i.e. the entire span is the reference and nothing else, same discipline
-#     rules_plane._path_ref_re() enforces with `^...$`. This is capture group 2;
-#     extract_citations reads `group(1) or group(2)`.
-_CITATION_RE = re.compile(
-    r"(?<![\w./-])("
-    r"(?:[\w.-]+/)*[\w.-]+\.(?:" + "|".join(_CODE_EXTS) + r")"
-    r"|(?:[\w.-]+/)+(?:" + "|".join(re.escape(n) for n in _EXTENSIONLESS_NAMES) + r")"
-    r")(?!\w|\.\w)(?::\d+(?:-\d+)?)?"
-    r"|(?<=`)(" + "|".join(re.escape(n) for n in _EXTENSIONLESS_NAMES) + r")(?::\d+(?:-\d+)?)?(?=`)"
-)
-
 _FENCE = "---"
 
 
@@ -192,6 +93,32 @@ from .provenance_format import (  # noqa: E402,F401
 )
 
 
+# --------------------------------------------------------------------------- #
+# ORC / CUR: the CITATION layer — the extractor's vocabulary, the git-index oracle, the
+# ONE resolver and the ONE merge policy — decomposed into provenance_citations.py (pure
+# code motion; the module-size ratchet fired on the ORC-4/CUR-2 work). Façade re-exports,
+# same contract as the two blocks above.
+# --------------------------------------------------------------------------- #
+from .provenance_citations import (  # noqa: E402,F401
+    EXCLUDE_KEY,
+    _CITATION_RE,
+    _CODE_EXTS,
+    _EXCLUDE_KEY_RE,
+    _EXTENSIONLESS_NAMES,
+    _frontmatter_cited_paths,
+    _strip_relative_prefix,
+    build_repo_file_index,
+    cited_paths_for_body,
+    extract_citations,
+    derive_citations,
+    frontmatter_excluded_paths,
+    legacy_basename_repoints,
+    merge_citations,
+    resolve_citations,
+    unresolved_citations,
+)
+
+
 def split_frontmatter(text: str) -> Tuple[Optional[List[str]], str]:
     """Split a memory file into ``(frontmatter_lines, body_text)``.
 
@@ -219,122 +146,6 @@ def parse_frontmatter(text: str) -> dict:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
-
-
-# --------------------------------------------------------------------------- #
-# Citation extraction + resolution
-# --------------------------------------------------------------------------- #
-def extract_citations(body: str) -> List[str]:
-    """Return the de-duplicated, order-preserving list of path-like tokens in ``body``
-    (line numbers stripped)."""
-    seen: set = set()
-    out: List[str] = []
-    for m in _CITATION_RE.finditer(body or ""):
-        # ORC-3: group(1) is the dotted-or-directory-qualified-extensionless branch;
-        # group(2) is the whole-backtick-span bare-extensionless branch. Exactly one is
-        # populated per match — the two are separate top-level alternatives.
-        tok = m.group(1) or m.group(2)
-        if tok not in seen:
-            seen.add(tok)
-            out.append(tok)
-    return out
-
-
-def build_repo_file_index(repo_root: str) -> Tuple[set, Dict[str, List[str]]]:
-    """Return ``(repo_files, basename_index)`` from ``git ls-files``.
-
-    ``--full-name`` (SHP-1): without it, ``ls-files`` emits paths CWD-relative to
-    ``repo_root`` — so when ``repo_root`` is a monorepo subdir (``CLAUDE_PROJECT_DIR``
-    pointing below the git toplevel), this index would be subdir-relative while
-    ``staleness._path_change_times`` (``git log --name-only``, always toplevel-relative,
-    unaffected by ``-C``) is not. That mismatch means ``find_stale``'s
-    ``path_times.get(p, 0) > base`` NEVER matches for a subdir-rooted corpus — a silent,
-    permanent false-negative for the flagship staleness signal. ``--full-name`` makes this
-    index toplevel-relative too, matching git log's convention everywhere in this module.
-    """
-    files = [f for f in run_git(["ls-files", "--full-name"], repo_root).split("\n") if f]
-    repo_files = set(files)
-    basename_index: Dict[str, List[str]] = {}
-    for f in files:
-        basename_index.setdefault(f.rsplit("/", 1)[-1], []).append(f)
-    return repo_files, basename_index
-
-
-def resolve_citations(
-    tokens: List[str], repo_files: set, basename_index: Dict[str, List[str]]
-) -> List[str]:
-    """Resolve raw tokens to repo-relative paths — ONLY when a token pins exactly one file.
-
-    - A token that is already a tracked repo path is used as-is. A leading ``./`` is
-      normalised away first (ORC-1): ``git ls-files`` never emits one, so ``./src/a.py``
-      missed the exact match and fell through to the basename fallback — which DROPPED it
-      whenever the basename was ambiguous. A citation written MORE precisely resolved
-      WORSE than the bare basename, which is exactly backwards.
-    - A bare basename is kept ONLY if it resolves to exactly ONE repo file. An AMBIGUOUS
-      bare basename (e.g. ``contracts.py`` -> 52 files, ``config.py`` -> 38) is DROPPED:
-      it is almost always a generic/pattern mention in prose, not a pinpoint citation, and
-      keeping all candidates poisons the staleness signal (any same-named file changing
-      would flag the memory). Under-flag beats cry-wolf.
-    - Unresolvable tokens (not in the repo) are dropped.
-    """
-    out: List[str] = []
-    seen: set = set()
-    for tok in tokens:
-        norm = tok[2:] if tok.startswith("./") else tok
-        if norm in repo_files:
-            cands = [norm]
-        else:
-            matches = basename_index.get(norm.rsplit("/", 1)[-1], [])
-            cands = matches if len(matches) == 1 else []  # drop ambiguous bare basenames
-        for c in cands:
-            if c not in seen:
-                seen.add(c)
-                out.append(c)
-    return out
-
-
-def cited_paths_for_body(body: str, repo_files: set, basename_index: Dict[str, List[str]]) -> List[str]:
-    return resolve_citations(extract_citations(body), repo_files, basename_index)
-
-
-def unresolved_citations(
-    body: str, repo_files: set, basename_index: Dict[str, List[str]]
-) -> List[str]:
-    """Tokens the extractor produced from ``body`` that the oracle could not pin (DRV-1).
-
-    The receipt for a derivation that came back empty-handed. A token lands here when it
-    resolves to nothing: the file is untracked (written but not yet ``git add``ed — the
-    index is ``git ls-files``, not the filesystem), the path is wrong, or the bare basename
-    is ambiguous and ``resolve_citations`` dropped it by design.
-
-    Without this, all three are indistinguishable from "this memory cites no code" — the
-    body says ``src/thing.py`` in plain sight and ``cited_paths`` is ``[]``, which
-    ``citation_rot_lines`` itself calls the worst rot state (staleness-exempt). Reuses the
-    one resolver rather than re-implementing its rules, so the two can never disagree.
-    """
-    return [
-        tok
-        for tok in extract_citations(body)
-        if not resolve_citations([tok], repo_files, basename_index)
-    ]
-
-
-def _frontmatter_cited_paths(fm: dict) -> List[str]:
-    """The ``cited_paths`` a PARSED frontmatter dict already carries (both schemas).
-
-    The "before" side of ``dropped_citations`` (LIF-3). Dict-level on purpose: the two
-    result-producing callers (``backfill_file``'s refresh branch, ``reverify_file``) have
-    already parsed the frontmatter, and ``staleness.read_provenance`` — the text-level
-    reader with the same both-schema lookup — lives in a module that imports THIS one,
-    so it cannot be reused here without a cycle.
-    """
-    meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-    cited = fm.get("cited_paths")
-    if cited is None:
-        cited = (meta or {}).get("cited_paths")
-    if not isinstance(cited, list):
-        return []
-    return [c for c in cited if isinstance(c, str)]
 
 
 def git_last_commit(rel_path: str, repo_root: str) -> Optional[str]:
@@ -388,7 +199,7 @@ def git_head_with_time(repo_root: str) -> Tuple[Optional[str], Optional[int]]:
 # Backfill (surgical, idempotent, body-preserving)
 # --------------------------------------------------------------------------- #
 def _has_cited_paths(fm_lines: List[str]) -> bool:
-    return any(re.match(r"\s*cited_paths\s*:", ln) for ln in fm_lines)
+    return bool(_own_scope_key_lines(fm_lines, _CITED_PATHS_KEY_RE))
 
 
 def _flow_list(paths: List[str]) -> str:
@@ -433,6 +244,7 @@ def backfill_text(
 
 
 _PROVENANCE_KEY_RE = re.compile(r"^(\s*)(?:cited_paths|source_commit|source_commit_time)\s*:")
+_CITED_PATHS_KEY_RE = re.compile(r"^(\s*)cited_paths\s*:")
 _INVALID_AFTER_KEY_RE = re.compile(r"^(\s*)invalid_after\s*:")
 _BLOCK_ITEM_RE = re.compile(r"^(\s*)-\s")
 
@@ -475,9 +287,11 @@ def _value_run_end(lines: List[str], start: int, key_indent: int) -> int:
         break
     return j
 # An indented KEY line — deliberately NOT `^(\s+)\S`, which also matches a block-list item
-# (`    - keep-me`) and so reports the ITEM's indent as the block's key indent. See
+# (`    - keep-me`) and so reports the ITEM's indent as the block's key indent; nor a
+# comment line, whose indent is whatever the author felt like. See
 # ``insert_frontmatter_keys``.
-_INDENTED_KEY_RE = re.compile(r"^(\s+)(?!-\s)\S")
+_INDENTED_KEY_RE = re.compile(r"^(\s+)(?!-\s|#)\S")
+_METADATA_OPEN_RE = re.compile(r"^metadata\s*:\s*$")
 
 
 def insert_frontmatter_keys(fm: List[str], new_keys: List[str]) -> List[str]:
@@ -500,23 +314,68 @@ def insert_frontmatter_keys(fm: List[str], new_keys: List[str]) -> List[str]:
     mapping inside a sequence — frontmatter that does not parse. The block-style
     ``cited_paths`` bug made this reachable on ordinary corpus files, but the defect is
     independent of it: any memory whose ``metadata:`` block ENDS in a block list hit it.
+
+    COR-24: "the last indented KEY" was still the wrong line. Given a block that ends in a
+    nested MAPPING — hippo's own ``edge_origin:`` dedup-review stamp is one::
+
+        metadata:
+          type: project
+          edge_origin:
+            some-other-memory: dedup-review
+
+    the last indented key is the map's CHILD, so the new keys were written at four spaces
+    and YAML folded ``cited_paths``/``source_commit``/``source_commit_time`` INTO
+    ``edge_origin``. The damage guard refused the write — correctly — and thereby made the
+    file permanently un-writable by rederive, refresh-one and reverify. The indent a new
+    first-level key needs is the block's FIRST key's: a block mapping's first entry sets
+    the indent every sibling must share, whatever nests beneath later ones. The insert
+    POSITION is unchanged (after the block's last line, nested value included).
     """
-    meta_idx = next((i for i, ln in enumerate(fm) if re.match(r"^metadata\s*:\s*$", ln)), None)
+    meta_idx = next((i for i, ln in enumerate(fm) if _METADATA_OPEN_RE.match(ln)), None)
     if meta_idx is None:
         return fm + list(new_keys)
-    indent = "  "
+    indent = None
     last = meta_idx
     j = meta_idx + 1
     while j < len(fm):
         ln = fm[j]
         if ln.strip() == "" or not ln.startswith((" ", "\t")):
             break
-        m = _INDENTED_KEY_RE.match(ln)
-        if m:
-            indent = m.group(1)
+        if indent is None:
+            m = _INDENTED_KEY_RE.match(ln)
+            if m:
+                indent = m.group(1)
         last = j
         j += 1
+    indent = indent or "  "
     return fm[: last + 1] + [f"{indent}{k}" for k in new_keys] + fm[last + 1:]
+
+
+def _own_scope_key_lines(fm: List[str], key_re) -> List[int]:
+    """Indices of ``fm`` lines where ``key_re`` matches a key in one of the TWO scopes every
+    reader looks in — top level, or a direct child of ``metadata:`` (COR-24).
+
+    ``key_re`` alone matches at ANY indent, so a nested map's child that merely shares an
+    owned key's name (``pack_info:`` → ``source_commit: …``) was stripped as if it were the
+    memory's own provenance, hollowing out its parent — the same un-writable-forever
+    outcome as the insert bug, from the strip side. No reader resolves a key at that depth,
+    so no writer may claim it.
+    """
+    out: List[int] = []
+    in_meta = False
+    child_indent: Optional[int] = None
+    for i, ln in enumerate(fm):
+        if not ln.strip():
+            continue
+        depth = len(ln) - len(ln.lstrip(" \t"))
+        if depth == 0:
+            in_meta = bool(_METADATA_OPEN_RE.match(ln))
+            child_indent = None
+        elif in_meta and child_indent is None and _INDENTED_KEY_RE.match(ln):
+            child_indent = depth
+        if key_re.match(ln) and (depth == 0 or (in_meta and depth == child_indent)):
+            out.append(i)
+    return out
 
 
 def strip_frontmatter_keys(text: str, key_re) -> str:
@@ -549,10 +408,11 @@ def strip_frontmatter_keys(text: str, key_re) -> str:
     if close is None:
         return text
     fm = lines[1:close]
+    owned = set(_own_scope_key_lines(fm, key_re))  # COR-24: never a nested map's child
     out: List[str] = []
     i = 0
     while i < len(fm):
-        m = key_re.match(fm[i])
+        m = key_re.match(fm[i]) if i in owned else None
         if not m:
             out.append(fm[i])
             i += 1
@@ -702,6 +562,16 @@ def backfill_file(
     its file. Callers surface the kept set (the keep-line) so deliberate pruning stays a
     visible hand edit rather than an automatic loss.
 
+    ``excluded`` (CUR-2): paths the memory's own ``cited_paths_exclude`` list HELD OUT of
+    this derivation — a human's deliberate prune, honoured on every path including the
+    initial backfill, never written by one. A stored citation the list names is dropped
+    (it appears in ``dropped_citations``) but in NEITHER cause partition below: it is not
+    rot, and the renderer says so on its own informational line.
+
+    ``baseline`` (MIG-2): ``"initial"`` (no provenance yet — baselined to the file's last
+    commit), ``"preserved"`` (refresh kept the stored ``source_commit``) or ``"assigned"``
+    (refresh found ``cited_paths`` but NO ``source_commit``, so there was nothing to keep).
+
     ``dropped_gone`` / ``dropped_not_derived`` (LIF-4): the drop set, partitioned by CAUSE.
     Computed here because this is where ``repo_files`` — the only oracle that can answer
     "is it actually missing?" — is in scope. Under CUR-1 this producer only ever drops
@@ -723,6 +593,8 @@ def backfill_file(
         "dropped_gone": [],
         "dropped_not_derived": [],
         "preserved_not_derived": [],
+        "excluded": [],
+        "dropped_repointed": {},
         "extracted_but_unresolved": [],
         "source_commit": None,
         "source_commit_time": None,
@@ -733,16 +605,17 @@ def backfill_file(
             text = fh.read()
         original = text  # COR-9: `text` is re-assigned by the strip below; the guard needs this
         _, body = split_frontmatter(text)
-        cited = cited_paths_for_body(body, repo_files, basename_index)
         # DRV-1: the derivation's OTHER half — what the body offered that the oracle refused.
         result["extracted_but_unresolved"] = unresolved_citations(body, repo_files, basename_index)
         rel = os.path.relpath(path, repo_root)
-        dropped: List[str] = []
         gone: List[str] = []
         not_derived: List[str] = []
-        preserved: List[str] = []
+        fm = parse_frontmatter(text)
+        # CUR-2: the human-owned exclusion binds EVERY derivation, the first one included —
+        # a memory written with `cited_paths_exclude:` must never be born citing the path.
+        merged = derive_citations(body, fm, repo_files, basename_index, use_stored=False)
+        result["baseline"] = "initial"  # MIG-2: which branch ran, so callers say what happened
         if refresh and _has_cited_paths(split_frontmatter(text)[0] or []):
-            fm = parse_frontmatter(text)
             if not fm:
                 # Frontmatter carries provenance (it has a cited_paths line) but does NOT
                 # yaml-parse. Re-deriving here would FALL THROUGH to git_last_commit and
@@ -756,11 +629,15 @@ def backfill_file(
             sct = fm.get("source_commit_time")
             if sct is None:
                 sct = meta.get("source_commit_time")
+            result["baseline"] = "preserved"
             if sc is None:
+                # cited_paths without a source_commit (hand-written, or a legacy partial
+                # backfill): there is no baseline TO preserve, so one is assigned — and the
+                # result says so rather than claiming a preservation that did not happen.
+                result["baseline"] = "assigned"
                 sc, sct = git_last_commit_with_time(rel, repo_root)
                 if sc is None:
                     sc, sct = git_head_with_time(repo_root)
-            before = _frontmatter_cited_paths(fm)
             # CUR-1 (owner-ratified 2026-07-18): a re-derivation must not destroy a LIVE
             # citation it merely cannot re-derive. cited_paths conflates machine-derived
             # and hand-CURATED entries (a `Dockerfile` the prose names only bare/bold, a
@@ -772,14 +649,13 @@ def backfill_file(
             # fabricated entries) is now sticky until pruned by hand; the keep-line and
             # the worklist's `keeps` clause make it visible, and a hand edit of the
             # frontmatter is the pruning verb.
-            preserved = [p for p in before if p in repo_files and p not in cited]
-            cited = cited + preserved
-            dropped = [p for p in before if p not in cited]
+            # CUR-2/ORC-4: ONE merge policy, shared with reverify_file and rederive_preview.
+            merged = derive_citations(body, fm, repo_files, basename_index)
             # LIF-4: partition HERE, where repo_files is in scope. The renderer cannot do it
             # — reconsolidate and the MCP tool call it with no repo index in hand. (With
-            # CUR-1 every drop this producer emits IS gone — the partition stays for the
-            # result-shape contract and for any pre-CUR-1 dict a caller replays.)
-            gone, not_derived = partition_dropped(dropped, repo_files)
+            # CUR-1 every drop with no NAMED cause IS gone — the partition stays for the
+            # result-shape contract and any pre-CUR-1 dict a caller replays.)
+            gone, not_derived = partition_dropped(_uncaused_drops(merged), repo_files)
             text = _strip_provenance(text)  # drop old provenance; body untouched
         else:
             # A file with no commit history yet (just created by write_memory, or
@@ -790,6 +666,7 @@ def backfill_file(
             sc, sct = git_last_commit_with_time(rel, repo_root)
             if sc is None:
                 sc, sct = git_head_with_time(repo_root)
+        cited, preserved, dropped = merged["cited"], merged["preserved"], merged["dropped"]
         new_text, changed = backfill_text(text, cited, sc, sct)
         damage = _frontmatter_damage(original, new_text, _PROVENANCE_OWNED) if changed else None
         if damage:
@@ -805,6 +682,8 @@ def backfill_file(
                 "dropped_gone": gone,
                 "dropped_not_derived": not_derived,
                 "preserved_not_derived": preserved,
+                "excluded": merged["excluded"],
+                "dropped_repointed": merged["repointed"],
                 "source_commit": sc,
                 "source_commit_time": sct,
                 "changed": changed,
@@ -1035,6 +914,8 @@ def reverify_file(
         "dropped_gone": [],
         "dropped_not_derived": [],
         "preserved_not_derived": [],
+        "excluded": [],
+        "dropped_repointed": {},
         "source_commit": None,
         "source_commit_time": None,
         "last_verified": None,
@@ -1059,15 +940,12 @@ def reverify_file(
             result["error"] = "unparseable frontmatter — refusing to re-baseline (fix the YAML)"
             return result
         sc, sct = git_head_with_time(repo_root)
-        cited = cited_paths_for_body(body, repo_files, basename_index)
-        before_paths = _frontmatter_cited_paths(fm)
-        # CUR-1: preserve live-but-not-derivable citations — see backfill_file. A human
-        # re-verifying CONTENT must not silently lose the curated citations either.
-        preserved = [p for p in before_paths if p in repo_files and p not in cited]
-        cited = cited + preserved
-        dropped = [p for p in before_paths if p not in cited]
+        # CUR-1 + CUR-2: the ONE merge policy — see backfill_file. A human re-verifying
+        # CONTENT must not silently lose the curated citations, nor regain an excluded one.
+        merged = derive_citations(body, fm, repo_files, basename_index)
+        cited, preserved, dropped = merged["cited"], merged["preserved"], merged["dropped"]
         # LIF-4: partition where repo_files is in scope — see backfill_file.
-        gone, not_derived = partition_dropped(dropped, repo_files)
+        gone, not_derived = partition_dropped(_uncaused_drops(merged), repo_files)
         stripped = _strip_verified_by(_strip_invalid_after(_strip_provenance(text)))
         # RET-6: last_verified is write-once — a memory that already carries one keeps its
         # FIRST confirmation timestamp; only an as-yet-never-verified memory gets stamped.
@@ -1113,6 +991,8 @@ def reverify_file(
                 "dropped_gone": gone,
                 "dropped_not_derived": not_derived,
                 "preserved_not_derived": preserved,
+                "excluded": merged["excluded"],
+                "dropped_repointed": merged["repointed"],
                 "source_commit": sc,
                 "source_commit_time": sct,
                 "last_verified": lv,
@@ -1142,6 +1022,14 @@ def reverify_file(
     except Exception as exc:
         result["error"] = str(exc)
     return result
+
+
+def _uncaused_drops(merged: dict) -> List[str]:
+    """The drops ``merge_citations`` did NOT already attribute — an excluded path (CUR-2)
+    is a human's prune and a re-pointed one (ORC-4) a named machine mistake; only what is
+    left is LIF-4's to partition into gone / not-derived."""
+    named = set(merged["excluded"]) | set(merged["repointed"])
+    return [p for p in merged["dropped"] if p not in named]
 
 
 def partition_dropped(dropped: List[str], repo_files: set) -> Tuple[List[str], List[str]]:
@@ -1204,7 +1092,10 @@ def citation_rot_lines(name: str, result: dict, *, dry_run: bool = False) -> Lis
     re-derivation the extractor could not reproduce, so deliberate pruning stays visible
     and manual rather than an automatic loss.
     """
-    dropped = result.get("dropped_citations") or []
+    # CUR-2: a path the memory's own `cited_paths_exclude` held out is a deliberate human
+    # prune — never rot, so it leaves the ⚠ accounting and gets its own ℹ line.
+    excluded = result.get("excluded") or []
+    dropped = [p for p in (result.get("dropped_citations") or []) if p not in excluded]
     # CUR-1: preserved-but-not-derivable citations get an INFORMATIONAL line, not a ⚠ —
     # nothing was lost; the reader just learns the body no longer carries the token (a
     # hand-curated entry, an extractor gap, or an edited-away mention) and that pruning
@@ -1217,8 +1108,23 @@ def citation_rot_lines(name: str, result: dict, *, dry_run: bool = False) -> Lis
         keep_lines = [
             f"ℹ kept — {name}: {len(preserved)} cited path(s) still in the repo but not "
             f"derivable from the body ({shown}{more}) — hand-curated or an extractor gap; "
-            "edit the memory's frontmatter to prune deliberately"
+            "to prune one deliberately, delete it from `cited_paths` (a path the body "
+            "still names comes back on the next derivation unless you also list it under "
+            "`cited_paths_exclude:`)"
         ]
+    if excluded:
+        shown = ", ".join(excluded[:6])
+        more = f" (+{len(excluded) - 6} more)" if len(excluded) > 6 else ""
+        tail = ""
+        if not (result.get("cited") or []) and not dropped:
+            state = "would be" if dry_run else "is now"
+            tail = (f" — cited_paths {state} EMPTY, so this memory is EXEMPT from staleness "
+                    "tracking")
+        keep_lines.append(
+            f"ℹ excluded — {name}: {len(excluded)} path(s) held out by this memory's "
+            f"`cited_paths_exclude` ({shown}{more}) — a deliberate prune, honoured by every "
+            f"derivation; edit that list to restore one{tail}"
+        )
     if not dropped:
         return keep_lines
     cited_after = result.get("cited") or []
@@ -1229,6 +1135,11 @@ def citation_rot_lines(name: str, result: dict, *, dry_run: bool = False) -> Lis
     if gone is None and not_derived is None:
         gone, not_derived = dropped, []
     gone, not_derived = list(gone or []), list(not_derived or [])
+    # ORC-4: a stored path only the pre-v5 basename fallback ever bound — named with the
+    # token that caused it, because "the body names a DIFFERENT directory" is checkable.
+    repointed = result.get("dropped_repointed") or {}
+    gone = [p for p in gone if p not in repointed]
+    not_derived = [p for p in not_derived if p not in repointed]
 
     verb = "would drop" if dry_run else "dropped"
     # "ALL n" only when this single cause accounts for the whole drop AND nothing survived —
@@ -1251,6 +1162,17 @@ def citation_rot_lines(name: str, result: dict, *, dry_run: bool = False) -> Lis
                 emphasise_all=_all(not_derived),
             )
         )
+    if repointed:
+        pairs = [f"{p} ← `{tok}`" for p, tok in repointed.items()]
+        clauses.append(
+            _rot_clause(
+                pairs,
+                verb,
+                "that an older extractor bound by basename alone — the body names a "
+                "DIFFERENT directory, so this was never this memory's file (ORC-4)",
+                emphasise_all=_all(pairs),
+            )
+        )
     head = f"⚠ citation rot — {name}: " + "; ".join(clauses)
     if not cited_after:
         state = "would be" if dry_run else "is now"
@@ -1267,40 +1189,51 @@ def citation_rot_lines(name: str, result: dict, *, dry_run: bool = False) -> Lis
 def rederive_preview(path: str, repo_root: str, repo_files: set, basename_index: Dict[str, List[str]]) -> dict:
     """What re-deriving ONE memory's citations WOULD change — read-only. Never raises.
 
-    ``{"name", "before", "after", "gained", "lost", "kept", "unresolved", "changed",
-    "error"}``. ``kept`` (CUR-1) is the preserved set: still in the repo, not derivable
-    from the body, carried through unchanged by an apply.
+    ``{"name", "before", "after", "gained", "lost", "kept", "excluded", "unresolved",
+    "changed", "error"}``. ``kept`` (CUR-1) is the preserved set: still in the repo, not
+    derivable from the body, carried through unchanged by an apply. ``excluded`` (CUR-2) is
+    what the memory's own ``cited_paths_exclude`` held out — which is what lets a
+    deliberate prune of a DERIVABLE path stay pruned, and so lets the worklist empty.
     The review payload for the worklist below: the operator sees the attributed diff for
     THIS memory and approves THIS memory, which is what makes the fold that follows a
     legitimate SEC-6 consent rather than the gate consenting to itself.
     """
     out = {
         "name": os.path.basename(path)[:-3],
-        "before": [], "after": [], "gained": [], "lost": [], "kept": [], "unresolved": [],
-        "changed": False, "error": None,
+        "before": [], "after": [], "gained": [], "lost": [], "kept": [], "excluded": [],
+        "repointed": {}, "unresolved": [], "changed": False, "error": None,
     }
     try:
         with open(path, "r", encoding="utf-8") as fh:
             text = fh.read()
+        fm_lines, body = split_frontmatter(text)
+        if fm_lines is None:
+            # MIG-2: NOT "unparseable" — that sends the reader hunting a YAML error in a
+            # file that has no YAML at all. A different defect with a different remedy.
+            out["error"] = (
+                "no frontmatter — the file does not open with a `---` fenced block, so it "
+                "is not a recall-ready memory (add frontmatter, or move it out of the corpus)"
+            )
+            return out
         fm = parse_frontmatter(text)
         if not fm:
             out["error"] = "unparseable frontmatter — fix the YAML first"
             return out
-        _, body = split_frontmatter(text)
         before = _frontmatter_cited_paths(fm)
-        derived = cited_paths_for_body(body, repo_files, basename_index)
-        # CUR-1: the preview MUST mirror the producers' preservation exactly — the stamp's
+        # CUR-1/CUR-2: the preview MUST run the producers' ONE merge policy — the stamp's
         # earned-empty-worklist check compares this preview's `changed` against what
-        # `rederive_file` would write; if only one side preserved, a curated corpus could
-        # never stamp (or worse, stamp while still differing).
-        kept = [p for p in before if p in repo_files and p not in derived]
-        after = derived + kept
+        # `rederive_file` would write; if only one side preserved (or excluded), a curated
+        # corpus could never stamp (or worse, stamp while still differing).
+        merged = derive_citations(body, fm, repo_files, basename_index)
+        after = merged["cited"]
         out.update(
             before=before,
             after=after,
             gained=[p for p in after if p not in before],
             lost=[p for p in before if p not in after],
-            kept=kept,
+            kept=merged["preserved"],
+            excluded=merged["excluded"],
+            repointed=merged["repointed"],
             unresolved=unresolved_citations(body, repo_files, basename_index),
             changed=sorted(before) != sorted(after),
         )
@@ -1361,9 +1294,18 @@ def rederive_file(
     result = {
         "path": path, "name": os.path.basename(path)[:-3], "changed": False,
         "cited": [], "dropped_citations": [], "dropped_gone": [],
-        "dropped_not_derived": [], "preserved_not_derived": [], "error": None,
+        "dropped_not_derived": [], "preserved_not_derived": [], "excluded": [],
+        "dropped_repointed": {}, "gained": [], "lost": [], "baseline": None, "error": None,
     }
     try:
+        # MIG-2: a preview taken NOW, against the same index the write uses. The worklist
+        # the operator reviewed was computed against `git ls-files` at ITS call time; a
+        # sibling session staging files in between changes what this write derives, and
+        # the full `cited` list alone made that easy to miss. `gained`/`lost` are relative
+        # to the STORED frontmatter, so the caller can print them and drift is loud.
+        pv = rederive_preview(path, repo_root, repo_files, basename_index)
+        if not pv.get("error"):
+            result["gained"], result["lost"] = pv["gained"], pv["lost"]
         # backfill_file(refresh=True) already does exactly the derivation half correctly —
         # it preserves source_commit AND live curated citations (CUR-1), partitions the
         # loss (LIF-4), and refuses to damage a key it does not own (COR-9). Reuse it
@@ -1371,7 +1313,9 @@ def rederive_file(
         bf = backfill_file(path, repo_root, repo_files, basename_index, dry_run=dry_run, refresh=True)
         result.update({k: bf[k] for k in
                        ("changed", "cited", "dropped_citations", "dropped_gone",
-                        "dropped_not_derived", "preserved_not_derived", "error") if k in bf})
+                        "dropped_not_derived", "preserved_not_derived", "excluded",
+                        "dropped_repointed", "baseline", "source_commit", "error")
+                       if k in bf})
         if bf.get("error"):
             return result
         if bf.get("changed") and not dry_run:
@@ -1393,6 +1337,86 @@ def rederive_file(
     except Exception as exc:
         result["error"] = str(exc)
         return result
+
+
+def rederive_worklist_lines(work: List[dict]) -> List[str]:
+    """The per-memory lines of a MIG-1 worklist — ONE rendering for the CLI and the MCP
+    tool (each adds its own header/footer), so the two surfaces cannot drift."""
+    out: List[str] = []
+    for w in work:
+        if w["error"]:
+            out.append(f"  ✘ {w['name']}: {w['error']}")
+            continue
+        out.append(f"  {w['name']}")
+        if w["gained"]:
+            out.append(f"      + gains  : {', '.join(w['gained'])}")
+        if w["lost"]:
+            out.append(f"      - loses  : {', '.join(w['lost'])}")
+        for path, tok in (w.get("repointed") or {}).items():
+            out.append(f"          ↳ {path} was bound by basename alone from `{tok}` — the "
+                       "body names a different directory (ORC-4)")
+        if w.get("kept"):
+            out.append(f"      = keeps  : {', '.join(w['kept'])} (still in the repo, not "
+                       "derivable from the body — preserved, CUR-1)")
+        if w.get("excluded"):
+            out.append(f"      ⊘ excludes: {', '.join(w['excluded'])} (this memory's "
+                       "`cited_paths_exclude` — a deliberate prune, CUR-2)")
+        if w["unresolved"]:
+            out.append(f"      ? unresolved in body: {', '.join(w['unresolved'])}")
+    return out
+
+
+# CUR-2: the worklist's standing answer to "this gain is WRONG for this memory" — before
+# the exclusion existed the only advice was a hand prune that the next preview undid.
+REDERIVE_EXCLUDE_HINT = (
+    "A gain that is wrong for a memory (another repo's file, a generic basename like "
+    "`plan.json` that merely happens to be unique here)? List the path under "
+    "`cited_paths_exclude:` in that memory's frontmatter (beside `cited_paths`) — every "
+    "derivation honours it, none ever writes it, and the memory leaves this worklist."
+)
+
+
+def rederive_one_lines(base: str, r: dict, *, dry_run: bool = False) -> List[str]:
+    """The ONE rendering of a ``rederive_file`` result (CLI ``--rederive-one`` and the MCP
+    tool's ``action='one'``). MIG-2: says what ACTUALLY happened to the baseline, and
+    prints the call-time ``gained``/``lost`` against the stored frontmatter so an index
+    that moved since the operator's worklist read is loud, not buried in the full list."""
+    verb = "would re-derive" if dry_run else "re-derived"
+    lines = [f"{verb} {base}: cited_paths = {r['cited']}"]
+    lines.append(
+        f"  gained: {', '.join(r.get('gained') or []) or '(none)'}   "
+        f"lost: {', '.join(r.get('lost') or []) or '(none)'}   — vs this memory's stored "
+        "cited_paths, previewed at call time against the CURRENT git index. If that is not "
+        "the diff you reviewed, the index moved since your worklist read (a sibling "
+        "staged or removed files) — re-read before the next one."
+    )
+    lines += citation_rot_lines(base, r, dry_run=dry_run)
+    if not dry_run and r.get("changed"):
+        sha = (r.get("source_commit") or "")[:9] or "unresolved"
+        if r.get("baseline") == "initial":
+            what = (
+                "this memory carried NO provenance, so there was no source_commit to "
+                f"preserve — it was baselined to its file's last commit ({sha}), exactly "
+                "as a first backfill would"
+            )
+        elif r.get("baseline") == "assigned":
+            what = (
+                "this memory carried cited_paths but NO source_commit — nothing to "
+                f"preserve, so one was assigned: its file's last commit ({sha})"
+            )
+        else:
+            what = ("source_commit PRESERVED (this is not a re-verify — no staleness flag "
+                    "was cleared)")
+        # BND-3: the folded-into-consent claim was unconditional — false whenever the
+        # fold anomalously failed. State whichever actually happened.
+        if r.get("consent_note"):
+            lines.append(f"{what}; ⚠ {r['consent_note']}.")
+        else:
+            lines.append(
+                f"{what}; the reviewed bytes were folded into the consent baseline, so "
+                "the memory is not quarantined."
+            )
+    return lines
 
 
 def snapshot_corpus(memory_dir: str, stamp: str) -> str:
@@ -1558,22 +1582,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                   "this plugin's extractor.")
             return 0
         print(f"re-derivation worklist: {len(work)} memory(ies) would change\n")
-        for w in work:
-            if w["error"]:
-                print(f"  ✘ {w['name']}: {w['error']}")
-                continue
-            print(f"  {w['name']}")
-            if w["gained"]:
-                print(f"      + gains  : {', '.join(w['gained'])}")
-            if w["lost"]:
-                print(f"      - loses  : {', '.join(w['lost'])}")
-            if w.get("kept"):
-                print(f"      = keeps  : {', '.join(w['kept'])} (still in the repo, not "
-                      "derivable from the body — preserved, CUR-1)")
-            if w["unresolved"]:
-                print(f"      ? unresolved in body: {', '.join(w['unresolved'])}")
+        print("\n".join(rederive_worklist_lines(work)))
         print("\nReview each, then approve individually: "
               "python -m memory.provenance --rederive-one <name>")
+        print(REDERIVE_EXCLUDE_HINT)
         return 0
 
     if args.rederive_one:
@@ -1585,12 +1597,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         if r["error"]:
             print(f"rederive {base}: refused — {r['error']}")
             return 1
-        verb = "would re-derive" if args.dry_run else "re-derived"
-        print(f"{verb} {base}: cited_paths = {r['cited']}")
-        for ln in citation_rot_lines(base, r, dry_run=args.dry_run):
-            print(ln)
-        if r.get("consent_note"):  # BND-3: the one write-moment disclosure line
-            print(f"⚠ {r['consent_note']}")
+        print("\n".join(rederive_one_lines(base, r, dry_run=args.dry_run)))
         return 0
 
     if args.reverify:

@@ -153,16 +153,18 @@ def add_typed_relation(path: str, relation: str, target: str, *, dry_run: bool =
         fm_lines = lines[1:close]
         value = "[" + ", ".join(json.dumps(t) for t in merged) + "]"
 
+        from .provenance import _own_scope_key_lines, _value_run_end
+
         key_re = re.compile(rf"^(\s*){relation}\s*:")
-        key_idx = next((i for i, ln in enumerate(fm_lines) if key_re.match(ln)), None)
+        # COR-24: the key in one of the two scopes `parse_typed_relations` READS — never a
+        # nested map's child that merely shares the relation's name.
+        key_idx = next(iter(_own_scope_key_lines(fm_lines, key_re)), None)
         if key_idx is not None:
-            # Rewrite the existing key in place (merged flow list), dropping any block-style
-            # `- item` continuation lines that belonged to it — their values are already in
-            # ``merged`` via the YAML parse above, so nothing is lost.
+            # Rewrite the existing key in place (merged flow list), dropping the continuation
+            # lines that ARE its old value (the shared COR-20 value-run rule) — their values
+            # are already in ``merged`` via the YAML parse above, so nothing is lost.
             indent = key_re.match(fm_lines[key_idx]).group(1)
-            end = key_idx + 1
-            while end < len(fm_lines) and re.match(r"^\s+-\s", fm_lines[end]):
-                end += 1
+            end = _value_run_end(fm_lines, key_idx + 1, len(indent))
             fm2 = fm_lines[:key_idx] + [f"{indent}{relation}: {value}"] + fm_lines[end:]
         else:
             # Fresh key: nest under an existing `metadata:` block when present, else append
@@ -240,23 +242,27 @@ def remove_typed_relation(path: str, relation: str, target: str, *, dry_run: boo
         if len(kept) == len(existing):
             return result  # idempotent: the edge is not declared here
 
-        from .provenance import _frontmatter_damage, strip_frontmatter_keys
+        from .provenance import (
+            _frontmatter_damage,
+            _own_scope_key_lines,
+            _value_run_end,
+            strip_frontmatter_keys,
+        )
 
         key_re = re.compile(rf"^(\s*){relation}\s*:")
         if kept:
-            # Rewrite the key in place as a flow list of the survivors (dropping any
-            # block-style continuation lines — their values are in `existing` already).
+            # Rewrite the key in place as a flow list of the survivors (dropping the old
+            # value's continuation lines — their values are in `existing` already). Same
+            # own-scope key + shared value-run rule as add_typed_relation (COR-24).
             lines = text.split("\n")
             close = next((i for i in range(1, len(lines)) if lines[i].strip() == _FENCE), None)
             fm_lines = lines[1:close]
-            key_idx = next((i for i, ln in enumerate(fm_lines) if key_re.match(ln)), None)
+            key_idx = next(iter(_own_scope_key_lines(fm_lines, key_re)), None)
             if key_idx is None:
                 result["error"] = "relation key not found in frontmatter (parse/lines disagree)"
                 return result
             indent = key_re.match(fm_lines[key_idx]).group(1)
-            end = key_idx + 1
-            while end < len(fm_lines) and re.match(r"^\s+-\s", fm_lines[end]):
-                end += 1
+            end = _value_run_end(fm_lines, key_idx + 1, len(indent))
             value = "[" + ", ".join(json.dumps(t) for t in kept) + "]"
             fm2 = fm_lines[:key_idx] + [f"{indent}{relation}: {value}"] + fm_lines[end:]
             new_text = "\n".join([lines[0]] + fm2 + lines[close:])

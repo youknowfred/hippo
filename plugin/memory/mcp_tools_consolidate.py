@@ -315,11 +315,13 @@ def _tool_rederive(args: Dict[str, Any]) -> str:
     from . import trust
     from .provenance import (
         CITATION_DERIVATION_VERSION,
+        REDERIVE_EXCLUDE_HINT,
         build_repo_file_index,
-        citation_rot_lines,
         read_cite_derivation,
         rederive_file,
+        rederive_one_lines,
         rederive_worklist,
+        rederive_worklist_lines,
         resolve_dirs,
         snapshot_corpus,
         write_cite_derivation,
@@ -396,27 +398,13 @@ def _tool_rederive(args: Dict[str, Any]) -> str:
                 "plugin's extractor."
             )
         out = [f"re-derivation worklist: {len(work)} memory(ies) would change", ""]
-        for w in work:
-            if w["error"]:
-                out.append(f"  ✘ {w['name']}: {w['error']}")
-                continue
-            out.append(f"  {w['name']}")
-            if w["gained"]:
-                out.append(f"      + gains  : {', '.join(w['gained'])}")
-            if w["lost"]:
-                out.append(f"      - loses  : {', '.join(w['lost'])}")
-            if w.get("kept"):
-                out.append(
-                    f"      = keeps  : {', '.join(w['kept'])} (still in the repo, not "
-                    "derivable from the body — preserved, CUR-1)"
-                )
-            if w["unresolved"]:
-                out.append(f"      ? unresolved in body: {', '.join(w['unresolved'])}")
+        out += rederive_worklist_lines(work)
         out += [
             "",
             "Review EACH diff, then apply one at a time: rederive action='one' name=<name>.",
             "This rewrites frontmatter and has no undo on a gitignored corpus — take "
             "rederive action='snapshot' stamp=<label> first.",
+            REDERIVE_EXCLUDE_HINT,
         ]
         return "\n".join(out)
 
@@ -433,23 +421,7 @@ def _tool_rederive(args: Dict[str, Any]) -> str:
         r = rederive_file(target, repo_root, repo_files, basename_index, dry_run=dry)
         if r["error"]:
             return f"rederive {fname}: refused — {r['error']}"
-        verb = "would re-derive" if dry else "re-derived"
-        lines = [f"{verb} {fname}: cited_paths = {r['cited']}"]
-        lines += citation_rot_lines(fname, r, dry_run=dry)
-        if not dry and r["changed"]:
-            # BND-3: the folded-into-consent claim was unconditional — false whenever
-            # the fold anomalously failed. State whichever actually happened.
-            if r.get("consent_note"):
-                lines.append(
-                    "source_commit PRESERVED (this is not a re-verify — no staleness flag "
-                    f"was cleared); ⚠ {r['consent_note']}."
-                )
-            else:
-                lines.append(
-                    "source_commit PRESERVED (this is not a re-verify — no staleness flag was "
-                    "cleared); the reviewed bytes were folded into the consent baseline, so the "
-                    "memory is not quarantined."
-                )
+        lines = rederive_one_lines(fname, r, dry_run=dry)
         return "\n".join(lines)
 
     return (

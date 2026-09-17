@@ -551,6 +551,11 @@ def check_dream_ledger(ctx: DoctorContext) -> Dict[str, str]:
     while its stamp sits intact under ``archive/`` (a pre-fix archive, or a hand
     ``git mv``) is classified separately — an inert-edge WARN naming the archive-aware
     ``--undo`` that now actually works — never a corruption-grade ghost fail.
+
+    DRM-7: a TRUE ghost used to be a permanent ✘ — both named reconcile routes can be shut
+    (``--undo`` is byte-exact and has nothing to reverse; git history only helps if the
+    stamp was ever committed). The fail now names each ghost's cause (source deleted vs
+    stamp missing) and the per-edge ``--retire-ghost`` verb that closes it.
     """
     try:
         import re as _re
@@ -578,11 +583,12 @@ def check_dream_ledger(ctx: DoctorContext) -> Dict[str, str]:
             for name in sorted(os.listdir(archive_dir)):
                 if name.endswith(".md"):
                     _stamped_edges(os.path.join(archive_dir, name), archived_on_disk)
-        active = {
-            e.get("edge_id")
+        active_rows = {
+            e.get("edge_id"): e
             for e in read_apply_ledger(ctx.memory_dir)
             if e.get("state") == "active"
         }
+        active = set(active_rows)
         if not on_disk and not active:
             return {"status": "ok", "message": "no dream edges applied (nothing to reconcile)."}
         orphans = sorted(on_disk - active)
@@ -608,8 +614,21 @@ def check_dream_ledger(ctx: DoctorContext) -> Dict[str, str]:
                 f"{len(orphans)} on-disk stamp(s) with no ACTIVE ledger line: {', '.join(orphans[:5])}"
             )
         if ghosts:
+            # DRM-7: name the CAUSE per ghost — a source deleted/folded away outside
+            # archive_memory (which would have retired the row) reads differently from a
+            # stamped line lost inside a file that is still here, and only the second
+            # could ever have been a hand edit worth chasing through git.
+            from .dream_apply import edge_source_location
+
+            def _why(eid: str) -> str:
+                fname, where = edge_source_location(ctx.memory_dir, active_rows[eid])
+                if where == "gone":
+                    return f"{eid} (source {fname or '?'} DELETED — in neither corpus nor archive/)"
+                return f"{eid} (stamp missing from {fname}, which is still in the {where})"
+
             parts.append(
-                f"{len(ghosts)} active ledger edge(s) with no on-disk stamp: {', '.join(ghosts[:5])}"
+                f"{len(ghosts)} active ledger edge(s) with no on-disk stamp: "
+                + ", ".join(_why(g) for g in ghosts[:5])
             )
         if inert:
             parts.append(
@@ -618,8 +637,16 @@ def check_dream_ledger(ctx: DoctorContext) -> Dict[str, str]:
         return {
             "status": "fail",
             "message": "dream stamp/ledger MISMATCH — " + "; ".join(parts) + ". Reconcile "
-            "via `python -m memory.dream --log` (+ --undo for stray edges) or git history; "
-            "never hand-edit stamped lines.",
+            "via `python -m memory.dream --log` (+ --undo for stray edges) or git history"
+            + (
+                "; a ghost whose stamp is provably gone (nothing to undo, nothing in git to "
+                "restore) retires per edge with `python -m memory.dream --retire-ghost "
+                "<edge-id>` (MCP: dream action='retire_ghost' edge_id=…) — it proves the "
+                "absence itself and refuses otherwise"
+                if ghosts
+                else ""
+            )
+            + "; never hand-edit stamped lines or the ledger.",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"dream-ledger check failed: {exc}."}

@@ -94,7 +94,19 @@ source set only after 5 un-undone sessions (`DREAM_AGE_SESSIONS`):
 "$PY" -m memory.dream --undo <edge-id>    # revert exactly one edge
 "$PY" -m memory.dream --undo-since <N|date>
 "$PY" -m memory.dream --log               # every edge: active / aged-in / undone
+"$PY" -m memory.dream --retire-ghost <edge-id> [--reason "…"]   # DRM-7, see below
 ```
+
+**A ghost edge** (doctor: "active ledger edge(s) with no on-disk stamp") is an ACTIVE
+ledger row whose stamp no longer exists anywhere — its source memory was deleted or folded
+away outside `archive_memory`, or the stamped line was lost to a rewrite before it was ever
+committed. `--undo` correctly refuses (it has no bytes to reverse) and git history has
+nothing to restore, so `--retire-ghost <edge-id>` (MCP: `dream` with
+`action='retire_ghost'`, `edge_id`, optional `reason`) appends the superseding
+`state: "undone"` line — and ONLY after proving the stamp is absent from every memory in
+the corpus root and `archive/`. It refuses while the stamp is on disk anywhere (that is
+`--undo`'s job), is strictly per-edge, touches no memory file, and never commits. Never
+hand-edit stamped lines or `dream-ledger.jsonl`.
 
 Prefer per-item hand-application when the user wants to review each edge: a
 **completion/bridge** is one `[[wikilink]]` added to the source body; a **refines** is

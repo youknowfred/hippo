@@ -46,6 +46,10 @@ metadata:
   (`path:line` tokens, `.md` excluded — memory-to-memory references are `[[wikilinks]]`,
   never staleness citations). Auto-derived by `memory.provenance` at write time; the set a
   memory watches for drift. An empty list makes a memory staleness-EXEMPT — nothing to watch.
+- **`metadata.cited_paths_exclude`** — optional, and YOURS: repo paths that are NOT this
+  memory's citations even though its body names them (a file in another repo whose basename
+  happens to be unique here; a wrong path you pruned by hand). Every derivation honours the
+  list and none ever writes it, so a deliberate prune stays pruned. Exact repo paths.
 - **`metadata.source_commit`** / **`metadata.source_commit_time`** — the staleness baseline:
   the commit (and its epoch) the cited paths were last known to match. Re-baselined to HEAD
   only by a human-confirmed re-verification (`reconsolidate --reverify ... --outcome

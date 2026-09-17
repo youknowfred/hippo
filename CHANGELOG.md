@@ -7,6 +7,141 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.35.0 — 2026-09-17 — "A derivation you can finish"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**; citation derivation **4 → 5** (ORC-4 + CUR-2 — the
+resolver moved, so this is an extractor-class change on the DRV-2 axis). **Operator action:
+one**, and only for a corpus already stamped v4: `/hippo:doctor` and SessionStart name the
+older derivation and route to the per-item, consent-gated `rederive` worklist (MIG-1) —
+nothing migrates automatically. Commissioned, like the four releases before it, from the
+em-growth-labs field corpus: a 419-memory MIG-1 re-derive worked per item on 2026-09-17
+(579 memories, Linear GRO-1745), every finding reproduced against the shipped v1.34.0
+functions before a line changed. The theme is one sentence: **hippo could start a
+migration it could not finish.** One memory could never be written again, a wrong citation
+could be pruned but never stay pruned, the stamp that ends the migration could therefore
+never be earned, and a doctor ✘ named two remedies that were both shut.
+
+- **COR-24 — the insert walk takes the FIRST-level indent, and no writer claims a nested
+  map's child.** COR-9's walk took the insert indent from the last indented KEY in the
+  `metadata:` block. When the block's last key (after the provenance triplet is stripped)
+  is a nested MAPPING — hippo's own `edge_origin:` dedup-review stamp is one — that last
+  key is the map's CHILD, so `cited_paths` / `source_commit` / `source_commit_time` were
+  written at the child's indent and YAML folded them INTO `edge_origin`. The damage guard
+  refused the write (no corruption ever reached disk) and thereby made the file
+  permanently un-writable by `rederive`, `--refresh-one` and `--reverify`: hippo's writers
+  produced a shape its provenance writer could not round-trip. The indent now comes from
+  the block's first key (a block mapping's first entry sets the indent every sibling
+  shares; a comment line's indent is ignored); the insert position is unchanged. The audit
+  of every caller found the same class from the other side: the owned-key regexes match at
+  ANY indent, so a nested child that merely shares an owned key's name (`pack_info:` →
+  `source_commit:`) was stripped or rewritten as if it were the memory's own. One new
+  primitive, `_own_scope_key_lines` (top level, or a direct child of `metadata:` — the only
+  two scopes any reader resolves), now gates `strip_frontmatter_keys`, `_has_cited_paths`,
+  `links.add_typed_relation` / `remove_typed_relation`, and `dream_generate`'s
+  `_set_confidence` / `_set_cited_paths`; the two typed-relation in-place rewrites also
+  join the shared COR-20 `_value_run_end` rule instead of their own `- item` loop. The
+  report's minimal repro sits beside COR-9's block-list fixture; a second test drives
+  every writer on the walk (`set_invalid_after`, both typed-relation verbs, both dream
+  setters, `_stamp_last_verified`, `_stamp_verified_by`, `_stamp_pack`) against the shape.
+- **ORC-4 — a directory-qualified token must suffix-match.** `resolve_citations` fell back
+  to `basename_index[token.rsplit("/", 1)[-1]]` whatever directories the token named.
+  Measured on the field corpus: 21 such resolutions, **11 wrong** — another repo's file
+  (`apps/api/routes/admin.py` → `ingest/nightly_steps/admin.py`), a never-built module
+  (`ingest/ga4/audit.py` → `ingest/impact/audit.py`), an untracked `.handoff/x/census.mjs`
+  → a tracked skill script of the same name. Each bound a memory to a file its claim is
+  not about — the outcome this module's own comments call the worst one. A
+  directory-qualified token that is not itself a tracked path now keeps a basename
+  candidate only when the candidate path ENDS WITH the token, after leading `./` and `../`
+  segments are normalised away; the basename must still be unique. `../views-kit.js`
+  resolves by its tail, and a `../`-relative token must still pin exactly one file.
+  (Letting a suffix pick one file among several same-named ones was tried and cut: it
+  turned the field corpus's 21-memory worklist into 98 — its own measured round.) The accepted miss, pinned honestly: a slash-joined PAIR
+  (`patterns.json/vocabulary.ts`) no longer resolves its last half. `rederive_preview`,
+  `backfill_file`, `reverify_file` and `unresolved_citations` stay on the ONE resolver.
+  **The migration half:** CUR-1 preserves any stored path whose file exists, so a v4
+  corpus would have KEPT every wrong re-point silently and could have stamped v5 while
+  still bound to the wrong files. `legacy_basename_repoints` identifies exactly the
+  bindings only the v4 fallback could have made; the merge drops them, and the worklist
+  (`- loses`, with a `↳ … bound by basename alone from <token>` line) and the rot line
+  (its own ORC-4 clause — never "no longer in the repo", never a fake deletion) name the
+  cause. A stored path the body ALSO names properly stays. `CITATION_DERIVATION_VERSION`
+  4 → 5 with its history entry and the SessionStart nudge's v4 gap clause.
+- **CUR-2 — `cited_paths_exclude`: a deliberate prune that holds.** `rederive_preview`
+  computed `after = derived + kept`, so a DERIVABLE path removed from the frontmatter by
+  hand came straight back as a gain, the worklist never emptied, and `action='stamp'`
+  refused forever — the keep-line's advice ("edit the memory's frontmatter to prune
+  deliberately") only ever worked for NOT-derivable citations. A memory may now carry
+  `cited_paths_exclude:` (under `metadata:` or top-level; a list of repo paths, `./`
+  normalised): owned by the human, **never written by a derivation**, honoured
+  identically by the initial backfill, `--refresh` / `--refresh-one`, `--reverify`, and
+  the `rederive` preview and apply — all five now call one `derive_citations` →
+  `merge_citations`, so the preview and the write cannot disagree and the stamp's
+  earned-empty-worklist proof stays sound. The COR-9 damage guard covers it as a key no
+  writer owns (a rewrite that alters or drops it refuses). Held-out paths are a receipt,
+  not a silence: a new `excluded` result key, an `ℹ excluded` line (never a ⚠ — it is not
+  rot; a prune that empties `cited_paths` still says the memory is now staleness-EXEMPT),
+  a `⊘ excludes` worklist line, and a standing worklist hint on both surfaces. This also
+  covers the class no mechanical rule can fix: a bare generic basename unique in THIS repo
+  (`plan.json`, `catalog.py`, `ci.yml`, `.env.example`) inside a memory plainly about
+  another one. Pack extraction strips the key with the citations it prunes (it names this
+  repo's paths). Additive, optional, human-owned — not a `corpus_format` event (the CLB-2
+  `verified_by` precedent) — but part of what "derived by v5" asserts.
+- **DRM-7 — a ghost dream edge can be retired.** Doctor's "dream stamp/ledger MISMATCH —
+  N active ledger edge(s) with no on-disk stamp" named two reconcile routes that could both
+  be shut: `--undo` is byte-exact and refuses when the stamped line is missing or the
+  source is gone (correctly — it has nothing to reverse), and git history only helps if
+  the stamp was ever committed. Field corpus, three rows: a source memory deleted by a
+  compaction commit (a plain delete, not `archive_memory` — no file, no `archive/` copy),
+  and two rows whose ledger lines were committed while the stamped lines never reached a
+  commit. New per-edge verb `python -m memory.dream --retire-ghost <edge-id>
+  [--reason …]` (MCP: `dream` `action='retire_ghost'`, `edge_id`, `reason`) appends the
+  superseding `state: "undone"` line with `retired_ghost` / `retire_cause` /
+  `retire_reason` — the `archive_draft` idiom through the existing `_mark_dream_rows`
+  writer, append-only, no memory byte touched — and ONLY after proving the ghost: the row
+  is ACTIVE and no readable `*.md` in the corpus root or `archive/` carries its
+  `<!-- dream: … edge=<id>` stamp, the exact surface doctor reconciles. A stamp found
+  anywhere refuses toward `--undo`; an unreadable file refuses (absence unproven); prose
+  that merely mentions the edge id is not a stamp; there is no bulk form to call
+  (signature-pinned). A retired pair stays a standing verdict — the next pass never
+  silently re-stamps it. Doctor's fail now names each ghost's CAUSE (`source … DELETED — in
+  neither corpus nor archive/` vs `stamp missing from <file>`), which is what makes a
+  delete or fold outside `archive_memory` visible where it bites, and names the verb.
+- **MIG-2 — `rederive` says what happened.** (a) `action='one'` printed "source_commit
+  PRESERVED" on a memory that had NO `source_commit` — it takes the initial-backfill
+  branch and baselines to the file's last commit. Right behaviour, false sentence: results
+  now carry `baseline` (`initial` / `preserved` / `assigned`) and the line says which.
+  (b) The worklist is computed against `git ls-files` at call time, so a sibling session
+  staging files between the `worklist` read and the `one` write changed what got written
+  (one field memory gained an archive path its reviewed diff never showed). `one` now
+  previews at call time and prints an explicit `gained: … lost: …` line against the STORED
+  frontmatter, saying what it means when that is not the diff you reviewed. (c) A memory
+  file with no frontmatter at all was reported as "unparseable frontmatter — fix the YAML
+  first", sending the reader after a YAML error that is not there; it now says **no
+  frontmatter**. The CLI and the MCP tool share one rendering for the worklist items and
+  the `one` result (`rederive_worklist_lines` / `rederive_one_lines`), so the two
+  surfaces cannot drift — the CLI gains the baseline sentence it never had.
+- **GRF-7 (roadmap only, deliberately not built) — folded-section awareness.** 478 of the
+  field corpus's 499 "dangling" wikilink edges point at a slug that survives as a `###`
+  heading inside a digest memory (a deliberate fold), so edge rot reads 499 where 21 are
+  real. Recorded in `ROADMAP.enhancements2.yaml` with that evidence and the design
+  constraint the field memory documents: it must be a lint CLASSIFICATION beside GRF-1's
+  `cross_tier` and GRF-6's `planned`, never a graph edge (resolving the link would make
+  six digests the graph's dominant hubs), and it needs headings carried through
+  `links.json` to keep GRA-6's zero-read producer path — a schema bump that did not belong
+  in a correctness release.
+- **Code layout.** The citation layer — the extractor's vocabulary, the `git ls-files`
+  oracle, the one resolver, the one merge policy — moved to
+  `plugin/memory/provenance_citations.py` when the ORC-4/CUR-2 work crossed
+  `provenance.py`'s size pin (pure code motion behind façade re-exports; it depends only
+  on `provenance_env`, reached by module attribute so the zero-git test pins still bind).
+  The four crash-contract writers stay AST-pinned to `provenance.py`. No new write site:
+  DRM-7 appends through the already-allowlisted `archive._mark_dream_rows`. 46 new tests
+  — `tests/test_provenance_field_round.py` (31), `tests/test_dream_retire_ghost.py` (14),
+  and the COR-24 repro beside COR-9's fixture. Every defect-pinning test was run against
+  the v1.34.0 plugin first and fails there; the controls (the right half of the ORC-4
+  measurement, the no-exclusion stamp refusal) pass on both, by design.
+
 ## v1.34.0 — 2026-09-16 — "The tree you're standing in"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format

@@ -1442,6 +1442,26 @@ _BLOCK_META = (
 )
 
 
+# COR-24 — the same family's THIRD break, found in the field (em-growth-labs, 2026-09-17):
+# a `metadata:` block whose LAST key is a nested MAPPING — hippo's own `edge_origin:`
+# dedup-review stamp. COR-9 took the insert indent from the last indented KEY, which here
+# is the map's CHILD, so the provenance triplet was folded INTO `edge_origin`; the damage
+# guard refused, and the file could never be re-derived, refreshed or re-verified again.
+_NESTED_MAP_TAIL = (
+    "---\n"
+    "name: M\n"
+    "metadata:\n"
+    "  type: project\n"
+    '  cited_paths: ["src/keep.py"]\n'
+    "  edge_origin:\n"
+    "    some-other-memory: dedup-review\n"
+    '  source_commit: "0000000000000000000000000000000000000000"\n'
+    "  source_commit_time: 1\n"
+    "---\n"
+    "body cites src/keep.py\n"
+)
+
+
 def _prov_free(fm: dict) -> dict:
     """``fm`` minus the three provenance keys, at BOTH schema levels."""
     out = {k: v for k, v in fm.items() if k not in _PROV_KEYS}
@@ -1462,6 +1482,20 @@ def test_strip_provenance_consumes_block_style_continuation_lines():
     assert fm["metadata"]["type"] == "project"  # not swallowed by the orphans
     assert fm["metadata"]["last_verified"] is not None  # the fold victim in the wild
     assert "cited_paths" not in fm["metadata"]
+
+
+def test_backfill_text_round_trips_a_metadata_block_ending_in_a_nested_map():
+    """COR-24, the report's minimal repro verbatim: strip + re-insert must land the triplet
+    at the block's FIRST-level indent, after the nested map — never inside it."""
+    new, changed = P.backfill_text(
+        P._strip_provenance(_NESTED_MAP_TAIL), ["src/keep.py"], "1" * 40, 2
+    )
+    assert changed
+    assert P._frontmatter_damage(_NESTED_MAP_TAIL, new, P._PROVENANCE_OWNED) is None
+    meta = P.parse_frontmatter(new)["metadata"]
+    assert meta["edge_origin"] == {"some-other-memory": "dedup-review"}  # untouched
+    assert meta["cited_paths"] == ["src/keep.py"] and meta["source_commit"] == "1" * 40
+    assert '\n  cited_paths: ["src/keep.py"]\n' in new  # two spaces, not the child's four
 
 
 def test_strip_provenance_leaves_an_adjacent_block_list_alone():
@@ -2010,9 +2044,12 @@ def test_the_extractor_fix_is_not_a_corpus_format_event(tmp_path):
     CORPUS_FORMAT_VERSION. That is exactly why it felt like a regex tweak and was in fact a
     corpus-wide rewrite — the axis to say so did not exist. ORC-3 (extensionless names)
     is the second extractor change to land on this same axis, for the same reason.
-    IOP-2 (.mdc joins the vocabulary) is the third — same axis, same rationale."""
-    assert P.CORPUS_FORMAT_VERSION == 5  # unmoved by ORC-1/DRV-1/ORC-3/IOP-2
-    assert P.CITATION_DERIVATION_VERSION == 4  # the axis that DID move, three times now
+    IOP-2 (.mdc joins the vocabulary) is the third — same axis, same rationale. ORC-4 +
+    CUR-2 is the fourth, and the first where the RESOLVER moved rather than the vocabulary
+    (a directory-qualified token must suffix-match; `cited_paths_exclude` binds every
+    derivation) — still values, still not a shape."""
+    assert P.CORPUS_FORMAT_VERSION == 5  # unmoved by ORC-1/DRV-1/ORC-3/IOP-2/ORC-4/CUR-2
+    assert P.CITATION_DERIVATION_VERSION == 5  # the axis that DID move, four times now
 
 
 # --------------------------------------------------------------------------- #

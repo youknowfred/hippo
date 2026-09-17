@@ -556,6 +556,49 @@ workstreams:
           .memory-pending, THEN telemetry.abstention_backlog for the prospective-recall
           metric. Reuse reconsolidate's horizon/archive machinery for draft decay.
 
+      - id: DRM-7
+        title: Retire a ghost edge — the per-edge verb for an active ledger row whose stamp is provably gone
+        priority: P1
+        effort: S
+        status: done                   # 2026-09-17 (v1.35.0) — dream_apply.retire_ghost_edge +
+                                       # edge_source_location; `dream --retire-ghost <edge-id>
+                                       # [--reason]`; MCP dream action='retire_ghost'; doctor's
+                                       # check_dream_ledger names each ghost's cause + the verb.
+                                       # tests/test_dream_retire_ghost.py (14).
+        provenance: {source: em-growth-labs field corpus, linear: GRO-1745, date: 2026-09-17}
+        problem: >-
+          doctor's ghost fail ("N active ledger edge(s) with no on-disk stamp") named two
+          reconcile routes and BOTH could be shut. `--undo` is byte-exact and refuses when
+          the stamped line is missing ("manual drift") or the source file is gone
+          ("unreadable") — correctly, it has nothing to reverse — and git history helps
+          only if the stamp was ever committed. Field corpus, 3 rows: one source memory
+          deleted by a corpus compaction (a plain delete, not archive_memory — no file, no
+          archive/ copy); two rows whose ledger lines were committed while the stamped
+          lines never reached a commit and a later fold rewrite dropped the dream:links
+          block. A permanent ✘, and hand-editing the ledger is the one thing its contract
+          forbids.
+        proposal: >-
+          A supported verb that appends the superseding state:"undone" line (the
+          archive_draft / _mark_dream_rows idiom — append-only, no memory byte touched)
+          with retired_ghost / retire_cause / retire_reason, ONLY after proving the ghost:
+          the row is ACTIVE and no readable *.md in the corpus root or archive/ carries its
+          `<!-- dream: … edge=<id>` stamp — the exact surface doctor reconciles, so the
+          verb retires what doctor calls a ghost and nothing else. A stamp found anywhere
+          refuses toward --undo; an unreadable file refuses (absence unproven). Per-edge
+          by signature. Doctor names the cause per ghost (source DELETED vs stamp missing)
+          so a delete/fold outside archive_memory is visible where it bites.
+        acceptance_criteria:
+          - a source-deleted ghost and a stamp-missing ghost each retire with their own recorded cause, and doctor returns to ok
+          - a live stamp (corpus root, archive/, or copied into another memory) is never retired; prose that merely mentions the edge id is not a stamp
+          - the ledger is append-only across the verb (prior bytes identical), no memory file is written, and there is no bulk form (signature-pinned)
+          - a retired pair stays a standing verdict — run_apply_pass's undone-pair guard never silently re-stamps it
+        dependencies: [DRM-2]
+        invariant_note: >-
+          inv4 (corrective writes per-item and agent-gated — no bulk retire exists to
+          call) + DRM-2's audit contract (the ledger only ever grows; stamped lines and
+          ledger rows are never hand-edited). The verb is a PROOF-gated ledger append, not
+          a second undo implementation: it reverses no bytes because there are none.
+
 # ---------------------------------------------------------------------------
 # The disciplined cuts — what /dream deliberately does NOT do (the safety spine).
 # ---------------------------------------------------------------------------

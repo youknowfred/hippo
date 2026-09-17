@@ -87,11 +87,24 @@ _FORMAT_MARKER_NAME = ".format"
 #   4 — IOP-2: `.mdc` (Cursor rule files) joins _CODE_EXTS, so a body naming a
 #       `.cursor/rules/*.mdc` derives it as a cited path. SAME class as 3 (vocabulary grew,
 #       no shape change) — lands here, not corpus_format; a .mdc-free corpus stamps clean.
+#   5 — ORC-4 + CUR-2. The RESOLVER changed, not the vocabulary: a directory-qualified
+#       token that is not itself a tracked path now keeps a basename candidate only when
+#       the candidate path ENDS WITH the token (v4 ignored every directory the token
+#       named, so `apps/api/routes/admin.py` — another repo's file — bound the memory to
+#       this repo's only `admin.py`; measured 11 wrong of 21 on a 579-memory field
+#       corpus). A v4 corpus re-derived under v5 mostly LOSES citations — the
+#       wrong re-points. CUR-1 would otherwise preserve each STORED one forever (its file
+#       exists; the body "does not yield it"), so the merge identifies exactly the paths
+#       only the v4 fallback could have bound (`legacy_basename_repoints`) and reports
+#       them as a loss WITH the token that caused it. CUR-2 is what makes any deliberate
+#       prune stable: a per-memory `cited_paths_exclude` list every derivation honours —
+#       additive, optional, human-owned, so NOT a corpus_format event (the CLB-2
+#       `verified_by` precedent), but part of what "derived by v5" asserts.
 #
 # Kept on the corpus-level marker rather than in each file's frontmatter: a per-file key
 # WOULD be a shape change (a real corpus_format v6), needs a corpus-wide rewrite just to
 # introduce, and answers a question that is not per-file anyway.
-CITATION_DERIVATION_VERSION = 4
+CITATION_DERIVATION_VERSION = 5
 
 
 def format_marker_path(memory_dir: str) -> str:
