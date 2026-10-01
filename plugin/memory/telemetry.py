@@ -146,6 +146,25 @@ def _producer_version() -> Optional[str]:
     return v
 
 
+def _host_load() -> Optional[dict]:
+    """MSR-7: the host's 1-minute load average and CPU count at log time, or None.
+
+    A recall's wall time is CPU-bound Python + ONNX, so on a machine with more runnable
+    work than cores it stretches for reasons that have nothing to do with hippo. Without
+    this on the row, doctor's KPI-3 line could not tell a contended tail from a hippo
+    regression. ``os.getloadavg`` is absent on Windows and can raise OSError where the
+    kernel won't say; either way the row simply omits the fields (never a guessed 0).
+    """
+    try:
+        load1 = float(os.getloadavg()[0])
+        cpus = os.cpu_count()
+    except (AttributeError, OSError):
+        return None
+    if not cpus or load1 < 0:
+        return None
+    return {"load1": round(load1, 2), "cpus": int(cpus)}
+
+
 
 def log_recall_event(
     results: List[dict],
@@ -205,6 +224,12 @@ def log_recall_event(
     to the asking agent as a tool result, not silently into context, so MCP events
     deliberately never carry it. Additive/absence-emits-nothing; an abstention
     emitted nothing, so it writes no key rather than a fake 0.
+
+    MSR-7 ``load1``/``cpus``: the host's 1-minute load average and CPU count, sampled
+    here (see ``_host_load``) on every channel. Doctor's KPI-3 line splits the p95 on
+    ``load1 / cpus`` so a tail caused by a busy machine is not reported as a hippo
+    regression. Additive; rows from before this field, or from a platform without
+    ``getloadavg``, carry neither key and doctor counts them as unclassified.
     """
     try:
         td = _resolve_dir(telemetry_dir)
@@ -232,6 +257,9 @@ def log_recall_event(
             event["channel"] = channel
         if injected_chars is not None:
             event["injected_chars"] = int(injected_chars)
+        load = _host_load()  # MSR-7: additive; absent where the platform can't say
+        if load:
+            event.update(load)
         v = _producer_version()  # MEA-4: provenance stamp, cached; omitted when unreadable
         if v:
             event["v"] = v

@@ -124,7 +124,10 @@ def test_ledger_concurrent_appenders_no_crash_no_torn_lines_across_rotation(tmp_
     for ln in lines:
         obj = json.loads(ln)  # raises (fails the test) on any corrupt/torn line
         assert isinstance(obj, dict)
-        assert set(obj.keys()) == {
+        # MSR-7: load1/cpus ride every row where the platform reports host load (absent
+        # on Windows), so they are optional here — but they always travel as a pair.
+        assert ("load1" in obj) == ("cpus" in obj)
+        assert set(obj.keys()) - {"load1", "cpus"} == {
             "ts",
             "session_id",
             "names",
