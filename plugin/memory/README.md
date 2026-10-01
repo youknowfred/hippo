@@ -302,9 +302,30 @@ frontmatter (top-level or under `metadata:`; bare string tolerated) — a dangli
 matching a declaration on its OWN source reclassifies to the informational `planned` class:
 silent at SessionStart and out of doctor's rot count (noted, never counted), still listed
 by the CLI and `memory.links --audit`. Declarations round-trip through `links.json`
-(schema v5), so the cached producer path stays zero-read. Archived, superseded, and
+(since schema v5), so the cached producer path stays zero-read. Archived, superseded, and
 cross-tier targets are never maskable; `--audit` flags a declaration whose target now
 exists as a stale planned marker.
+
+**Folded memories (GRF-7).** A corpus whose fold ritual moves an idle memory into a digest
+and deletes the file declares its digests once, in the committed marker:
+
+```json
+{"corpus_format": 5, "fold_digests": ["folded-*.md", "live-lanes-*.md"]}
+```
+*(in `.claude/memory/.format`; `fnmatch` globs over memory filenames, read via
+`provenance.read_fold_digests`; no writer — operator-committed policy like `volatile_paths`)*
+
+A dangling wikilink whose target survives in a declared digest — as a `### <slug>` heading
+(family digests) or a `- [<slug>](…)` list row (day files; the href is free) — reclassifies
+to the informational `folded` class, each entry naming its digest: silent at SessionStart,
+out of doctor's rot count (noted, never counted), listed by `memory.lint_links` and
+`memory.links --audit` as `src -> target (in <digest>)`. It is a classification, never an
+edge: adjacency, `links.json`'s edge lists and recall's 1-hop expansion are identical with
+or without the declaration, so a digest never becomes a hub. Archived targets are never
+maskable (GRF-6's rule); typed relations into a folded slug stay `typed_dangling`; the
+`--boundary` view stays fold-blind. The fold surface rides `links.json` (schema v6) beside
+the declaration it was read under — the cached producer path stays zero memory-file reads,
+and an edited declaration reads as a cache miss. Undeclared ⇒ byte-identical behavior.
 
 **Typed edges (GRA-4, corpus format 2).** Frontmatter may declare
 `supersedes: [name]`, `contradicts: [name]`, `refines: [name]` (each a list of memory

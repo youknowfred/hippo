@@ -6,7 +6,9 @@ it NEVER edits a memory file:
                     A dangling target its OWN source declares in ``planned:`` frontmatter
                     (GRF-6) splits to the informational ``planned`` class instead — a
                     deliberate forward reference stops nagging, an unmarked absent target
-                    (typo or undeclared ref) stays advisory here.
+                    (typo or undeclared ref) stays advisory here. A dangling target whose
+                    slug survives inside a corpus-declared fold digest (GRF-7, ``.format``
+                    ``fold_digests``) splits to the informational ``folded`` class.
   - ambiguous     : a ``[[target]]`` whose soft alias is claimed by TWO OR MORE files
                     (COR-9) — resolve() refuses it rather than guess, and the lint line
                     names every claimant so the fix (link the full stem) is obvious.
@@ -51,10 +53,12 @@ def lint(memory_dir: str, index_dir: Optional[str] = None) -> dict:
             "cross_tier": [],
             "cross_tier_typed": [],
             "planned": [],
+            "folded": [],
             "orphans": [],
             "files": 0,
         }
-    return _classify_planned(memory_dir, _classify_cross_tier(memory_dir, _graph_report(g)), g)
+    report = _classify_cross_tier(memory_dir, _graph_report(g))
+    return _classify_folded(memory_dir, _classify_planned(memory_dir, report, g), g)
 
 
 def _classify_cross_tier(memory_dir: str, report: dict) -> dict:
@@ -139,6 +143,53 @@ def _classify_planned(memory_dir: str, report: dict, g: LinkGraph) -> dict:
         report["planned"] = planned
     except Exception:
         report["planned"] = []
+    return report
+
+
+def _classify_folded(memory_dir: str, report: dict, g: LinkGraph) -> dict:
+    """Split FOLDED targets out of ``dangling`` (GRF-7) — runs after the planned split.
+
+    A corpus's fold ritual retires an idle memory into a digest and deletes its file;
+    the slug survives inside the digest as a ``### <slug>`` heading or a ``- [<slug>](…)``
+    row, so every inbound ``[[slug]]`` still names real text yet resolves to no stem.
+    When the corpus declares its digests (``.format`` ``fold_digests`` globs), a dangling
+    wikilink whose slug-normalized target is on a declared digest's fold surface
+    (``LinkGraph.folded_raw``) moves to the informational ``folded`` class, each entry
+    gaining ``digest`` (the holding stem; first in sorted order when several hold it) —
+    reclassified, never dropped, so the CLI and ``graph_audit`` still name it while
+    ``health_line`` and doctor's rot count stop counting it. Same guards as GRF-6: the
+    cross-tier split has already run, and an ARCHIVED target is never maskable (a fold
+    heading cannot quiet an edge that outlived a real retirement). A CLASSIFICATION, never
+    an edge: nothing here touches adjacency, the typed maps, or links.json's edge lists,
+    so recall expansion cannot gain a digest hub. Typed relations are out of scope — a
+    ``supersedes`` into a folded slug disables the demotion it exists to cause, so
+    ``typed_dangling`` stays loud. Zero file reads (the surface rides links.json v6). On
+    any failure the entry stays advisory dangling. Never raises.
+    """
+    report["folded"] = []
+    danglings = report.get("dangling") or []
+    surface_raw = getattr(g, "folded_raw", None) or {}
+    if not danglings or not surface_raw:
+        return report
+    try:
+        from .links import archived_target, normalize_slug
+
+        holder: Dict[str, str] = {}
+        for digest in sorted(surface_raw):
+            for slug in surface_raw[digest]:
+                holder.setdefault(normalize_slug(slug), digest)
+        keep: List[dict] = []
+        folded: List[dict] = []
+        for d in danglings:
+            digest = holder.get(normalize_slug(d["target"]))
+            if digest and not archived_target(memory_dir, d["target"]):
+                folded.append({**d, "digest": digest})
+            else:
+                keep.append(d)
+        report["dangling"] = keep
+        report["folded"] = folded
+    except Exception:
+        report["folded"] = []
     return report
 
 
@@ -429,6 +480,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"planned forward refs: {len(planned)} (declared deliberate — not rot)")
         for d in planned:
             print(f"  » {d['file']} -> [[{d['target']}]] (planned)")
+    folded = report.get("folded") or []
+    if folded:
+        print(f"folded links     : {len(folded)} (target folded into a declared digest — not rot)")
+        for d in folded:
+            print(f"  ⤷ {d['file']} -> [[{d['target']}]] (in {d['digest']})")
     print(f"orphans (no outbound links): {len(report['orphans'])}")
     if args.show_orphans:
         for o in report["orphans"]:

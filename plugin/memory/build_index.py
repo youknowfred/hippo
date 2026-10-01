@@ -1523,7 +1523,7 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
                 try:
                     from .links import LinkGraph, links_cache_fresh, write_links_cache
 
-                    if not links_cache_fresh(index_dir, sigs):
+                    if not links_cache_fresh(index_dir, sigs, memory_dir):
                         write_links_cache(index_dir, LinkGraph(memory_dir, texts=texts), sigs)
                 except Exception:
                     pass

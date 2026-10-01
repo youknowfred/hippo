@@ -234,6 +234,17 @@ mechanically. Follow it by hand until it is.
   superseded, or cross-tier target classifies as itself regardless. When the target is
   finally written the link resolves on its own; the audit then flags the leftover
   declaration as a stale planned marker — delete the line.
+- **Folded memories — `.format` `fold_digests` (GRF-7).** If your corpus retires idle
+  memories by FOLDING them — moving the text into a digest file and deleting the original —
+  every `[[link]]` to a folded slug dangles even though the text lives on. Declare the
+  digests once, corpus-wide, in the committed `.claude/memory/.format` marker as filename
+  globs — `"fold_digests": ["folded-*.md", "live-lanes-*.md"]` — and a dangling link whose
+  target survives in a declared digest as a `### <slug>` heading or a `- [<slug>](…)` row
+  reclassifies to the informational `folded` class, naming the digest: silent at
+  SessionStart, out of doctor's rot count, still listed by both lint CLIs. Do NOT re-point
+  those links at the digest: a folded link is deliberately never a graph edge, so a large,
+  low-specificity digest never becomes a hub for recall expansion. An archived target
+  still reads as rot, and a typed relation (`supersedes:` …) into a folded slug stays loud.
 - **When to use a typed relation instead of `[[wikilink]]`**: only when you mean the specific
   `supersedes`/`contradicts`/`refines` consequence described above. If you just mean "these
   two are related, worth reading together," that's an untyped `[[wikilink]]` — a typed

@@ -7,6 +7,51 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.37.0 — 2026-10-01 — "Folded, not gone"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**; the link cache
+`links.json` moves **5 → 6** (a derived cache — it rebuilds itself on the next refresh, no
+action). **Operator action: optional, one line** — a corpus with a fold ritual declares its
+digests in `.claude/memory/.format` (below); an undeclared corpus behaves exactly as before.
+
+- **GRF-7 — a link into a folded memory is not edge rot.** The em-growth-labs fold ritual
+  retires an idle lane by moving its text into a digest — a `folded-*-rounds.md` family
+  digest, where the slug survives as a `### <slug>` heading, or a `live-lanes-YYYY-MM-DD.md`
+  day file, where it survives as a `- [<slug>](…)` row — and deleting the file. hippo
+  resolves a wikilink to a file stem only, so every inbound link to a folded slug read as
+  `dangling`, and doctor's edge-rot line could never clear. Re-pointing those links at the
+  digests was refused corpus-side for a reason this release keeps: it would give six large,
+  low-specificity digests ~80 inbound edges each and make them recall expansion's dominant
+  hubs. So the fix is a classification, never an edge. A corpus declares its digests as
+  filename globs — `"fold_digests": ["folded-*.md", "live-lanes-*.md"]`, the marker's third
+  policy key after `volatile_paths` and `floor_lint` (operator-committed, no writer, read by
+  `provenance.read_fold_digests`). A dangling wikilink whose target is on a declared
+  digest's fold surface moves to an informational `folded` class beside GRF-1's
+  `cross_tier` and GRF-6's `planned`: `memory.lint_links` and `memory.links --audit` list
+  each as `src -> target (in <digest>)`, SessionStart's link-health line stops naming them,
+  and doctor's edge-rot line counts only true rot and notes the folded count separately.
+  Same guards as `planned`: an archived target is never masked, typed relations stay loud
+  (a `supersedes:` into a folded slug disables the demotion it exists to cause), and the
+  `--boundary` view stays fold-blind. Adjacency, `links.json`'s edge lists and recall's
+  1-hop expansion are byte-identical with and without the declaration — asserted in the
+  tests, and on the field corpus (63 digests, 905 surviving slugs, edge sets equal).
+- **Measured on the field corpus before it shipped** (em-growth-labs, 989 memories,
+  2026-10-01, read-only copy with the declaration added): audited edge rot **605 → 72**,
+  533 reported as folded. What remains is real and corpus-side: 54 `superseded` edges (links
+  into memories another memory supersedes — 40 of them into one), 17 dangling wikilinks
+  (relative doc paths written as wikilinks, Linear ids, a few renamed lanes, one link to a
+  day file that was itself folded), and 1 typed `supersedes:` into a deleted memory.
+- **The fold surface rides `links.json` v6** (`folded` + the `fold_digests` it was read
+  under), so the SessionStart producer still classifies with zero memory-file reads; its one
+  corpus-dir read is the small `.format` marker, compared so that editing the declaration
+  reads as a cache miss (a stat sweep cannot see `.format`). Recall's `load_edges` never
+  reads either key. 16 tests in `tests/test_links_folded.py` on a fixture corpus (a digest
+  with headings, a day file with rows, a truly dangling link, an archived target, a
+  lookalike heading in an undeclared file, a fenced heading). GRF-7 was recorded deferred in
+  v1.35.0; it ships reshaped — corpus-declared digests and two exact surface forms rather
+  than any heading in any live memory, so a stray heading cannot quiet real rot.
+
 ## v1.36.1 — 2026-10-01 — "Defined before it runs"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format

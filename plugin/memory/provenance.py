@@ -87,6 +87,7 @@ from .provenance_format import (  # noqa: E402,F401
     read_cite_derivation,
     read_corpus_format,
     read_floor_lint,
+    read_fold_digests,
     read_volatile_paths,
     write_cite_derivation,
     write_corpus_format,

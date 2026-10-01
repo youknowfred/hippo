@@ -50,6 +50,10 @@ round-trip through links.json so recall reads them O(1) with zero corpus re-read
 the deliberate-forward-reference key and ``LinkGraph.planned_raw`` carries it per stem —
 lint metadata for ``lint_links._classify_planned``, deliberately NOT an edge and NOT a
 typed relation (it must never enter adjacency, typed maps, or recall traversal).
+GRF-7's fold surface rides the same pass under the same rule: ``parse_fold_surface`` reads
+the ``### <slug>`` headings / ``- [<slug>](…)`` rows of the digests a corpus declares in
+``.format`` ``fold_digests``, and ``LinkGraph.folded_raw`` carries them per digest — lint
+metadata for ``lint_links._classify_folded``, never an edge (no digest becomes a hub).
 
 Read-only throughout; the family's one write primitive (``add_typed_relation``) stays in
 the façade. Never raises into a caller.
@@ -57,12 +61,13 @@ the façade. Never raises into a caller.
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import re
 from typing import Dict, List, Optional, Set, Tuple
 
 from .markdown_code import strip_code
-from .provenance import _iter_memory_files, parse_frontmatter
+from .provenance import _iter_memory_files, parse_frontmatter, read_fold_digests
 
 _WIKILINK_RE = re.compile(r"\[\[([^\]\[]+?)\]\]")
 
@@ -257,6 +262,42 @@ def parse_planned(fm: dict) -> List[str]:
     return out
 
 
+
+# GRF-7: the fold surface — where a FOLDED memory's slug survives inside a declared digest
+# (``.format`` ``fold_digests``): a ``### <slug>`` heading (the family-digest form) or a
+# ``- [<slug>](…)`` list row (the day-file form; the href is free — rows often point at
+# the digest that now holds the lane). Level-3 headings only, by the convention's own
+# definition: a digest's ``## Members`` scaffolding is never a fold slot.
+_FOLD_HEADING_RE = re.compile(r"^###[ \t]+(.+?)[ \t]*#*[ \t]*$", re.MULTILINE)
+_FOLD_ROW_RE = re.compile(r"^[ \t]*[-*+][ \t]+\[([^\]\[]+)\]\(", re.MULTILINE)
+
+
+def parse_fold_surface(text: str) -> List[str]:
+    """Slugs a fold digest keeps alive — ``### <slug>`` headings and ``- [<slug>](…)`` rows,
+    in document order, de-duped by normalized slug (raw spelling kept, like
+    ``parse_planned``). Code spans/fences are not surface (COR-20). Lint metadata for
+    ``lint_links._classify_folded`` — NEVER an edge: it must not enter adjacency, the
+    typed maps, or recall traversal. Pure; never raises.
+    """
+    try:
+        body = strip_code(text or "")
+        hits = sorted(
+            [(m.start(), m.group(1)) for m in _FOLD_HEADING_RE.finditer(body)]
+            + [(m.start(), m.group(1)) for m in _FOLD_ROW_RE.finditer(body)]
+        )
+    except Exception:
+        return []
+    seen: Set[str] = set()
+    out: List[str] = []
+    for _pos, raw in hits:
+        raw = raw.strip()
+        slug = normalize_slug(raw)
+        if slug and slug not in seen:
+            seen.add(slug)
+            out.append(raw)
+    return out
+
+
 class LinkGraph:
     """Resolved wikilink adjacency over the memory corpus. All nodes are STEMS."""
 
@@ -296,6 +337,13 @@ class LinkGraph:
         # structure. Round-trips through links.json (schema v5) so the CACHED lint path
         # classifies planned refs with zero file reads.
         self.planned_raw: Dict[str, List[str]] = {}  # stem -> declared planned targets
+        # GRF-7: per-DIGEST fold surface (slugs kept alive as ``###`` headings / list rows
+        # inside files matching ``.format`` ``fold_digests``) + the globs it was read
+        # under. Lint metadata like ``planned_raw`` — NEVER an edge. Round-trips through
+        # links.json (schema v6) so the CACHED lint path classifies folded links with
+        # zero file reads; a changed declaration reads as a cache miss.
+        self.fold_patterns: List[str] = []
+        self.folded_raw: Dict[str, List[str]] = {}  # digest stem -> surviving slugs
         self._build()
 
     # -- construction ----------------------------------------------------- #
@@ -395,6 +443,16 @@ class LinkGraph:
 
         for amb in self._ambiguous:
             self._alias_to_stem.pop(amb, None)
+
+        # GRF-7: read the fold surface of the corpus-declared digests only (an undeclared
+        # corpus pays nothing and stores nothing — ED-4).
+        self.fold_patterns = read_fold_digests(self.memory_dir)
+        if self.fold_patterns:
+            for stem in self.files:
+                if any(fnmatch.fnmatchcase(stem + ".md", p) for p in self.fold_patterns):
+                    surface = parse_fold_surface(texts.get(stem, ""))
+                    if surface:
+                        self.folded_raw[stem] = surface
 
         # Edges — forward AND reverse in the same pass, so inbound-degree queries never
         # need a second O(V+E) inversion anywhere else.

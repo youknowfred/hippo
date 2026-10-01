@@ -22,7 +22,7 @@ import os
 from typing import Dict, List, Optional
 
 from .links_graph import LinkGraph, dream_edges_admitted, normalize_slug
-from .provenance import _is_memory_filename
+from .provenance import _is_memory_filename, read_fold_digests
 
 # links.json schema — independent of the manifest's SCHEMA_VERSION (the two files evolve
 # separately; a manifest bump must not silently invalidate a perfectly good edge cache).
@@ -39,7 +39,11 @@ from .provenance import _is_memory_filename
 # forward-reference declarations) — a v4 cache predates the key and would silently
 # serve every declaration as absent, re-nagging the exact links the idiom exists to
 # quiet. Same reasoning as v3/v4: bump, force one rebuild, no shim.
-LINKS_SCHEMA_VERSION = 5
+# v6 (GRF-7): the payload gained the top-level "folded" map (per-digest fold surface —
+# slugs a declared fold digest keeps alive) and "fold_digests" (the ``.format`` globs it
+# was read under). A v5 cache predates both and would serve every folded link as plain
+# dangling. Same reasoning: bump, force one rebuild, no shim.
+LINKS_SCHEMA_VERSION = 6
 _LINKS_CACHE_NAME = "links.json"
 
 
@@ -94,6 +98,10 @@ def write_links_cache(index_dir: str, graph: LinkGraph, sigs: Dict[str, List[int
             # GRF-6: per-stem ``planned:`` declarations round-trip so the CACHED lint
             # path classifies deliberate forward references with zero file reads (v5).
             "planned": {s: list(t) for s, t in graph.planned_raw.items()},
+            # GRF-7: the fold surface + the declaration it was read under (v6). Lint
+            # metadata only — never consulted by ``load_edges`` (no recall edge, ever).
+            "fold_digests": list(graph.fold_patterns),
+            "folded": {s: list(t) for s, t in graph.folded_raw.items()},
         }
         path = os.path.join(index_dir, _LINKS_CACHE_NAME)
         tmp = path + f".tmp.{os.getpid()}"  # COR-17: unique per writer — concurrent processes must not share a tmp
@@ -135,8 +143,11 @@ def _load_links_payload(index_dir: str) -> Optional[dict]:
                 "typed_raw",
                 "typed_unresolved",
                 "planned",
+                "folded",
             )
         ):
+            return None
+        if not isinstance(payload.get("fold_digests"), list):
             return None
         return payload
     except Exception:
@@ -164,8 +175,27 @@ def _stat_signatures(memory_dir: str) -> Optional[Dict[str, List[int]]]:
         return None
 
 
-def links_cache_fresh(index_dir: str, sigs: Dict[str, List[int]]) -> bool:
-    """True when ``links.json`` exists and its per-file sigs exactly match ``sigs``.
+def fold_policy_matches(payload: dict, memory_dir: Optional[str]) -> bool:
+    """GRF-7: True when the cache's fold surface was read under the corpus's CURRENT
+    ``.format`` ``fold_digests`` declaration. ``.format`` is not a memory file, so the
+    per-file stat sigs cannot see an edit to it — without this check, declaring (or
+    retiring) a digest glob would leave the cached lint path serving the old answer
+    until some memory file happened to change. ``memory_dir=None`` skips the check
+    (recall's ``load_edges`` never reads the fold surface). One small JSON read; never
+    raises (any trouble reads as a mismatch — a wasted rebuild, the safe direction)."""
+    if memory_dir is None:
+        return True
+    try:
+        return list(payload.get("fold_digests") or []) == read_fold_digests(memory_dir)
+    except Exception:
+        return False
+
+
+def links_cache_fresh(
+    index_dir: str, sigs: Dict[str, List[int]], memory_dir: Optional[str] = None
+) -> bool:
+    """True when ``links.json`` exists and its per-file sigs exactly match ``sigs`` (and,
+    given ``memory_dir``, its fold surface was read under the current declaration — GRF-7).
 
     Used by ``refresh_index``'s no-op short-circuit: the corpus-unchanged check compares
     ``doc_text`` hashes, which body edits do NOT perturb — so the short-circuit must
@@ -173,7 +203,7 @@ def links_cache_fresh(index_dir: str, sigs: Dict[str, List[int]]) -> bool:
     (the exact kind that changes wikilinks) would leave a stale links.json in place forever.
     """
     payload = _load_links_payload(index_dir)
-    if payload is None:
+    if payload is None or not fold_policy_matches(payload, memory_dir):
         return False
     try:
         cached = {s: list(rec.get("sig") or []) for s, rec in payload["files"].items()}
@@ -220,6 +250,8 @@ def _graph_from_payload(memory_dir: str, payload: dict) -> LinkGraph:
         for s, m in payload["typed_unresolved"].items()
     }
     g.planned_raw = {str(s): list(t) for s, t in payload["planned"].items()}
+    g.fold_patterns = [str(p) for p in payload["fold_digests"]]
+    g.folded_raw = {str(s): list(t) for s, t in payload["folded"].items()}
     g.adjacency = {}
     g._inbound = {stem: set() for stem in g.files}
     g.typed = {}

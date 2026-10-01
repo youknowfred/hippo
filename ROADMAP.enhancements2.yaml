@@ -684,10 +684,12 @@ workstreams:
         title: Folded-section awareness — a [[slug]] that survives as a `### slug` heading in a digest is not edge rot
         priority: P2
         effort: M
-        status: deferred               # 2026-09-17 — scoped out of v1.35.0 (the GRO-1745 field
-                                       # round) WITH its evidence, rather than half-built: done
-                                       # right it rides links.json (a LINKS_SCHEMA_VERSION bump)
-                                       # to keep GRA-6's zero-read producer path.
+        status: done                   # 2026-10-01 — v1.37.0. Deferred 2026-09-17 (scoped out of
+                                       # v1.35.0 rather than half-built); shipped riding links.json
+                                       # v6. Reshaped at build: the digests are CORPUS-DECLARED
+                                       # (.format fold_digests globs) and the surface is `###`
+                                       # headings + `- [slug](…)` rows, not any heading in any
+                                       # live memory — a stray heading must not quiet real rot.
         source: {lens: graph-retrieval, verdict: FIELD, convergence: 1, landscape: [em-growth-labs-gro-1745]}
         problem: >-
           On the em-growth-labs corpus (579 memories, 2026-09-17) 478 of 499 "dangling"
