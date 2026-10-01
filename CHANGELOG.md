@@ -7,6 +7,26 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.36.1 — 2026-10-01 — "Defined before it runs"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**. One defect fix, found
+in the installed v1.36.0: the floor lint's own terminal command crashed on every run.
+
+- **FLR-2 — `python -m memory.lint_floor` runs again.** The module's
+  `if __name__ == "__main__":` guard sat above `floor_governance` and
+  `format_governance_summary`, which FLR-1 added below it. A `-m` run executes the module
+  top to bottom, so `main()` ran before those defs existed and every invocation died with
+  `NameError: name 'format_governance_summary' is not defined`. Importers (doctor's
+  floor-governance line, the SessionStart `floor` producer, the edit-time nag) finish the
+  import first and were never affected, and neither were the in-process tests, which is
+  how it shipped. The guard is now the module's last statement. Two new pins:
+  `test_floor_governance` runs the real CLI as a subprocess against a fixture corpus whose
+  `.format` declares `floor_lint` (clean floor exits 0; a banned-token floor exits 1 with
+  the governance line and no traceback), and `test_main_guard_last` is a structural check
+  over every `plugin/memory/*.py`: a `__main__` guard followed by any more top-level code
+  fails the suite. A sweep of every module found `lint_floor` was the only one.
+
 ## v1.36.0 — 2026-09-17 — "The directory you wrote"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
