@@ -213,10 +213,6 @@ def main(argv=None) -> int:
     return 1
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-
 # --------------------------------------------------------------------------- #
 # FLR-1: floor governance — size vs the harness read window, plus the corpus's own
 # declared line policy (.format `floor_lint`). The lint lives where the edits happen.
@@ -381,3 +377,7 @@ def observe_floor_edit(
         )
     except Exception:
         return None
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
