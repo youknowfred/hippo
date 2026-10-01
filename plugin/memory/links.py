@@ -42,6 +42,7 @@ from .links_graph import (  # noqa: F401  (re-exports are this façade's contrac
     _strip_first_segment,
     dream_edges_admitted,
     normalize_slug,
+    parse_fold_surface,
     parse_planned,
     parse_typed_relations,
     parse_wikilinks,
@@ -53,6 +54,7 @@ from .links_cache import (  # noqa: F401  (re-exports are this façade's contrac
     _graph_from_payload,
     _load_links_payload,
     _stat_signatures,
+    fold_policy_matches,
     links_cache_fresh,
     load_edges,
     write_links_cache,
@@ -75,9 +77,11 @@ def build_graph(memory_dir: str, index_dir: Optional[str] = None) -> Optional[Li
             payload = _load_links_payload(index_dir)
             if payload is not None:
                 sigs = _stat_signatures(memory_dir)
-                if sigs is not None and sigs == {
-                    s: list(rec.get("sig") or []) for s, rec in payload["files"].items()
-                }:
+                if (
+                    sigs is not None
+                    and sigs == {s: list(rec.get("sig") or []) for s, rec in payload["files"].items()}
+                    and fold_policy_matches(payload, memory_dir)
+                ):
                     return _graph_from_payload(memory_dir, payload)
         except Exception:
             pass  # any cache trouble -> full rebuild below
@@ -424,6 +428,13 @@ def graph_audit(memory_dir: str) -> Optional[dict]:
                                  (archived/cross-tier targets are never maskable there);
                                  carried beside ``cross_tier`` so the audit still names
                                  every declared ref instead of silently dropping it.
+      folded                   — [{src, target, via, digest}] — dangling wikilinks whose
+                                 target slug survives as a ``### <slug>`` heading or a
+                                 ``- [<slug>](…)`` row inside a digest the corpus
+                                 declares in ``.format`` ``fold_digests`` (GRF-7, the
+                                 fold ritual). Reclassified out of ``rot`` by
+                                 ``lint_links._classify_folded`` (archived targets never
+                                 maskable); NEVER an edge — no digest becomes a hub.
       planned_stale            — [{src, target, reason}] — ``planned:`` declarations
                                  whose target now RESOLVES (in-project or cross-tier) or
                                  was archived: the marker outlived its purpose, so the
@@ -460,6 +471,11 @@ def graph_audit(memory_dir: str) -> Optional[dict]:
     planned: List[dict] = [
         {"src": i["file"], "target": i["target"], "via": "wikilink"}
         for i in report.get("planned", [])
+    ]
+
+    folded: List[dict] = [
+        {"src": i["file"], "target": i["target"], "via": "wikilink", "digest": i["digest"]}
+        for i in report.get("folded", [])
     ]
 
     # GRF-6: stale planned markers — a ``planned:`` declaration whose target now EXISTS
@@ -536,6 +552,7 @@ def graph_audit(memory_dir: str) -> Optional[dict]:
         "rot": rot,
         "cross_tier": cross_tier,
         "planned": planned,
+        "folded": folded,
         "planned_stale": planned_stale,
     }
 
@@ -570,7 +587,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="GRF-1: the one-call graph audit — edge classes, structure stats, "
         "edge_origin tags, edge rot (archived/superseded/dangling targets), and the "
-        "GRF-6 planned forward-reference classes",
+        "GRF-6 planned forward-reference and GRF-7 folded classes",
     )
     args = parser.parse_args(argv)
 
@@ -614,6 +631,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"planned forward refs ({len(planned)}) — declared deliberate (GRF-6), NOT rot:")
             for r in planned:
                 print(f"  {'planned':<10} {r['src']} -> {r['target']} (via {r['via']})")
+        folded = report.get("folded") or []
+        if folded:
+            print(
+                f"folded links ({len(folded)}) — target folded into a declared digest "
+                "(GRF-7, .format fold_digests), NOT rot:"
+            )
+            for r in folded:
+                print(f"  {'folded':<10} {r['src']} -> {r['target']} (in {r['digest']})")
         stale = report.get("planned_stale") or []
         if stale:
             print(f"stale planned marker(s) ({len(stale)}) — the target now exists; retire the declaration:")

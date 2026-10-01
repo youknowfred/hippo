@@ -6,7 +6,8 @@ corpus declares — ``corpus_format`` (the SHAPE of a memory file) and ``cite_de
 merge-not-clobber writer, and the format/derivation history that explains every bump.
 VOL-1 adds the marker's first POLICY key, ``volatile_paths`` (``read_volatile_paths``):
 corpus-owned declarations that, like the version axes, must travel with the corpus
-through git rather than live in any machine-local state.
+through git rather than live in any machine-local state. FLR-1's ``floor_lint`` and
+GRF-7's ``fold_digests`` (``read_floor_lint`` / ``read_fold_digests``) follow it.
 
 Decomposed out of ``provenance.py`` as pure code motion when the module-size ratchet
 fired (CUR-1/COR-20 work); every symbol stays importable at ``memory.provenance.<name>``
@@ -314,4 +315,47 @@ def read_floor_lint(memory_dir: str) -> dict:
         v = raw.get(key)
         if isinstance(v, int) and not isinstance(v, bool) and 0 < v <= ceiling:
             out[key] = v
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# GRF-7: the fold-digest POLICY key — the marker's third policy key after FLR-1
+# --------------------------------------------------------------------------- #
+def read_fold_digests(memory_dir: str) -> list:
+    """The corpus's declared fold-digest filename globs (GRF-7); ``[]`` when undeclared.
+    Never raises.
+
+    ``fold_digests`` names the corpus's FOLD convention: a ritual that retires an idle
+    memory by moving its text into a digest file and deleting the original. The old slug
+    survives inside the digest — as a ``### <slug>`` heading or a ``- [<slug>](…)`` row —
+    so every ``[[slug]]`` pointing at it still names real, recallable text, yet resolves
+    to no file stem. ``lint_links._classify_folded`` reads the declared digests and moves
+    such links out of ``dangling`` into the informational ``folded`` class. A
+    CLASSIFICATION only: a folded link is never an edge (resolving it would make every
+    digest a hub for recall expansion — the field corpus would have given six digests
+    ~80 inbound edges each).
+
+    Same posture as VOL-1/FLR-1: corpus-owned, committed, travels through git, no
+    writer (operator-committed policy; the version-stamp writers preserve it via
+    ``_write_marker_keys``), and every reader pulls only its own key. Entries are
+    ``fnmatch`` globs over memory FILENAMES in the corpus dir (``"folded-*.md"``,
+    ``"live-lanes-*.md"``) — a leading ``./`` is normalized off; entries carrying a
+    ``/``, non-strings and blanks drop; order preserved minus duplicates. An absent,
+    empty or garbled key degrades to ``[]`` — byte-identical behavior to an undeclared
+    corpus (ED-4).
+    """
+    raw = _read_marker(memory_dir).get("fold_digests")
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return []
+    out: list = []
+    for entry in raw:
+        if not isinstance(entry, str):
+            continue
+        p = entry.strip()
+        if p.startswith("./"):
+            p = p[2:]
+        if p and "/" not in p and p not in out:
+            out.append(p)
     return out
