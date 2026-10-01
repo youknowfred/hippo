@@ -46,6 +46,35 @@ def test_append_writes_one_event_with_schema(tmp_path):
     assert e["session_id"]  # a session id was stamped
 
 
+def test_recall_event_records_host_load(tmp_path, monkeypatch):
+    # MSR-7: every row carries the host's 1-min load + CPU count, so doctor's KPI-3 line
+    # can tell a contended tail from a hippo regression.
+    monkeypatch.setattr(T.os, "getloadavg", lambda: (37.456, 30.0, 20.0))
+    monkeypatch.setattr(T.os, "cpu_count", lambda: 16)
+    td = str(tmp_path / "tele")
+    assert T.log_recall_event([], query="q", k=5, latency_ms=1.0, telemetry_dir=td)
+    e = _events(td)[0]
+    assert e["load1"] == 37.46 and e["cpus"] == 16
+
+
+def test_recall_event_omits_host_load_where_platform_cannot_say(tmp_path, monkeypatch):
+    # MSR-7: no getloadavg (Windows) or an OSError -> the keys are ABSENT, never a fake 0.
+    td = str(tmp_path / "tele")
+    monkeypatch.delattr(T.os, "getloadavg")
+    assert T.log_recall_event([], query="q", k=5, latency_ms=1.0, telemetry_dir=td)
+
+    def _raise():
+        raise OSError("load average unobtainable")
+
+    monkeypatch.setattr(T.os, "getloadavg", _raise, raising=False)
+    assert T.log_recall_event([], query="q", k=5, latency_ms=1.0, telemetry_dir=td)
+    monkeypatch.setattr(T.os, "getloadavg", lambda: (1.0, 1.0, 1.0))
+    monkeypatch.setattr(T.os, "cpu_count", lambda: None)
+    assert T.log_recall_event([], query="q", k=5, latency_ms=1.0, telemetry_dir=td)
+    for e in _events(td):
+        assert "load1" not in e and "cpus" not in e
+
+
 def test_empty_results_logged_with_none_backend(tmp_path):
     td = str(tmp_path / "tele")
     assert (

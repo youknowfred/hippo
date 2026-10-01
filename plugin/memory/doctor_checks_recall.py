@@ -266,6 +266,36 @@ def check_edge_rot(ctx: DoctorContext) -> Dict[str, str]:
 
 _HOT_PATH_P95_BUDGET_MS = 1500.0  # KPI-3 / PRF-2: the cold per-prompt budget
 
+# MSR-7: a recall row whose host 1-minute load average is below this many runnable tasks
+# per CPU counts as UNCONTENDED. At or above 1.0 the run queue is at least as long as
+# the core count, so a CPU-bound recall (Python + ONNX) waits for a core and its wall
+# time measures the machine as much as hippo. The KPI-3 regression verdict is judged
+# on the uncontended slice only.
+_UNCONTENDED_LOAD_PER_CPU = 1.0
+# MSR-7: below this many uncontended rows, their p95 is too thin to clear or convict
+# hippo (nearest-rank p95 over < 20 rows is the max), so doctor says "not enough".
+_UNCONTENDED_MIN_EVENTS = 20
+
+
+def _p95(lats: List[float]) -> float:
+    """Nearest-rank p95 (ceil(0.95*n), no float math) over a non-empty list."""
+    s = sorted(lats)
+    n = len(s)
+    return s[max(1, min(n, (95 * n + 99) // 100)) - 1]
+
+
+def _host_load_per_cpu(event: dict) -> Optional[float]:
+    """MSR-7: ``load1 / cpus`` off a recall row, or None for a row that never recorded
+    host load (pre-MSR-7, or a platform without ``getloadavg``) — never guessed."""
+    load1, cpus = event.get("load1"), event.get("cpus")
+    if isinstance(load1, bool) or isinstance(cpus, bool):
+        return None
+    if not isinstance(load1, (int, float)) or not isinstance(cpus, int) or cpus <= 0:
+        return None
+    if load1 < 0:
+        return None
+    return float(load1) / cpus
+
 
 def check_hot_path_latency(ctx: DoctorContext) -> Dict[str, str]:
     """INT-5: report the recall hook's measured p95 wall-time over the telemetry ledger.
@@ -280,36 +310,85 @@ def check_hot_path_latency(ctx: DoctorContext) -> Dict[str, str]:
     MCP-channel events (the recall/why tools), and an in-process MCP recall's timing is
     a different animal from the fresh-hook-process cost this p95 budgets. Without the
     filter, one MCP call would corrupt the KPI-3 gate this line exists to watch.
+
+    MSR-7: the same recall takes several times longer on a machine with more runnable
+    work than cores, and before MSR-7 the ledger had no way to show that — so a fleet
+    host's contended tail read as "a heavier model regressed it". Rows now carry
+    ``load1``/``cpus``; the p95 is reported overall AND over the uncontended slice
+    (``load1/cpus < _UNCONTENDED_LOAD_PER_CPU``). The regression wording fires only
+    when the uncontended slice itself breaches the budget. A breach confined to the
+    contended slice is reported as host load (status ok: there is nothing in hippo to
+    fix). Rows without the fields are counted as unclassified and never assigned to
+    either slice; when there are too few uncontended rows to judge, the warning names
+    the breach without blaming anything.
     """
     try:
         from .telemetry import default_telemetry_dir, read_events
 
         td = default_telemetry_dir(ctx.memory_dir)
-        lats = sorted(
-            float(e["latency_ms"])
+        rows = [
+            (float(e["latency_ms"]), _host_load_per_cpu(e), e.get("load1"), e.get("cpus"))
             for e in read_events(td)
             if isinstance(e.get("latency_ms"), (int, float))
             and e.get("channel") in (None, "hook")
-        )
-        if not lats:
+        ]
+        if not rows:
             return {
                 "status": "ok",
                 "message": "hot-path latency: no recall events logged yet — nothing to measure.",
             }
-        n = len(lats)
-        rank = max(1, min(n, (95 * n + 99) // 100))  # nearest-rank ceil(0.95*n), no float math
-        p95 = lats[rank - 1]
-        if p95 > _HOT_PATH_P95_BUDGET_MS:
+        n = len(rows)
+        p95 = _p95([lat for lat, _, _, _ in rows])
+        quiet = [
+            lat
+            for lat, per_cpu, _, _ in rows
+            if per_cpu is not None and per_cpu < _UNCONTENDED_LOAD_PER_CPU
+        ]
+        busy = [r for r in rows if r[1] is not None and r[1] >= _UNCONTENDED_LOAD_PER_CPU]
+        n_unclassified = n - len(quiet) - len(busy)
+        split = (
+            f"{len(quiet)} uncontended / {len(busy)} contended / {n_unclassified} unclassified "
+            f"(contended = host load ≥ {_UNCONTENDED_LOAD_PER_CPU:g}× CPUs)"
+        )
+        budget = f"{_HOT_PATH_P95_BUDGET_MS:.0f}ms"
+        if p95 <= _HOT_PATH_P95_BUDGET_MS:
+            tail = f"; {split}" if n_unclassified < n else ""
             return {
-                "status": "warn",
-                "message": f"hot-path p95 = {p95:.0f}ms over {n} recall(s) — ABOVE the "
-                f"{_HOT_PATH_P95_BUDGET_MS:.0f}ms per-prompt budget (KPI-3). A heavier model or "
-                "new per-import cost likely regressed it.",
+                "status": "ok",
+                "message": f"hot-path p95 = {p95:.0f}ms over {n} recall(s) (budget {budget}{tail}).",
             }
+        if len(quiet) >= _UNCONTENDED_MIN_EVENTS:
+            q95 = _p95(quiet)
+            if q95 > _HOT_PATH_P95_BUDGET_MS:
+                return {
+                    "status": "warn",
+                    "message": f"hot-path p95 = {p95:.0f}ms over {n} recall(s), {q95:.0f}ms over "
+                    f"the {len(quiet)} uncontended — ABOVE the {budget} per-prompt budget "
+                    "(KPI-3) even on a quiet host. A heavier model or new per-import cost "
+                    f"likely regressed it. [{split}]",
+                }
+            # The breach lives in the contended slice: name the load it ran under.
+            mid = sorted(busy, key=lambda r: r[1])[len(busy) // 2]
+            return {
+                "status": "ok",
+                "message": f"hot-path p95 = {p95:.0f}ms overall, {q95:.0f}ms uncontended "
+                f"(budget {budget}) — the tail tracks host load (median {mid[2]:g}/{mid[3]} "
+                f"CPUs on contended recalls), not hippo. [{split}]",
+            }
+        if n_unclassified == n:
+            why = (
+                "every row predates host-load recording, so host contention and a hippo "
+                "regression can't be told apart yet — re-run after new recalls accumulate."
+            )
+        else:
+            why = (
+                f"only {len(quiet)} uncontended recall(s) (need {_UNCONTENDED_MIN_EVENTS}) — "
+                "too few to tell host contention from a hippo regression."
+            )
         return {
-            "status": "ok",
-            "message": f"hot-path p95 = {p95:.0f}ms over {n} recall(s) "
-            f"(budget {_HOT_PATH_P95_BUDGET_MS:.0f}ms).",
+            "status": "warn",
+            "message": f"hot-path p95 = {p95:.0f}ms over {n} recall(s) — ABOVE the {budget} "
+            f"per-prompt budget (KPI-3); {why} [{split}]",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"hot-path latency check failed: {exc}."}
