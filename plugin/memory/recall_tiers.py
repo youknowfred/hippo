@@ -6,10 +6,16 @@ re-exports."""
 
 from __future__ import annotations
 
+import math
 import os
+from bisect import bisect_left
+from collections.abc import Mapping
 from typing import Dict, List, Optional, Tuple
 
 from .build_index import (
+    _BM25_B,
+    _BM25_EPSILON,
+    _BM25_K1,
     SCHEMA_VERSION,
     LoadedIndex,
     build_index,
@@ -189,6 +195,131 @@ def _recall_tier_dirs(memory_dir: str, index_dir: Optional[str]) -> List[Tuple[s
     return tiers
 
 
+def _persisted_bm25(li: LoadedIndex) -> Optional[dict]:
+    """A tier's persisted BM25 block when it provably describes THIS loaded doc space
+    (entries then body chunks, one ``doc_len`` per doc matching that doc's token count),
+    else None. The check is O(docs), against the O(tokens) recompute it lets us skip."""
+    stats = li.manifest.get("bm25")
+    if not isinstance(stats, dict) or not isinstance(stats.get("postings"), dict):
+        return None
+    doc_len = stats.get("doc_len")
+    docs = li.entries + li.body_chunks
+    if not isinstance(doc_len, list) or len(doc_len) != len(docs):
+        return None
+    for n, d in zip(doc_len, docs):
+        if n != len(d.get("tokens") or []):
+            return None
+    return stats
+
+
+class _MergedPostings(Mapping):
+    """PRF-6: the merged doc space's postings, assembled per token ON FIRST READ.
+
+    A query reads the postings of its own handful of tokens; materializing all ~176k
+    postings of a real corpus (every project body-chunk posting shifts when another tier
+    adds entries ahead of it) costs as much as recounting them. Read-only, ordered like
+    ``compute_bm25_stats``'s dict; equal to it under ``==``. Deliberately a ``Mapping``,
+    not a ``dict``: anything that tries to ``json.dump`` an in-memory merged manifest
+    fails loudly instead of writing a partial table.
+    """
+
+    def __init__(self, sources: Dict[str, list], order: List[str]):
+        self._sources = sources  # token -> [(plist, split, entry_off, chunk_shift), ...]
+        self._order = order
+        self._built: Dict[str, List[List[int]]] = {}
+
+    def __getitem__(self, tok: str) -> List[List[int]]:
+        got = self._built.get(tok)
+        if got is not None:
+            return got
+        slot = self._sources[tok]  # KeyError for an unknown token, like a dict
+        merged: List[List[int]] = []
+        for plist, k, entry_off, _ in slot:  # all tiers' entry postings first...
+            if k:
+                merged.extend(plist[:k] if not entry_off else [[d + entry_off, tf] for d, tf in plist[:k]])
+        for plist, k, _, chunk_shift in slot:  # ...then all tiers' body-chunk postings
+            if k < len(plist):
+                merged.extend([[d + chunk_shift, tf] for d, tf in plist[k:]])
+        self._built[tok] = merged
+        return merged
+
+    def __contains__(self, tok: object) -> bool:
+        return tok in self._sources
+
+    def __iter__(self):
+        return iter(self._order)
+
+    def __len__(self) -> int:
+        return len(self._order)
+
+
+def _merge_bm25_stats(parts: List[Tuple[dict, int, int]]) -> dict:
+    """PRF-6: ``compute_bm25_stats`` over the merged doc space, assembled from each tier's
+    PERSISTED stats instead of re-counting every token on every prompt.
+
+    The merged doc order is every tier's entries (tier order), then every tier's body
+    chunks (tier order), exactly as ``_merge_loaded_indexes`` lays them out — so each
+    tier's postings split at its entry count and shift by fixed offsets. Only per-TOKEN
+    work happens here (document frequency, first doc, IDF); the postings lists themselves
+    are merged lazily (``_MergedPostings``). The result equals recomputing, dict order and
+    float bits included: tokens are ordered by their first merged doc (ties keep the owning
+    tier's order, which is within-doc order) and IDF runs the same loop in that order (a
+    test pins equality). ``parts`` is one ``(stats, n_entries, n_chunks)`` per tier, each
+    ``stats`` describing exactly that tier's KEPT docs (see ``_merge_loaded_indexes``).
+    """
+    n_entries_total = sum(n_e for _, n_e, _ in parts)
+    doc_len: List[int] = []
+    for stats, n_e, _ in parts:
+        doc_len.extend(stats["doc_len"][:n_e])
+    for stats, n_e, _ in parts:
+        doc_len.extend(stats["doc_len"][n_e:])
+
+    sources: Dict[str, list] = {}
+    df: Dict[str, int] = {}
+    keys: Dict[str, Tuple[int, int]] = {}
+    entry_off = 0
+    chunk_off = n_entries_total
+    for stats, n_e, n_c in parts:
+        chunk_shift = chunk_off - n_e
+        for pos, (tok, plist) in enumerate(stats["postings"].items()):
+            if not plist:
+                continue
+            k = bisect_left(plist, [n_e])
+            sources.setdefault(tok, []).append((plist, k, entry_off, chunk_shift))
+            df[tok] = df.get(tok, 0) + len(plist)
+            first = plist[0][0] + (entry_off if k else chunk_shift)
+            if tok not in keys or first < keys[tok][0]:
+                keys[tok] = (first, pos)
+        entry_off += n_e
+        chunk_off += n_c
+    order = sorted(keys, key=keys.__getitem__)
+
+    # Okapi IDF — the same loop, in the same token order, as build_index.compute_bm25_stats.
+    corpus_size = len(doc_len)
+    idf: Dict[str, float] = {}
+    negative: List[str] = []
+    idf_sum = 0.0
+    for tok in order:
+        d = df[tok]
+        val = math.log(corpus_size - d + 0.5) - math.log(d + 0.5)
+        idf[tok] = val
+        idf_sum += val
+        if val < 0:
+            negative.append(tok)
+    average_idf = idf_sum / len(idf) if idf else 0.0
+    floor = _BM25_EPSILON * average_idf
+    for tok in negative:
+        idf[tok] = floor
+    return {
+        "postings": _MergedPostings(sources, order),
+        "doc_len": doc_len,
+        "avgdl": (sum(doc_len) / corpus_size) if corpus_size else 0.0,
+        "idf": idf,
+        "k1": _BM25_K1,
+        "b": _BM25_B,
+    }
+
+
 def _merge_loaded_indexes(
     loadeds: List[Tuple[LoadedIndex, str, str]]
 ) -> Optional[LoadedIndex]:
@@ -198,9 +329,10 @@ def _merge_loaded_indexes(
     slug collision). Every kept entry is tagged with its ``root`` (absolute corpus dir) and
     ``corpus`` (origin label). Dense is vstacked ONLY when every tier is dense-ready under the
     SAME model — otherwise the merged view degrades to BM25-only (a transient state healed at
-    the next per-tier dense rebuild), never a half-valid matrix. BM25 stats are recomputed once
-    over the unified doc space (entries then body chunks), byte-for-byte the way ``build_index``
-    assembles them. Returns the single index unchanged when there is nothing to merge.
+    the next per-tier dense rebuild), never a half-valid matrix. BM25 stats cover the unified
+    doc space (entries then body chunks), byte-for-byte the way ``build_index`` assembles them
+    — merged from the tiers' persisted stats when possible (PRF-6), else recomputed.
+    Returns the single index unchanged when there is nothing to merge.
     """
     loadeds = [(li, root, label) for (li, root, label) in loadeds if li is not None]
     if not loadeds:
@@ -217,12 +349,15 @@ def _merge_loaded_indexes(
     merged_chunks: List[dict] = []
     dense_vectors: List = []
     seen_names: set = set()
+    kept_per_tier: List[Tuple[LoadedIndex, bool, List[dict], List[dict]]] = []
     model: Optional[str] = None
 
     for li, root, label in loadeds:
         if li.model and model is None:
             model = li.model
         remap: Dict[int, int] = {}  # this tier's entry-index -> merged entry-index
+        tier_entries: List[dict] = []
+        tier_chunks: List[dict] = []
         for old_i, e in enumerate(li.entries):
             name = e.get("name")
             if name in seen_names:
@@ -238,6 +373,7 @@ def _merge_loaded_indexes(
             else:
                 ne["row"] = None
             merged_entries.append(ne)
+            tier_entries.append(ne)
         for c in li.body_chunks:
             parent = c.get("entry")
             if parent not in remap:
@@ -250,6 +386,9 @@ def _merge_loaded_indexes(
             else:
                 nc["row"] = None
             merged_chunks.append(nc)
+            tier_chunks.append(nc)
+        dropped = len(tier_entries) < len(li.entries)
+        kept_per_tier.append((li, dropped, tier_entries, tier_chunks))
 
     merged_dense = None
     if build_dense and dense_vectors:
@@ -257,10 +396,29 @@ def _merge_loaded_indexes(
 
         merged_dense = np.vstack(dense_vectors)
 
-    bm25 = compute_bm25_stats(
-        [e.get("tokens") or [] for e in merged_entries]
-        + [c.get("tokens") or [] for c in merged_chunks]
-    )
+    # PRF-6: each tier contributes its persisted stats; a tier that lost entries to a
+    # higher tier's slug (a promoted memory lives in both) recounts only its own kept docs —
+    # first-wins means that is never the project tier. A tier without usable persisted stats
+    # sends the whole merge back to one recompute over the merged tokens, as before.
+    parts: List[Tuple[dict, int, int]] = []
+    for li, dropped, tier_entries, tier_chunks in kept_per_tier:
+        stats = (
+            compute_bm25_stats(
+                [e.get("tokens") or [] for e in tier_entries]
+                + [c.get("tokens") or [] for c in tier_chunks]
+            )
+            if dropped
+            else _persisted_bm25(li)
+        )
+        if stats is None:
+            break
+        parts.append((stats, len(tier_entries), len(tier_chunks)))
+    bm25 = _merge_bm25_stats(parts) if len(parts) == len(kept_per_tier) else None
+    if bm25 is None:
+        bm25 = compute_bm25_stats(
+            [e.get("tokens") or [] for e in merged_entries]
+            + [c.get("tokens") or [] for c in merged_chunks]
+        )
     manifest = {
         "schema_version": SCHEMA_VERSION,
         "model": model if merged_dense is not None else None,
