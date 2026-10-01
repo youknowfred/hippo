@@ -261,3 +261,46 @@ def test_nag_rides_record_from_payload_context(tmp_path, monkeypatch):
         context_out=ctx2,
     )
     assert ctx2 == []
+
+
+# --------------------------------------------------------------------------- #
+# The CLI, run the way users run it: `python -m memory.lint_floor` in a subprocess.
+# v1.36.0 shipped the `__main__` guard ABOVE floor_governance/format_governance_summary,
+# so `-m` ran main() before those defs existed (NameError) while every importer —
+# doctor, the SessionStart producer, the in-process tests above — passed. Only a real
+# `-m` run sees module-execution order.
+# --------------------------------------------------------------------------- #
+_PLUGIN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "plugin")
+
+
+def _run_lint_floor_cli(tmp_path, mem: str):
+    import subprocess
+    import sys
+
+    env = {k: v for k, v in os.environ.items() if not k.startswith("HIPPO_")}
+    env["PYTHONPATH"] = _PLUGIN_DIR
+    return subprocess.run(
+        [sys.executable, "-m", "memory.lint_floor", "--memory-dir", mem],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        env=env,
+        timeout=60,
+    )
+
+
+def test_cli_clean_floor_exits_zero(tmp_path):
+    mem = _corpus(tmp_path, _CLEAN_FLOOR, {"banned_re": _M3_RE, "max_line": 200})
+    write_file(mem, "a.md", "---\nname: a\ndescription: a\nmetadata:\n  type: user\n---\n\na\n")
+    proc = _run_lint_floor_cli(tmp_path, mem)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "floor invariant holds" in proc.stdout
+    assert proc.stderr == ""
+
+
+def test_cli_declared_policy_violation_exits_one_with_governance_line(tmp_path):
+    mem = _dirty_corpus(tmp_path)
+    proc = _run_lint_floor_cli(tmp_path, mem)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "Traceback" not in proc.stderr
+    assert "MEMORY.md floor: 1 banned-token line(s): L5" in proc.stdout
