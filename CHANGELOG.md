@@ -7,6 +7,53 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.38.0 — 2026-10-01 — "The load you were under"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**. **Operator action:
+none.** Rows logged before this release carry no host load, so doctor reports them as
+unclassified until new recalls accumulate. Commissioned from a 2026-10-01 doctor pass on the
+em-growth-labs field corpus (hippo 1.36.0, before v1.36.1 and v1.37.0 shipped the same day),
+which warned `hot-path p95 = 2339ms over 534 recall(s) — ABOVE the 1500ms per-prompt budget
+(KPI-3). A heavier model or new per-import cost likely regressed it.` That attribution was
+wrong. Over the corpus's 577 recall events
+(one model, all 1.36.0): p50 473ms, p95 2511ms. The tail was not first-call-of-session (p95
+1903 first-in-session vs 2529 later) and not hippo's own concurrency (p95 2472 for events
+with no other recall within ±5s). The host was running at load average 33–43 on 16 cores
+(about 37 Claude sessions plus their test suites and headless-Chrome render gates). Capping
+threads made no difference. The ledger had no host-load field, so nothing could tell
+contention from a regression.
+
+- **MSR-7 — every recall row records host load, and KPI-3 is judged on the quiet slice.**
+  `log_recall_event` stamps `load1` (`os.getloadavg()[0]`) and `cpus` (`os.cpu_count()`) on
+  every channel. The fields are additive and absent where the platform can't report them
+  (no `getloadavg` on Windows, an `OSError`, an unknown CPU count). They are never a guessed
+  0. Doctor's `hot_path_latency` line now reports the p95 overall and over the
+  **uncontended** slice (`load1 / cpus < 1.0`; at 1.0 or above the run queue is at least as
+  long as the core count, so a CPU-bound recall waits for a core):
+  - **Breach in the uncontended slice:** the existing regression wording, now with both
+    numbers.
+  - **Breach only in the contended slice:** `p95 X ms overall, Y ms uncontended — the tail
+    tracks host load (median N/cpus CPUs on contended recalls), not hippo`. Status is ok,
+    because there is nothing in hippo to fix.
+  - **Rows without the fields:** counted as unclassified and never put in either slice. A
+    breach over unclassified rows, or over fewer than 20 uncontended rows, is named with no
+    cause blamed.
+
+  Every message carries the `uncontended / contended / unclassified` counts. Pins:
+  `tests/test_doctor_host_load.py` (contended-only attribution, uncontended breach,
+  all-unclassified, mixed old+new ledger, threshold boundary and malformed load fields) and
+  `tests/test_telemetry.py` (fields recorded; absent on no-`getloadavg` / `OSError` /
+  unknown CPU count); `test_concurrency`'s ledger key pin admits the optional pair.
+- **Measured, not built — the hook pays a fresh interpreter and model load per prompt.**
+  `memory_user_prompt.sh` spawns `python -m memory.recall` on every prompt, and
+  `latency_ms` starts after interpreter start and imports, so the ledger understates the
+  wait by 0.4–1.1 s per prompt (measured at load 46–66 on 16 cores). A recall with the model
+  already loaded still costs 0.65–1.2 s here, most of it per-call frontmatter YAML parsing
+  and BM25 stats recomputed on every call. Serving hook recall from the resident MCP server,
+  and the cheaper per-index caching that would help both paths, are written up in the
+  release PR for an owner decision.
+
 ## v1.37.0 — 2026-10-01 — "Folded, not gone"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
