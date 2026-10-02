@@ -1693,4 +1693,5 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 if __name__ == "__main__":
+    __import__("gc").disable()  # PRF-6: one-shot hook/CLI process; in-process callers keep GC
     raise SystemExit(main())

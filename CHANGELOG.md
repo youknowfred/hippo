@@ -7,6 +7,57 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.39.0 — 2026-10-01 — "What the index already knew"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**, link cache still
+**6**. **Operator action: none.** This is the owner-approved first step from the v1.38.0
+hook-path write-up: before considering serving hook recall from the resident MCP server,
+stop redoing per-prompt work the index already holds, then re-measure. Measured on the
+em-growth-labs field corpus (999 project memories plus a 28-memory user tier). A warm recall
+spent most of its time on recomputation rather than on the model:
+- re-counting BM25 over all 3,431 fused docs, because a user tier existed;
+- pure-Python YAML-parsing 200 frontmatters for the mid-session drift check;
+- cyclic-GC passes over the loaded index.
+
+- **PRF-6 — the fused index reuses each tier's persisted BM25 stats.**
+  - `_merge_loaded_indexes` no longer recomputes `compute_bm25_stats` over every fused doc.
+    It merges the stats each tier's index already persisted, doing only per-token work
+    (document frequency, first doc, IDF in the same order).
+  - Postings lists are assembled lazily on first read (`_MergedPostings`), since a query only
+    reads its own few tokens.
+  - A tier that lost entries to a slug collision (a promoted memory lives in both tiers)
+    recounts only its own kept docs. The project tier never loses a collision.
+  - A tier whose persisted stats don't describe its loaded docs sends the merge back to one
+    full recompute, as before.
+  - The result equals recomputing, down to dict order and float bits. A hypothesis property
+    test pins that over random tiers with collisions. Field corpus: the tier merge went from
+    ≈125–300 ms to ≈13 ms in isolation.
+- **PRF-6 — frontmatter parses through libyaml.** `parse_frontmatter` uses PyYAML's
+  `CSafeLoader` when the wheel ships it. It produced identical output on all 1,764 real
+  frontmatter blocks across every corpus on the dev machine, and is ≈12× faster. Pure-Python
+  PyYAML and the vendored miniyaml keep `yaml.safe_load`. The drift check went from ≈360 ms
+  to ≈35–55 ms per prompt.
+- **PRF-6 — the hook's one-shot process runs without cyclic GC.** `python -m memory.recall`
+  disables cyclic GC for its lifetime. Each collection pass rescanned the loaded index's
+  JSON containers (≈70 ms of a warm recall). It is guarded to the module-as-script path, so
+  tests and the MCP server (which call `recall()` in-process) keep normal GC.
+
+**Measured, end to end** (fresh-process hook runs, main vs this tree, alternating, 18 each,
+host load ≈23 on 16 cores):
+
+| | main | this tree |
+|---|---|---|
+| hook wall time p50 | 581 ms | **426 ms** |
+| logged `latency_ms` p50 | 440 ms | **286 ms** |
+| top-k results | — | identical for every query |
+
+Warm in-process recall: median ≈870–1030 ms → ≈420–480 ms at load 23–38.
+
+Serving hook recall from the MCP server stays unbuilt. It would now save only the
+interpreter start and the model load, and that decision should wait for the
+uncontended-slice numbers v1.38.0 now records. Pins: `tests/test_recall_tier_bm25.py`.
+
 ## v1.38.0 — 2026-10-01 — "The load you were under"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
