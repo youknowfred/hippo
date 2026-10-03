@@ -304,6 +304,20 @@ def _flags_missing_from(module_src: str, flags) -> list:
     return [f for f in flags if f not in module_src]
 
 
+# RWY-1: a façade whose CLI moved into a sibling module still answers ``-m memory.<façade>``
+# (its ``main`` delegates), so the flags it advertises are bound to the façade AND the
+# sibling that now defines its argparse.
+_CLI_SIBLINGS = {
+    "recall": "recall_hook",
+    "dream": "dream_cli",
+    "reconsolidate": "reconsolidate_cli",
+}
+
+
+def _cli_source(modules: dict, name: str) -> str:
+    return modules[name] + modules.get(_CLI_SIBLINGS.get(name, ""), "")
+
+
 def test_every_named_cli_flag_exists_on_its_module():
     """INT-18 itself: 'provenance --reverify' shipped in a nudge; the flag lives in
     reconsolidate. Bind each named flag to the module named alongside it and require
@@ -317,7 +331,7 @@ def test_every_named_cli_flag_exists_on_its_module():
         for span in re.findall(r"`([^`\n]+)`", text):
             m = re.match(r"\s*(?:python\s+-m\s+memory\.|memory\.)?([a-z_][a-z0-9_]*)\s+--", span)
             if m and m.group(1) in modules:
-                missing = _flags_missing_from(modules[m.group(1)], _FLAG_RE.findall(span))
+                missing = _flags_missing_from(_cli_source(modules, m.group(1)), _FLAG_RE.findall(span))
                 bad += [f"{origin}: `{span}` names {f} but memory/{m.group(1)}.py has no such flag" for f in missing]
         # Form 2: flags scattered through ONE Python advice string that names exactly
         # one `-m memory.<module>` (the cite_derivation nudge's shape). Python string
@@ -329,7 +343,7 @@ def test_every_named_cli_flag_exists_on_its_module():
         named = set(re.findall(r"-m\s+memory\.([a-z_][a-z0-9_]*)", text)) & set(modules)
         if len(named) == 1:
             mod = named.pop()
-            missing = _flags_missing_from(modules[mod], _FLAG_RE.findall(text))
+            missing = _flags_missing_from(_cli_source(modules, mod), _FLAG_RE.findall(text))
             bad += [f"{origin}: names {f} alongside memory.{mod}, which has no such flag" for f in missing]
     assert not bad, "advice names CLI flags their module does not define (INT-18):\n  " + "\n  ".join(
         sorted(set(bad))

@@ -56,7 +56,7 @@ WRITE_OPEN_ALLOWLIST = {
     #    targets the TMP file; the swap is atomic at the real path --
     ("build_index", "build_index"): "manifest write: own unique-tmp + os.replace (COR-12/COR-17)",
     ("links_cache", "write_links_cache"): "own unique-tmp + os.replace (COR-12/COR-17)",
-    ("staleness", "write_stale_cache"): "own unique-tmp + os.replace (COR-17)",
+    ("staleness_cache", "write_stale_cache"): "own unique-tmp + os.replace (COR-17)",
     ("outcome", "write_outcome_cache"): "own unique-tmp + os.replace (COR-17)",
     ("rules_plane", "refresh_rules_cache"): "own unique-tmp + os.replace (COR-17)",
     ("telemetry_usage", "write_user_usage_summary"): "own unique-tmp + os.replace (committed .usage summary)",

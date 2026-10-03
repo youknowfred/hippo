@@ -28,7 +28,7 @@ shift || true
 
 case "$cmd" in
   recall)
-    exec "$PY" -m memory.recall "$@"
+    exec "$PY" -m memory.recall_hook "$@"
     ;;
   new)
     exec "$PY" -m memory.new_memory "$@"
