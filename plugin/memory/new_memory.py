@@ -1223,9 +1223,13 @@ def write_memory(
 
         tier_b = scan_tier_b(rendered)
         if tier_b:
-            from .telemetry import log_threat_findings
+            from .telemetry import default_telemetry_dir, log_threat_findings
 
-            log_threat_findings(tier_b, source="write", name=name)
+            # OBS-9: the row belongs beside the corpus written to, not the launch dir's.
+            log_threat_findings(
+                tier_b, source="write", name=name,
+                telemetry_dir=default_telemetry_dir(memory_dir),
+            )
     except Exception:
         pass
 

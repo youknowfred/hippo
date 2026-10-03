@@ -86,6 +86,7 @@ from .reconsolidate_watermark import (  # noqa: F401
     watermark_stale_candidates,
 )
 from .telemetry import (
+    default_telemetry_dir,
     read_events,
     read_reconsolidation_events,
     record_reconsolidation_outcome,
@@ -447,6 +448,8 @@ def semantic_reverify(
         "error": None,
     }
     try:
+        # OBS-9: the verdict belongs in the HANDED corpus's ledger, not the launch dir's.
+        telemetry_dir = telemetry_dir or default_telemetry_dir(memory_dir)
         if outcome not in _VALID_OUTCOMES:
             result["error"] = f"invalid outcome: {outcome!r}"
             return result
@@ -619,6 +622,7 @@ def snooze(
     """
     result = {"name": name, "logged": False, "error": None}
     try:
+        telemetry_dir = telemetry_dir or default_telemetry_dir(memory_dir)  # OBS-9
         fname = name if name.endswith(".md") else f"{name}.md"
         if not os.path.isfile(os.path.join(memory_dir, fname)):
             result["error"] = f"memory not found: {fname}"

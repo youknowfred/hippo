@@ -792,13 +792,43 @@ def read_archive_regret(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
         return
 
 
-def read_reconsolidation_events(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
-    """Yield parsed reconsolidation-outcome events, skipping corrupt/partial lines. Never raises."""
+# OBS-9: until v1.40.0, three end-to-end tests appended verdicts for fixture memories to the
+# developer's LIVE reconsolidation ledger whenever the suite ran from a hippo checkout (727
+# of hippo's 999 rows). The leak is fixed at the source; these are the names it minted.
+_LEAKED_FIXTURE_NAMES = frozenset({"m_alpha", "m_feature_design", "reranker_voyage"})
+
+
+def _quarantined_fixture_names(telemetry_dir: str) -> frozenset:
+    """The leaked fixture names that this ledger's own corpus does not hold. The corpus is
+    the telemetry dir's sibling ``memory``; when that dir is absent (a custom telemetry
+    dir) nothing is quarantined, and a real memory that shares a fixture's name (live or
+    archived) is never hidden."""
+    md = os.path.join(os.path.dirname(os.path.abspath(telemetry_dir)), "memory")
+    if not os.path.isdir(md):
+        return frozenset()
+    return frozenset(
+        n
+        for n in _LEAKED_FIXTURE_NAMES
+        if not os.path.exists(os.path.join(md, n + ".md"))
+        and not os.path.exists(os.path.join(md, "archive", n + ".md"))
+    )
+
+
+def read_reconsolidation_events(
+    telemetry_dir: Optional[str] = None, *, include_quarantined: bool = False
+) -> Iterator[dict]:
+    """Yield parsed reconsolidation-outcome events, skipping corrupt/partial lines. Never raises.
+
+    OBS-9: rows the test suite leaked into a live ledger (``_LEAKED_FIXTURE_NAMES`` absent
+    from this ledger's corpus) are skipped, so every KPI reader — the graduation rate, the
+    snooze window, doctor — counts only real verdicts. ``include_quarantined=True`` is the
+    forensic view."""
     try:
         td = _resolve_dir(telemetry_dir)
         path = _reconsolidation_ledger_path(td)
         if not os.path.exists(path):
             return
+        skip = frozenset() if include_quarantined else _quarantined_fixture_names(td)
         with open(path, "r", encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
@@ -808,7 +838,7 @@ def read_reconsolidation_events(telemetry_dir: Optional[str] = None) -> Iterator
                     obj = json.loads(line)
                 except Exception:
                     continue
-                if isinstance(obj, dict):
+                if isinstance(obj, dict) and obj.get("name") not in skip:
                     yield obj
     except Exception:
         return

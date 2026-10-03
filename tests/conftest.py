@@ -132,6 +132,28 @@ def _strip_ambient_plugin_env(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_launch_dir(tmp_path_factory, monkeypatch):
+    """OBS-9: every test's implicit corpus resolution starts in tmp, never in the checkout
+    pytest was launched from.
+
+    ``resolve_dirs()`` starts at ``CLAUDE_PROJECT_DIR``-or-cwd, and SHP-7 redirects a linked
+    worktree to the main tree's corpus — so a write that resolves its dir implicitly (a
+    ledger append with no ``telemetry_dir``) lands in the developer's LIVE ``.claude/.memory-*``
+    dirs when the suite runs from a hippo checkout. Three end-to-end reverify tests did that on
+    every full-suite run, until 727 of the real reconsolidation ledger's 999 verdicts were
+    fixtures. So: chdir into a fresh dir outside any repo (a sibling of ``tmp_path``, not inside
+    it, so tests that list ``tmp_path`` see nothing new) and drop the ambient overrides that
+    would pin resolution back at a real corpus. A test exercising resolution chdirs or sets
+    these itself; monkeypatch restores both. tests/test_live_ledger_hermeticity.py pins it.
+    """
+    monkeypatch.chdir(tmp_path_factory.mktemp("launch"))
+    for var in (
+        "CLAUDE_PROJECT_DIR", "HIPPO_CORPUS_ROOT", "HIPPO_MEMORY_DIR", "HIPPO_TELEMETRY_DIR"
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_trust_registry(tmp_path, monkeypatch):
     """Keep the SEC-1 trust gate hermetic + open by default across the whole suite.
 
