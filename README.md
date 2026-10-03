@@ -202,7 +202,7 @@ full map (with where each analogy ends) is in
 
 ## Commands
 
-hippo ships as 16 `/hippo:*` skills. You rarely invoke most of them by hand — the agent runs the
+hippo ships as 18 `/hippo:*` skills. You rarely invoke most of them by hand — the agent runs the
 maintenance ones when a session-start signal calls for it — but here is the whole surface, grouped
 by what it's for.
 
@@ -380,7 +380,7 @@ plugin/
 ├── assets/packs/                 # starter packs (core seeded by default; rest opt-in)
 ├── bin/hippo                     # CLI launcher for the stateless engine commands
 ├── requirements.txt              # fastembed, numpy, PyYAML, rank-bm25 (the venv path)
-└── skills/                       # 16 /hippo:* commands (see the Commands section above)
+└── skills/                       # 18 /hippo:* commands (see the Commands section above)
 tests/                            # hermetic test suite (no network/model download by default)
 .github/workflows/ci.yml          # hermetic matrix + dense/secret-scan/resolution lanes + shellcheck
 ```

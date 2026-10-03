@@ -65,7 +65,7 @@ case "$cmd" in
     exit 1
     ;;
   *)
-    echo "usage: hippo <recall|new|build-index|staleness|review|mcp> [args...]" >&2
+    echo "usage: hippo <recall|new|build-index|staleness|review|sleep|mcp> [args...]" >&2
     echo "  (init/bootstrap/doctor/audit are skills — use /hippo:<name>)" >&2
     exit 2
     ;;

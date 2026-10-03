@@ -13,7 +13,7 @@ rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a
 
 ## 2. Rebuild a derived cache (automatic)
 
-The recall index carries its own `schema_version` (currently 6), separate from your corpus format.
+The recall index carries its own `schema_version` (currently 7), separate from your corpus format.
 When the plugin's schema is newer than the persisted index, **every load path treats the stale index
 as absent** and the next SessionStart refresh does one full rebuild — no action needed. The same is
 true of the link cache, staleness cache, and telemetry ledgers: they are gitignored, rebuildable

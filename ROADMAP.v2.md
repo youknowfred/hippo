@@ -50,8 +50,9 @@ has outgrown its budget:
   straight into ranking. Injection precision (KPI-2) is **1.7%** on emgl and about 10% on hippo
   itself (measured lens).
 - **Maintenance work mostly confirms that nothing changed.**
-  - About 3 in 4 reverify verdicts are `graduate`: 224 of 311 on hippo (72%) ✓, after removing
-    688 test-fixture rows that leak into the live ledger (OBS-9), and 297 of 401 on emgl (74%) ✓.
+  - Over 3 in 4 reverify verdicts are `graduate`: 185 of 242 on hippo (76%) ✓, after removing the
+    test-fixture rows that leak into the live ledger (OBS-9), and 297 of 371 on emgl (80%) ✓.
+    Snoozes are deferrals, not verdicts, so they sit outside both denominators.
   - Two citation-derivation bumps cost **about 600 per-item `rederive` calls** (419 + 179;
     fact-check transcript grep).
   - `trust_drift` fires in **97%** of emgl SessionStarts and 59% of hippo's ✓.
@@ -112,8 +113,8 @@ The top five moves are in §13.
 | Injection precision (KPI-2) | emgl 1.7% (132/7,660); hippo ~10% (250/2,446) | measured lens (`outcome.injection_precision`) |
 | Hook latency | emgl p50 423 ms / p95 2,269 ms logged ✓; logged ms omits 0.4–1.1 s interpreter start | ✓ ledger; `CHANGELOG.md` v1.38.0 |
 | PostToolUse spawns | median 7.47 Python spawns per recall prompt (63 sessions) | arch lens |
-| Reverify verdicts | hippo 224/311 graduate (72%) after removing 688 test-fixture rows; emgl 297/401 (74%) | ✓ `reconsolidation_events.jsonl` |
-| Ledger hygiene | 688 of hippo's 999 verdict rows name test fixtures (`m_alpha` 394, `m_feature_design` 294) that exist in no corpus; stamped up to v1.37.0, so the leak is ongoing | ✓ ledger vs corpus listing; fact-check |
+| Reverify verdicts | hippo 185/242 graduate (76%) after removing test-fixture rows; emgl 297/371 (80%); snoozes excluded | ✓ `reconsolidation_events.jsonl` |
+| Ledger hygiene | 727 of hippo's 999 verdict rows name test fixtures (`m_alpha` 394, `m_feature_design` 294, `reranker_voyage` 39) that exist in no corpus; stamped up to v1.39.0, so the leak is ongoing | ✓ ledger vs corpus listing; fact-check |
 | Staleness backlog | emgl 764/1,024 (74.6%) flagged stale; 72 verdicts in 30 days | measured lens |
 | Two staleness stories | recall banners 49/80 hippo memories while SessionStart arms 1 (+45 type-exempt, +3 volatile) | ux lens; `recall_salience.py:173-206` |
 | MCP surface | 28 tools, 36,546 chars of `tools/list`; no annotations, no `outputSchema`; protocol version echoed | ✓ `json.dumps(_TOOLS)`; `mcp_server.py:168,264` |
@@ -255,14 +256,14 @@ built on false premises.
 | Warm socket keyed on `session_id` | MCP server never sees a session id ✓ | HOT-6 is rebuilt on `mcp_tool` hooks (§2.1); socket design kept as fallback with a keying + version-handshake spike |
 | Warm p50 ≤80 ms | Warm *in-process* recall measured at ~420–480 ms under load (`CHANGELOG.md` v1.39.0) | Gate is relative: contended wall p95 ≥40% below spawn |
 | Make hippo's writes refresh trust (DISTILL TND-6) | Already shipped: `record_authored_write`, called from 8 write modules ✓ | Replaced by OBS-6 trust-drift root-cause repro |
-| Evidence-gated graduation from fences (≥70% batchable) | 0/1,028 emgl memories carry fences; future-only ✓ | TND-3 adds *derived* anchors, validated by replaying historical verdicts (~712 real ones; see the next table) |
+| Evidence-gated graduation from fences (≥70% batchable) | 0/1,028 emgl memories carry fences; future-only ✓ | TND-3 adds *derived* anchors, validated by replaying historical verdicts (~613 real ones; see the next table) |
 | Dual-shape idiom ×27 in 15 modules | 24 exact hits in 13 files (26 in 15 loose) | RWY-2 baseline restated |
 
 The Phase-5 fact-check then corrected the first draft of this document:
 
 | First-draft claim | Reality | Effect |
 |---|---|---|
-| "91% of hippo verdicts are `graduate`" | 688/999 rows are test fixtures leaking into the live ledger; real share 72% (224/311) ✓ | Baselines restated; new OBS-9 (test hermeticity); TND-3 replays ~712 real verdicts |
+| "91% of hippo verdicts are `graduate`" | 727/999 rows are test fixtures leaking into the live ledger; real share 76% (185/242 verdicts) ✓ | Baselines restated; new OBS-9 (test hermeticity); TND-3 replays ~613 real verdicts |
 | "About half of emgl recalls are task-notification turns" | 58% are machine turns once subagent hand-backs, cross-session messages and scheduled tasks are counted, and `clean_query` doesn't know three of those tags ✓ | HOT-1 and OBS-1 cover every machine-turn class |
 | "One derivation bump cost 623 calls" | Two bumps (v1.35.0 4→5, v1.36.0 5→6): 419 + 179 per-item calls, plus worklist and stamp calls | Restated as ~600 across two bumps |
 | RWY-4 moves 845 LOC cleanly | `eval_recall.py:1196-1199,1242-1243` dispatch `--ab`/`--calibrate` into those modules | RWY-4 moves the dispatch too |
@@ -351,9 +352,9 @@ Skyline), never from 2.3 days of ledger or one corpus.*
 - **OBS-8 1,000-memory dense-under-load nightly lane** `S` — Synthetic 1,000-memory corpus, dense
   on, ≥8 concurrent recalls, beside the 500-memory BM25 lane. Fails on >25% regression against
   the trailing 7 nights.
-- **OBS-9 Tests never write the live ledgers (repro-first)** `S` *(new — fact-check)* — 688 of
-  hippo's 999 verdict rows are test fixtures (`m_alpha`, `m_feature_design`), stamped as late as
-  v1.37.0 ✓. A test is leaking into the real telemetry dir. Write the failing hermeticity test
+- **OBS-9 Tests never write the live ledgers (repro-first)** `S` *(new — fact-check)* — 727 of
+  hippo's 999 verdict rows are test fixtures (`m_alpha`, `m_feature_design`, `reranker_voyage`),
+  stamped as late as v1.39.0 ✓. A test is leaking into the real telemetry dir. Write the failing hermeticity test
   first: run the suite and assert that no file under any real `.memory-telemetry` changes. Then
   fix the leak and quarantine the polluted rows from KPI readers. *Why:* every KPI in §9 reads
   these ledgers.
@@ -469,8 +470,8 @@ same on every surface.*
   cited-symbol and identifier hits inside the `source_commit..HEAD` hunks of each cited path,
   computed at staleness time with **zero corpus writes**. A memory whose cited path changed but
   whose anchors are intact becomes *quiet*: visible in doctor, not armed, not bannered. *Gate:*
-  replay the ~712 real historical verdicts first (311 hippo after removing fixture rows, plus 401
-  emgl). At least 50% of graduates must be
+  replay the ~613 real historical verdicts first (242 hippo after removing fixture rows and
+  snoozes, plus 371 emgl). At least 50% of graduates must be
   quiet, with ≤5% of fix/demote verdicts suppressed. *Why:* fences are future-only, so 0/1,028
   emgl memories carry one ✓.
 - **TND-4 Batched acknowledgement for owner-ruled classes** `M` · deps TND-2, TND-3, V2Q-1 —
@@ -743,7 +744,7 @@ opt-in data before the v2.0 default decision.
 
 ### v1.43.0 — "Last 1.x: derived self-tending"
 > **Gate:**
-> - The TND-3 replay over ~712 real historical verdicts shows ≥50% of graduates quiet and ≤5% of
+> - The TND-3 replay over ~613 real historical verdicts shows ≥50% of graduates quiet and ≤5% of
 >   fix/demote suppressed.
 > - FMT-2 dual binding shows ≤1% staleness-verdict diff on emgl.
 > - HOT-6 opt-in has ≥14 days of contended emgl data.
@@ -846,7 +847,7 @@ PLT-1's receipts confirm or revise it before NAT-2 builds. This satisfies the v1
 | K3 Abstention | off-topic fixtures abstaining; field share reported | 0/11; 0/486 ✓ | ≥8/11, with K4 non-decreasing | `abstention_fixtures`, OBS-1 |
 | K4 Injection precision (KPI-2) | injected memories whose cited file was touched in-session | emgl 1.7%, hippo ~10% | emgl ≥5%, hippo ≥20% | `outcome.injection_precision` |
 | K5 Hook wall latency (KPI-3) | shell-measured UserPromptSubmit wall time | logged p95 2,269 ms emgl ✓ + unlogged start | warm contended p95 ≥40% below spawn; spawns per prompt ≤2 | OBS-4 |
-| K6 Maintenance toil (KPI-6) | graduate share of human verdicts; per-item writes per derivation bump | hippo 72% / emgl 74% ✓ (fixture rows removed); ~600 across two bumps | ≤50%; 0 | reconsolidation ledger (after OBS-9); OBS-2 |
+| K6 Maintenance toil (KPI-6) | graduate share of human verdicts; per-item writes per derivation bump | hippo 76% (185/242) / emgl 80% (297/371) ✓ (fixture rows removed, snoozes excluded); ~600 across two bumps | ≤50%; 0 | reconsolidation ledger (after OBS-9); OBS-2 |
 | K7 Trust noise | SessionStarts showing `trust_drift` | 97% emgl / 59% hippo ✓ | set after OBS-6 diagnosis | `injection_producers` |
 | K8 Field recall (KPI-4) | recall@10 / MRR@10 on pinned field sets | emgl 0.577 / 0.265 (stale set) | no regression >0.02 on any corpus; stretch emgl ≥0.70 | OBS-5 |
 | K9 Surface weight | skills / tools / `tools/list` chars / frozen env / user-facing ids / raw-python hints | 18 / 28 / 36,546 ✓ / 22 / ids in 18/18 SKILL.md ✓ / 51 | 9 / about 10 / ≤15,000 / ≤12 / 0 / 0 | registry and lint tests |

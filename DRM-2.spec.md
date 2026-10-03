@@ -1,6 +1,6 @@
 # DRM-2 — Tier-A auto-apply + MCP notify-with-undo (implementation spec)
 
-**Status: DRAFT spec for owner review.** The executable design for the reversible-autonomy
+**Status: SHIPPED in v1.11.0 ("The generative sleep pass"); kept as the design record.** The executable design for the reversible-autonomy
 loop introduced in [`EXPLORATIONS.dream.md`](EXPLORATIONS.dream.md) §4. Scope is **Tier A
 only** — the additive, body-preserving, ranking-only edges that are safe to apply
 autonomously because undo is trivial. Tiers B/C (schemas, hypotheses, supersede/contradict)

@@ -1312,6 +1312,7 @@ workstreams:
         title: Verbatim-evidence convention — compress claims, preserve quotes
         priority: P3
         effort: S
+        status: shipped (under DOC-6; reconciled in ROADMAP.v1.md §2)
         provenance: {dimension: landscape, landscape: [cogcanvas-verbatim-ablation]}
         problem: >-
           Extraction is lossy distillation; verbatim chunks beat extracted
@@ -2179,9 +2180,9 @@ release_train:
       - {id: GRA-8,  gate: "none — schedule opportunistically (CLOSED 2026-07-16: core shipped at PR #27, remainder absorbed by GRF-1's `links --audit` + doctor edge_rot line)"}
       - {id: RET-8,  gate: "RET-1 + GRA-1 landed"}
       - {id: LIF-7,  gate: "CAP-2 capture pipeline proven across temporally-diverse sessions"}
-      - {id: LIF-8,  gate: "RET-2 body indexing landed"}
+      - {id: LIF-8,  gate: "none — RECONCILED: the evidence-block convention shipped under DOC-6, and RET-2 body indexing has landed (ROADMAP.v1.md §2)"}
       - {id: CAP-5,  gate: "CAP-4 consolidation skill proven"}
-      - {id: INT-6,  gate: "INT-5 p95 evidence shows the daemon is worth its complexity"}
+      - {id: INT-6,  gate: "superseded — the machine-wide daemon stays cut (OQ-9); in-session served recall is ROADMAP.v2 HOT-6 (V2Q-2, 2026-10-03)"}
 
 # ============================================================================
 # Measurement — "uniform utility" gets a yardstick
@@ -2286,6 +2287,18 @@ decisions:
       SEC-1 ships as specified: foreign corpora inject nothing until a
       one-time trust prompt showing memory count and sample names; init marks
       self-created corpora trusted; CI opts in via env var.
+  - id: OQ-9
+    question: Build INT-6's warm recall daemon?
+    decision: no — cut at the v1 launch (ROADMAP.v1.md §3); superseded 2026-10-03
+    decided: 2026-07-08
+    consequence: >-
+      A machine-wide socket daemon (SessionStart-launched, idle-suicide,
+      cross-process lifecycle) adds a failure surface against the local,
+      offline, simple-hooks identity for a nice-to-have latency win. The
+      2026-10-03 v2 ruling V2Q-2 keeps that cut and allows a narrower
+      alternative instead: recall served opt-in by the session's own MCP
+      server through an mcp_tool hook (ROADMAP.v2 HOT-6), with spawn always
+      available.
 
 # ============================================================================
 # Non-goals — explicitly out, so their absence reads as a decision
