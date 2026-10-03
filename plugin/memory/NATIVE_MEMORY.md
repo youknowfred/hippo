@@ -46,11 +46,30 @@ source of authority; the native symlink is only the *delivery* path for the floo
 | **Symlink-target drift** | The link resolves somewhere other than this corpus — the floor is drawn from a different target, or nothing. | `doctor` `symlink` (`broken`) + `native_coexistence` (DRIFT) |
 | **Native-layout / encoding change** | The harness changes the projects-dir encoding, so a legacy-encoded link is read and the correct one is ignored. | `doctor` `symlink` (`legacy_wrong_encoding`) + `native_coexistence` |
 | **Native memory occupies the slot** | A real directory/file (native memory taking over, or a stray write) sits where hippo's symlink should be — the floor can't inject through it. | `doctor` `native_coexistence` (native-layout change) |
-| **Unexpected native write into the corpus** | Because the symlink points native memory at `.claude/memory/`, a native write lands in the corpus dir. | `doctor` `integrity` (unparseable frontmatter) surfaces non-hippo files; the corpus stays the git-tracked source of truth |
+| **Unexpected native write into the corpus** | Because the symlink points native memory at `.claude/memory/`, a native write lands in the corpus dir. | `doctor` `integrity` (unparseable frontmatter) surfaces non-hippo files; `native_auto_memory` counts files carrying native's stamp with no hippo provenance, and untracked ones (NAT-1); the corpus stays the git-tracked source of truth |
+| **Auto memory turned off** | `autoMemoryEnabled: false` (any settings scope) or `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` stops native memory loading `MEMORY.md`, so the floor never reaches context. | `doctor` `native_auto_memory` (warn, names the setting that decided it) |
+| **Native directory redirected** | `autoMemoryDirectory` (any settings scope) makes native memory read that directory's `MEMORY.md` and write topic files there, bypassing the symlink. | `doctor` `native_auto_memory` (warn, names the scope and the target) |
+| **A memory edited through the native path** | An edit made through `~/.claude/projects/<encoded>/memory/` gets native's frontmatter stamp (`node_type`, `originSessionId`, `modified`) and a reflowed body, so the file drifts from its consent baseline. | `doctor` `native_auto_memory` (stamp count) and the trust-drift line |
 
 The repair in every case is the same and idempotent: re-run `/hippo:init` (ONB-5 leaves an
 existing corpus untouched — it only rebuilds the machine-local symlink + index), moving any real
 file/dir aside first if native memory has taken the slot.
+
+## Verified behavior (PLT-1, 2026-10-03, Claude Code 2.1.286)
+
+Observed with tools disabled, so a fact could only come from what Claude Code loaded; the full
+receipts and method are in the root [`PLATFORM.md`](../../PLATFORM.md).
+
+| Behavior | Observed |
+|---|---|
+| `MEMORY.md` through the symlink, default settings | loads |
+| `autoMemoryEnabled: false`, or `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` | does **not** load: the floor is gone |
+| `autoMemoryDirectory` set (project, local, or `--settings`) | the other directory's `MEMORY.md` loads instead; the symlink is bypassed |
+| A CLAUDE.md `@.claude/memory/MEMORY.md` import | loads, with auto memory on or off |
+| A general-purpose subagent | receives the floor under either channel (the docs say native auto memory does not reach subagents) |
+| A linked worktree | the symlink channel reads the main tree's copy (native keys its directory on the repository); an import reads the worktree's own copy |
+| Topic files | not loaded until opened; no per-turn native recall step was observed |
+| An edit through the native path | gains native's frontmatter stamp; the same edit through `.claude/memory/` does not |
 
 ## Why this over built-in memory?
 
