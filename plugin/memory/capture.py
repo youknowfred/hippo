@@ -37,6 +37,7 @@ import re
 import time
 from typing import Dict, List, Optional
 
+from .harness_envelopes import is_envelope_preview
 from .provenance import ensure_self_ignoring_dir, launch_root, resolve_dirs, run_git
 from .secrets import scan_text
 from .telemetry import (
@@ -336,7 +337,8 @@ def gather_session_context(
 
     Reads ``episode_buffer.jsonl`` (via ``telemetry.read_episodes``), keeps only this session's
     episodes, derives the HEAD watermark (the earliest recorded ``head_commit``), unions the
-    recalled names, collects the (already-truncated) query previews, and diffs the repo since
+    recalled names, collects the (already-truncated) query previews that are not harness
+    envelopes (``harness_envelopes.is_envelope_preview``), and diffs the repo since
     the watermark — including bounded VERBATIM diff hunks (GRW-1) so a drafted memory can quote
     its evidence instead of paraphrasing. ``include_hunks=False`` skips the hunk subprocesses
     for read-only consumers (the SessionStart resume card) that never persist the seed. Returns
@@ -394,7 +396,10 @@ def _gather_session_context_raw(
                 seen_names.add(n)
                 names.append(n)
         q = (e.get("query_preview") or "").strip()
-        if q and q not in seen_previews:
+        # A harness envelope (a task result, a subagent's hand-back, another session's message)
+        # is nothing the user asked: kept, it read as a resume-card theme, a "query the user
+        # asked" in the triage prompt, and query breadth in the salience score.
+        if q and q not in seen_previews and not is_envelope_preview(q):
             seen_previews.add(q)
             previews.append(q)
 

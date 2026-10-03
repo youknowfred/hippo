@@ -9,7 +9,7 @@ beside the abstention/forgetting/update lanes. The pins:
        zero templating — the templated-fixture kill).
   AC2  volume-capped per run (module constant) + deduplicated against tracked queries
        AND queued drafts; noise filters are deterministic and tested (short /
-       system-reminder / slash-command previews never draft).
+       harness-envelope / slash-command previews never draft, truncated or not).
   AC3  drafts land in the SEC-3 pending queue; NOTHING enters the tracked fixture
        without per-item ``confirm_hard_set_row`` — which keeps refusing absent stems
        (negative-capability: no bulk-admit path exists).
@@ -101,6 +101,53 @@ def test_noise_filters_are_deterministic(memory_dir):
     assert summary["skipped_noise"] == 4
     # AC4: nothing to add -> the drafts file is never created
     assert not os.path.exists(default_drafts_path(memory_dir))
+
+
+# The desktop app's two envelopes in their UserPromptSubmit shape (closed, nothing trailing);
+# log_episode cuts each to the preview budget, so the drafter only ever sees the unclosed head.
+HAND_BACK = (
+    '<agent-message from="a0aee28d53630a1ba">\n[Subagent hand-back] The text below is the '
+    "final report of a subagent you launched.\nalpha subsystem rollback handled.\n"
+    "</agent-message>"
+)
+CROSS_SESSION = (
+    '<cross-session-message from="uds:/tmp/cc-socks/23938.sock" from-name="Verify fork" '
+    'from-mode="prompting">\nLane check before I claim the alpha rollback work.\n'
+    "</cross-session-message>"
+)
+
+
+@pytest.mark.parametrize(
+    "prompt", [HAND_BACK, CROSS_SESSION], ids=["agent-message", "cross-session-message"]
+)
+def test_truncated_desktop_envelopes_never_draft(memory_dir, prompt):
+    """The drafter's private tag copy predated these envelopes: one refresh queued 25 of 25
+    hand-backs, and every prune was undone by the next refresh."""
+    td = _setup(memory_dir)
+    _confirmed_touch(td, session="s1", query=prompt, name="alpha-notes", path="src/a.py")
+    preview = list(T.read_episodes(td))[0]["query_preview"]
+    tag = prompt[1 : prompt.index(" ")]
+    assert preview.startswith(f"<{tag} ") and f"</{tag}>" not in preview  # truncated, unclosed
+    summary = EF.draft_livedin_fixtures(memory_dir, telemetry_dir=td)
+    assert summary["added"] == []
+    assert summary["skipped_noise"] == 1
+    assert not os.path.exists(default_drafts_path(memory_dir))
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "why does the alpha rollback drafter keep queueing agent-message rows",
+        "strip the <agent-message> wrapper before alpha rollback rows draft",
+    ],
+    ids=["bare-word", "bracketed-mid-sentence"],
+)
+def test_a_query_that_mentions_agent_message_still_drafts(memory_dir, query):
+    td = _setup(memory_dir)
+    _confirmed_touch(td, session="s1", query=query, name="alpha-notes", path="src/a.py")
+    summary = EF.draft_livedin_fixtures(memory_dir, telemetry_dir=td)
+    assert summary["added"] == [query]  # verbatim, the mention included
+    assert summary["skipped_noise"] == 0
 
 
 def test_dedup_against_tracked_and_queued(memory_dir):

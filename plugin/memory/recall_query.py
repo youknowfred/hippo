@@ -11,17 +11,24 @@ import re
 from typing import List, Tuple
 
 from .build_index import tokenize
+from .harness_envelopes import (
+    HARNESS_ENVELOPE_TAGS,
+    HARNESS_TAGS,
+    TAG_NAME_END,
+    is_envelope_preview,
+)
 
 # --------------------------------------------------------------------------- #
 # Query hygiene
 # --------------------------------------------------------------------------- #
 # The UserPromptSubmit hook feeds the prompt VERBATIM. In practice a large fraction of prompts
-# are harness envelopes (<task-notification> tool-use blobs) or near-empty continuations
-# ("?", "continue") that carry no retrieval intent — embedding them wastes a ~400ms cold model
-# load to inject pure semantic noise. clean_query() strips the envelopes and returns "" to SKIP
-# recall entirely when nothing of substance remains (the hook then injects no context).
+# are harness envelopes (<task-notification> tool-use blobs, subagent hand-backs) or near-empty
+# continuations ("?", "continue") that carry no retrieval intent — embedding them wastes a
+# ~400ms cold model load to inject pure semantic noise. clean_query() strips the envelopes and
+# returns "" to SKIP recall entirely when nothing of substance remains (the hook then injects
+# no context). The tag names come from harness_envelopes, the one list every plane reads.
 _ENVELOPE_BLOCK_RE = re.compile(
-    r"<(task-notification|system-reminder|local-command-stdout)\b[^>]*>.*?</\1>",
+    r"<(" + "|".join(HARNESS_ENVELOPE_TAGS) + r")" + TAG_NAME_END + r"[^>]*>.*?</\1>",
     re.DOTALL | re.IGNORECASE,
 )
 _FENCE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
@@ -32,17 +39,10 @@ _FENCE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
 # harness's own envelope/wrapper tags means an unknown tag (a Python repr, a generic type, a
 # stray HTML-ish fragment a user pasted) is LEFT IN PLACE; angle brackets tokenize harmlessly
 # (they're not word chars) so the identifier text inside/around them still reaches BM25/dense.
-_KNOWN_HARNESS_TAGS = (
-    "task-notification",
-    "system-reminder",
-    "local-command-stdout",
-    "local-command-caveat",
-    "command-name",
-    "command-message",
-    "command-args",
-)
+# Known = every envelope tag (an unclosed one loses its marker here) plus the wrapper tags.
+_KNOWN_HARNESS_TAGS = HARNESS_TAGS
 _TAG_RE = re.compile(
-    r"</?(?:" + "|".join(_KNOWN_HARNESS_TAGS) + r")\b[^>]*/?>",
+    r"</?(?:" + "|".join(_KNOWN_HARNESS_TAGS) + r")" + TAG_NAME_END + r"[^>]*/?>",
     re.IGNORECASE,
 )
 _MIN_CONTENT_TOKENS = 2
@@ -78,6 +78,32 @@ def _rescue_turns() -> int:
         return int(raw)
     except ValueError:
         return _RESCUE_TURNS
+
+
+def _envelope_only(raw: str) -> bool:
+    """True when ``raw`` has text but nothing survives stripping harness envelopes and tags."""
+    return bool(raw.strip()) and not _TAG_RE.sub(" ", _ENVELOPE_BLOCK_RE.sub(" ", raw)).strip()
+
+
+def _rescue_previews(raw: str, episodes: List[dict]) -> List[str]:
+    """RCL-3's blend material for a terse prompt: the last ``_rescue_turns()`` same-session
+    query previews that are not harness envelopes, or none when ``raw`` is itself nothing but
+    envelopes.
+
+    ``clean_query`` blanks an envelope-only prompt (a background task's result, a subagent's
+    hand-back) so that it injects nothing. Without the first guard the rescue read that blank as
+    a terse follow-up and recalled on the previous turns' previews anyway. Envelope previews are
+    left out of the blend for the lived-in drafter's reason: truncated, their ids read as
+    content tokens.
+    """
+    if _envelope_only(raw or ""):
+        return []
+    previews = [
+        ep["query_preview"]
+        for ep in episodes
+        if ep.get("query_preview") and not is_envelope_preview(ep["query_preview"])
+    ]
+    return previews[-_rescue_turns():]
 
 # Terse continuation/filler prompts that carry no retrieval intent (matched normalized+lowered).
 _CONTINUATION_PHRASES = frozenset(
@@ -180,9 +206,12 @@ def clean_query(raw: str) -> str:
         text = _ENVELOPE_BLOCK_RE.sub(" ", raw)
 
         # Mine identifiers from fenced blocks AND raw traceback lines BEFORE the fences are
-        # removed from the running text — mining reads the ORIGINAL raw (fences + surrounding
-        # prose both scanned) so a traceback pasted without a fence is treated identically.
-        mined = _mine_identifiers(raw)
+        # removed from the running text — mining reads the envelope-stripped text (fences +
+        # surrounding prose both scanned) so a traceback pasted without a fence is treated
+        # identically. Envelope bodies are NOT mined: reading the original raw here handed back
+        # a task notification's output-file path and a cross-session sender's socket address
+        # as the query, which is how a stripped envelope still reached recall.
+        mined = _mine_identifiers(text)
 
         text = _FENCE_BLOCK_RE.sub(" ", text)
         text = _TAG_RE.sub(" ", text)

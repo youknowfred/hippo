@@ -515,11 +515,14 @@ def draft_update_fixtures(
 _LIVEDIN_MAX_DRAFTS_PER_RUN = 25  # volume cap per drafting run — strongest evidence first
 # Previews that never draft: harness envelopes and slash-command invocations are session
 # mechanics, not retrieval demand. clean_query's min-content gate handles the terse rest.
-# The envelope prefixes are matched EXPLICITLY (not just delegated to clean_query's
-# envelope-stripping) because query_previews are TRUNCATED at the ledger's preview budget:
-# an unclosed envelope defeats the block regex and its mined ids read as content tokens —
-# the exact shape the first live drain surfaced (23/25 task-notification rows).
-_LIVEDIN_SKIP_PREFIXES = ("<system-reminder", "<task-notification", "<command-name", "/")
+# Envelopes are matched EXPLICITLY by harness_envelopes.is_envelope_preview (not just
+# delegated to clean_query's envelope-stripping) because query_previews are TRUNCATED at the
+# ledger's preview budget: an unclosed envelope defeats the block regex and its mined ids read
+# as content tokens — the exact shape the first live drain surfaced (23/25 task-notification
+# rows). The envelope tags used to be a private copy here, and that copy predated the desktop
+# app's <agent-message> and <cross-session-message>: one later run queued 25 of 25 hand-backs.
+# The prefixes below are the drafter's own non-envelope skips.
+_LIVEDIN_SKIP_PREFIXES = ("<command-name", "/")
 
 
 def draft_livedin_fixtures(
@@ -536,7 +539,7 @@ def draft_livedin_fixtures(
     MSR-6; never a second join, never a per-memory table). Queries ride VERBATIM —
     zero LLM, zero rewording, zero templating (the templated-fixture kill); the only
     filters are deterministic noise gates (``clean_query`` min-content;
-    system-reminder/slash-command prefixes). Rows aggregate per query
+    harness-envelope/slash-command prefixes). Rows aggregate per query
     (``derived_expected`` = every outcome-confirmed memory for it, the TMB-4
     evidence-suggestion convention; ``expected`` always empty), capped per run at
     ``_LIVEDIN_MAX_DRAFTS_PER_RUN`` (most distinct hit-sessions first, then query —
@@ -561,6 +564,7 @@ def draft_livedin_fixtures(
     The name says ``derived``, not ``judged``; keep it that way.
     """
     from .eval_metrics import _load_fixture_docs
+    from .harness_envelopes import is_envelope_preview
     from .outcome import _injection_join
     from .recall_query import clean_query
     from .telemetry import default_telemetry_dir, read_episodes
@@ -588,7 +592,7 @@ def draft_livedin_fixtures(
         if not names:
             continue
         hit_pairs += len(names)
-        if q.startswith(_LIVEDIN_SKIP_PREFIXES) or not clean_query(q):
+        if is_envelope_preview(q) or q.startswith(_LIVEDIN_SKIP_PREFIXES) or not clean_query(q):
             skipped_noise += 1
             continue
         if q in tracked or q in drafted:
