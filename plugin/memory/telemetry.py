@@ -225,6 +225,12 @@ def log_recall_event(
     deliberately never carry it. Additive/absence-emits-nothing; an abstention
     emitted nothing, so it writes no key rather than a fake 0.
 
+    OBS-3 ``collapsed``: ``names``/``scores``/``ranks`` record only what was SERVED. An
+    entry the hook rendered as a collapsed line (``floor_collapsed`` — already in the
+    always-loaded floor — or ``cooldown_collapsed`` — surfaced earlier this session) goes
+    to ``collapsed`` instead, so the usage aggregates stop counting every floor memory as
+    recalled on every prompt. Additive; absent when nothing collapsed.
+
     MSR-7 ``load1``/``cpus``: the host's 1-minute load average and CPU count, sampled
     here (see ``_host_load``) on every channel. Doctor's KPI-3 line splits the p95 on
     ``load1 / cpus`` so a tail caused by a busy machine is not reported as a hippo
@@ -235,7 +241,16 @@ def log_recall_event(
         td = _resolve_dir(telemetry_dir)
         ensure_self_ignoring_dir(td)  # derived dir: mkdir + self-ignoring .gitignore (SEC-3)
         backend = (results[0].get("backend") if results else None) or "none"
-        named = [r for r in results if r.get("name")]
+        named = [
+            r
+            for r in results
+            if r.get("name") and not (r.get("floor_collapsed") or r.get("cooldown_collapsed"))
+        ]
+        collapsed = [
+            r.get("name")
+            for r in results
+            if r.get("name") and (r.get("floor_collapsed") or r.get("cooldown_collapsed"))
+        ]
         event = {
             "ts": round(time.time(), 3),
             "session_id": current_session_id(td, session_id=session_id),
@@ -247,6 +262,8 @@ def log_recall_event(
             "k": int(k),
             "query_preview": (query or "")[:_QUERY_PREVIEW_CHARS],
         }
+        if collapsed:
+            event["collapsed"] = collapsed
         if drops:
             event["drops"] = drops
         if near_miss:
