@@ -350,26 +350,42 @@ def record_authored_write(
         gate_root = gate_repo_root(memory_dir, repo_root)
         if gate_root is None:
             return False
-        key = _corpus_key(gate_root)
+        # OBS-6: a write in a LINKED worktree's corpus copy reaches the main checkout through
+        # a merge, and the consent record lives on the main tree. Folding only under the
+        # worktree's own key (which has no record) was a silent no-op, and the bytes hippo
+        # itself wrote arrived on main as unconsented drift. Extend both records, each only
+        # if it exists with a fingerprint baseline.
+        keys = [_corpus_key(gate_root)]
+        try:
+            from .provenance_env import main_worktree_root
+
+            main = main_worktree_root(gate_root)
+            if main and _corpus_key(main) not in keys:
+                keys.append(_corpus_key(main))
+        except Exception:
+            pass
         doc = _load_registry_doc()
         trusted = doc.get("trusted")
-        if not isinstance(trusted, dict) or not isinstance(trusted.get(key), dict):
+        if not isinstance(trusted, dict):
             return False
-        entry = trusted[key]
-        fp = entry.get("fingerprint")
-        if not isinstance(fp, dict) or not isinstance(fp.get("files"), dict):
-            return False  # legacy record — quarantine is off, nothing to extend
         h = file_sha256(path)
         if h is None:
             return False
         import hashlib
 
         stem = os.path.splitext(os.path.basename(path))[0]
-        fp["files"][stem] = h
-        fp["digest"] = hashlib.sha256(
-            "\n".join(f"{k}:{v}" for k, v in sorted(fp["files"].items())).encode("utf-8")
-        ).hexdigest()
-        return _write_registry_doc(doc)
+        folded = False
+        for key in keys:
+            entry = trusted.get(key)
+            fp = entry.get("fingerprint") if isinstance(entry, dict) else None
+            if not isinstance(fp, dict) or not isinstance(fp.get("files"), dict):
+                continue  # no record, or a legacy one — quarantine is off there, nothing to extend
+            fp["files"][stem] = h
+            fp["digest"] = hashlib.sha256(
+                "\n".join(f"{k}:{v}" for k, v in sorted(fp["files"].items())).encode("utf-8")
+            ).hexdigest()
+            folded = True
+        return _write_registry_doc(doc) if folded else False
     except Exception:
         return False
 
