@@ -96,6 +96,7 @@ CRASH_CONTRACT = {
     ("staleness", "set_invalid_after"): ("detected", "rolled_back"),  # dedup-merge write #2
     ("telemetry_rollup", "_update"): ("detected",),  # OBS-1: the fold returns False; today's row keeps its prior bytes
     ("telemetry_rollup", "_append_finalized"): ("intact",),  # OBS-1: the 365-day trim is best-effort; the appended day stays
+    ("telemetry_rollup", "_drain_spool"): ("detected",),  # OBS-2: fold returns False; spool kept, so no use is lost or double-counted
     ("trust", "_write_registry_doc"): ("detected",),  # mark_trusted returns False
 }
 
@@ -895,6 +896,27 @@ def scn_rollup_trim_intact(tmp_path, monkeypatch):
     assert TR.read_rollups(td, now=t0 + 2 * 86400)[-1]["hook"]["prompts"] == 1
 
 
+def scn_rollup_drain_spool_detected(tmp_path, monkeypatch):
+    """OBS-2: a torn spool truncation fails the fold loudly and keeps both files, so the
+    next fold counts each spooled use exactly once."""
+    from memory import telemetry_rollup as TR
+
+    td = str(tmp_path / "tele")
+    os.makedirs(td)
+    assert TR.record_usage(td, surface="mcp", verb="recall")
+    spool = os.path.join(td, TR._SPOOL_NAME)
+    with open(spool, "w", encoding="utf-8") as fh:
+        fh.write('{"surface":"skill","verb":"new","action":"","client":"cli"}\n')
+    before = _snap(spool, os.path.join(td, TR._TODAY_NAME))
+    _arm(monkeypatch, "telemetry_rollup", "_drain_spool")
+    assert TR.record_usage(td, surface="mcp", verb="recall") is False
+    _assert_unchanged(before)
+    for name, real in _REAL_ATOMICS.items():  # disarm only the tear, not the suite's env isolation
+        monkeypatch.setattr(A, name, real)
+    assert TR.record_usage(td, surface="mcp", verb="recall")
+    assert TR.read_rollups(td)[-1]["surface"] == {"mcp:recall": 2, "skill:new": 1}
+
+
 def scn_presence_write_doc_intact(tmp_path, monkeypatch):
     """T18 FLT-1: a torn presence-doc write is SILENT (the jit._write_state posture) —
     the SessionStart that carries it must not degrade, and no partial doc may land (a
@@ -977,6 +999,7 @@ _SCENARIOS = [
     (("trust", "_write_registry_doc"), "detected", scn_trust_registry_detected),
     (("telemetry_rollup", "_update"), "detected", scn_rollup_update_detected),
     (("telemetry_rollup", "_append_finalized"), "intact", scn_rollup_trim_intact),
+    (("telemetry_rollup", "_drain_spool"), "detected", scn_rollup_drain_spool_detected),
 ]
 
 

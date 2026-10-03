@@ -60,3 +60,24 @@ hippo_floor_present() {
   [ -f ".claude/memory/MEMORY.md" ] && return 0
   main="$(hippo_main_tree)" && [ -f "$main/.claude/memory/MEMORY.md" ]
 }
+
+# OBS-2: count one use of a bash-only hippo surface (`hippo <verb>`, a skill preflight, a
+# hook whose Python failed) without spawning Python: append one line to the corpus's
+# usage spool, which the next Python fold drains into the day's rollup. Resolves the
+# telemetry dir the way the engine does (HIPPO_TELEMETRY_DIR, this tree, or — SHP-7 — the
+# main tree of a linked worktree) and writes nothing unless that dir already exists, so a
+# never-opted-in project gains no ledger from bash. Never fails the caller.
+hippo_note_usage() {  # <surface> <verb> [action]
+  local td="" main=""
+  if [ -n "${HIPPO_TELEMETRY_DIR:-}" ]; then
+    td="$HIPPO_TELEMETRY_DIR"
+  elif [ -d ".claude/memory" ]; then
+    td=".claude/.memory-telemetry"
+  elif main="$(hippo_main_tree)" && [ -d "$main/.claude/memory" ]; then
+    td="$main/.claude/.memory-telemetry"
+  fi
+  [ -n "$td" ] && [ -d "$td" ] || return 0
+  printf '{"surface":"%s","verb":"%s","action":"%s","client":"%s"}\n' \
+    "${1:-}" "${2:-}" "${3:-}" "${CLAUDE_CODE_ENTRYPOINT:-unknown}" >> "$td/usage_spool.jsonl" 2>/dev/null || true
+  return 0
+}

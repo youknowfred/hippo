@@ -31,6 +31,7 @@ floor-outcome section below).
 ```bash
 . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
 hippo_resolve_py
+hippo_note_usage skill new  # OBS-2: count this skill's use (one spool line, no Python)
 ```
 
 CLI synopsis (`<required>` / `{choice-a|choice-b}` / `[optional]` — standard usage notation,

@@ -13,7 +13,12 @@ A day row holds:
     per-session histogram), and histograms of the shell-measured wall (OBS-4) and the
     in-process latency;
   - session_start: runs, a chars histogram, runs at the cap, and how often each producer
-    was dropped or cut by the budget.
+    was dropped or cut by the budget;
+  - surface (OBS-2): uses per ``surface:verb[:action]`` — every MCP tool call, every
+    ``hippo <verb>``, every skill preflight, every hook spawn (and a failed one) — plus
+    tallies of the client and the plugin version that served them. The bash-only surfaces
+    append a line to ``usage_spool.jsonl`` (``hippo_note_usage`` in ``_resolve_py.sh``,
+    no Python spawn) and the next fold drains it into the open day.
 
 Latency and char values are kept as fixed-bucket histograms so 30-day percentiles merge
 across days; a percentile reads as the bucket's upper bound ("≤ X"). Per-corpus (it lives in
@@ -30,6 +35,9 @@ from contextlib import contextmanager
 from typing import Dict, Iterator, List, Optional
 
 _TODAY_NAME = "rollup_today.json"
+_SPOOL_NAME = "usage_spool.jsonl"
+# A spool line is short and written by our own scripts; anything longer is not ours.
+_MAX_SPOOL_LINE = 512
 _ROLLUP_NAME = "daily_rollups.jsonl"
 _LOCK_NAME = ".rollup.lock"
 ROLLUP_VERSION = 1
@@ -86,7 +94,59 @@ def _empty(date: str) -> dict:
             "dropped": {},
             "cut": {},
         },
+        "surface": {},
+        "client": {},
+        "version": {},
     }
+
+
+def _usage_key(surface: str, verb: str, action: Optional[str] = None) -> str:
+    key = f"{surface}:{verb}"
+    return f"{key}:{action}" if action else key
+
+
+def _client() -> str:
+    """Which harness surface is running: Claude Code's own entrypoint label when it set one
+    (``cli``, ``claude-desktop``, an SDK name), else ``unknown``."""
+    return (os.environ.get("CLAUDE_CODE_ENTRYPOINT") or "").strip() or "unknown"
+
+
+def _stamp(acc: dict, client: Optional[str] = None) -> None:
+    try:
+        from .telemetry import _producer_version
+
+        _bump(acc.setdefault("version", {}), _producer_version() or "unknown")
+    except Exception:
+        pass
+    _bump(acc.setdefault("client", {}), client or _client())
+
+
+def _drain_spool(td: str, acc: dict) -> None:
+    """Fold the bash surfaces' spooled uses into the open day, then empty the spool (the
+    caller holds the lock). A malformed line is skipped, never fatal."""
+    path = os.path.join(td, _SPOOL_NAME)
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except Exception:
+        return
+    if not lines:
+        return
+    surface = acc.setdefault("surface", {})
+    for line in lines:
+        if len(line) > _MAX_SPOOL_LINE:
+            continue
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(rec, dict) or not rec.get("surface") or not rec.get("verb"):
+            continue
+        _bump(surface, _usage_key(str(rec["surface"]), str(rec["verb"]), str(rec.get("action") or "") or None))
+        _bump(acc.setdefault("client", {}), str(rec.get("client") or "unknown"))
+    from .atomic import write_text_atomic
+
+    write_text_atomic(path, "")
 
 
 def _finalize(acc: dict) -> dict:
@@ -163,6 +223,7 @@ def _update(td: str, now: Optional[float], fold) -> bool:
             elif acc["date"] != today:
                 _append_finalized(td, _finalize(acc))
                 acc = _empty(today)
+            _drain_spool(td, acc)
             fold(acc)
             write_json_atomic(path, acc, indent=None, sort_keys=True)
         return True
@@ -186,6 +247,8 @@ def record_prompt(
     and nothing else (they never recall). Fire-and-forget: never raises."""
 
     def fold(acc: dict) -> None:
+        _bump(acc.setdefault("surface", {}), _usage_key("hook", "user_prompt", "spawn"))
+        _stamp(acc)
         hook = acc["hook"]
         hook["prompts"] += 1
         _bump(hook["trigger"], trigger or "human")
@@ -244,6 +307,8 @@ def record_session_start(
     """Fold one SessionStart emission into today's row. Never raises."""
 
     def fold(acc: dict) -> None:
+        _bump(acc.setdefault("surface", {}), _usage_key("hook", "session_start", "spawn"))
+        _stamp(acc)
         ss = acc["session_start"]
         ss["runs"] += 1
         ss["chars_total"] += int(total)
@@ -254,6 +319,25 @@ def record_session_start(
             _bump(ss["dropped"], label)
         for label in cut or ():
             _bump(ss["cut"], label)
+
+    return _update(telemetry_dir, now, fold)
+
+
+def record_usage(
+    telemetry_dir: str,
+    *,
+    surface: str,
+    verb: str,
+    action: Optional[str] = None,
+    client: Optional[str] = None,
+    now: Optional[float] = None,
+) -> bool:
+    """OBS-2: count one use of a hippo surface (``mcp``, ``cli``, ``skill``, ``hook``).
+    Never raises."""
+
+    def fold(acc: dict) -> None:
+        _bump(acc.setdefault("surface", {}), _usage_key(surface, verb, action))
+        _stamp(acc, client)
 
     return _update(telemetry_dir, now, fold)
 
@@ -344,4 +428,15 @@ def summarize(rows: List[dict]) -> dict:
         "ss_at_cap": ss_total("at_cap"),
         "ss_dropped": _merge(rows, "session_start", "dropped"),
         "ss_cut": _merge(rows, "session_start", "cut"),
+        "surface": _merge_top(rows, "surface"),
+        "client": _merge_top(rows, "client"),
+        "version": _merge_top(rows, "version"),
     }
+
+
+def _merge_top(rows: List[dict], key: str) -> Dict[str, int]:
+    out: Dict[str, int] = {}
+    for row in rows:
+        for k, v in (row.get(key) or {}).items():
+            _bump(out, k, int(v))
+    return out

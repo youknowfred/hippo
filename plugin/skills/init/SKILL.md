@@ -146,6 +146,7 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
    . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
    hippo_resolve_py
+   hippo_note_usage skill init  # OBS-2: count this skill's use (one spool line, no Python)
    "$PY" -c \
      "import sys, json; from memory.provenance import create_project_symlink; \
       r = create_project_symlink(sys.argv[1], sys.argv[1] + '/.claude/memory'); \

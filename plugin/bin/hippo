@@ -26,6 +26,12 @@ CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$SCRIPT_DIR}" hippo_resolve_py
 cmd="${1:-}"
 shift || true
 
+# OBS-2: count this verb's use (a spool line; no extra process). mcp is counted per tool
+# call by the server itself.
+case "$cmd" in
+  recall|new|build-index|staleness|review|sleep) hippo_note_usage cli "$cmd" ;;
+esac
+
 case "$cmd" in
   recall)
     exec "$PY" -m memory.recall_hook "$@"

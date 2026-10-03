@@ -1,7 +1,7 @@
 """Receipt checks for the deterministic doctor engine — the v2 scoreboard's durable inputs.
 
-OBS-1's 30-day KPIs from the rotation-proof daily rollups, and OBS-4's shell-measured hook
-wall. Read-only and display-only (``ok`` unless the read itself
+OBS-1's 30-day KPIs from the rotation-proof daily rollups, OBS-2's per-verb surface usage
+from the same rows, and OBS-4's shell-measured hook wall. Read-only and display-only (``ok`` unless the read itself
 fails): these lines report numbers a later gate judges, they never judge them here.
 ``DoctorContext`` lives in ``doctor_checks_env``.
 """
@@ -106,3 +106,35 @@ def check_kpi_rollups(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "ok", "message": " ".join(parts[:1]) + " " + "; ".join(parts[1:]) + "."}
     except Exception as exc:
         return {"status": "warn", "message": f"30-day KPI check failed: {exc}."}
+
+
+_USAGE_LINE_MAX = 14
+
+
+def check_surface_usage(ctx: DoctorContext) -> Dict[str, str]:
+    """OBS-2: 30-day use counts per surface and verb — every MCP tool call, ``hippo <verb>``,
+    skill preflight and hook spawn — from the daily rollups. This is the count the v2
+    deprecation windows read before any name is removed. ``ok`` always."""
+    try:
+        from .telemetry import default_telemetry_dir
+        from .telemetry_rollup import read_rollups, summarize
+
+        k = summarize(read_rollups(default_telemetry_dir(ctx.memory_dir), days=30))
+        usage = k["surface"]
+        if not usage:
+            return {
+                "status": "ok",
+                "message": "surface usage (30 days): nothing counted yet (recorded from v1.40.0 on).",
+            }
+        ranked = sorted(usage.items(), key=lambda kv: (-kv[1], kv[0]))
+        shown = ", ".join(f"{name} {n}" for name, n in ranked[:_USAGE_LINE_MAX])
+        more = f" (+{len(ranked) - _USAGE_LINE_MAX} more)" if len(ranked) > _USAGE_LINE_MAX else ""
+        clients = ", ".join(f"{c} {n}" for c, n in sorted(k["client"].items(), key=lambda kv: (-kv[1], kv[0])))
+        return {
+            "status": "ok",
+            "message": f"surface usage (30 days, {sum(usage.values())} uses): {shown}{more}"
+            + (f"; clients: {clients}" if clients else "")
+            + ".",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"surface usage check failed: {exc}."}

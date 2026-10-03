@@ -24,6 +24,7 @@ else. Nothing here is a bulk sweep.
 [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell. On Claude Desktop this is expected — take the MCP-tool route in 'Surface routing' above instead of this bash flow. In a genuine terminal Claude Code session it means Claude Code is likely too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
 . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
 hippo_resolve_py
+hippo_note_usage skill consolidate  # OBS-2: count this skill's use (one spool line, no Python)
 ```
 
 > **Desktop / MCP surface (INT-13):** the tool-by-tool mapping is in 'Surface routing' above — drive the SAME flow through those MCP tools, same order, same per-item approval gates. Each capture seed is a plain JSON file: read it directly for the full evidence when drafting.

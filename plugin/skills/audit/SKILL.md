@@ -76,6 +76,7 @@ not a multi-PR roadmap.
   ```bash
   . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
   hippo_resolve_py
+  hippo_note_usage skill audit  # OBS-2: count this skill's use (one spool line, no Python)
   "$PY" -c \
     "from memory import eval_recall, soak, staleness, reconsolidate, archive, links, lint_links, lint_floor, telemetry, provenance"
   ```

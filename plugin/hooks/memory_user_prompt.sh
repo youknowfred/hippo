@@ -58,5 +58,5 @@ fi
 # payload (prompt + session_id, COR-6) directly off stdin and emits the hookSpecificOutput JSON
 # itself — replacing the previous three launches (parse .prompt, parse .session_id, recall) plus
 # the jq/python emission wrap. An empty/unparseable prompt or an empty result prints nothing.
-printf '%s' "$PAYLOAD" | "$PY" -m memory.recall_hook --stdin-json 2>/dev/null || true
+printf '%s' "$PAYLOAD" | "$PY" -m memory.recall_hook --stdin-json 2>/dev/null || hippo_note_usage hook user_prompt failed
 exit 0
