@@ -123,6 +123,7 @@ from .doctor_checks_recall import (
     check_succession_replay,
     check_update_eval,
 )
+from .doctor_checks_native import check_native_auto_memory  # NAT-1
 from .doctor_checks_kpi import check_hook_wall, check_kpi_rollups, check_surface_usage  # OBS-4, OBS-1, OBS-2
 
 # One glyph per status — the deterministic line prefix. Ordered dict-free lookup.
@@ -331,6 +332,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("corpus", check_corpus_exists),
     ("symlink", check_symlink),
     ("native_coexistence", check_native_coexistence),
+    ("native_auto_memory", check_native_auto_memory),  # NAT-1: auto-memory settings + its footprint in the corpus
     ("resolution", check_corpus_resolution),
     ("worktree_copies", check_worktree_copies),  # SHP-7: a linked worktree's dead .memory-* copies, named
     ("git_mode", check_git_mode),

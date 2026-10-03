@@ -191,6 +191,14 @@ def _isolate_claude_projects_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_claude_user_settings(tmp_path, monkeypatch):
+    """NAT-1: native auto-memory detection reads Claude Code's user settings; point it at a
+    per-test path that does not exist so a developer's real settings never steer a test."""
+    monkeypatch.setenv("HIPPO_CLAUDE_SETTINGS", str(tmp_path / "absent-claude-settings.json"))
+    monkeypatch.delenv("CLAUDE_CODE_DISABLE_AUTO_MEMORY", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_memory_tiers(tmp_path, monkeypatch):
     """Keep TEA-1/TEA-3 multi-corpus fusion hermetic across the whole suite.
 
