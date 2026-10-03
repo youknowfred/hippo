@@ -7,6 +7,45 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.39.1 — 2026-10-03 — "Not something you asked"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**, link cache still
+**6**. One defect fix, the first slice of ROADMAP.v2's HOT-1. Harness traffic that reaches the
+UserPromptSubmit hook as a prompt was being treated as something the user asked. Three planes
+each kept their own copy of the harness tag list, and none of the copies knew the desktop
+app's subagent hand-backs (`<agent-message>`) or messages from other local sessions
+(`<cross-session-message>`). On em-growth-labs, one lived-in draft run queued 25 rows, all 25
+of them hand-backs, and deleting the rows did nothing because the next refresh re-added them.
+
+- **HOT-1 (part) — one harness-envelope list, read by every plane that needs it.**
+  - New `memory/harness_envelopes.py` holds the envelope tags (task-notification,
+    system-reminder, local-command-stdout, agent-message, cross-session-message) and the
+    wrapper tags. It also holds `is_envelope_preview`, which matches an opening tag by name
+    alone because query previews are cut at 80 chars, closing tag and all.
+  - `clean_query` builds its block and marker regexes from that list. It also stops mining
+    identifiers out of envelope bodies. That was a separate leak: v1.39.0 read the raw prompt
+    for mining, so a stripped task notification came back as its own output-file path, and a
+    cross-session message as its sender's socket address.
+  - The RCL-3 rescue no longer revives an envelope-only prompt from the previous turns'
+    previews, and it never blends an envelope preview into a terse follow-up.
+  - The lived-in drafter skips both new envelope kinds, truncated or not.
+  - Capture leaves envelope previews out of a seed's `query_previews`. That clears them from
+    the SessionStart resume card, the triage prompt, the pending-queue listing and the
+    salience score.
+  - A structural pin fails the suite if any other `plugin/memory` module spells an envelope
+    tag name in a string constant, so a second copy cannot drift again.
+- **Measured** on real hook-form prompts from em-growth-labs transcripts. `clean_query` used
+  to return a query for 503 of 510 task notifications, 87 of 87 hand-backs and 61 of 61
+  cross-session messages. It now returns one for none of them (0 of 512, 87 and 61).
+  `recall.py` drops two lines (1697 → 1695, back under its pin).
+- **Still open in HOT-1 for v1.40.0:** `scheduled-task` and `bash-input` turns still reach
+  recall; the ledgers still store the raw prompt rather than the cleaned one; the
+  ledger-window replay is still to run.
+- **Operator action:** rows already queued in `.claude/.memory-pending/recall_hard_set.drafts.yaml`
+  stay until you prune them, since the drafter only appends. After the prune they do not come
+  back. Capture seeds already pending keep their previews until drained.
+
 ## v1.39.0 — 2026-10-01 — "What the index already knew"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
