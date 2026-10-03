@@ -13,6 +13,7 @@ import json
 import os
 from typing import Dict, List, Optional, Tuple
 
+from .fm_access import fm_get
 from .provenance import (
     check_project_symlink,
     git_root,
@@ -398,10 +399,7 @@ def check_empty_baselines(ctx: DoctorContext) -> Dict[str, str]:
                     fm = parse_frontmatter(fh.read())
                 if not fm:
                     continue  # check_integrity owns unparseable files
-                meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-                sc = fm.get("source_commit")
-                if sc is None:
-                    sc = (meta or {}).get("source_commit")
+                sc = fm_get(fm, "source_commit")
                 if sc is not None and not str(sc).strip():
                     empty.append(os.path.basename(path)[:-3])
             except Exception:

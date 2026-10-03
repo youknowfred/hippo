@@ -61,6 +61,8 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
+from .fm_access import fm_get
+
 # --------------------------------------------------------------------------- #
 # The stated bounds (acceptance criteria carry these numbers; tests import them)
 # --------------------------------------------------------------------------- #
@@ -104,8 +106,7 @@ def _memory_type(fm) -> str:
     direction ``new_memory`` uses), lowercased; ``""`` when unreadable."""
     if not isinstance(fm, dict):
         return ""
-    meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-    val = meta.get("type") or fm.get("type")
+    val = fm_get(fm, "type", falsy=True, nested_first=True)
     return val.strip().lower() if isinstance(val, str) else ""
 
 

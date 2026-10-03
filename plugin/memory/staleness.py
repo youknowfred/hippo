@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
+from .fm_access import fm_get
 from .provenance import (
     _iter_memory_files,
     build_repo_file_index,
@@ -55,13 +56,8 @@ def read_provenance(text: str) -> tuple[List[str], Optional[str]]:
     fm = parse_frontmatter(text)
     if not fm:
         return [], None
-    meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-    cited = fm.get("cited_paths")
-    if cited is None:
-        cited = meta.get("cited_paths")
-    sc = fm.get("source_commit")
-    if sc is None:
-        sc = meta.get("source_commit")
+    cited = fm_get(fm, "cited_paths")
+    sc = fm_get(fm, "source_commit")
     if not isinstance(cited, list):
         cited = []
     cited = [c for c in cited if isinstance(c, str)]
@@ -78,8 +74,7 @@ def read_memory_type(text: str) -> Optional[str]:
     fm = parse_frontmatter(text)
     if not fm:
         return None
-    meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-    t = fm.get("type") if fm.get("type") is not None else meta.get("type")
+    t = fm_get(fm, "type")
     return t.strip().lower() if isinstance(t, str) and t.strip() else None
 
 
@@ -93,10 +88,7 @@ def read_source_commit_time(text: str) -> Optional[int]:
     fm = parse_frontmatter(text)
     if not fm:
         return None
-    meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-    sct = fm.get("source_commit_time")
-    if sct is None:
-        sct = meta.get("source_commit_time")
+    sct = fm_get(fm, "source_commit_time")
     if isinstance(sct, bool):
         return None
     if isinstance(sct, int):
@@ -123,10 +115,7 @@ def read_last_verified(text: str) -> Optional[str]:
     fm = parse_frontmatter(text)
     if not fm:
         return None
-    meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-    lv = fm.get("last_verified")
-    if lv is None:
-        lv = meta.get("last_verified")
+    lv = fm_get(fm, "last_verified")
     if hasattr(lv, "isoformat"):
         # COR-19: PyYAML types an UNQUOTED date as datetime.date/datetime — the
         # isinstance(str) guard read a hand-authored stamp as "never verified" on

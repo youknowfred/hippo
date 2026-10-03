@@ -27,6 +27,7 @@ import os
 import re
 from typing import Dict, List, Optional
 
+from .fm_access import fm_get
 from .provenance import _is_memory_filename, _iter_memory_files, parse_frontmatter
 
 # Decomposition façade (CONTRIBUTING "Code layout"): every moved name re-imported
@@ -318,10 +319,7 @@ def _edge_origin_map(memory_dir: str) -> Dict[str, Dict[str, str]]:
                 continue
             if not isinstance(fm, dict):
                 continue
-            meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-            eo = fm.get("edge_origin")
-            if eo is None:
-                eo = (meta or {}).get("edge_origin")
+            eo = fm_get(fm, "edge_origin")
             if not isinstance(eo, dict):
                 continue
             tagged = {

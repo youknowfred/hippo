@@ -33,6 +33,8 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Optional
 
+from .fm_access import fm_get
+
 _AGENTS_BASENAME = "AGENTS.md"
 
 
@@ -45,11 +47,10 @@ def _graduation(text: str) -> Dict[str, Optional[str]]:
         from .staleness import read_last_verified
 
         fm = parse_frontmatter(text)
-        meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-        mtype = (meta or {}).get("type") or fm.get("type")
+        mtype = fm_get(fm, "type", falsy=True, nested_first=True)
         if isinstance(mtype, str):
             out["type"] = mtype
-        conf = (meta or {}).get("confidence")
+        conf = fm_get(fm, "confidence", falsy=True, nested_first=True)
         if isinstance(conf, str):
             out["confidence"] = conf
         out["last_verified"] = read_last_verified(text)

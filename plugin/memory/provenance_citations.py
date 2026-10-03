@@ -22,6 +22,7 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 from . import provenance_env as _env
+from .fm_access import fm_get
 
 # Code/config extensions we treat as "cited code" for the staleness signal. .md is EXCLUDED
 # (memory<->memory refs are [[wikilinks]], Tier 3; doc/changelog churn isn't code drift); .mdc
@@ -274,10 +275,7 @@ def _frontmatter_cited_paths(fm: dict) -> List[str]:
     reader with the same both-schema lookup — lives in a module that imports THIS one,
     so it cannot be reused here without a cycle.
     """
-    meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-    cited = fm.get("cited_paths")
-    if cited is None:
-        cited = (meta or {}).get("cited_paths")
+    cited = fm_get(fm, "cited_paths")
     if not isinstance(cited, list):
         return []
     return [c for c in cited if isinstance(c, str)]
@@ -302,10 +300,7 @@ def frontmatter_excluded_paths(fm: dict) -> List[str]:
     another one, the class no mechanical rule can fix. Exact repo paths; a leading ``./``
     is normalised like a body token's. A bare string reads as a one-item list.
     """
-    meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-    raw = fm.get(EXCLUDE_KEY)
-    if raw is None:
-        raw = (meta or {}).get(EXCLUDE_KEY)
+    raw = fm_get(fm, EXCLUDE_KEY)
     if isinstance(raw, str):
         raw = [raw]
     if not isinstance(raw, list):

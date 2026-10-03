@@ -31,6 +31,7 @@ import time
 from typing import List, Optional, Set, Tuple
 
 from .build_index import default_index_dir, extract_description
+from .fm_access import fm_get
 from .provenance import _iter_memory_files, parse_frontmatter, resolve_dirs
 from .recall import DEFAULT_K, _cross_encoder_rerank, _rerank_enabled, recall
 
@@ -50,10 +51,7 @@ def _read_text(path: str) -> str:
 def _memory_type(text: str) -> str:
     """The memory's declared type (``metadata.type``, falling back to a top-level ``type``)."""
     fm = parse_frontmatter(text)
-    md = fm.get("metadata")
-    if isinstance(md, dict) and md.get("type"):
-        return str(md.get("type"))
-    return str(fm.get("type") or "")
+    return str(fm_get(fm, "type", falsy=True, nested_first=True) or "")
 
 
 def _memory_origin(text: str) -> str:
@@ -63,10 +61,7 @@ def _memory_origin(text: str) -> str:
     answers "where was this learned" right in the recall view.
     """
     fm = parse_frontmatter(text)
-    md = fm.get("metadata")
-    if isinstance(md, dict) and md.get("origin"):
-        return str(md.get("origin"))
-    return str(fm.get("origin") or "")
+    return str(fm_get(fm, "origin", falsy=True, nested_first=True) or "")
 
 
 def _name_from_path(path: str) -> str:

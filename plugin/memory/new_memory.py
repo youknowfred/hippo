@@ -39,6 +39,8 @@ import json
 import os
 from typing import Dict, List, Optional
 
+from .fm_access import fm_get, fm_metadata
+
 VALID_TYPES = ("user", "feedback", "project", "reference")
 
 # GRA-3: how many related memories new_memory suggests via recall() at write time.
@@ -1429,18 +1431,17 @@ def promote_memory(
             text = fh.read()
 
         fm = parse_frontmatter(text)
-        meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
         description = fm.get("description")
         if not isinstance(description, str) or not description.strip():
             result["error"] = "no description in frontmatter — not a recall-ready memory"
             return result
-        mtype = (meta or {}).get("type") or fm.get("type")
+        mtype = fm_get(fm, "type", falsy=True, nested_first=True)
         if mtype not in VALID_TYPES:
             result["error"] = (
                 f"invalid or missing type {mtype!r} (expected one of {VALID_TYPES})"
             )
             return result
-        confidence = (meta or {}).get("confidence")
+        confidence = fm_metadata(fm).get("confidence")
         if confidence not in _VALID_CONFIDENCE:
             confidence = None
 
@@ -1578,8 +1579,7 @@ def promote_candidates(memory_dir: Optional[str] = None) -> List[dict]:
             except Exception:
                 continue
             fm = parse_frontmatter(text)
-            meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-            mtype = (meta or {}).get("type") or fm.get("type")
+            mtype = fm_get(fm, "type", falsy=True, nested_first=True)
             if mtype not in ("user", "feedback"):
                 continue
             if read_invalid_after(text) is not None:
