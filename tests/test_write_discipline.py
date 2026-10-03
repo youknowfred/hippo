@@ -68,6 +68,8 @@ WRITE_OPEN_ALLOWLIST = {
     ("telemetry", "log_threat_findings"): "append-only gitignored Tier-B threat ledger (SEN-2); torn tail skipped",
     ("eval_recall", "append_run_ledger"): "append-only gitignored run ledger (MSR-1); torn tail skipped",
     ("telemetry", "log_episode"): "append-only gitignored ledger; torn tail skipped",
+    ("telemetry_rollup", "_append_finalized"): "append-only gitignored day rollups (OBS-1); torn tail skipped, trim goes through write_text_atomic",
+    ("telemetry_rollup", "_locked"): "flock lock file opened in append mode; nothing is ever written to it",
     ("telemetry", "log_decision"): "append-only gitignored ledger; torn tail skipped",
     ("telemetry", "log_outcome"): "append-only gitignored ledger; torn tail skipped",
     ("telemetry", "record_reconsolidation_outcome"): "append-only gitignored ledger; torn tail skipped",

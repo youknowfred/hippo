@@ -362,7 +362,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     # trace, matching recall()'s own zero-injection posture. A non-git corpus, or one with
     # no resolvable repo_root, has an inapplicable gate (gate_root is None) and is
     # untouched by this check -- same fail-open posture as recall()'s own gate.
-    if is_human and raw_query and memory_dir and os.path.isdir(memory_dir) and trusted_or_gate_inapplicable:
+    telemetry_ok = bool(raw_query and memory_dir and os.path.isdir(memory_dir) and trusted_or_gate_inapplicable)
+    wall_ms = _hook_wall_ms() if args.stdin_json else None
+    if is_human and telemetry_ok:
         # The corpus-existence gate (SEC-3): a project that never opted in (no
         # .claude/memory) must never gain a telemetry ledger with prompt previews —
         # a habitual `git add .` would commit prompt fragments to shared history.
@@ -390,7 +392,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # writes no key (absence-emits-nothing, never a fake 0).
                 injected_chars=len(out) if out else None,
                 # OBS-4: the shell-measured wall, hook path only.
-                wall_ms=_hook_wall_ms() if args.stdin_json else None,
+                wall_ms=wall_ms,
             )
             log_episode(
                 [r.get("name") for r in results if r.get("name")],
@@ -398,6 +400,26 @@ def main(argv: Optional[List[str]] = None) -> int:
                 repo_root=repo_root,
                 telemetry_dir=td,
                 session_id=args.session_id or None,
+            )
+        except Exception:
+            pass
+    # OBS-1: every UserPromptSubmit run, machine turns included, folds into today's
+    # rotation-proof rollup under the same corpus-existence and trust gates. The hook path
+    # only: a CLI recall is a person browsing, not a prompt.
+    if args.stdin_json and telemetry_ok:
+        try:
+            from .telemetry import default_telemetry_dir
+            from .telemetry_rollup import record_prompt
+
+            record_prompt(
+                default_telemetry_dir(memory_dir),
+                trigger=trigger,
+                session_id=args.session_id or None,
+                ran_recall=bool(query),
+                backend=(results[0].get("backend") if results else None) or "none",
+                injected_chars=len(out) if out else None,
+                latency_ms=latency_ms if is_human else None,
+                wall_ms=wall_ms,
             )
         except Exception:
             pass

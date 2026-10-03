@@ -1,6 +1,7 @@
 """Receipt checks for the deterministic doctor engine — the v2 scoreboard's durable inputs.
 
-OBS-4's shell-measured hook wall. Read-only and display-only (``ok`` unless the read itself
+OBS-1's 30-day KPIs from the rotation-proof daily rollups, and OBS-4's shell-measured hook
+wall. Read-only and display-only (``ok`` unless the read itself
 fails): these lines report numbers a later gate judges, they never judge them here.
 ``DoctorContext`` lives in ``doctor_checks_env``.
 """
@@ -64,3 +65,44 @@ def check_hook_wall(ctx: DoctorContext) -> Dict[str, str]:
         }
     except Exception as exc:
         return {"status": "warn", "message": f"hook wall check failed: {exc}."}
+
+
+def check_kpi_rollups(ctx: DoctorContext) -> Dict[str, str]:
+    """OBS-1: the last 30 days of this corpus's hook and SessionStart, from the daily rollups
+    (which survive ledger rotation). Percentiles read as bucket upper bounds. ``ok`` always."""
+    try:
+        from .telemetry import default_telemetry_dir
+        from .telemetry_rollup import read_rollups, summarize
+
+        k = summarize(read_rollups(default_telemetry_dir(ctx.memory_dir), days=30))
+        if not k["days"]:
+            return {
+                "status": "ok",
+                "message": "30-day KPIs: no daily rollups yet (recorded from v1.40.0 on; "
+                "one row per active day).",
+            }
+        parts = [f"30-day KPIs ({k['days']} day(s) since {k['first']}):"]
+        if k["prompts"]:
+            human = k["trigger"].get("human", 0)
+            parts.append(
+                f"{k['prompts']} prompt(s), {human} human / {k['machine_prompts']} machine "
+                f"({k['machine_injected_chars']} chars injected on machine turns)"
+            )
+            if k["ran_recall"]:
+                parts.append(f"abstained {k['abstained']}/{k['ran_recall']}")
+            if k["injected_prompts"]:
+                parts.append(
+                    f"{k['chars_per_injected_prompt']:.0f} chars per injecting prompt, "
+                    f"per-session p50 ≤{k['session_chars_p50']} / p95 ≤{k['session_chars_p95']}"
+                )
+            if k["wall_p95"]:
+                parts.append(f"hook wall p50 ≤{k['wall_p50']}ms / p95 ≤{k['wall_p95']}ms")
+        if k["ss_runs"]:
+            ss = f"SessionStart median ≤{k['ss_chars_p50']} chars, {k['ss_at_cap']}/{k['ss_runs']} at the cap"
+            if k["ss_dropped"]:
+                top = sorted(k["ss_dropped"].items(), key=lambda kv: (-kv[1], kv[0]))[:3]
+                ss += ", most dropped: " + ", ".join(f"{name} ({n})" for name, n in top)
+            parts.append(ss)
+        return {"status": "ok", "message": " ".join(parts[:1]) + " " + "; ".join(parts[1:]) + "."}
+    except Exception as exc:
+        return {"status": "warn", "message": f"30-day KPI check failed: {exc}."}

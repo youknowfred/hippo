@@ -94,6 +94,8 @@ CRASH_CONTRACT = {
     ("sleep", "_write_report"): ("detected",),  # report still prints; the miss is named
     ("sleep", "_write_state"): ("detected",),  # a lost run-stamp is named on stdout
     ("staleness", "set_invalid_after"): ("detected", "rolled_back"),  # dedup-merge write #2
+    ("telemetry_rollup", "_update"): ("detected",),  # OBS-1: the fold returns False; today's row keeps its prior bytes
+    ("telemetry_rollup", "_append_finalized"): ("intact",),  # OBS-1: the 365-day trim is best-effort; the appended day stays
     ("trust", "_write_registry_doc"): ("detected",),  # mark_trusted returns False
 }
 
@@ -859,6 +861,40 @@ def scn_jit_state_intact(tmp_path, monkeypatch):
     assert not [f for f in leftovers if f.endswith(".json")], "state absent, never partial"
 
 
+def scn_rollup_update_detected(tmp_path, monkeypatch):
+    """OBS-1: a torn accumulator write is reported (the fold returns False) and the open
+    day's row keeps its prior bytes."""
+    from memory import telemetry_rollup as TR
+
+    td = str(tmp_path / "tele")
+    os.makedirs(td)
+    assert TR.record_prompt(td, trigger="human")
+    path = os.path.join(td, TR._TODAY_NAME)
+    before = _snap(path)
+    _arm(monkeypatch, "telemetry_rollup", "_update")
+    assert TR.record_prompt(td, trigger="human") is False
+    _assert_unchanged(before)
+
+
+def scn_rollup_trim_intact(tmp_path, monkeypatch):
+    """OBS-1: a torn 365-day trim is silent and costs nothing: the finished day stays
+    appended and the new day still folds."""
+    from memory import telemetry_rollup as TR
+
+    td = str(tmp_path / "tele")
+    os.makedirs(td)
+    monkeypatch.setattr(TR, "MAX_DAYS", 1)
+    t0 = 1_790_000_000.0
+    assert TR.record_prompt(td, trigger="human", now=t0)
+    assert TR.record_prompt(td, trigger="human", now=t0 + 86400)  # roll 1: no trim needed
+    _arm(monkeypatch, "telemetry_rollup", "_append_finalized")
+    assert TR.record_prompt(td, trigger="human", now=t0 + 2 * 86400)  # roll 2: the trim tears
+    with open(os.path.join(td, TR._ROLLUP_NAME), encoding="utf-8") as fh:
+        rows = [json.loads(line) for line in fh if line.strip()]
+    assert [r["date"] for r in rows] == [TR._today(t0), TR._today(t0 + 86400)]
+    assert TR.read_rollups(td, now=t0 + 2 * 86400)[-1]["hook"]["prompts"] == 1
+
+
 def scn_presence_write_doc_intact(tmp_path, monkeypatch):
     """T18 FLT-1: a torn presence-doc write is SILENT (the jit._write_state posture) —
     the SessionStart that carries it must not degrade, and no partial doc may land (a
@@ -939,6 +975,8 @@ _SCENARIOS = [
     (("staleness", "set_invalid_after"), "detected", scn_invalid_after_detected),
     (("staleness", "set_invalid_after"), "rolled_back", scn_invalid_after_rolled_back),
     (("trust", "_write_registry_doc"), "detected", scn_trust_registry_detected),
+    (("telemetry_rollup", "_update"), "detected", scn_rollup_update_detected),
+    (("telemetry_rollup", "_append_finalized"), "intact", scn_rollup_trim_intact),
 ]
 
 

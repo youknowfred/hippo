@@ -559,6 +559,17 @@ def main(
                         telemetry_dir=default_telemetry_dir(memory_dir),
                         session_id=session_id,
                     )
+                    # OBS-1: the same emission, folded into today's durable rollup.
+                    from .telemetry_rollup import dropped_producers, record_session_start
+
+                    lost = dropped_producers(producer_chars, ctx)
+                    record_session_start(
+                        default_telemetry_dir(memory_dir),
+                        total=len(ctx),
+                        cap=_MAX_CONTEXT_CHARS,
+                        dropped=lost["dropped"],
+                        cut=lost["cut"],
+                    )
             except Exception:
                 pass
     except Exception:
