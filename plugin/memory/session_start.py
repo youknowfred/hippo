@@ -235,6 +235,23 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
 ]
 
 
+def _armed_names(memory_dir: str, stale: List[dict]) -> List[str]:
+    """HOT-4: the stale names SessionStart arms — VOL-1/TYPE-1 partition, minus demoted
+    (``invalid_after`` already set) and snoozed names. Never raises."""
+    try:
+        from .reconsolidate import _snoozed_names
+        from .staleness import invalid_after_map
+        from .staleness_policy import armed_stale_names
+        from .telemetry import default_telemetry_dir
+
+        names = [item["name"] for item in stale if item.get("name")]
+        exclude = set(invalid_after_map(names, memory_dir))
+        exclude |= _snoozed_names(default_telemetry_dir(memory_dir))
+        return armed_stale_names(memory_dir, stale, exclude=exclude)
+    except Exception:
+        return []
+
+
 def _build_run_context(memory_dir: str, repo_root: str) -> RunContext:
     """LIF-6: compute ``find_stale`` (and the reconsolidation worklist derived from it)
     EXACTLY ONCE per SessionStart run, instead of ``staleness_producer`` and
@@ -296,7 +313,14 @@ def _build_run_context(memory_dir: str, repo_root: str) -> RunContext:
         if os.path.isdir(memory_dir):
             from .build_index import default_index_dir
 
-            write_stale_cache(default_index_dir(memory_dir), stale, evidence_drift=evidence_drift)
+            # HOT-4: persist the armed subset beside the detection so recall's verify-at-use
+            # banner tells the same staleness story this SessionStart does.
+            write_stale_cache(
+                default_index_dir(memory_dir),
+                stale,
+                evidence_drift=evidence_drift,
+                armed=_armed_names(memory_dir, stale),
+            )
     except Exception:
         pass
     # T16 JIT-1: refresh the first-touch reminder map (touchmap.json) at this SAME

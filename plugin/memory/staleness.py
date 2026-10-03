@@ -350,6 +350,7 @@ from .staleness_cache import (  # noqa: E402,F401
     STALE_CACHE_SCHEMA_VERSION,
     _SHORT_SHA_LEN,
     _STALE_CACHE_NAME,
+    read_armed_names,
     read_evidence_drift,
     read_stale_cache,
     stale_cache_path,

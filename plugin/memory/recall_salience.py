@@ -171,7 +171,8 @@ def _staleness_penalty_map(index_dir: Optional[str]) -> Dict[str, float]:
 
 
 def _stale_banner_map(index_dir: Optional[str]) -> Dict[str, str]:
-    """Name -> RET-6's one-line verify-at-use banner text, from LIF-6's persisted
+    """Name -> RET-6's one-line verify-at-use banner text for each ARMED stale memory
+    (HOT-4), from LIF-6's persisted
     ``stale.json`` (``staleness.read_stale_cache``) — advisory, SessionStart-derived: an
     absent/corrupt cache degrades to ``{}`` (no banners for anyone), NEVER a git call on this
     hot path (mirrors ``_staleness_penalty_map``'s read, but UNCONDITIONAL — this runs
@@ -189,12 +190,19 @@ def _stale_banner_map(index_dir: Optional[str]) -> Dict[str, str]:
     if not index_dir:
         return {}
     try:
-        from .staleness import read_evidence_drift, read_stale_cache
+        from .staleness import read_armed_names, read_evidence_drift, read_stale_cache
 
         stale = read_stale_cache(index_dir)
+        # HOT-4: SessionStart persists the subset its arming policy arms (VOL-1, TYPE-1,
+        # demoted, snoozed). When present, only those carry the drift banner, so recall and
+        # SessionStart tell one staleness story. A cache from before HOT-4 has no such list
+        # and keeps the old every-detected-drift behavior until the next SessionStart.
+        armed = read_armed_names(index_dir)
         out: Dict[str, str] = {}
         for name, rec in (stale or {}).items():
             if not isinstance(rec, dict):
+                continue
+            if armed is not None and name not in armed:
                 continue
             sha = rec.get("sha")
             if not isinstance(sha, str) or not sha:

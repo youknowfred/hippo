@@ -23,7 +23,7 @@ with), and the three ARMING surfaces partition through ``split_volatile_only``:
 An item arms iff at least ONE drifted cited path is non-volatile; an armed item keeps its
 FULL changed-path listing (the render stays honest — the volatile path did drift, it just
 didn't arm alone). Everything else is deliberately registry-blind: ``find_stale`` detection
-and ``stale.json`` (RET-5's penalty, RET-6's banner), the JIT touch map, ``--for-diff``,
+and ``stale.json``'s detected set (RET-5's penalty), the JIT touch map, ``--for-diff``,
 derivation/rederive (AC6: byte-identical output with or without the registry), and the
 deep-judgment surfaces (audit's raw stale section, archive's admission leg, publish's
 preflight) — those exist to see everything. CLB-3 quoted-evidence drift also arms through
@@ -56,6 +56,11 @@ explicit type ever exempts — which also keeps typeless fixtures and older corp
 byte-identical). The exempt set ships as ``{"project"}``; ``HIPPO_ARMING_EXEMPT_TYPES``
 (comma-list; set EMPTY to arm everything) is the reversible override — ED-1 holds, every
 verdict stays human, per-item.
+
+HOT-4 (v1.40.0): RET-6's verify-at-use banner left the registry-blind list. SessionStart
+persists ``armed_stale_names`` (this partition, minus demoted and snoozed names) into
+``stale.json``, and recall banners only those, so the hot path and SessionStart tell one
+staleness story (hippo's own corpus: 49 bannered before, 1 armed).
 
 Pure functions over caller-supplied data + one tiny marker read; no writes anywhere.
 Sibling of ``staleness.py`` (never imports it); reads the registry via
@@ -154,6 +159,30 @@ def split_type_exempt(
     except Exception:
         return list(items), []
     return armed, suppressed
+
+
+def arming_partition(
+    memory_dir: str, stale: Iterable[dict]
+) -> Tuple[List[dict], List[dict], List[dict]]:
+    """``(armed, volatile_suppressed, type_suppressed)`` — VOL-1 then TYPE-1, the one order
+    every arming surface partitions in. Never raises."""
+    armed, vol_sup = split_volatile_only(stale, volatile_set(memory_dir))
+    armed, type_sup = split_type_exempt(armed, arming_exempt_types())
+    return armed, vol_sup, type_sup
+
+
+def armed_stale_names(memory_dir: str, stale: Iterable[dict], *, exclude: Iterable[str] = ()) -> List[str]:
+    """HOT-4: the stale memories SessionStart actually arms — ``arming_partition``'s armed
+    side minus ``exclude`` (the caller passes the demoted names, which already carry
+    ``invalid_after`` and a recall penalty, and the snoozed ones a human deferred).
+    Persisted into ``stale.json`` so recall's verify-at-use banner names exactly this set
+    instead of every detected drift. Sorted; never raises."""
+    try:
+        armed, _vol, _type = arming_partition(memory_dir, stale)
+        skip = set(exclude)
+        return sorted({item["name"] for item in armed if item.get("name") and item["name"] not in skip})
+    except Exception:
+        return []
 
 
 def note_suppressed(diagnostics: Optional[dict], names: Iterable[str], key: str = DIAG_KEY) -> None:

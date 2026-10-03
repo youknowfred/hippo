@@ -25,7 +25,10 @@ def stale_cache_path(index_dir: str) -> str:
 
 
 def write_stale_cache(
-    index_dir: str, stale: List[dict], evidence_drift: Optional[Dict[str, dict]] = None
+    index_dir: str,
+    stale: List[dict],
+    evidence_drift: Optional[Dict[str, dict]] = None,
+    armed: Optional[List[str]] = None,
 ) -> bool:
     """Persist ``find_stale``'s result to ``<index_dir>/stale.json`` (RET-5/RET-6 setup).
 
@@ -37,6 +40,11 @@ def write_stale_cache(
 
         {"schema_version": 1, "generated_at": "<iso8601>",
          "stale": {"<name>": {"changed": <len(changed_paths)>, "sha": "<short source_commit>"}}}
+
+    ``armed`` (HOT-4) is an OPTIONAL top-level sorted name list: the subset SessionStart's
+    arming policy actually arms (``staleness_policy.armed_stale_names``). Written whenever
+    the caller passes it, an empty list included (nothing armed means no stale-lane banner);
+    absent on a cache from before HOT-4, which ``read_armed_names`` reports as ``None``.
 
     ``evidence_drift`` (CLB-3) is an OPTIONAL top-level field, written only when
     non-empty (absence-emits-nothing, no schema bump — ``read_stale_cache`` never
@@ -67,6 +75,8 @@ def write_stale_cache(
                 for item in stale
             },
         }
+        if armed is not None:
+            payload["armed"] = sorted({str(n) for n in armed})
         if evidence_drift:
             payload["evidence_drift"] = {
                 str(name): {
@@ -119,6 +129,22 @@ def read_evidence_drift(index_dir: str) -> Dict[str, dict]:
         }
     except Exception:
         return {}
+
+
+def read_armed_names(index_dir: str) -> Optional[set]:
+    """HOT-4's reader: the armed name set from ``stale.json``, or ``None`` when the cache is
+    absent, corrupt, schema-mismatched, or predates the field. Never raises."""
+    try:
+        with open(stale_cache_path(index_dir), "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        if not isinstance(payload, dict) or payload.get("schema_version") != STALE_CACHE_SCHEMA_VERSION:
+            return None
+        armed = payload.get("armed")
+        if not isinstance(armed, list):
+            return None
+        return {n for n in armed if isinstance(n, str)}
+    except Exception:
+        return None
 
 
 def read_stale_cache(index_dir: str) -> Optional[Dict[str, dict]]:
