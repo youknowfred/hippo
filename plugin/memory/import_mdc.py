@@ -329,9 +329,12 @@ def import_mdc_file(
         from .threat_lint import scan_tier_a, scan_tier_b
 
         try:
-            from .telemetry import log_threat_findings
+            from .telemetry import default_telemetry_dir, log_threat_findings
 
-            log_threat_findings(scan_tier_b(candidate_text), source="import", name=slug)
+            log_threat_findings(  # OBS-9: beside the corpus imported into, not the launch dir's
+                scan_tier_b(candidate_text), source="import", name=slug,
+                telemetry_dir=default_telemetry_dir(memory_dir),
+            )
         except Exception:
             pass
         threats = scan_tier_a(candidate_text)

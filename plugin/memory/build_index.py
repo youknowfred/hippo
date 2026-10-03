@@ -37,6 +37,7 @@ import time
 from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple
 
+from .fm_access import fm_get
 from .provenance import (
     _iter_memory_files,
     ensure_self_ignoring_dir,
@@ -458,10 +459,7 @@ def extract_description(text: str) -> str:
     fm = parse_frontmatter(text)
     desc = ""
     if isinstance(fm, dict):
-        d = fm.get("description")
-        if not d:
-            meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-            d = meta.get("description")
+        d = fm_get(fm, "description", falsy=True)
         if isinstance(d, str):
             desc = d.strip()
     if not desc:
@@ -616,10 +614,7 @@ def _extract_invalid_after(fm: dict) -> Optional[str]:
     """
     if not isinstance(fm, dict):
         return None
-    ia = fm.get("invalid_after")
-    if not ia:
-        meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-        ia = meta.get("invalid_after")
+    ia = fm_get(fm, "invalid_after", falsy=True)
     if isinstance(ia, str):
         return ia
     if isinstance(ia, (date, datetime)):
@@ -645,10 +640,7 @@ def _extract_steer(fm: dict) -> Optional[str]:
     """
     if not isinstance(fm, dict):
         return None
-    val = fm.get("steer")
-    if not val:
-        meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-        val = meta.get("steer")
+    val = fm_get(fm, "steer", falsy=True)
     if isinstance(val, str) and val.strip().lower() in _VALID_STEER:
         return val.strip().lower()
     return None
@@ -670,10 +662,7 @@ def _extract_confidence(fm: dict) -> Optional[str]:
     """
     if not isinstance(fm, dict):
         return None
-    val = fm.get("confidence")
-    if not val:
-        meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-        val = meta.get("confidence")
+    val = fm_get(fm, "confidence", falsy=True)
     if isinstance(val, str) and val.strip().lower() in _VALID_CONFIDENCE:
         return val.strip().lower()
     return None

@@ -26,6 +26,7 @@ from __future__ import annotations
 import os
 from typing import Dict, Optional, Set, Tuple
 
+from .fm_access import fm_get
 from .provenance import (
     _iter_memory_files,
     parse_frontmatter,
@@ -46,10 +47,7 @@ def read_verified_by(text: str) -> Optional[Tuple[str, str]]:
         fm = parse_frontmatter(text)
         if not fm:
             return None
-        meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-        raw = fm.get("verified_by")
-        if raw is None:
-            raw = (meta or {}).get("verified_by")
+        raw = fm_get(fm, "verified_by")
         if not isinstance(raw, str) or "@" not in raw:
             return None
         slug, ts = raw.rsplit("@", 1)

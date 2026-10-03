@@ -16,6 +16,7 @@ import os
 from typing import Dict, List
 
 from .doctor_checks_env import DoctorContext, _iter_memory_files_safe
+from .fm_access import fm_get
 from .provenance import parse_frontmatter
 
 
@@ -256,9 +257,8 @@ def check_pack_drift(ctx: DoctorContext) -> Dict[str, str]:
                     fm = parse_frontmatter(fh.read())
             except Exception:
                 continue
-            meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-            pack = fm.get("pack") or (meta or {}).get("pack")
-            pver = fm.get("pack_version") or (meta or {}).get("pack_version")
+            pack = fm_get(fm, "pack", falsy=True)
+            pver = fm_get(fm, "pack_version", falsy=True)
             if not pack or pver is None:
                 continue
             latest = shipped.get(str(pack))

@@ -166,6 +166,37 @@ from .mcp_tools_setup import (
 
 _SERVER_NAME = "hippo"
 _DEFAULT_PROTOCOL = "2024-11-05"
+# OBS-2: the MCP client's own name from `initialize`, the fallback client label when the
+# harness set no CLAUDE_CODE_ENTRYPOINT.
+_CLIENT_NAME: Optional[str] = None
+
+
+def _note_tool_use(tool: str, args: Dict[str, Any]) -> None:
+    """OBS-2: count one tool call in the resolved corpus's daily rollup — only for a corpus
+    that exists and passes the trust gate (SEC-3/SEC-1: no ledger trace otherwise). The
+    ``action`` argument, when a tool has one, rides the key. Never raises."""
+    try:
+        from . import trust
+        from .provenance import resolve_dirs
+        from .telemetry import default_telemetry_dir
+        from .telemetry_rollup import record_usage
+
+        memory_dir, repo_root = resolve_dirs()
+        if not memory_dir or not os.path.isdir(memory_dir):
+            return
+        gate = trust.gate_repo_root(memory_dir, repo_root)
+        if gate is not None and not trust.is_trusted(gate):
+            return
+        action = args.get("action")
+        record_usage(
+            default_telemetry_dir(memory_dir),
+            surface="mcp",
+            verb=str(tool),
+            action=action if isinstance(action, str) and action else None,
+            client=(os.environ.get("CLAUDE_CODE_ENTRYPOINT") or "").strip() or _CLIENT_NAME,
+        )
+    except Exception:
+        pass
 
 
 def _plugin_version() -> str:
@@ -257,8 +288,12 @@ def handle_request(req: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
 
     if method == "initialize":
+        global _CLIENT_NAME
         params = req.get("params") or {}
         proto = params.get("protocolVersion")
+        info = params.get("clientInfo")
+        if isinstance(info, dict) and isinstance(info.get("name"), str):
+            _CLIENT_NAME = info["name"][:64] or None
         return result(
             {
                 "protocolVersion": proto if isinstance(proto, str) else _DEFAULT_PROTOCOL,
@@ -281,14 +316,17 @@ def handle_request(req: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         fn = _DISPATCH.get(tool)
         if fn is None:
             return error(-32602, f"unknown tool: {tool}")
+        args = args if isinstance(args, dict) else {}
         try:
-            text = fn(args if isinstance(args, dict) else {})
+            text = fn(args)
             return result({"content": [{"type": "text", "text": text}]})
         except Exception as exc:  # a tool failure is an isError result, not a dead server
             _log(f"tool {tool} raised: {exc!r}")
             return result(
                 {"content": [{"type": "text", "text": f"tool error: {exc}"}], "isError": True}
             )
+        finally:
+            _note_tool_use(tool, args)
     if method == "resources/list":
         return result({"resources": _RESOURCES})
     if method == "resources/read":

@@ -31,6 +31,8 @@ try:
 except Exception:  # pragma: no cover - bare python3 pre-bootstrap (ONB-2)
     from ._vendor import miniyaml as yaml  # type: ignore  # frontmatter-subset fallback
 
+from .fm_access import fm_get, fm_metadata  # noqa: E402
+
 _FENCE = "---"
 
 
@@ -631,11 +633,8 @@ def backfill_file(
                 # (find_unparseable / the SessionStart integrity producer surface these.)
                 result["error"] = "unparseable frontmatter — refusing to refresh (fix the YAML)"
                 return result
-            meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-            sc = fm.get("source_commit") or meta.get("source_commit")
-            sct = fm.get("source_commit_time")
-            if sct is None:
-                sct = meta.get("source_commit_time")
+            sc = fm_get(fm, "source_commit", falsy=True)
+            sct = fm_get(fm, "source_commit_time")
             result["baseline"] = "preserved"
             if sc is None:
                 # cited_paths without a source_commit (hand-written, or a legacy partial
@@ -755,9 +754,8 @@ def heal_empty_baselines(memory_dir: str, repo_root: str) -> Tuple[List[str], Di
                 fm = parse_frontmatter(text)
                 if not fm:
                     continue  # no/unparseable frontmatter — not this function's job
-                meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-                has_key = "source_commit" in fm or "source_commit" in (meta or {})
-                current = fm.get("source_commit") or (meta or {}).get("source_commit")
+                has_key = "source_commit" in fm or "source_commit" in fm_metadata(fm)
+                current = fm_get(fm, "source_commit", falsy=True)
                 if not has_key or current:
                     continue  # never touch a real baseline (no blind re-baseline)
                 lines = text.split("\n")
@@ -961,10 +959,7 @@ def reverify_file(
         # never removes it, so an append-after-backfill_text ordering would flip on the very next
         # call (the triplet always re-lands at fm's tail while last_verified sat still), breaking
         # the triplet's idempotence contract on the SECOND reverify, not the first.
-        meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-        existing_lv = fm.get("last_verified")
-        if existing_lv is None:
-            existing_lv = meta.get("last_verified")
+        existing_lv = fm_get(fm, "last_verified")
         if isinstance(existing_lv, str) and existing_lv.strip():
             lv = existing_lv
             pre_stamp = stripped  # already present -- untouched by the strip above

@@ -56,7 +56,7 @@ WRITE_OPEN_ALLOWLIST = {
     #    targets the TMP file; the swap is atomic at the real path --
     ("build_index", "build_index"): "manifest write: own unique-tmp + os.replace (COR-12/COR-17)",
     ("links_cache", "write_links_cache"): "own unique-tmp + os.replace (COR-12/COR-17)",
-    ("staleness", "write_stale_cache"): "own unique-tmp + os.replace (COR-17)",
+    ("staleness_cache", "write_stale_cache"): "own unique-tmp + os.replace (COR-17)",
     ("outcome", "write_outcome_cache"): "own unique-tmp + os.replace (COR-17)",
     ("rules_plane", "refresh_rules_cache"): "own unique-tmp + os.replace (COR-17)",
     ("telemetry_usage", "write_user_usage_summary"): "own unique-tmp + os.replace (committed .usage summary)",
@@ -68,6 +68,8 @@ WRITE_OPEN_ALLOWLIST = {
     ("telemetry", "log_threat_findings"): "append-only gitignored Tier-B threat ledger (SEN-2); torn tail skipped",
     ("eval_recall", "append_run_ledger"): "append-only gitignored run ledger (MSR-1); torn tail skipped",
     ("telemetry", "log_episode"): "append-only gitignored ledger; torn tail skipped",
+    ("telemetry_rollup", "_append_finalized"): "append-only gitignored day rollups (OBS-1); torn tail skipped, trim goes through write_text_atomic",
+    ("telemetry_rollup", "_locked"): "flock lock file opened in append mode; nothing is ever written to it",
     ("telemetry", "log_decision"): "append-only gitignored ledger; torn tail skipped",
     ("telemetry", "log_outcome"): "append-only gitignored ledger; torn tail skipped",
     ("telemetry", "record_reconsolidation_outcome"): "append-only gitignored ledger; torn tail skipped",

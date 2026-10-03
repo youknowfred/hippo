@@ -24,14 +24,11 @@ from .staleness import (
     nondrift_old_invalidated,
 )
 from .staleness_policy import (
-    arming_exempt_types,
-    split_type_exempt,
-    split_volatile_only,
+    arming_partition,
     stale_note_all_suppressed,
     stale_note_tail,
     type_note_all_suppressed,
     type_note_tail,
-    volatile_set,
 )
 
 
@@ -88,11 +85,11 @@ def staleness_producer(
         )
     # VOL-1: partitioned AFTER nondrift_old (suppressed items DO have drift — not retired);
     # anything the worklist armed anyway (the CLB-3 evidence lane) renders THERE, not here.
-    stale, vol_sup = split_volatile_only(stale, volatile_set(memory_dir))
-    vol_sup = [i for i in vol_sup if i["name"] not in worklist_names]
     # TYPE-1: the type exemption partitions the VOL-1 remainder (order VOL then TYPE, the
-    # worklist's order) — same worklist-armed exclusion so nothing double-reports.
-    stale, type_sup = split_type_exempt(stale, arming_exempt_types())
+    # worklist's order) — same worklist-armed exclusion so nothing double-reports. HOT-4: the
+    # partition is the shared one recall's banner set is derived from.
+    stale, vol_sup, type_sup = arming_partition(memory_dir, stale)
+    vol_sup = [i for i in vol_sup if i["name"] not in worklist_names]
     type_sup = [i for i in type_sup if i["name"] not in worklist_names]
     vol_line = (stale_note_all_suppressed if not stale else stale_note_tail)(len(vol_sup)) if vol_sup else None
     type_line = (type_note_all_suppressed if not stale else type_note_tail)(len(type_sup)) if type_sup else None

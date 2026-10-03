@@ -79,6 +79,7 @@ from .dream import (
     dream_dir,
     generated_rows,
 )
+from .fm_access import fm_get
 from .links import normalize_slug
 from .provenance import parse_frontmatter
 from .soak import soak_status
@@ -257,10 +258,7 @@ def _description_of(texts: Dict[str, str], stem: str) -> str:
 def _cited_paths_of(texts: Dict[str, str], stem: str) -> List[str]:
     try:
         fm = parse_frontmatter(texts.get(stem, "")) or {}
-        meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-        val = fm.get("cited_paths")
-        if val is None:
-            val = (meta or {}).get("cited_paths")
+        val = fm_get(fm, "cited_paths")
         if isinstance(val, str):
             val = [val]
         return [p.strip() for p in val if isinstance(p, str) and p.strip()] if isinstance(val, list) else []
@@ -625,10 +623,7 @@ def stage_generated(
                 with open(path, "r", encoding="utf-8") as fh:
                     text = fh.read()
                 fm_now = parse_frontmatter(text) or {}
-                meta_now = fm_now.get("metadata") if isinstance(fm_now.get("metadata"), dict) else {}
-                existing_cited = fm_now.get("cited_paths")
-                if existing_cited is None:
-                    existing_cited = (meta_now or {}).get("cited_paths")
+                existing_cited = fm_get(fm_now, "cited_paths")
                 if not existing_cited:
                     _set_cited_paths(path, cited)
         except Exception:

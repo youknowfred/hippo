@@ -37,7 +37,11 @@ GRANDFATHERED_PLUGIN = {
     "eval_recall.py": 1644,  # re-pinned at the round-6 ED5R-3 split (GRF-3 sweep → eval_floor, default-fixture resolvers → eval_fixtures); SIG-6/MSR-1 writers stay AST-pinned to this file (crash contract), GRF-3's moved WITH it
     "new_memory.py": 1757,
     "build_index.py": 1735,
-    "recall.py": 1637,  # recall() orchestrator + hook entry; rankers/salience/tiers already split out
+    # recall() orchestrator; rankers/salience/tiers/query already split out. Re-pinned
+    # 1637 -> 1424 at RWY-1 (v1.40.0): the hook/CLI entry moved to recall_hook (1364 lines
+    # left). The pin sits 60 above that size on purpose, so pin + slack leaves the 120-line
+    # runway RWY-1's gate asks for; it can still only shrink from here.
+    "recall.py": 1424,
     # links.py left this ledger at the GRF-6 split (parse/resolve core → links_graph,
     # persisted cache → links_cache): 642 lines, under the cap, so the general cap
     # governs it now.
@@ -45,15 +49,8 @@ GRANDFATHERED_PLUGIN = {
     # telemetry.py left this ledger at the round-6 LIF-4/TEA-5 split (usage aggregates →
     # telemetry_usage): 761 lines, under the cap, so the general cap governs it now.
     "packs.py": 988,
-    # Re-pinned 914 -> 946 in round 6 (28 -> 28 tools: ZERO new tools, +32 lines of edited
-    # `description` prose on abstention_fixtures/resolve/reconsolidate/capture). The old
-    # comment claimed this file "grows only with new tools"; the measured record says
-    # otherwise, and that is the whole reason the pin needed raising. Splitting is not the
-    # remedy here: the module is a 6-line docstring, one import, and ONE 937-line _TOOLS
-    # list — no functions and no section banners, so there is nothing the ratchet's
-    # "split along a section banner" advice can bind to. A family split (the 5 pack_* tools,
-    # ~163 lines) is the fallback if description churn keeps eating the slack.
-    "mcp_schemas.py": 946,
+    # mcp_schemas.py left this ledger at RWY-1 (v1.40.0): the pack_* family split into
+    # mcp_schemas_packs (the fallback the old pin comment named), 798 lines, under the cap.
 }
 
 GRANDFATHERED_TESTS = {

@@ -44,6 +44,9 @@ def _repo(tmp_path, monkeypatch):
     subprocess.run(["git", "init", "-q", root], check=True)
     subprocess.run(["git", "-C", root, "add", "-A"], check=True)
     subprocess.run(["git", "-C", root, "commit", "-qm", "seed"], check=True, env=_GIT_ENV)
+    # The session launches from THIS repo, as the harness sets it for the MCP server. Without
+    # it, repo_root (and so the trust gate) came from pytest's cwd — the hippo checkout.
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", root)
     monkeypatch.setenv("HIPPO_MEMORY_DIR", md)
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(tmp_path / "plugin-data"))

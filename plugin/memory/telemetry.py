@@ -179,6 +179,7 @@ def log_recall_event(
     dense_floor: Optional[float] = None,
     channel: Optional[str] = None,
     injected_chars: Optional[int] = None,
+    wall_ms: Optional[float] = None,
 ) -> bool:
     """Append ONE recall event to the ledger. Fire-and-forget: NEVER raises.
 
@@ -225,6 +226,17 @@ def log_recall_event(
     deliberately never carry it. Additive/absence-emits-nothing; an abstention
     emitted nothing, so it writes no key rather than a fake 0.
 
+    OBS-3 ``collapsed``: ``names``/``scores``/``ranks`` record only what was SERVED. An
+    entry the hook rendered as a collapsed line (``floor_collapsed`` — already in the
+    always-loaded floor — or ``cooldown_collapsed`` — surfaced earlier this session) goes
+    to ``collapsed`` instead, so the usage aggregates stop counting every floor memory as
+    recalled on every prompt. Additive; absent when nothing collapsed.
+
+    OBS-4 ``wall_ms``: the hook's SHELL-measured wall from its start stamp to just before
+    this append — interpreter start and imports included, which ``latency_ms`` (timed inside
+    the process, around recall itself) never saw. Hook channel only; absent when the shell
+    could not stamp (bash 3.2 without GNU date).
+
     MSR-7 ``load1``/``cpus``: the host's 1-minute load average and CPU count, sampled
     here (see ``_host_load``) on every channel. Doctor's KPI-3 line splits the p95 on
     ``load1 / cpus`` so a tail caused by a busy machine is not reported as a hippo
@@ -235,7 +247,16 @@ def log_recall_event(
         td = _resolve_dir(telemetry_dir)
         ensure_self_ignoring_dir(td)  # derived dir: mkdir + self-ignoring .gitignore (SEC-3)
         backend = (results[0].get("backend") if results else None) or "none"
-        named = [r for r in results if r.get("name")]
+        named = [
+            r
+            for r in results
+            if r.get("name") and not (r.get("floor_collapsed") or r.get("cooldown_collapsed"))
+        ]
+        collapsed = [
+            r.get("name")
+            for r in results
+            if r.get("name") and (r.get("floor_collapsed") or r.get("cooldown_collapsed"))
+        ]
         event = {
             "ts": round(time.time(), 3),
             "session_id": current_session_id(td, session_id=session_id),
@@ -247,6 +268,8 @@ def log_recall_event(
             "k": int(k),
             "query_preview": (query or "")[:_QUERY_PREVIEW_CHARS],
         }
+        if collapsed:
+            event["collapsed"] = collapsed
         if drops:
             event["drops"] = drops
         if near_miss:
@@ -257,6 +280,8 @@ def log_recall_event(
             event["channel"] = channel
         if injected_chars is not None:
             event["injected_chars"] = int(injected_chars)
+        if wall_ms is not None:
+            event["wall_ms"] = round(float(wall_ms), 1)
         load = _host_load()  # MSR-7: additive; absent where the platform can't say
         if load:
             event.update(load)
@@ -767,13 +792,43 @@ def read_archive_regret(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
         return
 
 
-def read_reconsolidation_events(telemetry_dir: Optional[str] = None) -> Iterator[dict]:
-    """Yield parsed reconsolidation-outcome events, skipping corrupt/partial lines. Never raises."""
+# OBS-9: until v1.40.0, three end-to-end tests appended verdicts for fixture memories to the
+# developer's LIVE reconsolidation ledger whenever the suite ran from a hippo checkout (727
+# of hippo's 999 rows). The leak is fixed at the source; these are the names it minted.
+_LEAKED_FIXTURE_NAMES = frozenset({"m_alpha", "m_feature_design", "reranker_voyage"})
+
+
+def _quarantined_fixture_names(telemetry_dir: str) -> frozenset:
+    """The leaked fixture names that this ledger's own corpus does not hold. The corpus is
+    the telemetry dir's sibling ``memory``; when that dir is absent (a custom telemetry
+    dir) nothing is quarantined, and a real memory that shares a fixture's name (live or
+    archived) is never hidden."""
+    md = os.path.join(os.path.dirname(os.path.abspath(telemetry_dir)), "memory")
+    if not os.path.isdir(md):
+        return frozenset()
+    return frozenset(
+        n
+        for n in _LEAKED_FIXTURE_NAMES
+        if not os.path.exists(os.path.join(md, n + ".md"))
+        and not os.path.exists(os.path.join(md, "archive", n + ".md"))
+    )
+
+
+def read_reconsolidation_events(
+    telemetry_dir: Optional[str] = None, *, include_quarantined: bool = False
+) -> Iterator[dict]:
+    """Yield parsed reconsolidation-outcome events, skipping corrupt/partial lines. Never raises.
+
+    OBS-9: rows the test suite leaked into a live ledger (``_LEAKED_FIXTURE_NAMES`` absent
+    from this ledger's corpus) are skipped, so every KPI reader — the graduation rate, the
+    snooze window, doctor — counts only real verdicts. ``include_quarantined=True`` is the
+    forensic view."""
     try:
         td = _resolve_dir(telemetry_dir)
         path = _reconsolidation_ledger_path(td)
         if not os.path.exists(path):
             return
+        skip = frozenset() if include_quarantined else _quarantined_fixture_names(td)
         with open(path, "r", encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
@@ -783,7 +838,7 @@ def read_reconsolidation_events(telemetry_dir: Optional[str] = None) -> Iterator
                     obj = json.loads(line)
                 except Exception:
                     continue
-                if isinstance(obj, dict):
+                if isinstance(obj, dict) and obj.get("name") not in skip:
                     yield obj
     except Exception:
         return

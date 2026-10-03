@@ -3819,10 +3819,12 @@ def test_recall_output_bounded_under_cap_with_every_result_stale(tmp_path, monke
 # via session_start._build_run_context) then simply omits the memory from stale.json, and
 # the banner clears on the next recall() with no separate "clear" step anywhere.
 # --------------------------------------------------------------------------- #
-def _mem_with_provenance(name: str, description: str, cited: list, source_commit: str) -> str:
+def _mem_with_provenance(
+    name: str, description: str, cited: list, source_commit: str, mtype: str = "project"
+) -> str:
     cp = "[" + ", ".join(f'"{c}"' for c in cited) + "]"
     return (
-        f'---\nname: {name}\ndescription: "{description}"\ntype: project\n'
+        f'---\nname: {name}\ndescription: "{description}"\ntype: {mtype}\n'
         f'cited_paths: {cp}\nsource_commit: "{source_commit}"\n---\nbody references {cited[0]}\n'
     )
 
@@ -3842,7 +3844,9 @@ def test_reinforcement_clears_banner_end_to_end(repo, memory_dir, monkeypatch):
     write_file(
         memory_dir,
         "m_alpha.md",
-        _mem_with_provenance("m_alpha", "gizmo widget calibration alpha", ["src/dep.py"], c1),
+        # HOT-4: the banner follows SessionStart's arming, and TYPE-1 exempts project
+        # memories, so this loop runs on a type that arms.
+        _mem_with_provenance("m_alpha", "gizmo widget calibration alpha", ["src/dep.py"], c1, "feedback"),
     )
     git_commit(repo, "memory", now - 200)
     write_file(repo, "src/dep.py", "v = 2\n")  # cited code drifts -> genuinely stale

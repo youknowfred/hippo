@@ -20,6 +20,24 @@ hippo_resolve_py() {
   export PYTHONPATH="${CLAUDE_PLUGIN_ROOT:-}${PYTHONPATH:+:$PYTHONPATH}"
 }
 
+# OBS-4: stamp the hook's start in epoch milliseconds (HIPPO_HOOK_T0_MS) so the Python
+# side can log the SHELL-measured wall — interpreter start and imports included, which the
+# in-process latency_ms never saw. bash 5's $EPOCHREALTIME costs no spawn; GNU date's %N
+# (Linux) costs one cheap one. Neither available (stock macOS bash 3.2 + BSD date): no
+# stamp at all, and the row simply omits wall_ms — never a guessed or second-grained value.
+hippo_stamp_t0() {
+  local t=""
+  if [ -n "${EPOCHREALTIME:-}" ]; then
+    t="${EPOCHREALTIME//[.,]/}"
+    t="${t:0:13}"
+  else
+    t="$(date +%s%3N 2>/dev/null)" || t=""
+  fi
+  case "$t" in
+    [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) export HIPPO_HOOK_T0_MS="$t" ;;
+  esac
+}
+
 # SHP-7 — the hooks' pre-Python probes, worktree-aware. hippo_main_tree() prints the MAIN
 # working tree when the cwd is a LINKED git worktree (its .git is a FILE, so the common
 # path — a plain checkout — costs one stat and no subprocess; only that shape pays one
@@ -41,4 +59,25 @@ hippo_corpus_present() {
 hippo_floor_present() {
   [ -f ".claude/memory/MEMORY.md" ] && return 0
   main="$(hippo_main_tree)" && [ -f "$main/.claude/memory/MEMORY.md" ]
+}
+
+# OBS-2: count one use of a bash-only hippo surface (`hippo <verb>`, a skill preflight, a
+# hook whose Python failed) without spawning Python: append one line to the corpus's
+# usage spool, which the next Python fold drains into the day's rollup. Resolves the
+# telemetry dir the way the engine does (HIPPO_TELEMETRY_DIR, this tree, or — SHP-7 — the
+# main tree of a linked worktree) and writes nothing unless that dir already exists, so a
+# never-opted-in project gains no ledger from bash. Never fails the caller.
+hippo_note_usage() {  # <surface> <verb> [action]
+  local td="" main=""
+  if [ -n "${HIPPO_TELEMETRY_DIR:-}" ]; then
+    td="$HIPPO_TELEMETRY_DIR"
+  elif [ -d ".claude/memory" ]; then
+    td=".claude/.memory-telemetry"
+  elif main="$(hippo_main_tree)" && [ -d "$main/.claude/memory" ]; then
+    td="$main/.claude/.memory-telemetry"
+  fi
+  [ -n "$td" ] && [ -d "$td" ] || return 0
+  printf '{"surface":"%s","verb":"%s","action":"%s","client":"%s"}\n' \
+    "${1:-}" "${2:-}" "${3:-}" "${CLAUDE_CODE_ENTRYPOINT:-unknown}" >> "$td/usage_spool.jsonl" 2>/dev/null || true
+  return 0
 }

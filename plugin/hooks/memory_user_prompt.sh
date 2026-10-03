@@ -26,6 +26,7 @@ cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" 
 
 # shellcheck disable=SC1091  # dynamic path via CLAUDE_PLUGIN_ROOT; see hooks/_resolve_py.sh
 . "${CLAUDE_PLUGIN_ROOT:-.}/hooks/_resolve_py.sh"
+hippo_stamp_t0  # OBS-4: the shell-side start of this hook's wall time
 
 # COR-10: a never-opted-in repo has no .claude/memory at all — bail before paying
 # for stdin capture or a Python spawn. A stat is ~free; recall.py's own SEC-3
@@ -53,9 +54,9 @@ else
   export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-${XDG_CACHE_HOME:-$HOME/.cache}/hippo-memory/fastembed}"
 fi
 
-# INT-5: ONE Python spawn for the whole hook. memory.recall --stdin-json reads the hook JSON
+# INT-5: ONE Python spawn for the whole hook. memory.recall_hook --stdin-json reads the hook JSON
 # payload (prompt + session_id, COR-6) directly off stdin and emits the hookSpecificOutput JSON
 # itself — replacing the previous three launches (parse .prompt, parse .session_id, recall) plus
 # the jq/python emission wrap. An empty/unparseable prompt or an empty result prints nothing.
-printf '%s' "$PAYLOAD" | "$PY" -m memory.recall --stdin-json 2>/dev/null || true
+printf '%s' "$PAYLOAD" | "$PY" -m memory.recall_hook --stdin-json 2>/dev/null || hippo_note_usage hook user_prompt failed
 exit 0

@@ -279,5 +279,8 @@ def test_format_results_falls_through_to_generic_label(tmp_path):
 def test_hook_path_never_involves_all_projects():
     # inv6 + the item's own AC: the stdin-json hook entry and the per-prompt recall()
     # never touch cross-project fusion — it is an explicit-surface feature only.
+    from memory import recall_hook
+
     assert "all_projects" not in inspect.getsource(R.main)
+    assert "all_projects" not in inspect.getsource(recall_hook.main)  # the moved body (RWY-1)
     assert "all_projects" not in inspect.getsource(R.recall)

@@ -66,6 +66,7 @@ import os
 import re
 from typing import Dict, List, Optional, Set, Tuple
 
+from .fm_access import fm_get
 from .markdown_code import strip_code
 from .provenance import _iter_memory_files, parse_frontmatter, read_fold_digests
 
@@ -199,11 +200,8 @@ def parse_typed_relations(fm: dict) -> Dict[str, List[str]]:
     out: Dict[str, List[str]] = {}
     if not isinstance(fm, dict):
         return out
-    meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
     for rel in TYPED_RELATIONS:
-        val = fm.get(rel)
-        if val is None:
-            val = (meta or {}).get(rel)
+        val = fm_get(fm, rel)
         if isinstance(val, str):
             val = [val]
         if not isinstance(val, list):
@@ -242,10 +240,7 @@ def parse_planned(fm: dict) -> List[str]:
     """
     if not isinstance(fm, dict):
         return []
-    meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
-    val = fm.get(PLANNED_KEY)
-    if val is None:
-        val = (meta or {}).get(PLANNED_KEY)
+    val = fm_get(fm, PLANNED_KEY)
     if isinstance(val, str):
         val = [val]
     if not isinstance(val, list):

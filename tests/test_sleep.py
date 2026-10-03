@@ -171,7 +171,7 @@ def test_print_schedule_emits_recipes_and_installs_nothing(tmp_path, monkeypatch
     out = _run(["--print-schedule"], capsys=capsys)
     assert "crontab" in out and "-m memory.sleep" in out
     assert "launchd" in out and "<plist" in out and "StartCalendarInterval" in out
-    assert "scheduled-task" in out and '"schedule"' in out
+    assert "scheduled task" in out and '"schedule"' in out
     assert root in out  # THIS repo's paths, not placeholders
     # print-only: no report artifact, no state file, nothing installed anywhere.
     td = default_telemetry_dir(md)

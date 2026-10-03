@@ -1,5 +1,6 @@
 """The one list of harness envelope tags: Claude Code's own traffic that reaches the
-UserPromptSubmit hook as if the user had typed it.
+UserPromptSubmit hook as if the user had typed it — and, since HOT-1, the trigger class each
+machine-generated turn belongs to.
 
 Three planes have to tell that traffic from a real query, and each used to keep its own copy
 of the tag list. The copies drifted. The desktop app's subagent hand-backs
@@ -31,6 +32,10 @@ HARNESS_ENVELOPE_TAGS = (
     "local-command-stdout",
     "agent-message",  # desktop app: a subagent's hand-back, <agent-message from="a…">
     "cross-session-message",  # desktop app: another local session, from="uds:/tmp/cc-socks/…"
+    "scheduled-task",  # HOT-1: a scheduled task's automated run, <scheduled-task name="…">
+    "bash-input",  # HOT-1: a `!`-bash turn — the command, then its output blocks
+    "bash-stdout",
+    "bash-stderr",
 )
 # WRAPPER tags: the markers are harness syntax but the body is the user's own words (the slash
 # command they ran, its arguments), so only the markers go.
@@ -41,6 +46,25 @@ HARNESS_WRAPPER_TAGS = (
     "command-args",
 )
 HARNESS_TAGS = HARNESS_ENVELOPE_TAGS + HARNESS_WRAPPER_TAGS
+
+# HOT-1: the trigger class a prompt made only of envelopes belongs to. A turn is a MACHINE turn
+# when nothing a person wrote survives once its envelopes are removed; its class is the first
+# machine envelope it carries (the bash trio is one class), else "system-reminder-only" for a
+# turn that is nothing but injected reminders. Anything else is "human". The recall hook never
+# recalls on a machine turn, and the daily rollups count turns by these classes.
+HUMAN_TURN = "human"
+SYSTEM_REMINDER_ONLY = "system-reminder-only"
+MACHINE_TURN_CLASSES = {
+    "task-notification": "task-notification",
+    "agent-message": "agent-message",
+    "cross-session-message": "cross-session-message",
+    "scheduled-task": "scheduled-task",
+    "bash-input": "bash-input",
+    "bash-stdout": "bash-input",
+    "bash-stderr": "bash-input",
+}
+REMINDER_TAG = "system-reminder"
+TRIGGER_CLASSES = (HUMAN_TURN,) + tuple(dict.fromkeys(MACHINE_TURN_CLASSES.values())) + (SYSTEM_REMINDER_ONLY,)
 
 # Where a tag name ends: at anything that cannot continue it, so "<agent-messages" is not
 # "<agent-message". Shared with recall_query's regexes so every plane draws the same edge.

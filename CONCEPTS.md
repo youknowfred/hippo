@@ -54,8 +54,9 @@ adds no second always-load channel of its own.)
 **On-demand recall — matched per prompt.** Everything else is recalled *only when it fits*. On
 each prompt, a hook matches your words against the whole corpus using **hybrid search** — a
 local dense-embedding model plus classic keyword (BM25) scoring, fused together — and injects
-just the few memories that actually match. This hot path runs entirely on your machine in
-milliseconds: **no LLM call, no network, no tokens spent.** Before you've downloaded the
+just the few memories that actually match. This hot path runs entirely on your machine, in
+hundreds of milliseconds: **no LLM call, no network** — the memories it injects are the only
+context it spends, and `/hippo:doctor` counts them. Before you've downloaded the
 embedding model it still works, in keyword-only mode; the dense half is an upgrade, never a
 requirement.
 

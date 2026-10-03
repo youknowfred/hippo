@@ -220,7 +220,7 @@ def test_hot_path_never_imports_the_receipt():
     """The receipt fires only via the explicit skill invocation — session_start (the
     producers) and the recall hot path never touch it, and doctor gained no check."""
     for mod in ("session_start.py", "session_start_health.py", "session_start_signals.py",
-                "recall.py", "recall_tiers.py", "doctor.py", "doctor_checks_corpus.py",
+                "recall.py", "recall_hook.py", "recall_tiers.py", "doctor.py", "doctor_checks_corpus.py",
                 "doctor_checks_env.py", "doctor_checks_recall.py", "doctor_checks_lifecycle.py",
                 "doctor_checks_abstention.py"):
         assert "export_receipts" not in _module_source(mod), mod

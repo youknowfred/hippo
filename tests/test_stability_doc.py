@@ -215,3 +215,48 @@ def test_stated_bin_hippo_subcommands_match_the_registry():
         f"{sorted(surfaces.BIN_HIPPO_SUBCOMMANDS)}. Update the doc and the registry "
         "together — the published list is a stability promise."
     )
+
+
+# --------------------------------------------------------------------------- #
+# CON-1: the same fact pins, extended past STABILITY.md. Each of these docs drifted
+# on its own (UPGRADING said index schema 6 at 7; README counted 16 skills at 18;
+# bin/hippo's usage line left out `sleep`).
+# --------------------------------------------------------------------------- #
+def _read(rel: str) -> str:
+    with open(os.path.join(_REPO_ROOT, rel), encoding="utf-8") as fh:
+        return " ".join(fh.read().split())
+
+
+def _skill_count() -> int:
+    skills = os.path.join(_REPO_ROOT, "plugin", "skills")
+    return sum(1 for d in os.listdir(skills) if os.path.isfile(os.path.join(skills, d, "SKILL.md")))
+
+
+def test_upgrading_states_the_current_versions():
+    text = _read("UPGRADING.md")
+    m = re.search(r"`schema_version` \(currently (\d+)\)", text)
+    assert m and int(m.group(1)) == SCHEMA_VERSION, f"UPGRADING.md index schema != {SCHEMA_VERSION}"
+    m = re.search(r'\{"corpus_format": N\}`, currently \*\*(\d+)\*\*', text)
+    assert m and int(m.group(1)) == CORPUS_FORMAT_VERSION, f"UPGRADING.md corpus format != {CORPUS_FORMAT_VERSION}"
+
+
+def test_engine_readme_states_the_current_versions():
+    text = _read("plugin/memory/README.md")
+    m = re.search(r"`provenance\.CORPUS_FORMAT_VERSION`, currently \*\*(\d+)\*\*", text)
+    assert m and int(m.group(1)) == CORPUS_FORMAT_VERSION
+    m = re.search(r"`links\.json` \(schema v(\d+)\)", text)
+    assert m and int(m.group(1)) == LINKS_SCHEMA_VERSION
+
+
+def test_readme_counts_the_shipped_skills():
+    text = _read("README.md")
+    stated = [int(n) for n in re.findall(r"(\d+) `?/hippo:\*`? (?:skills|commands)", text)]
+    assert stated, "README.md no longer states how many /hippo:* skills ship"
+    assert set(stated) == {_skill_count()}, f"README.md states {stated} skills; {_skill_count()} ship"
+
+
+def test_bin_hippo_usage_line_names_every_subcommand():
+    with open(os.path.join(_REPO_ROOT, "plugin", "bin", "hippo"), encoding="utf-8") as fh:
+        m = re.search(r"usage: hippo <([a-z|-]+)>", fh.read())
+    assert m, "bin/hippo lost its usage line"
+    assert set(m.group(1).split("|")) == set(surfaces.BIN_HIPPO_SUBCOMMANDS)
