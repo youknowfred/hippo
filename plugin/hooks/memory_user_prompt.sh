@@ -26,6 +26,7 @@ cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" 
 
 # shellcheck disable=SC1091  # dynamic path via CLAUDE_PLUGIN_ROOT; see hooks/_resolve_py.sh
 . "${CLAUDE_PLUGIN_ROOT:-.}/hooks/_resolve_py.sh"
+hippo_stamp_t0  # OBS-4: the shell-side start of this hook's wall time
 
 # COR-10: a never-opted-in repo has no .claude/memory at all — bail before paying
 # for stdin capture or a Python spawn. A stat is ~free; recall.py's own SEC-3

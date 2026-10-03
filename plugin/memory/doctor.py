@@ -123,6 +123,7 @@ from .doctor_checks_recall import (
     check_succession_replay,
     check_update_eval,
 )
+from .doctor_checks_kpi import check_hook_wall  # OBS-4
 
 # One glyph per status — the deterministic line prefix. Ordered dict-free lookup.
 _GLYPH = {"ok": "✔", "warn": "⚠", "fail": "✘"}
@@ -342,6 +343,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("steering", check_steering),  # GOV-2: N pinned (pre-wires the mandatory MUTE count)
     ("hot_path_latency", check_hot_path_latency),
     ("recall_channels", check_recall_channels),  # MSR-3: hook/mcp volume + MCP blind-spot arm
+    ("hook_wall", check_hook_wall),  # OBS-4: shell-measured wall vs the logged latency
     ("recall_blind_spots", check_recall_blind_spots),
     ("drop_autopsy", check_drop_autopsy),  # MSR-4: which mechanism eats candidates, aggregated
 

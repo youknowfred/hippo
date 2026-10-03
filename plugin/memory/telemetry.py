@@ -179,6 +179,7 @@ def log_recall_event(
     dense_floor: Optional[float] = None,
     channel: Optional[str] = None,
     injected_chars: Optional[int] = None,
+    wall_ms: Optional[float] = None,
 ) -> bool:
     """Append ONE recall event to the ledger. Fire-and-forget: NEVER raises.
 
@@ -231,6 +232,11 @@ def log_recall_event(
     to ``collapsed`` instead, so the usage aggregates stop counting every floor memory as
     recalled on every prompt. Additive; absent when nothing collapsed.
 
+    OBS-4 ``wall_ms``: the hook's SHELL-measured wall from its start stamp to just before
+    this append — interpreter start and imports included, which ``latency_ms`` (timed inside
+    the process, around recall itself) never saw. Hook channel only; absent when the shell
+    could not stamp (bash 3.2 without GNU date).
+
     MSR-7 ``load1``/``cpus``: the host's 1-minute load average and CPU count, sampled
     here (see ``_host_load``) on every channel. Doctor's KPI-3 line splits the p95 on
     ``load1 / cpus`` so a tail caused by a busy machine is not reported as a hippo
@@ -274,6 +280,8 @@ def log_recall_event(
             event["channel"] = channel
         if injected_chars is not None:
             event["injected_chars"] = int(injected_chars)
+        if wall_ms is not None:
+            event["wall_ms"] = round(float(wall_ms), 1)
         load = _host_load()  # MSR-7: additive; absent where the platform can't say
         if load:
             event.update(load)

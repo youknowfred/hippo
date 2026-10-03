@@ -36,6 +36,23 @@ def _session_episodes(memory_dir: Optional[str], session_id: Optional[str]) -> L
         return []
 
 
+# OBS-4: a stamp further than this from "now" is a stale or foreign env value, not this hook.
+_MAX_HOOK_WALL_MS = 600_000.0
+
+
+def _hook_wall_ms() -> Optional[float]:
+    """Milliseconds since the hook script's ``HIPPO_HOOK_T0_MS`` stamp, or None when the shell
+    could not stamp (or the value is junk / out of range). Never raises."""
+    raw = os.environ.get("HIPPO_HOOK_T0_MS")
+    if not raw:
+        return None
+    try:
+        wall = time.time() * 1000.0 - int(raw)
+    except ValueError:
+        return None
+    return wall if 0.0 <= wall < _MAX_HOOK_WALL_MS else None
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
     import json
@@ -372,6 +389,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # emission point (`out` above) — an abstention emitted nothing and
                 # writes no key (absence-emits-nothing, never a fake 0).
                 injected_chars=len(out) if out else None,
+                # OBS-4: the shell-measured wall, hook path only.
+                wall_ms=_hook_wall_ms() if args.stdin_json else None,
             )
             log_episode(
                 [r.get("name") for r in results if r.get("name")],

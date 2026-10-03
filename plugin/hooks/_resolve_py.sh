@@ -20,6 +20,24 @@ hippo_resolve_py() {
   export PYTHONPATH="${CLAUDE_PLUGIN_ROOT:-}${PYTHONPATH:+:$PYTHONPATH}"
 }
 
+# OBS-4: stamp the hook's start in epoch milliseconds (HIPPO_HOOK_T0_MS) so the Python
+# side can log the SHELL-measured wall — interpreter start and imports included, which the
+# in-process latency_ms never saw. bash 5's $EPOCHREALTIME costs no spawn; GNU date's %N
+# (Linux) costs one cheap one. Neither available (stock macOS bash 3.2 + BSD date): no
+# stamp at all, and the row simply omits wall_ms — never a guessed or second-grained value.
+hippo_stamp_t0() {
+  local t=""
+  if [ -n "${EPOCHREALTIME:-}" ]; then
+    t="${EPOCHREALTIME//[.,]/}"
+    t="${t:0:13}"
+  else
+    t="$(date +%s%3N 2>/dev/null)" || t=""
+  fi
+  case "$t" in
+    [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) export HIPPO_HOOK_T0_MS="$t" ;;
+  esac
+}
+
 # SHP-7 — the hooks' pre-Python probes, worktree-aware. hippo_main_tree() prints the MAIN
 # working tree when the cwd is a LINKED git worktree (its .git is a FILE, so the common
 # path — a plain checkout — costs one stat and no subprocess; only that shape pays one
