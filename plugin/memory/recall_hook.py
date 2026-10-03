@@ -43,6 +43,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Read at call time from the recall façade, so a monkeypatched memory.recall.<name>
     # steers this entry exactly as it did before the split.
+    from .recall_query import HUMAN_TURN, human_text, turn_class
     from .recall import (
         DEFAULT_K,
         _RULES_SOURCE,
@@ -149,13 +150,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         except Exception:
             memory_dir = None
 
+    # HOT-1: a machine-generated turn (a background task's result, a subagent's hand-back, a
+    # cross-session message, a scheduled task, a `!`-bash turn, reminders alone) is not a
+    # prompt anyone typed. It never recalls, never arms the RCL-3 rescue, and writes no recall
+    # or episode row.
+    trigger = turn_class(raw_query)
+    is_human = trigger == HUMAN_TURN
+
     # Query hygiene: strip harness envelopes / skip near-empty prompts BEFORE embedding, so a
-    # task-notification blob or a "?" continuation never pays a model load to inject noise.
-    query = clean_query(raw_query)
+    # "?" continuation never pays a model load to inject noise.
+    query = clean_query(raw_query) if is_human else ""
 
     # RCL-2/RCL-3 SHARE this one bounded episode-buffer read: RCL-2's cooldown collapse and
     # RCL-3's terse-follow-up rescue both need this session's prior-turn episodes.
-    session_episodes = _session_episodes(memory_dir, args.session_id)
+    session_episodes = _session_episodes(memory_dir, args.session_id) if is_human else []
 
     # RCL-3: rescue a terse follow-up ("continue", "and the other one?") that carries no
     # retrieval intent ON ITS OWN. Triggered when the cleaned query is blank OR still short
@@ -170,7 +178,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if session_episodes and (not query or len(tokenize(query)) < _rescue_min_tokens()):
         previews = _rescue_previews(raw_query, session_episodes)
         if previews:
-            blended = clean_query((raw_query + " " + " ".join(previews)).strip())
+            blended = clean_query((human_text(raw_query) + " " + " ".join(previews)).strip())
             if blended:
                 query = blended
 
@@ -321,8 +329,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         else:
             print(out)
     # Telemetry: fire-and-forget AFTER results are computed/printed. Logs even a SKIP (empty
-    # results -> backend "none") under the RAW prompt preview, so the ledger shows hygiene at
-    # work. Logging lives ONLY in main() (the CLI/hook entry) — NOT in recall() — so
+    # results -> backend "none"), so the ledger shows hygiene at work. HOT-1: the preview is
+    # the prompt's human text (no harness XML), and a machine turn logs no row at all. Logging lives ONLY in main() (the CLI/hook entry) — NOT in recall() — so
     # eval_recall's direct recall() calls never pollute the ledger. Wrapped so it can never
     # raise into / delay the hook. The episode buffer (the future capture pass's replay log)
     # is logged in the SAME block, right after the recall ledger, on the SAME raw_query gate —
@@ -337,7 +345,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # trace, matching recall()'s own zero-injection posture. A non-git corpus, or one with
     # no resolvable repo_root, has an inapplicable gate (gate_root is None) and is
     # untouched by this check -- same fail-open posture as recall()'s own gate.
-    if raw_query and memory_dir and os.path.isdir(memory_dir) and trusted_or_gate_inapplicable:
+    if is_human and raw_query and memory_dir and os.path.isdir(memory_dir) and trusted_or_gate_inapplicable:
         # The corpus-existence gate (SEC-3): a project that never opted in (no
         # .claude/memory) must never gain a telemetry ledger with prompt previews —
         # a habitual `git add .` would commit prompt fragments to shared history.
@@ -345,9 +353,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             from .telemetry import default_telemetry_dir, log_episode, log_recall_event
 
             td = default_telemetry_dir(memory_dir)
+            preview = human_text(raw_query)
             log_recall_event(
                 results,
-                query=raw_query,
+                query=preview,
                 k=args.k,
                 latency_ms=latency_ms,
                 telemetry_dir=td,
@@ -366,7 +375,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
             log_episode(
                 [r.get("name") for r in results if r.get("name")],
-                query=raw_query,
+                query=preview,
                 repo_root=repo_root,
                 telemetry_dir=td,
                 session_id=args.session_id or None,

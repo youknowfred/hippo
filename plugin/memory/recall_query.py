@@ -14,6 +14,10 @@ from .build_index import tokenize
 from .harness_envelopes import (
     HARNESS_ENVELOPE_TAGS,
     HARNESS_TAGS,
+    HUMAN_TURN,
+    MACHINE_TURN_CLASSES,
+    REMINDER_TAG,
+    SYSTEM_REMINDER_ONLY,
     TAG_NAME_END,
     is_envelope_preview,
 )
@@ -80,9 +84,59 @@ def _rescue_turns() -> int:
         return _RESCUE_TURNS
 
 
+# HOT-1: every envelope opening tag, wherever it sits (for classifying a turn), and the cut
+# debris a truncated preview can end on ("...</bash-input><bash-stdo").
+_ENVELOPE_ANY_RE = re.compile(r"<(" + "|".join(HARNESS_ENVELOPE_TAGS) + r")" + TAG_NAME_END, re.IGNORECASE)
+_TRAILING_PARTIAL_TAG_RE = re.compile(r"<[A-Za-z/][^<>]*\Z")
+
+
+def _strip_envelopes(raw: str) -> str:
+    """``raw`` minus every closed envelope block. An envelope left OPEN at the start (an
+    80-char ledger preview, or a message that never closed) owns the rest of the text, and a
+    partial tag dangling at the end of an envelope-bearing text is cut debris."""
+    text = _ENVELOPE_BLOCK_RE.sub(" ", raw)
+    if is_envelope_preview(text):
+        return ""
+    if _ENVELOPE_ANY_RE.search(raw):
+        text = _TRAILING_PARTIAL_TAG_RE.sub(" ", text)
+    return text
+
+
+def human_text(raw: str) -> str:
+    """What a person wrote in ``raw``: envelopes and known wrapper tags removed, whitespace
+    collapsed. ``""`` for a machine turn. HOT-1's ledgers store this, never harness XML.
+    Never raises."""
+    try:
+        if not raw:
+            return ""
+        return " ".join(_TAG_RE.sub(" ", _strip_envelopes(raw)).split())
+    except Exception:
+        return (raw or "").strip()
+
+
+def turn_class(raw: str) -> str:
+    """HOT-1's trigger class for one UserPromptSubmit prompt (``harness_envelopes``'s
+    ``TRIGGER_CLASSES``): ``"human"`` when anything a person wrote survives the envelopes,
+    so a reminder riding a typed prompt never hides it; otherwise the first machine
+    envelope's class, or ``"system-reminder-only"``. Never raises (degrades to ``"human"``,
+    the pre-HOT-1 behavior)."""
+    try:
+        if not raw or not raw.strip():
+            return HUMAN_TURN
+        kinds = [m.group(1).lower() for m in _ENVELOPE_ANY_RE.finditer(raw)]
+        if not kinds or human_text(raw):
+            return HUMAN_TURN
+        for kind in kinds:
+            if kind in MACHINE_TURN_CLASSES:
+                return MACHINE_TURN_CLASSES[kind]
+        return SYSTEM_REMINDER_ONLY if REMINDER_TAG in kinds else HUMAN_TURN
+    except Exception:
+        return HUMAN_TURN
+
+
 def _envelope_only(raw: str) -> bool:
     """True when ``raw`` has text but nothing survives stripping harness envelopes and tags."""
-    return bool(raw.strip()) and not _TAG_RE.sub(" ", _ENVELOPE_BLOCK_RE.sub(" ", raw)).strip()
+    return bool(raw.strip()) and not human_text(raw)
 
 
 def _rescue_previews(raw: str, episodes: List[dict]) -> List[str]:
@@ -98,12 +152,15 @@ def _rescue_previews(raw: str, episodes: List[dict]) -> List[str]:
     """
     if _envelope_only(raw or ""):
         return []
+    # HOT-1: blend only human text. Rows written before HOT-1 hold the raw 80-char preview,
+    # so a preview that merely carries an envelope (a closed reminder, a wrapper tag) is
+    # reduced to what the person wrote, and one that is nothing else drops out.
     previews = [
-        ep["query_preview"]
+        human_text(ep["query_preview"])
         for ep in episodes
         if ep.get("query_preview") and not is_envelope_preview(ep["query_preview"])
     ]
-    return previews[-_rescue_turns():]
+    return [p for p in previews if p][-_rescue_turns():]
 
 # Terse continuation/filler prompts that carry no retrieval intent (matched normalized+lowered).
 _CONTINUATION_PHRASES = frozenset(
@@ -203,7 +260,7 @@ def clean_query(raw: str) -> str:
     try:
         if not raw or not raw.strip():
             return ""
-        text = _ENVELOPE_BLOCK_RE.sub(" ", raw)
+        text = _strip_envelopes(raw)
 
         # Mine identifiers from fenced blocks AND raw traceback lines BEFORE the fences are
         # removed from the running text — mining reads the envelope-stripped text (fences +

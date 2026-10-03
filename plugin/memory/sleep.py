@@ -35,7 +35,7 @@ do" report (not silence, not noise). Headless from a bare venv: no
 telemetry dir, not plugin data).
 
 Scheduling (SLP-2) is EXPLICIT-INSTALL ONLY, mirroring bootstrap's consent style:
-``--print-schedule`` prints copy-pasteable launchd/cron/scheduled-task recipes for
+``--print-schedule`` prints copy-pasteable launchd/cron/scheduled task recipes for
 THIS machine's interpreter and repo — hippo never writes system state; the human
 owns the install. Failure modes and where they surface:
 
@@ -371,7 +371,7 @@ copy the one you want and install it yourself — the explicit-install posture i
 ## launchctl load ~/Library/LaunchAgents/com.hippo.sleep.{key}.plist
 {plist}
 
-## Claude scheduled-task (paste into your scheduler of choice)
+## Claude scheduled task (paste into your scheduler of choice)
 {task}
 
 Failure modes — where each one surfaces (nothing vanishes silently):
@@ -403,7 +403,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--print-schedule",
         action="store_true",
-        help="print copy-pasteable launchd/cron/scheduled-task recipes for THIS "
+        help="print copy-pasteable launchd/cron/scheduled task recipes for THIS "
         "machine and repo — prints only, never installs (SLP-2)",
     )
     parser.add_argument(
