@@ -101,6 +101,7 @@ from .recall_query import (
     _intent_weights,
     _mine_identifiers,
     _rescue_min_tokens,
+    _rescue_previews,
     _rescue_turns,
     clean_query,
 )
@@ -1478,13 +1479,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     # a genuinely substantive prompt is never touched). Pure string assembly (no LLM/network,
     # inv6-safe): blend the RAW prompt with the last few same-session query previews and
     # re-run clean_query on the combined text -- never mutates clean_query itself, which
-    # stays pure/single-prompt and unit-pinned.
+    # stays pure/single-prompt and unit-pinned. A prompt that is nothing but harness envelopes
+    # is not a follow-up: _rescue_previews gives it nothing, and never blends an envelope.
     if session_episodes and (not query or len(tokenize(query)) < _rescue_min_tokens()):
-        previews = [
-            ep["query_preview"]
-            for ep in session_episodes[-_rescue_turns():]
-            if ep.get("query_preview")
-        ]
+        previews = _rescue_previews(raw_query, session_episodes)
         if previews:
             blended = clean_query((raw_query + " " + " ".join(previews)).strip())
             if blended:
