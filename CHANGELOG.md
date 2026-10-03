@@ -7,6 +7,118 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.40.0 — 2026-10-03 — "Room, receipts, clean turns"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**, link cache still
+**6**; `stale.json` keeps schema **1** (one additive field). The first release of the
+owner-ratified [`ROADMAP.v2.md`](ROADMAP.v2.md), all 14 of its v1.40.0 items. Four modules
+get room to grow. Machine-generated turns stop reaching recall. Durable receipts start
+recording, so every later v2 claim is measured on more than 2.3 days of ledger. The README
+stops claiming what the field telemetry disproved.
+
+**Operator action: none required.**
+- The first SessionStart after updating rewrites `stale.json` with the armed set. From then
+  on, recall's verify-at-use banner names only what SessionStart arms.
+- Four doctor lines are new: `hook_wall`, `kpi_rollups`, `surface_usage` and
+  `native_auto_memory`. The last one warns if Claude Code's auto memory is turned off or
+  redirected, because either stops hippo's floor from loading (see `PLATFORM.md`).
+- Recall-ledger rows change meaning in two places: `names` is now what was served, and
+  `query_preview` is the prompt's human text. Compare KPIs across the v1.40.0 boundary with
+  that in mind.
+
+**Runway**
+- **RWY-1 — the four at-cap modules are pre-split (pure code motion).** The hook/CLI entry
+  moves to `recall_hook.py` (`recall.py` 1695 → 1364; pin 1637 → 1424). `dream.py`'s CLI
+  moves to `dream_cli.py` (900 → 642). The `stale.json` cache moves to `staleness_cache.py`
+  (896 → 764). `reconsolidate.py`'s CLI moves to `reconsolidate_cli.py` (875 → 726). The
+  five `pack_*` schemas move to `mcp_schemas_packs.py` (958 → 798). Each of the four now has
+  at least 120 lines of runway. Old import paths and `python -m` entries still work, and the
+  hook spawns `memory.recall_hook` directly. Bench recall output (hook + CLI, BM25 + dense)
+  is byte-identical before and after.
+- **RWY-2 — one frontmatter accessor.** `fm_access.fm_get` replaces 25 hand-rolled
+  flat-or-nested reads in 13 modules. Each call states its precedence (`falsy=`,
+  `nested_first=`), and a grep test keeps the idiom inside the accessor. A process-local
+  flat-read counter is the signal FMT-1 will report. One defect fixed, repro first: the
+  export receipt ignored a flat-shape `confidence:` that recall ranks on.
+
+**Clean turns**
+- **HOT-1 — machine turns never trigger recall** (completing v1.39.1's slice).
+  `scheduled-task` and `!`-bash turns join the one envelope list. `turn_class` names each
+  prompt's trigger class (human, task-notification, agent-message, cross-session-message,
+  scheduled-task, bash-input, system-reminder-only). An envelope left open at the start
+  (an 80-char preview, a message cut short) owns the rest of the text. A machine turn skips
+  recall, the RCL-3 rescue and both ledger rows. The rescue blends only human text, and the
+  ledgers store the human text, never harness XML.
+  - Receipts: on the v1.39.1 base, 6 of 12 machine-turn fixtures (one per class, full and
+    truncated) still injected; now 0.
+  - Replaying every retained hook row on six local corpora, each machine row that used to
+    inject now injects nothing: hippo 142, em-growth-labs 389, Skyline 184.
+- **HOT-4 — one staleness truth.** SessionStart persists the subset it arms (VOL-1, TYPE-1,
+  minus demoted and snoozed) into `stale.json`, and recall banners only that subset. On
+  hippo's own corpus: 49 bannered before, 1 now, which equals SessionStart's armed count.
+
+**Receipts**
+- **OBS-1 — rotation-proof daily rollups.** Each recall-hook run and SessionStart folds into
+  one durable row per active day per corpus: prompts by trigger class, backend mix,
+  abstentions, injected chars, shell wall and latency histograms, SessionStart chars and
+  dropped producers. Rows are capped at 365 days, survive ledger rotation, and update under
+  an flock. Doctor's `kpi_rollups` line reads 30 days of them.
+- **OBS-2 — every surface use is counted.** This covers MCP tool calls (with their
+  `action`), `hippo <verb>`, every skill preflight, and hook spawns and failures. Bash-only
+  surfaces append a spool line without spawning Python. Doctor's `surface_usage` line prints
+  30-day per-verb counts, the input SRF-3 and SRF-8 need before removing any name.
+- **OBS-3 — rows log what was served.** Floor- and cooldown-collapsed entries move to a
+  separate `collapsed` list, so usage aggregates stop counting every floor memory as
+  recalled on every prompt. Hook rows had named a median of 28 memories against k = 10.
+- **OBS-4 — the hook's wall time, measured from the shell.** `hippo_stamp_t0` stamps
+  epoch-ms with no spawn on bash 5, and the hook row logs `wall_ms`. Doctor's `hook_wall`
+  line shows the gap that in-process latency never saw (bench corpus: logged 5–31 ms
+  against a wall of 58–88 ms).
+- **OBS-6 — trust drift's dominant source.** Across three corpora, every drifted file was
+  classified by arrival. em-growth-labs' 28 all arrived by merge from worktree branches,
+  their bytes written there by hippo verbs pinned to the worktree copy. Those verbs folded
+  into a consent record keyed on the worktree, which had none, so the fold was a silent
+  no-op. A write in a linked worktree now also extends the main tree's consent record.
+  Hand edits still drift; authorship, never git, is consent.
+- **OBS-9 — tests never write the live ledgers.**
+  - Three end-to-end tests had been appending fixture verdicts to the developer's real
+    ledger, and two write paths had been logging threat findings beside the launch dir
+    instead of the corpus handed to them. Both are fixed.
+  - An autouse guard runs every test from a tmp dir.
+  - The rows already leaked are quarantined from every KPI reader: 752 of hippo's 1,025.
+    The real graduate share is 185/242.
+
+**Platform and native memory**
+- **PLT-1 — dated receipts in [`PLATFORM.md`](PLATFORM.md)** (Claude Code 2.1.286).
+  - `mcp_tool` hooks substitute `${prompt}`, `${session_id}` and `${cwd}`, and reach
+    `plugin:hippo:hippo`. Their reply reaches context only as JSON `additionalContext`.
+  - Turning auto memory off stops `MEMORY.md` loading, and a redirected
+    `autoMemoryDirectory` bypasses hippo's symlink. A CLAUDE.md import loads the floor
+    either way.
+  - A general-purpose subagent received the floor under both channels.
+  - An edit through the native memory path stamps the file; the same edit through the repo
+    path does not.
+  - `userConfig` values reach the MCP server but not the Bash tool.
+  - `PostToolBatch` carries no `batch_id`, and async hooks are abandoned when the process
+    exits.
+  - Still open: a typed `/hippo:doctor` on Desktop needs a person at the keyboard.
+- **NAT-1 — native auto memory, detected.** Doctor's `native_auto_memory` line reads
+  `autoMemoryEnabled` (local, project, user), `CLAUDE_CODE_DISABLE_AUTO_MEMORY` and
+  `autoMemoryDirectory`. It also counts corpus files carrying native's stamp without hippo
+  provenance, and untracked ones.
+
+**Contract and honesty**
+- **CON-1 — doc drift fixed, and fact-linted.**
+  - Fixed: UPGRADING's index schema (6 → 7), README's skill count (16 → 18), the `bin/hippo`
+    usage line (adds `sleep`), and the stale LIF-8, OQ-9 and DRM-2 markers.
+  - `ROADMAP.v2.md`'s baselines are restated on verdicts only.
+  - The fact pins now cover UPGRADING, both READMEs and the usage line.
+- **CON-2 — the falsified claims are gone.** "Recall costs zero tokens" and "no other tool
+  checks whether the code a memory cites has moved" are out of the README, and the native
+  "static and unranked" line now says what native does. Recall calls no model and no
+  network; what it injects is context, and doctor counts it.
+
 ## v1.39.1 — 2026-10-03 — "Not something you asked"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
