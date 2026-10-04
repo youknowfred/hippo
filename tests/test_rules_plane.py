@@ -378,6 +378,224 @@ def test_symbol_ref_unresolvable_or_ambiguous_module_is_silence(repo, memory_dir
     assert RP.rules_rot(repo)["code_ref_rot"] == []  # under-flag beats cry-wolf
 
 
+# ---- the symbol leg stays silent where a by-name module pick cannot be sure --------------- #
+# The 2026-10-04 Skyline sweep: all seven symbol findings false, across five classes. Each
+# test below pins one class AND a true positive beside it, so the fix can never pass by
+# going quiet.
+import memory.rules_plane_symbols as RS  # noqa: E402
+
+
+def _symbol_rot(repo):
+    return [f["ref"] for f in RP.rules_rot(repo)["code_ref_rot"] if f["kind"] == "symbol"]
+
+
+def test_symbol_ref_async_def_is_defined(repo, memory_dir):
+    """Class 1: ``async def stage_faq_reorder(`` — the old regex admitted only def/class.
+    A coroutine method counts too (ic-memobot's ``base_deep_agent._invoke_with_phase_poll``)."""
+    write_file(
+        repo,
+        "src/app/services/faq_manage.py",
+        "async def stage_faq_reorder(session):\n    return None\n\n\n"
+        "class Agent:\n    async def _invoke_with_phase_poll(self):\n        return None\n",
+    )
+    git_commit(repo, "faq manage", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/rules/doors.md",
+        "Reorder through `faq_manage.stage_faq_reorder`; the poll is "
+        "`faq_manage._invoke_with_phase_poll`; `faq_manage.stage_faq_gone` is gone.",
+    )
+    assert _symbol_rot(repo) == ["faq_manage.stage_faq_gone"]
+
+
+def test_symbol_ref_annotated_module_constant_is_defined(repo, memory_dir):
+    """Class 2: ``YOAST_META_FIELDS: dict[str, YoastMetaField] = {`` at col 0 — the old
+    ``^SYMBOL\\s*=`` missed an annotation. A bare annotation declares the name too."""
+    write_file(
+        repo,
+        "src/app/wp_contract.py",
+        "YOAST_META_FIELDS: dict[str, YoastMetaField] = {\n    'title': None,\n}\n"
+        "DECLARED_ONLY: int\n",
+    )
+    git_commit(repo, "contract", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/rules/doors.md",
+        "Meta writes go through `wp_contract.YOAST_META_FIELDS` and `wp_contract.DECLARED_ONLY`, "
+        "never `wp_contract.OLD_META_FIELDS`.",
+    )
+    assert _symbol_rot(repo) == ["wp_contract.OLD_META_FIELDS"]
+
+
+def test_symbol_ref_token_bound_as_an_object_is_silence(repo, memory_dir):
+    """Class 3: ``settings.move_destination_host`` is a pydantic field on the ``settings``
+    OBJECT in config.py, but the only ``settings.py`` is a route module. The token is
+    bound as an object (``settings = Settings()``, ``from app.config import settings``)
+    and the field is defined, so the pick is a guess. A field defined NOWHERE still
+    flags, object or not."""
+    write_file(
+        repo,
+        "src/app/config.py",
+        "class Settings(BaseSettings):\n"
+        "    move_destination_host: str = '{new-host}'\n"
+        "    compliance_clearing_authority: str = 'someone'\n\n\n"
+        "settings = Settings()\n",
+    )
+    write_file(repo, "src/app/api/routes/settings.py", "def read_settings_route():\n    return {}\n")
+    write_file(repo, "src/app/worker.py", "from app.config import settings\n")
+    git_commit(repo, "settings object + settings route", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/rules/pipeline.md",
+        "Clearing is `settings.compliance_clearing_authority`; moves use "
+        "`settings.move_destination_host`; `settings.retired_flag` is long gone.",
+    )
+    assert _symbol_rot(repo) == ["settings.retired_flag"]
+
+
+def test_object_import_alone_marks_the_token_as_an_object(repo, memory_dir):
+    """The object can live outside the tree (``from django.conf import settings``): the
+    import alone is enough, with the field defined in the project's own code."""
+    write_file(repo, "proj/api/settings.py", "def view():\n    return None\n")
+    write_file(repo, "proj/defaults.py", "class Defaults:\n    FEATURE_X = True\n")
+    write_file(repo, "proj/app.py", "from django.conf import settings\n\nflag = settings.FEATURE_X\n")
+    git_commit(repo, "third-party settings object", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "Gate on `settings.FEATURE_X`; `settings.NEVER_DEFINED` is rot.")
+    assert _symbol_rot(repo) == ["settings.NEVER_DEFINED"]
+
+
+def test_symbol_ref_table_column_is_silence(repo, memory_dir):
+    """Class 4: ``wp_post_contract.acf`` names the ``acf`` column of the
+    ``wp_post_contract`` table. In Skyline the resolved helper module happens to carry an
+    ``acf:`` class field (an indented annotated field — counted); where it does not, the
+    ``__tablename__`` plus a defined column vouch. A column defined nowhere still flags."""
+    write_file(
+        repo,
+        "src/app/db/models.py",
+        "class WpPostContract(SiteScoped, Base):\n"
+        '    __tablename__ = "wp_post_contract"\n'
+        "    id: Mapped[int] = mapped_column(primary_key=True)\n"
+        "    acf: Mapped[dict | None] = mapped_column(JSONB)\n",
+    )
+    write_file(
+        repo,
+        "src/app/db/wp_post_contract.py",
+        "class WpPostContractCapture(BaseModel):\n    acf: dict | list | None = None\n\n\n"
+        "async def capture(session, row):\n    id_of_row = row\n    return id_of_row\n",
+    )
+    git_commit(repo, "table + helper", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/rules/doors.md",
+        "Diff `wp_post_contract.acf` and key on `wp_post_contract.id`; "
+        "`wp_post_contract.gone_column` was dropped.",
+    )
+    assert _symbol_rot(repo) == ["wp_post_contract.gone_column"]
+
+
+def test_symbol_ref_quoted_string_is_silence(repo, memory_dir):
+    """Class 5: ``faq.restored`` is an event_type string (``FAQ_RESTORED =
+    "faq.restored"``) while ``faq`` resolves to a route module — any quoted occurrence in
+    tracked code/data says the dotted name lives in another namespace (likewise a Railway
+    ``${{nightly.PGHOST}}`` reference in YAML). Prose in a multi-line docstring is NOT a
+    string value, and a governance file never vouches for itself."""
+    write_file(repo, "src/app/api/routes/faq.py", 'def restore():\n    """Restore.\n\n    Emits faq.archived.\n    """\n')
+    write_file(repo, "src/app/events/types.py", 'FAQ_RESTORED = "faq.restored"\n')
+    write_file(repo, "frontend/src/faq-panel.tsx", "const kind = 'faq.created';\n")
+    write_file(repo, "ingest/nightly.py", "def run():\n    pass\n")
+    write_file(repo, "config/env.yaml", 'PGHOST: "${{nightly.PGHOST}}"\n')
+    git_commit(repo, "event types", 1_700_000_000)
+    write_file(
+        repo,
+        ".claude/rules/doors.md",
+        'One `faq.restored` receipt, one `faq.created`; host is `nightly.PGHOST`. '
+        '`faq.archived` and "`faq.vanished_event`" are gone.',
+    )
+    assert _symbol_rot(repo) == ["faq.archived", "faq.vanished_event"]
+
+
+def test_symbol_ref_qualifier_contradicting_the_pick_is_silence(repo, memory_dir):
+    """The ref's own spelling can overrule the by-name pick: ``ingest.ads.tests`` is the
+    module ``ingest/ads/tests.py``, not a ``tests`` symbol in the one ``ads.py``
+    elsewhere; ``CHARTER.template.md`` is a filename. A qualifier that FITS still flags."""
+    write_file(repo, "ingest/nightly_steps/ads.py", "def step():\n    pass\n")
+    write_file(repo, "ingest/ads/tests.py", "def main():\n    pass\n")
+    write_file(repo, "email/lib/template.py", "def render():\n    pass\n")
+    write_file(repo, "other/utils.py", "def unrelated():\n    pass\n")
+    write_file(repo, "pkg/utils/helpers.py", "def h():\n    pass\n")
+    write_file(repo, "src/pkg/util.py", "def kept():\n    pass\n")
+    git_commit(repo, "qualified names", 1_700_000_000)
+    write_file(
+        repo,
+        "CLAUDE.md",
+        "Run `ingest.ads.tests`; copy `CHARTER.template.md`; see `utils.helpers`. "
+        "`pkg.util.kept` is fine and `pkg.util.vanished` is not.",
+    )
+    assert _symbol_rot(repo) == ["pkg.util.vanished"]
+
+
+def test_symbol_ref_moved_symbol_still_flags(repo, memory_dir):
+    """The true positive the conservatism must keep: ``helper`` moved from util.py to
+    helpers.py. The symbol IS defined somewhere, the module imports as a module
+    (``from pkg import util``), and the module's own name is a string in its tree
+    (``LANE = "util"``) — none of that makes ``util`` an object, so the stale rule flags."""
+    write_file(repo, "pkg/util.py", 'LANE = "util"\n\n\ndef kept():\n    pass\n')
+    write_file(repo, "pkg/helpers.py", "def helper():\n    pass\n")
+    write_file(repo, "pkg/main.py", "from pkg import util\n\n\ndef go():\n    util = None\n    return util\n")
+    git_commit(repo, "helper moved out of util", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "Use `util.kept` and `util.helper`.")
+    assert _symbol_rot(repo) == ["util.helper"]
+
+
+def test_module_binding_kinds_counted_and_function_locals_not(repo, memory_dir):
+    """What the parsed module counts: a façade's re-export, a class attribute, a name
+    bound under a module-level try/if. A function local is not reachable as
+    ``module.name`` and still flags."""
+    write_file(
+        repo,
+        "pkg/facade.py",
+        "from .impl import moved_fn\n\n"
+        "try:\n    import fastjson as json_backend\nexcept ImportError:\n    json_backend = None\n\n\n"
+        "class Limits:\n    MAX_ROWS = 3\n\n\n"
+        "def work():\n    local_only = 1\n    return local_only\n",
+    )
+    write_file(repo, "pkg/impl.py", "def moved_fn():\n    pass\n")
+    git_commit(repo, "facade", 1_700_000_000)
+    write_file(
+        repo,
+        "CLAUDE.md",
+        "Call `facade.moved_fn`, honor `facade.MAX_ROWS`, check `facade.json_backend`; "
+        "`facade.local_only` is not a module attribute.",
+    )
+    assert _symbol_rot(repo) == ["facade.local_only"]
+
+
+def test_star_import_or_module_getattr_makes_any_name_possible(repo, memory_dir):
+    write_file(repo, "pkg/reexports.py", "from .impl import *\n")
+    write_file(repo, "pkg/lazy.py", "def __getattr__(name):\n    raise AttributeError(name)\n")
+    write_file(repo, "pkg/impl.py", "def anything():\n    pass\n")
+    git_commit(repo, "dynamic modules", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "`reexports.whatever` and `lazy.whatever` resolve at runtime.")
+    assert _symbol_rot(repo) == []
+
+
+def test_unparseable_module_falls_back_to_the_regex(repo, memory_dir):
+    """A module the running interpreter cannot parse (newer syntax, a broken file) still
+    gets a verdict: the generous regex fallback, never a crash and never a silent pass."""
+    write_file(repo, "pkg/broken.py", "def kept(:\n    pass\n\nasync def also_kept():\n    pass\n")
+    git_commit(repo, "broken", 1_700_000_000)
+    write_file(repo, "CLAUDE.md", "`broken.kept`, `broken.also_kept`, `broken.gone`.")
+    assert _symbol_rot(repo) == ["broken.gone"]
+
+
+def test_defined_names_is_warning_silent():
+    """An invalid escape in someone's source warns on parse (SyntaxWarning on 3.12+,
+    DeprecationWarning before); a doctor run must not print it. Under this suite's
+    ``filterwarnings = error`` an unsilenced warning would make the parse fail."""
+    names = RS.defined_names('PATTERN = "\\d+"\n')
+    assert names is not None and "PATTERN" in names
+
+
 def test_dead_paths_glob_flagged_with_exact_glob(repo, memory_dir):
     write_file(repo, "src/real.py", "x = 1\n")
     git_commit(repo, "add real", 1_700_000_000)

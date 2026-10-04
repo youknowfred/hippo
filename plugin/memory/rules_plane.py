@@ -267,7 +267,7 @@ def _path_ref_re() -> "re.Pattern":
 # A dotted-symbol ref (``module.symbol`` / ``pkg.module.symbol``): resolved conservatively —
 # the module component must map to exactly ONE ``<module>.py`` in the tree, and only a
 # LOCATED-module-with-MISSING-symbol is a finding (an unresolvable module is silence, never
-# a cry-wolf guess).
+# a cry-wolf guess). What "missing" has to survive first lives in rules_plane_symbols.
 _SYMBOL_REF_RE = re.compile(r"^([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+)$")
 
 
@@ -525,12 +525,16 @@ def rules_rot(repo_root: str) -> dict:
     target left the tree — a path-like ref (code extension, optional ``:line`` stripped)
     absent from ``git ls-files`` (bare basenames resolve through the basename index), or a
     dotted ``module.symbol`` ref whose module resolves to exactly one ``.py`` file that no
-    longer defines the symbol (``def``/``class``/module-level assignment). Before flagging,
-    the dotted path is also tried as a nested MAPPING path against every tracked
-    YAML/JSON/TOML document (``meta.mechanisms`` under ``meta:`` in a data file is a live
-    citation, not a Python symbol) — parsed lazily, only for a ref about to flag.
-    Unresolvable modules and ambiguous basenames are SILENCE, not findings — under-flag
-    beats cry-wolf.
+    longer binds the symbol (``rules_plane_symbols``: parsed, so ``async def``, annotated
+    constants, class attributes and re-exports all count). Before flagging, the ref must
+    also survive: a package qualifier that contradicts the picked file, or a whole dotted
+    path that is itself a module (``ingest.ads.tests``); the dotted path as a nested
+    MAPPING path in any tracked YAML/JSON/TOML document (``meta.mechanisms`` under
+    ``meta:``); and one sweep of the tree for a quoted occurrence (an event type, a
+    deploy reference) or a token bound as something other than the module (a
+    ``settings`` object, a table name) whose symbol is defined somewhere. The data and
+    tree passes run lazily, only for refs about to flag. Unresolvable modules and
+    ambiguous basenames are SILENCE, not findings — under-flag beats cry-wolf.
 
     PATHS-GLOB leg (RUL-0-gated, confirmed 2026-07-08): a ``.claude/rules`` file whose
     frontmatter ``paths:`` globs match NOTHING in the tree (tracked ∪ untracked-unignored)
@@ -542,6 +546,7 @@ def rules_rot(repo_root: str) -> dict:
     """
     empty: dict = {"code_ref_rot": [], "dead_path_globs": []}
     try:
+        from . import rules_plane_symbols as RS
         from .provenance import build_repo_file_index
 
         repo_files, basename_index = build_repo_file_index(repo_root)
@@ -549,8 +554,9 @@ def rules_rot(repo_root: str) -> dict:
             return empty  # non-git / empty tree: no oracle, no findings
 
         code_rot: List[dict] = []
-        module_text_cache: Dict[str, Optional[str]] = {}
+        module_cache: Dict[str, object] = {}
         data_doc_cache: Dict[str, list] = {}
+        about_to_flag: Dict[str, tuple] = {}  # span -> (parts, mod_path), for the tree sweep
         for path in gov_files(repo_root):
             try:
                 with open(path, "r", encoding="utf-8") as fh:
@@ -583,27 +589,21 @@ def rules_rot(repo_root: str) -> dict:
                     if len(candidates) != 1:
                         continue  # unresolvable/ambiguous module: silence, not a guess
                     mod_path = candidates[0]
-                    if mod_path not in module_text_cache:
-                        try:
-                            with open(
-                                os.path.join(repo_root, mod_path), "r", encoding="utf-8"
-                            ) as fh:
-                                module_text_cache[mod_path] = fh.read()
-                        except Exception:
-                            module_text_cache[mod_path] = None
-                    mod_text = module_text_cache[mod_path]
-                    if mod_text is None:
-                        continue
-                    defined = re.search(
-                        rf"(?m)^\s*(?:def|class)\s+{re.escape(symbol)}\b"
-                        rf"|^{re.escape(symbol)}\s*=",
-                        mod_text,
-                    )
-                    if not defined:
-                        if _dotted_ref_in_data_files(parts, repo_root, repo_files, data_doc_cache):
-                            continue  # a data-mapping path (YAML/JSON/TOML) — alive, not rot
-                        seen_refs.add(span)
-                        code_rot.append({"file": rel, "ref": span, "kind": "symbol"})
+                    if RS.qualifier_contradicts(parts, mod_path, basename_index):
+                        continue  # the ref's own spelling says the by-name pick is wrong
+                    if RS.module_defines(repo_root, mod_path, symbol, module_cache) is not False:
+                        continue  # bound in the module, or unreadable: silence either way
+                    if _dotted_ref_in_data_files(parts, repo_root, repo_files, data_doc_cache):
+                        continue  # a data-mapping path (YAML/JSON/TOML) — alive, not rot
+                    seen_refs.add(span)
+                    about_to_flag[span] = (parts, mod_path)
+                    code_rot.append({"file": rel, "ref": span, "kind": "symbol"})
+
+        if about_to_flag:
+            vouched = RS.alive_elsewhere(repo_root, repo_files, about_to_flag)
+            code_rot = [
+                f for f in code_rot if not (f["kind"] == "symbol" and f["ref"] in vouched)
+            ]
 
         dead_globs: List[dict] = []
         universe: Optional[Set[str]] = None
