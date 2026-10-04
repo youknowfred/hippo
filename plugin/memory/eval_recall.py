@@ -1187,7 +1187,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         "deterministic noise filters, volume-capped); confirm each per item via "
         "confirm_hard_set_row(query, [stems], category='single-hop')",
     )
+    parser.add_argument(
+        "--scoreboard",
+        action="store_true",
+        help="OBS-5: print the per-corpus field scoreboard (newest persisted run vs the "
+        "pinned baseline, aggregates only) for every live registry corpus, or for the one "
+        "--memory-dir (DIR or LABEL=DIR). Read-only.",
+    )
     args, ab_extra = parser.parse_known_args(argv)
+    if args.scoreboard:
+        from .eval_scoreboard import corpus_arg, scoreboard
+
+        print(scoreboard(corpus_arg(args.memory_dir) if args.memory_dir else None))
+        return 0
     if args.ab is None and ab_extra:
         # Extras are pass-through ONLY under --ab; the plain eval keeps strict parsing.
         parser.error(f"unrecognized arguments: {' '.join(ab_extra)}")
