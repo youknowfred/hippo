@@ -134,10 +134,10 @@ def test_routed_skills_name_every_tool_they_drive():
 
 
 def test_routed_skills_keep_their_surface_routing_section():
-    """CLM-8: typed /hippo:* runs on Desktop, but the Desktop Bash tool gets no
-    CLAUDE_PLUGIN_DATA, so each routed skill's own 'Surface routing' section is what
-    sends it to its MCP tools there (PLATFORM.md §1). The section stays until the bash
-    flow has a Desktop route, and it must not lean on the retired SessionStart note."""
+    """CLM-8: typed /hippo:* runs on Desktop, and each routed skill's own 'Surface routing'
+    section is what sends it to its MCP tools there (PLATFORM.md §1). Since INT-20 the bash
+    preflight passes on Desktop too, but no verb's bash flow has a Desktop receipt yet, so the
+    section stays until one does. It must not lean on the retired SessionStart note."""
     texts = _skill_texts()
     for v in S.VERBS:
         text = texts[v.verb]
@@ -147,7 +147,7 @@ def test_routed_skills_keep_their_surface_routing_section():
         if v.desktop != "terminal_only":
             assert "## Surface routing" in text, (
                 f"skills/{v.verb}/SKILL.md lost its 'Surface routing' section — without it "
-                "the skill falls into a bash preflight that cannot pass on Desktop"
+                "a Desktop session runs its bash flow, which has no Desktop receipt yet"
             )
 
 

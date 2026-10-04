@@ -7,6 +7,49 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.40.2 — 2026-10-03 — "Filled in on load"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**, link cache still
+**6**; `stale.json` schema still **1**. A patch for a defect v1.40.1's receipts uncovered. On
+Claude Code 2.1.286 and 2.1.289 the Bash tool gets no `CLAUDE_PLUGIN_DATA` and no
+`CLAUDE_PLUGIN_ROOT` on any surface, the interactive terminal included. Every skill's bash
+preflight read `${CLAUDE_PLUGIN_DATA:-}`, so every `/hippo:*` skill stopped in the terminal
+too. The 11 routed skills fell back to their MCP tools. The 7 terminal-only verbs
+(`export-agents`, `import`, `promote`, `promote-rule`, `publish`, `remove`, `review`) had no
+working route anywhere.
+
+**Operator action: none required.** Update the plugin; the skills' bash flows run in the
+terminal again.
+
+- **INT-20 — the skills pin the paths Claude Code fills in.**
+  - Claude Code writes a bare `${CLAUDE_PLUGIN_DATA}` / `${CLAUDE_PLUGIN_ROOT}` into a
+    plugin skill's text when the skill loads, in the terminal (2.1.289) as on Desktop
+    (2.1.286). Every preflight now opens by exporting both from that bare form, then
+    checks them. A copy Claude Code did not fill in (the SKILL.md file itself, or a Claude
+    Code that substitutes nothing) still stops at the guard before any path expands.
+  - The guard's message says what happened. The old one blamed an old Claude Code and
+    suggested exporting `CLAUDE_PLUGIN_DATA` to `~/.claude/hippo-data`, an empty dir with
+    no venv.
+  - Each Bash call is a fresh shell, so the `$PY` a preflight set never reached the next
+    block. Every block that runs hippo's python now pins the paths and resolves `$PY`
+    itself, and sets the variables it reads. The exported data path also reaches the
+    engine, which reads it for the model cache, `model.json` and its ledgers.
+  - The 7 terminal-only skills stop on Desktop by their own check
+    (`CLAUDE_CODE_ENTRYPOINT=claude-desktop`). Desktop fills the paths in too, so the data
+    guard no longer stopped them there. None of their bash flows has a Desktop receipt
+    yet, so Desktop behavior is unchanged: the 11 routed skills still take their MCP
+    tools, and `surfaces.py` keeps its 7 `terminal_only` rows.
+  - The contract tests run every preflight the way Claude Code delivers it, in a shell
+    with no plugin env, and run it again unfilled to prove it fails closed. A lint holds
+    every bash block to setting what it reads. The block extractor is now line-anchored:
+    a fence in `consolidate` with an info string had hidden that skill's four later bash
+    blocks from every block check.
+- **PLATFORM.md §1** adds the interactive-terminal receipts: no plugin env in its Bash
+  tool, skill-body substitution, no shell state between Bash calls, and an end-to-end run
+  of `/hippo:review` and `/hippo:why` on 2.1.289. The SRF-1 input records the preflight
+  route as built and lists what a Desktop bash route still needs.
+
 ## v1.40.1 — 2026-10-03 — "Nothing to translate"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format

@@ -16,29 +16,37 @@ same day from code.claude.com (hooks, memory, plugins reference, settings refere
 ## 1. Desktop
 
 These rows ran on 2026-10-03 against Claude Code 2.1.286 in the Desktop app's Code tab, with
-hippo 1.39.1 installed from its marketplace. The method is in each row.
+hippo 1.39.1 installed from its marketplace. The interactive-terminal rows ran the same day on
+2.1.289. The method is in each row.
 
 | Question | Answer | Receipt | Consequence |
 |---|---|---|---|
 | Does a typed `/hippo:doctor` run in the Desktop Code tab? | **Yes.** On 2026-07-11 a typed `/hippo:init` was refused there as "isn't a recognized command here". | The maintainer typed `/hippo:doctor` into a Desktop Code-tab session. The plugin skill loaded from the installed plugin cache and followed its "Surface routing" section to the `doctor` MCP tool. Only `/hippo:doctor` was typed; every other `/hippo:*` verb loads through the same skill loader. | CLM-8 (v1.40.1) retired the 1,723-char SessionStart surface note and every "typed commands are terminal-only" claim. The 7 `terminal_only` verbs in `surfaces.py` keep their rows: their skills still say plainly that they need a terminal. |
-| Does the Desktop Bash tool get the plugin env? | **No.** It has `CLAUDE_CODE_ENTRYPOINT=claude-desktop` but no `CLAUDE_PLUGIN_DATA` and no `CLAUDE_PLUGIN_ROOT`. | `env` from the Bash tool in two Desktop sessions: the maintainer's, then the session that built v1.40.1. The plugins reference says these variables are not exported to Bash tool commands. | The skills' bash preflight still stops on Desktop. The "Surface routing" sections in the 11 routed skills send them to their MCP tools instead, so those sections stay until the bash flow has a Desktop route (SRF-1, below). |
+| Does the Desktop Bash tool get the plugin env? | **No.** It has `CLAUDE_CODE_ENTRYPOINT=claude-desktop` but no `CLAUDE_PLUGIN_DATA` and no `CLAUDE_PLUGIN_ROOT`. | `env` from the Bash tool in two Desktop sessions: the maintainer's, then the session that built v1.40.1. The plugins reference says these variables are not exported to Bash tool commands. | Through v1.40.1 the skills' bash preflight stopped on Desktop. Since v1.40.2 (INT-20) it pins the substituted paths (rows below) and passes there too. The "Surface routing" sections still send the 11 routed skills to their MCP tools, and the 7 terminal-only skills stop on `CLAUDE_CODE_ENTRYPOINT=claude-desktop` themselves, until a verb's bash flow has its own Desktop receipt (SRF-1, below). |
 | Is the plugin's `bin/` on the Desktop Bash `PATH`? | **Yes.** | `which hippo` resolved to `bin/hippo` in the installed plugin cache. The script finds its own plugin root, but with `CLAUDE_PLUGIN_DATA` unset it falls back to bare `python3`, not the venv. | `hippo <verb>` runs from Desktop Bash, without the venv's dependencies. |
 | Does each surface get its own plugin-data dir? | **Not any more.** Every live Desktop session's hippo MCP server had `CLAUDE_PLUGIN_DATA=~/.claude/plugins/data/hippo-hippo`, the dir a terminal marketplace install uses. On 2026-07-12 a Desktop MCP server had `…/hippo-inline`. | `ps eww` on the hippo MCP server of four live Desktop sessions. None of the 26 running Desktop `claude` processes passed `--plugin-dir`; in July Desktop passed one per plugin. The docs name the dir after the plugin's `plugin@marketplace` id, which fits `-inline` for a `--plugin-dir` load. Both dirs on this machine still hold a venv. | A terminal bootstrap now serves Desktop sessions too. `bootstrap`'s sibling-install line still matters for older versions and `--plugin-dir` loads. |
-| Are `${CLAUDE_PLUGIN_ROOT}` and `${CLAUDE_PLUGIN_DATA}` in a skill body substituted on Desktop? | **Yes for the bare form. No for `${CLAUDE_PLUGIN_DATA:-}`.** | The installed `doctor` and `resolve` skills, loaded through the Skill tool in a Desktop session. `${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh` arrived as the absolute cache path, and a bare `${CLAUDE_PLUGIN_DATA}` arrived as `~/.claude/plugins/data/hippo-hippo`. The preflight's `${CLAUDE_PLUGIN_DATA:-}` arrived as written, so it expands to empty in Bash. The plugins reference documents the substitution. | What stops the bash flow on Desktop is hippo's own preflight guard. See the SRF-1 input below. |
-| Does the terminal CLI's Bash tool get the plugin env? | **No, headless.** `CLAUDE_CODE_ENTRYPOINT=sdk-cli`, no `CLAUDE_PLUGIN_DATA`, no `CLAUDE_PLUGIN_ROOT`; `bin/hippo` was on `PATH`. | `claude -p` on Haiku in a throwaway directory, asked to run `env` through the Bash tool. An interactive terminal session was not probed. The plugins reference says the variables are absent from Bash commands in every session. | If an interactive terminal agrees, the skills' bash preflight stops in the terminal too, and the 7 terminal-only verbs have no working route anywhere. Re-run this row interactively before SRF-1 builds; it may warrant its own patch. |
+| Are `${CLAUDE_PLUGIN_ROOT}` and `${CLAUDE_PLUGIN_DATA}` in a skill body substituted? | **Yes for the bare form, on Desktop (2.1.286) and in an interactive terminal (2.1.289). No for `${CLAUDE_PLUGIN_DATA:-}`.** | Desktop: the installed `doctor` and `resolve` skills, loaded through the Skill tool. `${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh` arrived as the absolute cache path, and a bare `${CLAUDE_PLUGIN_DATA}` arrived as `~/.claude/plugins/data/hippo-hippo`. The preflight's `${CLAUDE_PLUGIN_DATA:-}` arrived as written, so it expands to empty in Bash. Terminal: an interactive `claude` session on Haiku with hooks disabled loaded the installed `resolve` skill the same way; the session transcript holds the skill text as delivered, with the same three results. A `--plugin-dir` load gets `…/data/hippo-inline` instead. The plugins reference documents the substitution. | What stopped the bash flow was hippo's own preflight guard. v1.40.2 (INT-20) builds the bash route on the bare form: see the rows below and the SRF-1 input. |
+| Does the terminal CLI's Bash tool get the plugin env? | **No, headless or interactive.** Headless on 2.1.286 (`CLAUDE_CODE_ENTRYPOINT=sdk-cli`) and interactive on 2.1.289 (`cli`): no `CLAUDE_PLUGIN_DATA`, no `CLAUDE_PLUGIN_ROOT`. `bin/hippo` was on `PATH`. | Headless: `claude -p` on Haiku in a throwaway directory, asked to run `env` through the Bash tool. Interactive: `claude` sessions on Haiku with hooks disabled, launched from a terminal tab, each writing its result to a file (the TUI's screen does not come back through the terminal reader); `env` held 0 `CLAUDE_PLUGIN_` variables. The plugins reference says the variables are absent from Bash commands in every session. | Through v1.40.1 every skill's bash preflight stopped in the terminal too. The 11 routed skills fell back to their MCP tools; the 7 terminal-only verbs had no working route anywhere. v1.40.2 (INT-20) fixes it: see the next two rows. |
+| Does shell state carry from one Bash tool call to the next? | **No.** | Desktop 2.1.286: a plain variable, an exported variable and a function set in one Bash call were all unset in the next. The Bash tool's own instructions say the same. | A skill's later block cannot use the `$PY` its preflight set. Since v1.40.2 every block that runs hippo's python opens by pinning both paths and resolving `$PY` itself, and a contract test holds every block to setting what it reads. |
+| Does the pinned preflight run a skill's bash flow end to end in the terminal? | **Yes, on 2.1.289.** | An interactive `claude` session on Haiku, with hooks disabled, the installed hippo disabled and v1.40.2's `plugin/` loaded with `--plugin-dir`. It loaded `/hippo:review` (terminal-only) and `/hippo:why` (routed) and ran each one's preflight, then its next block, as separate Bash calls copied from the loaded text. `env` held 0 `CLAUDE_PLUGIN_` variables. All four calls exited 0: `review` printed its packet, and `why` returned receipts marked `won via dense+bm25`, which needs the venv's fastembed and the data dir's model cache. | The terminal runs all 18 skills' bash flows again. On Desktop the same filled-in text passes the preflight too, but no verb's bash flow has run there end to end, so Desktop routing is unchanged. |
 | Does plugin install work end to end on Desktop, bootstrap included? | **Not run.** The Desktop docs (fetched 2026-10-03) say plugins install from the desktop app. | Running it would reinstall the plugin on the maintainer's machine, and the hippo install in use here may have come from either surface. | Unchanged: the README's install step keeps its terminal route until a clean-profile run records this row. |
 
 ### Input for SRF-1 (v1.42): a bash route from Desktop
 
-Not built in v1.40.1. Two routes, smallest first:
+Two routes, smallest first. v1.40.2 (INT-20) built the first, which is what fixed the
+terminal. The second is not built.
 
-1. **Pin the substituted values in the preflight.** Claude Code substitutes a bare
-   `${CLAUDE_PLUGIN_DATA}` and `${CLAUDE_PLUGIN_ROOT}` in a skill body when the skill loads
-   (row above). A preflight that exports them from the bare form, and then checks the
-   result, would give every skill's bash blocks the real data dir and venv on both
-   surfaces. The guard has to change shape too: today's `${CLAUDE_PLUGIN_DATA:-}` is not
-   substituted, so it is what fails. Check first that a bare reference left unsubstituted
-   (an older Claude Code) still fails closed.
+1. **Pin the substituted values in the preflight. Built in v1.40.2.** Every preflight now
+   opens with `export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}"
+   CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"` and then checks the pinned values. Every later
+   block that runs hippo's python pins them again, because no shell state carries between
+   Bash calls. A bare reference that arrives unsubstituted expands to empty in a shell
+   without the env, and the guard stops there; the contract tests run every preflight both
+   ways. On Desktop the preflight now passes as well, but nothing routes through it yet: the
+   11 routed skills still take their MCP tools, and the 7 terminal-only ones stop on
+   `CLAUDE_CODE_ENTRYPOINT=claude-desktop`. For a verb to run its bash flow on Desktop it
+   needs its own Desktop receipt end to end, and `surfaces.py` needs a way to declare a
+   bash-routed Desktop verb (a routed row must name MCP tools today).
 2. **Let `bin/hippo` find its own data dir.** When `CLAUDE_PLUGIN_DATA` is unset, a script
    at `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/bin/hippo` can derive
    `~/.claude/plugins/data/<plugin>-<marketplace>` from its own path, using the docs' id rule
@@ -46,7 +54,9 @@ Not built in v1.40.1. Two routes, smallest first:
    gives `hippo-hippo`, which is the dir the live Desktop MCP servers use. Use it only when
    that dir holds a bootstrap sentinel, and stay on bare `python3` otherwise (a
    `--plugin-dir` load lives outside the cache). The script's header comment, which says
-   `bin/` is not on `PATH`, is out of date.
+   `bin/` is not on `PATH`, is out of date. Route 1 does not cover a bare `hippo <verb>`
+   typed into Bash outside a loaded skill, which is SRF-1's entry point. The `recall` skill's
+   `bin/hippo recall` fallback passes the pinned data path in front of the call instead.
 
 Either route could give the 7 `terminal_only` verbs (export-agents, import, promote,
 promote-rule, publish, remove, review) a Desktop route. Each verb then needs its own

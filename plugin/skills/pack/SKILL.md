@@ -19,13 +19,18 @@ prompt-injection threat — every inbound step below is per-item, demarcated, an
 ## Preflight (shared across all hippo skills)
 
 ```bash
-[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell. On Claude Desktop this is expected — take the MCP-tool route in 'Surface routing' above instead of this bash flow. In a genuine terminal Claude Code session it means Claude Code is likely too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:pack skill, not from a copy of its SKILL.md. If the loaded skill stops here too, take the MCP-tool route in 'Surface routing' above."; exit 1; }
 . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
 hippo_resolve_py
 hippo_note_usage skill pack  # OBS-2: count this skill's use (one spool line, no Python)
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 MEMORY_DIR="$REPO_ROOT/.claude/memory"
 ```
+
+Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
+opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
+and resolver lines, in the same call.
 
 > **Desktop / MCP surface (INT-16):** the tool-by-tool mapping is in 'Surface routing' above — drive the SAME flow through those `pack_*` MCP tools, same order, same per-item approval gates. The `git clone` of a hosted pack still happens in your shell; only the hippo primitives need the plugin env. Never bypass a stopped preflight by hand-rolling venv paths — the tools ARE the supported path there.
 
@@ -47,6 +52,9 @@ MEMORY_DIR="$REPO_ROOT/.claude/memory"
    instead of refusing; report them to the user — nothing is silently dropped.
 
    ```bash
+   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+   . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
+   REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
    "$PY" -c \
      "import sys, json; from memory.packs import pack_extract; \
       names = 'all' if sys.argv[1] == 'all' else sys.argv[1].split(','); \
@@ -91,6 +99,10 @@ git clone --depth 1 "<git-url>" "$SRC_DIR"   # or: SRC_DIR=<path to a local pack
 
 1. **Plan — read-only review material, nothing installs from a plan:**
    ```bash
+   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+   . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
+   REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
+   SRC_DIR="<the pack dir from the clone step above>"
    "$PY" -c \
      "import sys, json; from memory.packs import pack_install_plan; \
       print(json.dumps(pack_install_plan(sys.argv[1], memory_dir=sys.argv[2], repo_root=sys.argv[3]), indent=1))" \
@@ -112,6 +124,10 @@ git clone --depth 1 "<git-url>" "$SRC_DIR"   # or: SRC_DIR=<path to a local pack
 3. **Install each explicitly-approved item — one call per name, never a loop over the
    whole plan:**
    ```bash
+   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+   . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
+   REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
+   SRC_DIR="<the pack dir from the clone step above>"
    "$PY" -c \
      "import sys, json; from memory.packs import pack_install_item; \
       print(json.dumps(pack_install_item(sys.argv[1], sys.argv[2], memory_dir=sys.argv[3], repo_root=sys.argv[4], source=sys.argv[5]), indent=1))" \
@@ -127,6 +143,10 @@ git clone --depth 1 "<git-url>" "$SRC_DIR"   # or: SRC_DIR=<path to a local pack
 Same source resolution as install (clone/point `SRC_DIR` at the NEW version), then:
 
 ```bash
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
+SRC_DIR="<the pack dir from the clone step above>"
 "$PY" -c \
   "import sys, json; from memory.packs import pack_update_plan; \
    print(json.dumps(pack_update_plan(sys.argv[1], memory_dir=sys.argv[2], repo_root=sys.argv[3]), indent=1))" \
@@ -140,6 +160,10 @@ update never deletes your file and never resurrects one you removed. `new_upstre
 route through the INSTALL flow above. Apply each approved item:
 
 ```bash
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
+SRC_DIR="<the pack dir from the clone step above>"
 "$PY" -c \
   "import sys, json; from memory.packs import pack_update_item; \
    resolved = open(sys.argv[5], encoding='utf-8').read() if len(sys.argv) > 5 else None; \

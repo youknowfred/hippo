@@ -20,14 +20,20 @@ import os
 import re
 import subprocess
 
+import pytest
+
 _PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "plugin"))
 _SKILLS_DIR = os.path.join(_PLUGIN_DIR, "skills")
 _ALL_SKILLS = sorted(glob.glob(os.path.join(_SKILLS_DIR, "*", "SKILL.md")))
 _RESOLVE_PY_SH = os.path.join(_PLUGIN_DIR, "hooks", "_resolve_py.sh")
 
-# The shared ONB-7 preflight guard: unset/empty CLAUDE_PLUGIN_DATA must stop a skill
-# BEFORE any code block expands it (`uv venv "/venv"` provisions a root-owned path).
-_GUARD = '[ -n "${CLAUDE_PLUGIN_DATA:-}" ] ||'
+# The shared preflight (ONB-7, reshaped by INT-20). The Bash tool inherits neither plugin path on
+# any surface; Claude Code instead fills a bare ${CLAUDE_PLUGIN_DATA} / ${CLAUDE_PLUGIN_ROOT} into
+# the skill's text when it loads it. So the preflight first PINS both from the bare form (exported,
+# so python sees them too), then GUARDS: empty paths mean text Claude Code did not fill in, and
+# must stop the skill BEFORE any block expands them (`uv venv "/venv"` provisions a root-owned path).
+_PIN = 'export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"'
+_GUARD = '[ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] ||'
 
 
 def test_shipped_skills_are_exactly_these():
@@ -40,23 +46,26 @@ def test_shipped_skills_are_exactly_these():
 
 
 def test_every_skill_carries_the_plugin_data_guard():
+    """The preflight (each skill's first bash block) opens with the pin and carries the guard."""
     for path in _ALL_SKILLS:
-        with open(path, "r", encoding="utf-8") as fh:
-            text = fh.read()
-        assert _GUARD in text, (
-            f"{os.path.relpath(path)} lacks the shared CLAUDE_PLUGIN_DATA preflight "
-            "guard (ONB-7) — an unset var makes its code blocks expand to root paths"
+        preflight = _bash_blocks(path)[0]
+        assert preflight.lstrip().startswith(_PIN), (
+            f"{os.path.relpath(path)}: the preflight does not open by pinning both plugin paths "
+            "from the bare form Claude Code fills in on load (INT-20)"
+        )
+        assert _GUARD in preflight, (
+            f"{os.path.relpath(path)} lacks the shared plugin-path preflight guard (ONB-7) — "
+            "empty paths make its code blocks expand to root paths"
         )
 
 
 def test_guard_appears_before_any_plugin_data_expansion():
-    """The guard must come BEFORE the first code line that expands the variable."""
+    """The guard must come BEFORE the first code line that expands the variable. The pin lines
+    read the bare form only to assign it, so they are not expansions."""
     for path in _ALL_SKILLS:
         with open(path, "r", encoding="utf-8") as fh:
-            text = fh.read()
+            text = fh.read().replace(_PIN, "#" * len(_PIN))
         guard_pos = text.find(_GUARD)
-        # First expansion that is NOT the guard itself / prose backticks: look for the
-        # brace-expansion form used in runnable blocks.
         for m in re.finditer(r"\$\{CLAUDE_PLUGIN_DATA\}", text):
             assert guard_pos != -1 and guard_pos < m.start(), (
                 f"{os.path.relpath(path)}: ${{CLAUDE_PLUGIN_DATA}} expanded at "
@@ -342,7 +351,11 @@ def test_audit_skill_contradiction_fork_carries_the_mislabel_guard():
 # no-op: see test_no_silent_skips_in_the_python_contract.
 # =============================================================================================
 
-_FENCE_RE = re.compile(r"```(\w*)\n(.*?)\n[ \t]*```", re.DOTALL)
+# Line-anchored on both ends (INT-20): an opener may carry an info string after its language
+# (consolidate's "```diff evidence: ..."), and a closer is a line of nothing but the backticks.
+# The unanchored form paired a closer with the next opener after such a fence and silently
+# skipped consolidate's later bash blocks.
+_FENCE_RE = re.compile(r"^[ \t]*```([\w-]*)[^\n`]*\n(.*?)\n[ \t]*```[ \t]*$", re.DOTALL | re.MULTILINE)
 
 
 def _fenced_blocks(path: str):
@@ -697,4 +710,214 @@ def test_project_local_claude_paths_use_the_canonical_trio(monkeypatch):
                         )
                 # A bare `.claude/memory[...]` reference needs no further check here — that
                 # IS the canonical (git-tracked, no leading dot) corpus dir already.
+    assert not failures, "\n".join(failures)
+
+
+# =============================================================================================
+# INT-20: every block runs the way Claude Code actually delivers it.
+#
+# Observed 2026-10-03 (PLATFORM.md §1) on Claude Code 2.1.286 in the Desktop app and 2.1.289 in
+# an interactive terminal: the Bash tool gets NO CLAUDE_PLUGIN_DATA and NO CLAUDE_PLUGIN_ROOT on
+# any surface. What Claude Code does instead is substitute a bare ${CLAUDE_PLUGIN_DATA} /
+# ${CLAUDE_PLUGIN_ROOT} in a plugin skill's text when the skill loads; any other parameter form
+# (the old preflight's ${CLAUDE_PLUGIN_DATA:-}) arrives as written. And every Bash tool call is
+# a fresh shell: no variable, export or function carries from one block to the next.
+#
+# Before v1.40.2 the preflight read only the :- form, so it stopped in every terminal session,
+# and every later block read a $PY the previous call had set. These tests run the blocks under
+# exactly those rules: loaded (substituted), in a shell with no plugin env, one block per shell.
+# =============================================================================================
+
+# What the block sees and what a child process (python reading os.environ) would see.
+_PROBE_TAIL = (
+    'printf "\\nPROBE PY=%s\\n" "${PY:-}"\n'
+    "sh -c 'printf \"PROBE CHILD_DATA=%s CHILD_ROOT=%s\\n\" "
+    '"${CLAUDE_PLUGIN_DATA:-}" "${CLAUDE_PLUGIN_ROOT:-}"\'\n'
+)
+
+
+def _skill_name(path: str) -> str:
+    return os.path.basename(os.path.dirname(path))
+
+
+def _as_loaded(code: str, data_dir: str, root_dir: str = _PLUGIN_DIR) -> str:
+    """The skill text as Claude Code hands it to the model: only the bare forms are filled in."""
+    return code.replace("${CLAUDE_PLUGIN_DATA}", data_dir).replace("${CLAUDE_PLUGIN_ROOT}", root_dir)
+
+
+def _bash_tool_env(entrypoint: str = "cli") -> dict:
+    """The Bash tool's environment: no plugin variables, no hippo overrides."""
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(("CLAUDE_PLUGIN_", "HIPPO_", "CLAUDE_CODE_"))
+    }
+    env["CLAUDE_CODE_ENTRYPOINT"] = entrypoint
+    return env
+
+
+def _run_block(code: str, cwd: str, entrypoint: str = "cli", tail: str = ""):
+    """One Bash tool call: a fresh non-interactive shell running the block (plus a probe tail)."""
+    return subprocess.run(
+        ["bash", "-c", code + "\n" + tail],
+        cwd=cwd, env=_bash_tool_env(entrypoint), capture_output=True, text=True, timeout=60,
+    )
+
+
+@pytest.fixture
+def plugin_data(tmp_path):
+    """A bootstrapped-looking plugin-data dir: an executable venv python that does nothing."""
+    data = tmp_path / "plugins" / "data" / "hippo-hippo"
+    py = data / "venv" / "bin" / "python"
+    py.parent.mkdir(parents=True)
+    py.write_text("#!/bin/sh\nexit 0\n")
+    py.chmod(0o755)
+    return str(data)
+
+
+def test_preflight_passes_as_loaded_with_no_plugin_env(tmp_path, plugin_data):
+    """The repro. Every skill's preflight, as loaded, in a terminal Bash tool with no plugin
+    env, must pass, export both paths to child processes, and resolve the venv python."""
+    work = tmp_path / "work"
+    work.mkdir()
+    failures = []
+    for path in _ALL_SKILLS:
+        name = _skill_name(path)
+        preflight = _bash_blocks(path)[0]
+        r = _run_block(_as_loaded(preflight, plugin_data), str(work), tail=_PROBE_TAIL)
+        if r.returncode != 0:
+            failures.append(f"{name}: preflight exited {r.returncode}: {r.stdout.strip()[-240:]}")
+            continue
+        if f"PROBE CHILD_DATA={plugin_data} CHILD_ROOT={_PLUGIN_DIR}" not in r.stdout:
+            failures.append(f"{name}: preflight did not export both plugin paths to child processes")
+        if "hippo_resolve_py" in preflight and f"PROBE PY={plugin_data}/venv/bin/python" not in r.stdout:
+            failures.append(f"{name}: preflight resolved PY to something other than the venv python")
+    assert not failures, "\n".join(failures)
+
+
+def test_preflight_fails_closed_when_the_paths_did_not_arrive(tmp_path):
+    """A block run from text Claude Code did NOT fill in (the SKILL.md file itself, or a Claude
+    Code that substitutes nothing) has empty paths. It must stop with a ✘ line, before any
+    later line of the block runs."""
+    work = tmp_path / "work"
+    work.mkdir()
+    failures = []
+    for path in _ALL_SKILLS:
+        name = _skill_name(path)
+        r = _run_block(_bash_blocks(path)[0], str(work), tail='printf "REACHED\\n"')
+        if r.returncode != 1 or "REACHED" in r.stdout or "✘" not in r.stdout:
+            failures.append(f"{name}: unsubstituted preflight exited {r.returncode} ({r.stdout.strip()[-160:]})")
+    assert not failures, "\n".join(failures)
+
+
+def test_terminal_only_preflights_stop_on_desktop_and_say_why(tmp_path, plugin_data):
+    """Desktop substitutes the paths too, so the data guard no longer stops a terminal-only
+    verb there. Until a verb has its own Desktop receipt (and its surfaces.py row flips), its
+    preflight stops on Desktop itself, carrying the honest marker."""
+    from memory.surfaces import TERMINAL_ONLY_MARKER, terminal_only_verbs
+
+    work = tmp_path / "work"
+    work.mkdir()
+    failures = []
+    for verb in terminal_only_verbs():
+        preflight = _bash_blocks(os.path.join(_SKILLS_DIR, verb, "SKILL.md"))[0]
+        r = _run_block(
+            _as_loaded(preflight, plugin_data), str(work),
+            entrypoint="claude-desktop", tail='printf "REACHED\\n"',
+        )
+        if r.returncode != 1 or "REACHED" in r.stdout or TERMINAL_ONLY_MARKER not in r.stdout:
+            failures.append(f"{verb}: Desktop preflight exited {r.returncode} ({r.stdout.strip()[-160:]})")
+    assert not failures, "\n".join(failures)
+
+
+# The launch line of hippo's python: the resolved $PY, or the venv's own interpreter.
+_HIPPO_PY_LAUNCH_RE = re.compile(r'"\$PY"|/venv/bin/python"')
+
+
+def test_every_block_that_runs_hippo_python_pins_its_own_paths(tmp_path, plugin_data):
+    """Each Bash call is a fresh shell, so a block that launches hippo's python must set up
+    everything itself, from its own (substituted) text: the lines before its first launch, run
+    alone, export both paths and (when it uses $PY) resolve the venv python."""
+    work = tmp_path / "work"
+    work.mkdir()
+    failures = []
+    for path in _ALL_SKILLS:
+        name = _skill_name(path)
+        for i, code in enumerate(_bash_blocks(path), start=1):
+            lines = code.split("\n")
+            launch = next((n for n, line in enumerate(lines) if _HIPPO_PY_LAUNCH_RE.search(line)), None)
+            if launch is None:
+                continue
+            setup = "\n".join(lines[:launch])
+            r = _run_block(_as_loaded(setup, plugin_data), str(work), tail=_PROBE_TAIL)
+            if f"PROBE CHILD_DATA={plugin_data} CHILD_ROOT={_PLUGIN_DIR}" not in r.stdout:
+                failures.append(f"{name} bash block #{i}: launches python without exporting the pinned paths")
+            if '"$PY"' in lines[launch] and f"PROBE PY={plugin_data}/venv/bin/python" not in r.stdout:
+                failures.append(f"{name} bash block #{i}: runs \"$PY\" without resolving it in the same block")
+    assert not failures, "\n".join(failures)
+
+
+# A static read/assign scan for the fresh-shell rule. _shell_code_only() walks a block left to
+# right and keeps only text that can expand: comments and single-quoted strings go, and so does a
+# double-quoted string with no `$` in it (an echo message, a python -c body). Heredoc bodies are
+# removed first. The bare ${CLAUDE_PLUGIN_*} forms are filled in on load, so they are not reads.
+_LOADED_FORM_RE = re.compile(r"\$\{CLAUDE_PLUGIN_(?:DATA|ROOT)\}")
+_HEREDOC_BODY_RE = re.compile(r"<<-?'(\w+)'\n.*?\n[ \t]*\1\b", re.DOTALL)
+_VAR_READ_RE = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)")
+_VAR_SET_RE = re.compile(r"(?:^|[\s;(&|])(?:export\s+|local\s+)?([A-Za-z_][A-Za-z0-9_]*)=")
+_FOR_VAR_RE = re.compile(r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b")
+
+
+def _shell_code_only(code: str) -> str:
+    out, i, n = [], 0, len(code)
+    while i < n:
+        c = code[i]
+        if c == "\\":
+            out.append(code[i:i + 2])
+            i += 2
+        elif c == "#" and (i == 0 or code[i - 1] in " \t\n;"):
+            j = code.find("\n", i)
+            i = n if j == -1 else j
+        elif c == "'":
+            j = code.find("'", i + 1)
+            out.append("''")
+            i = n if j == -1 else j + 1
+        elif c == '"':
+            j = i + 1
+            while j < n and code[j] != '"':
+                j += 2 if code[j] == "\\" else 1
+            seg = code[i:j + 1]
+            out.append(seg if "$" in seg else '""')
+            i = j + 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+# What the Bash tool's shell legitimately inherits from Claude Code / the OS.
+_INHERITED = frozenset({"HOME", "PATH", "PWD", "TMPDIR", "PYTHONPATH", "CLAUDE_CODE_ENTRYPOINT"})
+
+
+def test_every_bash_block_sets_what_it_reads():
+    """No block may read a variable an EARLIER block set ($PY, $REPO_ROOT, $MEMORY_DIR, $NAME,
+    $SRC_DIR ...): in the Bash tool that variable is empty. hippo_resolve_py counts as setting PY."""
+    failures = []
+    for path in _ALL_SKILLS:
+        name = _skill_name(path)
+        for i, code in enumerate(_bash_blocks(path), start=1):
+            s = _shell_code_only(_HEREDOC_BODY_RE.sub("", _LOADED_FORM_RE.sub("/loaded/path", code)))
+            first_set: dict = {}
+            for m in list(_VAR_SET_RE.finditer(s)) + list(_FOR_VAR_RE.finditer(s)):
+                first_set[m.group(1)] = min(first_set.get(m.group(1), m.start(1)), m.start(1))
+            resolve_at = s.find("hippo_resolve_py")
+            if resolve_at != -1:
+                first_set["PY"] = min(first_set.get("PY", resolve_at), resolve_at)
+            unset = sorted({
+                m.group(1) for m in _VAR_READ_RE.finditer(s)
+                if m.group(1) not in _INHERITED
+                and not (m.group(1) in first_set and first_set[m.group(1)] < m.start())
+            })
+            if unset:
+                failures.append(f"{name} bash block #{i}: reads {', '.join(unset)} without setting it")
     assert not failures, "\n".join(failures)
