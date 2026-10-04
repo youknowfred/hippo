@@ -1,0 +1,89 @@
+"""Doctor checks about the platform hippo runs on: which plugin version Claude Code has
+installed versus the one this process is actually running (FMT-3).
+
+Read-only; every check returns ``{"status", "message"}`` and never raises.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from typing import Dict, List, Optional, Tuple
+
+from .doctor_checks_env import DoctorContext
+
+
+def _semver(v: Optional[str]) -> Optional[Tuple[int, ...]]:
+    try:
+        return tuple(int(p) for p in str(v).strip().lstrip("v").split("-")[0].split("."))
+    except Exception:
+        return None
+
+
+def _running_version(ctx: DoctorContext) -> Optional[str]:
+    try:
+        with open(os.path.join(ctx.plugin_root, ".claude-plugin", "plugin.json"), encoding="utf-8") as fh:
+            return json.load(fh).get("version")
+    except Exception:
+        return None
+
+
+def installed_plugins_path() -> str:
+    """Claude Code's plugin registry: ``<config dir>/plugins/installed_plugins.json``."""
+    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    return os.path.join(base, "plugins", "installed_plugins.json")
+
+
+def installed_versions(path: Optional[str] = None) -> List[str]:
+    """Every version Claude Code records for a ``hippo@<marketplace>`` install; ``[]`` when
+    the registry is missing, unreadable, or has no hippo entry."""
+    try:
+        with open(path or installed_plugins_path(), encoding="utf-8") as fh:
+            doc = json.load(fh)
+        out: List[str] = []
+        for key, rows in (doc.get("plugins") or {}).items():
+            if str(key).split("@", 1)[0] != "hippo":
+                continue
+            for row in rows if isinstance(rows, list) else [rows]:
+                v = row.get("version") if isinstance(row, dict) else None
+                if v and v not in out:
+                    out.append(str(v))
+        return out
+    except Exception:
+        return []
+
+
+def check_installed_version(ctx: DoctorContext) -> Dict[str, str]:
+    """FMT-3: the version Claude Code INSTALLED vs the version this process RUNS.
+
+    After ``claude plugin update`` the registry moves at once, but every session started
+    before it keeps the old hooks and MCP server until it restarts (field installs lagged
+    about three minors). A mismatch names which side is behind."""
+    try:
+        running = _running_version(ctx)
+        installed = installed_versions()
+        if not running:
+            return {"status": "warn", "message": "installed-vs-running: this plugin's version is unreadable."}
+        if not installed:
+            return {
+                "status": "ok",
+                "message": f"installed-vs-running: v{running} running; no marketplace install of "
+                "hippo is recorded here (a --plugin-dir or dev load), so nothing to compare.",
+            }
+        if running in installed:
+            return {"status": "ok", "message": f"installed-vs-running: v{running} running = installed."}
+        newest = max(installed, key=lambda v: _semver(v) or ())
+        behind = (_semver(running) or ()) < (_semver(newest) or ())
+        tail = (
+            "this session started before the update and still runs the old hooks and MCP "
+            "server — restart Claude Code sessions to load it"
+            if behind
+            else "this process is ahead of the install (a --plugin-dir or dev load)"
+        )
+        return {
+            "status": "warn",
+            "message": f"installed-vs-running: Claude Code has hippo v{newest} installed but this "
+            f"process runs v{running} — {tail}.",
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"installed-vs-running check failed: {exc}."}

@@ -90,15 +90,25 @@ def check_format_version(ctx: DoctorContext) -> Dict[str, str]:
                     "SessionStart refresh performs one full rebuild"
                 )
 
+        from .provenance_format import marker_state
+
+        st = marker_state(ctx.memory_dir)
         declared = read_corpus_format(ctx.memory_dir)
-        if declared == CORPUS_FORMAT_VERSION:
+        if st["state"] == "unreadable":
+            # FMT-3: name the garbled marker instead of reporting it as a v1 corpus.
+            status = "warn"
+            parts.append(
+                f"corpus format marker (.format) is unreadable ({st['error']}) — hippo reads "
+                "this corpus as format 1 until the marker's JSON is fixed"
+            )
+        elif declared == CORPUS_FORMAT_VERSION:
             parts.append(f"corpus format current (v{declared})")
         elif declared > CORPUS_FORMAT_VERSION:
             status = "warn"
             parts.append(
                 f"corpus format is v{declared} but this plugin only understands "
-                f"v{CORPUS_FORMAT_VERSION} — update the hippo plugin (a newer-format corpus "
-                "can carry conventions this version misreads or silently ignores)"
+                f"v{CORPUS_FORMAT_VERSION} — recall and SessionStart inject nothing from it "
+                "(FMT-3) until you update the hippo plugin"
             )
         else:
             status = "warn"

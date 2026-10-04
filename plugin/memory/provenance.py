@@ -86,6 +86,8 @@ from .provenance_format import (  # noqa: E402,F401
     _read_marker,
     _write_marker_keys,
     format_marker_path,
+    injection_refusal,
+    marker_state,
     read_cite_derivation,
     read_corpus_format,
     read_floor_lint,

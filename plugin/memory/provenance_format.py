@@ -193,12 +193,57 @@ def read_corpus_format(memory_dir: str) -> int:
 
     A missing marker IS format 1 (the pre-versioning baseline every existing corpus is
     on), so no corpus ever needs backfilling to be readable. An unreadable/corrupt/
-    wrong-shape marker also degrades to 1 — the never-raise direction; doctor's format
-    check reports against whatever this returns, so a garbled marker at worst reads as
-    the baseline rather than blocking recall.
+    wrong-shape marker also degrades to 1 — the never-raise direction. FMT-3: that fold
+    is no longer silent — ``marker_state`` tells an unreadable marker apart, and doctor and
+    the SessionStart format producer name it.
     """
     v = _read_marker(memory_dir).get("corpus_format")
     return v if isinstance(v, int) and not isinstance(v, bool) else 1
+
+
+def marker_state(memory_dir: str) -> dict:
+    """FMT-3: what the format marker actually says — ``{"state", "declared", "error"}``.
+
+    ``state`` is ``absent`` (no marker, or no ``corpus_format`` key: format 1), ``ok``,
+    ``newer`` (declares a format this plugin cannot read) or ``unreadable`` (not JSON, not
+    an object, or a non-integer ``corpus_format``). ``read_corpus_format`` folds the last
+    into format 1 so nothing raises; anything that must not misread a corpus asks here.
+    Never raises.
+    """
+    p = format_marker_path(memory_dir)
+    if not os.path.isfile(p):
+        return {"state": "absent", "declared": 1, "error": None}
+    try:
+        with open(p, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception as exc:
+        return {"state": "unreadable", "declared": None, "error": type(exc).__name__}
+    if not isinstance(data, dict):
+        return {"state": "unreadable", "declared": None, "error": "not a JSON object"}
+    v = data.get("corpus_format")
+    if v is None:
+        return {"state": "absent", "declared": 1, "error": None}
+    if not isinstance(v, int) or isinstance(v, bool):
+        return {"state": "unreadable", "declared": None, "error": "corpus_format is not an integer"}
+    return {"state": "newer" if v > CORPUS_FORMAT_VERSION else "ok", "declared": v, "error": None}
+
+
+def injection_refusal(memory_dir: str) -> Optional[str]:
+    """FMT-3: why this plugin must inject NOTHING from ``memory_dir``, or ``None``.
+
+    A corpus declaring a NEWER format than this plugin reads can carry conventions it
+    misreads, so readers refuse instead of warning and injecting anyway. Never raises."""
+    try:
+        st = marker_state(memory_dir)
+        if st["state"] == "newer":
+            return (
+                f"this corpus declares format v{st['declared']} but this hippo plugin reads up "
+                f"to v{CORPUS_FORMAT_VERSION}, so it injects nothing from it until the plugin "
+                "is updated"
+            )
+    except Exception:
+        pass
+    return None
 
 
 def write_corpus_format(memory_dir: str, version: Optional[int] = None) -> bool:

@@ -121,9 +121,18 @@ def corpus_format_producer(
     is unused — see ``stale_venv_producer`` for why it's declared anyway.
     """
     try:
+        from .provenance_format import marker_state
+
+        st = marker_state(memory_dir)
         declared = read_corpus_format(memory_dir)
     except Exception:
         return None
+    if st.get("state") == "unreadable":
+        # FMT-3: no longer silent — a garbled marker is read as format 1 and must say so.
+        return (
+            f"⚠ Corpus format — .claude/memory/.format is unreadable ({st.get('error')}), so "
+            "hippo is reading this corpus as format 1. Fix the marker's JSON."
+        )
     if declared <= CORPUS_FORMAT_VERSION:
         return None
     return (

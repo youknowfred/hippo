@@ -41,6 +41,7 @@ from .provenance import resolve_dirs
 # DOC-4 decomposition: the check implementations live in the flat, prefix-named siblings
 # below; these explicit grouped re-imports keep every historical ``memory.doctor.<name>``
 # import and monkeypatch target (mcp_server, sleep, tests) resolving unchanged.
+from .doctor_checks_platform import check_installed_version
 from .doctor_checks_env import (
     DoctorContext,
     _iter_memory_files_safe,
@@ -328,6 +329,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("bootstrap", check_bootstrap),
     ("plugin_version", check_plugin_version),
     ("plugin_source_skew", check_plugin_source_skew),  # OPS-1: running hooks vs this tree's plugin source (dogfood shape only; empty-norm elsewhere)
+    ("installed_version", check_installed_version),  # FMT-3: installed_plugins.json vs the version this process runs
     ("venv", check_venv),
     ("corpus", check_corpus_exists),
     ("symlink", check_symlink),

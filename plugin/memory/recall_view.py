@@ -137,6 +137,8 @@ def _abstention_receipt(
 
         dl: dict = {}
         _recall(query, memory_dir=memory_dir, index_dir=index_dir, repo_root=repo_root, drop_log=dl)
+        if dl.get("refused"):  # FMT-3
+            return base + "\nReason: " + dl["refused"] + "."
         if dl.get("abstained"):
             return base + "\nReason: " + receipt_line(dl["abstained"]) + "." + tail
     except Exception:

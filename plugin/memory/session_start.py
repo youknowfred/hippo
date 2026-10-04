@@ -346,6 +346,12 @@ def build_context(
             return _bound(untrusted_corpus_nudge(memory_dir, repo_root) or "", max_chars)
     except Exception:
         pass
+    # FMT-3: a newer-format corpus injects nothing; the integrity line is all that shows.
+    from .provenance_format import injection_refusal
+
+    refusal = injection_refusal(memory_dir)
+    if refusal:
+        return _bound(f"⚠ Corpus format — {refusal}. Update the hippo plugin.", max_chars)
     run_ctx = _build_run_context(memory_dir, repo_root)
     blocks: List[str] = []
     for _label, fn in PRODUCERS:

@@ -105,6 +105,7 @@ from .recall_query import (
     _rescue_turns,
     clean_query,
 )
+from .provenance_format import injection_refusal
 from .recall_abstain import corroboration
 from .recall_budget import _PROMPT_BUDGET_CHARS, below_knee, fit
 from .recall_rank import (
@@ -566,6 +567,12 @@ def recall(
         if index is None:
             gate_root = trust.gate_repo_root(memory_dir, repo_root)
             if gate_root is not None and not trust.is_trusted(gate_root):
+                return []
+            # FMT-3: a corpus declaring a newer format than this plugin reads injects nothing.
+            refusal = injection_refusal(memory_dir) if memory_dir else None
+            if refusal:
+                if drop_log is not None:
+                    drop_log["refused"] = refusal
                 return []
             consented_hashes = trust.consented_hashes(gate_root)
             # TEA-1/TEA-3: only AFTER the project corpus clears the trust gate do we fuse the
