@@ -130,8 +130,7 @@ def _tool_doctor(args: Dict[str, Any]) -> str:
         "trust/consent step (mark_trusted) → the trust_corpus tool, and "
         "/hippo:consolidate's steps → the capture, new_memory (check:true first), "
         "secrets_scan, reconsolidate, build_index, co_recall_proposals, and "
-        "abstention_fixtures tools (per item, as the consolidate skill directs). Typed "
-        "/hippo:* commands exist only in the Claude Code terminal."
+        "abstention_fixtures tools (per item, as the consolidate skill directs)."
     )
 
 

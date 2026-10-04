@@ -282,13 +282,6 @@ def test_pack_skill_preflight_maps_every_pack_tool():
         assert tool in M._DISPATCH, f"SKILL.md names {tool} but the server does not serve it"
 
 
-def test_desktop_surface_note_maps_pack_to_the_tools():
-    from memory.session_start import _DESKTOP_SURFACE_NOTE as note
-
-    for tool in _PACK_TOOLS:
-        assert tool in note, f"the Desktop surface note no longer names {tool}"
-
-
 def test_traverse_tool_walks_the_graph(corpus):
     resp = _call("traverse", {"name": "deploy_runbook", "hops": 1})
     text = _text(resp)
@@ -365,9 +358,10 @@ def test_decision_history_refuses_untrusted_corpus_then_renders_after_consent(co
 
 def test_untrusted_refusals_name_this_servers_own_tools(corpus, monkeypatch):
     """Every SEC-1/SEC-13 refusal on this surface must name a remedy that WORKS here:
-    the server's own doctor/trust_corpus/init tools first, typed /hippo:* second — a
-    typed command is terminal-only (the Claude Desktop app rejects it), so a refusal
-    that named only /hippo:doctor would dead-end the exact client it refused."""
+    the server's own doctor/trust_corpus/init tools first, typed /hippo:* second. A
+    model or subagent acting mid-turn cannot type a command, and until 2026-10 the
+    Claude Desktop app rejected typed ones, so a refusal naming only /hippo:doctor
+    dead-ended the client it refused."""
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     for tool, args in (
         ("new_memory", {"name": "x", "description": "d", "type": "project"}),

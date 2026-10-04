@@ -7,6 +7,51 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.40.1 — 2026-10-03 — "Nothing to translate"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**, link cache still
+**6**; `stale.json` schema still **1**. ROADMAP.v2's patch candidate CLM-8, rescoped by its
+receipts. Typed `/hippo:*` commands now run in the Claude Desktop app's Code tab: on
+2026-10-03 a typed `/hippo:doctor` loaded its skill, which routed to the `doctor` MCP tool.
+In July the desktop app refused typed plugin commands. hippo was still telling Desktop users
+they would fail, and SessionStart appended a 1,723-char note that mapped every verb to an
+MCP tool.
+
+**Operator action: none required.**
+
+- **CLM-8 — the Desktop routing note is retired.**
+  - Desktop SessionStart output is now byte-identical to the terminal's. A Desktop session
+    whose context names a `/hippo:` command carries 1,725 fewer chars (the note and its
+    separator), and an over-budget session keeps that budget for its own signal.
+  - Nothing in the note still needed saying at session start. The 11 routed skills send
+    themselves to their MCP tools. The 7 terminal-only skills (`export-agents`, `import`,
+    `promote`, `promote-rule`, `publish`, `remove`, `review`) say so in their own preflight.
+    The producer that needs a repair tool names it.
+  - The doctor tool's closing line, the two Desktop onboarding nudges and both READMEs no
+    longer say typed commands are terminal-only. A lint fails the suite if a shipped string
+    or README says it again.
+  - **Kept, unlike the roadmap's first draft:** the "Surface routing" sections in the 11
+    skills and the `terminal_only` rows in `surfaces.py`. The Desktop Bash tool still gets
+    no `CLAUDE_PLUGIN_DATA`, so the skills' bash flows still can't run there, and those
+    sections are what route them. Their Desktop cue named the retired note; it now reads the
+    session context, `CLAUDE_CODE_ENTRYPOINT`, or the preflight stopping on an unset
+    `CLAUDE_PLUGIN_DATA`.
+- **PLATFORM.md §1 records the Desktop receipts**, each with its method:
+  - the typed `/hippo:doctor` run;
+  - no plugin env in the Desktop Bash tool, while `bin/hippo` is on its `PATH` (where it
+    falls back to bare `python3`);
+  - the Desktop MCP server now uses the terminal's plugin-data dir (`hippo-hippo`); in July
+    it had its own (`hippo-inline`). The README's troubleshooting entry is dated to match;
+  - Claude Code substitutes a bare `${CLAUDE_PLUGIN_DATA}` in a skill body when it loads
+    the skill, but not the preflight's `${CLAUDE_PLUGIN_DATA:-}`;
+  - the Bash tool of a headless terminal `claude -p` has no plugin env either. An
+    interactive terminal was not probed.
+  - It closes with an input note for SRF-1 (v1.42): two ways to give the bash flow a route
+    from Desktop.
+- **Still open:** plugin install end to end on Desktop. Claude Code's docs say it works;
+  hippo has not run it, so the README's install step stays in the terminal.
+
 ## v1.40.0 — 2026-10-03 — "Room, receipts, clean turns"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format

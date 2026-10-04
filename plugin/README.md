@@ -49,14 +49,16 @@ The five core tools (the frozen v1.0 surface):
 And the four setup tools (INT-9..12) — the `/hippo:*` setup flows re-served as tools, so a
 surface with **no typed-command input can still set hippo up end to end**. The one that
 matters: the **Claude Desktop app**'s local sessions run installed plugins' hooks, skills,
-and MCP servers through the same engine as the terminal CLI — they only reject *typed*
-`/hippo:*` commands. With these tools, install is the single terminal step; everything after
-(bootstrap, init, consent, diagnostics, daily recall) works from either surface:
+and MCP servers through the same engine as the terminal CLI. They rejected *typed*
+`/hippo:*` commands until 2026-10 and run them now, but their Bash tool still gets no plugin
+env, so each skill routes to these tools there. With these tools, install is the single
+terminal step hippo has verified; everything after (bootstrap, init, consent, diagnostics,
+daily recall) works from either surface:
 
 | Tool | Purpose |
 |---|---|
 | `doctor()` | The `/hippo:doctor` engine verbatim (deterministic, read-only), plus a mapping from each named fix to the tool that runs it on this surface |
-| `bootstrap(action, multilingual)` | Per-machine-surface provisioning, kick-off-and-poll: `start` detaches the venv-build + ~130MB model-warm worker, `status` polls it (sentinel-last; log tail included). The terminal and the desktop app get **different plugin-data dirs** from the harness, so each surface bootstraps once — `status` names a sibling surface's install when it detects one |
+| `bootstrap(action, multilingual)` | Per-machine-surface provisioning, kick-off-and-poll: `start` detaches the venv-build + ~130MB model-warm worker, `status` polls it (sentinel-last; log tail included). Bootstrap is once per plugin-data dir. In 2026-07 the terminal and the desktop app got **different** ones from the harness, so each surface bootstrapped once (on Claude Code 2.1.286 they share one). `status` names a sibling install when it detects one |
 | `init()` | The mechanical `/hippo:init` flow: seed a fresh corpus (core pack + floor + format marker) or wire an existing one (symlink, index, CONVENTIONS backfill, `.gitignore`, private tier). Idempotent, never overwrites, never commits |
 | `trust_corpus(confirm_digest)` | The SEC-1 consent flow, two-step: a review call **never trusts** — it returns the memory count, the exact description strings recall would inject (quoted as untrusted data), and a consent digest; the confirm call requires that digest, binding consent to the reviewed bytes (a corpus that changed in between refuses). Also the SEC-6 drift re-consent path |
 

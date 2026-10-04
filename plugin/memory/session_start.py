@@ -39,7 +39,7 @@ Contract (mirrors ``.claude/hooks/agent_staleness.sh``):
 
 The producer implementations live in the flat siblings ``session_start_health`` /
 ``session_start_signals`` (REL-1); this façade keeps the ``PRODUCERS`` registry, the
-dispatcher (``build_context``/``main``), the bounding/surface-note helpers, and explicit
+dispatcher (``build_context``/``main``), the bounding helper, and explicit
 re-exports of every moved name, so every historical ``memory.session_start.<name>``
 dotted path keeps resolving.
 """
@@ -125,76 +125,15 @@ from .session_start_signals import (
 _MAX_CONTEXT_CHARS = 9000
 _MAX_ITEMS_PER_PRODUCER = 5
 
-# Typed /hippo:* commands exist only in the Claude Code terminal CLI. The Claude Desktop
-# app (CLAUDE_CODE_ENTRYPOINT=claude-desktop, present in the hook env) runs the same
-# hooks/skills/MCP server but REJECTS typed plugin commands — so producer advice like
-# "run /hippo:doctor" dead-ends there. Rather than fork every producer's wording, the
-# dispatcher appends ONE mapping note when (a) the merged context names a /hippo:* command
-# and (b) the surface is the Desktop app — the same append-a-suffix shape the MCP doctor
-# tool already uses. Producers stay byte-identical for a given corpus state (the DOC-4
-# determinism posture); the note is keyed deterministically on env state.
-_DESKTOP_ENTRYPOINT = "claude-desktop"
-_DESKTOP_SURFACE_NOTE = (
-    "⌨ Surface note: this session is the Claude Desktop app — typed /hippo:* commands are "
-    "terminal-only and will not work here. Take these routes SILENTLY — just call the tool; skip "
-    "the why-not-bash preamble, it is repeated noise. When acting on (or relaying) any /hippo:* advice "
-    "above, use the Desktop equivalents: /hippo:bootstrap → the hippo bootstrap MCP tool, "
-    "/hippo:init → the init tool, /hippo:doctor → the doctor tool (trust/re-consent → the "
-    "trust_corpus tool), /hippo:consolidate → the consolidate skill driving its MCP tools "
-    "(capture, new_memory check:true, secrets_scan, reconsolidate, build_index, "
-    "co_recall_proposals, abstention_fixtures, interview — per item); /hippo:pack → the pack skill "
-    "driving the pack_* MCP tools (pack_extract; install: pack_install_plan then per-item "
-    "pack_install_item; update: pack_update_plan then per-item pack_update_item); "
-    "/hippo:dream → the dream tool; /hippo:new → the new_memory tool; /hippo:recall → the "
-    "recall tool (its --list-by-type and --all-projects modes are terminal-only); "
-    "/hippo:why → the why tool; "
-    # INV-4 (scope ratified 2026-07-16): the two nudge-routed dead ends get real routes —
-    # resolve + audit only; the other five keep their honest terminal-only preflights.
-    "/hippo:resolve → the resolve tool (action='inbox', then ONE action='verdict' per "
-    "pair); /hippo:audit → the audit skill driving the audit tool (read-only report "
-    "material; judgment and applies stay per-item in the skill). "
-    # INT-19: never promise a route that dead-ends — this list stays honest.
-    "NOT available on this surface (terminal-only for now — say so, do not improvise a "
-    "workaround): export-agents, import, promote, promote-rule, publish, remove, review. "
-    "The corpus-repair and incident-response verbs are MCP tools on BOTH surfaces, with no "
-    "/hippo:* form: rederive (action='worklist'|'one'|'snapshot'|'stamp'), heal_baselines, "
-    "untrust (revoke a corpus's trust after finding it bad) and blast_radius (read-only: "
-    "what a suspect memory touched)."
-)
-
-
-def _surface_note(ctx: str) -> str:
-    """The Desktop mapping note for a merged context that names typed ``/hippo:*`` commands.
-
-    Empty (the common case) unless BOTH hold: the context mentions a ``/hippo:`` command
-    somewhere, and this process runs under the Claude Desktop app's harness. Reading the
-    entrypoint from the env at call time keeps the output deterministic per surface —
-    the same corpus state renders the same bytes on the same surface.
-    """
-    if "/hippo:" not in ctx:
-        return ""
-    if (os.environ.get("CLAUDE_CODE_ENTRYPOINT") or "").strip() != _DESKTOP_ENTRYPOINT:
-        return ""
-    return _DESKTOP_SURFACE_NOTE
-
-
-def _bound_with_surface_note(ctx: str, max_chars: int) -> str:
-    """Bound the merged context and append the Desktop surface note when it applies.
-
-    The note's budget is reserved BEFORE truncation so appending it can never push the
-    output past ``max_chars`` — and the note is dropped entirely (never truncated into
-    garbage) when ``max_chars`` is too small to carry both it and a useful signal. With
-    no note this reduces exactly to the old bound: byte-identical terminal output.
-    """
-    if not ctx:
-        return ""
-    note = _surface_note(ctx)
-    if note and len(note) + 200 > max_chars:
-        note = ""  # never let the mapping note crowd out the signal itself
-    budget = max_chars - (len(note) + 2 if note else 0)
-    if len(ctx) > budget:
-        ctx = ctx[: budget - 16].rstrip() + "\n…(truncated)"
-    return ctx + ("\n\n" + note if note else "")
+# CLM-8: one rendering for both surfaces. Typed /hippo:* commands run in the Claude
+# Desktop app's Code tab (PLATFORM.md §1, 2026-10-03), and every routed skill sends
+# itself to its MCP tools there, so the 1,723-char Desktop mapping note this module used
+# to append is gone and Desktop output is the terminal's bytes.
+def _bound(ctx: str, max_chars: int) -> str:
+    """Bound the merged context to ``max_chars``, marking a cut with ``…(truncated)``."""
+    if len(ctx) > max_chars:
+        ctx = ctx[: max_chars - 16].rstrip() + "\n…(truncated)"
+    return ctx
 
 
 # (label, fn). Each tier appends a producer here — never a parallel hook entry. Every fn
@@ -209,7 +148,7 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("trust_drift", trust_drift_producer),  # SEC-6: trusted corpus drifted from its consent baseline — recall is withholding files
     ("presence", presence_producer),  # FLT-1: another live session shares this working tree (fleet visibility; empty-norm)
     # Positive signal blocks ride AHEAD of the warning lists: the fixed order is also the
-    # truncation order (_bound_with_surface_note cuts the tail), and the measured
+    # truncation order (_bound cuts the tail), and the measured
     # warnings-first ordering starved these three structurally — portable_floor was
     # discarded in 100% of over-budget sessions, resume_card in 35%+, and
     # relevant_to_work (the one precision block) rarely survived to context at all.
@@ -389,8 +328,8 @@ def build_context(
     producer stays silent (an untrusted corpus injects nothing) and the ONLY block emitted is
     the low-frequency untrusted-corpus nudge — the single legible signal on the gated path.
 
-    Both return paths route through ``_bound_with_surface_note`` so any ``/hippo:*`` advice
-    (including the untrusted nudge's) names its Desktop-app equivalent on that surface.
+    Both return paths bound through ``_bound``. The output is the same on every surface
+    (CLM-8): a typed ``/hippo:*`` in any block runs on the Desktop app too.
 
     MSR-6 ``producer_chars``: an OPT-IN out-param dict filled with each contributing
     producer's emitted char count ``{label: len(block)}`` — the numbers this function
@@ -404,9 +343,7 @@ def build_context(
 
         gate_root = trust.gate_repo_root(memory_dir, repo_root)
         if gate_root is not None and not trust.is_trusted(gate_root):
-            return _bound_with_surface_note(
-                untrusted_corpus_nudge(memory_dir, repo_root) or "", max_chars
-            )
+            return _bound(untrusted_corpus_nudge(memory_dir, repo_root) or "", max_chars)
     except Exception:
         pass
     run_ctx = _build_run_context(memory_dir, repo_root)
@@ -425,7 +362,7 @@ def build_context(
                 producer_chars[_label] = len(blocks[-1])
     if not blocks:
         return ""
-    return _bound_with_surface_note("\n\n".join(blocks), max_chars)
+    return _bound("\n\n".join(blocks), max_chars)
 
 
 def _read_hook_payload() -> Tuple[Optional[str], Optional[str]]:

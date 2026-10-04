@@ -5,7 +5,7 @@ sweep) is one recurring bug: a verb or nudge ships terminal-first, the Desktop s
 dead-ends or the advice names a non-runnable command, a field report arrives, an INT-id
 patches the instance. The class recurred because no single artifact declared each verb's
 surface story — the intent lived in seven separately-worded skill preflights, one hook
-note, and whichever nudge strings happened to name a command.
+note (retired by CLM-8), and whichever nudge strings happened to name a command.
 
 This module is that artifact. It declares, for every ``/hippo:*`` verb:
 
@@ -20,15 +20,16 @@ verbs) and the ``bin/hippo`` subcommand list (frozen in STABILITY.md).
 
 BUILD-TIME ARTIFACT ONLY. ``tests/test_surface_registry.py`` is the parity lint that
 cross-checks every declaration here against reality — ``_DISPATCH``, the skills dir,
-each SKILL.md's Desktop routing, the Desktop surface note in ``session_start``, and
-every nudge/advice string that names a runnable command. Nothing on the hot path (hooks,
-the MCP server, recall) imports this module — the lint asserts that too. Editing rules:
+each SKILL.md's Desktop routing, and every nudge/advice string that names a runnable
+command. Nothing on the hot path (hooks, the MCP server, recall) imports this module —
+the lint asserts that too. Editing rules:
 
   - a NEW MCP tool must be claimed here (a verb row's ``mcp_tools`` or
     ``VERBLESS_TOOLS``) or the lint fails naming this file;
   - a NEW skill must gain a row (and a row must have a skill dir);
-  - flipping a verb ``terminal_only`` -> routed means updating its SKILL.md preflight
-    AND the Desktop surface note in the same change — the lint holds all three together.
+  - flipping a verb ``terminal_only`` -> routed means giving its SKILL.md a 'Surface
+    routing' section that names the tools, and dropping the honest marker, in the same
+    change — the lint holds the row and the skill together.
 """
 
 from __future__ import annotations
@@ -190,8 +191,8 @@ VERBS: Tuple[VerbSurface, ...] = (
 )
 
 # MCP tools that serve NO /hippo:* verb: the corpus-repair verbs (INT-14/15 — they exist
-# to undo defects hippo itself shipped, on both surfaces, with no typed form). The lint
-# requires the Desktop surface note to name these so they are discoverable there.
+# to undo defects hippo itself shipped, on both surfaces, with no typed form). The
+# producer that needs one names it as an MCP tool (e.g. cite_derivation names rederive).
 VERBLESS_TOOLS: Dict[str, str] = {
     "rederive": "MIG-1 citation re-derivation — MCP tool on both surfaces, no /hippo:* form",
     "heal_baselines": "COR-10 empty-baseline heal — MCP tool on both surfaces, no /hippo:* form",

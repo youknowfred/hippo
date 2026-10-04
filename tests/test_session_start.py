@@ -59,67 +59,47 @@ def test_output_is_bounded_under_cap(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# Desktop surface note — typed /hippo:* advice gains ONE mapping footer on the
-# Claude Desktop app (CLAUDE_CODE_ENTRYPOINT=claude-desktop) and nowhere else;
-# terminal bytes stay byte-identical (conftest strips the ambient entrypoint).
+# CLM-8: one SessionStart for both surfaces. Typed /hippo:* commands run in the
+# Claude Desktop app's Code tab (PLATFORM.md §1, 2026-10-03), and each skill routes
+# itself there, so Desktop output is the terminal's bytes — no appended mapping note.
+# (conftest strips the ambient entrypoint, so "unset" models the terminal.)
 # --------------------------------------------------------------------------- #
 
 
-def test_terminal_output_carries_no_surface_note(monkeypatch):
+def _both_surfaces(monkeypatch, **kw):
+    """``(terminal, desktop)`` renders of the same producers and corpus state."""
+    monkeypatch.delenv("CLAUDE_CODE_ENTRYPOINT", raising=False)
+    terminal = S.build_context("md", "repo", **kw)
+    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
+    return terminal, S.build_context("md", "repo", **kw)
+
+
+def test_terminal_output_is_the_signal_alone(monkeypatch):
     _producers(monkeypatch, [("a", lambda md, repo, ctx=None: "Run /hippo:doctor to review.")])
     assert S.build_context("md", "repo") == "Run /hippo:doctor to review."
 
 
-def test_desktop_appends_the_mapping_note_after_the_signal(monkeypatch):
-    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
+def test_desktop_output_is_byte_identical_to_terminal(monkeypatch):
     _producers(monkeypatch, [("a", lambda md, repo, ctx=None: "Run /hippo:doctor to review.")])
-    ctx = S.build_context("md", "repo")
-    assert ctx.startswith("Run /hippo:doctor to review.")
-    assert ctx.endswith(S._DESKTOP_SURFACE_NOTE)
-    assert "terminal-only" in ctx and "trust_corpus" in ctx
+    terminal, desktop = _both_surfaces(monkeypatch)
+    assert desktop == terminal == "Run /hippo:doctor to review."
 
 
-def test_desktop_note_only_when_a_typed_command_is_named(monkeypatch):
-    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
-    _producers(monkeypatch, [("a", lambda md, repo, ctx=None: "plain block, no commands")])
-    assert S.build_context("md", "repo") == "plain block, no commands"
-
-
-def test_non_desktop_entrypoints_stay_on_terminal_wording(monkeypatch):
-    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
-    _producers(monkeypatch, [("a", lambda md, repo, ctx=None: "Run /hippo:doctor to review.")])
-    assert "Surface note" not in S.build_context("md", "repo")
-
-
-def test_desktop_note_never_pushes_output_past_the_cap(monkeypatch):
-    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
+def test_desktop_bound_is_the_plain_bound(monkeypatch):
+    # No budget is reserved for a Desktop footer any more: an over-cap context keeps
+    # the same signal on both surfaces.
     _producers(
         monkeypatch,
         [("big", lambda md, repo, ctx=None: "run /hippo:doctor " + "x" * 50_000)],
     )
-    ctx = S.build_context("md", "repo", max_chars=2000)
-    assert len(ctx) <= 2000
-    assert "…(truncated)" in ctx
-    assert ctx.endswith(S._DESKTOP_SURFACE_NOTE)  # the note survives whole, at the end
+    for cap in (500, 2000):
+        terminal, desktop = _both_surfaces(monkeypatch, max_chars=cap)
+        assert desktop == terminal
+        assert len(desktop) <= cap and desktop.endswith("…(truncated)")
 
 
-def test_desktop_note_dropped_when_cap_cannot_carry_both(monkeypatch):
-    # A cap too small to hold the note AND a useful signal keeps the signal, whole —
-    # the note is never itself truncated into garbage.
-    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
-    _producers(
-        monkeypatch,
-        [("big", lambda md, repo, ctx=None: "run /hippo:doctor " + "x" * 50_000)],
-    )
-    ctx = S.build_context("md", "repo", max_chars=500)
-    assert len(ctx) <= 500
-    assert "Surface note" not in ctx
-
-
-def test_untrusted_nudge_gains_the_note_on_desktop(monkeypatch):
-    # The SEC-1 short-circuit path returns ONLY the untrusted nudge — its /hippo:doctor
-    # advice must map on the Desktop surface too.
-    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
+def test_untrusted_nudge_is_byte_identical_on_desktop(monkeypatch):
+    # The SEC-1 short-circuit path returns ONLY the untrusted nudge.
     import memory.trust as trust
 
     monkeypatch.setattr(trust, "gate_repo_root", lambda md, rr: "/gated/root")
@@ -127,9 +107,8 @@ def test_untrusted_nudge_gains_the_note_on_desktop(monkeypatch):
     monkeypatch.setattr(
         S, "untrusted_corpus_nudge", lambda md, rr: "Run /hippo:doctor to trust it."
     )
-    ctx = S.build_context("md", "repo")
-    assert ctx.startswith("Run /hippo:doctor to trust it.")
-    assert ctx.endswith(S._DESKTOP_SURFACE_NOTE)
+    terminal, desktop = _both_surfaces(monkeypatch)
+    assert desktop == terminal == "Run /hippo:doctor to trust it."
 
 
 def test_dispatcher_calls_every_producer_with_the_shared_run_context(monkeypatch):
@@ -1162,21 +1141,6 @@ def test_a_raising_producer_is_named_not_vanished(monkeypatch):
     assert "boom" in ctx and "wired wrong" in ctx, (
         "a producer crash must be named in the context, not silently dropped"
     )
-
-
-def test_desktop_surface_note_is_honest_about_terminal_only_verbs():
-    """INT-19: the note said resolve/audit 'run as hippo skills — invoke them directly'
-    — but both skills hard-abort on Desktop ('re-run from a terminal'), so the note
-    routed users into a dead end it had just promised was a path. It must name the
-    terminal-only verbs AS terminal-only, and name the tools that do exist (dream,
-    new_memory, recall, why)."""
-    note = S._DESKTOP_SURFACE_NOTE
-    assert "terminal-only for now" in note
-    for verb in ("resolve", "audit", "export-agents", "import", "promote", "remove"):
-        assert verb in note
-    assert "dream" in note and "new_memory" in note and "why tool" in note
-    # The old claim must be gone: resolve/audit are not 'invoke them directly' verbs.
-    assert "(resolve, audit, new, recall, why) run as hippo skills" not in note
 
 
 # --------------------------------------------------------------------------- #
