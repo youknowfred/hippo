@@ -1,11 +1,11 @@
 """RUL-2's symbol leg: is a dotted ``module.symbol`` backtick ref really rot?
 
-Decomposed out of ``rules_plane.py``, which keeps ``rules_rot`` and the data-file leg;
-this sibling never imports its façade. The leg finds the module BY NAME (the only
-``<module>.py`` in the tree), so a name match is a guess, and a guess must never become a
-finding: under-flag beats cry-wolf. On 2026-10-04 every one of the seven symbol findings
-in fred-em/Skyline's ``.claude/rules`` was false, and so were all eight in four other
-repos checked beside it. The classes, each answered here:
+Decomposed out of ``rules_plane.py``, which keeps ``rules_rot`` (the data-file leg is
+``rules_plane_data``); this sibling never imports its façade. The leg finds the module
+BY NAME (the only ``<module>.py`` in the tree), so a name match is a guess, and a guess
+must never become a finding: under-flag beats cry-wolf. On 2026-10-04 every one of the
+seven symbol findings in fred-em/Skyline's ``.claude/rules`` was false, and so were all
+eight in four other repos checked beside it. The classes, each answered here:
 
   1. ``async def stage_faq_reorder(`` — the old regex admitted only ``def``/``class``.
   2. ``YOAST_META_FIELDS: dict[str, YoastMetaField] = {`` — an annotated module constant.
