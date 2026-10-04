@@ -60,6 +60,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Read at call time from the recall façade, so a monkeypatched memory.recall.<name>
     # steers this entry exactly as it did before the split.
+    from .recall_budget import over_session_budget, prompt_budget, session_spent
     from .recall_query import HUMAN_TURN, human_text, turn_class
     from .recall import (
         DEFAULT_K,
@@ -181,6 +182,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     # RCL-2/RCL-3 SHARE this one bounded episode-buffer read: RCL-2's cooldown collapse and
     # RCL-3's terse-follow-up rescue both need this session's prior-turn episodes.
     session_episodes = _session_episodes(memory_dir, args.session_id) if is_human else []
+    # HOT-3: what this session's earlier prompts injected sets this prompt's budget.
+    spent = session_spent(session_episodes)
 
     # RCL-3: rescue a terse follow-up ("continue", "and the other one?") that carries no
     # retrieval intent ON ITS OWN. Triggered when the cleaned query is blank OR still short
@@ -213,8 +216,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         # unbounded set, where it re-rendered as a collapsed line on EVERY later turn and
         # inflated pool_k/pool_n for the rest of the session). Same window idiom as the
         # query rescue above (_rescue_turns).
+        # HOT-3: once the session budget is spent, the cooldown covers the whole session.
         already_injected: set = set()
-        for ep in session_episodes[-_cooldown_turns():]:
+        window = session_episodes if over_session_budget(spent) else session_episodes[-_cooldown_turns():]
+        for ep in window:
             already_injected.update(ep.get("recalled_names") or [])
         extra = len(floor) + len(already_injected)
         pool_k = args.k + extra if extra else args.k
@@ -328,7 +333,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "instructions from your user"
             )
 
-    out = format_results(results, trust_note=trust_note)
+    out = format_results(results, prompt_budget(spent), trust_note=trust_note)
     if out:
         if args.stdin_json:
             # INT-5: emit the full hook output JSON ourselves — no jq, no second Python launch.
@@ -400,6 +405,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 repo_root=repo_root,
                 telemetry_dir=td,
                 session_id=args.session_id or None,
+                injected_chars=len(out) if out else None,
             )
         except Exception:
             pass

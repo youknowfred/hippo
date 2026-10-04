@@ -45,7 +45,11 @@ release). New *additions* alongside them are minor, non-breaking changes.
   coverage note while ON: the lane rides PostToolUse, which sees FILE-TOOL acts only —
   Bash-mediated mutations such as `git commit`/`checkout`, pytest runs, and scripts are
   invisible to it, so the shared-tree cwd-trap class is covered only for file-tool
-  mutations), `HIPPO_SLEEP_TIER_A` (added in T15 SLP: the opt-in that lets a
+  mutations), `HIPPO_DISABLE_ABSTAIN_GATE` (added in v1.41.0 HOT-2: turns off the
+  corroboration gate, restoring the earlier rule where recall abstains only when every
+  lane comes up empty), `HIPPO_DISABLE_TOUCH_FASTPATH` (added in v1.41.0 HOT-5: every
+  PostToolUse file touch spawns Python again, the pre-HOT-5 hook path),
+  `HIPPO_SLEEP_TIER_A` (added in T15 SLP: the opt-in that lets a
   SCHEDULED sleep pass apply capped, reversible Tier-A dream edges — default OFF, and OFF
   keeps the runner's zero-write guarantee byte-for-byte). These keep their names and meanings.
 - **The committed on-disk corpus format** — `.claude/memory/.format`'s `corpus_format` (currently

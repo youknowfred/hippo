@@ -41,6 +41,13 @@ from typing import Dict, List, Optional
 
 from .fm_access import fm_get, fm_metadata
 
+from .new_memory_floor import (  # RWY-3 split: re-exported, every old path resolves
+    _append_floor_pointer,
+    _ensure_tier_floor,
+    _pointer_name,  # noqa: F401  (tests and lint callers read it here)
+    _remove_floor_pointer,
+)
+
 VALID_TYPES = ("user", "feedback", "project", "reference")
 
 # GRA-3: how many related memories new_memory suggests via recall() at write time.
@@ -93,53 +100,8 @@ _VALID_TIERS = ("project", "user", "private")
 _VALID_CONFIDENCE = ("draft", "verified", "authoritative")
 
 
-def _ensure_tier_floor(tier_dir: str, label: str) -> None:
-    """Seed a NON-project tier's ``MEMORY.md`` with the two canonical floor sections the first
-    time a memory is written there, so a ``user``/``feedback`` pointer has somewhere to land.
-    Created once, minimally; never overwrites an existing floor. Never raises."""
-    try:
-        floor_path = os.path.join(tier_dir, "MEMORY.md")
-        if os.path.exists(floor_path):
-            return
-        os.makedirs(tier_dir, exist_ok=True)
-        from .atomic import write_text_atomic
-
-        # INV-2: a torn skeleton would pass the exists() guard above forever and block
-        # every future floor append — the floor is corpus-class truth, write it whole.
-        write_text_atomic(
-            floor_path,
-            f"# Agent Memory ({label} tier)\n\n"
-            f"> {label.capitalize()}-tier user/feedback memories — recalled alongside the "
-            "project corpus and delivered each session by the SessionStart portable-floor "
-            "producer (TEA-1/TEA-3), NOT the native symlink.\n\n"
-            "## User\n\n"
-            "## Working Style & Process Feedback\n",
-        )
-    except Exception:
-        pass
-
-
 def _title_from_slug(name: str) -> str:
     return name.replace("_", " ").replace("-", " ").strip().title()
-
-
-def _pointer_name(line: str) -> Optional[str]:
-    """The memory name a floor-section ``line`` points at, or ``None`` if it isn't a pointer.
-
-    TEA-4: reuses lint_floor's own link regex + restore-pointer allow-list so "what counts as
-    a pointer to sort by" is the exact same notion the lint guard already parses — a hand-
-    authored ``[MEMORY.full.md](MEMORY.full.md)`` restore link inside a floor section (rare,
-    but the allow-list tolerates it) is never treated as a memory entry to sort against.
-    """
-    from .lint_floor import _ALLOWLIST, _MD_LINK_RE
-
-    m = _MD_LINK_RE.search(line)
-    if not m:
-        return None
-    base = m.group(1).rsplit("/", 1)[-1]
-    if base in _ALLOWLIST:
-        return None
-    return base[:-3] if base.endswith(".md") else base
 
 
 def _unresolvable_link_warnings(related: List[str], memory_dir: str) -> List[str]:
@@ -875,148 +837,6 @@ def _append_rationale(body: str, rationale: Optional[str]) -> str:
     return f"{body}\n\n{line}\n" if body else f"{line}\n"
 
 
-def _append_floor_pointer(
-    memory_dir: str, section_header: str, name: str, title: str, hook: str
-) -> dict:
-    """Insert ``- [title](name.md) — hook`` at its SORTED position within ``section_header``.
-
-    Returns the ``result["floor"]`` outcome dict — ``{"status", "reason"}`` (LIF-5). This used
-    to return a bare bool that silently no-oped on a missing file OR a renamed header, so a
-    user/feedback memory could lose its always-load pointer with no signal anywhere. Now every
-    outcome is explicit; never raises; MEMORY.md stays the ONLY file this module edits:
-
-    - ``appended`` (reason None) — the section exists; the pointer is inserted at its
-      deterministic lexicographic position among the section's EXISTING pointer lines (TEA-4 —
-      see the insertion-point comment below), never necessarily the block tail anymore.
-    - ``created-section`` — MEMORY.md exists but ``section_header`` does not (renamed or
-      deleted by hand — the floor drifted from ``assets/MEMORY.skeleton.md``). The canonical
-      section is re-created at the END of MEMORY.md in the skeleton's own format (one blank
-      separator line, ``## Header``, then the pointer as its first entry). Repairing beats
-      skipping here: the pointer is the whole point of a user/feedback write, and the created
-      section is exactly what lint_floor/floor_memory_names already parse as floor. Merging a
-      RENAMED section's leftovers into the canonical one stays agent-gated (/hippo:new routes
-      it) — this function never touches other sections.
-    - ``skipped`` — nothing written; ``reason`` is machine-readable: ``MEMORY.md missing``
-      (floor CREATION is /hippo:init's job — skeleton + starter packs; fabricating the whole
-      file here would shadow that), ``pointer already present`` (idempotence — the same
-      ``name.md`` is already floor-linked), or ``MEMORY.md unreadable/write failed: ...``.
-    """
-    path = os.path.join(memory_dir, "MEMORY.md")
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            lines = fh.read().split("\n")
-    except FileNotFoundError:
-        return {
-            "status": "skipped",
-            "reason": "MEMORY.md missing — pointer NOT recorded; run /hippo:init to create "
-            "the floor, then add the pointer line by hand",
-        }
-    except Exception as exc:
-        return {"status": "skipped", "reason": f"MEMORY.md unreadable: {exc}"}
-
-    link = f"]({name}.md)"
-    if any(link in ln for ln in lines):
-        return {"status": "skipped", "reason": "pointer already present"}
-
-    pointer = f"- [{title}]({name}.md) — {hook}".rstrip()
-
-    # Find the section header, then the end of its block (next "## " or EOF).
-    start = next((i for i, ln in enumerate(lines) if ln.strip() == section_header), None)
-    if start is None:
-        # LIF-5: header renamed/deleted — re-create the canonical section at EOF, skeleton
-        # format. (An empty-but-existing MEMORY.md gets the section with no leading blank.)
-        text = "\n".join(lines).rstrip("\n")
-        section = f"{section_header}\n{pointer}\n"
-        new_text = f"{text}\n\n{section}" if text else section
-        try:
-            from .atomic import write_text_atomic
-
-            write_text_atomic(path, new_text)  # COR-18: MEMORY.md is source of truth
-        except Exception as exc:
-            return {"status": "skipped", "reason": f"MEMORY.md write failed: {exc}"}
-        return {
-            "status": "created-section",
-            "reason": f"section not found: {section_header} — created it at the end of MEMORY.md",
-        }
-
-    end = len(lines)
-    for j in range(start + 1, len(lines)):
-        if lines[j].strip().startswith("## "):
-            end = j
-            break
-
-    # TEA-4: sorted insertion — the new pointer goes BEFORE the first existing pointer line in
-    # the block whose memory name sorts lexicographically greater than this one. This is what
-    # kills tail-collision merge conflicts: two clones adding DIFFERENT names to the same
-    # section each touch a diff hunk at THEIR OWN name's position, not both appending to the
-    # single highest-churn shared line (the section tail) — git merges the two non-overlapping
-    # insertions cleanly. A fully-sorted section stays sorted (every insert lands at its exact
-    # slot). An unsorted legacy section gets each new entry placed at its locally-correct spot
-    # relative to whatever order already exists, WITHOUT touching or reordering any other
-    # line — no bulk re-sort, per the no-bulk-autonomous-sweeps invariant. Non-pointer lines
-    # (blank lines, hand-written prose) are skipped when searching but never moved.
-    insert = None
-    for j in range(start + 1, end):
-        other = _pointer_name(lines[j])
-        if other is not None and other > name:
-            insert = j
-            break
-    if insert is None:
-        # No existing pointer sorts greater than this name (a brand-new section, an
-        # append-only section, or this name is the section's new last entry) — falls through
-        # to the same "end of block" position the pre-TEA-4 append always used, so a freshly
-        # created section's first pointer (LIF-5) and an alphabetically-last name both land
-        # exactly where they always did.
-        insert = start + 1
-        for j in range(start + 1, end):
-            if lines[j].strip():
-                insert = j + 1
-
-    lines.insert(insert, pointer)
-    try:
-        from .atomic import write_text_atomic
-
-        write_text_atomic(path, "\n".join(lines))  # COR-18
-    except Exception as exc:
-        return {"status": "skipped", "reason": f"MEMORY.md write failed: {exc}"}
-    return {"status": "appended", "reason": None}
-
-
-def _remove_floor_pointer(memory_dir: str, name: str) -> dict:
-    """Drop ``name``'s floor pointer line from MEMORY.md — ``_append_floor_pointer``'s inverse.
-
-    RCH-1: when /hippo:promote lifts a user/feedback memory OUT of the project corpus, the
-    project floor's pointer to it would dangle (the .md is gone); this removes exactly that
-    line. What counts as "the pointer" is ``_pointer_name`` — the same notion the TEA-4
-    sorted insert and lint_floor parse — so a prose line that merely mentions ``name.md``
-    is never touched. Returns the same explicit outcome-dict contract as append, never
-    raises, and MEMORY.md stays the only file this module edits:
-
-    - ``removed`` (reason None) — the pointer line(s) were dropped.
-    - ``skipped`` — nothing written; ``reason`` names why: ``MEMORY.md missing``,
-      ``pointer not present`` (idempotence — safe to call for never-floor-linked types),
-      or ``MEMORY.md unreadable/write failed: ...``.
-    """
-    path = os.path.join(memory_dir, "MEMORY.md")
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            lines = fh.read().split("\n")
-    except FileNotFoundError:
-        return {"status": "skipped", "reason": "MEMORY.md missing"}
-    except Exception as exc:
-        return {"status": "skipped", "reason": f"MEMORY.md unreadable: {exc}"}
-    kept = [ln for ln in lines if _pointer_name(ln) != name]
-    if len(kept) == len(lines):
-        return {"status": "skipped", "reason": "pointer not present"}
-    try:
-        from .atomic import write_text_atomic
-
-        write_text_atomic(path, "\n".join(kept))  # COR-18
-    except Exception as exc:
-        return {"status": "skipped", "reason": f"MEMORY.md write failed: {exc}"}
-    return {"status": "removed", "reason": None}
-
-
 def write_memory(
     name: str,
     description: str,
@@ -1190,11 +1010,28 @@ def write_memory(
     except Exception:
         result["rule_neighbors"] = []
 
+    # RWY-3: the memory is born whole. It is written to a staging name (no .md suffix, so no
+    # reader treats it as a memory), its citation provenance is backfilled THERE, and only then
+    # is it linked to <name>.md. os.link is atomic and never overwrites, so it keeps the old
+    # exclusive-create guarantee; a crash at any point leaves no provenance-less memory.
+    if os.path.exists(path):
+        result["error"] = f"{name}.md already exists — refusing to overwrite"
+        return result
+    staging = os.path.join(memory_dir, f".{name}.md.staging-{os.getpid()}")
+    bf: dict = {}
     try:
         os.makedirs(memory_dir, exist_ok=True)
-        # "x" = exclusive create: atomic no-overwrite (no TOCTOU window between check + write).
-        with open(path, "x", encoding="utf-8") as fh:
+        with open(staging, "x", encoding="utf-8") as fh:
             fh.write(rendered)
+        try:
+            # 1. Provenance backfill (best-effort — a new file with no code citations is fine).
+            from .provenance import backfill_file
+
+            repo_files, basename_index = build_repo_file_index(repo_root)
+            bf = backfill_file(staging, repo_root, repo_files, basename_index) or {}
+        except Exception:
+            bf = {}
+        os.link(staging, path)
         result["created"] = True
         result["path"] = path
     except FileExistsError:
@@ -1203,6 +1040,11 @@ def write_memory(
     except Exception as exc:
         result["error"] = f"write failed: {exc}"
         return result
+    finally:
+        try:
+            os.unlink(staging)
+        except OSError:
+            pass
 
     # SEN-1: the write ticket — the secret lint (SEC-2) plus fenced-hunk fidelity and
     # archive-shadow, assembled over the RENDERED text exactly as the check-first dry run
@@ -1253,12 +1095,8 @@ def write_memory(
     except Exception:
         pass
 
-    # 1. Provenance backfill (best-effort — a new file with no code citations is fine).
+    # 1. (backfilled above, before the link) — report what it could not resolve.
     try:
-        from .provenance import backfill_file
-
-        repo_files, basename_index = build_repo_file_index(repo_root)
-        bf = backfill_file(path, repo_root, repo_files, basename_index)
         # DRV-1: this return used to be discarded, which made ONE outcome indistinguishable
         # from "cites no code": the body names real files, none resolve, and the memory is
         # born with `cited_paths: []` — staleness-EXEMPT, the worst rot state, silently. The

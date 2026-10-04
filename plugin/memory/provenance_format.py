@@ -144,14 +144,21 @@ def _write_marker_keys(memory_dir: str, **keys) -> bool:
     silently erase the other one's answer.
     """
     try:
-        from .atomic import write_text_atomic
+        from .atomic import CasConflict, content_token, write_text_cas
 
-        data = _read_marker(memory_dir)
-        data.update(keys)
-        # INV-2: the marker is COMMITTED corpus truth (format + derivation axes in one
-        # file) — a torn write would have the corpus declaring garbage to every reader.
-        write_text_atomic(format_marker_path(memory_dir), json.dumps(data) + "\n")
-        return True
+        path = format_marker_path(memory_dir)
+        for _ in range(8):  # RWY-3: re-merge on a concurrent marker write, never lose it
+            token = content_token(path)
+            data = _read_marker(memory_dir)
+            data.update(keys)
+            try:
+                # INV-2: the marker is COMMITTED corpus truth (format + derivation axes in
+                # one file) — a torn write would have the corpus declaring garbage.
+                write_text_cas(path, json.dumps(data) + "\n", token)
+                return True
+            except CasConflict:
+                continue
+        return False
     except Exception:
         return False
 
@@ -186,12 +193,57 @@ def read_corpus_format(memory_dir: str) -> int:
 
     A missing marker IS format 1 (the pre-versioning baseline every existing corpus is
     on), so no corpus ever needs backfilling to be readable. An unreadable/corrupt/
-    wrong-shape marker also degrades to 1 — the never-raise direction; doctor's format
-    check reports against whatever this returns, so a garbled marker at worst reads as
-    the baseline rather than blocking recall.
+    wrong-shape marker also degrades to 1 — the never-raise direction. FMT-3: that fold
+    is no longer silent — ``marker_state`` tells an unreadable marker apart, and doctor and
+    the SessionStart format producer name it.
     """
     v = _read_marker(memory_dir).get("corpus_format")
     return v if isinstance(v, int) and not isinstance(v, bool) else 1
+
+
+def marker_state(memory_dir: str) -> dict:
+    """FMT-3: what the format marker actually says — ``{"state", "declared", "error"}``.
+
+    ``state`` is ``absent`` (no marker, or no ``corpus_format`` key: format 1), ``ok``,
+    ``newer`` (declares a format this plugin cannot read) or ``unreadable`` (not JSON, not
+    an object, or a non-integer ``corpus_format``). ``read_corpus_format`` folds the last
+    into format 1 so nothing raises; anything that must not misread a corpus asks here.
+    Never raises.
+    """
+    p = format_marker_path(memory_dir)
+    if not os.path.isfile(p):
+        return {"state": "absent", "declared": 1, "error": None}
+    try:
+        with open(p, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception as exc:
+        return {"state": "unreadable", "declared": None, "error": type(exc).__name__}
+    if not isinstance(data, dict):
+        return {"state": "unreadable", "declared": None, "error": "not a JSON object"}
+    v = data.get("corpus_format")
+    if v is None:
+        return {"state": "absent", "declared": 1, "error": None}
+    if not isinstance(v, int) or isinstance(v, bool):
+        return {"state": "unreadable", "declared": None, "error": "corpus_format is not an integer"}
+    return {"state": "newer" if v > CORPUS_FORMAT_VERSION else "ok", "declared": v, "error": None}
+
+
+def injection_refusal(memory_dir: str) -> Optional[str]:
+    """FMT-3: why this plugin must inject NOTHING from ``memory_dir``, or ``None``.
+
+    A corpus declaring a NEWER format than this plugin reads can carry conventions it
+    misreads, so readers refuse instead of warning and injecting anyway. Never raises."""
+    try:
+        st = marker_state(memory_dir)
+        if st["state"] == "newer":
+            return (
+                f"this corpus declares format v{st['declared']} but this hippo plugin reads up "
+                f"to v{CORPUS_FORMAT_VERSION}, so it injects nothing from it until the plugin "
+                "is updated"
+            )
+    except Exception:
+        pass
+    return None
 
 
 def write_corpus_format(memory_dir: str, version: Optional[int] = None) -> bool:
@@ -262,6 +314,11 @@ def read_volatile_paths(memory_dir: str) -> list:
 # MEMORY.md floor is subject to them whether or not it declares anything.
 HARNESS_FLOOR_READ_CAP_BYTES = 25000
 HARNESS_FLOOR_WARN_BYTES = 17500
+# CLM-7: the same window has a LINE edge too — native memory loads MEMORY.md "up to 200 lines
+# or 25 KB, whichever comes first" (code.claude.com memory docs; PLT-1 re-observed the floor
+# loading on 2.1.286). The warn sits at the bytes warn's 70%.
+HARNESS_FLOOR_READ_CAP_LINES = 200
+HARNESS_FLOOR_WARN_LINES = 140
 
 
 def read_floor_lint(memory_dir: str) -> dict:
@@ -276,7 +333,8 @@ def read_floor_lint(memory_dir: str) -> dict:
     edits happen; the POLICY (what tokens are banned, how long a line may run) stays the
     corpus's own declaration.
 
-    Returns ``{"banned_re", "max_line", "warn_bytes", "cap_bytes"}``:
+    Returns ``{"banned_re", "max_line", "warn_bytes", "cap_bytes", "warn_lines",
+    "cap_lines", "section_budgets"}``:
 
     - ``banned_re`` — OPT-IN: a regex (string) whose match on a MEMORY.md line flags it
       (the linear-memory-boundary class: status vocabulary, PR refs, SHAs, chip ids).
@@ -289,6 +347,10 @@ def read_floor_lint(memory_dir: str) -> dict:
       harness's window; declaring a laxer cap than the harness enforces would just
       un-warn real truncation, so larger values are ignored). Non-positive/invalid
       declarations fall back to the constants.
+    - ``warn_lines`` / ``cap_lines`` (CLM-7) — the window's line edge, same downward-only
+      override.
+    - ``section_budgets`` (CLM-7) — OPT-IN ``{"## Section": max_bytes}``; a section is its
+      header line through the line before the next ``## `` header. Invalid entries drop.
     """
     raw = _read_marker(memory_dir).get("floor_lint")
     out = {
@@ -296,9 +358,19 @@ def read_floor_lint(memory_dir: str) -> dict:
         "max_line": None,
         "warn_bytes": HARNESS_FLOOR_WARN_BYTES,
         "cap_bytes": HARNESS_FLOOR_READ_CAP_BYTES,
+        "warn_lines": HARNESS_FLOOR_WARN_LINES,
+        "cap_lines": HARNESS_FLOOR_READ_CAP_LINES,
+        "section_budgets": {},
     }
     if not isinstance(raw, dict):
         return out
+    budgets = raw.get("section_budgets")
+    if isinstance(budgets, dict):
+        out["section_budgets"] = {
+            str(k).strip(): v
+            for k, v in budgets.items()
+            if str(k).strip().startswith("## ") and isinstance(v, int) and not isinstance(v, bool) and v > 0
+        }
     pat = raw.get("banned_re")
     if isinstance(pat, str) and pat.strip():
         try:
@@ -311,7 +383,12 @@ def read_floor_lint(memory_dir: str) -> dict:
     ml = raw.get("max_line")
     if isinstance(ml, int) and not isinstance(ml, bool) and ml > 0:
         out["max_line"] = ml
-    for key, ceiling in (("warn_bytes", HARNESS_FLOOR_WARN_BYTES), ("cap_bytes", HARNESS_FLOOR_READ_CAP_BYTES)):
+    for key, ceiling in (
+        ("warn_bytes", HARNESS_FLOOR_WARN_BYTES),
+        ("cap_bytes", HARNESS_FLOOR_READ_CAP_BYTES),
+        ("warn_lines", HARNESS_FLOOR_WARN_LINES),
+        ("cap_lines", HARNESS_FLOOR_READ_CAP_LINES),
+    ):
         v = raw.get(key)
         if isinstance(v, int) and not isinstance(v, bool) and 0 < v <= ceiling:
             out[key] = v

@@ -126,3 +126,30 @@ def test_wired_into_producers_and_flows_through_build_context(repo):
 def test_bogus_dir_never_raises(tmp_path):
     bogus = str(tmp_path / "nope")
     assert S.resume_card_producer(bogus, bogus) is None
+
+
+def test_themes_carry_no_markup(repo):
+    """CLM-3: a pasted block's wrapper and any leftover tag never reach the card."""
+    md, _sc = _setup(repo)
+    _episode(md, repo, "prev", ["app-note"], '<pasted_content id="a091">\nCreating pull request for x')
+    _episode(md, repo, "prev", ["app-note"], "check the <b>bold</b> idea and the docs")
+    out = S.resume_card_producer(md, repo)
+    assert out is not None and "<" not in out
+    assert "Creating pull request for x" in out and "check the bold idea and the docs" in out
+
+
+def test_leaned_on_lists_the_three_memories_served_most(repo):
+    """CLM-3: served names from the recall ledger, at most three, never "+N more"."""
+    md, sc = _setup(repo)
+    names = [f"m{i}" for i in range(8)]
+    for n in names:
+        _mem(md, n, ["src/app.py"], sc)
+    td = default_telemetry_dir(md)
+    _episode(md, repo, "prev", names, "how does the app boot")
+    for served in (["m5", "m2"], ["m5", "m7"], ["m5", "m2", "m1"]):
+        results = [{"name": n, "backend": "bm25", "score": 0.1, "rank": i + 1} for i, n in enumerate(served)]
+        T.log_recall_event(results, query="q", k=10, latency_ms=1.0, telemetry_dir=td, session_id="prev")
+    out = S.resume_card_producer(md, repo)
+    line = next(ln for ln in out.splitlines() if "you leaned on" in ln)
+    assert line.endswith("you leaned on: m5, m2, m7") or line.endswith("you leaned on: m5, m2, m1")
+    assert "more" not in line

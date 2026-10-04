@@ -138,3 +138,38 @@ def native_memory_state(memory_dir: str, repo_root: Optional[str]) -> Dict:
     except Exception:
         pass
     return state
+
+
+def native_interference(memory_dir: str, repo_root: Optional[str]) -> Optional[str]:
+    """CLM-1's integrity lane: one line when native memory's SETTINGS stop hippo's floor from
+    loading (auto memory off, or ``autoMemoryDirectory`` pointing elsewhere — PLATFORM.md §3),
+    else ``None``. Settings only, no corpus scan, so it is cheap enough for SessionStart."""
+    try:
+        layers = _settings_layers(repo_root)
+        env = (os.environ.get(_DISABLE_ENV) or "").strip().lower()
+        if env and env not in ("0", "false", "no"):
+            why = f"{_DISABLE_ENV} is set"
+        else:
+            why = next(
+                (f"autoMemoryEnabled is false in {label}" for label, doc in layers
+                 if doc.get("autoMemoryEnabled") is False),
+                None,
+            )
+            if why is None:
+                for label, doc in layers:
+                    d = doc.get("autoMemoryDirectory")
+                    if isinstance(d, str) and d.strip():
+                        target = os.path.expanduser(d.strip())
+                        if not os.path.isabs(target) and repo_root:
+                            target = os.path.join(repo_root, target)
+                        if os.path.realpath(target) != os.path.realpath(memory_dir):
+                            why = f"autoMemoryDirectory in {label} points elsewhere"
+                        break
+        if not why:
+            return None
+        return (
+            f"⚠ Native memory — {why}, so Claude Code does not load this corpus's MEMORY.md: "
+            "hippo's always-load floor is not in context. Re-enable it or point it back."
+        )
+    except Exception:
+        return None

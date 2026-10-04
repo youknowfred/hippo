@@ -182,6 +182,83 @@ def floor_producer(
         return None
 
 
+def trim_safety_report(
+    memory_dir: str,
+    *,
+    index_dir: Optional[str] = None,
+    telemetry_dir: Optional[str] = None,
+    k: int = 10,
+    max_queries: int = 200,
+) -> dict:
+    """CLM-7: would removing a floor pointer lose a recall hit? Read-only; never raises.
+
+    Replays this clone's recent human prompts (the episode buffer, HOT-1-cleaned, newest
+    ``max_queries`` distinct) through ``recall()``, which never floor-dedups, and counts per
+    floor pointer how many prompts surfaced its memory in the top ``k`` on its own. A pointer
+    whose memory recall carries is a trim candidate (those prompts keep the hit); one recall
+    never surfaced has the floor as its only channel. Rows are biggest line first, so the
+    safest bytes to trim read off the top. ``{"queries", "rows": [{line, name, bytes,
+    carried}]}``.
+    """
+    out: dict = {"queries": 0, "rows": []}
+    try:
+        from .build_index import default_index_dir, load_index
+        from .recall import recall
+        from .recall_query import HUMAN_TURN, human_text, turn_class
+        from .telemetry import default_telemetry_dir, read_episodes
+
+        with open(_floor_path(memory_dir), encoding="utf-8") as fh:
+            lines = fh.read().split("\n")
+        floor_set = floor_memory_names(memory_dir)
+        rows = []
+        for i, line in enumerate(lines, start=1):
+            m = _MD_LINK_RE.search(line)
+            name = m.group(1).rsplit("/", 1)[-1][:-3] if m else None
+            if name and name in floor_set:
+                rows.append({"line": i, "name": name, "bytes": len(line.encode("utf-8")) + 1, "carried": 0})
+        td = telemetry_dir or default_telemetry_dir(memory_dir)
+        queries: List[str] = []
+        for e in read_episodes(td):
+            q = (e.get("query_preview") or "").strip()
+            if q and turn_class(q) == HUMAN_TURN:
+                q = human_text(q)
+                if q and q not in queries:
+                    queries.append(q)
+        queries = queries[-max_queries:]
+        idir = index_dir or default_index_dir(memory_dir)
+        idx = load_index(idir)
+        by_name = {r["name"]: r for r in rows}
+        if idx is not None and by_name:
+            for q in queries:
+                for hit in recall(q, k=k, index=idx, index_dir=idir, memory_dir=memory_dir):
+                    if hit.get("name") in by_name:
+                        by_name[hit["name"]]["carried"] += 1
+        out["queries"] = len(queries)
+        out["rows"] = sorted(rows, key=lambda r: (-r["bytes"], r["line"]))
+    except Exception:
+        pass
+    return out
+
+
+def render_trim_report(report: dict) -> str:
+    rows = report.get("rows") or []
+    if not rows:
+        return "floor trim report: no floor pointers to weigh."
+    n = report.get("queries", 0)
+    lines = [
+        f"floor trim report — {len(rows)} pointer(s), {n} recent prompt(s) replayed "
+        "(carried = prompts where recall surfaced the memory on its own):"
+    ]
+    for r in rows:
+        verdict = (
+            f"carried on {r['carried']}/{n} — trimming keeps those hits"
+            if r["carried"]
+            else "never surfaced by recall — the floor is its only channel"
+        )
+        lines.append(f"  L{r['line']} {r['name']} ({r['bytes']}B): {verdict}")
+    return "\n".join(lines)
+
+
 def main(argv=None) -> int:
     import argparse
 
@@ -189,10 +266,19 @@ def main(argv=None) -> int:
 
     parser = argparse.ArgumentParser(description="Lint the MEMORY.md floor invariant (read-only).")
     parser.add_argument("--memory-dir", default=None)
+    parser.add_argument(
+        "--trim-report",
+        action="store_true",
+        help="CLM-7: replay recent prompts and say, per floor pointer, whether recall carries "
+        "its memory without the floor line (read-only)",
+    )
     args = parser.parse_args(argv)
 
     memory_dir, _ = resolve_dirs()
     memory_dir = args.memory_dir or memory_dir
+    if args.trim_report:
+        print(render_trim_report(trim_safety_report(memory_dir)))
+        return 0
 
     v = floor_violations(memory_dir)
     rebloat, missing = v["rebloat"], v["missing_targets"]
@@ -246,8 +332,14 @@ def floor_governance(memory_dir: str) -> dict:
         "bytes": 0,
         "warn_bytes": policy["warn_bytes"],
         "cap_bytes": policy["cap_bytes"],
+        "lines": 0,
+        "warn_lines": policy["warn_lines"],
+        "cap_lines": policy["cap_lines"],
         "over_warn": False,
         "over_cap": False,
+        "over_line_warn": False,
+        "over_line_cap": False,
+        "sections_over": [],
         "banned": [],
         "longlines": [],
         "policy_declared": bool(policy["banned_re"] or policy["max_line"]),
@@ -260,6 +352,13 @@ def floor_governance(memory_dir: str) -> dict:
     out["bytes"] = len(raw)
     out["over_warn"] = len(raw) > policy["warn_bytes"]
     out["over_cap"] = len(raw) > policy["cap_bytes"]
+    # CLM-7: the line edge — whichever limit comes first truncates the floor.
+    out["lines"] = len(raw.decode("utf-8", "replace").splitlines())
+    out["over_line_warn"] = out["lines"] > policy["warn_lines"]
+    out["over_line_cap"] = out["lines"] > policy["cap_lines"]
+    out["sections_over"] = sections_over_budget(
+        raw.decode("utf-8", "replace"), policy["section_budgets"]
+    )
     if not out["policy_declared"]:
         return out
     banned_re = None
@@ -283,6 +382,47 @@ def floor_governance(memory_dir: str) -> dict:
     return out
 
 
+def section_bytes(text: str) -> Dict[str, int]:
+    """CLM-7: utf-8 bytes per ``## `` section (its header through the line before the next)."""
+    sizes: Dict[str, int] = {}
+    current = None
+    for line in text.split("\n"):
+        if line.startswith("## "):
+            current = line.strip()
+            sizes.setdefault(current, 0)
+        if current is not None:
+            sizes[current] += len(line.encode("utf-8")) + 1
+    return sizes
+
+
+def sections_over_budget(text: str, budgets: Dict[str, int]) -> List[dict]:
+    """``[{section, bytes, budget}]`` for each declared section over its byte budget."""
+    if not budgets:
+        return []
+    sizes = section_bytes(text)
+    return [
+        {"section": sec, "bytes": sizes[sec], "budget": cap}
+        for sec, cap in budgets.items()
+        if sizes.get(sec, 0) > cap
+    ]
+
+
+def over_hard_edge(text: str, policy: dict) -> Optional[str]:
+    """CLM-7: why ``text`` would cross a hard floor edge (either native read limit, or a
+    declared section budget), or ``None``. Used to refuse hippo's own floor writes."""
+    n_bytes = len(text.encode("utf-8"))
+    n_lines = len(text.splitlines())
+    if n_bytes > policy["cap_bytes"]:
+        return f"{n_bytes:,}B, past the {policy['cap_bytes']:,}B read limit"
+    if n_lines > policy["cap_lines"]:
+        return f"{n_lines} lines, past the {policy['cap_lines']}-line read limit"
+    over = sections_over_budget(text, policy.get("section_budgets") or {})
+    if over:
+        o = over[0]
+        return f"'{o['section']}' at {o['bytes']:,}B, past its {o['budget']:,}B budget"
+    return None
+
+
 def format_governance_summary(gov: dict) -> Optional[str]:
     """ONE bounded line naming every governance finding, or ``None`` when clean.
 
@@ -300,6 +440,15 @@ def format_governance_summary(gov: dict) -> Optional[str]:
             )
         elif gov.get("over_warn"):
             parts.append(f"{gov['bytes']:,}B — over the {gov['warn_bytes']:,}B warn line")
+        if gov.get("over_line_cap"):
+            parts.append(
+                f"{gov['lines']} lines — PAST the {gov['cap_lines']}-line read limit: lines "
+                f"{gov['cap_lines'] + 1}+ never load"
+            )
+        elif gov.get("over_line_warn"):
+            parts.append(f"{gov['lines']} lines — over the {gov['warn_lines']}-line warn line")
+        for o in (gov.get("sections_over") or [])[:3]:
+            parts.append(f"'{o['section']}' {o['bytes']:,}B over its {o['budget']:,}B budget")
         banned = gov.get("banned") or []
         if banned:
             preview = ", ".join(

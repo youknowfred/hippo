@@ -135,8 +135,9 @@ def add_typed_relation(path: str, relation: str, target: str, *, dry_run: bool =
             result["error"] = "empty target"
             return result
         target = target.strip()
-        with open(path, "r", encoding="utf-8") as fh:
-            text = fh.read()
+        from .atomic import read_text_cas
+
+        text, _cas_token = read_text_cas(path)  # RWY-3: the CAS token of what we read
         fm = parse_frontmatter(text)
         if not text.startswith(_FENCE):
             result["error"] = "no frontmatter -- cannot write a typed relation"
@@ -189,9 +190,9 @@ def add_typed_relation(path: str, relation: str, target: str, *, dry_run: bool =
             return result
         result["changed"] = new_text != text
         if result["changed"] and not dry_run:
-            from .atomic import write_text_atomic
+            from .atomic import write_text_cas
 
-            write_text_atomic(path, new_text)  # COR-18: never a torn corpus file
+            write_text_cas(path, new_text, _cas_token)  # COR-18: never a torn corpus file
             # SEC-6: per-item, agent-gated typed-edge write — fold the new bytes into the
             # trusted-corpus consent baseline (review = consent; no-op on legacy
             # fingerprint-less records / ungated corpora; never fatal).
@@ -232,8 +233,9 @@ def remove_typed_relation(path: str, relation: str, target: str, *, dry_run: boo
             result["error"] = "empty target"
             return result
         target = target.strip()
-        with open(path, "r", encoding="utf-8") as fh:
-            text = fh.read()
+        from .atomic import read_text_cas
+
+        text, _cas_token = read_text_cas(path)  # RWY-3: the CAS token of what we read
         if not text.startswith(_FENCE):
             result["error"] = "no frontmatter -- cannot edit a typed relation"
             return result
@@ -280,9 +282,9 @@ def remove_typed_relation(path: str, relation: str, target: str, *, dry_run: boo
             return result
         result["changed"] = new_text != text
         if result["changed"] and not dry_run:
-            from .atomic import write_text_atomic
+            from .atomic import write_text_cas
 
-            write_text_atomic(path, new_text)  # COR-18: never a torn corpus file
+            write_text_cas(path, new_text, _cas_token)  # COR-18: never a torn corpus file
             # BND-3: same disclosure contract as add_typed_relation.
             try:
                 from .trust import record_authored_write_disclosing

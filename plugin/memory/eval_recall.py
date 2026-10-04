@@ -554,12 +554,14 @@ def confirm_hard_set_row(
             + f"  category: {json.dumps(cat, ensure_ascii=False)}\n"
         )
     if os.path.exists(fp):
-        with open(fp, "r", encoding="utf-8") as fh:
-            text = fh.read()
+        from .atomic import read_text_cas
+
+        text, _cas_token = read_text_cas(fp)  # RWY-3: the CAS token of what we read
         if text and not text.endswith("\n"):
             text += "\n"
         text += row_text
     else:
+        _cas_token = None  # RWY-3: create only while the fixture is still absent
         os.makedirs(os.path.dirname(fp), exist_ok=True)
         created_note = (
             "project-local recall eval fixture — rows admitted per-item via "
@@ -569,11 +571,11 @@ def confirm_hard_set_row(
             f"note: {json.dumps(created_note)}\n"
             f"generated_at: {time.strftime('%Y-%m-%d')}\n---\n" + row_text
         )
-    from .atomic import write_text_atomic
+    from .atomic import write_text_cas
 
     # INV-2: the tracked fixture is COMMITTED calibration truth (its existing bytes are
     # preserved verbatim above the append) — never leave it torn.
-    write_text_atomic(fp, text)
+    write_text_cas(fp, text, _cas_token)
 
     removed = False
     dp = drafts_path or default_drafts_path(memory_dir)
@@ -591,6 +593,8 @@ def confirm_hard_set_row(
             parts.append(
                 yaml.safe_dump(keep, sort_keys=False, allow_unicode=True) if keep else "[]\n"
             )
+            from .atomic import write_text_atomic
+
             write_text_atomic(dp, "".join(parts))  # INV-2: same drafts-queue guarantee
             removed = True
     return {
@@ -1187,7 +1191,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         "deterministic noise filters, volume-capped); confirm each per item via "
         "confirm_hard_set_row(query, [stems], category='single-hop')",
     )
+    parser.add_argument(
+        "--scoreboard",
+        action="store_true",
+        help="OBS-5: print the per-corpus field scoreboard (newest persisted run vs the "
+        "pinned baseline, aggregates only) for every live registry corpus, or for the one "
+        "--memory-dir (DIR or LABEL=DIR). Read-only.",
+    )
     args, ab_extra = parser.parse_known_args(argv)
+    if args.scoreboard:
+        from .eval_scoreboard import corpus_arg, scoreboard
+
+        print(scoreboard(corpus_arg(args.memory_dir) if args.memory_dir else None))
+        return 0
     if args.ab is None and ab_extra:
         # Extras are pass-through ONLY under --ab; the plain eval keeps strict parsing.
         parser.error(f"unrecognized arguments: {' '.join(ab_extra)}")

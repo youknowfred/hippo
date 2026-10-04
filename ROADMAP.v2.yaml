@@ -1,0 +1,460 @@
+# ============================================================================
+# hippo — the Road to v2.0.0: the ONE live ledger (CON-4)
+# ============================================================================
+# ROADMAP.v2.md (ratified 2026-10-03) is the design record: why each item exists,
+# its done-means, the owner rulings. THIS file is where status lives. Each
+# release updates the rows it ships, in the same PR. The earlier trains
+# (ROADMAP.yaml, ROADMAP.enhancements*.yaml, ROADMAP.dream.yaml) are history:
+# closed, kept for their reasoning, and no longer updated.
+#
+# status: planned | built (in an open release PR) | partial | done (released).
+# tests/test_roadmap_v2_ledger.py keeps every item id here in step with
+# ROADMAP.v2.md section 5.
+
+meta:
+  title: hippo — road to v2.0.0
+  design_record: ROADMAP.v2.md
+  ratified: 2026-10-03
+  chartered: 2026-10-03  # at v1.41.0, by CON-4
+
+releases:
+  - version: v1.40.0
+    theme: "Room, receipts, clean turns"
+    status: released
+    re_bootstrap: "no"
+  - version: v1.40.1
+    theme: "Nothing to translate (CLM-8 patch)"
+    status: released
+    re_bootstrap: "no"
+  - version: v1.40.2
+    theme: "Filled in on load (skill preflight patch, no roadmap item)"
+    status: released
+    re_bootstrap: "no"
+  - version: v1.41.0
+    theme: "Earned injection"
+    status: in review
+    re_bootstrap: "no"
+  - version: v1.42.0
+    theme: "One door, one queue"
+    status: planned
+    re_bootstrap: "no"
+  - version: v1.43.0
+    theme: "Last 1.x: derived self-tending"
+    status: planned
+    re_bootstrap: "no"
+  - version: v2.0.0
+    theme: "Smaller, calmer, honest"
+    status: planned
+    re_bootstrap: "yes (once)"
+
+items:
+  - id: RWY-1
+    title: "Pre-split the four at-cap modules"
+    size: M
+    release: "v1.40.0"
+    status: done
+  - id: RWY-2
+    title: "One frontmatter accessor"
+    size: S
+    release: "v1.40.0"
+    status: done
+  - id: RWY-3
+    title: "Compare-and-swap writes, repro-first"
+    size: M
+    release: "v1.41.0"
+    status: built
+    note: "v1.41.0 release PR"
+  - id: RWY-4
+    title: "Ship only the runtime (reshaped)"
+    size: S
+    release: "v1.43.0"
+    status: planned
+  - id: RWY-5
+    title: "Foundation→engine edge lint"
+    size: S
+    release: "v1.43.0"
+    status: planned
+  - id: OBS-1
+    title: "Rotation-proof daily rollups"
+    size: M
+    release: "v1.40.0"
+    status: done
+  - id: OBS-2
+    title: "Surface-usage ledger"
+    size: S
+    release: "v1.40.0"
+    status: done
+  - id: OBS-3
+    title: "Log served names, not the collapsed pool"
+    size: S
+    release: "v1.40.0"
+    status: done
+  - id: OBS-4
+    title: "Shell-measured hook wall time"
+    size: S
+    release: "v1.40.0"
+    status: done
+  - id: OBS-5
+    title: "Field eval gate on 3 corpora"
+    size: M
+    release: "v1.41.0"
+    status: built
+    note: "v1.41.0 release PR"
+  - id: OBS-6
+    title: "Trust-drift root cause, repro-first"
+    size: S
+    release: "v1.40.0"
+    status: done
+  - id: OBS-7
+    title: "Dogfood drain, keeping derivation 4 on purpose"
+    size: S
+    release: "v1.41.0"
+    status: partial
+    note: "operational; 5 contradiction verdicts + 18 capture discards done 2026-10-03, the withheld memory was already re-consented; cite_derivation 4 kept as the FMT-4 rehearsal target"
+  - id: OBS-8
+    title: "1,000-memory dense-under-load nightly lane"
+    size: S
+    release: "v1.43.0"
+    status: planned
+  - id: OBS-9
+    title: "Tests never write the live ledgers (repro-first)"
+    size: S
+    release: "v1.40.0"
+    status: done
+  - id: HOT-1
+    title: "Close the machine-turn leak end to end"
+    size: S
+    release: "v1.40.0"
+    status: done
+  - id: HOT-2
+    title: "Calibrated abstention"
+    size: M
+    release: "v1.41.0"
+    status: built
+    deps: [OBS-5]
+    note: "v1.41.0 release PR"
+  - id: HOT-3
+    title: "Per-prompt and per-session context budgets"
+    size: M
+    release: "v1.41.0"
+    status: built
+    deps: [HOT-1, OBS-1]
+    note: "v1.41.0 release PR"
+  - id: HOT-4
+    title: "One staleness truth"
+    size: S
+    release: "v1.40.0"
+    status: done
+  - id: HOT-5
+    title: "Stop paying an interpreter per file touch"
+    size: M
+    release: "v1.41.0"
+    status: built
+    deps: [OBS-4, PLT-1]
+    note: "v1.41.0 release PR"
+  - id: HOT-6
+    title: "Warm recall served by the session's own MCP server"
+    size: L
+    release: "v1.42.0"
+    status: planned
+    deps: [RWY-1, OBS-4, PLT-1]
+  - id: CLM-1
+    title: "Budgeted SessionStart digest"
+    size: L
+    release: "v1.41.0"
+    status: built
+    deps: [OBS-1]
+    note: "v1.41.0 release PR"
+  - id: CLM-2
+    title: "Attention setting"
+    size: S
+    release: "v1.41.0"
+    status: built
+    note: "v1.41.0 release PR"
+  - id: CLM-3
+    title: "Resume card from cleaned queries and served names"
+    size: S
+    release: "v1.41.0"
+    status: built
+    deps: [HOT-1, OBS-3]
+    note: "v1.41.0 release PR"
+  - id: CLM-4
+    title: "Onboarding nudge scoped per repo"
+    size: S
+    release: "v1.42.0"
+    status: planned
+  - id: CLM-5
+    title: "Jargon lint"
+    size: S
+    release: "v1.42.0"
+    status: planned
+  - id: CLM-6
+    title: "One remediation spelling"
+    size: M
+    release: "v1.42.0"
+    status: planned
+    deps: [SRF-1]
+  - id: CLM-7
+    title: "A floor with hard edges"
+    size: M
+    release: "v1.41.0"
+    status: built
+    deps: [RWY-3]
+    note: "v1.41.0 release PR"
+  - id: CLM-8
+    title: "Retire the Desktop routing note"
+    size: S
+    release: "v1.40.0 (patch)"
+    status: done
+    deps: [PLT-1]
+    note: "v1.40.1"
+  - id: TND-1
+    title: "One derived, ranked maintenance queue"
+    size: M
+    release: "v1.42.0"
+    status: planned
+  - id: TND-2
+    title: "The `tend` verb"
+    size: L
+    release: "v1.42.0"
+    status: planned
+    deps: [TND-1, SRF-1]
+  - id: TND-3
+    title: "Derived evidence anchors and quiet arming"
+    size: L
+    release: "v1.43.0"
+    status: planned
+    deps: [TND-1, OBS-5]
+  - id: TND-4
+    title: "Batched acknowledgement for owner-ruled classes"
+    size: M
+    release: "v1.43.0"
+    status: planned
+    deps: [TND-2, TND-3, V2Q-1]
+  - id: TND-5
+    title: "Capture-queue hygiene"
+    size: S
+    release: "v1.42.0"
+    status: planned
+  - id: TND-6
+    title: "`hippo trust` and per-session batched re-consent"
+    size: S
+    release: "v1.42.0"
+    status: planned
+    deps: [OBS-6]
+  - id: TND-7
+    title: "Scheduled sleep for every opted-in corpus"
+    size: S
+    release: "v1.43.0"
+    status: planned
+  - id: FMT-1
+    title: "`hippo migrate --check`"
+    size: S
+    release: "v1.42.0"
+    status: planned
+    deps: [RWY-2, SRF-1]
+  - id: FMT-2
+    title: "Derived citation binding moves into the index (dual mode)"
+    size: L
+    release: "v1.43.0"
+    status: planned
+    deps: [RWY-1, RWY-2]
+  - id: FMT-3
+    title: "N-1 compat guard"
+    size: S
+    release: "v1.41.0"
+    status: built
+    note: "v1.41.0 release PR"
+  - id: FMT-4
+    title: "`hippo migrate` apply: one previewed changeset, v5→v6"
+    size: L
+    release: "v2.0.0"
+    status: planned
+    deps: [FMT-1]
+  - id: FMT-5
+    title: "Strict format-6 readers"
+    size: S
+    release: "v2.0.0"
+    status: planned
+  - id: FMT-6
+    title: "Sunset legacy readers"
+    size: M
+    release: "v2.0.0"
+    status: planned
+  - id: SRF-1
+    title: "`hippo <verb>` is the one engine entry"
+    size: M
+    release: "v1.42.0"
+    status: planned
+    deps: [RWY-1]
+  - id: SRF-2
+    title: "MCP v2 toolset"
+    size: L
+    release: "v1.42.0"
+    status: planned
+    deps: [SRF-1, TND-2, OBS-2]
+  - id: SRF-3
+    title: "The v2 skill set: 9 verbs"
+    size: L
+    release: "v1.42.0"
+    status: planned
+    deps: [SRF-1, OBS-2, TND-2]
+  - id: SRF-4
+    title: "Config consolidation"
+    size: M
+    release: "v1.42.0"
+    status: planned
+  - id: SRF-5
+    title: "One machine-wide venv and model cache"
+    size: M
+    release: "v2.0.0"
+    status: planned
+  - id: SRF-6
+    title: "Python 3.11 floor; drop `rank-bm25`"
+    size: S
+    release: "v2.0.0"
+    status: planned
+  - id: SRF-7
+    title: "Dream: reduce to the linker unless it earns more"
+    size: M
+    release: "v1.43.0"
+    status: planned
+  - id: SRF-8
+    title: "The v2 removal cut"
+    size: M
+    release: "v2.0.0"
+    status: planned
+    deps: [SRF-2, SRF-3, SRF-4, CON-3]
+  - id: PLT-1
+    title: "Platform-reality spike, with dated receipts"
+    size: S
+    release: "v1.40.0"
+    status: done
+  - id: PLT-2
+    title: "Declare and check a minimum Claude Code version"
+    size: S
+    release: "v1.41.0"
+    status: built
+    note: "v1.41.0 release PR"
+  - id: NAT-1
+    title: "Detect native auto memory"
+    size: S
+    release: "v1.40.0"
+    status: done
+  - id: NAT-2
+    title: "The v2 coexistence contract"
+    size: M
+    release: "v2.0.0"
+    status: planned
+    deps: [PLT-1, NAT-1, V2Q-3]
+  - id: CON-1
+    title: "Fix doc drift; fact-lint every contract doc"
+    size: S
+    release: "v1.40.0"
+    status: done
+  - id: CON-2
+    title: "Positioning: fix the false claims now, date the table later"
+    size: S
+    release: "v1.40.0"
+    status: partial
+    note: "v1.40.0 removed the false claims; the dated comparison table is a v2.0 completion"
+  - id: CON-3
+    title: "STABILITY v2"
+    size: M
+    release: "v1.43.0"
+    status: planned
+  - id: CON-4
+    title: "`ROADMAP.v2.yaml` as the one live ledger"
+    size: S
+    release: "v1.41.0"
+    status: built
+    note: "v1.41.0 release PR"
+  - id: CON-5
+    title: "Release-gate hardening"
+    size: S
+    release: "v2.0.0"
+    status: planned
+  - id: CON-6
+    title: "Official marketplace submission"
+    size: S
+    release: "v2.0.0"
+    status: planned
+
+# Threads no train had chartered, and where they stand now.
+threads:
+  - id: LDG-1
+    title: "External-ledger read-time join (LDG-1.spec.md)"
+    status: planned
+    release: v2.x
+    note: "V2Q-10 answers its Q1: direction A, a derived cache; build in v2.x on the frozen core. Its other three owner questions stay open until then."
+  - id: GP-S4
+    title: "recall --for-issue: an issue-id join beside recall --for-diff"
+    status: planned
+    release: v2.x
+    note: "growing-pains slate (2026-08-27) S4; reach work per V2Q-12."
+  - id: GP-S5
+    title: "Trim-safety report for the MEMORY.md floor"
+    status: built
+    release: v1.41.0
+    note: "delivered as CLM-7's lint_floor --trim-report."
+  - id: GP-S6
+    title: "Doctor restart detector: running version vs installed_plugins.json"
+    status: built
+    release: v1.41.0
+    note: "delivered as FMT-3's doctor installed_version line."
+  - id: GP-S7
+    title: "CAS floor edits + a worktree-corpus SessionStart warning"
+    status: partial
+    release: v1.41.0
+    note: "RWY-3 put every floor edit on compare-and-swap; SHP-7 (v1.34.0) resolves worktree sessions to the main corpus. A floor_edit MCP verb is not built; SRF-2's tool redraw decides whether it should exist."
+
+# The owner rulings recorded in ROADMAP.v2.md section 8; all ratified 2026-10-03.
+owner_rulings:
+  - id: V2Q-1
+    question: "One reviewed changeset may stand in for N per-item gates"
+    ruling: "(b) only evidence-quiet graduates and lossless format rewrites"
+    status: ratified
+  - id: V2Q-2
+    question: "In-session served recall vs the daemon ban"
+    ruling: "(b) opt-in mcp_tool hook into the session's own server"
+    status: ratified
+  - id: V2Q-3
+    question: "Native-memory contract direction"
+    ruling: "(B) redirect native writes to an inbox, floor by CLAUDE.md import; confirmed or revised by PLT-1 before NAT-2"
+    status: ratified
+  - id: V2Q-4
+    question: "Frozen-surface policy"
+    ruling: "freeze a core set; new verbs eligible after 2 releases plus usage"
+    status: ratified
+  - id: V2Q-5
+    question: "Derived citations out of committed frontmatter"
+    ruling: "yes, with a <=1% parity gate"
+    status: ratified
+  - id: V2Q-6
+    question: "Deprecation window length"
+    ruling: "two minors, usage-counted, at most one dated extension"
+    status: ratified
+  - id: V2Q-7
+    question: "Dream's fate"
+    ruling: "keep the Tier-A linker; cut the rest unless >=+0.02 field recall@10 by v1.43"
+    status: ratified
+  - id: V2Q-8
+    question: "Calm SessionStart by default at v2.0"
+    ruling: "yes"
+    status: ratified
+  - id: V2Q-9
+    question: "Python 3.11 floor at v2.0"
+    ruling: "yes"
+    status: ratified
+  - id: V2Q-10
+    question: "LDG-1"
+    ruling: "direction A now, build in v2.x"
+    status: ratified
+  - id: V2Q-11
+    question: "Release gate"
+    ruling: "non-linear-merge check now; enforce_admins for the v2.0.0 cut"
+    status: ratified
+  - id: V2Q-12
+    question: "Reach inside v2.0"
+    ruling: "marketplace submission only"
+    status: ratified

@@ -330,7 +330,10 @@ def _corpus_trusted(memory_dir: str, repo_root: Optional[str]) -> bool:
     """
     try:
         from . import trust
+        from .provenance_format import injection_refusal
 
+        if injection_refusal(memory_dir):  # FMT-3: a newer-format corpus injects nothing
+            return False
         root = trust.gate_repo_root(memory_dir, repo_root)
         return True if root is None else trust.is_trusted(root)
     except Exception:

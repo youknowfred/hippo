@@ -1,7 +1,7 @@
 {
   "name": "hippo",
   "description": "Local, git-native memory for Claude Code — your repo is the store, recall is $0/prompt (no LLM, no network), staleness is git-drift (the cited code moved), and team memory ships through review.",
-  "version": "1.40.2",
+  "version": "1.41.0",
   "author": {
     "name": "youknowfred",
     "url": "https://youknowfred.com"
@@ -10,6 +10,14 @@
   "repository": "https://github.com/youknowfred/hippo",
   "license": "MIT",
   "keywords": ["memory", "recall", "agent-memory", "knowledge-base"],
+  "userConfig": {
+    "calm_session_start": {
+      "type": "boolean",
+      "title": "Calm SessionStart",
+      "description": "Open each session with a short digest (integrity warnings, where you left off, one next step, a count of queued maintenance) instead of the full report. HIPPO_ATTENTION=calm or full overrides it.",
+      "default": false
+    }
+  },
   "mcpServers": {
     "hippo": {
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/hippo",

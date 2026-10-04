@@ -814,6 +814,9 @@ def _update_states(source_dir: str, memory_dir: str) -> Tuple[Optional[dict], Op
         else:
             with open(ours_path, "r", encoding="utf-8") as fh:
                 ours = fh.read()
+            from .atomic import content_token
+
+            it["token"] = content_token(ours_path)  # RWY-3: what the merge was computed over
             with open(os.path.join(source_dir, fname), "r", encoding="utf-8") as fh:
                 theirs_raw = fh.read()
             theirs = _ensure_pack_stamp(theirs_raw, pack, new_version)
@@ -950,11 +953,12 @@ def pack_update_item(
                 f"secret-lint flagged the updated {name}.md — refusing: {'; '.join(secrets)}"
             )
             return result
-        from .atomic import write_text_atomic
+        from .atomic import write_text_cas
 
         # COR-18: atomic — this write REPLACES a file holding the user's local edits;
         # a torn in-place write was the one way to lose them (they exist nowhere else).
-        write_text_atomic(it["path"], new_text)
+        # RWY-3: and only over the bytes the three-way merge was computed from.
+        write_text_cas(it["path"], new_text, it.get("token"))
         result["updated"] = True
         result["path"] = it["path"]
 

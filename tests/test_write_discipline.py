@@ -88,7 +88,6 @@ WRITE_OPEN_ALLOWLIST = {
     ("telemetry_usage", "_update_usage_aggregates"): "gitignored aggregate cache; recomputed from the ledger",
     ("dream_ledgers", "write_boost_ledger"): "derived replay-boost cache; rebuilt by the next pass",
     ("dream_ledgers", "write_candidate_ledger"): "derived candidate cache; rebuilt by the next pass",
-    ("dream_apply", "_undo_one_edge"): "derived dream ledger rewrite; corpus edge stamps stay the truth",
     ("dream_generate", "write_proposals_ledger"): "derived proposals ledger; rebuilt by the next pass",
     ("dream_generate", "freeze_abstention_backlog"): "derived frozen-backlog snapshot",
     ("deparasite", "write_report"): "derived report artifact in the telemetry dir",

@@ -7,6 +7,128 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.41.0 — 2026-10-03 — "Earned injection"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**, link cache still
+**6**; `stale.json` still schema **1**. The second release of [`ROADMAP.v2.md`](ROADMAP.v2.md):
+its 12 v1.41.0 PR items, plus OBS-7's operational drain. Field baselines were pinned before
+any ranking change. Recall now has to earn each injection: it abstains when nothing
+corroborates the prompt, and it renders inside a per-prompt and a per-session budget. Corpus
+writes become compare-and-swap. The floor gets hard edges, and readers refuse a corpus
+format they cannot read.
+
+**Operator action: none required.** Things you may notice:
+- Recall injects nothing more often (emgl replay: 72 of 276 human prompts, up from 23).
+  `why` on a prompt shows the closest memory and the threshold it missed.
+  `HIPPO_DISABLE_ABSTAIN_GATE=1` restores the old rule.
+- Each prompt's block is at most 2,500 chars. Rows that don't fit collapse into one
+  "N more past this prompt's context budget" line that still names them.
+- `calm_session_start` is a new plugin option, off by default (or set
+  `HIPPO_ATTENTION=calm`). `HIPPO_MUTE` hides named SessionStart signals; integrity signals
+  always show.
+- doctor gains `installed_version`, `claude_code_version` and `attention` lines. The
+  supported floor is now **Claude Code 2.1.269** (README support matrix).
+- `HIPPO_DISABLE_TOUCH_FASTPATH=1` restores the always-spawn PostToolUse hook.
+
+**Field scoreboard** (OBS-5; the pin is taken at the commit before any ranking change; both
+runs on the same frozen snapshot of each corpus):
+
+| corpus | memories | hard set (multi-hop) | recall@10 pin → now | MRR@10 pin → now | self-recall@10 | off-topic abstained |
+|---|---:|---:|---:|---:|---:|---:|
+| hippo | 89 | 16 (0) | 0.938 → 0.938 | 0.755 → 0.755 | 0.978 | 0/11 → 8/11 |
+| emgl | 1,037 | 105 (6) | 0.457 → 0.448 | 0.269 → 0.264 | 0.792 | 0/20 → 18/20 |
+| Skyline | 101 | 25 (4) | 0.440 → 0.440 | 0.302 → 0.302 | 0.951 | no fixture |
+
+**Receipts first**
+- **OBS-5 — field baselines on three corpora.** `eval_recall --scoreboard` prints the table
+  above from each corpus's persisted `eval_runs.jsonl` and pinned
+  `recall_eval_baseline.json`. It shows aggregates only, and a delta only when the corpus
+  and fixture fingerprints match the pin. The pins and run ledgers were written on hippo,
+  emgl and Skyline before HOT-2. emgl's hard set grew from 52 to 105 rows and Skyline got
+  its first 25. Every row is a verbatim real prompt, reviewed and admitted one at a time.
+  Multi-hop rows from real traffic came to 6 and 4; a ≥15-row multi-hop set would need
+  synthetic queries.
+
+**Earned injection**
+- **HOT-2 — abstain unless the lanes corroborate.** A query injects only when its best
+  cosine is ≥0.76; or a description in the lexical top 10 shares ≥3 query terms carrying
+  ≥40% of the query's IDF mass; or one memory sits in both lanes' top 10 and shares ≥2 terms
+  or has a cosine ≥0.72. A single shared word never admits without dense support. The
+  thresholds are per embedding model, so a BM25-only index or an uncalibrated model has no
+  gate. The pack corpus abstains on 6 of 6 off-topic probes (was 2).
+- **HOT-3 — context budgets.** 2,500 chars per prompt, rows added whole. 12,000 chars per
+  session: after that a prompt gets 800 chars, and every memory already shown this session
+  collapses. Replayed over each corpus's retained human prompts (prompt p90 / session mean /
+  KPI-2, before → after):
+  - hippo: 3,876 → 2,463 / 12,898 → 7,605 / 8.0% → 8.0%
+  - emgl: 4,198 → 2,468 / 9,355 → 4,400 / 1.07% → 1.07%
+  - Skyline: 3,941 → 2,470 / 11,163 → 6,523 / 3.9% → 4.2%
+- **HOT-5 — no interpreter per file touch.** A bash fast path appends the outcome row
+  itself whenever Python would do nothing else. Python still runs for a cited path, a due
+  fleet check whose HEAD moved, MEMORY.md, a possible worktree nudge, and anything it cannot
+  parse exactly. The rows match Python's field for field, so KPI-2 is unchanged on a
+  replayed fixture. Median Python spawns per human prompt that touched files, replayed:
+  hippo 8 → 2, emgl 4 → 1.5, Skyline 8 → 2. (`mcp_tool` hooks were ruled out by PLT-1's
+  receipts: a failed call is invisible to the model.)
+
+**Calm surfaces**
+- **CLM-1 — the calm SessionStart digest (opt-in).** It has four parts: an integrity lane
+  that is never cut; orientation (the fleet line, the resume card, relevant-to-work, the
+  portable floor); one next-best action; and one counted line of everything else queued.
+  The whole digest aims at 2,000 chars. On copies of each corpus (full → calm): hippo
+  7,344 → 1,796, emgl 8,997 → 1,824, Skyline 8,919 → 1,933. A corrupt index still shows the
+  integrity lane.
+- **CLM-2 — the attention setting.** A calm/full switch: `HIPPO_ATTENTION`, then the boolean
+  `calm_session_start` option (no `options` picker, which would break loading before Claude
+  Code 2.1.271), then full. `HIPPO_MUTE` mutes signals by name. Integrity signals (venv,
+  harness, corpus format, malformed memories, index, trust quarantine, and a new
+  native-interference line) can never be muted.
+- **CLM-3 — the resume card reads clean.** Themes are the human text of human turns, with no
+  harness XML or paste wrappers. "You leaned on" names the three memories the session was
+  served most, never "+54 more".
+- **CLM-7 — a floor with hard edges.** Floor governance now models native memory's 200-line
+  limit beside the 25 KB one, plus declared `floor_lint.section_budgets`. hippo refuses its
+  own floor-pointer write past either limit or past its section's budget.
+  `lint_floor --trim-report` replays recent prompts and says, per floor line, whether recall
+  would still carry that memory without it.
+
+**Write safety and compatibility**
+- **RWY-3 — compare-and-swap corpus writes, repro first.** Both repros failed first: an
+  interleaved MEMORY.md writer was erased, and a crash between create and backfill left a
+  memory with no provenance. `atomic.write_text_cas` / `update_text_cas` now carry every
+  corpus read-modify-write:
+  - floor pointers;
+  - verdicts and citation backfill;
+  - the `.format` marker;
+  - typed edges;
+  - dream edges and their undo (which also stops truncating in place);
+  - pack merges;
+  - the hard-set fixture.
+
+  `new_memory` stages, backfills and then `os.link`s, so a memory is born whole. An AST
+  registry fails the suite on any corpus read-modify-write left on a plain write. The floor
+  edits moved to `new_memory_floor.py` to make room.
+- **FMT-3 — readers refuse a newer corpus format.** recall injects nothing, SessionStart
+  shows one integrity line, and JIT stays quiet, each naming the fix. A garbled `.format`
+  is now named instead of silently reading as format 1. doctor compares
+  `installed_plugins.json` with the version the process actually runs.
+- **PLT-2 — a declared minimum Claude Code.** 2.1.269 is checked through `AI_AGENT`, which
+  hooks inherit. That isn't documented; PLATFORM.md §6 dates the receipt. doctor prints it,
+  and SessionStart names an older harness.
+
+**Ledger and dogfood**
+- **CON-4 — `ROADMAP.v2.yaml` is the one live ledger.** It holds all 59 v2 items with
+  status, the unchartered threads (LDG-1, growing-pains S4–S7) and the twelve rulings. A
+  test keeps it in step with ROADMAP.v2.md. The five `ROADMAP.enhancements*.yaml` files now
+  open with a HISTORY header.
+- **OBS-7 (operational, no code).** hippo's own corpus:
+  - 5 dream-proposed contradiction pairs, each judged not conflicting;
+  - 18 pending captures discarded, every one covered by an existing memory or the code;
+  - the withheld memory, already re-consented.
+
+  `cite_derivation: 4` stays, on purpose, as FMT-4's first rehearsal target.
+
 ## v1.40.2 — 2026-10-03 — "Filled in on load"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format

@@ -81,6 +81,26 @@ def bootstrap_state(
         return "current"
 
 
+def harness_floor_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """PLT-2: name a Claude Code older than hippo's declared floor; silent otherwise (and
+    when the version is unknown). ``ctx`` is unused — see ``stale_venv_producer``."""
+    from .platform_floor import harness_floor_line
+
+    return harness_floor_line()
+
+
+def native_interference_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """CLM-1 integrity lane (NAT-1's signal): native settings keep the floor out of
+    context. Settings only, no corpus scan. ``ctx`` is unused."""
+    from .native_memory import native_interference
+
+    return native_interference(memory_dir, repo_root)
+
+
 def stale_venv_producer(
     memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
 ) -> Optional[str]:
@@ -121,9 +141,18 @@ def corpus_format_producer(
     is unused — see ``stale_venv_producer`` for why it's declared anyway.
     """
     try:
+        from .provenance_format import marker_state
+
+        st = marker_state(memory_dir)
         declared = read_corpus_format(memory_dir)
     except Exception:
         return None
+    if st.get("state") == "unreadable":
+        # FMT-3: no longer silent — a garbled marker is read as format 1 and must say so.
+        return (
+            f"⚠ Corpus format — .claude/memory/.format is unreadable ({st.get('error')}), so "
+            "hippo is reading this corpus as format 1. Fix the marker's JSON."
+        )
     if declared <= CORPUS_FORMAT_VERSION:
         return None
     return (

@@ -612,17 +612,19 @@ def test_apply_refines_rolls_back_frontmatter_edge_when_stamp_write_fails(dirs, 
             "score": 0.9}
     import memory.atomic as atomic
 
-    real_write = atomic.write_text_atomic
+    # RWY-3: the edge and the stamp are compare-and-swap writes now; the rollback restores
+    # bytes through write_text_atomic, which stays unpatched.
+    real_write = atomic.write_text_cas
     w_count = {"n": 0}
 
     def failing_write(path, text, *a, **k):
         if str(path).endswith("narrow-lesson.md"):
             w_count["n"] += 1
-            if w_count["n"] == 2:  # write #1 = the typed edge; write #2 = the stamp;
-                raise OSError(28, "No space left on device")  # write #3 = the rollback
+            if w_count["n"] == 2:  # write #1 = the typed edge; write #2 = the stamp
+                raise OSError(28, "No space left on device")
         return real_write(path, text, *a, **k)
 
-    monkeypatch.setattr(atomic, "write_text_atomic", failing_write)
+    monkeypatch.setattr(atomic, "write_text_cas", failing_write)
     ok, reason, undo = dream._apply_one(md, cand, "edge-test-1", "pass-test-1")
     monkeypatch.undo()
 

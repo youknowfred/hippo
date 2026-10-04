@@ -129,6 +129,20 @@ def _abstention_receipt(
     index = _ensure_index(None, memory_dir or "", index_dir)
     if index is None or not len(index.entries):
         return base + "\nReason: no memory corpus/index resolves here at all."
+    try:
+        # HOT-2: the corroboration gate abstained — its verdict names the closest candidate
+        # and the thresholds it missed, which is the honest receipt for this case.
+        from .recall import recall as _recall
+        from .recall_abstain import receipt_line
+
+        dl: dict = {}
+        _recall(query, memory_dir=memory_dir, index_dir=index_dir, repo_root=repo_root, drop_log=dl)
+        if dl.get("refused"):  # FMT-3
+            return base + "\nReason: " + dl["refused"] + "."
+        if dl.get("abstained"):
+            return base + "\nReason: " + receipt_line(dl["abstained"]) + "." + tail
+    except Exception:
+        pass
     if not index.dense_ready:
         return (
             base + "\nReason: no memory shares a token with this query (BM25-only corpus "
