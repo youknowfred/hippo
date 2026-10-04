@@ -22,7 +22,8 @@ not just a raw injection block.
 ## Preflight (shared across all hippo skills)
 
 ```bash
-[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell. On Claude Desktop this is expected — take the MCP-tool route in 'Surface routing' above instead of this bash flow. In a genuine terminal Claude Code session it means Claude Code is likely too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:recall skill, not from a copy of its SKILL.md. If the loaded skill stops here too, take the MCP-tool route in 'Surface routing' above."; exit 1; }
 . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
 hippo_resolve_py
 hippo_note_usage skill recall  # OBS-2: count this skill's use (one spool line, no Python)
@@ -94,14 +95,15 @@ The recall hook fires only on a top-level user prompt, so mid-turn retrieval and
   first-class `recall(query, k)`, `new_memory(...)`, and `traverse(name, hops)` tools that
   subagents inherit automatically — call them mid-turn, no user prompt required.
 - **`bin/hippo recall`, the fallback** (pre-bootstrap, or where MCP is unavailable): run
-  `"${CLAUDE_PLUGIN_ROOT}/bin/hippo" recall "<focused query>"` for the raw injection block, or
+  `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" "${CLAUDE_PLUGIN_ROOT}/bin/hippo" recall "<focused query>"`
+  for the raw injection block (the data path is what lets it find the venv), or
   this skill's `memory.recall_view` for the browsable listing.
 
 **Task-prompt injection for policy-critical delegations.** When you delegate work whose
 correctness depends on remembered policy (a user's feedback rule, a project constraint), don't
-rely on the subagent discovering it — INJECT it. Run `bin/hippo recall "<the policy topic>"`
-yourself and paste the relevant memory into the Task prompt so the subagent is grounded from
-its first token, before it calls any tool. This is the deterministic path where "the subagent
+rely on the subagent discovering it — INJECT it. Run the `bin/hippo recall` fallback above on
+"<the policy topic>" yourself and paste the relevant memory into the Task prompt so the
+subagent is grounded from its first token, before it calls any tool. This is the deterministic path where "the subagent
 might query memory" isn't good enough.
 
 **Subagent discoveries are captured (INT-3).** When a subagent finishes, a `SubagentStop` hook

@@ -21,11 +21,16 @@ else. Nothing here is a bulk sweep.
 ## Preflight (shared across all hippo skills)
 
 ```bash
-[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell. On Claude Desktop this is expected — take the MCP-tool route in 'Surface routing' above instead of this bash flow. In a genuine terminal Claude Code session it means Claude Code is likely too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:consolidate skill, not from a copy of its SKILL.md. If the loaded skill stops here too, take the MCP-tool route in 'Surface routing' above."; exit 1; }
 . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
 hippo_resolve_py
 hippo_note_usage skill consolidate  # OBS-2: count this skill's use (one spool line, no Python)
 ```
+
+Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
+opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
+and resolver lines, in the same call.
 
 > **Desktop / MCP surface (INT-13):** the tool-by-tool mapping is in 'Surface routing' above — drive the SAME flow through those MCP tools, same order, same per-item approval gates. Each capture seed is a plain JSON file: read it directly for the full evidence when drafting.
 
@@ -230,6 +235,8 @@ distinct sessions (the threshold is deliberately high — on a sparse or noisy m
 proposes NOTHING, and that empty result is the designed outcome, not a failure):
 
 ```bash
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
 "$PY" - <<'PYEOF'
 from memory.lint_floor import floor_memory_names
 from memory.links import build_graph
@@ -291,6 +298,8 @@ exactly the memory that closes such a gap. Record that as an eval fixture so KPI
 the gap-closing loop end to end — first refresh the drafts queue:
 
 ```bash
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
 "$PY" - <<'PYEOF'
 import json
 from memory.eval_recall import draft_abstention_fixtures, draft_livedin_fixtures
@@ -311,6 +320,8 @@ For each unconfirmed row: if a memory you JUST captured — or an existing one �
 answers the query, propose the pair and, on explicit approval, admit it per item:
 
 ```bash
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
 "$PY" - <<'PYEOF'
 import json
 from memory.eval_recall import confirm_hard_set_row
@@ -333,6 +344,8 @@ drafts at their decay horizon. Render the (at most three) questions and put each
 USER, verbatim — never answer one yourself:
 
 ```bash
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
 "$PY" - <<'PYEOF'
 from memory.interview import gather_questions, render_questions
 from memory.provenance import resolve_dirs

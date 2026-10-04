@@ -19,7 +19,8 @@ Every code block below expands the plugin data dir variable — unset, `uv venv 
 would provision into a root-owned path. Run this guard FIRST and stop if it fails:
 
 ```bash
-[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell. On Claude Desktop this is expected — take the MCP-tool route in 'Surface routing' above instead of this bash flow. In a genuine terminal Claude Code session it means Claude Code is likely too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:bootstrap skill, not from a copy of its SKILL.md. If the loaded skill stops here too, take the MCP-tool route in 'Surface routing' above."; exit 1; }
 ```
 
 ## What this does
@@ -56,6 +57,8 @@ would provision into a root-owned path. Run this guard FIRST and stop if it fail
      re-run."; exit 1`
    Then install:
    ```bash
+   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+   [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell; see the preflight above."; exit 1; }
    uv pip install -r "${CLAUDE_PLUGIN_ROOT}/requirements.txt" --python "${CLAUDE_PLUGIN_DATA}/venv/bin/python"
    # fallback if uv is absent:
    "${CLAUDE_PLUGIN_DATA}/venv/bin/pip" install -q -r "${CLAUDE_PLUGIN_ROOT}/requirements.txt"
@@ -63,6 +66,8 @@ would provision into a root-owned path. Run this guard FIRST and stop if it fail
 3. **Warm the model cache OFFLINE-SAFE.** This is the actual online step — it downloads the
    ~130MB `bge-small-en-v1.5` ONNX model via `fastembed` the FIRST time only. Run:
    ```bash
+   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+   [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell; see the preflight above."; exit 1; }
    PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -c \
      "from memory.build_index import ensure_fastembed_cache_path; ensure_fastembed_cache_path(); from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
    ```
@@ -76,6 +81,8 @@ would provision into a root-owned path. Run this guard FIRST and stop if it fail
    tool's offline rerank — never the hot path). Best-effort: a failure here must NOT fail
    bootstrap (the rerank already degrades to the un-reranked order on any cache miss):
    ```bash
+   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+   [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell; see the preflight above."; exit 1; }
    PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -c \
      "from memory.build_index import ensure_fastembed_cache_path; ensure_fastembed_cache_path(); from fastembed.rerank.cross_encoder import TextCrossEncoder; TextCrossEncoder('Xenova/ms-marco-MiniLM-L-6-v2')" \
      || true
@@ -103,6 +110,8 @@ will flag this for you if it notices), switch to a multilingual model instead:
 1. Run the SAME venv-build steps above first (`--multilingual` doesn't skip provisioning), then
    **write the model preset** so the choice persists across sessions without an env var:
    ```bash
+   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+   [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell; see the preflight above."; exit 1; }
    PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -c \
      "import json, os; os.makedirs(os.environ['CLAUDE_PLUGIN_DATA'], exist_ok=True); \
       json.dump({'embed_model': 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'}, \
@@ -115,6 +124,8 @@ will flag this for you if it notices), switch to a multilingual model instead:
 2. **Warm THAT model** (mirrors step 3 above, but for the multilingual id — a separate ~220MB
    ONNX download the first time):
    ```bash
+   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+   [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell; see the preflight above."; exit 1; }
    PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -c \
      "from memory.build_index import ensure_fastembed_cache_path; ensure_fastembed_cache_path(); from fastembed import TextEmbedding; TextEmbedding('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')"
    ```
@@ -124,6 +135,8 @@ will flag this for you if it notices), switch to a multilingual model instead:
    existing row a cache miss — every memory gets re-embedded from scratch, once, under the new
    model. Expect this to take noticeably longer than an incremental rebuild on a large corpus:
    ```bash
+   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+   [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell; see the preflight above."; exit 1; }
    PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -m memory.build_index \
      --memory-dir <memory_dir> --index-dir <index_dir> --force
    ```

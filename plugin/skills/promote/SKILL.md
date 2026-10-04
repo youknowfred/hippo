@@ -15,13 +15,19 @@ hand-move the file.
 ## Preflight (shared across all hippo skills)
 
 ```bash
-[ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell — this does NOT necessarily mean Claude Code is too old: on some surfaces (e.g. Claude Desktop) the agent's Bash tool never inherits plugin-scoped env vars even on a fully current, correctly-bootstrapped install, since only hippo's MCP server and hooks (not the general Bash tool) receive them. This skill has no Desktop-safe MCP-tool equivalent yet — re-run it from a terminal Claude Code session. If this IS a genuine terminal Claude Code session and you still see this, Claude Code likely is too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
+[ "${CLAUDE_CODE_ENTRYPOINT:-}" != "claude-desktop" ] || { echo "✘ /hippo:promote has no Desktop-safe MCP-tool equivalent yet. Run it from a terminal Claude Code session in this repo (claude, then /hippo:promote)."; exit 1; }
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:promote skill, not from a copy of its SKILL.md. If the loaded skill stops here too, this Claude Code does not fill them in: update it and run /hippo:promote again."; exit 1; }
 . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
 hippo_resolve_py
 hippo_note_usage skill promote  # OBS-2: count this skill's use (one spool line, no Python)
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 MEMORY_DIR="$REPO_ROOT/.claude/memory"
 ```
+
+Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
+opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
+and resolver lines, in the same call.
 
 ## What this does, in order
 
@@ -30,6 +36,9 @@ MEMORY_DIR="$REPO_ROOT/.claude/memory"
    `consequential` count warns how many per-item confirmations the lift will need):
 
    ```bash
+   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+   . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
+   REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
    "$PY" -c \
      "import sys, json; from memory.new_memory import promote_candidates; \
       print(json.dumps(promote_candidates(memory_dir=sys.argv[1]), indent=1))" \
@@ -41,6 +50,9 @@ MEMORY_DIR="$REPO_ROOT/.claude/memory"
 2. **Portability report (read-only), before anything moves.** Show the user every finding:
 
    ```bash
+   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+   . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
+   REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
    "$PY" -c \
      "import sys, json; from memory.portability import scan_portability; \
       text = open(sys.argv[1], encoding='utf-8').read(); \
@@ -63,6 +75,9 @@ MEMORY_DIR="$REPO_ROOT/.claude/memory"
    an explicit yes:
 
    ```bash
+   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+   . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
+   REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
    "$PY" -c \
      "import sys, json; from memory.new_memory import promote_memory; \
       r = promote_memory(sys.argv[1], memory_dir=sys.argv[2], repo_root=sys.argv[3], \

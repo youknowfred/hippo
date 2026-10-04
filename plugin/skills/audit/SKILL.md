@@ -67,13 +67,19 @@ not a multi-PR roadmap.
 
 ## Phase 0 — Preflight
 
-- **Guard `CLAUDE_PLUGIN_DATA` first** (shared across all hippo skills — the venv paths
-  below expand it):
+- **Pin and guard the plugin paths first** (shared across all hippo skills — the venv paths
+  below expand them):
   ```bash
-  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell. On Claude Desktop this is expected — take the MCP-tool route in 'Surface routing' above instead of this bash flow. In a genuine terminal Claude Code session it means Claude Code is likely too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+  export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:audit skill, not from a copy of its SKILL.md. If the loaded skill stops here too, take the MCP-tool route in 'Surface routing' above."; exit 1; }
   ```
+
+  Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
+  opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
+  and resolver lines, in the same call.
 - Confirm every tool imports cleanly:
   ```bash
+  export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
   . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
   hippo_resolve_py
   hippo_note_usage skill audit  # OBS-2: count this skill's use (one spool line, no Python)
@@ -186,6 +192,8 @@ bookkeeping like the Phase 1 history-file write, not a corpus mutation. ADMISSIO
 tracked fixture is the gated act, and it is always per-item + human-approved.
 
 ```bash
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
 "$PY" - <<'PYEOF'
 import json
 from memory.eval_recall import draft_abstention_fixtures, draft_livedin_fixtures
@@ -224,6 +232,8 @@ the drafts file, newly added or not. Exactly one verdict each:
 Admission, per approved row (never a loop over the file):
 
 ```bash
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
 "$PY" - <<'PYEOF'
 import json
 from memory.eval_recall import confirm_hard_set_row
@@ -246,11 +256,14 @@ value is cheap **in-process set/dict arithmetic across all of them at once**; a 
 would force that state through serialization for zero parallelism win. Revisit this only if a
 corpus grows 5-10x past what's realistic today (see Hard Rules).
 
-Run this as one script (adjust flags per the invocation; `PY` is resolved by
-`hippo_resolve_py` in Phase 0 — `${CLAUDE_PLUGIN_DATA}/venv/bin/python` with
-`PYTHONPATH=${CLAUDE_PLUGIN_ROOT}` set, or bare `python3` pre-bootstrap):
+Run this as one script (adjust flags per the invocation; its first two lines resolve `PY`
+the same way Phase 0 does, since no shell state carries between Bash calls —
+`${CLAUDE_PLUGIN_DATA}/venv/bin/python` with `PYTHONPATH=${CLAUDE_PLUGIN_ROOT}` set, or bare
+`python3` pre-bootstrap):
 
 ```bash
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
 "$PY" - <<'PYEOF'
 import json, os, re, subprocess
 from datetime import datetime, timezone
@@ -649,6 +662,8 @@ the rendered verdicts back into the history file (bookkeeping, not a corpus muta
 regardless of `--apply`):
 
 ```bash
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
 "$PY" - <<'PYEOF'
 import json
 from pathlib import Path

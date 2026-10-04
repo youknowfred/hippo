@@ -74,8 +74,9 @@ The `/hippo:dream` generative sleep pass is likewise a verb tool — `dream(acti
 prospective; see the dream skill for the doctrine).
 
 And the six **consolidate-flow tools (INT-13)** — `/hippo:consolidate`'s five steps as thin,
-per-item primitives, so the sleep-time drain runs from either surface too (the desktop app's
-Bash tool never inherits `CLAUDE_PLUGIN_DATA`, so the skill's bash blocks can't run there).
+per-item primitives, so the sleep-time drain runs from either surface too (they were built
+because the desktop app's Bash tool never inherits `CLAUDE_PLUGIN_DATA`, and they stay the
+desktop route).
 The skill remains the doctrine; deliberately **not** one monolithic "consolidate" tool —
 nothing batches writes past the per-item approval gate:
 

@@ -15,10 +15,15 @@ symlink Claude Code's native memory system reads from.
 
 ## Preflight
 
-- **Guard `CLAUDE_PLUGIN_DATA` first** (shared across all hippo skills — step 4 expands it):
+- **Pin and guard the plugin paths first** (shared across all hippo skills — step 4 expands them):
   ```bash
-  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ CLAUDE_PLUGIN_DATA is unset/empty in this shell. On Claude Desktop this is expected — take the MCP-tool route in 'Surface routing' above instead of this bash flow. In a genuine terminal Claude Code session it means Claude Code is likely too old for hippo's self-provisioning — update it, or export CLAUDE_PLUGIN_DATA to a writable dir (e.g. ~/.claude/hippo-data) and re-run."; exit 1; }
+  export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:init skill, not from a copy of its SKILL.md. If the loaded skill stops here too, take the MCP-tool route in 'Surface routing' above."; exit 1; }
   ```
+
+  Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
+  opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
+  and resolver lines, in the same call.
 - **If `.claude/memory/MEMORY.md` already exists (ONB-5), this is an EXISTING CORPUS, not a
   fresh project** — the flagship case here is a teammate cloning the repo, or opening a new
   `git worktree` of a repo already using hippo: the corpus is already in git, but THIS machine
@@ -143,6 +148,7 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    stripping), and the create-or-confirm logic itself is ONE tested Python helper
    (`memory.provenance.create_project_symlink`, ONB-5) — never hand-rolled `ln -s` in bash:
    ```bash
+   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
    . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
    hippo_resolve_py
@@ -160,9 +166,9 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    stop and report the conflict rather than silently overwriting it; a pre-existing symlink to
    a different target is a sign of a prior manual setup that shouldn't be clobbered.
 4. **Build the index**: `"$PY" -m memory.build_index --memory-dir .claude/memory --index-dir
-   .claude/.memory-index` — reuse the `$PY`/`PYTHONPATH` already resolved by `hippo_resolve_py`
-   in step 3 (falls back to bare `python3` if bootstrap hasn't run yet — BM25-only index still
-   builds and works).
+   .claude/.memory-index` — run it after step 3's first three lines, in the same Bash call, so
+   `hippo_resolve_py` sets its `$PY`/`PYTHONPATH` (falls back to bare `python3` if bootstrap
+   hasn't run yet — BM25-only index still builds and works).
 4b. **Mark this corpus TRUSTED (SEC-1) + register it for cross-project recall (RCH-4).**
    Recall is gated: until this machine's user trusts a corpus, recall injects nothing from it
    (a cloned repo's memories are otherwise an unreviewed prompt-injection channel). Running
@@ -170,8 +176,11 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    (steps 1-2) or re-ran init against an existing one (ONB-5) — so mark it trusted now, and
    register it in the machine-local project registry so `/hippo:recall --all-projects` can
    find it from other projects (registration is a LIST, not a grant — every registered corpus
-   is still trust-gated per-source at query time). Reuse the `$PY` + `REPO_ROOT` from step 3:
+   is still trust-gated per-source at query time). The block resolves its own `$PY` + `REPO_ROOT`:
    ```bash
+   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+   . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
+   REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
    "$PY" -c \
      "import sys, json; from memory.trust import mark_trusted; \
       from memory.registry import register_project; \
@@ -201,6 +210,8 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    note). Create it and make it self-ignoring so it can never be committed even without the
    step-5 patch (SEC-3 pattern):
    ```bash
+   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+   . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
    "$PY" -c \
      "import sys; from memory.provenance import ensure_self_ignoring_dir; \
       ensure_self_ignoring_dir(sys.argv[1])" \
