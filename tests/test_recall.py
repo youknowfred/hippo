@@ -1595,7 +1595,9 @@ def test_format_results_is_bounded(tmp_path):
     ]
     out = R.format_results(big, max_chars=9000)
     assert len(out) <= 9000
-    assert out.endswith("(truncated)")
+    # HOT-3: rows are cut whole, and the overflow line still names what did not fit.
+    assert "(truncated)" not in out
+    assert out.splitlines()[-1].startswith("  ⤷ 2 more past this prompt's context budget: m_38")
 
 
 def test_format_results_empty_is_empty():
@@ -3789,7 +3791,9 @@ def test_format_results_stale_banner_counts_toward_budget_and_truncates():
     ]
     out = R.format_results(big, max_chars=9000)
     assert len(out) <= 9000
-    assert out.endswith("(truncated)")
+    rows = [ln for ln in out.splitlines() if ln.startswith("  • ")]
+    assert rows and all(ln.endswith("verify before relying]") for ln in rows)
+    assert "more past this prompt's context budget" in out.splitlines()[-1]
 
 
 def test_recall_output_bounded_under_cap_with_every_result_stale(tmp_path, monkeypatch):

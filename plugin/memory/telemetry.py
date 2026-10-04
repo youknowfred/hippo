@@ -487,8 +487,12 @@ def log_episode(
     repo_root: Optional[str] = None,
     telemetry_dir: Optional[str] = None,
     session_id: Optional[str] = None,
+    injected_chars: Optional[int] = None,
 ) -> bool:
     """Append ONE episode to the gitignored ``episode_buffer.jsonl``. Fire-and-forget.
+
+    HOT-3 ``injected_chars``: what this prompt's hook emitted, so the next prompt can read
+    the session's spend off the buffer it already scans. Additive; absent on an abstention.
 
     Records the recalled memory NAMES (not content — the buffer has nothing else to
     "replay"), a TRUNCATED query preview, the current session id, and the repo's HEAD
@@ -516,6 +520,8 @@ def log_episode(
             "recalled_names": [n for n in (recalled_names or []) if n],
             "head_commit": head_commit,
         }
+        if injected_chars:
+            event["injected_chars"] = int(injected_chars)
         path = _episode_ledger_path(td)
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, ensure_ascii=False) + "\n")
