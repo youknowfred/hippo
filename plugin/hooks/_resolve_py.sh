@@ -196,7 +196,9 @@ hippo_touch_fastpath() {  # <payload json>; 0 = logged here, 1 = spawn Python
           *)
             if ! grep -q '"nudged": *true' "$doc" 2>/dev/null; then
               for other in "$td"/presence/*.json; do
-                [ -f "$other" ] && [ "$other" != "$doc" ] || continue
+                if [ ! -f "$other" ] || [ "$other" = "$doc" ]; then
+                  continue
+                fi
                 m="$(_hippo_mtime "$other")" || return 1
                 case "$m" in ""|*[!0-9]*) return 1 ;; esac
                 [ $((now - m)) -le 21600 ] && return 1  # another live session: nudge may be owed
