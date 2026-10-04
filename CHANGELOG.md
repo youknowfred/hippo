@@ -7,6 +7,50 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.41.1 — 2026-10-03 — "Quiet and quick"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**, link cache still
+**6**; `stale.json` schema still **1**. A patch to RUL-2's rules-plane rot check, the
+SessionStart and doctor signal that names a governance file's backtick reference to code
+that left the tree. Its symbol leg found a dotted ref's module by name and flagged whatever
+it could not find there: every one of the seven symbol findings in Skyline's
+`.claude/rules` was false, and so were all eight in four other repos. Its data leg parsed
+every tracked YAML/JSON/TOML file before a symbol ref could flag, which cost em-growth-labs
+3.6s of every SessionStart.
+
+**Operator action: none required.** Rules-plane rot shows fewer symbol findings, and
+SessionStart is faster on repos with many data files.
+
+- **RUL-2 — a module found by name is a guess (#134).** The symbol leg moves to a new
+  sibling, `rules_plane_symbols`.
+  - The resolved module is parsed, so `async def`, annotated and bare-annotated names,
+    class attributes and fields, re-exports and try/if-bound names all count as defined.
+    Function locals do not. A star import or a module `__getattr__` makes any name
+    possible. Source that will not parse falls back to a generous regex.
+  - A package qualifier that contradicts the picked file (`ingest.ads.tests` against the
+    one `ads.py` elsewhere), or a dotted path that is itself a module, is silence.
+  - A ref that still looks missing gets one pass over the tracked tree. It is alive if it
+    appears inside a quoted string (an event type, a Railway `${{nightly.PGHOST}}`
+    reference, a schema.table), or if its token is bound as something other than the
+    module (a `settings` object, a field, an alias, a table name) and its symbol is defined
+    somewhere. A symbol that moved to another module still flags: that move is the rot
+    this leg exists to catch.
+  - Skyline: 7 symbol findings before, 0 after. Seven true-rot probes planted in a clone
+    (a missing function, constant, settings field, event and column, a moved function, a
+    fully qualified missing symbol) all still flag.
+- **RUL-2 — the data leg reads before it parses (#136).** The leg moves to a new sibling,
+  `rules_plane_data`.
+  - A data file is parsed only when every part of the dotted path occurs in its raw bytes,
+    or when it holds a double-quoted key built from `\x`/`\u`/`\U` escapes or a YAML
+    escaped line break, the one way a key can name an identifier without spelling it.
+  - Small data files (≤32KB) are tried first, then the tree pass, then the big data files,
+    each only for refs nothing has vouched for yet. Every pass only ever silences a ref, on
+    that ref's own evidence, so the order changes the cost and never the findings.
+  - `rules_rot` with identical findings: em-growth-labs 3.78s → 0.20s, Skyline 0.10s →
+    0.075s, ic-memobot 0.11s → 0.07s. A genuinely rotten ref whose words are common still
+    parses the big YAMLs that mention them.
+
 ## v1.41.0 — 2026-10-03 — "Earned injection"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
