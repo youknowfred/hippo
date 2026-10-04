@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Dict, List, Optional, Tuple
 
 from .recall import _INVALIDATION_RECENT_DAYS, _invalidation_state
@@ -708,7 +709,9 @@ def relevant_to_work_producer(
 # SIG-2: the resume card's strict caps + the substantive-thread gate. A trivial/exploratory
 # last session (one throwaway query, no recall) is BELOW the gate and produces nothing.
 _MAX_RESUME_THEMES = 4
-_MAX_RESUME_RELIED = 6
+_MAX_RESUME_RELIED = 3  # CLM-3: the few memories the session was served most, never "+54 more"
+# CLM-3: any markup left in a preview after human_text (a paste wrapper, a truncated tag).
+_MARKUP_RE = re.compile(r"</?[A-Za-z][\w:.-]*(?:\s[^<>]*)?>?")
 _MAX_RESUME_CHANGED = 6
 _MIN_RESUME_THEMES = 2  # substantive iff it leaned on a memory OR asked >= this many distinct things
 
@@ -731,6 +734,36 @@ def _corpus_cited_union(memory_dir: str) -> set:
     except Exception:
         return union
     return union
+
+
+def _resume_themes(previews: List[str]) -> List[str]:
+    """CLM-3: what the person typed — machine turns dropped, envelopes and any leftover
+    markup stripped, blanks and repeats removed."""
+    from .recall_query import HUMAN_TURN, human_text, turn_class
+
+    out: List[str] = []
+    for p in previews:
+        if turn_class(p) != HUMAN_TURN:
+            continue
+        text = " ".join(_MARKUP_RE.sub(" ", human_text(p)).split())
+        if text and text not in out:
+            out.append(text)
+    return out
+
+
+def _served_most(td: str, sid: Optional[str]) -> List[str]:
+    """CLM-3: the memories this session's recall rows SERVED most often (OBS-3's ``names``
+    exclude collapsed lines), at most ``_MAX_RESUME_RELIED``. ``[]`` when the ledger has
+    rotated past the session."""
+    from collections import Counter
+
+    from .telemetry import read_events
+
+    counts: Counter = Counter()
+    for e in read_events(td):
+        if sid and e.get("session_id") == sid and e.get("channel") in (None, "hook"):
+            counts.update(n for n in (e.get("names") or []) if n)
+    return [n for n, _ in counts.most_common(_MAX_RESUME_RELIED)]
 
 
 def resume_card_producer(
@@ -782,10 +815,11 @@ def resume_card_producer(
         )
         if not seed:
             return None
-        themes = seed.get("query_previews") or []
-        relied = seed.get("recalled_names") or []
-        if not relied and len(themes) < _MIN_RESUME_THEMES:
+        themes = _resume_themes(seed.get("query_previews") or [])
+        recalled = seed.get("recalled_names") or []
+        if not recalled and len(themes) < _MIN_RESUME_THEMES:
             return None  # trivial/exploratory last session — nothing worth resuming
+        relied = _served_most(td, sid) or recalled[:_MAX_RESUME_RELIED]
 
         changed = set(seed.get("changed_paths") or [])
         changed_cited = sorted(changed & _corpus_cited_union(memory_dir)) if changed else []
@@ -799,9 +833,7 @@ def resume_card_producer(
             more = f" (+{len(themes) - _MAX_RESUME_THEMES} more)" if len(themes) > _MAX_RESUME_THEMES else ""
             lines.append(f"  • you were working on: {shown}{more}")
         if relied:
-            shown = ", ".join(relied[:_MAX_RESUME_RELIED])
-            more = f" (+{len(relied) - _MAX_RESUME_RELIED} more)" if len(relied) > _MAX_RESUME_RELIED else ""
-            lines.append(f"  • you leaned on: {shown}{more}")
+            lines.append(f"  • you leaned on: {', '.join(relied)}")
         if changed_cited:
             shown = ", ".join(changed_cited[:_MAX_RESUME_CHANGED])
             more = f" (+{len(changed_cited) - _MAX_RESUME_CHANGED} more)" if len(changed_cited) > _MAX_RESUME_CHANGED else ""
