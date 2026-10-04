@@ -90,12 +90,31 @@ def _append_floor_pointer(
     """
     from .atomic import update_text_cas
 
+    from .lint_floor import over_hard_edge
+    from .provenance import read_floor_lint
+
     path = os.path.join(memory_dir, "MEMORY.md")
     outcome: dict = {}
+    policy = read_floor_lint(memory_dir)
+    # CLM-7: a hard edge for hippo's own writes — the global read limits, and the budget of
+    # the section this pointer lands in (another section's overrun is not this write's).
+    edge_policy = {
+        **policy,
+        "section_budgets": {
+            k: v for k, v in (policy.get("section_budgets") or {}).items() if k == section_header
+        },
+    }
 
     def transform(text: str) -> Optional[str]:
         # RWY-3: re-run on fresh bytes after a CAS conflict, so it must be pure.
         new_text, out = _with_pointer(text, section_header, name, title, hook)
+        edge = over_hard_edge(new_text, edge_policy) if new_text is not None else None
+        if edge:
+            new_text, out = None, {
+                "status": "skipped",
+                "reason": f"the pointer would leave MEMORY.md at {edge} — NOT recorded; trim "
+                "the floor (move detail into the linked memory files), then add it",
+            }
         outcome.clear()
         outcome.update(out)
         return new_text

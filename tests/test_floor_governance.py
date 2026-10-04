@@ -66,6 +66,9 @@ def test_read_floor_lint_defaults_when_undeclared(tmp_path):
         "max_line": None,
         "warn_bytes": HARNESS_FLOOR_WARN_BYTES,
         "cap_bytes": HARNESS_FLOOR_READ_CAP_BYTES,
+        "warn_lines": 140,  # CLM-7: the window's line edge
+        "cap_lines": 200,
+        "section_budgets": {},
     }
 
 

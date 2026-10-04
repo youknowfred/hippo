@@ -269,6 +269,11 @@ def read_volatile_paths(memory_dir: str) -> list:
 # MEMORY.md floor is subject to them whether or not it declares anything.
 HARNESS_FLOOR_READ_CAP_BYTES = 25000
 HARNESS_FLOOR_WARN_BYTES = 17500
+# CLM-7: the same window has a LINE edge too — native memory loads MEMORY.md "up to 200 lines
+# or 25 KB, whichever comes first" (code.claude.com memory docs; PLT-1 re-observed the floor
+# loading on 2.1.286). The warn sits at the bytes warn's 70%.
+HARNESS_FLOOR_READ_CAP_LINES = 200
+HARNESS_FLOOR_WARN_LINES = 140
 
 
 def read_floor_lint(memory_dir: str) -> dict:
@@ -283,7 +288,8 @@ def read_floor_lint(memory_dir: str) -> dict:
     edits happen; the POLICY (what tokens are banned, how long a line may run) stays the
     corpus's own declaration.
 
-    Returns ``{"banned_re", "max_line", "warn_bytes", "cap_bytes"}``:
+    Returns ``{"banned_re", "max_line", "warn_bytes", "cap_bytes", "warn_lines",
+    "cap_lines", "section_budgets"}``:
 
     - ``banned_re`` — OPT-IN: a regex (string) whose match on a MEMORY.md line flags it
       (the linear-memory-boundary class: status vocabulary, PR refs, SHAs, chip ids).
@@ -296,6 +302,10 @@ def read_floor_lint(memory_dir: str) -> dict:
       harness's window; declaring a laxer cap than the harness enforces would just
       un-warn real truncation, so larger values are ignored). Non-positive/invalid
       declarations fall back to the constants.
+    - ``warn_lines`` / ``cap_lines`` (CLM-7) — the window's line edge, same downward-only
+      override.
+    - ``section_budgets`` (CLM-7) — OPT-IN ``{"## Section": max_bytes}``; a section is its
+      header line through the line before the next ``## `` header. Invalid entries drop.
     """
     raw = _read_marker(memory_dir).get("floor_lint")
     out = {
@@ -303,9 +313,19 @@ def read_floor_lint(memory_dir: str) -> dict:
         "max_line": None,
         "warn_bytes": HARNESS_FLOOR_WARN_BYTES,
         "cap_bytes": HARNESS_FLOOR_READ_CAP_BYTES,
+        "warn_lines": HARNESS_FLOOR_WARN_LINES,
+        "cap_lines": HARNESS_FLOOR_READ_CAP_LINES,
+        "section_budgets": {},
     }
     if not isinstance(raw, dict):
         return out
+    budgets = raw.get("section_budgets")
+    if isinstance(budgets, dict):
+        out["section_budgets"] = {
+            str(k).strip(): v
+            for k, v in budgets.items()
+            if str(k).strip().startswith("## ") and isinstance(v, int) and not isinstance(v, bool) and v > 0
+        }
     pat = raw.get("banned_re")
     if isinstance(pat, str) and pat.strip():
         try:
@@ -318,7 +338,12 @@ def read_floor_lint(memory_dir: str) -> dict:
     ml = raw.get("max_line")
     if isinstance(ml, int) and not isinstance(ml, bool) and ml > 0:
         out["max_line"] = ml
-    for key, ceiling in (("warn_bytes", HARNESS_FLOOR_WARN_BYTES), ("cap_bytes", HARNESS_FLOOR_READ_CAP_BYTES)):
+    for key, ceiling in (
+        ("warn_bytes", HARNESS_FLOOR_WARN_BYTES),
+        ("cap_bytes", HARNESS_FLOOR_READ_CAP_BYTES),
+        ("warn_lines", HARNESS_FLOOR_WARN_LINES),
+        ("cap_lines", HARNESS_FLOOR_READ_CAP_LINES),
+    ):
         v = raw.get(key)
         if isinstance(v, int) and not isinstance(v, bool) and 0 < v <= ceiling:
             out[key] = v
