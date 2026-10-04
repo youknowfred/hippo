@@ -356,7 +356,7 @@ def build_context(
     refusal = injection_refusal(memory_dir)
     if refusal:
         return _bound(f"⚠ Corpus format — {refusal}. Update the hippo plugin.", max_chars)
-    from .attention import INTEGRITY_SIGNALS, muted_signals
+    from .attention import CALM, INTEGRITY_SIGNALS, attention_mode, muted_signals
 
     run_ctx = _build_run_context(memory_dir, repo_root)
     muted, _refused = muted_signals()  # CLM-2: integrity names are never muted
@@ -375,6 +375,16 @@ def build_context(
             labelled.append((_label, out.rstrip()))
     if not labelled:
         return ""
+    if attention_mode() == CALM:
+        # CLM-1: the budgeted digest; only what it shows counts as emitted.
+        from .session_start_calm import calm_digest
+
+        digest = calm_digest(labelled)
+        if producer_chars is not None:
+            for label, block in labelled:
+                if block in digest:
+                    producer_chars[label] = len(block)
+        return _bound(digest, max_chars)
     blocks = [block for _label, block in labelled]
     if producer_chars is not None:
         for label, block in labelled:
