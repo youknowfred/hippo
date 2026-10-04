@@ -40,6 +40,13 @@ hippo_corpus_present || exit 0  # SHP-7: a linked worktree whose MAIN tree has t
 # parse it INSIDE the outcome module (one Python spawn) rather than with a separate launch.
 PAYLOAD="$(cat 2>/dev/null || true)"
 
+# HOT-5: most touches need nothing but their outcome row — append it here, no interpreter.
+if hippo_touch_fastpath "$PAYLOAD"; then
+  hippo_note_usage hook post_tool fast
+  exit 0
+fi
+hippo_note_usage hook post_tool spawn
+
 hippo_resolve_py
 
 printf '%s' "$PAYLOAD" | "$PY" -m memory.outcome --from-hook 2>/dev/null || true
