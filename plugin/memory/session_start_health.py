@@ -81,6 +81,16 @@ def bootstrap_state(
         return "current"
 
 
+def harness_floor_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """PLT-2: name a Claude Code older than hippo's declared floor; silent otherwise (and
+    when the version is unknown). ``ctx`` is unused — see ``stale_venv_producer``."""
+    from .platform_floor import harness_floor_line
+
+    return harness_floor_line()
+
+
 def stale_venv_producer(
     memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
 ) -> Optional[str]:

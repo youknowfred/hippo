@@ -73,6 +73,7 @@ from .session_start_health import (
     _MAX_ITEMS_PER_PRODUCER,
     bootstrap_state,
     stale_venv_producer,
+    harness_floor_producer,
     corpus_format_producer,
     cite_derivation_producer,
     integrity_producer,
@@ -141,6 +142,7 @@ def _bound(ctx: str, max_chars: int) -> str:
 # when a given producer ignores it (see the module docstring).
 PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[str]]]] = [
     ("stale_venv", stale_venv_producer),  # environment-level — a stale venv taints everything below
+    ("harness_floor", harness_floor_producer),  # PLT-2: a Claude Code older than hippo's declared floor
     ("corpus_format", corpus_format_producer),  # a corpus NEWER than the plugin taints every reader below (COR-7)
     ("cite_derivation", cite_derivation_producer),  # citations derived by a fixed-since extractor (DRV-2)
     ("integrity", integrity_producer),  # a malformed memory must not hide

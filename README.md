@@ -314,8 +314,10 @@ worktree).
 | Linux | **Fully supported** — CI runs the full suite on Ubuntu. Without `CLAUDE_PLUGIN_DATA`, the fallback cache dir is XDG-aware: `${XDG_CACHE_HOME:-~/.cache}/hippo-memory` ([ROADMAP.yaml](ROADMAP.yaml), OSP-2) |
 | Windows | **Out of scope** — a decision, not an omission ([ROADMAP.yaml](ROADMAP.yaml), decision OQ-2 + non_goals): the hooks are bash and the engine is untested there. Revisit only on concrete adoption evidence |
 
-Python 3.10 and 3.12 are exercised in CI. Bootstrap runs once per machine; init runs once
-per project.
+**Claude Code 2.1.269 or newer.** That is the first version that sets plugin options from
+`/config` (the attention setting); `/hippo:doctor` prints the running version against this
+floor, and SessionStart names an older one. Python 3.10 and 3.12 are exercised in CI.
+Bootstrap runs once per machine; init runs once per project.
 
 ## hippo and Claude Code's native memory
 

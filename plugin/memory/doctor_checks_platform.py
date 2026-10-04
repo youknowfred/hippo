@@ -1,5 +1,6 @@
 """Doctor checks about the platform hippo runs on: which plugin version Claude Code has
-installed versus the one this process is actually running (FMT-3).
+installed versus the one this process is actually running (FMT-3), and the running Claude
+Code version against hippo's declared floor (PLT-2).
 
 Read-only; every check returns ``{"status", "message"}`` and never raises.
 """
@@ -87,3 +88,26 @@ def check_installed_version(ctx: DoctorContext) -> Dict[str, str]:
         }
     except Exception as exc:
         return {"status": "warn", "message": f"installed-vs-running check failed: {exc}."}
+
+
+def check_claude_code_version(ctx: DoctorContext) -> Dict[str, str]:
+    """PLT-2: the running Claude Code version against ``MIN_CLAUDE_CODE``."""
+    try:
+        from .platform_floor import MIN_CLAUDE_CODE, claude_code_version, harness_too_old
+
+        v = claude_code_version()
+        if v is None:
+            return {
+                "status": "ok",
+                "message": f"Claude Code version: unknown here (no AI_AGENT in this process) — "
+                f"hippo supports {MIN_CLAUDE_CODE} or newer.",
+            }
+        if harness_too_old():
+            return {
+                "status": "warn",
+                "message": f"Claude Code {v} is older than hippo's floor {MIN_CLAUDE_CODE} — "
+                "plugin options and newer hook types may not load; update Claude Code.",
+            }
+        return {"status": "ok", "message": f"Claude Code {v} (floor {MIN_CLAUDE_CODE})."}
+    except Exception as exc:
+        return {"status": "warn", "message": f"Claude Code version check failed: {exc}."}

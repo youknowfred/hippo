@@ -101,3 +101,9 @@ Desktop receipt before its `surfaces.py` row flips.
 |---|---|---|---|
 | What does `PostToolBatch` receive? | **The common fields plus `tool_calls`, each `{tool_name, tool_input, tool_response, tool_use_id}`.** It fired once for a batch of two parallel reads. | The hook wrote its stdin to a file. The docs also list `batch_id` and, per call, `success` and `output`; none of them were present. | HOT-5 option (a)/(b) can read `tool_input` paths per batch. It must not depend on `batch_id` or `success`. |
 | What does `async: true` do? | **Runs in the background without blocking; abandoned if the process exits first.** | With a 3 s async hook in a longer turn, the hook started at 6.2 s, finished at 9.6 s, and the run exited at 12.3 s. With a 6 s hook in a shorter run, the hook never finished. | HOT-5 option (c) suits fire-and-forget logging in interactive sessions. Headless runs may drop the tail. |
+
+## 6. Which Claude Code is running
+
+| Question | Answer | Receipt | Consequence |
+|---|---|---|---|
+| Can a hook tell which Claude Code version runs it? | **Yes, from `AI_AGENT`, which is not documented.** It reads `claude-code_<major>-<minor>-<patch>_<role>`. | 2026-10-03: a headless `claude -p` on 2.1.289 ran a SessionStart and a UserPromptSubmit command hook that dumped their env; both saw `AI_AGENT=claude-code_2-1-289_harness`. A Desktop Code-tab Bash tool on 2.1.286 sees `claude-code_2-1-286_agent`. The plugins reference documents no version variable and no minimum-version manifest field. | PLT-2 parses `AI_AGENT` strictly (the role suffix varies) and treats anything else as unknown. doctor prints the running version against the declared floor (2.1.269), and the SessionStart integrity lane names an older harness. |
