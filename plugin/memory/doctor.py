@@ -41,7 +41,7 @@ from .provenance import resolve_dirs
 # DOC-4 decomposition: the check implementations live in the flat, prefix-named siblings
 # below; these explicit grouped re-imports keep every historical ``memory.doctor.<name>``
 # import and monkeypatch target (mcp_server, sleep, tests) resolving unchanged.
-from .doctor_checks_platform import check_claude_code_version, check_installed_version
+from .doctor_checks_platform import check_attention, check_claude_code_version, check_installed_version
 from .doctor_checks_env import (
     DoctorContext,
     _iter_memory_files_safe,
@@ -331,6 +331,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("plugin_source_skew", check_plugin_source_skew),  # OPS-1: running hooks vs this tree's plugin source (dogfood shape only; empty-norm elsewhere)
     ("installed_version", check_installed_version),  # FMT-3: installed_plugins.json vs the version this process runs
     ("claude_code_version", check_claude_code_version),  # PLT-2: the running Claude Code vs hippo's declared floor
+    ("attention", check_attention),  # CLM-2: calm/full SessionStart and the mute list
     ("venv", check_venv),
     ("corpus", check_corpus_exists),
     ("symlink", check_symlink),

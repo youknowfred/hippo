@@ -74,6 +74,7 @@ from .session_start_health import (
     bootstrap_state,
     stale_venv_producer,
     harness_floor_producer,
+    native_interference_producer,
     corpus_format_producer,
     cite_derivation_producer,
     integrity_producer,
@@ -144,6 +145,7 @@ PRODUCERS: List[Tuple[str, Callable[[str, str, Optional[RunContext]], Optional[s
     ("stale_venv", stale_venv_producer),  # environment-level — a stale venv taints everything below
     ("harness_floor", harness_floor_producer),  # PLT-2: a Claude Code older than hippo's declared floor
     ("corpus_format", corpus_format_producer),  # a corpus NEWER than the plugin taints every reader below (COR-7)
+    ("native_interference", native_interference_producer),  # CLM-1/NAT-1: native settings keep the floor out of context
     ("cite_derivation", cite_derivation_producer),  # citations derived by a fixed-since extractor (DRV-2)
     ("integrity", integrity_producer),  # a malformed memory must not hide
     ("citation_rot", citation_rot_producer),  # cited paths gone from the repo (LIF-3) — find_unparseable's rot sibling
@@ -354,9 +356,14 @@ def build_context(
     refusal = injection_refusal(memory_dir)
     if refusal:
         return _bound(f"⚠ Corpus format — {refusal}. Update the hippo plugin.", max_chars)
+    from .attention import INTEGRITY_SIGNALS, muted_signals
+
     run_ctx = _build_run_context(memory_dir, repo_root)
-    blocks: List[str] = []
+    muted, _refused = muted_signals()  # CLM-2: integrity names are never muted
+    labelled: List[Tuple[str, str]] = []
     for _label, fn in PRODUCERS:
+        if _label in muted and _label not in INTEGRITY_SIGNALS:
+            continue
         try:
             out = fn(memory_dir, repo_root, run_ctx)
         except Exception as exc:
@@ -365,11 +372,13 @@ def build_context(
             # doctor pattern: a visible warn carrying the exception), keep the rest.
             out = f"⚠ {_label} producer failed: {type(exc).__name__}: {exc}"
         if out:
-            blocks.append(out.rstrip())
-            if producer_chars is not None:
-                producer_chars[_label] = len(blocks[-1])
-    if not blocks:
+            labelled.append((_label, out.rstrip()))
+    if not labelled:
         return ""
+    blocks = [block for _label, block in labelled]
+    if producer_chars is not None:
+        for label, block in labelled:
+            producer_chars[label] = len(block)
     return _bound("\n\n".join(blocks), max_chars)
 
 

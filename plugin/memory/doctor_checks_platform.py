@@ -111,3 +111,24 @@ def check_claude_code_version(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "ok", "message": f"Claude Code {v} (floor {MIN_CLAUDE_CODE})."}
     except Exception as exc:
         return {"status": "warn", "message": f"Claude Code version check failed: {exc}."}
+
+
+def check_attention(ctx: DoctorContext) -> Dict[str, str]:
+    """CLM-2: which SessionStart attention mode applies here, and what is muted."""
+    try:
+        from .attention import attention_mode, muted_signals
+
+        mode = attention_mode()
+        muted, refused = muted_signals()
+        msg = f"attention: {mode}"
+        msg += (
+            " (the short digest)" if mode == "calm"
+            else " (set HIPPO_ATTENTION=calm or the plugin's calm_session_start option for the short digest)"
+        )
+        if muted:
+            msg += f"; muted: {', '.join(sorted(muted))}"
+        if refused:
+            msg += f"; NOT muted (integrity signals always show): {', '.join(sorted(refused))}"
+        return {"status": "warn" if refused else "ok", "message": msg + "."}
+    except Exception as exc:
+        return {"status": "warn", "message": f"attention check failed: {exc}."}

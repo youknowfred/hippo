@@ -91,6 +91,16 @@ def harness_floor_producer(
     return harness_floor_line()
 
 
+def native_interference_producer(
+    memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
+) -> Optional[str]:
+    """CLM-1 integrity lane (NAT-1's signal): native settings keep the floor out of
+    context. Settings only, no corpus scan. ``ctx`` is unused."""
+    from .native_memory import native_interference
+
+    return native_interference(memory_dir, repo_root)
+
+
 def stale_venv_producer(
     memory_dir: str, repo_root: str, ctx: Optional[RunContext] = None
 ) -> Optional[str]:
