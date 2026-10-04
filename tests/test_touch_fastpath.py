@@ -203,3 +203,30 @@ def test_the_shell_cap_matches_the_engine():
 
     sh = open(os.path.join(_PLUGIN_ROOT, "hooks", "_resolve_py.sh"), encoding="utf-8").read()
     assert f"HIPPO_JIT_CITED_ROWS_CAP={MAX_PROVENANCE_ROWS_PER_SESSION}" in sh
+
+
+_GNU_STAT = """#!/bin/bash
+# Behaves like GNU coreutils stat for the two forms the hook tries: -c FORMAT reads a format;
+# -f means --file-system, so a BSD-style '-f %m FILE' treats '%m' as a missing FILE.
+if [ "$1" = "-c" ] && [ "$2" = "%Y" ]; then
+  exec perl -e 'print((stat $ARGV[0])[9], "\\n")' "$3"
+fi
+if [ "$1" = "-f" ]; then
+  echo "  File: \\"$3\\""
+  echo "    ID: 1000 Namelen: 255 Type: ext2/ext3"
+  echo "stat: cannot read file system information for '$2': No such file or directory" >&2
+  exit 1
+fi
+exit 1
+"""
+
+
+def test_the_fast_path_works_with_gnu_stat(tmp_path):
+    """Linux CI: GNU stat must be read right, or every touch silently spawns Python."""
+    bindir = _bin(tmp_path)
+    os.remove(os.path.join(bindir, "stat"))
+    with open(os.path.join(bindir, "stat"), "w") as fh:
+        fh.write(_GNU_STAT)
+    os.chmod(os.path.join(bindir, "stat"), 0o755)
+    _row, how, _ = _touch(tmp_path, "gnu", "Read", "src/plain.py")
+    assert how == "fast"

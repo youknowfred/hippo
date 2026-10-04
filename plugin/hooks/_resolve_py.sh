@@ -91,8 +91,14 @@ hippo_note_usage() {  # <surface> <verb> [action]
 # a shared-tree mutation that could still owe the worktree nudge. Otherwise it appends exactly the row
 # telemetry.log_outcome writes, so the KPI-2 join input is unchanged. Rotation stays with
 # the next Python write. HIPPO_DISABLE_TOUCH_FASTPATH=1 restores the always-spawn path.
-_hippo_mtime() {
-  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null
+_hippo_mtime() {  # epoch mtime from GNU (`-c %Y`) or BSD (`-f %m`) stat; only a clean number counts
+  local m
+  # GNU first: BSD stat rejects -c outright, but GNU reads BSD's `-f %m FILE` as
+  # --file-system with '%m' as a second (missing) FILE and prints filesystem text.
+  m="$(stat -c %Y "$1" 2>/dev/null)" || m=""
+  case "$m" in ""|*[!0-9]*) m="$(stat -f %m "$1" 2>/dev/null)" || m="" ;; esac
+  case "$m" in ""|*[!0-9]*) return 1 ;; esac
+  printf '%s' "$m"
 }
 _hippo_epoch_ms_ts() {  # prints epoch seconds with 3 decimals, or fails
   local t=""
