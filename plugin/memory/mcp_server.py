@@ -31,14 +31,16 @@ only — no ``mcp`` package, consistent with the vendoring/offline identity). Fi
 Plus four SETUP tools (INT-9..12, additive post-1.0) — the /hippo:* setup flows re-served
 for surfaces with no typed-command input. The Claude desktop app's local sessions run
 installed plugins' hooks, skills, and MCP servers through the same engine as the CLI, but
-reject typed ``/hippo:*`` commands — before these tools, setup was terminal-only there:
+rejected typed ``/hippo:*`` commands until 2026-10 — before these tools, setup was
+terminal-only there. Typed commands run there now, yet its Bash tool still gets no
+plugin env, so the skills route to these tools on that surface (PLATFORM.md §1):
 
   - ``doctor()``          — the DOC-4 diagnostic engine verbatim + a fix→tool mapping for
                             this surface. Ungated: doctor IS the pre-consent review path.
   - ``bootstrap(action)`` — kick-off-and-poll per-surface provisioning (``memory.bootstrap``:
                             detached worker, sentinel-last, log tail via action="status").
-                            Needed per SURFACE: the harness hands the terminal and the
-                            desktop app different plugin-data dirs.
+                            Needed per data dir: in 2026-07 the harness handed the
+                            terminal and the desktop app different ones (PLATFORM.md §1).
   - ``init()``            — the mechanical /hippo:init flow (``memory.init_project``). A
                             corpus this call CREATES is trusted (it is the plugin's own
                             starter content); a pre-existing corpus is NEVER auto-trusted

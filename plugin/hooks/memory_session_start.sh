@@ -42,16 +42,15 @@ NUDGE_EVERY=5
 if [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ ! -f "${CLAUDE_PLUGIN_DATA}/.nudge-dismissed" ]; then
   NUDGE=""
   SILENCE="(To silence this nudge permanently: touch '${CLAUDE_PLUGIN_DATA}/.nudge-dismissed')"
-  # Typed /hippo:* commands exist only in the terminal CLI. The Claude Desktop app
-  # (CLAUDE_CODE_ENTRYPOINT=claude-desktop in the hook env) runs the same hooks/skills/
-  # MCP server but REJECTS typed plugin commands — there the same flows are the hippo
-  # MCP setup tools (bootstrap/init, shipped in v1.10.0), so the nudge must name THOSE
-  # or it dead-ends the exact user it is onboarding.
+  # The Claude Desktop app (CLAUDE_CODE_ENTRYPOINT=claude-desktop in the hook env) runs
+  # the same hooks/skills/MCP server, but its Bash tool gets no plugin env, so the setup
+  # flows there are the hippo MCP setup tools (bootstrap/init, shipped in v1.10.0) and
+  # the nudge names THOSE. Typed /hippo:* commands run there too since 2026-10 (CLM-8).
   if [ "${CLAUDE_CODE_ENTRYPOINT:-}" = "claude-desktop" ]; then
     if [ ! -x "${CLAUDE_PLUGIN_DATA}/venv/bin/python" ] || [ ! -f "${CLAUDE_PLUGIN_DATA}/.bootstrap-sentinel" ]; then
-      NUDGE="hippo memory is installed but not bootstrapped — recall is inert. Set it up via the hippo MCP setup tools: run bootstrap once per machine, then init once per project (just ask for it — typed /hippo:* commands are terminal-only and do not work in this app). ${SILENCE}"
+      NUDGE="hippo memory is installed but not bootstrapped — recall is inert. Set it up via the hippo MCP setup tools: run bootstrap once per machine, then init once per project (just ask for it). ${SILENCE}"
     elif ! hippo_floor_present; then
-      NUDGE="hippo memory is bootstrapped but this project has no memory corpus — run the hippo init MCP tool to seed .claude/memory/ (just ask for it — typed /hippo:* commands are terminal-only and do not work in this app). ${SILENCE}"
+      NUDGE="hippo memory is bootstrapped but this project has no memory corpus — run the hippo init MCP tool to seed .claude/memory/ (just ask for it). ${SILENCE}"
     fi
   elif [ ! -x "${CLAUDE_PLUGIN_DATA}/venv/bin/python" ] || [ ! -f "${CLAUDE_PLUGIN_DATA}/.bootstrap-sentinel" ]; then
     NUDGE="hippo memory is installed but not bootstrapped — recall is inert. Run /hippo:bootstrap once per machine, then /hippo:init once per project. ${SILENCE}"

@@ -525,13 +525,6 @@ def test_consolidate_skill_preflight_maps_every_flow_tool():
     assert "check:true" in text or "check: true" in text  # the CAP-3 dry-run flag
 
 
-def test_desktop_surface_note_maps_consolidate_to_the_flow_tools():
-    from memory.session_start import _DESKTOP_SURFACE_NOTE as note
-
-    for tool in _FLOW_TOOLS:
-        assert tool in note, f"the Desktop surface note no longer names {tool}"
-
-
 def test_capture_list_names_corrupt_seed_files(corpus, tmp_path):
     """RCH-9: a corrupt seed silently vanished from the listing — while the
     SessionStart nudge (a bare file count) still counted it, so the queue said '2

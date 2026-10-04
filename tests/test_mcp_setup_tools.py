@@ -544,6 +544,9 @@ def test_doctor_tool_runs_the_engine_and_maps_fixes_to_tools(corpus, tmp_path, m
     assert "not bootstrapped" in text or "CLAUDE_PLUGIN_DATA" in text  # bootstrap line
     # The one addition over the terminal engine: the fix→tool mapping for this surface.
     assert "trust_corpus" in text and "bootstrap tool" in text and "init tool" in text
+    # CLM-8: typed /hippo:* commands run on the Desktop app too (PLATFORM.md §1), so
+    # the mapping must not claim they are terminal-only.
+    assert "exist only in the Claude Code terminal" not in text
 
 
 def test_doctor_tool_reviews_an_untrusted_corpus_without_leaking_it(corpus, monkeypatch):

@@ -8,8 +8,9 @@ this lint fails when reality disagrees:
     adding a tool without a registry row fails here, naming the registry;
   - each SKILL.md's Desktop routing must match its row (the honest terminal-only
     marker on terminal-only verbs, the named tools on routed verbs — INT-19's class);
-  - the Desktop surface note must map every routed verb, list EXACTLY the registry's
-    terminal-only verbs, and name the verbless repair tools;
+  - every routed skill keeps its 'Surface routing' section, the only thing that sends
+    it to its MCP tools on Desktop, and nothing shipped says typed /hippo:* commands
+    are terminal-only (CLM-8 retired the SessionStart surface note);
   - every nudge/advice string in ``plugin/memory`` (and every SKILL.md) that names a
     runnable command must name one that EXISTS on the surface that renders it: a
     ``/hippo:<verb>`` must be a registered verb, ``the <name> tool`` must be a served
@@ -28,7 +29,6 @@ import re
 
 from memory import mcp_server as M
 from memory import surfaces as S
-from memory.session_start import _DESKTOP_SURFACE_NOTE
 
 _MEMORY_PKG = os.path.dirname(os.path.abspath(S.__file__))
 _PLUGIN_ROOT = os.path.dirname(_MEMORY_PKG)
@@ -133,44 +133,53 @@ def test_routed_skills_name_every_tool_they_drive():
             )
 
 
-# --------------------------------------------------------------------------- #
-# The Desktop surface note (session_start) against the registry
-# --------------------------------------------------------------------------- #
-def test_surface_note_maps_every_routed_verb():
+def test_routed_skills_keep_their_surface_routing_section():
+    """CLM-8: typed /hippo:* runs on Desktop, but the Desktop Bash tool gets no
+    CLAUDE_PLUGIN_DATA, so each routed skill's own 'Surface routing' section is what
+    sends it to its MCP tools there (PLATFORM.md §1). The section stays until the bash
+    flow has a Desktop route, and it must not lean on the retired SessionStart note."""
+    texts = _skill_texts()
     for v in S.VERBS:
-        mapped = f"/hippo:{v.verb} →" in _DESKTOP_SURFACE_NOTE
-        if v.desktop == "terminal_only":
-            assert not mapped, (
-                f"the Desktop surface note maps /hippo:{v.verb} but the registry says "
-                "terminal_only — the note is promising a route that dead-ends (INT-19)"
-            )
-        else:
-            assert mapped, f"the Desktop surface note has no mapping for /hippo:{v.verb} →"
-            primary = v.mcp_tools[0]
-            assert primary in _DESKTOP_SURFACE_NOTE, (
-                f"the surface note maps /hippo:{v.verb} but never names its primary tool "
-                f"{primary!r}"
-            )
-
-
-def test_surface_note_terminal_only_list_matches_registry_exactly():
-    m = re.search(
-        r"NOT available on this surface[^:]*:\s*([a-z, \-]+?)\.", _DESKTOP_SURFACE_NOTE
-    )
-    assert m, "the Desktop surface note lost its 'NOT available on this surface' list"
-    listed = tuple(part.strip() for part in m.group(1).split(",") if part.strip())
-    assert sorted(listed) == sorted(S.terminal_only_verbs()), (
-        f"the surface note's terminal-only list {sorted(listed)} != the registry's "
-        f"{sorted(S.terminal_only_verbs())} — they must shrink and grow together"
-    )
-
-
-def test_surface_note_names_the_verbless_repair_tools():
-    for tool in S.VERBLESS_TOOLS:
-        assert tool in _DESKTOP_SURFACE_NOTE, (
-            f"the surface note never names the verbless tool {tool!r} — with no /hippo:* "
-            "form, the note is its only Desktop discovery surface"
+        text = texts[v.verb]
+        assert "⌨ Surface note" not in text, (
+            f"skills/{v.verb}/SKILL.md still cites the retired SessionStart surface note"
         )
+        if v.desktop != "terminal_only":
+            assert "## Surface routing" in text, (
+                f"skills/{v.verb}/SKILL.md lost its 'Surface routing' section — without it "
+                "the skill falls into a bash preflight that cannot pass on Desktop"
+            )
+
+
+# --------------------------------------------------------------------------- #
+# CLM-8: nothing shipped may claim typed /hippo:* commands are terminal-only.
+# They ran in the Desktop app's Code tab on 2026-10-03 (PLATFORM.md §1). The
+# honest per-verb story stays where it lives: TERMINAL_ONLY_MARKER above.
+# --------------------------------------------------------------------------- #
+_TERMINAL_ONLY_CLAIM = re.compile(
+    r"typed\s+`?/hippo:\*`?\s+commands\s+(?:are\s+terminal-only|exist\s+only|work\s+only)",
+    re.I,
+)
+_READMES = (
+    os.path.join(os.path.dirname(_PLUGIN_ROOT), "README.md"),
+    os.path.join(_PLUGIN_ROOT, "README.md"),
+)
+
+
+def test_no_shipped_text_claims_typed_commands_are_terminal_only():
+    texts = list(_all_advice_texts())
+    for path in _READMES:
+        with open(path, encoding="utf-8") as fh:
+            texts.append((os.path.relpath(path, os.path.dirname(_PLUGIN_ROOT)), False, fh.read()))
+    bad = [
+        f"{origin}: {m.group(0)!r}"
+        for origin, _is_doc, text in texts
+        for m in _TERMINAL_ONLY_CLAIM.finditer(text)
+    ]
+    assert not bad, (
+        "these strings still say typed /hippo:* commands are terminal-only, which stopped "
+        f"being true on the Desktop app (PLATFORM.md §1): {bad}"
+    )
 
 
 # --------------------------------------------------------------------------- #

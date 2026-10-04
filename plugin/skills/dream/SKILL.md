@@ -32,7 +32,7 @@ dream).
 
 ## Surface routing — decide first, then act silently
 
-- **On Claude Desktop** (you have the `⌨ Surface note` in your context, or `CLAUDE_CODE_ENTRYPOINT` is `claude-desktop`): the Desktop path for this verb IS the `dream` MCP tool — call it directly and present what it proposed or applied. Skip the bash preflight and the shell blocks below; those run only in a terminal. Call the tool with no preamble — don't explain that typed commands or the shell flow don't work on this surface, or why you're reaching for a tool instead of bash. That surface-plumbing narration is exactly the repeated noise this routing removes.
+- **On Claude Desktop** (your context says you are in the Claude desktop app, `CLAUDE_CODE_ENTRYPOINT` is `claude-desktop`, or the preflight below stops on an unset `CLAUDE_PLUGIN_DATA`): the Desktop path for this verb IS the `dream` MCP tool — call it directly and present what it proposed or applied. Skip the bash preflight and the shell blocks below; those run only in a terminal. Call the tool with no preamble — don't explain that the shell flow doesn't run on this surface, or why you're reaching for a tool instead of bash. That surface-plumbing narration is exactly the repeated noise this routing removes.
 - **In a terminal Claude Code session**: run the bash flow below, guard first.
 
 ## Preflight (shared across all hippo skills)
