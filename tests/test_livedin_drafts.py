@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import pytest
 import yaml
@@ -103,7 +104,7 @@ def test_noise_filters_are_deterministic(memory_dir):
     assert not os.path.exists(default_drafts_path(memory_dir))
 
 
-# The desktop app's two envelopes in their UserPromptSubmit shape (closed, nothing trailing);
+# The desktop app's envelopes in their UserPromptSubmit shape (closed, nothing trailing);
 # log_episode cuts each to the preview budget, so the drafter only ever sees the unclosed head.
 HAND_BACK = (
     '<agent-message from="a0aee28d53630a1ba">\n[Subagent hand-back] The text below is the '
@@ -115,10 +116,16 @@ CROSS_SESSION = (
     'from-mode="prompting">\nLane check before I claim the alpha rollback work.\n'
     "</cross-session-message>"
 )
+CI_MONITOR = (
+    '<ci-monitor-event>"Rollback" checks failed on the watched pull request: the alpha '
+    "subsystem rollback job is red.</ci-monitor-event>"
+)
 
 
 @pytest.mark.parametrize(
-    "prompt", [HAND_BACK, CROSS_SESSION], ids=["agent-message", "cross-session-message"]
+    "prompt",
+    [HAND_BACK, CROSS_SESSION, CI_MONITOR],
+    ids=["agent-message", "cross-session-message", "ci-monitor-event"],
 )
 def test_truncated_desktop_envelopes_never_draft(memory_dir, prompt):
     """The drafter's private tag copy predated these envelopes: one refresh queued 25 of 25
@@ -126,8 +133,8 @@ def test_truncated_desktop_envelopes_never_draft(memory_dir, prompt):
     td = _setup(memory_dir)
     _confirmed_touch(td, session="s1", query=prompt, name="alpha-notes", path="src/a.py")
     preview = list(T.read_episodes(td))[0]["query_preview"]
-    tag = prompt[1 : prompt.index(" ")]
-    assert preview.startswith(f"<{tag} ") and f"</{tag}>" not in preview  # truncated, unclosed
+    tag = re.match(r"<([\w-]+)", prompt).group(1)
+    assert preview.startswith(f"<{tag}") and f"</{tag}>" not in preview  # truncated, unclosed
     summary = EF.draft_livedin_fixtures(memory_dir, telemetry_dir=td)
     assert summary["added"] == []
     assert summary["skipped_noise"] == 1

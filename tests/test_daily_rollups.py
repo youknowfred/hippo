@@ -147,6 +147,24 @@ def test_summary_and_doctor_line(tmp_path, monkeypatch):
     assert "1/1 at the cap" in msg and "floor (1)" in msg
 
 
+def test_a_new_trigger_class_merges_with_days_that_predate_it(tmp_path):
+    """A class added to harness_envelopes.MACHINE_TURN_CLASSES is one more key in an open
+    counter map: a row finalized before it existed still reads, and summarize and the doctor
+    line count the new class as machine traffic without a ROLLUP_VERSION bump."""
+    td = str(tmp_path)
+    TR.record_prompt(td, trigger="human", ran_recall=True, backend="bm25", now=T0)
+    TR.record_prompt(td, trigger="task-notification", now=T0)
+    TR.record_prompt(td, trigger="ci-monitor-event", now=T0 + DAY)
+    rows = TR.read_rollups(td, now=T0 + DAY)
+    assert [r["hook"]["trigger"] for r in rows] == [
+        {"human": 1, "task-notification": 1},
+        {"ci-monitor-event": 1},
+    ]
+    k = TR.summarize(rows)
+    assert k["trigger"] == {"human": 1, "task-notification": 1, "ci-monitor-event": 1}
+    assert k["prompts"] == 3 and k["machine_prompts"] == 2
+
+
 def test_a_corrupt_accumulator_restarts_the_day(tmp_path):
     td = str(tmp_path)
     with open(os.path.join(td, TR._TODAY_NAME), "w", encoding="utf-8") as fh:
