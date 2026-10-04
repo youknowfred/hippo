@@ -451,13 +451,14 @@ sessions, permanently dismissable) instead of staying silent.
   the always-load *floor* (the `user`/`feedback` pointers) is injected every prompt;
   everything else surfaces when a prompt actually matches it. Phrase your question closer to
   the memory's own wording, or confirm it's indexed with `/hippo:doctor`.
-- **Recall surfaces something off-topic.** Recall returns nothing only when *every* lane comes
-  up empty — dense and BM25, description and body — and BM25 admits any prompt sharing a
-  single token with any memory. So on a corpus whose vocabulary is already broad, an unrelated
-  prompt will usually surface *something*, weakly ranked. Warming the dense model with
-  `/hippo:bootstrap` buys ranking quality (no lexical rule separates a coincidental keyword
-  overlap from a real one), but it does not make recall abstain more often — it adds lanes.
-  `/hippo:doctor` reports the measured per-corpus rate when you supply an off-topic fixture.
+- **Recall surfaces something off-topic.** Since v1.41.0, recall injects only when the dense
+  and lexical lanes agree on a memory, or when one of them is strong on its own (a very close
+  meaning, or a description sharing several of the prompt's terms). A prompt that shares one
+  coincidental word with a memory abstains. The gate needs the dense model, so on a BM25-only
+  install (`/hippo:bootstrap` not run, or the model cache cold) any shared token still admits.
+  Ask `/hippo:why` about the prompt to see which memory matched and why;
+  `HIPPO_DISABLE_ABSTAIN_GATE=1` turns the gate off. `/hippo:doctor` reports the measured
+  per-corpus rate when you supply an off-topic fixture.
 - **I'm in a git worktree and doctor / recall / capture seem to be looking at the wrong corpus.**
   They aren't, since v1.34.0: a linked worktree resolves the main checkout's live corpus, and
   the `resolved corpus:` doctor line says which tree it used. If that line reads `tree: LINKED

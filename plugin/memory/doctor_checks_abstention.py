@@ -139,20 +139,29 @@ def check_abstention_floor_sanity(ctx: DoctorContext) -> Dict[str, str]:
         abstained = round(n * rate)
         backend = "dense" if index.dense_ready else "bm25-only"
         if rate < GATE_ABSTENTION:
-            # ABS-2: state the MECHANISM, not a knob. recall abstains only when all four
-            # lanes are empty, and the BM25 lanes admit on a single shared token with no
-            # score floor of any kind — so on a corpus whose description+body vocabulary
-            # already covers these probes, this number reports coverage, not a mis-set floor.
+            # ABS-2: state the MECHANISM, not a knob. HOT-2: on a calibrated dense model,
+            # recall injects only when the dense and lexical lanes corroborate a memory; a
+            # BM25-only index (or an uncalibrated model) has no gate, so the lanes admit on
+            # a single shared token and this number reports coverage, not a mis-set floor.
+            if index.dense_ready:
+                mechanism = (
+                    "Recall injects only when the dense and lexical lanes agree on a memory "
+                    "(or one lane is strong on its own), so a probe that leaks shares several "
+                    "terms with, or sits very close in meaning to, something this corpus "
+                    "holds. why on one of these queries names the memory it matched."
+                )
+            else:
+                mechanism = (
+                    "Without the dense model there is no corroboration gate: the lexical "
+                    "lanes admit on a single shared token, so a probe that overlaps any "
+                    "memory's wording surfaces something. Warming the model turns the gate on."
+                )
             return {
                 "status": "warn",
                 "message": f"abstention floor: only {abstained}/{n} off-topic fixture queries "
                 f"abstained on this {backend} corpus (rate {rate:.2f} < {GATE_ABSTENTION}) — "
-                "off-topic prompts may inject. Recall abstains only when EVERY lane comes up "
-                "empty (dense + BM25, description + body), and the BM25 lanes admit on a single "
-                "shared token with no score floor at all, so a probe that overlaps any memory's "
-                "wording will surface something whatever the floor is set to. HIPPO_DENSE_FLOOR "
-                "gates the dense lanes only. Read this as a measurement of what the corpus "
-                "admits, not a knob that is set wrong.",
+                f"off-topic prompts may inject. {mechanism} Read this as a measurement of "
+                "what the corpus admits, not a knob that is set wrong.",
             }
         return {
             "status": "ok",

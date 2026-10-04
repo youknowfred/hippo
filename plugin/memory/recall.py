@@ -105,6 +105,7 @@ from .recall_query import (
     _rescue_turns,
     clean_query,
 )
+from .recall_abstain import corroboration
 from .recall_rank import (
     _DENSE_FLOOR_BY_MODEL,
     _DENSE_FLOOR_DEFAULT,
@@ -513,7 +514,10 @@ def recall(
                         past-cliff organic skips alike), ``pool_overflow`` (ranked
                         below the POOL_N admission bound), ``mmr_displaced`` (in the
                         admissible pool but not selected for the final top-k at the
-                        MMR re-cut — a pure rank cut when MMR degrades to a no-op).
+                        MMR re-cut — a pure rank cut when MMR degrades to a no-op),
+                        ``uncorroborated`` (HOT-2: the gate abstained; the record names
+                        the closest candidate and its cosine).
+      ``abstained``   — HOT-2's verdict dict when the corroboration gate abstained.
       ``near_miss``   — ``[{name, score}]`` best sub-floor DENSE candidates
                         (description rows only) — the abstention arm's evidence.
       ``dense_floor`` — the calibrated floor those cosines missed (margin = floor - score).
@@ -644,7 +648,10 @@ def recall(
         # single raw order into a description ranking and a body ranking below -- doing this
         # twice (once per ranking) would double the per-query embed+matmul cost for no benefit,
         # which is exactly what an earlier draft of this item did and blew the p95 gate.
-        raw_dense_rows = _dense_rank_rows(query, idx, subfloor_out=subfloor, watch_rows=watch_rows)
+        sims_out: List = []
+        raw_dense_rows = _dense_rank_rows(
+            query, idx, subfloor_out=subfloor, watch_rows=watch_rows, sims_out=sims_out
+        )
         # MSR-4: the floor cut's near-misses — recorded IMMEDIATELY so the hard-skip
         # abstention return below still carries them (that is the whole point: the
         # abstention arm finally gets its "how close was the miss" evidence).
@@ -714,6 +721,18 @@ def recall(
         # interplay: this return happens BEFORE `_expand_neighbors` ever runs, so an empty
         # organic list yields NO graph seeds and thus no expansion -- abstention is absolute,
         # never overridden by a linked memory that shares no signal with the query itself.
+        # HOT-2: a match on one shared term is a coincidence until the dense lane agrees.
+        # The gate abstains when no memory is corroborated by both lanes (see recall_abstain);
+        # it is off for a BM25-only index or an uncalibrated model.
+        verdict = corroboration(
+            bm25_terms(q_tokens), idx, sims_out[0] if sims_out else None, bm25, bm25_body
+        )
+        if verdict is not None and not verdict["admit"]:
+            if drop_log is not None:
+                drop_log["abstained"] = verdict
+                best = verdict.get("best") or {}
+                _record_drop(best.get("name"), "uncorroborated", best.get("cosine") or 0.0)
+            rankings = []
         if not rankings:
             # RUL-4: corpus abstention stays absolute for MEMORIES (no graph expansion, no
             # padding) — but a governance section that strongly matches is still the right

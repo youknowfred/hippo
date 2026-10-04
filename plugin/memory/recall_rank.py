@@ -248,6 +248,7 @@ def _dense_rank_rows(
     *,
     subfloor_out: Optional[List] = None,
     watch_rows: Optional[set] = None,
+    sims_out: Optional[List] = None,
 ) -> List[int]:
     """RAW dense-matrix row indices ordered by descending cosine similarity, ABOVE the
     calibrated floor for ``index.model``, or [].
@@ -293,6 +294,8 @@ def _dense_rank_rows(
             DENSE_QUERY_TIMEOUT_SECS,
         )
         sims = index.dense @ qvec  # rows are L2-normalized -> dot == cosine
+        if sims_out is not None:
+            sims_out.append(sims)  # HOT-2: the abstention gate reads every row's cosine
         order = np.argsort(-sims)
         floor = _dense_floor(index.model or DEFAULT_MODEL)
         # MSR-4: when a caller passes ``subfloor_out``, the SAME descending walk also
