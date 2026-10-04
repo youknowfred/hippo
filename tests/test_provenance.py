@@ -2236,14 +2236,14 @@ def test_heal_empty_baselines_names_the_files_it_could_not_heal(repo, memory_dir
     write_file(memory_dir, "healable.md", good)
     write_file(memory_dir, "cursed.md", bad)
 
-    real = atomic.write_text_atomic
+    real = atomic.write_text_cas  # RWY-3: the heal is a compare-and-swap write
 
     def failing(path, text, *a, **k):
         if path.endswith("cursed.md"):
             raise OSError(28, "No space left on device")
         return real(path, text, *a, **k)
 
-    monkeypatch.setattr(atomic, "write_text_atomic", failing)
+    monkeypatch.setattr(atomic, "write_text_cas", failing)
     healed, failed = P.heal_empty_baselines(memory_dir, repo)
     assert healed == ["healable"]
     assert set(failed) == {"cursed"} and "No space left" in failed["cursed"]

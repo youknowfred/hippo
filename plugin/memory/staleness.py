@@ -531,8 +531,9 @@ def set_invalid_after(path: str, ts: Optional[str] = None, *, dry_run: bool = Fa
     try:
         if ts is None:
             ts = datetime.now(timezone.utc).isoformat()
-        with open(path, "r", encoding="utf-8") as fh:
-            text = fh.read()
+        from .atomic import read_text_cas
+
+        text, _cas_token = read_text_cas(path)  # RWY-3: the CAS token of what we read
         fm_lines, _ = split_frontmatter(text)
         if fm_lines is None:
             result["error"] = "no frontmatter -- cannot write invalid_after"
@@ -566,9 +567,9 @@ def set_invalid_after(path: str, ts: Optional[str] = None, *, dry_run: bool = Fa
                 return result
         result.update({"changed": changed, "invalid_after": ts})
         if changed and not dry_run:
-            from .atomic import write_text_atomic
+            from .atomic import write_text_cas
 
-            write_text_atomic(path, new_text)  # COR-18: never a torn corpus file
+            write_text_cas(path, new_text, _cas_token)  # COR-18: never a torn corpus file
             # SEC-6: this per-item, agent-gated frontmatter write is a reviewed edit —
             # fold the file's new bytes into the trusted-corpus consent baseline so a
             # retire/demote verdict never quarantines the very file it just judged

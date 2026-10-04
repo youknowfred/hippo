@@ -290,8 +290,9 @@ def _apply_one(
 
     src_path = os.path.join(memory_dir, cand["source"] + ".md")
     try:
-        with open(src_path, "r", encoding="utf-8") as fh:
-            text = fh.read()
+        from .atomic import read_text_cas
+
+        text, _cas_token = read_text_cas(src_path)  # RWY-3: the CAS token of what we read
     except Exception as exc:
         return False, f"source unreadable: {exc}", None
 
@@ -303,9 +304,9 @@ def _apply_one(
             return False, "edge already present (wikilink)", None
         new_text, block_rec = _insert_block_line(text, line)
         try:
-            from .atomic import write_text_atomic
+            from .atomic import write_text_cas
 
-            write_text_atomic(src_path, new_text)  # COR-18: never a torn corpus file
+            write_text_cas(src_path, new_text, _cas_token)  # COR-18: never a torn corpus file
         except Exception as exc:
             return False, f"write failed: {exc}", None
         return True, "", {"file": os.path.basename(src_path), "block": block_rec}
@@ -339,16 +340,17 @@ def _apply_one(
             return False, f"{step}: {exc} — the frontmatter edge was rolled back", None
 
         try:
-            with open(src_path, "r", encoding="utf-8") as fh:
-                after_fm_text = fh.read()
+            from .atomic import read_text_cas
+
+            after_fm_text, _cas_token = read_text_cas(src_path)  # RWY-3: the CAS token of what we read
             region_after = _frontmatter_region(after_fm_text)
             new_text, block_rec = _insert_block_line(after_fm_text, line)
         except Exception as exc:
             return _roll_back("re-read failed after frontmatter write", exc)
         try:
-            from .atomic import write_text_atomic
+            from .atomic import write_text_cas
 
-            write_text_atomic(src_path, new_text)  # COR-18
+            write_text_cas(src_path, new_text, _cas_token)  # COR-18
         except Exception as exc:
             return _roll_back("write failed", exc)
         return True, "", {

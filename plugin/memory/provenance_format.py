@@ -144,14 +144,21 @@ def _write_marker_keys(memory_dir: str, **keys) -> bool:
     silently erase the other one's answer.
     """
     try:
-        from .atomic import write_text_atomic
+        from .atomic import CasConflict, content_token, write_text_cas
 
-        data = _read_marker(memory_dir)
-        data.update(keys)
-        # INV-2: the marker is COMMITTED corpus truth (format + derivation axes in one
-        # file) — a torn write would have the corpus declaring garbage to every reader.
-        write_text_atomic(format_marker_path(memory_dir), json.dumps(data) + "\n")
-        return True
+        path = format_marker_path(memory_dir)
+        for _ in range(8):  # RWY-3: re-merge on a concurrent marker write, never lose it
+            token = content_token(path)
+            data = _read_marker(memory_dir)
+            data.update(keys)
+            try:
+                # INV-2: the marker is COMMITTED corpus truth (format + derivation axes in
+                # one file) — a torn write would have the corpus declaring garbage.
+                write_text_cas(path, json.dumps(data) + "\n", token)
+                return True
+            except CasConflict:
+                continue
+        return False
     except Exception:
         return False
 

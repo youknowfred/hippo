@@ -43,7 +43,12 @@ from memory import atomic as A
 
 _MEMORY_PKG = os.path.dirname(os.path.abspath(A.__file__))
 _PLUGIN_ROOT = os.path.dirname(_MEMORY_PKG)
-_ATOMIC_NAMES = {"write_text_atomic", "write_json_atomic", "write_bytes_atomic"}
+# RWY-3: the compare-and-swap writers are atomic writers too (same tmp + rename), so every
+# corpus read-modify-write site stays registered and tearable after moving onto them.
+_ATOMIC_NAMES = {
+    "write_text_atomic", "write_json_atomic", "write_bytes_atomic",
+    "write_text_cas", "update_text_cas",
+}
 
 _GIT_ENV = {
     **os.environ,
@@ -59,6 +64,7 @@ _GIT_ENV = {
 # --------------------------------------------------------------------------- #
 CRASH_CONTRACT = {
     ("dream", "_apply_one"): ("detected", "rolled_back"),  # bridge write; refines chain write #2
+    ("dream_apply", "_undo_one_edge"): ("detected",),  # RWY-3: was a raw truncating write; now CAS, the miss is named
     ("dream_generate", "_set_confidence"): ("detected",),
     ("dream_generate", "_set_cited_paths"): ("detected",),
     ("eval_recall", "draft_abstention_fixtures"): ("detected",),
@@ -76,9 +82,9 @@ CRASH_CONTRACT = {
     ("lint_floor", "observe_floor_edit"): ("intact",),  # FLR-1 nag sentinel: content-free session bookkeeping (the jit._write_state posture) — a lost write costs one repeat nag, never a torn file
     ("links", "add_typed_relation"): ("detected", "rolled_back"),  # demote+supersede write #2
     ("links", "remove_typed_relation"): ("detected", "rolled_back"),  # resolve's declaration drop; scope_both 2-file chain
-    ("new_memory", "_ensure_tier_floor"): ("intact",),  # opportunistic skeleton: silent by design
-    ("new_memory", "_append_floor_pointer"): ("detected",),  # floor outcome dict names the failure
-    ("new_memory", "_remove_floor_pointer"): ("detected",),
+    ("new_memory_floor", "_ensure_tier_floor"): ("intact",),  # opportunistic skeleton: silent by design
+    ("new_memory_floor", "_append_floor_pointer"): ("detected",),  # floor outcome dict names the failure
+    ("new_memory_floor", "_remove_floor_pointer"): ("detected",),
     ("packs", "_write_lockfile"): ("detected", "rolled_back"),  # install: re-run adopts; update: file restored
     ("packs", "pack_update_item"): ("detected",),  # ours-replacement write
     ("presence", "_write_doc"): ("intact",),  # T18 fleet bookkeeping: silent by design (the jit._write_state posture) — a lost write costs one stale fleet line, never a torn doc
@@ -267,6 +273,24 @@ def scn_dream_apply_refines_rolled_back(tmp_path, monkeypatch):
     )
     _assert_unchanged(before)  # byte-exact restore of the frontmatter edge
     assert ok is False and "rolled back" in reason and undo is None
+
+
+def scn_dream_undo_detected(tmp_path, monkeypatch):
+    from memory.dream import _apply_one
+    from memory.dream_apply import _undo_one_edge
+
+    _root, md = _git_repo(tmp_path)
+    a = _mem(md, "alpha")
+    _mem(md, "beta")
+    ok, _reason, undo = _apply_one(
+        md, {"kind": "bridge", "source": "alpha", "target": "beta", "cofire": 0.9}, "p1-e1", "p1"
+    )
+    assert ok and undo
+    before = _snap(a)
+    _arm(monkeypatch, "dream_apply", "_undo_one_edge")
+    ok, reason = _undo_one_edge(md, {"undo": undo})
+    _assert_unchanged(before)
+    assert ok is False and "write failed" in reason
 
 
 def scn_dream_generate_confidence_detected(tmp_path, monkeypatch):
@@ -516,7 +540,7 @@ def scn_tier_floor_intact(tmp_path, monkeypatch):
     from memory.new_memory import _ensure_tier_floor
 
     tier = str(tmp_path / "tier")
-    _arm(monkeypatch, "new_memory", "_ensure_tier_floor")
+    _arm(monkeypatch, "new_memory_floor", "_ensure_tier_floor")
     _ensure_tier_floor(tier, "user")  # swallows by design (opportunistic skeleton)
     assert not os.path.exists(os.path.join(tier, "MEMORY.md"))  # absent, never partial
 
@@ -529,7 +553,7 @@ def scn_floor_append_detected(tmp_path, monkeypatch):
     with open(floor, "w", encoding="utf-8") as fh:
         fh.write("# Memory\n\n## User\n\n## Working Style & Process Feedback\n")
     before = _snap(floor)
-    _arm(monkeypatch, "new_memory", "_append_floor_pointer")
+    _arm(monkeypatch, "new_memory_floor", "_append_floor_pointer")
     r = _append_floor_pointer(md, "## User", "alpha", "Alpha", "hook")
     _assert_unchanged(before)
     assert r["status"] == "skipped" and "write failed" in (r["reason"] or "")
@@ -543,7 +567,7 @@ def scn_floor_remove_detected(tmp_path, monkeypatch):
     with open(floor, "w", encoding="utf-8") as fh:
         fh.write("# Memory\n\n## User\n- [Alpha](alpha.md) — hook\n")
     before = _snap(floor)
-    _arm(monkeypatch, "new_memory", "_remove_floor_pointer")
+    _arm(monkeypatch, "new_memory_floor", "_remove_floor_pointer")
     r = _remove_floor_pointer(md, "alpha")
     _assert_unchanged(before)
     assert r["status"] == "skipped" and "write failed" in (r["reason"] or "")
@@ -955,6 +979,7 @@ def scn_floor_nag_sentinel_intact(tmp_path, monkeypatch):
 
 _SCENARIOS = [
     (("dream", "_apply_one"), "detected", scn_dream_apply_bridge_detected),
+    (("dream_apply", "_undo_one_edge"), "detected", scn_dream_undo_detected),
     (("dream", "_apply_one"), "rolled_back", scn_dream_apply_refines_rolled_back),
     (("dream_generate", "_set_confidence"), "detected", scn_dream_generate_confidence_detected),
     (("dream_generate", "_set_cited_paths"), "detected", scn_dream_generate_cited_detected),
@@ -977,9 +1002,9 @@ _SCENARIOS = [
     (("links", "remove_typed_relation"), "detected", scn_links_remove_typed_detected),
     (("links", "remove_typed_relation"), "rolled_back", scn_links_remove_typed_rolled_back),
     (("staleness", "set_invalid_after"), "rolled_back", scn_invalid_after_resolve_keep_one_rolled_back),
-    (("new_memory", "_ensure_tier_floor"), "intact", scn_tier_floor_intact),
-    (("new_memory", "_append_floor_pointer"), "detected", scn_floor_append_detected),
-    (("new_memory", "_remove_floor_pointer"), "detected", scn_floor_remove_detected),
+    (("new_memory_floor", "_ensure_tier_floor"), "intact", scn_tier_floor_intact),
+    (("new_memory_floor", "_append_floor_pointer"), "detected", scn_floor_append_detected),
+    (("new_memory_floor", "_remove_floor_pointer"), "detected", scn_floor_remove_detected),
     (("packs", "_write_lockfile"), "detected", scn_pack_lockfile_install_detected),
     (("packs", "_write_lockfile"), "rolled_back", scn_pack_lockfile_update_rolled_back),
     (("packs", "pack_update_item"), "detected", scn_pack_update_write_detected),

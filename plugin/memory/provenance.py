@@ -610,8 +610,9 @@ def backfill_file(
         "error": None,
     }
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            text = fh.read()
+        from .atomic import read_text_cas
+
+        text, _cas_token = read_text_cas(path)  # RWY-3: the CAS token of what we read
         original = text  # COR-9: `text` is re-assigned by the strip below; the guard needs this
         _, body = split_frontmatter(text)
         # DRV-1: the derivation's OTHER half — what the body offered that the oracle refused.
@@ -696,9 +697,9 @@ def backfill_file(
             }
         )
         if changed and not dry_run:
-            from .atomic import write_text_atomic
+            from .atomic import write_text_cas
 
-            write_text_atomic(path, new_text)  # COR-18: never a torn corpus file
+            write_text_cas(path, new_text, _cas_token)  # COR-18: never a torn corpus file
     except Exception as exc:  # never break a corpus-wide backfill on one file
         result["error"] = str(exc)
     return result
@@ -749,8 +750,9 @@ def heal_empty_baselines(memory_dir: str, repo_root: str) -> Tuple[List[str], Di
         for path in _iter_memory_files(memory_dir):
             stem = os.path.splitext(os.path.basename(path))[0]
             try:
-                with open(path, "r", encoding="utf-8") as fh:
-                    text = fh.read()
+                from .atomic import read_text_cas
+
+                text, _cas_token = read_text_cas(path)  # RWY-3: the CAS token of what we read
                 fm = parse_frontmatter(text)
                 if not fm:
                     continue  # no/unparseable frontmatter — not this function's job
@@ -769,9 +771,9 @@ def heal_empty_baselines(memory_dir: str, repo_root: str) -> Tuple[List[str], Di
                     if m:
                         lines[i] = f'{m.group(1)}"{head}"'
                         try:
-                            from .atomic import write_text_atomic
+                            from .atomic import write_text_cas
 
-                            write_text_atomic(path, "\n".join(lines))  # COR-18
+                            write_text_cas(path, "\n".join(lines), _cas_token)  # COR-18
                         except Exception as exc:
                             failed[stem] = str(exc)  # RCH-9: named, never dropped
                             break
@@ -928,8 +930,9 @@ def reverify_file(
         "error": None,
     }
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            text = fh.read()
+        from .atomic import read_text_cas
+
+        text, _cas_token = read_text_cas(path)  # RWY-3: the CAS token of what we read
         fm_lines, body = split_frontmatter(text)
         if fm_lines is None:
             result["error"] = "no frontmatter — run backfill first"
@@ -1003,9 +1006,9 @@ def reverify_file(
             }
         )
         if changed and not dry_run:
-            from .atomic import write_text_atomic
+            from .atomic import write_text_cas
 
-            write_text_atomic(path, new_text)  # COR-18: never a torn corpus file
+            write_text_cas(path, new_text, _cas_token)  # COR-18: never a torn corpus file
         if not dry_run:
             # SEC-6: a re-verify IS a per-item human review of this exact file — fold its
             # current bytes into the trusted-corpus consent baseline (review = consent;

@@ -190,8 +190,9 @@ def _undo_one_edge(memory_dir: str, edge: dict) -> Tuple[bool, str]:
         if os.path.isfile(archived):
             path = archived
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            text = fh.read()
+        from .atomic import read_text_cas
+
+        text, cas_token = read_text_cas(path)  # RWY-3: the CAS token of what we read
     except Exception as exc:
         return False, f"unreadable: {exc}"
 
@@ -222,8 +223,10 @@ def _undo_one_edge(memory_dir: str, edge: dict) -> Tuple[bool, str]:
         if empty_block in new_text:
             new_text = new_text.replace(empty_block, "", 1)
     try:
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write(new_text)
+        from .atomic import write_text_cas
+
+        # RWY-3: whole (it used to truncate in place) and only over the bytes we verified.
+        write_text_cas(path, new_text, cas_token)
     except Exception as exc:
         return False, f"write failed: {exc}"
     return True, ""

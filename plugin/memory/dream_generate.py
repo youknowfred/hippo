@@ -688,8 +688,9 @@ def _set_confidence(path: str, value: str, *, dry_run: bool = False) -> dict:
     """
     result = {"path": path, "changed": False, "confidence": value, "error": None}
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            text = fh.read()
+        from .atomic import read_text_cas
+
+        text, _cas_token = read_text_cas(path)  # RWY-3: the CAS token of what we read
         if not text.startswith("---"):
             result["error"] = "no frontmatter"
             return result
@@ -737,9 +738,9 @@ def _set_confidence(path: str, value: str, *, dry_run: bool = False) -> dict:
             return result
         result["changed"] = new_text != text
         if result["changed"] and not dry_run:
-            from .atomic import write_text_atomic
+            from .atomic import write_text_cas
 
-            write_text_atomic(path, new_text)  # COR-18: never a torn corpus file
+            write_text_cas(path, new_text, _cas_token)  # COR-18: never a torn corpus file
             # BND-3: an anomalous fold failure rides the result additively.
             try:
                 from .trust import record_authored_write_disclosing
@@ -765,8 +766,9 @@ def _set_cited_paths(path: str, paths: List[str], *, dry_run: bool = False) -> d
     """
     result = {"path": path, "changed": False, "error": None}
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            text = fh.read()
+        from .atomic import read_text_cas
+
+        text, _cas_token = read_text_cas(path)  # RWY-3: the CAS token of what we read
         if not text.startswith("---"):
             result["error"] = "no frontmatter"
             return result
@@ -814,9 +816,9 @@ def _set_cited_paths(path: str, paths: List[str], *, dry_run: bool = False) -> d
             return result
         result["changed"] = new_text != text
         if result["changed"] and not dry_run:
-            from .atomic import write_text_atomic
+            from .atomic import write_text_cas
 
-            write_text_atomic(path, new_text)  # COR-18: never a torn corpus file
+            write_text_cas(path, new_text, _cas_token)  # COR-18: never a torn corpus file
     except Exception as exc:
         result["error"] = str(exc)
     return result

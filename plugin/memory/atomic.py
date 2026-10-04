@@ -28,9 +28,11 @@ file behind it, so the link survives and the write is still atomic at the target
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
+from typing import Callable, Optional, Tuple
 
 
 def write_text_atomic(path: str, text: str, encoding: str = "utf-8") -> None:
@@ -107,3 +109,83 @@ def write_json_atomic(path: str, doc, *, indent: int = 2, sort_keys: bool = Fals
     this replaces truncated the file first and raised after).
     """
     write_text_atomic(path, json.dumps(doc, indent=indent, sort_keys=sort_keys) + "\n")
+
+
+# --------------------------------------------------------------------------- #
+# RWY-3: compare-and-swap for corpus read-modify-writes.
+#
+# write_text_atomic makes every write whole, but two writers that each read, edit and
+# replace the same document still lose one edit: the later replace carries the bytes it
+# read, not the other writer's (a floor pointer, a verdict stamp, a typed edge). The CAS
+# write takes the token of the bytes the caller read and swaps its document in only if the
+# target still holds them. The check runs after the temp file is written, immediately
+# before the rename, so the window is the rename itself. No locks, no coordinator.
+# --------------------------------------------------------------------------- #
+class CasConflict(OSError):
+    """The target changed between the caller's read and its write."""
+
+
+def _real(path: str) -> str:
+    return os.path.realpath(path) if os.path.islink(path) else path
+
+
+def content_token(path: str) -> Optional[str]:
+    """sha256 of ``path``'s bytes, or ``None`` when it does not exist (the "absent" token)."""
+    try:
+        with open(_real(path), "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except FileNotFoundError:
+        return None
+
+
+def read_text_cas(path: str, encoding: str = "utf-8") -> Tuple[str, str]:
+    """``(text, token)`` for one read. Raises like ``open(path)`` (missing file included)."""
+    with open(_real(path), "rb") as fh:
+        data = fh.read()
+    return data.decode(encoding), hashlib.sha256(data).hexdigest()
+
+
+def write_text_cas(path: str, text: str, expected: Optional[str], encoding: str = "utf-8") -> None:
+    """Write ``text`` only if ``path`` still holds the bytes whose token is ``expected``
+    (``None``: only if it still does not exist). Raises ``CasConflict`` otherwise, leaving
+    the target untouched. Same unique-tmp, permission and symlink discipline as
+    ``write_text_atomic``."""
+    real = _real(path)
+    d = os.path.dirname(os.path.abspath(real)) or "."
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(real) + ".tmp.", dir=d)
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as fh:
+            fh.write(text)
+        try:
+            os.chmod(tmp, os.stat(real).st_mode & 0o777)
+        except OSError:
+            os.chmod(tmp, 0o644 & ~_umask())
+        if content_token(real) != expected:
+            raise CasConflict(f"{os.path.basename(real)} changed since it was read")
+        os.replace(tmp, real)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def update_text_cas(
+    path: str, transform: Callable[[str], Optional[str]], *, retries: int = 8, encoding: str = "utf-8"
+) -> str:
+    """Read ``path``, apply ``transform``, CAS-write the result; on a conflict re-read and
+    re-apply (``transform`` must be a pure function of the text). ``transform`` returning
+    ``None`` or the text unchanged writes nothing. Returns the final text. A missing file
+    raises ``FileNotFoundError``; ``retries`` conflicts in a row raise ``CasConflict``."""
+    for _ in range(max(1, retries)):
+        text, token = read_text_cas(path, encoding)
+        new = transform(text)
+        if new is None or new == text:
+            return text
+        try:
+            write_text_cas(path, new, token, encoding)
+            return new
+        except CasConflict:
+            continue
+    raise CasConflict(f"{os.path.basename(path)} kept changing; gave up after {retries} tries")
