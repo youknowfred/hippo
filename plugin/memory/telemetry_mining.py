@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Optional
 
+from .harness_envelopes import is_envelope_preview
 from .telemetry_store import _resolve_dir, read_episodes, read_events
 
 # --------------------------------------------------------------------------- #
@@ -69,6 +70,13 @@ def abstention_backlog(
     ``[{"count", "sample_query", "terms", "queries"}]``. One-off / diverse abstentions never
     reach ``min_count``, so they never surface. Read-only; never raises; ``[]`` on any failure.
 
+    A preview that opens with a harness envelope (``harness_envelopes.is_envelope_preview``)
+    is skipped: a hook older than HOT-1 logged the raw prompt, so the ledger can still hold
+    another session's message or a subagent's hand-back as an abstained "query". Same-shaped
+    envelopes cluster on their tag and sender tokens, and every reader of this backlog
+    (SessionStart, doctor, the interview, the fixture drafts, capture's seed score, dream's
+    frozen baseline, archive regret) inherits the one filter here.
+
     MSR-3 ``channel``: ``None`` (every pre-MSR-3 caller) clusters ALL abstentions,
     byte-identical to before; ``'hook'``/``'mcp'`` restricts to that surface's events
     (absent-means-hook on the row) — the MCP arm is the highest-intent demand signal
@@ -83,7 +91,7 @@ def abstention_backlog(
             if channel is not None and (e.get("channel") or "hook") != channel:
                 continue
             q = (e.get("query_preview") or "").strip()
-            if not q:
+            if not q or is_envelope_preview(q):
                 continue
             toks = _abstention_content_tokens(q)
             if not toks:

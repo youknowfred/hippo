@@ -7,13 +7,16 @@ of the tag list. The copies drifted. The desktop app's subagent hand-backs
 (``<agent-message>``) and messages from other local sessions (``<cross-session-message>``)
 were in none of them, so the recall hook ranked hand-backs as queries, the lived-in drafter
 queued them as hard-set rows, and capture showed them back as "what you were working on".
-Each plane now derives what it needs from the tuples below:
+A fourth plane never checked at all: the blind-spot backlog clustered those previews into
+recurring "questions". Each plane now derives what it needs from the tuples below:
 
 - ``recall_query`` builds ``clean_query``'s envelope-block and tag-marker regexes from them,
   and the hook's RCL-3 rescue neither revives an envelope-only prompt nor blends an envelope
   preview into a terse follow-up;
 - ``eval_fixtures.draft_livedin_fixtures`` skips a preview that opens with an envelope;
-- ``capture.gather_session_context`` leaves such previews out of a seed's ``query_previews``.
+- ``capture.gather_session_context`` leaves such previews out of a seed's ``query_previews``;
+- ``telemetry_mining.abstention_backlog`` skips them, so no surface reading the blind-spot
+  backlog (SessionStart, doctor, the interview, the abstention fixture drafts) asks about one.
 
 A new harness tag is one edit here. The module is pure and imports nothing from the package,
 so the hot path and the cold planes can all depend on it without depending on each other.

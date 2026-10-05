@@ -132,3 +132,60 @@ def test_bogus_dir_never_raises(tmp_path):
     bogus = str(tmp_path / "nope")
     assert abstention_backlog(bogus) == []
     assert S.blind_spot_producer(bogus, bogus) is None
+
+
+# ---- harness envelopes are not questions -------------------------------------------------- #
+# A hook older than HOT-1 logged the raw prompt, so the ledger still holds abstained "queries"
+# that are the harness talking: another local session's message, a subagent's hand-back, a
+# background task's result, a `!`-bash turn. Same-shaped envelopes share their tag and sender
+# tokens, so they cluster, and every surface reading the backlog asked the human about them.
+_ENVELOPE_ABSTENTIONS = (
+    [f'<cross-session-message from="uds:/tmp/cc-socks/9f2c.sock">\nPR {n} merged, branch gone' for n in range(7)]
+    + [f'<agent-message from="a41c{n}">\nDone. The worktree sweep found no stale branches' for n in range(3)]
+    + [f"<task-notification>\n<task-id>b7{n}</task-id>\n<status>completed</status>" for n in range(3)]
+    + ["<bash-input>git status --short</bash-input>" for _ in range(3)]
+)
+_REAL = "how do I roll back a deploy"
+_MENTIONS = "why does an agent-message hand-back draft as a fixture"  # names a tag, opens with none
+
+
+def _seed_envelopes_and_real_queries(td):
+    for q in _ENVELOPE_ABSTENTIONS:
+        _abstain(td, q)
+    for _ in range(3):
+        _abstain(td, _REAL)
+        _abstain(td, _MENTIONS)
+
+
+def test_harness_envelopes_are_not_blind_spots(memory_dir):
+    td = default_telemetry_dir(memory_dir)
+    _seed_envelopes_and_real_queries(td)
+
+    backlog = abstention_backlog(td)
+    assert sorted((c["sample_query"], c["count"]) for c in backlog) == [
+        (_REAL, 3),
+        (_MENTIONS, 3),
+    ]
+
+
+def test_backlog_consumers_never_ask_about_envelopes(memory_dir, repo, monkeypatch):
+    """SessionStart, doctor, the consolidate interview and the fixture drafts all read the
+    backlog, so none of them may surface an envelope; the real recurring query still does."""
+    from memory import eval_recall as E
+    from memory import interview as IV
+
+    monkeypatch.delenv("HIPPO_PENDING_DIR", raising=False)
+    td = default_telemetry_dir(memory_dir)
+    _seed_envelopes_and_real_queries(td)
+    tags = ("<cross-session-message", "<agent-message", "<task-notification", "<bash-input")
+
+    producer = S.blind_spot_producer(memory_dir, repo)
+    doctor = D.check_recall_blind_spots(D.DoctorContext(memory_dir, repo))["message"]
+    questions = [q["question"] for q in IV.gather_questions(memory_dir, repo_root=repo, telemetry_dir=td)]
+    drafted = E.draft_abstention_fixtures(memory_dir, telemetry_dir=td, probe=False)["added"]
+
+    for surface in [producer, doctor, *questions, *drafted]:
+        assert not any(t in surface for t in tags), surface
+    assert _REAL in producer
+    assert any(_REAL in q for q in questions)
+    assert sorted(drafted) == sorted([_REAL, _MENTIONS])
