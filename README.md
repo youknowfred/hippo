@@ -208,7 +208,7 @@ full map (with where each analogy ends) is in
 
 ## Commands
 
-hippo ships as 18 `/hippo:*` skills. You rarely invoke most of them by hand — the agent runs the
+hippo ships as 19 `/hippo:*` skills. You rarely invoke most of them by hand — the agent runs the
 maintenance ones when a session-start signal calls for it — but here is the whole surface, grouped
 by what it's for.
 
@@ -229,6 +229,10 @@ by what it's for.
   typed edges, steering, salience) — or why it *didn't* (the near-miss score and the floor it missed).
 
 **Curation & health:**
+- `/hippo:tend` — the one maintenance queue: every kind of upkeep (captures, memories whose cited
+  code moved, contradictions, merged-in duplicates, broken baselines and links, floor overflow,
+  citation re-derivation, changes waiting for re-consent) in one ranked list, worked one verdict
+  at a time with your yes. `hippo tend` in a terminal; the `tend` MCP tool on Desktop.
 - `/hippo:doctor` — fast check of the *plumbing*: bootstrapped, venv healthy, corpus symlinked +
   indexed + trusted, format current.
 - `/hippo:audit` — deep, judgment-based review of the *content*: staleness, drift, orphans, archive
@@ -389,7 +393,7 @@ plugin/
 ├── assets/packs/                 # starter packs (core seeded by default; rest opt-in)
 ├── bin/hippo                     # `hippo <verb>`: the one entry into the engine
 ├── requirements.txt              # fastembed, numpy, PyYAML, rank-bm25 (the venv path)
-└── skills/                       # 18 /hippo:* commands (see the Commands section above)
+└── skills/                       # 19 /hippo:* commands (see the Commands section above)
 tests/                            # hermetic test suite (no network/model download by default)
 .github/workflows/ci.yml          # hermetic matrix + dense/secret-scan/resolution lanes + shellcheck
 ```

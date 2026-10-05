@@ -186,6 +186,13 @@ VERBS: Tuple[VerbSurface, ...] = (
         "local recall preview); --ci is the single memory-diff CI gate",
     ),
     VerbSurface(
+        "tend",
+        desktop="skill_tools",
+        mcp_tools=("tend",),
+        note="the one maintenance queue, worked one verdict at a time; drafting a "
+        "capture goes through new_memory",
+    ),
+    VerbSurface(
         "why",
         desktop="tool",
         mcp_tools=("why",),

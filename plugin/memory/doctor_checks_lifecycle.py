@@ -291,3 +291,32 @@ def check_subset_boundary(ctx: DoctorContext) -> Dict[str, str]:
         }
     except Exception as exc:
         return {"status": "warn", "message": f"subset-boundary check failed: {exc}."}
+
+
+def check_tend_queue(ctx: DoctorContext) -> Dict[str, str]:
+    """TND-2: the one maintenance queue's pending count by kind, and what the owner holds.
+
+    Read-only: the queue is derived from the sources the other checks report one at a
+    time. A pending item is work, not a fault, so the status is ``warn`` only when
+    something waits on a decision.
+    """
+    try:
+        from .tend_queue import KINDS, build_queue, total_pending
+
+        r = build_queue(ctx.memory_dir, ctx.repo_root, write_cache=False)
+        total = total_pending(r)
+        held = sorted({e["kind"] for e in r["held"]})
+        held_s = f"; held by the owner: {', '.join(held)}" if held else ""
+        errs = f"; {len(r['errors'])} source(s) failed: {', '.join(sorted(r['errors']))}" if r["errors"] else ""
+        if total == 0:
+            return {"status": "ok", "message": f"maintenance queue empty{held_s}{errs}."}
+        parts = ", ".join(f"{r['counts'][k]} {k}" for k in KINDS if r["counts"].get(k))
+        return {
+            "status": "warn",
+            "message": (
+                f"{total} maintenance item(s) need a decision ({parts}){held_s}{errs}. "
+                "Say \"tend memory\", or run `hippo tend` in a terminal."
+            ),
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"maintenance-queue check failed: {exc}."}

@@ -41,7 +41,7 @@ def test_shipped_skills_are_exactly_these():
     assert names == [
         "audit", "bootstrap", "consolidate", "doctor", "dream", "export-agents", "import",
         "init", "new", "pack", "promote", "promote-rule", "publish", "recall", "remove",
-        "resolve", "review", "why",
+        "resolve", "review", "tend", "why",
     ]
 
 

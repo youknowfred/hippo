@@ -47,6 +47,7 @@ CLI_VERBS: Tuple[CliVerb, ...] = (
     # Added in v1.42 (SRF-1): every other entry the skills, hooks and hints call.
     CliVerb("inspect", "recall_view", "a readable recall listing, why receipts, decision history"),
     CliVerb("doctor", "doctor", "health check for the install and the corpus"),
+    CliVerb("tend", "tend", "the maintenance queue: list, next, apply one verdict"),
     CliVerb("capture", "capture", "the pending-capture queue: list, discard, snooze"),
     CliVerb("reconsolidate", "reconsolidate", "the reverify worklist and per-item verdicts"),
     CliVerb("brief", "reconsolidate_brief", "the evidence brief for one stale memory"),

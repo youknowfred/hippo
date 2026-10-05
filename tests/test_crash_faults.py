@@ -104,6 +104,7 @@ CRASH_CONTRACT = {
     ("telemetry_rollup", "_append_finalized"): ("intact",),  # OBS-1: the 365-day trim is best-effort; the appended day stays
     ("telemetry_rollup", "_drain_spool"): ("detected",),  # OBS-2: fold returns False; spool kept, so no use is lost or double-counted
     ("trust", "_write_registry_doc"): ("detected",),  # mark_trusted returns False
+    ("tend", "_write_state"): ("detected",),  # TND-2: hold/snooze/skip report the failure; prior state kept
     ("tend_queue", "_write_cache"): ("intact",),  # TND-1: the cache is derived; the build still returns
 }
 
@@ -978,6 +979,22 @@ def scn_floor_nag_sentinel_intact(tmp_path, monkeypatch):
     assert not leftovers, "sentinel absent, never partial"
 
 
+def scn_tend_state_detected(tmp_path, monkeypatch):
+    """TND-2: a torn tend-state write is reported (the hold is refused) and the prior state
+    file keeps its bytes."""
+    from memory import tend as T
+    from memory import tend_queue as Q
+
+    md = tmp_path / "repo" / ".claude" / "memory"
+    md.mkdir(parents=True)
+    assert T.hold("capture", "first", memory_dir=str(md), repo_root=str(tmp_path / "repo"))["ok"]
+    before = _snap(Q.state_path(str(md)))
+    _arm(monkeypatch, "tend", "_write_state")
+    r = T.hold("link", "second", memory_dir=str(md), repo_root=str(tmp_path / "repo"))
+    assert not r["ok"] and "could not write" in r["message"]
+    _assert_unchanged(before)
+
+
 def scn_tend_cache_intact(tmp_path, monkeypatch):
     """TND-1: a torn queue-cache write costs nothing — the build still returns the queue and
     the previous cache keeps its bytes."""
@@ -1042,6 +1059,7 @@ _SCENARIOS = [
     (("telemetry_rollup", "_update"), "detected", scn_rollup_update_detected),
     (("telemetry_rollup", "_append_finalized"), "intact", scn_rollup_trim_intact),
     (("telemetry_rollup", "_drain_spool"), "detected", scn_rollup_drain_spool_detected),
+    (("tend", "_write_state"), "detected", scn_tend_state_detected),
     (("tend_queue", "_write_cache"), "intact", scn_tend_cache_intact),
 ]
 

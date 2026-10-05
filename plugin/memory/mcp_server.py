@@ -165,6 +165,7 @@ from .mcp_tools_setup import (
     _tool_init,
     _tool_trust_corpus,
 )
+from .mcp_tools_tend import _tool_tend
 
 _SERVER_NAME = "hippo"
 _DEFAULT_PROTOCOL = "2024-11-05"
@@ -252,6 +253,8 @@ _DISPATCH = {
     # forensics). Appended at the END, same position freeze.
     "untrust": _tool_untrust,
     "blast_radius": _tool_blast_radius,
+    # TND-2: the maintenance queue — appended at the END (the same position freeze).
+    "tend": _tool_tend,
 }
 
 

@@ -88,6 +88,7 @@ from .doctor_checks_corpus import (
     check_producer_versions,
 )
 from .doctor_checks_lifecycle import (
+    check_tend_queue,
     check_invalid_after_terminal,
     check_archive_shadowing,
     check_archive_regret,
@@ -352,6 +353,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("hook_wall", check_hook_wall),  # OBS-4: shell-measured wall vs the logged latency
     ("kpi_rollups", check_kpi_rollups),  # OBS-1: 30-day KPIs from the rotation-proof daily rollups
     ("surface_usage", check_surface_usage),  # OBS-2: 30-day per-verb use counts (the deprecation windows' input)
+    ("tend_queue", check_tend_queue),  # TND-2: the one maintenance queue, by kind
     ("recall_blind_spots", check_recall_blind_spots),
     ("drop_autopsy", check_drop_autopsy),  # MSR-4: which mechanism eats candidates, aggregated
 

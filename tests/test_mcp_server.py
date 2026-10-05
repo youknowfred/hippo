@@ -106,6 +106,7 @@ _EXT3_TOOLS = ["interview"]
 # Additive SEN-5 incident-response tools (T10): untrust (revoke) + blast_radius (read-only
 # forensics). Appended after EXT-3, same position freeze.
 _INCIDENT_TOOLS = ["untrust", "blast_radius"]
+_TEND_TOOLS = ["tend"]  # TND-2: the one maintenance queue
 
 
 def test_tools_list_exposes_frozen_five_plus_setup_tools():
@@ -113,7 +114,7 @@ def test_tools_list_exposes_frozen_five_plus_setup_tools():
     names = [t["name"] for t in resp["result"]["tools"]]
     assert names == (
         _FROZEN_TOOLS + _SETUP_TOOLS + _VERB_TOOLS + _CONSOLIDATE_TOOLS + _REPAIR_TOOLS
-        + _PACK_TOOLS + _INV4_TOOLS + _EXT3_TOOLS + _INCIDENT_TOOLS
+        + _PACK_TOOLS + _INV4_TOOLS + _EXT3_TOOLS + _INCIDENT_TOOLS + _TEND_TOOLS
     )
     for t in resp["result"]["tools"]:
         assert t["inputSchema"]["type"] == "object"  # every tool has a JSON schema

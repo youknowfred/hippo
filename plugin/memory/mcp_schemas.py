@@ -795,4 +795,38 @@ _TOOLS = [
             "required": ["name"],
         },
     },
+    {
+        "name": "tend",
+        "description": (
+            "The maintenance queue: every kind of memory upkeep in one ranked list — "
+            "changes waiting for re-consent, broken baselines, contradictions, merged-in "
+            "duplicates, pending captures, memories whose cited code moved, broken links, "
+            "floor overflow, and citation re-derivation. action='list' (default) counts and "
+            "lists them; 'next' shows the top item with its evidence, the likely verdict and "
+            "the verdicts it accepts; 'show' does the same for one id; 'apply' executes ONE "
+            "verdict on ONE item (there is no apply-all — confirm each with the user first); "
+            "'snooze' (days), 'skip' (until its evidence changes), 'hold' (an owner decision "
+            "with a reason, on a kind or an id; held items count as resolved) and 'release'."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "next", "show", "apply", "snooze", "skip", "hold", "release"],
+                },
+                "id": {"type": "string", "description": "an item id from list/next (kind:target)"},
+                "kind": {
+                    "type": "string",
+                    "description": "limit list/next to one kind, or the kind to hold/release",
+                },
+                "verdict": {"type": "string", "description": "with apply: one of the verdicts show lists"},
+                "winner": {"type": "string", "description": "contradiction keep_one/merge, merge supersede"},
+                "loser": {"type": "string", "description": "contradiction keep_one/merge"},
+                "superseded_by": {"type": "string", "description": "reverify demote: the successor memory"},
+                "days": {"type": "number", "description": "with snooze (default 7)"},
+                "reason": {"type": "string", "description": "with hold: why (required)"},
+            },
+        },
+    },
 ]
