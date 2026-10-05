@@ -801,6 +801,8 @@ def heal_empty_baselines(memory_dir: str, repo_root: str) -> Tuple[List[str], Di
 def backfill_corpus(
     memory_dir: str, repo_root: str, dry_run: bool = False, refresh: bool = False
 ) -> List[dict]:
+    if not os.path.isdir(memory_dir):
+        return []  # MIG-4: no corpus is nothing to backfill; an unreadable one still raises
     repo_files, basename_index = build_repo_file_index(repo_root)
     return [
         backfill_file(p, repo_root, repo_files, basename_index, dry_run=dry_run, refresh=refresh)
@@ -1364,13 +1366,13 @@ def rederive_file(
         return result
 
 
-def rederive_no_corpus_line(memory_dir: str) -> Optional[str]:
-    """MIG-3: the worklist/stamp answer in a repo with no corpus (CLI and MCP share it);
-    None when the corpus dir exists. Without it an empty worklist reads as "already match"
-    and the stamp tries to write ``.format`` into a dir that is not there."""
+def rederive_no_corpus_line(memory_dir: str, what: str = "re-derive or stamp") -> Optional[str]:
+    """MIG-3: a corpus-wide verb's answer in a repo with no corpus (CLI and MCP share it; ``what``
+    names the verb); None when the corpus dir exists. Without it an empty worklist reads as
+    "already match" and the stamp tries to write ``.format`` into a dir that is not there."""
     if os.path.isdir(memory_dir):
         return None
-    return (f"no corpus at {memory_dir}, so there is nothing to re-derive or stamp — "
+    return (f"no corpus at {memory_dir}, so there is nothing to {what} — "
             "run /hippo:setup to create one.")
 
 
@@ -1587,8 +1589,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 1
         return 0
 
-    if args.stamp_derivation or args.rederive_worklist:
-        no_corpus = rederive_no_corpus_line(memory_dir)
+    rederive = args.stamp_derivation or args.rederive_worklist
+    if rederive or not (args.rederive_one or args.reverify or args.refresh_one):  # MIG-4: + backfill
+        no_corpus = rederive_no_corpus_line(memory_dir, "re-derive or stamp" if rederive else "backfill")
         if no_corpus:
             print(no_corpus)
             return 0
