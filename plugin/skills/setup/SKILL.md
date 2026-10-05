@@ -231,6 +231,22 @@ symlink Claude Code's native memory system reads from.
   makes re-running `/hippo:setup` on an already-initialized project safe and useful — it is how
   `/hippo:doctor` tells a user to repair a missing/broken symlink, instead of routing them back
   to a hard stop.
+- **Before seeding anything, check for Claude Code's own memory directory for this repo.**
+  When native auto memory has been writing to `~/.claude/projects/<encoded>/memory`, that path
+  is a real directory, and step 3's link cannot be made over it. Preview adopting it — this
+  writes nothing and prints the file count, any collisions, and the exact actions:
+  ```bash
+  hippo adopt
+  ```
+  If it reports nothing to adopt, carry on. Otherwise show the user the preview and ASK
+  whether to adopt it. On an explicit yes, run the confirm line it printed (`hippo adopt
+  --confirm <digest>`): it copies the files into `.claude/memory/` byte for byte (refusing if
+  a same-named file there differs), renames the native directory to a dated backup, makes the
+  link, builds the index, and stamps the corpus format only if no adopted memory uses
+  hippo's frontmatter keys for something else. Then continue on the EXISTING-corpus path
+  (steps 2c-5) but **skip step 4b**: adoption already registered the project, and adopted
+  memories are not trusted until the user reviews them — end the report with `hippo trust
+  review` as the next step. On a no, skip adoption; step 3 will then report the conflict.
 - Check `${CLAUDE_PROJECT_DIR}` (or `git rev-parse --show-toplevel`) resolves to a real git
   repo (`git rev-parse --show-toplevel` exits non-zero when it isn't). Do **NOT** halt when it
   isn't one — seed the corpus anyway (everything in steps 1-4 below works without git: the
@@ -355,7 +371,8 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    clone / new worktree / re-running init) — nothing to report beyond the health-check line in
    step 6. `status: "conflict"` means the symlink already exists and points somewhere ELSE —
    stop and report the conflict rather than silently overwriting it; a pre-existing symlink to
-   a different target is a sign of a prior manual setup that shouldn't be clobbered.
+   a different target is a sign of a prior manual setup that shouldn't be clobbered. A real
+   directory there is Claude Code's own memory: that is the adoption case in the preflight.
 4. **Build the index**: `hippo build-index --memory-dir .claude/memory --index-dir
    .claude/.memory-index` — run it in the same Bash call as step 3's pin line, so `hippo`
    uses the plugin's venv (it falls back to bare `python3` if bootstrap hasn't run yet — a

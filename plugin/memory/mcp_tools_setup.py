@@ -202,10 +202,35 @@ def _tool_bootstrap(args: Dict[str, Any]) -> str:
 def _tool_init(args: Dict[str, Any]) -> str:
     from .init_project import init_project
 
+    from .native_adopt import render_plan, render_result
+
     # dense_python: right after a mid-session bootstrap, only a freshly-resolved venv
     # python can embed dense vectors — this process may still be the pre-venv python3.
-    r = init_project(dense_python=_fresh_python())
+    r = init_project(
+        dense_python=_fresh_python(), adopt_digest=str(args.get("adopt_digest") or "") or None
+    )
+    if r.get("mode") == "adopt_preview":
+        # CLM-4: the native memory dir sits in the link slot; nothing was written.
+        return "init: " + render_plan(
+            r.get("adoption") or {},
+            confirm_hint=(
+                "Show this to the user and ask. On their explicit yes, call init again with "
+                'adopt_digest="{digest}". To set up without adopting, call init with '
+                'adopt_digest="skip" (the native directory stays, and the link is not made).'
+            ),
+        )
+    if r.get("mode") == "adopt_refused":
+        return "init: " + render_result(r.get("adoption") or {})
     lines = [f"init ({r.get('mode')} corpus) — {r.get('memory_dir')}"]
+    if r.get("nested_owner"):
+        lines.append(
+            f"✔ this repo is nested inside {r['nested_owner']}, whose corpus it used to "
+            "resolve; init set up this repo's own corpus instead."
+        )
+    if isinstance(r.get("adoption"), dict) and r["adoption"].get("ok"):
+        lines.append(render_result(
+            r["adoption"], next_step="Nothing adopted is trusted yet (see the trust line below)."
+        ))
     if r.get("seeded"):
         lines.append("✔ seeded: " + ", ".join(r["seeded"]))
     if r.get("format_marker") == "stamped":

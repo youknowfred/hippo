@@ -55,6 +55,7 @@ from .provenance_env import (  # noqa: E402,F401
     current_user_slug,
     encode_project_dir,
     ensure_self_ignoring_dir,
+    foreign_corpus_owner,
     git_remote_info,
     git_root,
     launch_root,

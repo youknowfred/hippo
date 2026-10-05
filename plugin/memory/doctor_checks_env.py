@@ -20,6 +20,7 @@ from .provenance import (
     resolve_corpus_start,
     walk_up_for_memory_dir,
 )
+from .provenance_env import foreign_corpus_owner, nested_repo_line
 
 
 # The venv deps whose import must resolve for recall to run at full fidelity (SKILL.md's
@@ -197,6 +198,15 @@ def check_symlink(ctx: DoctorContext) -> Dict[str, str]:
                 "message": "no project symlink yet — Claude Code can't find this corpus. Fix: "
                 f"`{repair}` (or run /hippo:init here — ONB-5 leaves the existing corpus untouched).",
             }
+        link = r.get("expected_path") or ""
+        if status == "broken" and os.path.isdir(link) and not os.path.islink(link):
+            # CLM-4: native auto memory owns the slot; `rm -f` cannot (and must not) clear it.
+            return {
+                "status": "fail",
+                "message": f"Claude Code's own memory directory sits where hippo's link goes "
+                f"({link}), so the harness reads it instead of this corpus. Adopt it: run init "
+                "here, which previews the adoption first (`hippo adopt` shows the same preview).",
+            }
         if status == "broken":
             return {
                 "status": "fail",
@@ -315,6 +325,10 @@ def check_corpus_resolution(ctx: DoctorContext) -> Dict[str, str]:
                 "resolution start).",
             }
         if reason == "root-fallthrough":
+            # CLM-4: the walk can climb past THIS repo's toplevel into an ancestor's corpus.
+            owner = foreign_corpus_owner(ctx.memory_dir, ctx.repo_root)
+            if owner:
+                return {"status": "warn", "message": nested_repo_line(ctx.repo_root, owner)}
             return {
                 "status": "ok",
                 "message": f"resolved corpus: {ctx.memory_dir} — {tree}; root-fallthrough (no "

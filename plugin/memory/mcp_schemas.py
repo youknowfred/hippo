@@ -188,9 +188,21 @@ _TOOLS = [
             "clone, second machine) is never auto-trusted — the result names the "
             "trust_corpus review as the next step. Call when the user asks to set up "
             "hippo/memory for this project; follow the nudges in the result (fill "
-            "user_role.md from the user's own words — never invent its content)."
+            "user_role.md from the user's own words — never invent its content). When "
+            "Claude Code's own memory directory for this repo already holds files, the "
+            "first call only PREVIEWS adopting them (writes nothing) and returns a digest."
         ),
-        "inputSchema": {"type": "object", "properties": {}},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "adopt_digest": {
+                    "type": "string",
+                    "description": "the digest an adoption preview returned — pass it ONLY "
+                    "after the user's explicit yes to that preview; or 'skip' to set up "
+                    "without adopting",
+                },
+            },
+        },
     },
     {
         "name": "trust_corpus",

@@ -523,7 +523,7 @@ def test_init_tool_threads_the_fresh_interpreter(fresh_project, tmp_path, monkey
     seen = {}
     real = IP.init_project
 
-    def spy(claude_projects_dir=None, dense_python=None):
+    def spy(claude_projects_dir=None, dense_python=None, adopt_digest=None):
         seen["dense_python"] = dense_python
         return real(claude_projects_dir=str(tmp_path / "cp"), dense_python=None)
 
