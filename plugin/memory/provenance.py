@@ -947,10 +947,15 @@ def reverify_file(
         text, _cas_token = read_text_cas(path)  # RWY-3: the CAS token of what we read
         fm_lines, body = split_frontmatter(text)
         if fm_lines is None:
-            result["error"] = "no frontmatter — run backfill first"
+            result["error"] = "no frontmatter — give it a `---` frontmatter block first"
             return result
         if not _has_cited_paths(fm_lines):
-            result["error"] = "no provenance yet — run backfill first"
+            # CLM-6: name the one-line remedy for THIS memory (an initial backfill of one file).
+            stem = os.path.basename(path)[:-3]
+            result["error"] = (
+                f"no provenance yet — record it first with `hippo provenance --refresh-one {stem}`, "
+                "then render the verdict again"
+            )
             return result
         fm = parse_frontmatter(text)
         if not fm:
@@ -1601,7 +1606,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"re-derivation worklist: {len(work)} memory(ies) would change\n")
         print("\n".join(rederive_worklist_lines(work)))
         print("\nReview each, then approve individually: "
-              "python -m memory.provenance --rederive-one <name>")
+              "hippo provenance --rederive-one <name>")
         print(REDERIVE_EXCLUDE_HINT)
         return 0
 

@@ -53,7 +53,7 @@ def test_the_init_line_names_a_native_dir_init_can_adopt(tmp_path):
     )
     _assert_contract(proc, "SessionStart")
     ctx = _ctx(proc)
-    assert "/hippo:init" in ctx and f"({nd}) can be adopted" in ctx and "\n" not in ctx
+    assert "/hippo:setup" in ctx and f"({nd}) can be adopted" in ctx and "\n" not in ctx
 
 
 def test_a_native_dir_alone_does_not_opt_a_repo_in(tmp_path):
@@ -76,7 +76,7 @@ def test_the_projects_registry_opts_a_repo_in(tmp_path):
         _SESSION_START_HOOK, "", tmp_path, with_corpus=False, venv_python=True, sentinel=True,
         extra_env={"HIPPO_PROJECTS_FILE": str(reg)},
     )
-    assert "/hippo:init" in _ctx(proc)
+    assert "/hippo:setup" in _ctx(proc)
 
 
 def test_a_plugin_enabled_false_does_not_opt_in(tmp_path):

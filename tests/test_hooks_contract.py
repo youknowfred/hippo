@@ -532,7 +532,7 @@ class TestSessionStartNudge:
         proc, _, _ = _run_hook(_SESSION_START_HOOK, "", tmp_path, venv_python=False)
         _assert_contract(proc, "SessionStart")
         ctx = self._ctx(proc)
-        assert "/hippo:bootstrap" in ctx and "not bootstrapped" in ctx
+        assert "/hippo:setup" in ctx and "not bootstrapped" in ctx
         assert "\n" not in ctx  # exactly one nudge line
         assert len(proc.stdout.strip().splitlines()) == 1  # exactly one JSON object
 
@@ -541,7 +541,7 @@ class TestSessionStartNudge:
             _SESSION_START_HOOK, "", tmp_path, venv_python=True, sentinel=False
         )
         _assert_contract(proc, "SessionStart")
-        assert "/hippo:bootstrap" in self._ctx(proc)
+        assert "/hippo:setup" in self._ctx(proc)
 
     def test_corpus_absent_nudges_init(self, tmp_path):
         _opt_in(tmp_path)
@@ -551,7 +551,7 @@ class TestSessionStartNudge:
         )
         _assert_contract(proc, "SessionStart")
         ctx = self._ctx(proc)
-        assert "/hippo:init" in ctx and "/hippo:bootstrap" not in ctx
+        assert "/hippo:setup" in ctx and "/hippo:init" not in ctx
 
     def test_corpus_absent_in_a_repo_that_never_opted_in_stays_silent(self, tmp_path):
         # CLM-4: the init nudge is scoped to repos where hippo was enabled or init ran.
@@ -570,7 +570,7 @@ class TestSessionStartNudge:
             _SESSION_START_HOOK, "", tmp_path, with_corpus=False, venv_python=True, sentinel=True,
         )
         ctx = self._ctx(proc)
-        assert "/hippo:init" in ctx and "nudge-dismissed-repos" in ctx
+        assert "/hippo:setup" in ctx and "nudge-dismissed-repos" in ctx
         assert os.path.realpath(project) in ctx  # the stop command names this repo
         assert not os.path.exists(os.path.join(data_dir, ".nudge-counter"))
         with open(os.path.join(data_dir, "nudge-dismissed-repos"), "a", encoding="utf-8") as fh:
@@ -588,7 +588,7 @@ class TestSessionStartNudge:
             _SESSION_START_HOOK, "", other, with_corpus=False, venv_python=True, sentinel=True,
             extra_env={"CLAUDE_PLUGIN_DATA": data_dir},
         )
-        assert "/hippo:init" in self._ctx(proc)
+        assert "/hippo:setup" in self._ctx(proc)
 
     def test_dismissal_marker_silences_permanently(self, tmp_path):
         # The pre-CLM-4 machine-wide marker is still honored: it was a user's explicit
@@ -630,7 +630,7 @@ class TestSessionStartNudge:
         )
         _assert_contract(proc, "SessionStart")
         ctx = self._ctx(proc)
-        assert "/hippo:init" not in ctx and "init MCP tool" in ctx
+        assert "/hippo:setup" not in ctx and "setup MCP tool's init step" in ctx
         assert "terminal-only" not in ctx and "do not work in this app" not in ctx
 
     def test_terminal_wording_is_unchanged_by_an_unrelated_entrypoint(self, tmp_path):
@@ -640,7 +640,7 @@ class TestSessionStartNudge:
             _SESSION_START_HOOK, "", tmp_path, venv_python=False, entrypoint="cli",
         )
         _assert_contract(proc, "SessionStart")
-        assert "/hippo:bootstrap" in self._ctx(proc)
+        assert "/hippo:setup" in self._ctx(proc)
 
 
 # --------------------------------------------------------------------------- #
@@ -655,7 +655,7 @@ class TestStaleVenvNudge:
         )
         _assert_contract(proc, "SessionStart")
         ctx = json.loads(proc.stdout.strip())["hookSpecificOutput"]["additionalContext"]
-        assert "deps changed" in ctx and "/hippo:bootstrap" in ctx
+        assert "deps changed" in ctx and "/hippo:setup" in ctx
 
     def test_current_hash_stays_silent(self, tmp_path):
         proc, _, _ = _run_hook(
@@ -681,7 +681,7 @@ class TestStaleVenvNudge:
                 json.loads(proc.stdout.strip())["hookSpecificOutput"]["additionalContext"]
             )
         terminal, desktop = ctxs
-        assert "deps changed" in desktop and "/hippo:bootstrap" in desktop
+        assert "deps changed" in desktop and "/hippo:setup" in desktop
         assert "Surface note" not in desktop and "terminal-only" not in desktop
         assert desktop == terminal.replace(str(tmp_path / "run0"), str(tmp_path / "run1"))
 
@@ -810,7 +810,7 @@ class TestBashLevelCorpusGuard:
             input="", capture_output=True, text=True, timeout=60, env=env,
         )
         _assert_contract(proc, "SessionStart")
-        assert "/hippo:init" in proc.stdout
+        assert "/hippo:setup" in proc.stdout
         assert not canary.exists()
         assert _tree(project) == set()
 

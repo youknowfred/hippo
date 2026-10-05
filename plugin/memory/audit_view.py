@@ -295,7 +295,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Audit report material (INV-4): the /hippo:audit skill's Phase-1 "
+        description="Audit report material (INV-4): the /hippo:doctor content audit's Phase-1 "
         "gather as one read-only JSON document. Judgment stays with the skill."
     )
     parser.add_argument("--skip-eval", action="store_true", help="skip the eval_recall cluster")

@@ -227,10 +227,10 @@ def render_preflight(result: dict) -> str:
         if m:
             bits.append(
                 f"heals {n} / introduces {m} (net {m - n:+d}) boundary link(s) "
-                "(see: python -m memory.lint_links --boundary)"
+                "(see: hippo lint-links --boundary)"
             )
         else:
-            bits.append(f"heals {n} boundary link(s) (see: python -m memory.lint_links --boundary)")
+            bits.append(f"heals {n} boundary link(s) (see: hippo lint-links --boundary)")
     if r.get("strength") is not None:
         bits.append(f"soak {r['strength']:.2f}")
     if r.get("verified_by"):
@@ -266,7 +266,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="python -m memory.publish",
+        prog="hippo publish",
         description=(
             "Per-item publish preflight (PUB-1): mechanical refusals, the reused "
             "review gate with entropy ON, advisory receipt warnings, and the exact "

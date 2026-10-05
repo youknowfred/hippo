@@ -305,11 +305,11 @@ def _scorecard_message(memory_dir: str, repo_root: str) -> Tuple[str, str]:
         pass
 
     parts = [
-        f"{contested} contested-unresolved (→ /hippo:resolve)",
-        f"{rule_conflicts} rule↔memory conflict(s) (→ /hippo:consolidate)",
+        f"{contested} contested-unresolved (→ /hippo:tend)",
+        f"{rule_conflicts} rule↔memory conflict(s) (→ /hippo:tend)",
         f"{rot} rules-plane rot (edit the named file)",
-        f"{blind} blind spot(s) (→ /hippo:consolidate)",
-        f"{orphans} orphan(s) never recalled (→ /hippo:audit)",
+        f"{blind} blind spot(s) (→ /hippo:tend)",
+        f"{orphans} orphan(s) never recalled (→ /hippo:doctor's content audit)",
         f"{pinned} pinned / {muted} muted",
         f"{draft} draft",
         (f"{components} graph component(s)" if components is not None else "graph components: n/a"),

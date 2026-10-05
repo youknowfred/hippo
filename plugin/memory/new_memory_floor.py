@@ -124,7 +124,7 @@ def _append_floor_pointer(
     except FileNotFoundError:
         return {
             "status": "skipped",
-            "reason": "MEMORY.md missing — pointer NOT recorded; run /hippo:init to create "
+            "reason": "MEMORY.md missing — pointer NOT recorded; run /hippo:setup to create "
             "the floor, then add the pointer line by hand",
         }
     except Exception as exc:

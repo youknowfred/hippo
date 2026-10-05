@@ -406,7 +406,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     import argparse
     import json as _json
 
-    parser = argparse.ArgumentParser(prog="python -m memory.import_mdc")
+    parser = argparse.ArgumentParser(prog="hippo import")
     parser.add_argument(
         "--from", dest="source", choices=("cursor", "claude-mem"), default="cursor",
         help="which adapter's read-only report to print",

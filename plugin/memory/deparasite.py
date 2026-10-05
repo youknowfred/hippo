@@ -369,7 +369,7 @@ def deparasite_report(
                         "edge_id": e["edge_id"],
                         "source": e.get("source"),
                         "target": e.get("target"),
-                        "cmd": f"python -m memory.dream --undo {e['edge_id']}",
+                        "cmd": f"hippo dream --undo {e['edge_id']}",
                     }
                 )
             dream_partner = {
@@ -422,7 +422,7 @@ def deparasite_report(
                         "similarity": round(sim, 3),
                         "route": "resolve",
                         "note": "pair already carries a contradicts edge — an open "
-                        "DISAGREEMENT, not a duplicate; route to /hippo:resolve "
+                        "DISAGREEMENT, not a duplicate; route to /hippo:tend "
                         "(never auto-resolved)",
                     }
                 )
@@ -453,7 +453,7 @@ def deparasite_report(
                         "staleness.set_invalid_after — additive frontmatter only, no "
                         "body byte is touched, both files stay on disk, fully "
                         "reversible (the reconsolidate demote→invalid_after chain)",
-                        "command": f"python -m memory.dream --dedup-merge {survivor} {loser}",
+                        "command": f"hippo dream --dedup-merge {survivor} {loser}",
                     },
                 }
             )
@@ -569,7 +569,7 @@ def apply_dedup_merge(
         ):
             result["error"] = (
                 "pair carries a contradicts edge — an open disagreement is resolved in "
-                "/hippo:resolve, never merged away"
+                "/hippo:tend, never merged away"
             )
             return result
 
@@ -684,7 +684,7 @@ def render_report(report: dict, *, report_file: Optional[str] = None) -> str:
     if dedup:
         lines.append(
             f"   dedup: {stats.get('dedup_merge_proposals', 0)} merge proposal(s), "
-            f"{stats.get('dedup_routed_resolve', 0)} routed to /hippo:resolve "
+            f"{stats.get('dedup_routed_resolve', 0)} routed to /hippo:tend "
             f"(bar: Jaccard ≥ {report.get('dedup_jaccard')})"
         )
         for d in dedup:

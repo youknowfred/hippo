@@ -345,7 +345,7 @@ def init_project(
                 f"registered a corpus under a system temp root ({memory_dir}) — this "
                 "machine-registry entry will outlive the directory and go dead; "
                 "hermetic/test runs should set HIPPO_PROJECTS_FILE, and "
-                "`python -m memory.registry --prune-dead` clears such rows later"
+                "`hippo registry --prune-dead` clears such rows later"
             )
 
     # Step 5 + 5b (git repo only): .gitignore patch + the self-ignoring private tier.

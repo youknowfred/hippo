@@ -375,8 +375,8 @@ def _tool_resolve(args: Dict[str, Any]) -> str:
         lines += [f"  - {d}" for d in r["detail"]]
         if verdict in ("keep_one", "merge"):
             lines.append(
-                "  - an ordinary reviewable git change — commit it; run the build_index "
-                "tool so links.json carries the new edge for the next recall"
+                "  - an ordinary reviewable git change — commit it; rebuild the index (the setup "
+                "tool's action='build_index') so links.json carries the new edge for the next recall"
             )
         elif verdict == "scope_both":
             lines.append(

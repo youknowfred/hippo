@@ -186,7 +186,7 @@ def test_trust_report_presents_q2_and_never_prescribes(tmp_path):
     _trust_rows(tmp_path)
     text = "\n".join(MC._render_trust(MC.trust_census()))
     assert "REPORT-ONLY pending owner decision Q2" in text
-    assert "SEC-6 fingerprint baseline" in text
+    assert "fingerprint baseline" in text
     assert "legacy — no baseline" in text and "possibly unmounted" in text
 
 
@@ -425,7 +425,7 @@ def test_report_names_the_drain_flag_only_when_the_batch_exists(tmp_path):
     assert "--prune-dangling" not in text  # kept-class only: no batch to drain
     _add_symlink(farm, "-gone-tmp", str(tmp_path / "gone" / ".claude" / "memory"))
     text = "\n".join(MC._render_symlinks(MC.symlink_farm_census(farm)))
-    assert "python -m memory.machine_census --prune-dangling" in text
+    assert "hippo census --prune-dangling" in text
 
 
 def test_report_prints_scheduler_removal_recipe_for_stale_only(tmp_path):
@@ -505,7 +505,7 @@ def test_machine_state_ok_names_the_census_command(tmp_path, monkeypatch):
     _quiet_scheduler(monkeypatch)
     r = check_machine_state(None)
     assert r["status"] == "ok"
-    assert "python -m memory.machine_census" in r["message"]
+    assert "hippo census" in r["message"]
 
 
 def test_machine_state_warns_on_dangling_and_names_the_drain(tmp_path, monkeypatch):
@@ -529,7 +529,7 @@ def test_machine_state_warns_on_dead_trust_rows(tmp_path, monkeypatch):
     r = check_machine_state(None)
     assert r["status"] == "warn"
     assert "1 dead trust row" in r["message"]
-    assert "python -m memory.machine_census" in r["message"]
+    assert "hippo census" in r["message"]
 
 
 def test_machine_state_warns_on_stale_scheduler_artifacts(tmp_path, monkeypatch):
@@ -688,7 +688,7 @@ def test_check_machine_state_gains_the_quiet_count(monkeypatch):
     r = check_machine_state(None)
     assert r["status"] == "warn"
     assert "2 quiet scheduler artifacts (no recent sleep run)" in r["message"]
-    assert "python -m memory.machine_census" in r["message"]
+    assert "hippo census" in r["message"]
 
 
 def test_check_machine_state_tolerates_the_pre_quiet_census_shape(monkeypatch):
@@ -764,7 +764,7 @@ def test_trust_census_reports_withholding_for_drifted_live_rows(tmp_path, monkey
     text = "\n".join(MC._render_trust(out))
     assert (
         "WITHHOLDING 0 changed / 3 added — re-consent in that project "
-        "(trust_corpus / doctor)" in text
+        "(`hippo trust review` there)" in text
     )
 
 
@@ -833,7 +833,7 @@ def test_census_withholding_is_report_only():
     assert "mark_trusted" not in src
     assert "untrust(" not in src  # the verb CALL; untrusted_changes is the detector read
     assert "_write_registry" not in src
-    assert "re-consent in that project (trust_corpus / doctor)" in src
+    assert "re-consent in that project (`hippo trust review` there)" in src
 
 
 def test_check_machine_state_gains_the_withholding_clause(monkeypatch):
@@ -848,7 +848,7 @@ def test_check_machine_state_gains_the_withholding_clause(monkeypatch):
     r = check_machine_state(None)
     assert r["status"] == "warn"
     assert "2 withholding corpora (trust drift — re-consent in that project)" in r["message"]
-    assert "python -m memory.machine_census" in r["message"]
+    assert "hippo census" in r["message"]
     monkeypatch.setattr(
         MC, "trust_census", lambda: {"entries": [], "live": 1, "dead": 0, "withholding": 1}
     )

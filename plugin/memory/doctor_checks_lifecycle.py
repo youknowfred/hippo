@@ -49,7 +49,7 @@ def check_invalid_after_terminal(ctx: DoctorContext) -> Dict[str, str]:
             "message": f"invalid_after: {len(names)} memor"
             + ("y" if len(names) == 1 else "ies")
             + f" retired past the old horizon with no code drift ({shown}) — archivable "
-            "via `python -m memory.archive`; reinstate per item via reconsolidate "
+            "via `hippo archive`; reinstate per item via reconsolidate "
             "outcome=graduate|fix.",
         }
     except Exception as exc:
@@ -125,7 +125,7 @@ def check_archive_regret(ctx: DoctorContext) -> Dict[str, str]:
             "status": "warn",
             "message": f"archive regret: {len(matches)} recurring abstention(s) match an "
             f"ARCHIVED memory's body ({shown}) — evidence only, logged; if one is a real "
-            "regret, a human can restore it by name (`python -m memory.archive --restore "
+            "regret, a human can restore it by name (`hippo archive --restore "
             "<stem>`); nothing restores automatically.",
         }
     except Exception as exc:
@@ -211,7 +211,7 @@ def check_merge_digest(ctx: DoctorContext) -> Dict[str, str]:
             }
         shown = "; ".join(
             f"{p['incoming']} ⇄ {p['neighbor']} → "
-            + ("/hippo:resolve" if p["route"] == "resolve" else "/hippo:consolidate")
+            + ("/hippo:tend" if p["route"] == "resolve" else "/hippo:tend")
             for p in pairs
         )
         return {
@@ -287,7 +287,7 @@ def check_subset_boundary(ctx: DoctorContext) -> Dict[str, str]:
             "message": f"subset boundary: {len(findings)} committed link target(s) dangle in a "
             f"fresh checkout ({len({d['file'] for d in findings})} of {view['files']} committed "
             f"files{heal}) — expected-not-error (PR #67), never a gate; view: "
-            "python -m memory.lint_links --boundary.",
+            "hippo lint-links --boundary.",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"subset-boundary check failed: {exc}."}

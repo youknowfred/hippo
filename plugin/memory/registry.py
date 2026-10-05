@@ -279,7 +279,7 @@ def _repair_note(entry: dict) -> str:
     if not entry["repairable"]:
         return ""
     canonical = os.path.join(entry["root"], ".claude", "memory")
-    return f" (a live corpus exists at {canonical} — re-run /hippo:init there to re-register)"
+    return f" (a live corpus exists at {canonical} — re-run /hippo:setup there to re-register)"
 
 
 def _render_report(census: dict) -> str:
@@ -287,7 +287,7 @@ def _render_report(census: dict) -> str:
     if not entries:
         return (
             f"projects registry: nothing registered ({census['path']}) — "
-            "populated by /hippo:init."
+            "populated by /hippo:setup."
         )
     lines = [
         f"projects registry: {census['path']} "
@@ -318,9 +318,9 @@ def _render_report(census: dict) -> str:
     if prunable:
         lines.append(
             f"prune the {_n(prunable, 'mechanically-safe dead entry', 'mechanically-safe dead entries')}: "
-            "python -m memory.registry --prune-dead"
+            "hippo registry --prune-dead"
         )
-    lines.append("drop any single entry: python -m memory.registry --drop <root>")
+    lines.append("drop any single entry: hippo registry --drop <root>")
     return "\n".join(lines)
 
 
@@ -329,7 +329,7 @@ def main(argv=None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="python -m memory.registry",
+        prog="hippo registry",
         description=(
             "Projects-registry hygiene (RCH-11): report every entry's live/dead state, "
             "prune the temp-rooted dead ones, or drop one named entry."
@@ -378,7 +378,7 @@ def main(argv=None) -> int:
             print(
                 f"kept (not temp-rooted or retired-worktree — possibly an unmounted "
                 f"checkout): {e['root']} — "
-                f"drop deliberately: python -m memory.registry --drop {e['root']}"
+                f"drop deliberately: hippo registry --drop {e['root']}"
             )
         if not result["removed"]:
             print("nothing to prune — no dead entries in a mechanically-safe class.")

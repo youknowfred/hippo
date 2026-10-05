@@ -76,7 +76,7 @@ def check_abstention_cold_start(ctx: DoctorContext) -> Dict[str, str]:
             "prompt that shares even one keyword with a memory surfaces a weak match, and "
             "there is no semantic signal to rank it below a real hit — no lexical threshold "
             "separates a coincidental overlap from a genuine one (RET-11). Run "
-            "/hippo:bootstrap to warm the dense model and get that ranking signal. Note it "
+            "/hippo:setup to warm the dense model and get that ranking signal. Note it "
             "will not make recall abstain MORE often: abstention needs every lane empty, and "
             "the dense lanes only add candidates (ABS-2).",
         }
@@ -201,7 +201,7 @@ def check_floor_calibration(ctx: DoctorContext) -> Dict[str, str]:
             return {
                 "status": "ok",
                 "message": "floor calibration: no sweep recorded — "
-                "`python -m memory.eval_recall --floor-sweep` writes one (RET-9).",
+                "`hippo eval --floor-sweep` writes one (RET-9).",
             }
         # Staleness leg: only when an index is actually loadable — the sweep report is
         # self-contained (model + recommendation), so a deleted/rebuildable index cache
@@ -214,7 +214,7 @@ def check_floor_calibration(ctx: DoctorContext) -> Dict[str, str]:
                     return {
                         "status": "ok",
                         "message": "floor calibration: recorded sweep is STALE (corpus changed "
-                        "since) — re-run `python -m memory.eval_recall --floor-sweep`.",
+                        "since) — re-run `hippo eval --floor-sweep`.",
                     }
         configured = _dense_floor(sweep.get("model"))
         recommended = sweep.get("recommended")

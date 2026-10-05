@@ -793,7 +793,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(
             "The cold/never-recalled signal is not yet trustworthy — nothing is listed by "
             "design; re-run after more sessions. Note: coldness is CLONE-LOCAL unless teammates "
-            "commit per-user usage (TEA-5: `python -m memory.soak --record-usage` + commit "
+            "commit per-user usage (TEA-5: `hippo soak --record-usage` + commit "
             ".claude/memory/.usage/), which unions cross-clone recalls before judging cold."
         )
         return 0
@@ -817,7 +817,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not read_committed_usage(memory_dir)["memories"]:
         print(
             "  ⚠ the 'cold' leg is CLONE-LOCAL (only this clone's recalls) — a memory a "
-            "teammate hits daily can appear here. Union team usage first: `python -m memory.soak "
+            "teammate hits daily can appear here. Union team usage first: `hippo soak "
             "--record-usage` on each clone + commit .claude/memory/.usage/ (TEA-5)."
         )
     for item in candidates:

@@ -1270,7 +1270,7 @@ def test_worklist_nudge_names_a_runnable_verb_on_both_surfaces(repo, memory_dir,
     out = R.reconsolidation_producer(memory_dir, repo) or ""
     assert out, "worklist expected"
     assert "`provenance --reverify" not in out, "names a command that does not exist"
-    assert "reconsolidate" in out and "tool" in out, "must name the cross-surface verb"
-    assert "/hippo:" in out, (
-        "must carry a /hippo: token, the typed command that runs on both surfaces"
+    assert "tend" in out and "tool" in out, "must name the cross-surface verb"
+    assert "tend memory" in out, (
+        "must carry the intent phrase, which routes to /hippo:tend on both surfaces"
     )

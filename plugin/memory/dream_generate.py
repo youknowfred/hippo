@@ -991,7 +991,7 @@ def sweep_drafts(
             f"  ⌛ EXPIRED {stem} — unconfirmed for {item['age']} distinct sessions "
             f"(horizon {draft_horizon()}): validity window closed (recall demotes it "
             f"further); ARCHIVE PROPOSED — execute with "
-            f"`python -m memory.dream --archive-draft {stem}`."
+            f"`hippo dream --archive-draft {stem}`."
         )
 
     for item in state["awaiting_archive"]:
@@ -1322,7 +1322,7 @@ def run_generative_pass(
                 f"   ✚ STAGED {row['memory']} ({row['kind']}, confidence: draft, "
                 f"[{row['edge_id']}]) — down-weighted in recall, expires at horizon "
                 f"{draft_horizon()} unless outcome evidence graduates it; undo with "
-                f"`python -m memory.dream --undo {row['edge_id']}`"
+                f"`hippo dream --undo {row['edge_id']}`"
             )
         for prop, reason in staged["refused"]:
             lines.append(f"   ✘ refused {prop.get('name', '?')}: {reason}")

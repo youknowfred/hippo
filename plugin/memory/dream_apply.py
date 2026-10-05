@@ -446,7 +446,7 @@ def retire_ghost_edge(
     if holders:
         return 1, (
             f"🌙 dream --retire-ghost REFUSED: {edge_id} is not a ghost — its stamp is on disk "
-            f"in {', '.join(holders)}. Reverse real bytes with `python -m memory.dream --undo "
+            f"in {', '.join(holders)}. Reverse real bytes with `hippo dream --undo "
             f"{edge_id}` (archive-aware); nothing was written."
         )
     if unreadable:
@@ -558,7 +558,7 @@ def dream_applied_producer(memory_dir: str, repo_root: str, ctx=None) -> Optiona
         lines = [
             f"🌙 dream applied {len(fresh)} edge(s) awaiting age-in (each becomes trusted "
             f"/dream source after {window} sessions un-undone; revert any with "
-            "`python -m memory.dream --undo <edge-id>` or all recent with --undo-since):"
+            "`hippo dream --undo <edge-id>` or all recent with --undo-since):"
         ]
         for e in fresh[:_PRODUCER_MAX_ITEMS]:
             left = window - (now - e.get("applied_at_distinct_count", now))

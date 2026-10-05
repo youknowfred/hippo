@@ -68,7 +68,7 @@ def test_capture_to_approval_end_to_end(repo, monkeypatch):
 
     # 2) SessionStart nudge — the next session is told the queue awaits review.
     nudge = SS.pending_capture_producer(md, repo)
-    assert nudge and "1 pending" in nudge and "/hippo:consolidate" in nudge
+    assert nudge and "1 pending" in nudge and "/hippo:tend" in nudge
 
     # 3) The drain reads the seed and drafts a candidate fact from its provenance.
     seed = C.read_pending(memory_dir=md)[0]

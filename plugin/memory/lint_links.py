@@ -379,7 +379,8 @@ def health_line(report: dict) -> Optional[str]:
     # state for a leaf memory and is why orphans alone deliberately do not fire this line at
     # all (see the early return above). Say which thing it is.
     tail = f"; {n_orphans} orphan memo(s) (no outbound links)" if n_orphans else ""
-    return "🔗 Memory link health — " + "; ".join(bits) + tail + " (run `memory.lint_links`)."
+    return ("🔗 Memory link health — " + "; ".join(bits) + tail
+            + " (say \"tend memory\" to fix them one at a time; `hippo lint-links` lists them).")
 
 
 def lint_links_producer(

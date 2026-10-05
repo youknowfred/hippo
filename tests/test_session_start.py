@@ -197,7 +197,7 @@ def test_staleness_producer_old_invalidation_suggests_the_archive_flow(memory_di
     _stub_stale(monkeypatch, ["m_old"])
 
     out = S.staleness_producer(memory_dir, "repo")
-    assert "/hippo:audit" in out and "m_old" in out  # named ONLY in the archive suggestion
+    assert "/hippo:doctor" in out and "m_old" in out  # named ONLY in the archive suggestion
     assert "old-invalidation horizon" in out
 
 
@@ -555,7 +555,7 @@ def test_doctor_reports_the_empty_baseline_the_hook_no_longer_heals(tmp_path, mo
     r = D.check_empty_baselines(D.DoctorContext(memory_dir=md, repo_root=repo))
     assert r["status"] == "warn"
     assert "residual" in r["message"]
-    assert "--heal-baselines" in r["message"]  # names the command the human runs
+    assert "hippo tend next --kind baseline" in r["message"]  # names the command the human runs
 
 
 # --------------------------------------------------------------------------- #
@@ -583,7 +583,7 @@ def _plugin_env(tmp_path, monkeypatch, *, req_text: str, sentinel_hash):
 def test_stale_venv_producer_nudges_on_dep_bump(tmp_path, monkeypatch):
     _plugin_env(tmp_path, monkeypatch, req_text="numpy>=2\n", sentinel_hash="0" * 64)
     out = S.stale_venv_producer("md", "repo")
-    assert out and "/hippo:bootstrap" in out
+    assert out and "/hippo:setup" in out
 
 
 def test_stale_venv_producer_silent_when_hash_current(tmp_path, monkeypatch):
@@ -951,7 +951,7 @@ def test_squash_heal_producer_needs_both_signals(monkeypatch):
     out = S.squash_merge_heal_producer("md", "repo")
     assert out is not None
     assert "m_gone" in out
-    assert "/hippo:consolidate" in out
+    assert "/hippo:tend" in out
     assert "--outcome graduate" in out
     assert "per item" in out
 
@@ -1053,9 +1053,9 @@ def test_cite_derivation_producer_nudges_a_corpus_derived_by_the_old_extractor(t
     # to a health check that then named nothing, so the loop dead-ended: nudge -> doctor ->
     # (no command). Stating a conclusion while never naming the oracle is exactly LIF-4's
     # complaint, one layer up. The line must now carry the verb itself.
-    assert "rederive" in line  # the MCP tool — the ONLY form a Desktop user can call
-    assert "action='worklist'" in line  # ...and how to review before writing anything
-    assert "--rederive-worklist" in line  # the terminal form
+    assert "tend memory" in line  # the intent phrase — it routes on every surface
+    assert "citation diff" in line  # ...and what is reviewed before anything is written
+    assert "hippo tend next --kind derivation" in line  # the terminal form
     assert "per-item" in line  # still never a bulk self-migration
 
 

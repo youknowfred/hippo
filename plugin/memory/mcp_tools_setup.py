@@ -125,19 +125,17 @@ def _tool_doctor(args: Dict[str, Any]) -> str:
         memory_dir, repo_root = resolve_dirs()
         report = render(DoctorContext(memory_dir, repo_root))
     return report + caveat + (
-        "\n\nOn this MCP surface the named fixes map to tools: /hippo:bootstrap → the "
-        "bootstrap tool (action='start'), /hippo:init → the init tool, the "
-        "trust/consent step (`hippo trust review` / `grant`) → the trust_corpus tool, and "
-        "/hippo:consolidate's steps → the capture, new_memory (check:true first), "
-        "secrets_scan, reconsolidate, build_index, co_recall_proposals, and "
-        "abstention_fixtures tools (per item, as the consolidate skill directs)."
+        "\n\nOn this MCP surface the named fixes map to tools: /hippo:setup → the setup "
+        "tool (action='bootstrap' with step='start', then action='init'), the consent step "
+        "(`hippo trust review` / `grant`) → the trust tool (action='review', then 'grant'), "
+        "and \"tend memory\" → the tend tool (per item, as the tend skill directs)."
     )
 
 
 _NO_DATA_DIR_MSG = (
     "CLAUDE_PLUGIN_DATA is unset in this server's environment — there is nowhere to "
     "provision. This Claude Code version may be too old for plugin self-provisioning; "
-    "update it, or bootstrap from a terminal (/hippo:bootstrap)."
+    "update it, or bootstrap from a terminal (/hippo:setup)."
 )
 
 
@@ -155,7 +153,7 @@ def _tool_bootstrap(args: Dict[str, Any]) -> str:
         elif s.get("state") == "current":
             lines.append(
                 "✔ bootstrapped. To finish enabling dense recall for a project, run the "
-                "init tool once — it rebuilds the index under the new venv so it carries "
+                "setup tool's action='init' once — it rebuilds the index under the new venv so it carries "
                 "dense vectors; hooks then serve dense recall from the next prompt. (The "
                 "core recall/why tools in THIS server process stay BM25 until the session "
                 "restarts — its interpreter is fixed at session start.)"
@@ -191,7 +189,7 @@ def _tool_bootstrap(args: Dict[str, Any]) -> str:
             return (
                 f"bootstrap started (worker pid {r.get('pid')}) — the venv build + ~130MB "
                 "model download takes a few minutes. Poll with action='status'; done when "
-                "the state reads 'current', then run the init tool once so the project "
+                "the state reads 'current', then run the setup tool's action='init' once so the project "
                 "index rebuilds with dense vectors. Tell the user it is running in the "
                 "background."
             )
@@ -252,7 +250,7 @@ def _tool_init(args: Dict[str, Any]) -> str:
         if idx.get("error"):
             lines.append(f"⚠ index build failed: {idx['error']}")
         else:
-            dense = "hybrid" if idx.get("dense_ready") else "BM25-only (run the bootstrap tool for dense)"
+            dense = "hybrid" if idx.get("dense_ready") else "BM25-only (run the setup tool's action='bootstrap' for dense)"
             lines.append(f"✔ index built — {idx.get('count')} memories, {dense}")
     gi = r.get("gitignore")
     if gi == "patched":
@@ -296,7 +294,7 @@ def _tool_init(args: Dict[str, Any]) -> str:
         lines.append(
             "🔒 This machine is wired up, but the PRE-EXISTING corpus is NOT trusted yet — "
             "recall injects nothing from it until its content is reviewed (SEC-1; typing "
-            "/hippo:init in a terminal is itself that review, a model-invoked init is not). "
+            "/hippo:setup in a terminal is itself that review, a model-invoked init is not). "
             "Next step: call trust_corpus to review what it would inject and take the "
             "user's explicit consent."
         )
@@ -342,8 +340,8 @@ def _tool_trust_corpus(args: Dict[str, Any]) -> str:
     if gate_root is None:
         return (
             "trust_corpus: the trust gate is inapplicable here — no git repo and no memory "
-            "corpus content to gate. If this project has no corpus yet, run the init tool "
-            "first."
+            "corpus content to gate. If this project has no corpus yet, run the setup tool's "
+            "action='init' first."
         )
     already = trust.is_trusted(gate_root)
     digest = _consent_digest(memory_dir)

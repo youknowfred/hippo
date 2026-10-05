@@ -135,7 +135,7 @@ def test_session_start_names_a_nested_repo_in_one_line(tmp_path):
     _assert_contract(proc, "SessionStart")
     ctx = _ctx(proc)
     assert ctx.startswith(f"This repo is nested inside {os.path.realpath(project)}")
-    assert "run /hippo:init here" in ctx and "\n" not in ctx
+    assert "run /hippo:setup here" in ctx and "\n" not in ctx
     assert not os.path.isdir(os.path.join(child, ".claude"))  # wrote nothing
 
 
@@ -143,7 +143,7 @@ def test_session_start_nested_line_on_desktop_names_the_init_tool(tmp_path):
     child = _git_init(tmp_path / "project" / "child")
     proc, _, _ = _hook_in(tmp_path, child, entrypoint="claude-desktop")
     ctx = _ctx(proc)
-    assert "nested inside" in ctx and "init MCP tool" in ctx and "/hippo:init" not in ctx
+    assert "nested inside" in ctx and "setup MCP tool's init step" in ctx and "/hippo:setup" not in ctx
 
 
 def test_session_start_has_no_nested_line_for_a_subdir_or_a_plain_dir(tmp_path):

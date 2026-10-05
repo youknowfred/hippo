@@ -60,7 +60,7 @@ def _tool_capture(args: Dict[str, Any]) -> str:
             )
             if any(s.get("hunks_secret_flagged") for s in seeds):
                 out.append(
-                    "on this MCP surface, scan_with_remediation = the secrets_scan tool — "
+                    "on this MCP surface, scan_with_remediation = the doctor tool's action='secrets_scan' — "
                     "lint the exact hunk lines there before fencing ANY into a body."
                 )
             out.append(
@@ -521,11 +521,11 @@ def _tool_build_index(args: Dict[str, Any]) -> str:
     manifest = refresh_index(memory_dir)
     if manifest is None:
         return (
-            "build_index: no index was produced — is there a corpus here? Run the init "
-            "tool first."
+            "build_index: no index was produced — is there a corpus here? Run the setup "
+            "tool (action='init') first."
         )
     dense = (
-        "hybrid" if manifest.get("dense_ready") else "BM25-only (run the bootstrap tool for dense)"
+        "hybrid" if manifest.get("dense_ready") else "BM25-only (run the setup tool's action='bootstrap' for dense)"
     )
     return (
         f"index refreshed — {manifest.get('count')} memories, {dense}\n"
@@ -609,7 +609,7 @@ def _tool_co_recall_proposals(args: Dict[str, Any]) -> str:
         "For EACH pair: read both memories and judge whether the association is real — "
         "would someone recalling one genuinely need the other? On explicit approval, append "
         "a [[the-other-name]] reference into ONE side's body (its Related: line if present) "
-        "— a per-item agent edit; this tool never writes — then run the build_index tool so "
+        "— a per-item agent edit; this tool never writes — then rebuild the index (the setup tool's action='build_index') so "
         "links.json carries the edge. If no, skip it; the tally keeps its count."
     )
     return "\n".join(out)

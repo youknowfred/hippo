@@ -92,8 +92,12 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
    them affects every other project on this machine still using the plugin, so this skill only
    ever prints them for the user's own manual reclamation:
    - venv: `${CLAUDE_PLUGIN_DATA}/venv`
-   - fastembed model cache: the path `memory.build_index.durable_fastembed_cache_dir()` returns
-     (print it via `"$PY" -c "from memory.build_index import durable_fastembed_cache_dir; print(durable_fastembed_cache_dir())"`)
+   - fastembed model cache: the path this prints
+     ```bash
+     export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+     . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
+     "$PY" -c "from memory.build_index import durable_fastembed_cache_dir; print(durable_fastembed_cache_dir())"
+     ```
 
    State explicitly: "these are shared across every project using hippo on this machine — only
    delete them yourself if you're removing hippo everywhere, not just from this project."

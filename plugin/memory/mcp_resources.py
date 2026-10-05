@@ -89,7 +89,7 @@ def _resource_floor() -> str:
     if portable:
         parts.append("## Portable floor (user & private tiers)\n\n" + portable)
     if not parts:
-        return header + "\n\nFloor empty — no always-on memory configured yet (/hippo:init)."
+        return header + "\n\nFloor empty — no always-on memory configured yet (/hippo:setup)."
     return header + "\n\n" + "\n\n".join(parts)
 
 
@@ -137,7 +137,7 @@ def _resource_rules_view() -> str:
     conflicts = radar["edge_conflicts"]
     gaps = radar["authority_gaps"]
     if conflicts or gaps:
-        lines.append("## Conflicts (decide per item via /hippo:consolidate — nothing auto-resolves)")
+        lines.append("## Conflicts (decide per item via /hippo:tend — nothing auto-resolves)")
         for c in conflicts:
             lines.append(
                 f"- {c['cited_by'][0]} cites `{c['name']}` but `{c['by']}` {c['relation']} it"

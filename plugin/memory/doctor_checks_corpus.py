@@ -142,12 +142,10 @@ def check_format_version(ctx: DoctorContext) -> Dict[str, str]:
                 "sources; v4 bound a directory-qualified token to any file of that basename; "
                 "v5 dropped such a token among several same-named files instead of letting "
                 "its directories pick the one), so some memories watch the wrong file and some are staleness-"
-                "EXEMPT on an empty cited_paths. Review "
-                "with the rederive MCP tool (action='worklist'), apply per memory "
-                "(action='one' name=…), then action='stamp' — or in a terminal, "
-                "python -m memory.provenance --rederive-worklist / --rederive-one <name> / "
-                "--stamp-derivation. It rewrites frontmatter, so it is per-item, "
-                "consent-gated and never automatic"
+                "EXEMPT on an empty cited_paths. Work it through the maintenance queue: say "
+                "\"tend memory\" (or `hippo tend next --kind derivation`), apply each memory's "
+                "citation diff, then stamp the corpus. It rewrites frontmatter, so it is "
+                "per-item, consent-gated and never automatic"
             )
 
         return {"status": status, "message": "; ".join(parts) + "."}
@@ -607,7 +605,7 @@ def check_dream_ledger(ctx: DoctorContext) -> Dict[str, str]:
                     "status": "warn",
                     "message": f"{len(inert)} ACTIVE dream edge(s) whose source memory is "
                     f"archived (stamp intact under archive/): {', '.join(inert[:5])} — inert "
-                    "by definition, not corruption. Retire each with `python -m memory.dream "
+                    "by definition, not corruption. Retire each with `hippo dream "
                     "--undo <edge-id>` (archive-aware); archives made by archive_memory now "
                     "retire their edges automatically.",
                 }
@@ -644,10 +642,10 @@ def check_dream_ledger(ctx: DoctorContext) -> Dict[str, str]:
         return {
             "status": "fail",
             "message": "dream stamp/ledger MISMATCH — " + "; ".join(parts) + ". Reconcile "
-            "via `python -m memory.dream --log` (+ --undo for stray edges) or git history"
+            "via `hippo dream --log` (+ --undo for stray edges) or git history"
             + (
                 "; a ghost whose stamp is provably gone (nothing to undo, nothing in git to "
-                "restore) retires per edge with `python -m memory.dream --retire-ghost "
+                "restore) retires per edge with `hippo dream --retire-ghost "
                 "<edge-id>` (MCP: dream action='retire_ghost' edge_id=…) — it proves the "
                 "absence itself and refuses otherwise"
                 if ghosts
@@ -750,7 +748,7 @@ def check_non_english_corpus(ctx: DoctorContext) -> Dict[str, str]:
         return {
             "status": "warn",
             "message": f"corpus is {fraction:.0%} non-Latin-alphabetic but is served by the English "
-            "default embedding model — consider `/hippo:bootstrap --multilingual` (switches to "
+            "default embedding model — consider `/hippo:setup --multilingual` (switches to "
             "a multilingual model; forces a one-time full re-embed of the corpus).",
         }
     except Exception as exc:

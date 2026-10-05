@@ -114,7 +114,7 @@ def _abstention_receipt(
     )
     tail = (
         "\nAbstention is a feature (RET-1); if a memory SHOULD answer this, enrich its "
-        "description (/hippo:consolidate) or pin it (steer: pin)."
+        "description (/hippo:tend) or pin it (steer: pin)."
     )
     try:
         gate_root = trust.gate_repo_root(memory_dir, repo_root)
@@ -431,7 +431,7 @@ def list_by_type(*, memory_dir: Optional[str] = None) -> str:
     if not buckets:
         return (
             "This project has no memory corpus yet (nothing under .claude/memory/). "
-            "Run /hippo:init to seed one."
+            "Run /hippo:setup to seed one."
         )
     keys = [t for t in _TYPE_ORDER if t in buckets] + sorted(
         t for t in buckets if t not in _TYPE_ORDER
@@ -471,7 +471,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=None,
         metavar="NAME",
         help="RCH-3: replay the supersedes/refines decision chain around a memory as an "
-        "ordered narrative (same builder the decision_history MCP tool renders)",
+        "ordered narrative (same builder the inspect MCP tool's action='history' renders)",
     )
     parser.add_argument(
         "--all-projects",

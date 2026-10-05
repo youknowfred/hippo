@@ -120,7 +120,7 @@ def stale_venv_producer(
         return None
     return (
         "⚠ hippo deps changed with the last plugin update — the venv still runs the "
-        "old dependency set (new imports degrade silently). Run /hippo:bootstrap to "
+        "old dependency set (new imports degrade silently). Run /hippo:setup to "
         "re-provision."
     )
 
@@ -233,12 +233,11 @@ def cite_derivation_producer(
         f"🧬 Citation derivation — this corpus's cited_paths were derived by extractor "
         f"v{declared}; this plugin derives v{CITATION_DERIVATION_VERSION}. {'; '.join(gaps)} "
         "— so some memories watch the wrong file and some carry an empty cited_paths, which "
-        "makes them EXEMPT from staleness tracking. Review the attributed diff with the "
-        "`rederive` MCP tool (action='worklist'), apply it ONE memory at a time "
-        "(action='one' name=…), then action='stamp' to record it and stop this line. In a "
-        "terminal: `--rederive-worklist` / `--rederive-one <name>` / `--stamp-derivation` on "
-        "`python -m memory.provenance`. It rewrites frontmatter, so it is per-item and asks "
-        "first; take action='snapshot' first if this corpus is gitignored (no git undo)."
+        "makes them EXEMPT from staleness tracking. Say \"tend memory\" to review each "
+        "memory's citation diff and apply it ONE at a time, then stamp the corpus to stop "
+        "this line (`hippo tend next --kind derivation` in a terminal). It rewrites "
+        "frontmatter, so it is per-item and asks first; on a gitignored corpus take a "
+        "snapshot first (`hippo provenance --snapshot <label>`; no git undo)."
     )
 
 
@@ -401,7 +400,7 @@ def squash_merge_heal_producer(
         return (
             f"🩹 A merge landed recently and {len(names)} memories' staleness baselines no "
             "longer resolve (squash-merge rewrites history). Heal them per item via "
-            "/hippo:consolidate: confirm each memory still holds post-merge, then "
+            "/hippo:tend: confirm each memory still holds post-merge, then "
             "`reconsolidate --reverify <name> --outcome graduate` re-baselines it to the "
             f"current HEAD (reverify_file re-derives its citations too). Broken: {shown}{more}."
         )
@@ -507,6 +506,6 @@ def untrusted_corpus_nudge(memory_dir: str, repo_root: str) -> Optional[str]:
         "repo's memories are an unreviewed prompt-injection channel, so recall stays gated "
         "by default (a corpus extracted without git included). Next step: `hippo trust "
         "review` shows what it would inject, and its grant line consents to what you approve "
-        "— or /hippo:init if the corpus is yours (set HIPPO_TRUST_ALL=1 for CI, or "
+        "— or /hippo:setup if the corpus is yours (set HIPPO_TRUST_ALL=1 for CI, or "
         "HIPPO_TRUST_NONGIT=1 for a hand-made non-git corpus)."
     )

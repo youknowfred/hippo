@@ -65,7 +65,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Recall top-K memories for a query.",
         epilog="A query that STARTS with '-' needs the standard '--' separator "
-        "(flags first): python -m memory.recall_hook --memory-dir X -- '-v shaped query'. "
+        "(flags first): hippo recall --memory-dir X -- '-v shaped query'. "
         "The hook path is unaffected — it passes the prompt via --stdin-json, never argv.",
     )
     parser.add_argument("query", nargs="*", help="the query text (see epilog for '-'-leading queries)")

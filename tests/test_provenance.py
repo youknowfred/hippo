@@ -428,7 +428,7 @@ def test_reverify_requires_backfill_first(repo, memory_dir):
     git_commit(repo, "init", 1_700_000_000)
     write_file(repo, ".claude/memory/m.md", "---\nname: M\ntype: project\n---\nbody\n")
     res = _reverify_one(memory_dir, repo, "m")
-    assert res["changed"] is False and res["error"] and "backfill" in res["error"]
+    assert res["changed"] is False and res["error"] and "hippo provenance --refresh-one" in res["error"]
 
 
 def test_no_bulk_reverify_symbol():

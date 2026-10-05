@@ -138,7 +138,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--contradictions",
         action="store_true",
         help="DRM-C: run the LLM contradiction check over this pass's high-cofire pairs "
-        "(propose-only → the /hippo:resolve inbox; also enabled by "
+        "(propose-only → the /hippo:tend inbox; also enabled by "
         "HIPPO_DREAM_CONTRADICTIONS=1; needs an API key — silently skipped without one)",
     )
     parser.add_argument("--probe-k", type=int, default=None, help="co-fire probe depth (default 10)")

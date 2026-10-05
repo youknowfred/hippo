@@ -16,7 +16,7 @@ _PACK_TOOLS = [
         "name": "pack_extract",
         "description": (
             "Extract chosen corpus memories into a shareable pack directory "
-            "(manifest.json in the shipped packs' exact shape) — /hippo:pack's outbound "
+            "(manifest.json in the shipped packs' exact shape) — /hippo:share's outbound "
             "path. Pass names=[…], or all=true to let the canonical corpus filter select "
             "every real, un-retired memory (NEVER glob the corpus dir yourself — docs "
             "like MEMORY.md/CONVENTIONS.md live there and are not memories; all-mode "

@@ -114,7 +114,7 @@ def test_incoming_duplicate_surfaces_one_routed_pair(repo, memory_dir, tmp_path,
     assert out is not None
     assert "🔀 Incoming-merge duplicate digest" in out
     assert "m-in ⇄ m-local" in out
-    assert "/hippo:consolidate" in out and "GRW-3" in out
+    assert "/hippo:tend" in out and "GRW-3" in out
     assert "nothing merges or writes edges automatically" in out
 
 
@@ -126,7 +126,7 @@ def test_contradicts_pair_routes_to_resolve(repo, memory_dir, tmp_path, monkeypa
     _build(memory_dir)
     out = merge_digest_producer(memory_dir, repo)
     assert out is not None
-    assert "m-in ⇄ m-local" in out and "/hippo:resolve" in out
+    assert "m-in ⇄ m-local" in out and "/hippo:tend" in out
 
 
 def test_pairs_capped_at_five(repo, memory_dir, tmp_path, monkeypatch):
@@ -251,6 +251,6 @@ def test_doctor_merge_digest_warns_with_routed_pairs(repo, memory_dir, tmp_path,
     r = check_merge_digest(DoctorContext(memory_dir, repo))
     assert r["status"] == "warn"
     assert "m-in ⇄ m-local" in r["message"]
-    assert "/hippo:consolidate" in r["message"]
+    assert "/hippo:tend" in r["message"]
     assert "\n" not in r["message"]
     assert check_merge_digest(DoctorContext(memory_dir, repo)) == r  # deterministic

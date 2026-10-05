@@ -51,7 +51,7 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   SID_SAFE="$(printf '%s' "$SID" | tr -d '\042\134')"
   SID_FLAG=""
   [ -n "$SID_SAFE" ] && SID_FLAG=" --session-id '$SID_SAFE'"
-  MSG="$MSG Separately, record the WHY that cannot be re-derived from the diff — each decision the user explicitly made or confirmed this session (a tradeoff taken, an approach chosen, a constraint stated) — one command per decision, quoting or faithfully paraphrasing the user, never inferring: hippo capture --add-decision 'the decision, in one sentence'$SID_FLAG — these land in this session's capture seed for the next /hippo:consolidate drain."
+  MSG="$MSG Separately, record the WHY that cannot be re-derived from the diff — each decision the user explicitly made or confirmed this session (a tradeoff taken, an approach chosen, a constraint stated) — one command per decision, quoting or faithfully paraphrasing the user, never inferring: hippo capture --add-decision 'the decision, in one sentence'$SID_FLAG — these land in this session's capture seed for the next tend drain."
 fi
 
 printf '{"hookSpecificOutput":{"hookEventName":"PreCompact","additionalContext":"%s"}}\n' "$MSG" 2>/dev/null || true

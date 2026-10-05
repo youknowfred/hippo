@@ -89,7 +89,7 @@ def test_finds_cross_project_duplicate_with_provenance(tmp_path, monkeypatch):
         assert side["sha"] == "aaaabbbbcccc"[:7] or side["sha"].startswith("aaaabbb")
     # ... and the rendered report routes through the EXISTING per-item promote flow.
     text = PS.render_report(res)
-    assert "/hippo:promote" in text
+    assert "/hippo:share" in text
     assert "canary-first" in text and "deploy-canary-rule" in text
 
 
@@ -193,7 +193,7 @@ def test_sleep_report_carries_promotion_section_when_nonempty(tmp_path, monkeypa
     assert rc == 0
     out = capsys.readouterr().out
     assert "Cross-project promotion candidates" in out
-    assert "/hippo:promote" in out
+    assert "/hippo:share" in out
 
 
 def test_sleep_report_empty_norm_omits_the_section(tmp_path, monkeypatch, capsys):

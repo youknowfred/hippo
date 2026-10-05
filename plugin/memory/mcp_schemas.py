@@ -144,7 +144,7 @@ _TOOLS = [
     {
         "name": "bootstrap",
         "description": (
-            "One-time per-machine-surface provisioning — the /hippo:bootstrap flow: builds "
+            "One-time per-machine-surface provisioning — the /hippo:setup flow: builds "
             "the plugin venv and downloads the ~130MB offline embedding model (the ONE "
             "online step in hippo's lifecycle; recall already works BM25-only without it). "
             "action='start' kicks off a detached background worker and returns immediately; "
@@ -178,7 +178,7 @@ _TOOLS = [
     {
         "name": "init",
         "description": (
-            "One-time project setup — the mechanical core of the /hippo:init flow. On a "
+            "One-time project setup — the mechanical core of the /hippo:setup flow. On a "
             "project with no corpus it seeds .claude/memory/ (core starter pack + MEMORY.md "
             "floor + format marker), then on every run it wires THIS machine: the native-"
             "memory symlink, the recall index, CONVENTIONS.md backfill, the .gitignore "
@@ -365,7 +365,7 @@ _TOOLS = [
     {
         "name": "capture",
         "description": (
-            "The CAP-2 pending-capture queue — Step 1 of /hippo:consolidate's drain. "
+            "The CAP-2 pending-capture queue — Step 1 of /hippo:tend's drain. "
             "action='list' (default) shows every queued seed highest-value first with its "
             "provenance (session, commit range, changed paths, queries, user-confirmed "
             "decisions, verbatim-diff evidence + its secret-lint flag) and the queue dir; "
@@ -443,7 +443,7 @@ _TOOLS = [
     {
         "name": "reconsolidate",
         "description": (
-            "The LIF-1 reconsolidation worklist — Step 2 of /hippo:consolidate. "
+            "The LIF-1 reconsolidation worklist — Step 2 of /hippo:tend. "
             "action='worklist' (default) lists recently-recalled memories whose cited "
             "code has since drifted (plus commit-precise [since-watermark] hits), "
             "most-recently-drifted first, with 1-hop linked neighbors as review-adjacent "
@@ -496,7 +496,7 @@ _TOOLS = [
         "description": (
             "Refresh the recall index + the persisted link graph (links.json) so this "
             "session's writes are live and staleness is recomputed — Step 3 of "
-            "/hippo:consolidate, and the required follow-up after any approved co-recall "
+            "/hippo:tend, and the required follow-up after any approved co-recall "
             "wikilink append or typed-edge write. Offline and bounded: runs the full "
             "build under the freshly-bootstrapped venv python when one exists (dense "
             "vectors), else a never-downgrade in-process incremental refresh (a dense "
@@ -508,7 +508,7 @@ _TOOLS = [
     {
         "name": "co_recall_proposals",
         "description": (
-            "GRW-2 co-recall edge proposals — Step 4 of /hippo:consolidate. Similarity "
+            "GRW-2 co-recall edge proposals — Step 4 of /hippo:tend. Similarity "
             "can never link a bug to its unrelated-looking workaround, but the episode "
             "buffer records which memories actually SURFACE TOGETHER: this tallies pairs "
             "that co-recalled across many DISTINCT sessions (floor names excluded — they "
@@ -527,7 +527,7 @@ _TOOLS = [
     {
         "name": "abstention_fixtures",
         "description": (
-            "The SIG-6 blind-spot loop — Step 5 of /hippo:consolidate. A recurring "
+            "The SIG-6 blind-spot loop — Step 5 of /hippo:tend. A recurring "
             "abstained query means the corpus kept being asked something it couldn't "
             "answer, and the drain may have just captured exactly the memory that closes "
             "the gap. action='draft' (default) refreshes the gitignored drafts queue: one "
@@ -654,7 +654,7 @@ _TOOLS = [
     {
         "name": "resolve",
         "description": (
-            "Drain the contradiction inbox — /hippo:resolve's engine (the SessionStart "
+            "Drain the contradiction inbox — /hippo:tend's engine (the SessionStart "
             "contradiction-inbox nudge routes here). action='inbox' (default) lists "
             "every unresolved contradicts pair (declared frontmatter edges plus "
             "dream-PROPOSED candidates) with each side's description. For EACH pair, "
@@ -709,7 +709,7 @@ _TOOLS = [
     {
         "name": "audit",
         "description": (
-            "The /hippo:audit report MATERIAL, read-only — the skill's Phase-1 gather "
+            "The /hippo:doctor content-audit report MATERIAL, read-only — the skill's Phase-1 gather "
             "as one call (the old-invalidation SessionStart nudge routes here on this "
             "surface). Returns the cross-referenced JSON the audit skill's Phases 2-4 "
             "reason over: eval gates (skip_eval=true to skip the dense cluster), soak/"
@@ -746,7 +746,7 @@ _TOOLS = [
     {
         "name": "interview",
         "description": (
-            "EXT-3, the /hippo:consolidate asks step: at most THREE grounded questions "
+            "EXT-3, the /hippo:tend asks step: at most THREE grounded questions "
             "per session, template-rendered from existing gap signals — recurring "
             "recall abstentions (SIG-3), the unresolved contradiction inbox (GOV-1), "
             "and generated drafts at their decay horizon (DRM-6) — each citing its "

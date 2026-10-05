@@ -140,7 +140,7 @@ def test_capture_list_flagged_hunks_map_the_gate_to_the_secrets_scan_tool(corpus
     _seed(str(tmp_path / "pending"), hunks_secret_flagged=True)
     text = _text(_call("capture", {"action": "list"}))
     assert "scan_with_remediation" in text  # the CLI listing's own warning still travels
-    assert "secrets_scan tool" in text      # ...plus the mapping for THIS surface
+    assert "action='secrets_scan'" in text      # ...plus the mapping for THIS surface
 
 
 def test_capture_discard_by_filename_drains_the_seed(corpus, tmp_path):
@@ -347,7 +347,7 @@ def test_reconsolidate_brief_unknown_name_is_legible(repo_corpus):
 def test_reconsolidate_untrusted_is_withheld(corpus, monkeypatch):
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     text = _text(_call("reconsolidate", {}))
-    assert "withheld" in text and "trust_corpus" in text
+    assert "withheld" in text and "trust tool" in text
 
 
 # --------------------------------------------------------------------------- #
@@ -443,7 +443,7 @@ def test_co_recall_proposals_below_threshold_is_empty_by_design(corpus, tmp_path
 def test_co_recall_proposals_untrusted_is_withheld(corpus, monkeypatch):
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     text = _text(_call("co_recall_proposals", {}))
-    assert "withheld" in text and "trust_corpus" in text
+    assert "withheld" in text and "trust tool" in text
 
 
 # --------------------------------------------------------------------------- #
@@ -488,7 +488,7 @@ def test_abstention_fixtures_confirm_requires_query_and_stems(corpus):
 def test_abstention_fixtures_untrusted_is_withheld(corpus, monkeypatch):
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     text = _text(_call("abstention_fixtures", {}))
-    assert "withheld" in text and "trust_corpus" in text
+    assert "withheld" in text and "trust tool" in text
 
 
 # --------------------------------------------------------------------------- #
@@ -505,9 +505,7 @@ _FLOW_TOOLS = (
 def test_doctor_footer_maps_consolidate_to_the_flow_tools(corpus, tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     text = _text(_call("doctor", {}))
-    assert "/hippo:consolidate" in text
-    for tool in _FLOW_TOOLS:
-        assert tool in text, f"doctor's MCP-surface mapping no longer names {tool}"
+    assert '"tend memory" → the tend tool' in text  # the v2 route for the whole consolidate flow
 
 
 def test_consolidate_skill_preflight_maps_every_flow_tool():

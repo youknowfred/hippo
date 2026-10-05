@@ -120,25 +120,25 @@ if [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ ! -f "${CLAUDE_PLUGIN_DATA}/.nudge-dism
     NUDGE=""
     SILENCE="(To stop this note in this repo: printf '%s\n' '${REPO_KEY}' >> '${CLAUDE_PLUGIN_DATA}/nudge-dismissed-repos')"
     # The Claude Desktop app (CLAUDE_CODE_ENTRYPOINT=claude-desktop in the hook env) runs
-    # the same hooks/skills/MCP server; the setup flows there are the hippo MCP setup tools
-    # (bootstrap/init), so the nudge names THOSE. Typed /hippo:* runs there too (CLM-8).
+    # the same hooks/skills/MCP server; the setup flow there is the hippo setup MCP tool
+    # (bootstrap/init steps), so the nudge names it. Typed /hippo:* runs there too (CLM-8).
     if [ "${CLAUDE_CODE_ENTRYPOINT:-}" = "claude-desktop" ]; then
-      INIT_STEP="run the hippo init MCP tool (just ask for it)"
+      INIT_STEP="run the hippo setup MCP tool's init step (just ask for it)"
     else
-      INIT_STEP="run /hippo:init"
+      INIT_STEP="run /hippo:setup"
     fi
     if [ ! -x "${CLAUDE_PLUGIN_DATA}/venv/bin/python" ] || [ ! -f "${CLAUDE_PLUGIN_DATA}/.bootstrap-sentinel" ]; then
       if [ "${CLAUDE_CODE_ENTRYPOINT:-}" = "claude-desktop" ]; then
-        NUDGE="hippo memory is installed but not bootstrapped — recall is inert. Set it up via the hippo MCP setup tools: run bootstrap once per machine, then init once per project (just ask for it). ${SILENCE}"
+        NUDGE="hippo memory is installed but not bootstrapped — recall is inert. Set it up with the hippo setup MCP tool: bootstrap once per machine, then init once per project (just ask for it). ${SILENCE}"
       else
-        NUDGE="hippo memory is installed but not bootstrapped — recall is inert. Run /hippo:bootstrap once per machine, then /hippo:init once per project. ${SILENCE}"
+        NUDGE="hippo memory is installed but not bootstrapped — recall is inert. Run /hippo:setup once per machine, then once in each project. ${SILENCE}"
       fi
     elif OWNER="$(hippo_nested_owner)"; then
       NUDGE="This repo is nested inside ${OWNER}, so hippo resolves ${OWNER}'s memory corpus here, not one of this repo's own. To give this repo its own corpus, ${INIT_STEP} here. ${SILENCE}"
     elif ! hippo_floor_present && hippo_repo_opted_in "$REPO_KEY"; then
       NUDGE="hippo memory is enabled for this repo but it has no memory corpus yet — ${INIT_STEP} to seed .claude/memory/."
       if ND="$(hippo_native_memory_dir "$REPO_KEY")"; then
-        NUDGE="${NUDGE} Claude Code's own memory for this repo (${ND}) can be adopted into it; init previews that first."
+        NUDGE="${NUDGE} Claude Code's own memory for this repo (${ND}) can be adopted into it; setup previews that first."
       fi
       NUDGE="${NUDGE} ${SILENCE}"
     fi

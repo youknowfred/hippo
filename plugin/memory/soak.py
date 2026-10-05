@@ -307,7 +307,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("=== Curation report ===")
     print(f"usage-signal scope     : {scope}")
     if not cross_clone:
-        print("  (run `python -m memory.soak --record-usage` on each clone + commit .usage/ to make it team-wide)")
+        print("  (run `hippo soak --record-usage` on each clone + commit .usage/ to make it team-wide)")
     print(f"corpus memories        : {report['corpus_count']}")
     print(f"recalled >= once       : {report['recalled_count']}")
     print(f"never recalled (dead weight, {'cross-clone' if cross_clone else 'this clone only'}): {report['never_recalled_count']}")

@@ -213,7 +213,7 @@ def test_supersedes_gated_contradicts_routed_never_applied(dirs, monkeypatch):
     code, digest = _apply(md, idx, td)
     assert code == 0
     assert "supersedes candidate(s) GATED" in digest
-    assert "routed to /hippo:resolve" in digest
+    assert "routed to /hippo:tend" in digest
     assert _snapshot_md(md) == before, "Tier-B/C kinds must never touch the working tree"
     assert dream.read_apply_ledger(md) == []
 

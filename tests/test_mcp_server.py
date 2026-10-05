@@ -270,7 +270,7 @@ def test_pack_tools_honor_the_trust_gate(corpus, monkeypatch, tmp_path):
     corpus, so an untrusted corpus withholds it exactly as recall is withheld."""
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     resp = _call("pack_extract", {"dest": str(tmp_path / "p"), "all": True})
-    assert "untrusted" in _text(resp) and "trust_corpus" in _text(resp)
+    assert "untrusted" in _text(resp) and "trust tool" in _text(resp)
 
 
 def test_pack_skill_preflight_maps_every_pack_tool():
@@ -372,8 +372,8 @@ def test_untrusted_refusals_name_this_servers_own_tools(corpus, monkeypatch):
         ("decision_history", {"name": "deploy_runbook"}),
     ):
         text = _text(_call(tool, args))
-        assert "trust_corpus" in text, f"{tool} refusal must name the on-surface consent tool"
-        assert "/hippo:doctor" in text, f"{tool} refusal should still name the terminal path"
+        assert "trust tool" in text, f"{tool} refusal must name the on-surface consent tool"
+        assert "hippo trust review" in text, f"{tool} refusal should still name the terminal path"
 
 
 # --------------------------------------------------------------------------- #
@@ -524,7 +524,7 @@ def test_resources_read_rules_view_reports_conflict_and_rot(repo, memory_dir, mo
     text = _contents(_read("hippo://rules-view"))["text"]
     assert "CLAUDE.md cites `old_way` but `new_way` supersedes it" in text
     assert "`src/gone.py`" in text and "path gone" in text
-    assert "/hippo:consolidate" in text  # findings route to per-item decisions
+    assert "/hippo:tend" in text  # findings route to per-item decisions
 
 
 def test_resources_read_rules_view_clean_plane_is_legible(corpus, tmp_path, monkeypatch):
@@ -576,7 +576,7 @@ def test_resources_read_scorecard_rolls_up(corpus, tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     text = _contents(_read("hippo://scorecard"))["text"]
     assert "trust scorecard:" in text
-    assert "contested-unresolved (→ /hippo:resolve)" in text
+    assert "contested-unresolved (→ /hippo:tend)" in text
     assert "/hippo:doctor" in text  # the drill-down route
 
 

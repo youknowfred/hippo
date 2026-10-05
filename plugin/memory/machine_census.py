@@ -433,7 +433,7 @@ def _render_symlinks(farm: dict) -> List[str]:
         lines.append(
             "drain the "
             + _n(n_batch, "batch-safe entry", "batch-safe entries")
-            + ": python -m memory.machine_census --prune-dangling"
+            + ": hippo census --prune-dangling"
         )
     return lines
 
@@ -461,11 +461,11 @@ def _render_trust(census: dict) -> List[str]:
         if w:
             lines.append(
                 f"    WITHHOLDING {w['changed']} changed / {w['added']} added — "
-                "re-consent in that project (trust_corpus / doctor)"
+                "re-consent in that project (`hippo trust review` there)"
             )
     lines.append(
-        "  rows are REPORT-ONLY pending owner decision Q2 — the per-row route is the "
-        "`untrust` tool, which also deletes the row's SEC-6 fingerprint baseline "
+        "  rows are REPORT-ONLY pending owner decision Q2 — the per-row route is "
+        "`hippo trust revoke` in that project, which also deletes the row's fingerprint baseline "
         "(an unmounted-volume row would go from 'comes back trusted' to full re-consent)."
     )
     return lines
@@ -555,7 +555,7 @@ def main(argv=None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="python -m memory.machine_census",
+        prog="hippo census",
         description=(
             "Machine-state census (HYG-1): classify every machine-state class hippo "
             "creates — projects-registry rows, ~/.claude/projects memory symlinks, "

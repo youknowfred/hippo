@@ -244,7 +244,7 @@ def _tier_a_pass(memory_dir: str) -> Tuple[Optional[str], Optional[str]]:
     if applied > 0:
         lead = (
             f"{first} — undo: the dream tool action='undo' "
-            f"(terminal: `--undo` on `python -m memory.dream`)"
+            f"(terminal: `--undo` on `hippo dream`)"
         )
         return lead, text
     return None, text

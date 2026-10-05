@@ -18,8 +18,9 @@ from typing import Any, Dict
 # invocation on surfaces that reject typed commands, e.g. the Claude Desktop app) and the
 # typed terminal commands second.
 _UNTRUSTED_REMEDY = (
-    "Review and trust it with this server's doctor + trust_corpus tools — or the init tool "
-    "if the corpus is yours (in a terminal: /hippo:doctor, or /hippo:init)."
+    "Review and trust it with this server's trust tool (action='review', then 'grant' with "
+    "its digest) — or the setup tool's action='init' if the corpus is yours (in a terminal: "
+    "hippo trust review, or /hippo:setup)."
 )
 
 

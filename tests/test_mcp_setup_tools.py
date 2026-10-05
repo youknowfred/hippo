@@ -487,7 +487,7 @@ def test_doctor_tool_runs_engine_under_the_fresh_interpreter(corpus, tmp_path, m
     monkeypatch.setattr(MS, "_fresh_python", lambda: python_shim)
     text = _text(_call("doctor", {}))
     assert "MCP server starts" in text          # real engine lines came back
-    assert "trust_corpus" in text               # the MCP-surface suffix still applies
+    assert "trust tool" in text               # the MCP-surface suffix still applies
     assert "could not run under it" not in text  # no fallback caveat on the happy path
 
 
@@ -543,7 +543,7 @@ def test_doctor_tool_runs_the_engine_and_maps_fixes_to_tools(corpus, tmp_path, m
     assert "MCP server starts" in text          # a real engine line (check_mcp_launch)
     assert "not bootstrapped" in text or "CLAUDE_PLUGIN_DATA" in text  # bootstrap line
     # The one addition over the terminal engine: the fix→tool mapping for this surface.
-    assert "trust_corpus" in text and "bootstrap tool" in text and "init tool" in text
+    assert "trust tool" in text and "action='bootstrap'" in text and "action='init'" in text
     # CLM-8: typed /hippo:* commands run on the Desktop app too (PLATFORM.md §1), so
     # the mapping must not claim they are terminal-only.
     assert "exist only in the Claude Code terminal" not in text

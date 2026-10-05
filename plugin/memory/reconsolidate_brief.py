@@ -226,8 +226,8 @@ def render_brief(brief: dict) -> List[str]:
     if brief.get("linked"):
         lines.append(f"  linked (review-adjacent): {', '.join(brief['linked'])}")
     lines.append(
-        "  verdict (yours — LIF-1): graduate | fix | demote | snooze, via the reconsolidate "
-        "tool (action='reverify') or python -m memory.reconsolidate --reverify NAME --outcome …"
+        "  verdict (yours — LIF-1): graduate | fix | demote | snooze, via "
+        "`hippo tend apply reverify:NAME --verdict …` (the tend tool on Desktop)"
     )
     return lines
 

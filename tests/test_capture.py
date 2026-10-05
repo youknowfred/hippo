@@ -312,7 +312,7 @@ def test_pending_producer_surfaces_queue(repo):
     _seed_episode(md, repo, "s1", ["a"], "q1")
     C.write_session_capture("s1", memory_dir=md, repo_root=repo)
     out = SS.pending_capture_producer(md, repo)
-    assert out and "/hippo:consolidate" in out and "1 pending" in out
+    assert out and "/hippo:tend" in out and "1 pending" in out
 
 
 # --------------------------------------------------------------------------- #
