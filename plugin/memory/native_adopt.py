@@ -351,7 +351,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
     from .provenance import resolve_dirs
-    from .provenance_env import foreign_corpus_owner
 
     parser = argparse.ArgumentParser(
         prog="hippo adopt",
@@ -366,8 +365,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     md, rr = resolve_dirs()
     repo_root = args.repo_root or rr
     memory_dir = args.memory_dir or md
-    if not args.memory_dir and foreign_corpus_owner(memory_dir, repo_root):
-        memory_dir = os.path.join(repo_root, ".claude", "memory")  # this repo's own corpus
     if args.confirm is None:
         plan = plan_adoption(repo_root, memory_dir)
         print(render_plan(plan, confirm_hint="To adopt: hippo adopt --confirm {digest}"))

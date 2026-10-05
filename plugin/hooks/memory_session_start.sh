@@ -39,8 +39,9 @@ cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" 
 #     last showed, written only when it shows. Its own hint names a bootstrap-only
 #     machine-wide marker, PLUGIN_DATA/.bootstrap-nudge-dismissed, so dismissing it
 #     never hides a repo's later nested or no-corpus line;
-#   - a repo nested inside another corpus: hippo's resolver climbs past this repo's own
-#     toplevel into the ancestor's corpus, so its tools read and write THAT corpus;
+#   - a repo nested inside another corpus (or a submodule) with none of its own: hippo
+#     stops at this repo's toplevel (SHP-8), so the line names the ancestor's corpus and
+#     the two choices — init here, or pin HIPPO_CORPUS_ROOT to share it;
 #   - no corpus here: only in a repo that opted in — hippo enabled in its own
 #     .claude/settings*.json (a project or local install), or init recorded in the
 #     machine's projects registry. Not on a native memory dir alone: native auto memory
@@ -95,10 +96,13 @@ hippo_today() {  # the local date, YYYY-MM-DD: bash's own clock (4.2+), else dat
   printf -v d '%(%F)T' -1 2>/dev/null || d="$(date +%F 2>/dev/null)" || d=""
   case "$d" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) printf '%s' "$d" ;; esac
 }
-hippo_nested_owner() {  # prints the ancestor whose corpus a repo toplevel without one resolves
-  local d home="${HOME:-}"
+hippo_ancestor_corpus() {  # prints the dir above a corpus-less repo toplevel that carries one
+  local d home="${HOME:-}"  # mirrors provenance_env.ancestor_corpus_owner
+  if [ -n "${HIPPO_CORPUS_ROOT:-}" ] || [ -n "${HIPPO_MEMORY_DIR:-}" ]; then
+    return 1  # the corpus is already pinned
+  fi
   [ -d ".claude/memory" ] && return 1
-  [ -e ".git" ] || return 1  # only a toplevel launch climbs past itself (walk_up_for_memory_dir)
+  [ -e ".git" ] || return 1  # a toplevel launch only, as in Python
   if [ -f ".git" ] && hippo_main_tree >/dev/null; then
     return 1  # a linked worktree resolves its main tree's corpus, by design
   fi
@@ -156,8 +160,8 @@ if [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ ! -f "${CLAUDE_PLUGIN_DATA}/.nudge-dism
           { printf '%s\n' "$TODAY" > "$DAY_FILE"; } 2>/dev/null || true
         fi
       fi
-    elif OWNER="$(hippo_nested_owner)"; then
-      NUDGE="This repo is nested inside ${OWNER}, so hippo resolves ${OWNER}'s memory corpus here, not one of this repo's own. To give this repo its own corpus, ${INIT_STEP} here. ${SILENCE}"
+    elif OWNER="$(hippo_ancestor_corpus)"; then
+      NUDGE="This repo has no corpus of its own; ${OWNER} has one — ${INIT_STEP} here, or pin HIPPO_CORPUS_ROOT to share it. ${SILENCE}"
     elif ! hippo_floor_present && hippo_repo_opted_in "$REPO_KEY"; then
       NUDGE="hippo memory is enabled for this repo but it has no memory corpus yet — ${INIT_STEP} to seed .claude/memory/."
       if ND="$(hippo_native_memory_dir "$REPO_KEY")"; then

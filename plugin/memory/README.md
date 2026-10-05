@@ -279,9 +279,10 @@ volatile_paths)` — or one calm ℹ line when *everything* stale is policy-supp
 Wired via [`../hooks/memory_session_start.sh`](../hooks/memory_session_start.sh), which
 also owns the **first-run nudge**, emitted before Python is even involved. Venv/sentinel
 missing → "run /hippo:setup": a machine-level line, shown in the first session of each day
-(a day stamp in plugin data) and dismissed machine-wide. A repo nested inside another
-corpus, or an opted-in repo with no corpus → "run /hippo:setup here": per-repo lines, shown
-every session and dismissed per repo.
+(a day stamp in plugin data) and dismissed machine-wide. A corpus-less repo nested inside
+another corpus → "run /hippo:setup here, or pin HIPPO_CORPUS_ROOT to share it"; an opted-in
+repo with no corpus → "run /hippo:setup here": per-repo lines, shown every session and
+dismissed per repo.
 
 ## Wikilink graph
 
@@ -700,7 +701,9 @@ re-billed.
   `.memory-telemetry`) move together, while `provenance.launch_root()` keeps naming the
   worktree for session-local git facts (capture's diff, the presence doc's branch/head).
 - `HIPPO_CORPUS_ROOT` — pin the resolution start dir explicitly; disables the worktree
-  redirect (an explicit root is honored as-is, whichever tree it names).
+  redirect (an explicit root is honored as-is, whichever tree it names). It is also how a
+  nested repo or submodule shares its parent's corpus: resolution stops at the session's own
+  git toplevel (SHP-8), and the hooks' corpus guard honors the pin (SHP-10).
 - `HIPPO_INDEX_DIR` — override the index location (default `.claude/.memory-index/`).
 - `HIPPO_EMBED_MODEL` — dense model name (default `BAAI/bge-small-en-v1.5`).
 - `HIPPO_DISABLE=<list>` — turn features off: `dense` (force BM25-only — hermetic tests,

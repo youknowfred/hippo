@@ -413,6 +413,10 @@ carries **no** corpus leaves a worktree's branch-only corpus alone. `/hippo:doct
 tree it resolved in one line (`tree: MAIN working tree … (redirected from linked worktree …)`)
 and names any dead `.claude/.memory-*` copies a worktree still carries from before this behavior.
 
+A repo nested inside another, or a git submodule, resolves only its own corpus: resolution stops
+at the session's git toplevel. When it has none and a parent does, SessionStart and doctor say
+so; point `HIPPO_CORPUS_ROOT` at the parent to share the parent's corpus.
+
 ## Repo layout
 
 This repo is both a **plugin marketplace** and the **plugin itself**:
