@@ -45,7 +45,9 @@ hippo_stamp_t0() {
 # hook runs after cd'ing to the project: true when THIS dir carries .claude/memory, or
 # when its main tree does — the Python resolver then targets the main tree's corpus, so
 # the hook must not bail. hippo_floor_present() is the same probe on MEMORY.md, the
-# SessionStart first-run nudge's "has this project been seeded" question.
+# SessionStart first-run nudge's "has this project been seeded" question. Both also pass
+# for a corpus at HIPPO_CORPUS_ROOT (SHP-10): a repo that shares its parent's corpus on
+# purpose (SHP-8 no longer climbs to it) has none in its own dir.
 hippo_main_tree() {
   [ -f ".git" ] || return 1
   common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
@@ -54,10 +56,12 @@ hippo_main_tree() {
 }
 hippo_corpus_present() {
   [ -d ".claude/memory" ] && return 0
+  [ -n "${HIPPO_CORPUS_ROOT:-}" ] && [ -d "$HIPPO_CORPUS_ROOT/.claude/memory" ] && return 0
   main="$(hippo_main_tree)" && [ -d "$main/.claude/memory" ]
 }
 hippo_floor_present() {
   [ -f ".claude/memory/MEMORY.md" ] && return 0
+  [ -n "${HIPPO_CORPUS_ROOT:-}" ] && [ -f "$HIPPO_CORPUS_ROOT/.claude/memory/MEMORY.md" ] && return 0
   main="$(hippo_main_tree)" && [ -f "$main/.claude/memory/MEMORY.md" ]
 }
 

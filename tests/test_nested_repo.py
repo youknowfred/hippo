@@ -27,7 +27,7 @@ from memory.provenance import (
     walk_up_for_memory_dir,
 )
 
-from .test_hooks_contract import _SESSION_START_HOOK, _assert_contract, _run_hook
+from .test_hooks_contract import _SESSION_START_HOOK, _USER_PROMPT_HOOK, _assert_contract, _run_hook
 
 
 def _git_init(path) -> str:
@@ -347,3 +347,21 @@ def test_bash_and_python_name_the_same_ancestor(tmp_path, layout):
         assert _ctx(proc).startswith(f"This repo has no corpus of its own; {owner} has one")
     else:
         assert "no corpus of its own" not in proc.stdout
+
+
+# --------------------------------------------------------------------------- #
+# Sharing on purpose: HIPPO_CORPUS_ROOT reaches the hooks too
+# --------------------------------------------------------------------------- #
+def test_a_child_pinned_to_the_parents_corpus_recalls_from_it_in_the_hook(tmp_path):
+    """The line's second choice must work where recall happens. The hooks gate on a corpus
+    in the launch dir; a child pinned to its parent has none, so recall stayed inert."""
+    child = _git_init(tmp_path / "project" / "libs" / "child")
+    project = os.path.realpath(str(tmp_path / "project"))
+    stdin = json.dumps({"prompt": "how is the zebra service deployed with canary rollout"})
+    proc, _, _ = _run_hook(
+        _USER_PROMPT_HOOK, stdin, tmp_path, venv_python=True,
+        extra_env={"CLAUDE_PROJECT_DIR": child, "HIPPO_CORPUS_ROOT": project},
+    )
+    _assert_contract(proc, "UserPromptSubmit")
+    assert "zebra_deploy_runbook" in _ctx(proc)
+    assert not os.path.isdir(os.path.join(child, ".claude"))  # nothing landed in the child
