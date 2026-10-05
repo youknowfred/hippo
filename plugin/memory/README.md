@@ -279,9 +279,10 @@ volatile_paths)` — or one calm ℹ line when *everything* stale is policy-supp
 Wired via [`../hooks/memory_session_start.sh`](../hooks/memory_session_start.sh), which
 also owns the **first-run nudge**, emitted before Python is even involved. Venv/sentinel
 missing → "run /hippo:setup": a machine-level line, shown in the first session of each day
-(a day stamp in plugin data) and dismissed machine-wide. A repo nested inside another
-corpus, or an opted-in repo with no corpus → "run /hippo:setup here": per-repo lines, shown
-every session and dismissed per repo.
+(a day stamp in plugin data) and dismissed machine-wide. A corpus-less repo nested inside
+another corpus → "run /hippo:setup here, or pin HIPPO_CORPUS_ROOT to share it"; an opted-in
+repo with no corpus → "run /hippo:setup here": per-repo lines, shown every session and
+dismissed per repo.
 
 ## Wikilink graph
 
