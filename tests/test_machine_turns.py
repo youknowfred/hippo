@@ -1,8 +1,8 @@
 """HOT-1: machine-generated turns never trigger recall.
 
-Background-task notifications, subagent hand-backs, cross-session messages, scheduled-task
-runs, system-reminder-only turns and `!`-bash turns all arrive on UserPromptSubmit exactly like
-a typed prompt. On the field corpora they were most of the hook's traffic, and they injected:
+Background-task notifications, subagent hand-backs, cross-session messages, CI-monitor events,
+scheduled-task runs, system-reminder-only turns and `!`-bash turns all arrive on
+UserPromptSubmit exactly like a typed prompt. On the field corpora they were most of the hook's traffic, and they injected:
 ``clean_query`` knew only three envelope tags, and RET-4's identifier mining re-read the RAW
 prompt, so a stripped ``<task-notification>`` still contributed its output-file path, tool-use
 id and task id as the query. The RCL-3 rescue then blended raw prompts and raw previews.
@@ -41,6 +41,10 @@ CROSS_SESSION = (
     "Please re-run the kubernetes deployment rollout strategy review for helm_chart canary.\n"
     "</cross-session-message>"
 )
+CI_MONITOR = (
+    '<ci-monitor-event>"Deploy rollout" checks failed on the watched pull request: the '
+    "kubernetes deployment rollout helm_chart canary job is red.</ci-monitor-event>"
+)
 SCHEDULED_TASK = (
     '<scheduled-task name="weekday-rollout-check" file="/Users/dev/.claude/scheduled-tasks/'
     'weekday-rollout-check/SKILL.md">\nThis is an automated run of a scheduled task. Check the '
@@ -60,6 +64,7 @@ MACHINE_TURNS = {
     "task-notification": TASK_NOTIFICATION,
     "agent-message": AGENT_MESSAGE,
     "cross-session-message": CROSS_SESSION,
+    "ci-monitor-event": CI_MONITOR,
     "scheduled-task": SCHEDULED_TASK,
     "system-reminder-only": SYSTEM_REMINDER_ONLY,
     "bash-input": BASH_INPUT,
@@ -101,6 +106,13 @@ def test_human_turns_stay_human(text, expected):
     assert turn_class(text) == "human"
     if expected is not None:
         assert human_text(text) == expected
+
+
+def test_a_reminder_riding_a_ci_monitor_event_is_still_that_event():
+    """The class is the machine envelope's, not "system-reminder-only": a reminder beside the
+    event says nothing about who sent the turn."""
+    prompt = "<system-reminder>\nYou are operating in a git worktree.\n</system-reminder>\n" + CI_MONITOR
+    assert turn_class(prompt) == "ci-monitor-event"
 
 
 def test_mining_reads_only_the_human_text():
@@ -168,6 +180,17 @@ def test_machine_turn_injects_nothing_even_with_rescue_armed(cls, text, corpus, 
     # RCL-2 cooldown window or seed the capture drafter.
     assert len(_rows(os.path.join(td, "recall_events.jsonl"))) == recall_rows
     assert len(_rows(os.path.join(td, "episode_buffer.jsonl"))) == episodes
+
+
+def test_the_daily_rollup_counts_a_ci_monitor_event_as_its_own_class(corpus, capsys, monkeypatch):
+    from memory import telemetry_rollup as TR
+
+    md, idx, td = corpus
+    _hook("kubernetes deployment rollout strategy", md, idx, "sess-5", capsys, monkeypatch)
+    _hook(CI_MONITOR, md, idx, "sess-5", capsys, monkeypatch)
+    [row] = TR.read_rollups(td)
+    assert row["hook"]["trigger"] == {"human": 1, "ci-monitor-event": 1}
+    assert row["hook"]["injected_prompts"] == 1  # the human turn's; the event injected nothing
 
 
 def test_human_turn_with_a_reminder_still_recalls(corpus, capsys, monkeypatch):

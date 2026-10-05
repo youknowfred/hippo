@@ -35,6 +35,7 @@ HARNESS_ENVELOPE_TAGS = (
     "local-command-stdout",
     "agent-message",  # desktop app: a subagent's hand-back, <agent-message from="a…">
     "cross-session-message",  # desktop app: another local session, from="uds:/tmp/cc-socks/…"
+    "ci-monitor-event",  # desktop app: news about a PR it is watching, a bare <ci-monitor-event>
     "scheduled-task",  # HOT-1: a scheduled task's automated run, <scheduled-task name="…">
     "bash-input",  # HOT-1: a `!`-bash turn — the command, then its output blocks
     "bash-stdout",
@@ -54,13 +55,17 @@ HARNESS_TAGS = HARNESS_ENVELOPE_TAGS + HARNESS_WRAPPER_TAGS
 # when nothing a person wrote survives once its envelopes are removed; its class is the first
 # machine envelope it carries (the bash trio is one class), else "system-reminder-only" for a
 # turn that is nothing but injected reminders. Anything else is "human". The recall hook never
-# recalls on a machine turn, and the daily rollups count turns by these classes.
+# recalls on a machine turn, and the daily rollups count turns by these classes. A rollup row
+# keys its counts by class name, so a new class is one more key: rows written before it read
+# and merge unchanged. An envelope tag left out of this map does not make its turn a machine
+# turn: alone it reads as "human", beside a reminder as "system-reminder-only".
 HUMAN_TURN = "human"
 SYSTEM_REMINDER_ONLY = "system-reminder-only"
 MACHINE_TURN_CLASSES = {
     "task-notification": "task-notification",
     "agent-message": "agent-message",
     "cross-session-message": "cross-session-message",
+    "ci-monitor-event": "ci-monitor-event",
     "scheduled-task": "scheduled-task",
     "bash-input": "bash-input",
     "bash-stdout": "bash-input",

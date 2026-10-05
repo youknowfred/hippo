@@ -2,7 +2,8 @@
 
 Before this list each plane kept its own copy of the tag names, and none of the copies knew
 the desktop app's ``<agent-message>`` (a subagent's hand-back) or ``<cross-session-message>``
-(another local session). The pins:
+(another local session). The list itself then missed a third desktop envelope,
+``<ci-monitor-event>`` (news about a pull request the app is watching). The pins:
 
   - every plane derives from the one list: clean_query's block and marker regexes, the RCL-3
     rescue, the lived-in drafter (tests/test_livedin_drafts.py), and capture's previews;
@@ -48,10 +49,16 @@ TASK_NOTE = (
     "<status>completed</status>\n<summary>Background command finished</summary>\n"
     "</task-notification>"
 )
+# The ledger's real shape: no attributes, the body straight after ">". Through v1.41.1 the tag
+# was in no list, so the hook recalled on the body and injected on every CI event.
+CI_MONITOR = (
+    '<ci-monitor-event>"Deploy rollout" checks failed on the watched pull request: the '
+    "kubernetes deployment rollout helm chart canary job is red.</ci-monitor-event>"
+)
 ENVELOPES = pytest.mark.parametrize(
     "prompt",
-    [HAND_BACK, CROSS_SESSION, TASK_NOTE],
-    ids=["agent-message", "cross-session-message", "task-notification"],
+    [HAND_BACK, CROSS_SESSION, TASK_NOTE, CI_MONITOR],
+    ids=["agent-message", "cross-session-message", "task-notification", "ci-monitor-event"],
 )
 MENTIONS = "why does the drafter queue agent-message rows as hard-set queries"
 
@@ -82,7 +89,7 @@ def _turn(capsys, prompt, md, idx, session):
 def test_every_plane_reads_the_one_list():
     assert RQ._KNOWN_HARNESS_TAGS is HE.HARNESS_TAGS
     assert R._KNOWN_HARNESS_TAGS is HE.HARNESS_TAGS  # the façade re-export
-    for tag in ("agent-message", "cross-session-message"):
+    for tag in ("agent-message", "cross-session-message", "ci-monitor-event"):
         assert tag in HE.HARNESS_ENVELOPE_TAGS
     for tag in HE.HARNESS_ENVELOPE_TAGS:
         assert RQ._ENVELOPE_BLOCK_RE.fullmatch(f'<{tag} from="x">\nbody words\n</{tag}>'), tag
@@ -118,6 +125,15 @@ def test_no_module_keeps_a_private_copy_of_an_envelope_tag():
             ):
                 offenders.append(f"{os.path.basename(path)}:{node.lineno}: {node.value[:60]!r}")
     assert offenders == [], "envelope tag names outside harness_envelopes:\n" + "\n".join(offenders)
+
+
+def test_ci_monitor_event_preview_is_an_envelope_in_its_real_shape():
+    """No attributes, opening at offset 0, cut at the ledger's 80-char preview budget."""
+    preview = CI_MONITOR[:80]
+    assert "</ci-monitor-event>" not in preview
+    assert HE.is_envelope_preview(preview)
+    assert R.clean_query(preview) == ""
+    assert not HE.is_envelope_preview("why did the ci-monitor-event turn recall")
 
 
 def test_envelope_preview_matches_the_tag_name_not_a_longer_one():
@@ -196,8 +212,8 @@ def test_capture_previews_leave_envelopes_out(tmp_path):
     md = str(tmp_path / "memory")
     os.makedirs(md)
     td = default_telemetry_dir(md)
-    for q in ("how do we deploy", HAND_BACK, CROSS_SESSION, TASK_NOTE, MENTIONS):
+    for q in ("how do we deploy", HAND_BACK, CROSS_SESSION, TASK_NOTE, CI_MONITOR, MENTIONS):
         T.log_episode(["deploy_runbook"], query=q, telemetry_dir=td, session_id="sess-1")
     seed = C.gather_session_context("sess-1", telemetry_dir=td, memory_dir=md, include_hunks=False)
     assert seed["query_previews"] == ["how do we deploy", MENTIONS]
-    assert seed["episode_count"] == 5  # the episodes still count; only their previews drop
+    assert seed["episode_count"] == 6  # the episodes still count; only their previews drop
