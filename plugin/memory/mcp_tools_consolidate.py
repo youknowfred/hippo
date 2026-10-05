@@ -31,7 +31,9 @@ def _tool_capture(args: Dict[str, Any]) -> str:
         corrupt_pending,
         default_pending_dir,
         discard_pending,
+        expired_count,
         read_pending,
+        restore_pending,
         snooze_queue,
     )
     from .provenance import resolve_dirs
@@ -40,7 +42,7 @@ def _tool_capture(args: Dict[str, Any]) -> str:
     action = str(args.get("action") or "list").strip().lower()
     if action == "list":
         seeds = read_pending(memory_dir=memory_dir)
-        out = [_format_listing(seeds)]
+        out = [_format_listing(seeds, expired=expired_count(memory_dir=memory_dir))]
         broken = corrupt_pending(memory_dir=memory_dir)
         if broken:
             # RCH-9: the nudge's bare file count includes these — the listing must
@@ -64,7 +66,7 @@ def _tool_capture(args: Dict[str, Any]) -> str:
             out.append(
                 "Drain per item: draft the fact → new_memory (check:true) → secrets_scan "
                 "any verbatim hunk → new_memory (the real write) → capture "
-                "(action='discard', path=<seed>). Nothing is approved in bulk."
+                "(action='discard', path=<seed>, drafted=true). Nothing is approved in bulk."
             )
         return "\n".join(out)
     if action == "discard":
@@ -83,8 +85,23 @@ def _tool_capture(args: Dict[str, Any]) -> str:
                 "capture discard REFUSED — the path must name a seed file inside the "
                 f"pending queue ({pd}); this tool never removes anything else."
             )
-        ok = discard_pending(real)
+        ok = discard_pending(real, drafted=bool(args.get("drafted")), memory_dir=memory_dir)
         return f"discarded: {real}" if ok else f"nothing to discard at {real}"
+    if action == "restore":
+        restore_all = bool(args.get("all"))
+        target = str(args.get("path") or "").strip()
+        if not restore_all and not target:
+            return (
+                "capture restore: pass path=<expired seed filename or session id>, or all=true."
+            )
+        # Restore only ever moves files between the queue's own expired/ folder and the
+        # queue: the target is matched against that folder's listing, never opened as a path.
+        back = restore_pending(target or None, restore_all=restore_all, memory_dir=memory_dir)
+        if not back:
+            return "nothing restored (no matching seed in the queue's expired/ folder)."
+        return f"restored {len(back)} seed(s) into the queue: " + ", ".join(
+            os.path.basename(p) for p in back
+        )
     if action == "snooze":
         ok = snooze_queue(memory_dir=memory_dir)
         return (
@@ -117,7 +134,10 @@ def _tool_capture(args: Dict[str, Any]) -> str:
             if ok
             else "nothing recorded (empty text or unwritable ledger)"
         )
-    return "capture: pass action='list' (default), 'discard' (path=…), 'snooze', or 'add_decision' (text=…)."
+    return (
+        "capture: pass action='list' (default), 'discard' (path=…), 'restore' (path=… or "
+        "all=true), 'snooze', or 'add_decision' (text=…)."
+    )
 
 
 def _tool_secrets_scan(args: Dict[str, Any]) -> str:

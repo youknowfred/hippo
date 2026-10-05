@@ -589,10 +589,36 @@ def main(argv: Optional[List[str]] = None) -> int:
         "edge_origin tags, edge rot (archived/superseded/dangling targets), and the "
         "GRF-6 planned forward-reference and GRF-7 folded classes",
     )
+    parser.add_argument(
+        "--merge-related",
+        default=None,
+        metavar="NAME",
+        help="merge ONE memory's several Related lines into one (union of their links, "
+        "order kept); `hippo lint-links` lists the memories that have more than one",
+    )
     args = parser.parse_args(argv)
 
     md, _ = resolve_dirs()
     md = args.memory_dir or md
+    if args.merge_related:
+        from .related_lines import fix_duplicate_related
+
+        name = args.merge_related[:-3] if args.merge_related.endswith(".md") else args.merge_related
+        path = os.path.join(md, f"{name}.md")
+        if os.path.basename(name) != name or not os.path.isfile(path):
+            print(f"no memory named {args.merge_related!r} in {md}")
+            return 1
+        res = fix_duplicate_related(path, memory_dir=md)
+        if res["error"]:
+            print(f"not merged: {name} — {res['error']}")
+            return 1
+        print(
+            f"merged {name}'s Related lines into one" if res["fixed"]
+            else f"nothing to merge: {name} has at most one Related line"
+        )
+        if res.get("note"):
+            print(res["note"])
+        return 0
     g = build_graph(md)
     if g is None:
         print("could not build link graph")

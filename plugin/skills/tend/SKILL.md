@@ -11,7 +11,7 @@ Integrity items (changes withheld from recall, invisible baselines) come first.
 
 ## Surface routing — decide first, then act silently
 
-- **On Claude Desktop** (your context says you are in the Claude desktop app, `CLAUDE_CODE_ENTRYPOINT` is `claude-desktop`, or the preflight below stops on an unset `CLAUDE_PLUGIN_DATA`): run this same flow through the `tend` MCP tool — action='list', then 'next' (or 'show' with id=…), then per item action='apply' with id= and verdict=, or 'snooze' / 'skip' / 'hold'. Drafting a memory from a capture uses the `new_memory` tool (check:true first), and a verbatim hunk goes through the `doctor` tool's action='secrets_scan' before it is fenced into a body. The consolidate steps below map the same way: the graph refresh is the `setup` tool's action='build_index'; co-recall link suggestions are tend action='link_proposals'; the blind-spot fixtures are tend action='fixtures' (step='draft', then 'confirm' per item); the interview is tend action='interview' (step='questions' or 'respond'); a decision the user stated is tend action='add_decision'. Just start driving the tool; don't explain why the shell flow isn't used here.
+- **On Claude Desktop** (your context says you are in the Claude desktop app, `CLAUDE_CODE_ENTRYPOINT` is `claude-desktop`, or the preflight below stops on an unset `CLAUDE_PLUGIN_DATA`): run this same flow through the `tend` MCP tool — action='list', then 'next' (or 'show' with id=…), then per item action='apply' with id= and verdict=, or 'snooze' / 'skip' / 'hold'. Drafting a memory from a capture uses the `new_memory` tool (check:true first), then tend apply verdict='done' drains the seed as drafted (an expired seed comes back with tend action='restore', seed=… or all=true); a verbatim hunk goes through the `doctor` tool's action='secrets_scan' before it is fenced into a body. The consolidate steps below map the same way: the graph refresh is the `setup` tool's action='build_index'; co-recall link suggestions are tend action='link_proposals'; the blind-spot fixtures are tend action='fixtures' (step='draft', then 'confirm' per item); the interview is tend action='interview' (step='questions' or 'respond'); a decision the user stated is tend action='add_decision'. Just start driving the tool; don't explain why the shell flow isn't used here.
 - **In a terminal Claude Code session**: run the bash flow below, guard first.
 
 ## Preflight (shared across all hippo skills)
@@ -243,14 +243,15 @@ discard it so the queue drains and the nudge clears (`--dismiss` is the same op 
 a capture isn't worth keeping at all):
 
 ```
-hippo capture --discard <seed-path-from-the-list>
+hippo capture --discard <seed-path-from-the-list>            # skipped: nothing worth keeping
+hippo capture --discard <seed-path-from-the-list> --drafted  # it became a memory
 ```
 
-The queue is BOUNDED (CAP-6): each capture self-prunes to the highest-value, most-recent
-seeds, so an un-drained backlog can never grow without limit — a gitignored trivial seed a
-prune drops is nothing a future session couldn't re-capture. If you can't drain now, defer the
-SessionStart nudge for a few sessions instead of ignoring it (it re-nags after — a snooze is a
-deferral, not a dismissal):
+The queue is BOUNDED: each capture keeps the highest-value, most-recent seeds, and seeds older
+than 14 days or 20 sessions move to the queue's `expired/` folder. Nothing there is deleted —
+the listing counts it, and `hippo capture --restore <seed>` (or `--restore --all`) brings it
+back. If you can't drain now, defer the SessionStart nudge for a few sessions instead of
+ignoring it (it re-nags after — a snooze is a deferral, not a dismissal):
 
 ```
 hippo capture --snooze

@@ -215,7 +215,7 @@ def _apply_capture(target, verdict, memory_dir):
     path = os.path.join(default_pending_dir(memory_dir), target)
     if not os.path.isfile(path):
         return _refused(f"no pending capture named {target}")
-    if not discard_pending(path):
+    if not discard_pending(path, drafted=verdict == "done", memory_dir=memory_dir):
         return _refused(f"could not remove {target} from the pending queue")
     what = "drained after drafting" if verdict == "done" else "discarded"
     return _ok(f"{target}: {what}.")

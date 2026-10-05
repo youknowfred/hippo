@@ -213,16 +213,17 @@ def _discover_links(
 
 
 def _append_related_line(body: str, related: List[str]) -> str:
-    """Append a final ``Related: [[a]], [[b]]`` body line naming ``related`` memory names.
+    """Name ``related`` memories on the body's ONE ``Related: [[a]], [[b]]`` line.
 
-    Additive only — never touches any existing body text, just appends one trailing line (the
-    same additive-write discipline provenance backfill and the floor pointer already follow).
+    Additive only (the same discipline provenance backfill and the floor pointer follow).
+    TND-5: when the agent-written body already has its own ``Related:`` line, the new names
+    join THAT line (union, order kept, no repeats) — appending a second line under it is
+    how about a fifth of the dogfood corpus ended up with two. A body without one gets a
+    final line appended, as before (``related_lines.merge_related_line``).
     """
-    if not related:
-        return body
-    line = "Related: " + ", ".join(f"[[{r}]]" for r in related)
-    body = (body or "").rstrip("\n")
-    return f"{body}\n\n{line}\n" if body else f"{line}\n"
+    from .related_lines import merge_related_line
+
+    return merge_related_line(body, related)
 
 
 def _dup_threshold(default: float) -> float:

@@ -42,6 +42,8 @@ def _route_v1(action: str, args: Dict[str, Any]):
 
     if action == "add_decision":
         return _tool_capture({"action": "add_decision", "text": args.get("text")})
+    if action == "restore":  # TND-5: an expired capture seed back into the queue
+        return _tool_capture({"action": "restore", "path": args.get("seed"), "all": bool(args.get("all"))})
     if action == "snapshot":
         return _tool_rederive({"action": "snapshot", "stamp": args.get("stamp")})
     if action == "link_proposals":
@@ -116,5 +118,5 @@ def _tool_tend(args: Dict[str, Any]):
             r = tend.skip(item, memory_dir=memory_dir, repo_root=repo_root)
         else:
             return ("tend: action is one of list (default), next, show, apply, snooze, skip, "
-                    "hold, release, add_decision, snapshot, fixtures, interview, link_proposals.")
+                    "hold, release, add_decision, restore, snapshot, fixtures, interview, link_proposals.")
     return r["message"] if r["ok"] else f"refused — {r['message']}"

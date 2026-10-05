@@ -158,7 +158,7 @@ def _section_doctor(memory_dir: str, repo_root: str) -> Optional[str]:
 
 
 def _section_pending(memory_dir: str, repo_root: str) -> Optional[str]:
-    from .capture import _format_listing, default_pending_dir, queue_snoozed, read_pending
+    from .capture import _format_listing, default_pending_dir, expired_count, queue_snoozed, read_pending
 
     pd = default_pending_dir(memory_dir)
     seeds = read_pending(pd)
@@ -170,7 +170,7 @@ def _section_pending(memory_dir: str, repo_root: str) -> Optional[str]:
             f"{len(seeds)} seed(s) queued, nudge snoozed — seeds kept; the listing "
             "returns when the snooze expires."
         )
-    return _format_listing(seeds)
+    return _format_listing(seeds, expired=expired_count(pd))
 
 
 def _section_reconsolidation(memory_dir: str, repo_root: str) -> Optional[str]:

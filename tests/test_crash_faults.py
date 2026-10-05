@@ -95,6 +95,7 @@ CRASH_CONTRACT = {
     ("provenance", "heal_empty_baselines"): ("detected",),  # RCH-9: named in `failed`
     ("provenance", "reverify_file"): ("detected",),
     ("registry", "register_project"): ("detected",),  # returns False
+    ("related_lines", "fix_duplicate_related"): ("detected",),  # TND-5: per-item Related merge; error named, file intact
     ("registry", "deregister_project"): ("detected",),
     ("registry", "prune_dead"): ("detected",),  # RCH-11: ok=False; prior doc intact
     ("sleep", "_write_report"): ("detected",),  # report still prints; the miss is named
@@ -1024,6 +1025,17 @@ def scn_tend_cache_intact(tmp_path, monkeypatch):
     r = Q.build_queue(str(md), str(tmp_path / "repo"), kinds=("capture",))
     assert r["counts"] == {"capture": 0}
     _assert_unchanged(before)
+def scn_related_merge_detected(tmp_path, monkeypatch):
+    """TND-5: a torn Related-line merge names the failure and leaves the memory's bytes."""
+    from memory.related_lines import fix_duplicate_related
+
+    _root, md = _git_repo(tmp_path)
+    path = _mem(md, "twice", body="Fact.\n\nRelated: [[a]]\n\nRelated: [[b]]")
+    before = _snap(path)
+    _arm(monkeypatch, "related_lines", "fix_duplicate_related")
+    res = fix_duplicate_related(path)
+    _assert_unchanged(before)
+    assert res["fixed"] is False and "file unchanged" in res["error"]
 
 
 _SCENARIOS = [
@@ -1064,6 +1076,7 @@ _SCENARIOS = [
     (("provenance", "heal_empty_baselines"), "detected", scn_heal_baselines_detected),
     (("provenance", "reverify_file"), "detected", scn_reverify_detected),
     (("registry", "register_project"), "detected", scn_registry_register_detected),
+    (("related_lines", "fix_duplicate_related"), "detected", scn_related_merge_detected),
     (("registry", "deregister_project"), "detected", scn_registry_deregister_detected),
     (("registry", "prune_dead"), "detected", scn_registry_prune_dead_detected),
     (("sleep", "_write_report"), "detected", scn_sleep_report_write_detected),

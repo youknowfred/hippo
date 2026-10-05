@@ -214,15 +214,27 @@ def pending_capture_producer(
     except Exception:
         trivial = 0
     label = f" ({trivial} trivial)" if trivial else ""
-    # INV-1: the deferral must name RUNNABLE forms — the old text said `hippo capture
-    # --snooze`, a bin/hippo subcommand that does not exist (the INT-18 class; the
-    # surface-registry lint now fails on any such reference). The capture tool serves
-    # both surfaces; the terminal CLI spelling is `-m memory.capture --snooze`.
+    # TND-5: the expired/ shelf rides this line as a count — seeds there left the queue
+    # but were never deleted, so the human can still bring them back.
+    expired = ""
+    try:
+        from .capture import expired_count
+
+        n_exp = expired_count(pd)
+        if n_exp:
+            expired = (
+                f" ({n_exp} older capture(s) expired and are kept: "
+                "`hippo capture --restore --all` brings them back)"
+            )
+    except Exception:
+        expired = ""
+    # INV-1: the deferral must name RUNNABLE forms. SRF-1 made `hippo capture` the door
+    # (bin/hippo hands the verb to memory.capture), so the terminal spelling is that verb.
     return (
         f"📥 {n} pending capture(s){label} from a prior session await review — run "
         "/hippo:consolidate to draft them into memory (nothing is saved until you approve "
         "each one, per item), or defer this nudge with the capture tool (action='snooze'; "
-        "in a terminal: `--snooze` on `python -m memory.capture`)."
+        f"in a terminal: `hippo capture --snooze`){expired}."
     )
 
 

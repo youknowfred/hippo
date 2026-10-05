@@ -363,8 +363,11 @@ _TOOLS = [
             "nothing listed is in the corpus yet. Drain per item: draft the durable fact, "
             "check it with new_memory (check:true), secret-lint any verbatim hunk with "
             "secrets_scan BEFORE fencing it into a body, write with new_memory, then "
-            "action='discard' (path=…) removes that ONE processed seed (same op when a "
-            "capture isn't worth keeping). action='snooze' defers the SessionStart nudge a "
+            "action='discard' (path=…, drafted=true when it became a memory) removes that "
+            "ONE processed seed (same op when a capture isn't worth keeping). Seeds older "
+            "than 14 days or 20 sessions, or past the queue cap, wait in an expired/ folder: "
+            "action='restore' (path=… or all=true) brings them back. "
+            "action='snooze' defers the SessionStart nudge a "
             "few sessions (seeds untouched; it re-nags). action='add_decision' (text=…) "
             "records ONE user-confirmed decision — quote or faithfully paraphrase what the "
             "USER stated, never infer one; recorded UNATTRIBUTED on this surface (no "
@@ -376,15 +379,25 @@ _TOOLS = [
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "discard", "snooze", "add_decision"],
+                    "enum": ["list", "discard", "restore", "snooze", "add_decision"],
                     "description": "list = show the queue (default); discard = remove ONE "
-                    "processed seed; snooze = defer the nudge; add_decision = record ONE "
-                    "user-confirmed decision",
+                    "processed seed; restore = bring expired seed(s) back; snooze = defer "
+                    "the nudge; add_decision = record ONE user-confirmed decision",
                 },
                 "path": {
                     "type": "string",
                     "description": "with action='discard': the seed path or filename from "
-                    "the listing (must be inside the pending queue)",
+                    "the listing (must be inside the pending queue); with action='restore': "
+                    "an expired seed's filename or session id",
+                },
+                "drafted": {
+                    "type": "boolean",
+                    "description": "with action='discard': true when the seed became a "
+                    "memory (counted as drafted rather than discarded)",
+                },
+                "all": {
+                    "type": "boolean",
+                    "description": "with action='restore': restore every expired seed",
                 },
                 "text": {
                     "type": "string",

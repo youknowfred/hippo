@@ -11,6 +11,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
+import time
 
 import pytest
 
@@ -742,10 +743,12 @@ def test_capture_write_self_prunes_to_the_bound(repo, monkeypatch):
     os.makedirs(md)
     git_commit(repo, "init", 1_700_000_000)
     pd = C.default_pending_dir(md)
-    # Fill the queue up to a tiny bound with pre-existing trivial seeds…
+    # Fill the queue up to a tiny bound with pre-existing trivial seeds (recent ones — a
+    # seed older than the expiry age would leave by age, not by the cap)…
     monkeypatch.setattr(C, "_MAX_PENDING_SEEDS", 2)
-    _write_raw_seed(pd, "old1", score=0, captured_at=1.0)
-    _write_raw_seed(pd, "old2", score=0, captured_at=2.0)
+    now = time.time()
+    _write_raw_seed(pd, "old1", score=0, captured_at=now - 20)
+    _write_raw_seed(pd, "old2", score=0, captured_at=now - 10)
     # …then a real capture pushes past the bound and self-prunes on write.
     _seed_episode(md, repo, "fresh", ["m"], "q")
     path = C.write_session_capture("fresh", memory_dir=md, repo_root=repo)
@@ -753,6 +756,8 @@ def test_capture_write_self_prunes_to_the_bound(repo, monkeypatch):
     assert C.pending_count(memory_dir=md) == 2, "write must self-bound the queue (CAP-6)"
     # The just-written seed is the newest, so it always survives its own prune.
     assert os.path.exists(path), "a fresh capture must never prune itself away"
+    # TND-5: the overflow moved to expired/, it was not deleted.
+    assert C.expired_count(memory_dir=md) == 1
 
 
 def test_queue_snooze_silences_the_nudge_then_re_nags(repo):

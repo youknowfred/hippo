@@ -342,6 +342,29 @@ def record_usage(
     return _update(telemetry_dir, now, fold)
 
 
+# TND-5: the capture queue's inflow and drain, one counter per event. Inflow: a seed
+# ``captured`` (new file), ``folded`` (a re-capture merged into the session's existing
+# seed, SubagentStop included), ``restored`` from ``expired/``. Drain: ``expired`` (moved
+# to ``expired/`` by age, session count or the size cap), ``discarded`` (skipped by a
+# human), ``drafted`` (discarded after it became a memory).
+QUEUE_EVENTS = ("captured", "folded", "expired", "restored", "discarded", "drafted")
+
+
+def record_queue(
+    telemetry_dir: str, event: str, n: int = 1, *, now: Optional[float] = None
+) -> bool:
+    """Count ``n`` capture-queue events of kind ``event`` into today's row (a ``queue``
+    section; absent until the first event, so older rows read unchanged). Unknown kinds
+    and non-positive counts write nothing. Never raises."""
+    if event not in QUEUE_EVENTS or not isinstance(n, int) or n <= 0 or not telemetry_dir:
+        return False
+
+    def fold(acc: dict) -> None:
+        _bump(acc.setdefault("queue", {}), event, n)
+
+    return _update(telemetry_dir, now, fold)
+
+
 def read_rollups(telemetry_dir: str, *, days: int = 30, now: Optional[float] = None) -> List[dict]:
     """The finalized day rows inside the last ``days`` days plus today's open row,
     oldest first. ``[]`` when nothing has been recorded. Never raises."""
@@ -429,6 +452,7 @@ def summarize(rows: List[dict]) -> dict:
         "ss_dropped": _merge(rows, "session_start", "dropped"),
         "ss_cut": _merge(rows, "session_start", "cut"),
         "surface": _merge_top(rows, "surface"),
+        "queue": _merge_top(rows, "queue"),
         "client": _merge_top(rows, "client"),
         "version": _merge_top(rows, "version"),
     }

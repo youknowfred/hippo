@@ -489,6 +489,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.show_orphans:
         for o in report["orphans"]:
             print(f"  · {o}")
+    # TND-5: a memory should carry ONE Related line; a second one is the old writer's
+    # leftover. Listed read-only here; merging is per item, by name.
+    try:
+        from .related_lines import scan_duplicate_related
+
+        dupes = scan_duplicate_related(md)
+    except Exception:
+        dupes = []
+    if dupes:
+        print(f"more than one Related line: {len(dupes)}")
+        for d in dupes:
+            print(f"  ≡ {d['name']} ({d['count']} lines) — merge with `hippo links --merge-related {d['name']}`")
     # READ-ONLY: a linter never fails a workflow on findings.
     return 0
 

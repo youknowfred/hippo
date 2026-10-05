@@ -6,9 +6,10 @@
 # hook fires when a subagent finishes and runs the SAME CAP-2 capture pass the SessionEnd hook
 # does: it snapshots the session's episode buffer + `git diff` since the HEAD watermark (now
 # including the subagent's changes) into the GITIGNORED pending queue for later per-item
-# approval. Idempotent per session (the seed filename is keyed on the session id, so a
-# multi-subagent turn refreshes ONE seed rather than piling up duplicates), and a safety net if
-# the session is later killed before its own SessionEnd fires.
+# approval. Idempotent per session: the seed filename is keyed on the session id, and the
+# SubagentStop payload's session_id is the PARENT session's, so every subagent stop FOLDS into
+# the parent's one seed (evidence unioned, stops counted) rather than piling up duplicates. A
+# safety net if the session is later killed before its own SessionEnd fires.
 #
 # CRITICAL CONTRACT (identical to memory_session_end.sh):
 #   - ALWAYS exits 0.

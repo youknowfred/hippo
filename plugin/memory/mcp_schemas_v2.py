@@ -127,14 +127,15 @@ V2_TOOLS: List[dict] = [
             "overflow, citation re-derivation. action list (default) | next | show (id) | apply "
             "(id, verdict: ONE item, after the user agrees) | snooze | skip | hold (kind or id, "
             "reason) | release. Also: add_decision (text) records a decision the user made for "
-            "the capture drain; snapshot (stamp) backs up the corpus; fixtures (step draft or "
+            "the capture drain; restore (seed, or all) brings back an expired capture; "
+            "snapshot (stamp) backs up the corpus; fixtures (step draft or "
             "confirm) and interview (step questions or respond) run the blind-spot steps; "
             "link_proposals lists co-recall link suggestions."
         ),
         "inputSchema": _schema({
             "action": {"type": "string", "enum": [
                 "list", "next", "show", "apply", "snooze", "skip", "hold", "release",
-                "add_decision", "snapshot", "fixtures", "interview", "link_proposals"]},
+                "add_decision", "restore", "snapshot", "fixtures", "interview", "link_proposals"]},
             "id": dict(_S, description="an item id (kind:target)"),
             "kind": _S,
             "verdict": _S,
@@ -144,6 +145,8 @@ V2_TOOLS: List[dict] = [
             "days": {"type": "number"},
             "reason": _S,
             "text": dict(_S, description="with add_decision"),
+            "seed": dict(_S, description="with restore: an expired seed or session id"),
+            "all": _B,
             "stamp": dict(_S, description="with snapshot: a label"),
             "step": dict(_S, description="with fixtures or interview"),
             "query": _S, "expected": _S, "category": _S, "absent": _B, "superseded": _B,

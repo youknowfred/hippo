@@ -138,3 +138,25 @@ def check_surface_usage(ctx: DoctorContext) -> Dict[str, str]:
         }
     except Exception as exc:
         return {"status": "warn", "message": f"surface usage check failed: {exc}."}
+
+
+def check_capture_queue(ctx: DoctorContext) -> Dict[str, str]:
+    """TND-5: the capture queue's size, its expired shelf, and 30 days of inflow and drain
+    (captured / folded / restored in; expired / discarded / drafted out) from the daily
+    rollups. Read-only; ``ok`` always — a deep queue is the SessionStart nudge's job."""
+    try:
+        from .capture_queue import default_pending_dir, expired_count, pending_count
+        from .telemetry import default_telemetry_dir
+        from .telemetry_rollup import QUEUE_EVENTS, read_rollups, summarize
+
+        pd = default_pending_dir(ctx.memory_dir)
+        n, n_exp = pending_count(pd), expired_count(pd)
+        msg = f"capture queue: {n} pending, {n_exp} expired"
+        if n_exp:
+            msg += " (kept, never deleted; `hippo capture --restore --all` brings them back)"
+        flow = summarize(read_rollups(default_telemetry_dir(ctx.memory_dir), days=30))["queue"]
+        if flow:
+            msg += "; 30 days: " + ", ".join(f"{flow.get(ev, 0)} {ev}" for ev in QUEUE_EVENTS)
+        return {"status": "ok", "message": msg + "."}
+    except Exception as exc:
+        return {"status": "warn", "message": f"capture queue check failed: {exc}."}

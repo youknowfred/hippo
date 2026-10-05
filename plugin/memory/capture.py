@@ -59,11 +59,14 @@ from .threat_lint import scan_threats, scan_tier_b
 # this façade (CONTRIBUTING.md "Code layout").
 # --------------------------------------------------------------------------- #
 from .capture_queue import (  # noqa: F401
+    _EXPIRE_AGE_DAYS,
+    _EXPIRE_SESSIONS,
     _MAX_PENDING_SEEDS,
     _PENDING_DIRNAME,
     _SNOOZE_MARKER,
     _SNOOZE_WINDOW_SESSIONS,
     _format_listing,
+    _queue_telemetry_dir,
     _resolve_pending_dir,
     _seed_captured_at,
     _seed_score,
@@ -71,10 +74,16 @@ from .capture_queue import (  # noqa: F401
     corrupt_pending,
     default_pending_dir,
     discard_pending,
+    expire_pending,
+    expired_count,
+    expired_dir,
+    fold_seed,
     pending_count,
     prune_pending,
     queue_snoozed,
+    read_expired,
     read_pending,
+    restore_pending,
     snooze_queue,
 )
 
@@ -551,6 +560,20 @@ def _capture_outcome(
         pd = _resolve_pending_dir(pending_dir, memory_dir)
         ensure_self_ignoring_dir(pd)  # gitignored queue: mkdir + self-ignoring .gitignore (SEC-3)
         path = os.path.join(pd, _seed_filename(seed))
+        # TND-5: the seed is keyed on the session id, and a SubagentStop payload carries the
+        # PARENT session's id — so every subagent stop lands on the parent's one seed. FOLD
+        # into it (union the replayed evidence, keep the session's own reason, count the
+        # stops) instead of overwriting: the episode buffer rotates, and a later capture
+        # can hold less than the seed already does.
+        prior = None
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                prior = json.load(fh)
+        except Exception:
+            prior = None
+        if not isinstance(prior, dict):
+            prior = None
+        seed = fold_seed(prior, seed)
         # CAP-LLM (opt-in, default OFF): one bounded triage call annotates the seed with
         # SUGGESTED fields the drain reviewer still ratifies per item. The PRIOR seed at
         # this same per-session path rides along so an unchanged-evidence re-capture
@@ -562,12 +585,6 @@ def _capture_outcome(
             from .capture_triage import enrich_seed, triage_enabled
 
             if triage_enabled():
-                prior = None
-                try:
-                    with open(path, "r", encoding="utf-8") as fh:
-                        prior = json.load(fh)
-                except Exception:
-                    prior = None
                 enrichment = enrich_seed(seed, memory_dir, repo_root=repo_root, prior=prior)
                 if enrichment:
                     seed["llm_triage"] = enrichment
@@ -589,12 +606,24 @@ def _capture_outcome(
                 )
         except Exception:
             pass
-        # CAP-6: self-bound the queue so an un-drained backlog can't grow without limit. Prune
-        # keeps the highest-value seeds (recency breaks ties), so a just-written seed survives
-        # UNLESS the queue is already full of strictly higher-value captures — in which case a
-        # trivial new seed yields to them. Value-first, not FIFO: the queue keeps what a drain
-        # would lead with.
-        prune_pending(pd, max_seeds=_MAX_PENDING_SEEDS)
+        # TND-5: inflow is counted — a new seed is ``captured``, a re-capture ``folded``.
+        try:
+            from .telemetry_rollup import record_queue
+
+            qtd = _queue_telemetry_dir(pd, memory_dir, telemetry_dir)
+            if qtd:
+                record_queue(qtd, "folded" if prior else "captured")
+        except Exception:
+            pass
+        # TND-5: seeds nobody drained for 14 days or 20 sessions move to expired/ (kept,
+        # recoverable). CAP-6: then self-bound the queue so an un-drained backlog can't grow
+        # without limit. Prune keeps the highest-value seeds (recency breaks ties), so a
+        # just-written seed survives UNLESS the queue is already full of strictly
+        # higher-value captures — in which case a trivial new seed yields to them.
+        # Value-first, not FIFO: the queue keeps what a drain would lead with. The
+        # overflow moves to expired/ too; nothing here deletes a seed.
+        expire_pending(pd, memory_dir=memory_dir, telemetry_dir=telemetry_dir)
+        prune_pending(pd, max_seeds=_MAX_PENDING_SEEDS, memory_dir=memory_dir, telemetry_dir=telemetry_dir)
         return (_OUTCOME_CAPTURED, path, None)
     except Exception as exc:
         return (_OUTCOME_FAILED, None, type(exc).__name__)
@@ -620,6 +649,26 @@ def _hook_outcome_line(outcome: str, path: Optional[str], detail, session_id) ->
             line += f"; nearest: {', '.join(near)}"
         return line
     return f"capture failed: {detail}"
+
+
+def _payload_session_id(payload: Dict) -> Optional[str]:
+    """The session a hook payload belongs to — the key its seed is filed under.
+
+    SessionEnd and SubagentStop both carry ``session_id``; for SubagentStop it is the
+    PARENT session's id (the subagent is named by ``agent_id``, and its own transcript by
+    ``agent_transcript_path``), which is what folds every subagent stop into the parent's
+    one seed. A payload without ``session_id`` falls back to the stem of
+    ``transcript_path`` — the parent transcript file is ``<session_id>.jsonl``.
+    """
+    sid = payload.get("session_id")
+    if isinstance(sid, str) and sid.strip():
+        return sid.strip()
+    tp = payload.get("transcript_path")
+    if isinstance(tp, str) and tp.endswith(".jsonl"):
+        stem = os.path.basename(tp)[: -len(".jsonl")]
+        if stem:
+            return stem
+    return None
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -654,10 +703,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         f"{_SNOOZE_WINDOW_SESSIONS} sessions (the seeds stay; only the nudge quiets, then re-nags)",
     )
     parser.add_argument(
+        "--drafted",
+        action="store_true",
+        help="with --discard: the seed became a memory (counted as drafted, not discarded)",
+    )
+    parser.add_argument(
         "--prune",
         action="store_true",
-        help=f"CAP-6: bound the queue to the {_MAX_PENDING_SEEDS} highest-value/newest seeds now "
-        "(runs automatically on every capture; this forces it)",
+        help=f"CAP-6: bound the queue to the {_MAX_PENDING_SEEDS} highest-value/newest seeds now, "
+        f"and move seeds older than {_EXPIRE_AGE_DAYS} days or {_EXPIRE_SESSIONS} sessions to "
+        "expired/ (runs automatically on every capture; this forces it; nothing is deleted)",
+    )
+    parser.add_argument(
+        "--restore",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="SEED",
+        help="move an expired seed (its filename or session id) back into the queue; "
+        "with --all, every expired seed",
+    )
+    parser.add_argument(
+        "--all", dest="restore_all", action="store_true", help="with --restore: every expired seed"
     )
     parser.add_argument(
         "--add-decision",
@@ -692,7 +759,24 @@ def main(argv: Optional[List[str]] = None) -> int:
                 )
             return 0
         if args.list:
-            print(_format_listing(read_pending(memory_dir=args.memory_dir)))
+            print(_format_listing(
+                read_pending(memory_dir=args.memory_dir),
+                expired=expired_count(memory_dir=args.memory_dir),
+            ))
+            return 0
+        if args.restore is not None or args.restore_all:
+            if not args.restore and not args.restore_all:
+                print("name the expired seed to restore (`--restore <seed>`), or pass `--restore --all`")
+                return 2
+            back = restore_pending(
+                args.restore, restore_all=args.restore_all, memory_dir=args.memory_dir
+            )
+            if back:
+                print(f"restored {len(back)} seed(s) into the queue:")
+                for p in back:
+                    print(f"  {p}")
+            else:
+                print("nothing restored (no matching seed in the queue's expired/ folder)")
             return 0
         if args.snooze:
             ok = snooze_queue(memory_dir=args.memory_dir)
@@ -704,15 +788,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
             return 0
         if args.prune:
-            n = prune_pending(memory_dir=args.memory_dir)
+            n = expire_pending(memory_dir=args.memory_dir) + prune_pending(memory_dir=args.memory_dir)
             print(
-                f"pruned {n} low-value/old seed(s) — queue bounded to {_MAX_PENDING_SEEDS}"
+                f"moved {n} old or low-value seed(s) to expired/ (kept, restorable) — queue "
+                f"bounded to {_MAX_PENDING_SEEDS}"
                 if n
-                else f"nothing to prune (queue is within the {_MAX_PENDING_SEEDS}-seed bound)"
+                else f"nothing to move (queue is within the {_MAX_PENDING_SEEDS}-seed bound and "
+                "nothing has expired)"
             )
             return 0
         if args.discard:
-            ok = discard_pending(args.discard)
+            ok = discard_pending(args.discard, drafted=args.drafted, memory_dir=args.memory_dir)
             print(f"discarded: {args.discard}" if ok else f"nothing to discard at {args.discard}")
             return 0
         session_id, reason = args.session_id, args.reason
@@ -720,7 +806,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             try:
                 payload = json.load(sys.stdin)
                 if isinstance(payload, dict):
-                    session_id = session_id or (payload.get("session_id") or None)
+                    session_id = session_id or _payload_session_id(payload)
                     reason = reason or (payload.get("reason") or None)
             except Exception:
                 pass
