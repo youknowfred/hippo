@@ -187,6 +187,28 @@ def _api_key() -> Optional[str]:
     return None
 
 
+def key_visible() -> bool:
+    """Whether this process can see a key on any route ``_api_key`` reads. A yes or no
+    only — the value never leaves ``_api_key``. Never raises."""
+    try:
+        return _api_key() is not None
+    except Exception:
+        return False
+
+
+def no_key_line(what: str, alternative: str = "") -> str:
+    """The ONE plain line a run prints when ``what`` is turned on but ``key_visible()`` is
+    false (owner ruling 2026-10-05: a missing key is named, not swallowed). It names the
+    fix and never a key value. A cron or launchd run, and anything the Bash tool starts,
+    never receives the plugin options saved in /config (PLATFORM.md §4), so the
+    environment is the route this line points at."""
+    tail = f", or {alternative}" if alternative else ""
+    return (
+        f"{what} skipped: it is turned on, but this run sees no API key. Set "
+        f"HIPPO_LLM_API_KEY in this run's environment{tail}."
+    )
+
+
 def _complete_anthropic(
     prompt: str, *, timeout_s: float, max_tokens: int, system: Optional[str]
 ) -> Optional[str]:

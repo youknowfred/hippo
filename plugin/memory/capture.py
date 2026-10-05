@@ -531,8 +531,10 @@ def _capture_outcome(
     ``outcome`` is one of ``_OUTCOME_CAPTURED`` (``path`` = the written seed),
     ``_OUTCOME_NO_EPISODES`` (``detail`` = the sorted session ids the buffer DOES know —
     the paste-typo aid), or ``_OUTCOME_FAILED`` (``detail`` = the exception class name,
-    via the raising gather core). Same firewall and never-raise posture as the public
-    wrapper; the only writes target the pending queue.
+    via the raising gather core). On ``_OUTCOME_CAPTURED``, ``detail`` is the LLM triage
+    skip line when triage is turned on but this run sees no API key, else ``None``. Same
+    firewall and never-raise posture as the public wrapper; the only writes target the
+    pending queue.
     """
     try:
         if memory_dir is None:
@@ -580,7 +582,9 @@ def _capture_outcome(
         # (SubagentStop×N, then SessionEnd) carries the suggestions over instead of
         # re-billing. Lazy import behind the flag + its own catch: a triage failure of
         # ANY kind (no key, timeout, junk response) leaves this seed exactly as built
-        # above — the fail-open contract.
+        # above — the fail-open contract. A missing key is the one failure the run names
+        # (``triage_skip``): a shell-run capture never sees the key saved in /config.
+        triage_skip = None
         try:
             from .capture_triage import enrich_seed, triage_enabled
 
@@ -588,6 +592,11 @@ def _capture_outcome(
                 enrichment = enrich_seed(seed, memory_dir, repo_root=repo_root, prior=prior)
                 if enrichment:
                     seed["llm_triage"] = enrichment
+                else:
+                    from . import llm_client
+
+                    if not llm_client.key_visible():
+                        triage_skip = llm_client.no_key_line("LLM triage")
         except Exception:
             pass
         tmp = path + f".tmp.{os.getpid()}"  # COR-17: unique per writer — concurrent processes must not share a tmp
@@ -624,7 +633,7 @@ def _capture_outcome(
         # overflow moves to expired/ too; nothing here deletes a seed.
         expire_pending(pd, memory_dir=memory_dir, telemetry_dir=telemetry_dir)
         prune_pending(pd, max_seeds=_MAX_PENDING_SEEDS, memory_dir=memory_dir, telemetry_dir=telemetry_dir)
-        return (_OUTCOME_CAPTURED, path, None)
+        return (_OUTCOME_CAPTURED, path, triage_skip)
     except Exception as exc:
         return (_OUTCOME_FAILED, None, type(exc).__name__)
 
@@ -833,6 +842,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(_hook_outcome_line(outcome, path, detail, session_id), file=sys.stderr)
         elif path:
             print(f"captured → {path}")
+            if detail:
+                print(f"⚠ {detail}")
         return 0
     except Exception:  # never raise out of the SessionEnd hook path
         return 0

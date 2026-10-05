@@ -183,13 +183,17 @@ def _section_dream(memory_dir: str, repo_root: str) -> Optional[str]:
     """Dream discovery — report-only by default; the SLP-3 apply lane lives in
     ``_run_report`` (it must lead the report, not sit inside a section). Dream's own
     empty norms (no candidates / below-soak / empty corpus) read as nothing-to-report
-    here — an empty discovery must not stop the report being one line."""
+    here — an empty discovery must not stop the report being one line. The one thing
+    an empty pass still says is the LLM check's skip line: a scheduled run never sees the
+    key saved in /config, and a skip folded into "nothing to do" would stay silent on
+    every run."""
     from . import dream
 
     _code, text = dream.run_report_pass(memory_dir)
     first = (text or "").split("\n", 1)[0]
     if "— no candidates:" in first or re.search(r"\b0 candidate", first):
-        return None
+        skip = dream.contradictions_skip_line()
+        return f"⚠ {skip}" if skip else None
     return text
 
 
