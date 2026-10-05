@@ -187,7 +187,8 @@ def test_legacy_record_has_no_quarantine_and_doctor_names_upgrade(repo, memory_d
         r["name"] for r in R.recall("which reranker do we use", k=5, memory_dir=memory_dir, index_dir=idx)
     }
     r = D.check_trust_drift(D.DoctorContext(memory_dir, repo))
-    assert r["status"] == "warn" and "NO content fingerprint" in r["message"]
+    assert r["status"] == "warn" and "no per-file baseline" in r["message"]
+    assert "`hippo trust review`" in r["message"]
 
 
 def test_write_memory_consents_its_own_write(repo, memory_dir, tmp_path, monkeypatch):
@@ -301,12 +302,14 @@ def test_drift_producer_and_doctor_surface_the_withheld_delta(repo, memory_dir, 
         fh.write("drift\n")
 
     out = S.trust_drift_producer(memory_dir, repo)
-    assert out is not None and out.startswith("🔒 Memory trust drift")
-    assert "excel_header" in out and "WITHHOLDING" in out
+    assert out is not None and out.startswith("🔒 Recall is withholding 1 memory")
+    assert "excel_header" in out and "`hippo trust review`" in out
+    assert "\n" not in out  # TND-6: one line per session
 
     r = D.check_trust_drift(D.DoctorContext(memory_dir, repo))
     assert r["status"] == "warn" and "excel_header" in r["message"]
-    assert "mark_trusted" in r["message"]  # the exact re-consent command
+    assert "`hippo trust review`" in r["message"]  # the re-consent next step
+    assert "python -c" not in r["message"] and "mark_trusted" not in r["message"]
 
     assert any(label == "trust_drift" for label, _fn in S.PRODUCERS)
     assert "trust_drift" in [label for label, _ in D.CHECKS]

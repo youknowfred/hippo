@@ -530,9 +530,9 @@ def test_trust_check_warns_on_untrusted_corpus(repo, memory_dir, monkeypatch):
     git_commit(repo, "seed", 1_700_000_000)
     r = D.check_trust(_ctx(memory_dir, repo))
     assert r["status"] == "warn"
-    assert "UNTRUSTED" in r["message"] and "mark_trusted" in r["message"]
-    # The command names THIS repo's real git root (the gate key).
-    assert os.path.realpath(repo) in r["message"]
+    assert "UNTRUSTED" in r["message"] and "`hippo trust review`" in r["message"]
+    # TND-6: one plain verb, never a python -c line naming internals.
+    assert "python -c" not in r["message"] and "mark_trusted" not in r["message"]
 
 
 def test_trust_check_ok_when_trusted(repo, memory_dir, monkeypatch):

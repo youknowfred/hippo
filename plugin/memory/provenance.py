@@ -700,8 +700,11 @@ def backfill_file(
         )
         if changed and not dry_run:
             from .atomic import write_text_cas
+            from .trust import carry_consent_forward
 
             write_text_cas(path, new_text, _cas_token)  # COR-18: never a torn corpus file
+            # TND-6: not a review, so no new consent — but consented bytes stay consented.
+            carry_consent_forward(os.path.dirname(path), path, _cas_token, repo_root)
     except Exception as exc:  # never break a corpus-wide backfill on one file
         result["error"] = str(exc)
     return result
@@ -774,8 +777,10 @@ def heal_empty_baselines(memory_dir: str, repo_root: str) -> Tuple[List[str], Di
                         lines[i] = f'{m.group(1)}"{head}"'
                         try:
                             from .atomic import write_text_cas
+                            from .trust import carry_consent_forward
 
                             write_text_cas(path, "\n".join(lines), _cas_token)  # COR-18
+                            carry_consent_forward(memory_dir, path, _cas_token, repo_root)  # TND-6
                         except Exception as exc:
                             failed[stem] = str(exc)  # RCH-9: named, never dropped
                             break
@@ -1281,10 +1286,10 @@ def rederive_file(
       --refresh   re-derives and PRESERVES source_commit (right), but never folds the write
                   into the consent baseline (right — it is a bulk pass, and
                   trust.record_authored_write forbids that by name: "an unattended
-                  re-baseline would be the gate consenting to itself"). So it rewrites N
-                  files, drifts every one of them off its SEC-6 fingerprint, and recall
-                  WITHHOLDS them — handing the user N mystery quarantines whose banner
-                  blames "a git pull? a hand edit?" for hippo's own write.
+                  re-baseline would be the gate consenting to itself"). It used to drift
+                  every file it rewrote; since TND-6 it carries consent forward for files
+                  whose bytes were consented (``trust.carry_consent_forward``), which
+                  still never consents a change nobody reviewed.
       --reverify  folds (right — a re-verify IS a per-item human review) but re-baselines
                   source_commit to HEAD, which SILENTLY CLEARS every staleness flag the
                   corpus is carrying. It would trade a citation bug for the total loss of

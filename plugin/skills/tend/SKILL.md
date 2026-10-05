@@ -72,10 +72,10 @@ What each kind needs before its verdict:
 - **derivation** — read the citation diff, then `apply` for that memory; when every memory
   is applied, the `corpus` item takes `stamp`. On a corpus that is not committed to git,
   take a snapshot first (`hippo provenance --snapshot <label>`).
-- **trust** — re-consent is its own gate: the `trust` MCP tool (action='review', then
-  'grant' with the digest it returns) shows what changed since consent and binds your
-  confirmation to exactly what you read (in a terminal, `/hippo:doctor` walks the same
-  review). Consent is never inferred.
+- **trust** — re-consent is its own gate: `hippo trust review` shows each change against
+  the version consented to, and `hippo trust grant` takes the digest it prints (all of it,
+  or `--files` for part). On Desktop the `trust` MCP tool does the same (action='review',
+  then 'grant'). Consent is never inferred.
 
 ## 3. Deferring
 

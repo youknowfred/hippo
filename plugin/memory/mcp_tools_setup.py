@@ -127,7 +127,7 @@ def _tool_doctor(args: Dict[str, Any]) -> str:
     return report + caveat + (
         "\n\nOn this MCP surface the named fixes map to tools: /hippo:bootstrap → the "
         "bootstrap tool (action='start'), /hippo:init → the init tool, the "
-        "trust/consent step (mark_trusted) → the trust_corpus tool, and "
+        "trust/consent step (`hippo trust review` / `grant`) → the trust_corpus tool, and "
         "/hippo:consolidate's steps → the capture, new_memory (check:true first), "
         "secrets_scan, reconsolidate, build_index, co_recall_proposals, and "
         "abstention_fixtures tools (per item, as the consolidate skill directs)."
@@ -350,7 +350,8 @@ def _tool_trust_corpus(args: Dict[str, Any]) -> str:
                 f"file(s) since consent; recall is WITHHOLDING them: {', '.join(delta)} "
                 "(SEC-6 quarantine).\n\n"
                 + _consent_review_block(memory_dir, stems=changed + added)
-                + f"\n\nReview how each changed (git diff/log helps), then on the user's "
+                + f"\n\nReview how each changed (`hippo trust review` prints each file's "
+                f"diff against the consented version), then on the user's "
                 f'explicit yes call trust_corpus again with confirm_digest="{digest}". '
                 "A no leaves the quarantine active — that is the designed posture."
             )

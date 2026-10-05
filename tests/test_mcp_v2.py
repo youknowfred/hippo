@@ -108,7 +108,6 @@ def test_deprecated_names_say_so_in_the_listing_and_in_every_answer(corpus):
     ("why", {"query": "deploy canary"}, "inspect", {"action": "why", "query": "deploy canary"}),
     ("decision_history", {"name": "deploy_runbook"}, "inspect", {"action": "history", "name": "deploy_runbook"}),
     ("secrets_scan", {"text": "x = 1"}, "doctor", {"action": "secrets_scan", "text": "x = 1"}),
-    ("trust_corpus", {}, "trust", {"action": "review"}),
     ("bootstrap", {"action": "status"}, "setup", {"action": "bootstrap", "step": "status"}),
 ])
 def test_a_v2_route_answers_exactly_what_the_v1_name_did(corpus, old, old_args, new, new_args):
@@ -169,3 +168,22 @@ def test_doctor_names_permission_rules_for_deprecated_tools(tmp_path, monkeypatc
     assert r["status"] == "warn"
     assert "mcp__plugin_hippo_hippo__why → mcp__plugin_hippo_hippo__inspect" in r["message"]
     assert "hippo_hippo__recall →" not in r["message"]
+
+
+def test_trust_reviews_and_grants_file_by_file(corpus, monkeypatch):
+    """The v2 trust tool runs the per-file engine: a drifted memory is diffed against the
+    bytes consented to, and a grant with the review's digest consents to exactly that."""
+    from memory import trust
+
+    repo, md = corpus
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    assert trust.mark_trusted(repo, memory_dir=md)
+    write_file(md, "deploy_runbook.md", _MEM.replace("Deploy via the canary lane.", "Deploy via blue-green."))
+    assert "withheld" in _call("trust", {})["content"][0]["text"].lower()
+    review = _call("trust", {"action": "review"})["content"][0]["text"]
+    assert "Deploy via blue-green." in review and "action='grant'" in review
+    digest = review.split("digest ")[1].split()[0]
+    assert "refused" in _call("trust", {"action": "grant", "digest": "0" * 12})["content"][0]["text"]
+    granted = _call("trust", {"action": "grant", "digest": digest})["content"][0]["text"]
+    assert "consented to 1 memory" in granted
+    assert trust.untrusted_changes(repo, md)["changed"] == []

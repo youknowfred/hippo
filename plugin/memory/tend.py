@@ -143,8 +143,9 @@ def _detail_lines(entry: dict, memory_dir: str, repo_root: str) -> List[str]:
 def _verdict_help(kind: str, entry_id: str) -> List[str]:
     v = VERDICTS[kind]
     if kind == "trust":
-        return ["Re-consent is its own gate: the trust_corpus MCP tool (or /hippo:doctor) "
-                "shows what changed and binds consent to exactly what you read."]
+        return ["Re-consent is its own gate: `hippo trust review` shows each change against the "
+                "consented version, then `hippo trust grant` with the digest it prints (the trust "
+                "MCP tool on Desktop)."]
     lines = [f"Verdicts: {' | '.join(v)}", f"  hippo tend apply {entry_id} --verdict <verdict>"]
     if kind == "contradiction":
         lines.append("  keep_one and merge also take --winner <name> --loser <name>.")
@@ -297,8 +298,8 @@ def apply(
         if verdict not in VERDICTS[kind]:
             return _refused(f"{kind} items take: {', '.join(VERDICTS[kind])}")
         if kind == "trust":
-            return _refused("re-consent is its own gate: the trust_corpus MCP tool (or "
-                            "/hippo:doctor) shows what changed and binds consent to what you read.")
+            return _refused("re-consent is its own gate: `hippo trust review`, then "
+                            "`hippo trust grant` with the digest it prints.")
         if kind == "reverify":
             r = _apply_reverify(target, verdict, memory_dir, repo_root, superseded_by)
         elif kind == "baseline":

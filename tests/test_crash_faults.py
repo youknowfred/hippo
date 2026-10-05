@@ -106,6 +106,7 @@ CRASH_CONTRACT = {
     ("trust", "_write_registry_doc"): ("detected",),  # mark_trusted returns False
     ("tend", "_write_state"): ("detected",),  # TND-2: hold/snooze/skip report the failure; prior state kept
     ("tend_queue", "_write_cache"): ("intact",),  # TND-1: the cache is derived; the build still returns
+    ("trust_review", "keep_consented_baselines"): ("intact",),  # TND-6: best-effort store copy; consent itself already landed
 }
 
 
@@ -845,6 +846,20 @@ def scn_trust_registry_detected(tmp_path, monkeypatch):
     assert ok is False  # the caller must not pretend the corpus got trusted
 
 
+def scn_trust_baseline_store_intact(tmp_path, monkeypatch):
+    from memory import trust, trust_review
+
+    root, md = _git_repo(tmp_path)  # the memory below stays untracked: a store candidate
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    path = _mem(md, "local_only")
+    _arm(monkeypatch, "trust_review", "keep_consented_baselines")
+    assert trust.mark_trusted(root, memory_dir=md) is True  # consent is not hostage to the copy
+    assert trust.consented_hashes(root) == {"local_only": trust.file_sha256(path)}
+    store = trust_review.baseline_store_dir()
+    blobs = [n for n in os.listdir(store) if len(n) == 64] if os.path.isdir(store) else []
+    assert not blobs  # whole-or-absent: a review falls back to "no recorded baseline"
+
+
 def scn_interview_state_detected(tmp_path, monkeypatch):
     from memory.interview import STATE_NAME, respond
 
@@ -1056,6 +1071,7 @@ _SCENARIOS = [
     (("staleness", "set_invalid_after"), "detected", scn_invalid_after_detected),
     (("staleness", "set_invalid_after"), "rolled_back", scn_invalid_after_rolled_back),
     (("trust", "_write_registry_doc"), "detected", scn_trust_registry_detected),
+    (("trust_review", "keep_consented_baselines"), "intact", scn_trust_baseline_store_intact),
     (("telemetry_rollup", "_update"), "detected", scn_rollup_update_detected),
     (("telemetry_rollup", "_append_finalized"), "intact", scn_rollup_trim_intact),
     (("telemetry_rollup", "_drain_spool"), "detected", scn_rollup_drain_spool_detected),

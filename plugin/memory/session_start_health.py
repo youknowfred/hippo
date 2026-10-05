@@ -421,8 +421,8 @@ def trust_drift_producer(
     Recall is actively WITHHOLDING the drifted/new files (the per-file quarantine), so
     this is first-class loud (fires every session while drift exists, like the conflict
     radar — an active degradation must never wait for a nudge cadence, KPI-5). Names the
-    first few withheld stems and routes to ``/hippo:doctor`` for the delta review +
-    re-consent. Silent when: the gate is inapplicable/bypassed, the corpus is untrusted
+    first few withheld stems and routes to ``hippo trust review`` for the per-file diff +
+    grant (TND-6). Silent when: the gate is inapplicable/bypassed, the corpus is untrusted
     (the untrusted nudge owns that path), the record is legacy/fingerprint-less (no
     quarantine is active — the doctor check names that upgrade), or there is no drift.
     Read-only; ``ctx`` (LIF-6) unused; never raises.
@@ -491,7 +491,7 @@ def untrusted_corpus_nudge(memory_dir: str, repo_root: str) -> Optional[str]:
     would see a totally inert corpus with zero explanation. Silent when the corpus is trusted,
     when the gate is inapplicable (no resolvable git root), or when the low-frequency modulo
     says skip this session. Names the memory COUNT so the user knows something is being
-    withheld and points at ``/hippo:doctor`` (which shows the sample + takes consent).
+    withheld and points at ``hippo trust review`` (TND-6), whose grant is the consent.
     """
     from . import trust
 
@@ -505,8 +505,8 @@ def untrusted_corpus_nudge(memory_dir: str, repo_root: str) -> Optional[str]:
         f"🔒 This project has an UNTRUSTED memory corpus ({count} memories) — hippo is "
         "injecting nothing from it until you review and trust it. A cloned or downloaded "
         "repo's memories are an unreviewed prompt-injection channel, so recall stays gated "
-        "by default (SEC-12: this holds for an extracted, non-git corpus too). Run "
-        "/hippo:doctor to see the memory names and trust this corpus, or /hippo:init if it's "
-        "yours (set HIPPO_TRUST_ALL=1 for CI, or HIPPO_TRUST_NONGIT=1 for a hand-made non-git "
-        "corpus)."
+        "by default (a corpus extracted without git included). Next step: `hippo trust "
+        "review` shows what it would inject, and its grant line consents to what you approve "
+        "— or /hippo:init if the corpus is yours (set HIPPO_TRUST_ALL=1 for CI, or "
+        "HIPPO_TRUST_NONGIT=1 for a hand-made non-git corpus)."
     )

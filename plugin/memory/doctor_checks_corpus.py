@@ -323,13 +323,12 @@ def check_fill_me(ctx: DoctorContext) -> Dict[str, str]:
 
 
 def check_trust(ctx: DoctorContext) -> Dict[str, str]:
-    """Corpus trust state (SEC-1) — is this corpus trusted, and the exact command to trust it.
+    """Corpus trust state (SEC-1) — is this corpus trusted, and the command that reviews it.
 
     Recall is GATED: an untrusted (usually freshly-cloned) corpus injects nothing until this
     machine's user consents. Reports the four trust states deterministically and, on the untrusted
-    path, prints the exact ``mark_trusted`` command doctor's consent step runs. Doctor never
-    auto-trusts here — the interactive review lives in the SKILL prose; this line only reports the
-    state and the command.
+    path, names ``hippo trust review`` (TND-6), whose digest-bound grant is the consent. Doctor
+    never auto-trusts here — this line only reports the state and the next step.
     """
     try:
         from . import trust
@@ -352,9 +351,8 @@ def check_trust(ctx: DoctorContext) -> Dict[str, str]:
         return {
             "status": "warn",
             "message": f"corpus UNTRUSTED ({count} memories) — recall injects nothing from it. "
-            "Review the memory names, then trust it: "
-            f"python -c \"from memory.trust import mark_trusted; mark_trusted('{gate_root}')\" "
-            "(or set HIPPO_TRUST_ALL=1 for CI).",
+            "Next step: `hippo trust review` shows what it would inject, and its grant "
+            "line consents to what you approve (or set HIPPO_TRUST_ALL=1 for CI).",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"trust check failed: {exc}."}
@@ -366,9 +364,8 @@ def check_trust_drift(ctx: DoctorContext) -> Dict[str, str]:
     Three deterministic states for a TRUSTED, gate-applicable corpus:
       - baseline present, no drift  -> ok.
       - baseline present, drift     -> warn, naming the withheld stems (recall's per-file
-        quarantine is ACTIVE on them) + the exact re-consent command. The interactive
-        review (show what each changed file would inject — the SEC-5 consent sample —
-        then take the explicit yes) lives in the doctor SKILL, same as first consent.
+        quarantine is ACTIVE on them) + ``hippo trust review`` (TND-6: per-file diffs
+        against the consented bytes, then a digest-bound per-file grant).
       - baseline ABSENT (a legacy, pre-SEC-6 trust record) -> warn: trust works but
         change detection is OFF until a re-consent stamps a fingerprint.
     ok/N-A on the bypassed / non-git / untrusted paths (``check_trust`` owns those).
@@ -390,10 +387,9 @@ def check_trust_drift(ctx: DoctorContext) -> Dict[str, str]:
         if not drift.get("baseline"):
             return {
                 "status": "warn",
-                "message": "trust record has NO content fingerprint (pre-SEC-6 consent) — "
-                "recall cannot detect upstream changes to this corpus. Re-consent to stamp "
-                "one: python -c \"from memory.trust import mark_trusted; "
-                f"mark_trusted('{gate_root}', memory_dir='{ctx.memory_dir}')\"",
+                "message": "trust record has no per-file baseline (an older consent) — "
+                "recall cannot detect upstream changes to this corpus. Next step: `hippo "
+                "trust review`, then grant what you approve to record one.",
             }
         changed, added = drift.get("changed") or [], drift.get("added") or []
         if not changed and not added:
@@ -404,11 +400,10 @@ def check_trust_drift(ctx: DoctorContext) -> Dict[str, str]:
         names = ", ".join(changed + [f"{n} (new)" for n in added])
         return {
             "status": "warn",
-            "message": f"{len(changed)} changed / {len(added)} new memory file(s) since "
-            f"consent — recall is WITHHOLDING them: {names}. Review what each would inject "
-            "(the consent sample shows descriptions), then re-consent: "
-            "python -c \"from memory.trust import mark_trusted; "
-            f"mark_trusted('{gate_root}', memory_dir='{ctx.memory_dir}')\"",
+            "message": f"{len(changed) + len(added)} memories withheld from recall: "
+            f"{len(changed)} changed / {len(added)} new since consent ({names}). Next step: "
+            "`hippo trust review` shows each change against the consented version; grant "
+            "the ones you approve.",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"trust-drift check failed: {exc}."}

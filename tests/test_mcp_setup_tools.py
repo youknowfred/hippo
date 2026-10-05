@@ -585,7 +585,7 @@ def test_init_on_trusted_corpus_with_no_drift_still_says_recall_active(corpus, m
     assert T.mark_trusted(T.gate_repo_root(md, rr), memory_dir=md, origin="init")
     text = _text(_call("init", {}))
     assert "already trusted — recall active" in text
-    assert "WITHHOLDING" not in text
+    assert "withholding" not in text
 
 
 def test_init_on_trusted_corpus_reports_the_per_file_drift_it_is_withholding(
@@ -607,7 +607,7 @@ def test_init_on_trusted_corpus_reports_the_per_file_drift_it_is_withholding(
 
     text = _text(_call("init", {}))
     assert "recall active" not in text, "recall is NOT active for the withheld files"
-    assert "WITHHOLDING" in text
+    assert "Recall is withholding 2 memories" in text
     assert "deploy_runbook" in text and "new_note" in text
     assert "1 changed / 1 new" in text
     # and it still tells the truth about the marker itself

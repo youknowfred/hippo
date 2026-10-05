@@ -111,41 +111,69 @@ def _tool_setup(args: Dict[str, Any]) -> str:
     return _unknown("setup", action, ("bootstrap", "init", "build_index"))
 
 
-def _trust_status() -> str:
-    from . import trust
-    from .provenance import resolve_dirs
+# A first review of a large untrusted corpus as full per-file text would be a huge tool
+# result; past this many files it is the whole-corpus consent sample instead.
+_FULL_REVIEW_MAX_FILES = 25
+_MCP_GRANT_HINT = (
+    "\n\nOn this tool: grant with action='grant', digest=<the digest above>, and files=[…] "
+    "to consent to part of it."
+)
 
-    memory_dir, repo_root = resolve_dirs()
-    gate = trust.gate_repo_root(memory_dir, repo_root)
-    if gate is None:
-        return "trust: this project has no memory corpus yet — nothing to consent to."
-    if not trust.is_trusted(gate):
-        return ("trust: not consented — recall and writes are withheld. action='review' shows "
-                "what would be injected; 'grant' with its digest consents after the user agrees.")
-    drift = trust.untrusted_changes(gate, memory_dir)
-    changed, added = drift.get("changed") or [], drift.get("added") or []
-    if changed or added:
-        return (f"trust: consented, but {len(changed)} changed and {len(added)} new file(s) since "
-                "then are withheld from recall — action='review' shows them.")
-    return "trust: consented; nothing has changed since."
+
+def _str_list(v) -> Any:
+    if isinstance(v, list):
+        out = [str(x).strip() for x in v if str(x).strip()]
+        return out or None
+    if isinstance(v, str) and v.strip():
+        return [x.strip() for x in v.split(",") if x.strip()]
+    return None
 
 
 def _tool_trust(args: Dict[str, Any]) -> str:
-    from .mcp_tools_packs import _tool_untrust
+    """Consent through the per-file review engine (``trust_review``), the same one
+    ``hippo trust`` runs: a review diffs each changed memory against the exact bytes the
+    user consented to, and a grant consents to exactly what the review showed."""
+    from . import trust_review as TR
     from .mcp_tools_setup import _tool_trust_corpus
+    from .provenance import resolve_dirs
+    from .trust_cli import render_grant, render_review, render_status
 
+    memory_dir, repo_root = resolve_dirs()
     action = _action(args, "status")
+    files = _str_list(args.get("files"))
     if action == "status":
-        return _trust_status()
+        return render_status(TR.status(memory_dir, repo_root))
     if action == "review":
-        return _tool_trust_corpus({})
+        st = TR.status(memory_dir, repo_root)
+        if files is None and st.get("state") == "untrusted" and st.get("total", 0) > _FULL_REVIEW_MAX_FILES:
+            return _tool_trust_corpus({}) + (
+                f"\n\nThis corpus has {st['total']} memories, so this is the whole-corpus sample. "
+                "To read every memory in full instead, review it in batches: action='review' "
+                "with files=[…]."
+            )
+        return render_review(TR.build_review(memory_dir, repo_root, files=files)) + _MCP_GRANT_HINT
     if action == "grant":
         digest = args.get("digest")
         if not isinstance(digest, str) or not digest.strip():
             return "trust: action='grant' needs digest=… from action='review' (after the user agrees)."
-        return _tool_trust_corpus({"confirm_digest": digest.strip()})
+        res = TR.grant(memory_dir, repo_root, digest=digest.strip(), files=files,
+                       all_reviewed=files is None)
+        if res.get("ok"):
+            return render_grant(res)
+        if files is None and TR.status(memory_dir, repo_root).get("state") == "untrusted":
+            # The whole-corpus sample's digest (a large first review): its own confirm step.
+            return _tool_trust_corpus({"confirm_digest": digest.strip()})
+        return render_grant(res)
     if action == "revoke":
-        return _tool_untrust(_without(args, "action"))
+        if isinstance(args.get("repo_root"), str) and args["repo_root"].strip():
+            from .mcp_tools_packs import _tool_untrust
+
+            return _tool_untrust({"repo_root": args["repo_root"]})
+        res = TR.revoke(memory_dir, repo_root)
+        if not res.get("ok"):
+            return f"trust revoke: FAILED ({res.get('error')}); nothing changed."
+        return (f"trust revoke: {res['gate_root']} is no longer trusted; recall injects nothing "
+                "from it from the next prompt.")
     return _unknown("trust", action, ("status", "review", "grant", "revoke"))
 
 

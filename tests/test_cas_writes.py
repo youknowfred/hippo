@@ -142,6 +142,7 @@ NON_CORPUS_SITES = {
     ("tend", "_write_state"): "gitignored tend state (snooze/skip/hold), per clone",
     ("tend_queue", "_write_cache"): "gitignored derived queue counts, rebuilt on every run",
     ("trust", "_write_registry_doc"): "machine trust registry, outside the corpus",
+    ("trust_review", "keep_consented_baselines"): "content-addressed baseline store beside the trust registry, outside the corpus",
 }
 
 
