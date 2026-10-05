@@ -379,7 +379,8 @@ def health_line(report: dict) -> Optional[str]:
     # state for a leaf memory and is why orphans alone deliberately do not fire this line at
     # all (see the early return above). Say which thing it is.
     tail = f"; {n_orphans} orphan memo(s) (no outbound links)" if n_orphans else ""
-    return "🔗 Memory link health — " + "; ".join(bits) + tail + " (run `memory.lint_links`)."
+    return ("🔗 Memory link health — " + "; ".join(bits) + tail
+            + " (say \"tend memory\" to fix them one at a time; `hippo lint-links` lists them).")
 
 
 def lint_links_producer(
@@ -415,7 +416,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--boundary",
         action="store_true",
-        help="PUB-3: evaluate the COMMITTED-subset view — the links a fresh checkout "
+        help="evaluate the COMMITTED-subset view — the links a fresh checkout "
         "sees dangle, with per-candidate heals-N (never a gate)",
     )
     args = parser.parse_args(argv)
@@ -489,6 +490,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.show_orphans:
         for o in report["orphans"]:
             print(f"  · {o}")
+    # TND-5: a memory should carry ONE Related line; a second one is the old writer's
+    # leftover. Listed read-only here; merging is per item, by name.
+    try:
+        from .related_lines import scan_duplicate_related
+
+        dupes = scan_duplicate_related(md)
+    except Exception:
+        dupes = []
+    if dupes:
+        print(f"more than one Related line: {len(dupes)}")
+        for d in dupes:
+            print(f"  ≡ {d['name']} ({d['count']} lines) — merge with `hippo links --merge-related {d['name']}`")
     # READ-ONLY: a linter never fails a workflow on findings.
     return 0
 

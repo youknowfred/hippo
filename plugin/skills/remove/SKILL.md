@@ -4,7 +4,7 @@ description: Uninstall/offboarding for THIS project — removes the cross-machin
 
 # /hippo:remove — uninstall and offboarding path
 
-The teardown counterpart to `/hippo:init`. Scoped to **this one project** — it never touches
+The teardown counterpart to `/hippo:setup`. Scoped to **this one project** — it never touches
 another project's symlink, another project's corpus, or the shared per-machine venv/model cache
 (those are reported for reclamation, never deleted, since other projects may still depend on
 them).
@@ -15,15 +15,15 @@ them).
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
 [ "${CLAUDE_CODE_ENTRYPOINT:-}" != "claude-desktop" ] || { echo "✘ /hippo:remove has no Desktop-safe MCP-tool equivalent yet. Run it from a terminal Claude Code session in this repo (claude, then /hippo:remove)."; exit 1; }
 [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:remove skill, not from a copy of its SKILL.md. If the loaded skill stops here too, this Claude Code does not fill them in: update it and run /hippo:remove again."; exit 1; }
-. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver
 hippo_resolve_py
-hippo_note_usage skill remove  # OBS-2: count this skill's use (one spool line, no Python)
+hippo_note_usage skill remove  # count this skill's use (one spool line, no Python)
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 ```
 
 Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
-opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
-and resolver lines, in the same call.
+opens by pinning what it needs; an inline `hippo …` command runs
+as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 ## What this does, in order
 
@@ -31,8 +31,8 @@ and resolver lines, in the same call.
    from injecting the floor — as long as `~/.claude/projects/<encoded>/memory` resolves to this
    project's `.claude/memory`, Claude Code keeps reading it every session regardless of anything
    else in this skill. Use the ONE tested Python helper
-   (`memory.provenance.remove_project_symlink`, ONB-6 — the exact inverse of ONB-5's
-   `create_project_symlink`, same SHP-5 encoding formula) — never hand-rolled `rm` in bash:
+   (`memory.provenance.remove_project_symlink`, — the exact inverse of's
+   `create_project_symlink`, same encoding formula) — never hand-rolled `rm` in bash:
    ```bash
    export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
    . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
@@ -51,7 +51,7 @@ and resolver lines, in the same call.
      usually means either a prior manual setup or that `$REPO_ROOT` doesn't match what you
      expect; forcing it risks unlinking a symlink that belongs to a different project's corpus.
 
-1b. **De-register from the cross-project registry (RCH-4).** `/hippo:init` listed this project
+1b. **De-register from the cross-project registry.** `/hippo:setup` listed this project
    in the machine-local `~/.claude/hippo-projects.json` so `/hippo:recall --all-projects`
    could search it from other projects; offboarding removes that listing (idempotent — `true`
    also when it was never registered):
@@ -65,22 +65,22 @@ and resolver lines, in the same call.
      "$REPO_ROOT"
    ```
    Trust state (`hippo-trust.json`) is deliberately left as-is — trust records the user's
-   review of the CORPUS content, which removal does not un-review; re-running `/hippo:init`
-   later picks both straight back up. This is the opposite intent from SEN-5's `untrust` MCP
-   tool: **remove** = "I'm done working here" (offboard the project, keep the review), while
-   **untrust** = "I no longer trust this corpus" (revoke the review, by-gate, no cache wipe).
-   Reach for `untrust` after finding a bad/poisoned memory; reach for `remove` to offboard a
+   review of the CORPUS content, which removal does not un-review; re-running `/hippo:setup`
+   later picks both straight back up. This is the opposite intent from revoking consent (the `trust`
+   MCP tool, action='revoke'): **remove** = "I'm done working here" (offboard the project, keep
+   the review), while **revoke** = "I no longer trust this corpus" (withdraw the review,
+   by-gate, no cache wipe). Revoke after finding a bad/poisoned memory; remove to offboard a
    project you still trust.
 
 2. **Offer to delete the derived, gitignored dirs — agent-gated, never unconditional.** Ask the
    user (in this skill's own conversational turn) before deleting anything here; a "yes" to step
    1 is not consent for step 2. If confirmed, remove:
    - `.claude/.memory-index/` (the recall index — rebuildable any time via
-     `/hippo:init` or `memory.build_index`)
+     `/hippo:setup` or `memory.build_index`)
    - `.claude/.memory-telemetry/` (recall/episode/reconsolidation ledgers —
      `recall_events.jsonl`, `episode_buffer.jsonl`, `reconsolidation_events.jsonl` all live here;
      deleting the directory takes all three with it)
-   - `.claude/.memory-pending/` (CAP-2 draft-capture queue — un-approved session-capture seeds
+   - `.claude/.memory-pending/` (draft-capture queue — un-approved session-capture seeds
      awaiting review; deleting it discards those drafts, which never entered the corpus anyway)
 
    All three are already gitignored derived state — deleting them loses no git history and
@@ -92,15 +92,19 @@ and resolver lines, in the same call.
    them affects every other project on this machine still using the plugin, so this skill only
    ever prints them for the user's own manual reclamation:
    - venv: `${CLAUDE_PLUGIN_DATA}/venv`
-   - fastembed model cache: the path `memory.build_index.durable_fastembed_cache_dir()` returns
-     (print it via `"$PY" -c "from memory.build_index import durable_fastembed_cache_dir; print(durable_fastembed_cache_dir())"`)
+   - fastembed model cache: the path this prints
+     ```bash
+     export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+     . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
+     "$PY" -c "from memory.build_index import durable_fastembed_cache_dir; print(durable_fastembed_cache_dir())"
+     ```
 
    State explicitly: "these are shared across every project using hippo on this machine — only
    delete them yourself if you're removing hippo everywhere, not just from this project."
 
 4. **Explain what was left alone.** End every run with this, regardless of what steps 2-3 did:
    `.claude/memory/` itself — the git-tracked corpus — is untouched and stays committed in git,
-   inert, until someone runs `/hippo:init` again (in this repo or a fresh clone of it). Removal
+   inert, until someone runs `/hippo:setup` again (in this repo or a fresh clone of it). Removal
    never edits, deletes, or archives a single memory file.
 
 ## Hard rules
@@ -121,6 +125,6 @@ and resolver lines, in the same call.
 No hook still fires for this project in a way that matters — `SessionStart` and
 `UserPromptSubmit` still run (they're global to the plugin, not per-project), but with the
 symlink gone, Claude Code's native memory has nothing to read for this repo, so there is no more
-floor injection and no more recall output tied to this corpus. Re-running `/hippo:init` here
-later picks the existing `.claude/memory/` corpus back up exactly where it was left (ONB-5's
+floor injection and no more recall output tied to this corpus. Re-running `/hippo:setup` here
+later picks the existing `.claude/memory/` corpus back up exactly where it was left ('s
 existing-corpus path) — nothing was lost.

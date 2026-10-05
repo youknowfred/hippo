@@ -87,14 +87,14 @@ def test_resolve_is_gated_like_the_pack_tools(tmp_path, monkeypatch):
     _root, _md = _repo(tmp_path, monkeypatch)
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     out = _call("resolve", {})
-    assert "untrusted" in out and "SEC-1" in out
+    assert "untrusted" in out
 
 
 def test_audit_is_gated_like_the_pack_tools(tmp_path, monkeypatch):
     _root, _md = _repo(tmp_path, monkeypatch)
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     out = _call("audit", {})
-    assert "untrusted" in out and "SEC-1" in out
+    assert "untrusted" in out
 
 
 # --------------------------------------------------------------------------- #

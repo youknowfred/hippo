@@ -20,10 +20,12 @@ PY="${CLAUDE_PLUGIN_DATA}/venv/bin/python"   # built by /hippo:bootstrap
 export PYTHONPATH="${CLAUDE_PLUGIN_ROOT}"    # so `import memory` resolves to this package
 ```
 
-The four stateless commands also have a launcher — `"${CLAUDE_PLUGIN_ROOT}/bin/hippo"
-<recall|new|build-index|staleness>` — which does the same resolution internally (and falls
-back to bare `python3` pre-bootstrap: BM25-only via the vendored fallbacks in
-[`_vendor/`](_vendor/__init__.py)).
+Every module below with a command line is also a `hippo <verb>` (SRF-1): `bin/hippo`
+is the one entry the skills, hooks and printed hints use. It does the same resolution
+internally, finds the installed venv when the shell has no plugin env, and falls back to
+bare `python3` pre-bootstrap (BM25-only via the vendored fallbacks in
+[`_vendor/`](_vendor/__init__.py)). `hippo help --all` prints the verb table
+([`cli_verbs.py`](cli_verbs.py)); each verb runs its module exactly as `python -m` does.
 
 In a **dev checkout of this repo**, use `PY=.venv/bin/python` and `PYTHONPATH=plugin`
 instead.
@@ -640,16 +642,21 @@ untouched), and both routed through one auditable seam:
 Every consumer treats `None` as "skip the enrichment entirely", so a dead network can never
 break a hook or a dream pass. Provider/model/endpoint/key are config points (defaults:
 Anthropic, the `claude-haiku-4-5` alias — deliberately not a dated snapshot, so tier
-refreshes arrive without a release). Configuration is centralized in ONE machine-local file,
-**`~/.claude/hippo-llm.json`** (the `hippo-trust.json` dotfile family; `HIPPO_LLM_CONFIG`
-relocates it), layered per key as **env var > config file > shipped default** — the file is
-the durable machine-wide setting, an env var stays the per-run/CI override. Recognized keys:
-`provider`, `model`, `base_url`, `api_key`, `capture_triage`, `capture_timeout_s`,
-`dream_contradictions`, `dream_timeout_s`, `contra_max_pairs`, `contra_min_cofire`.
+refreshes arrive without a release). Since v1.42 the machine settings are the plugin's
+options (`plugin.json` `userConfig`): `capture_llm`, `dream_contradictions`,
+`dream_generative`, `llm_model`, and `llm_api_key` (`sensitive` — Claude Code keeps it in the
+system keychain). Hooks receive them as `CLAUDE_PLUGIN_OPTION_<KEY>`; the MCP server gets the
+same names through `${user_config.<key>}` in its `env`; a command the Bash tool runs gets
+none (`settings.py`). Precedence per key is **env var > plugin option > legacy file >
+shipped default**. The legacy file, **`~/.claude/hippo-llm.json`** (`HIPPO_LLM_CONFIG`
+relocates it), is still read through v1.43 — keys `provider`, `model`, `base_url`,
+`api_key`, `capture_triage`, `capture_timeout_s`, `dream_contradictions`,
+`dream_timeout_s`, `contra_max_pairs`, `contra_min_cofire` — and doctor warns while it holds
+a plaintext key.
 
 ### `capture_triage.py` — CAP-LLM, capture-time triage
 
-With `capture_triage: true` (or `HIPPO_CAPTURE_LLM=1`), the SessionEnd/SubagentStop capture
+With the `capture_llm` option (or `HIPPO_CAPTURE_LLM=1`), the SessionEnd/SubagentStop capture
 pass makes ONE bounded small-model call (default 6s, clamped ≤20s of the hooks' 30s budget)
 that annotates the pending seed with SUGGESTIONS the `/hippo:consolidate` reviewer still
 ratifies per item: a likely `type` + kebab name, a drafted one-line description, and
@@ -666,8 +673,9 @@ the triage seam reuses only `check_candidate`, the documented write-nothing dry 
 ### DRM-C in `dream.py` — contradiction discovery
 
 Cofire is a similarity: it can say two memories are ABOUT the same thing, never that they
-DISAGREE. With `dream_contradictions: true` (or `HIPPO_DREAM_CONTRADICTIONS=1`, or `dream
---contradictions`), the pass judges its own high-cofire pairs — the same `result["pairs"]`
+DISAGREE. With the `dream_contradictions` option (or `HIPPO_DREAM_CONTRADICTIONS=1`, the MCP
+`dream` tool's `contradictions: true`, or `dream --contradictions` with a key in the shell's own
+environment), the pass judges its own high-cofire pairs — the same `result["pairs"]`
 surface, no separate corpus scan — with one bounded call each: "conflict in substance, or
 merely related?". Conflict verdicts become `kind: "contradicts"` candidates — Tier-C via the
 pre-existing `_ROUTED_KINDS` routing, never admitted by `apply_eligible` (there is no Tier-A
@@ -693,7 +701,10 @@ re-billed.
   redirect (an explicit root is honored as-is, whichever tree it names).
 - `HIPPO_INDEX_DIR` — override the index location (default `.claude/.memory-index/`).
 - `HIPPO_EMBED_MODEL` — dense model name (default `BAAI/bge-small-en-v1.5`).
-- `HIPPO_DISABLE_DENSE=1` — force BM25-only (hermetic tests, CI).
+- `HIPPO_DISABLE=<list>` — turn features off: `dense` (force BM25-only — hermetic tests,
+  CI), `jit`, `presence`, `floor-nag`, `abstain-gate`, `touch-fastpath`. The older
+  `HIPPO_DISABLE_<FEATURE>` names still work through v1.43 (`settings.disabled`; the bash
+  fast paths use `hippo_disabled` in `hooks/_resolve_py.sh`).
 - `HIPPO_DENSE_TIMEOUT` — seconds before a dense query aborts to BM25 (default 5).
 - `HIPPO_REFRESH_TIMEOUT` — overall wall-clock budget for the offline SessionStart embed;
   exhausting it stops starting new chunks but keeps whatever already embedded (default 15).
@@ -716,8 +727,9 @@ re-billed.
 - `HIPPO_CAPTURE_LLM=1` — opt the SessionEnd/SubagentStop capture pass into CAP-LLM triage;
   `HIPPO_CAPTURE_LLM_TIMEOUT` caps the call (default 6s, clamped ≤20s).
 - `HIPPO_DREAM_CONTRADICTIONS=1` — opt dream passes into DRM-C contradiction discovery;
-  `HIPPO_DREAM_LLM_TIMEOUT` per-call cap (default 10s), `DREAM_CONTRA_MAX_PAIRS` attempts
-  per pass (default 6, hard-max 12), `DREAM_CONTRA_MIN_COFIRE` the pool bar (default θ).
+  `HIPPO_DREAM_LLM_TIMEOUT` per-call cap (default 10s), `HIPPO_DREAM_CONTRA_MAX_PAIRS`
+  attempts per pass (default 6, hard-max 12), `HIPPO_DREAM_CONTRA_MIN_COFIRE` the pool bar
+  (default θ); the unprefixed `DREAM_CONTRA_*` spellings still read through v1.43.
 
 ## Tests (dev checkout)
 

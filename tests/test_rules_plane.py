@@ -161,7 +161,7 @@ def test_producer_reports_edge_conflict_loud_and_specific(repo, memory_dir):
     assert out is not None
     assert out.startswith("⚖ Rule↔memory conflicts")
     assert "CLAUDE.md cites `old_way` but `new_way` supersedes it" in out
-    assert "/hippo:consolidate" in out  # routes to a per-item decision
+    assert "/hippo:tend" in out  # routes to a per-item decision
 
 
 def test_producer_reports_authority_gap_with_strength(repo, memory_dir):

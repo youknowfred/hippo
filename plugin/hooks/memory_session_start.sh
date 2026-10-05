@@ -10,9 +10,8 @@
 # so `import memory` resolves to the bundled package — code from PLUGIN_ROOT
 # (read-only, swapped on update), deps from PLUGIN_DATA (persistent across updates).
 # Falls back to a bare `python3` if bootstrap hasn't run yet (BM25-only / degraded,
-# never a hard failure). PY resolution itself is the ONE shared hippo_resolve_py()
-# in _resolve_py.sh (OSP-6) — every hook/skill/bin surface sources the same file
-# instead of re-deriving this logic.
+# never a hard failure). The hook reaches Python only through bin/hippo (SRF-1), which
+# runs the ONE shared hippo_resolve_py() in _resolve_py.sh (OSP-6).
 #
 # Wired as a SessionStart hook via plugin/hooks/hooks.json.
 set -uo pipefail
@@ -30,54 +29,135 @@ cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" 
 
 # shellcheck disable=SC1091  # dynamic path via CLAUDE_PLUGIN_ROOT; see hooks/_resolve_py.sh
 . "${CLAUDE_PLUGIN_ROOT:-.}/hooks/_resolve_py.sh"
-hippo_resolve_py
 
-# --- First-run nudge (ONB-1) — cheap pre-Python branch, pure stats -----------
+# --- First-run nudge (ONB-1; scoped per repo by CLM-4) — pre-Python, pure bash -------
 # After install the plugin is otherwise silently inert: hooks fall back to bare
-# python3 and every error is swallowed. Tell the user the ONE next step, at most
-# once per NUDGE_EVERY nudge-eligible sessions, permanently silenceable via a
-# dismissal marker. Emits a single well-formed hookSpecificOutput JSON and exits
-# 0 (the Python dispatcher would be inert in both nudge states anyway).
-NUDGE_EVERY=5
-if [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ ! -f "${CLAUDE_PLUGIN_DATA}/.nudge-dismissed" ]; then
-  NUDGE=""
-  SILENCE="(To silence this nudge permanently: touch '${CLAUDE_PLUGIN_DATA}/.nudge-dismissed')"
-  # The Claude Desktop app (CLAUDE_CODE_ENTRYPOINT=claude-desktop in the hook env) runs
-  # the same hooks/skills/MCP server, but its Bash tool gets no plugin env, so the setup
-  # flows there are the hippo MCP setup tools (bootstrap/init, shipped in v1.10.0) and
-  # the nudge names THOSE. Typed /hippo:* commands run there too since 2026-10 (CLM-8).
-  if [ "${CLAUDE_CODE_ENTRYPOINT:-}" = "claude-desktop" ]; then
-    if [ ! -x "${CLAUDE_PLUGIN_DATA}/venv/bin/python" ] || [ ! -f "${CLAUDE_PLUGIN_DATA}/.bootstrap-sentinel" ]; then
-      NUDGE="hippo memory is installed but not bootstrapped — recall is inert. Set it up via the hippo MCP setup tools: run bootstrap once per machine, then init once per project (just ask for it). ${SILENCE}"
-    elif ! hippo_floor_present; then
-      NUDGE="hippo memory is bootstrapped but this project has no memory corpus — run the hippo init MCP tool to seed .claude/memory/ (just ask for it). ${SILENCE}"
+# python3 and every error is swallowed. Tell the user the ONE next step, in one line:
+#   - not bootstrapped: machine-level, so it shows in any repo;
+#   - a repo nested inside another corpus: hippo's resolver climbs past this repo's own
+#     toplevel into the ancestor's corpus, so its tools read and write THAT corpus;
+#   - no corpus here: only in a repo that opted in — hippo enabled in its own
+#     .claude/settings*.json (a project or local install), or init recorded in the
+#     machine's projects registry. Not on a native memory dir alone: native auto memory
+#     is on by default, so that dir exists in most repos a user opens and keying on it
+#     would bring back the machine-wide nag. When one exists, the line mentions adoption.
+# Dismissal is per repo: a line per repo root in PLUGIN_DATA/nudge-dismissed-repos. The
+# old machine-wide .nudge-dismissed marker is still honored (an explicit "permanently"
+# from before), but nothing tells anyone to create it any more.
+hippo_repo_key() {  # the repo this session works in: git toplevel (main tree of a linked worktree)
+  local d main
+  d="$(pwd -P)"
+  while [ -n "$d" ]; do
+    if [ -e "$d/.git" ]; then
+      if [ -f "$d/.git" ] && main="$(cd "$d" && hippo_main_tree)" && [ -n "$main" ]; then
+        printf '%s' "$main"
+      else
+        printf '%s' "$d"
+      fi
+      return 0
     fi
-  elif [ ! -x "${CLAUDE_PLUGIN_DATA}/venv/bin/python" ] || [ ! -f "${CLAUDE_PLUGIN_DATA}/.bootstrap-sentinel" ]; then
-    NUDGE="hippo memory is installed but not bootstrapped — recall is inert. Run /hippo:bootstrap once per machine, then /hippo:init once per project. ${SILENCE}"
-  elif ! hippo_floor_present; then
-    NUDGE="hippo memory is bootstrapped but this project has no memory corpus — run /hippo:init to seed .claude/memory/. ${SILENCE}"
+    [ "$d" = "/" ] && break
+    d="${d%/*}"
+    [ -n "$d" ] || d="/"
+  done
+  pwd -P
+}
+hippo_nudge_dismissed() {  # <repo key>
+  local f="${CLAUDE_PLUGIN_DATA}/nudge-dismissed-repos" c
+  [ -f "$f" ] || return 1
+  c="$(<"$f")"
+  case $'\n'"$c"$'\n' in *$'\n'"$1"$'\n'*) return 0 ;; esac
+  return 1
+}
+hippo_repo_opted_in() {  # <repo key>
+  local f c reg
+  for f in "$1/.claude/settings.json" "$1/.claude/settings.local.json" \
+           "$PWD/.claude/settings.json" "$PWD/.claude/settings.local.json"; do
+    [ -f "$f" ] || continue
+    c="$(<"$f")"
+    [[ $c =~ \"hippo@[^\"]*\"[[:space:]]*:[[:space:]]*true ]] && return 0
+  done
+  reg="${HIPPO_PROJECTS_FILE:-${HOME:-}/.claude/hippo-projects.json}"
+  [ -f "$reg" ] || return 1
+  c="$(<"$reg")"
+  case "$c" in *"\"$1\":"*) return 0 ;; esac
+  return 1
+}
+hippo_nested_owner() {  # prints the ancestor whose corpus a repo toplevel without one resolves
+  local d home="${HOME:-}"
+  [ -d ".claude/memory" ] && return 1
+  [ -e ".git" ] || return 1  # only a toplevel launch climbs past itself (walk_up_for_memory_dir)
+  if [ -f ".git" ] && hippo_main_tree >/dev/null; then
+    return 1  # a linked worktree resolves its main tree's corpus, by design
   fi
-  if [ -n "$NUDGE" ]; then
-    COUNTER_FILE="${CLAUDE_PLUGIN_DATA}/.nudge-counter"
-    COUNT="$(cat "$COUNTER_FILE" 2>/dev/null || printf '0')"
-    case "$COUNT" in '' | *[!0-9]*) COUNT=0 ;; esac
-    printf '%s' "$((COUNT + 1))" > "$COUNTER_FILE" 2>/dev/null || true
-    if [ "$((COUNT % NUDGE_EVERY))" -eq 0 ]; then
-      # JSON-escape (backslash, double quote) with pure bash — the PLUGIN_DATA
-      # path is the only variable content. No jq dependency on this path.
+  d="$PWD"
+  while [ "$d" != "/" ] && [ -n "$d" ]; do
+    d="${d%/*}"
+    [ -n "$d" ] || d="/"
+    if [ -d "${d%/}/.claude/memory" ]; then
+      printf '%s' "$d"
+      return 0
+    fi
+    [ "$d" = "$home" ] && return 1
+  done
+  return 1
+}
+hippo_native_memory_dir() {  # <repo key>: Claude Code's own memory dir for it, when it holds files
+  local LC_ALL=C nd f
+  nd="${HIPPO_CLAUDE_PROJECTS_DIR:-${HOME:-}/.claude/projects}/${1//[!A-Za-z0-9]/-}/memory"
+  [ -d "$nd" ] && [ ! -L "$nd" ] || return 1
+  for f in "$nd"/*.md; do
+    if [ -f "$f" ]; then
+      printf '%s' "$nd"
+      return 0
+    fi
+  done
+  return 1
+}
+if [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ ! -f "${CLAUDE_PLUGIN_DATA}/.nudge-dismissed" ]; then
+  REPO_KEY="$(hippo_repo_key)"
+  if ! hippo_nudge_dismissed "$REPO_KEY"; then
+    NUDGE=""
+    SILENCE="(To stop this note in this repo: printf '%s\n' '${REPO_KEY}' >> '${CLAUDE_PLUGIN_DATA}/nudge-dismissed-repos')"
+    # The Claude Desktop app (CLAUDE_CODE_ENTRYPOINT=claude-desktop in the hook env) runs
+    # the same hooks/skills/MCP server; the setup flow there is the hippo setup MCP tool
+    # (bootstrap/init steps), so the nudge names it. Typed /hippo:* runs there too (CLM-8).
+    if [ "${CLAUDE_CODE_ENTRYPOINT:-}" = "claude-desktop" ]; then
+      INIT_STEP="run the hippo setup MCP tool's init step (just ask for it)"
+    else
+      INIT_STEP="run /hippo:setup"
+    fi
+    if [ ! -x "${CLAUDE_PLUGIN_DATA}/venv/bin/python" ] || [ ! -f "${CLAUDE_PLUGIN_DATA}/.bootstrap-sentinel" ]; then
+      if [ "${CLAUDE_CODE_ENTRYPOINT:-}" = "claude-desktop" ]; then
+        NUDGE="hippo memory is installed but not bootstrapped — recall is inert. Set it up with the hippo setup MCP tool: bootstrap once per machine, then init once per project (just ask for it). ${SILENCE}"
+      else
+        NUDGE="hippo memory is installed but not bootstrapped — recall is inert. Run /hippo:setup once per machine, then once in each project. ${SILENCE}"
+      fi
+    elif OWNER="$(hippo_nested_owner)"; then
+      NUDGE="This repo is nested inside ${OWNER}, so hippo resolves ${OWNER}'s memory corpus here, not one of this repo's own. To give this repo its own corpus, ${INIT_STEP} here. ${SILENCE}"
+    elif ! hippo_floor_present && hippo_repo_opted_in "$REPO_KEY"; then
+      NUDGE="hippo memory is enabled for this repo but it has no memory corpus yet — ${INIT_STEP} to seed .claude/memory/."
+      if ND="$(hippo_native_memory_dir "$REPO_KEY")"; then
+        NUDGE="${NUDGE} Claude Code's own memory for this repo (${ND}) can be adopted into it; setup previews that first."
+      fi
+      NUDGE="${NUDGE} ${SILENCE}"
+    fi
+    if [ -n "$NUDGE" ]; then
+      # JSON-escape (backslash, double quote) with pure bash — paths are the only
+      # variable content. No jq dependency on this path.
       ESCAPED="${NUDGE//\\/\\\\}"
       ESCAPED="${ESCAPED//\"/\\\"}"
       printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$ESCAPED" 2>/dev/null || true
+      exit 0
     fi
-    exit 0
   fi
 fi
 
 # COR-10: a never-opted-in repo has no .claude/memory at all — bail before the
 # Python dispatcher, which would otherwise mkdir a real .memory-index directory
 # via build_index.refresh_index even though there's no corpus to index. The nudge
-# block above still fires (and exits) in this exact case until dismissed; this
-# guard only matters once it's been silenced.
+# block above fires (and exits) only where it has something to say; every other
+# corpus-less repo stops here.
 hippo_corpus_present || exit 0  # SHP-7: a linked worktree whose MAIN tree has the corpus passes
 
 # Pin fastembed's ONNX model cache to a durable dir. UNSET, fastembed uses
@@ -94,5 +174,5 @@ else
   export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-${XDG_CACHE_HOME:-$HOME/.cache}/hippo-memory/fastembed}"
 fi
 
-printf '%s' "$PAYLOAD" | "$PY" -m memory.session_start 2>/dev/null || true
+printf '%s' "$PAYLOAD" | HIPPO_SURFACE=hook "$BASH" "${CLAUDE_PLUGIN_ROOT:-.}/bin/hippo" session-start 2>/dev/null || true
 exit 0

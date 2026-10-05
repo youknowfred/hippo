@@ -108,7 +108,7 @@ def check_format_version(ctx: DoctorContext) -> Dict[str, str]:
             parts.append(
                 f"corpus format is v{declared} but this plugin only understands "
                 f"v{CORPUS_FORMAT_VERSION} — recall and SessionStart inject nothing from it "
-                "(FMT-3) until you update the hippo plugin"
+                "until you update the hippo plugin"
             )
         else:
             status = "warn"
@@ -142,12 +142,10 @@ def check_format_version(ctx: DoctorContext) -> Dict[str, str]:
                 "sources; v4 bound a directory-qualified token to any file of that basename; "
                 "v5 dropped such a token among several same-named files instead of letting "
                 "its directories pick the one), so some memories watch the wrong file and some are staleness-"
-                "EXEMPT on an empty cited_paths. Review "
-                "with the rederive MCP tool (action='worklist'), apply per memory "
-                "(action='one' name=…), then action='stamp' — or in a terminal, "
-                "python -m memory.provenance --rederive-worklist / --rederive-one <name> / "
-                "--stamp-derivation. It rewrites frontmatter, so it is per-item, "
-                "consent-gated and never automatic"
+                "EXEMPT on an empty cited_paths. Work it through the maintenance queue: say "
+                "\"tend memory\" (or `hippo tend next --kind derivation`), apply each memory's "
+                "citation diff, then stamp the corpus. It rewrites frontmatter, so it is "
+                "per-item, consent-gated and never automatic"
             )
 
         return {"status": status, "message": "; ".join(parts) + "."}
@@ -176,7 +174,7 @@ def check_volatile_paths(ctx: DoctorContext) -> Dict[str, str]:
         if not vol:
             return {
                 "status": "ok",
-                "message": "volatile paths: none declared (optional .format "
+                "message": "volatile paths: none declared (optional hippo.json "
                 "volatile_paths key — staleness-arming policy).",
             }
         _, suppressed = split_volatile_only(
@@ -323,13 +321,12 @@ def check_fill_me(ctx: DoctorContext) -> Dict[str, str]:
 
 
 def check_trust(ctx: DoctorContext) -> Dict[str, str]:
-    """Corpus trust state (SEC-1) — is this corpus trusted, and the exact command to trust it.
+    """Corpus trust state (SEC-1) — is this corpus trusted, and the command that reviews it.
 
     Recall is GATED: an untrusted (usually freshly-cloned) corpus injects nothing until this
     machine's user consents. Reports the four trust states deterministically and, on the untrusted
-    path, prints the exact ``mark_trusted`` command doctor's consent step runs. Doctor never
-    auto-trusts here — the interactive review lives in the SKILL prose; this line only reports the
-    state and the command.
+    path, names ``hippo trust review`` (TND-6), whose digest-bound grant is the consent. Doctor
+    never auto-trusts here — this line only reports the state and the next step.
     """
     try:
         from . import trust
@@ -352,9 +349,8 @@ def check_trust(ctx: DoctorContext) -> Dict[str, str]:
         return {
             "status": "warn",
             "message": f"corpus UNTRUSTED ({count} memories) — recall injects nothing from it. "
-            "Review the memory names, then trust it: "
-            f"python -c \"from memory.trust import mark_trusted; mark_trusted('{gate_root}')\" "
-            "(or set HIPPO_TRUST_ALL=1 for CI).",
+            "Next step: `hippo trust review` shows what it would inject, and its grant "
+            "line consents to what you approve (or set HIPPO_TRUST_ALL=1 for CI).",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"trust check failed: {exc}."}
@@ -366,9 +362,8 @@ def check_trust_drift(ctx: DoctorContext) -> Dict[str, str]:
     Three deterministic states for a TRUSTED, gate-applicable corpus:
       - baseline present, no drift  -> ok.
       - baseline present, drift     -> warn, naming the withheld stems (recall's per-file
-        quarantine is ACTIVE on them) + the exact re-consent command. The interactive
-        review (show what each changed file would inject — the SEC-5 consent sample —
-        then take the explicit yes) lives in the doctor SKILL, same as first consent.
+        quarantine is ACTIVE on them) + ``hippo trust review`` (TND-6: per-file diffs
+        against the consented bytes, then a digest-bound per-file grant).
       - baseline ABSENT (a legacy, pre-SEC-6 trust record) -> warn: trust works but
         change detection is OFF until a re-consent stamps a fingerprint.
     ok/N-A on the bypassed / non-git / untrusted paths (``check_trust`` owns those).
@@ -390,10 +385,9 @@ def check_trust_drift(ctx: DoctorContext) -> Dict[str, str]:
         if not drift.get("baseline"):
             return {
                 "status": "warn",
-                "message": "trust record has NO content fingerprint (pre-SEC-6 consent) — "
-                "recall cannot detect upstream changes to this corpus. Re-consent to stamp "
-                "one: python -c \"from memory.trust import mark_trusted; "
-                f"mark_trusted('{gate_root}', memory_dir='{ctx.memory_dir}')\"",
+                "message": "trust record has no per-file baseline (an older consent) — "
+                "recall cannot detect upstream changes to this corpus. Next step: `hippo "
+                "trust review`, then grant what you approve to record one.",
             }
         changed, added = drift.get("changed") or [], drift.get("added") or []
         if not changed and not added:
@@ -404,11 +398,10 @@ def check_trust_drift(ctx: DoctorContext) -> Dict[str, str]:
         names = ", ".join(changed + [f"{n} (new)" for n in added])
         return {
             "status": "warn",
-            "message": f"{len(changed)} changed / {len(added)} new memory file(s) since "
-            f"consent — recall is WITHHOLDING them: {names}. Review what each would inject "
-            "(the consent sample shows descriptions), then re-consent: "
-            "python -c \"from memory.trust import mark_trusted; "
-            f"mark_trusted('{gate_root}', memory_dir='{ctx.memory_dir}')\"",
+            "message": f"{len(changed) + len(added)} memories withheld from recall: "
+            f"{len(changed)} changed / {len(added)} new since consent ({names}). Next step: "
+            "`hippo trust review` shows each change against the consented version; grant "
+            "the ones you approve.",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"trust-drift check failed: {exc}."}
@@ -466,7 +459,7 @@ def check_threat_lint(ctx: DoctorContext) -> Dict[str, str]:
             "status": "warn",
             "message": f"{len(findings)} file(s) carry Tier-A threat payloads — {' | '.join(parts)}. "
             f"Inspect before they re-inject on recall (HTML comments are lint-only by the "
-            f"dated ED-3 spike decision, 2026-07-16).{tier_b}",
+            f"dated spike decision, 2026-07-16).{tier_b}",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"threat scan failed: {exc}."}
@@ -525,7 +518,7 @@ def check_committed_usage_privacy(ctx: DoctorContext) -> Dict[str, str]:
             else []
         )
         if not summaries:
-            return {"status": "ok", "message": "no committed usage summaries (TEA-5 opt-in unused)."}
+            return {"status": "ok", "message": "no committed usage summaries (opt-in unused)."}
         remote = git_remote_info(ctx.repo_root)
         if not remote["url"]:
             return {
@@ -539,7 +532,7 @@ def check_committed_usage_privacy(ctx: DoctorContext) -> Dict[str, str]:
             "message": f"{len(summaries)} committed per-user usage summary(ies) in "
             f".claude/memory/.usage/ on {where} ({remote['url']}) — recall patterns (memory "
             "names + counts) are shared with anyone who can read it. Remove .claude/memory/.usage/ "
-            "if unintended (TEA-5/SEC-14).",
+            "if unintended.",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"committed-usage privacy check failed: {exc}."}
@@ -612,7 +605,7 @@ def check_dream_ledger(ctx: DoctorContext) -> Dict[str, str]:
                     "status": "warn",
                     "message": f"{len(inert)} ACTIVE dream edge(s) whose source memory is "
                     f"archived (stamp intact under archive/): {', '.join(inert[:5])} — inert "
-                    "by definition, not corruption. Retire each with `python -m memory.dream "
+                    "by definition, not corruption. Retire each with `hippo dream "
                     "--undo <edge-id>` (archive-aware); archives made by archive_memory now "
                     "retire their edges automatically.",
                 }
@@ -649,10 +642,10 @@ def check_dream_ledger(ctx: DoctorContext) -> Dict[str, str]:
         return {
             "status": "fail",
             "message": "dream stamp/ledger MISMATCH — " + "; ".join(parts) + ". Reconcile "
-            "via `python -m memory.dream --log` (+ --undo for stray edges) or git history"
+            "via `hippo dream --log` (+ --undo for stray edges) or git history"
             + (
                 "; a ghost whose stamp is provably gone (nothing to undo, nothing in git to "
-                "restore) retires per edge with `python -m memory.dream --retire-ghost "
+                "restore) retires per edge with `hippo dream --retire-ghost "
                 "<edge-id>` (MCP: dream action='retire_ghost' edge_id=…) — it proves the "
                 "absence itself and refuses otherwise"
                 if ghosts
@@ -755,7 +748,7 @@ def check_non_english_corpus(ctx: DoctorContext) -> Dict[str, str]:
         return {
             "status": "warn",
             "message": f"corpus is {fraction:.0%} non-Latin-alphabetic but is served by the English "
-            "default embedding model — consider `/hippo:bootstrap --multilingual` (switches to "
+            "default embedding model — consider `/hippo:setup --multilingual` (switches to "
             "a multilingual model; forces a one-time full re-embed of the corpus).",
         }
     except Exception as exc:
@@ -781,7 +774,7 @@ def check_producer_versions(ctx: DoctorContext) -> Dict[str, str]:
         if not rows:
             return {
                 "status": "ok",
-                "message": "producer versions: no rows in the outcome ledger yet (MEA-4 stamps "
+                "message": "producer versions: no rows in the outcome ledger yet (stamps "
                 "appear as evidence accrues; provenance only).",
             }
         by_v: Dict[str, int] = {}
@@ -795,7 +788,7 @@ def check_producer_versions(ctx: DoctorContext) -> Dict[str, str]:
         return {
             "status": "ok",
             "message": f"producer versions (running v{running}): {buckets} — provenance only "
-            "(MEA-4); rows stamped by an older version date the lagged-hook window from the "
+            "; rows stamped by an older version date the lagged-hook window from the "
             "ledger itself, unstamped rows predate the stamp (never backfilled).",
         }
     except Exception as exc:

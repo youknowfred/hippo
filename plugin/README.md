@@ -36,7 +36,16 @@ recall hook can't: mid-turn retrieval (after the agent discovers what it's worki
 subagent memory (Task turns get no `UserPromptSubmit`). Sixteen tools + three resources, offline
 (bootstrap's model download excepted) and corpus-local, reusing the exact hook ranking (no fork).
 
-The five core tools (the frozen v1.0 surface):
+**The v2 toolset (v1.42.0).** Ten tools carry the whole surface: `recall`, `new_memory`,
+`inspect` (why / traverse / history / blast radius), `tend` (the maintenance queue and the
+consolidate steps), `doctor` (checks, audit material, secrets scan), `setup` (bootstrap, init,
+index), `trust` (consent status, review, grant, revoke), `share` (packs), `dream` and `review`.
+Each is annotated (read-only or not, destructive or not), and `recall`, `doctor` and `tend`
+return structured content to clients that negotiate protocol 2025-06-18 or later. The v1 names
+below keep working through v1.43 and are removed in v2.0; each says so in its description and
+in every answer. [UPGRADING.md](../UPGRADING.md) maps each old permission id to its new one.
+
+The five core v1 tools (the frozen v1.0 surface):
 
 | Tool | Purpose |
 |---|---|

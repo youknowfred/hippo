@@ -125,19 +125,17 @@ def _tool_doctor(args: Dict[str, Any]) -> str:
         memory_dir, repo_root = resolve_dirs()
         report = render(DoctorContext(memory_dir, repo_root))
     return report + caveat + (
-        "\n\nOn this MCP surface the named fixes map to tools: /hippo:bootstrap → the "
-        "bootstrap tool (action='start'), /hippo:init → the init tool, the "
-        "trust/consent step (mark_trusted) → the trust_corpus tool, and "
-        "/hippo:consolidate's steps → the capture, new_memory (check:true first), "
-        "secrets_scan, reconsolidate, build_index, co_recall_proposals, and "
-        "abstention_fixtures tools (per item, as the consolidate skill directs)."
+        "\n\nOn this MCP surface the named fixes map to tools: /hippo:setup → the setup "
+        "tool (action='bootstrap' with step='start', then action='init'), the consent step "
+        "(`hippo trust review` / `grant`) → the trust tool (action='review', then 'grant'), "
+        "and \"tend memory\" → the tend tool (per item, as the tend skill directs)."
     )
 
 
 _NO_DATA_DIR_MSG = (
     "CLAUDE_PLUGIN_DATA is unset in this server's environment — there is nowhere to "
     "provision. This Claude Code version may be too old for plugin self-provisioning; "
-    "update it, or bootstrap from a terminal (/hippo:bootstrap)."
+    "update it, or bootstrap from a terminal (/hippo:setup)."
 )
 
 
@@ -155,7 +153,7 @@ def _tool_bootstrap(args: Dict[str, Any]) -> str:
         elif s.get("state") == "current":
             lines.append(
                 "✔ bootstrapped. To finish enabling dense recall for a project, run the "
-                "init tool once — it rebuilds the index under the new venv so it carries "
+                "setup tool's action='init' once — it rebuilds the index under the new venv so it carries "
                 "dense vectors; hooks then serve dense recall from the next prompt. (The "
                 "core recall/why tools in THIS server process stay BM25 until the session "
                 "restarts — its interpreter is fixed at session start.)"
@@ -191,7 +189,7 @@ def _tool_bootstrap(args: Dict[str, Any]) -> str:
             return (
                 f"bootstrap started (worker pid {r.get('pid')}) — the venv build + ~130MB "
                 "model download takes a few minutes. Poll with action='status'; done when "
-                "the state reads 'current', then run the init tool once so the project "
+                "the state reads 'current', then run the setup tool's action='init' once so the project "
                 "index rebuilds with dense vectors. Tell the user it is running in the "
                 "background."
             )
@@ -202,10 +200,35 @@ def _tool_bootstrap(args: Dict[str, Any]) -> str:
 def _tool_init(args: Dict[str, Any]) -> str:
     from .init_project import init_project
 
+    from .native_adopt import render_plan, render_result
+
     # dense_python: right after a mid-session bootstrap, only a freshly-resolved venv
     # python can embed dense vectors — this process may still be the pre-venv python3.
-    r = init_project(dense_python=_fresh_python())
+    r = init_project(
+        dense_python=_fresh_python(), adopt_digest=str(args.get("adopt_digest") or "") or None
+    )
+    if r.get("mode") == "adopt_preview":
+        # CLM-4: the native memory dir sits in the link slot; nothing was written.
+        return "init: " + render_plan(
+            r.get("adoption") or {},
+            confirm_hint=(
+                "Show this to the user and ask. On their explicit yes, call init again with "
+                'adopt_digest="{digest}". To set up without adopting, call init with '
+                'adopt_digest="skip" (the native directory stays, and the link is not made).'
+            ),
+        )
+    if r.get("mode") == "adopt_refused":
+        return "init: " + render_result(r.get("adoption") or {})
     lines = [f"init ({r.get('mode')} corpus) — {r.get('memory_dir')}"]
+    if r.get("nested_owner"):
+        lines.append(
+            f"✔ this repo is nested inside {r['nested_owner']}, whose corpus it used to "
+            "resolve; init set up this repo's own corpus instead."
+        )
+    if isinstance(r.get("adoption"), dict) and r["adoption"].get("ok"):
+        lines.append(render_result(
+            r["adoption"], next_step="Nothing adopted is trusted yet (see the trust line below)."
+        ))
     if r.get("seeded"):
         lines.append("✔ seeded: " + ", ".join(r["seeded"]))
     if r.get("format_marker") == "stamped":
@@ -227,7 +250,7 @@ def _tool_init(args: Dict[str, Any]) -> str:
         if idx.get("error"):
             lines.append(f"⚠ index build failed: {idx['error']}")
         else:
-            dense = "hybrid" if idx.get("dense_ready") else "BM25-only (run the bootstrap tool for dense)"
+            dense = "hybrid" if idx.get("dense_ready") else "BM25-only (run the setup tool's action='bootstrap' for dense)"
             lines.append(f"✔ index built — {idx.get('count')} memories, {dense}")
     gi = r.get("gitignore")
     if gi == "patched":
@@ -270,8 +293,8 @@ def _tool_init(args: Dict[str, Any]) -> str:
         lines.append("")
         lines.append(
             "🔒 This machine is wired up, but the PRE-EXISTING corpus is NOT trusted yet — "
-            "recall injects nothing from it until its content is reviewed (SEC-1; typing "
-            "/hippo:init in a terminal is itself that review, a model-invoked init is not). "
+            "recall injects nothing from it until its content is reviewed (; typing "
+            "/hippo:setup in a terminal is itself that review, a model-invoked init is not). "
             "Next step: call trust_corpus to review what it would inject and take the "
             "user's explicit consent."
         )
@@ -317,8 +340,8 @@ def _tool_trust_corpus(args: Dict[str, Any]) -> str:
     if gate_root is None:
         return (
             "trust_corpus: the trust gate is inapplicable here — no git repo and no memory "
-            "corpus content to gate. If this project has no corpus yet, run the init tool "
-            "first."
+            "corpus content to gate. If this project has no corpus yet, run the setup tool's "
+            "action='init' first."
         )
     already = trust.is_trusted(gate_root)
     digest = _consent_digest(memory_dir)
@@ -338,7 +361,7 @@ def _tool_trust_corpus(args: Dict[str, Any]) -> str:
             if not drift.get("baseline"):
                 return (
                     "trust_corpus REVIEW — corpus is trusted but its record has NO content "
-                    "fingerprint (a pre-SEC-6 consent), so recall cannot detect upstream "
+                    "fingerprint (an older consent), so recall cannot detect upstream "
                     "changes. Re-consenting stamps one.\n\n"
                     + _consent_review_block(memory_dir)
                     + f"\n\nOn the user's explicit yes, call trust_corpus again with "
@@ -348,15 +371,16 @@ def _tool_trust_corpus(args: Dict[str, Any]) -> str:
             return (
                 f"trust_corpus REVIEW — {len(changed)} changed / {len(added)} new memory "
                 f"file(s) since consent; recall is WITHHOLDING them: {', '.join(delta)} "
-                "(SEC-6 quarantine).\n\n"
+                "(quarantine).\n\n"
                 + _consent_review_block(memory_dir, stems=changed + added)
-                + f"\n\nReview how each changed (git diff/log helps), then on the user's "
+                + f"\n\nReview how each changed (`hippo trust review` prints each file's "
+                f"diff against the consented version), then on the user's "
                 f'explicit yes call trust_corpus again with confirm_digest="{digest}". '
                 "A no leaves the quarantine active — that is the designed posture."
             )
         return (
             f"trust_corpus REVIEW — corpus at {gate_root} is UNTRUSTED ({count} memories); "
-            "recall injects NOTHING from it until this machine's user consents (SEC-1: a "
+            "recall injects NOTHING from it until this machine's user consents (a "
             "cloned corpus is otherwise an unreviewed prompt-injection channel).\n\n"
             + _consent_review_block(memory_dir)
             + f"\n\nASK the user whether they trust this corpus, showing the sample above. "
@@ -383,7 +407,7 @@ def _tool_trust_corpus(args: Dict[str, Any]) -> str:
         )
     return (
         "✔ corpus trusted — recall active from the next prompt. The consent-time content "
-        "fingerprint was stamped (SEC-6): recall will withhold any memory file that later "
+        "fingerprint was stamped: recall will withhold any memory file that later "
         "drifts from these bytes until a re-consent through this same review."
     )
 
@@ -474,10 +498,25 @@ def _tool_dream(args: Dict[str, Any]) -> str:
             return render_prospective(prospective_recall(memory_dir))
         apply_arg = args.get("apply")
         do_apply = bool(apply_arg) if apply_arg is not None else apply_mode_default()
-        if do_apply:
-            _code, text = run_apply_pass(memory_dir, repo_root=repo_root)
-        else:
-            _code, text = run_report_pass(memory_dir)
+        # SRF-4: the contradiction check needs the LLM key, and a sensitive plugin option
+        # reaches this server's env but never a Bash-run `hippo dream` — so this is the
+        # key-bearing door for it. Scoped to this one call: the server is long-lived, and
+        # the CLI's own --contradictions uses the same in-process env flag.
+        contra = args.get("contradictions")
+        prior = os.environ.get("HIPPO_DREAM_CONTRADICTIONS")
+        if contra is not None:
+            os.environ["HIPPO_DREAM_CONTRADICTIONS"] = "1" if bool(contra) else "0"
+        try:
+            if do_apply:
+                _code, text = run_apply_pass(memory_dir, repo_root=repo_root)
+            else:
+                _code, text = run_report_pass(memory_dir)
+        finally:
+            if contra is not None:
+                if prior is None:
+                    os.environ.pop("HIPPO_DREAM_CONTRADICTIONS", None)
+                else:
+                    os.environ["HIPPO_DREAM_CONTRADICTIONS"] = prior
         return text
     except Exception as exc:
         return f"dream: pass failed ({exc}) — nothing was changed."

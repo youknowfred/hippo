@@ -237,4 +237,4 @@ def test_doctor_line_warns_with_finding_counts(tmp_path, memory_dir, repo):
     assert r["status"] == "warn"
     assert "1 .mdc with missing cited path(s)" in r["message"]
     assert "1 dead .mdc glob(s)" in r["message"]
-    assert "/hippo:audit" in r["message"] and "\n" not in r["message"]
+    assert "/hippo:doctor" in r["message"] and "\n" not in r["message"]

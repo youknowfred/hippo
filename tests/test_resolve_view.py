@@ -182,7 +182,7 @@ def test_producer_lists_pairs_and_routes_to_resolve(memory_dir, repo):
     out = S.contradiction_inbox_producer(memory_dir, repo)
     assert out is not None
     assert out.startswith("⚖ Contradiction inbox — 1 unresolved")
-    assert "/hippo:resolve" in out and "nothing auto-picks a winner" in out
+    assert "/hippo:tend" in out and "nothing auto-picks a winner" in out
     assert "new-api ⇄ old-api" in out
 
 

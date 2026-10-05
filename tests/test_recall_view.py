@@ -126,7 +126,7 @@ def test_list_by_type_empty_corpus_nudges_init(tmp_path):
     md = str(tmp_path / "memory")
     os.makedirs(md)
     out = V.list_by_type(memory_dir=md)
-    assert "/hippo:init" in out
+    assert "/hippo:setup" in out
 
 
 # --------------------------------------------------------------------------- #

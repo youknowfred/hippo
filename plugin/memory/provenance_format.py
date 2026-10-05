@@ -136,6 +136,55 @@ def _read_marker(memory_dir: str) -> dict:
         return {}
 
 
+# --------------------------------------------------------------------------- #
+# SRF-4: the corpus policy file — ``.claude/memory/hippo.json``
+# --------------------------------------------------------------------------- #
+# The policy keys moved out of the version marker into their own committed file. JSON, like
+# ``.format``, so the pre-bootstrap ``python3`` and every tool that already reads the marker
+# reads it with the stdlib. Both spellings are read through v1.43: a key present in
+# ``hippo.json`` wins; otherwise the old ``.format`` key still answers. ``.format`` keeps the
+# two version axes, which describe the corpus's SHAPE rather than its policy.
+_POLICY_FILE_NAME = "hippo.json"
+_FORMAT_AXES = ("corpus_format", "cite_derivation")
+
+
+def policy_file_path(memory_dir: str) -> str:
+    """``<memory_dir>/hippo.json`` — the corpus policy file's one canonical location."""
+    return os.path.join(memory_dir, _POLICY_FILE_NAME)
+
+
+def read_policy_file(memory_dir: str) -> dict:
+    """``hippo.json``'s raw dict; ``{}`` when absent/unreadable/wrong-shape. Never raises."""
+    try:
+        p = policy_file_path(memory_dir)
+        if not os.path.isfile(p):
+            return {}
+        with open(p, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def read_policy_key(memory_dir: str, key: str):
+    """One corpus policy key: ``hippo.json`` first, then the legacy ``.format`` key.
+
+    Every ``read_*`` policy reader below goes through here, so a corpus can move a key
+    at its own pace and the value is the same whichever file holds it. ``None`` when
+    neither declares it. Never raises."""
+    pol = read_policy_file(memory_dir)
+    if key in pol:
+        return pol[key]
+    return _read_marker(memory_dir).get(key)
+
+
+def legacy_policy_keys(memory_dir: str) -> list:
+    """The non-format keys still living in ``.format`` (sorted) — each one a legacy
+    spelling doctor names with its new home, ``hippo.json``. A key ``hippo.json`` also
+    declares is still listed: the ``.format`` copy is dead weight to delete."""
+    return sorted(k for k in _read_marker(memory_dir) if k not in _FORMAT_AXES)
+
+
 def _write_marker_keys(memory_dir: str, **keys) -> bool:
     """Merge ``keys`` into the marker, PRESERVING every key already there.
 
@@ -286,9 +335,10 @@ def read_volatile_paths(memory_dir: str) -> list:
     normalized off, non-strings and blanks drop, order preserved minus duplicates —
     it's a hand-committed declaration, so declaration order is the honest render order).
     There is deliberately NO writer: the registry is operator-committed corpus policy
-    (edit ``.claude/memory/.format`` and commit), never something a hook or sweep grows.
+    (edit ``.claude/memory/hippo.json`` — or, until v2.0, the legacy ``.format`` key — and
+    commit), never something a hook or sweep grows.
     """
-    raw = _read_marker(memory_dir).get("volatile_paths")
+    raw = read_policy_key(memory_dir, "volatile_paths")
     if not isinstance(raw, list):
         return []
     out: list = []
@@ -352,7 +402,7 @@ def read_floor_lint(memory_dir: str) -> dict:
     - ``section_budgets`` (CLM-7) — OPT-IN ``{"## Section": max_bytes}``; a section is its
       header line through the line before the next ``## `` header. Invalid entries drop.
     """
-    raw = _read_marker(memory_dir).get("floor_lint")
+    raw = read_policy_key(memory_dir, "floor_lint")
     out = {
         "banned_re": None,
         "max_line": None,
@@ -421,7 +471,7 @@ def read_fold_digests(memory_dir: str) -> list:
     empty or garbled key degrades to ``[]`` — byte-identical behavior to an undeclared
     corpus (ED-4).
     """
-    raw = _read_marker(memory_dir).get("fold_digests")
+    raw = read_policy_key(memory_dir, "fold_digests")
     if isinstance(raw, str):
         raw = [raw]
     if not isinstance(raw, list):

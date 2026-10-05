@@ -152,7 +152,7 @@ def floor_sweep(
         return {
             "ok": False,
             "error": "dense model unavailable (bm25-only run) — the floor gates raw "
-            "cosines, so the sweep needs the dense backend; run /hippo:bootstrap first",
+            "cosines, so the sweep needs the dense backend; run /hippo:setup first",
         }
 
     hs_path = hard_set_path or _default_hard_set_path()
@@ -172,7 +172,7 @@ def floor_sweep(
             "error": "need both on-topic hard-set rows resolvable against this corpus and "
             "off-topic abstention probes — "
             f"(on-topic {len(on_queries)}, off-topic {len(probes)}); draft the on-topic half "
-            "via /hippo:audit (it writes recall_hard_set.yaml); hand-author the rest (ABS-1)",
+            "via /hippo:doctor's content audit (it writes recall_hard_set.yaml); hand-author the rest",
         }
 
     from .recall import _dense_floor

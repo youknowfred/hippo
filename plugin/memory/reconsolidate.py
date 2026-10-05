@@ -463,7 +463,7 @@ def semantic_reverify(
                     f"superseded_by is only valid with outcome demote, not {outcome!r} — "
                     "graduate/fix assert the memory is CURRENT, which contradicts naming a "
                     "successor that replaces it (a supersede stamps the loser's "
-                    "invalid_after at the successor's commit date, GRW-7)"
+                    "invalid_after at the successor's commit date)"
                 )
                 return result
             sfname = superseded_by if superseded_by.endswith(".md") else f"{superseded_by}.md"
@@ -680,9 +680,9 @@ def reconsolidation_producer(
     header = (
         f"🧠 Reconsolidation worklist — {len(worklist)} recently-recalled memories cite code "
         "that has since drifted (most-recently-drifted first). Re-ground each against current "
-        "code, then render the verdict per item with the reconsolidate MCP tool "
-        "(action='reverify', name=…, outcome=graduate|fix|demote) — /hippo:consolidate "
-        "Step 2 drives the same flow in a terminal"
+        "code, then render the verdict per item through the maintenance queue: say \"tend "
+        "memory\" (the tend tool's reverify items; `hippo tend next --kind reverify` in a "
+        "terminal) — graduate, fix or demote, one at a time"
         # INT-18 (DOC-16's lesson): the old text said `provenance --reverify <name>` —
         # not runnable as written (no such command), the wrong verb (the cross-surface
         # path is reconsolidate/INT-13), and /hippo:-token-free, so the Desktop surface

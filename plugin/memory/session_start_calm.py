@@ -10,8 +10,8 @@ from the producers' output instead:
      floor (the user and private tiers' only always-load channel), cut at whole lines;
   3. one next-best action — the highest-priority maintenance signal that fired, as a plain
      sentence;
-  4. one counted line — every other maintenance signal, by name, pointing at the doctor
-     (``tend`` replaces it when TND-2 ships).
+  4. one counted line — every other maintenance signal, by name, pointing at ``tend``
+     (TND-2), the one queue that works them all.
 The whole digest aims at ``CALM_BUDGET`` chars: the integrity lane is never cut, so parts 2–4
 shrink to make room for it (down to ``_MIN_ROOM``). The maintenance producers still run, so their
 numbers stay data for doctor; calm mode only stops reciting them. Never raises.
@@ -31,16 +31,16 @@ _ORIENTATION = ("presence", "resume_card", "relevant_to_work", "portable_floor")
 # Highest priority first: (producer label, the next-best action in plain words).
 _ACTIONS = (
     ("floor", "trim the MEMORY.md floor (move detail into the linked memory files)"),
-    ("contradiction_inbox", "settle the conflicting memories (say \"resolve contradictions\")"),
-    ("reconsolidation", "re-check the stale memories this repo recently relied on (say \"consolidate memory\")"),
-    ("pending_capture", "review what earlier sessions captured (say \"consolidate memory\")"),
-    ("cite_derivation", "re-derive the corpus's citations (the rederive tool)"),
-    ("squash_merge_heal", "re-baseline the memories a squash merge orphaned (the heal tool)"),
+    ("contradiction_inbox", "settle the conflicting memories (say \"tend memory\")"),
+    ("reconsolidation", "re-check the stale memories this repo recently relied on (say \"tend memory\")"),
+    ("pending_capture", "review what earlier sessions captured (say \"tend memory\")"),
+    ("cite_derivation", "re-derive the corpus's citations (say \"tend memory\")"),
+    ("squash_merge_heal", "re-baseline the memories a squash merge orphaned (say \"tend memory\")"),
     ("unresolvable_baseline", "re-baseline memories whose source commit is gone"),
     ("citation_rot", "fix memories that cite files that no longer exist"),
     ("rules_conflict", "check governance rules that cite disputed memories"),
     ("rules_rot", "fix stale references in CLAUDE.md or .claude/rules"),
-    ("staleness", "re-verify memories whose cited code moved (say \"consolidate memory\")"),
+    ("staleness", "re-verify memories whose cited code moved (say \"tend memory\")"),
     ("merge_digest", "review the near-duplicates a merge brought in"),
     ("dream_applied", "look over the links the last dream pass added"),
     ("blind_spot", "capture an answer to a question the corpus keeps missing"),
@@ -102,8 +102,8 @@ def calm_digest(blocks: List[Tuple[str, str]], budget: int = CALM_BUDGET) -> str
             if others:
                 names = ", ".join(_NAMES.get(label, label.replace("_", " ")) for label in others)
                 tail.append(
-                    f"{len(others)} more item(s) queued ({names}) — ask for the memory doctor "
-                    "to see them."
+                    f"{len(others)} more item(s) queued ({names}) — say \"tend memory\" "
+                    "to work through them."
                 )
         # The whole digest aims at ``budget``: integrity lines are never cut, so orientation
         # gives way to them, down to a floor that keeps the action and queue lines.

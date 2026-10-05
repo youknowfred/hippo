@@ -123,7 +123,7 @@ def test_doctor_subset_boundary_warns_with_heal_and_view_command(repo, memory_di
     assert "3 committed link target(s) dangle" in r["message"]
     assert "publishing loc_c would heal 1" in r["message"]
     assert "expected-not-error" in r["message"]
-    assert "python -m memory.lint_links --boundary" in r["message"]
+    assert "hippo lint-links --boundary" in r["message"]
 
 
 def test_doctor_subset_boundary_ok_when_healed(repo, memory_dir):

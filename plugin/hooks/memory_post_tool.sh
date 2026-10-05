@@ -10,10 +10,10 @@
 # T16 JIT-1 rides the SAME single Python spawn: on the FIRST touch of a file cited by a
 # steer:pin/feedback memory this session, stdout carries ONE bounded hookSpecificOutput JSON
 # ("memory <name>: <description>" as additionalContext) — derived-cache reads only, empty on
-# almost every touch, killed entirely by HIPPO_DISABLE_JIT. JIT-2 stamps the same lookup onto
+# almost every touch, killed entirely by HIPPO_DISABLE=jit (or HIPPO_DISABLE_JIT). JIT-2 stamps the same lookup onto
 # the outcome row as optional touch-grain provenance (cited_by).
 #
-# T18 FLT rides it too (killed by HIPPO_DISABLE_PRESENCE): the moved-tree tripwire compares
+# T18 FLT rides it too (killed by HIPPO_DISABLE=presence or HIPPO_DISABLE_PRESENCE): the moved-tree tripwire compares
 # live HEAD against this session's presence doc (debounced; one neutral line, once per move)
 # and the worktree-first nudge fires at the first shared-tree mutation while another session
 # is present. Coverage is honest: PostToolUse sees FILE-TOOL acts only — Bash-mediated
@@ -47,7 +47,5 @@ if hippo_touch_fastpath "$PAYLOAD"; then
 fi
 hippo_note_usage hook post_tool spawn
 
-hippo_resolve_py
-
-printf '%s' "$PAYLOAD" | "$PY" -m memory.outcome --from-hook 2>/dev/null || true
+printf '%s' "$PAYLOAD" | HIPPO_SURFACE=hook "$BASH" "${CLAUDE_PLUGIN_ROOT:-.}/bin/hippo" outcome --from-hook 2>/dev/null || true
 exit 0

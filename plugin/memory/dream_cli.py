@@ -32,7 +32,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         prog="memory.dream",
         description=(
             "/dream — the generative sleep pass: replay the corpus against itself and "
-            "surface latent graph edges (DRM-1: report-only, zero memory writes)."
+            "surface latent graph edges (report-only, zero memory writes)."
         ),
     )
     parser.add_argument("--memory-dir", default=None)
@@ -47,7 +47,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="run the DRM-2 Tier-A auto-apply loop this pass (capped, θ/mutuality-gated, "
+        help="run the Tier-A auto-apply loop this pass (capped, θ/mutuality-gated, "
         "stamped, undoable; never commits). Also enabled by HIPPO_DREAM_APPLY=1.",
     )
     parser.add_argument(
@@ -70,7 +70,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument(
         "--retire-ghost", default=None, metavar="EDGE_ID",
-        help="DRM-7: retire ONE active ledger edge whose stamp is provably gone (source "
+        help="retire ONE active ledger edge whose stamp is provably gone (source "
         "deleted outside archive/, or the stamped line lost before a commit) — appends the "
         "superseding undone line; refuses while the stamp is on disk anywhere. Per edge.",
     )
@@ -78,7 +78,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--deparasite",
         action="store_true",
-        help="DRM-4: the de-parasiting counterweight — report per-memory out-degree, flag "
+        help="the de-parasiting counterweight — report per-memory out-degree, flag "
         "hubs over DREAM_MAX_OUT_DEGREE, and PROPOSE retractions (dream's own un-aged "
         "edges) vs gated demotions/dedup-merges. Report/propose only; zero memory writes.",
     )
@@ -101,7 +101,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--generate",
         action="store_true",
-        help="DRM-6: the generative tier — cluster co-firing sets into schema/gist + "
+        help="the generative tier — cluster co-firing sets into schema/gist + "
         "hypothesis PROPOSALS (report-only by default; proposals land under the derived "
         "dream dir). With --stage (or HIPPO_DREAM_GENERATIVE=1 on apply passes), stages "
         "them into the corpus at confidence:draft — quarantined, capped, ledgered, "
@@ -112,12 +112,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="with --generate: actually stage the proposals as confidence:draft memories "
         "(explicit opt-in, like --apply; the corpus must be trusted). Never verified — "
-        "graduation needs recorded outcome evidence (DREAM-KILL-1).",
+        "graduation needs recorded outcome evidence (DREAM-).",
     )
     parser.add_argument(
         "--sweep-drafts",
         action="store_true",
-        help="DRM-6 decay: graduate evidence-confirmed drafts (draft→verified on a "
+        help="decay: graduate evidence-confirmed drafts (draft→verified on a "
         "recorded outcome, never a glance), expire drafts past DREAM_DRAFT_HORIZON "
         "(auto-close validity + propose archive). Also runs inside every apply pass.",
     )
@@ -131,14 +131,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--prospective",
         action="store_true",
-        help="DRM-6 metric: abstain→hit flips over the FROZEN abstention backlog, with "
+        help="metric: abstain→hit flips over the FROZEN abstention backlog, with "
         "dream-attribution (measure-only, off the hot path)",
     )
     parser.add_argument(
         "--contradictions",
         action="store_true",
         help="DRM-C: run the LLM contradiction check over this pass's high-cofire pairs "
-        "(propose-only → the /hippo:resolve inbox; also enabled by "
+        "(propose-only → the /hippo:tend inbox; also enabled by "
         "HIPPO_DREAM_CONTRADICTIONS=1; needs an API key — silently skipped without one)",
     )
     parser.add_argument("--probe-k", type=int, default=None, help="co-fire probe depth (default 10)")

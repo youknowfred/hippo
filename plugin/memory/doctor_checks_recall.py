@@ -63,7 +63,7 @@ def check_link_density(ctx: DoctorContext) -> Dict[str, str]:
             "status": "warn",
             "message": f"link density is ZERO across {n} memories — memories can reference each "
             "other with [[name]] — see /hippo:new (new memories now suggest related links "
-            "automatically; existing ones can be cross-linked by hand or via /hippo:audit's "
+            "automatically; existing ones can be cross-linked by hand or via /hippo:doctor's content audit's "
             "link-densification pass).",
         }
     except Exception as exc:
@@ -173,29 +173,29 @@ def check_salience_evidence(ctx: DoctorContext) -> Dict[str, str]:
                     sibling = (
                         f" Sibling: outcome-prior A/B recorded "
                         f"({len(op.get('deltas') or {})} categor(ies), {op_arms}) — same "
-                        "ED-2 posture (measures only; the flag stays default-OFF)."
+                        "posture (measures only; the flag stays default-OFF)."
                     )
             except Exception:
                 sibling = ""
             return {
                 "status": "ok",
                 "message": f"salience evidence: A/B recorded ({len(deltas)} categor(ies), "
-                f"{arms}) — the flip stays a dated owner decision (ED-2)." + qualification
+                f"{arms}) — the flip stays a dated owner decision." + qualification
                 + sibling,
             }
         if sessions < _SALIENCE_LIVEDIN_MIN_SESSIONS:
             return {
                 "status": "ok",
                 "message": f"salience evidence: corpus not yet lived-in "
-                f"({sessions}/{_SALIENCE_LIVEDIN_MIN_SESSIONS} sessions logged) — the ED-2 "
+                f"({sessions}/{_SALIENCE_LIVEDIN_MIN_SESSIONS} sessions logged) — the "
                 "revisit rig waits.",
             }
         return {
             "status": "warn",
             "message": f"salience evidence: corpus is lived-in ({sessions} sessions, "
             f"{tracked} usage-tracked memories) but no A/B evidence is recorded — run "
-            "`python -m memory.eval_recall --ab HIPPO_SALIENCE` (measures only; the "
-            "default stays owner-decided-OFF per ED-2).",
+            "`hippo eval --ab HIPPO_SALIENCE` (measures only; the "
+            "default stays owner-decided-OFF).",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"salience-evidence check failed: {exc}."}
@@ -255,7 +255,7 @@ def check_edge_rot(ctx: DoctorContext) -> Dict[str, str]:
         return {
             "status": "warn",
             "message": f"edge rot: {len(rot)} edge(s) into retired/missing targets "
-            f"({detail}) — `python -m memory.links --audit` names each one."
+            f"({detail}) — `hippo links --audit` names each one."
             + cross_note
             + planned_note
             + folded_note,
@@ -364,7 +364,7 @@ def check_hot_path_latency(ctx: DoctorContext) -> Dict[str, str]:
                     "status": "warn",
                     "message": f"hot-path p95 = {p95:.0f}ms over {n} recall(s), {q95:.0f}ms over "
                     f"the {len(quiet)} uncontended — ABOVE the {budget} per-prompt budget "
-                    "(KPI-3) even on a quiet host. A heavier model or new per-import cost "
+                    " even on a quiet host. A heavier model or new per-import cost "
                     f"likely regressed it. [{split}]",
                 }
             # The breach lives in the contended slice: name the load it ran under.
@@ -388,7 +388,7 @@ def check_hot_path_latency(ctx: DoctorContext) -> Dict[str, str]:
         return {
             "status": "warn",
             "message": f"hot-path p95 = {p95:.0f}ms over {n} recall(s) — ABOVE the {budget} "
-            f"per-prompt budget (KPI-3); {why} [{split}]",
+            f"per-prompt budget; {why} [{split}]",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"hot-path latency check failed: {exc}."}
@@ -417,7 +417,7 @@ def check_recall_blind_spots(ctx: DoctorContext) -> Dict[str, str]:
             "status": "warn",
             "message": f"recall blind spots: {len(backlog)} recurring question(s) your corpus "
             f'can\'t answer — top: "{q}" (asked {top["count"]}× recently, nothing above the '
-            "floor). Capture via /hippo:consolidate.",
+            "floor). Capture via /hippo:tend.",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"recall blind-spots check failed: {exc}."}
@@ -582,7 +582,7 @@ def check_rules_conflicts(ctx: DoctorContext) -> Dict[str, str]:
             "status": "warn",
             "message": f"rule↔memory conflicts: {len(conflicts)} typed-edge conflict(s) + "
             f"{len(gaps)} authority gap(s) — top: {top}. Decide per item via "
-            "/hippo:consolidate.",
+            "/hippo:tend.",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"rules-conflict check failed: {exc}."}
@@ -754,8 +754,8 @@ def check_update_eval(ctx: DoctorContext) -> Dict[str, str]:
             "status": "warn",
             "message": f"update eval: {failures} outrank failure(s) across {u['n']} update "
             "row(s) in the latest persisted run — a superseded memory still outranks (or "
-            "hides) its successor; enrich the successor or re-run `python -m "
-            "memory.eval_recall` after corpus fixes (report-only; GATE_UPDATE_* stays an "
+            "hides) its successor; enrich the successor or re-run `hippo eval` after corpus "
+            "fixes (report-only; GATE_UPDATE_* stays an "
             "owner decision).",
         }
     except Exception as exc:
@@ -792,7 +792,7 @@ def check_foreign_dialects(ctx: DoctorContext) -> Dict[str, str]:
             "status": "warn",
             "message": f"foreign dialects: {counts} — {diverged} governance-diverged file(s), "
             f"{rotten} .mdc with missing cited path(s), {dead} dead .mdc glob(s) — "
-            "per-item detail via /hippo:audit; fixes are hand edits of the named files.",
+            "per-item detail via /hippo:doctor's content audit; fixes are hand edits of the named files.",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"foreign-dialect check failed: {exc}."}

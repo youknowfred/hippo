@@ -20,12 +20,17 @@ release). New *additions* alongside them are minor, non-breaking changes.
 - **The `/hippo:*` skill namespace** — the command names users type: `bootstrap`, `init`, `new`,
   `recall`, `why`, `doctor`, `audit`, `consolidate`, `resolve`, `promote`, `promote-rule`, `pack`,
   `export-agents`, `import`, `remove`. (New skills may be added; existing ones won't be renamed or
-  removed silently.)
+  removed silently.) v1.42.0 opened this list's deprecation window: the nine v2 verbs (`setup`,
+  `new`, `recall`, `tend`, `doctor`, `share`, `review`, `dream`, `remove`) absorbed the other
+  names, each of which now routes into its verb, keeps working through v1.43, and is removed in
+  v2.0.
 - **The `bin/hippo` CLI subcommands** — `recall`, `new`, `build-index`, `staleness`, `mcp`,
   `sleep` (added in T15 SLP as a minor, non-breaking addition), `review` (added in T12 CLB —
   the corpus review packet; its `--ci` mode is the single memory-diff CI gate).
 - **The MCP tool names** — `recall`, `new_memory`, `traverse`, `why`, `decision_history` (served by
-  `bin/hippo mcp`).
+  `bin/hippo mcp`). v1.42.0 opened their deprecation window: `traverse`, `why` and
+  `decision_history` now route through `inspect`, keep working unchanged through v1.43, and are
+  removed in v2.0 (each call says so).
 - **The `HIPPO_*` environment-variable namespace**, and specifically these documented operational
   variables: `HIPPO_MEMORY_DIR`, `HIPPO_INDEX_DIR`, `HIPPO_TELEMETRY_DIR`, `HIPPO_PENDING_DIR`,
   `HIPPO_LOCAL_MEMORY_DIR`, `HIPPO_USER_MEMORY_DIR`, `HIPPO_PROJECTS_FILE`, `HIPPO_TRUST_FILE`,
@@ -52,6 +57,24 @@ release). New *additions* alongside them are minor, non-breaking changes.
   `HIPPO_SLEEP_TIER_A` (added in T15 SLP: the opt-in that lets a
   SCHEDULED sleep pass apply capped, reversible Tier-A dream edges — default OFF, and OFF
   keeps the runner's zero-write guarantee byte-for-byte). These keep their names and meanings.
+- **The v2 environment set (from v1.42).** The frozen environment set shrinks to twelve names:
+  the nine directory overrides above (`HIPPO_MEMORY_DIR`, `HIPPO_INDEX_DIR`,
+  `HIPPO_TELEMETRY_DIR`, `HIPPO_PENDING_DIR`, `HIPPO_LOCAL_MEMORY_DIR`, `HIPPO_USER_MEMORY_DIR`,
+  `HIPPO_PROJECTS_FILE`, `HIPPO_TRUST_FILE`, `HIPPO_CLAUDE_PROJECTS_DIR`),
+  `HIPPO_DISABLE=<comma list>` (features `dense`, `jit`, `presence`, `floor-nag`,
+  `abstain-gate`, `touch-fastpath`), `HIPPO_TRUST_ALL` and `HIPPO_TRUST_NONGIT`. The six
+  `HIPPO_DISABLE_<FEATURE>` names are deprecated spellings of that list, and
+  `DREAM_CONTRA_MAX_PAIRS` / `DREAM_CONTRA_MIN_COFIRE` of their `HIPPO_`-prefixed names. The
+  other names in the list above (`HIPPO_EMBED_MODEL`, `HIPPO_MCP_MAX_MESSAGE_CHARS`,
+  `HIPPO_TEA5_OPT_IN`, `HIPPO_SALIENCE`, `HIPPO_DENSE_FLOOR`, `HIPPO_DUP_THRESHOLD`,
+  `HIPPO_SLEEP_TIER_A`) stay readable as overrides but become configuration, outside the
+  frozen set. Settings that are not environment variables moved too: corpus policy to the
+  committed `.claude/memory/hippo.json` (its keys used to sit in `.format`) and machine
+  settings to the plugin's options (they used to sit in `~/.claude/hippo-llm.json`). An
+  environment variable wins over a plugin option, which wins over `hippo.json`, which wins
+  over the old location. **Deprecation window:** every old name keeps working unchanged
+  through v1.43, `/hippo:doctor` names each one it sees with its new spelling, and each use is
+  counted; the window is two minors (v1.42, v1.43) and the old names are removed at v2.0.
 - **The committed on-disk corpus format** — `.claude/memory/.format`'s `corpus_format` (currently
   **5**) and the memory-file frontmatter conventions ([CONVENTIONS.md](plugin/assets/CONVENTIONS.md)).
   The format version only ever increases, and every increase ships a documented migration
@@ -74,6 +97,17 @@ These may change at any release without a major bump — do not build on them:
 - **The Python API** — importing `memory.*` internals directly. hippo is consumed as a Claude Code
   plugin (skills + hooks + MCP + `bin/hippo`), not as a library; module-level functions and
   signatures may change. Depend on the CLI and MCP surfaces, not the Python symbols.
+- **`hippo` verbs beyond the seven above** — v1.42.0 made `bin/hippo` the one engine entry
+  and gave every engine command a verb (`hippo help --all` lists them). The seven frozen
+  subcommands keep their names and behavior; the rest stay unfrozen until STABILITY v2
+  classifies them.
+- **The v2 MCP toolset and its shapes** — `inspect`, `tend`, `setup`, `trust`, `share` and
+  `review` (added in v1.42.0), the internal `recall_hook`, every tool's `annotations` and
+  `outputSchema`, and the order `tools/list` returns. STABILITY v2 freezes the v2 names at v2.0;
+  until then they are additions, not promises.
+- **The `recall_hook` MCP tool** — internal: the opt-in warm-recall hook (`hippo setup --warm`)
+  calls it, never a model or a skill. Its inputs, its reply and the handshake files it shares with
+  the recall hook may change in any release; the `hippo setup` verb is unfrozen too.
 - **Exact recall output text and ordering** — recall is a ranker; its wording, formatting, and the
   precise order of results are tuned continuously.
 

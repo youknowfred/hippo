@@ -205,7 +205,7 @@ def suppressed_count_note(count: int) -> str:
     """The worklist listings' one-line honesty tail (CLI + MCP render it verbatim)."""
     return (
         f"({count} memor{'y' if count == 1 else 'ies'} policy-suppressed: only "
-        "volatile-path drift — churn-by-design files declared in .format volatile_paths)"
+        "volatile-path drift — churn-by-design files declared in hippo.json volatile_paths)"
     )
 
 
@@ -213,7 +213,7 @@ def stale_note_tail(count: int) -> str:
     """The SessionStart staleness note's suppressed-count tail line (armed items exist)."""
     return (
         f"  (+{count} whose only drift is volatile-path — policy-suppressed from arming; "
-        "see .format volatile_paths)"
+        "see hippo.json volatile_paths)"
     )
 
 
@@ -225,7 +225,7 @@ def stale_note_all_suppressed(count: int) -> str:
     """
     return (
         f"ℹ Memory staleness — {count} stale memor{'y' if count == 1 else 'ies'} whose "
-        "only drift is volatile-path (policy-suppressed; see .format volatile_paths); "
+        "only drift is volatile-path (policy-suppressed; see hippo.json volatile_paths); "
         "nothing to verify."
     )
 
@@ -234,7 +234,7 @@ def type_exempt_count_note(count: int) -> str:
     """The worklist listings' TYPE-1 honesty tail (CLI + MCP render it verbatim)."""
     return (
         f"({count} memor{'y' if count == 1 else 'ies'} arming-exempt by type — project-"
-        "memory staleness meters repo velocity, not truth-risk (TYPE-1); detection/recall "
+        "memory staleness meters repo velocity, not truth-risk; detection/recall "
         f"unaffected; override via {_EXEMPT_TYPES_ENV})"
     )
 
@@ -242,7 +242,7 @@ def type_exempt_count_note(count: int) -> str:
 def type_note_tail(count: int) -> str:
     """The SessionStart staleness note's TYPE-1 suppressed-count tail (armed items exist)."""
     return (
-        f"  (+{count} type-exempt from arming — TYPE-1 policy on project memories; "
+        f"  (+{count} type-exempt from arming — policy on project memories; "
         f"detection unaffected; override via {_EXEMPT_TYPES_ENV})"
     )
 
@@ -254,6 +254,6 @@ def type_note_all_suppressed(count: int) -> str:
     """
     return (
         f"ℹ Memory staleness — {count} stale memor{'y' if count == 1 else 'ies'}, all "
-        "arming-exempt by type (TYPE-1: project-memory staleness meters repo velocity, "
+        "arming-exempt by type (project-memory staleness meters repo velocity, "
         f"not truth-risk); detection/recall unaffected; override via {_EXEMPT_TYPES_ENV}."
     )

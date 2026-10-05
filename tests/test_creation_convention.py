@@ -879,7 +879,7 @@ def test_missing_memory_md_is_loud_skip_never_fabricated(tmp_path, monkeypatch):
     assert res["created"] is True and res["error"] is None
     assert res["floor"]["status"] == "skipped"
     assert res["floor"]["reason"].startswith("MEMORY.md missing")
-    assert "/hippo:init" in res["floor"]["reason"]  # names the fix, not just the failure
+    assert "/hippo:setup" in res["floor"]["reason"]  # names the fix, not just the failure
     assert not os.path.exists(os.path.join(md, "MEMORY.md"))  # NOT fabricated
 
 
@@ -924,7 +924,7 @@ def test_new_memory_cli_prints_floor_outcome_when_not_plain_appended(tmp_path, m
     out = capsys.readouterr().out
     assert rc == 0
     assert "floor   : skipped — MEMORY.md missing" in out
-    assert "/hippo:init" in out
+    assert "/hippo:setup" in out
 
     # Renamed section -> created-section with the reason, merge guidance routed to the agent.
     md2 = str(tmp_path / "b" / ".claude" / "memory")

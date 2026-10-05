@@ -1681,7 +1681,7 @@ def test_main_cli_prints_per_category_lines(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert "category single-hop " in out and "category update " in out
-    assert "n=1 (RET-8)" in out
+    assert "n=1" in out
 
 
 def test_main_cli_explicit_memory_dir_never_inherits_ambient_fixtures(tmp_path, monkeypatch):
@@ -2381,5 +2381,5 @@ def test_reachability_cli_prints_baseline(tmp_path, monkeypatch, capsys):
     rc = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs, "--reachability"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "typed-2-hop reachability" in out and "GRA-7" in out
+    assert "typed-2-hop reachability" in out
     assert "NOT a shipped depth-2 mechanism" in out

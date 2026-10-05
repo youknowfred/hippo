@@ -16,7 +16,8 @@ This module is that artifact. It declares, for every ``/hippo:*`` verb:
     honest preflight says so — never a dead-end promise),
 
 plus the tools that serve NO typed verb (mid-turn/subagent reads, the corpus-repair
-verbs) and the ``bin/hippo`` subcommand list (frozen in STABILITY.md).
+verbs) and the ``hippo <verb>`` list (SRF-1; declared in ``cli_verbs``, the frozen rows
+stated in STABILITY.md).
 
 BUILD-TIME ARTIFACT ONLY. ``tests/test_surface_registry.py`` is the parity lint that
 cross-checks every declaration here against reality — ``_DISPATCH``, the skills dir,
@@ -37,17 +38,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Tuple
 
+from .cli_verbs import CLI_VERBS
+from .mcp_schemas_v2 import DEPRECATED
+
 # The honest-preflight marker every terminal-only skill must carry verbatim (the
 # INT-19 wording): the lint greps SKILL.md for it, and its PRESENCE in a routed
 # skill is as much a failure as its absence in a terminal-only one.
 TERMINAL_ONLY_MARKER = "no Desktop-safe MCP-tool equivalent yet"
 
-# bin/hippo's dispatching subcommands (STABILITY.md's frozen CLI surface). The lint
-# parses the script's exec-ing case arms and asserts equality, so advice naming
-# ``hippo <sub>`` can be checked against a list that cannot drift from the script.
-BIN_HIPPO_SUBCOMMANDS: Tuple[str, ...] = (
-    "recall", "new", "build-index", "staleness", "mcp", "sleep", "review",
-)
+# SRF-1: every ``hippo <verb>`` the door dispatches, read from the one table in
+# ``cli_verbs`` (pure data, which ``memory.cli`` reads at runtime; this registry only
+# re-exports it). Advice naming ``hippo <verb>`` is checked against this list, and
+# STABILITY.md's frozen CLI surface against the ``frozen`` rows.
+BIN_HIPPO_SUBCOMMANDS: Tuple[str, ...] = tuple(v.verb for v in CLI_VERBS)
+FROZEN_BIN_HIPPO_SUBCOMMANDS: Tuple[str, ...] = tuple(v.verb for v in CLI_VERBS if v.frozen)
 
 
 @dataclass(frozen=True)
@@ -55,69 +59,25 @@ class VerbSurface:
     """One ``/hippo:<verb>``'s surface story. ``verb`` == its ``plugin/skills/`` dir."""
 
     verb: str
-    desktop: str  # "tool" | "skill_tools" | "terminal_only"
-    mcp_tools: Tuple[str, ...]  # every tool serving this verb; () iff terminal_only
+    desktop: str  # "tool" | "skill_tools" | "terminal_only" | "route"
+    mcp_tools: Tuple[str, ...]  # every tool serving this verb; () iff terminal_only or route
     note: str  # one-line human story (documentation, not linted prose)
+    routes_to: str = ""  # "route" rows only: the v2 verb this retired name now opens
 
+
+# SRF-3: the nine v2 verbs. Each absorbed one or more v1 skills as a section of its own
+# SKILL.md (doctor's content audit is a supporting file, read on demand).
+V2_VERBS: Tuple[str, ...] = (
+    "setup", "new", "recall", "tend", "doctor", "share", "review", "dream", "remove",
+)
 
 VERBS: Tuple[VerbSurface, ...] = (
     VerbSurface(
-        "audit",
+        "setup",
         desktop="skill_tools",
-        mcp_tools=("audit",),
-        note="the skill drives judgment on both surfaces; the audit tool serves the "
-        "read-only Phase-1 report material (INV-4, scope ratified 2026-07-16)",
-    ),
-    VerbSurface(
-        "bootstrap",
-        desktop="tool",
-        mcp_tools=("bootstrap",),
-        note="per-machine-surface provisioning (INT-10)",
-    ),
-    VerbSurface(
-        "consolidate",
-        desktop="skill_tools",
-        mcp_tools=(
-            "capture",
-            "new_memory",
-            "secrets_scan",
-            "reconsolidate",
-            "build_index",
-            "co_recall_proposals",
-            "abstention_fixtures",
-            "interview",
-        ),
-        note="the skill is the doctrine on both surfaces; its steps are per-item tools (INT-13; EXT-3 adds the asks step)",
-    ),
-    VerbSurface(
-        "doctor",
-        desktop="tool",
-        mcp_tools=("doctor", "trust_corpus"),
-        note="health check + the SEC-1 consent flow (INT-9/INT-12)",
-    ),
-    VerbSurface(
-        "dream",
-        desktop="tool",
-        mcp_tools=("dream",),
-        note="the generative sleep pass (DRM-2)",
-    ),
-    VerbSurface(
-        "export-agents",
-        desktop="terminal_only",
-        mcp_tools=(),
-        note="AGENTS.md fan-out; propose-only diffs in a terminal",
-    ),
-    VerbSurface(
-        "import",
-        desktop="terminal_only",
-        mcp_tools=(),
-        note="migration on-ramp (Cursor rules); per-item confirmed in a terminal",
-    ),
-    VerbSurface(
-        "init",
-        desktop="tool",
-        mcp_tools=("init",),
-        note="per-project wiring; pre-existing corpora route to trust_corpus (INT-11)",
+        mcp_tools=("setup", "trust"),
+        note="bootstrap once per machine, init once per project; an existing corpus's "
+        "consent goes through the trust tool",
     ),
     VerbSurface(
         "new",
@@ -126,41 +86,45 @@ VERBS: Tuple[VerbSurface, ...] = (
         note="the per-item corpus write, right-by-construction",
     ),
     VerbSurface(
-        "pack",
-        desktop="skill_tools",
-        mcp_tools=(
-            "pack_extract",
-            "pack_install_plan",
-            "pack_install_item",
-            "pack_update_plan",
-            "pack_update_item",
-        ),
-        note="share/adopt packs; the skill drives five per-item primitives (INT-16)",
-    ),
-    VerbSurface(
-        "promote",
-        desktop="terminal_only",
-        mcp_tools=(),
-        note="lift ONE memory to the user tier; per-item in a terminal",
-    ),
-    VerbSurface(
-        "promote-rule",
-        desktop="terminal_only",
-        mcp_tools=(),
-        note="promote ONE memory into a scoped rule; propose-only in a terminal",
-    ),
-    VerbSurface(
-        "publish",
-        desktop="terminal_only",
-        mcp_tools=(),
-        note="PUB-1: per-item entry INTO the committed subset; print-only pending Q3, "
-        "per-item in a terminal (the export-agents precedent)",
-    ),
-    VerbSurface(
         "recall",
         desktop="tool",
-        mcp_tools=("recall", "decision_history", "traverse"),
-        note="query recall + lineage + graph hops; --list-by-type/--all-projects stay terminal-only",
+        mcp_tools=("recall", "inspect"),
+        note="query recall plus the why receipt, lineage and graph hops (inspect); "
+        "--list-by-type/--all-projects stay terminal-only",
+    ),
+    VerbSurface(
+        "tend",
+        desktop="skill_tools",
+        mcp_tools=("tend", "new_memory"),
+        note="the one maintenance queue and the consolidate steps; drafting a capture "
+        "goes through new_memory",
+    ),
+    VerbSurface(
+        "doctor",
+        desktop="skill_tools",
+        mcp_tools=("doctor", "trust"),
+        note="health checks + the consent step; the content audit is a supporting file "
+        "whose material the doctor tool serves (action='audit')",
+    ),
+    VerbSurface(
+        "share",
+        desktop="skill_tools",
+        mcp_tools=("share",),
+        note="packs through the share tool; promote, promote-rule, publish, export and "
+        "import need a terminal (each flow's own guard says so)",
+    ),
+    VerbSurface(
+        "review",
+        desktop="tool",
+        mcp_tools=("review",),
+        note="the corpus review packet (op-classified diff + scoped lints + local recall "
+        "preview); --ci is the single memory-diff CI gate",
+    ),
+    VerbSurface(
+        "dream",
+        desktop="tool",
+        mcp_tools=("dream",),
+        note="the offline link pass",
     ),
     VerbSurface(
         "remove",
@@ -168,42 +132,38 @@ VERBS: Tuple[VerbSurface, ...] = (
         mcp_tools=(),
         note="project offboarding; terminal-only by intent",
     ),
-    VerbSurface(
-        "resolve",
-        desktop="tool",
-        mcp_tools=("resolve",),
-        note="the contradiction inbox + ONE per-pair verdict per call — the "
-        "nudge-routed dead end closed (INV-4, scope ratified 2026-07-16)",
-    ),
-    VerbSurface(
-        "review",
-        desktop="terminal_only",
-        mcp_tools=(),
-        note="CLB-1: the corpus review packet (op-classified diff + scoped lints + "
-        "local recall preview); --ci is the single memory-diff CI gate",
-    ),
-    VerbSurface(
-        "why",
-        desktop="tool",
-        mcp_tools=("why",),
-        note="the glass-box recall receipt (GOV-5)",
+    # The v1 skill names, through the deprecation window (v1.42-v1.43): each SKILL.md is a
+    # one-line route into its v2 verb, and its preflight counts the old name (OBS-2).
+    *(
+        VerbSurface(old, desktop="route", mcp_tools=(), note=f"now /hippo:{new}", routes_to=new)
+        for old, new in (
+            ("bootstrap", "setup"), ("init", "setup"), ("why", "recall"),
+            ("consolidate", "tend"), ("resolve", "tend"), ("audit", "doctor"),
+            ("pack", "share"), ("promote", "share"), ("promote-rule", "share"),
+            ("publish", "share"), ("export-agents", "share"), ("import", "share"),
+        )
     ),
 )
 
-# MCP tools that serve NO /hippo:* verb: the corpus-repair verbs (INT-14/15 — they exist
-# to undo defects hippo itself shipped, on both surfaces, with no typed form). The
-# producer that needs one names it as an MCP tool (e.g. cite_derivation names rederive).
+# MCP tools that serve NO /hippo:* verb. (The v1 repair and incident tools are deprecated
+# names now, claimed below through the v2 mapping.)
 VERBLESS_TOOLS: Dict[str, str] = {
-    "rederive": "MIG-1 citation re-derivation — MCP tool on both surfaces, no /hippo:* form",
-    "heal_baselines": "COR-10 empty-baseline heal — MCP tool on both surfaces, no /hippo:* form",
-    "untrust": "SEN-5 incident response — revoke a corpus's trust; MCP tool on both surfaces, no /hippo:* form",
-    "blast_radius": "SEN-5 incident forensics — read-only touch report; MCP tool on both surfaces, no /hippo:* form",
+    "recall_hook": "HOT-6 INTERNAL, unfrozen — the opt-in warm-recall hook's entry; the harness calls it, never a model or a skill",
 }
+
+# SRF-2: the v1 tool names, still served through the deprecation window, claimed through
+# the v2 route each one names (``mcp_schemas_v2.DEPRECATED``, pure data).
+DEPRECATED_TOOLS: Dict[str, str] = {old: new for old, (new, _how) in DEPRECATED.items()}
 
 
 def verb_map() -> Dict[str, VerbSurface]:
     """``verb -> row`` for lookups; the tuple above stays the declaration of record."""
     return {v.verb: v for v in VERBS}
+
+
+def route_verbs() -> Dict[str, str]:
+    """``retired name -> v2 verb`` for the route rows."""
+    return {v.verb: v.routes_to for v in VERBS if v.desktop == "route"}
 
 
 def terminal_only_verbs() -> Tuple[str, ...]:
@@ -213,7 +173,7 @@ def terminal_only_verbs() -> Tuple[str, ...]:
 
 def claimed_tools() -> frozenset:
     """Every MCP tool name the registry accounts for — must equal ``_DISPATCH`` exactly."""
-    tools = set(VERBLESS_TOOLS)
+    tools = set(VERBLESS_TOOLS) | set(DEPRECATED_TOOLS)
     for v in VERBS:
         tools.update(v.mcp_tools)
     return frozenset(tools)

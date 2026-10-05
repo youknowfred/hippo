@@ -27,10 +27,10 @@ you'd rather skip the ~130 MB model download, you can run the whole suite BM25-o
 
 ```bash
 .venv/bin/python -m pytest                       # full hermetic suite (needs fastembed cached)
-HIPPO_DISABLE_DENSE=1 .venv/bin/python -m pytest  # BM25-only — no model download, fully offline
+HIPPO_DISABLE=dense .venv/bin/python -m pytest  # BM25-only — no model download, fully offline
 ```
 
-`HIPPO_DISABLE_DENSE=1` is the airplane-mode path: the vendored BM25 scorer + frontmatter parser
+`HIPPO_DISABLE=dense` (or the older `HIPPO_DISABLE_DENSE=1`) is the airplane-mode path: the vendored BM25 scorer + frontmatter parser
 under `plugin/memory/_vendor/` serve recall on a bare interpreter, so the suite runs without the
 embedding model. This is the recommended default for iterating.
 
@@ -87,7 +87,7 @@ item ([`ROADMAP.yaml`](ROADMAP.yaml) / [`ROADMAP.v1.md`](ROADMAP.v1.md)):
   e.g. `CAP-6: bound the capture pending queue`. A PR bundles related items; each stays its own
   commit. If your change isn't tied to an existing item, describe it plainly — a new id isn't
   required for an outside contribution.
-- **Keep the full suite green after each commit.** `HIPPO_DISABLE_DENSE=1 pytest` from the root.
+- **Keep the full suite green after each commit.** `HIPPO_DISABLE=dense pytest` from the root.
 - **Preserve the guiding invariants.** They're listed in `ROADMAP.yaml` (`guiding_invariants`) —
   the load-bearing ones: markdown-in-git is the only source of authority (index/telemetry/graph are
   derived, rebuildable, gitignored caches); hooks always `exit 0`, never download, never block; the

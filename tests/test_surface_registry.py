@@ -92,11 +92,16 @@ def test_every_dispatch_tool_is_claimed_by_the_registry():
 
 def test_registry_shape_is_coherent():
     for v in S.VERBS:
-        assert v.desktop in ("tool", "skill_tools", "terminal_only"), v.verb
-        if v.desktop == "terminal_only":
-            assert not v.mcp_tools, f"{v.verb}: terminal_only rows must claim no tools"
+        assert v.desktop in ("tool", "skill_tools", "terminal_only", "route"), v.verb
+        if v.desktop in ("terminal_only", "route"):
+            assert not v.mcp_tools, f"{v.verb}: {v.desktop} rows must claim no tools"
         else:
             assert v.mcp_tools, f"{v.verb}: a routed verb must name the tool(s) that serve it"
+        if v.desktop == "route":
+            assert v.routes_to in S.V2_VERBS, f"{v.verb}: routes to {v.routes_to!r}, not a v2 verb"
+        else:
+            assert v.verb in S.V2_VERBS and not v.routes_to, v.verb
+    assert {v.verb for v in S.VERBS if v.desktop != "route"} == set(S.V2_VERBS)
     overlap = set(S.VERBLESS_TOOLS) & {t for v in S.VERBS for t in v.mcp_tools}
     assert not overlap, f"tool(s) {sorted(overlap)} are both verb-bound and verbless — pick one"
 
@@ -108,6 +113,9 @@ def test_terminal_only_skills_carry_the_honest_marker():
     texts = _skill_texts()
     for v in S.VERBS:
         text = texts[v.verb]
+        if v.desktop == "route":
+            assert S.TERMINAL_ONLY_MARKER not in text, v.verb
+            continue
         if v.desktop == "terminal_only":
             assert S.TERMINAL_ONLY_MARKER in text, (
                 f"skills/{v.verb}/SKILL.md: registry says terminal_only but the preflight "
@@ -124,7 +132,7 @@ def test_terminal_only_skills_carry_the_honest_marker():
 def test_routed_skills_name_every_tool_they_drive():
     texts = _skill_texts()
     for v in S.VERBS:
-        if v.desktop == "terminal_only":
+        if v.desktop in ("terminal_only", "route"):
             continue
         for tool in v.mcp_tools:
             assert re.search(rf"\b{re.escape(tool)}\b", texts[v.verb]), (
@@ -144,11 +152,45 @@ def test_routed_skills_keep_their_surface_routing_section():
         assert "⌨ Surface note" not in text, (
             f"skills/{v.verb}/SKILL.md still cites the retired SessionStart surface note"
         )
-        if v.desktop != "terminal_only":
+        if v.desktop not in ("terminal_only", "route"):
             assert "## Surface routing" in text, (
                 f"skills/{v.verb}/SKILL.md lost its 'Surface routing' section — without it "
                 "a Desktop session runs its bash flow, which has no Desktop receipt yet"
             )
+
+
+def test_route_rows_open_their_v2_verb_and_count_the_old_name():
+    """SRF-3: a retired name is a one-line route — its SKILL.md names the v2 verb it now
+    opens, and its preflight counts the OLD name, the usage the v2.0 removal is decided on."""
+    texts = _skill_texts()
+    for old, new in S.route_verbs().items():
+        text = texts[old]
+        assert f"`/hippo:{new}`" in text and f"hippo:{new}" in text, old
+        assert re.search(rf"^hippo_note_usage skill {re.escape(old)}\b", text, re.M), old
+        assert len(text.splitlines()) < 30, f"{old}: a route stub, not a second copy of the flow"
+
+
+def test_v2_skills_teach_v2_names_only():
+    """SRF-3: the nine verbs name v2 tools and v2 verbs; the v1 names are routes, never advice."""
+    texts = _skill_texts()
+    deprecated = set(S.DEPRECATED_TOOLS)
+    retired = set(S.route_verbs())
+    extra = os.path.join(_SKILLS_DIR, "doctor", "audit.md")
+    with open(extra, encoding="utf-8") as fh:
+        texts = dict(texts, **{"doctor/audit.md": fh.read()})
+    bad = []
+    for verb, text in texts.items():
+        if verb in retired:
+            continue
+        for pattern in _TOOL_REF_RES:
+            for m in pattern.finditer(text):
+                name = m.group(1)[len(_WIRE_PREFIX):] if m.group(1).startswith(_WIRE_PREFIX) else m.group(1)
+                if name in deprecated:
+                    bad.append(f"{verb}: names v1 tool {name!r}")
+        for m in re.finditer(r"/hippo:([a-z][a-z0-9-]*)", text):
+            if m.group(1) in retired:
+                bad.append(f"{verb}: names retired verb /hippo:{m.group(1)}")
+    assert not bad, "\n".join(sorted(set(bad)))
 
 
 # --------------------------------------------------------------------------- #
@@ -185,22 +227,21 @@ def test_no_shipped_text_claims_typed_commands_are_terminal_only():
 # --------------------------------------------------------------------------- #
 # bin/hippo subcommand parity
 # --------------------------------------------------------------------------- #
-def _bin_hippo_dispatching_arms() -> set:
-    """Case arms in bin/hippo that exec a command (the redirect/usage arms don't count)."""
+def test_bin_hippo_hands_every_verb_but_mcp_to_the_door():
+    """SRF-1: the script has exactly two exec arms — the long-lived MCP server, and the
+    door (memory.cli) for everything else. A verb added as its own case arm would bypass
+    the table the registry and the usage text read."""
     with open(_BIN_HIPPO, encoding="utf-8") as fh:
         script = fh.read()
-    arms = set()
-    for m in re.finditer(r"^\s{2}([a-z|\-]+)\)\n(.*?)^\s{4};;", script, re.M | re.S):
-        if re.search(r"^\s*exec\b", m.group(2), re.M):
-            arms.update(m.group(1).split("|"))
-    return arms
+    execs = re.findall(r"^\s*exec\s+\"\$PY\"\s+-m\s+(memory\.[a-z_]+)", script, re.M)
+    assert execs == ["memory.mcp_server", "memory.cli"], execs
 
 
 def test_bin_hippo_subcommands_match_registry():
-    assert _bin_hippo_dispatching_arms() == set(S.BIN_HIPPO_SUBCOMMANDS), (
-        "bin/hippo's exec-ing case arms drifted from surfaces.BIN_HIPPO_SUBCOMMANDS — "
-        "update both together (STABILITY.md freezes this list)"
-    )
+    from memory.cli_verbs import CLI_VERBS
+
+    assert S.BIN_HIPPO_SUBCOMMANDS == tuple(v.verb for v in CLI_VERBS)
+    assert len(set(S.BIN_HIPPO_SUBCOMMANDS)) == len(S.BIN_HIPPO_SUBCOMMANDS)
 
 
 # --------------------------------------------------------------------------- #

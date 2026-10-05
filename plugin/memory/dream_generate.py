@@ -141,8 +141,12 @@ def _env_int(name: str, default: int) -> int:
 
 def generative_enabled() -> bool:
     """``HIPPO_DREAM_GENERATIVE`` — the DRM-6 flag. DEFAULT OFF (P3 ships behind a flag;
-    DREAM-KILL-1). Only an explicit truthy value enables; junk stays off."""
-    return os.environ.get("HIPPO_DREAM_GENERATIVE", "").strip() in ("1", "true", "True")
+    DREAM-KILL-1). Only an explicit truthy value enables; junk stays off. SRF-4: when the
+    env var is unset, the ``dream_generative`` plugin option decides (it reaches the MCP
+    server and hooks, never a Bash-run ``hippo dream``)."""
+    from .settings import opt_in
+
+    return opt_in("HIPPO_DREAM_GENERATIVE", "dream_generative")
 
 
 def max_generate_per_pass() -> int:
@@ -987,7 +991,7 @@ def sweep_drafts(
             f"  ⌛ EXPIRED {stem} — unconfirmed for {item['age']} distinct sessions "
             f"(horizon {draft_horizon()}): validity window closed (recall demotes it "
             f"further); ARCHIVE PROPOSED — execute with "
-            f"`python -m memory.dream --archive-draft {stem}`."
+            f"`hippo dream --archive-draft {stem}`."
         )
 
     for item in state["awaiting_archive"]:
@@ -1252,7 +1256,7 @@ def run_generative_pass(
         gate_root = trust.gate_repo_root(memory_dir, repo_root)
         if gate_root is not None and not trust.is_trusted(gate_root):
             return 1, (
-                "🌱 dream --generate: STAGING REFUSED — this corpus is untrusted (SEC-1). "
+                "🌱 dream --generate: STAGING REFUSED — this corpus is untrusted. "
                 "The report-only form (no --stage) remains available."
             )
         if generated_rows(memory_dir):
@@ -1299,7 +1303,7 @@ def run_generative_pass(
         lines.append(
             f"   ⚠ oversized cluster SKIPPED ({len(big)} members > "
             f"{schema_max_cluster()}): {', '.join(big[:6])}… — θ under-discriminates at "
-            "this density; a schema over it would be a haystack (and born over DRM-4's "
+            "this density; a schema over it would be a haystack (and born over the "
             "hub bar). Raise DREAM_COFIRE_THETA before staging."
         )
 
@@ -1318,7 +1322,7 @@ def run_generative_pass(
                 f"   ✚ STAGED {row['memory']} ({row['kind']}, confidence: draft, "
                 f"[{row['edge_id']}]) — down-weighted in recall, expires at horizon "
                 f"{draft_horizon()} unless outcome evidence graduates it; undo with "
-                f"`python -m memory.dream --undo {row['edge_id']}`"
+                f"`hippo dream --undo {row['edge_id']}`"
             )
         for prop, reason in staged["refused"]:
             lines.append(f"   ✘ refused {prop.get('name', '?')}: {reason}")

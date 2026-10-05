@@ -179,7 +179,7 @@ class TestSkillRedirects:
     def test_each_skill_command_redirects(self, tmp_path):
         cwd = tmp_path / "scratch_cwd"
         os.makedirs(cwd, exist_ok=True)
-        for name in ("init", "bootstrap", "doctor", "audit"):
+        for name in ("init", "bootstrap", "audit"):
             proc = _run_hippo([name], tmp_path, cwd=cwd)
             assert proc.returncode == 1, (
                 f"'{name}': expected exit 1, got {proc.returncode}; stderr: {proc.stderr!r}"
@@ -195,9 +195,9 @@ class TestSkillRedirects:
         proves the case arm doesn't accidentally try to consume/forward them."""
         cwd = tmp_path / "scratch_cwd"
         os.makedirs(cwd, exist_ok=True)
-        proc = _run_hippo(["doctor", "--verbose", "extra"], tmp_path, cwd=cwd)
+        proc = _run_hippo(["audit", "--verbose", "extra"], tmp_path, cwd=cwd)
         assert proc.returncode == 1
-        assert "/hippo:doctor" in proc.stderr
+        assert "/hippo:audit" in proc.stderr
 
 
 # --------------------------------------------------------------------------- #

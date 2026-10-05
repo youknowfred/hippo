@@ -50,7 +50,7 @@ def test_no_clock_means_no_stamp_never_a_guess():
 def test_user_prompt_hook_stamps_before_python():
     hook = os.path.join(os.path.dirname(_RESOLVE), "memory_user_prompt.sh")
     text = open(hook, encoding="utf-8").read()
-    assert text.index("hippo_stamp_t0") < text.index('"$PY" -m memory.recall_hook')
+    assert text.index("hippo_stamp_t0") < text.index("bin/hippo\" recall --stdin-json")
 
 
 @pytest.fixture

@@ -217,9 +217,9 @@ def merge_digest_producer(
         ]
         for p in pairs:
             if p["route"] == "resolve":
-                target = "/hippo:resolve (declared contradicts — already in the inbox)"
+                target = "/hippo:tend (declared contradicts — already in the inbox)"
             else:
-                target = "/hippo:consolidate (GRW-3 merge tier: update-existing / supersede / skip)"
+                target = "/hippo:tend (merge tier: update-existing / supersede / skip)"
             lines.append(
                 f"  • {p['incoming']} ⇄ {p['neighbor']} ({p['score']:.2f}) → {target}"
             )

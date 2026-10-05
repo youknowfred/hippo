@@ -5,7 +5,7 @@ network, and zero LLM calls**. Run it yourself:
 
 ```bash
 bench/run.sh                       # dense if bootstrapped, else BM25-only
-HIPPO_DISABLE_DENSE=1 bench/run.sh # force the model-free path (no ~130MB download)
+HIPPO_DISABLE=dense bench/run.sh # force the model-free path (no ~130MB download)
 ```
 
 ## What it measures

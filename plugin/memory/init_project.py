@@ -147,7 +147,9 @@ def _build_index_via(python: str, memory_dir: str, index_dir: str) -> Dict[str, 
 
 
 def init_project(
-    claude_projects_dir: Optional[str] = None, dense_python: Optional[str] = None
+    claude_projects_dir: Optional[str] = None,
+    dense_python: Optional[str] = None,
+    adopt_digest: Optional[str] = None,
 ) -> Dict[str, object]:
     """Run the mechanical init flow against the resolved corpus. Returns a result dict;
     never raises (per-step failures degrade to reported statuses).
@@ -156,6 +158,16 @@ def init_project(
     real ``~/.claude/projects``. ``dense_python`` runs the index build under that
     interpreter (the MCP server passes its freshly-resolved venv python so a rebuild
     right after a mid-session bootstrap embeds dense vectors); None builds in-process.
+
+    CLM-4 — two cases init used to get wrong:
+      - a repo NESTED inside another repo's corpus resolved that ancestor's corpus, so
+        init "re-wired" the ancestor's. Init here means this repo's own corpus, so the
+        target becomes ``<repo_root>/.claude/memory`` (``nested_owner`` names the other);
+      - a native memory directory in the link slot. ``adopt_digest`` None returns the
+        adoption preview (``mode: "adopt_preview"``) and writes NOTHING; the preview's
+        digest adopts it (``native_adopt.execute_adoption``) and continues on the
+        existing-corpus path, which never auto-trusts; ``"skip"`` runs init as before
+        (the link step then reports the conflict).
     """
     from . import trust
     from .build_index import build_index, default_index_dir
@@ -169,8 +181,15 @@ def init_project(
     )
     from .registry import register_project
 
+    from .machine_census import claude_projects_root
+    from .native_adopt import adoption_applies, execute_adoption, plan_adoption
+    from .provenance_env import foreign_corpus_owner
+
     plugin_root = _plugin_root()
     memory_dir, repo_root = resolve_dirs()
+    nested_owner = foreign_corpus_owner(memory_dir, repo_root)
+    if nested_owner:
+        memory_dir = os.path.join(repo_root, ".claude", "memory")
     is_git = git_root(repo_root) is not None
     result: Dict[str, object] = {
         "memory_dir": memory_dir,
@@ -178,7 +197,20 @@ def init_project(
         "git": is_git,
         "seeded": [],
         "warnings": [],
+        "nested_owner": nested_owner,
     }
+    projects_dir = claude_projects_dir or claude_projects_root()
+
+    adopt = (adopt_digest or "").strip()
+    if adoption_applies(repo_root, projects_dir) and adopt != "skip":
+        if not adopt:
+            result["mode"] = "adopt_preview"
+            result["adoption"] = plan_adoption(repo_root, memory_dir, projects_dir)
+            return result
+        result["adoption"] = execute_adoption(repo_root, memory_dir, adopt, projects_dir)
+        if not result["adoption"].get("ok"):
+            result["mode"] = "adopt_refused"
+            return result
 
     existing = _has_existing_corpus(memory_dir)
     result["mode"] = "existing" if existing else "fresh"
@@ -254,10 +286,8 @@ def init_project(
     # ONE write path (HYG-2: the conftest guard sets it suite-wide — 19 of 25 farm
     # entries on the reference machine were dangling symlinks minted by tests calling
     # this very step with no isolation).
-    from .machine_census import claude_projects_root
-
     result["symlink"] = create_project_symlink(
-        repo_root, memory_dir, claude_projects_dir=claude_projects_dir or claude_projects_root()
+        repo_root, memory_dir, claude_projects_dir=projects_dir
     )
 
     # Step 4: the recall index. allow_download=False — init is offline by contract (the
@@ -315,7 +345,7 @@ def init_project(
                 f"registered a corpus under a system temp root ({memory_dir}) — this "
                 "machine-registry entry will outlive the directory and go dead; "
                 "hermetic/test runs should set HIPPO_PROJECTS_FILE, and "
-                "`python -m memory.registry --prune-dead` clears such rows later"
+                "`hippo registry --prune-dead` clears such rows later"
             )
 
     # Step 5 + 5b (git repo only): .gitignore patch + the self-ignoring private tier.

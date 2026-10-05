@@ -494,6 +494,48 @@ def launch_root() -> str:
     return git_root(launch) or launch
 
 
+def foreign_corpus_owner(memory_dir: str, repo_root: Optional[str]) -> Optional[str]:
+    """CLM-4: the root that owns ``memory_dir`` when it is NOT the session's own repo.
+
+    ``walk_up_for_memory_dir`` checks the toplevel's own corpus first, but a session
+    launched AT a git toplevel with no corpus keeps ascending past it. A repo nested
+    inside another repo (or under any directory with a corpus) then resolves the
+    ANCESTOR's corpus, and every write lands there. This names that case: the resolved
+    corpus sits outside the session's git toplevel. None when they agree, when the corpus
+    is inside the session's repo (a per-package corpus), when either root is unknown, or
+    when an explicit ``HIPPO_MEMORY_DIR`` / ``HIPPO_CORPUS_ROOT`` pinned the corpus.
+    Linked worktrees never trip it: SHP-7 moves ``repo_root`` to the main tree with the
+    corpus. Never raises.
+    """
+    try:
+        if os.environ.get("HIPPO_MEMORY_DIR") or os.environ.get("HIPPO_CORPUS_ROOT"):
+            return None
+        session = git_root(repo_root) if repo_root else None
+        if not session or not memory_dir:
+            return None
+        head, tail = os.path.split(os.path.normpath(memory_dir))
+        corpus_root, claude = os.path.split(head)
+        if tail != "memory" or claude != ".claude":
+            return None
+        session_real = os.path.realpath(session)
+        corpus_real = os.path.realpath(corpus_root)
+        if corpus_real == session_real or corpus_real.startswith(session_real + os.sep):
+            return None
+        return git_root(corpus_root) or corpus_root
+    except Exception:
+        return None
+
+
+def nested_repo_line(repo_root: str, owner: str) -> str:
+    """The one plain line doctor prints for ``foreign_corpus_owner`` (the SessionStart hook
+    prints the same words from bash)."""
+    return (
+        f"this repo ({git_root(repo_root) or repo_root}) is nested inside {owner}, so hippo "
+        f"resolves {owner}'s memory corpus here, not one of this repo's own. Run init here "
+        "to give this repo its own corpus."
+    )
+
+
 def resolve_dirs() -> Tuple[str, str]:
     """Return ``(memory_dir, repo_root)``.
 

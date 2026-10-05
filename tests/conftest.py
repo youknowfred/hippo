@@ -12,6 +12,26 @@ import subprocess
 
 import pytest
 
+# SRF-4: CI exports the v2 spelling ``HIPPO_DISABLE=dense``. The suite's per-test toggles
+# (``monkeypatch.delenv("HIPPO_DISABLE_DENSE")`` to exercise the dense path, ``setenv`` of
+# the other old ``HIPPO_DISABLE_*`` names) predate the list and keep working because every
+# old spelling still does. Translate the job-wide list into those old names ONCE, before any
+# test runs (subprocess hooks inherit it too), so a test that clears the old name gets the
+# feature back exactly as it did when CI exported ``HIPPO_DISABLE_DENSE=1``.
+_DISABLE_LEGACY = {
+    "dense": "HIPPO_DISABLE_DENSE",
+    "jit": "HIPPO_DISABLE_JIT",
+    "presence": "HIPPO_DISABLE_PRESENCE",
+    "floor-nag": "HIPPO_DISABLE_FLOOR_NAG",
+    "abstain-gate": "HIPPO_DISABLE_ABSTAIN_GATE",
+    "touch-fastpath": "HIPPO_DISABLE_TOUCH_FASTPATH",
+}
+_job_disable = os.environ.pop("HIPPO_DISABLE", "")
+for _token in _job_disable.replace(" ", ",").split(","):
+    _legacy = _DISABLE_LEGACY.get(_token.strip().lower().replace("_", "-"))
+    if _legacy:
+        os.environ.setdefault(_legacy, "1")
+
 
 def _run(args, cwd, env=None):
     return subprocess.run(
@@ -129,6 +149,10 @@ def _strip_ambient_plugin_env(monkeypatch):
     monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
     monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_ENTRYPOINT", raising=False)
+    # SRF-4: a saved plugin option (calm SessionStart, the LLM opt-ins, the API key) must
+    # not leak from a developer's live session into the suite.
+    for key in [k for k in os.environ if k.startswith("CLAUDE_PLUGIN_OPTION_")]:
+        monkeypatch.delenv(key, raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -225,6 +249,7 @@ def _isolate_llm_config(tmp_path, monkeypatch):
     monkeypatch.setenv("HIPPO_LLM_CONFIG", str(tmp_path / "absent-llm-config.json"))
     monkeypatch.delenv("HIPPO_CAPTURE_LLM", raising=False)
     monkeypatch.delenv("HIPPO_DREAM_CONTRADICTIONS", raising=False)
+    monkeypatch.delenv("HIPPO_DREAM_GENERATIVE", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("HIPPO_LLM_API_KEY", raising=False)
 

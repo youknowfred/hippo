@@ -183,7 +183,7 @@ def test_composes_linked_drift_fences_and_invalid_after(repo, memory_dir):
     assert brief["linked"] == ["m_keep", "m_other"]
     text = "\n".join(RB.render_brief(brief))
     assert "[since-watermark]" in text
-    assert "evidence drift (CLB-3): 2 fenced snippet(s) — 1 missing at HEAD" in text
+    assert "evidence drift: 2 fenced snippet(s) — 1 missing at HEAD" in text
     assert "invalid_after: 2026-01-01" in text and "pre-cut penalty" in text
     assert "linked (review-adjacent): m_keep, m_other" in text
 
@@ -332,7 +332,7 @@ def test_no_minutes_per_verdict_claim_ships():
 
     skill = os.path.join(
         os.path.dirname(os.path.dirname(inspect.getsourcefile(RB))), "skills",
-        "consolidate", "SKILL.md",
+        "tend", "SKILL.md",
     )
     with open(skill, "r", encoding="utf-8") as fh:
         skill_text = fh.read()
@@ -344,11 +344,11 @@ def test_no_minutes_per_verdict_claim_ships():
 def test_skill_step2_names_the_brief_cli():
     skill = os.path.join(
         os.path.dirname(os.path.dirname(inspect.getsourcefile(RB))), "skills",
-        "consolidate", "SKILL.md",
+        "tend", "SKILL.md",
     )
     with open(skill, "r", encoding="utf-8") as fh:
         text = fh.read()
-    assert "memory.reconsolidate_brief" in text and "action='brief'" in text
+    assert "hippo brief" in text and "action='show' with id='reverify:<name>'" in text
 
 
 # --------------------------------------------------------------------------- #

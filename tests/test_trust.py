@@ -272,7 +272,7 @@ def test_build_context_untrusted_emits_only_nudge(repo, memory_dir, tmp_path, mo
     _write_corpus(memory_dir)
     ctx = S.build_context(memory_dir, repo)
     assert "UNTRUSTED" in ctx
-    assert "/hippo:doctor" in ctx
+    assert "`hippo trust review`" in ctx  # TND-6: the review-then-grant next step
     assert str(len(_CORPUS)) in ctx  # the memory count is shown
 
 

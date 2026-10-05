@@ -198,7 +198,7 @@ def render_report(result: dict, *, ledger_path: Optional[str]) -> str:
         lines.append(
             f"   ⚡ contradiction discovery (DRM-C, LLM opt-in): {contra.get('attempts', 0)} "
             f"pair(s) checked → {contra.get('judged', 0)} judged, {contra.get('proposed', 0)} "
-            "proposed into the /hippo:resolve inbox (propose-only — never auto-applied)"
+            "proposed into the /hippo:tend inbox (propose-only — never auto-applied)"
             + (
                 f" · {contra.get('llm_failures', 0)} LLM failure(s) skipped"
                 if contra.get("llm_failures")
@@ -212,7 +212,7 @@ def render_report(result: dict, *, ledger_path: Optional[str]) -> str:
         )
     if stats.get("reward_boosted_edges") or stats.get("reward_outcome_memories"):
         lines.append(
-            f"   reward (DRM-5 reverse replay): {stats.get('reward_boosted_edges', 0)} upstream "
+            f"   reward (reverse replay): {stats.get('reward_boosted_edges', 0)} upstream "
             f"edge boost(s) from {stats.get('reward_outcome_memories', 0)} outcome-anchored "
             f"memory(ies) — replay priority + candidate ORDERING only (θ reads raw cofire)"
         )
@@ -270,7 +270,7 @@ def render_report(result: dict, *, ledger_path: Optional[str]) -> str:
         )
     else:
         lines.append(
-            "   auto-apply is OFF (report-only) — the DRM-2 flip is a dated owner decision "
+            "   auto-apply is OFF (report-only) — the flip is a dated owner decision "
             "after this calibration."
         )
     return "\n".join(lines)
@@ -398,7 +398,7 @@ def run_apply_pass(
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
         return 1, (
-            "🌙 dream: APPLY REFUSED — this corpus is untrusted (SEC-1). Review and trust "
+            "🌙 dream: APPLY REFUSED — this corpus is untrusted. Review and trust "
             "it first (/hippo:doctor → trust flow); the report-only pass (--dry-run) "
             "remains available."
         )
@@ -562,13 +562,13 @@ def run_apply_pass(
             lines.append(f"     • {c['source']} supersedes {c['target']} (cofire {c['cofire']:.2f})")
     if routed:
         lines.append(
-            f"  ↪ {len(routed)} contradicts candidate(s) routed to /hippo:resolve — never auto."
+            f"  ↪ {len(routed)} contradicts candidate(s) routed to /hippo:tend — never auto."
         )
     contra_stats = (result.get("stats") or {}).get("contradictions")
     if contra_stats:
         lines.append(
             f"  ⚡ contradiction discovery (DRM-C): {contra_stats.get('attempts', 0)} pair(s) "
-            f"checked → {contra_stats.get('proposed', 0)} proposed into the /hippo:resolve "
+            f"checked → {contra_stats.get('proposed', 0)} proposed into the /hippo:tend "
             "inbox (propose-only)"
             + (
                 f" · {contra_stats.get('llm_failures', 0)} LLM failure(s) skipped"

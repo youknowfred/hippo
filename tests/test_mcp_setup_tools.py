@@ -487,7 +487,7 @@ def test_doctor_tool_runs_engine_under_the_fresh_interpreter(corpus, tmp_path, m
     monkeypatch.setattr(MS, "_fresh_python", lambda: python_shim)
     text = _text(_call("doctor", {}))
     assert "MCP server starts" in text          # real engine lines came back
-    assert "trust_corpus" in text               # the MCP-surface suffix still applies
+    assert "trust tool" in text               # the MCP-surface suffix still applies
     assert "could not run under it" not in text  # no fallback caveat on the happy path
 
 
@@ -523,7 +523,7 @@ def test_init_tool_threads_the_fresh_interpreter(fresh_project, tmp_path, monkey
     seen = {}
     real = IP.init_project
 
-    def spy(claude_projects_dir=None, dense_python=None):
+    def spy(claude_projects_dir=None, dense_python=None, adopt_digest=None):
         seen["dense_python"] = dense_python
         return real(claude_projects_dir=str(tmp_path / "cp"), dense_python=None)
 
@@ -543,7 +543,7 @@ def test_doctor_tool_runs_the_engine_and_maps_fixes_to_tools(corpus, tmp_path, m
     assert "MCP server starts" in text          # a real engine line (check_mcp_launch)
     assert "not bootstrapped" in text or "CLAUDE_PLUGIN_DATA" in text  # bootstrap line
     # The one addition over the terminal engine: the fix→tool mapping for this surface.
-    assert "trust_corpus" in text and "bootstrap tool" in text and "init tool" in text
+    assert "trust tool" in text and "action='bootstrap'" in text and "action='init'" in text
     # CLM-8: typed /hippo:* commands run on the Desktop app too (PLATFORM.md §1), so
     # the mapping must not claim they are terminal-only.
     assert "exist only in the Claude Code terminal" not in text
@@ -585,7 +585,7 @@ def test_init_on_trusted_corpus_with_no_drift_still_says_recall_active(corpus, m
     assert T.mark_trusted(T.gate_repo_root(md, rr), memory_dir=md, origin="init")
     text = _text(_call("init", {}))
     assert "already trusted — recall active" in text
-    assert "WITHHOLDING" not in text
+    assert "withholding" not in text
 
 
 def test_init_on_trusted_corpus_reports_the_per_file_drift_it_is_withholding(
@@ -607,7 +607,7 @@ def test_init_on_trusted_corpus_reports_the_per_file_drift_it_is_withholding(
 
     text = _text(_call("init", {}))
     assert "recall active" not in text, "recall is NOT active for the withheld files"
-    assert "WITHHOLDING" in text
+    assert "Recall is withholding 2 memories" in text
     assert "deploy_runbook" in text and "new_note" in text
     assert "1 changed / 1 new" in text
     # and it still tells the truth about the marker itself

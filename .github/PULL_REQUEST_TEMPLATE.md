@@ -10,7 +10,7 @@ the test markers, and the commit conventions.
 
 ## Checklist
 
-- [ ] The full suite is green: `HIPPO_DISABLE_DENSE=1 python -m pytest` from the repo root
+- [ ] The full suite is green: `HIPPO_DISABLE=dense python -m pytest` from the repo root
 - [ ] Secret-scan is clean: `PYTHONPATH=plugin python -m memory.secrets --repo .`
 - [ ] New wall-clock/timing assertions are marked `slow`; model-download tests are marked `network`
 - [ ] Preserves the guiding invariants (markdown-in-git is the only authority; hooks exit 0 / never

@@ -1,5 +1,7 @@
 """The recall hook / CLI entry: ``main()`` (the UserPromptSubmit ``--stdin-json`` path and
-``python -m memory.recall``) plus its RCL-2/RCL-3 session-episode read.
+``python -m memory.recall``) plus its RCL-2/RCL-3 session-episode read. HOT-6 moved the
+per-prompt body into ``run_recall`` so the warm path (``recall_warm``, served by the
+session's own MCP server) runs the very same code.
 
 Split out of ``recall.py`` by RWY-1 as pure code motion so the orchestrator keeps runway
 (it was at its module-size pin). ``recall.main`` and ``recall._session_episodes`` stay
@@ -11,7 +13,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 
 def _session_episodes(memory_dir: Optional[str], session_id: Optional[str]) -> List[dict]:
@@ -58,30 +60,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     import json
     import sys
 
-    # Read at call time from the recall façade, so a monkeypatched memory.recall.<name>
-    # steers this entry exactly as it did before the split.
-    from .recall_budget import over_session_budget, prompt_budget, session_spent
-    from .recall_query import HUMAN_TURN, human_text, turn_class
-    from .recall import (
-        DEFAULT_K,
-        _RULES_SOURCE,
-        _cooldown_turns,
-        _rescue_min_tokens,
-        _rescue_previews,
-        archive,
-        clean_query,
-        format_results,
-        fused_floor_names,
-        recall,
-        resolve_dirs,
-        tokenize,
-        trust,
-    )
+    from .recall import DEFAULT_K
 
     parser = argparse.ArgumentParser(
         description="Recall top-K memories for a query.",
         epilog="A query that STARTS with '-' needs the standard '--' separator "
-        "(flags first): python -m memory.recall_hook --memory-dir X -- '-v shaped query'. "
+        "(flags first): hippo recall --memory-dir X -- '-v shaped query'. "
         "The hook path is unaffected — it passes the prompt via --stdin-json, never argv.",
     )
     parser.add_argument("query", nargs="*", help="the query text (see epilog for '-'-leading queries)")
@@ -92,13 +76,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--session-id",
         default=None,
-        help="harness-provided session id (COR-6) — keys telemetry directly instead of the "
+        help="harness-provided session id — keys telemetry directly instead of the "
         "shared file-based token, fixing concurrent-session attribution.",
     )
     parser.add_argument(
         "--stdin-json",
         action="store_true",
-        help="INT-5: read the UserPromptSubmit hook JSON payload ({prompt, session_id}) from "
+        help="read the UserPromptSubmit hook JSON payload ({prompt, session_id}) from "
         "stdin and emit the hookSpecificOutput JSON directly — so the whole recall hook is ONE "
         "Python spawn (no separate prompt-parse, session-id-parse, or jq/python emission launches).",
     )
@@ -106,7 +90,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--for-diff",
         default=None,
         metavar="RANGE",
-        help="EXT-1: instead of a query, join a git diff range (A..B / A...B / ref) against "
+        help="instead of a query, join a git diff range (A..B / A...B / ref) against "
         "the corpus's cited_paths and render the citing memories — the reviewer's recall. "
         "Read-only; no index, no model, no telemetry. Empty result exits 0 with no output.",
     )
@@ -147,14 +131,91 @@ def main(argv: Optional[List[str]] = None) -> int:
     else:
         raw_query = " ".join(args.query).strip()
 
+    def _emit(out: str) -> None:
+        print(hook_envelope(out) if args.stdin_json else out)
+
+    run_recall(
+        raw_query,
+        session_id=args.session_id,
+        k=args.k,
+        memory_dir=args.memory_dir,
+        index_dir=args.index_dir,
+        repo_root=args.repo_root,
+        hook=args.stdin_json,
+        wall_ms=_hook_wall_ms if args.stdin_json else None,
+        emit=_emit,
+    )
+    return 0
+
+
+def hook_envelope(out: str) -> str:
+    """The UserPromptSubmit hook output for ``out``: one ``hookSpecificOutput`` JSON line.
+    INT-5: Python emits it itself (no jq, no second launch). HOT-6's served path returns
+    the same line, since an ``mcp_tool`` hook's plain-text reply never reaches context."""
+    import json
+
+    return json.dumps(
+        {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": out}},
+        ensure_ascii=False,
+    )
+
+
+def run_recall(
+    raw_query: str,
+    *,
+    session_id: Optional[str] = None,
+    k: Optional[int] = None,
+    memory_dir: Optional[str] = None,
+    index_dir: Optional[str] = None,
+    repo_root: Optional[str] = None,
+    hook: bool = False,
+    wall_ms: Optional[Callable[[], Optional[float]]] = None,
+    emit: Optional[Callable[[str], None]] = None,
+    defer: Optional[Callable[[Callable[[], None]], None]] = None,
+    path: str = "spawn",
+) -> str:
+    """One prompt's recall, end to end: the machine-turn filter, query hygiene, the RCL-2 and
+    RCL-3 session reads, ranking, the floor and cooldown collapse, the trust banner, the
+    HOT-3 budgets and the telemetry rows. Returns the rendered block ("" when nothing is
+    injected).
+
+    HOT-6: the ONE body behind both recall-hook paths, so they cannot drift — ``main`` (the
+    spawned ``--stdin-json`` hook and the CLI) and the warm path in ``recall_warm`` (served
+    by the session's own MCP server). ``emit`` gets a non-empty block before any telemetry
+    runs (where ``main`` printed it), and ``wall_ms`` is read right after that. ``hook``
+    marks a UserPromptSubmit run (only those fold into the daily rollup), ``path`` names the
+    hook path that ran it, and ``defer``, when given, receives the telemetry work instead of
+    running it inline, so the served path can answer first.
+    """
+    # Read at call time from the recall façade, so a monkeypatched memory.recall.<name>
+    # steers this entry exactly as it did before the split.
+    from .recall_budget import over_session_budget, prompt_budget, session_spent
+    from .recall_query import HUMAN_TURN, human_text, turn_class
+    from .recall import (
+        DEFAULT_K,
+        _RULES_SOURCE,
+        _cooldown_turns,
+        _rescue_min_tokens,
+        _rescue_previews,
+        archive,
+        clean_query,
+        format_results,
+        fused_floor_names,
+        recall,
+        resolve_dirs,
+        tokenize,
+        trust,
+    )
+
+    if k is None:
+        k = DEFAULT_K
+
     # Resolve the memory dir + repo root once so we can both drive recall and read the
     # MEMORY.md floor for floor-dedup, plus stamp the episode-log watermark commit. A
     # resolution failure leaves whichever wasn't explicitly passed at None — recall resolves
     # its own dir, floor-dedup is skipped, and the episode log's head_commit is omitted.
     # RCL-3 needs memory_dir resolved BEFORE clean_query runs (the terse-follow-up rescue
     # below reads the episode buffer), so this now happens ahead of query hygiene.
-    memory_dir = args.memory_dir
-    repo_root = args.repo_root
     if memory_dir is None:
         # Only resolve_dirs() when memory_dir actually needs it -- never spend an EXTRA git
         # call just to backfill repo_root when --memory-dir was already explicit (keeps an
@@ -181,7 +242,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # RCL-2/RCL-3 SHARE this one bounded episode-buffer read: RCL-2's cooldown collapse and
     # RCL-3's terse-follow-up rescue both need this session's prior-turn episodes.
-    session_episodes = _session_episodes(memory_dir, args.session_id) if is_human else []
+    session_episodes = _session_episodes(memory_dir, session_id) if is_human else []
     # HOT-3: what this session's earlier prompts injected sets this prompt's budget.
     spent = session_spent(session_episodes)
 
@@ -210,7 +271,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         # injects redundant tokens. RCL-2: over-fetch by BOTH the floor size AND this
         # session's already-injected count so a COLLAPSED entry (see below) still costs no
         # top-k slot — collapse, never drop, keeps the line legible instead of vanishing.
-        floor = fused_floor_names(memory_dir, args.index_dir) if memory_dir else set()
+        floor = fused_floor_names(memory_dir, index_dir) if memory_dir else set()
         # Cooldown window: only the last _cooldown_turns() episodes feed the set — a memory
         # last surfaced further back may re-inject in full (strictly better than the
         # unbounded set, where it re-rendered as a collapsed line on EVERY later turn and
@@ -222,7 +283,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         for ep in window:
             already_injected.update(ep.get("recalled_names") or [])
         extra = len(floor) + len(already_injected)
-        pool_k = args.k + extra if extra else args.k
+        pool_k = k + extra if extra else k
         # MSR-4: the hook passes a drop-log collector (no watch set — capped capture
         # only), so the ledger event below can finally say WHY a candidate didn't
         # surface. Values are read off the walk recall() already ran (inv6).
@@ -231,7 +292,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             query,
             k=pool_k,
             memory_dir=memory_dir,
-            index_dir=args.index_dir,
+            index_dir=index_dir,
             repo_root=repo_root,
             drop_log=drop_log,
         )
@@ -256,7 +317,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         # Collapse (never drop): a floor/cooldown member is TAGGED and rendered as one
         # legible line instead of vanishing (inv3), but must still cost no top-k slot — the
-        # walk below only counts NON-collapsed entries against args.k, relying on the
+        # walk below only counts NON-collapsed entries against k, relying on the
         # pool_k over-fetch above to keep enough real candidates in the pool. Natural rank
         # order is preserved (a collapsed entry renders exactly where it would have ranked).
         kept = 0
@@ -265,7 +326,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         # session state recall() never sees. Collapsed entries still RENDER (one line,
         # no slot — inv3's collapse-not-drop), so their reason codes carry the
         # `_collapsed` suffix to say "declined full injection", not "vanished"; an
-        # entry past args.k after the collapse walk is the one true drop here.
+        # entry past k after the collapse walk is the one true drop here.
         _main_drop_counts: Dict[str, int] = {}
 
         def _record_main_drop(r: dict, reason: str) -> None:
@@ -287,7 +348,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 r["cooldown_collapsed"] = True
                 _record_main_drop(r, "cooldown_collapsed")
                 walked.append(r)
-            elif kept < args.k:
+            elif kept < k:
                 walked.append(r)
                 kept += 1
             else:
@@ -334,25 +395,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
 
     out = format_results(results, prompt_budget(spent), trust_note=trust_note)
-    if out:
-        if args.stdin_json:
-            # INT-5: emit the full hook output JSON ourselves — no jq, no second Python launch.
-            print(
-                json.dumps(
-                    {
-                        "hookSpecificOutput": {
-                            "hookEventName": "UserPromptSubmit",
-                            "additionalContext": out,
-                        }
-                    },
-                    ensure_ascii=False,
-                )
-            )
-        else:
-            print(out)
+    if out and emit is not None:
+        emit(out)
     # Telemetry: fire-and-forget AFTER results are computed/printed. Logs even a SKIP (empty
     # results -> backend "none"), so the ledger shows hygiene at work. HOT-1: the preview is
-    # the prompt's human text (no harness XML), and a machine turn logs no row at all. Logging lives ONLY in main() (the CLI/hook entry) — NOT in recall() — so
+    # the prompt's human text (no harness XML), and a machine turn logs no row at all. Logging lives ONLY here (the CLI and both hook paths) — NOT in recall() — so
     # eval_recall's direct recall() calls never pollute the ledger. Wrapped so it can never
     # raise into / delay the hook. The episode buffer (the future capture pass's replay log)
     # is logged in the SAME block, right after the recall ledger, on the SAME raw_query gate —
@@ -368,68 +415,77 @@ def main(argv: Optional[List[str]] = None) -> int:
     # no resolvable repo_root, has an inapplicable gate (gate_root is None) and is
     # untouched by this check -- same fail-open posture as recall()'s own gate.
     telemetry_ok = bool(raw_query and memory_dir and os.path.isdir(memory_dir) and trusted_or_gate_inapplicable)
-    wall_ms = _hook_wall_ms() if args.stdin_json else None
-    if is_human and telemetry_ok:
-        # The corpus-existence gate (SEC-3): a project that never opted in (no
-        # .claude/memory) must never gain a telemetry ledger with prompt previews —
-        # a habitual `git add .` would commit prompt fragments to shared history.
-        try:
-            from .telemetry import default_telemetry_dir, log_episode, log_recall_event
+    wall = wall_ms() if wall_ms is not None else None
 
-            td = default_telemetry_dir(memory_dir)
-            preview = human_text(raw_query)
-            log_recall_event(
-                results,
-                query=preview,
-                k=args.k,
-                latency_ms=latency_ms,
-                telemetry_dir=td,
-                session_id=args.session_id or None,
-                # MSR-4: the admission-walk autopsy — additive fields, absent when
-                # nothing was cut. near_miss rides ONLY the abstention arm (results
-                # empty -> backend "none"): that is the score-less arm this item
-                # exists to light up; a served recall's misses live in `drops`.
-                drops=drop_log.get("drops") or None,
-                near_miss=(drop_log.get("near_miss") or None) if not results else None,
-                dense_floor=drop_log.get("dense_floor") if not results else None,
-                # MSR-6: the ACTUAL emitted payload length, measured at the one
-                # emission point (`out` above) — an abstention emitted nothing and
-                # writes no key (absence-emits-nothing, never a fake 0).
-                injected_chars=len(out) if out else None,
-                # OBS-4: the shell-measured wall, hook path only.
-                wall_ms=wall_ms,
-            )
-            log_episode(
-                [r.get("name") for r in results if r.get("name")],
-                query=preview,
-                repo_root=repo_root,
-                telemetry_dir=td,
-                session_id=args.session_id or None,
-                injected_chars=len(out) if out else None,
-            )
-        except Exception:
-            pass
-    # OBS-1: every UserPromptSubmit run, machine turns included, folds into today's
-    # rotation-proof rollup under the same corpus-existence and trust gates. The hook path
-    # only: a CLI recall is a person browsing, not a prompt.
-    if args.stdin_json and telemetry_ok:
-        try:
-            from .telemetry import default_telemetry_dir
-            from .telemetry_rollup import record_prompt
+    def _log() -> None:
+        if is_human and telemetry_ok:
+            # The corpus-existence gate (SEC-3): a project that never opted in (no
+            # .claude/memory) must never gain a telemetry ledger with prompt previews —
+            # a habitual `git add .` would commit prompt fragments to shared history.
+            try:
+                from .telemetry import default_telemetry_dir, log_episode, log_recall_event
 
-            record_prompt(
-                default_telemetry_dir(memory_dir),
-                trigger=trigger,
-                session_id=args.session_id or None,
-                ran_recall=bool(query),
-                backend=(results[0].get("backend") if results else None) or "none",
-                injected_chars=len(out) if out else None,
-                latency_ms=latency_ms if is_human else None,
-                wall_ms=wall_ms,
-            )
-        except Exception:
-            pass
-    return 0
+                td = default_telemetry_dir(memory_dir)
+                preview = human_text(raw_query)
+                log_recall_event(
+                    results,
+                    query=preview,
+                    k=k,
+                    latency_ms=latency_ms,
+                    telemetry_dir=td,
+                    session_id=session_id or None,
+                    # MSR-4: the admission-walk autopsy — additive fields, absent when
+                    # nothing was cut. near_miss rides ONLY the abstention arm (results
+                    # empty -> backend "none"): that is the score-less arm this item
+                    # exists to light up; a served recall's misses live in `drops`.
+                    drops=drop_log.get("drops") or None,
+                    near_miss=(drop_log.get("near_miss") or None) if not results else None,
+                    dense_floor=drop_log.get("dense_floor") if not results else None,
+                    # MSR-6: the ACTUAL emitted payload length, measured at the one
+                    # emission point (`out` above) — an abstention emitted nothing and
+                    # writes no key (absence-emits-nothing, never a fake 0).
+                    injected_chars=len(out) if out else None,
+                    # OBS-4: the shell-measured wall, spawned hook path only (the served
+                    # path's wall has its own rollup histogram, so this line stays comparable).
+                    wall_ms=wall if path == "spawn" else None,
+                )
+                log_episode(
+                    [r.get("name") for r in results if r.get("name")],
+                    query=preview,
+                    repo_root=repo_root,
+                    telemetry_dir=td,
+                    session_id=session_id or None,
+                    injected_chars=len(out) if out else None,
+                )
+            except Exception:
+                pass
+        # OBS-1: every UserPromptSubmit run, machine turns included, folds into today's
+        # rotation-proof rollup under the same corpus-existence and trust gates. The hook path
+        # only: a CLI recall is a person browsing, not a prompt.
+        if hook and telemetry_ok:
+            try:
+                from .telemetry import default_telemetry_dir
+                from .telemetry_rollup import record_prompt
+
+                record_prompt(
+                    default_telemetry_dir(memory_dir),
+                    trigger=trigger,
+                    session_id=session_id or None,
+                    ran_recall=bool(query),
+                    backend=(results[0].get("backend") if results else None) or "none",
+                    injected_chars=len(out) if out else None,
+                    latency_ms=latency_ms if is_human else None,
+                    wall_ms=wall,
+                    path=path,
+                )
+            except Exception:
+                pass
+
+    if defer is not None:
+        defer(_log)
+    else:
+        _log()
+    return out
 
 if __name__ == "__main__":
     __import__("gc").disable()  # PRF-6: one-shot hook/CLI process; in-process callers keep GC

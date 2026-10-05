@@ -164,7 +164,7 @@ def test_corpus_check_ok_with_floor(repo, memory_dir):
 def test_corpus_check_fails_when_absent(repo, tmp_path):
     missing = str(tmp_path / "nope" / ".claude" / "memory")
     r = D.check_corpus_exists(_ctx(missing, repo))
-    assert r["status"] == "fail" and "/hippo:init" in r["message"]
+    assert r["status"] == "fail" and "/hippo:setup" in r["message"]
 
 
 # --------------------------------------------------------------------------- #
@@ -289,7 +289,7 @@ def test_abstention_cold_start_warns_on_bm25_only(repo, memory_dir, tmp_path, mo
     B.build_index(memory_dir, idx)
     r = D.check_abstention_cold_start(_ctx(memory_dir, repo))
     assert r["status"] == "warn"
-    assert "/hippo:bootstrap" in r["message"]
+    assert "/hippo:setup" in r["message"]
     assert "will not make recall abstain MORE often" in r["message"]
     assert "enable the abstention floor" not in r["message"]
 
@@ -530,9 +530,9 @@ def test_trust_check_warns_on_untrusted_corpus(repo, memory_dir, monkeypatch):
     git_commit(repo, "seed", 1_700_000_000)
     r = D.check_trust(_ctx(memory_dir, repo))
     assert r["status"] == "warn"
-    assert "UNTRUSTED" in r["message"] and "mark_trusted" in r["message"]
-    # The command names THIS repo's real git root (the gate key).
-    assert os.path.realpath(repo) in r["message"]
+    assert "UNTRUSTED" in r["message"] and "`hippo trust review`" in r["message"]
+    # TND-6: one plain verb, never a python -c line naming internals.
+    assert "python -c" not in r["message"] and "mark_trusted" not in r["message"]
 
 
 def test_trust_check_ok_when_trusted(repo, memory_dir, monkeypatch):
@@ -636,7 +636,7 @@ def test_edge_rot_warns_and_names_the_audit_command(repo, memory_dir):
     r = D.check_edge_rot(_ctx(memory_dir, repo))
     assert r["status"] == "warn"
     assert "archived=1" in r["message"] and "dangling=1" in r["message"]
-    assert "python -m memory.links --audit" in r["message"]  # runnable remedy, named
+    assert "hippo links --audit" in r["message"]  # runnable remedy, named
     assert "\n" not in r["message"]  # ONE line — the doctor render/line-count determinism pins
 
 
@@ -1096,11 +1096,11 @@ def test_trust_scorecard_all_zero_on_empty_state(memory_dir, repo):
     assert r["status"] == "ok"
     m = r["message"]
     assert m.startswith("trust scorecard: ")
-    assert "0 contested-unresolved (→ /hippo:resolve)" in m
-    assert "0 rule↔memory conflict(s) (→ /hippo:consolidate)" in m
+    assert "0 contested-unresolved (→ /hippo:tend)" in m
+    assert "0 rule↔memory conflict(s) (→ /hippo:tend)" in m
     assert "0 rules-plane rot (edit the named file)" in m
-    assert "0 blind spot(s) (→ /hippo:consolidate)" in m
-    assert "0 orphan(s) never recalled (→ /hippo:audit)" in m
+    assert "0 blind spot(s) (→ /hippo:tend)" in m
+    assert "0 orphan(s) never recalled (→ /hippo:doctor's content audit)" in m
     assert "0 pinned / 0 muted" in m
     assert "0 draft" in m
     assert "no watermark baseline yet" in m
@@ -1137,7 +1137,7 @@ def test_trust_scorecard_aggregates_real_counts(memory_dir, repo, tmp_path, monk
     r = D.check_trust_scorecard(D.DoctorContext(memory_dir, repo))
     m = r["message"]
     assert r["status"] == "warn"  # a live contradiction is actionable
-    assert "1 contested-unresolved (→ /hippo:resolve)" in m
+    assert "1 contested-unresolved (→ /hippo:tend)" in m
     assert "1 pinned / 0 muted" in m
     assert "1 draft" in m
     assert "corpus +1/−0 since last session" in m
@@ -1382,7 +1382,7 @@ def test_floor_calibration_no_sweep_names_the_command(repo, memory_dir, monkeypa
     _seed(memory_dir)
     r = D.check_floor_calibration(_ctx(memory_dir, repo))
     assert r["status"] == "ok"
-    assert "python -m memory.eval_recall --floor-sweep" in r["message"]
+    assert "hippo eval --floor-sweep" in r["message"]
     assert "\n" not in r["message"]  # ONE line — the doctor render/line-count determinism pins
 
 

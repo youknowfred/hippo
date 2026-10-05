@@ -116,15 +116,20 @@ def check_claude_code_version(ctx: DoctorContext) -> Dict[str, str]:
 def check_attention(ctx: DoctorContext) -> Dict[str, str]:
     """CLM-2: which SessionStart attention mode applies here, and what is muted."""
     try:
-        from .attention import attention_mode, muted_signals
+        from .attention import attention_source, muted_signals
 
-        mode = attention_mode()
-        muted, refused = muted_signals()
+        mode, source = attention_source(memory_dir=ctx.memory_dir)
+        muted, refused = muted_signals(memory_dir=ctx.memory_dir)
         msg = f"attention: {mode}"
-        msg += (
-            " (the short digest)" if mode == "calm"
-            else " (set HIPPO_ATTENTION=calm or the plugin's calm_session_start option for the short digest)"
-        )
+        if mode == "calm":
+            msg += f" (the short digest; set by {source})"
+        elif source == "default":
+            msg += (
+                " (for the short digest: the plugin's calm_session_start option, "
+                '"attention": "calm" in .claude/memory/hippo.json, or HIPPO_ATTENTION=calm)'
+            )
+        else:
+            msg += f" (set by {source})"
         if muted:
             msg += f"; muted: {', '.join(sorted(muted))}"
         if refused:
@@ -132,3 +137,42 @@ def check_attention(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn" if refused else "ok", "message": msg + "."}
     except Exception as exc:
         return {"status": "warn", "message": f"attention check failed: {exc}."}
+
+
+_WIRE = "mcp__plugin_hippo_hippo__"
+
+
+def check_mcp_allowlist(ctx) -> Dict[str, str]:
+    """SRF-2: permission rules that name a hippo tool deprecated in v1.42. Read-only.
+
+    The old names keep working through v1.43 and are removed in v2.0; a rule naming only
+    the old id would then stop matching, so each one is named with the id to add.
+    """
+    try:
+        from .mcp_schemas_v2 import DEPRECATED
+        from .native_memory import _settings_layers
+
+        found = []
+        for label, settings in _settings_layers(ctx.repo_root):
+            perms = settings.get("permissions") if isinstance(settings, dict) else None
+            rules = []
+            if isinstance(perms, dict):
+                for key in ("allow", "ask", "deny"):
+                    if isinstance(perms.get(key), list):
+                        rules += [r for r in perms[key] if isinstance(r, str)]
+            for rule in rules:
+                if rule.startswith(_WIRE) and rule[len(_WIRE):] in DEPRECATED:
+                    old = rule[len(_WIRE):]
+                    found.append(f"{rule} → {_WIRE}{DEPRECATED[old][0]} ({label})")
+        if not found:
+            return {"status": "ok", "message": "no permission rule names a deprecated hippo tool."}
+        return {
+            "status": "warn",
+            "message": (
+                f"{len(found)} permission rule(s) name hippo tools that are removed in v2.0 "
+                f"(they work until then): {'; '.join(sorted(set(found)))}. Add the new id beside "
+                "each; nothing here edits your settings."
+            ),
+        }
+    except Exception as exc:
+        return {"status": "warn", "message": f"permission-rule check failed: {exc}."}

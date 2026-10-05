@@ -68,17 +68,17 @@ def check_abstention_cold_start(ctx: DoctorContext) -> Dict[str, str]:
             return {
                 "status": "ok",
                 "message": "dense model warmed — the semantic ranking signal is live "
-                "(this is a ranking property, not an abstention one; ABS-2).",
+                "(this is a ranking property, not an abstention one).",
             }
         return {
             "status": "warn",
             "message": "recall is serving BM25-only (dense model not warmed): an off-topic "
             "prompt that shares even one keyword with a memory surfaces a weak match, and "
             "there is no semantic signal to rank it below a real hit — no lexical threshold "
-            "separates a coincidental overlap from a genuine one (RET-11). Run "
-            "/hippo:bootstrap to warm the dense model and get that ranking signal. Note it "
+            "separates a coincidental overlap from a genuine one. Run "
+            "/hippo:setup to warm the dense model and get that ranking signal. Note it "
             "will not make recall abstain MORE often: abstention needs every lane empty, and "
-            "the dense lanes only add candidates (ABS-2).",
+            "the dense lanes only add candidates.",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"abstention cold-start check failed: {exc}."}
@@ -126,7 +126,7 @@ def check_abstention_floor_sanity(ctx: DoctorContext) -> Dict[str, str]:
                 "message": "abstention floor: no corpus-local off-topic fixture "
                 "(.audit-fixtures/recall_abstention_set.yaml) — nothing generates this file; "
                 "author it by hand as a list of `- query: \"...\"` rows this corpus should "
-                "have NO answer for. (SIG-6's abstention_fixtures flow drafts the opposite "
+                "have NO answer for. (the abstention_fixtures flow drafts the opposite "
                 "polarity — queries that DID abstain — into recall_hard_set.yaml.)",
             }
         index_dir = default_index_dir(ctx.memory_dir)
@@ -201,7 +201,7 @@ def check_floor_calibration(ctx: DoctorContext) -> Dict[str, str]:
             return {
                 "status": "ok",
                 "message": "floor calibration: no sweep recorded — "
-                "`python -m memory.eval_recall --floor-sweep` writes one (RET-9).",
+                "`hippo eval --floor-sweep` writes one.",
             }
         # Staleness leg: only when an index is actually loadable — the sweep report is
         # self-contained (model + recommendation), so a deleted/rebuildable index cache
@@ -214,7 +214,7 @@ def check_floor_calibration(ctx: DoctorContext) -> Dict[str, str]:
                     return {
                         "status": "ok",
                         "message": "floor calibration: recorded sweep is STALE (corpus changed "
-                        "since) — re-run `python -m memory.eval_recall --floor-sweep`.",
+                        "since) — re-run `hippo eval --floor-sweep`.",
                     }
         configured = _dense_floor(sweep.get("model"))
         recommended = sweep.get("recommended")
@@ -235,7 +235,7 @@ def check_floor_calibration(ctx: DoctorContext) -> Dict[str, str]:
             remedy = (
                 f"adopting it would cut {sweep.get('cut_on')} real quer(ies) and still leak "
                 f"{sweep.get('leaked_off')} of {sweep.get('off_n')} probes THROUGH THE DENSE "
-                "LANE, which BM25 admits past anyway (ABS-2) — evidence, not a fix"
+                "LANE, which BM25 admits past anyway — evidence, not a fix"
             )
         else:
             remedy = (

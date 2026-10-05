@@ -80,8 +80,8 @@ def staleness_producer(
             f"♻ {len(names)} memor{'y' if len(names) == 1 else 'ies'} retired OUTSIDE the "
             f"drift signal — invalid_after past the {int(_INVALIDATION_RECENT_DAYS)}-day "
             f"horizon with no cited-code drift (supersede/merge retirements): {shown}{more} "
-            "— recall already filters them; now archivable via the /hippo:audit archive "
-            "flow (`python -m memory.archive`), reinstatable per item via reconsolidate "
+            "— recall already filters them; now archivable via the /hippo:doctor archive "
+            "flow (`hippo archive`), reinstatable per item via reconsolidate "
             "outcome=graduate|fix."
         )
     # VOL-1: partitioned AFTER nondrift_old (suppressed items DO have drift — not retired);
@@ -165,7 +165,7 @@ def staleness_producer(
         more = f" (+{len(old) - 4} more)" if len(old) > 4 else ""
         lines.append(
             f"  ({len(old)} demoted past the {int(_INVALIDATION_RECENT_DAYS)}-day "
-            f"old-invalidation horizon — consider the /hippo:audit archive flow: {shown}{more})"
+            f"old-invalidation horizon — consider the archive flow of /hippo:doctor's content audit: {shown}{more})"
         )
     if retired_line:
         lines.append(retired_line)  # TMB-2: the non-drift retirements (never in `stale`)
@@ -214,15 +214,26 @@ def pending_capture_producer(
     except Exception:
         trivial = 0
     label = f" ({trivial} trivial)" if trivial else ""
-    # INV-1: the deferral must name RUNNABLE forms — the old text said `hippo capture
-    # --snooze`, a bin/hippo subcommand that does not exist (the INT-18 class; the
-    # surface-registry lint now fails on any such reference). The capture tool serves
-    # both surfaces; the terminal CLI spelling is `-m memory.capture --snooze`.
+    # TND-5: the expired/ shelf rides this line as a count — seeds there left the queue
+    # but were never deleted, so the human can still bring them back.
+    expired = ""
+    try:
+        from .capture import expired_count
+
+        n_exp = expired_count(pd)
+        if n_exp:
+            expired = (
+                f" ({n_exp} older capture(s) expired and are kept: "
+                "`hippo capture --restore --all` brings them back)"
+            )
+    except Exception:
+        expired = ""
+    # INV-1: the deferral must name RUNNABLE forms. SRF-1 made `hippo capture` the door
+    # (bin/hippo hands the verb to memory.capture), so the terminal spelling is that verb.
     return (
         f"📥 {n} pending capture(s){label} from a prior session await review — run "
-        "/hippo:consolidate to draft them into memory (nothing is saved until you approve "
-        "each one, per item), or defer this nudge with the capture tool (action='snooze'; "
-        "in a terminal: `--snooze` on `python -m memory.capture`)."
+        "/hippo:tend to draft them into memory (nothing is saved until you approve "
+        f"each one, per item), or defer this nudge (`hippo capture --snooze`){expired}."
     )
 
 
@@ -264,7 +275,7 @@ def blind_spot_producer(
             return None
         lines = [
             "🔎 Recall blind spots — recurring questions your corpus can't answer (asked, but "
-            "nothing cleared the floor). Capture one via /hippo:consolidate:"
+            "nothing cleared the floor). Capture one via /hippo:tend:"
         ]
         for c in backlog[:_MAX_BLIND_SPOT_LINES]:
             q = c.get("sample_query") or ", ".join(c.get("terms") or [])
@@ -304,7 +315,7 @@ def rules_conflict_producer(
             return None
         lines = [
             "⚖ Rule↔memory conflicts — governance files cite memories the corpus disputes. "
-            "Decide per item via /hippo:consolidate (nothing auto-resolves):"
+            "Decide per item via /hippo:tend (nothing auto-resolves):"
         ]
         entries: List[str] = []
         for c in conflicts:
@@ -415,13 +426,13 @@ def contradiction_inbox_producer(
         fresh = [item for item in inbox if tuple(item["pair"]) not in radar_pairs]
         lines = [
             f"⚖ Contradiction inbox — {len(inbox)} unresolved contradiction pair(s) in the "
-            "corpus. Decide per item via /hippo:resolve (nothing auto-picks a winner):"
+            "corpus. Decide per item via /hippo:tend (nothing auto-picks a winner):"
         ]
         for item in fresh[:_MAX_CONTRADICTION_LINES]:
             lines.append(f"  • {item['pair'][0]} ⇄ {item['pair'][1]}")
         overflow = len(fresh) - _MAX_CONTRADICTION_LINES
         if overflow > 0:
-            lines.append(f"  … and {overflow} more — run /hippo:resolve for the full list.")
+            lines.append(f"  … and {overflow} more — run /hippo:tend for the full list.")
         skipped = len(inbox) - len(fresh)
         if skipped > 0:
             lines.append(

@@ -84,17 +84,18 @@ _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
 def triage_enabled() -> bool:
-    """The CAP-LLM opt-in — DEFAULT OFF. Env ``HIPPO_CAPTURE_LLM`` > config file > off.
+    """The CAP-LLM opt-in — DEFAULT OFF. Env ``HIPPO_CAPTURE_LLM`` > the ``capture_llm``
+    plugin option > the legacy config file > off.
 
     A SET env var decides entirely (the closed ``llm_client.TRUTHY`` set enables, any
-    other value is an explicit off — so ``HIPPO_CAPTURE_LLM=0`` overrides a config file
-    that says on); an UNSET one defers to ``capture_triage`` in ``hippo-llm.json``.
+    other value is an explicit off — so ``HIPPO_CAPTURE_LLM=0`` overrides everything
+    below it); a saved plugin option decides next (SRF-4 — the SessionEnd/SubagentStop
+    hooks receive it); an unset one defers to ``capture_triage`` in ``hippo-llm.json``.
     Junk stays off, the flag-gating convention for every capability that ships dark.
     """
-    env = os.environ.get("HIPPO_CAPTURE_LLM")
-    if env is not None and env.strip():
-        return env.strip() in llm_client.TRUTHY
-    return llm_client.as_bool(llm_client.file_setting("capture_triage"))
+    from .settings import opt_in
+
+    return opt_in("HIPPO_CAPTURE_LLM", "capture_llm", llm_client.file_setting("capture_triage"))
 
 
 def llm_timeout_s() -> float:

@@ -9,22 +9,26 @@ touched memory represents, whether the shipped lints flag it, and how the change
 shift recall. `memory review` builds that packet with zero LLM and zero network — every
 classification derives from git name-status, frontmatter edges, and `archive/` moves.
 
+## Surface routing — decide first, then act silently
+
+- **On Claude Desktop** (your context says you are in the Claude desktop app, `CLAUDE_CODE_ENTRYPOINT` is `claude-desktop`, or the preflight below stops on an unset `CLAUDE_PLUGIN_DATA`): the `review` MCP tool builds the same packet — pass range for a branch or PR (default: working tree vs HEAD), ci=true for the lints-only gate. Present the packet as is. Call the tool with no preamble.
+- **In a terminal Claude Code session**: run the bash flow below, guard first.
+
 ## Preflight (shared across all hippo skills)
 
 ```bash
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
-[ "${CLAUDE_CODE_ENTRYPOINT:-}" != "claude-desktop" ] || { echo "✘ /hippo:review has no Desktop-safe MCP-tool equivalent yet. Run it from a terminal Claude Code session in this repo (claude, then /hippo:review)."; exit 1; }
-[ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:review skill, not from a copy of its SKILL.md. If the loaded skill stops here too, this Claude Code does not fill them in: update it and run /hippo:review again."; exit 1; }
-. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:review skill, not from a copy of its SKILL.md. If the loaded skill stops here too, take the MCP-tool route in 'Surface routing' above."; exit 1; }
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver
 hippo_resolve_py
-hippo_note_usage skill review  # OBS-2: count this skill's use (one spool line, no Python)
+hippo_note_usage skill review  # count this skill's use (one spool line, no Python)
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 MEMORY_DIR="$REPO_ROOT/.claude/memory"
 ```
 
 Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
-opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
-and resolver lines, in the same call.
+opens by pinning what it needs; an inline `hippo …` command runs
+as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 ## What this does, in order
 
@@ -39,7 +43,7 @@ and resolver lines, in the same call.
    export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
    . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
-   "$PY" -m memory.review --memory-dir "$MEMORY_DIR" --repo-root "$REPO_ROOT"
+   hippo review --memory-dir "$MEMORY_DIR" --repo-root "$REPO_ROOT"
    ```
 
    or, for a committed range:
@@ -48,7 +52,7 @@ and resolver lines, in the same call.
    export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
    . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
-   "$PY" -m memory.review origin/main...HEAD --memory-dir "$MEMORY_DIR" --repo-root "$REPO_ROOT"
+   hippo review origin/main...HEAD --memory-dir "$MEMORY_DIR" --repo-root "$REPO_ROOT"
    ```
 
    Present the packet to the user as-is (it is pasteable markdown — a PR comment a
@@ -72,21 +76,21 @@ and resolver lines, in the same call.
 
 ## CI wiring (the one canonical memory-diff gate)
 
-`--ci` is the SINGLE sanctioned CI scan for memory-file diffs — SEC-8's memory-diff
-gate half, and the SEN-2 threat-lint CI leg rides the same vehicle:
+`--ci` is the SINGLE sanctioned CI scan for memory-file diffs's memory-diff
+gate half, and the threat-lint CI leg rides the same vehicle:
 
 ```bash
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
 . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
-"$PY" -m memory.review --ci origin/main...HEAD --memory-dir "$MEMORY_DIR" --repo-root "$REPO_ROOT"
+hippo review --ci origin/main...HEAD --memory-dir "$MEMORY_DIR" --repo-root "$REPO_ROOT"
 ```
 
 Exit 1 iff a gate finding (secret / threat Tier-A) exists on a touched memory file;
 exit 0 otherwise — including when the range touches no memory files at all. The
 repo's `memory-review` job in `.github/workflows/ci.yml` runs exactly this against
 each PR; do not add a second memory-scanning CI surface. (The `secret-scan` job in
-the same file is SEC-8's other half — release hygiene over the whole shipped tree,
+the same file is the other half — release hygiene over the whole shipped tree,
 a different scope.)
 
 ## Hard rules
@@ -95,10 +99,10 @@ a different scope.)
   accept, merge, or post anything. The human merges everywhere.
 - **Zero LLM, zero network.** Op classification is mechanical; a packet that needed
   a model to explain itself would not be reviewable evidence.
-- **The preview is local-only.** Never in CI (`--ci` omits it; `HIPPO_DISABLE_DENSE=1`
+- **The preview is local-only.** Never in CI (`--ci` omits it; `HIPPO_DISABLE=dense`
   and CI environments skip it with an explicit line) — a fresh clone has no episode
   buffer, and an honest "no local episodes to replay" beats a fabricated preview.
 - **Advisory lints never gate.** Cited paths ARE repo coupling (portability would
   flag nearly every project memory), and an unresolved contradiction is a human
-  judgment for /hippo:resolve — failing CI on either would automate a decision
+  judgment for /hippo:tend — failing CI on either would automate a decision
   hippo deliberately leaves to people.

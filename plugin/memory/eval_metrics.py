@@ -580,7 +580,7 @@ def t11_category_lines(report: dict, k: int) -> List[str]:
         lines.append(
             f"  category {'forgetting':11s} absence@{k}={f['absence']:.4f} "
             f"held={f['held']}/{f['n']} skipped={f['skipped']} "
-            "(TMB-3, report-only; absence POLARITY — an archived stem surfacing is the failure)"
+            "(report-only; absence POLARITY — an archived stem surfacing is the failure)"
         )
     u = report.get("update_knowledge")
     if u:
@@ -589,7 +589,7 @@ def t11_category_lines(report: dict, k: int) -> List[str]:
             f"(unstamped/recent — successor must beat the corpse), presence "
             f"{u['presence']['pass']}/{u['presence']['n']} (old-stamped — corpse is "
             f"display-filtered), {u['outrank_failures']} outrank failure(s) "
-            "(TMB-4, report-only; GATE_UPDATE_* stays a dated owner decision)"
+            "(report-only; GATE_UPDATE_* stays a dated owner decision)"
         )
     return lines
 

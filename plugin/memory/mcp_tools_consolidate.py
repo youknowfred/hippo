@@ -31,7 +31,9 @@ def _tool_capture(args: Dict[str, Any]) -> str:
         corrupt_pending,
         default_pending_dir,
         discard_pending,
+        expired_count,
         read_pending,
+        restore_pending,
         snooze_queue,
     )
     from .provenance import resolve_dirs
@@ -40,7 +42,7 @@ def _tool_capture(args: Dict[str, Any]) -> str:
     action = str(args.get("action") or "list").strip().lower()
     if action == "list":
         seeds = read_pending(memory_dir=memory_dir)
-        out = [_format_listing(seeds)]
+        out = [_format_listing(seeds, expired=expired_count(memory_dir=memory_dir))]
         broken = corrupt_pending(memory_dir=memory_dir)
         if broken:
             # RCH-9: the nudge's bare file count includes these — the listing must
@@ -58,13 +60,13 @@ def _tool_capture(args: Dict[str, Any]) -> str:
             )
             if any(s.get("hunks_secret_flagged") for s in seeds):
                 out.append(
-                    "on this MCP surface, scan_with_remediation = the secrets_scan tool — "
+                    "on this MCP surface, scan_with_remediation = the doctor tool's action='secrets_scan' — "
                     "lint the exact hunk lines there before fencing ANY into a body."
                 )
             out.append(
                 "Drain per item: draft the fact → new_memory (check:true) → secrets_scan "
                 "any verbatim hunk → new_memory (the real write) → capture "
-                "(action='discard', path=<seed>). Nothing is approved in bulk."
+                "(action='discard', path=<seed>, drafted=true). Nothing is approved in bulk."
             )
         return "\n".join(out)
     if action == "discard":
@@ -83,8 +85,23 @@ def _tool_capture(args: Dict[str, Any]) -> str:
                 "capture discard REFUSED — the path must name a seed file inside the "
                 f"pending queue ({pd}); this tool never removes anything else."
             )
-        ok = discard_pending(real)
+        ok = discard_pending(real, drafted=bool(args.get("drafted")), memory_dir=memory_dir)
         return f"discarded: {real}" if ok else f"nothing to discard at {real}"
+    if action == "restore":
+        restore_all = bool(args.get("all"))
+        target = str(args.get("path") or "").strip()
+        if not restore_all and not target:
+            return (
+                "capture restore: pass path=<expired seed filename or session id>, or all=true."
+            )
+        # Restore only ever moves files between the queue's own expired/ folder and the
+        # queue: the target is matched against that folder's listing, never opened as a path.
+        back = restore_pending(target or None, restore_all=restore_all, memory_dir=memory_dir)
+        if not back:
+            return "nothing restored (no matching seed in the queue's expired/ folder)."
+        return f"restored {len(back)} seed(s) into the queue: " + ", ".join(
+            os.path.basename(p) for p in back
+        )
     if action == "snooze":
         ok = snooze_queue(memory_dir=memory_dir)
         return (
@@ -117,7 +134,10 @@ def _tool_capture(args: Dict[str, Any]) -> str:
             if ok
             else "nothing recorded (empty text or unwritable ledger)"
         )
-    return "capture: pass action='list' (default), 'discard' (path=…), 'snooze', or 'add_decision' (text=…)."
+    return (
+        "capture: pass action='list' (default), 'discard' (path=…), 'restore' (path=… or "
+        "all=true), 'snooze', or 'add_decision' (text=…)."
+    )
 
 
 def _tool_secrets_scan(args: Dict[str, Any]) -> str:
@@ -166,7 +186,7 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
-            "reconsolidate: withheld — this project's memory corpus is untrusted (SEC-1: "
+            "reconsolidate: withheld — this project's memory corpus is untrusted ("
             "the worklist exposes memory names and a verdict writes corpus files, gated "
             "just as recall and new_memory are). " + _UNTRUSTED_REMEDY
         )
@@ -211,7 +231,7 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
         out.append(
             "Evidence per item: action='brief' (name=…) renders the cited-path diff from "
             "the entry's own baseline — diffstat + hunk headers, secret-linted bodies when "
-            "clean (EVD-1; no more hand-diffing)."
+            "clean (; no more hand-diffing)."
         )
         return "\n".join(out)
     if action == "brief":
@@ -333,7 +353,7 @@ def _tool_rederive(args: Dict[str, Any]) -> str:
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
-            "rederive: withheld — this project's memory corpus is untrusted (SEC-1: the "
+            "rederive: withheld — this project's memory corpus is untrusted (the "
             "worklist exposes memory names and 'one' writes corpus files, gated just as "
             "recall and reconsolidate are). " + _UNTRUSTED_REMEDY
         )
@@ -451,7 +471,7 @@ def _tool_heal_baselines(args: Dict[str, Any]) -> str:
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
-            "heal_baselines: withheld — this project's memory corpus is untrusted (SEC-1: "
+            "heal_baselines: withheld — this project's memory corpus is untrusted ("
             "this writes corpus files). " + _UNTRUSTED_REMEDY
         )
     healed, failed = heal_empty_baselines(memory_dir, repo_root)
@@ -501,11 +521,11 @@ def _tool_build_index(args: Dict[str, Any]) -> str:
     manifest = refresh_index(memory_dir)
     if manifest is None:
         return (
-            "build_index: no index was produced — is there a corpus here? Run the init "
-            "tool first."
+            "build_index: no index was produced — is there a corpus here? Run the setup "
+            "tool (action='init') first."
         )
     dense = (
-        "hybrid" if manifest.get("dense_ready") else "BM25-only (run the bootstrap tool for dense)"
+        "hybrid" if manifest.get("dense_ready") else "BM25-only (run the setup tool's action='bootstrap' for dense)"
     )
     return (
         f"index refreshed — {manifest.get('count')} memories, {dense}\n"
@@ -530,7 +550,7 @@ def _tool_co_recall_proposals(args: Dict[str, Any]) -> str:
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
             "co_recall_proposals: withheld — this project's memory corpus is untrusted "
-            "(SEC-1: proposals expose memory names, gated just as recall is). "
+            "(proposals expose memory names, gated just as recall is). "
             + _UNTRUSTED_REMEDY
         )
     pairs = co_recall_pairs(
@@ -589,7 +609,7 @@ def _tool_co_recall_proposals(args: Dict[str, Any]) -> str:
         "For EACH pair: read both memories and judge whether the association is real — "
         "would someone recalling one genuinely need the other? On explicit approval, append "
         "a [[the-other-name]] reference into ONE side's body (its Related: line if present) "
-        "— a per-item agent edit; this tool never writes — then run the build_index tool so "
+        "— a per-item agent edit; this tool never writes — then rebuild the index (the setup tool's action='build_index') so "
         "links.json carries the edge. If no, skip it; the tally keeps its count."
     )
     return "\n".join(out)
@@ -607,7 +627,7 @@ def _tool_abstention_fixtures(args: Dict[str, Any]) -> str:
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
             "abstention_fixtures: withheld — this project's memory corpus is untrusted "
-            "(SEC-1: fixture rows name corpus memories and the confirm step writes into "
+            "(fixture rows name corpus memories and the confirm step writes into "
             ".claude/memory/, gated just as recall and new_memory are). " + _UNTRUSTED_REMEDY
         )
     action = str(args.get("action") or "draft").strip().lower()
@@ -622,7 +642,7 @@ def _tool_abstention_fixtures(args: Dict[str, Any]) -> str:
             "abstention drafts refreshed — unconfirmed rows (expected: []) are gitignored "
             "queue state; nothing is tracked until a per-item confirm:\n"
             + json.dumps(r, indent=2)
-            + "\nlived-in drafts refreshed (MEA-2, the fourth lane — outcome-confirmed "
+            + "\nlived-in drafts refreshed (the fourth lane — outcome-confirmed "
             "verbatim queries; judge derived_expected, confirm with category='single-hop'):\n"
             + json.dumps(lv, indent=2)
         )
@@ -639,7 +659,7 @@ def _tool_abstention_fixtures(args: Dict[str, Any]) -> str:
                 "abstention_fixtures confirm: 'query' and a non-empty 'expected' stem list "
                 "are both required — and only after judging that those memories genuinely "
                 "answer the query (never fabricate a memory to make a fixture pass). "
-                "TMB-3 forgetting rows pass absent=[archived stems] instead of expected."
+                "forgetting rows pass absent=[archived stems] instead of expected."
             )
         kwargs: Dict[str, Any] = {}
         cat = str(args.get("category") or "").strip()

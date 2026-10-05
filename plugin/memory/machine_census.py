@@ -426,14 +426,14 @@ def _render_symlinks(farm: dict) -> List[str]:
     if farm["pytest_leaked"]:
         lines.append(
             f"  NB: {farm['pytest_leaked']} of the dangling targets are pytest tmp trees — "
-            "self-inflicted test leak (the HYG-2 conftest isolation is the faucet fix)."
+            "self-inflicted test leak (the conftest isolation is the faucet fix)."
         )
     n_batch = farm["dangling_temp_rooted"] + farm.get("dangling_worktree_retired", 0)
     if n_batch:
         lines.append(
             "drain the "
             + _n(n_batch, "batch-safe entry", "batch-safe entries")
-            + ": python -m memory.machine_census --prune-dangling"
+            + ": hippo census --prune-dangling"
         )
     return lines
 
@@ -461,11 +461,11 @@ def _render_trust(census: dict) -> List[str]:
         if w:
             lines.append(
                 f"    WITHHOLDING {w['changed']} changed / {w['added']} added — "
-                "re-consent in that project (trust_corpus / doctor)"
+                "re-consent in that project (`hippo trust review` there)"
             )
     lines.append(
-        "  rows are REPORT-ONLY pending owner decision Q2 — the per-row route is the "
-        "`untrust` tool, which also deletes the row's SEC-6 fingerprint baseline "
+        "  rows are REPORT-ONLY pending owner decision Q2 — the per-row route is "
+        "`hippo trust revoke` in that project, which also deletes the row's fingerprint baseline "
         "(an unmounted-volume row would go from 'comes back trusted' to full re-consent)."
     )
     return lines
@@ -555,9 +555,9 @@ def main(argv=None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="python -m memory.machine_census",
+        prog="hippo census",
         description=(
-            "Machine-state census (HYG-1): classify every machine-state class hippo "
+            "Machine-state census: classify every machine-state class hippo "
             "creates — projects-registry rows, ~/.claude/projects memory symlinks, "
             "trust rows, installed scheduler artifacts. Read-only."
         ),

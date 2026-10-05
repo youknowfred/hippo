@@ -267,7 +267,7 @@ def test_staleness_note_counts_policy_suppressed_tail(memory_dir, monkeypatch):
     assert "m_mix" in out
     assert "m_vol" not in out.replace("m_vol2", "")  # no per-item line for suppressed items
     assert "(+2" in out and "volatile" in out and "policy-suppressed" in out
-    assert ".format volatile_paths" in out  # auditable pointer, per the report
+    assert "hippo.json volatile_paths" in out  # auditable pointer to the policy's home
 
 
 def test_staleness_note_all_suppressed_renders_one_calm_line(memory_dir, monkeypatch):

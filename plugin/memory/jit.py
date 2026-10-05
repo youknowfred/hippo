@@ -84,7 +84,9 @@ def jit_disabled() -> bool:
     switch — same convention as ``build_index.dense_disabled``. Killed means byte-for-byte
     pre-T16 behavior: no reminder, no touch-grain provenance, no SessionStart cache write.
     """
-    return os.environ.get("HIPPO_DISABLE_JIT", "").strip() not in ("", "0", "false", "False")
+    from .settings import disabled
+
+    return disabled("jit")  # SRF-4: HIPPO_DISABLE=jit, or the older HIPPO_DISABLE_JIT
 
 
 def touch_cache_path(index_dir: str) -> str:

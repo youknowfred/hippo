@@ -174,7 +174,7 @@ def test_boost_ledger_written_with_decision_chain_provenance(dirs):
 
     code, text = dream.run_report_pass(md, idx, td)
     assert code == 0
-    assert "reward (DRM-5 reverse replay)" in text
+    assert "reward (reverse replay)" in text
     ddir = dream.dream_dir(td)
     boost_files = [f for f in os.listdir(ddir) if f.startswith("boosts-") and f.endswith(".jsonl")]
     assert len(boost_files) == 1

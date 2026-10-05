@@ -1,13 +1,14 @@
 """Receipt checks for the deterministic doctor engine — the v2 scoreboard's durable inputs.
 
 OBS-1's 30-day KPIs from the rotation-proof daily rollups, OBS-2's per-verb surface usage
-from the same rows, and OBS-4's shell-measured hook wall. Read-only and display-only (``ok`` unless the read itself
+from the same rows, OBS-4's shell-measured hook wall, and HOT-6's warm-recall paths. Read-only and display-only (``ok`` unless the read itself
 fails): these lines report numbers a later gate judges, they never judge them here.
 ``DoctorContext`` lives in ``doctor_checks_env``.
 """
 
 from __future__ import annotations
 
+import os
 from typing import Dict, List
 
 from .doctor_checks_env import DoctorContext
@@ -138,3 +139,57 @@ def check_surface_usage(ctx: DoctorContext) -> Dict[str, str]:
         }
     except Exception as exc:
         return {"status": "warn", "message": f"surface usage check failed: {exc}."}
+
+
+def check_capture_queue(ctx: DoctorContext) -> Dict[str, str]:
+    """TND-5: the capture queue's size, its expired shelf, and 30 days of inflow and drain
+    (captured / folded / restored in; expired / discarded / drafted out) from the daily
+    rollups. Read-only; ``ok`` always — a deep queue is the SessionStart nudge's job."""
+    try:
+        from .capture_queue import default_pending_dir, expired_count, pending_count
+        from .telemetry import default_telemetry_dir
+        from .telemetry_rollup import QUEUE_EVENTS, read_rollups, summarize
+
+        pd = default_pending_dir(ctx.memory_dir)
+        n, n_exp = pending_count(pd), expired_count(pd)
+        msg = f"capture queue: {n} pending, {n_exp} expired"
+        if n_exp:
+            msg += " (kept, never deleted; `hippo capture --restore --all` brings them back)"
+        flow = summarize(read_rollups(default_telemetry_dir(ctx.memory_dir), days=30))["queue"]
+        if flow:
+            msg += "; 30 days: " + ", ".join(f"{flow.get(ev, 0)} {ev}" for ev in QUEUE_EVENTS)
+        return {"status": "ok", "message": msg + "."}
+    except Exception as exc:
+        return {"status": "warn", "message": f"capture queue check failed: {exc}."}
+def check_warm_recall(ctx: DoctorContext) -> Dict[str, str]:
+    """HOT-6: whether the opt-in warm-recall hook is configured (local, project or user
+    settings), and how this corpus's prompts were served over 30 days — warm (the session's
+    MCP server), spawn (a fresh process) or failed — with each path's wall. ``ok`` unless the
+    configured entry is not this version's."""
+    try:
+        from .setup_cli import format_path_counts, path_counts, warm_state
+
+        st = warm_state(ctx.repo_root)
+        counts = path_counts(ctx.memory_dir)
+        if not st["configured"]:
+            from .recall_warm import warm_dir
+
+            msg = "warm recall: off (`hippo setup --warm` previews turning it on)"
+            if counts["warm"] or counts["failed"]:
+                msg += "; " + format_path_counts(counts)
+            d = warm_dir()
+            if d and os.listdir(d):
+                return {
+                    "status": "warn",
+                    "message": msg + "; its handshake files are still here, so each prompt's "
+                    "hook keeps writing one — `hippo setup --warm --off --yes` clears them.",
+                }
+            return {"status": "ok", "message": msg + "."}
+        msg = f"warm recall: on (the hook is in {st['file']})"
+        status = "ok"
+        if not st["current"]:
+            status = "warn"
+            msg += " but differs from this version's entry — `hippo setup --warm --yes` updates it"
+        return {"status": status, "message": msg + "; " + format_path_counts(counts) + "."}
+    except Exception as exc:
+        return {"status": "warn", "message": f"warm recall check failed: {exc}."}

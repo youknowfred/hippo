@@ -140,7 +140,7 @@ def test_capture_list_flagged_hunks_map_the_gate_to_the_secrets_scan_tool(corpus
     _seed(str(tmp_path / "pending"), hunks_secret_flagged=True)
     text = _text(_call("capture", {"action": "list"}))
     assert "scan_with_remediation" in text  # the CLI listing's own warning still travels
-    assert "secrets_scan tool" in text      # ...plus the mapping for THIS surface
+    assert "action='secrets_scan'" in text      # ...plus the mapping for THIS surface
 
 
 def test_capture_discard_by_filename_drains_the_seed(corpus, tmp_path):
@@ -347,7 +347,7 @@ def test_reconsolidate_brief_unknown_name_is_legible(repo_corpus):
 def test_reconsolidate_untrusted_is_withheld(corpus, monkeypatch):
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     text = _text(_call("reconsolidate", {}))
-    assert "withheld" in text and "trust_corpus" in text
+    assert "withheld" in text and "trust tool" in text
 
 
 # --------------------------------------------------------------------------- #
@@ -443,7 +443,7 @@ def test_co_recall_proposals_below_threshold_is_empty_by_design(corpus, tmp_path
 def test_co_recall_proposals_untrusted_is_withheld(corpus, monkeypatch):
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     text = _text(_call("co_recall_proposals", {}))
-    assert "withheld" in text and "trust_corpus" in text
+    assert "withheld" in text and "trust tool" in text
 
 
 # --------------------------------------------------------------------------- #
@@ -488,7 +488,7 @@ def test_abstention_fixtures_confirm_requires_query_and_stems(corpus):
 def test_abstention_fixtures_untrusted_is_withheld(corpus, monkeypatch):
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     text = _text(_call("abstention_fixtures", {}))
-    assert "withheld" in text and "trust_corpus" in text
+    assert "withheld" in text and "trust tool" in text
 
 
 # --------------------------------------------------------------------------- #
@@ -505,24 +505,23 @@ _FLOW_TOOLS = (
 def test_doctor_footer_maps_consolidate_to_the_flow_tools(corpus, tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     text = _text(_call("doctor", {}))
-    assert "/hippo:consolidate" in text
-    for tool in _FLOW_TOOLS:
-        assert tool in text, f"doctor's MCP-surface mapping no longer names {tool}"
+    assert '"tend memory" → the tend tool' in text  # the v2 route for the whole consolidate flow
 
 
 def test_consolidate_skill_preflight_maps_every_flow_tool():
-    """The skill's guard must route Desktop to the tools (not claim no path exists), and
-    every tool it names must be one the server actually serves."""
-    path = os.path.join(
-        os.path.dirname(__file__), "..", "plugin", "skills", "consolidate", "SKILL.md"
-    )
+    """The consolidate flow now lives in /hippo:tend (SRF-3). Its Desktop routing must map every
+    step onto a v2 tool route the server serves (not claim no path exists)."""
+    path = os.path.join(os.path.dirname(__file__), "..", "plugin", "skills", "tend", "SKILL.md")
     with open(path, encoding="utf-8") as fh:
         text = fh.read()
-    assert "no Desktop-safe MCP-tool equivalent" not in text  # the pre-INT-13 claim is gone
-    for tool in _FLOW_TOOLS:
-        assert tool in text, f"consolidate SKILL.md no longer names the {tool} tool"
-        assert tool in M._DISPATCH, f"SKILL.md names {tool} but the server does not serve it"
-    assert "check:true" in text or "check: true" in text  # the CAP-3 dry-run flag
+    assert "no Desktop-safe MCP-tool equivalent" not in text
+    for tool in ("tend", "new_memory", "doctor", "setup"):
+        assert f"`{tool}`" in text, f"tend SKILL.md no longer names the {tool} tool"
+        assert tool in M._DISPATCH
+    for route in ("action='secrets_scan'", "action='build_index'", "action='link_proposals'",
+                  "action='fixtures'", "action='interview'", "action='add_decision'"):
+        assert route in text, f"tend SKILL.md no longer maps a consolidate step to {route}"
+    assert "check:true" in text or "check: true" in text  # the dry-run flag
 
 
 def test_capture_list_names_corrupt_seed_files(corpus, tmp_path):

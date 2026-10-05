@@ -10,7 +10,8 @@ import math
 import os
 from bisect import bisect_left
 from collections.abc import Mapping
-from typing import Dict, List, Optional, Tuple
+from contextvars import ContextVar
+from typing import Callable, Dict, List, Optional, Tuple
 
 from .build_index import (
     _BM25_B,
@@ -531,6 +532,15 @@ def portable_floor_producer(
         return None
 
 
+# HOT-6: the warm path's index source. While set (only inside ``recall_warm``'s served
+# call), ``_ensure_index`` reads the index through it and NEVER builds one: the served path
+# writes nothing to the corpus or the index. ``None`` everywhere else (the spawned hook,
+# the CLI, the MCP recall tool) keeps the implicit build exactly as it was.
+INDEX_LOADER: "ContextVar[Optional[Callable[[str], Optional[LoadedIndex]]]]" = ContextVar(
+    "hippo_index_loader", default=None
+)
+
+
 def _ensure_index(
     index: Optional[LoadedIndex], memory_dir: str, index_dir: Optional[str]
 ) -> Optional[LoadedIndex]:
@@ -542,6 +552,9 @@ def _ensure_index(
     if not memory_dir or not os.path.isdir(memory_dir):
         return None
     index_dir = index_dir or default_index_dir(memory_dir)
+    loader = INDEX_LOADER.get()
+    if loader is not None:
+        return loader(index_dir)  # read-only: an absent index serves nothing, never builds
     loaded = load_index(index_dir)
     if loaded is not None:
         return loaded

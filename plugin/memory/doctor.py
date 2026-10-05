@@ -41,7 +41,12 @@ from .provenance import resolve_dirs
 # DOC-4 decomposition: the check implementations live in the flat, prefix-named siblings
 # below; these explicit grouped re-imports keep every historical ``memory.doctor.<name>``
 # import and monkeypatch target (mcp_server, sleep, tests) resolving unchanged.
-from .doctor_checks_platform import check_attention, check_claude_code_version, check_installed_version
+from .doctor_checks_platform import (
+    check_attention,
+    check_claude_code_version,
+    check_installed_version,
+    check_mcp_allowlist,
+)
 from .doctor_checks_env import (
     DoctorContext,
     _iter_memory_files_safe,
@@ -88,6 +93,8 @@ from .doctor_checks_corpus import (
     check_producer_versions,
 )
 from .doctor_checks_lifecycle import (
+    check_format_migration,
+    check_tend_queue,
     check_invalid_after_terminal,
     check_archive_shadowing,
     check_archive_regret,
@@ -125,7 +132,9 @@ from .doctor_checks_recall import (
     check_update_eval,
 )
 from .doctor_checks_native import check_native_auto_memory  # NAT-1
-from .doctor_checks_kpi import check_hook_wall, check_kpi_rollups, check_surface_usage  # OBS-4, OBS-1, OBS-2
+from .doctor_checks_settings import check_settings  # SRF-4
+from .doctor_checks_kpi import check_capture_queue, check_hook_wall, check_kpi_rollups, check_surface_usage  # TND-5, OBS-4, OBS-1, OBS-2
+from .doctor_checks_kpi import check_warm_recall  # HOT-6
 
 # One glyph per status — the deterministic line prefix. Ordered dict-free lookup.
 _GLYPH = {"ok": "✔", "warn": "⚠", "fail": "✘"}
@@ -296,11 +305,11 @@ def _scorecard_message(memory_dir: str, repo_root: str) -> Tuple[str, str]:
         pass
 
     parts = [
-        f"{contested} contested-unresolved (→ /hippo:resolve)",
-        f"{rule_conflicts} rule↔memory conflict(s) (→ /hippo:consolidate)",
+        f"{contested} contested-unresolved (→ /hippo:tend)",
+        f"{rule_conflicts} rule↔memory conflict(s) (→ /hippo:tend)",
         f"{rot} rules-plane rot (edit the named file)",
-        f"{blind} blind spot(s) (→ /hippo:consolidate)",
-        f"{orphans} orphan(s) never recalled (→ /hippo:audit)",
+        f"{blind} blind spot(s) (→ /hippo:tend)",
+        f"{orphans} orphan(s) never recalled (→ /hippo:doctor's content audit)",
         f"{pinned} pinned / {muted} muted",
         f"{draft} draft",
         (f"{components} graph component(s)" if components is not None else "graph components: n/a"),
@@ -332,6 +341,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("installed_version", check_installed_version),  # FMT-3: installed_plugins.json vs the version this process runs
     ("claude_code_version", check_claude_code_version),  # PLT-2: the running Claude Code vs hippo's declared floor
     ("attention", check_attention),  # CLM-2: calm/full SessionStart and the mute list
+    ("settings", check_settings),  # SRF-4: legacy env/config names in use + their new spelling; a plaintext key file
     ("venv", check_venv),
     ("corpus", check_corpus_exists),
     ("symlink", check_symlink),
@@ -352,6 +362,9 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("hook_wall", check_hook_wall),  # OBS-4: shell-measured wall vs the logged latency
     ("kpi_rollups", check_kpi_rollups),  # OBS-1: 30-day KPIs from the rotation-proof daily rollups
     ("surface_usage", check_surface_usage),  # OBS-2: 30-day per-verb use counts (the deprecation windows' input)
+    ("tend_queue", check_tend_queue),  # TND-2: the one maintenance queue, by kind
+    ("capture_queue", check_capture_queue),  # TND-5: pending + expired counts, 30-day inflow/drain
+    ("warm_recall", check_warm_recall),  # HOT-6: the opt-in warm hook configured? + 30-day warm/spawn/failed paths
     ("recall_blind_spots", check_recall_blind_spots),
     ("drop_autopsy", check_drop_autopsy),  # MSR-4: which mechanism eats candidates, aggregated
 
@@ -364,6 +377,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("rules_plane_rot", check_rules_plane_rot),
     ("rules_source", check_rules_source),
     ("format_version", check_format_version),
+    ("format_migration", check_format_migration),  # FMT-1: what format 6 will touch, read-only
     ("volatile_paths", check_volatile_paths),  # VOL-1: arming-policy state, ok-glyph always
     ("floor_governance", check_floor_governance),  # FLR-1: floor vs the harness read window + declared floor_lint policy
     ("empty_baselines", check_empty_baselines),  # COR-10: the heal moved off the hook
@@ -377,6 +391,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("edge_rot", check_edge_rot),  # GRF-1: edges into archived/superseded/dangling targets
     ("dream_ledger", check_dream_ledger),  # DRM-2: on-disk dream stamps ↔ dream-ledger.jsonl reconcile
     ("non_english_corpus", check_non_english_corpus),
+    ("mcp_allowlist", check_mcp_allowlist),  # SRF-2: permission rules naming deprecated tools (read-only)
     ("mcp_launch", check_mcp_launch),  # INT-8: the stdio MCP server (bin/hippo mcp) actually starts
     ("committed_usage_privacy", check_committed_usage_privacy),  # SEC-14: TEA-5 usage on a shared remote
     ("projects_registry", check_projects_registry),  # RCH-11: dead-row hygiene, machine-level

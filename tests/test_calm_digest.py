@@ -24,6 +24,7 @@ def test_parts_in_order_and_inside_the_budget():
     assert "➡ Next: settle the conflicting memories" in out  # contradictions outrank staleness
     last = out.splitlines()[-1]
     assert last.startswith("2 more item(s) queued (stale memories, link health)")
+    assert 'say "tend memory"' in last  # the counted line points at the one queue
     assert "  …" in out  # orientation was cut at a whole line
 
 

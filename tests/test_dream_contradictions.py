@@ -164,7 +164,7 @@ def test_flag_on_proposes_pair_and_never_writes_corpus(dirs, monkeypatch):
     # Both memories rode the verdict prompt verbatim (bounded).
     assert "gateway-current" in calls[0]["prompt"] and "gateway-dropped" in calls[0]["prompt"]
     # The report says what was judged and where proposals went.
-    assert "contradiction discovery" in text and "/hippo:resolve" in text
+    assert "contradiction discovery" in text and "/hippo:tend" in text
     # The derived verdict ledger carries the proposed row.
     rows = [
         json.loads(l)
@@ -208,7 +208,7 @@ def test_apply_pass_routes_contradicts_and_applies_nothing(dirs, monkeypatch):
 
     assert code == 0
     assert _snapshot_md(md) == before, "apply pass wrote the corpus for a contradicts candidate"
-    assert "routed to /hippo:resolve — never auto" in text
+    assert "routed to /hippo:tend — never auto" in text
     assert "contradiction discovery" in text
     # No Tier-A edge existed, so the committed apply ledger was never even created.
     assert not os.path.exists(dream.apply_ledger_path(md))

@@ -342,7 +342,7 @@ def import_mdc_file(
             result["held"] = True
             result["warnings"] = threats
             result["error"] = (
-                "held for review: threat-lint payload in the source .mdc (SEN-2 Tier-A: "
+                "held for review: threat-lint payload in the source .mdc (Tier-A: "
                 f"{'; '.join(threats)}) — clean {rel} first; foreign input is never written flagged"
             )
             return result
@@ -406,7 +406,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     import argparse
     import json as _json
 
-    parser = argparse.ArgumentParser(prog="python -m memory.import_mdc")
+    parser = argparse.ArgumentParser(prog="hippo import")
     parser.add_argument(
         "--from", dest="source", choices=("cursor", "claude-mem"), default="cursor",
         help="which adapter's read-only report to print",

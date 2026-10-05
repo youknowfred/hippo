@@ -32,11 +32,22 @@ releases:
     re_bootstrap: "no"
   - version: v1.41.0
     theme: "Earned injection"
-    status: in review
+    status: released
+    re_bootstrap: "no"
+    open_gates:
+      - "the 30-day machine-turn check on OBS-1 rollups (field time)"
+      - "v1.40.0's 7 rollup rows on 3 corpora (field time)"
+  - version: v1.41.1
+    theme: "Quiet and quick (two RUL-2 rules-rot fixes, #134 and #136; no roadmap item)"
+    status: released
+    re_bootstrap: "no"
+  - version: v1.41.2
+    theme: "Only real questions (#138 the blind-spot backlog skips harness envelopes; #139 HOT-1 learns <ci-monitor-event>)"
+    status: released
     re_bootstrap: "no"
   - version: v1.42.0
     theme: "One door, one queue"
-    status: planned
+    status: in review
     re_bootstrap: "no"
   - version: v1.43.0
     theme: "Last 1.x: derived self-tending"
@@ -62,8 +73,8 @@ items:
     title: "Compare-and-swap writes, repro-first"
     size: M
     release: "v1.41.0"
-    status: built
-    note: "v1.41.0 release PR"
+    status: done
+    note: "v1.41.0"
   - id: RWY-4
     title: "Ship only the runtime (reshaped)"
     size: S
@@ -98,8 +109,8 @@ items:
     title: "Field eval gate on 3 corpora"
     size: M
     release: "v1.41.0"
-    status: built
-    note: "v1.41.0 release PR"
+    status: done
+    note: "v1.41.0"
   - id: OBS-6
     title: "Trust-drift root cause, repro-first"
     size: S
@@ -109,8 +120,8 @@ items:
     title: "Dogfood drain, keeping derivation 4 on purpose"
     size: S
     release: "v1.41.0"
-    status: partial
-    note: "operational; 5 contradiction verdicts + 18 capture discards done 2026-10-03, the withheld memory was already re-consented; cite_derivation 4 kept as the FMT-4 rehearsal target"
+    status: done
+    note: "operational, closed with v1.41.0: 5 contradiction verdicts + 18 capture discards done 2026-10-03, the withheld memory was already re-consented; cite_derivation 4 kept as the FMT-4 rehearsal target"
   - id: OBS-8
     title: "1,000-memory dense-under-load nightly lane"
     size: S
@@ -126,20 +137,21 @@ items:
     size: S
     release: "v1.40.0"
     status: done
+    note: "v1.41.2 (#139) added <ci-monitor-event> to the envelope list with its own trigger class"
   - id: HOT-2
     title: "Calibrated abstention"
     size: M
     release: "v1.41.0"
-    status: built
+    status: done
     deps: [OBS-5]
-    note: "v1.41.0 release PR"
+    note: "v1.41.0"
   - id: HOT-3
     title: "Per-prompt and per-session context budgets"
     size: M
     release: "v1.41.0"
-    status: built
+    status: done
     deps: [HOT-1, OBS-1]
-    note: "v1.41.0 release PR"
+    note: "v1.41.0"
   - id: HOT-4
     title: "One staleness truth"
     size: S
@@ -149,58 +161,62 @@ items:
     title: "Stop paying an interpreter per file touch"
     size: M
     release: "v1.41.0"
-    status: built
+    status: done
     deps: [OBS-4, PLT-1]
-    note: "v1.41.0 release PR"
+    note: "v1.41.0"
   - id: HOT-6
     title: "Warm recall served by the session's own MCP server"
     size: L
     release: "v1.42.0"
-    status: planned
+    status: built
+    note: "v1.42.0 release PR"
     deps: [RWY-1, OBS-4, PLT-1]
   - id: CLM-1
     title: "Budgeted SessionStart digest"
     size: L
     release: "v1.41.0"
-    status: built
+    status: done
     deps: [OBS-1]
-    note: "v1.41.0 release PR"
+    note: "v1.41.0"
   - id: CLM-2
     title: "Attention setting"
     size: S
     release: "v1.41.0"
-    status: built
-    note: "v1.41.0 release PR"
+    status: done
+    note: "v1.41.0"
   - id: CLM-3
     title: "Resume card from cleaned queries and served names"
     size: S
     release: "v1.41.0"
-    status: built
+    status: done
     deps: [HOT-1, OBS-3]
-    note: "v1.41.0 release PR"
+    note: "v1.41.0"
   - id: CLM-4
     title: "Onboarding nudge scoped per repo"
     size: S
     release: "v1.42.0"
-    status: planned
+    status: built
+    note: "v1.42.0 release PR"
   - id: CLM-5
     title: "Jargon lint"
     size: S
     release: "v1.42.0"
-    status: planned
+    status: built
+    note: "v1.42.0 release PR"
   - id: CLM-6
     title: "One remediation spelling"
     size: M
     release: "v1.42.0"
-    status: planned
+    status: built
+    note: "v1.42.0 release PR"
     deps: [SRF-1]
   - id: CLM-7
     title: "A floor with hard edges"
     size: M
     release: "v1.41.0"
-    status: built
+    status: done
     deps: [RWY-3]
-    note: "v1.41.0 release PR"
+    note: "v1.41.0"
   - id: CLM-8
     title: "Retire the Desktop routing note"
     size: S
@@ -212,12 +228,14 @@ items:
     title: "One derived, ranked maintenance queue"
     size: M
     release: "v1.42.0"
-    status: planned
+    status: built
+    note: "v1.42.0 release PR"
   - id: TND-2
     title: "The `tend` verb"
     size: L
     release: "v1.42.0"
-    status: planned
+    status: built
+    note: "v1.42.0 release PR"
     deps: [TND-1, SRF-1]
   - id: TND-3
     title: "Derived evidence anchors and quiet arming"
@@ -235,12 +253,14 @@ items:
     title: "Capture-queue hygiene"
     size: S
     release: "v1.42.0"
-    status: planned
+    status: built
+    note: "v1.42.0 release PR"
   - id: TND-6
     title: "`hippo trust` and per-session batched re-consent"
     size: S
     release: "v1.42.0"
-    status: planned
+    status: built
+    note: "v1.42.0 release PR"
     deps: [OBS-6]
   - id: TND-7
     title: "Scheduled sleep for every opted-in corpus"
@@ -251,7 +271,8 @@ items:
     title: "`hippo migrate --check`"
     size: S
     release: "v1.42.0"
-    status: planned
+    status: built
+    note: "v1.42.0 release PR"
     deps: [RWY-2, SRF-1]
   - id: FMT-2
     title: "Derived citation binding moves into the index (dual mode)"
@@ -263,8 +284,8 @@ items:
     title: "N-1 compat guard"
     size: S
     release: "v1.41.0"
-    status: built
-    note: "v1.41.0 release PR"
+    status: done
+    note: "v1.41.0"
   - id: FMT-4
     title: "`hippo migrate` apply: one previewed changeset, v5→v6"
     size: L
@@ -285,25 +306,29 @@ items:
     title: "`hippo <verb>` is the one engine entry"
     size: M
     release: "v1.42.0"
-    status: planned
+    status: built
+    note: "v1.42.0 release PR"
     deps: [RWY-1]
   - id: SRF-2
     title: "MCP v2 toolset"
     size: L
     release: "v1.42.0"
-    status: planned
+    status: built
+    note: "v1.42.0 release PR"
     deps: [SRF-1, TND-2, OBS-2]
   - id: SRF-3
     title: "The v2 skill set: 9 verbs"
     size: L
     release: "v1.42.0"
-    status: planned
+    status: built
+    note: "v1.42.0 release PR"
     deps: [SRF-1, OBS-2, TND-2]
   - id: SRF-4
     title: "Config consolidation"
     size: M
     release: "v1.42.0"
-    status: planned
+    status: built
+    note: "v1.42.0 release PR"
   - id: SRF-5
     title: "One machine-wide venv and model cache"
     size: M
@@ -334,8 +359,8 @@ items:
     title: "Declare and check a minimum Claude Code version"
     size: S
     release: "v1.41.0"
-    status: built
-    note: "v1.41.0 release PR"
+    status: done
+    note: "v1.41.0"
   - id: NAT-1
     title: "Detect native auto memory"
     size: S
@@ -367,8 +392,8 @@ items:
     title: "`ROADMAP.v2.yaml` as the one live ledger"
     size: S
     release: "v1.41.0"
-    status: built
-    note: "v1.41.0 release PR"
+    status: done
+    note: "v1.41.0"
   - id: CON-5
     title: "Release-gate hardening"
     size: S
@@ -394,19 +419,19 @@ threads:
     note: "growing-pains slate (2026-08-27) S4; reach work per V2Q-12."
   - id: GP-S5
     title: "Trim-safety report for the MEMORY.md floor"
-    status: built
+    status: done
     release: v1.41.0
     note: "delivered as CLM-7's lint_floor --trim-report."
   - id: GP-S6
     title: "Doctor restart detector: running version vs installed_plugins.json"
-    status: built
+    status: done
     release: v1.41.0
     note: "delivered as FMT-3's doctor installed_version line."
   - id: GP-S7
     title: "CAS floor edits + a worktree-corpus SessionStart warning"
     status: partial
     release: v1.41.0
-    note: "RWY-3 put every floor edit on compare-and-swap; SHP-7 (v1.34.0) resolves worktree sessions to the main corpus. A floor_edit MCP verb is not built; SRF-2's tool redraw decides whether it should exist."
+    note: "RWY-3 put every floor edit on compare-and-swap; SHP-7 (v1.34.0) resolves worktree sessions to the main corpus. SRF-2 (v1.42.0) redrew the MCP tools without a floor_edit verb: floor overflow is a tend queue kind, fixed by hand and re-checked."
 
 # The owner rulings recorded in ROADMAP.v2.md section 8; all ratified 2026-10-03.
 owner_rulings:

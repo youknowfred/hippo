@@ -271,7 +271,7 @@ def test_cli_report_names_the_repair_route(tmp_path, capsys):
 
     assert R.main([]) == 0
     out = capsys.readouterr().out
-    assert "/hippo:init" in out  # the re-register route rides the report
+    assert "/hippo:setup" in out  # the re-register route rides the report
 
 
 def test_cli_report_empty_norm(tmp_path, capsys):
@@ -345,7 +345,7 @@ def test_doctor_check_warns_with_count_and_commands(tmp_path):
     r = check_projects_registry(_doctor_ctx(tmp_path))
     assert r["status"] == "warn"
     assert "2 dead" in r["message"]
-    assert "python -m memory.registry" in r["message"]
+    assert "hippo registry" in r["message"]
     assert "--prune-dead" in r["message"]
 
 
@@ -372,7 +372,7 @@ def test_doctor_check_names_the_repair_route(tmp_path):
 
     r = check_projects_registry(_doctor_ctx(tmp_path))
     assert r["status"] == "warn"
-    assert "/hippo:init" in r["message"]
+    assert "/hippo:setup" in r["message"]
 
 
 def test_doctor_check_is_registered():

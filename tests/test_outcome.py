@@ -227,7 +227,7 @@ def test_doctor_reports_precision(repo, memory_dir):
 
     r = D.check_injection_precision(D.DoctorContext(memory_dir, repo))
     assert r["status"] == "ok"
-    assert "injection precision (KPI-2)" in r["message"]
+    assert "injection precision" in r["message"]
     assert "100%" in r["message"]
 
 
@@ -397,9 +397,9 @@ def test_lane_health_reports_volumes_maps_and_worktree_share(repo, memory_dir):
     assert "worktree-prefixed rows: 2 of 4 (50%)" in out
     # MEA-6 (the named follow-up, now landed): the line splits normalized-vs-historical —
     # these fixture rows all predate the stamp, so 0 carry tree_path and 1 would map.
-    assert "0 carry tree_path (normalized at record time, MEA-6" in out
+    assert "0 carry tree_path (normalized at record time" in out
     assert "1 historical row(s) would map if prefix-stripped" in out
-    assert "predate MEA-6's record-time normalization" in out  # historical rows named, never rewritten
+    assert "predate the record-time normalization" in out  # historical rows named, never rewritten
 
 
 def test_lane_health_zero_cited_by_names_live_hook_lag(repo, memory_dir):

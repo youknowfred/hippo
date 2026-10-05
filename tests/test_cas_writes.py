@@ -139,7 +139,12 @@ NON_CORPUS_SITES = {
     ("telemetry_rollup", "_update"): "telemetry, held under flock",
     ("telemetry_rollup", "_append_finalized"): "telemetry, held under flock",
     ("telemetry_rollup", "_drain_spool"): "telemetry, held under flock",
+    ("tend", "_write_state"): "gitignored tend state (snooze/skip/hold), per clone",
+    ("tend_queue", "_write_cache"): "gitignored derived queue counts, rebuilt on every run",
     ("trust", "_write_registry_doc"): "machine trust registry, outside the corpus",
+    ("trust_review", "keep_consented_baselines"): "content-addressed baseline store beside the trust registry, outside the corpus",
+    ("recall_warm", "_publish"): "warm-recall heartbeat in the plugin data dir; one writer (the session's server)",
+    ("setup_cli", "_backup"): "a fresh timestamped backup copy (the settings write itself is CAS)",
 }
 
 

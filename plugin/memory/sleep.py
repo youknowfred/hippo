@@ -132,6 +132,8 @@ def _drain_line(verb: str) -> str:
     from .surfaces import verb_map
 
     row = verb_map().get(verb)
+    if row is not None and row.desktop == "route":  # SRF-3: a retired name opens its v2 verb
+        verb, row = row.routes_to, verb_map().get(row.routes_to)
     if row is None:
         return f"drain: /hippo:{verb} (terminal)"
     if row.desktop == "tool":
@@ -156,7 +158,7 @@ def _section_doctor(memory_dir: str, repo_root: str) -> Optional[str]:
 
 
 def _section_pending(memory_dir: str, repo_root: str) -> Optional[str]:
-    from .capture import _format_listing, default_pending_dir, queue_snoozed, read_pending
+    from .capture import _format_listing, default_pending_dir, expired_count, queue_snoozed, read_pending
 
     pd = default_pending_dir(memory_dir)
     seeds = read_pending(pd)
@@ -168,7 +170,7 @@ def _section_pending(memory_dir: str, repo_root: str) -> Optional[str]:
             f"{len(seeds)} seed(s) queued, nudge snoozed — seeds kept; the listing "
             "returns when the snooze expires."
         )
-    return _format_listing(seeds)
+    return _format_listing(seeds, expired=expired_count(pd))
 
 
 def _section_reconsolidation(memory_dir: str, repo_root: str) -> Optional[str]:
@@ -215,11 +217,11 @@ def _section_promote_scan(memory_dir: str, repo_root: str) -> Optional[str]:
 # monkeypatch a section producer on the module and the runner sees it)
 _SECTIONS = (
     ("doctor", "Plumbing (doctor)", "doctor", "_section_doctor"),
-    ("pending_captures", "Pending captures (CAP-2 triage)", "consolidate", "_section_pending"),
-    ("reconsolidation", "Reconsolidation worklist (LIF-1)", "consolidate", "_section_reconsolidation"),
-    ("dream", "Dream discovery (DRM-1)", "dream", "_section_dream"),
-    ("link_health", "Link health (GRA)", "consolidate", "_section_links"),
-    ("promotion_mining", "Cross-project promotion candidates (EXT-2)", "promote", "_section_promote_scan"),
+    ("pending_captures", "Pending captures (triage)", "tend", "_section_pending"),
+    ("reconsolidation", "Reconsolidation worklist", "tend", "_section_reconsolidation"),
+    ("dream", "Dream discovery", "dream", "_section_dream"),
+    ("link_health", "Link health (GRA)", "tend", "_section_links"),
+    ("promotion_mining", "Cross-project promotion candidates", "share", "_section_promote_scan"),
 )
 
 
@@ -242,7 +244,7 @@ def _tier_a_pass(memory_dir: str) -> Tuple[Optional[str], Optional[str]]:
     if applied > 0:
         lead = (
             f"{first} — undo: the dream tool action='undo' "
-            f"(terminal: `--undo` on `python -m memory.dream`)"
+            f"(terminal: `--undo` on `hippo dream`)"
         )
         return lead, text
     return None, text
@@ -396,7 +398,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="The sleep runner (SLP-1/2/3): render the read-only maintenance "
+        description="The sleep runner (/2/3): render the read-only maintenance "
         "worklists into one morning report. Zero corpus writes; the report is a "
         "proposal queue you drain per item in your next interactive session."
     )
@@ -404,14 +406,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--print-schedule",
         action="store_true",
         help="print copy-pasteable launchd/cron/scheduled task recipes for THIS "
-        "machine and repo — prints only, never installs (SLP-2)",
+        "machine and repo — prints only, never installs",
     )
     parser.add_argument(
         "--snooze",
         default=None,
         metavar="Nd",
         help="silence the sleep report for N days (e.g. 7d; 0d clears) — it says so "
-        "once when it resumes (SLP-2)",
+        "once when it resumes",
     )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--repo-root", default=None)

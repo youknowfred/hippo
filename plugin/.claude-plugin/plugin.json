@@ -1,7 +1,7 @@
 {
   "name": "hippo",
   "description": "Local, git-native memory for Claude Code — your repo is the store, recall is $0/prompt (no LLM, no network), staleness is git-drift (the cited code moved), and team memory ships through review.",
-  "version": "1.41.2",
+  "version": "1.42.0",
   "author": {
     "name": "youknowfred",
     "url": "https://youknowfred.com"
@@ -16,12 +16,49 @@
       "title": "Calm SessionStart",
       "description": "Open each session with a short digest (integrity warnings, where you left off, one next step, a count of queued maintenance) instead of the full report. HIPPO_ATTENTION=calm or full overrides it.",
       "default": false
+    },
+    "capture_llm": {
+      "type": "boolean",
+      "title": "LLM triage of captured sessions",
+      "description": "Opt in to one small-model call when a session ends, suggesting a type and description for its pending capture. Suggestions only; you still approve every memory. Needs the LLM API key below. HIPPO_CAPTURE_LLM overrides it.",
+      "default": false
+    },
+    "dream_contradictions": {
+      "type": "boolean",
+      "title": "LLM contradiction check in dream",
+      "description": "Opt in to a small-model check of strongly related memory pairs during a dream pass run through hippo's MCP tool; conflicts go to the resolve inbox, never applied. Needs the LLM API key below. HIPPO_DREAM_CONTRADICTIONS overrides it.",
+      "default": false
+    },
+    "dream_generative": {
+      "type": "boolean",
+      "title": "Dream drafts tier",
+      "description": "Let dream passes run through hippo's MCP tool stage draft schema memories (flagged, self-expiring, no LLM). HIPPO_DREAM_GENERATIVE overrides it.",
+      "default": false
+    },
+    "llm_model": {
+      "type": "string",
+      "title": "LLM model",
+      "description": "Model id for the opt-in LLM passes. Leave empty for hippo's default small model. HIPPO_LLM_MODEL overrides it."
+    },
+    "llm_api_key": {
+      "type": "string",
+      "title": "LLM API key",
+      "description": "Anthropic API key for the opt-in LLM passes, kept in your system keychain. It reaches hippo's hooks and MCP server only, never a shell command. HIPPO_LLM_API_KEY or ANTHROPIC_API_KEY override it.",
+      "sensitive": true
     }
   },
   "mcpServers": {
     "hippo": {
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/hippo",
-      "args": ["mcp"]
+      "args": ["mcp"],
+      "env": {
+        "CLAUDE_PLUGIN_OPTION_CALM_SESSION_START": "${user_config.calm_session_start}",
+        "CLAUDE_PLUGIN_OPTION_CAPTURE_LLM": "${user_config.capture_llm}",
+        "CLAUDE_PLUGIN_OPTION_DREAM_CONTRADICTIONS": "${user_config.dream_contradictions}",
+        "CLAUDE_PLUGIN_OPTION_DREAM_GENERATIVE": "${user_config.dream_generative}",
+        "CLAUDE_PLUGIN_OPTION_LLM_MODEL": "${user_config.llm_model}",
+        "CLAUDE_PLUGIN_OPTION_LLM_API_KEY": "${user_config.llm_api_key}"
+      }
     }
   }
 }

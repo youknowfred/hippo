@@ -16,7 +16,7 @@ _PACK_TOOLS = [
         "name": "pack_extract",
         "description": (
             "Extract chosen corpus memories into a shareable pack directory "
-            "(manifest.json in the shipped packs' exact shape) — /hippo:pack's outbound "
+            "(manifest.json in the shipped packs' exact shape) — /hippo:share's outbound "
             "path. Pass names=[…], or all=true to let the canonical corpus filter select "
             "every real, un-retired memory (NEVER glob the corpus dir yourself — docs "
             "like MEMORY.md/CONVENTIONS.md live there and are not memories; all-mode "
@@ -92,9 +92,9 @@ _PACK_TOOLS = [
             "findings refuse (foreign content never gets warn-only leniency); an "
             "existing <name>.md refuses (a same-name update routes through "
             "pack_update_item); a stamp rewrite that would touch anything beyond the "
-            "two pack keys refuses (COR-13 — a hippo bug, reported, never written). On "
+            "two pack keys refuses (a hippo bug, reported, never written). On "
             "install: pack-stamped, recorded in the committed .packs.lock.json "
-            "(source/version + the future three-way base), folded into the SEC-6 "
+            "(source/version + the future three-way base), folded into the "
             "consent baseline (the per-item approval IS the review), index refreshed. "
             "Commit the new memory + the lockfile together."
         ),
@@ -126,7 +126,7 @@ _PACK_TOOLS = [
             "pack_update_item; conflict refuses until a human resolves; local-only / "
             "unchanged need nothing; removed-upstream / missing-local are report-only "
             "(update never deletes your file, never resurrects one you removed); "
-            "stamp-refused names a hippo stamp-writer bug (COR-13) — report it, skip "
+            "stamp-refused names a hippo stamp-writer bug — report it, skip "
             "the item. new_upstream additions route through the install flow. Walk the "
             "states WITH the user before applying anything."
         ),
@@ -150,7 +150,7 @@ _PACK_TOOLS = [
             "hand-merge; report-only states refuse with the state named. The new text "
             "is secret-linted (refuses on findings — the same hard gate as install), "
             "the lockfile base advances to the new upstream text so the next update "
-            "merges from the right ancestor, the SEC-6 baseline absorbs the bytes, and "
+            "merges from the right ancestor, the baseline absorbs the bytes, and "
             "the index refreshes."
         ),
         "inputSchema": {

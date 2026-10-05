@@ -118,23 +118,16 @@ both **propose-only**, so the review gate above is untouched:
   judgment similarity math can't make. Confirmed candidates feed the `/hippo:resolve`
   inbox, where you render the verdict as usual. Nothing auto-applies.
 
-Turn either on in one machine-local file, `~/.claude/hippo-llm.json`:
-
-```json
-{
-  "capture_triage": true,
-  "dream_contradictions": true,
-  "api_key": "sk-ant-…"
-}
-```
-
-The key can live in that file (as above) or in your `ANTHROPIC_API_KEY` environment variable —
-but on the Claude **Desktop** app the env var often doesn't reach the background capture hook, so
-the `api_key` field is the reliable route there. Defaults to the `claude-haiku-4-5` alias (a heavy
-month of captures costs on the order of a dollar); `"model": "claude-sonnet-5"` upgrades the
-judgment at ~3× the (still tiny) per-call cost. Any failure — no key, no network, a malformed
-reply — falls back to exactly the un-enriched behavior. The file is machine-local (`~/.claude/`,
-never in the repo). Full knob reference:
+Turn either on in hippo's plugin options: Claude Code asks for them when you enable the
+plugin, and lists the switches in `/config` — **LLM triage of captured sessions** and **LLM
+contradiction check in dream**. Set the **LLM API key** option too (from hippo's entry in
+`/plugin`): it is masked and kept in your system keychain, never in a file. The key reaches
+hippo's hooks and its MCP server and never a shell command, so the contradiction check runs
+through hippo's MCP `dream` tool. An `ANTHROPIC_API_KEY` in your environment overrides the
+option. Defaults to the `claude-haiku-4-5` alias (a heavy month of captures costs on the order
+of a dollar); set the **LLM model** option to `claude-sonnet-5` to upgrade the judgment at ~3×
+the (still tiny) per-call cost. Any failure — no key, no network, a malformed reply — falls back
+to exactly the un-enriched behavior. Full knob reference:
 [`plugin/memory/README.md`](plugin/memory/README.md#standalone-llm-enrichment-opt-in-default-off).
 
 ## Compared to other memory tools
@@ -208,59 +201,55 @@ full map (with where each analogy ends) is in
 
 ## Commands
 
-hippo ships as 18 `/hippo:*` skills. You rarely invoke most of them by hand — the agent runs the
-maintenance ones when a session-start signal calls for it — but here is the whole surface, grouped
-by what it's for.
+hippo ships as 9 `/hippo:*` skills. You rarely invoke most of them by hand — the agent runs the
+maintenance ones when a session-start signal calls for it — but here is the whole surface. In a
+terminal the same engine is one command, `hippo <verb>` (`hippo help` lists the verbs).
 
 **Setup (you run these):**
-- `/hippo:bootstrap` — once per machine. Builds the plugin's venv and warms the offline embedding
-  model; the one online step in hippo's whole lifecycle.
-- `/hippo:init` — once per project (also safe on a teammate's clone or a second machine). Seeds
-  `.claude/memory/`, wires the native-memory symlink, builds the recall index. A linked `git
-  worktree` needs nothing: it resolves the main checkout's corpus (see below).
+- `/hippo:setup` — once per machine, builds the plugin's venv and warms the offline embedding
+  model (the one online step in hippo's whole lifecycle); once per project, seeds
+  `.claude/memory/`, wires the native-memory symlink and builds the recall index. Safe on a
+  teammate's clone or a second machine: an existing corpus is wired, never overwritten. A linked
+  `git worktree` needs nothing: it resolves the main checkout's corpus (see below).
 
 **Everyday:**
 - `/hippo:new` — save one memory the right way (correct frontmatter, provenance backfill, index
   refresh, floor pointer when applicable). This is what *"remember this: …"* routes to.
-- `/hippo:recall` — deliberately pull from the corpus: *"what do you remember about X"*, or list it
-  by type. (The prompt hook already recalls automatically every turn; this is for when you want to
-  *see* it.)
-- `/hippo:why` — the glass-box receipt: why hippo surfaced a memory for a query (winning backend,
-  typed edges, steering, salience) — or why it *didn't* (the near-miss score and the floor it missed).
+- `/hippo:recall` — deliberately pull from the corpus: *"what do you remember about X"*, list it
+  by type, or ask why a memory was (or wasn't) recalled — the winning ranking lane, typed edges,
+  steering, or the near-miss score and the floor it missed. (The prompt hook already recalls
+  automatically every turn; this is for when you want to *see* it.)
 
 **Curation & health:**
-- `/hippo:doctor` — fast check of the *plumbing*: bootstrapped, venv healthy, corpus symlinked +
-  indexed + trusted, format current.
-- `/hippo:audit` — deep, judgment-based review of the *content*: staleness, drift, orphans, archive
-  candidates.
-- `/hippo:consolidate` — the sleep-time drain: approve pending captures, work the reconsolidation
-  worklist, refresh the graph. Run it when a session-start nudge says the queue or worklist is deep.
-- `/hippo:dream` — the *generative* sleep-time pass: offline, it replays recall over each memory's
-  own self-query, watches which memories co-fire, and diffs that against the link graph to surface
-  latent edges (and, behind a default-off flag, draft schema/hypothesis memories). Report-first,
-  θ-gated, capped per pass, and soak-gated before anything it proposes can feed the next pass. The
-  empty pass is the designed norm, not a failure.
-- `/hippo:resolve` — drain the contradiction inbox: a per-item verdict on each unresolved
-  `contradicts` pair (keep one and supersede, scope both, merge, or mark not-conflicting).
+- `/hippo:tend` — the one maintenance queue: every kind of upkeep (captures, memories whose cited
+  code moved, contradictions, merged-in duplicates, broken baselines and links, floor overflow,
+  citation re-derivation, changes waiting for re-consent) in one ranked list, worked one verdict
+  at a time with your yes. `hippo tend` in a terminal; the `tend` MCP tool on Desktop.
+- `/hippo:doctor` — fast check of the *plumbing* (bootstrapped, venv healthy, corpus symlinked,
+  indexed and trusted, format current) plus the consent step; on request, a deep, judgment-based
+  audit of the *content* (staleness, drift, orphans, archive candidates).
+- `/hippo:dream` — the offline link pass: it replays recall over each memory's own self-query,
+  watches which memories co-fire, and diffs that against the link graph to surface latent edges.
+  Report-first, gated, capped per pass; the empty pass is the designed norm.
+- `/hippo:review` — review a memory diff like a pull request: what each touched memory's change
+  *is* (added, updated, superseded, archived, relinked), the lints on the touched files, and how
+  recall would shift.
 
 **Sharing & portability:**
-- `/hippo:promote` — lift one proven-portable memory into your machine-local user tier (or this
-  repo's private tier) with an origin stamp, so it recalls in every project.
-- `/hippo:promote-rule` — promote one reinforced procedural memory into a glob-scoped
-  `.claude/rules/` file the harness loads only for edits under the paths it cites.
-- `/hippo:pack` — share or adopt memory *packs*: extract chosen memories (or `all`) into a
-  portable pack, or install one (per-item, on the trust spine). On the Desktop app the same
-  flow runs through the `pack_*` MCP tools (`pack_extract`, `pack_install_plan`/`_item`,
-  `pack_update_plan`/`_item`).
-- `/hippo:export-agents` — render your memory floor as a proposed `AGENTS.md` diff for the
-  cross-tool rule plane (Codex/Cursor/Copilot all read `AGENTS.md`).
-- `/hippo:import` — migration on-ramp: import existing rules/notes from other tools (Cursor
-  `.cursor/rules/*.mdc` first) into ranked, deduped, secret-linted hippo memories.
+- `/hippo:share` — memory beyond this project, one item at a time: extract or install memory
+  *packs*; promote a proven-portable memory into your machine-local user tier; turn a procedural
+  memory into a glob-scoped `.claude/rules/` file; publish one memory into the repo's committed
+  subset; export the floor as a proposed `AGENTS.md` diff; import rules from other tools (Cursor
+  `.cursor/rules/*.mdc` first).
 
 **Offboarding:**
 - `/hippo:remove` — uninstall for this project: drop the symlink so native memory stops injecting
   the floor, offer to delete the derived index/telemetry, and report (never delete) the shared
   venv/cache.
+
+The v1 skill names (`bootstrap`, `init`, `why`, `consolidate`, `resolve`, `audit`, `pack`,
+`promote`, `promote-rule`, `publish`, `export-agents`, `import`) keep working until v2.0: each is
+now a one-line route into the verb above that absorbed it.
 
 **CI — memory for reviewers who don't run Claude:**
 - `hippo recall --for-diff <range> [--json]` — the reviewer's recall: joins a git diff's changed
@@ -276,16 +265,43 @@ by what it's for.
 **Which one do I want?**
 - **recall vs. doctor** — `recall` asks the *corpus* a question; `doctor` asks whether the *plugin*
   is healthy. Empty recall **and** a green doctor means you just haven't written that memory yet.
-- **doctor vs. audit** — `doctor` is fast plumbing (seconds, deterministic); `audit` is a slow,
-  judgment-based read of whether the content is still *accurate*. Doctor never tells you a memory
-  is out of date; audit does.
-- **consolidate vs. audit** — `consolidate` *drains and closes loops* (captures → memory, stale
-  worklist → verdicts, graph refresh); `audit` *diagnoses* content health but drains nothing.
-  Consolidate is routine sleep-time upkeep; audit is a periodic deep review.
-- **consolidate vs. dream** — both run *off* the hot path, but `consolidate` *drains* what you
-  already captured (pending queue → memory, stale worklist → verdicts); `dream` *discovers* what
-  wasn't captured — latent edges between existing memories — and proposes, never bulk-writes.
-  Reach for consolidate when the queue is deep; dream is a rare, mostly-silent surfacing pass.
+- **doctor vs. its content audit** — the checks are fast plumbing (seconds, deterministic); the
+  audit is a slow, judgment-based read of whether the content is still *accurate*. The checks
+  never tell you a memory is out of date; the audit does.
+- **tend vs. the audit** — `tend` *drains and closes loops* (captures → memory, stale memories →
+  verdicts, contradictions → decisions); the audit *diagnoses* content health but drains nothing.
+- **tend vs. dream** — both run *off* the hot path, but `tend` works what is already queued;
+  `dream` *discovers* what wasn't captured — latent links between existing memories.
+
+## Warm recall (opt-in)
+
+By default each prompt's recall runs in a fresh Python process: start the interpreter, load the
+index and the embedding model, rank, exit. That is a few hundred milliseconds per prompt, more on a
+busy machine. Warm recall hands the same work to the session's own hippo MCP server, which keeps
+the model loaded between prompts.
+
+```
+hippo setup --warm               # preview: the exact hook and the file it goes in; writes nothing
+hippo setup --warm --yes         # turn it on (the settings file is backed up first)
+hippo setup --warm --status      # is it on, and which path served recent prompts
+hippo setup --warm --off --yes   # turn it off again
+```
+
+**What it changes:** one `UserPromptSubmit` hook of type `mcp_tool` in your user settings
+(`~/.claude/settings.json`), pointing at hippo's server. Nothing else is touched, and users who
+don't opt in pay nothing. hippo's usual recall hook stays installed and decides, prompt by prompt,
+which of the two answers, so recall never runs twice. The usual path takes over whenever the server
+can't answer: the first prompt of some sessions, a session still running an older hippo after an
+update (restart it), a server busy with another tool, or a session whose served recall failed or
+ran slow.
+
+**What stays the same:** the ranking, filtering, budgets and trust checks are the same code. The
+server reads the index on disk and writes nothing to your corpus or index; it keeps a few small
+handshake files in the plugin's data directory.
+
+**Cost:** no money and no network, as before. Each session's server holds the embedding model in
+memory once it has served a prompt. `/hippo:doctor` shows whether warm recall is on and how many
+prompts in the last 30 days were served warm, by the usual path, or failed.
 
 ## Removal / Uninstall
 
@@ -305,6 +321,28 @@ paths, since those are shared across every project using the plugin on this mach
 `.claude/memory/` itself — the git-tracked corpus — is always left alone: it stays committed in
 git, inert, until someone runs `/hippo:init` again (in this repo, a fresh clone, or a new
 worktree).
+
+## Settings (moved in v1.42)
+
+hippo's settings now live in three places, and the first one that answers wins:
+
+1. **An environment variable** — a per-shell or CI override.
+2. **hippo's plugin options** — your machine's settings: the calm SessionStart switch, the
+   LLM opt-ins, the LLM model, and the LLM API key (kept in your system keychain).
+3. **`.claude/memory/hippo.json`** — the corpus's committed policy, shared with your team:
+   `volatile_paths`, `floor_lint`, `fold_digests`, `attention` (`"calm"` or `"full"`) and
+   `mute` (SessionStart signals to hide).
+
+The environment variables you might still set are the directory overrides,
+`HIPPO_DISABLE=<list>` (any of `dense`, `jit`, `presence`, `floor-nag`, `abstain-gate`,
+`touch-fastpath`), `HIPPO_TRUST_ALL` and `HIPPO_TRUST_NONGIT`.
+
+The old spellings keep working through v1.43 and stop at v2.0: `HIPPO_DISABLE_DENSE` and its
+five siblings (now `HIPPO_DISABLE=dense`, …), `DREAM_CONTRA_MAX_PAIRS` and
+`DREAM_CONTRA_MIN_COFIRE` (now with a `HIPPO_` prefix), the policy keys in
+`.claude/memory/.format` (move them to `hippo.json`; the format number stays in `.format`), and
+`~/.claude/hippo-llm.json` (move its settings to the plugin options, and its key out of the
+plain-text file). `/hippo:doctor` lists every old name it sees with its new spelling.
 
 ## Support matrix
 
@@ -387,9 +425,9 @@ plugin/
 │   └── _vendor/                  # pre-bootstrap fallbacks (BM25 + frontmatter parser)
 ├── hooks/                        # UserPromptSubmit recall + SessionStart dispatcher + PreCompact nudge + SessionEnd/SubagentStop capture
 ├── assets/packs/                 # starter packs (core seeded by default; rest opt-in)
-├── bin/hippo                     # CLI launcher for the stateless engine commands
+├── bin/hippo                     # `hippo <verb>`: the one entry into the engine
 ├── requirements.txt              # fastembed, numpy, PyYAML, rank-bm25 (the venv path)
-└── skills/                       # 18 /hippo:* commands (see the Commands section above)
+└── skills/                       # 9 /hippo:* verbs (+ 12 v1 names routing to them) (see the Commands section above)
 tests/                            # hermetic test suite (no network/model download by default)
 .github/workflows/ci.yml          # hermetic matrix + dense/secret-scan/resolution lanes + shellcheck
 ```
@@ -459,7 +497,7 @@ sessions, permanently dismissable) instead of staying silent.
   coincidental word with a memory abstains. The gate needs the dense model, so on a BM25-only
   install (`/hippo:bootstrap` not run, or the model cache cold) any shared token still admits.
   Ask `/hippo:why` about the prompt to see which memory matched and why;
-  `HIPPO_DISABLE_ABSTAIN_GATE=1` turns the gate off. `/hippo:doctor` reports the measured
+  `HIPPO_DISABLE=abstain-gate` turns the gate off. `/hippo:doctor` reports the measured
   per-corpus rate when you supply an off-topic fixture.
 - **I'm in a git worktree and doctor / recall / capture seem to be looking at the wrong corpus.**
   They aren't, since v1.34.0: a linked worktree resolves the main checkout's live corpus, and

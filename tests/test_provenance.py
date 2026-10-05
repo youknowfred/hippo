@@ -428,7 +428,7 @@ def test_reverify_requires_backfill_first(repo, memory_dir):
     git_commit(repo, "init", 1_700_000_000)
     write_file(repo, ".claude/memory/m.md", "---\nname: M\ntype: project\n---\nbody\n")
     res = _reverify_one(memory_dir, repo, "m")
-    assert res["changed"] is False and res["error"] and "backfill" in res["error"]
+    assert res["changed"] is False and res["error"] and "hippo provenance --refresh-one" in res["error"]
 
 
 def test_no_bulk_reverify_symbol():
@@ -2112,10 +2112,10 @@ def test_rederive_preserves_the_staleness_baseline_unlike_reverify(repo, memory_
 def test_rederive_folds_the_reviewed_bytes_so_the_migration_does_not_quarantine(
     repo, memory_dir, monkeypatch
 ):
-    """AC (MIG-1), half two. --refresh re-derives correctly and never folds (correctly — it
-    is a bulk pass, and trust forbids self-consent), so it would leave every memory it fixed
-    withheld by recall, under a banner blaming the user for hippo's write. The per-item verb
-    folds, because a human just reviewed THIS file's diff."""
+    """AC (MIG-1), half two. --refresh is a bulk pass and never folds new consent (trust
+    forbids self-consent; since TND-6 it only carries consent forward for files whose
+    consented bytes it read). The per-item verb folds, because a human just reviewed THIS
+    file's diff."""
     from memory import trust as T
 
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)

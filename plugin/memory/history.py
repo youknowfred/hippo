@@ -152,7 +152,7 @@ def render_decision_history(
         return (
             f"decision history for '{chain['seed']}': no supersedes/refines edges touch "
             "it — there is no authored lineage to replay (typed edges are written at "
-            "supersede/refine time; see /hippo:new and /hippo:resolve)."
+            "supersede/refine time; see /hippo:new and /hippo:tend)."
         )
 
     by_declarer: dict = {}

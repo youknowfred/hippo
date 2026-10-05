@@ -442,12 +442,12 @@ def run_ab(
         ]
         skipped = [
             ("precision@10", "no relevance fixture for the synthetic corpus — tracked on the real eval spine"),
-            ("net_token", "edges ADD injection cost by design; no token-saving claim (EXPLORATIONS §6 honest limits — the token win belongs to DRM-6's schema tier)"),
+            ("net_token", "edges ADD injection cost by design; no token-saving claim (EXPLORATIONS §6 honest limits — the token win belongs to the schema tier)"),
         ]
         all_pass = all(ok for _n, ok, _d in gates)
 
         # ---- render. --------------------------------------------------------------------
-        lines.append("=== eval --ab HIPPO_DREAM — /dream snapshot-diff A/B (DRM-3) ===")
+        lines.append("=== eval --ab HIPPO_DREAM — /dream snapshot-diff A/B ===")
         lines.append(
             f"fixture: {s0} (frozen; harness worked on a copy) · dream applied "
             f"{len(applied)} edge(s) on the copy · backend {off_report.get('backend')}"
@@ -559,7 +559,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     ap = argparse.ArgumentParser(
         prog="memory.dream_eval",
-        description="DRM-3: the /dream HIPPO_DREAM snapshot-diff A/B (measure-only).",
+        description="the /dream HIPPO_DREAM snapshot-diff A/B (measure-only).",
     )
     ap.add_argument("--fixture-dir", default=None, help="dir holding S0/ + hard_set.yaml + pinned_off.json")
     ap.add_argument("--pin", action="store_true", help="(re)write the pre-dream OFF baseline from the pristine fixture")

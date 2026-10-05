@@ -44,6 +44,16 @@ Design contract (every caller depends on it):
     The feature modules (``capture_triage``, ``dream``) read their keys through
     ``file_setting()`` here so the whole LLM surface has one config home. Adding a
     provider = one function + one ``_PROVIDERS`` entry; no caller changes.
+
+SRF-4 moved the machine settings to the plugin's ``userConfig`` options: ``capture_llm``,
+``dream_contradictions``, ``dream_generative``, ``llm_model`` and the ``sensitive``
+``llm_api_key`` (kept in the OS keychain by Claude Code). Hooks receive them as
+``CLAUDE_PLUGIN_OPTION_<KEY>``; the MCP server receives the same names through
+``plugin.json``'s ``${user_config.<key>}`` env wiring (``settings.plugin_option``). The
+precedence per key is now env var > plugin option > the file above > shipped default, and
+the file stays a LEGACY read through v1.43 — doctor names a plaintext key in it. A process
+the Bash tool runs gets no plugin option at all (PLATFORM.md §4), so an LLM call meant to
+use the keychain key has to run in a hook or the MCP server.
 """
 
 from __future__ import annotations
@@ -65,7 +75,6 @@ _ANTHROPIC_VERSION = "2023-06-01"
 _MAX_RESPONSE_BYTES = 1_000_000
 _DEFAULT_MAX_TOKENS = 512
 
-_CONFIG_FILENAME = "hippo-llm.json"
 # The closed truthy set every hippo opt-in flag parses — shared here so the config file's
 # tolerated string forms ("1", "true") mean exactly what the env vars mean.
 TRUTHY = ("1", "true", "True")
@@ -76,11 +85,11 @@ def config_path() -> str:
 
     The ``hippo-trust.json`` / ``hippo-projects.json`` machine-local dotfile convention:
     one JSON file per machine-scoped concern, relocatable by env var for hermetic tests.
+    One resolver with ``settings.llm_config_path`` (doctor's legacy-name check).
     """
-    override = (os.environ.get("HIPPO_LLM_CONFIG") or "").strip()
-    if override:
-        return override
-    return os.path.join(os.path.expanduser("~"), ".claude", _CONFIG_FILENAME)
+    from .settings import llm_config_path
+
+    return llm_config_path()
 
 
 def file_config() -> dict:
@@ -120,11 +129,25 @@ def provider_name() -> str:
     return DEFAULT_PROVIDER
 
 
+def _option(key: str) -> Optional[str]:
+    """A plugin option (SRF-4 ``userConfig``), or ``None`` when unset. Never raises."""
+    try:
+        from .settings import plugin_option
+
+        return plugin_option(key)
+    except Exception:
+        return None
+
+
 def model_name() -> str:
-    """Model id — env ``HIPPO_LLM_MODEL`` > config ``model`` > the shipped alias."""
+    """Model id — env ``HIPPO_LLM_MODEL`` > the ``llm_model`` plugin option > config
+    ``model`` > the shipped alias."""
     env = (os.environ.get("HIPPO_LLM_MODEL") or "").strip()
     if env:
         return env
+    opt = _option("llm_model")
+    if opt:
+        return opt
     cfg = file_setting("model")
     if isinstance(cfg, str) and cfg.strip():
         return cfg.strip()
@@ -143,16 +166,21 @@ def _base_url() -> str:
 
 
 def _api_key() -> Optional[str]:
-    """The key to send: ``HIPPO_LLM_API_KEY`` > ``ANTHROPIC_API_KEY`` > config ``api_key``.
+    """The key to send: ``HIPPO_LLM_API_KEY`` > ``ANTHROPIC_API_KEY`` > the ``llm_api_key``
+    plugin option > config ``api_key``.
 
-    Both env vars outrank the file so a shell/CI key always wins; the file slot exists for
-    a machine that keeps a hippo-scoped key out of every shell profile. (A dotfile key is
-    a convenience, not a vault — same posture as the conventional ``~/.netrc``.)
+    Both env vars outrank the rest so a shell/CI key always wins. The plugin option is the
+    v1.42 home (``sensitive``: Claude Code keeps it in the OS keychain and hands it to
+    hooks and the MCP server only). The file slot is the legacy plaintext home, read
+    through v1.43 — a dotfile key is a convenience, not a vault.
     """
     for var in ("HIPPO_LLM_API_KEY", "ANTHROPIC_API_KEY"):
         key = (os.environ.get(var) or "").strip()
         if key:
             return key
+    opt = _option("llm_api_key")
+    if opt:
+        return opt
     cfg = file_setting("api_key")
     if isinstance(cfg, str) and cfg.strip():
         return cfg.strip()

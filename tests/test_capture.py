@@ -11,6 +11,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
+import time
 
 import pytest
 
@@ -311,7 +312,7 @@ def test_pending_producer_surfaces_queue(repo):
     _seed_episode(md, repo, "s1", ["a"], "q1")
     C.write_session_capture("s1", memory_dir=md, repo_root=repo)
     out = SS.pending_capture_producer(md, repo)
-    assert out and "/hippo:consolidate" in out and "1 pending" in out
+    assert out and "/hippo:tend" in out and "1 pending" in out
 
 
 # --------------------------------------------------------------------------- #
@@ -638,7 +639,7 @@ def test_wired_hooks_discard_stderr_and_force_exit_zero():
     for name in ("memory_session_end.sh", "memory_subagent_stop.sh"):
         with open(os.path.join(hooks_dir, name), encoding="utf-8") as fh:
             src = fh.read()
-        line = next(l for l in src.splitlines() if "-m memory.capture --from-hook" in l)
+        line = next(l for l in src.splitlines() if "bin/hippo\" capture --from-hook" in l)
         assert "2>/dev/null" in line, f"{name}: the capture invocation must discard stderr"
         assert "|| true" in line, f"{name}: the capture invocation must force exit 0"
 
@@ -742,10 +743,12 @@ def test_capture_write_self_prunes_to_the_bound(repo, monkeypatch):
     os.makedirs(md)
     git_commit(repo, "init", 1_700_000_000)
     pd = C.default_pending_dir(md)
-    # Fill the queue up to a tiny bound with pre-existing trivial seeds…
+    # Fill the queue up to a tiny bound with pre-existing trivial seeds (recent ones — a
+    # seed older than the expiry age would leave by age, not by the cap)…
     monkeypatch.setattr(C, "_MAX_PENDING_SEEDS", 2)
-    _write_raw_seed(pd, "old1", score=0, captured_at=1.0)
-    _write_raw_seed(pd, "old2", score=0, captured_at=2.0)
+    now = time.time()
+    _write_raw_seed(pd, "old1", score=0, captured_at=now - 20)
+    _write_raw_seed(pd, "old2", score=0, captured_at=now - 10)
     # …then a real capture pushes past the bound and self-prunes on write.
     _seed_episode(md, repo, "fresh", ["m"], "q")
     path = C.write_session_capture("fresh", memory_dir=md, repo_root=repo)
@@ -753,6 +756,8 @@ def test_capture_write_self_prunes_to_the_bound(repo, monkeypatch):
     assert C.pending_count(memory_dir=md) == 2, "write must self-bound the queue (CAP-6)"
     # The just-written seed is the newest, so it always survives its own prune.
     assert os.path.exists(path), "a fresh capture must never prune itself away"
+    # TND-5: the overflow moved to expired/, it was not deleted.
+    assert C.expired_count(memory_dir=md) == 1
 
 
 def test_queue_snooze_silences_the_nudge_then_re_nags(repo):

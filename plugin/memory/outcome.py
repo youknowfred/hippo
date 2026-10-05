@@ -436,7 +436,7 @@ def format_touch_grain_report(memory_dir: str, telemetry_dir: Optional[str] = No
         t_hits = sum(r["hits"] for r in touch.values())
         only_session = sorted(set(session) - set(touch))
         lines = [
-            "injection_hits by grain (JIT-2, report-only — session grain stays the default):",
+            "injection_hits by grain (report-only — session grain stays the default):",
             f"  session grain: {len(session)} memories / {s_hits} hit-session(s) — injected AND a cited file touched that session",
             f"  touch grain:   {len(touch)} memories / {t_hits} hit-session(s) — only recorded (memory, file, touch) coincidences",
         ]
@@ -510,7 +510,7 @@ def format_lane_health(memory_dir: str, telemetry_dir: Optional[str] = None) -> 
             if len(tail) == 2 and tail[1] in cited_map:
                 mappable += 1
         lines = [
-            "touch-grain lane health (EVD-2 — diagnosis, not trend; report-only):",
+            "touch-grain lane health (diagnosis, not trend; report-only):",
             f"  outcome rows: {total} across {sessions} session(s); {with_cb} carry cited_by touch provenance",
             f"  touchmap: {len(cited_map)} cited path(s) / {len(reminders_map)} reminder path(s)",
         ]
@@ -530,14 +530,14 @@ def format_lane_health(memory_dir: str, telemetry_dir: Optional[str] = None) -> 
             )
             lines.append(
                 f"  rows by producing version (running v{running}): {buckets} — provenance "
-                "only (MEA-4); rows stamped by an older version date the lagged-hook window "
+                "only; rows stamped by an older version date the lagged-hook window "
                 "from the ledger itself"
             )
         if total:
             share = 100.0 * len(wt_paths) / total
             lines.append(
                 f"  worktree-prefixed rows: {len(wt_paths)} of {total} ({share:.0f}%) — "
-                f"{stamped} carry tree_path (normalized at record time, MEA-6 — these join "
+                f"{stamped} carry tree_path (normalized at record time, — these join "
                 f"the touch-grain evidence directly); {mappable} historical row(s) would map "
                 "if prefix-stripped (recorded before normalization; left untouched)"
             )
@@ -550,7 +550,7 @@ def format_lane_health(memory_dir: str, telemetry_dir: Optional[str] = None) -> 
         if wt_paths and not stamped:
             lines.append(
                 "  diagnosis: worktree-prefixed touches starved the touch-grain joins — these "
-                "rows predate MEA-6's record-time normalization (new worktree touches carry "
+                "rows predate the record-time normalization (new worktree touches carry "
                 "tree_path and join directly); historical rows stay untouched"
             )
         lines.append("")
@@ -565,29 +565,29 @@ def format_report(memory_dir: str, telemetry_dir: Optional[str] = None) -> str:
     r = injection_precision(memory_dir, telemetry_dir)
     n = r.get("injected_with_cites", 0)
     if not n:
-        return "injection precision (KPI-2): no injected-then-touched signal yet."
+        return "injection precision: no injected-then-touched signal yet."
     pct = (r["precision"] or 0) * 100
     return (
-        f"injection precision (KPI-2) ~ {pct:.0f}% — {r['hits']}/{n} injected memories had a "
+        f"injection precision ~ {pct:.0f}% — {r['hits']}/{n} injected memories had a "
         f"cited file touched in-session across {r['sessions']} session(s). Measurement only."
     )
 
 
 def main(argv: Optional[list] = None) -> int:
     parser = argparse.ArgumentParser(
-        description="SIG-4 PostToolUse read-signal (KPI-2). --from-hook logs one file-touch "
+        description="PostToolUse read-signal. --from-hook logs one file-touch "
         "outcome from the PostToolUse stdin payload; otherwise prints the injection-precision "
         "proxy over the ledger. Measurement only — never influences ranking."
     )
     parser.add_argument(
         "--from-hook", action="store_true", help="read the PostToolUse JSON payload from stdin and log it"
     )
-    parser.add_argument("--report", action="store_true", help="print the KPI-2 injection-precision proxy")
+    parser.add_argument("--report", action="store_true", help="print the injection-precision proxy")
     parser.add_argument(
         "--touch-grain",
         action="store_true",
         help="print the touch-grain lane health/diagnosis + the touch-vs-session grain "
-        "comparison (JIT-2/EVD-2; report-only — explains the lane's zeros, changes nothing)",
+        "comparison (; report-only — explains the lane's zeros, changes nothing)",
     )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--repo-root", default=None)

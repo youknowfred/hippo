@@ -569,30 +569,56 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--components",
         action="store_true",
-        help="GRA-8: list weakly-connected components (fragmentation of the memory graph)",
+        help="list weakly-connected components (fragmentation of the memory graph)",
     )
     parser.add_argument(
         "--degree",
         action="store_true",
-        help="GRA-8: per-memory in/out/total degree, most-connected first",
+        help="per-memory in/out/total degree, most-connected first",
     )
     parser.add_argument(
         "--export",
         choices=["json", "dot", "mermaid"],
         default=None,
-        help="GRA-8: serialize the whole graph (json | Graphviz dot | mermaid)",
+        help="serialize the whole graph (json | Graphviz dot | mermaid)",
     )
     parser.add_argument(
         "--audit",
         action="store_true",
-        help="GRF-1: the one-call graph audit — edge classes, structure stats, "
+        help="the one-call graph audit — edge classes, structure stats, "
         "edge_origin tags, edge rot (archived/superseded/dangling targets), and the "
-        "GRF-6 planned forward-reference and GRF-7 folded classes",
+        "planned forward-reference and folded classes",
+    )
+    parser.add_argument(
+        "--merge-related",
+        default=None,
+        metavar="NAME",
+        help="merge ONE memory's several Related lines into one (union of their links, "
+        "order kept); `hippo lint-links` lists the memories that have more than one",
     )
     args = parser.parse_args(argv)
 
     md, _ = resolve_dirs()
     md = args.memory_dir or md
+    if args.merge_related:
+        from .related_lines import fix_duplicate_related
+
+        name = args.merge_related[:-3] if args.merge_related.endswith(".md") else args.merge_related
+        path = os.path.join(md, f"{name}.md")
+        if os.path.basename(name) != name or not os.path.isfile(path):
+            print(f"no memory named {args.merge_related!r} in {md}")
+            return 1
+        res = fix_duplicate_related(path, memory_dir=md)
+        if res["error"]:
+            print(f"not merged: {name} — {res['error']}")
+            return 1
+        print(
+            f"merged {name}'s Related lines into one" if res["fixed"]
+            else f"nothing to merge: {name} has at most one Related line"
+        )
+        if res.get("note"):
+            print(res["note"])
+        return 0
     g = build_graph(md)
     if g is None:
         print("could not build link graph")
@@ -628,14 +654,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"  {r['tier']:<10} {r['src']} -> {r['target']} (via {r['via']})")
         planned = report.get("planned") or []
         if planned:
-            print(f"planned forward refs ({len(planned)}) — declared deliberate (GRF-6), NOT rot:")
+            print(f"planned forward refs ({len(planned)}) — declared deliberate, NOT rot:")
             for r in planned:
                 print(f"  {'planned':<10} {r['src']} -> {r['target']} (via {r['via']})")
         folded = report.get("folded") or []
         if folded:
             print(
                 f"folded links ({len(folded)}) — target folded into a declared digest "
-                "(GRF-7, .format fold_digests), NOT rot:"
+                "(.format fold_digests), NOT rot:"
             )
             for r in folded:
                 print(f"  {'folded':<10} {r['src']} -> {r['target']} (in {r['digest']})")

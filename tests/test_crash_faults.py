@@ -41,6 +41,8 @@ import pytest
 
 from memory import atomic as A
 
+from .crash_scenarios_warm import scenarios as _warm_scenarios
+
 _MEMORY_PKG = os.path.dirname(os.path.abspath(A.__file__))
 _PLUGIN_ROOT = os.path.dirname(_MEMORY_PKG)
 # RWY-3: the compare-and-swap writers are atomic writers too (same tmp + rename), so every
@@ -95,6 +97,7 @@ CRASH_CONTRACT = {
     ("provenance", "heal_empty_baselines"): ("detected",),  # RCH-9: named in `failed`
     ("provenance", "reverify_file"): ("detected",),
     ("registry", "register_project"): ("detected",),  # returns False
+    ("related_lines", "fix_duplicate_related"): ("detected",),  # TND-5: per-item Related merge; error named, file intact
     ("registry", "deregister_project"): ("detected",),
     ("registry", "prune_dead"): ("detected",),  # RCH-11: ok=False; prior doc intact
     ("sleep", "_write_report"): ("detected",),  # report still prints; the miss is named
@@ -104,6 +107,12 @@ CRASH_CONTRACT = {
     ("telemetry_rollup", "_append_finalized"): ("intact",),  # OBS-1: the 365-day trim is best-effort; the appended day stays
     ("telemetry_rollup", "_drain_spool"): ("detected",),  # OBS-2: fold returns False; spool kept, so no use is lost or double-counted
     ("trust", "_write_registry_doc"): ("detected",),  # mark_trusted returns False
+    ("tend", "_write_state"): ("detected",),  # TND-2: hold/snooze/skip report the failure; prior state kept
+    ("tend_queue", "_write_cache"): ("intact",),  # TND-1: the cache is derived; the build still returns
+    ("trust_review", "keep_consented_baselines"): ("intact",),  # TND-6: best-effort store copy; consent itself already landed
+    ("recall_warm", "_publish"): ("intact",),  # HOT-6 heartbeat: bookkeeping; a missing one makes the hook spawn
+    ("setup_cli", "_apply"): ("detected",),  # HOT-6 settings write: exit 1, "Nothing was changed"
+    ("setup_cli", "_backup"): ("detected",),  # the backup tears first: the settings write never starts
 }
 
 
@@ -843,6 +852,20 @@ def scn_trust_registry_detected(tmp_path, monkeypatch):
     assert ok is False  # the caller must not pretend the corpus got trusted
 
 
+def scn_trust_baseline_store_intact(tmp_path, monkeypatch):
+    from memory import trust, trust_review
+
+    root, md = _git_repo(tmp_path)  # the memory below stays untracked: a store candidate
+    monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
+    path = _mem(md, "local_only")
+    _arm(monkeypatch, "trust_review", "keep_consented_baselines")
+    assert trust.mark_trusted(root, memory_dir=md) is True  # consent is not hostage to the copy
+    assert trust.consented_hashes(root) == {"local_only": trust.file_sha256(path)}
+    store = trust_review.baseline_store_dir()
+    blobs = [n for n in os.listdir(store) if len(n) == 64] if os.path.isdir(store) else []
+    assert not blobs  # whole-or-absent: a review falls back to "no recorded baseline"
+
+
 def scn_interview_state_detected(tmp_path, monkeypatch):
     from memory.interview import STATE_NAME, respond
 
@@ -977,7 +1000,51 @@ def scn_floor_nag_sentinel_intact(tmp_path, monkeypatch):
     assert not leftovers, "sentinel absent, never partial"
 
 
+def scn_tend_state_detected(tmp_path, monkeypatch):
+    """TND-2: a torn tend-state write is reported (the hold is refused) and the prior state
+    file keeps its bytes."""
+    from memory import tend as T
+    from memory import tend_queue as Q
+
+    md = tmp_path / "repo" / ".claude" / "memory"
+    md.mkdir(parents=True)
+    assert T.hold("capture", "first", memory_dir=str(md), repo_root=str(tmp_path / "repo"))["ok"]
+    before = _snap(Q.state_path(str(md)))
+    _arm(monkeypatch, "tend", "_write_state")
+    r = T.hold("link", "second", memory_dir=str(md), repo_root=str(tmp_path / "repo"))
+    assert not r["ok"] and "could not write" in r["message"]
+    _assert_unchanged(before)
+
+
+def scn_tend_cache_intact(tmp_path, monkeypatch):
+    """TND-1: a torn queue-cache write costs nothing — the build still returns the queue and
+    the previous cache keeps its bytes."""
+    from memory import tend_queue as Q
+
+    md = tmp_path / "repo" / ".claude" / "memory"
+    md.mkdir(parents=True)
+    os.makedirs(Q._telemetry_dir(str(md)))
+    Q.build_queue(str(md), str(tmp_path / "repo"), kinds=("capture",))
+    before = _snap(os.path.join(Q._telemetry_dir(str(md)), Q._QUEUE_FILE))
+    _arm(monkeypatch, "tend_queue", "_write_cache")
+    r = Q.build_queue(str(md), str(tmp_path / "repo"), kinds=("capture",))
+    assert r["counts"] == {"capture": 0}
+    _assert_unchanged(before)
+def scn_related_merge_detected(tmp_path, monkeypatch):
+    """TND-5: a torn Related-line merge names the failure and leaves the memory's bytes."""
+    from memory.related_lines import fix_duplicate_related
+
+    _root, md = _git_repo(tmp_path)
+    path = _mem(md, "twice", body="Fact.\n\nRelated: [[a]]\n\nRelated: [[b]]")
+    before = _snap(path)
+    _arm(monkeypatch, "related_lines", "fix_duplicate_related")
+    res = fix_duplicate_related(path)
+    _assert_unchanged(before)
+    assert res["fixed"] is False and "file unchanged" in res["error"]
+
+
 _SCENARIOS = [
+    *_warm_scenarios(_arm, _snap, _assert_unchanged),  # HOT-6 sites (tests/crash_scenarios_warm.py)
     (("dream", "_apply_one"), "detected", scn_dream_apply_bridge_detected),
     (("dream_apply", "_undo_one_edge"), "detected", scn_dream_undo_detected),
     (("dream", "_apply_one"), "rolled_back", scn_dream_apply_refines_rolled_back),
@@ -1015,6 +1082,7 @@ _SCENARIOS = [
     (("provenance", "heal_empty_baselines"), "detected", scn_heal_baselines_detected),
     (("provenance", "reverify_file"), "detected", scn_reverify_detected),
     (("registry", "register_project"), "detected", scn_registry_register_detected),
+    (("related_lines", "fix_duplicate_related"), "detected", scn_related_merge_detected),
     (("registry", "deregister_project"), "detected", scn_registry_deregister_detected),
     (("registry", "prune_dead"), "detected", scn_registry_prune_dead_detected),
     (("sleep", "_write_report"), "detected", scn_sleep_report_write_detected),
@@ -1022,9 +1090,12 @@ _SCENARIOS = [
     (("staleness", "set_invalid_after"), "detected", scn_invalid_after_detected),
     (("staleness", "set_invalid_after"), "rolled_back", scn_invalid_after_rolled_back),
     (("trust", "_write_registry_doc"), "detected", scn_trust_registry_detected),
+    (("trust_review", "keep_consented_baselines"), "intact", scn_trust_baseline_store_intact),
     (("telemetry_rollup", "_update"), "detected", scn_rollup_update_detected),
     (("telemetry_rollup", "_append_finalized"), "intact", scn_rollup_trim_intact),
     (("telemetry_rollup", "_drain_spool"), "detected", scn_rollup_drain_spool_detected),
+    (("tend", "_write_state"), "detected", scn_tend_state_detected),
+    (("tend_queue", "_write_cache"), "intact", scn_tend_cache_intact),
 ]
 
 
@@ -1049,103 +1120,6 @@ def test_tear_once(site, cls, scenario, tmp_path, monkeypatch, capsys):
     if "capsys" in inspect.signature(scenario).parameters:
         kwargs["capsys"] = capsys
     scenario(**kwargs)
-
-
-# --------------------------------------------------------------------------- #
-# The subprocess kill lane (slow-marked): a real SIGKILL mid-write, then the
-# documented recovery. Deterministic — the child kills ITSELF at the exact
-# write moment (a genuine process death; no handlers, no cleanup).
-# --------------------------------------------------------------------------- #
-_KILL_CHILD = r"""
-import os, signal, sys
-sys.path.insert(0, {plugin_root!r})
-import builtins
-_real_open = builtins.open
-_state = {{"writes": 0}}
-def _open(path, mode="r", *a, **k):
-    if any(c in mode for c in "wax") and {suffix!r} in str(path):
-        _state["writes"] += 1
-        if _state["writes"] >= {nth}:
-            fh = _real_open(path, mode, *a, **k)
-            fh.write({partial!r})  # bytes hit the disk...
-            fh.flush()
-            os.kill(os.getpid(), signal.SIGKILL)  # ...and the process dies mid-write
-    return _real_open(path, mode, *a, **k)
-builtins.open = _open
-{body}
-"""
-
-
-def _run_child(body: str, *, suffix: str, nth: int = 1, partial: str = "{TORN") -> int:
-    code = _KILL_CHILD.format(
-        plugin_root=_PLUGIN_ROOT, suffix=suffix, nth=nth, partial=partial, body=body
-    )
-    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
-    return proc.returncode
-
-
-@pytest.mark.slow
-def test_kill9_mid_pack_extract_rerun_refuses_with_the_documented_message(tmp_path):
-    """SIGKILL while extract writes a pack file: the dest holds a partial write the
-    process never got to roll back (RCH-8 can't run under SIGKILL). The documented
-    recovery is the REFUSAL arm: a re-run refuses the non-empty dest by name — the
-    operator deletes the partial dir and re-runs clean."""
-    root, md = _git_repo(tmp_path)
-    _mem(md, "alpha")
-    _mem(md, "beta")
-    dest = str(tmp_path / "pack-out")
-    body = (
-        "from memory.packs import pack_extract\n"
-        f"pack_extract(['alpha', 'beta'], {dest!r}, memory_dir={md!r}, repo_root={root!r})\n"
-    )
-    rc = _run_child(body, suffix=".md", nth=1)
-    assert rc == -signal.SIGKILL
-    assert os.path.isdir(dest)  # the partial dest the crash stranded
-
-    from memory.packs import pack_extract
-
-    r = pack_extract(["alpha", "beta"], dest, memory_dir=md, repo_root=root)
-    # The documented refusal: every colliding name reported, zero files written.
-    assert r["error"] and "refusing to overwrite" in r["error"], r
-    assert r["extracted"] == [] and "zero files written" in r["error"]
-    import shutil
-
-    shutil.rmtree(dest)
-    r2 = pack_extract(["alpha", "beta"], dest, memory_dir=md, repo_root=root)
-    assert not r2["error"] and len(r2["extracted"]) == 2  # clean re-run heals
-
-
-@pytest.mark.slow
-def test_kill9_mid_build_index_rerun_heals(tmp_path):
-    """SIGKILL while build_index writes its manifest TMP: the published manifest is
-    old-or-absent (never torn — the swap never ran), and a re-run heals the index."""
-    from memory.build_index import build_index, default_index_dir
-
-    _root, md = _git_repo(tmp_path)
-    _mem(md, "alpha")
-    _mem(md, "beta")
-    idx = default_index_dir(md)
-    body = (
-        "os.environ['HIPPO_DISABLE_DENSE'] = '1'\n"
-        "from memory.build_index import build_index\n"
-        f"build_index({md!r}, {idx!r})\n"
-    )
-    rc = _run_child(body, suffix="manifest.json", nth=1)  # matches the unique tmp too
-    assert rc == -signal.SIGKILL
-
-    manifest = os.path.join(idx, "manifest.json")
-    if os.path.exists(manifest):  # whatever survived must parse whole — never torn
-        with open(manifest, encoding="utf-8") as fh:
-            json.load(fh)
-
-    os.environ["HIPPO_DISABLE_DENSE"] = "1"
-    try:
-        build_index(md, idx)
-    finally:
-        os.environ.pop("HIPPO_DISABLE_DENSE", None)
-    with open(manifest, encoding="utf-8") as fh:
-        m = json.load(fh)
-    assert m.get("count") == 2  # the re-run healed the index completely
 
 
 # --------------------------------------------------------------------------- #

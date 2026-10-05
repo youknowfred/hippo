@@ -151,8 +151,9 @@ def _contradiction_questions(
                         "resolve the pair now?"
                     ),
                     "route": (
-                        "accept: /hippo:resolve (terminal) or the resolve tool "
-                        "(action='inbox', then ONE action='verdict' per pair)"
+                        "accept: through the maintenance queue — `hippo tend next --kind "
+                        "contradiction`, or the tend tool's contradiction items (ONE verdict "
+                        "per pair)"
                     ),
                     "evidence": {"pair": [a, b]},
                 }
@@ -269,6 +270,6 @@ def render_questions(questions: List[dict]) -> str:
         lines.append(f"{i}. [{q['kind']}] {q['question']}")
         lines.append(f"   {q['route']}")
         lines.append(
-            f"   qid: {q['qid']} — decline/later via the interview tool action='respond'"
+            f"   qid: {q['qid']} — decline/later via the tend tool action='interview', step='respond'"
         )
     return "\n".join(lines)

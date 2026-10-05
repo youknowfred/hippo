@@ -55,6 +55,7 @@ from .provenance_env import (  # noqa: E402,F401
     current_user_slug,
     encode_project_dir,
     ensure_self_ignoring_dir,
+    foreign_corpus_owner,
     git_remote_info,
     git_root,
     launch_root,
@@ -84,6 +85,10 @@ from .provenance_format import (  # noqa: E402,F401
     HARNESS_FLOOR_WARN_BYTES,
     _FORMAT_MARKER_NAME,
     _read_marker,
+    legacy_policy_keys,
+    policy_file_path,
+    read_policy_file,
+    read_policy_key,
     _write_marker_keys,
     format_marker_path,
     injection_refusal,
@@ -700,8 +705,11 @@ def backfill_file(
         )
         if changed and not dry_run:
             from .atomic import write_text_cas
+            from .trust import carry_consent_forward
 
             write_text_cas(path, new_text, _cas_token)  # COR-18: never a torn corpus file
+            # TND-6: not a review, so no new consent — but consented bytes stay consented.
+            carry_consent_forward(os.path.dirname(path), path, _cas_token, repo_root)
     except Exception as exc:  # never break a corpus-wide backfill on one file
         result["error"] = str(exc)
     return result
@@ -774,8 +782,10 @@ def heal_empty_baselines(memory_dir: str, repo_root: str) -> Tuple[List[str], Di
                         lines[i] = f'{m.group(1)}"{head}"'
                         try:
                             from .atomic import write_text_cas
+                            from .trust import carry_consent_forward
 
                             write_text_cas(path, "\n".join(lines), _cas_token)  # COR-18
+                            carry_consent_forward(memory_dir, path, _cas_token, repo_root)  # TND-6
                         except Exception as exc:
                             failed[stem] = str(exc)  # RCH-9: named, never dropped
                             break
@@ -937,10 +947,15 @@ def reverify_file(
         text, _cas_token = read_text_cas(path)  # RWY-3: the CAS token of what we read
         fm_lines, body = split_frontmatter(text)
         if fm_lines is None:
-            result["error"] = "no frontmatter — run backfill first"
+            result["error"] = "no frontmatter — give it a `---` frontmatter block first"
             return result
         if not _has_cited_paths(fm_lines):
-            result["error"] = "no provenance yet — run backfill first"
+            # CLM-6: name the one-line remedy for THIS memory (an initial backfill of one file).
+            stem = os.path.basename(path)[:-3]
+            result["error"] = (
+                f"no provenance yet — record it first with `hippo provenance --refresh-one {stem}`, "
+                "then render the verdict again"
+            )
             return result
         fm = parse_frontmatter(text)
         if not fm:
@@ -1176,7 +1191,7 @@ def citation_rot_lines(name: str, result: dict, *, dry_run: bool = False) -> Lis
                 pairs,
                 verb,
                 "that an older extractor bound by basename alone — the body names a "
-                "DIFFERENT directory, so this was never this memory's file (ORC-4)",
+                "DIFFERENT directory, so this was never this memory's file",
                 emphasise_all=_all(pairs),
             )
         )
@@ -1281,10 +1296,10 @@ def rederive_file(
       --refresh   re-derives and PRESERVES source_commit (right), but never folds the write
                   into the consent baseline (right — it is a bulk pass, and
                   trust.record_authored_write forbids that by name: "an unattended
-                  re-baseline would be the gate consenting to itself"). So it rewrites N
-                  files, drifts every one of them off its SEC-6 fingerprint, and recall
-                  WITHHOLDS them — handing the user N mystery quarantines whose banner
-                  blames "a git pull? a hand edit?" for hippo's own write.
+                  re-baseline would be the gate consenting to itself"). It used to drift
+                  every file it rewrote; since TND-6 it carries consent forward for files
+                  whose bytes were consented (``trust.carry_consent_forward``), which
+                  still never consents a change nobody reviewed.
       --reverify  folds (right — a re-verify IS a per-item human review) but re-baselines
                   source_commit to HEAD, which SILENTLY CLEARS every staleness flag the
                   corpus is carrying. It would trade a citation bug for the total loss of
@@ -1361,13 +1376,13 @@ def rederive_worklist_lines(work: List[dict]) -> List[str]:
             out.append(f"      - loses  : {', '.join(w['lost'])}")
         for path, tok in (w.get("repointed") or {}).items():
             out.append(f"          ↳ {path} was bound by basename alone from `{tok}` — the "
-                       "body names a different directory (ORC-4)")
+                       "body names a different directory")
         if w.get("kept"):
             out.append(f"      = keeps  : {', '.join(w['kept'])} (still in the repo, not "
-                       "derivable from the body — preserved, CUR-1)")
+                       "derivable from the body — preserved)")
         if w.get("excluded"):
             out.append(f"      ⊘ excludes: {', '.join(w['excluded'])} (this memory's "
-                       "`cited_paths_exclude` — a deliberate prune, CUR-2)")
+                       "`cited_paths_exclude` — a deliberate prune)")
         if w["unresolved"]:
             out.append(f"      ? unresolved in body: {', '.join(w['unresolved'])}")
     return out
@@ -1494,16 +1509,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--heal-baselines",
         action="store_true",
-        help="COR-10: set source_commit to HEAD for memories whose baseline is EMPTY (a "
+        help="set source_commit to HEAD for memories whose baseline is EMPTY (a "
         "memory with one is invisible to staleness forever). This used to run silently on "
         "every SessionStart — a hook writing to memory frontmatter, which drifted each file "
-        "off its own SEC-6 fingerprint and then blamed the user for the drift. It is a "
+        "off its own fingerprint and then blamed the user for the drift. It is a "
         "write, so it lives here, where you ran it on purpose.",
     )
     parser.add_argument(
         "--rederive-worklist",
         action="store_true",
-        help="MIG-1: list every memory whose cited_paths would CHANGE under this plugin's "
+        help="list every memory whose cited_paths would CHANGE under this plugin's "
         "extractor, with the attributed diff. Read-only — review this, then approve one "
         "memory at a time with --rederive-one.",
     )
@@ -1511,7 +1526,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--rederive-one",
         metavar="NAME",
         default=None,
-        help="MIG-1: re-derive ONE memory's cited_paths after you have reviewed ITS diff. "
+        help="re-derive ONE memory's cited_paths after you have reviewed ITS diff. "
         "Re-derives + PRESERVES source_commit (unlike --reverify, which resets it to HEAD "
         "and silently clears every staleness flag) + folds the reviewed bytes into the "
         "consent baseline (unlike --refresh, which would leave the memory quarantined). "
@@ -1521,13 +1536,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--snapshot",
         metavar="STAMP",
         default=None,
-        help="MIG-1: copy the corpus to memory.pre-cite<N>-<STAMP>/ before migrating. A "
+        help="copy the corpus to memory.pre-cite<N>-<STAMP>/ before migrating. A "
         "gitignored corpus has no `git checkout` undo — take this first.",
     )
     parser.add_argument(
         "--stamp-derivation",
         action="store_true",
-        help="MIG-1's LAST step: record that this corpus's citations were derived by THIS "
+        help="the LAST step: record that this corpus's citations were derived by THIS "
         "plugin's extractor, which stops the citation-derivation nudge. Refused while any "
         "memory still derives differently — the stamp asserts a derivation, so it must be "
         "earned (an empty worklist) rather than claimed.",
@@ -1591,7 +1606,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"re-derivation worklist: {len(work)} memory(ies) would change\n")
         print("\n".join(rederive_worklist_lines(work)))
         print("\nReview each, then approve individually: "
-              "python -m memory.provenance --rederive-one <name>")
+              "hippo provenance --rederive-one <name>")
         print(REDERIVE_EXCLUDE_HINT)
         return 0
 

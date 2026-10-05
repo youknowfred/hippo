@@ -106,6 +106,11 @@ _EXT3_TOOLS = ["interview"]
 # Additive SEN-5 incident-response tools (T10): untrust (revoke) + blast_radius (read-only
 # forensics). Appended after EXT-3, same position freeze.
 _INCIDENT_TOOLS = ["untrust", "blast_radius"]
+_TEND_TOOLS = ["tend"]  # TND-2: the one maintenance queue
+_V2_NEW_TOOLS = ["inspect", "setup", "trust", "share", "review"]  # SRF-2: appended after the v1 names
+# HOT-6: the opt-in warm-recall hook's entry — internal and unfrozen (STABILITY.md), called by
+# the harness's mcp_tool hook, never a model. Appended after SEN-5, same position freeze.
+_INTERNAL_TOOLS = ["recall_hook"]
 
 
 def test_tools_list_exposes_frozen_five_plus_setup_tools():
@@ -113,7 +118,7 @@ def test_tools_list_exposes_frozen_five_plus_setup_tools():
     names = [t["name"] for t in resp["result"]["tools"]]
     assert names == (
         _FROZEN_TOOLS + _SETUP_TOOLS + _VERB_TOOLS + _CONSOLIDATE_TOOLS + _REPAIR_TOOLS
-        + _PACK_TOOLS + _INV4_TOOLS + _EXT3_TOOLS + _INCIDENT_TOOLS
+        + _PACK_TOOLS + _INV4_TOOLS + _EXT3_TOOLS + _INCIDENT_TOOLS + _TEND_TOOLS + _INTERNAL_TOOLS + _V2_NEW_TOOLS
     )
     for t in resp["result"]["tools"]:
         assert t["inputSchema"]["type"] == "object"  # every tool has a JSON schema
@@ -265,21 +270,19 @@ def test_pack_tools_honor_the_trust_gate(corpus, monkeypatch, tmp_path):
     corpus, so an untrusted corpus withholds it exactly as recall is withheld."""
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     resp = _call("pack_extract", {"dest": str(tmp_path / "p"), "all": True})
-    assert "untrusted" in _text(resp) and "trust_corpus" in _text(resp)
+    assert "untrusted" in _text(resp) and "trust tool" in _text(resp)
 
 
 def test_pack_skill_preflight_maps_every_pack_tool():
-    """INT-16 mirrors INT-13's contract: the skill's guard must route Desktop to the
-    tools (not claim no path exists), and every tool it names must be served."""
-    path = os.path.join(
-        os.path.dirname(__file__), "..", "plugin", "skills", "pack", "SKILL.md"
-    )
+    """The pack flow now lives in /hippo:share (SRF-3): its Desktop routing names the share
+    tool and every pack action it routes, and the server serves them."""
+    path = os.path.join(os.path.dirname(__file__), "..", "plugin", "skills", "share", "SKILL.md")
     with open(path, encoding="utf-8") as fh:
         text = fh.read()
-    assert "no Desktop-safe MCP-tool equivalent" not in text  # the pre-INT-16 claim is gone
+    assert "`share` MCP tool" in text and "share" in M._DISPATCH
     for tool in _PACK_TOOLS:
-        assert tool in text, f"pack SKILL.md no longer names the {tool} tool"
-        assert tool in M._DISPATCH, f"SKILL.md names {tool} but the server does not serve it"
+        assert f"'{tool}'" in text, f"share SKILL.md no longer routes the {tool} action"
+        assert tool in M._DISPATCH
 
 
 def test_traverse_tool_walks_the_graph(corpus):
@@ -369,8 +372,8 @@ def test_untrusted_refusals_name_this_servers_own_tools(corpus, monkeypatch):
         ("decision_history", {"name": "deploy_runbook"}),
     ):
         text = _text(_call(tool, args))
-        assert "trust_corpus" in text, f"{tool} refusal must name the on-surface consent tool"
-        assert "/hippo:doctor" in text, f"{tool} refusal should still name the terminal path"
+        assert "trust tool" in text, f"{tool} refusal must name the on-surface consent tool"
+        assert "hippo trust review" in text, f"{tool} refusal should still name the terminal path"
 
 
 # --------------------------------------------------------------------------- #
@@ -521,7 +524,7 @@ def test_resources_read_rules_view_reports_conflict_and_rot(repo, memory_dir, mo
     text = _contents(_read("hippo://rules-view"))["text"]
     assert "CLAUDE.md cites `old_way` but `new_way` supersedes it" in text
     assert "`src/gone.py`" in text and "path gone" in text
-    assert "/hippo:consolidate" in text  # findings route to per-item decisions
+    assert "/hippo:tend" in text  # findings route to per-item decisions
 
 
 def test_resources_read_rules_view_clean_plane_is_legible(corpus, tmp_path, monkeypatch):
@@ -573,7 +576,7 @@ def test_resources_read_scorecard_rolls_up(corpus, tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     text = _contents(_read("hippo://scorecard"))["text"]
     assert "trust scorecard:" in text
-    assert "contested-unresolved (→ /hippo:resolve)" in text
+    assert "contested-unresolved (→ /hippo:tend)" in text
     assert "/hippo:doctor" in text  # the drill-down route
 
 

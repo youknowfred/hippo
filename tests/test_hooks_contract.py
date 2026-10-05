@@ -71,6 +71,16 @@ def _make_project(tmp_path, with_corpus: bool) -> str:
     return str(project)
 
 
+def _opt_in(tmp_path, *, local: bool = False) -> str:
+    """CLM-4: enable hippo in the project's own Claude settings (a project-scope install, or
+    a local one with ``local``) — the signal the no-corpus nudge is scoped to."""
+    claude = tmp_path / "project" / ".claude"
+    os.makedirs(claude, exist_ok=True)
+    name = "settings.local.json" if local else "settings.json"
+    (claude / name).write_text(json.dumps({"enabledPlugins": {"hippo@hippo": True}}), encoding="utf-8")
+    return str(tmp_path / "project")
+
+
 def _symlink_once(src: str, dst) -> None:
     if src and not os.path.lexists(dst):
         os.symlink(src, dst)
@@ -522,7 +532,7 @@ class TestSessionStartNudge:
         proc, _, _ = _run_hook(_SESSION_START_HOOK, "", tmp_path, venv_python=False)
         _assert_contract(proc, "SessionStart")
         ctx = self._ctx(proc)
-        assert "/hippo:bootstrap" in ctx and "not bootstrapped" in ctx
+        assert "/hippo:setup" in ctx and "not bootstrapped" in ctx
         assert "\n" not in ctx  # exactly one nudge line
         assert len(proc.stdout.strip().splitlines()) == 1  # exactly one JSON object
 
@@ -531,27 +541,58 @@ class TestSessionStartNudge:
             _SESSION_START_HOOK, "", tmp_path, venv_python=True, sentinel=False
         )
         _assert_contract(proc, "SessionStart")
-        assert "/hippo:bootstrap" in self._ctx(proc)
+        assert "/hippo:setup" in self._ctx(proc)
 
     def test_corpus_absent_nudges_init(self, tmp_path):
+        _opt_in(tmp_path)
         proc, _, _ = _run_hook(
             _SESSION_START_HOOK, "", tmp_path, with_corpus=False, venv_python=True,
             sentinel=True,
         )
         _assert_contract(proc, "SessionStart")
         ctx = self._ctx(proc)
-        assert "/hippo:init" in ctx and "/hippo:bootstrap" not in ctx
+        assert "/hippo:setup" in ctx and "/hippo:init" not in ctx
 
-    def test_nudge_fires_once_per_n_sessions_not_spam(self, tmp_path):
-        # Session 1 nudges; sessions 2..5 stay silent; session 6 nudges again.
-        emitted = []
-        for _ in range(6):
-            proc, _, _ = _run_hook(_SESSION_START_HOOK, "", tmp_path, venv_python=False)
-            _assert_contract(proc, "SessionStart")
-            emitted.append(bool(proc.stdout.strip()))
-        assert emitted == [True, False, False, False, False, True]
+    def test_corpus_absent_in_a_repo_that_never_opted_in_stays_silent(self, tmp_path):
+        # CLM-4: the init nudge is scoped to repos where hippo was enabled or init ran.
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, "", tmp_path, with_corpus=False, venv_python=True,
+            sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        assert proc.stdout.strip() == ""
+
+    def test_nudge_is_not_spam_dismissal_is_per_repo(self, tmp_path):
+        # Not spam: one line, and a dismissal silences it for THIS repo only. (The old
+        # machine-wide every-5th counter is gone.)
+        _opt_in(tmp_path)
+        proc, project, data_dir = _run_hook(
+            _SESSION_START_HOOK, "", tmp_path, with_corpus=False, venv_python=True, sentinel=True,
+        )
+        ctx = self._ctx(proc)
+        assert "/hippo:setup" in ctx and "nudge-dismissed-repos" in ctx
+        assert os.path.realpath(project) in ctx  # the stop command names this repo
+        assert not os.path.exists(os.path.join(data_dir, ".nudge-counter"))
+        with open(os.path.join(data_dir, "nudge-dismissed-repos"), "a", encoding="utf-8") as fh:
+            fh.write("/some/other/repo\n" + os.path.realpath(project) + "\n")
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, "", tmp_path, with_corpus=False, venv_python=True, sentinel=True,
+        )
+        _assert_contract(proc, "SessionStart")
+        assert proc.stdout.strip() == ""
+        # Another opted-in repo, same machine: still nudged.
+        other = tmp_path / "second"
+        other.mkdir()
+        _opt_in(other, local=True)
+        proc, _, _ = _run_hook(
+            _SESSION_START_HOOK, "", other, with_corpus=False, venv_python=True, sentinel=True,
+            extra_env={"CLAUDE_PLUGIN_DATA": data_dir},
+        )
+        assert "/hippo:setup" in self._ctx(proc)
 
     def test_dismissal_marker_silences_permanently(self, tmp_path):
+        # The pre-CLM-4 machine-wide marker is still honored: it was a user's explicit
+        # "permanently". Nothing tells anyone to create it any more.
         data_dir = tmp_path / "plugin-data"
         os.makedirs(data_dir, exist_ok=True)
         (data_dir / ".nudge-dismissed").touch()
@@ -582,13 +623,14 @@ class TestSessionStartNudge:
         assert "\n" not in ctx  # still exactly one nudge line
 
     def test_desktop_init_nudge_names_the_init_tool(self, tmp_path):
+        _opt_in(tmp_path)
         proc, _, _ = _run_hook(
             _SESSION_START_HOOK, "", tmp_path, with_corpus=False, venv_python=True,
             sentinel=True, entrypoint="claude-desktop",
         )
         _assert_contract(proc, "SessionStart")
         ctx = self._ctx(proc)
-        assert "/hippo:init" not in ctx and "init MCP tool" in ctx
+        assert "/hippo:setup" not in ctx and "setup MCP tool's init step" in ctx
         assert "terminal-only" not in ctx and "do not work in this app" not in ctx
 
     def test_terminal_wording_is_unchanged_by_an_unrelated_entrypoint(self, tmp_path):
@@ -598,7 +640,7 @@ class TestSessionStartNudge:
             _SESSION_START_HOOK, "", tmp_path, venv_python=False, entrypoint="cli",
         )
         _assert_contract(proc, "SessionStart")
-        assert "/hippo:bootstrap" in self._ctx(proc)
+        assert "/hippo:setup" in self._ctx(proc)
 
 
 # --------------------------------------------------------------------------- #
@@ -613,7 +655,7 @@ class TestStaleVenvNudge:
         )
         _assert_contract(proc, "SessionStart")
         ctx = json.loads(proc.stdout.strip())["hookSpecificOutput"]["additionalContext"]
-        assert "deps changed" in ctx and "/hippo:bootstrap" in ctx
+        assert "deps changed" in ctx and "/hippo:setup" in ctx
 
     def test_current_hash_stays_silent(self, tmp_path):
         proc, _, _ = _run_hook(
@@ -639,7 +681,7 @@ class TestStaleVenvNudge:
                 json.loads(proc.stdout.strip())["hookSpecificOutput"]["additionalContext"]
             )
         terminal, desktop = ctxs
-        assert "deps changed" in desktop and "/hippo:bootstrap" in desktop
+        assert "deps changed" in desktop and "/hippo:setup" in desktop
         assert "Surface note" not in desktop and "terminal-only" not in desktop
         assert desktop == terminal.replace(str(tmp_path / "run0"), str(tmp_path / "run1"))
 
@@ -753,16 +795,22 @@ class TestBashLevelCorpusGuard:
         assert not os.path.isdir(os.path.join(project, ".claude", ".memory-telemetry"))
 
     def test_session_start_nudge_still_fires_before_guard_when_not_dismissed(self, tmp_path):
-        # The bash guard must NOT silence the ONB-1 nudge — it sits AFTER it.
+        # The bash guard must NOT silence the ONB-1 nudge — it sits AFTER it. The repo
+        # opted in through the projects registry (init ran here once), so the project
+        # tree itself stays empty.
         project, _data_dir, canary, env = self._canary_env(
             tmp_path, with_corpus=False, nudge_dismissed=False
         )
+        reg = tmp_path / "home" / ".claude" / "hippo-projects.json"
+        os.makedirs(reg.parent, exist_ok=True)
+        reg.write_text(json.dumps({"projects": {os.path.realpath(project): {
+            "memory_dir": os.path.join(project, ".claude", "memory")}}}), encoding="utf-8")
         proc = subprocess.run(
             ["/bin/bash", _SESSION_START_HOOK],
             input="", capture_output=True, text=True, timeout=60, env=env,
         )
         _assert_contract(proc, "SessionStart")
-        assert "/hippo:init" in proc.stdout
+        assert "/hippo:setup" in proc.stdout
         assert not canary.exists()
         assert _tree(project) == set()
 

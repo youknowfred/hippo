@@ -213,16 +213,17 @@ def _discover_links(
 
 
 def _append_related_line(body: str, related: List[str]) -> str:
-    """Append a final ``Related: [[a]], [[b]]`` body line naming ``related`` memory names.
+    """Name ``related`` memories on the body's ONE ``Related: [[a]], [[b]]`` line.
 
-    Additive only — never touches any existing body text, just appends one trailing line (the
-    same additive-write discipline provenance backfill and the floor pointer already follow).
+    Additive only (the same discipline provenance backfill and the floor pointer follow).
+    TND-5: when the agent-written body already has its own ``Related:`` line, the new names
+    join THAT line (union, order kept, no repeats) — appending a second line under it is
+    how about a fifth of the dogfood corpus ended up with two. A body without one gets a
+    final line appended, as before (``related_lines.merge_related_line``).
     """
-    if not related:
-        return body
-    line = "Related: " + ", ".join(f"[[{r}]]" for r in related)
-    body = (body or "").rstrip("\n")
-    return f"{body}\n\n{line}\n" if body else f"{line}\n"
+    from .related_lines import merge_related_line
+
+    return merge_related_line(body, related)
 
 
 def _dup_threshold(default: float) -> float:
@@ -605,7 +606,7 @@ def build_write_ticket(
     warns: List[str] = list(ticket["secret_warnings"])
     if ticket["threat_warnings"]:
         warns.append(
-            "⚠ threat lint (SEN-2 Tier-A): " + "; ".join(ticket["threat_warnings"])
+            "⚠ threat lint (Tier-A): " + "; ".join(ticket["threat_warnings"])
             + " — a poisoning payload (invisible/confusable/exfil/HTML-comment) in the memory "
             "text; inspect and scrub before this is committed and re-injected on every recall."
         )
@@ -1087,7 +1088,7 @@ def write_memory(
         ungrounded = find_ungrounded(f"{description}\n{body}", rationale=rationale)
         if ungrounded:
             result["warnings"] = (result.get("warnings") or []) + [
-                "⚠ ungrounded prescription (SEN-3): this memory asserts user intent — "
+                "⚠ ungrounded prescription: this memory asserts user intent — "
                 f"\"{'; '.join(ungrounded)}\" — grounded in neither the captured evidence nor "
                 "a --rationale. Transcribe what the diff/decision shows, or cite the WHY; a "
                 "synthesized standing preference amplifies sycophancy on every recall."
@@ -1456,7 +1457,7 @@ def main(argv=None) -> int:
         "--tier",
         default="project",
         choices=_VALID_TIERS,
-        help="TEA-1: 'project' (default, git-native in-repo) or 'user' (machine-local user "
+        help="'project' (default, git-native in-repo) or 'user' (machine-local user "
         "tier, recalled across every project; its floor pointer lands in the user tier's own "
         "MEMORY.md, never the shared project one)",
     )
@@ -1467,7 +1468,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--links",
         default=None,
-        help="comma-separated existing memory names — OVERRIDES recall-based link discovery (GRA-3)",
+        help="comma-separated existing memory names — OVERRIDES recall-based link discovery",
     )
     parser.add_argument(
         "--no-links",
@@ -1477,13 +1478,13 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="CAP-3 DRY RUN: score this candidate against the corpus for near-dupes and print "
+        help="DRY RUN: score this candidate against the corpus for near-dupes and print "
         "the route (add / review) WITHOUT writing anything — used when draining captured candidates",
     )
     parser.add_argument(
         "--rationale",
         default=None,
-        help="GOV-3: evidence trail fenced into the body as a trailing 'Rationale:' line "
+        help="evidence trail fenced into the body as a trailing 'Rationale:' line "
         "(e.g. 'from session <sid>; replaces <neighbor> (similarity 0.9x); as of HEAD <sha>') "
         "— the git-committed WHY behind a consolidation-approved write",
     )
@@ -1491,7 +1492,7 @@ def main(argv=None) -> int:
         "--confidence",
         default=None,
         choices=_VALID_CONFIDENCE,
-        help="GOV-7: the author's trust dial (draft | verified | authoritative) — rendered "
+        help="the author's trust dial (draft | verified | authoritative) — rendered "
         "at inject and in /hippo:recall, never a ranking input; omit for today's default",
     )
     args = parser.parse_args(argv)

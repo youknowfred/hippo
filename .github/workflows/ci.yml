@@ -67,7 +67,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         python: ["3.10", "3.12"]
     env:
-      HIPPO_DISABLE_DENSE: "1"
+      HIPPO_DISABLE: dense
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -188,7 +188,7 @@ jobs:
       matrix:
         python: ["3.11", "3.13", "3.14"]
     env:
-      HIPPO_DISABLE_DENSE: "1"
+      HIPPO_DISABLE: dense
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -217,7 +217,7 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     env:
-      HIPPO_DISABLE_DENSE: "1"  # BM25-only for speed — the scale lane asserts lexical-path envelope
+      HIPPO_DISABLE: dense  # BM25-only for speed — the scale lane asserts lexical-path envelope
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0

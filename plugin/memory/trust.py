@@ -192,9 +192,23 @@ def mark_trusted(
             entry["fingerprint"] = prior["fingerprint"]
         trusted[key] = entry
         doc["trusted"] = trusted
-        return _write_registry_doc(doc)
+        ok = _write_registry_doc(doc)
+        if ok and memory_dir is not None:
+            _keep_baselines(memory_dir)
+        return ok
     except Exception:
         return False
+
+
+def _keep_baselines(memory_dir: str, paths: Optional[List[str]] = None) -> None:
+    """TND-6: keep a local copy of consented bytes git cannot give back (see
+    ``trust_review.keep_consented_baselines``). Best-effort; never raises."""
+    try:
+        from .trust_review import keep_consented_baselines
+
+        keep_consented_baselines(memory_dir, paths)
+    except Exception:
+        pass
 
 
 def untrust(repo_root: str) -> bool:
@@ -346,6 +360,33 @@ def record_authored_write(
     an automatic pass (hooks, index builds): an unattended re-baseline would be the gate
     consenting to itself.
     """
+    return _fold_file(memory_dir, path, repo_root, before_sha=None)
+
+
+def carry_consent_forward(
+    memory_dir: str, path: str, before_sha: Optional[str], repo_root: Optional[str] = None
+) -> bool:
+    """TND-6: keep consent across a MECHANICAL rewrite hippo itself made to one file.
+
+    Some hippo writes are not reviews: a baseline heal, a citation refresh, a corpus-wide
+    backfill. They rewrite hippo's own provenance keys, and before this the file then read
+    as drift, so recall withheld memories hippo had just touched itself. Folding the new
+    bytes the way ``record_authored_write`` does would be self-consent. This carries
+    consent forward only when the bytes hippo READ (``before_sha``) were the consented
+    bytes: a consented file stays consented, and a file that had already drifted stays
+    drifted, so the user still reviews it. Safe from bulk passes for that reason. Never
+    raises; False when nothing was carried.
+    """
+    if not before_sha:
+        return False
+    return _fold_file(memory_dir, path, repo_root, before_sha=before_sha)
+
+
+def _fold_file(
+    memory_dir: str, path: str, repo_root: Optional[str], before_sha: Optional[str]
+) -> bool:
+    """The one baseline fold. ``before_sha`` None: fold unconditionally (authorship);
+    set: fold only into a record whose consented hash for this file equals it."""
     try:
         gate_root = gate_repo_root(memory_dir, repo_root)
         if gate_root is None:
@@ -380,12 +421,17 @@ def record_authored_write(
             fp = entry.get("fingerprint") if isinstance(entry, dict) else None
             if not isinstance(fp, dict) or not isinstance(fp.get("files"), dict):
                 continue  # no record, or a legacy one — quarantine is off there, nothing to extend
+            if before_sha is not None and fp["files"].get(stem) != before_sha:
+                continue  # the bytes hippo rewrote were not the consented ones — stays drift
             fp["files"][stem] = h
             fp["digest"] = hashlib.sha256(
                 "\n".join(f"{k}:{v}" for k, v in sorted(fp["files"].items())).encode("utf-8")
             ).hexdigest()
             folded = True
-        return _write_registry_doc(doc) if folded else False
+        ok = _write_registry_doc(doc) if folded else False
+        if ok:
+            _keep_baselines(memory_dir, [path])
+        return ok
     except Exception:
         return False
 
@@ -439,11 +485,13 @@ def drift_withholding_line(drift: dict, *, max_names: int = 6) -> Optional[str]:
     withheld = changed + [f"{n} (new)" for n in added]
     shown = ", ".join(withheld[:max_names])
     more = f" (+{len(withheld) - max_names} more)" if len(withheld) > max_names else ""
+    # TND-6: one line, the count first, one next step. The review shows each file's diff
+    # against the version consented to, and the grant re-consents per file.
+    noun = "memory" if len(withheld) == 1 else "memories"
     return (
-        f"🔒 Memory trust drift: {len(changed)} changed / {len(added)} new memory "
-        f"file(s) since you trusted this corpus (a git pull? a hand edit?) — recall is "
-        f"WITHHOLDING them until you re-review: {shown}{more}. Run /hippo:doctor to see "
-        "what each would inject and re-consent."
+        f"🔒 Recall is withholding {len(withheld)} {noun} that changed since you consented "
+        f"to this corpus ({len(changed)} changed / {len(added)} new: {shown}{more}). "
+        "Next step: `hippo trust review` shows each change; grant the ones you approve."
     )
 
 

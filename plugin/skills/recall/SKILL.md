@@ -1,5 +1,5 @@
 ---
-description: Deliberately recall what memory knows — answer "what do you remember about X", "what do you know here", or "why was that injected", and list the corpus by type. Wraps hybrid recall + the link graph into a human-readable listing (name, type, staleness, inbound/outbound links). Triggers include "what do you remember about", "what do you know here", "recall", "/hippo:recall". The read verb between /hippo:new (write) and /hippo:audit (maintenance); not plumbing (that's /hippo:doctor).
+description: Deliberately recall what memory knows — "what do you remember about X", "what do you know here", the corpus by type — and the receipt for why a memory was or was not recalled. Same ranking as the prompt hook, shown with type, staleness and links. Triggers include "what do you remember about", "why did you recall that", "why didn't you remember", "recall receipt", "/hippo:recall".
 ---
 
 # /hippo:recall — the read-side verb
@@ -16,7 +16,7 @@ not just a raw injection block.
 
 ## Surface routing — decide first, then act silently
 
-- **On Claude Desktop** (your context says you are in the Claude desktop app, `CLAUDE_CODE_ENTRYPOINT` is `claude-desktop`, or the preflight below stops on an unset `CLAUDE_PLUGIN_DATA`): drive this verb through the `recall` MCP tool for query-recall — memory lineage → the `decision_history` tool, graph hops → the `traverse` tool. The `--list-by-type` corpus map and `--all-projects` cross-project modes below have no tool form yet — say they are terminal-only plainly rather than improvising one. Skip the bash preflight and the shell blocks below; those run only in a terminal. Call the tool with no preamble — don't explain that the shell flow doesn't run on this surface, or why you're reaching for a tool instead of bash. That surface-plumbing narration is exactly the repeated noise this routing removes.
+- **On Claude Desktop** (your context says you are in the Claude desktop app, `CLAUDE_CODE_ENTRYPOINT` is `claude-desktop`, or the preflight below stops on an unset `CLAUDE_PLUGIN_DATA`): drive this verb through the `recall` MCP tool for query-recall, and the `inspect` tool for the rest: action='why' for the recall receipt, 'history' for a memory's lineage, 'traverse' for graph hops. The `--list-by-type` corpus map and `--all-projects` cross-project modes below have no tool form yet — say they are terminal-only plainly rather than improvising one. Skip the bash preflight and the shell blocks below; those run only in a terminal. Call the tool with no preamble — don't explain that the shell flow doesn't run on this surface, or why you're reaching for a tool instead of bash. That surface-plumbing narration is exactly the repeated noise this routing removes.
 - **In a terminal Claude Code session**: run the bash flow below, guard first.
 
 ## Preflight (shared across all hippo skills)
@@ -24,9 +24,9 @@ not just a raw injection block.
 ```bash
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
 [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:recall skill, not from a copy of its SKILL.md. If the loaded skill stops here too, take the MCP-tool route in 'Surface routing' above."; exit 1; }
-. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver
 hippo_resolve_py
-hippo_note_usage skill recall  # OBS-2: count this skill's use (one spool line, no Python)
+hippo_note_usage skill recall  # count this skill's use (one spool line, no Python)
 ```
 
 ## Usage
@@ -35,30 +35,30 @@ Query the corpus (natural language — phrase it as the underlying question, the
 index matches):
 
 ```
-"$PY" -m memory.recall_view "<what to recall — e.g. how do we deploy the web service>" [-k <max matches>]
+hippo inspect "<what to recall — e.g. how do we deploy the web service>" [-k <max matches>]
 ```
 
 List everything this project knows, grouped by type (a map of the corpus — no query):
 
 ```
-"$PY" -m memory.recall_view --list-by-type
+hippo inspect --list-by-type
 ```
 
-Replay how a decision evolved (RCH-3 — walks the authored supersedes/refines chain around
+Replay how a decision evolved (walks the authored supersedes/refines chain around
 a memory into an ordered narrative, with retirement boundaries and contradiction branch
 points; answers "why did we decide X" / "what replaced Y"):
 
 ```
-"$PY" -m memory.recall_view --history "<memory-name>"
+hippo inspect --history "<memory-name>"
 ```
 
-Search EVERY registered project on this machine, not just this one (RCH-4 — explicit
-command only, never the hook; each source passes the SEC-1 trust gate at query time,
+Search EVERY registered project on this machine, not just this one (explicit
+command only, never the hook; each source passes the trust gate at query time,
 cross-project hits are labeled `from <repo>`, and a trailer names every corpus searched
 or skipped):
 
 ```
-"$PY" -m memory.recall_view --all-projects "<what to recall>"
+hippo inspect --all-projects "<what to recall>"
 ```
 
 ## Reading the output
@@ -73,17 +73,17 @@ Each match prints as:
 ```
 
 - **`<type>`** — `user` / `feedback` / `project` / `reference` (the floor taxonomy).
-- **`relevance <score>`** — the true fused+penalized score (COR-8), NOT a rank proxy — higher
+- **`relevance <score>`** — the true fused+penalized score, NOT a rank proxy — higher
   is a stronger match. This is the honest answer to "why was this injected".
-- **`via 1-hop link`** — present only when the memory entered top-k through GRA-1 graph
+- **`via 1-hop link`** — present only when the memory entered top-k through graph
   expansion (a linked neighbor of a lexical/dense hit), not by matching the query directly.
 - **`⚠ stale`** — the memory is anchored to a commit whose cited files have since changed
-  (RET-6). Treat its content as needing a re-check before you rely on it.
+. Treat its content as needing a re-check before you rely on it.
 - **`→ links to` / `← linked from`** — the memory's outbound and inbound `[[wikilink]]`
   neighbors, so you can traverse related memory by hand.
 
 **Abstention is a feature.** If nothing clears the relevance floor the skill says so rather
-than padding out low-signal matches (RET-1) — an unrelated or too-thin query correctly
+than padding out low-signal matches — an unrelated or too-thin query correctly
 surfaces nothing. Reach for `--list-by-type` to see what *is* known.
 
 ## Agents and subagents
@@ -91,7 +91,7 @@ surfaces nothing. Reach for `--list-by-type` to see what *is* known.
 The recall hook fires only on a top-level user prompt, so mid-turn retrieval and subagents
 (launched via Task, which get no `UserPromptSubmit` at all) need another path. Two exist:
 
-- **The MCP server (INT-2), preferred.** The plugin declares a stdio MCP server exposing
+- **The MCP server, preferred.** The plugin declares a stdio MCP server exposing
   first-class `recall(query, k)`, `new_memory(...)`, and `traverse(name, hops)` tools that
   subagents inherit automatically — call them mid-turn, no user prompt required.
 - **`bin/hippo recall`, the fallback** (pre-bootstrap, or where MCP is unavailable): run
@@ -106,7 +106,7 @@ rely on the subagent discovering it — INJECT it. Run the `bin/hippo recall` fa
 subagent is grounded from its first token, before it calls any tool. This is the deterministic path where "the subagent
 might query memory" isn't good enough.
 
-**Subagent discoveries are captured (INT-3).** When a subagent finishes, a `SubagentStop` hook
+**Subagent discoveries are captured.** When a subagent finishes, a `SubagentStop` hook
 runs the same draft-capture pass as `SessionEnd` (see `memory.capture`): what the subagent
 changed is snapshotted into the gitignored pending queue for later per-item approval, so a
 delegated discovery doesn't vanish when the subagent returns. Nothing it found reaches the
@@ -115,5 +115,57 @@ corpus without an explicit approval, same gate as everywhere else.
 ## When NOT to use
 
 - "Is memory working / why is recall empty" — that's plumbing: use `/hippo:doctor`.
-- "Is the corpus content still accurate" (a judgment-based maintenance pass) — use `/hippo:audit`.
+- "Is the corpus content still accurate" (a judgment-based maintenance pass) — use `/hippo:doctor`.
 - Saving something — use `/hippo:new`. This verb is read-only; it never writes the corpus.
+
+## Why — the recall receipt
+
+Two questions erode trust the most: "why did you surface that?" and "why did you NOT
+surface the thing I know we wrote down?". The recall hook is invisible by design, so this
+skill answers both deliberately — it re-runs the SAME ranking the hook would apply to the
+query and prints a per-hit breakdown, or the honest abstention reason. Read-only: nothing
+is written, logged, or reordered for future sessions.
+
+### Before you start
+
+```bash
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:recall skill, not from a copy of its SKILL.md. If the loaded skill stops here too, take the MCP-tool route in 'Surface routing' above."; exit 1; }
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver
+hippo_resolve_py
+hippo_note_usage skill recall why  # count this skill's use (one spool line, no Python)
+```
+
+Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
+opens by pinning what it needs; an inline `hippo …` command runs
+as written (`hippo` is on the Bash tool's PATH and finds its own venv).
+
+### Get the receipt
+
+Use the user's own words as the query — the receipt explains what the hook would do for
+*that* prompt, so paraphrasing it changes the answer:
+
+```bash
+export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
+hippo inspect --why "<the query, ideally the user's own phrasing>"
+```
+
+### Reading it
+
+- **Hits** carry `[type · relevance N · won via <backend> · …]` tags: the backend(s) whose
+  ranking produced the hit, `via 1-hop link` for a graph expansion, `pinned ×1.2` when a
+  steer:pin lifted it, the typed-edge note (`superseded by X` / `contradicts X — verify`),
+  and the salience components when that flag is on.
+- **A `(rule)` pointer's** receipt names its query **containment** score and the rules
+  floor — governance sections are matched by containment, not cosine.
+- **Abstention** names the reason, honestly ranked: an UNTRUSTED corpus (recall withheld,
+  nothing scored — trust it via /hippo:doctor), a BM25-only corpus where no memory shares
+  a token, or the near-miss: "best candidate `X` scored 0.42, below the floor 0.60". A
+  near-miss that SHOULD have answered the query is a capture/description problem — enrich
+  it via /hippo:tend, or pin it (`steer: pin`).
+
+### When NOT to use
+
+- "What do you remember about X" (the answer, not the explanation) — `/hippo:recall`.
+- "Is recall broken / empty for everything" (plumbing, not ranking) — `/hippo:doctor`.

@@ -20,6 +20,7 @@ from .provenance import (
     resolve_corpus_start,
     walk_up_for_memory_dir,
 )
+from .provenance_env import foreign_corpus_owner, nested_repo_line
 
 
 # The venv deps whose import must resolve for recall to run at full fidelity (SKILL.md's
@@ -92,7 +93,7 @@ def check_bootstrap(ctx: DoctorContext) -> Dict[str, str]:
         if state == "not_bootstrapped":
             return {
                 "status": "fail",
-                "message": "not bootstrapped (no .bootstrap-sentinel) — run /hippo:bootstrap.",
+                "message": "not bootstrapped (no .bootstrap-sentinel) — run /hippo:setup.",
             }
         if state == "no_requirements":
             return {
@@ -104,7 +105,7 @@ def check_bootstrap(ctx: DoctorContext) -> Dict[str, str]:
             return {
                 "status": "fail",
                 "message": "bootstrapped but STALE — requirements.txt changed since the last "
-                "bootstrap (new imports degrade silently). Run /hippo:bootstrap again.",
+                "bootstrap (new imports degrade silently). Run /hippo:setup again.",
             }
         return {"status": "ok", "message": "bootstrapped — deps current."}
     except Exception as exc:
@@ -129,7 +130,7 @@ def check_venv(ctx: DoctorContext) -> Dict[str, str]:
         if not os.path.isfile(sentinel_path):
             return {
                 "status": "warn",
-                "message": "not bootstrapped — venv import check skipped (run /hippo:bootstrap).",
+                "message": "not bootstrapped — venv import check skipped (run /hippo:setup).",
             }
         import importlib.util
 
@@ -142,7 +143,7 @@ def check_venv(ctx: DoctorContext) -> Dict[str, str]:
                 "status": "fail",
                 "message": f"venv is missing import(s): {', '.join(missing)} — the sentinel "
                 "claims success but the venv is corrupt/partial. Delete "
-                "${CLAUDE_PLUGIN_DATA}/venv + .bootstrap-sentinel and re-run /hippo:bootstrap.",
+                "${CLAUDE_PLUGIN_DATA}/venv + .bootstrap-sentinel and re-run /hippo:setup.",
             }
         return {"status": "ok", "message": f"venv healthy — {', '.join(_REQUIRED_DEPS)} all import."}
     except Exception as exc:
@@ -167,12 +168,12 @@ def check_corpus_exists(ctx: DoctorContext) -> Dict[str, str]:
         if os.path.isdir(ctx.memory_dir):
             return {
                 "status": "warn",
-                "message": f"{ctx.memory_dir} exists but has no MEMORY.md floor — run /hippo:init "
+                "message": f"{ctx.memory_dir} exists but has no MEMORY.md floor — run /hippo:setup "
                 "here to seed it.",
             }
         return {
             "status": "fail",
-            "message": f"no corpus at {ctx.memory_dir} — run /hippo:init to create one.",
+            "message": f"no corpus at {ctx.memory_dir} — run /hippo:setup to create one.",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"corpus-existence check failed: {exc}."}
@@ -195,19 +196,28 @@ def check_symlink(ctx: DoctorContext) -> Dict[str, str]:
             return {
                 "status": "fail",
                 "message": "no project symlink yet — Claude Code can't find this corpus. Fix: "
-                f"`{repair}` (or run /hippo:init here — ONB-5 leaves the existing corpus untouched).",
+                f"`{repair}` (or run /hippo:setup here — leaves the existing corpus untouched).",
+            }
+        link = r.get("expected_path") or ""
+        if status == "broken" and os.path.isdir(link) and not os.path.islink(link):
+            # CLM-4: native auto memory owns the slot; `rm -f` cannot (and must not) clear it.
+            return {
+                "status": "fail",
+                "message": f"Claude Code's own memory directory sits where hippo's link goes "
+                f"({link}), so the harness reads it instead of this corpus. Adopt it: run init "
+                "here, which previews the adoption first (`hippo adopt` shows the same preview).",
             }
         if status == "broken":
             return {
                 "status": "fail",
                 "message": "project symlink points elsewhere — Claude Code reads a different "
-                f"corpus. Fix: `{repair}` (or run /hippo:init here — ONB-5).",
+                f"corpus. Fix: `{repair}` (or run /hippo:setup here).",
             }
         if status == "legacy_wrong_encoding":
             return {
                 "status": "warn",
-                "message": "a legacy (pre-SHP-5) mis-encoded symlink exists for this repo. Fix: "
-                f"`{repair}` (or run /hippo:init here — creates the correct link but does not "
+                "message": "a legacy mis-encoded symlink (an older layout) exists for this repo. Fix: "
+                f"`{repair}` (or run /hippo:setup here — creates the correct link but does not "
                 "remove the stale legacy dir).",
             }
         return {"status": "warn", "message": f"project symlink status: {status}."}
@@ -239,7 +249,7 @@ def check_native_coexistence(ctx: DoctorContext) -> Dict[str, str]:
                 "status": "warn",
                 "message": f"native-layout change: {expected} is a real {kind}, not hippo's "
                 "symlink — Claude Code's native memory may have taken the projects-dir slot. "
-                "hippo's floor cannot inject through it; move it aside, then run /hippo:init.",
+                "hippo's floor cannot inject through it; move it aside, then run /hippo:setup.",
             }
         status = r.get("status")
         if status == "ok":
@@ -253,18 +263,18 @@ def check_native_coexistence(ctx: DoctorContext) -> Dict[str, str]:
                 "status": "warn",
                 "message": "native-memory symlink DRIFT — the projects-dir link resolves to a "
                 "different target than this corpus, so the always-load floor is drawn elsewhere "
-                "(or nowhere). Fix: /hippo:init (the symlink check names the exact command).",
+                "(or nowhere). Fix: /hippo:setup (the symlink check names the exact command).",
             }
         if status == "legacy_wrong_encoding":
             return {
                 "status": "warn",
                 "message": "native projects-dir layout changed — a legacy-encoded link exists, so "
-                "the harness reads a different path now. Fix: /hippo:init.",
+                "the harness reads a different path now. Fix: /hippo:setup.",
             }
         # missing → coexistence not established yet; check_symlink already flags it as the setup step.
         return {
             "status": "ok",
-            "message": "native coexistence: no projects-dir memory link yet — /hippo:init "
+            "message": "native coexistence: no projects-dir memory link yet — /hippo:setup "
             "establishes it (the floor injects via that native symlink).",
         }
     except Exception as exc:
@@ -315,6 +325,10 @@ def check_corpus_resolution(ctx: DoctorContext) -> Dict[str, str]:
                 "resolution start).",
             }
         if reason == "root-fallthrough":
+            # CLM-4: the walk can climb past THIS repo's toplevel into an ancestor's corpus.
+            owner = foreign_corpus_owner(ctx.memory_dir, ctx.repo_root)
+            if owner:
+                return {"status": "warn", "message": nested_repo_line(ctx.repo_root, owner)}
             return {
                 "status": "ok",
                 "message": f"resolved corpus: {ctx.memory_dir} — {tree}; root-fallthrough (no "
@@ -324,7 +338,7 @@ def check_corpus_resolution(ctx: DoctorContext) -> Dict[str, str]:
         return {
             "status": "warn",
             "message": f"resolved corpus: {ctx.memory_dir} — {tree}; none found in the walk (this "
-            "is the start-dir default; run /hippo:init here or at the repo root).",
+            "is the start-dir default; run /hippo:setup here or at the repo root).",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"corpus-resolution check failed: {exc}."}
@@ -410,9 +424,9 @@ def check_empty_baselines(ctx: DoctorContext) -> Dict[str, str]:
             "status": "warn",
             "message": (
                 f"{len(empty)} memory(ies) have an EMPTY staleness baseline and are "
-                f"invisible to staleness tracking: {', '.join(sorted(empty))}. Heal them to "
-                "HEAD with the heal_baselines MCP tool, or in a terminal: "
-                "python -m memory.provenance --heal-baselines"
+                f"invisible to staleness tracking: {', '.join(sorted(empty))}. Re-baseline each "
+                "through the maintenance queue (say \"tend memory\", or `hippo tend next --kind "
+                "baseline`)"
             ),
         }
     except Exception as exc:
@@ -481,8 +495,7 @@ def check_index_count(ctx: DoctorContext) -> Dict[str, str]:
         return {
             "status": "warn",
             "message": f"index count ({recorded}) does not match the corpus ({actual}) — a "
-            "memory was added/removed since the last build. Rebuild: `python -m "
-            "memory.build_index --memory-dir <memory_dir> --index-dir <index_dir>` (a persistent "
+            "memory was added/removed since the last build. Rebuild: `hippo build-index` (a persistent "
             "mismatch across sessions points at a SessionStart hook problem).",
         }
     except Exception as exc:
@@ -510,11 +523,15 @@ def check_mcp_launch(ctx: DoctorContext) -> Dict[str, str]:
             k: os.environ.get(k)
             for k in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "FASTEMBED_CACHE_PATH")
         }
+        # The canned handshake runs in THIS process: when doctor itself is served by the MCP
+        # server, it must not overwrite the live session's negotiated protocol or client name.
+        session = (M._NEGOTIATED, M._CLIENT_NAME)
         out = io.StringIO()
         try:
             req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
             M.serve(io.StringIO(req + "\n"), out)
         finally:
+            M._NEGOTIATED, M._CLIENT_NAME = session
             for k, v in saved.items():
                 if v is None:
                     os.environ.pop(k, None)
@@ -582,7 +599,7 @@ def check_projects_registry(ctx: DoctorContext) -> Dict[str, str]:
         if not entries:
             return {
                 "status": "ok",
-                "message": "projects registry: nothing registered (populated by /hippo:init).",
+                "message": "projects registry: nothing registered (populated by /hippo:setup).",
             }
         total = len(entries)
         dead = [e for e in entries if not e["live"]]
@@ -598,13 +615,13 @@ def check_projects_registry(ctx: DoctorContext) -> Dict[str, str]:
         msg = (
             f"projects registry: {len(dead)} dead entr"
             + ("y" if len(dead) == 1 else "ies")
-            + f" of {total} ({volatile} temp-rooted) — report: python -m memory.registry "
+            + f" of {total} ({volatile} temp-rooted) — report: hippo registry "
             "(then --prune-dead to clear the temp-rooted, --drop <root> for one entry)"
         )
         if repairable:
             msg += (
                 f"; {repairable} of them have a live corpus at the canonical "
-                "<root>/.claude/memory — re-run /hippo:init there to re-register"
+                "<root>/.claude/memory — re-run /hippo:setup there to re-register"
             )
         return {"status": "warn", "message": msg + "."}
     except Exception as exc:
@@ -653,7 +670,7 @@ def check_plugin_version(ctx: DoctorContext) -> Dict[str, str]:
                     "status": "warn",
                     "message": f"plugin v{installed} installed but at least one venv looks "
                     f"STALE — inferred sentinel probe (CLAUDE_PLUGIN_DATA unset): {detail}. "
-                    "Run /hippo:bootstrap on the stale surface(s); set CLAUDE_PLUGIN_DATA "
+                    "Run /hippo:setup on the stale surface(s); set CLAUDE_PLUGIN_DATA "
                     "or run via the harness to pin which one applies here.",
                 }
             if rows and all(v == installed for _b, v in rows):
@@ -680,14 +697,14 @@ def check_plugin_version(ctx: DoctorContext) -> Dict[str, str]:
             return {
                 "status": "warn",
                 "message": f"plugin v{installed} installed, but the bootstrap sentinel predates "
-                "version tracking — run /hippo:bootstrap to record it.",
+                "version tracking — run /hippo:setup to record it.",
             }
         if bootstrapped == installed:
             return {"status": "ok", "message": f"plugin v{installed} installed and bootstrapped — in sync."}
         return {
             "status": "warn",
             "message": f"version delta: plugin v{installed} installed but the venv was bootstrapped "
-            f"for v{bootstrapped} — run /hippo:bootstrap (check the CHANGELOG's 're-bootstrap' flag "
+            f"for v{bootstrapped} — run /hippo:setup (check the CHANGELOG's 're-bootstrap' flag "
             "for whether deps changed).",
         }
     except Exception as exc:
@@ -811,7 +828,7 @@ def check_machine_state(ctx: DoctorContext) -> Dict[str, str]:
             return {
                 "status": "ok",
                 "message": "machine state: no dead trust rows, dangling memory symlinks, "
-                "or stale/quiet scheduler artifacts (full census: python -m memory.machine_census).",
+                "or stale/quiet scheduler artifacts (full census: hippo census).",
             }
         parts = []
         if dangling:
@@ -834,7 +851,7 @@ def check_machine_state(ctx: DoctorContext) -> Dict[str, str]:
                 + ("" if quiet_sched == 1 else "s")
                 + " (no recent sleep run)"
             )
-        msg = "machine state: " + ", ".join(parts) + " — census: python -m memory.machine_census"
+        msg = "machine state: " + ", ".join(parts) + " — census: hippo census"
         if farm["dangling_temp_rooted"]:
             msg += " (then --prune-dangling for the temp-rooted batch)"
         return {"status": "warn", "message": msg + "."}

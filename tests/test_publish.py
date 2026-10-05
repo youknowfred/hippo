@@ -241,7 +241,7 @@ def test_receipt_carries_introduces_and_render_states_net(repo, memory_dir):
     text = P.render_preflight(r)
     assert (
         "heals 3 / introduces 1 (net -2) boundary link(s) "
-        "(see: python -m memory.lint_links --boundary)" in text
+        "(see: hippo lint-links --boundary)" in text
     )
 
 
@@ -252,7 +252,7 @@ def test_receipt_zero_introduces_renders_byte_identical(repo, memory_dir):
     r = P.publish_preflight("loc_c", memory_dir, repo)
     assert r["receipt"]["heals"] == 1 and r["receipt"]["introduces"] == 0
     text = P.render_preflight(r)
-    assert "heals 1 boundary link(s) (see: python -m memory.lint_links --boundary)" in text
+    assert "heals 1 boundary link(s) (see: hippo lint-links --boundary)" in text
     assert "introduces" not in text
 
 

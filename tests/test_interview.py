@@ -74,7 +74,7 @@ def test_contradiction_question_names_both_sides(repo, memory_dir):
     q = qs[0]
     assert q["kind"] == "contradiction"
     assert a in q["question"] and b in q["question"]
-    assert "resolve" in q["route"]
+    assert "--kind contradiction" in q["route"]
 
 
 def test_expiring_draft_question_names_the_draft(repo, memory_dir, monkeypatch):

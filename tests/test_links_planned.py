@@ -271,7 +271,7 @@ def test_lint_cli_and_audit_cli_render_planned_lines(corpus, capsys):
     assert "hub -> [[future-plan]] (planned)" in out
     assert links_main(["--memory-dir", corpus, "--audit"]) == 0
     out = capsys.readouterr().out
-    assert "planned forward refs (2) — declared deliberate (GRF-6), NOT rot:" in out
+    assert "planned forward refs (2) — declared deliberate, NOT rot:" in out
     assert "edge rot (1):" in out  # the unmarked control is still named
 
 

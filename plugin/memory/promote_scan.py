@@ -195,7 +195,7 @@ def render_report(result: dict) -> str:
                 lines.append(f"   a: \"{a['description']}\"")
                 lines.append(f"   b: \"{b['description']}\"")
                 lines.append(
-                    f"   accept: run /hippo:promote {a['name']} inside {a['repo']} "
+                    f"   accept: run /hippo:share (promote) {a['name']} inside {a['repo']} "
                     f"(or its twin in {b['repo']}) — per-item, origin-stamped, terminal"
                 )
         untrusted = result.get("projects_untrusted") or 0
@@ -215,9 +215,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="EXT-2: cross-project promotion mining — report-only sweep over this "
+        description="cross-project promotion mining — report-only sweep over this "
         "machine's TRUSTED registered corpora for lessons learned in >=2 projects. "
-        "Acceptance routes through /hippo:promote (per item); this never writes."
+        "Acceptance routes through /hippo:share (per item); this never writes."
     )
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     args = parser.parse_args(argv)

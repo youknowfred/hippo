@@ -146,7 +146,7 @@ def test_report_writes_beside_salience_ab_and_doctor_reads_it(memory_dir, monkey
         D.DoctorContext(memory_dir, os.path.dirname(os.path.dirname(memory_dir)))
     )
     assert "outcome-prior A/B recorded" in r["message"]
-    assert "ED-2" in r["message"]
+    assert "dated owner decision" in r["message"]
 
 
 def test_flip_language_absent_everywhere():

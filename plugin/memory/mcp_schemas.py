@@ -35,7 +35,7 @@ _TOOLS = [
             "user/feedback types). Reports near-duplicate/conflict neighbors (warn-only) so you "
             "can decide add / update-existing / supersede / skip. A per-item, agent-initiated "
             "write — never call it in a loop to bulk-import. Pass check:true FIRST when "
-            "draining the capture queue (the CAP-3 dry-run: neighbors + proposal-time "
+            "draining the capture queue (the dry-run: neighbors + proposal-time "
             "baseline, writes nothing), then call again without it for the real write."
         ),
         "inputSchema": {
@@ -53,12 +53,12 @@ _TOOLS = [
                 "confidence": {
                     "type": "string",
                     "enum": ["draft", "verified", "authoritative"],
-                    "description": "GOV-7: the author's trust dial — display-only, never a "
+                    "description": "the author's trust dial — display-only, never a "
                     "ranking input; omit for the default",
                 },
                 "check": {
                     "type": "boolean",
-                    "description": "CAP-3 dry-run: score this candidate against the existing "
+                    "description": "dry-run: score this candidate against the existing "
                     "corpus (near-duplicate neighbors, governance echoes, the proposal-time "
                     "git baseline) and write NOTHING — run it before the real write when "
                     "draining captures, so a duplicate routes to update/supersede instead of "
@@ -86,7 +86,7 @@ _TOOLS = [
     {
         "name": "why",
         "description": (
-            "The recall receipt (GOV-5, glass-box): re-runs the SAME ranking the recall "
+            "The recall receipt (glass-box): re-runs the SAME ranking the recall "
             "hook uses for a query and explains it — per hit the winning backend, typed "
             "edges, steering and salience; on abstention, the best candidate's sub-floor "
             "near-miss score and the floor it missed (or the honest reason: untrusted "
@@ -144,7 +144,7 @@ _TOOLS = [
     {
         "name": "bootstrap",
         "description": (
-            "One-time per-machine-surface provisioning — the /hippo:bootstrap flow: builds "
+            "One-time per-machine-surface provisioning — the /hippo:setup flow: builds "
             "the plugin venv and downloads the ~130MB offline embedding model (the ONE "
             "online step in hippo's lifecycle; recall already works BM25-only without it). "
             "action='start' kicks off a detached background worker and returns immediately; "
@@ -178,7 +178,7 @@ _TOOLS = [
     {
         "name": "init",
         "description": (
-            "One-time project setup — the mechanical core of the /hippo:init flow. On a "
+            "One-time project setup — the mechanical core of the /hippo:setup flow. On a "
             "project with no corpus it seeds .claude/memory/ (core starter pack + MEMORY.md "
             "floor + format marker), then on every run it wires THIS machine: the native-"
             "memory symlink, the recall index, CONVENTIONS.md backfill, the .gitignore "
@@ -188,14 +188,26 @@ _TOOLS = [
             "clone, second machine) is never auto-trusted — the result names the "
             "trust_corpus review as the next step. Call when the user asks to set up "
             "hippo/memory for this project; follow the nudges in the result (fill "
-            "user_role.md from the user's own words — never invent its content)."
+            "user_role.md from the user's own words — never invent its content). When "
+            "Claude Code's own memory directory for this repo already holds files, the "
+            "first call only PREVIEWS adopting them (writes nothing) and returns a digest."
         ),
-        "inputSchema": {"type": "object", "properties": {}},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "adopt_digest": {
+                    "type": "string",
+                    "description": "the digest an adoption preview returned — pass it ONLY "
+                    "after the user's explicit yes to that preview; or 'skip' to set up "
+                    "without adopting",
+                },
+            },
+        },
     },
     {
         "name": "trust_corpus",
         "description": (
-            "The SEC-1 consent flow for this project's memory corpus — the ONLY way to "
+            "The consent flow for this project's memory corpus — the ONLY way to "
             "un-gate recall on an untrusted (e.g. freshly cloned) corpus from this surface, "
             "and the re-consent path when recall reports withheld/drifted files. Two steps, "
             "one tool: called WITHOUT confirm_digest it never trusts anything — it returns "
@@ -232,21 +244,24 @@ _TOOLS = [
             "(the owner-ratified default, 2026-07-12): additive stamped edges only, "
             "capped single-digit, θ/mutuality-gated, secret-linted, never committed, live "
             "in recall immediately — present the returned digest verbatim, it carries the "
-            "undo handles. apply=false runs report-only (zero writes). action='undo' "
+            "undo handles. apply=false runs report-only (zero writes). "
+            "contradictions=true adds the opt-in LLM contradiction check over the pass's "
+            "strongest pairs (propose-only, into the resolve inbox; it uses the plugin's "
+            "LLM API key, which reaches this server and never a shell). action='undo' "
             "reverts the latest pass (or edge_id for one edge), byte-exact, refusing on "
             "manual drift. action='retire_ghost' (edge_id=…, optional reason=…) retires ONE "
             "ACTIVE ledger edge whose stamp is provably gone — its source memory was "
             "deleted outside archive/, or the stamped line never survived a rewrite — by "
             "appending the superseding undone line; it refuses while the stamp is on disk "
             "anywhere (use undo) and has no bulk form. action='log' lists every dream edge "
-            "(active / aged-in / undone). action='deparasite' runs the DRM-4 counterweight: reports "
+            "(active / aged-in / undone). action='deparasite' runs the counterweight: reports "
             "per-memory out-degree, flags hubs over DREAM_MAX_OUT_DEGREE, and PROPOSES "
             "retractions (dream's own un-aged edges — executed only with retract=true) "
             "vs per-item GATED demotions and non-lossy dedup-merges (never auto; "
             "protected floor/co-recalled/cited hubs are never proposed for depression). "
             "action='dedup_merge' executes ONE ratified merge proposal (survivor gains "
             "supersedes, loser gets invalid_after — additive frontmatter, nothing "
-            "deleted). action='generate' runs the DRM-6 generative tier: clusters "
+            "deleted). action='generate' runs the generative tier: clusters "
             "co-firing sets into schema/gist + hypothesis PROPOSALS (report-only unless "
             "stage=true or HIPPO_DREAM_GENERATIVE=1) — staged memories are QUARANTINED: "
             "created only at confidence:draft, down-weighted in recall, never answering "
@@ -276,10 +291,10 @@ _TOOLS = [
                     ],
                     "description": "pass = run a dream pass (default); undo = revert; "
                     "retire_ghost = close one active ledger edge whose stamp is provably "
-                    "gone; log = list edges; deparasite = DRM-4 counterweight report; "
-                    "dedup_merge = execute one ratified merge; generate = DRM-6 "
+                    "gone; log = list edges; deparasite = counterweight report; "
+                    "dedup_merge = execute one ratified merge; generate = "
                     "schema/hypothesis proposals (stage=true stages drafts); "
-                    "sweep_drafts = DRM-6 decay sweep; archive_draft = execute one "
+                    "sweep_drafts = decay sweep; archive_draft = execute one "
                     "proposed draft archive; prospective = the abstain→hit flip metric",
                 },
                 "apply": {
@@ -288,6 +303,12 @@ _TOOLS = [
                     "this pass — false = report-only (zero writes), true = force apply. "
                     "Omit to follow the default (auto-apply ON, owner-ratified "
                     "2026-07-12).",
+                },
+                "contradictions": {
+                    "type": "boolean",
+                    "description": "with action='pass': run the LLM contradiction check "
+                    "for this pass (needs the plugin's LLM API key; silently skipped "
+                    "without one). Omit to follow the dream_contradictions option.",
                 },
                 "edge_id": {
                     "type": "string",
@@ -344,15 +365,18 @@ _TOOLS = [
     {
         "name": "capture",
         "description": (
-            "The CAP-2 pending-capture queue — Step 1 of /hippo:consolidate's drain. "
+            "The pending-capture queue — Step 1 of /hippo:tend's drain. "
             "action='list' (default) shows every queued seed highest-value first with its "
             "provenance (session, commit range, changed paths, queries, user-confirmed "
             "decisions, verbatim-diff evidence + its secret-lint flag) and the queue dir; "
             "nothing listed is in the corpus yet. Drain per item: draft the durable fact, "
             "check it with new_memory (check:true), secret-lint any verbatim hunk with "
             "secrets_scan BEFORE fencing it into a body, write with new_memory, then "
-            "action='discard' (path=…) removes that ONE processed seed (same op when a "
-            "capture isn't worth keeping). action='snooze' defers the SessionStart nudge a "
+            "action='discard' (path=…, drafted=true when it became a memory) removes that "
+            "ONE processed seed (same op when a capture isn't worth keeping). Seeds older "
+            "than 14 days or 20 sessions, or past the queue cap, wait in an expired/ folder: "
+            "action='restore' (path=… or all=true) brings them back. "
+            "action='snooze' defers the SessionStart nudge a "
             "few sessions (seeds untouched; it re-nags). action='add_decision' (text=…) "
             "records ONE user-confirmed decision — quote or faithfully paraphrase what the "
             "USER stated, never infer one; recorded UNATTRIBUTED on this surface (no "
@@ -364,15 +388,25 @@ _TOOLS = [
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "discard", "snooze", "add_decision"],
+                    "enum": ["list", "discard", "restore", "snooze", "add_decision"],
                     "description": "list = show the queue (default); discard = remove ONE "
-                    "processed seed; snooze = defer the nudge; add_decision = record ONE "
-                    "user-confirmed decision",
+                    "processed seed; restore = bring expired seed(s) back; snooze = defer "
+                    "the nudge; add_decision = record ONE user-confirmed decision",
                 },
                 "path": {
                     "type": "string",
                     "description": "with action='discard': the seed path or filename from "
-                    "the listing (must be inside the pending queue)",
+                    "the listing (must be inside the pending queue); with action='restore': "
+                    "an expired seed's filename or session id",
+                },
+                "drafted": {
+                    "type": "boolean",
+                    "description": "with action='discard': true when the seed became a "
+                    "memory (counted as drafted rather than discarded)",
+                },
+                "all": {
+                    "type": "boolean",
+                    "description": "with action='restore': restore every expired seed",
                 },
                 "text": {
                     "type": "string",
@@ -409,7 +443,7 @@ _TOOLS = [
     {
         "name": "reconsolidate",
         "description": (
-            "The LIF-1 reconsolidation worklist — Step 2 of /hippo:consolidate. "
+            "The reconsolidation worklist — Step 2 of /hippo:tend. "
             "action='worklist' (default) lists recently-recalled memories whose cited "
             "code has since drifted (plus commit-precise [since-watermark] hits), "
             "most-recently-drifted first, with 1-hop linked neighbors as review-adjacent "
@@ -417,7 +451,7 @@ _TOOLS = [
             "action='brief' (name=…) renders that entry's evidence — diffstat + hunk "
             "headers from the entry's OWN source_commit baseline to HEAD, secret-linted "
             "hunk bodies when clean, plus evidence-drift fences, invalid_after, and "
-            "linked neighbors (EVD-1 — the hand-gathered diff is retired; the brief is "
+            "linked neighbors (the hand-gathered diff is retired; the brief is "
             "read-only and applies nothing). Then render ONE per-item verdict via "
             "action='reverify': outcome="
             "'graduate' (re-verified current — clears staleness, re-baselines "
@@ -451,7 +485,7 @@ _TOOLS = [
                 },
                 "superseded_by": {
                     "type": "string",
-                    "description": "GRA-4 opt-in (demote only): the SUCCESSOR memory that "
+                    "description": "opt-in (demote only): the SUCCESSOR memory that "
                     "replaces this one's claim — one successor, one memory, never bulk",
                 },
             },
@@ -462,7 +496,7 @@ _TOOLS = [
         "description": (
             "Refresh the recall index + the persisted link graph (links.json) so this "
             "session's writes are live and staleness is recomputed — Step 3 of "
-            "/hippo:consolidate, and the required follow-up after any approved co-recall "
+            "/hippo:tend, and the required follow-up after any approved co-recall "
             "wikilink append or typed-edge write. Offline and bounded: runs the full "
             "build under the freshly-bootstrapped venv python when one exists (dense "
             "vectors), else a never-downgrade in-process incremental refresh (a dense "
@@ -474,7 +508,7 @@ _TOOLS = [
     {
         "name": "co_recall_proposals",
         "description": (
-            "GRW-2 co-recall edge proposals — Step 4 of /hippo:consolidate. Similarity "
+            "co-recall edge proposals — Step 4 of /hippo:tend. Similarity "
             "can never link a bug to its unrelated-looking workaround, but the episode "
             "buffer records which memories actually SURFACE TOGETHER: this tallies pairs "
             "that co-recalled across many DISTINCT sessions (floor names excluded — they "
@@ -493,7 +527,7 @@ _TOOLS = [
     {
         "name": "abstention_fixtures",
         "description": (
-            "The SIG-6 blind-spot loop — Step 5 of /hippo:consolidate. A recurring "
+            "The blind-spot loop — Step 5 of /hippo:tend. A recurring "
             "abstained query means the corpus kept being asked something it couldn't "
             "answer, and the drain may have just captured exactly the memory that closes "
             "the gap. action='draft' (default) refreshes the gitignored drafts queue: one "
@@ -531,18 +565,18 @@ _TOOLS = [
                 "category": {
                     "type": "string",
                     "description": "with action='confirm': the row's category tag "
-                    "(default 'abstention'; TMB-3/TMB-4 rows use 'forgetting'/'update')",
+                    "(default 'abstention'; rows use 'forgetting'/'update')",
                 },
                 "absent": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "TMB-3, with action='confirm' INSTEAD of expected: "
+                    "description": ", with action='confirm' INSTEAD of expected: "
                     "ARCHIVED stem(s) that must NOT surface for the query (each must "
                     "exist in archive/; refused otherwise)",
                 },
                 "superseded": {
                     "type": "string",
-                    "description": "TMB-4, with action='confirm' + expected: the "
+                    "description": ", with action='confirm' + expected: the "
                     "still-live CORPSE stem this update row's query was verbatim-derived "
                     "from (enables stamp-state-bucketed scoring)",
                 },
@@ -552,8 +586,8 @@ _TOOLS = [
     {
         "name": "rederive",
         "description": (
-            "MIG-1: re-derive cited_paths after hippo's citation EXTRACTOR changed (the "
-            "DRV-2 'citation derivation' nudge / doctor line routes here). Corpora written "
+            "re-derive cited_paths after hippo's citation EXTRACTOR changed (the "
+            " 'citation derivation' nudge / doctor line routes here). Corpora written "
             "by an older extractor carry citations it could not see — so some memories "
             "watch the wrong file and some sit at cited_paths: [], which makes them EXEMPT "
             "from staleness tracking. action='worklist' (default) is READ-ONLY and shows "
@@ -598,13 +632,13 @@ _TOOLS = [
     {
         "name": "heal_baselines",
         "description": (
-            "COR-10: set source_commit to HEAD for memories whose staleness baseline is "
+            "set source_commit to HEAD for memories whose staleness baseline is "
             "EMPTY. A memory with one is invisible to staleness, reconsolidation and "
             "archive gating — forever. doctor's empty-baseline check names this tool. "
             "This can never CLEAR a staleness flag (an empty baseline never raised one), "
             "so it only turns tracking ON. Deliberately human-invoked and never automatic: "
             "it used to run inside the SessionStart hook, which meant a hook writing to the "
-            "corpus — drifting each healed file off its own SEC-6 consent fingerprint, "
+            "corpus — drifting each healed file off its own consent fingerprint, "
             "after which the drift banner asked the user 'a git pull? a hand edit?' about "
             "hippo's own write."
         ),
@@ -620,7 +654,7 @@ _TOOLS = [
     {
         "name": "resolve",
         "description": (
-            "Drain the contradiction inbox — /hippo:resolve's engine (the SessionStart "
+            "Drain the contradiction inbox — /hippo:tend's engine (the SessionStart "
             "contradiction-inbox nudge routes here). action='inbox' (default) lists "
             "every unresolved contradicts pair (declared frontmatter edges plus "
             "dream-PROPOSED candidates) with each side's description. For EACH pair, "
@@ -635,7 +669,7 @@ _TOOLS = [
             "demote-in-place chain, nothing deleted; not_conflicting (a=, b=) records "
             "the one corpus-preserving verdict in this clone's ledger (files and edge "
             "untouched). Nothing auto-picks a winner; never bulk-apply a verdict; "
-            "two-write verdicts roll back cleanly when a write refuses (COR-16)."
+            "two-write verdicts roll back cleanly when a write refuses."
         ),
         "inputSchema": {
             "type": "object",
@@ -665,7 +699,7 @@ _TOOLS = [
                 "prefill": {
                     "type": "string",
                     "enum": ["keep_one", "scope_both", "merge", "not_conflicting", "abstain"],
-                    "description": "TMB-1 (verdict calls): the inbox evidence card's "
+                    "description": " (verdict calls): the inbox evidence card's "
                     "suggested verdict as you saw it — recorded next to your choice "
                     "(per-clone ledger, capture only; nothing ever auto-applies it)",
                 },
@@ -675,7 +709,7 @@ _TOOLS = [
     {
         "name": "audit",
         "description": (
-            "The /hippo:audit report MATERIAL, read-only — the skill's Phase-1 gather "
+            "The /hippo:doctor content-audit report MATERIAL, read-only — the skill's Phase-1 gather "
             "as one call (the old-invalidation SessionStart nudge routes here on this "
             "surface). Returns the cross-referenced JSON the audit skill's Phases 2-4 "
             "reason over: eval gates (skip_eval=true to skip the dense cluster), soak/"
@@ -712,10 +746,10 @@ _TOOLS = [
     {
         "name": "interview",
         "description": (
-            "EXT-3, the /hippo:consolidate asks step: at most THREE grounded questions "
+            ", the /hippo:tend asks step: at most THREE grounded questions "
             "per session, template-rendered from existing gap signals — recurring "
-            "recall abstentions (SIG-3), the unresolved contradiction inbox (GOV-1), "
-            "and generated drafts at their decay horizon (DRM-6) — each citing its "
+            "recall abstentions, the unresolved contradiction inbox, "
+            "and generated drafts at their decay horizon — each citing its "
             "evidence verbatim. action='questions' (default) lists them; ask the HUMAN, "
             "never answer for them. Every ACCEPTED answer routes through the existing "
             "per-item write verbs (new_memory with check:true / resolve / reconsolidate "
@@ -751,7 +785,7 @@ _TOOLS = [
     {
         "name": "untrust",
         "description": (
-            "SEN-5: REVOKE trust for a corpus after discovering it is bad/poisoned — the "
+            "REVOKE trust for a corpus after discovering it is bad/poisoned — the "
             "incident-response inverse of the trust_corpus consent flow (the only recourse "
             "was to consent; there was no un-consent). Removes exactly THIS repo's entry from "
             "the machine-local trust registry, preserving every sibling; idempotent (an "
@@ -775,7 +809,7 @@ _TOOLS = [
     {
         "name": "blast_radius",
         "description": (
-            "SEN-5: read-only incident forensics for a suspect memory — after untrust (or on "
+            "read-only incident forensics for a suspect memory — after untrust (or on "
             "spotting one poisoned memory), see what it TOUCHED. Joins four traces: the "
             "sessions whose recall surfaced it (episode buffer), its typed+untyped link graph "
             "adjacency (who it points at / who points at it), governance files that cite it, "
@@ -793,6 +827,60 @@ _TOOLS = [
                 },
             },
             "required": ["name"],
+        },
+    },
+    {
+        "name": "tend",
+        "description": (
+            "The maintenance queue: every kind of memory upkeep in one ranked list — "
+            "changes waiting for re-consent, broken baselines, contradictions, merged-in "
+            "duplicates, pending captures, memories whose cited code moved, broken links, "
+            "floor overflow, and citation re-derivation. action='list' (default) counts and "
+            "lists them; 'next' shows the top item with its evidence, the likely verdict and "
+            "the verdicts it accepts; 'show' does the same for one id; 'apply' executes ONE "
+            "verdict on ONE item (there is no apply-all — confirm each with the user first); "
+            "'snooze' (days), 'skip' (until its evidence changes), 'hold' (an owner decision "
+            "with a reason, on a kind or an id; held items count as resolved) and 'release'."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "next", "show", "apply", "snooze", "skip", "hold", "release"],
+                },
+                "id": {"type": "string", "description": "an item id from list/next (kind:target)"},
+                "kind": {
+                    "type": "string",
+                    "description": "limit list/next to one kind, or the kind to hold/release",
+                },
+                "verdict": {"type": "string", "description": "with apply: one of the verdicts show lists"},
+                "winner": {"type": "string", "description": "contradiction keep_one/merge, merge supersede"},
+                "loser": {"type": "string", "description": "contradiction keep_one/merge"},
+                "superseded_by": {"type": "string", "description": "reverify demote: the successor memory"},
+                "days": {"type": "number", "description": "with snooze (default 7)"},
+                "reason": {"type": "string", "description": "with hold: why (required)"},
+            },
+        },
+    },
+    # HOT-6 — INTERNAL and unfrozen: the opt-in warm-recall hook's entry, called by the
+    # harness (a UserPromptSubmit mcp_tool hook that `hippo setup --warm` writes), never by
+    # a model. Appended at the END, same position freeze.
+    {
+        "name": "recall_hook",
+        "description": (
+            "Internal: called by hippo's opt-in UserPromptSubmit hook, not for direct use. "
+            "Serves one prompt's recall from this session's server and returns the hook's "
+            "JSON reply, or {} when the command hook's own recall serves it instead."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string", "description": "the submitted prompt"},
+                "session_id": {"type": "string", "description": "the harness session id"},
+                "prompt_id": {"type": "string", "description": "the harness prompt id"},
+                "cwd": {"type": "string", "description": "the session's working directory"},
+            },
         },
     },
 ]

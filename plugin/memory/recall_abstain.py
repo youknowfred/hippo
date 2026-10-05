@@ -27,13 +27,12 @@ on held-out rows admitted afterwards (53 emgl, 25 Skyline): recall@10 moved -0.0
 (one terse approval prompt) and 0.000 on Skyline. The
 cosine thresholds belong to one embedding space, like ``recall_rank._DENSE_FLOOR_BY_MODEL``,
 so an uncalibrated model (or a BM25-only index, or a dense failure) leaves the gate off:
-abstention stays dense-gated, as RET-11 decided. ``HIPPO_DISABLE_ABSTAIN_GATE=1`` turns it
-off. The gate only decides whether to inject, never how anything ranks.
+abstention stays dense-gated, as RET-11 decided. ``HIPPO_DISABLE=abstain-gate`` (or the older
+``HIPPO_DISABLE_ABSTAIN_GATE=1``) turns it off. The gate only decides whether to inject, never how anything ranks.
 """
 
 from __future__ import annotations
 
-import os
 from typing import Dict, List, Optional, Sequence
 
 # Both lanes' top N must share a memory. Calibrated across an 86- and a 1,033-memory corpus.
@@ -56,9 +55,10 @@ _COSINE_BY_MODEL = {
 
 
 def gate_disabled() -> bool:
-    return (os.environ.get("HIPPO_DISABLE_ABSTAIN_GATE") or "").strip().lower() in (
-        "1", "true", "yes", "on",
-    )
+    """``HIPPO_DISABLE=abstain-gate``, or the older ``HIPPO_DISABLE_ABSTAIN_GATE`` (SRF-4)."""
+    from .settings import disabled
+
+    return disabled("abstain-gate")
 
 
 def _thresholds(model: Optional[str]) -> Optional[Dict[str, float]]:

@@ -359,7 +359,7 @@ def build_context(
     from .attention import CALM, INTEGRITY_SIGNALS, attention_mode, muted_signals
 
     run_ctx = _build_run_context(memory_dir, repo_root)
-    muted, _refused = muted_signals()  # CLM-2: integrity names are never muted
+    muted, _refused = muted_signals(memory_dir=memory_dir)  # CLM-2: integrity names are never muted
     labelled: List[Tuple[str, str]] = []
     for _label, fn in PRODUCERS:
         if _label in muted and _label not in INTEGRITY_SIGNALS:
@@ -375,7 +375,7 @@ def build_context(
             labelled.append((_label, out.rstrip()))
     if not labelled:
         return ""
-    if attention_mode() == CALM:
+    if attention_mode(memory_dir=memory_dir) == CALM:
         # CLM-1: the budgeted digest; only what it shows counts as emitted.
         from .session_start_calm import calm_digest
 
@@ -491,6 +491,29 @@ def main(
             # T18 FLT-1: fleet presence doc — branch/head of the LAUNCH tree (SHP-7: the tree
             # this session works in, not the corpus's main tree when a worktree redirected).
             write_presence(memory_dir, launch_root(), session_id=session_id)
+        except Exception:
+            pass
+        # SRF-4: count every legacy env/config spelling still in use, once per session,
+        # through the OBS-2 usage map — the deprecation window's evidence. SessionStart, not
+        # the per-prompt hook; the same corpus-existence guard as the ledgers above, and the
+        # SEC-1 zero-trace posture: an untrusted corpus grows no row.
+        try:
+            from . import trust
+
+            gate_root = trust.gate_repo_root(memory_dir, repo_root)
+            trusted = gate_root is None or trust.is_trusted(gate_root)
+            if session_id and trusted and os.path.isdir(memory_dir):
+                from .settings import legacy_names_in_use, usage_verb
+                from .telemetry import default_telemetry_dir
+                from .telemetry_rollup import record_legacy_names
+
+                seen = legacy_names_in_use(memory_dir=memory_dir)
+                if seen:
+                    record_legacy_names(
+                        default_telemetry_dir(memory_dir),
+                        session_id,
+                        [(surface, usage_verb(old)) for surface, old, _new in seen],
+                    )
         except Exception:
             pass
         producer_chars: dict = {}
