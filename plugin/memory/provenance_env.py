@@ -314,6 +314,12 @@ def walk_up_for_memory_dir(start: str) -> Tuple[str, str]:
     the git toplevel when resolvable, and NEVER ascends past ``$HOME`` — an outer safety
     bound so a repo with an unusual structure, or no git repo at all, can't walk
     arbitrarily far up the filesystem.
+
+    SHP-8: a start that IS the toplevel never ascends at all, so a repo nested inside
+    another (or a submodule) resolves its own corpus, never its parent's — the parent's
+    is shared deliberately through ``HIPPO_CORPUS_ROOT``. The toplevel is compared by
+    real path: git names it physically, and a start reached through a symlink must still
+    meet it.
     """
     start = os.path.abspath(start)
     nested = _candidate_memory_dir(start)
@@ -321,9 +327,12 @@ def walk_up_for_memory_dir(start: str) -> Tuple[str, str]:
         return nested, "nested"
 
     toplevel = git_root(start)
+    top = os.path.realpath(toplevel) if toplevel else None
     home = os.path.expanduser("~")
     cur = start
     while True:
+        if top and os.path.realpath(cur) == top:
+            break  # stop AT (inclusive) the session's own git toplevel
         parent = os.path.dirname(cur)
         if parent == cur:
             break  # filesystem root
@@ -331,8 +340,6 @@ def walk_up_for_memory_dir(start: str) -> Tuple[str, str]:
         cand = _candidate_memory_dir(cur)
         if os.path.isdir(cand):
             return cand, "root-fallthrough"
-        if toplevel and os.path.abspath(cur) == os.path.abspath(toplevel):
-            break  # stop AT (inclusive) the git toplevel
         if os.path.abspath(cur) == os.path.abspath(home):
             break  # never ascend past $HOME
     return "", "none-found"
