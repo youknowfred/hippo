@@ -97,6 +97,55 @@ Desktop receipt before its `surfaces.py` row flips.
 | Does it reach a command hook? | **Not with defaults alone.** | With only `default` values (no answers saved through the configuration dialog), a command hook saw no `CLAUDE_PLUGIN_OPTION_*` variable. The docs say every option is exported to hooks. Saved values were not probed, since sensitive values need the interactive dialog. | Treat hook reach as unverified. |
 | Version floors | `/config` rows need 2.1.269; `options` pickers need 2.1.271 (docs). | This machine runs 2.1.286. | A string `options` picker stops the plugin loading on older versions, so CLM-2 stays a boolean (as planned). PLT-2 declares the floor. |
 
+**Re-running the hook row with saved values (owner ruling 2026-10-05).** A person runs this
+probe, because the sensitive value is saved through Claude Code's configuration dialog. The
+probe is a throwaway plugin, `key-probe`, added from a local marketplace directory. Its
+wiring copies hippo's:
+
+- a `sensitive` string option `llm_api_key` and a boolean `probe_flag`;
+- command hooks on SessionStart, UserPromptSubmit and SessionEnd;
+- an MCP server whose `env` maps both options through `${user_config.*}`, as hippo's
+  `plugin.json` does.
+
+All of them run the script below. It appends one line per call and never records a value.
+A separate plugin keeps any real key out of the probe and leaves hippo's install alone.
+Options are exported per plugin, so the answer applies to hippo.
+
+```sh
+#!/bin/sh
+k=${CLAUDE_PLUGIN_OPTION_LLM_API_KEY-}
+f=${CLAUDE_PLUGIN_OPTION_PROBE_FLAG-}
+case $k in *'${'*) kp=true ;; *) kp=false ;; esac
+if [ -n "$k" ]; then ks=true; else ks=false; fi
+if [ -n "$f" ]; then fs=true; else fs=false; fi
+printf '{"at":"%s","surface":"%s","agent":"%s","entrypoint":"%s","key_set":%s,"key_len":%s,"key_placeholder":%s,"flag_set":%s,"flag_len":%s}\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "${AI_AGENT-}" "${CLAUDE_CODE_ENTRYPOINT-}" \
+  "$ks" "${#k}" "$kp" "$fs" "${#f}" >> "$HOME/.claude/key-probe-records.jsonl"
+[ "$1" = mcp ] && exit 1   # as an MCP server it records its env, then stops
+exit 0
+```
+
+1. Add the marketplace and install `key-probe@key-probe`.
+2. In a terminal session, open `/plugin configure key-probe@key-probe` (or `/config`). Save a
+   dummy string such as `probe-dummy-not-a-key` (21 characters) as the key, and turn the
+   switch on. Then `claude plugin configure key-probe@key-probe --json` lists both options
+   under `configured`. Delete the records written before the save.
+3. Start a fresh terminal session, send one prompt, then `/exit`.
+4. Start a fresh session in the Desktop Code tab, send one prompt, then close it.
+5. Read `~/.claude/key-probe-records.jsonl`. Then uninstall the plugin, remove the
+   marketplace and delete the records file.
+
+How to read the records:
+
+- On a `hook:*` line, `key_len` 21 means a saved sensitive value reaches command hooks on that
+  surface, and `key_set: false` means it does not. `agent` names the version and `entrypoint`
+  the surface.
+- `flag_len` 4 (`true`) gives the same answer for a plain option.
+- An `mcp` line gives the answer for the MCP server with a saved value. `key_placeholder: true`
+  means the `${user_config.…}` reference reached the server unsubstituted.
+
+Date the row with the result.
+
 ## 5. `PostToolBatch` and `async` hooks
 
 | Question | Answer | Receipt | Consequence |
