@@ -92,7 +92,8 @@ def _make_path_dir(tmp_path, *, python3: bool, jq: bool) -> str:
     os.makedirs(bindir, exist_ok=True)
     # sed/tr/head joined the genuine set with GRW-4 (the PreCompact nudge extracts the
     # payload's session_id and sanitizes the embedded command, still zero Python spawn).
-    for tool in ("cat", "printf", "sed", "tr", "head"):
+    # date joined with CLM-4's day stamp: bash before 4.2 (macOS /bin/bash) has no clock.
+    for tool in ("cat", "printf", "sed", "tr", "head", "date"):
         _symlink_once(shutil.which(tool), bindir / tool)
     if python3:
         # The test venv's interpreter, exposed as `python3` — it has the pinned deps.

@@ -462,8 +462,9 @@ an implicit SessionStart auto-provision. Reasoning:
 - It keeps the hard hook contract (`exit 0`, never downloads, never blocks) simple and
   auditable: hooks only ever *read* an already-warmed cache; they never *provision* one.
 
-Until bootstrap runs, the SessionStart hook nudges the next step (once every few
-sessions, permanently dismissable) instead of staying silent.
+Until bootstrap runs, the SessionStart hook names the next step instead of staying
+silent: in the first session of each day, in any repo, with a one-line command that
+dismisses it on this machine.
 
 ## Troubleshooting
 
