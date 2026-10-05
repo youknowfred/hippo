@@ -1479,8 +1479,9 @@ def snapshot_corpus(memory_dir: str, stamp: str) -> str:
     dest = os.path.join(os.path.dirname(memory_dir), f"memory.pre-cite2-{stamp}")
     if os.path.exists(dest):
         raise FileExistsError(f"{dest} already exists — refusing to overwrite a snapshot")
+    entries = os.listdir(memory_dir)  # MIG-5: read before dest exists — no debris on failure
     ensure_self_ignoring_dir(dest)  # the `*` marker lands first — no unignored window
-    for entry in os.listdir(memory_dir):
+    for entry in entries:
         src = os.path.join(memory_dir, entry)
         dst = os.path.join(dest, entry)
         if os.path.isdir(src):
@@ -1575,8 +1576,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             dest = snapshot_corpus(memory_dir, args.snapshot)
             print(f"snapshot: {dest}")
             return 0
-        except Exception as exc:
-            print(f"snapshot FAILED: {exc} — do not migrate without one")
+        except Exception as exc:  # MIG-5: an absent corpus is named as that, not as a failed copy
+            print(rederive_no_corpus_line(memory_dir, "snapshot")
+                  or f"snapshot FAILED: {exc} — do not migrate without one")
             return 1
 
     if args.heal_baselines:
