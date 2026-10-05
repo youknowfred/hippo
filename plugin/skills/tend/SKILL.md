@@ -133,7 +133,7 @@ sessions are labelled; the score orders your review, it never gates a seed):
 hippo capture --list
 ```
 
-When CAP-LLM triage is enabled (`capture_triage: true` in `~/.claude/hippo-llm.json`, or
+When CAP-LLM triage is enabled (hippo's LLM triage plugin option, or
 `HIPPO_CAPTURE_LLM=1`), a seed may also carry `triage (LLM suggestion …)` lines — a
 suggested type + name, a drafted description, and possible duplicates (the model's semantic
 second opinion, plus a pre-run of the same `--check` machinery you use below). These are

@@ -143,8 +143,11 @@ def default_index_dir(memory_dir: str) -> str:
 
 
 def dense_disabled() -> bool:
-    """True when the dense path is explicitly suppressed (tests / forced BM25-only)."""
-    return os.environ.get("HIPPO_DISABLE_DENSE", "").strip() not in ("", "0", "false", "False")
+    """True when the dense path is explicitly suppressed (tests / forced BM25-only):
+    ``HIPPO_DISABLE=dense``, or the older ``HIPPO_DISABLE_DENSE`` (SRF-4, ``settings``)."""
+    from .settings import disabled
+
+    return disabled("dense")
 
 
 # --------------------------------------------------------------------------- #

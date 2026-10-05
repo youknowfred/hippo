@@ -176,7 +176,7 @@ def check_volatile_paths(ctx: DoctorContext) -> Dict[str, str]:
         if not vol:
             return {
                 "status": "ok",
-                "message": "volatile paths: none declared (optional .format "
+                "message": "volatile paths: none declared (optional hippo.json "
                 "volatile_paths key — staleness-arming policy).",
             }
         _, suppressed = split_volatile_only(

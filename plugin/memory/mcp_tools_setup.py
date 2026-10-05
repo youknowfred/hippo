@@ -500,10 +500,25 @@ def _tool_dream(args: Dict[str, Any]) -> str:
             return render_prospective(prospective_recall(memory_dir))
         apply_arg = args.get("apply")
         do_apply = bool(apply_arg) if apply_arg is not None else apply_mode_default()
-        if do_apply:
-            _code, text = run_apply_pass(memory_dir, repo_root=repo_root)
-        else:
-            _code, text = run_report_pass(memory_dir)
+        # SRF-4: the contradiction check needs the LLM key, and a sensitive plugin option
+        # reaches this server's env but never a Bash-run `hippo dream` — so this is the
+        # key-bearing door for it. Scoped to this one call: the server is long-lived, and
+        # the CLI's own --contradictions uses the same in-process env flag.
+        contra = args.get("contradictions")
+        prior = os.environ.get("HIPPO_DREAM_CONTRADICTIONS")
+        if contra is not None:
+            os.environ["HIPPO_DREAM_CONTRADICTIONS"] = "1" if bool(contra) else "0"
+        try:
+            if do_apply:
+                _code, text = run_apply_pass(memory_dir, repo_root=repo_root)
+            else:
+                _code, text = run_report_pass(memory_dir)
+        finally:
+            if contra is not None:
+                if prior is None:
+                    os.environ.pop("HIPPO_DREAM_CONTRADICTIONS", None)
+                else:
+                    os.environ["HIPPO_DREAM_CONTRADICTIONS"] = prior
         return text
     except Exception as exc:
         return f"dream: pass failed ({exc}) — nothing was changed."

@@ -315,7 +315,7 @@ def test_preview_skipped_when_dense_disabled(repo, memory_dir, monkeypatch):
     git_commit(repo, "add", 1_700_000_100)
     _code, text = _run(repo, memory_dir, ["HEAD~1..HEAD"])
     assert "recall-impact preview skipped" in text
-    assert "HIPPO_DISABLE_DENSE" in text
+    assert "HIPPO_DISABLE=dense" in text  # the message names the v2 spelling; the old one still disables
 
 
 def test_preview_skipped_under_ci_env(repo, memory_dir, monkeypatch):

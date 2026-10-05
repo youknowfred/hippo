@@ -132,6 +132,7 @@ from .doctor_checks_recall import (
     check_update_eval,
 )
 from .doctor_checks_native import check_native_auto_memory  # NAT-1
+from .doctor_checks_settings import check_settings  # SRF-4
 from .doctor_checks_kpi import check_capture_queue, check_hook_wall, check_kpi_rollups, check_surface_usage  # TND-5, OBS-4, OBS-1, OBS-2
 
 # One glyph per status — the deterministic line prefix. Ordered dict-free lookup.
@@ -339,6 +340,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("installed_version", check_installed_version),  # FMT-3: installed_plugins.json vs the version this process runs
     ("claude_code_version", check_claude_code_version),  # PLT-2: the running Claude Code vs hippo's declared floor
     ("attention", check_attention),  # CLM-2: calm/full SessionStart and the mute list
+    ("settings", check_settings),  # SRF-4: legacy env/config names in use + their new spelling; a plaintext key file
     ("venv", check_venv),
     ("corpus", check_corpus_exists),
     ("symlink", check_symlink),

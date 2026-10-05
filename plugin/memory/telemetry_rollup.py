@@ -158,6 +158,7 @@ def _finalize(acc: dict) -> dict:
         _bump(hist, _bucket(float(chars), _SESSION_CHAR_BUCKETS))
     row["hook"]["sessions"] = len(sessions)
     row["hook"]["session_chars_hist"] = hist
+    row.pop("legacy_sessions", None)  # SRF-4's once-per-session guard: ids, never a KPI
     return row
 
 
@@ -222,7 +223,10 @@ def _update(td: str, now: Optional[float], fold) -> bool:
                 acc = _empty(today)
             elif acc["date"] != today:
                 _append_finalized(td, _finalize(acc))
+                carry = acc.get("legacy_sessions")
                 acc = _empty(today)
+                if isinstance(carry, list) and carry:
+                    acc["legacy_sessions"] = carry  # a session spanning midnight counts once
             _drain_spool(td, acc)
             fold(acc)
             write_json_atomic(path, acc, indent=None, sort_keys=True)
@@ -363,6 +367,43 @@ def record_queue(
         _bump(acc.setdefault("queue", {}), event, n)
 
     return _update(telemetry_dir, now, fold)
+
+
+# SRF-4: how many recent session ids the legacy-name counter remembers, so a session's
+# resume/compact SessionStarts do not count the same old names again.
+_LEGACY_SESSIONS_KEPT = 50
+
+
+def record_legacy_names(
+    telemetry_dir: str,
+    session_id: Optional[str],
+    names: List[tuple],
+    *,
+    now: Optional[float] = None,
+) -> int:
+    """SRF-4: count each legacy env/config name in use ONCE for this session through the
+    OBS-2 usage map (``surface:verb`` — e.g. ``env:HIPPO_DISABLE_DENSE``,
+    ``config:format.volatile_paths``), so the deprecation window can see who still uses
+    an old spelling before v2.0 removes it. ``names`` is ``[(surface, verb)]``. A session
+    already counted (its SessionStart fired again on resume or compaction) counts nothing.
+    Returns how many names were counted. Never raises."""
+    if not telemetry_dir or not session_id or not names:
+        return 0
+    counted = [0]
+
+    def fold(acc: dict) -> None:
+        seen = acc.get("legacy_sessions")
+        seen = seen if isinstance(seen, list) else []
+        if session_id in seen:
+            return
+        usage = acc.setdefault("surface", {})
+        for surface, verb in names:
+            _bump(usage, _usage_key(str(surface), str(verb)))
+            counted[0] += 1
+        seen.append(session_id)
+        acc["legacy_sessions"] = seen[-_LEGACY_SESSIONS_KEPT:]
+
+    return counted[0] if _update(telemetry_dir, now, fold) else 0
 
 
 def read_rollups(telemetry_dir: str, *, days: int = 30, now: Optional[float] = None) -> List[dict]:

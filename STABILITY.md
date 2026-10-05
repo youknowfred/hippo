@@ -57,6 +57,24 @@ release). New *additions* alongside them are minor, non-breaking changes.
   `HIPPO_SLEEP_TIER_A` (added in T15 SLP: the opt-in that lets a
   SCHEDULED sleep pass apply capped, reversible Tier-A dream edges — default OFF, and OFF
   keeps the runner's zero-write guarantee byte-for-byte). These keep their names and meanings.
+- **The v2 environment set (from v1.42).** The frozen environment set shrinks to twelve names:
+  the nine directory overrides above (`HIPPO_MEMORY_DIR`, `HIPPO_INDEX_DIR`,
+  `HIPPO_TELEMETRY_DIR`, `HIPPO_PENDING_DIR`, `HIPPO_LOCAL_MEMORY_DIR`, `HIPPO_USER_MEMORY_DIR`,
+  `HIPPO_PROJECTS_FILE`, `HIPPO_TRUST_FILE`, `HIPPO_CLAUDE_PROJECTS_DIR`),
+  `HIPPO_DISABLE=<comma list>` (features `dense`, `jit`, `presence`, `floor-nag`,
+  `abstain-gate`, `touch-fastpath`), `HIPPO_TRUST_ALL` and `HIPPO_TRUST_NONGIT`. The six
+  `HIPPO_DISABLE_<FEATURE>` names are deprecated spellings of that list, and
+  `DREAM_CONTRA_MAX_PAIRS` / `DREAM_CONTRA_MIN_COFIRE` of their `HIPPO_`-prefixed names. The
+  other names in the list above (`HIPPO_EMBED_MODEL`, `HIPPO_MCP_MAX_MESSAGE_CHARS`,
+  `HIPPO_TEA5_OPT_IN`, `HIPPO_SALIENCE`, `HIPPO_DENSE_FLOOR`, `HIPPO_DUP_THRESHOLD`,
+  `HIPPO_SLEEP_TIER_A`) stay readable as overrides but become configuration, outside the
+  frozen set. Settings that are not environment variables moved too: corpus policy to the
+  committed `.claude/memory/hippo.json` (its keys used to sit in `.format`) and machine
+  settings to the plugin's options (they used to sit in `~/.claude/hippo-llm.json`). An
+  environment variable wins over a plugin option, which wins over `hippo.json`, which wins
+  over the old location. **Deprecation window:** every old name keeps working unchanged
+  through v1.43, `/hippo:doctor` names each one it sees with its new spelling, and each use is
+  counted; the window is two minors (v1.42, v1.43) and the old names are removed at v2.0.
 - **The committed on-disk corpus format** — `.claude/memory/.format`'s `corpus_format` (currently
   **5**) and the memory-file frontmatter conventions ([CONVENTIONS.md](plugin/assets/CONVENTIONS.md)).
   The format version only ever increases, and every increase ships a documented migration

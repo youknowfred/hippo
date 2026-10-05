@@ -141,8 +141,12 @@ def _env_int(name: str, default: int) -> int:
 
 def generative_enabled() -> bool:
     """``HIPPO_DREAM_GENERATIVE`` — the DRM-6 flag. DEFAULT OFF (P3 ships behind a flag;
-    DREAM-KILL-1). Only an explicit truthy value enables; junk stays off."""
-    return os.environ.get("HIPPO_DREAM_GENERATIVE", "").strip() in ("1", "true", "True")
+    DREAM-KILL-1). Only an explicit truthy value enables; junk stays off. SRF-4: when the
+    env var is unset, the ``dream_generative`` plugin option decides (it reaches the MCP
+    server and hooks, never a Bash-run ``hippo dream``)."""
+    from .settings import opt_in
+
+    return opt_in("HIPPO_DREAM_GENERATIVE", "dream_generative")
 
 
 def max_generate_per_pass() -> int:

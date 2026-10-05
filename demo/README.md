@@ -9,7 +9,7 @@ demo/git_drift.sh
 Builds a throwaway git repo, writes a memory that cites a function, edits that function, and shows
 hippo flag the memory **stale** — because *the code it cites moved*, not because a timer expired.
 This is the one behavior no calendar-decay memory tool can reproduce; run it in ~5 seconds, no
-model download needed (`HIPPO_DISABLE_DENSE=1` is set for you). It leaves nothing behind.
+model download needed (`HIPPO_DISABLE=dense` is set for you). It leaves nothing behind.
 
 Expected finish (step 4, after the cited function is edited):
 

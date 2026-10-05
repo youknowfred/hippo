@@ -310,7 +310,9 @@ def floor_nag_disabled() -> bool:
     """FLR-1's kill switch (the JIT/PRESENCE precedent): truthy env kills the edit-time
     nag lane entirely. The SessionStart producer and doctor line are NOT covered — they
     are once-per-surface state reports, not per-edit interjections."""
-    return bool(os.environ.get("HIPPO_DISABLE_FLOOR_NAG", "").strip())
+    from .settings import disabled
+
+    return disabled("floor-nag")  # SRF-4: HIPPO_DISABLE=floor-nag, or HIPPO_DISABLE_FLOOR_NAG
 
 
 def floor_governance(memory_dir: str) -> dict:

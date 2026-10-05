@@ -118,23 +118,16 @@ both **propose-only**, so the review gate above is untouched:
   judgment similarity math can't make. Confirmed candidates feed the `/hippo:resolve`
   inbox, where you render the verdict as usual. Nothing auto-applies.
 
-Turn either on in one machine-local file, `~/.claude/hippo-llm.json`:
-
-```json
-{
-  "capture_triage": true,
-  "dream_contradictions": true,
-  "api_key": "sk-ant-…"
-}
-```
-
-The key can live in that file (as above) or in your `ANTHROPIC_API_KEY` environment variable —
-but on the Claude **Desktop** app the env var often doesn't reach the background capture hook, so
-the `api_key` field is the reliable route there. Defaults to the `claude-haiku-4-5` alias (a heavy
-month of captures costs on the order of a dollar); `"model": "claude-sonnet-5"` upgrades the
-judgment at ~3× the (still tiny) per-call cost. Any failure — no key, no network, a malformed
-reply — falls back to exactly the un-enriched behavior. The file is machine-local (`~/.claude/`,
-never in the repo). Full knob reference:
+Turn either on in hippo's plugin options: Claude Code asks for them when you enable the
+plugin, and lists the switches in `/config` — **LLM triage of captured sessions** and **LLM
+contradiction check in dream**. Set the **LLM API key** option too (from hippo's entry in
+`/plugin`): it is masked and kept in your system keychain, never in a file. The key reaches
+hippo's hooks and its MCP server and never a shell command, so the contradiction check runs
+through hippo's MCP `dream` tool. An `ANTHROPIC_API_KEY` in your environment overrides the
+option. Defaults to the `claude-haiku-4-5` alias (a heavy month of captures costs on the order
+of a dollar); set the **LLM model** option to `claude-sonnet-5` to upgrade the judgment at ~3×
+the (still tiny) per-call cost. Any failure — no key, no network, a malformed reply — falls back
+to exactly the un-enriched behavior. Full knob reference:
 [`plugin/memory/README.md`](plugin/memory/README.md#standalone-llm-enrichment-opt-in-default-off).
 
 ## Compared to other memory tools
@@ -299,6 +292,28 @@ paths, since those are shared across every project using the plugin on this mach
 git, inert, until someone runs `/hippo:init` again (in this repo, a fresh clone, or a new
 worktree).
 
+## Settings (moved in v1.42)
+
+hippo's settings now live in three places, and the first one that answers wins:
+
+1. **An environment variable** — a per-shell or CI override.
+2. **hippo's plugin options** — your machine's settings: the calm SessionStart switch, the
+   LLM opt-ins, the LLM model, and the LLM API key (kept in your system keychain).
+3. **`.claude/memory/hippo.json`** — the corpus's committed policy, shared with your team:
+   `volatile_paths`, `floor_lint`, `fold_digests`, `attention` (`"calm"` or `"full"`) and
+   `mute` (SessionStart signals to hide).
+
+The environment variables you might still set are the directory overrides,
+`HIPPO_DISABLE=<list>` (any of `dense`, `jit`, `presence`, `floor-nag`, `abstain-gate`,
+`touch-fastpath`), `HIPPO_TRUST_ALL` and `HIPPO_TRUST_NONGIT`.
+
+The old spellings keep working through v1.43 and stop at v2.0: `HIPPO_DISABLE_DENSE` and its
+five siblings (now `HIPPO_DISABLE=dense`, …), `DREAM_CONTRA_MAX_PAIRS` and
+`DREAM_CONTRA_MIN_COFIRE` (now with a `HIPPO_` prefix), the policy keys in
+`.claude/memory/.format` (move them to `hippo.json`; the format number stays in `.format`), and
+`~/.claude/hippo-llm.json` (move its settings to the plugin options, and its key out of the
+plain-text file). `/hippo:doctor` lists every old name it sees with its new spelling.
+
 ## Support matrix
 
 | Platform | Status |
@@ -452,7 +467,7 @@ sessions, permanently dismissable) instead of staying silent.
   coincidental word with a memory abstains. The gate needs the dense model, so on a BM25-only
   install (`/hippo:bootstrap` not run, or the model cache cold) any shared token still admits.
   Ask `/hippo:why` about the prompt to see which memory matched and why;
-  `HIPPO_DISABLE_ABSTAIN_GATE=1` turns the gate off. `/hippo:doctor` reports the measured
+  `HIPPO_DISABLE=abstain-gate` turns the gate off. `/hippo:doctor` reports the measured
   per-corpus rate when you supply an off-topic fixture.
 - **I'm in a git worktree and doctor / recall / capture seem to be looking at the wrong corpus.**
   They aren't, since v1.34.0: a linked worktree resolves the main checkout's live corpus, and

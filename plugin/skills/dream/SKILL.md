@@ -63,6 +63,11 @@ Machine-readable form (for scripting / inspection):
 hippo dream --json
 ```
 
+**The LLM contradiction check** (opt-in) needs the LLM API key, and the plugin's key option
+reaches hippo's MCP server but never a shell command. Run it through the MCP `dream` tool
+(`contradictions: true` on a pass), not `hippo dream --contradictions`, which only finds a
+key exported in the shell itself. Without a key the check is skipped silently.
+
 Useful knobs (env or flags): `--probe-k <n>` co-fire probe depth (default 10),
 `--max-seeds <n>` cap the replay worklist (default all), `DREAM_COFIRE_THETA` /
 `DREAM_MAX_APPLY_PER_PASS` — the auto-apply calibration knobs the report's θ sweep feeds

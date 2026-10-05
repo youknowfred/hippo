@@ -140,28 +140,42 @@ def _llm_file_setting(key: str):
 
 
 def contradictions_enabled() -> bool:
-    """The DRM-C flag — DEFAULT OFF. Env ``HIPPO_DREAM_CONTRADICTIONS`` > config file > off.
+    """The DRM-C flag — DEFAULT OFF. Env ``HIPPO_DREAM_CONTRADICTIONS`` > the
+    ``dream_contradictions`` plugin option > the legacy config file > off.
 
     A SET env var decides entirely (truthy enables, anything else is an explicit off, so
-    ``HIPPO_DREAM_CONTRADICTIONS=0`` overrides a config file that says on); an UNSET one
-    defers to ``dream_contradictions`` in ``hippo-llm.json``. Junk stays off (the
+    ``HIPPO_DREAM_CONTRADICTIONS=0`` overrides everything below it); a saved plugin option
+    (SRF-4 — the MCP server receives it) decides next; an unset one defers to
+    ``dream_contradictions`` in ``hippo-llm.json``. Junk stays off (the
     ``generative_enabled`` convention).
     """
-    env = os.environ.get("HIPPO_DREAM_CONTRADICTIONS")
-    if env is not None and env.strip():
-        return env.strip() in ("1", "true", "True")
     try:
-        from . import llm_client
+        from .settings import opt_in
 
-        return llm_client.as_bool(llm_client.file_setting("dream_contradictions"))
+        return opt_in(
+            "HIPPO_DREAM_CONTRADICTIONS", "dream_contradictions",
+            _llm_file_setting("dream_contradictions"),
+        )
     except Exception:
         return False
 
 
+def _contra_env(name: str) -> str:
+    """SRF-4: ``HIPPO_DREAM_CONTRA_*`` is the spelling; the unprefixed ``DREAM_CONTRA_*``
+    still reads (deprecated, through v1.43). The new name wins when both are set."""
+    try:
+        from .settings import env_first
+
+        return env_first(("HIPPO_" + name, name)) or ""
+    except Exception:
+        return ""
+
+
 def contra_max_pairs() -> int:
-    """LLM attempts per pass — env ``DREAM_CONTRA_MAX_PAIRS`` > config ``contra_max_pairs``
-    > 6; clamped to [0, 12] regardless of source (the hard max is not overridable)."""
-    raw = os.environ.get("DREAM_CONTRA_MAX_PAIRS", "").strip()
+    """LLM attempts per pass — env ``HIPPO_DREAM_CONTRA_MAX_PAIRS`` (or the older
+    ``DREAM_CONTRA_MAX_PAIRS``) > config ``contra_max_pairs`` > 6; clamped to [0, 12]
+    regardless of source (the hard max is not overridable)."""
+    raw = _contra_env("DREAM_CONTRA_MAX_PAIRS")
     val = None
     if raw:
         try:
@@ -175,13 +189,17 @@ def contra_max_pairs() -> int:
 
 
 def contra_min_cofire() -> float:
-    """The "high-cofire" bar for DRM-C — env ``DREAM_CONTRA_MIN_COFIRE`` > config
-    ``contra_min_cofire`` > θ.
+    """The "high-cofire" bar for DRM-C — env ``HIPPO_DREAM_CONTRA_MIN_COFIRE`` (or the
+    older ``DREAM_CONTRA_MIN_COFIRE``) > config ``contra_min_cofire`` > θ.
 
     Reusing ``cofire_theta`` by default keeps "which pairs are even worth an LLM call"
     consistent with the pass's existing calibrated notion of a strong pair.
     """
-    val = _env_float("DREAM_CONTRA_MIN_COFIRE", float("nan"))
+    raw = _contra_env("DREAM_CONTRA_MIN_COFIRE")
+    try:
+        val = float(raw) if raw else float("nan")
+    except ValueError:
+        val = float("nan")
     if val == val:  # not NaN — the env var parsed
         return val
     cfg = _llm_file_setting("contra_min_cofire")

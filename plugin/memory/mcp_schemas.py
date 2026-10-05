@@ -244,7 +244,10 @@ _TOOLS = [
             "(the owner-ratified default, 2026-07-12): additive stamped edges only, "
             "capped single-digit, θ/mutuality-gated, secret-linted, never committed, live "
             "in recall immediately — present the returned digest verbatim, it carries the "
-            "undo handles. apply=false runs report-only (zero writes). action='undo' "
+            "undo handles. apply=false runs report-only (zero writes). "
+            "contradictions=true adds the opt-in LLM contradiction check over the pass's "
+            "strongest pairs (propose-only, into the resolve inbox; it uses the plugin's "
+            "LLM API key, which reaches this server and never a shell). action='undo' "
             "reverts the latest pass (or edge_id for one edge), byte-exact, refusing on "
             "manual drift. action='retire_ghost' (edge_id=…, optional reason=…) retires ONE "
             "ACTIVE ledger edge whose stamp is provably gone — its source memory was "
@@ -300,6 +303,12 @@ _TOOLS = [
                     "this pass — false = report-only (zero writes), true = force apply. "
                     "Omit to follow the default (auto-apply ON, owner-ratified "
                     "2026-07-12).",
+                },
+                "contradictions": {
+                    "type": "boolean",
+                    "description": "with action='pass': run the LLM contradiction check "
+                    "for this pass (needs the plugin's LLM API key; silently skipped "
+                    "without one). Omit to follow the dream_contradictions option.",
                 },
                 "edge_id": {
                     "type": "string",

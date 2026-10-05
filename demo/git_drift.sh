@@ -17,7 +17,7 @@ cd "$demo"
 export PYTHONPATH="$hippo_root/plugin"
 export HIPPO_MEMORY_DIR="$demo/.claude/memory"
 export HIPPO_TRUST_ALL=1       # skip the trust prompt in this throwaway demo repo
-export HIPPO_DISABLE_DENSE=1   # BM25-only: staleness is git-based, no embedding model needed
+export HIPPO_DISABLE=dense    # BM25-only: staleness is git-based, no embedding model needed
 idx="$demo/.claude/.memory-index"
 
 recall() { python3 -m memory.recall "$1" --memory-dir "$HIPPO_MEMORY_DIR" --index-dir "$idx"; }

@@ -99,7 +99,7 @@ a different scope.)
   accept, merge, or post anything. The human merges everywhere.
 - **Zero LLM, zero network.** Op classification is mechanical; a packet that needed
   a model to explain itself would not be reviewable evidence.
-- **The preview is local-only.** Never in CI (`--ci` omits it; `HIPPO_DISABLE_DENSE=1`
+- **The preview is local-only.** Never in CI (`--ci` omits it; `HIPPO_DISABLE=dense`
   and CI environments skip it with an explicit line) — a fresh clone has no episode
   buffer, and an honest "no local episodes to replay" beats a fabricated preview.
 - **Advisory lints never gate.** Cited paths ARE repo coupling (portability would

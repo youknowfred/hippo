@@ -90,7 +90,8 @@ hippo_note_usage() {  # <surface> <verb> [action]
 # cited_by quota is spent and no reminder can fire), a due fleet check whose HEAD moved, or
 # a shared-tree mutation that could still owe the worktree nudge. Otherwise it appends exactly the row
 # telemetry.log_outcome writes, so the KPI-2 join input is unchanged. Rotation stays with
-# the next Python write. HIPPO_DISABLE_TOUCH_FASTPATH=1 restores the always-spawn path.
+# the next Python write. HIPPO_DISABLE=touch-fastpath (or the older
+# HIPPO_DISABLE_TOUCH_FASTPATH=1) restores the always-spawn path.
 _hippo_mtime() {  # epoch mtime from GNU (`-c %Y`) or BSD (`-f %m`) stat; only a clean number counts
   local m
   # GNU first: BSD stat rejects -c outright, but GNU reads BSD's `-f %m FILE` as
@@ -114,13 +115,50 @@ _hippo_epoch_ms_ts() {  # prints epoch seconds with 3 decimals, or fails
 _hippo_off() {  # the engine's kill-switch reading: off unless "", 0, false or False
   case "${1//[[:space:]]/}" in ""|0|false|False) return 1 ;; *) return 0 ;; esac
 }
+# SRF-4: hippo_disabled <feature> — the bash twin of memory.settings.disabled. True (0) when
+# HIPPO_DISABLE lists the feature (comma or space separated, any case, _ or -), or when the
+# feature's older variable says so under that variable's own historical reading. Builtins
+# only (bash 3.2, minimal PATH): no tr, no ${x,,} — nocasematch is scoped to the call.
+hippo_disabled() {  # <feature>: dense | jit | presence | floor-nag | abstain-gate | touch-fastpath
+  local f="$1" legacy="" list rc=1 had_nocase=1
+  case "$f" in
+    dense) _hippo_off "${HIPPO_DISABLE_DENSE:-}" && return 0 ;;
+    jit) _hippo_off "${HIPPO_DISABLE_JIT:-}" && return 0 ;;
+    presence) _hippo_off "${HIPPO_DISABLE_PRESENCE:-}" && return 0 ;;
+    touch-fastpath) _hippo_off "${HIPPO_DISABLE_TOUCH_FASTPATH:-}" && return 0 ;;
+    floor-nag)
+      legacy="${HIPPO_DISABLE_FLOOR_NAG:-}"
+      [ -n "${legacy//[[:space:]]/}" ] && return 0
+      ;;
+    abstain-gate)
+      legacy="${HIPPO_DISABLE_ABSTAIN_GATE:-}"
+      legacy="${legacy//[[:space:]]/}"
+      shopt -q nocasematch && had_nocase=0
+      shopt -s nocasematch
+      case "$legacy" in 1|true|yes|on) rc=0 ;; esac
+      [ "$had_nocase" -eq 0 ] || shopt -u nocasematch
+      [ "$rc" -eq 0 ] && return 0
+      ;;
+    *) return 1 ;;
+  esac
+  [ -n "${HIPPO_DISABLE:-}" ] || return 1
+  list="${HIPPO_DISABLE//_/-}"
+  list="${list//[[:space:]]/,}"
+  list=",${list},"
+  had_nocase=1
+  shopt -q nocasematch && had_nocase=0
+  shopt -s nocasematch
+  case "$list" in *",$f,"*) rc=0 ;; esac
+  [ "$had_nocase" -eq 0 ] || shopt -u nocasematch
+  return "$rc"
+}
 # jit.MAX_PROVENANCE_ROWS_PER_SESSION — tests/test_touch_fastpath.py pins the two together.
 HIPPO_JIT_CITED_ROWS_CAP=40
 hippo_touch_fastpath() {  # <payload json>; 0 = logged here, 1 = spawn Python
   local p="$1" tool path sid corpus tree rel tree_rel td idx doc now m v ts row other rc
   local d old_head old_branch live_head live_branch st
   local LC_ALL=C
-  _hippo_off "${HIPPO_DISABLE_TOUCH_FASTPATH:-}" && return 1
+  hippo_disabled touch-fastpath && return 1
   [ -z "${HIPPO_INDEX_DIR:-}" ] || return 1
   # Each key exactly once, so a key-like string inside a value can never be read as one.
   [ "${p//\"tool_name\"/}" = "${p/\"tool_name\"/}" ] || return 1
@@ -162,7 +200,7 @@ hippo_touch_fastpath() {  # <payload json>; 0 = logged here, 1 = spawn Python
   # (or no grep) spawns.
   grep -qF -e "\"$tree_rel\"" "$idx" 2>/dev/null
   rc=$?
-  if [ $rc -eq 0 ] && ! _hippo_off "${HIPPO_DISABLE_JIT:-}"; then
+  if [ $rc -eq 0 ] && ! hippo_disabled jit; then
     # A cited path. Python adds cited_by until this session's quota is spent, and could
     # emit a first-touch reminder; with no reminder candidates at all and the quota spent,
     # it adds nothing.
@@ -175,7 +213,7 @@ hippo_touch_fastpath() {  # <payload json>; 0 = logged here, 1 = spawn Python
   elif [ $rc -ne 0 ] && [ $rc -ne 1 ]; then
     return 1
   fi
-  if ! _hippo_off "${HIPPO_DISABLE_PRESENCE:-}"; then
+  if ! hippo_disabled presence; then
       doc="$td/presence/$sid.json"
       [ -f "$doc" ] || return 1
       now="$(date +%s 2>/dev/null)" || return 1

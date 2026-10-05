@@ -120,7 +120,9 @@ def presence_disabled() -> bool:
     SessionEnd clear (a doc already on disk just ages out via TTL): pre-T18 hook behavior.
     Same convention as ``jit.jit_disabled`` / ``build_index.dense_disabled``.
     """
-    return os.environ.get("HIPPO_DISABLE_PRESENCE", "").strip() not in ("", "0", "false", "False")
+    from .settings import disabled
+
+    return disabled("presence")  # SRF-4: HIPPO_DISABLE=presence, or HIPPO_DISABLE_PRESENCE
 
 
 def _presence_dir(telemetry_dir: str) -> str:

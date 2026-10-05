@@ -231,6 +231,7 @@ V2_TOOLS: List[dict] = [
                 "sweep_drafts", "archive_draft", "prospective"]},
             "apply": _B, "edge_id": _S, "reason": _S, "undo_since": _S, "retract": _B,
             "survivor": _S, "loser": _S, "stage": _B, "name": _S,
+            "contradictions": dict(_B, description="with a pass: also run the LLM contradiction check"),
         }),
     },
     {

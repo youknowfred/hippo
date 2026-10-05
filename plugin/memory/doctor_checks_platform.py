@@ -116,15 +116,20 @@ def check_claude_code_version(ctx: DoctorContext) -> Dict[str, str]:
 def check_attention(ctx: DoctorContext) -> Dict[str, str]:
     """CLM-2: which SessionStart attention mode applies here, and what is muted."""
     try:
-        from .attention import attention_mode, muted_signals
+        from .attention import attention_source, muted_signals
 
-        mode = attention_mode()
-        muted, refused = muted_signals()
+        mode, source = attention_source(memory_dir=ctx.memory_dir)
+        muted, refused = muted_signals(memory_dir=ctx.memory_dir)
         msg = f"attention: {mode}"
-        msg += (
-            " (the short digest)" if mode == "calm"
-            else " (set HIPPO_ATTENTION=calm or the plugin's calm_session_start option for the short digest)"
-        )
+        if mode == "calm":
+            msg += f" (the short digest; set by {source})"
+        elif source == "default":
+            msg += (
+                " (for the short digest: the plugin's calm_session_start option, "
+                '"attention": "calm" in .claude/memory/hippo.json, or HIPPO_ATTENTION=calm)'
+            )
+        else:
+            msg += f" (set by {source})"
         if muted:
             msg += f"; muted: {', '.join(sorted(muted))}"
         if refused:

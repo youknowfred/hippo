@@ -636,8 +636,8 @@ def run(
         sections.append("")
         if _dense_disabled():
             sections.append(
-                "recall-impact preview skipped — HIPPO_DISABLE_DENSE=1 (the preview "
-                "is a local-only feature)."
+                "recall-impact preview skipped — dense recall is turned off "
+                "(HIPPO_DISABLE=dense; the preview is a local-only feature)."
             )
         elif os.environ.get("CI"):
             sections.append(

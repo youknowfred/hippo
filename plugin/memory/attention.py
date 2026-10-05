@@ -6,14 +6,16 @@ signals. Integrity signals can never be muted: a quarantined corpus, a corrupt i
 format this plugin cannot read, a harness or venv that cannot run hippo, and native
 settings that keep the floor out of context always show.
 
-Where the setting comes from, first answer wins:
+Where the setting comes from, first answer wins (SRF-4's precedence, ``settings.py``):
   1. ``HIPPO_ATTENTION`` = ``calm`` | ``full``;
   2. the plugin's ``calm_session_start`` boolean option (``userConfig``), which Claude Code
      exports to hooks as ``CLAUDE_PLUGIN_OPTION_CALM_SESSION_START`` once it has a saved
-     value (PLATFORM.md §4: an unsaved default is not exported);
-  3. ``full``.
-The mute list is ``HIPPO_MUTE``, comma-separated SessionStart signal names. It moves into
-``hippo.json`` with SRF-4. Never raises.
+     value (PLATFORM.md §4: an unsaved default is not exported) — a saved ``true`` is
+     calm, a saved ``false`` is full;
+  3. the corpus policy file's ``attention`` key (``.claude/memory/hippo.json``);
+  4. ``full``.
+The mute list is ``HIPPO_MUTE`` (comma-separated SessionStart signal names) when set,
+else ``hippo.json``'s ``mute`` (a list, or the same comma string). Never raises.
 """
 
 from __future__ import annotations
@@ -35,22 +37,53 @@ INTEGRITY_SIGNALS = frozenset({
     "native_interference",
 })
 
-_TRUE = ("1", "true", "yes", "on")
+
+def _policy(memory_dir: Optional[str], key: str):
+    if not memory_dir:
+        return None
+    try:
+        from .provenance_format import read_policy_key
+
+        return read_policy_key(memory_dir, key)
+    except Exception:
+        return None
 
 
-def attention_mode(env: Optional[dict] = None) -> str:
+def attention_source(env: Optional[dict] = None, memory_dir: Optional[str] = None) -> Tuple[str, str]:
+    """``(mode, source)`` — the mode and which home decided it (``HIPPO_ATTENTION``, the
+    ``calm_session_start`` option, ``hippo.json``, or ``default``)."""
     e = env if env is not None else os.environ
     raw = (e.get("HIPPO_ATTENTION") or "").strip().lower()
     if raw in (CALM, FULL):
-        return raw
-    if (e.get("CLAUDE_PLUGIN_OPTION_CALM_SESSION_START") or "").strip().lower() in _TRUE:
-        return CALM
-    return FULL
+        return raw, "HIPPO_ATTENTION"
+    try:
+        from .settings import option_bool
+
+        opt = option_bool("calm_session_start", e)
+    except Exception:
+        opt = None
+    if opt is not None:
+        return (CALM if opt else FULL), "the calm_session_start option"
+    pol = _policy(memory_dir, "attention")
+    if isinstance(pol, str) and pol.strip().lower() in (CALM, FULL):
+        return pol.strip().lower(), "hippo.json"
+    return FULL, "default"
 
 
-def muted_signals(env: Optional[dict] = None) -> Tuple[Set[str], Set[str]]:
-    """``(muted, refused)``: the names ``HIPPO_MUTE`` mutes, and the integrity names it asked
-    to mute and was refused."""
+def attention_mode(env: Optional[dict] = None, memory_dir: Optional[str] = None) -> str:
+    return attention_source(env, memory_dir)[0]
+
+
+def muted_signals(env: Optional[dict] = None, memory_dir: Optional[str] = None) -> Tuple[Set[str], Set[str]]:
+    """``(muted, refused)``: the names ``HIPPO_MUTE`` (else ``hippo.json`` ``mute``) mutes,
+    and the integrity names it asked to mute and was refused."""
     e = env if env is not None else os.environ
-    asked = {s.strip() for s in (e.get("HIPPO_MUTE") or "").split(",") if s.strip()}
+    raw = e.get("HIPPO_MUTE")
+    if raw is not None and raw.strip():
+        asked = {s.strip() for s in raw.split(",") if s.strip()}
+    else:
+        pol = _policy(memory_dir, "mute")
+        if isinstance(pol, str):
+            pol = pol.split(",")
+        asked = {str(s).strip() for s in pol if str(s).strip()} if isinstance(pol, list) else set()
     return asked - INTEGRITY_SIGNALS, asked & INTEGRITY_SIGNALS

@@ -47,6 +47,24 @@ finds (it never edits your settings).
 | `mcp__plugin_hippo_hippo__pack_update_plan` | `mcp__plugin_hippo_hippo__share` | action='pack_update_plan' |
 | `mcp__plugin_hippo_hippo__pack_update_item` | `mcp__plugin_hippo_hippo__share` | action='pack_update_item' |
 
+### Settings moved in v1.42
+
+Nothing breaks: every old name keeps working through v1.43, and `/hippo:doctor` lists each one it
+sees with its new spelling. Move them before v2.0, when the old names stop being read:
+
+| Old | New |
+|---|---|
+| `HIPPO_DISABLE_DENSE`, `HIPPO_DISABLE_JIT`, `HIPPO_DISABLE_PRESENCE`, `HIPPO_DISABLE_FLOOR_NAG`, `HIPPO_DISABLE_ABSTAIN_GATE`, `HIPPO_DISABLE_TOUCH_FASTPATH` | one list: `HIPPO_DISABLE=dense,jit,presence,floor-nag,abstain-gate,touch-fastpath` (name only what you turn off) |
+| `DREAM_CONTRA_MAX_PAIRS`, `DREAM_CONTRA_MIN_COFIRE` | `HIPPO_DREAM_CONTRA_MAX_PAIRS`, `HIPPO_DREAM_CONTRA_MIN_COFIRE` |
+| `volatile_paths`, `floor_lint`, `fold_digests` in `.claude/memory/.format` | the same keys in `.claude/memory/hippo.json` (commit it; `corpus_format` and `cite_derivation` stay in `.format`) |
+| `HIPPO_MUTE` as your only mute list | `"mute"` in `hippo.json` for the team; `HIPPO_MUTE` still overrides it |
+| `~/.claude/hippo-llm.json` `capture_triage`, `dream_contradictions`, `model` | hippo's plugin options: LLM triage of captured sessions, LLM contradiction check in dream, LLM model |
+| `~/.claude/hippo-llm.json` `api_key` | hippo's LLM API key option (masked, kept in your system keychain); then delete the key from the file |
+
+Which value wins: an environment variable, then hippo's plugin option, then `hippo.json`, then the
+old location. The plugin options reach hippo's hooks and its MCP server but not commands run in a
+shell, so the dream contradiction check runs through hippo's MCP `dream` tool.
+
 ## 2. Rebuild a derived cache (automatic)
 
 The recall index carries its own `schema_version` (currently 7), separate from your corpus format.
