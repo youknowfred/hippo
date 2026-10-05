@@ -11,6 +11,42 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### v1.42.0: new MCP tool names (the old ones work until v2.0)
+
+v1.42.0 adds the v2 MCP toolset: `recall`, `new_memory`, `inspect`, `tend`, `doctor`, `setup`,
+`trust`, `share`, `dream` and `review`. Every other tool name keeps working through v1.43 and is
+removed in v2.0. Each still appears in the tool list with a description that names its
+replacement, and each call's result carries a one-line notice. If a permission rule in your
+settings names one of the old tools, add the new id beside it; `/hippo:doctor` lists any it
+finds (it never edits your settings).
+
+| Old permission id | New permission id | Call it with |
+|---|---|---|
+| `mcp__plugin_hippo_hippo__traverse` | `mcp__plugin_hippo_hippo__inspect` | action='traverse' |
+| `mcp__plugin_hippo_hippo__why` | `mcp__plugin_hippo_hippo__inspect` | action='why' |
+| `mcp__plugin_hippo_hippo__decision_history` | `mcp__plugin_hippo_hippo__inspect` | action='history' |
+| `mcp__plugin_hippo_hippo__blast_radius` | `mcp__plugin_hippo_hippo__inspect` | action='blast_radius' |
+| `mcp__plugin_hippo_hippo__bootstrap` | `mcp__plugin_hippo_hippo__setup` | action='bootstrap' |
+| `mcp__plugin_hippo_hippo__init` | `mcp__plugin_hippo_hippo__setup` | action='init' |
+| `mcp__plugin_hippo_hippo__build_index` | `mcp__plugin_hippo_hippo__setup` | action='build_index' |
+| `mcp__plugin_hippo_hippo__trust_corpus` | `mcp__plugin_hippo_hippo__trust` | action='review', then 'grant' |
+| `mcp__plugin_hippo_hippo__untrust` | `mcp__plugin_hippo_hippo__trust` | action='revoke' |
+| `mcp__plugin_hippo_hippo__secrets_scan` | `mcp__plugin_hippo_hippo__doctor` | action='secrets_scan' |
+| `mcp__plugin_hippo_hippo__audit` | `mcp__plugin_hippo_hippo__doctor` | action='audit' |
+| `mcp__plugin_hippo_hippo__capture` | `mcp__plugin_hippo_hippo__tend` | kind='capture' (add_decision is action='add_decision') |
+| `mcp__plugin_hippo_hippo__reconsolidate` | `mcp__plugin_hippo_hippo__tend` | kind='reverify' |
+| `mcp__plugin_hippo_hippo__resolve` | `mcp__plugin_hippo_hippo__tend` | kind='contradiction' |
+| `mcp__plugin_hippo_hippo__rederive` | `mcp__plugin_hippo_hippo__tend` | kind='derivation' (snapshot is action='snapshot') |
+| `mcp__plugin_hippo_hippo__heal_baselines` | `mcp__plugin_hippo_hippo__tend` | kind='baseline' |
+| `mcp__plugin_hippo_hippo__co_recall_proposals` | `mcp__plugin_hippo_hippo__tend` | action='link_proposals' |
+| `mcp__plugin_hippo_hippo__abstention_fixtures` | `mcp__plugin_hippo_hippo__tend` | action='fixtures' |
+| `mcp__plugin_hippo_hippo__interview` | `mcp__plugin_hippo_hippo__tend` | action='interview' |
+| `mcp__plugin_hippo_hippo__pack_extract` | `mcp__plugin_hippo_hippo__share` | action='pack_extract' |
+| `mcp__plugin_hippo_hippo__pack_install_plan` | `mcp__plugin_hippo_hippo__share` | action='pack_install_plan' |
+| `mcp__plugin_hippo_hippo__pack_install_item` | `mcp__plugin_hippo_hippo__share` | action='pack_install_item' |
+| `mcp__plugin_hippo_hippo__pack_update_plan` | `mcp__plugin_hippo_hippo__share` | action='pack_update_plan' |
+| `mcp__plugin_hippo_hippo__pack_update_item` | `mcp__plugin_hippo_hippo__share` | action='pack_update_item' |
+
 ## 2. Rebuild a derived cache (automatic)
 
 The recall index carries its own `schema_version` (currently 7), separate from your corpus format.

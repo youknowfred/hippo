@@ -247,6 +247,7 @@ def describe(
     why: bool = False,
     all_projects: bool = False,
     channel: Optional[str] = None,
+    collect: Optional[List[dict]] = None,
 ) -> str:
     """Human-readable answer to "what do you remember about ``query``".
 
@@ -263,6 +264,10 @@ def describe(
     per-source-trust-gated local corpus — labels cross-project hits "from <repo>", and
     appends a sources trailer naming everything searched and everything skipped (inv3).
     Explicit surfaces only; the hook path never sets it.
+
+    SRF-2 ``collect``: when given a list, each rendered hit is also appended to it as
+    ``{"name", "type", "score", "corpus", "note"}`` — the MCP recall tool's structured
+    content, read off the same hits the text lists (no second recall).
 
     MSR-3 ``channel``: ``"mcp"`` (the MCP recall/why tools pass it) fire-and-forget
     logs the recall event channel-tagged, closing the "MCP recall is telemetry-
@@ -387,6 +392,14 @@ def describe(
                 tags.append(f"salience {parts}")
         if h.get("stale_banner"):
             tags.append("⚠ stale — verify before relying")
+        if collect is not None:
+            collect.append({
+                "name": name,
+                "type": "rule" if corpus == "rule" else mtype,
+                "score": float(score) if isinstance(score, (int, float)) else None,
+                "corpus": corpus,
+                "note": h.get("note"),
+            })
         out.append(f"  • {name}  [{' · '.join(tags)}]")
         desc = h.get("description") or ""
         if desc:

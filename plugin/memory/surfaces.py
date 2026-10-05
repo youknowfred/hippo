@@ -208,6 +208,12 @@ VERBLESS_TOOLS: Dict[str, str] = {
     "heal_baselines": "COR-10 empty-baseline heal — MCP tool on both surfaces, no /hippo:* form",
     "untrust": "SEN-5 incident response — revoke a corpus's trust; MCP tool on both surfaces, no /hippo:* form",
     "blast_radius": "SEN-5 incident forensics — read-only touch report; MCP tool on both surfaces, no /hippo:* form",
+    # SRF-2: the v2 names that route to v1 handlers by action (SRF-3 assigns each to its verb).
+    "inspect": "v2: why / traverse / history / blast_radius by action",
+    "setup": "v2: bootstrap / init / build_index by action",
+    "trust": "v2: consent status / review / grant / revoke",
+    "share": "v2: the pack primitives by action",
+    "review": "v2: the memory-diff review packet (read-only)",
 }
 
 

@@ -120,6 +120,17 @@ from .mcp_resources import (
     _resource_scorecard,
 )
 from .mcp_schemas import _TOOLS
+from .mcp_schemas_v2 import (
+    ANNOTATIONS,
+    ANNOTATIONS_SINCE,
+    DEPRECATED,
+    OUTPUT_SCHEMAS,
+    PROTOCOL_VERSIONS,
+    STRUCTURED_SINCE,
+    V2_NAMES,
+    V2_TOOLS,
+    deprecation_line,
+)
 from .mcp_tools_consolidate import (
     _tool_abstention_fixtures,
     _tool_build_index,
@@ -166,9 +177,21 @@ from .mcp_tools_setup import (
     _tool_trust_corpus,
 )
 from .mcp_tools_tend import _tool_tend
+from .mcp_tools_v2 import (
+    _tool_doctor_v2,
+    _tool_inspect,
+    _tool_recall_v2,
+    _tool_review,
+    _tool_setup,
+    _tool_share,
+    _tool_trust,
+)
 
 _SERVER_NAME = "hippo"
 _DEFAULT_PROTOCOL = "2024-11-05"
+# SRF-2: the version this session negotiated at initialize; None until then (treated as
+# the oldest, so a client that never initialized sees the v1 shapes exactly).
+_NEGOTIATED: Optional[str] = None
 # OBS-2: the MCP client's own name from `initialize`, the fallback client label when the
 # harness set no CLAUDE_CODE_ENTRYPOINT.
 _CLIENT_NAME: Optional[str] = None
@@ -215,12 +238,12 @@ def _plugin_version() -> str:
 
 
 _DISPATCH = {
-    "recall": _tool_recall,
+    "recall": _tool_recall_v2,
     "new_memory": _tool_new_memory,
     "traverse": _tool_traverse,
     "why": _tool_why,
     "decision_history": _tool_decision_history,
-    "doctor": _tool_doctor,
+    "doctor": _tool_doctor_v2,
     "bootstrap": _tool_bootstrap,
     "init": _tool_init,
     "trust_corpus": _tool_trust_corpus,
@@ -255,7 +278,56 @@ _DISPATCH = {
     "blast_radius": _tool_blast_radius,
     # TND-2: the maintenance queue — appended at the END (the same position freeze).
     "tend": _tool_tend,
+    # SRF-2: the v2 names that route to v1 handlers by action.
+    "inspect": _tool_inspect,
+    "setup": _tool_setup,
+    "trust": _tool_trust,
+    "share": _tool_share,
+    "review": _tool_review,
 }
+
+
+def _at_least(version: Optional[str], floor: str) -> bool:
+    """Protocol versions are ISO dates, so string order is release order."""
+    return bool(version) and version >= floor
+
+
+def _tools_list() -> list:
+    """SRF-2: every v1 name in its shipped position (the v2 schema in place for the five
+    names v2 keeps; a deprecation-first description for the rest), then the five new v2
+    names. Annotations and output schemas only for a client that negotiated them."""
+    v2 = {t["name"]: t for t in V2_TOOLS}
+    out = []
+    for t in _TOOLS:
+        name = t["name"]
+        if name in v2:
+            out.append(dict(v2[name]))
+        elif name in DEPRECATED:
+            new, how = DEPRECATED[name]
+            out.append(dict(t, description=f"Deprecated — use `{new}` ({how}). " + t["description"]))
+        else:
+            out.append(dict(t))
+    listed = {t["name"] for t in out}
+    out += [dict(v2[n]) for n in V2_NAMES if n not in listed]
+    for t in out:
+        if _at_least(_NEGOTIATED, ANNOTATIONS_SINCE) and t["name"] in ANNOTATIONS:
+            t["annotations"] = ANNOTATIONS[t["name"]]
+        if _at_least(_NEGOTIATED, STRUCTURED_SINCE) and t["name"] in OUTPUT_SCHEMAS:
+            t["outputSchema"] = OUTPUT_SCHEMAS[t["name"]]
+    return out
+
+
+def _fallback_structured(tool: str, args: Dict[str, Any], text: str) -> Dict[str, Any]:
+    """A schema-conformant structured result for a plain-text answer (an argument error, or
+    an action with no structured shape of its own)."""
+    out: Dict[str, Any] = {"text": text}
+    if tool == "recall":
+        out.update(query=str(args.get("query") or ""), abstained=True, hits=[])
+    else:
+        action = args.get("action")
+        out["action"] = action if isinstance(action, str) and action else (
+            "check" if tool == "doctor" else "list")
+    return out
 
 
 _RESOURCE_DISPATCH = {
@@ -293,15 +365,21 @@ def handle_request(req: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
 
     if method == "initialize":
-        global _CLIENT_NAME
+        global _CLIENT_NAME, _NEGOTIATED
         params = req.get("params") or {}
         proto = params.get("protocolVersion")
         info = params.get("clientInfo")
         if isinstance(info, dict) and isinstance(info.get("name"), str):
             _CLIENT_NAME = info["name"][:64] or None
+        # SRF-2: real negotiation — the client's version when this server speaks it, else
+        # the newest one it does (the client then decides whether it can continue).
+        if not isinstance(proto, str):
+            _NEGOTIATED = _DEFAULT_PROTOCOL  # a client that names none gets the oldest shapes
+        else:
+            _NEGOTIATED = proto if proto in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0]
         return result(
             {
-                "protocolVersion": proto if isinstance(proto, str) else _DEFAULT_PROTOCOL,
+                "protocolVersion": _NEGOTIATED,
                 # RUL-5: resources declared minimally ({} — no subscribe/listChanged), the
                 # same style as tools; the 2024-11-05 rev supports resources/list + /read.
                 "capabilities": {"tools": {}, "resources": {}},
@@ -313,7 +391,7 @@ def handle_request(req: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if method == "ping":
         return result({})
     if method == "tools/list":
-        return result({"tools": _TOOLS})
+        return result({"tools": _tools_list()})
     if method == "tools/call":
         params = req.get("params") or {}
         tool = params.get("name")
@@ -323,8 +401,19 @@ def handle_request(req: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             return error(-32602, f"unknown tool: {tool}")
         args = args if isinstance(args, dict) else {}
         try:
-            text = fn(args)
-            return result({"content": [{"type": "text", "text": text}]})
+            out = fn(args)
+            text, structured = out if isinstance(out, tuple) else (out, None)
+            payload: Dict[str, Any] = {"content": [{"type": "text", "text": text}]}
+            if tool in DEPRECATED:
+                # SRF-2: a v1 name still answers through the window; the route to use rides
+                # as its own content block, so the answer itself stays byte-identical.
+                payload["content"].append({"type": "text", "text": deprecation_line(tool)})
+            if _at_least(_NEGOTIATED, STRUCTURED_SINCE) and tool in OUTPUT_SCHEMAS:
+                payload["structuredContent"] = (
+                    dict(structured, text=text) if structured is not None
+                    else _fallback_structured(tool, args, text)
+                )
+            return result(payload)
         except Exception as exc:  # a tool failure is an isError result, not a dead server
             _log(f"tool {tool} raised: {exc!r}")
             return result(

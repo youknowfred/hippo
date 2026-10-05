@@ -25,7 +25,9 @@ release). New *additions* alongside them are minor, non-breaking changes.
   `sleep` (added in T15 SLP as a minor, non-breaking addition), `review` (added in T12 CLB —
   the corpus review packet; its `--ci` mode is the single memory-diff CI gate).
 - **The MCP tool names** — `recall`, `new_memory`, `traverse`, `why`, `decision_history` (served by
-  `bin/hippo mcp`).
+  `bin/hippo mcp`). v1.42.0 opened their deprecation window: `traverse`, `why` and
+  `decision_history` now route through `inspect`, keep working unchanged through v1.43, and are
+  removed in v2.0 (each call says so).
 - **The `HIPPO_*` environment-variable namespace**, and specifically these documented operational
   variables: `HIPPO_MEMORY_DIR`, `HIPPO_INDEX_DIR`, `HIPPO_TELEMETRY_DIR`, `HIPPO_PENDING_DIR`,
   `HIPPO_LOCAL_MEMORY_DIR`, `HIPPO_USER_MEMORY_DIR`, `HIPPO_PROJECTS_FILE`, `HIPPO_TRUST_FILE`,
@@ -78,6 +80,10 @@ These may change at any release without a major bump — do not build on them:
   and gave every engine command a verb (`hippo help --all` lists them). The seven frozen
   subcommands keep their names and behavior; the rest stay unfrozen until STABILITY v2
   classifies them.
+- **The v2 MCP toolset and its shapes** — `inspect`, `tend`, `setup`, `trust`, `share` and
+  `review` (added in v1.42.0), the internal `recall_hook`, every tool's `annotations` and
+  `outputSchema`, and the order `tools/list` returns. STABILITY v2 freezes the v2 names at v2.0;
+  until then they are additions, not promises.
 - **Exact recall output text and ordering** — recall is a ranker; its wording, formatting, and the
   precise order of results are tuned continuously.
 

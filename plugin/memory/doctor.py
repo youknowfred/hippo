@@ -41,7 +41,12 @@ from .provenance import resolve_dirs
 # DOC-4 decomposition: the check implementations live in the flat, prefix-named siblings
 # below; these explicit grouped re-imports keep every historical ``memory.doctor.<name>``
 # import and monkeypatch target (mcp_server, sleep, tests) resolving unchanged.
-from .doctor_checks_platform import check_attention, check_claude_code_version, check_installed_version
+from .doctor_checks_platform import (
+    check_attention,
+    check_claude_code_version,
+    check_installed_version,
+    check_mcp_allowlist,
+)
 from .doctor_checks_env import (
     DoctorContext,
     _iter_memory_files_safe,
@@ -381,6 +386,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("edge_rot", check_edge_rot),  # GRF-1: edges into archived/superseded/dangling targets
     ("dream_ledger", check_dream_ledger),  # DRM-2: on-disk dream stamps ↔ dream-ledger.jsonl reconcile
     ("non_english_corpus", check_non_english_corpus),
+    ("mcp_allowlist", check_mcp_allowlist),  # SRF-2: permission rules naming deprecated tools (read-only)
     ("mcp_launch", check_mcp_launch),  # INT-8: the stdio MCP server (bin/hippo mcp) actually starts
     ("committed_usage_privacy", check_committed_usage_privacy),  # SEC-14: TEA-5 usage on a shared remote
     ("projects_registry", check_projects_registry),  # RCH-11: dead-row hygiene, machine-level

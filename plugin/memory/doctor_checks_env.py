@@ -510,11 +510,15 @@ def check_mcp_launch(ctx: DoctorContext) -> Dict[str, str]:
             k: os.environ.get(k)
             for k in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "FASTEMBED_CACHE_PATH")
         }
+        # The canned handshake runs in THIS process: when doctor itself is served by the MCP
+        # server, it must not overwrite the live session's negotiated protocol or client name.
+        session = (M._NEGOTIATED, M._CLIENT_NAME)
         out = io.StringIO()
         try:
             req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
             M.serve(io.StringIO(req + "\n"), out)
         finally:
+            M._NEGOTIATED, M._CLIENT_NAME = session
             for k, v in saved.items():
                 if v is None:
                     os.environ.pop(k, None)

@@ -107,6 +107,7 @@ _EXT3_TOOLS = ["interview"]
 # forensics). Appended after EXT-3, same position freeze.
 _INCIDENT_TOOLS = ["untrust", "blast_radius"]
 _TEND_TOOLS = ["tend"]  # TND-2: the one maintenance queue
+_V2_NEW_TOOLS = ["inspect", "setup", "trust", "share", "review"]  # SRF-2: appended after the v1 names
 
 
 def test_tools_list_exposes_frozen_five_plus_setup_tools():
@@ -114,7 +115,7 @@ def test_tools_list_exposes_frozen_five_plus_setup_tools():
     names = [t["name"] for t in resp["result"]["tools"]]
     assert names == (
         _FROZEN_TOOLS + _SETUP_TOOLS + _VERB_TOOLS + _CONSOLIDATE_TOOLS + _REPAIR_TOOLS
-        + _PACK_TOOLS + _INV4_TOOLS + _EXT3_TOOLS + _INCIDENT_TOOLS + _TEND_TOOLS
+        + _PACK_TOOLS + _INV4_TOOLS + _EXT3_TOOLS + _INCIDENT_TOOLS + _TEND_TOOLS + _V2_NEW_TOOLS
     )
     for t in resp["result"]["tools"]:
         assert t["inputSchema"]["type"] == "object"  # every tool has a JSON schema

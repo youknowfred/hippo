@@ -14,11 +14,55 @@ from typing import Any, Dict
 from .mcp_tools_packs import _corpus_gate, _opt_str
 
 
-def _tool_tend(args: Dict[str, Any]) -> str:
+_ITEM_KEYS = ("id", "kind", "target", "evidence", "proposed", "gate")
+
+
+def _structured(action: str, text: str, result: dict, items) -> dict:
+    from . import tend_queue as Q
+
+    return {
+        "text": text,
+        "action": action,
+        "pending": Q.total_pending(result),
+        "counts": dict(result.get("counts") or {}),
+        "items": [{k: e[k] for k in _ITEM_KEYS} for e in items],
+    }
+
+
+def _route_v1(action: str, args: Dict[str, Any]):
+    """SRF-2: the consolidate-flow steps that are not queue items keep their v1 handlers
+    and are reached as tend actions. Returns None when ``action`` is not one of them."""
+    from .mcp_tools_consolidate import (
+        _tool_abstention_fixtures,
+        _tool_capture,
+        _tool_co_recall_proposals,
+        _tool_rederive,
+    )
+    from .mcp_tools_packs import _tool_interview
+
+    if action == "add_decision":
+        return _tool_capture({"action": "add_decision", "text": args.get("text")})
+    if action == "snapshot":
+        return _tool_rederive({"action": "snapshot", "stamp": args.get("stamp")})
+    if action == "link_proposals":
+        return _tool_co_recall_proposals({})
+    if action == "fixtures":
+        fwd = {k: v for k, v in args.items() if k not in ("action", "step")}
+        return _tool_abstention_fixtures({**fwd, "action": args.get("step") or "draft"})
+    if action == "interview":
+        fwd = {k: v for k, v in args.items() if k not in ("action", "step")}
+        return _tool_interview({**fwd, "action": args.get("step") or "questions"})
+    return None
+
+
+def _tool_tend(args: Dict[str, Any]):
     from . import tend
     from . import tend_queue as Q
 
     action = _opt_str(args, "action") or "list"
+    routed = _route_v1(action, args)
+    if routed is not None:
+        return routed
     refusal, memory_dir, repo_root = _corpus_gate(
         "tend", "the queue renders corpus text and its verdicts write corpus files"
     )
@@ -31,9 +75,11 @@ def _tool_tend(args: Dict[str, Any]) -> str:
     if action in ("list", "next"):
         result = Q.build_queue(memory_dir, repo_root, kinds=kinds)
         if action == "list":
-            return tend.render_list(result)
+            text = tend.render_list(result)
+            return text, _structured(action, text, result, result["pending"])
         top = result["pending"][0] if result["pending"] else None
-        return tend.render_next(top, memory_dir, repo_root, Q.total_pending(result))
+        text = tend.render_next(top, memory_dir, repo_root, Q.total_pending(result))
+        return text, _structured(action, text, result, [top] if top else [])
     if action == "release":
         key = item or kind
         if not key:
@@ -70,5 +116,5 @@ def _tool_tend(args: Dict[str, Any]) -> str:
             r = tend.skip(item, memory_dir=memory_dir, repo_root=repo_root)
         else:
             return ("tend: action is one of list (default), next, show, apply, snooze, skip, "
-                    "hold, release.")
+                    "hold, release, add_decision, snapshot, fixtures, interview, link_proposals.")
     return r["message"] if r["ok"] else f"refused — {r['message']}"
