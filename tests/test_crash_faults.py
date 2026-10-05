@@ -104,6 +104,7 @@ CRASH_CONTRACT = {
     ("telemetry_rollup", "_append_finalized"): ("intact",),  # OBS-1: the 365-day trim is best-effort; the appended day stays
     ("telemetry_rollup", "_drain_spool"): ("detected",),  # OBS-2: fold returns False; spool kept, so no use is lost or double-counted
     ("trust", "_write_registry_doc"): ("detected",),  # mark_trusted returns False
+    ("tend_queue", "_write_cache"): ("intact",),  # TND-1: the cache is derived; the build still returns
 }
 
 
@@ -977,6 +978,22 @@ def scn_floor_nag_sentinel_intact(tmp_path, monkeypatch):
     assert not leftovers, "sentinel absent, never partial"
 
 
+def scn_tend_cache_intact(tmp_path, monkeypatch):
+    """TND-1: a torn queue-cache write costs nothing — the build still returns the queue and
+    the previous cache keeps its bytes."""
+    from memory import tend_queue as Q
+
+    md = tmp_path / "repo" / ".claude" / "memory"
+    md.mkdir(parents=True)
+    os.makedirs(Q._telemetry_dir(str(md)))
+    Q.build_queue(str(md), str(tmp_path / "repo"), kinds=("capture",))
+    before = _snap(os.path.join(Q._telemetry_dir(str(md)), Q._QUEUE_FILE))
+    _arm(monkeypatch, "tend_queue", "_write_cache")
+    r = Q.build_queue(str(md), str(tmp_path / "repo"), kinds=("capture",))
+    assert r["counts"] == {"capture": 0}
+    _assert_unchanged(before)
+
+
 _SCENARIOS = [
     (("dream", "_apply_one"), "detected", scn_dream_apply_bridge_detected),
     (("dream_apply", "_undo_one_edge"), "detected", scn_dream_undo_detected),
@@ -1025,6 +1042,7 @@ _SCENARIOS = [
     (("telemetry_rollup", "_update"), "detected", scn_rollup_update_detected),
     (("telemetry_rollup", "_append_finalized"), "intact", scn_rollup_trim_intact),
     (("telemetry_rollup", "_drain_spool"), "detected", scn_rollup_drain_spool_detected),
+    (("tend_queue", "_write_cache"), "intact", scn_tend_cache_intact),
 ]
 
 

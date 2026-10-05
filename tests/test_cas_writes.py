@@ -139,6 +139,7 @@ NON_CORPUS_SITES = {
     ("telemetry_rollup", "_update"): "telemetry, held under flock",
     ("telemetry_rollup", "_append_finalized"): "telemetry, held under flock",
     ("telemetry_rollup", "_drain_spool"): "telemetry, held under flock",
+    ("tend_queue", "_write_cache"): "gitignored derived queue counts, rebuilt on every run",
     ("trust", "_write_registry_doc"): "machine trust registry, outside the corpus",
 }
 
