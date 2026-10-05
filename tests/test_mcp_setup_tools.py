@@ -850,6 +850,24 @@ def test_rederive_worklist_names_the_stamp_when_there_is_nothing_to_migrate(rede
     assert "action='stamp'" in text  # names the way out
 
 
+def test_rederive_in_a_repo_with_no_corpus_says_so_instead_of_a_tool_error(tmp_path, monkeypatch):
+    """MIG-3: worklist and stamp came back as `tool error: [Errno 2]` in a git repo with no
+    corpus. Each now answers in the CLI's one line, and neither creates the directory."""
+    import subprocess
+
+    repo = str(tmp_path / "bare")
+    os.makedirs(repo)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    for args in ({}, {"action": "stamp"}):
+        resp = _call("rederive", args)
+        assert not resp["result"].get("isError"), _text(resp)
+        text = _text(resp)
+        assert "no corpus" in text and "/hippo:setup" in text, text
+        assert "still declares" not in text and "stamp FAILED" not in text
+    assert not os.path.exists(os.path.join(repo, ".claude"))
+
+
 def test_rederive_snapshot_is_self_ignoring(rederive_repo):
     repo, md = rederive_repo
     text = _text(_call("rederive", {"action": "snapshot", "stamp": "t1"}))

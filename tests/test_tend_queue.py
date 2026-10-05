@@ -163,3 +163,14 @@ def test_a_corpus_behind_the_extractor_with_nothing_to_change_asks_for_a_stamp(c
         json.dump({"corpus_format": 5, "cite_derivation": 4}, fh)
     r = Q.build_queue(md, repo, kinds=("derivation",))
     assert [e["target"] for e in r["pending"]] == ["corpus"]
+
+
+def test_a_repo_with_no_corpus_has_no_derivation_item_and_no_failed_source(repo):
+    """MIG-3: the derivation source raised FileNotFoundError in a repo with no corpus (so
+    every list printed "the derivation source failed"), and an empty worklist alone would
+    then ask to stamp a corpus that does not exist."""
+    md = os.path.join(repo, ".claude", "memory")
+    r = Q.build_queue(md, repo, kinds=("derivation",), write_cache=False)
+    assert r["errors"] == {}
+    assert r["pending"] == []
+    assert not os.path.exists(os.path.join(repo, ".claude"))

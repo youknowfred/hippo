@@ -1269,8 +1269,11 @@ def rederive_worklist(memory_dir: str, repo_root: str) -> List[dict]:
     """Every memory whose citations would change under this plugin's extractor (MIG-1).
 
     Read-only. The operator reviews these, then approves them ONE AT A TIME via
-    ``rederive_file`` — there is deliberately no "approve all".
+    ``rederive_file`` — there is deliberately no "approve all". MIG-3: an ABSENT corpus
+    is an empty worklist; one that exists but cannot be read still raises.
     """
+    if not os.path.isdir(memory_dir):
+        return []
     repo_files, basename_index = build_repo_file_index(repo_root)
     out = []
     for path in _iter_memory_files(memory_dir):
@@ -1359,6 +1362,16 @@ def rederive_file(
     except Exception as exc:
         result["error"] = str(exc)
         return result
+
+
+def rederive_no_corpus_line(memory_dir: str) -> Optional[str]:
+    """MIG-3: the worklist/stamp answer in a repo with no corpus (CLI and MCP share it);
+    None when the corpus dir exists. Without it an empty worklist reads as "already match"
+    and the stamp tries to write ``.format`` into a dir that is not there."""
+    if os.path.isdir(memory_dir):
+        return None
+    return (f"no corpus at {memory_dir}, so there is nothing to re-derive or stamp — "
+            "run /hippo:setup to create one.")
 
 
 def rederive_worklist_lines(work: List[dict]) -> List[str]:
@@ -1573,6 +1586,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"  - {n}: {reason}")
             return 1
         return 0
+
+    if args.stamp_derivation or args.rederive_worklist:
+        no_corpus = rederive_no_corpus_line(memory_dir)
+        if no_corpus:
+            print(no_corpus)
+            return 0
 
     if args.stamp_derivation:
         work = rederive_worklist(memory_dir, repo_root)
