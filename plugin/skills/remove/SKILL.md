@@ -15,9 +15,9 @@ them).
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
 [ "${CLAUDE_CODE_ENTRYPOINT:-}" != "claude-desktop" ] || { echo "✘ /hippo:remove has no Desktop-safe MCP-tool equivalent yet. Run it from a terminal Claude Code session in this repo (claude, then /hippo:remove)."; exit 1; }
 [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:remove skill, not from a copy of its SKILL.md. If the loaded skill stops here too, this Claude Code does not fill them in: update it and run /hippo:remove again."; exit 1; }
-. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver
 hippo_resolve_py
-hippo_note_usage skill remove  # OBS-2: count this skill's use (one spool line, no Python)
+hippo_note_usage skill remove  # count this skill's use (one spool line, no Python)
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 ```
 
@@ -31,8 +31,8 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
    from injecting the floor — as long as `~/.claude/projects/<encoded>/memory` resolves to this
    project's `.claude/memory`, Claude Code keeps reading it every session regardless of anything
    else in this skill. Use the ONE tested Python helper
-   (`memory.provenance.remove_project_symlink`, ONB-6 — the exact inverse of ONB-5's
-   `create_project_symlink`, same SHP-5 encoding formula) — never hand-rolled `rm` in bash:
+   (`memory.provenance.remove_project_symlink`, — the exact inverse of's
+   `create_project_symlink`, same encoding formula) — never hand-rolled `rm` in bash:
    ```bash
    export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
    . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
@@ -51,7 +51,7 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
      usually means either a prior manual setup or that `$REPO_ROOT` doesn't match what you
      expect; forcing it risks unlinking a symlink that belongs to a different project's corpus.
 
-1b. **De-register from the cross-project registry (RCH-4).** `/hippo:setup` listed this project
+1b. **De-register from the cross-project registry.** `/hippo:setup` listed this project
    in the machine-local `~/.claude/hippo-projects.json` so `/hippo:recall --all-projects`
    could search it from other projects; offboarding removes that listing (idempotent — `true`
    also when it was never registered):
@@ -80,7 +80,7 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
    - `.claude/.memory-telemetry/` (recall/episode/reconsolidation ledgers —
      `recall_events.jsonl`, `episode_buffer.jsonl`, `reconsolidation_events.jsonl` all live here;
      deleting the directory takes all three with it)
-   - `.claude/.memory-pending/` (CAP-2 draft-capture queue — un-approved session-capture seeds
+   - `.claude/.memory-pending/` (draft-capture queue — un-approved session-capture seeds
      awaiting review; deleting it discards those drafts, which never entered the corpus anyway)
 
    All three are already gitignored derived state — deleting them loses no git history and
@@ -126,5 +126,5 @@ No hook still fires for this project in a way that matters — `SessionStart` an
 `UserPromptSubmit` still run (they're global to the plugin, not per-project), but with the
 symlink gone, Claude Code's native memory has nothing to read for this repo, so there is no more
 floor injection and no more recall output tied to this corpus. Re-running `/hippo:setup` here
-later picks the existing `.claude/memory/` corpus back up exactly where it was left (ONB-5's
+later picks the existing `.claude/memory/` corpus back up exactly where it was left ('s
 existing-corpus path) — nothing was lost.

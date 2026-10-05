@@ -212,7 +212,7 @@ def render_report(result: dict, *, ledger_path: Optional[str]) -> str:
         )
     if stats.get("reward_boosted_edges") or stats.get("reward_outcome_memories"):
         lines.append(
-            f"   reward (DRM-5 reverse replay): {stats.get('reward_boosted_edges', 0)} upstream "
+            f"   reward (reverse replay): {stats.get('reward_boosted_edges', 0)} upstream "
             f"edge boost(s) from {stats.get('reward_outcome_memories', 0)} outcome-anchored "
             f"memory(ies) — replay priority + candidate ORDERING only (θ reads raw cofire)"
         )
@@ -270,7 +270,7 @@ def render_report(result: dict, *, ledger_path: Optional[str]) -> str:
         )
     else:
         lines.append(
-            "   auto-apply is OFF (report-only) — the DRM-2 flip is a dated owner decision "
+            "   auto-apply is OFF (report-only) — the flip is a dated owner decision "
             "after this calibration."
         )
     return "\n".join(lines)
@@ -398,7 +398,7 @@ def run_apply_pass(
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
         return 1, (
-            "🌙 dream: APPLY REFUSED — this corpus is untrusted (SEC-1). Review and trust "
+            "🌙 dream: APPLY REFUSED — this corpus is untrusted. Review and trust "
             "it first (/hippo:doctor → trust flow); the report-only pass (--dry-run) "
             "remains available."
         )

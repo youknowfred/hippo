@@ -269,7 +269,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--trim-report",
         action="store_true",
-        help="CLM-7: replay recent prompts and say, per floor pointer, whether recall carries "
+        help="replay recent prompts and say, per floor pointer, whether recall carries "
         "its memory without the floor line (read-only)",
     )
     args = parser.parse_args(argv)

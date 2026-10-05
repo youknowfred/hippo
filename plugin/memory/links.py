@@ -569,25 +569,25 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--components",
         action="store_true",
-        help="GRA-8: list weakly-connected components (fragmentation of the memory graph)",
+        help="list weakly-connected components (fragmentation of the memory graph)",
     )
     parser.add_argument(
         "--degree",
         action="store_true",
-        help="GRA-8: per-memory in/out/total degree, most-connected first",
+        help="per-memory in/out/total degree, most-connected first",
     )
     parser.add_argument(
         "--export",
         choices=["json", "dot", "mermaid"],
         default=None,
-        help="GRA-8: serialize the whole graph (json | Graphviz dot | mermaid)",
+        help="serialize the whole graph (json | Graphviz dot | mermaid)",
     )
     parser.add_argument(
         "--audit",
         action="store_true",
-        help="GRF-1: the one-call graph audit — edge classes, structure stats, "
+        help="the one-call graph audit — edge classes, structure stats, "
         "edge_origin tags, edge rot (archived/superseded/dangling targets), and the "
-        "GRF-6 planned forward-reference and GRF-7 folded classes",
+        "planned forward-reference and folded classes",
     )
     parser.add_argument(
         "--merge-related",
@@ -654,14 +654,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"  {r['tier']:<10} {r['src']} -> {r['target']} (via {r['via']})")
         planned = report.get("planned") or []
         if planned:
-            print(f"planned forward refs ({len(planned)}) — declared deliberate (GRF-6), NOT rot:")
+            print(f"planned forward refs ({len(planned)}) — declared deliberate, NOT rot:")
             for r in planned:
                 print(f"  {'planned':<10} {r['src']} -> {r['target']} (via {r['via']})")
         folded = report.get("folded") or []
         if folded:
             print(
                 f"folded links ({len(folded)}) — target folded into a declared digest "
-                "(GRF-7, .format fold_digests), NOT rot:"
+                "(.format fold_digests), NOT rot:"
             )
             for r in folded:
                 print(f"  {'folded':<10} {r['src']} -> {r['target']} (in {r['digest']})")

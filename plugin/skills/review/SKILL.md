@@ -19,9 +19,9 @@ classification derives from git name-status, frontmatter edges, and `archive/` m
 ```bash
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
 [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:review skill, not from a copy of its SKILL.md. If the loaded skill stops here too, take the MCP-tool route in 'Surface routing' above."; exit 1; }
-. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver
 hippo_resolve_py
-hippo_note_usage skill review  # OBS-2: count this skill's use (one spool line, no Python)
+hippo_note_usage skill review  # count this skill's use (one spool line, no Python)
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 MEMORY_DIR="$REPO_ROOT/.claude/memory"
 ```
@@ -76,8 +76,8 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 ## CI wiring (the one canonical memory-diff gate)
 
-`--ci` is the SINGLE sanctioned CI scan for memory-file diffs — SEC-8's memory-diff
-gate half, and the SEN-2 threat-lint CI leg rides the same vehicle:
+`--ci` is the SINGLE sanctioned CI scan for memory-file diffs's memory-diff
+gate half, and the threat-lint CI leg rides the same vehicle:
 
 ```bash
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
@@ -90,7 +90,7 @@ Exit 1 iff a gate finding (secret / threat Tier-A) exists on a touched memory fi
 exit 0 otherwise — including when the range touches no memory files at all. The
 repo's `memory-review` job in `.github/workflows/ci.yml` runs exactly this against
 each PR; do not add a second memory-scanning CI surface. (The `secret-scan` job in
-the same file is SEC-8's other half — release hygiene over the whole shipped tree,
+the same file is the other half — release hygiene over the whole shipped tree,
 a different scope.)
 
 ## Hard rules

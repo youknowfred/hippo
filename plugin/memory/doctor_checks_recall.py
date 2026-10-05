@@ -173,21 +173,21 @@ def check_salience_evidence(ctx: DoctorContext) -> Dict[str, str]:
                     sibling = (
                         f" Sibling: outcome-prior A/B recorded "
                         f"({len(op.get('deltas') or {})} categor(ies), {op_arms}) — same "
-                        "ED-2 posture (measures only; the flag stays default-OFF)."
+                        "posture (measures only; the flag stays default-OFF)."
                     )
             except Exception:
                 sibling = ""
             return {
                 "status": "ok",
                 "message": f"salience evidence: A/B recorded ({len(deltas)} categor(ies), "
-                f"{arms}) — the flip stays a dated owner decision (ED-2)." + qualification
+                f"{arms}) — the flip stays a dated owner decision." + qualification
                 + sibling,
             }
         if sessions < _SALIENCE_LIVEDIN_MIN_SESSIONS:
             return {
                 "status": "ok",
                 "message": f"salience evidence: corpus not yet lived-in "
-                f"({sessions}/{_SALIENCE_LIVEDIN_MIN_SESSIONS} sessions logged) — the ED-2 "
+                f"({sessions}/{_SALIENCE_LIVEDIN_MIN_SESSIONS} sessions logged) — the "
                 "revisit rig waits.",
             }
         return {
@@ -195,7 +195,7 @@ def check_salience_evidence(ctx: DoctorContext) -> Dict[str, str]:
             "message": f"salience evidence: corpus is lived-in ({sessions} sessions, "
             f"{tracked} usage-tracked memories) but no A/B evidence is recorded — run "
             "`hippo eval --ab HIPPO_SALIENCE` (measures only; the "
-            "default stays owner-decided-OFF per ED-2).",
+            "default stays owner-decided-OFF).",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"salience-evidence check failed: {exc}."}
@@ -364,7 +364,7 @@ def check_hot_path_latency(ctx: DoctorContext) -> Dict[str, str]:
                     "status": "warn",
                     "message": f"hot-path p95 = {p95:.0f}ms over {n} recall(s), {q95:.0f}ms over "
                     f"the {len(quiet)} uncontended — ABOVE the {budget} per-prompt budget "
-                    "(KPI-3) even on a quiet host. A heavier model or new per-import cost "
+                    " even on a quiet host. A heavier model or new per-import cost "
                     f"likely regressed it. [{split}]",
                 }
             # The breach lives in the contended slice: name the load it ran under.
@@ -388,7 +388,7 @@ def check_hot_path_latency(ctx: DoctorContext) -> Dict[str, str]:
         return {
             "status": "warn",
             "message": f"hot-path p95 = {p95:.0f}ms over {n} recall(s) — ABOVE the {budget} "
-            f"per-prompt budget (KPI-3); {why} [{split}]",
+            f"per-prompt budget; {why} [{split}]",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"hot-path latency check failed: {exc}."}

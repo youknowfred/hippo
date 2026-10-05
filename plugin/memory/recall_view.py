@@ -113,14 +113,14 @@ def _abstention_receipt(
         "injected for a prompt like this."
     )
     tail = (
-        "\nAbstention is a feature (RET-1); if a memory SHOULD answer this, enrich its "
+        "\nAbstention is a feature; if a memory SHOULD answer this, enrich its "
         "description (/hippo:tend) or pin it (steer: pin)."
     )
     try:
         gate_root = trust.gate_repo_root(memory_dir, repo_root)
         if gate_root is not None and not trust.is_trusted(gate_root):
             return (
-                base + "\nReason: this corpus is UNTRUSTED (SEC-1) — recall is withheld "
+                base + "\nReason: this corpus is UNTRUSTED — recall is withheld "
                 "entirely, nothing was scored at all. Run /hippo:doctor to review and "
                 "trust it."
             )
@@ -311,7 +311,7 @@ def describe(
             return _abstention_receipt(query, memory_dir, index_dir, repo_root)
         message = (
             f'No memories cleared the relevance floor for "{query}" — nothing would be '
-            "injected for a prompt like this. Abstention is a feature (RET-1): an unrelated "
+            "injected for a prompt like this. Abstention is a feature: an unrelated "
             "or too-thin query surfaces nothing rather than padding out low-signal matches. "
             "Try /hippo:recall --list-by-type to see everything this project knows "
             "(or /hippo:recall --why for the abstention receipt)."
@@ -451,7 +451,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Read-side recall (INT-1): query the corpus, or list it by type."
+        description="Read-side recall: query the corpus, or list it by type."
     )
     parser.add_argument("query", nargs="*", help="what to recall (natural-language)")
     parser.add_argument("-k", type=int, default=DEFAULT_K, help="max matches to show")
@@ -463,20 +463,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--why",
         action="store_true",
-        help="GOV-5: the recall receipt — per-hit winning backend/edges/salience/steer, "
+        help="the recall receipt — per-hit winning backend/edges/salience/steer, "
         "and on abstention the near-miss score vs the floor it missed",
     )
     parser.add_argument(
         "--history",
         default=None,
         metavar="NAME",
-        help="RCH-3: replay the supersedes/refines decision chain around a memory as an "
+        help="replay the supersedes/refines decision chain around a memory as an "
         "ordered narrative (same builder the inspect MCP tool's action='history' renders)",
     )
     parser.add_argument(
         "--all-projects",
         action="store_true",
-        help="RCH-4: search every registered local corpus alongside this project's tiers "
+        help="search every registered local corpus alongside this project's tiers "
         "— each source trust-gated at query time, each hit labeled by source repo; "
         "explicit command only, never the hook",
     )

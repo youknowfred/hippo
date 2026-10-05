@@ -548,7 +548,7 @@ def archive_memory(
             result["error"] = (
                 f"{len(referrers)} inbound referrer(s) still link here: "
                 f"{', '.join(referrers)}. Rewrite those references first — a `supersedes:` "
-                "edge on the successor memory (GRA-4) is the machine-readable forwarding "
+                "edge on the successor memory is the machine-readable forwarding "
                 "pointer — or re-run with --force (force=True) to move it anyway"
             )
             return result
@@ -720,12 +720,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="git-mv ONE memory into .claude/memory/archive/ after confirming it's a "
         "genuine candidate (per-item, gated by the memory-master agent reviewing the "
         "report first). NAME is the slug, with or without .md. Refuses while other "
-        "memories still link to NAME (GRA-5) unless --force",
+        "memories still link to NAME unless --force",
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="bypass the GRA-5 inbound-referrer guard: archive NAME even while other "
+        help="bypass the inbound-referrer guard: archive NAME even while other "
         "memories still reference it (the referrer list is printed so those links can be "
         "rewritten in the same commit)",
     )
@@ -733,7 +733,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--restore",
         metavar="NAME",
         default=None,
-        help="TMB-3: move ONE archived memory back into the live corpus (per-item, "
+        help="move ONE archived memory back into the live corpus (per-item, "
         "journaled). REFUSES — never overwrites — when a live memory with the same stem "
         "exists (the shadowing hazard). NAME is the slug, with or without .md; no bulk "
         "form exists",
@@ -768,7 +768,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     f"{', '.join(r['referrers'])}"
                 )
                 print(
-                    "  (a `supersedes:` edge on the successor memory — GRA-4 — is the "
+                    "  (a `supersedes:` edge on the successor memory is the "
                     "machine-readable forwarding pointer)"
                 )
         return 0
@@ -793,7 +793,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(
             "The cold/never-recalled signal is not yet trustworthy — nothing is listed by "
             "design; re-run after more sessions. Note: coldness is CLONE-LOCAL unless teammates "
-            "commit per-user usage (TEA-5: `hippo soak --record-usage` + commit "
+            "commit per-user usage (`hippo soak --record-usage` + commit "
             ".claude/memory/.usage/), which unions cross-clone recalls before judging cold."
         )
         return 0
@@ -818,7 +818,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(
             "  ⚠ the 'cold' leg is CLONE-LOCAL (only this clone's recalls) — a memory a "
             "teammate hits daily can appear here. Union team usage first: `hippo soak "
-            "--record-usage` on each clone + commit .claude/memory/.usage/ (TEA-5)."
+            "--record-usage` on each clone + commit .claude/memory/.usage/."
         )
     for item in candidates:
         if item.get("invalid_after_old"):

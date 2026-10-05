@@ -565,7 +565,7 @@ def confirm_hard_set_row(
         os.makedirs(os.path.dirname(fp), exist_ok=True)
         created_note = (
             "project-local recall eval fixture — rows admitted per-item via "
-            "eval_recall.confirm_hard_set_row (SIG-6)"
+            "eval_recall.confirm_hard_set_row"
         )
         text = (
             f"note: {json.dumps(created_note)}\n"
@@ -1048,7 +1048,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--abstention-set",
         default=None,
-        help="RET-1/RET-8: fixture of clearly off-topic queries — measures the fraction "
+        help="fixture of clearly off-topic queries — measures the fraction "
         "recall() correctly abstains (returns []) on. Tracked gate when provided "
         "(GATE_ABSTENTION); skipped, never failed, when absent.",
     )
@@ -1057,7 +1057,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--gate-cold",
         action="store_true",
-        help="PRF-2/PRF-5: gate cold_latency's p95 tail (fresh-subprocess-per-sample, the honest "
+        help="gate cold_latency's p95 tail (fresh-subprocess-per-sample, the honest "
         "per-prompt cost) against GATE_COLD_P95_MS. Off by default so cold_latency stays a "
         "report-only signal everywhere except CI's dense lane, which restores a warm model "
         "cache and passes this flag so a real cold-path regression fails the build. Skipped "
@@ -1069,7 +1069,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--json",
         action="store_true",
-        help="MSR-1: print the full evaluate() report as ONE JSON line instead of the "
+        help="print the full evaluate report as ONE JSON line instead of the "
         "human gate table (exit code semantics unchanged). Any --out/--baseline notes "
         "print on later lines — machine consumers parse the first line.",
     )
@@ -1079,7 +1079,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         const="",
         default=None,
         metavar="PATH",
-        help="MSR-1: append this run (full report + git-HEAD/fixture/corpus fingerprints) "
+        help="append this run (full report + git-HEAD/fixture/corpus fingerprints) "
         "to the gitignored run ledger — default <telemetry-dir>/eval_runs.jsonl, or an "
         "explicit PATH. Append-only, byte-rotated, never affects the exit code.",
     )
@@ -1089,7 +1089,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         const="",
         default=None,
         metavar="PATH",
-        help="MSR-1: report-only drift vs a committed baseline (default: this corpus's "
+        help="report-only drift vs a committed baseline (default: this corpus's "
         ".audit-fixtures/recall_eval_baseline.json, falling back to the repo fixture on "
         "an ambient run). Fingerprint mismatch skips loudly; drift NEVER fails the run.",
     )
@@ -1099,14 +1099,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         const="",
         default=None,
         metavar="PATH",
-        help="MSR-1: pin THIS run's deterministic metrics as the committed baseline file "
+        help="pin THIS run's deterministic metrics as the committed baseline file "
         "(atomic write). Committing it — and any CI ratchet over it — is a deliberate, "
         "dated owner decision, never automatic.",
     )
     parser.add_argument(
         "--arms",
         action="store_true",
-        help="MSR-2: run the null-hypothesis condition matrix — a grep/token-overlap "
+        help="run the null-hypothesis condition matrix — a grep/token-overlap "
         "null (a ranking-stack-lift measure, NOT an adoption threshold), a TRUE "
         "bm25-only arm (second index in a scratch dir), and the explicitly-labeled "
         "mixed/degraded arm (dense resident, bm25 at query time). Report-only "
@@ -1117,7 +1117,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         type=int,
         default=None,
         metavar="K",
-        help="MSR-1: the pass^k determinism probe — run the same eval K times in FRESH "
+        help="the pass^k determinism probe — run the same eval K times in FRESH "
         "processes on the hermetic lane (HIPPO_DISABLE_DENSE=1) and assert byte-identity "
         "of the deterministic metrics (latency/staleness excluded). Exit 1 on any delta.",
     )
@@ -1126,8 +1126,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=None,
         metavar="FLAG",
         help="run a paired A/B toggling ONLY the named flag. Whitelist: HIPPO_DREAM "
-        "(DRM-3 — the /dream snapshot-diff harness, memory.dream_eval; extra args pass "
-        "through, e.g. --ab HIPPO_DREAM --live) and HIPPO_SALIENCE (MSR-5 — the ED-2 "
+        "(the /dream snapshot-diff harness, memory.dream_eval; extra args pass "
+        "through, e.g. --ab HIPPO_DREAM --live) and HIPPO_SALIENCE (the "
         "salience-revisit rig, memory.salience_eval: OFF/ON/OFF over the live corpus, "
         "per-category deltas to the gitignored dir; MEASURES ONLY, the default stays "
         "owner-decided-OFF).",
@@ -1135,24 +1135,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--calibrate",
         action="store_true",
-        help="RET-15: grid-search HIPPO_KNEE_RATIO/HIPPO_DENSE_FLOOR against this same "
+        help="grid-search HIPPO_KNEE_RATIO/HIPPO_DENSE_FLOOR against this same "
         "--memory-dir/--hard-set/--abstention-set (memory.calibrate_thresholds) instead of "
         "running the normal gate report. Report-only — never mutates recall.py's default.",
     )
     parser.add_argument(
         "--reachability",
         action="store_true",
-        help="GRF-4: the typed-2-hop reachability audit — per multi-hop row, the min "
+        help="the typed-2-hop reachability audit — per multi-hop row, the min "
         "hop depth (0/1/2/unreachable) at which each expected stem is reachable from "
         "the row's top-3 seeds over links.json, and the edge kind of the first hop. "
-        "GRA-7's PPR gate must beat THIS baseline. Pure offline walk; print-only; "
+        "the PPR gate must beat THIS baseline. Pure offline walk; print-only; "
         "skips below the grown n>=10 multi-hop fixture. Authorizes NO hot-path "
         "depth-2 mechanism.",
     )
     parser.add_argument(
         "--floor-sweep",
         action="store_true",
-        help="GRF-3 (delivers RET-9's calibration half): recommend a per-model/per-corpus "
+        help="the calibration half: recommend a per-model/per-corpus "
         "dense floor from the RAW-cosine separation of on-topic hard-set queries vs "
         "off-topic abstention probes (never fused metrics — complementary to --calibrate's "
         "end-to-end grid). Persists the report for doctor's advisory comparison line. "
@@ -1162,31 +1162,31 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--adversarial",
         action="store_true",
-        help="SEN-4: the poisoned-memory coverage report — acceptance-test the shipped trust "
-        "spine (SEC-5/6/7) against fixtures under .audit-fixtures/adversarial/. Per poisoned "
-        "fixture, five deterministic booleans (payload crossed into format_results, SEC-6 "
-        "quarantine withheld a drifted file, SEC-5 consent shows it byte-equal, threat-lint "
+        help="the poisoned-memory coverage report — acceptance-test the shipped trust "
+        "spine (/6/7) against fixtures under .audit-fixtures/adversarial/. Per poisoned "
+        "fixture, five deterministic booleans (payload crossed into format_results"
+        "quarantine withheld a drifted file, consent shows it byte-equal, threat-lint "
         "flagged it, knee/floor/MMR admitted it) by driving the shipped code — no LLM. "
         "Report-only; skips when no fixture corpus exists; never gates CI.",
     )
     parser.add_argument(
         "--draft-forgetting",
         action="store_true",
-        help="TMB-3: enumerate archive/*.md into archive-absence DRAFT rows in the SIG-6 "
+        help="enumerate archive/*.md into archive-absence DRAFT rows in the "
         "drafts queue (zero LLM); confirm each per item via confirm_hard_set_row("
         "absent=[stem], category='forgetting')",
     )
     parser.add_argument(
         "--draft-update",
         action="store_true",
-        help="TMB-4: walk supersedes chains into category:update DRAFT rows (verbatim "
+        help="walk supersedes chains into category:update DRAFT rows (verbatim "
         "spans of the superseded file; zero LLM, fail closed); confirm each per item via "
         "confirm_hard_set_row(query, [tip], category='update', superseded=<corpse>)",
     )
     parser.add_argument(
         "--draft-livedin",
         action="store_true",
-        help="MEA-2: queue outcome-confirmed lived-in retrievals (verbatim episode query "
+        help="queue outcome-confirmed lived-in retrievals (verbatim episode query "
         "x session-grain injection hit) as DRAFT rows — the fourth lane (zero LLM, "
         "deterministic noise filters, volume-capped); confirm each per item via "
         "confirm_hard_set_row(query, [stems], category='single-hop')",
@@ -1194,7 +1194,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--scoreboard",
         action="store_true",
-        help="OBS-5: print the per-corpus field scoreboard (newest persisted run vs the "
+        help="print the per-corpus field scoreboard (newest persisted run vs the "
         "pinned baseline, aggregates only) for every live registry corpus, or for the one "
         "--memory-dir (DIR or LABEL=DIR). Read-only.",
     )
@@ -1290,7 +1290,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
         s = audit["summary"]
         print(
-            f"typed-2-hop reachability (GRA-7's baseline arm; seeds/row={s['seeds_per_row']}): "
+            f"typed-2-hop reachability (the baseline arm; seeds/row={s['seeds_per_row']}): "
             f"{s['expected_stems']} expected stem(s) — {s['seed_rank_0']} ranked as a seed, "
             f"{s['reachable_at_1']} reachable at 1 hop, {s['reachable_at_2']} at 2 hops, "
             f"{s['unreachable']} unreachable"
@@ -1300,7 +1300,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             via = f" via {r['via']}" if r["via"] not in (None, "-") else ""
             print(f"  {d:<12} {r['stem']}{via} — \"{r['query']}\"")
         print(
-            "  (offline links.json walk — a baseline for GRA-7's gate, NOT a shipped "
+            "  (offline links.json walk — a baseline for the gate, NOT a shipped "
             "depth-2 mechanism)"
         )
         return 0
@@ -1335,7 +1335,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"  persisted for doctor: {doc['path']}")
         print(
             "  advisory only — edit recall._DENSE_FLOOR_BY_MODEL (or set "
-            "HIPPO_DENSE_FLOOR) yourself; nothing auto-writes (RET-9 closed by this sweep)"
+            "HIPPO_DENSE_FLOOR) yourself; nothing auto-writes (closed by this sweep)"
         )
         return 0
 
@@ -1354,7 +1354,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         t = rep["totals"]
         print(
             f"adversarial coverage ({t['n']} poisoned fixture(s)) — acceptance-testing the "
-            f"shipped spine (SEC-5/6/7). Booleans are ADMISSION/COVERAGE, not 'injection success':"
+            f"shipped trust spine. Booleans are ADMISSION/COVERAGE, not 'injection success':"
         )
         def _m(v):
             return "?" if v is None else ("yes" if v else "no ")
@@ -1368,8 +1368,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 f"admitted={_m(r['admitted'])}  — \"{r['query']}\""
             )
         print(
-            f"  totals: {t['crossed']}/{t['n']} crossed raw, {t['sec6_withheld']} SEC-6-withheld, "
-            f"{t['sec5_byte_equal']} SEC-5 byte-equal, {t['threat_flagged']} threat-flagged, "
+            f"  totals: {t['crossed']}/{t['n']} crossed raw, {t['sec6_withheld']} withheld by fingerprint, "
+            f"{t['sec5_byte_equal']} byte-equal, {t['threat_flagged']} threat-flagged, "
             f"{t['admitted']} admitted (report-only — never gates CI)"
         )
         return 0
@@ -1468,7 +1468,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     for cat, m in (report.get("by_category") or {}).items():
         print(
             f"  category {cat:11s} recall@{args.k}={m['recall']:.4f} mrr@{args.k}={m['mrr']:.4f} "
-            f"n={m['n']} (RET-8)"
+            f"n={m['n']}"
         )
     # MEA-1 (ED5R-2): the sensitivity line — present only when some fixture row cannot
     # resolve against this corpus (absence-emits-nothing keeps healthy output unchanged).
@@ -1492,7 +1492,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             score = f" (score {m['score']}{margin})" if m.get("score") is not None else ""
             print(
                 f"  miss {cat}: `{m['stem']}` cut by {m['reason']}{score} — "
-                f"query \"{m['query']}\" (MSR-4)"
+                f"query \"{m['query']}\""
             )
     # MSR-2: the null-hypothesis arm deltas — every arm explicitly labeled, every
     # category's n printed, everything report-only (no arm feeds a gate).
@@ -1502,10 +1502,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         if not arm:
             continue
         if arm.get("skipped"):
-            print(f"  arm {arm_key}: skipped — {arm['skipped']} (MSR-2)")
+            print(f"  arm {arm_key}: skipped — {arm['skipped']}")
             continue
         note = f" [{arm['note']}]" if arm.get("note") else ""
-        print(f"  arm {arm_key}: {arm['label']}{note} (MSR-2, report-only)")
+        print(f"  arm {arm_key}: {arm['label']}{note} (report-only)")
         for cat, d in sorted((na.get("deltas") or {}).get(arm_key, {}).items()):
             print(
                 f"    {cat}: Δrecall={d['recall']:+.4f} Δmrr={d['mrr']:+.4f} n={d['n']} "
@@ -1519,7 +1519,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(
             f"  latency (cold, per-process model load): p50={c['p50']}ms p95={c.get('p95')}ms "
             f"max={c['max']}ms n={c['n']} — the REAL hook cost; the warm p95 above understates it "
-            "(p95 is what --gate-cold gates, PRF-5)"
+            "(p95 is what --gate-cold gates)"
         )
 
     # Report-only scorecard additions (Tier 1, memory-organism-instrument-immunize) — none
@@ -1543,7 +1543,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     bp = report.get("body_probe") or {}
     if bp.get("n"):
         print(
-            f"  body_probe@{args.k} (RET-2, n={bp['n']}): {bp['recall']} — parent recall for "
+            f"  body_probe@{args.k} (n={bp['n']}): {bp['recall']} — parent recall for "
             "queries derived from body-only tokens (report-only)"
         )
     # RET-7: the RESULT line always names the serving backend -- e.g.

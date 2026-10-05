@@ -43,7 +43,7 @@ _SALIENCE_AB_SCHEMA = 1
 _LOW_N_FLOOR = LOW_N_FLOOR
 
 _ED2_FOOTER = (
-    "ED-2: measures only — salience stays owner-decided-OFF (SIG-5 ratified 2026-07-09); "
+    "measures only — salience stays owner-decided-OFF (ratified 2026-07-09); "
     "any default flip is a dated owner decision on affirmative evidence, never an "
     "automatic consequence of this report."
 )
@@ -82,7 +82,7 @@ def _signal_inventory(memory_dir: str, index_dir: Optional[str]) -> dict:
             "ok": False,
             "error": "usage-prior precondition violated: usage_aggregates.json is non-empty "
             "but recall's _usage_boost_map resolved empty — the ON arm would measure "
-            "nothing (the pre-MSR-5 usage-blind shape). Fix the wiring before measuring.",
+            "nothing (the older usage-blind shape). Fix the wiring before measuring.",
         }
     stale_map = _staleness_penalty_map(index_dir)
     try:
@@ -228,7 +228,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="MSR-5: paired salience A/B over a live corpus (measures only — ED-2)."
+        description="paired salience A/B over a live corpus (measures only)."
     )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--index-dir", default=None)

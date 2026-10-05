@@ -646,7 +646,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Contradiction inbox (GOV-1): list unresolved contradicts pairs, or "
+        description="Contradiction inbox: list unresolved contradicts pairs, or "
         "record the one corpus-preserving verdict (mark a pair not-conflicting)."
     )
     parser.add_argument(
@@ -664,7 +664,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--prefill",
         choices=sorted(_VERDICT_NAMES) + [_ABSTAIN],
         default=None,
-        help="TMB-1 (with --dismiss): the evidence card's suggested verdict as you saw it, "
+        help=" (with --dismiss): the evidence card's suggested verdict as you saw it, "
         "recorded next to your choice in the per-clone ledger — capture only, never "
         "auto-applied",
     )

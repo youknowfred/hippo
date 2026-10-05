@@ -10,7 +10,7 @@ doctor answers "is the plumbing working," audit answers "is the corpus content s
 trustworthy" (a much heavier, judgment-based pass). Don't reach for audit when doctor's quick
 checks are what's actually being asked.
 
-Doctor's checks are a DETERMINISTIC engine (`memory.doctor`, DOC-4): identical state produces
+Doctor's checks are a DETERMINISTIC engine (`memory.doctor`): identical state produces
 identical output across models and sessions. This SKILL is a thin wrapper — it runs that engine
 and presents its output verbatim, then handles the one step a non-interactive module cannot: the
 untrusted-corpus consent prompt.
@@ -25,9 +25,9 @@ untrusted-corpus consent prompt.
 ```bash
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
 [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:doctor skill, not from a copy of its SKILL.md. If the loaded skill stops here too, take the MCP-tool route in 'Surface routing' above."; exit 1; }
-. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver
 hippo_resolve_py
-hippo_note_usage skill doctor  # OBS-2: count this skill's use (one spool line, no Python)
+hippo_note_usage skill doctor  # count this skill's use (one spool line, no Python)
 ```
 
 Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
@@ -44,21 +44,21 @@ hippo doctor
 
 Print its output VERBATIM — every `✔`/`✘`/`⚠` line, in order. Do not re-word, re-order, drop,
 or re-run individual checks by hand: the whole point of the engine is that the diagnostic is
-reproducible, and paraphrasing reintroduces the run-to-run variance DOC-4 removed. The engine
+reproducible, and paraphrasing reintroduces the run-to-run variance removed. The engine
 resolves the corpus/repo the same way recall does (`resolve_dirs`) and runs, in a FIXED order:
-bootstrap state, installed-vs-bootstrapped plugin version (DOC-7), venv imports, corpus
-existence, project symlink (SHP-5/ONB-5), native-memory
-coexistence (INT-4: symlink-target drift + native-layout change), corpus
-resolution (SHP-2 nested-vs-root walk-up, naming WHICH tree it resolved — SHP-7: a linked git
+bootstrap state, installed-vs-bootstrapped plugin version, venv imports, corpus
+existence, project symlink, native-memory
+coexistence (symlink-target drift + native-layout change), corpus
+resolution (nested-vs-root walk-up, naming WHICH tree it resolved: a linked git
 worktree resolves the MAIN checkout's corpus, and the line says `tree: MAIN working tree …
 (redirected from linked worktree …)`, `tree: this checkout …`, `tree: LINKED worktree …` when
 the main tree has no corpus, or `tree: OVERRIDE via HIPPO_CORPUS_ROOT=…`), worktree copies
-(SHP-7: a worktree's own dead `.claude/.memory-pending` / `.memory-index` / `.memory-telemetry`
+(a worktree's own dead `.claude/.memory-pending` / `.memory-index` / `.memory-telemetry`
 dirs from before the redirect — a dead queue WITH seeds warns; nothing drains it from there),
-git degraded-mode (SHP-4), corpus trust (SEC-1),
-frontmatter integrity, index corruption (QUA-5), index count vs corpus, hot-path p95 latency
-(INT-5), index format version, pack drift, `<FILL-ME` templates, and the corpus-wide secret
-scan (SEC-2). Each line already
+git degraded-mode, corpus trust,
+frontmatter integrity, index corruption, index count vs corpus, hot-path p95 latency
+, index format version, pack drift, `<FILL-ME` templates, and the corpus-wide secret
+scan. Each line already
 names the specific finding and the exact command to fix it.
 
 ## The one interactive step doctor still owns — consent to the corpus

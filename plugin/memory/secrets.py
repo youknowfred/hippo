@@ -455,7 +455,7 @@ def main(argv=None) -> int:
 
     ap = argparse.ArgumentParser(
         prog="memory.secrets",
-        description="Secret-scan the shipped/committed tree (SEC-8). Exit 1 on any finding.",
+        description="Secret-scan the shipped/committed tree. Exit 1 on any finding.",
     )
     ap.add_argument("--repo", metavar="ROOT", default=".", help="repo root to scan (default: .)")
     args = ap.parse_args(argv)

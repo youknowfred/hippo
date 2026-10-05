@@ -234,7 +234,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--record-usage",
         action="store_true",
-        help="TEA-5: fold THIS clone's usage aggregates into the COMMITTED per-user summary "
+        help="fold THIS clone's usage aggregates into the COMMITTED per-user summary "
         ".claude/memory/.usage/<user>.json (append-only, merge-friendly, no session ids) so a "
         "teammate's clone unions your recalls before judging coldness. Then commit .usage/. "
         "This is the only write this tool makes; agent/user-gated by invoking it explicitly.",
@@ -242,7 +242,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--yes",
         action="store_true",
-        help="SEC-14: confirm --record-usage even when the repo has a remote (the committed "
+        help="confirm --record-usage even when the repo has a remote (the committed "
         "summary — your recalled memory names + counts — is shared with anyone who can read it).",
     )
     args = parser.parse_args(argv)
@@ -264,7 +264,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         remote = git_remote_info(repo_root)
         if remote["url"]:
             where = ("a PUBLIC-host remote" if remote["public_host"] else "a remote")
-            print("⚠ TEA-5 privacy: this writes a COMMITTED per-user usage summary")
+            print("⚠ privacy: this writes a COMMITTED per-user usage summary")
             print("  (.claude/memory/.usage/<user>.json — your recalled memory NAMES + counts; no")
             print("  session ids). It is NOT gitignored: the whole point is that teammates union it.")
             print(f"  This repo has {where} ({remote['url']}). Once you commit + push .usage/,")
@@ -298,7 +298,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("=== Recall soak ledger ===")
     print(f"distinct sessions     : {status['distinct_sessions']} (curation-soak bar >= {status['gate_threshold']})")
     if status.get("committed_sessions"):
-        print(f"  (+{status['committed_sessions']} committed cross-clone sessions unioned in — TEA-5)")
+        print(f"  (+{status['committed_sessions']} committed cross-clone sessions unioned in)")
     print(f"total events          : {status['total_events']}")
     print(f"curation soak         : {'MET ✅' if status['gate_met'] else 'pending'}")
     if status["gate_met"]:

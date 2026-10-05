@@ -177,7 +177,7 @@ def main(argv=None) -> int:
 
     ap = argparse.ArgumentParser(
         prog="memory.promote_rule",
-        description="Propose a glob-scoped .claude/rules/<name>.md for a procedural memory (RUL-6).",
+        description="Propose a glob-scoped .claude/rules/<name>.md for a procedural memory.",
     )
     ap.add_argument("--name", required=True, help="memory stem to promote (e.g. lint_before_commit)")
     ap.add_argument("--memory-dir", default=None)

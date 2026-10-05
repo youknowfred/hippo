@@ -714,7 +714,7 @@ def _format_listing(seeds: List[Dict], expired: int = 0) -> str:
                 )
             if s.get("hunks_threat_flagged"):
                 out.append(
-                    "      ⚠ threat lint flagged these hunks (SEN-2 Tier-A: invisible Unicode / "
+                    "      ⚠ threat lint flagged these hunks (Tier-A: invisible Unicode / "
                     "confusable / exfil shape / HTML comment) — inspect before fencing into a "
                     "body (run memory.threat_lint.scan_tier_a on the exact lines)"
                 )

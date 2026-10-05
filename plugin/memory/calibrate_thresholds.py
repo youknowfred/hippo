@@ -229,7 +229,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     ap = argparse.ArgumentParser(
         prog="memory.calibrate_thresholds",
-        description="RET-15: grid-search the knee-ratio/dense-floor constants against the "
+        description="grid-search the knee-ratio/dense-floor constants against the "
         "eval harness (report-only — never mutates recall.py's shipped default).",
     )
     ap.add_argument("--memory-dir", default=None)

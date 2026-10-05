@@ -34,7 +34,7 @@ def _ensure_tier_floor(tier_dir: str, label: str) -> None:
             f"# Agent Memory ({label} tier)\n\n"
             f"> {label.capitalize()}-tier user/feedback memories — recalled alongside the "
             "project corpus and delivered each session by the SessionStart portable-floor "
-            "producer (TEA-1/TEA-3), NOT the native symlink.\n\n"
+            "producer, NOT the native symlink.\n\n"
             "## User\n\n"
             "## Working Style & Process Feedback\n",
             None,

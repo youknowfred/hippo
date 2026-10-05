@@ -35,7 +35,7 @@ _TOOLS = [
             "user/feedback types). Reports near-duplicate/conflict neighbors (warn-only) so you "
             "can decide add / update-existing / supersede / skip. A per-item, agent-initiated "
             "write — never call it in a loop to bulk-import. Pass check:true FIRST when "
-            "draining the capture queue (the CAP-3 dry-run: neighbors + proposal-time "
+            "draining the capture queue (the dry-run: neighbors + proposal-time "
             "baseline, writes nothing), then call again without it for the real write."
         ),
         "inputSchema": {
@@ -53,12 +53,12 @@ _TOOLS = [
                 "confidence": {
                     "type": "string",
                     "enum": ["draft", "verified", "authoritative"],
-                    "description": "GOV-7: the author's trust dial — display-only, never a "
+                    "description": "the author's trust dial — display-only, never a "
                     "ranking input; omit for the default",
                 },
                 "check": {
                     "type": "boolean",
-                    "description": "CAP-3 dry-run: score this candidate against the existing "
+                    "description": "dry-run: score this candidate against the existing "
                     "corpus (near-duplicate neighbors, governance echoes, the proposal-time "
                     "git baseline) and write NOTHING — run it before the real write when "
                     "draining captures, so a duplicate routes to update/supersede instead of "
@@ -86,7 +86,7 @@ _TOOLS = [
     {
         "name": "why",
         "description": (
-            "The recall receipt (GOV-5, glass-box): re-runs the SAME ranking the recall "
+            "The recall receipt (glass-box): re-runs the SAME ranking the recall "
             "hook uses for a query and explains it — per hit the winning backend, typed "
             "edges, steering and salience; on abstention, the best candidate's sub-floor "
             "near-miss score and the floor it missed (or the honest reason: untrusted "
@@ -207,7 +207,7 @@ _TOOLS = [
     {
         "name": "trust_corpus",
         "description": (
-            "The SEC-1 consent flow for this project's memory corpus — the ONLY way to "
+            "The consent flow for this project's memory corpus — the ONLY way to "
             "un-gate recall on an untrusted (e.g. freshly cloned) corpus from this surface, "
             "and the re-consent path when recall reports withheld/drifted files. Two steps, "
             "one tool: called WITHOUT confirm_digest it never trusts anything — it returns "
@@ -254,14 +254,14 @@ _TOOLS = [
             "deleted outside archive/, or the stamped line never survived a rewrite — by "
             "appending the superseding undone line; it refuses while the stamp is on disk "
             "anywhere (use undo) and has no bulk form. action='log' lists every dream edge "
-            "(active / aged-in / undone). action='deparasite' runs the DRM-4 counterweight: reports "
+            "(active / aged-in / undone). action='deparasite' runs the counterweight: reports "
             "per-memory out-degree, flags hubs over DREAM_MAX_OUT_DEGREE, and PROPOSES "
             "retractions (dream's own un-aged edges — executed only with retract=true) "
             "vs per-item GATED demotions and non-lossy dedup-merges (never auto; "
             "protected floor/co-recalled/cited hubs are never proposed for depression). "
             "action='dedup_merge' executes ONE ratified merge proposal (survivor gains "
             "supersedes, loser gets invalid_after — additive frontmatter, nothing "
-            "deleted). action='generate' runs the DRM-6 generative tier: clusters "
+            "deleted). action='generate' runs the generative tier: clusters "
             "co-firing sets into schema/gist + hypothesis PROPOSALS (report-only unless "
             "stage=true or HIPPO_DREAM_GENERATIVE=1) — staged memories are QUARANTINED: "
             "created only at confidence:draft, down-weighted in recall, never answering "
@@ -291,10 +291,10 @@ _TOOLS = [
                     ],
                     "description": "pass = run a dream pass (default); undo = revert; "
                     "retire_ghost = close one active ledger edge whose stamp is provably "
-                    "gone; log = list edges; deparasite = DRM-4 counterweight report; "
-                    "dedup_merge = execute one ratified merge; generate = DRM-6 "
+                    "gone; log = list edges; deparasite = counterweight report; "
+                    "dedup_merge = execute one ratified merge; generate = "
                     "schema/hypothesis proposals (stage=true stages drafts); "
-                    "sweep_drafts = DRM-6 decay sweep; archive_draft = execute one "
+                    "sweep_drafts = decay sweep; archive_draft = execute one "
                     "proposed draft archive; prospective = the abstain→hit flip metric",
                 },
                 "apply": {
@@ -365,7 +365,7 @@ _TOOLS = [
     {
         "name": "capture",
         "description": (
-            "The CAP-2 pending-capture queue — Step 1 of /hippo:tend's drain. "
+            "The pending-capture queue — Step 1 of /hippo:tend's drain. "
             "action='list' (default) shows every queued seed highest-value first with its "
             "provenance (session, commit range, changed paths, queries, user-confirmed "
             "decisions, verbatim-diff evidence + its secret-lint flag) and the queue dir; "
@@ -443,7 +443,7 @@ _TOOLS = [
     {
         "name": "reconsolidate",
         "description": (
-            "The LIF-1 reconsolidation worklist — Step 2 of /hippo:tend. "
+            "The reconsolidation worklist — Step 2 of /hippo:tend. "
             "action='worklist' (default) lists recently-recalled memories whose cited "
             "code has since drifted (plus commit-precise [since-watermark] hits), "
             "most-recently-drifted first, with 1-hop linked neighbors as review-adjacent "
@@ -451,7 +451,7 @@ _TOOLS = [
             "action='brief' (name=…) renders that entry's evidence — diffstat + hunk "
             "headers from the entry's OWN source_commit baseline to HEAD, secret-linted "
             "hunk bodies when clean, plus evidence-drift fences, invalid_after, and "
-            "linked neighbors (EVD-1 — the hand-gathered diff is retired; the brief is "
+            "linked neighbors (the hand-gathered diff is retired; the brief is "
             "read-only and applies nothing). Then render ONE per-item verdict via "
             "action='reverify': outcome="
             "'graduate' (re-verified current — clears staleness, re-baselines "
@@ -485,7 +485,7 @@ _TOOLS = [
                 },
                 "superseded_by": {
                     "type": "string",
-                    "description": "GRA-4 opt-in (demote only): the SUCCESSOR memory that "
+                    "description": "opt-in (demote only): the SUCCESSOR memory that "
                     "replaces this one's claim — one successor, one memory, never bulk",
                 },
             },
@@ -508,7 +508,7 @@ _TOOLS = [
     {
         "name": "co_recall_proposals",
         "description": (
-            "GRW-2 co-recall edge proposals — Step 4 of /hippo:tend. Similarity "
+            "co-recall edge proposals — Step 4 of /hippo:tend. Similarity "
             "can never link a bug to its unrelated-looking workaround, but the episode "
             "buffer records which memories actually SURFACE TOGETHER: this tallies pairs "
             "that co-recalled across many DISTINCT sessions (floor names excluded — they "
@@ -527,7 +527,7 @@ _TOOLS = [
     {
         "name": "abstention_fixtures",
         "description": (
-            "The SIG-6 blind-spot loop — Step 5 of /hippo:tend. A recurring "
+            "The blind-spot loop — Step 5 of /hippo:tend. A recurring "
             "abstained query means the corpus kept being asked something it couldn't "
             "answer, and the drain may have just captured exactly the memory that closes "
             "the gap. action='draft' (default) refreshes the gitignored drafts queue: one "
@@ -565,18 +565,18 @@ _TOOLS = [
                 "category": {
                     "type": "string",
                     "description": "with action='confirm': the row's category tag "
-                    "(default 'abstention'; TMB-3/TMB-4 rows use 'forgetting'/'update')",
+                    "(default 'abstention'; rows use 'forgetting'/'update')",
                 },
                 "absent": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "TMB-3, with action='confirm' INSTEAD of expected: "
+                    "description": ", with action='confirm' INSTEAD of expected: "
                     "ARCHIVED stem(s) that must NOT surface for the query (each must "
                     "exist in archive/; refused otherwise)",
                 },
                 "superseded": {
                     "type": "string",
-                    "description": "TMB-4, with action='confirm' + expected: the "
+                    "description": ", with action='confirm' + expected: the "
                     "still-live CORPSE stem this update row's query was verbatim-derived "
                     "from (enables stamp-state-bucketed scoring)",
                 },
@@ -586,8 +586,8 @@ _TOOLS = [
     {
         "name": "rederive",
         "description": (
-            "MIG-1: re-derive cited_paths after hippo's citation EXTRACTOR changed (the "
-            "DRV-2 'citation derivation' nudge / doctor line routes here). Corpora written "
+            "re-derive cited_paths after hippo's citation EXTRACTOR changed (the "
+            " 'citation derivation' nudge / doctor line routes here). Corpora written "
             "by an older extractor carry citations it could not see — so some memories "
             "watch the wrong file and some sit at cited_paths: [], which makes them EXEMPT "
             "from staleness tracking. action='worklist' (default) is READ-ONLY and shows "
@@ -632,13 +632,13 @@ _TOOLS = [
     {
         "name": "heal_baselines",
         "description": (
-            "COR-10: set source_commit to HEAD for memories whose staleness baseline is "
+            "set source_commit to HEAD for memories whose staleness baseline is "
             "EMPTY. A memory with one is invisible to staleness, reconsolidation and "
             "archive gating — forever. doctor's empty-baseline check names this tool. "
             "This can never CLEAR a staleness flag (an empty baseline never raised one), "
             "so it only turns tracking ON. Deliberately human-invoked and never automatic: "
             "it used to run inside the SessionStart hook, which meant a hook writing to the "
-            "corpus — drifting each healed file off its own SEC-6 consent fingerprint, "
+            "corpus — drifting each healed file off its own consent fingerprint, "
             "after which the drift banner asked the user 'a git pull? a hand edit?' about "
             "hippo's own write."
         ),
@@ -669,7 +669,7 @@ _TOOLS = [
             "demote-in-place chain, nothing deleted; not_conflicting (a=, b=) records "
             "the one corpus-preserving verdict in this clone's ledger (files and edge "
             "untouched). Nothing auto-picks a winner; never bulk-apply a verdict; "
-            "two-write verdicts roll back cleanly when a write refuses (COR-16)."
+            "two-write verdicts roll back cleanly when a write refuses."
         ),
         "inputSchema": {
             "type": "object",
@@ -699,7 +699,7 @@ _TOOLS = [
                 "prefill": {
                     "type": "string",
                     "enum": ["keep_one", "scope_both", "merge", "not_conflicting", "abstain"],
-                    "description": "TMB-1 (verdict calls): the inbox evidence card's "
+                    "description": " (verdict calls): the inbox evidence card's "
                     "suggested verdict as you saw it — recorded next to your choice "
                     "(per-clone ledger, capture only; nothing ever auto-applies it)",
                 },
@@ -746,10 +746,10 @@ _TOOLS = [
     {
         "name": "interview",
         "description": (
-            "EXT-3, the /hippo:tend asks step: at most THREE grounded questions "
+            ", the /hippo:tend asks step: at most THREE grounded questions "
             "per session, template-rendered from existing gap signals — recurring "
-            "recall abstentions (SIG-3), the unresolved contradiction inbox (GOV-1), "
-            "and generated drafts at their decay horizon (DRM-6) — each citing its "
+            "recall abstentions, the unresolved contradiction inbox, "
+            "and generated drafts at their decay horizon — each citing its "
             "evidence verbatim. action='questions' (default) lists them; ask the HUMAN, "
             "never answer for them. Every ACCEPTED answer routes through the existing "
             "per-item write verbs (new_memory with check:true / resolve / reconsolidate "
@@ -785,7 +785,7 @@ _TOOLS = [
     {
         "name": "untrust",
         "description": (
-            "SEN-5: REVOKE trust for a corpus after discovering it is bad/poisoned — the "
+            "REVOKE trust for a corpus after discovering it is bad/poisoned — the "
             "incident-response inverse of the trust_corpus consent flow (the only recourse "
             "was to consent; there was no un-consent). Removes exactly THIS repo's entry from "
             "the machine-local trust registry, preserving every sibling; idempotent (an "
@@ -809,7 +809,7 @@ _TOOLS = [
     {
         "name": "blast_radius",
         "description": (
-            "SEN-5: read-only incident forensics for a suspect memory — after untrust (or on "
+            "read-only incident forensics for a suspect memory — after untrust (or on "
             "spotting one poisoned memory), see what it TOUCHED. Joins four traces: the "
             "sessions whose recall surfaced it (episode buffer), its typed+untyped link graph "
             "adjacency (who it points at / who points at it), governance files that cite it, "

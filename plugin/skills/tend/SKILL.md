@@ -108,9 +108,9 @@ else. Nothing here is a bulk sweep.
 ```bash
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
 [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:tend skill, not from a copy of its SKILL.md. If the loaded skill stops here too, take the MCP-tool route in 'Surface routing' above."; exit 1; }
-. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver
 hippo_resolve_py
-hippo_note_usage skill tend consolidate  # OBS-2: count this skill's use (one spool line, no Python)
+hippo_note_usage skill tend consolidate  # count this skill's use (one spool line, no Python)
 ```
 
 Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
@@ -119,11 +119,11 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 > **Desktop:** the tool-by-tool mapping is in 'Surface routing' at the top of this skill — drive the SAME flow through those MCP tools, same order, same per-item approval gates. Each capture seed is a plain JSON file: read it directly for the full evidence when drafting.
 
-### Step 1 — Drain the pending capture queue (CAP-2 → CAP-3)
+### Step 1 — Drain the pending capture queue
 
 The SessionEnd/SubagentStop capture pass leaves gitignored `session-capture` seeds — a
 prior session's episode replay (queries, recalled names) + `git diff`, including bounded
-VERBATIM diff hunks (GRW-1) — in `.claude/.memory-pending/`. Nothing in there is in the
+VERBATIM diff hunks — in `.claude/.memory-pending/`. Nothing in there is in the
 corpus; you approve it here, per item.
 
 List what's queued (highest-value first — each seed carries a `value:` score and trivial
@@ -146,7 +146,7 @@ like flagged hunks.
 For EACH seed, read its provenance (changed/new files, query previews, recalled names) and
 decide what — if anything — is a durable fact worth keeping. Skip anything re-derivable from
 the code or git history. For each candidate fact you draft, **check it against the corpus
-BEFORE writing** so a near-duplicate never becomes a new file (CAP-3, a dry run — writes
+BEFORE writing** so a near-duplicate never becomes a new file (a dry run — writes
 nothing):
 
 ```
@@ -154,7 +154,7 @@ hippo new --check <candidate-name> "<one-line description>" --type {user|feedbac
 ```
 
 Then, for each candidate that survives the check, **render its RATIONALE before asking for
-approval** (GOV-3) — the evidence a teammate reviewing the eventual MEMORY.md diff needs,
+approval** — the evidence a teammate reviewing the eventual MEMORY.md diff needs,
 fused from what is already in hand (the seed listing + the `--check` block):
 
 ```
@@ -166,7 +166,7 @@ proposal <candidate-name>: from session <sid> (queries: "<q1>", "<q2>", …)
   baseline : as of HEAD <sha>                          [--check's baseline line]
 ```
 
-A seed's `decisions` entries (GRW-4) are the session's recorded WHY — text the agent captured
+A seed's `decisions` entries are the session's recorded WHY — text the agent captured
 in-session, quoting or paraphrasing what the USER stated or confirmed. Fold the relevant ones
 into the drafted `--body` (they are exactly the durable rationale a memory needs and the one
 thing git cannot re-derive). TRANSCRIPTION, NOT SYNTHESIS: never invent a WHY the seed does
@@ -206,7 +206,7 @@ Seeds already flagged at capture (`⚠ secret lint flagged these hunks` in the l
 the same treatment: their hunks NEVER reach a body verbatim — summarize around the secret,
 or scrub it and lint again until the scan is clean.
 
-**Evidence-fence marker (CLB-3 — future drains only).** When you fence hunk lines into a
+**Evidence-fence marker (future drains only).** When you fence hunk lines into a
 body, attribute the fence machine-recognizably so the drift detector can re-verify the
 quote against the live tree at every SessionStart: put `evidence: <path>:<start>-<end>`
 at the end of the fence's info string — `<path>` is the toplevel-relative file the hunk
@@ -257,17 +257,17 @@ ignoring it (it re-nags after — a snooze is a deferral, not a dismissal):
 hippo capture --snooze
 ```
 
-### Step 2 — Work the reconsolidation worklist (LIF-1)
+### Step 2 — Work the reconsolidation worklist
 
 Recently-recalled memories whose cited code has drifted are the worklist. Address them per
-item — LIF-1 gave `demote` a terminal state (it chains straight to soft-invalidation, no second
+item — gave `demote` a terminal state (it chains straight to soft-invalidation, no second
 command) and an ack/snooze so a deferred item stops re-nagging:
 
 ```
 hippo reconsolidate --dry-run
 ```
 
-For each item, render its evidence brief BEFORE the verdict (EVD-1 — read-only; retires
+For each item, render its evidence brief BEFORE the verdict (read-only; retires
 the hand-gathered `git diff`): diffstat + bounded hunk headers from the entry's OWN
 `source_commit` baseline to HEAD, secret-linted hunk bodies when clean, plus
 evidence-drift fences, `invalid_after` state, and linked neighbors. Read the memory
@@ -290,10 +290,10 @@ drops off the next N worklists instead of re-nagging).
 
 Two SessionStart signals route extra items through this same per-item gate:
 
-- `[since-watermark]` worklist items (GRW-5) were flagged by COMMITS landed since your last
+- `[since-watermark]` worklist items were flagged by COMMITS landed since your last
   session touching their cited files — commit-precise, on the list whether or not they were
   recently recalled. Same verdicts as above.
-- **Squash-merge healing (GRW-6):** when SessionStart reported a recent merge broke
+- **Squash-merge healing:** when SessionStart reported a recent merge broke
   staleness baselines (`🩹 … baselines no longer resolve`), re-ground each NAMED memory
   against the post-merge code, and once you confirm it still holds, render `--outcome
   graduate` — the reverify re-baselines its `source_commit` to the current HEAD and
@@ -309,11 +309,11 @@ recomputed:
 hippo build-index
 ```
 
-For link densification on the existing corpus (GRA-3 — suggest edges between high-similarity
+For link densification on the existing corpus (suggest edges between high-similarity
 pairs, agent-gated, never an autonomous body edit), use `/hippo:doctor`'s densification pass;
 this skill's job is to drain and close loops, not to re-audit content.
 
-### Step 4 — Propose co-recall edges (GRW-2)
+### Step 4 — Propose co-recall edges
 
 Similarity can never link a bug to its unrelated-looking workaround — but the episode buffer
 records which memories actually SURFACE TOGETHER. Tally pairs that co-recalled across many
@@ -354,9 +354,9 @@ PYEOF
 For EACH printed pair (already-linked pairs are dropped above), read both memories and judge
 whether the association is real — would someone recalling one genuinely need the other? If
 yes, ask for approval, then append a `[[the-other-name]]` reference into ONE side's body
-(its `Related:` line if present — an untyped wikilink, the GRA-3 convention; no new edge
+(its `Related:` line if present — an untyped wikilink, the convention; no new edge
 type, no schema change). In the SAME edit, stamp the edge's provenance in that file's
-frontmatter (GRF-1 — the key is `edge_origin`, NOT `origin`, which is the memory-level
+frontmatter (the key is `edge_origin`, NOT `origin`, which is the memory-level
 promote stamp):
 
 ```yaml
@@ -373,14 +373,14 @@ hand-authored one. Per item, agent-gated — never append the whole list in bulk
 skip it; the tally will keep its count and you can dismiss it again next drain.
 
 After any approved append, re-run `hippo build-index` so `links.json` carries the
-new edge — GRA-1's 1-hop expansion picks it up on the very next recall, no ranking change
+new edge's 1-hop expansion picks it up on the very next recall, no ranking change
 involved.
 
-### Step 5 — Close the blind-spot loop (SIG-6)
+### Step 5 — Close the blind-spot loop
 
 The SessionStart blind-spot nudge routes HERE: a recurring abstained query means the corpus
 kept being asked something it couldn't answer, and Step 1's drain may have just captured
-exactly the memory that closes such a gap. Record that as an eval fixture so KPI-4 measures
+exactly the memory that closes such a gap. Record that as an eval fixture so measures
 the gap-closing loop end to end — first refresh the drafts queue:
 
 ```bash
@@ -394,7 +394,7 @@ print(json.dumps(draft_livedin_fixtures(), indent=2))
 PYEOF
 ```
 
-MEA-2 refreshes the FOURTH lane in the same step: `draft_livedin_fixtures` queues
+refreshes the FOURTH lane in the same step: `draft_livedin_fixtures` queues
 (verbatim query → outcome-confirmed memory) candidates from the session ledgers —
 `derived_expected` names the evidence, `expected` stays empty, and admission is the same
 per-item confirm below (`category='single-hop'` for these).
@@ -422,7 +422,7 @@ a memory to make a fixture pass** (the primitive refuses stems that don't exist 
 is a verdict, not a thing to work around). Delete rows that are noise. Per item,
 agent-gated — never admit the whole queue in bulk.
 
-### Step 6 — The interview: ask up to three grounded questions (EXT-3)
+### Step 6 — The interview: ask up to three grounded questions
 
 hippo tells, but never asked. Three gap signals are machine-detected with no encode-side
 loop — the recurring abstentions Step 5 just triaged, the contradiction inbox, and generated
@@ -455,7 +455,7 @@ same tend action: action='interview', step='respond', `qid=<from the listing>`,
 `outcome='decline'` or `'later'`. Zero questions is the designed norm, not a failure; if dogfooding ever says this
 step nags, the cap and decline memory are the dials that exist to be turned down.
 
-> A future auto-maintained map-of-content note (CAP-5) will also be refreshed here once it
+> A future auto-maintained map-of-content note will also be refreshed here once it
 > ships; today consolidation ends at a drained queue, an addressed worklist, a current graph,
 > a blind-spot queue that is judged rather than silently growing, and at most three grounded
 > questions the human actually wanted to be asked.
@@ -480,9 +480,9 @@ verdict that doesn't touch the corpus (mark-not-conflicting) lands in a per-clon
 ```bash
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
 [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:tend skill, not from a copy of its SKILL.md. If the loaded skill stops here too, take the MCP-tool route in 'Surface routing' above."; exit 1; }
-. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver
 hippo_resolve_py
-hippo_note_usage skill tend resolve  # OBS-2: count this skill's use (one spool line, no Python)
+hippo_note_usage skill tend resolve  # count this skill's use (one spool line, no Python)
 ```
 
 Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
@@ -501,7 +501,7 @@ Every unresolved `contradicts` pair in the corpus, whether or not the two memori
 co-surfaced in a recall. `(declared by: …)` names which file carries the `contradicts:`
 frontmatter — that is the file a corpus-mutating verdict edits.
 
-Each pair carries a deterministic **evidence card** (TMB-1): conflict age in
+Each pair carries a deterministic **evidence card**: conflict age in
 commits-since-declaration (git-mined; "unknown" for uncommitted/rewritten history), the
 git-newer side, cached cited-code drift per side, usage asymmetry (withheld below 5
 recorded sessions), and a `suggested:` prefill expressed strictly in the four verdict

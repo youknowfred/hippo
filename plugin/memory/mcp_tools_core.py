@@ -56,7 +56,7 @@ def _tool_new_memory(args: Dict[str, Any]) -> str:
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
-            "new_memory REFUSED — this project's memory corpus is untrusted (SEC-13: writing "
+            "new_memory REFUSED — this project's memory corpus is untrusted (writing "
             "to an unreviewed corpus is gated just as reading it is — and the check dry-run "
             "reads its descriptions). " + _UNTRUSTED_REMEDY
         )
@@ -166,7 +166,7 @@ def _tool_traverse(args: Dict[str, Any]) -> str:
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
-            "traverse: withheld — this project's memory corpus is untrusted (SEC-1: the link "
+            "traverse: withheld — this project's memory corpus is untrusted (the link "
             "graph exposes memory names and typed edges, gated just as recall is). "
             + _UNTRUSTED_REMEDY
         )
@@ -208,7 +208,7 @@ def _tool_decision_history(args: Dict[str, Any]) -> str:
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
-            "decision_history: withheld — this project's memory corpus is untrusted (SEC-1: "
+            "decision_history: withheld — this project's memory corpus is untrusted ("
             "the lineage narrative exposes memory names, dates, and typed edges, gated just as "
             "recall is). " + _UNTRUSTED_REMEDY
         )

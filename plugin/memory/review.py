@@ -667,7 +667,7 @@ def _parse(argv: Optional[List[str]]) -> argparse.Namespace:
         prog="memory review",
         description="Corpus review packet: op-classified memory diff + touched-file "
         "lints + a local-only recall-impact preview. --ci is the single canonical "
-        "CI scan for memory diffs (SEC-8 gate half + SEN-2 threat leg): exit 1 iff "
+        "CI scan for memory diffs (gate half + threat leg): exit 1 iff "
         "a secret/threat finding exists on a touched file.",
     )
     parser.add_argument(

@@ -47,7 +47,7 @@ literacy; this skill matches that separation rather than blurring it.
 - **`--skip-eval`** — skip the `eval_recall.evaluate()` cluster (useful for a fast
   drift/curation/archive-only pass, or when the dense/fastembed model cache is cold and you
   don't want to pay the load).
-- **`--generate-eval-set [N]`** (N default `12`) — RET-7: (re)generate this project's own
+- **`--generate-eval-set [N]`** (N default `12`): (re)generate this project's own
   `.claude/memory/.audit-fixtures/recall_hard_set.yaml` from a fresh sample of THIS corpus
   (see Phase 0.5). **Never runs on its own** — regeneration is explicit, one invocation at a
   time, never autonomous; absent this flag Phase 0.5 is skipped entirely and Phase 1 just
@@ -71,9 +71,9 @@ not a multi-PR roadmap.
 - Confirm every tool imports cleanly:
   ```bash
   eval "$(hippo env)"  # a fresh shell: ask hippo again
-  . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
+  . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver
   hippo_resolve_py
-  hippo_note_usage skill doctor audit  # OBS-2: count this skill's use (one spool line, no Python)
+  hippo_note_usage skill doctor audit  # count this skill's use (one spool line, no Python)
   "$PY" -c \
     "from memory import eval_recall, soak, staleness, reconsolidate, archive, links, lint_links, lint_floor, telemetry, provenance"
   ```
@@ -100,7 +100,7 @@ not a multi-PR roadmap.
   finding as "nothing recurs," and conflating the two is exactly the kind of overclaim Phase 4's
   honesty section exists to prevent.
 
-### Phase 0.5 — Eval-set generation (RET-7, only under `--generate-eval-set`, agent-gated)
+### Phase 0.5 — Eval-set generation (only under `--generate-eval-set`, agent-gated)
 
 **Skipped entirely unless `--generate-eval-set` was passed.** This is what makes "uniform
 recall efficacy" checkable on ANY project's own corpus, not just the engine repo's own
@@ -140,7 +140,7 @@ paraphrase queries from scratch.
    check Phase 0's import line already exercises) before deciding what to write:
    `generated_with_backend: dense+bm25` only if dense is genuinely available this run, else
    `generated_with_backend: bm25-only`. **Never write `dense+bm25` speculatively** — an
-   inflated claim here is exactly what RET-7's `backend_mismatch` flag exists to catch on a
+   inflated claim here is exactly what the `backend_mismatch` flag exists to catch on a
    LATER run, so getting it right at generation time avoids a false alarm against your own
    fixture. Add `generated_at: <today's date>`.
 
@@ -171,14 +171,14 @@ Once confirmed, Phase 1 picks up the (possibly just-written) fixture via its exi
 discovery logic — no separate wiring needed; `_default_fixture_path` already probes
 `.claude/memory/.audit-fixtures/` first (see Phase 1's `hard_set`/`rel_set` resolution below).
 
-### Phase 0.6 — Abstention-fixture drafting (SIG-6 — routine drafting, gated admission)
+### Phase 0.6 — Abstention-fixture drafting (routine drafting, gated admission)
 
 Phase 0.5 samples what someone thought to test; this phase grows the same fixture from what
-users actually ASK. The SIG-3 blind-spot backlog (recurring queries recall abstained on) is
-turned into CANDIDATE fixture rows — so KPI-4's yardstick self-populates from real
+users actually ASK. The blind-spot backlog (recurring queries recall abstained on) is
+turned into CANDIDATE fixture rows — so the yardstick self-populates from real
 un-answered traffic. Runs on every audit, no flag: the drafter only APPENDS to a gitignored
 drafts QUEUE (`.claude/.memory-pending/recall_hard_set.drafts.yaml` — raw ledger query text
-stays in the SEC-3 self-ignoring pending dir, the capture-seed precedent), which is
+stays in the self-ignoring pending dir, the capture-seed precedent), which is
 bookkeeping like the Phase 1 history-file write, not a corpus mutation. ADMISSION into the
 tracked fixture is the gated act, and it is always per-item + human-approved.
 
@@ -193,7 +193,7 @@ print(json.dumps(draft_livedin_fixtures(), indent=2))
 PYEOF
 ```
 
-The second call is MEA-2's lived-in lane (the fourth): outcome-confirmed verbatim queries
+The second call is the lived-in lane (the fourth): outcome-confirmed verbatim queries
 from the session ledgers, queued beside the abstention rows with `derived_expected` as
 judgment material — pure ledger reads, so it runs identically under `--skip-eval`; confirm
 per item with `category='single-hop'`.
@@ -214,7 +214,7 @@ the drafts file, newly added or not. Exactly one verdict each:
   but say so explicitly: it reddens `hard_recall@10` until the gap is fixed, and admitting
   that tripwire is precisely the human's call. On explicit approval, admit it (see below).
 - **(b) No existing memory answers it** — a CAPTURE gap, not fixture material. Route it to
-  `/hippo:tend` (the SIG-3 nudge's own path) and leave the row drafted. **Never create
+  `/hippo:tend` (the nudge's own path) and leave the row drafted. **Never create
   a memory just to make a fixture admissible** — that inverts the loop (the killed
   demand-gap-auto-draft); capture decisions are made on their own merits in the drain.
 - **(c) Noise** (tool spew, a malformed preview, a never-again question) — delete the row
@@ -233,7 +233,7 @@ PYEOF
 ```
 
 The row lands in `.claude/memory/.audit-fixtures/recall_hard_set.yaml` tagged
-`category: abstention` (RET-8's per-category bucket — the eval now measures the gap-closing
+`category: abstention` (the per-category bucket — the eval now measures the gap-closing
 loop end to end), the fixture's existing bytes are preserved verbatim above the append, and
 the drafts-queue row drains. The primitive REFUSES fabricated stems, duplicate queries, and
 empty judgments — a refusal is a verdict to report, never a thing to work around.
@@ -267,7 +267,7 @@ from memory.recall import recall
 
 SKIP_EVAL = False          # --skip-eval
 WINDOW_SESSIONS = 30       # --window-sessions
-LINK_SIM_K = 3             # GRA-3 densification: candidates recalled per sampled memory
+LINK_SIM_K = 3             # densification: candidates recalled per sampled memory
 LINK_SIM_MAX_SAMPLE = 200  # cap: corpus-size assumption (see Hard Rules) — recall() per file
                            # is O(1) index lookups, not a re-embed, but stay bounded regardless
 
@@ -299,7 +299,7 @@ graph = links.build_graph(memory_dir)
 link_report = lint_links.lint(memory_dir)
 floor = lint_floor.floor_violations(memory_dir)
 
-# links.py speaks STEMS ("foo", never "foo.md") since GRA-2 — same identity as
+# links.py speaks STEMS ("foo", never "foo.md") — same identity as
 # staleness/soak/archive, so graph output joins below with no conversion step.
 names = set(graph.files) if graph else set()
 never_recalled = set(curation["never_recalled"])
@@ -334,7 +334,7 @@ join_authority_gap = sorted(
     name for name in cited_by_governance if strength.get(name, 0.0) < 0.15
 )
 
-# --- IOP-1 foreign-dialect radar: the rule dialects hippo does NOT own (.cursor/rules
+# --- foreign-dialect radar: the rule dialects hippo does NOT own (.cursor/rules
 # Cursor .mdc, .github/instructions Copilot, watch-only unratified .agents/rules) —
 # censused by glob-presence alone, divergence-vs-governance via rule_dup_candidates,
 # existence-only .mdc citation/glob rot. Report-only, and its FOREIGN_GLOBS surface
@@ -349,9 +349,9 @@ foreign_dialects = foreign_radar(str(repo_root_p))
 # archive.archive_candidates()'s real 4-way gate. ---
 join_graph_isolated_watchlist = graph.isolates() if graph else []
 
-# --- GRA-3 link-densification pass: SUGGESTIONS only, never an autonomous body edit. ---
+# --- link-densification pass: SUGGESTIONS only, never an autonomous body edit. ---
 # Reuses recall() over each sampled memory's OWN doc_text (name + description — the exact
-# query new_memory's write-time discovery uses, GRA-3) to find its highest-similarity
+# query new_memory's write-time discovery uses) to find its highest-similarity
 # EXISTING neighbors that are NOT already an outbound edge. This is read-only: it proposes
 # high-similarity pairs for the agent to review in Phase 3/5 and hand-add as [[wikilinks]]
 # ONE memory at a time if approved — it never writes to any memory body itself. Skipped
@@ -374,7 +374,7 @@ if graph and names:
         if candidates:
             link_density_suggestions.append({"memory": name, "candidates": candidates})
 
-# --- GRW-3 merge-candidate pass: near-duplicate COMMITTED pairs, SUGGESTIONS only. ---
+# --- merge-candidate pass: near-duplicate COMMITTED pairs, SUGGESTIONS only. ---
 # Committed-vs-committed duplicate detection reuses the WRITE-TIME dup checker
 # (new_memory.committed_duplicate_neighbors: dense cosine >= 0.80 when available,
 # normalized BM25 >= 0.45 otherwise — the calibrated [0,1]-ish similarity scales) fed each
@@ -401,7 +401,7 @@ if names:
                 continue  # one-way similarity is not a merge signal
             merge_candidates.append({"pair": [a, b], "score_a_to_b": s_ab, "score_b_to_a": s_ba})
 
-# --- SEN-3: ungrounded-prescription sweep. Classify each memory grounded / ungrounded-
+# ---: ungrounded-prescription sweep. Classify each memory grounded / ungrounded-
 # prescription / observation; the ungrounded ones are agent-voiced "the user always wants X"
 # claims backed by neither a Rationale line nor a fenced hunk — the synthesized-prescription
 # shape that amplifies sycophancy. Report-only; the agent proposes per-item fixes in Phase 5
@@ -472,7 +472,7 @@ print(json.dumps({
     "run_date": today,
     "corpus_size": len(names),
     "fixtures_present": {"hard_set": hard_set is not None, "relevance_set": rel_set is not None},
-    # RET-7: surfaced at the top level (not just buried in `eval_recall`) so Phase 2/4 can't
+    # surfaced at the top level (not just buried in `eval_recall`) so Phase 2/4 can't
     # accidentally skip past it — `ev` is {} under --skip-eval, hence the guarded .get().
     "recall_backend": ev.get("backend"),
     "recall_backend_mismatch": ev.get("backend_mismatch", False),
@@ -519,7 +519,7 @@ The joins above are already computed as plain data; this phase is about **interp
    readings are possible and only Phase 3's actual read can tell them apart: (a) the citing doc
    already inlines the content, so low recall is fine; or (b) the citing doc's claim has drifted
    from what agents actually pull at runtime. Report which governance file cited it and the
-   exact strength score (or "absent — never recalled in this clone; TEA-5: cross-clone only if
+   exact strength score (or "absent — never recalled in this clone; cross-clone only if
    committed .usage/*.json is present").
 3. **Worklist recurrence** (`joins.worklist_recurrence` / `>= 3`) — a name recalled-and-stale for
    the 3rd+ consecutive audit run with no `last_verdict` on record is a stronger finding than a
@@ -535,14 +535,14 @@ The joins above are already computed as plain data; this phase is about **interp
 6. **Graph-isolated watch-list** — report as a clearly-separate, explicitly-labeled section.
    **Never treat it as archive-eligible.** Only `archive_candidates` output (the real 4-way gate)
    may ever become an archive proposal in Phase 5.
-7. **Link-densification suggestions** (`link_density_suggestions`, GRA-3) — each entry is "this
+7. **Link-densification suggestions** (`link_density_suggestions`) — each entry is "this
    memory's highest-similarity EXISTING neighbors that aren't already an outbound edge", i.e. a
    *candidate* edge, not a confirmed one. A shared vocabulary is not the same as a meaningful
    relationship (the same caution `/hippo:new`'s own Related-line curation carries) — judge each
    pair by whether the BODY content actually relates, not just the description text. Report every
    entry; don't pre-filter by score alone. **Suggestions only — the agent applies approved ones
    per-item in Phase 5; there is no bulk/autonomous body edit anywhere in this pass.**
-8. **Merge candidates** (`merge_candidates`, GRW-3) — pairs of COMMITTED memories that clear the
+8. **Merge candidates** (`merge_candidates`) — pairs of COMMITTED memories that clear the
    calibrated near-duplicate threshold in BOTH directions. Read both bodies before calling
    anything a merge: a merge candidate is a **concordant restatement** — two files saying the
    same thing — and folding them into one canonical memory un-splits their recall signal. A pair
@@ -550,10 +550,10 @@ The joins above are already computed as plain data; this phase is about **interp
    merging it would silently erase one side of a dispute someone needs to adjudicate. Neither
    verdict is applied here: merges route through Phase 5's per-item merge recipe, disagreements
    through a typed `contradicts`/`supersedes` edge.
-9. **Contradiction adjudication — the three-way fork (GRW-8).** Every high-similarity pair the
+9. **Contradiction adjudication — the three-way fork.** Every high-similarity pair the
    sweep surfaces — a `merge_candidates` row OR a `link_density_suggestions` candidate whose
    bodies you actually read — gets exactly ONE of three verdicts:
-   - **(a) concordant restatement** → merge candidate (GRW-3, Phase 5 merge recipe). Two
+   - **(a) concordant restatement** → merge candidate (Phase 5 merge recipe). Two
      wordings of the same claim. High similarity + no opposing assertion.
    - **(b) genuine disagreement** → contradiction candidate: the two bodies make OPPOSING
      claims about the same thing (one says "always X", the other "never X"; different values
@@ -565,12 +565,12 @@ The joins above are already computed as plain data; this phase is about **interp
    duplicate is NOT a contradiction** — similarity says the pair is ABOUT the same thing;
    only the claims' actual CONTENT can say whether they disagree. Never render (b) from
    scores, titles, or descriptions alone; cite the two opposing sentences in the report row.
-   Accepted `contradicts` edges drain through the GOV-1 inbox (`/hippo:tend` — the
+   Accepted `contradicts` edges drain through the inbox (`/hippo:tend` — the
    SessionStart contradiction-inbox producer picks them up automatically) and, when a
    governance doc cites either side, light the T2 rules-conflict radar; recall annotates the
    pair with its "contradicts … — verify" note on every co-surface until resolved.
 
-10. **Ungrounded prescriptions** (`ungrounded_prescriptions`, SEN-3) — the corpus split into
+10. **Ungrounded prescriptions** (`ungrounded_prescriptions`) — the corpus split into
    `observation` / `grounded` / `ungrounded`, with `ungrounded_items` naming each memory that
    asserts user intent (the `the-<subject>-always-wants-X` shape) backed by neither a
    `Rationale:` line nor a fenced hunk overlapping the claim. This is the synthesized-prescription shape that amplifies
@@ -582,7 +582,7 @@ The joins above are already computed as plain data; this phase is about **interp
    a corpus-health signal (the transcription-not-synthesis discipline slipping), not a per-file
    emergency.
 
-11. **Foreign-dialect radar** (`foreign_dialects`, IOP-1) — the rule dialects hippo does NOT
+11. **Foreign-dialect radar** (`foreign_dialects`) — the rule dialects hippo does NOT
    own. Report the census honestly (all globs empty → "no other dialects found" — one line and
    move on). Each `divergence` row is a foreign file whose substance a governance block already
    contains: a same-rule-diverged pair in the making — the fix is a per-item human choice
@@ -629,7 +629,7 @@ For each selected item, concretely:
      yourself in this session, then recommend `semantic_reverify(name, "fix", ...)`.
    - **demote** — the claim is wrong or no longer worth tracking. Recommend
      `semantic_reverify(name, "demote", ...)` — the staleness flag stays **set** by design, and
-     the call itself chains `invalid_after` onto the memory (LIF-1), so recall's pre-cut penalty
+     the call itself chains `invalid_after` onto the memory, so recall's pre-cut penalty
      demotes it immediately — no separate `staleness --invalidate` step. If this is also an
      authority-evidence-gap hit, say so explicitly (demoting the memory doesn't fix the
      governance doc that still cites it — that needs its own follow-up edit).
@@ -641,7 +641,7 @@ For each selected item, concretely:
      demote.
 
    When the **operator** explicitly defers an item instead of rendering a verdict, ack it with
-   `hippo reconsolidate --snooze <name>` (LIF-1) — the worklist stops re-nagging it
+   `hippo reconsolidate --snooze <name>` — the worklist stops re-nagging it
    for the next 5 sessions and the ack is logged in the reconsolidation ledger. A snooze is a
    deferral, not a verdict: never record it as one of the outcomes above.
 5. Every verdict needs a 2-4 sentence justification **citing the specific diff hunk, commit, or
@@ -682,7 +682,7 @@ Fixtures: hard-set <present|absent>, relevance-set <present|absent>
 Recall backend this run: <dense+bm25|bm25-only> <— dense path unverified this run if bm25-only; ⚠ FIXTURE/BACKEND MISMATCH if eval_recall.evaluate() set backend_mismatch>
 Prior audit runs on record: <count from history file, or "none — first run">
 Soak state: <distinct_sessions>/5 sessions (gate_met=<bool>)
-Usage-signal scope: <CLONE-LOCAL — only this clone's recalls | cross-clone — unions committed .usage/*.json> (TEA-5)
+Usage-signal scope: <CLONE-LOCAL — only this clone's recalls | cross-clone — unions committed .usage/*.json>
 
 ## This week (ranked)
 1. **[<TAG>] <memory name>** — <verdict> — <one-sentence why>
@@ -706,27 +706,27 @@ report. Never a vague hedge.>
 - Graduation history ∩ currently-stale: <names + prior verdicts>
 - Graph-isolated watch-list (never archive-eligible on its own): <names>
 
-## Link-densification suggestions (GRA-3 — SUGGESTIONS only, none auto-applied)
+## Link-densification suggestions (SUGGESTIONS only, none auto-applied)
 | Memory | Candidate | Score | Judged relevant? | Applied this run? |
 |---|---|---|---|---|
 <one row per candidate reviewed; "Applied this run?" is always "no" unless --apply AND the
 operator approved that specific pair — see Phase 5>
 
-## Merge candidates (GRW-3 — both-direction near-duplicates, SUGGESTIONS only, none auto-applied)
+## Merge candidates (both-direction near-duplicates, SUGGESTIONS only, none auto-applied)
 | Pair | a→b | b→a | Verdict | Applied this run? |
 |---|---|---|---|---|
 <one row per merge_candidates pair; Verdict ∈ {merge — concordant restatement, contradiction —
 they disagree (route to a typed edge, never a merge), distinct — leave both}; "Applied this
 run?" is always "no" unless --apply AND the operator named that specific pair — see Phase 5>
 
-## Contradiction candidates (GRW-8 — proposals only, none auto-applied)
+## Contradiction candidates (proposals only, none auto-applied)
 | Pair | Opposing claims (quote both sides, one line each) | Proposed edge | Applied this run? |
 |---|---|---|---|
 <one row per pair verdicted (b) in Phase 2's three-way fork; "Proposed edge" ∈
 {contradicts — needs adjudication, supersedes <winner> — one side clearly current}; a row
 with no quoted opposing claims is invalid — similarity alone never makes a contradiction>
 
-## Abstention-fixture drafts (SIG-6 — admission per-item, human-approved)
+## Abstention-fixture drafts (admission per-item, human-approved)
 | Draft query | Asked | current_hits | Verdict | Admitted this run? |
 |---|---|---|---|---|
 <one row per drafts-queue row judged in Phase 0.6; Verdict ∈ {admit → <stem>, capture gap —
@@ -751,7 +751,7 @@ Every write goes through the tools' **existing single-item, no-bulk primitives**
 never adds a batch wrapper around them:
 
 - **graduate / fix (body already hand-edited)** → `reconsolidate.semantic_reverify(name,
-  outcome, memory_dir, repo_root)`. Executes **same-turn** under `--apply`. **RET-6
+  outcome, memory_dir, repo_root)`. Executes **same-turn** under `--apply`. **Reverify
   reinforcement (automatic, no extra step):** this call routes through
   `provenance.reverify_file`, which re-baselines `source_commit` to HEAD and — the FIRST
   time this memory is ever reverified — additively stamps a write-once `last_verified`
@@ -762,7 +762,7 @@ never adds a batch wrapper around them:
   reinforced memory simply stops appearing in it. Do not chase the banner with any other
   primitive; graduate/fix already IS the clear.
 - **demote** → same call with `outcome="demote"` — staleness flag stays set by design; still
-  logged. The call chains `invalid_after` onto the memory itself (LIF-1, recorded in the
+  logged. The call chains `invalid_after` onto the memory itself (recorded in the
   ledger event as `invalidated`), so the recall demotion is immediate — do **not** follow up
   with a separate `staleness.set_invalid_after` for the same memory.
 - **archive** → `archive.archive_memory(name, memory_dir, repo_root)`, but **only** for names
@@ -770,7 +770,7 @@ never adds a batch wrapper around them:
   graph-isolated watch-list or any other heuristic this skill invents. Archive gets a **two-turn
   confirmation gate**: the first `--apply` invocation proposes archive candidates in the report
   and takes no `git mv` action; only a follow-up invocation that **explicitly names the specific
-  memories to archive** executes the move. The primitive carries its own inbound guard (GRA-5):
+  memories to archive** executes the move. The primitive carries its own inbound guard:
   it refuses — `refused: True` plus the `referrers` list in the result, no `git mv` — while any
   other memory still references the target via a `[[wikilink]]` or a typed
   `supersedes`/`contradicts`/`refines` edge. Candidates are zero-untyped-inbound by
@@ -780,7 +780,7 @@ never adds a batch wrapper around them:
   when the operator explicitly chooses to force (keeping the typed forwarding pointer in
   place), the result still lists the referrers — rewrite any plain wikilinks among them in the
   same commit.
-- **link-densification (GRA-3)** → same **two-turn confirmation gate** as archive: the first
+- **link-densification** → same **two-turn confirmation gate** as archive: the first
   `--apply` invocation only PRODUCES the suggestions table above and applies NOTHING (there is
   no bulk primitive for this — appending a wikilink is a body edit, and body edits are exactly
   the kind of write this project never automates). A follow-up invocation that **explicitly
@@ -789,7 +789,7 @@ never adds a batch wrapper around them:
   Related line is additive-only) and re-runs `build_index.refresh_index` so the new edge is
   immediately reflected in `links.json`. Never touch more than the named pairs; never infer
   additional edges beyond what was explicitly approved.
-- **merge (GRW-3)** → same **two-turn confirmation gate**: the first `--apply` invocation only
+- **merge** → same **two-turn confirmation gate**: the first `--apply` invocation only
   produces the merge-candidates table; a follow-up invocation that **explicitly names the
   specific pair** executes ONE merge, per item. There is NO body-rewrite primitive anywhere in
   the tooling and this skill must not simulate one — a merge is a sequence of ordinary
@@ -812,18 +812,18 @@ never adds a batch wrapper around them:
        `invalid_after` onto the loser, so recall demotes it immediately while the pointer
        stays queryable.
      - **archive** (clean removal): `archive.archive_memory(<loser>, memory_dir, repo_root)` —
-       its GRA-5 inbound guard REFUSES while ANY `[[wikilink]]` or typed edge still points at
+       its inbound guard REFUSES while ANY `[[wikilink]]` or typed edge still points at
        the loser, which structurally proves steps 3-4 actually zeroed the inbound set. Do not
        reach for `force=True` to skip the rewrite; a refusal here means a referrer was missed.
        (Note the two endings are exclusive by construction: the demote ending's `supersedes:`
        pointer is itself a typed inbound edge, so an archive AFTER it would refuse — pick the
        ending first.)
   6. Re-run `build_index.refresh_index` so `links.json` and the index reflect the fold.
-- **contradiction edge (GRW-8)** → same **two-turn confirmation gate**: the first `--apply`
+- **contradiction edge** → same **two-turn confirmation gate**: the first `--apply`
   invocation only produces the contradiction-candidates table; a follow-up invocation that
   **explicitly names the specific pair** writes ONE typed edge, per item:
   - dispute needs adjudication → `links.add_typed_relation("<path-of-the-declaring-side>",
-    "contradicts", "<other-name>")` — the pair lands in the GOV-1 contradiction inbox and
+    "contradicts", "<other-name>")` — the pair lands in the contradiction inbox and
     stays there until `/hippo:tend` renders a verdict; recall's typed note flags every
     co-surface with "contradicts … — verify" in the meantime.
   - one side is clearly current → prefer the shipped supersede flow over a bare edge:
@@ -846,7 +846,7 @@ never adds a batch wrapper around them:
 - **No bulk anything.** `semantic_reverify`, `set_invalid_after`, `archive_memory` all take
   exactly one name. This skill must never simulate a batch by looping them silently in one turn
   without the Phase 3 per-item justification attached to each.
-- **Fixture admission is per-item and human-approved (SIG-6).** `confirm_hard_set_row` is
+- **Fixture admission is per-item and human-approved.** `confirm_hard_set_row` is
   called once per explicitly-approved row — never looped over the drafts queue in one silent
   sweep. And never CREATE a memory to make a fixture admissible: the primitive refuses stems
   that don't exist, and satisfying it by fabricating the memory first is the exact inversion
@@ -865,14 +865,14 @@ never adds a batch wrapper around them:
   error, and a one-way hit is not a merge signal. A merge is also never rendered without
   reading BOTH bodies — "reworded duplicate" and "opposing claims" look identical in any
   similarity score.
-- **A contradiction verdict requires quoted opposing claims (GRW-8).** The three-way fork's
+- **A contradiction verdict requires quoted opposing claims.** The three-way fork's
   (b) arm is rendered from body CONTENT only — never from similarity, titles, or
   descriptions; a contradiction-candidates row must quote the two opposing sentences. And
   the fork never auto-writes: every `contradicts`/`supersedes` edge is a per-item, two-turn
   proposal like every other write in this skill.
 - **Never claim the never-recalled/cold signal is actionable while `soak_status()['gate_met']`
   is False.** State the exact session count and gap instead.
-- **Always name the coldness signal's SCOPE (TEA-5).** "Never recalled" is CLONE-LOCAL unless
+- **Always name the coldness signal's SCOPE.** "Never recalled" is CLONE-LOCAL unless
   `curation_report()['committed_usage_present']` is True — a memory a teammate hits daily reads
   as cold on your clone. When flagging a cold/dead-weight memory on a team, say the signal is
   clone-local and point at `hippo soak --record-usage` (each clone commits
@@ -888,7 +888,7 @@ never adds a batch wrapper around them:
   `reconsolidate.py` — the authority-citation scan is reimplemented locally in Phase 1's
   script specifically to avoid coupling to internals that could be renamed without a
   deprecation cycle, and graph isolation comes from the PUBLIC `LinkGraph.inbound()`/
-  `isolates()` primitives (GRA-2) rather than a hand-rolled adjacency inversion. If those
+  `isolates` primitives rather than a hand-rolled adjacency inversion. If those
   modules' real predicates ever change, re-sync the local reimplementation.
 - **Corpus-size assumption.** This design (single session, no fan-out, `--deep-dive-n` read by
   hand) is sized for "well under a thousand memories." If a corpus grows 5-10x, revisit: Phase 1
@@ -905,7 +905,7 @@ never adds a batch wrapper around them:
   The gates and the report-only scorecard metrics are orthogonal — none of the latter can move
   `ok` or any `gates` entry. And if no hard-set fixture exists for this project, say so plainly
   rather than letting an absent gate read as a passing one.
-- **(RET-7) A BM25-only pass is never reported as "hybrid recall verified."** Always state
+- **A BM25-only pass is never reported as "hybrid recall verified."** Always state
   `recall_backend` (`dense+bm25` or `bm25-only`) next to the eval_recall summary — a
   `bm25-only` pass proves BM25 alone clears the bar, not that the dense half of hybrid recall
   works. If `recall_backend_mismatch` is `True` (this project's hard-set fixture was
@@ -913,7 +913,7 @@ never adds a batch wrapper around them:
   its own explicitly-flagged line in the report, not folded silently into the scorecard table
   — this is precisely the "mismatched-backend pass masquerading as hybrid health" this item
   exists to make impossible to miss.
-- **(RET-7) `--generate-eval-set` never runs implicitly.** A routine audit invocation
+- **`--generate-eval-set` never runs implicitly.** A routine audit invocation
   (no flag) must never regenerate, overwrite, or even touch an existing
   `.claude/memory/.audit-fixtures/recall_hard_set.yaml` — Phase 0.5 is entered ONLY when that
   exact flag is present on THIS invocation. And even when it IS present, the generated draft
@@ -948,7 +948,7 @@ never adds a batch wrapper around them:
 > `<memory-d>`). I reviewed both — go ahead and add exactly those two wikilinks, nothing else
 > from the table, and commit.
 
-#### (F) Generate this project's own recall eval set (RET-7)
+#### (F) Generate this project's own recall eval set
 
 > Run a content audit with `--generate-eval-set`. This project has no `recall_hard_set.yaml` yet (or
 > the corpus has grown a lot since the last one) — sample memories across types, write

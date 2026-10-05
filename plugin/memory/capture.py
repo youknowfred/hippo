@@ -676,7 +676,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     import sys
 
     parser = argparse.ArgumentParser(
-        description="Draft-capture pass (CAP-2): snapshot the session's episode buffer + diff "
+        description="Draft-capture pass: snapshot the session's episode buffer + diff "
         "into the GITIGNORED pending queue for later per-item approval. Never writes the corpus."
     )
     parser.add_argument("--session-id", default=None, help="the harness session id to capture")
@@ -699,7 +699,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--snooze",
         action="store_true",
-        help="CAP-6: defer the SessionStart pending-capture nudge for "
+        help="defer the SessionStart pending-capture nudge for "
         f"{_SNOOZE_WINDOW_SESSIONS} sessions (the seeds stay; only the nudge quiets, then re-nags)",
     )
     parser.add_argument(
@@ -710,7 +710,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--prune",
         action="store_true",
-        help=f"CAP-6: bound the queue to the {_MAX_PENDING_SEEDS} highest-value/newest seeds now, "
+        help=f"bound the queue to the {_MAX_PENDING_SEEDS} highest-value/newest seeds now, "
         f"and move seeds older than {_EXPIRE_AGE_DAYS} days or {_EXPIRE_SESSIONS} sessions to "
         "expired/ (runs automatically on every capture; this forces it; nothing is deleted)",
     )
@@ -730,10 +730,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--add-decision",
         default=None,
         metavar="TEXT",
-        help="GRW-4: record ONE user-confirmed session decision (quote or faithfully "
+        help="record ONE user-confirmed session decision (quote or faithfully "
         "paraphrase what the USER stated — never infer one from the diff); with "
         "--session-id it rides that session's capture seed — without it the row is "
-        "UNATTRIBUTED and surfaces window-matched at the drain (WRT-3)",
+        "UNATTRIBUTED and surfaces window-matched at the drain",
     )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--repo-root", default=None)

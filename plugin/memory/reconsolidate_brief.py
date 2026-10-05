@@ -195,7 +195,7 @@ def render_brief(brief: dict) -> List[str]:
     if not brief.get("baseline_resolvable"):
         lines.append(
             f"  baseline {_short(brief.get('source_commit')) or '(none)'} is not in this repo's "
-            "history (squash-merge or shallow clone — SHP-3's class): no diff can be rendered; "
+            "history (squash-merge or shallow clone's class): no diff can be rendered; "
             "re-read the cited paths at HEAD"
         )
     if brief.get("diffstat"):
@@ -215,7 +215,7 @@ def render_brief(brief: dict) -> List[str]:
     drift = brief.get("evidence_drift")
     if isinstance(drift, dict):
         lines.append(
-            f"  evidence drift (CLB-3): {drift.get('fences', 0)} fenced snippet(s) — "
+            f"  evidence drift: {drift.get('fences', 0)} fenced snippet(s) — "
             f"{drift.get('missing', 0)} missing at HEAD, {drift.get('whitespace', 0)} whitespace-only"
         )
     if brief.get("invalid_after"):
@@ -226,7 +226,7 @@ def render_brief(brief: dict) -> List[str]:
     if brief.get("linked"):
         lines.append(f"  linked (review-adjacent): {', '.join(brief['linked'])}")
     lines.append(
-        "  verdict (yours — LIF-1): graduate | fix | demote | snooze, via "
+        "  verdict (yours): graduate | fix | demote | snooze, via "
         "`hippo tend apply reverify:NAME --verdict …` (the tend tool on Desktop)"
     )
     return lines

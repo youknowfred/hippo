@@ -215,7 +215,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="EXT-2: cross-project promotion mining — report-only sweep over this "
+        description="cross-project promotion mining — report-only sweep over this "
         "machine's TRUSTED registered corpora for lessons learned in >=2 projects. "
         "Acceptance routes through /hippo:share (per item); this never writes."
     )

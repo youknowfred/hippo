@@ -183,7 +183,7 @@ def test_composes_linked_drift_fences_and_invalid_after(repo, memory_dir):
     assert brief["linked"] == ["m_keep", "m_other"]
     text = "\n".join(RB.render_brief(brief))
     assert "[since-watermark]" in text
-    assert "evidence drift (CLB-3): 2 fenced snippet(s) — 1 missing at HEAD" in text
+    assert "evidence drift: 2 fenced snippet(s) — 1 missing at HEAD" in text
     assert "invalid_after: 2026-01-01" in text and "pre-cut penalty" in text
     assert "linked (review-adjacent): m_keep, m_other" in text
 

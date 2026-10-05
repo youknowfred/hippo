@@ -165,7 +165,7 @@ def test_missing_store_and_drifted_schema_degrade_legibly(tmp_path, monkeypatch)
     sqlite3.connect(bare).executescript("CREATE TABLE something_else (id INTEGER);")
     r2 = C.audit_report(bare, repo_root=repo)
     assert r2["exists"] is True
-    assert "re-probe" in r2["error"] and "ED-3" in r2["error"]
+    assert "re-probe" in r2["error"]
 
 
 # --------------------------------------------------------------------------- #

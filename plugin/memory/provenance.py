@@ -1191,7 +1191,7 @@ def citation_rot_lines(name: str, result: dict, *, dry_run: bool = False) -> Lis
                 pairs,
                 verb,
                 "that an older extractor bound by basename alone — the body names a "
-                "DIFFERENT directory, so this was never this memory's file (ORC-4)",
+                "DIFFERENT directory, so this was never this memory's file",
                 emphasise_all=_all(pairs),
             )
         )
@@ -1376,13 +1376,13 @@ def rederive_worklist_lines(work: List[dict]) -> List[str]:
             out.append(f"      - loses  : {', '.join(w['lost'])}")
         for path, tok in (w.get("repointed") or {}).items():
             out.append(f"          ↳ {path} was bound by basename alone from `{tok}` — the "
-                       "body names a different directory (ORC-4)")
+                       "body names a different directory")
         if w.get("kept"):
             out.append(f"      = keeps  : {', '.join(w['kept'])} (still in the repo, not "
-                       "derivable from the body — preserved, CUR-1)")
+                       "derivable from the body — preserved)")
         if w.get("excluded"):
             out.append(f"      ⊘ excludes: {', '.join(w['excluded'])} (this memory's "
-                       "`cited_paths_exclude` — a deliberate prune, CUR-2)")
+                       "`cited_paths_exclude` — a deliberate prune)")
         if w["unresolved"]:
             out.append(f"      ? unresolved in body: {', '.join(w['unresolved'])}")
     return out
@@ -1509,16 +1509,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--heal-baselines",
         action="store_true",
-        help="COR-10: set source_commit to HEAD for memories whose baseline is EMPTY (a "
+        help="set source_commit to HEAD for memories whose baseline is EMPTY (a "
         "memory with one is invisible to staleness forever). This used to run silently on "
         "every SessionStart — a hook writing to memory frontmatter, which drifted each file "
-        "off its own SEC-6 fingerprint and then blamed the user for the drift. It is a "
+        "off its own fingerprint and then blamed the user for the drift. It is a "
         "write, so it lives here, where you ran it on purpose.",
     )
     parser.add_argument(
         "--rederive-worklist",
         action="store_true",
-        help="MIG-1: list every memory whose cited_paths would CHANGE under this plugin's "
+        help="list every memory whose cited_paths would CHANGE under this plugin's "
         "extractor, with the attributed diff. Read-only — review this, then approve one "
         "memory at a time with --rederive-one.",
     )
@@ -1526,7 +1526,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--rederive-one",
         metavar="NAME",
         default=None,
-        help="MIG-1: re-derive ONE memory's cited_paths after you have reviewed ITS diff. "
+        help="re-derive ONE memory's cited_paths after you have reviewed ITS diff. "
         "Re-derives + PRESERVES source_commit (unlike --reverify, which resets it to HEAD "
         "and silently clears every staleness flag) + folds the reviewed bytes into the "
         "consent baseline (unlike --refresh, which would leave the memory quarantined). "
@@ -1536,13 +1536,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--snapshot",
         metavar="STAMP",
         default=None,
-        help="MIG-1: copy the corpus to memory.pre-cite<N>-<STAMP>/ before migrating. A "
+        help="copy the corpus to memory.pre-cite<N>-<STAMP>/ before migrating. A "
         "gitignored corpus has no `git checkout` undo — take this first.",
     )
     parser.add_argument(
         "--stamp-derivation",
         action="store_true",
-        help="MIG-1's LAST step: record that this corpus's citations were derived by THIS "
+        help="the LAST step: record that this corpus's citations were derived by THIS "
         "plugin's extractor, which stops the citation-derivation nudge. Refused while any "
         "memory still derives differently — the stamp asserts a derivation, so it must be "
         "earned (an empty worklist) rather than claimed.",

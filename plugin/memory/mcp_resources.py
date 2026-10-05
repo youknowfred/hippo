@@ -40,7 +40,7 @@ _RESOURCES = [
         "uri": "hippo://scorecard",
         "name": "hippo trust scorecard",
         "description": (
-            "GOV-6: the one-line corpus-health rollup a lead scans before trusting the "
+            "the one-line corpus-health rollup a lead scans before trusting the "
             "corpus — contested-unresolved contradictions, rule↔memory conflicts, rules-"
             "plane rot, blind spots, orphans, pinned/muted/draft counts, and the floor/"
             "corpus delta since this clone's last session. Each number names the skill "
@@ -70,7 +70,7 @@ def _resource_floor() -> str:
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
             header + "\n\nFloor WITHHELD — this project's memory corpus is untrusted "
-            "(SEC-1: a cloned corpus is an unreviewed prompt-injection channel). "
+            "(a cloned corpus is an unreviewed prompt-injection channel). "
             + _UNTRUSTED_REMEDY
         )
     parts = []
@@ -105,7 +105,7 @@ def _resource_scorecard() -> str:
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
-            header + "\n\nScorecard WITHHELD — this project's corpus is untrusted (SEC-1). "
+            header + "\n\nScorecard WITHHELD — this project's corpus is untrusted. "
             + _UNTRUSTED_REMEDY
         )
     status, message = _scorecard_message(memory_dir, repo_root)
@@ -128,7 +128,7 @@ def _resource_rules_view() -> str:
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
-            header + "\n\nView WITHHELD — this project's corpus is untrusted (SEC-1). "
+            header + "\n\nView WITHHELD — this project's corpus is untrusted. "
             + _UNTRUSTED_REMEDY
         )
     radar = conflict_radar(memory_dir, repo_root)

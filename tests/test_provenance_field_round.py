@@ -271,7 +271,7 @@ def test_a_stored_v4_repoint_is_lost_with_its_cause_not_preserved_forever(repo, 
     assert r["error"] is None and r["cited"] == ["src/keep.py"]
     assert r["dropped_gone"] == [] and r["dropped_not_derived"] == []  # a NAMED cause
     (rot, *_rest) = P.citation_rot_lines("m.md", r)
-    assert "ORC-4" in rot and "no longer in the repo" not in rot  # never a fake deletion
+    assert "bound by basename alone" in rot and "no longer in the repo" not in rot  # never a fake deletion
     assert _fm(target)["metadata"]["cited_paths"] == ["src/keep.py"]
     assert P.rederive_worklist(memory_dir, repo) == []
 

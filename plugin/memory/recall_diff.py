@@ -322,7 +322,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="EXT-1: memories citing the files a diff touches — the reviewer's "
+        description="memories citing the files a diff touches — the reviewer's "
         "recall. Read-only; no index, no model, no telemetry."
     )
     parser.add_argument("--range", required=True, help="git diff range (A..B, A...B, or a ref)")
@@ -331,7 +331,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--candidates",
         action="store_true",
-        help="PUB-2: partition the full-corpus rows by committed membership — the "
+        help="partition the full-corpus rows by committed membership — the "
         "local-only rows are the publish candidates, with display-only readiness "
         "(heals-N, soak, verified_by, staleness). Report-only; empty when none.",
     )

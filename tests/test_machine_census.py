@@ -142,7 +142,7 @@ def test_symlink_farm_counts_the_pytest_leak_and_report_labels_it(tmp_path):
     out = MC.symlink_farm_census(farm)
     assert out["pytest_leaked"] == 1
     text = "\n".join(MC._render_symlinks(out))
-    assert "self-inflicted test leak" in text and "HYG-2" in text
+    assert "self-inflicted test leak" in text
 
 
 def test_symlink_farm_missing_root_is_empty(tmp_path):

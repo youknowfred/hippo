@@ -342,7 +342,7 @@ def import_mdc_file(
             result["held"] = True
             result["warnings"] = threats
             result["error"] = (
-                "held for review: threat-lint payload in the source .mdc (SEN-2 Tier-A: "
+                "held for review: threat-lint payload in the source .mdc (Tier-A: "
                 f"{'; '.join(threats)}) — clean {rel} first; foreign input is never written flagged"
             )
             return result

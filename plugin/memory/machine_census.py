@@ -426,7 +426,7 @@ def _render_symlinks(farm: dict) -> List[str]:
     if farm["pytest_leaked"]:
         lines.append(
             f"  NB: {farm['pytest_leaked']} of the dangling targets are pytest tmp trees — "
-            "self-inflicted test leak (the HYG-2 conftest isolation is the faucet fix)."
+            "self-inflicted test leak (the conftest isolation is the faucet fix)."
         )
     n_batch = farm["dangling_temp_rooted"] + farm.get("dangling_worktree_retired", 0)
     if n_batch:
@@ -557,7 +557,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="hippo census",
         description=(
-            "Machine-state census (HYG-1): classify every machine-state class hippo "
+            "Machine-state census: classify every machine-state class hippo "
             "creates — projects-registry rows, ~/.claude/projects memory symlinks, "
             "trust rows, installed scheduler artifacts. Read-only."
         ),

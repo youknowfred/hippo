@@ -199,7 +199,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     ap = argparse.ArgumentParser(
         prog="memory.blast_radius",
-        description="SEN-5: read-only blast-radius report for a suspect memory (writes nothing).",
+        description="read-only blast-radius report for a suspect memory (writes nothing).",
     )
     ap.add_argument("name", help="the memory slug (with or without .md)")
     ap.add_argument("--memory-dir", default=None)

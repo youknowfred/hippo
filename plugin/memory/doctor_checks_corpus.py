@@ -108,7 +108,7 @@ def check_format_version(ctx: DoctorContext) -> Dict[str, str]:
             parts.append(
                 f"corpus format is v{declared} but this plugin only understands "
                 f"v{CORPUS_FORMAT_VERSION} — recall and SessionStart inject nothing from it "
-                "(FMT-3) until you update the hippo plugin"
+                "until you update the hippo plugin"
             )
         else:
             status = "warn"
@@ -459,7 +459,7 @@ def check_threat_lint(ctx: DoctorContext) -> Dict[str, str]:
             "status": "warn",
             "message": f"{len(findings)} file(s) carry Tier-A threat payloads — {' | '.join(parts)}. "
             f"Inspect before they re-inject on recall (HTML comments are lint-only by the "
-            f"dated ED-3 spike decision, 2026-07-16).{tier_b}",
+            f"dated spike decision, 2026-07-16).{tier_b}",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"threat scan failed: {exc}."}
@@ -518,7 +518,7 @@ def check_committed_usage_privacy(ctx: DoctorContext) -> Dict[str, str]:
             else []
         )
         if not summaries:
-            return {"status": "ok", "message": "no committed usage summaries (TEA-5 opt-in unused)."}
+            return {"status": "ok", "message": "no committed usage summaries (opt-in unused)."}
         remote = git_remote_info(ctx.repo_root)
         if not remote["url"]:
             return {
@@ -532,7 +532,7 @@ def check_committed_usage_privacy(ctx: DoctorContext) -> Dict[str, str]:
             "message": f"{len(summaries)} committed per-user usage summary(ies) in "
             f".claude/memory/.usage/ on {where} ({remote['url']}) — recall patterns (memory "
             "names + counts) are shared with anyone who can read it. Remove .claude/memory/.usage/ "
-            "if unintended (TEA-5/SEC-14).",
+            "if unintended.",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"committed-usage privacy check failed: {exc}."}
@@ -774,7 +774,7 @@ def check_producer_versions(ctx: DoctorContext) -> Dict[str, str]:
         if not rows:
             return {
                 "status": "ok",
-                "message": "producer versions: no rows in the outcome ledger yet (MEA-4 stamps "
+                "message": "producer versions: no rows in the outcome ledger yet (stamps "
                 "appear as evidence accrues; provenance only).",
             }
         by_v: Dict[str, int] = {}
@@ -788,7 +788,7 @@ def check_producer_versions(ctx: DoctorContext) -> Dict[str, str]:
         return {
             "status": "ok",
             "message": f"producer versions (running v{running}): {buckets} — provenance only "
-            "(MEA-4); rows stamped by an older version date the lagged-hook window from the "
+            "; rows stamped by an older version date the lagged-hook window from the "
             "ledger itself, unstamped rows predate the stamp (never backfilled).",
         }
     except Exception as exc:

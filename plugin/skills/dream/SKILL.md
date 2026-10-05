@@ -1,5 +1,5 @@
 ---
-description: The generative sleep pass — offline replay surfaces the latent graph edges consolidate can't reach (bridges, unlinked mentions, undeclared refines). Tier-A edges auto-apply reversibly; --dry-run previews; --deparasite runs the counterweight; reverse replay boosts ranking; --generate runs the quarantined DRM-6 schema/hypothesis draft tier (flagged, self-decaying, evidence-graduated). Triggers "dream", "find latent links", "de-parasite my graph", "generate schemas", "/hippo:dream".
+description: The generative sleep pass — offline replay surfaces the latent graph edges consolidate can't reach (bridges, unlinked mentions, undeclared refines). Tier-A edges auto-apply reversibly; --dry-run previews; --deparasite runs the counterweight; reverse replay boosts ranking; --generate runs the quarantined schema/hypothesis draft tier (flagged, self-decaying, evidence-graduated). Triggers "dream", "find latent links", "de-parasite my graph", "generate schemas", "/hippo:dream".
 ---
 
 # /hippo:dream — the generative sleep pass
@@ -40,9 +40,9 @@ dream).
 ```bash
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
 [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:dream skill, not from a copy of its SKILL.md. If the loaded skill stops here too, take the MCP-tool route in 'Surface routing' above."; exit 1; }
-. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver
 hippo_resolve_py
-hippo_note_usage skill dream  # OBS-2: count this skill's use (one spool line, no Python)
+hippo_note_usage skill dream  # count this skill's use (one spool line, no Python)
 ```
 
 ## Run a pass
@@ -75,7 +75,7 @@ Useful knobs (env or flags): `--probe-k <n>` co-fire probe depth (default 10),
 
 ## What auto-apply does (and never does)
 
-The bare pass runs the DRM-2 loop — `apply-reversibly → notify → undo-window → age-in`
+The bare pass runs the loop — `apply-reversibly → notify → undo-window → age-in`
 (`--apply` forces it even under `HIPPO_DREAM_APPLY=0`):
 
 ```
@@ -101,7 +101,7 @@ hippo dream --undo              # revert the latest pass
 hippo dream --undo <edge-id>    # revert exactly one edge
 hippo dream --undo-since <N|date>
 hippo dream --log               # every edge: active / aged-in / undone
-hippo dream --retire-ghost <edge-id> [--reason "…"]   # DRM-7, see below
+hippo dream --retire-ghost <edge-id> [--reason "…"]   # see below
 ```
 
 **A ghost edge** (doctor: "active ledger edge(s) with no on-disk stamp") is an ACTIVE
@@ -119,7 +119,7 @@ Prefer per-item hand-application when the user wants to review each edge: a
 **completion/bridge** is one `[[wikilink]]` added to the source body; a **refines** is
 additive frontmatter. Never bulk-apply the whole ledger by hand — the cap is the point.
 
-## De-parasiting counterweight (DRM-4) — the forgetting function
+## De-parasiting counterweight — the forgetting function
 
 An edge-only pass has no restoring force; this is sleep's downscaling half. Report/propose
 posture — the pass itself writes **nothing**:
@@ -154,10 +154,10 @@ carrying `contradicts` is a disagreement, not a duplicate: it routes to `/hippo:
 and is never auto-resolved or merged. Present proposals as proposals — apply nothing
 without the owner's per-item yes.
 
-## Reward-gated reverse replay (DRM-5) — outcome-anchored boosts
+## Reward-gated reverse replay — outcome-anchored boosts
 
 Runs inside every pass, silently when there is no signal. Memories with a RECORDED
-outcome (injected, then a cited file touched in-session — the KPI-2 join) anchor a
+outcome (injected, then a cited file touched in-session — the join) anchor a
 backward walk along their `supersedes`/`refines` decision chain; the upstream chain earns
 **replay priority** (probed first) and its candidates earn **ordering priority** under the
 apply cap. Strictly reward-gated and ranking-only: no outcome → no boost; θ eligibility
@@ -165,10 +165,10 @@ always reads the raw cofire; no memory byte ever changes. Boosted edges are logg
 `boosts-<pass>.jsonl` in the derived dream dir, each row carrying the justifying
 decision chain; un-aged dream edges conduct no reward (the aging firewall extends here).
 
-## Generative payload (DRM-6) — schema/gist + hypotheses, quarantined
+## Generative payload — schema/gist + hypotheses, quarantined
 
 The boldest tier: net-new memories, not just edges. **OFF by default**
-(`HIPPO_DREAM_GENERATIVE=1` opts apply passes in; DREAM-KILL-1 — never auto-applied as
+(`HIPPO_DREAM_GENERATIVE=1` opts apply passes in; DREAM- — never auto-applied as
 verified) and quarantined end to end:
 
 ```
@@ -178,7 +178,7 @@ hippo dream --generate --stage   # stage them as confidence:draft memories
 
 - **schema/gist** — a mutual co-firing cluster (≥3 memories above θ) earns ONE net-new
   parent that abstracts it: `[[child]]` links in the body, `derives-from: [children]`
-  typed frontmatter (the DRM-6 relation), cited paths inherited from the children.
+  typed frontmatter (the relation), cited paths inherited from the children.
 - **hypothesis** — a strong mutual pair with NO graph path (`A+B ⇒ likely related`),
   same quarantine.
 

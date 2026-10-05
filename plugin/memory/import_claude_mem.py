@@ -192,7 +192,7 @@ def audit_report(
             except Exception as exc:
                 out["error"] = (
                     f"observations unreadable ({exc}) — schema drifted past this "
-                    "adapter; re-probe the store format (ED-3) before trusting counts"
+                    "adapter; re-probe the store format before trusting counts"
                 )
                 return out
         finally:
@@ -253,7 +253,7 @@ def describe_audit(report: dict) -> str:
     sv = report.get("schema_versions") or []
     lines.append(
         f"  store schema versions: {', '.join(map(str, sv)) if sv else 'unrecorded'} "
-        "(claude-mem migrates fast — a failed read here means re-probe, ED-3)"
+        "(claude-mem migrates fast — a failed read here means re-probe)"
     )
     lines.append(
         f"  {report['candidates']} observation candidate(s) across "
@@ -286,6 +286,6 @@ def describe_audit(report: dict) -> str:
         )
     lines.append(
         "  zero writes performed. A future write leg is per-item (one observation, one "
-        "yes, one run) on the import_mdc_file pattern + RCH-5's refuse-on-secret."
+        "yes, one run) on the import_mdc_file pattern + the refuse-on-secret."
     )
     return "\n".join(lines)

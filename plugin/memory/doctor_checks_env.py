@@ -196,7 +196,7 @@ def check_symlink(ctx: DoctorContext) -> Dict[str, str]:
             return {
                 "status": "fail",
                 "message": "no project symlink yet — Claude Code can't find this corpus. Fix: "
-                f"`{repair}` (or run /hippo:setup here — ONB-5 leaves the existing corpus untouched).",
+                f"`{repair}` (or run /hippo:setup here — leaves the existing corpus untouched).",
             }
         link = r.get("expected_path") or ""
         if status == "broken" and os.path.isdir(link) and not os.path.islink(link):
@@ -211,12 +211,12 @@ def check_symlink(ctx: DoctorContext) -> Dict[str, str]:
             return {
                 "status": "fail",
                 "message": "project symlink points elsewhere — Claude Code reads a different "
-                f"corpus. Fix: `{repair}` (or run /hippo:setup here — ONB-5).",
+                f"corpus. Fix: `{repair}` (or run /hippo:setup here).",
             }
         if status == "legacy_wrong_encoding":
             return {
                 "status": "warn",
-                "message": "a legacy (pre-SHP-5) mis-encoded symlink exists for this repo. Fix: "
+                "message": "a legacy mis-encoded symlink (an older layout) exists for this repo. Fix: "
                 f"`{repair}` (or run /hippo:setup here — creates the correct link but does not "
                 "remove the stale legacy dir).",
             }

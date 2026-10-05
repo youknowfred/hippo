@@ -44,7 +44,7 @@ _OUTCOME_AB_NAME = "outcome_prior_ab.json"
 _OUTCOME_AB_SCHEMA = 1
 
 _ED2_FOOTER = (
-    "ED-2/LIF-7: measures only — HIPPO_OUTCOME_PRIOR stays default-OFF (RET-14); any "
+    "measures only — HIPPO_OUTCOME_PRIOR stays default-OFF; any "
     "ranking flip is a separate dated owner decision on affirmative evidence, never an "
     "automatic consequence of this report; the touch-grain graduation arm stays severed."
 )
@@ -160,7 +160,7 @@ def run_ab(
                         else "arms byte-identical under the staged cache"
                     )
                     + "; NOT a finding about the outcome prior, and not decision-grade at "
-                    "this n (ED-3)"
+                    "this n"
                 )
             }
             if core["identical_arms"]
@@ -205,7 +205,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="MEA-5: paired outcome-prior A/B over a live corpus (measures only — ED-2)."
+        description="paired outcome-prior A/B over a live corpus (measures only)."
     )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--index-dir", default=None)

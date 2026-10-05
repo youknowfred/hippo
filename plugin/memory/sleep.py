@@ -217,11 +217,11 @@ def _section_promote_scan(memory_dir: str, repo_root: str) -> Optional[str]:
 # monkeypatch a section producer on the module and the runner sees it)
 _SECTIONS = (
     ("doctor", "Plumbing (doctor)", "doctor", "_section_doctor"),
-    ("pending_captures", "Pending captures (CAP-2 triage)", "tend", "_section_pending"),
-    ("reconsolidation", "Reconsolidation worklist (LIF-1)", "tend", "_section_reconsolidation"),
-    ("dream", "Dream discovery (DRM-1)", "dream", "_section_dream"),
+    ("pending_captures", "Pending captures (triage)", "tend", "_section_pending"),
+    ("reconsolidation", "Reconsolidation worklist", "tend", "_section_reconsolidation"),
+    ("dream", "Dream discovery", "dream", "_section_dream"),
     ("link_health", "Link health (GRA)", "tend", "_section_links"),
-    ("promotion_mining", "Cross-project promotion candidates (EXT-2)", "share", "_section_promote_scan"),
+    ("promotion_mining", "Cross-project promotion candidates", "share", "_section_promote_scan"),
 )
 
 
@@ -398,7 +398,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="The sleep runner (SLP-1/2/3): render the read-only maintenance "
+        description="The sleep runner (/2/3): render the read-only maintenance "
         "worklists into one morning report. Zero corpus writes; the report is a "
         "proposal queue you drain per item in your next interactive session."
     )
@@ -406,14 +406,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--print-schedule",
         action="store_true",
         help="print copy-pasteable launchd/cron/scheduled task recipes for THIS "
-        "machine and repo — prints only, never installs (SLP-2)",
+        "machine and repo — prints only, never installs",
     )
     parser.add_argument(
         "--snooze",
         default=None,
         metavar="Nd",
         help="silence the sleep report for N days (e.g. 7d; 0d clears) — it says so "
-        "once when it resumes (SLP-2)",
+        "once when it resumes",
     )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--repo-root", default=None)

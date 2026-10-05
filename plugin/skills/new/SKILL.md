@@ -35,9 +35,9 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 ```bash
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
-. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver
 hippo_resolve_py
-hippo_note_usage skill new  # OBS-2: count this skill's use (one spool line, no Python)
+hippo_note_usage skill new  # count this skill's use (one spool line, no Python)
 ```
 
 CLI synopsis (`<required>` / `{choice-a|choice-b}` / `[optional]` — standard usage notation,
@@ -66,7 +66,7 @@ hippo new \
     NOT added to the floor — recalled on demand only.
   - `reference` — a pointer to an external system (a tracker, a dashboard, a channel) plus
     what it's for.
-- `--tier` (TEA-1) — where the memory lives:
+- `--tier` — where the memory lives:
   - `project` (default) — the git-native in-repo corpus teammates share on clone.
   - `user` — the **machine-local user tier** (`~/.claude/hippo-memory`, or
     `HIPPO_USER_MEMORY_DIR`). It is recalled ALONGSIDE every project's corpus, so a
@@ -81,7 +81,7 @@ hippo new \
   discovery below entirely (no `recall()` call happens at all — your list wins verbatim).
 - `--no-links` — suppress the Related line entirely (no discovery, no `--links`).
 
-## Related: [[...]] — link creation at write time (GRA-3)
+## Related: [[...]] — link creation at write time
 
 Unless suppressed, `new_memory` runs an in-process `recall()` against the **existing** corpus
 (BM25-only, never blocks, never raises, silently skipped on an empty/unbuilt corpus) using the
@@ -111,7 +111,7 @@ Only `user`/`feedback`/`project`/`reference` memories written via THIS tool ever
 Related line — it is never retrofitted onto an existing memory by any automated process (see
 `/hippo:doctor`'s link-densification pass for the agent-gated equivalent on the existing corpus).
 
-## Near-duplicate / conflict check (LIF-2) — the tool reports, YOU decide
+## Near-duplicate / conflict check — the tool reports, YOU decide
 
 At creation the tool scores the new memory's name+description against the **existing** index
 (dense cosine when the dense index is warm, normalized BM25 otherwise; each threshold is
@@ -147,7 +147,7 @@ reviewable, per-item git diff — never a bulk sweep). **Read the flagged neighb
   hippo build-index   # refresh links.json so the demotion is live THIS session
   ```
 
-  This appends `supersedes: ["<old-name>"]` to the NEW memory's frontmatter (the GRA-4
+  This appends `supersedes: ["<old-name>"]` to the NEW memory's frontmatter (the
   edge) and logs the verdict; recall then demotes the loser automatically (halved rank,
   `[superseded by <new-name>]` annotation) — the old file stays in the corpus as history
   and can be archived later via `/hippo:doctor` once it ages out.
@@ -160,7 +160,7 @@ When the check could not run at all, the result carries a machine-readable
 corpus with `--links`/`--no-links`). No warning ≠ no duplicates in that case — apply the
 search-first judgment below yourself.
 
-## Rules-plane echo check (RUL-3) — link, don't copy
+## Rules-plane echo check — link, don't copy
 
 Alongside the corpus-neighbor check, the tool scores the draft's content against the
 project's GOVERNANCE plane (`CLAUDE.md`, `AGENTS.md`, `.claude/rules/`, `.claude/agents/`,
@@ -172,7 +172,7 @@ warning : restates a governance rule — link, don't copy:
   decide  : cite the rule file (rules stay in the rules plane) / keep both if genuinely distinct — see /hippo:new
 ```
 
-**Creation is never blocked** (same warn-only contract as LIF-2), but a memory that copies a
+**Creation is never blocked** (the same warn-only contract as the duplicate check), but a memory that copies a
 rule starts two-plane drift the day it lands: the rule gets edited, the memory keeps
 asserting the old text, and recall injects the stale copy. Pick one:
 
@@ -185,9 +185,9 @@ asserting the old text, and recall injects the stale copy. Pick one:
 
 The flag is conservative (containment ≥ 0.6 of the draft's content tokens inside one rule
 block; short drafts are never judged) — silence does not certify novelty against the rules
-plane any more than LIF-2's silence does against the corpus.
+plane any more than the silence does against the corpus.
 
-## Floor-pointer outcome (LIF-5) — read the `floor` line, SURFACE anything unusual
+## Floor-pointer outcome — read the `floor` line, SURFACE anything unusual
 
 For `user`/`feedback` types the always-load pointer append used to silently no-op when
 `MEMORY.md` was missing or a section header had been hand-renamed — the memory quietly lost
@@ -197,7 +197,7 @@ outcome silently — report it to the user and act on it:**
 
 - `appended` — the normal case: the pointer landed at its deterministic sorted position
   (lexicographic by memory name) within the type's canonical section — not necessarily the
-  end (TEA-4). Nothing to surface.
+  end. Nothing to surface.
 - `created-section — section not found: ## <Header> …` — `MEMORY.md` exists but the
   canonical section header was renamed or deleted (the floor drifted from
   `assets/MEMORY.skeleton.md`). Rather than dropping the pointer, the tool re-created the

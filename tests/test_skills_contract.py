@@ -327,7 +327,7 @@ def test_audit_skill_contradiction_fork_carries_the_mislabel_guard():
     assert '"contradicts"' in text, (
         "the (b) arm proposes links.add_typed_relation(..., 'contradicts', ...) per item"
     )
-    assert "GOV-1" in text and "/hippo:tend" in text, (
+    assert "/hippo:tend" in text, (
         "accepted contradicts edges drain through the GOV-1 inbox"
     )
     assert "refresh_index" in text, (

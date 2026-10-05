@@ -798,7 +798,7 @@ def _update_states(source_dir: str, memory_dir: str) -> Tuple[Optional[dict], Op
             f"pack {pack!r} has no lockfile record in this corpus — nothing to update. "
             "Install first: pack_install_item records the lockfile base, and a "
             "byte-identical hand-seeded file is ADOPTED (record restored) rather "
-            "than refused (INT-17)"
+            "than refused"
         )
     manifest_files = {r["file"] for r in manifest["memories"]}
     items: dict = {}

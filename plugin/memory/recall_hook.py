@@ -76,13 +76,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--session-id",
         default=None,
-        help="harness-provided session id (COR-6) — keys telemetry directly instead of the "
+        help="harness-provided session id — keys telemetry directly instead of the "
         "shared file-based token, fixing concurrent-session attribution.",
     )
     parser.add_argument(
         "--stdin-json",
         action="store_true",
-        help="INT-5: read the UserPromptSubmit hook JSON payload ({prompt, session_id}) from "
+        help="read the UserPromptSubmit hook JSON payload ({prompt, session_id}) from "
         "stdin and emit the hookSpecificOutput JSON directly — so the whole recall hook is ONE "
         "Python spawn (no separate prompt-parse, session-id-parse, or jq/python emission launches).",
     )
@@ -90,7 +90,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--for-diff",
         default=None,
         metavar="RANGE",
-        help="EXT-1: instead of a query, join a git diff range (A..B / A...B / ref) against "
+        help="instead of a query, join a git diff range (A..B / A...B / ref) against "
         "the corpus's cited_paths and render the citing memories — the reviewer's recall. "
         "Read-only; no index, no model, no telemetry. Empty result exits 0 with no output.",
     )

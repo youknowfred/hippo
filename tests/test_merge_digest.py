@@ -114,7 +114,7 @@ def test_incoming_duplicate_surfaces_one_routed_pair(repo, memory_dir, tmp_path,
     assert out is not None
     assert "🔀 Incoming-merge duplicate digest" in out
     assert "m-in ⇄ m-local" in out
-    assert "/hippo:tend" in out and "GRW-3" in out
+    assert "/hippo:tend" in out and "merge tier" in out
     assert "nothing merges or writes edges automatically" in out
 
 

@@ -186,7 +186,7 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
-            "reconsolidate: withheld — this project's memory corpus is untrusted (SEC-1: "
+            "reconsolidate: withheld — this project's memory corpus is untrusted ("
             "the worklist exposes memory names and a verdict writes corpus files, gated "
             "just as recall and new_memory are). " + _UNTRUSTED_REMEDY
         )
@@ -231,7 +231,7 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
         out.append(
             "Evidence per item: action='brief' (name=…) renders the cited-path diff from "
             "the entry's own baseline — diffstat + hunk headers, secret-linted bodies when "
-            "clean (EVD-1; no more hand-diffing)."
+            "clean (; no more hand-diffing)."
         )
         return "\n".join(out)
     if action == "brief":
@@ -353,7 +353,7 @@ def _tool_rederive(args: Dict[str, Any]) -> str:
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
-            "rederive: withheld — this project's memory corpus is untrusted (SEC-1: the "
+            "rederive: withheld — this project's memory corpus is untrusted (the "
             "worklist exposes memory names and 'one' writes corpus files, gated just as "
             "recall and reconsolidate are). " + _UNTRUSTED_REMEDY
         )
@@ -471,7 +471,7 @@ def _tool_heal_baselines(args: Dict[str, Any]) -> str:
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
-            "heal_baselines: withheld — this project's memory corpus is untrusted (SEC-1: "
+            "heal_baselines: withheld — this project's memory corpus is untrusted ("
             "this writes corpus files). " + _UNTRUSTED_REMEDY
         )
     healed, failed = heal_empty_baselines(memory_dir, repo_root)
@@ -550,7 +550,7 @@ def _tool_co_recall_proposals(args: Dict[str, Any]) -> str:
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
             "co_recall_proposals: withheld — this project's memory corpus is untrusted "
-            "(SEC-1: proposals expose memory names, gated just as recall is). "
+            "(proposals expose memory names, gated just as recall is). "
             + _UNTRUSTED_REMEDY
         )
     pairs = co_recall_pairs(
@@ -627,7 +627,7 @@ def _tool_abstention_fixtures(args: Dict[str, Any]) -> str:
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
             "abstention_fixtures: withheld — this project's memory corpus is untrusted "
-            "(SEC-1: fixture rows name corpus memories and the confirm step writes into "
+            "(fixture rows name corpus memories and the confirm step writes into "
             ".claude/memory/, gated just as recall and new_memory are). " + _UNTRUSTED_REMEDY
         )
     action = str(args.get("action") or "draft").strip().lower()
@@ -642,7 +642,7 @@ def _tool_abstention_fixtures(args: Dict[str, Any]) -> str:
             "abstention drafts refreshed — unconfirmed rows (expected: []) are gitignored "
             "queue state; nothing is tracked until a per-item confirm:\n"
             + json.dumps(r, indent=2)
-            + "\nlived-in drafts refreshed (MEA-2, the fourth lane — outcome-confirmed "
+            + "\nlived-in drafts refreshed (the fourth lane — outcome-confirmed "
             "verbatim queries; judge derived_expected, confirm with category='single-hop'):\n"
             + json.dumps(lv, indent=2)
         )
@@ -659,7 +659,7 @@ def _tool_abstention_fixtures(args: Dict[str, Any]) -> str:
                 "abstention_fixtures confirm: 'query' and a non-empty 'expected' stem list "
                 "are both required — and only after judging that those memories genuinely "
                 "answer the query (never fabricate a memory to make a fixture pass). "
-                "TMB-3 forgetting rows pass absent=[archived stems] instead of expected."
+                "forgetting rows pass absent=[archived stems] instead of expected."
             )
         kwargs: Dict[str, Any] = {}
         cat = str(args.get("category") or "").strip()

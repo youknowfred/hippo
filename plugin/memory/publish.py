@@ -145,7 +145,7 @@ def publish_preflight(name: str, memory_dir: str, repo_root: str) -> dict:
                     advisory.append(
                         {"stem": stem, "lint": "contradicts",
                          "finding": f"unresolved contradicts pair with {other[0]} — "
-                         "flagged, never refused (CLB-1 keeps edges advisory)"}
+                         "flagged, never refused (keeps edges advisory)"}
                     )
         except Exception:
             pass
@@ -248,7 +248,7 @@ def render_preflight(result: dict) -> str:
     if result["ok"]:
         lines.append(
             "  ready — PRINT-ONLY pending Q3: the human executes the printed commands "
-            "(the consent moments are this command, the PR review, and the CLB-1 CI gate):"
+            "(the consent moments are this command, the PR review, and the CI gate):"
         )
         for cmd in result["commands"]:
             lines.append(f"    {cmd}")
@@ -268,7 +268,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="hippo publish",
         description=(
-            "Per-item publish preflight (PUB-1): mechanical refusals, the reused "
+            "Per-item publish preflight: mechanical refusals, the reused "
             "review gate with entropy ON, advisory receipt warnings, and the exact "
             "git add -f + commit line — printed, never executed (Q3 pending)."
         ),

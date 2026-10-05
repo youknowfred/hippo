@@ -47,7 +47,7 @@ from .provenance import ensure_self_ignoring_dir, resolve_dirs
 # --------------------------------------------------------------------------- #
 _DRAFTS_FILENAME = "recall_hard_set.drafts.yaml"
 _DRAFTS_NOTE = (
-    "SIG-6 candidate eval fixtures drafted from recurring recall abstentions — UNCONFIRMED. "
+    "candidate eval fixtures drafted from recurring recall abstentions — UNCONFIRMED. "
     "For each row: if a REAL existing memory should answer the query, put its stem in "
     "'expected' and admit the row via eval_recall.confirm_hard_set_row (per item); if no "
     "memory answers it, that is a capture gap — capture the memory first (never invent a "
@@ -139,7 +139,7 @@ def promoted_gate(value, threshold, passed: bool, path: Optional[str], kind: str
     if path and local:
         entry["reported_only"] = (
             f"project-local {kind} — this threshold is calibrated against the shipped pack "
-            "corpus and does not transfer (ABS-3)"
+            "corpus and does not transfer"
         )
     return entry
 

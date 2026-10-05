@@ -64,9 +64,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--superseded-by",
         metavar="SUCCESSOR",
         default=None,
-        help="GRA-4 opt-in (demote only): name the SUCCESSOR memory that replaces this "
+        help="opt-in (demote only): name the SUCCESSOR memory that replaces this "
         "one's claim — appends `supersedes: [NAME]` to the successor's frontmatter AND "
-        "stamps the loser's invalid_after at the successor's commit date (GRW-7), so the "
+        "stamps the loser's invalid_after at the successor's commit date, so the "
         "supersession is an auditable boundary. One successor, one memory, never autonomous.",
     )
     parser.add_argument("--dry-run", action="store_true", help="report only; do not write")

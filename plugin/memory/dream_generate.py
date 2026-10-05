@@ -1256,7 +1256,7 @@ def run_generative_pass(
         gate_root = trust.gate_repo_root(memory_dir, repo_root)
         if gate_root is not None and not trust.is_trusted(gate_root):
             return 1, (
-                "🌱 dream --generate: STAGING REFUSED — this corpus is untrusted (SEC-1). "
+                "🌱 dream --generate: STAGING REFUSED — this corpus is untrusted. "
                 "The report-only form (no --stage) remains available."
             )
         if generated_rows(memory_dir):
@@ -1303,7 +1303,7 @@ def run_generative_pass(
         lines.append(
             f"   ⚠ oversized cluster SKIPPED ({len(big)} members > "
             f"{schema_max_cluster()}): {', '.join(big[:6])}… — θ under-discriminates at "
-            "this density; a schema over it would be a haystack (and born over DRM-4's "
+            "this density; a schema over it would be a haystack (and born over the "
             "hub bar). Raise DREAM_COFIRE_THETA before staging."
         )
 

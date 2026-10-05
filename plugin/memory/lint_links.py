@@ -416,7 +416,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--boundary",
         action="store_true",
-        help="PUB-3: evaluate the COMMITTED-subset view — the links a fresh checkout "
+        help="evaluate the COMMITTED-subset view — the links a fresh checkout "
         "sees dangle, with per-candidate heals-N (never a gate)",
     )
     args = parser.parse_args(argv)

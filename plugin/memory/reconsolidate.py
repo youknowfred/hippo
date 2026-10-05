@@ -463,7 +463,7 @@ def semantic_reverify(
                     f"superseded_by is only valid with outcome demote, not {outcome!r} — "
                     "graduate/fix assert the memory is CURRENT, which contradicts naming a "
                     "successor that replaces it (a supersede stamps the loser's "
-                    "invalid_after at the successor's commit date, GRW-7)"
+                    "invalid_after at the successor's commit date)"
                 )
                 return result
             sfname = superseded_by if superseded_by.endswith(".md") else f"{superseded_by}.md"

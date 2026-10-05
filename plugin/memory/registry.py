@@ -331,7 +331,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="hippo registry",
         description=(
-            "Projects-registry hygiene (RCH-11): report every entry's live/dead state, "
+            "Projects-registry hygiene: report every entry's live/dead state, "
             "prune the temp-rooted dead ones, or drop one named entry."
         ),
     )

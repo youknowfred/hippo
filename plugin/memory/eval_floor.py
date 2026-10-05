@@ -172,7 +172,7 @@ def floor_sweep(
             "error": "need both on-topic hard-set rows resolvable against this corpus and "
             "off-topic abstention probes — "
             f"(on-topic {len(on_queries)}, off-topic {len(probes)}); draft the on-topic half "
-            "via /hippo:doctor's content audit (it writes recall_hard_set.yaml); hand-author the rest (ABS-1)",
+            "via /hippo:doctor's content audit (it writes recall_hard_set.yaml); hand-author the rest",
         }
 
     from .recall import _dense_floor

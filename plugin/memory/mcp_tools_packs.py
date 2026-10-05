@@ -28,7 +28,7 @@ def _corpus_gate(tool: str, why: str):
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
-            f"{tool}: withheld — this project's memory corpus is untrusted (SEC-1: "
+            f"{tool}: withheld — this project's memory corpus is untrusted ("
             f"{why}). " + _UNTRUSTED_REMEDY,
             memory_dir,
             repo_root,
@@ -232,7 +232,7 @@ def _tool_pack_install_item(args: Dict[str, Any]) -> str:
     consent = (
         f"⚠ {r['consent_note']}"
         if r.get("consent_note")
-        else "the SEC-6 consent baseline absorbed the bytes (the per-item approval IS the review)"
+        else "the consent baseline absorbed the bytes (the per-item approval IS the review)"
     )
     return (
         f"✔ {verb} {name} → {r['path']} — pack-stamped; .packs.lock.json records "

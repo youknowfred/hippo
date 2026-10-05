@@ -293,7 +293,7 @@ def _tool_init(args: Dict[str, Any]) -> str:
         lines.append("")
         lines.append(
             "🔒 This machine is wired up, but the PRE-EXISTING corpus is NOT trusted yet — "
-            "recall injects nothing from it until its content is reviewed (SEC-1; typing "
+            "recall injects nothing from it until its content is reviewed (; typing "
             "/hippo:setup in a terminal is itself that review, a model-invoked init is not). "
             "Next step: call trust_corpus to review what it would inject and take the "
             "user's explicit consent."
@@ -361,7 +361,7 @@ def _tool_trust_corpus(args: Dict[str, Any]) -> str:
             if not drift.get("baseline"):
                 return (
                     "trust_corpus REVIEW — corpus is trusted but its record has NO content "
-                    "fingerprint (a pre-SEC-6 consent), so recall cannot detect upstream "
+                    "fingerprint (an older consent), so recall cannot detect upstream "
                     "changes. Re-consenting stamps one.\n\n"
                     + _consent_review_block(memory_dir)
                     + f"\n\nOn the user's explicit yes, call trust_corpus again with "
@@ -371,7 +371,7 @@ def _tool_trust_corpus(args: Dict[str, Any]) -> str:
             return (
                 f"trust_corpus REVIEW — {len(changed)} changed / {len(added)} new memory "
                 f"file(s) since consent; recall is WITHHOLDING them: {', '.join(delta)} "
-                "(SEC-6 quarantine).\n\n"
+                "(quarantine).\n\n"
                 + _consent_review_block(memory_dir, stems=changed + added)
                 + f"\n\nReview how each changed (`hippo trust review` prints each file's "
                 f"diff against the consented version), then on the user's "
@@ -380,7 +380,7 @@ def _tool_trust_corpus(args: Dict[str, Any]) -> str:
             )
         return (
             f"trust_corpus REVIEW — corpus at {gate_root} is UNTRUSTED ({count} memories); "
-            "recall injects NOTHING from it until this machine's user consents (SEC-1: a "
+            "recall injects NOTHING from it until this machine's user consents (a "
             "cloned corpus is otherwise an unreviewed prompt-injection channel).\n\n"
             + _consent_review_block(memory_dir)
             + f"\n\nASK the user whether they trust this corpus, showing the sample above. "
@@ -407,7 +407,7 @@ def _tool_trust_corpus(args: Dict[str, Any]) -> str:
         )
     return (
         "✔ corpus trusted — recall active from the next prompt. The consent-time content "
-        "fingerprint was stamped (SEC-6): recall will withhold any memory file that later "
+        "fingerprint was stamped: recall will withhold any memory file that later "
         "drifts from these bytes until a re-consent through this same review."
     )
 

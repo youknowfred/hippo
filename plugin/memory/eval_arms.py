@@ -451,7 +451,7 @@ def reachability_audit(
     if len(multi) < _REACHABILITY_MIN_ROWS:
         return {
             "skipped": f"multi-hop n={len(multi)} < {_REACHABILITY_MIN_ROWS} — a "
-            "reachability baseline over the ungrown fixture is vacuous (GRF-2 grows it)"
+            "reachability baseline over the ungrown fixture is vacuous (grows it)"
         }
     edges = load_edges(index_dir) if index_dir else None
     if not edges:
