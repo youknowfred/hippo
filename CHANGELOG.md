@@ -7,6 +7,47 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.41.2 — 2026-10-04 — "Only real questions"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**, link cache still
+**6**; `stale.json` schema still **1**. Two patches for harness traffic that hippo read as a
+person's question. SIG-3's recall blind-spot backlog clustered envelopes that a hook older
+than HOT-1 had logged as abstained queries, so `/hippo:consolidate`'s interview asked the
+human to write down a memory for a cross-session message that recall had "abstained" on 7×.
+And the desktop app's `<ci-monitor-event>`, news about a pull request it is watching, was on
+no envelope list at all, so the recall hook ranked memories against it and injected them as
+if it were a typed prompt.
+
+**Operator action: none required.** Both changes apply on update. A draft row the SIG-6
+drafter already queued from an envelope stays in
+`.claude/.memory-pending/recall_hard_set.drafts.yaml` until you delete it: the drafter only
+appends. CI-monitor turns recorded before this release stay counted as human in the daily
+rollups.
+
+- **SIG-3 — an envelope is not a question (#138).** `abstention_backlog` skips a preview
+  that opens with a harness envelope (`harness_envelopes.is_envelope_preview`), the check
+  the lived-in drafter, capture and `recall_query` already made. Every reader of the
+  backlog inherits it: the SessionStart blind-spot nudge, both doctor checks, the
+  consolidate interview, the abstention fixture drafts, capture's seed score, dream's
+  frozen baseline and archive regret.
+  - Envelopes also took slots under the 5-cluster cap, so they could push a real blind
+    spot out of the backlog.
+  - A query that only mentions a tag ("why does an agent-message hand-back draft…") does
+    not open with one and still counts.
+  - Run against a real ledger whose only two clusters were envelopes (7× and 3×), the
+    backlog is now empty: its remaining abstentions are one-offs.
+- **HOT-1 — a CI event is not a question (#139).** `<ci-monitor-event>` joins
+  `HARNESS_ENVELOPE_TAGS`, so every plane that reads the one list now drops it:
+  `clean_query` strips its body, the hook neither recalls on it nor logs a ledger or
+  episode row, the lived-in drafter and capture skip its preview, and the blind-spot
+  backlog's new filter sees it.
+  - It gets its own trigger class, `ci-monitor-event`. A daily rollup row keys its counts
+    by class name, so rows written before the class existed read and merge unchanged, with
+    no `ROLLUP_VERSION` bump.
+  - A local ledger held 7 such turns. The 5 logged after HOT-1 (on v1.40.2 and v1.41.0)
+    each injected 2.3k–3.9k chars.
+
 ## v1.41.1 — 2026-10-03 — "Quiet and quick"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
