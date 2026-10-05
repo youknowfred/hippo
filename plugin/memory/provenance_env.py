@@ -501,45 +501,51 @@ def launch_root() -> str:
     return git_root(launch) or launch
 
 
-def foreign_corpus_owner(memory_dir: str, repo_root: Optional[str]) -> Optional[str]:
-    """CLM-4: the root that owns ``memory_dir`` when it is NOT the session's own repo.
+def ancestor_corpus_owner(start: Optional[str]) -> Optional[str]:
+    """CLM-4/SHP-8: the nearest dir ABOVE this repo that carries a corpus this repo lacks.
 
-    ``walk_up_for_memory_dir`` checks the toplevel's own corpus first, but a session
-    launched AT a git toplevel with no corpus keeps ascending past it. A repo nested
-    inside another repo (or under any directory with a corpus) then resolves the
-    ANCESTOR's corpus, and every write lands there. This names that case: the resolved
-    corpus sits outside the session's git toplevel. None when they agree, when the corpus
-    is inside the session's repo (a per-package corpus), when either root is unknown, or
-    when an explicit ``HIPPO_MEMORY_DIR`` / ``HIPPO_CORPUS_ROOT`` pinned the corpus.
-    Linked worktrees never trip it: SHP-7 moves ``repo_root`` to the main tree with the
-    corpus. Never raises.
+    Since SHP-8 a session launched at a git toplevel never climbs into an ancestor's corpus,
+    so a repo nested inside another (or a submodule) with no corpus of its own resolves
+    nothing. When an ancestor (up to ``$HOME``, inclusive) does carry one, doctor and the
+    SessionStart hook name it in one line (``ancestor_corpus_line``): init here, or pin
+    ``HIPPO_CORPUS_ROOT`` to share it. Returns the dir holding that ``.claude/memory`` (the
+    value to pin). None unless ``start`` IS a git toplevel with no ``.claude/memory`` of its
+    own; also None for a linked worktree (its corpus belongs to its main tree, SHP-7) and when
+    ``HIPPO_CORPUS_ROOT`` / ``HIPPO_MEMORY_DIR`` already pin the corpus. Mirrors the hook's
+    ``hippo_ancestor_corpus``. Never raises.
     """
     try:
         if os.environ.get("HIPPO_MEMORY_DIR") or os.environ.get("HIPPO_CORPUS_ROOT"):
             return None
-        session = git_root(repo_root) if repo_root else None
-        if not session or not memory_dir:
+        if not start:
             return None
-        head, tail = os.path.split(os.path.normpath(memory_dir))
-        corpus_root, claude = os.path.split(head)
-        if tail != "memory" or claude != ".claude":
+        start = os.path.abspath(start)
+        top = git_root(start)
+        if not top or os.path.realpath(top) != os.path.realpath(start):
             return None
-        session_real = os.path.realpath(session)
-        corpus_real = os.path.realpath(corpus_root)
-        if corpus_real == session_real or corpus_real.startswith(session_real + os.sep):
+        if os.path.isdir(_candidate_memory_dir(start)) or main_worktree_root(top):
             return None
-        return git_root(corpus_root) or corpus_root
+        home = os.path.abspath(os.path.expanduser("~"))
+        cur = start
+        while True:
+            parent = os.path.dirname(cur)
+            if parent == cur:
+                return None
+            cur = parent
+            if os.path.isdir(_candidate_memory_dir(cur)):
+                return cur
+            if cur == home:
+                return None
     except Exception:
         return None
 
 
-def nested_repo_line(repo_root: str, owner: str) -> str:
-    """The one plain line doctor prints for ``foreign_corpus_owner`` (the SessionStart hook
-    prints the same words from bash)."""
+def ancestor_corpus_line(owner: str) -> str:
+    """The one plain line doctor prints for ``ancestor_corpus_owner`` (the SessionStart hook
+    prints the same words from bash, naming its surface's init step)."""
     return (
-        f"this repo ({git_root(repo_root) or repo_root}) is nested inside {owner}, so hippo "
-        f"resolves {owner}'s memory corpus here, not one of this repo's own. Run init here "
-        "to give this repo its own corpus."
+        f"this repo has no corpus of its own; {owner} has one — init here, or pin "
+        "HIPPO_CORPUS_ROOT to share it."
     )
 
 

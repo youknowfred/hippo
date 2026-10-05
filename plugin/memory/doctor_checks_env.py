@@ -20,7 +20,7 @@ from .provenance import (
     resolve_corpus_start,
     walk_up_for_memory_dir,
 )
-from .provenance_env import foreign_corpus_owner, nested_repo_line
+from .provenance_env import ancestor_corpus_line, ancestor_corpus_owner
 
 
 # The venv deps whose import must resolve for recall to run at full fidelity (SKILL.md's
@@ -316,7 +316,8 @@ def check_corpus_resolution(ctx: DoctorContext) -> Dict[str, str]:
     """
     try:
         info = resolve_corpus_start()
-        _found, reason = walk_up_for_memory_dir(info.get("start") or os.getcwd())
+        start = info.get("start") or os.getcwd()
+        _found, reason = walk_up_for_memory_dir(start)
         tree = _resolution_tree_phrase(info)
         if reason == "nested":
             return {
@@ -325,16 +326,16 @@ def check_corpus_resolution(ctx: DoctorContext) -> Dict[str, str]:
                 "resolution start).",
             }
         if reason == "root-fallthrough":
-            # CLM-4: the walk can climb past THIS repo's toplevel into an ancestor's corpus.
-            owner = foreign_corpus_owner(ctx.memory_dir, ctx.repo_root)
-            if owner:
-                return {"status": "warn", "message": nested_repo_line(ctx.repo_root, owner)}
             return {
                 "status": "ok",
                 "message": f"resolved corpus: {ctx.memory_dir} — {tree}; root-fallthrough (no "
                 "nested corpus at the start dir, so the walk ascended to it; correct, but your "
                 "edits land in this corpus, not a per-package one).",
             }
+        # CLM-4/SHP-8: the walk stops at this repo's toplevel; an ancestor's corpus is named.
+        owner = ancestor_corpus_owner(start)
+        if owner:
+            return {"status": "warn", "message": ancestor_corpus_line(owner)}
         return {
             "status": "warn",
             "message": f"resolved corpus: {ctx.memory_dir} — {tree}; none found in the walk (this "
