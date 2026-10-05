@@ -82,6 +82,70 @@ hippo_note_usage() {  # <surface> <verb> [action]
   return 0
 }
 
+# HOT-6: the warm-recall decider. With warm recall opted in (`hippo setup --warm` adds a
+# UserPromptSubmit mcp_tool hook), the session's own MCP server can serve this prompt from its
+# warm model; this hook runs in parallel and DECIDES, through one claim file per prompt in
+# ${CLAUDE_PLUGIN_DATA}/warm/ (protocol: memory/recall_warm.py). It claims "warm" only for a
+# server heartbeat from a live pid on this hook's own plugin version that accepts and is not
+# mid-serve; otherwise "spawn". The claim is created exclusively (noclobber), so if the server
+# got there first (it only ever writes "spawn") this obeys it. 0 = the server serves (skip the
+# spawn), 1 = spawn as before. No warm dir (never opted in), no ids, any doubt: 1. Builtins only.
+hippo_warm_route() {  # <payload json>
+  local p="$1" dir sid pid hb mine m f c d="spawn" rc
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
+  dir="$CLAUDE_PLUGIN_DATA/warm"
+  [ -d "$dir" ] || return 1
+  # Each key exactly once, so a key-like string inside the prompt can never be read as one.
+  [ "${p//\"session_id\"/}" = "${p/\"session_id\"/}" ] || return 1
+  [ "${p//\"prompt_id\"/}" = "${p/\"prompt_id\"/}" ] || return 1
+  [[ $p =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9_-]+)\" ]] || return 1
+  sid="${BASH_REMATCH[1]}"
+  [[ $p =~ \"prompt_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9_-]+)\" ]] || return 1
+  pid="${BASH_REMATCH[1]}"
+  [ "${#sid}" -le 128 ] && [ "${#pid}" -le 128 ] || return 1
+  # A "warm" claim from an earlier prompt that no server ever read: the server is not
+  # answering (dead with its pid reused, or never called). Count it once, mark the session,
+  # and spawn until the server answers again (it removes the marker on its next call).
+  for f in "$dir/$sid".*.claim; do
+    [ -f "$f" ] || continue
+    c=""
+    IFS= read -r c < "$f" 2>/dev/null || true
+    if [ "$c" = "warm" ]; then
+      printf 'lost' >| "$f" 2>/dev/null || true
+      : >| "$dir/$sid.lost" 2>/dev/null || true
+      hippo_note_usage hook user_prompt failed
+    fi
+  done
+  mine=""
+  if [ -f "${CLAUDE_PLUGIN_ROOT:-}/.claude-plugin/plugin.json" ]; then
+    m="$(<"${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json")"
+    [[ $m =~ \"version\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]] && mine="${BASH_REMATCH[1]}"
+  fi
+  hb=""
+  if [ -n "$mine" ] && [ ! -e "$dir/$sid.lost" ] && [ -f "$dir/$sid.server.json" ]; then
+    IFS= read -r hb < "$dir/$sid.server.json" 2>/dev/null || hb=""
+  fi
+  if [ -n "$hb" ] \
+    && [[ $hb =~ \"pid\":[[:space:]]*([1-9][0-9]*) ]] && kill -0 "${BASH_REMATCH[1]}" 2>/dev/null \
+    && [[ $hb =~ \"version\":[[:space:]]*\"([^\"]*)\" ]] && [ "${BASH_REMATCH[1]}" = "$mine" ] \
+    && [[ $hb =~ \"accept\":[[:space:]]*true ]] \
+    && ! [[ $hb =~ \"state\":[[:space:]]*\"serving\" ]]; then
+    d="warm"
+  fi
+  f="$dir/$sid.$pid.claim"
+  set -C
+  { printf '%s' "$d" > "$f"; } 2>/dev/null
+  rc=$?
+  set +C
+  if [ "$rc" -ne 0 ]; then
+    c=""
+    IFS= read -r c < "$f" 2>/dev/null || true
+    d="spawn"
+    [ "$c" = "warm" ] && d="warm"
+  fi
+  [ "$d" = "warm" ]
+}
+
 # HOT-5: the PostToolUse fast path — log a file touch WITHOUT a Python spawn when Python would
 # do nothing but append the outcome row. That was ~7.5 interpreter starts per recall prompt.
 # Python still runs (return 1) whenever it could add anything: a NotebookEdit, a path this

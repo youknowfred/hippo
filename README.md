@@ -273,6 +273,36 @@ now a one-line route into the verb above that absorbed it.
 - **tend vs. dream** — both run *off* the hot path, but `tend` works what is already queued;
   `dream` *discovers* what wasn't captured — latent links between existing memories.
 
+## Warm recall (opt-in)
+
+By default each prompt's recall runs in a fresh Python process: start the interpreter, load the
+index and the embedding model, rank, exit. That is a few hundred milliseconds per prompt, more on a
+busy machine. Warm recall hands the same work to the session's own hippo MCP server, which keeps
+the model loaded between prompts.
+
+```
+hippo setup --warm               # preview: the exact hook and the file it goes in; writes nothing
+hippo setup --warm --yes         # turn it on (the settings file is backed up first)
+hippo setup --warm --status      # is it on, and which path served recent prompts
+hippo setup --warm --off --yes   # turn it off again
+```
+
+**What it changes:** one `UserPromptSubmit` hook of type `mcp_tool` in your user settings
+(`~/.claude/settings.json`), pointing at hippo's server. Nothing else is touched, and users who
+don't opt in pay nothing. hippo's usual recall hook stays installed and decides, prompt by prompt,
+which of the two answers, so recall never runs twice. The usual path takes over whenever the server
+can't answer: the first prompt of some sessions, a session still running an older hippo after an
+update (restart it), a server busy with another tool, or a session whose served recall failed or
+ran slow.
+
+**What stays the same:** the ranking, filtering, budgets and trust checks are the same code. The
+server reads the index on disk and writes nothing to your corpus or index; it keeps a few small
+handshake files in the plugin's data directory.
+
+**Cost:** no money and no network, as before. Each session's server holds the embedding model in
+memory once it has served a prompt. `/hippo:doctor` shows whether warm recall is on and how many
+prompts in the last 30 days were served warm, by the usual path, or failed.
+
 ## Removal / Uninstall
 
 To stop hippo from acting on a project, run inside Claude Code:

@@ -105,6 +105,9 @@ These may change at any release without a major bump — do not build on them:
   `review` (added in v1.42.0), the internal `recall_hook`, every tool's `annotations` and
   `outputSchema`, and the order `tools/list` returns. STABILITY v2 freezes the v2 names at v2.0;
   until then they are additions, not promises.
+- **The `recall_hook` MCP tool** — internal: the opt-in warm-recall hook (`hippo setup --warm`)
+  calls it, never a model or a skill. Its inputs, its reply and the handshake files it shares with
+  the recall hook may change in any release; the `hippo setup` verb is unfrozen too.
 - **Exact recall output text and ordering** — recall is a ranker; its wording, formatting, and the
   precise order of results are tuned continuously.
 

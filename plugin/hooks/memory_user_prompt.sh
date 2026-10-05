@@ -37,6 +37,14 @@ hippo_corpus_present || exit 0
 # UserPromptSubmit delivers the event as JSON on stdin; ".prompt" is the user's text.
 PAYLOAD="$(cat 2>/dev/null || true)"
 
+# HOT-6: warm recall (opt-in, `hippo setup --warm`). The session's own MCP server may serve
+# this prompt from its warm model through the `recall_hook` tool, which the harness runs in
+# parallel with this hook. hippo_warm_route decides, so exactly one of the two injects; it
+# returns 1 (spawn below, as before) whenever warm recall is off or anything is in doubt.
+if hippo_warm_route "$PAYLOAD"; then
+  exit 0
+fi
+
 # Force the dense model OFFLINE for the hook path (belt — recall.py also guards this).
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"

@@ -134,6 +134,7 @@ from .doctor_checks_recall import (
 from .doctor_checks_native import check_native_auto_memory  # NAT-1
 from .doctor_checks_settings import check_settings  # SRF-4
 from .doctor_checks_kpi import check_capture_queue, check_hook_wall, check_kpi_rollups, check_surface_usage  # TND-5, OBS-4, OBS-1, OBS-2
+from .doctor_checks_kpi import check_warm_recall  # HOT-6
 
 # One glyph per status — the deterministic line prefix. Ordered dict-free lookup.
 _GLYPH = {"ok": "✔", "warn": "⚠", "fail": "✘"}
@@ -363,6 +364,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("surface_usage", check_surface_usage),  # OBS-2: 30-day per-verb use counts (the deprecation windows' input)
     ("tend_queue", check_tend_queue),  # TND-2: the one maintenance queue, by kind
     ("capture_queue", check_capture_queue),  # TND-5: pending + expired counts, 30-day inflow/drain
+    ("warm_recall", check_warm_recall),  # HOT-6: the opt-in warm hook configured? + 30-day warm/spawn/failed paths
     ("recall_blind_spots", check_recall_blind_spots),
     ("drop_autopsy", check_drop_autopsy),  # MSR-4: which mechanism eats candidates, aggregated
 

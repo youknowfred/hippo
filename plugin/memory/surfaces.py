@@ -147,7 +147,9 @@ VERBS: Tuple[VerbSurface, ...] = (
 
 # MCP tools that serve NO /hippo:* verb. (The v1 repair and incident tools are deprecated
 # names now, claimed below through the v2 mapping.)
-VERBLESS_TOOLS: Dict[str, str] = {}
+VERBLESS_TOOLS: Dict[str, str] = {
+    "recall_hook": "HOT-6 INTERNAL, unfrozen — the opt-in warm-recall hook's entry; the harness calls it, never a model or a skill",
+}
 
 # SRF-2: the v1 tool names, still served through the deprecation window, claimed through
 # the v2 route each one names (``mcp_schemas_v2.DEPRECATED``, pure data).

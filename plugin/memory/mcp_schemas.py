@@ -863,4 +863,24 @@ _TOOLS = [
             },
         },
     },
+    # HOT-6 — INTERNAL and unfrozen: the opt-in warm-recall hook's entry, called by the
+    # harness (a UserPromptSubmit mcp_tool hook that `hippo setup --warm` writes), never by
+    # a model. Appended at the END, same position freeze.
+    {
+        "name": "recall_hook",
+        "description": (
+            "Internal: called by hippo's opt-in UserPromptSubmit hook, not for direct use. "
+            "Serves one prompt's recall from this session's server and returns the hook's "
+            "JSON reply, or {} when the command hook's own recall serves it instead."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string", "description": "the submitted prompt"},
+                "session_id": {"type": "string", "description": "the harness session id"},
+                "prompt_id": {"type": "string", "description": "the harness prompt id"},
+                "cwd": {"type": "string", "description": "the session's working directory"},
+            },
+        },
+    },
 ]

@@ -73,6 +73,13 @@ past the per-item gate:
                                 append stays a per-item agent edit).
   - ``abstention_fixtures(action)`` — the SIG-6 blind-spot loop: draft + per-item confirm.
 
+Plus one INTERNAL, unfrozen tool (HOT-6): ``recall_hook`` — the opt-in warm-recall hook's
+entry. The harness calls it from a UserPromptSubmit ``mcp_tool`` hook that ``hippo setup
+--warm`` writes into the user's settings; it serves a prompt's recall from this warm process
+when the command hook hands the prompt over (``recall_warm`` has the handshake). It is not
+counted as a tool use, and every OTHER tool call marks this server busy meanwhile, so a prompt
+that would queue behind one goes to the spawned hook instead.
+
 And three RESOURCES (RUL-5) — the baseline-memory pull path for subagents:
 
   - ``hippo://floor``       — the always-on memory floor (project MEMORY.md + the TEA-1
@@ -163,6 +170,7 @@ from .mcp_tools_packs import (
     _tool_resolve,
     _tool_untrust,
 )
+from . import recall_warm
 from .mcp_tools_setup import (
     _CONSENT_DIGEST_CHARS,
     _NO_DATA_DIR_MSG,
@@ -284,7 +292,14 @@ _DISPATCH = {
     "trust": _tool_trust,
     "share": _tool_share,
     "review": _tool_review,
+    # HOT-6 — internal and unfrozen: the opt-in warm-recall hook's entry (recall_warm).
+    # Appended at the END, same position freeze.
+    "recall_hook": recall_warm.serve,
 }
+
+# Tools only the harness calls (an mcp_tool hook): not counted as a tool use (the hook path
+# counts itself) and never marked busy (the busy mark exists so they are not queued).
+_INTERNAL_TOOLS = frozenset({"recall_hook"})
 
 
 def _at_least(version: Optional[str], floor: str) -> bool:
@@ -400,6 +415,9 @@ def handle_request(req: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if fn is None:
             return error(-32602, f"unknown tool: {tool}")
         args = args if isinstance(args, dict) else {}
+        internal = tool in _INTERNAL_TOOLS
+        if not internal:
+            recall_warm.mark_busy(True)  # HOT-6: a prompt arriving now spawns instead of queueing
         try:
             out = fn(args)
             text, structured = out if isinstance(out, tuple) else (out, None)
@@ -420,7 +438,9 @@ def handle_request(req: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                 {"content": [{"type": "text", "text": f"tool error: {exc}"}], "isError": True}
             )
         finally:
-            _note_tool_use(tool, args)
+            if not internal:
+                recall_warm.mark_busy(False)
+                _note_tool_use(tool, args)
     if method == "resources/list":
         return result({"resources": _RESOURCES})
     if method == "resources/read":
@@ -488,6 +508,7 @@ def serve(stdin=None, stdout=None) -> int:
             resp = None
         if resp is not None:
             _write(stdout, resp)
+        recall_warm.drain()  # HOT-6: a served recall's telemetry, after its answer went out
     return 0
 
 

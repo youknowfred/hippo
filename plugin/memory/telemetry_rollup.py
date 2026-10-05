@@ -246,12 +246,17 @@ def record_prompt(
     latency_ms: Optional[float] = None,
     wall_ms: Optional[float] = None,
     now: Optional[float] = None,
+    path: str = "spawn",
 ) -> bool:
     """Fold one UserPromptSubmit hook run into today's row. Machine turns count by trigger
-    and nothing else (they never recall). Fire-and-forget: never raises."""
+    and nothing else (they never recall). Fire-and-forget: never raises.
+
+    HOT-6 ``path``: which hook path ran the recall — ``spawn`` (a fresh Python per prompt)
+    or ``warm`` (served by the session's own MCP server). It keys the surface count, and a
+    warm run's wall lands in its own histogram so the spawn wall stays comparable."""
 
     def fold(acc: dict) -> None:
-        _bump(acc.setdefault("surface", {}), _usage_key("hook", "user_prompt", "spawn"))
+        _bump(acc.setdefault("surface", {}), _usage_key("hook", "user_prompt", path or "spawn"))
         _stamp(acc)
         hook = acc["hook"]
         hook["prompts"] += 1
@@ -272,7 +277,8 @@ def record_prompt(
         if session_id:
             _bump(hook["session_chars"], str(session_id), int(injected_chars or 0))
         if wall_ms is not None:
-            _bump(hook["wall_ms_hist"], _bucket(float(wall_ms), _MS_BUCKETS))
+            key = "warm_wall_ms_hist" if path == "warm" else "wall_ms_hist"
+            _bump(hook.setdefault(key, {}), _bucket(float(wall_ms), _MS_BUCKETS))
 
     return _update(telemetry_dir, now, fold)
 
@@ -485,6 +491,8 @@ def summarize(rows: List[dict]) -> dict:
         "session_chars_p95": _hist_percentile(_merge(rows, "hook", "session_chars_hist"), 95),
         "wall_p50": _hist_percentile(_merge(rows, "hook", "wall_ms_hist"), 50),
         "wall_p95": _hist_percentile(_merge(rows, "hook", "wall_ms_hist"), 95),
+        "warm_wall_p50": _hist_percentile(_merge(rows, "hook", "warm_wall_ms_hist"), 50),
+        "warm_wall_p95": _hist_percentile(_merge(rows, "hook", "warm_wall_ms_hist"), 95),
         "latency_p50": _hist_percentile(_merge(rows, "hook", "latency_ms_hist"), 50),
         "latency_p95": _hist_percentile(_merge(rows, "hook", "latency_ms_hist"), 95),
         "ss_runs": ss_total("runs"),
