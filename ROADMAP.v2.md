@@ -436,7 +436,9 @@ same on every surface.*
   memories instead of "+54 more".
 - **CLM-4 Onboarding nudge scoped per repo** `S` — Nudge only where install or init happened.
   Dismissal is per repo. This replaces the global every-5th-session counter and the machine-global
-  touch file (`memory_session_start.sh:41-72`).
+  touch file (`memory_session_start.sh:41-72`). *Owner ruling 2026-10-05:* the not-bootstrapped
+  line is about the machine, so it shows in the first session of each day and is dismissed
+  machine-wide by its own marker. The nested and no-corpus lines stay per repo, every session.
 - **CLM-5 Jargon lint** `S` — Fail CI on `[A-Z]{2,5}-\d+` in SKILL.md bodies and descriptions,
   hook-injected text, doctor output, and MCP descriptions and handler output. CHANGELOG, roadmaps
   and comments are allowlisted. *Why:* roadmap ids appear in 18/18 SKILL.md files ✓, 2 of them in
