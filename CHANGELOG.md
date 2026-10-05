@@ -7,6 +7,162 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.42.0 — 2026-10-05 — "One door, one queue"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**, link cache still
+**6**; `stale.json` still schema **1**. The third release of [`ROADMAP.v2.md`](ROADMAP.v2.md):
+its 13 v1.42.0 items. The consolidation lands in one release, so the two-minor deprecation
+window (v1.42–v1.43) can count how the old names are used before v2.0 removes any of them.
+Every engine entry is now one command, `hippo <verb>`. Every kind of upkeep is one ranked
+queue, worked with `tend`. The MCP tools come down to ten, the skills to nine, and the frozen
+environment variables to twelve. Nothing old stops working.
+
+**Operator action: none required.** Things you may notice:
+- **Skills.** The nine verbs are `/hippo:setup`, `new`, `recall`, `tend`, `doctor`, `share`,
+  `review`, `dream` and `remove`. The other twelve names (`bootstrap`, `init`, `why`,
+  `consolidate`, `resolve`, `audit`, `pack`, `promote`, `promote-rule`, `publish`,
+  `export-agents`, `import`) still run as one-line routes into the verb that absorbed them,
+  until v2.0.
+- **MCP tools.** The v2 set is `recall`, `new_memory`, `inspect`, `tend`, `doctor`, `setup`,
+  `trust`, `share`, `dream` and `review`. Every other name still works and says so in each
+  answer. A permission rule that names an old tool keeps working until v2.0; doctor lists
+  each one, and [UPGRADING.md](UPGRADING.md) maps every old id to its new one.
+- **Settings.** Corpus policy can live in a committed `.claude/memory/hippo.json`. Machine
+  settings are plugin options, and the LLM API key option is stored in your OS keychain.
+  `HIPPO_DISABLE=dense,jit,…` is the new spelling of the six `HIPPO_DISABLE_*` switches.
+  Every old name keeps working, and doctor lists the ones it sees.
+- **Trust.** `hippo trust review` shows each memory that changed since you consented, as a
+  diff against the consented bytes. `hippo trust grant` consents to exactly what the review
+  showed, one file or all of them.
+- **Onboarding.** The setup nudge appears only in repos where hippo is enabled or was set up
+  before, and dismissing it is per repo. Setup can adopt Claude Code's own memory directory
+  for a repo, previewing first. A repo nested inside another corpus's repo is named.
+- **Captures.** A subagent's capture folds into its session's seed. Seeds older than 14 days
+  or 20 sessions move to `expired/`, never deleted, and `hippo capture --restore` brings
+  them back.
+- **Warm recall** is opt-in: `hippo setup --warm` previews the hook it would add to your user
+  settings, and `--yes` writes it.
+
+**Receipts first**
+- **The door.** 0 `-m memory.` call sites remain in skills and hooks (there were 65), and a
+  test holds it. `hippo help --all` lists 38 verbs: the 7 frozen ones unchanged, 29 new, and
+  2 that only hooks call.
+- **The queue.** On the dogfood corpus `tend` built a 30-item queue in 4 kinds in about a
+  second. Each item routes to the engine call that owns its write.
+- **The format check.** `hippo migrate --check --all-projects` ran over this machine's 7
+  registered corpora (1,397 memories). Every corpus's files hashed identical before and
+  after: 1,481 files, compared by content, size and mtime.
+- **Warm recall.** A live two-prompt headless probe served the second prompt's recall in
+  31 ms from the session's server. A spawn-only control took about 400 ms.
+- **The surface.** The v2 tools' listing is 11,385 chars at the newest protocol (budget
+  15,000; it was 36,546 for 28 tools). The full listing during the window, old names
+  included, is 46,385.
+
+**One door**
+- **SRF-1 — `hippo <verb>` is the one engine entry.** `bin/hippo` hands every verb but `mcp`
+  to `memory.cli`. It runs that verb's module exactly as `python -m memory.<module>` did:
+  same argv, output and exit code. The usage text is generated from the one verb table.
+  Hooks call the door with the bash that runs them. A Bash-tool shell has no plugin env, so
+  `bin/hippo` derives a marketplace install's data dir from its own path, using it only when
+  a bootstrap sentinel is there.
+- **SRF-2 — the MCP v2 toolset.** Five new names (`inspect`, `setup`, `trust`, `share`,
+  `review`) route by action to the v1 handlers, so a v2 route answers exactly what the v1
+  name did. Each v1 name outside the v2 set stays listed and callable. Its description opens
+  with the route to use, and each answer carries a deprecation notice as its own content
+  block. OBS-2 counts every call by the name used.
+  - Protocol negotiation is real. Tools carry `annotations` from 2025-03-26. `recall`,
+    `doctor` and `tend` return `structuredContent` from 2025-06-18.
+- **SRF-3 — the nine-verb skill set.** The twelve retired skills' flows moved, verbatim, into
+  the verbs that absorbed them. The content audit is a supporting file that doctor reads on
+  request, so a routine health check does not load it. Its shell blocks ask
+  `eval "$(hippo env)"` for the plugin paths, because Claude Code fills those into SKILL.md
+  only. The merged skills name only v2 tools and verbs, and a lint holds that.
+- **SRF-4 — config consolidation.** One resolver applies one precedence: environment, then
+  plugin option, then `hippo.json`, then the legacy location.
+  - The v2 frozen environment set is twelve names: the nine directory overrides,
+    `HIPPO_DISABLE`, `HIPPO_TRUST_ALL` and `HIPPO_TRUST_NONGIT`.
+  - Legacy names are read through v1.43. doctor prints each one it sees, and SessionStart
+    counts each once per session. CI now sets `HIPPO_DISABLE=dense`.
+  - An LLM path that runs from a shell cannot read the keychain key. Dream's contradiction
+    check therefore runs through the MCP `dream` tool (`contradictions: true`).
+
+**One queue**
+- **TND-1 — one derived, ranked maintenance queue.** It covers trust drift, broken baselines,
+  contradictions, incoming merge duplicates, pending captures, the reverify worklist, link
+  rot, floor overflow and citation derivation. Each entry carries its evidence, a likely
+  verdict and the per-item gate. The queue writes nothing to the corpus. It keeps two
+  gitignored files: the last build's counts, and the operator's snoozes, skips and owner
+  holds. Held items count as resolved.
+- **TND-2 — `tend`.** It is a verb, an MCP tool and a skill: list, next, show, apply, snooze,
+  skip, hold and release. `apply` executes one verdict on one item through the engine call
+  that already owns that write, and refuses any verdict the kind does not accept. Link and
+  floor items are re-checked before they clear. A stamp is refused while any memory still
+  re-derives. The calm SessionStart digest's next action and counted line now say
+  "tend memory".
+- **TND-5 — capture-queue hygiene.** A SubagentStop seed now folds into its parent session's
+  seed instead of overwriting it. Expiry, the cap prune and restore keep every seed: nothing
+  is deleted except by a human. Inflow and drain are counted.
+  - Repro first: `new_memory` appended a discovered `Related:` line under one the body
+    already ended with. That shape was on 20 of the dogfood corpus's 94 memories. It now
+    merges into the existing line. `hippo lint-links` lists duplicates, and
+    `hippo links --merge-related <name>` merges one memory's lines, per item.
+- **TND-6 — `hippo trust` and batched re-consent.** `status`, `review`, `grant` and `revoke`.
+  - A review finds each changed memory's consented bytes by hash in its git history, or in a
+    local baseline store for files git cannot recover. It diffs against them and prints a
+    digest. A grant consents to exactly the reviewed files.
+  - Consent is never inferred from git authorship.
+  - The field case: three corpora with 31, 4 and 1 withheld memories, whose only remedy was
+    a whole-corpus `mark_trusted` or a per-file hand call.
+  - Repro first: three mechanical hippo rewrites (`heal_baselines`, `--refresh-one` and
+    `--refresh`) wrote memories without carrying their consent forward, so recall withheld
+    memories nobody had changed. They carry it now, but only for bytes that were consented
+    when hippo read them.
+- **FMT-1 — `hippo migrate --check`.** It inventories what corpus format 6 will touch: the
+  marker's state, the citation derivation, flat files, legacy keys, derived citation fields,
+  policy keys due to move, and unreadable files. It is read-only, a test hashes the tree to
+  hold that, and doctor runs it.
+
+**Calm and plain**
+- **CLM-4 — the onboarding nudge, scoped per repo.** The machine-wide every-fifth-session
+  counter is gone. "Opted in" means hippo is enabled in the repo's own settings, or the repo
+  is in the projects registry. Dismissal is per repo, and the old global marker is still
+  honored.
+  - Setup adopts a native memory directory in two steps: preview, then a digest-bound
+    confirm. It copies the files byte for byte, keeps a dated backup, makes the link, builds
+    the index, and stamps the format only after a key-collision check. Adopted memories wait
+    for review before recall uses them.
+  - doctor's symlink line used to print an `rm -f` repair that cannot remove a directory. It
+    now names the adoption.
+- **CLM-5 — jargon lint.** Roadmap ids are gone from every skill, every runtime string
+  (doctor, SessionStart, MCP descriptions and handler output, CLI help), the strings hooks
+  print, and the live MCP listings: 241 strings and 182 skill lines. A test fails CI on a new
+  one. Comments, docstrings, the CHANGELOG and the roadmaps are exempt.
+- **CLM-6 — one remediation spelling.** Every hint is a plain intent phrase ("say *tend
+  memory*") or a bare `hippo <verb>`. That rewrote 42 `python -m` hints, 83 retired skill
+  names and about 20 references to v1 tool names. A test holds all three rules.
+  - Repro first: reverify refused a memory with no provenance ("run backfill first") and
+    named no command. It now names `hippo provenance --refresh-one <name>`, which unblocks
+    the verdict.
+
+**Warm recall (opt-in)**
+- **HOT-6 — recall served by the session's own MCP server.** `hippo setup --warm` adds a
+  UserPromptSubmit `mcp_tool` hook. The internal `recall_hook` tool then answers from a
+  server that already holds the model. The command hook stays and decides every prompt
+  through one exclusive claim file per `prompt_id`, so exactly one path injects.
+  - It falls back to spawning on a version mismatch, a dead server, a busy server or a
+    tripped breaker.
+  - Every outcome is logged as warm, spawn or failed, and doctor shows the counts.
+  - The served path never writes the corpus or index; a test hashes both.
+  - Default-on at v2.0 only if contended field latency is at least 40% below spawn over 14
+    days.
+
+**Also**
+- doctor's in-process MCP launch check no longer resets the serving session's negotiated
+  protocol and client name. The structured-content tests caught it.
+- The crash-test kill lane moved to `tests/test_crash_faults_kill.py` to stay under the
+  test-module size cap.
+
 ## v1.41.2 — 2026-10-04 — "Only real questions"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
