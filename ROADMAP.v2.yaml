@@ -32,7 +32,18 @@ releases:
     re_bootstrap: "no"
   - version: v1.41.0
     theme: "Earned injection"
-    status: in review
+    status: released
+    re_bootstrap: "no"
+    open_gates:
+      - "the 30-day machine-turn check on OBS-1 rollups (field time)"
+      - "v1.40.0's 7 rollup rows on 3 corpora (field time)"
+  - version: v1.41.1
+    theme: "Quiet and quick (two RUL-2 rules-rot fixes, #134 and #136; no roadmap item)"
+    status: released
+    re_bootstrap: "no"
+  - version: v1.41.2
+    theme: "Only real questions (#138 the blind-spot backlog skips harness envelopes; #139 HOT-1 learns <ci-monitor-event>)"
+    status: released
     re_bootstrap: "no"
   - version: v1.42.0
     theme: "One door, one queue"
@@ -62,8 +73,8 @@ items:
     title: "Compare-and-swap writes, repro-first"
     size: M
     release: "v1.41.0"
-    status: built
-    note: "v1.41.0 release PR"
+    status: done
+    note: "v1.41.0"
   - id: RWY-4
     title: "Ship only the runtime (reshaped)"
     size: S
@@ -98,8 +109,8 @@ items:
     title: "Field eval gate on 3 corpora"
     size: M
     release: "v1.41.0"
-    status: built
-    note: "v1.41.0 release PR"
+    status: done
+    note: "v1.41.0"
   - id: OBS-6
     title: "Trust-drift root cause, repro-first"
     size: S
@@ -109,8 +120,8 @@ items:
     title: "Dogfood drain, keeping derivation 4 on purpose"
     size: S
     release: "v1.41.0"
-    status: partial
-    note: "operational; 5 contradiction verdicts + 18 capture discards done 2026-10-03, the withheld memory was already re-consented; cite_derivation 4 kept as the FMT-4 rehearsal target"
+    status: done
+    note: "operational, closed with v1.41.0: 5 contradiction verdicts + 18 capture discards done 2026-10-03, the withheld memory was already re-consented; cite_derivation 4 kept as the FMT-4 rehearsal target"
   - id: OBS-8
     title: "1,000-memory dense-under-load nightly lane"
     size: S
@@ -126,20 +137,21 @@ items:
     size: S
     release: "v1.40.0"
     status: done
+    note: "v1.41.2 (#139) added <ci-monitor-event> to the envelope list with its own trigger class"
   - id: HOT-2
     title: "Calibrated abstention"
     size: M
     release: "v1.41.0"
-    status: built
+    status: done
     deps: [OBS-5]
-    note: "v1.41.0 release PR"
+    note: "v1.41.0"
   - id: HOT-3
     title: "Per-prompt and per-session context budgets"
     size: M
     release: "v1.41.0"
-    status: built
+    status: done
     deps: [HOT-1, OBS-1]
-    note: "v1.41.0 release PR"
+    note: "v1.41.0"
   - id: HOT-4
     title: "One staleness truth"
     size: S
@@ -149,9 +161,9 @@ items:
     title: "Stop paying an interpreter per file touch"
     size: M
     release: "v1.41.0"
-    status: built
+    status: done
     deps: [OBS-4, PLT-1]
-    note: "v1.41.0 release PR"
+    note: "v1.41.0"
   - id: HOT-6
     title: "Warm recall served by the session's own MCP server"
     size: L
@@ -162,22 +174,22 @@ items:
     title: "Budgeted SessionStart digest"
     size: L
     release: "v1.41.0"
-    status: built
+    status: done
     deps: [OBS-1]
-    note: "v1.41.0 release PR"
+    note: "v1.41.0"
   - id: CLM-2
     title: "Attention setting"
     size: S
     release: "v1.41.0"
-    status: built
-    note: "v1.41.0 release PR"
+    status: done
+    note: "v1.41.0"
   - id: CLM-3
     title: "Resume card from cleaned queries and served names"
     size: S
     release: "v1.41.0"
-    status: built
+    status: done
     deps: [HOT-1, OBS-3]
-    note: "v1.41.0 release PR"
+    note: "v1.41.0"
   - id: CLM-4
     title: "Onboarding nudge scoped per repo"
     size: S
@@ -198,9 +210,9 @@ items:
     title: "A floor with hard edges"
     size: M
     release: "v1.41.0"
-    status: built
+    status: done
     deps: [RWY-3]
-    note: "v1.41.0 release PR"
+    note: "v1.41.0"
   - id: CLM-8
     title: "Retire the Desktop routing note"
     size: S
@@ -263,8 +275,8 @@ items:
     title: "N-1 compat guard"
     size: S
     release: "v1.41.0"
-    status: built
-    note: "v1.41.0 release PR"
+    status: done
+    note: "v1.41.0"
   - id: FMT-4
     title: "`hippo migrate` apply: one previewed changeset, v5→v6"
     size: L
@@ -334,8 +346,8 @@ items:
     title: "Declare and check a minimum Claude Code version"
     size: S
     release: "v1.41.0"
-    status: built
-    note: "v1.41.0 release PR"
+    status: done
+    note: "v1.41.0"
   - id: NAT-1
     title: "Detect native auto memory"
     size: S
@@ -367,8 +379,8 @@ items:
     title: "`ROADMAP.v2.yaml` as the one live ledger"
     size: S
     release: "v1.41.0"
-    status: built
-    note: "v1.41.0 release PR"
+    status: done
+    note: "v1.41.0"
   - id: CON-5
     title: "Release-gate hardening"
     size: S
@@ -394,12 +406,12 @@ threads:
     note: "growing-pains slate (2026-08-27) S4; reach work per V2Q-12."
   - id: GP-S5
     title: "Trim-safety report for the MEMORY.md floor"
-    status: built
+    status: done
     release: v1.41.0
     note: "delivered as CLM-7's lint_floor --trim-report."
   - id: GP-S6
     title: "Doctor restart detector: running version vs installed_plugins.json"
-    status: built
+    status: done
     release: v1.41.0
     note: "delivered as FMT-3's doctor installed_version line."
   - id: GP-S7
