@@ -48,6 +48,7 @@ CLI_VERBS: Tuple[CliVerb, ...] = (
     CliVerb("inspect", "recall_view", "a readable recall listing, why receipts, decision history"),
     CliVerb("doctor", "doctor", "health check for the install and the corpus"),
     CliVerb("tend", "tend", "the maintenance queue: list, next, apply one verdict"),
+    CliVerb("migrate", "migrate", "what the next corpus format will touch (--check, read-only)"),
     CliVerb("capture", "capture", "the pending-capture queue: list, discard, snooze"),
     CliVerb("reconsolidate", "reconsolidate", "the reverify worklist and per-item verdicts"),
     CliVerb("brief", "reconsolidate_brief", "the evidence brief for one stale memory"),

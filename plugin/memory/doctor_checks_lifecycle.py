@@ -320,3 +320,21 @@ def check_tend_queue(ctx: DoctorContext) -> Dict[str, str]:
         }
     except Exception as exc:
         return {"status": "warn", "message": f"maintenance-queue check failed: {exc}."}
+
+
+def check_format_migration(ctx: DoctorContext) -> Dict[str, str]:
+    """FMT-1: the corpus's readiness for the next format migration, read-only.
+
+    Informational: nothing here is broken today (the marker's own health is
+    ``check_format_version``). It counts what the format 6 migration will touch, so the
+    preview is known long before anything is applied.
+    """
+    try:
+        from .migrate import check, summary_line
+
+        report = check(ctx.memory_dir)
+        if report.get("error") and not report.get("files"):
+            return {"status": "ok", "message": f"format migration check: {report['error']}."}
+        return {"status": "ok", "message": summary_line(report)}
+    except Exception as exc:
+        return {"status": "warn", "message": f"format migration check failed: {exc}."}

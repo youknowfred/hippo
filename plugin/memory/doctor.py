@@ -88,6 +88,7 @@ from .doctor_checks_corpus import (
     check_producer_versions,
 )
 from .doctor_checks_lifecycle import (
+    check_format_migration,
     check_tend_queue,
     check_invalid_after_terminal,
     check_archive_shadowing,
@@ -366,6 +367,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("rules_plane_rot", check_rules_plane_rot),
     ("rules_source", check_rules_source),
     ("format_version", check_format_version),
+    ("format_migration", check_format_migration),  # FMT-1: what format 6 will touch, read-only
     ("volatile_paths", check_volatile_paths),  # VOL-1: arming-policy state, ok-glyph always
     ("floor_governance", check_floor_governance),  # FLR-1: floor vs the harness read window + declared floor_lint policy
     ("empty_baselines", check_empty_baselines),  # COR-10: the heal moved off the hook
