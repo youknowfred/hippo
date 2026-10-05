@@ -76,14 +76,30 @@ def test_an_id_not_in_the_queue_is_refused(corpus):
     assert not r["ok"] and "not in the maintenance queue" in r["message"]
 
 
-def test_link_done_is_rechecked_before_it_clears(corpus):
+def test_link_done_is_rechecked_before_it_clears(corpus, monkeypatch):
     repo, md = corpus
+    counted = []
+    monkeypatch.setattr(T, "_count", lambda md_, kind, verdict: counted.append((kind, verdict)))
     [link_id] = _ids(md, repo, "link")
     r = T.apply(link_id, "done", memory_dir=md, repo_root=repo)
-    assert not r["ok"] and "still reported" in r["message"]
+    assert not r["ok"] and "still reported" in r["message"] and counted == []
     write_file(md, "alpha.md", _MEM.format(name="alpha", body="see [[beta]]"))
     r = T.apply(link_id, "done", memory_dir=md, repo_root=repo)
-    assert not r["ok"] and "not in the maintenance queue" in r["message"]  # fixed: it left the queue
+    assert r == {"ok": True, "message": f"{link_id}: fixed."}  # the hand edit is the fix
+    assert counted == [("link", "done")]
+
+
+def test_floor_done_answers_fixed_once_the_floor_is_edited(corpus, monkeypatch):
+    repo, md = corpus
+    write_file(md, "MEMORY.md", "# floor\n\n## User\n- [Gone](gone.md) — removed\n")
+    [floor_id] = _ids(md, repo, "floor")
+    assert not T.apply(floor_id, "done", memory_dir=md, repo_root=repo)["ok"]
+    write_file(md, "MEMORY.md", "# floor\n\n## User\n")
+    r = T.apply(floor_id, "graduate", memory_dir=md, repo_root=repo)
+    assert not r["ok"] and "floor items take: done" in r["message"]
+    assert T.apply(floor_id, "done", memory_dir=md, repo_root=repo) == {"ok": True, "message": f"{floor_id}: fixed."}
+    monkeypatch.setitem(Q.SOURCES, "floor", lambda md_, rr: 1 / 0)  # a check that cannot run proves nothing
+    assert not T.apply(floor_id, "done", memory_dir=md, repo_root=repo)["ok"]
 
 
 def test_reverify_and_baseline_route_to_the_reverify_engine(corpus, monkeypatch):
