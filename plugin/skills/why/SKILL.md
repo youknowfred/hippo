@@ -26,8 +26,8 @@ hippo_note_usage skill why  # OBS-2: count this skill's use (one spool line, no 
 ```
 
 Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
-opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
-and resolver lines, in the same call.
+opens by pinning what it needs; an inline `hippo …` command runs
+as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 ## Get the receipt
 
@@ -37,7 +37,7 @@ Use the user's own words as the query — the receipt explains what the hook wou
 ```bash
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
 . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
-"$PY" -m memory.recall_view --why "<the query, ideally the user's own phrasing>"
+hippo inspect --why "<the query, ideally the user's own phrasing>"
 ```
 
 ## Reading it

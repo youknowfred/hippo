@@ -70,6 +70,7 @@ WRITE_OPEN_ALLOWLIST = {
     ("telemetry", "log_episode"): "append-only gitignored ledger; torn tail skipped",
     ("telemetry_rollup", "_append_finalized"): "append-only gitignored day rollups (OBS-1); torn tail skipped, trim goes through write_text_atomic",
     ("telemetry_rollup", "_locked"): "flock lock file opened in append mode; nothing is ever written to it",
+    ("cli", "_note_cli_use"): "one append-only spool line in an existing gitignored telemetry dir, the same line bash's hippo_note_usage appends (OBS-2)",
     ("telemetry", "log_decision"): "append-only gitignored ledger; torn tail skipped",
     ("telemetry", "log_outcome"): "append-only gitignored ledger; torn tail skipped",
     ("telemetry", "record_reconsolidation_outcome"): "append-only gitignored ledger; torn tail skipped",

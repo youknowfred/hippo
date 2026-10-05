@@ -387,7 +387,7 @@ plugin/
 │   └── _vendor/                  # pre-bootstrap fallbacks (BM25 + frontmatter parser)
 ├── hooks/                        # UserPromptSubmit recall + SessionStart dispatcher + PreCompact nudge + SessionEnd/SubagentStop capture
 ├── assets/packs/                 # starter packs (core seeded by default; rest opt-in)
-├── bin/hippo                     # CLI launcher for the stateless engine commands
+├── bin/hippo                     # `hippo <verb>`: the one entry into the engine
 ├── requirements.txt              # fastembed, numpy, PyYAML, rank-bm25 (the venv path)
 └── skills/                       # 18 /hippo:* commands (see the Commands section above)
 tests/                            # hermetic test suite (no network/model download by default)

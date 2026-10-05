@@ -32,7 +32,6 @@ hippo_corpus_present || exit 0  # SHP-7: a linked worktree whose MAIN tree has t
 # (one Python spawn, INT-5 discipline). --reason subagent-stop labels the seed's origin.
 PAYLOAD="$(cat 2>/dev/null || true)"
 
-hippo_resolve_py
 
-printf '%s' "$PAYLOAD" | "$PY" -m memory.capture --from-hook --reason subagent-stop 2>/dev/null || true
+printf '%s' "$PAYLOAD" | HIPPO_SURFACE=hook "$BASH" "${CLAUDE_PLUGIN_ROOT:-.}/bin/hippo" capture --from-hook --reason subagent-stop 2>/dev/null || true
 exit 0

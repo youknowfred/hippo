@@ -26,8 +26,8 @@ MEMORY_DIR="$REPO_ROOT/.claude/memory"
 ```
 
 Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
-opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
-and resolver lines, in the same call.
+opens by pinning what it needs; an inline `hippo …` command runs
+as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 ## What this does, in order
 

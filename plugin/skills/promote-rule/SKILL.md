@@ -32,8 +32,8 @@ NAME="the_memory_stem_to_promote"   # e.g. lint_before_commit (fill from the use
 ```
 
 Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
-opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
-and resolver lines, in the same call.
+opens by pinning what it needs; an inline `hippo …` command runs
+as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 ## What this does, in order
 
@@ -45,7 +45,7 @@ and resolver lines, in the same call.
    . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
    NAME="the_memory_stem_to_promote"   # the same name as in the preflight
-   "$PY" -m memory.promote_rule --name "$NAME" --memory-dir "$MEMORY_DIR" --repo-root "$REPO_ROOT"
+   hippo promote-rule --name "$NAME" --memory-dir "$MEMORY_DIR" --repo-root "$REPO_ROOT"
    ```
 
    Read the report to the user, concretely:
@@ -70,7 +70,7 @@ and resolver lines, in the same call.
    . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
    NAME="the_memory_stem_to_promote"   # the same name as in the preflight
-   "$PY" -m memory.promote_rule --name "$NAME" --memory-dir "$MEMORY_DIR" --repo-root "$REPO_ROOT" --apply
+   hippo promote-rule --name "$NAME" --memory-dir "$MEMORY_DIR" --repo-root "$REPO_ROOT" --apply
    ```
 
    Committing the file is the user's call, like any other working-tree change.

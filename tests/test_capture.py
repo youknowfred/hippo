@@ -638,7 +638,7 @@ def test_wired_hooks_discard_stderr_and_force_exit_zero():
     for name in ("memory_session_end.sh", "memory_subagent_stop.sh"):
         with open(os.path.join(hooks_dir, name), encoding="utf-8") as fh:
             src = fh.read()
-        line = next(l for l in src.splitlines() if "-m memory.capture --from-hook" in l)
+        line = next(l for l in src.splitlines() if "bin/hippo\" capture --from-hook" in l)
         assert "2>/dev/null" in line, f"{name}: the capture invocation must discard stderr"
         assert "|| true" in line, f"{name}: the capture invocation must force exit 0"
 

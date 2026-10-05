@@ -112,10 +112,35 @@ def test_every_skill_preflight_counts_its_own_verb():
 
 
 def test_bin_hippo_and_the_recall_hook_count_their_uses():
-    hippo = open(os.path.join(_PLUGIN, "bin", "hippo"), encoding="utf-8").read()
-    assert 'hippo_note_usage cli "$cmd"' in hippo
     hook = open(os.path.join(_PLUGIN, "hooks", "memory_user_prompt.sh"), encoding="utf-8").read()
     assert "|| hippo_note_usage hook user_prompt failed" in hook
+
+
+def _spool(td):
+    path = os.path.join(td, "usage_spool.jsonl")
+    if not os.path.exists(path):
+        return []
+    return [json.loads(line) for line in open(path, encoding="utf-8") if line.strip()]
+
+
+def test_a_typed_verb_counts_one_cli_use_and_a_hook_call_counts_none(tmp_path, monkeypatch):
+    """SRF-1: the door counts a verb typed into a shell (after it is known to exist), not
+    a typo and not a hook's own call (hooks count their path themselves)."""
+    from memory import cli
+
+    td = tmp_path / "tel"
+    td.mkdir()
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", str(td))
+    monkeypatch.delenv("HIPPO_SURFACE", raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
+    assert cli.main(["help"]) == 0
+    assert cli.main(["not-a-verb"]) == 2
+    assert _spool(str(td)) == []
+    cli._note_cli_use("doctor")
+    assert _spool(str(td)) == [{"surface": "cli", "verb": "doctor", "action": "", "client": "cli"}]
+    monkeypatch.setenv("HIPPO_SURFACE", "hook")
+    cli._note_cli_use("recall")
+    assert len(_spool(str(td))) == 1
 
 
 def test_hook_folds_count_their_spawn(tmp_path):

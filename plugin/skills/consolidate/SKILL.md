@@ -29,8 +29,8 @@ hippo_note_usage skill consolidate  # OBS-2: count this skill's use (one spool l
 ```
 
 Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
-opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
-and resolver lines, in the same call.
+opens by pinning what it needs; an inline `hippo …` command runs
+as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 > **Desktop / MCP surface (INT-13):** the tool-by-tool mapping is in 'Surface routing' above — drive the SAME flow through those MCP tools, same order, same per-item approval gates. Each capture seed is a plain JSON file: read it directly for the full evidence when drafting.
 
@@ -45,7 +45,7 @@ List what's queued (highest-value first — each seed carries a `value:` score a
 sessions are labelled; the score orders your review, it never gates a seed):
 
 ```
-"$PY" -m memory.capture --list
+hippo capture --list
 ```
 
 When CAP-LLM triage is enabled (`capture_triage: true` in `~/.claude/hippo-llm.json`, or
@@ -65,7 +65,7 @@ BEFORE writing** so a near-duplicate never becomes a new file (CAP-3, a dry run 
 nothing):
 
 ```
-"$PY" -m memory.new_memory --check <candidate-name> "<one-line description>" --type {user|feedback|project|reference}
+hippo new --check <candidate-name> "<one-line description>" --type {user|feedback|project|reference}
 ```
 
 Then, for each candidate that survives the check, **render its RATIONALE before asking for
@@ -91,7 +91,7 @@ in (the context is live), you may also record decisions the user confirmed just 
 command — before drafting:
 
 ```
-"$PY" -m memory.capture --add-decision "<the decision, in the user's own terms>"
+hippo capture --add-decision "<the decision, in the user's own terms>"
 ```
 
 The baseline is the `--check` output's own `baseline:` line — HEAD at PROPOSAL time
@@ -143,14 +143,14 @@ out of the detector's scope by contract (doctor counts them as unverifiable inst
 - **route `add`** → the candidate is novel; create it, fencing the rationale into the body
   so the WHY is git-committed with the memory (not a one-time drain display):
   ```
-  "$PY" -m memory.new_memory <candidate-name> "<description>" --type {user|feedback|project|reference} --body "<the WHY>" --rationale "from session <sid>; as of HEAD <sha>"
+  hippo new <candidate-name> "<description>" --type {user|feedback|project|reference} --body "<the WHY>" --rationale "from session <sid>; as of HEAD <sha>"
   ```
 - **route `review`** → a near-duplicate/conflict was named. Read it, then pick one, naming the
   target explicitly (Mem0's ADD/UPDATE/SUPERSEDE/NOOP): **update-existing** (fold the fact into
   the named memory's body/description, don't create a file), **supersede** (the new fact
   replaces the old claim — create it with
   `--rationale "replaces <old-name> (similarity 0.9x); from session <sid>; as of HEAD <sha>"`, then
-  `"$PY" -m memory.reconsolidate --reverify <old-name> --outcome demote --superseded-by <new-name>`),
+  `hippo reconsolidate --reverify <old-name> --outcome demote --superseded-by <new-name>`),
   or **skip** (already covered).
 
 When a seed is fully processed (whatever you decided — including "nothing worth keeping"),
@@ -158,7 +158,7 @@ discard it so the queue drains and the nudge clears (`--dismiss` is the same op 
 a capture isn't worth keeping at all):
 
 ```
-"$PY" -m memory.capture --discard <seed-path-from-the-list>
+hippo capture --discard <seed-path-from-the-list>
 ```
 
 The queue is BOUNDED (CAP-6): each capture self-prunes to the highest-value, most-recent
@@ -168,7 +168,7 @@ SessionStart nudge for a few sessions instead of ignoring it (it re-nags after �
 deferral, not a dismissal):
 
 ```
-"$PY" -m memory.capture --snooze
+hippo capture --snooze
 ```
 
 ## Step 2 — Work the reconsolidation worklist (LIF-1)
@@ -178,7 +178,7 @@ item — LIF-1 gave `demote` a terminal state (it chains straight to soft-invali
 command) and an ack/snooze so a deferred item stops re-nagging:
 
 ```
-"$PY" -m memory.reconsolidate --dry-run
+hippo reconsolidate --dry-run
 ```
 
 For each item, render its evidence brief BEFORE the verdict (EVD-1 — read-only; retires
@@ -188,14 +188,14 @@ evidence-drift fences, `invalid_after` state, and linked neighbors. Read the mem
 body itself alongside it — the brief carries the code-side half only:
 
 ```
-"$PY" -m memory.reconsolidate_brief <name>
+hippo brief <name>
 ```
 
 (Desktop/MCP: the `reconsolidate` tool, `action='brief'`, `name=…`.) Then, for each
 memory you re-ground, render exactly one verdict (per item):
 
 ```
-"$PY" -m memory.reconsolidate --reverify <name> --outcome {graduate|fix|demote|snooze}
+hippo reconsolidate --reverify <name> --outcome {graduate|fix|demote|snooze}
 ```
 
 `graduate` (re-verified current), `fix` (you corrected the content), `demote` (confirmed wrong
@@ -220,7 +220,7 @@ Refresh the index + persisted edge list so the session's writes are live and sta
 recomputed:
 
 ```
-"$PY" -m memory.build_index
+hippo build-index
 ```
 
 For link densification on the existing corpus (GRA-3 — suggest edges between high-similarity
@@ -281,12 +281,12 @@ metadata:
 
 (merge into an existing `edge_origin:` map if one is already there). The stamp is
 absence-emits-nothing — corpora without it behave identically, nothing bumps
-`corpus_format`, and it never enters links.json; `python -m memory.links --audit`
+`corpus_format`, and it never enters links.json; `hippo links --audit`
 displays stamped-edge counts so a co-recall-proposed edge stays distinguishable from a
 hand-authored one. Per item, agent-gated — never append the whole list in bulk. If no,
 skip it; the tally will keep its count and you can dismiss it again next drain.
 
-After any approved append, re-run `"$PY" -m memory.build_index` so `links.json` carries the
+After any approved append, re-run `hippo build-index` so `links.json` carries the
 new edge — GRA-1's 1-hop expansion picks it up on the very next recall, no ranking change
 involved.
 

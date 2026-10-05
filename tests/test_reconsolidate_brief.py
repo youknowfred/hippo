@@ -348,7 +348,7 @@ def test_skill_step2_names_the_brief_cli():
     )
     with open(skill, "r", encoding="utf-8") as fh:
         text = fh.read()
-    assert "memory.reconsolidate_brief" in text and "action='brief'" in text
+    assert "hippo brief" in text and "action='brief'" in text
 
 
 # --------------------------------------------------------------------------- #

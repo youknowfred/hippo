@@ -137,7 +137,7 @@ will flag this for you if it notices), switch to a multilingual model instead:
    ```bash
    export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
    [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell; see the preflight above."; exit 1; }
-   PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/venv/bin/python" -m memory.build_index \
+   hippo build-index \
      --memory-dir <memory_dir> --index-dir <index_dir> --force
    ```
 

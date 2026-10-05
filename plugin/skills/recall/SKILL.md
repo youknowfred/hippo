@@ -35,13 +35,13 @@ Query the corpus (natural language — phrase it as the underlying question, the
 index matches):
 
 ```
-"$PY" -m memory.recall_view "<what to recall — e.g. how do we deploy the web service>" [-k <max matches>]
+hippo inspect "<what to recall — e.g. how do we deploy the web service>" [-k <max matches>]
 ```
 
 List everything this project knows, grouped by type (a map of the corpus — no query):
 
 ```
-"$PY" -m memory.recall_view --list-by-type
+hippo inspect --list-by-type
 ```
 
 Replay how a decision evolved (RCH-3 — walks the authored supersedes/refines chain around
@@ -49,7 +49,7 @@ a memory into an ordered narrative, with retirement boundaries and contradiction
 points; answers "why did we decide X" / "what replaced Y"):
 
 ```
-"$PY" -m memory.recall_view --history "<memory-name>"
+hippo inspect --history "<memory-name>"
 ```
 
 Search EVERY registered project on this machine, not just this one (RCH-4 — explicit
@@ -58,7 +58,7 @@ cross-project hits are labeled `from <repo>`, and a trailer names every corpus s
 or skipped):
 
 ```
-"$PY" -m memory.recall_view --all-projects "<what to recall>"
+hippo inspect --all-projects "<what to recall>"
 ```
 
 ## Reading the output

@@ -48,8 +48,8 @@ hippo_note_usage skill dream  # OBS-2: count this skill's use (one spool line, n
 ## Run a pass
 
 ```
-"$PY" -m memory.dream            # the default: discover + auto-apply Tier-A, digest w/ undo handles
-"$PY" -m memory.dream --dry-run  # report-only preview (zero memory writes)
+hippo dream            # the default: discover + auto-apply Tier-A, digest w/ undo handles
+hippo dream --dry-run  # report-only preview (zero memory writes)
 ```
 
 Present the digest/report to the user roughly as printed — the status line (or the
@@ -60,7 +60,7 @@ Do not editorialize candidates into facts: an edge is a ranking hint, not a clai
 Machine-readable form (for scripting / inspection):
 
 ```
-"$PY" -m memory.dream --json
+hippo dream --json
 ```
 
 Useful knobs (env or flags): `--probe-k <n>` co-fire probe depth (default 10),
@@ -74,7 +74,7 @@ The bare pass runs the DRM-2 loop — `apply-reversibly → notify → undo-wind
 (`--apply` forces it even under `HIPPO_DREAM_APPLY=0`):
 
 ```
-"$PY" -m memory.dream --apply
+hippo dream --apply
 ```
 
 It auto-applies ONLY the Tier-A class — additive, body-prose-preserving, ranking-only:
@@ -92,11 +92,11 @@ Undo is one command, byte-exact, drift-refusing; applied edges age into /dream's
 source set only after 5 un-undone sessions (`DREAM_AGE_SESSIONS`):
 
 ```
-"$PY" -m memory.dream --undo              # revert the latest pass
-"$PY" -m memory.dream --undo <edge-id>    # revert exactly one edge
-"$PY" -m memory.dream --undo-since <N|date>
-"$PY" -m memory.dream --log               # every edge: active / aged-in / undone
-"$PY" -m memory.dream --retire-ghost <edge-id> [--reason "…"]   # DRM-7, see below
+hippo dream --undo              # revert the latest pass
+hippo dream --undo <edge-id>    # revert exactly one edge
+hippo dream --undo-since <N|date>
+hippo dream --log               # every edge: active / aged-in / undone
+hippo dream --retire-ghost <edge-id> [--reason "…"]   # DRM-7, see below
 ```
 
 **A ghost edge** (doctor: "active ledger edge(s) with no on-disk stamp") is an ACTIVE
@@ -120,8 +120,8 @@ An edge-only pass has no restoring force; this is sleep's downscaling half. Repo
 posture — the pass itself writes **nothing**:
 
 ```
-"$PY" -m memory.dream --deparasite            # report/propose only
-"$PY" -m memory.dream --deparasite --retract  # + execute the Tier-A lane
+hippo dream --deparasite            # report/propose only
+hippo dream --deparasite --retract  # + execute the Tier-A lane
 ```
 
 It reports per-memory out-degree, flags hubs over `DREAM_MAX_OUT_DEGREE` (default 8), and
@@ -139,7 +139,7 @@ splits every remedy along the reversibility gradient:
   Execute ONE ratified proposal at a time:
 
 ```
-"$PY" -m memory.dream --dedup-merge <survivor> <loser>
+hippo dream --dedup-merge <survivor> <loser>
 ```
 
 **Protected hubs — floor-linked, co-recalled (≥3 shared sessions), or cited by other
@@ -167,8 +167,8 @@ The boldest tier: net-new memories, not just edges. **OFF by default**
 verified) and quarantined end to end:
 
 ```
-"$PY" -m memory.dream --generate           # report proposals only (zero memory writes)
-"$PY" -m memory.dream --generate --stage   # stage them as confidence:draft memories
+hippo dream --generate           # report proposals only (zero memory writes)
+hippo dream --generate --stage   # stage them as confidence:draft memories
 ```
 
 - **schema/gist** — a mutual co-firing cluster (≥3 memories above θ) earns ONE net-new
@@ -189,9 +189,9 @@ draft refuses — archive or git-revert those).
 **The lifecycle is self-decaying (the sweep rides every apply pass, flag or no flag):**
 
 ```
-"$PY" -m memory.dream --sweep-drafts          # graduate / expire, on demand
-"$PY" -m memory.dream --archive-draft <name>  # execute ONE proposed archive (per-item)
-"$PY" -m memory.dream --prospective           # abstain→hit flips over the frozen backlog
+hippo dream --sweep-drafts          # graduate / expire, on demand
+hippo dream --archive-draft <name>  # execute ONE proposed archive (per-item)
+hippo dream --prospective           # abstain→hit flips over the frozen backlog
 ```
 
 - **Graduation is external-evidence-only**: a draft flips to `verified` exactly when the

@@ -47,7 +47,5 @@ if hippo_touch_fastpath "$PAYLOAD"; then
 fi
 hippo_note_usage hook post_tool spawn
 
-hippo_resolve_py
-
-printf '%s' "$PAYLOAD" | "$PY" -m memory.outcome --from-hook 2>/dev/null || true
+printf '%s' "$PAYLOAD" | HIPPO_SURFACE=hook "$BASH" "${CLAUDE_PLUGIN_ROOT:-.}/bin/hippo" outcome --from-hook 2>/dev/null || true
 exit 0

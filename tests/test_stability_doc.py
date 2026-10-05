@@ -209,10 +209,10 @@ def test_stated_bin_hippo_subcommands_match_the_registry():
     m = re.search(r"\*\*The `bin/hippo` CLI subcommands\*\*\s*—(.+?)- \*\*The MCP tool names", flat)
     assert m, "STABILITY.md's bin/hippo subcommand list is gone or reworded"
     stated = set(re.findall(r"`([a-z][a-z-]*)`", m.group(1)))
-    assert stated == set(surfaces.BIN_HIPPO_SUBCOMMANDS), (
-        f"STABILITY.md states bin/hippo subcommands {sorted(stated)} but the registry "
-        f"(surfaces.BIN_HIPPO_SUBCOMMANDS, itself pinned to the script by INV-1) says "
-        f"{sorted(surfaces.BIN_HIPPO_SUBCOMMANDS)}. Update the doc and the registry "
+    assert stated == set(surfaces.FROZEN_BIN_HIPPO_SUBCOMMANDS), (
+        f"STABILITY.md states bin/hippo subcommands {sorted(stated)} but the registry's "
+        f"frozen rows (cli_verbs, frozen=True) say "
+        f"{sorted(surfaces.FROZEN_BIN_HIPPO_SUBCOMMANDS)}. Update the doc and the table "
         "together — the published list is a stability promise."
     )
 
@@ -256,7 +256,12 @@ def test_readme_counts_the_shipped_skills():
 
 
 def test_bin_hippo_usage_line_names_every_subcommand():
-    with open(os.path.join(_REPO_ROOT, "plugin", "bin", "hippo"), encoding="utf-8") as fh:
-        m = re.search(r"usage: hippo <([a-z|-]+)>", fh.read())
-    assert m, "bin/hippo lost its usage line"
-    assert set(m.group(1).split("|")) == set(surfaces.BIN_HIPPO_SUBCOMMANDS)
+    """SRF-1: the usage text is generated from the verb table, so it names every public
+    verb (the hook-only rows stay out of it, and `help --all` shows them too)."""
+    from memory.cli import usage
+    from memory.cli_verbs import CLI_VERBS
+
+    shown = set(re.findall(r"^  ([a-z][a-z-]*)  ", usage(), re.M))
+    assert shown == {v.verb for v in CLI_VERBS if not v.internal}
+    shown_all = set(re.findall(r"^  ([a-z][a-z-]*)  ", usage(all_verbs=True), re.M))
+    assert shown_all == set(surfaces.BIN_HIPPO_SUBCOMMANDS)

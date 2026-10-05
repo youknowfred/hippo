@@ -22,8 +22,8 @@ symlink Claude Code's native memory system reads from.
   ```
 
   Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
-  opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
-  and resolver lines, in the same call.
+  opens by pinning what it needs; an inline `hippo …` command runs
+  as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 - **If `.claude/memory/MEMORY.md` already exists (ONB-5), this is an EXISTING CORPUS, not a
   fresh project** — the flagship case here is a teammate cloning the repo, or opening a new
   `git worktree` of a repo already using hippo: the corpus is already in git, but THIS machine
@@ -165,10 +165,10 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    step 6. `status: "conflict"` means the symlink already exists and points somewhere ELSE —
    stop and report the conflict rather than silently overwriting it; a pre-existing symlink to
    a different target is a sign of a prior manual setup that shouldn't be clobbered.
-4. **Build the index**: `"$PY" -m memory.build_index --memory-dir .claude/memory --index-dir
-   .claude/.memory-index` — run it after step 3's first three lines, in the same Bash call, so
-   `hippo_resolve_py` sets its `$PY`/`PYTHONPATH` (falls back to bare `python3` if bootstrap
-   hasn't run yet — BM25-only index still builds and works).
+4. **Build the index**: `hippo build-index --memory-dir .claude/memory --index-dir
+   .claude/.memory-index` — run it in the same Bash call as step 3's pin line, so `hippo`
+   uses the plugin's venv (it falls back to bare `python3` if bootstrap hasn't run yet — a
+   BM25-only index still builds and works).
 4b. **Mark this corpus TRUSTED (SEC-1) + register it for cross-project recall (RCH-4).**
    Recall is gated: until this machine's user trusts a corpus, recall injects nothing from it
    (a cloned repo's memories are otherwise an unreviewed prompt-injection channel). Running

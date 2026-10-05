@@ -10,9 +10,8 @@
 # so `import memory` resolves to the bundled package — code from PLUGIN_ROOT
 # (read-only, swapped on update), deps from PLUGIN_DATA (persistent across updates).
 # Falls back to a bare `python3` if bootstrap hasn't run yet (BM25-only / degraded,
-# never a hard failure). PY resolution itself is the ONE shared hippo_resolve_py()
-# in _resolve_py.sh (OSP-6) — every hook/skill/bin surface sources the same file
-# instead of re-deriving this logic.
+# never a hard failure). The hook reaches Python only through bin/hippo (SRF-1), which
+# runs the ONE shared hippo_resolve_py() in _resolve_py.sh (OSP-6).
 #
 # Wired as a SessionStart hook via plugin/hooks/hooks.json.
 set -uo pipefail
@@ -30,7 +29,6 @@ cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" 
 
 # shellcheck disable=SC1091  # dynamic path via CLAUDE_PLUGIN_ROOT; see hooks/_resolve_py.sh
 . "${CLAUDE_PLUGIN_ROOT:-.}/hooks/_resolve_py.sh"
-hippo_resolve_py
 
 # --- First-run nudge (ONB-1) — cheap pre-Python branch, pure stats -----------
 # After install the plugin is otherwise silently inert: hooks fall back to bare
@@ -94,5 +92,5 @@ else
   export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-${XDG_CACHE_HOME:-$HOME/.cache}/hippo-memory/fastembed}"
 fi
 
-printf '%s' "$PAYLOAD" | "$PY" -m memory.session_start 2>/dev/null || true
+printf '%s' "$PAYLOAD" | HIPPO_SURFACE=hook "$BASH" "${CLAUDE_PLUGIN_ROOT:-.}/bin/hippo" session-start 2>/dev/null || true
 exit 0

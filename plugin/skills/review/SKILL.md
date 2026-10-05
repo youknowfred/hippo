@@ -23,8 +23,8 @@ MEMORY_DIR="$REPO_ROOT/.claude/memory"
 ```
 
 Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
-opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
-and resolver lines, in the same call.
+opens by pinning what it needs; an inline `hippo …` command runs
+as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 ## What this does, in order
 
@@ -39,7 +39,7 @@ and resolver lines, in the same call.
    export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
    . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
-   "$PY" -m memory.review --memory-dir "$MEMORY_DIR" --repo-root "$REPO_ROOT"
+   hippo review --memory-dir "$MEMORY_DIR" --repo-root "$REPO_ROOT"
    ```
 
    or, for a committed range:
@@ -48,7 +48,7 @@ and resolver lines, in the same call.
    export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
    . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
-   "$PY" -m memory.review origin/main...HEAD --memory-dir "$MEMORY_DIR" --repo-root "$REPO_ROOT"
+   hippo review origin/main...HEAD --memory-dir "$MEMORY_DIR" --repo-root "$REPO_ROOT"
    ```
 
    Present the packet to the user as-is (it is pasteable markdown — a PR comment a
@@ -79,7 +79,7 @@ gate half, and the SEN-2 threat-lint CI leg rides the same vehicle:
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
 . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
-"$PY" -m memory.review --ci origin/main...HEAD --memory-dir "$MEMORY_DIR" --repo-root "$REPO_ROOT"
+hippo review --ci origin/main...HEAD --memory-dir "$MEMORY_DIR" --repo-root "$REPO_ROOT"
 ```
 
 Exit 1 iff a gate finding (secret / threat Tier-A) exists on a touched memory file;

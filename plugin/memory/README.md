@@ -20,10 +20,12 @@ PY="${CLAUDE_PLUGIN_DATA}/venv/bin/python"   # built by /hippo:bootstrap
 export PYTHONPATH="${CLAUDE_PLUGIN_ROOT}"    # so `import memory` resolves to this package
 ```
 
-The four stateless commands also have a launcher — `"${CLAUDE_PLUGIN_ROOT}/bin/hippo"
-<recall|new|build-index|staleness>` — which does the same resolution internally (and falls
-back to bare `python3` pre-bootstrap: BM25-only via the vendored fallbacks in
-[`_vendor/`](_vendor/__init__.py)).
+Every module below with a command line is also a `hippo <verb>` (SRF-1): `bin/hippo`
+is the one entry the skills, hooks and printed hints use. It does the same resolution
+internally, finds the installed venv when the shell has no plugin env, and falls back to
+bare `python3` pre-bootstrap (BM25-only via the vendored fallbacks in
+[`_vendor/`](_vendor/__init__.py)). `hippo help --all` prints the verb table
+([`cli_verbs.py`](cli_verbs.py)); each verb runs its module exactly as `python -m` does.
 
 In a **dev checkout of this repo**, use `PY=.venv/bin/python` and `PYTHONPATH=plugin`
 instead.

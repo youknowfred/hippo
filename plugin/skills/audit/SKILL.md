@@ -75,8 +75,8 @@ not a multi-PR roadmap.
   ```
 
   Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
-  opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
-  and resolver lines, in the same call.
+  opens by pinning what it needs; an inline `hippo …` command runs
+  as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 - Confirm every tool imports cleanly:
   ```bash
   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
@@ -650,7 +650,7 @@ For each selected item, concretely:
      demote.
 
    When the **operator** explicitly defers an item instead of rendering a verdict, ack it with
-   `"$PY" -m memory.reconsolidate --snooze <name>` (LIF-1) — the worklist stops re-nagging it
+   `hippo reconsolidate --snooze <name>` (LIF-1) — the worklist stops re-nagging it
    for the next 5 sessions and the ack is logged in the reconsolidation ledger. A snooze is a
    deferral, not a verdict: never record it as one of the outcomes above.
 5. Every verdict needs a 2-4 sentence justification **citing the specific diff hunk, commit, or
@@ -836,7 +836,7 @@ never adds a batch wrapper around them:
     stays there until `/hippo:resolve` renders a verdict; recall's typed note flags every
     co-surface with "contradicts … — verify" in the meantime.
   - one side is clearly current → prefer the shipped supersede flow over a bare edge:
-    `"$PY" -m memory.reconsolidate --reverify <loser> --outcome demote --superseded-by
+    `hippo reconsolidate --reverify <loser> --outcome demote --superseded-by
     <winner>` (edge + `invalid_after` in one per-item verdict).
   Then re-run `build_index.refresh_index` — `add_typed_relation` writes the frontmatter but
   NOT `links.json`, and recall's hot-path contradiction note reads the cache (the inbox
@@ -884,7 +884,7 @@ never adds a batch wrapper around them:
 - **Always name the coldness signal's SCOPE (TEA-5).** "Never recalled" is CLONE-LOCAL unless
   `curation_report()['committed_usage_present']` is True — a memory a teammate hits daily reads
   as cold on your clone. When flagging a cold/dead-weight memory on a team, say the signal is
-  clone-local and point at `python -m memory.soak --record-usage` (each clone commits
+  clone-local and point at `hippo soak --record-usage` (each clone commits
   `.claude/memory/.usage/`) as the fix before any archive is proposed.
 - **The "This week" section is capped and self-contained** — 5 ranked + up to 2
   recurrence-escalated items, no more.

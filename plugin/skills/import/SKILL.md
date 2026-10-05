@@ -24,8 +24,8 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 ```
 
 Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
-opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
-and resolver lines, in the same call.
+opens by pinning what it needs; an inline `hippo …` command runs
+as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 ## What this does, in order
 
@@ -100,7 +100,7 @@ corpus, rules.json, or the pending queue (there is deliberately no write leg yet
 ```bash
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
 . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
-"$PY" -m memory.import_mdc --from claude-mem
+hippo import --from claude-mem
 ```
 
 (`--store <path>` overrides the default `~/.claude-mem/claude-mem.db`; `--project

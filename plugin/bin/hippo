@@ -1,72 +1,61 @@
 #!/usr/bin/env bash
-# hippo — convenience launcher for the memory engine's stateless CLI entry points.
+# hippo — the one door into the memory engine (SRF-1): `hippo <verb> [args...]`.
 #
-# NOT auto-added to $PATH by the plugin system — invoke via its full plugin-relative
-# path: "${CLAUDE_PLUGIN_ROOT}/bin/hippo" <subcommand> [args...]. Runs the plugin's own
-# venv (${CLAUDE_PLUGIN_DATA}/venv) with PYTHONPATH set to this script's plugin root,
-# falling back to python3 pre-bootstrap (recall/staleness still work BM25-only). PY
-# resolution is the ONE shared hippo_resolve_py() in hooks/_resolve_py.sh (OSP-6),
-# sourced relative to this script's own known location — CLAUDE_PLUGIN_ROOT is pinned
-# to SCRIPT_DIR here so PYTHONPATH matches this exact plugin copy even when unset.
+# Claude Code puts this plugin's bin/ on the Bash tool's PATH (PLATFORM.md §1), so a bare
+# `hippo <verb>` runs from any shell the agent opens; hooks and skills call it by its
+# plugin-relative path. Every verb but `mcp` goes to memory.cli, which runs the verb's
+# module exactly as `python -m memory.<module>` would. The verb table is
+# plugin/memory/cli_verbs.py, and `hippo help` prints it.
 #
-# Wraps the genuinely stateless, single-purpose commands (recall, new, build-index,
-# staleness) plus `mcp` — the long-lived stdio MCP server (INT-2), the one non-stateless
-# entry, kept here so plugin.json's mcpServers command can reuse this script's canonical PY
-# resolution (venv, else python3 pre-bootstrap). init/bootstrap/doctor/audit are multi-step
-# orchestrations that belong in their SKILL.md files, not duplicated here — this script
-# redirects to them instead of re-implementing their logic.
+# Interpreter: the plugin's own venv (${CLAUDE_PLUGIN_DATA}/venv) with PYTHONPATH at this
+# script's plugin root, else bare python3 before bootstrap (recall still works BM25-only).
+# The resolution is the ONE shared hippo_resolve_py() in hooks/_resolve_py.sh (OSP-6).
+#
+# The Bash tool gets no CLAUDE_PLUGIN_DATA. A marketplace install lives at
+# ~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/, and its data dir is
+# ~/.claude/plugins/data/<plugin>-<marketplace> (characters other than letters, digits, _
+# and - become -). When that dir holds a bootstrap sentinel, it is used. A --plugin-dir
+# load lives outside the cache and stays on whatever the caller exported.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"  # plugin root (parent of bin/)
+# The plugin root (parent of bin/), found with builtins only: hooks call this script from a
+# minimal PATH, so it may not lean on dirname/basename/tr.
+case "${BASH_SOURCE[0]}" in
+  */*) _bin_dir="${BASH_SOURCE[0]%/*}" ;;
+  *) _bin_dir="." ;;
+esac
+SCRIPT_DIR="$(cd "$_bin_dir/.." && pwd)"
+
+if [ -z "${CLAUDE_PLUGIN_DATA:-}" ]; then
+  # Pure parameter expansion: no basename/dirname/tr forks on every call.
+  _plugin="${SCRIPT_DIR%/*}"
+  _market="${_plugin%/*}"
+  _cache="${_market%/*}"
+  _plugins="${_cache%/*}"
+  if [ "${_cache##*/}" = "cache" ] && [ "${_plugins##*/}" = "plugins" ]; then
+    _id="${_plugin##*/}-${_market##*/}"
+    _data="$_plugins/data/${_id//[^A-Za-z0-9_-]/-}"
+    if [ -f "$_data/.bootstrap-sentinel" ]; then
+      export CLAUDE_PLUGIN_DATA="$_data"
+    fi
+  fi
+fi
 
 # shellcheck disable=SC1091  # dynamic path via SCRIPT_DIR; see hooks/_resolve_py.sh
 . "${SCRIPT_DIR}/hooks/_resolve_py.sh"
 CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$SCRIPT_DIR}" hippo_resolve_py
 
 cmd="${1:-}"
-shift || true
-
-# OBS-2: count this verb's use (a spool line; no extra process). mcp is counted per tool
-# call by the server itself.
-case "$cmd" in
-  recall|new|build-index|staleness|review|sleep) hippo_note_usage cli "$cmd" ;;
-esac
 
 case "$cmd" in
-  recall)
-    exec "$PY" -m memory.recall_hook "$@"
-    ;;
-  new)
-    exec "$PY" -m memory.new_memory "$@"
-    ;;
-  build-index)
-    exec "$PY" -m memory.build_index "$@"
-    ;;
-  staleness)
-    exec "$PY" -m memory.staleness "$@"
-    ;;
-  review)
-    # CLB-1: the corpus review packet (op-classified memory diff + scoped lints +
-    # local recall-impact preview). --ci is the single memory-diff CI gate.
-    exec "$PY" -m memory.review "$@"
-    ;;
-  sleep)
-    # SLP-1/2: the headless maintenance runner (morning report; --print-schedule /
-    # --snooze). Stateless per invocation, like its siblings above.
-    exec "$PY" -m memory.sleep "$@"
-    ;;
   mcp)
     # INT-2: the stdio MCP server (mid-turn + subagent memory access). Long-lived — it owns
-    # stdin/stdout for the JSON-RPC stream, so exec (no wrapping) and let it run until EOF.
+    # stdin/stdout for the JSON-RPC stream, so exec it directly and let it run until EOF.
+    # OBS-2 counts it per tool call inside the server.
+    shift
     exec "$PY" -m memory.mcp_server "$@"
     ;;
-  init|bootstrap|doctor|audit)
-    echo "hippo: '$cmd' is a multi-step skill, not a bare CLI command — use /hippo:$cmd instead." >&2
-    exit 1
-    ;;
   *)
-    echo "usage: hippo <recall|new|build-index|staleness|review|sleep|mcp> [args...]" >&2
-    echo "  (init/bootstrap/doctor/audit are skills — use /hippo:<name>)" >&2
-    exit 2
+    exec "$PY" -m memory.cli "$@"
     ;;
 esac

@@ -14,9 +14,9 @@
 #
 # Runs the plugin's OWN self-provisioned venv (${CLAUDE_PLUGIN_DATA}/venv), PYTHONPATH
 # pointed at ${CLAUDE_PLUGIN_ROOT} so `import memory` resolves to the bundled package.
-# Falls back to a bare `python3` if bootstrap hasn't run yet. PY resolution itself is
-# the ONE shared hippo_resolve_py() in _resolve_py.sh (OSP-6) — every hook/skill/bin
-# surface sources the same file instead of re-deriving this logic.
+# Falls back to a bare `python3` if bootstrap hasn't run yet. The hook reaches Python only
+# through bin/hippo (SRF-1), which runs the ONE shared hippo_resolve_py() in
+# _resolve_py.sh (OSP-6).
 #
 # Wired as a UserPromptSubmit hook via plugin/hooks/hooks.json. The SessionStart dynamic
 # memory context is emitted by the separate memory_session_start.sh dispatcher.
@@ -37,8 +37,6 @@ hippo_corpus_present || exit 0
 # UserPromptSubmit delivers the event as JSON on stdin; ".prompt" is the user's text.
 PAYLOAD="$(cat 2>/dev/null || true)"
 
-hippo_resolve_py
-
 # Force the dense model OFFLINE for the hook path (belt — recall.py also guards this).
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
@@ -54,9 +52,10 @@ else
   export FASTEMBED_CACHE_PATH="${FASTEMBED_CACHE_PATH:-${XDG_CACHE_HOME:-$HOME/.cache}/hippo-memory/fastembed}"
 fi
 
-# INT-5: ONE Python spawn for the whole hook. memory.recall_hook --stdin-json reads the hook JSON
+# INT-5: ONE Python spawn for the whole hook, through the one door (SRF-1, bin/hippo).
+# `hippo recall --stdin-json` reads the hook JSON
 # payload (prompt + session_id, COR-6) directly off stdin and emits the hookSpecificOutput JSON
 # itself — replacing the previous three launches (parse .prompt, parse .session_id, recall) plus
 # the jq/python emission wrap. An empty/unparseable prompt or an empty result prints nothing.
-printf '%s' "$PAYLOAD" | "$PY" -m memory.recall_hook --stdin-json 2>/dev/null || hippo_note_usage hook user_prompt failed
+printf '%s' "$PAYLOAD" | HIPPO_SURFACE=hook "$BASH" "${CLAUDE_PLUGIN_ROOT:-.}/bin/hippo" recall --stdin-json 2>/dev/null || hippo_note_usage hook user_prompt failed
 exit 0

@@ -16,7 +16,8 @@ This module is that artifact. It declares, for every ``/hippo:*`` verb:
     honest preflight says so — never a dead-end promise),
 
 plus the tools that serve NO typed verb (mid-turn/subagent reads, the corpus-repair
-verbs) and the ``bin/hippo`` subcommand list (frozen in STABILITY.md).
+verbs) and the ``hippo <verb>`` list (SRF-1; declared in ``cli_verbs``, the frozen rows
+stated in STABILITY.md).
 
 BUILD-TIME ARTIFACT ONLY. ``tests/test_surface_registry.py`` is the parity lint that
 cross-checks every declaration here against reality — ``_DISPATCH``, the skills dir,
@@ -37,17 +38,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Tuple
 
+from .cli_verbs import CLI_VERBS
+
 # The honest-preflight marker every terminal-only skill must carry verbatim (the
 # INT-19 wording): the lint greps SKILL.md for it, and its PRESENCE in a routed
 # skill is as much a failure as its absence in a terminal-only one.
 TERMINAL_ONLY_MARKER = "no Desktop-safe MCP-tool equivalent yet"
 
-# bin/hippo's dispatching subcommands (STABILITY.md's frozen CLI surface). The lint
-# parses the script's exec-ing case arms and asserts equality, so advice naming
-# ``hippo <sub>`` can be checked against a list that cannot drift from the script.
-BIN_HIPPO_SUBCOMMANDS: Tuple[str, ...] = (
-    "recall", "new", "build-index", "staleness", "mcp", "sleep", "review",
-)
+# SRF-1: every ``hippo <verb>`` the door dispatches, read from the one table in
+# ``cli_verbs`` (pure data, which ``memory.cli`` reads at runtime; this registry only
+# re-exports it). Advice naming ``hippo <verb>`` is checked against this list, and
+# STABILITY.md's frozen CLI surface against the ``frozen`` rows.
+BIN_HIPPO_SUBCOMMANDS: Tuple[str, ...] = tuple(v.verb for v in CLI_VERBS)
+FROZEN_BIN_HIPPO_SUBCOMMANDS: Tuple[str, ...] = tuple(v.verb for v in CLI_VERBS if v.frozen)
 
 
 @dataclass(frozen=True)

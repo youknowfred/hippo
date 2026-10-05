@@ -26,15 +26,15 @@ hippo_note_usage skill resolve  # OBS-2: count this skill's use (one spool line,
 ```
 
 Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
-opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
-and resolver lines, in the same call.
+opens by pinning what it needs; an inline `hippo …` command runs
+as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 ## Step 1 — List the inbox
 
 ```bash
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
 . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
-"$PY" -m memory.resolve_view --list
+hippo resolve --list
 ```
 
 Every unresolved `contradicts` pair in the corpus, whether or not the two memories ever
@@ -70,7 +70,7 @@ hooks, not the full claims. Then pick exactly one, per item:
 - **keep-A-supersede-B** — one side won (the other is outdated/wrong). Demote the loser and
   record the succession edge:
   ```
-  "$PY" -m memory.reconsolidate --reverify <loser-name> --outcome demote --superseded-by <winner-name>
+  hippo reconsolidate --reverify <loser-name> --outcome demote --superseded-by <winner-name>
   ```
   Then edit the declaring memory's frontmatter to drop the now-settled `contradicts:` entry
   (the supersedes edge carries the story from here). Commit both — an ordinary reviewable diff.
@@ -85,7 +85,7 @@ hooks, not the full claims. Then pick exactly one, per item:
 
 - **mark-not-conflicting** — the edge itself was wrong; both stand as written:
   ```
-  "$PY" -m memory.resolve_view --dismiss <name-a> <name-b>
+  hippo resolve --dismiss <name-a> <name-b>
   ```
   This is the ONLY verdict that does not edit the corpus — it lands in this clone's
   gitignored ledger (under `${CLAUDE_PLUGIN_DATA}`), so the pair stops appearing here while
@@ -98,7 +98,7 @@ Never bulk-apply a verdict across pairs — each pair gets its own reading and i
 ```bash
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
 . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
-"$PY" -m memory.resolve_view --list
+hippo resolve --list
 ```
 
 Pairs you dismissed stay gone on this clone; pairs you resolved in the corpus are gone

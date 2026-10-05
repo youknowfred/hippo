@@ -43,8 +43,8 @@ MEMORY_DIR="$REPO_ROOT/.claude/memory"
 ```
 
 Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
-opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
-and resolver lines, in the same call.
+opens by pinning what it needs; an inline `hippo …` command runs
+as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 ## What this does, in order
 
@@ -56,11 +56,11 @@ and resolver lines, in the same call.
    ```bash
    export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
    . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
-   "$PY" -m memory.recall_diff --range origin/main~5..origin/main --candidates
+   hippo recall-diff --range origin/main~5..origin/main --candidates
    ```
 
    The boundary view names which candidates heal fresh-checkout link rot
-   (`"$PY" -m memory.lint_links --boundary`); publishing the top heals-N candidate
+   (`hippo lint-links --boundary`); publishing the top heals-N candidate
    repairs the most dangling links a stranger's clone sees.
 
 2. **Run the preflight** (read-only; nothing is staged, nothing is edited):
@@ -69,7 +69,7 @@ and resolver lines, in the same call.
    export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
    . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
    NAME="<the one memory name the user picked>"
-   "$PY" -m memory.publish "$NAME"
+   hippo publish "$NAME"
    ```
 
    - **Mechanical refusals only:** docs (`MEMORY.md`, `CONVENTIONS.md`) and

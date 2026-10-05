@@ -31,15 +31,15 @@ hippo_note_usage skill doctor  # OBS-2: count this skill's use (one spool line, 
 ```
 
 Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
-opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
-and resolver lines, in the same call.
+opens by pinning what it needs; an inline `hippo …` command runs
+as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 ## Run the engine
 
 ```bash
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
 . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
-"$PY" -m memory.doctor
+hippo doctor
 ```
 
 Print its output VERBATIM — every `✔`/`✘`/`⚠` line, in order. Do not re-word, re-order, drop,

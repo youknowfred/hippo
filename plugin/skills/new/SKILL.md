@@ -28,8 +28,8 @@ export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_P
 ```
 
 Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
-opens by pinning what it needs; give an inline `"$PY" …` command from the text the same pin
-and resolver lines, in the same call.
+opens by pinning what it needs; an inline `hippo …` command runs
+as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 ## Usage
 
@@ -44,7 +44,7 @@ CLI synopsis (`<required>` / `{choice-a|choice-b}` / `[optional]` — standard u
 not literal shell; fill in the placeholders before running):
 
 ```
-"$PY" -m memory.new_memory \
+hippo new \
   <name> "<one-line description — this is the recall hook, be specific>" \
   --type {user|feedback|project|reference} \
   [--tier {project|user}] \
@@ -135,7 +135,7 @@ reviewable, per-item git diff — never a bulk sweep). **Read the flagged neighb
   stale or incomplete). Fold the new content into the existing memory's body/description,
   then delete the just-created file (it is uncommitted — plus the floor pointer line the
   tool added to `MEMORY.md`, if the type was `user`/`feedback`; `git diff` shows it) and
-  re-run `"$PY" -m memory.build_index` so the index drops the deleted entry.
+  re-run `hippo build-index` so the index drops the deleted entry.
 - **supersede** — the new memory REPLACES the flagged one's claim (old asserts X, reality
   is now not-X). Keep the new file and record the typed edge + demotion verdict in one
   per-item step:
@@ -143,8 +143,8 @@ reviewable, per-item git diff — never a bulk sweep). **Read the flagged neighb
   ```bash
   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
   . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
-  "$PY" -m memory.reconsolidate --reverify "<old-name>" --outcome demote --superseded-by "<new-name>"
-  "$PY" -m memory.build_index   # refresh links.json so the demotion is live THIS session
+  hippo reconsolidate --reverify "<old-name>" --outcome demote --superseded-by "<new-name>"
+  hippo build-index   # refresh links.json so the demotion is live THIS session
   ```
 
   This appends `supersedes: ["<old-name>"]` to the NEW memory's frontmatter (the GRA-4
@@ -153,7 +153,7 @@ reviewable, per-item git diff — never a bulk sweep). **Read the flagged neighb
   and can be archived later via `/hippo:audit` once it ages out.
 - **skip** — the flagged memory already covers it and needs no update (the new file should
   not exist). Delete the just-created file (+ its floor pointer, as in update-existing)
-  and re-run `"$PY" -m memory.build_index`.
+  and re-run `hippo build-index`.
 
 When the check could not run at all, the result carries a machine-readable
 `note` (e.g. `duplicate check skipped: no index` — a first-ever memory, or a never-indexed

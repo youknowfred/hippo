@@ -74,6 +74,10 @@ These may change at any release without a major bump — do not build on them:
 - **The Python API** — importing `memory.*` internals directly. hippo is consumed as a Claude Code
   plugin (skills + hooks + MCP + `bin/hippo`), not as a library; module-level functions and
   signatures may change. Depend on the CLI and MCP surfaces, not the Python symbols.
+- **`hippo` verbs beyond the seven above** — v1.42.0 made `bin/hippo` the one engine entry
+  and gave every engine command a verb (`hippo help --all` lists them). The seven frozen
+  subcommands keep their names and behavior; the rest stay unfrozen until STABILITY v2
+  classifies them.
 - **Exact recall output text and ordering** — recall is a ranker; its wording, formatting, and the
   precise order of results are tuned continuously.
 

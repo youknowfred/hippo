@@ -185,22 +185,21 @@ def test_no_shipped_text_claims_typed_commands_are_terminal_only():
 # --------------------------------------------------------------------------- #
 # bin/hippo subcommand parity
 # --------------------------------------------------------------------------- #
-def _bin_hippo_dispatching_arms() -> set:
-    """Case arms in bin/hippo that exec a command (the redirect/usage arms don't count)."""
+def test_bin_hippo_hands_every_verb_but_mcp_to_the_door():
+    """SRF-1: the script has exactly two exec arms — the long-lived MCP server, and the
+    door (memory.cli) for everything else. A verb added as its own case arm would bypass
+    the table the registry and the usage text read."""
     with open(_BIN_HIPPO, encoding="utf-8") as fh:
         script = fh.read()
-    arms = set()
-    for m in re.finditer(r"^\s{2}([a-z|\-]+)\)\n(.*?)^\s{4};;", script, re.M | re.S):
-        if re.search(r"^\s*exec\b", m.group(2), re.M):
-            arms.update(m.group(1).split("|"))
-    return arms
+    execs = re.findall(r"^\s*exec\s+\"\$PY\"\s+-m\s+(memory\.[a-z_]+)", script, re.M)
+    assert execs == ["memory.mcp_server", "memory.cli"], execs
 
 
 def test_bin_hippo_subcommands_match_registry():
-    assert _bin_hippo_dispatching_arms() == set(S.BIN_HIPPO_SUBCOMMANDS), (
-        "bin/hippo's exec-ing case arms drifted from surfaces.BIN_HIPPO_SUBCOMMANDS — "
-        "update both together (STABILITY.md freezes this list)"
-    )
+    from memory.cli_verbs import CLI_VERBS
+
+    assert S.BIN_HIPPO_SUBCOMMANDS == tuple(v.verb for v in CLI_VERBS)
+    assert len(set(S.BIN_HIPPO_SUBCOMMANDS)) == len(S.BIN_HIPPO_SUBCOMMANDS)
 
 
 # --------------------------------------------------------------------------- #
