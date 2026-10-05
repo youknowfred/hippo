@@ -4,7 +4,7 @@ description: Uninstall/offboarding for THIS project — removes the cross-machin
 
 # /hippo:remove — uninstall and offboarding path
 
-The teardown counterpart to `/hippo:init`. Scoped to **this one project** — it never touches
+The teardown counterpart to `/hippo:setup`. Scoped to **this one project** — it never touches
 another project's symlink, another project's corpus, or the shared per-machine venv/model cache
 (those are reported for reclamation, never deleted, since other projects may still depend on
 them).
@@ -51,7 +51,7 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
      usually means either a prior manual setup or that `$REPO_ROOT` doesn't match what you
      expect; forcing it risks unlinking a symlink that belongs to a different project's corpus.
 
-1b. **De-register from the cross-project registry (RCH-4).** `/hippo:init` listed this project
+1b. **De-register from the cross-project registry (RCH-4).** `/hippo:setup` listed this project
    in the machine-local `~/.claude/hippo-projects.json` so `/hippo:recall --all-projects`
    could search it from other projects; offboarding removes that listing (idempotent — `true`
    also when it was never registered):
@@ -65,18 +65,18 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
      "$REPO_ROOT"
    ```
    Trust state (`hippo-trust.json`) is deliberately left as-is — trust records the user's
-   review of the CORPUS content, which removal does not un-review; re-running `/hippo:init`
-   later picks both straight back up. This is the opposite intent from SEN-5's `untrust` MCP
-   tool: **remove** = "I'm done working here" (offboard the project, keep the review), while
-   **untrust** = "I no longer trust this corpus" (revoke the review, by-gate, no cache wipe).
-   Reach for `untrust` after finding a bad/poisoned memory; reach for `remove` to offboard a
+   review of the CORPUS content, which removal does not un-review; re-running `/hippo:setup`
+   later picks both straight back up. This is the opposite intent from revoking consent (the `trust`
+   MCP tool, action='revoke'): **remove** = "I'm done working here" (offboard the project, keep
+   the review), while **revoke** = "I no longer trust this corpus" (withdraw the review,
+   by-gate, no cache wipe). Revoke after finding a bad/poisoned memory; remove to offboard a
    project you still trust.
 
 2. **Offer to delete the derived, gitignored dirs — agent-gated, never unconditional.** Ask the
    user (in this skill's own conversational turn) before deleting anything here; a "yes" to step
    1 is not consent for step 2. If confirmed, remove:
    - `.claude/.memory-index/` (the recall index — rebuildable any time via
-     `/hippo:init` or `memory.build_index`)
+     `/hippo:setup` or `memory.build_index`)
    - `.claude/.memory-telemetry/` (recall/episode/reconsolidation ledgers —
      `recall_events.jsonl`, `episode_buffer.jsonl`, `reconsolidation_events.jsonl` all live here;
      deleting the directory takes all three with it)
@@ -100,7 +100,7 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 4. **Explain what was left alone.** End every run with this, regardless of what steps 2-3 did:
    `.claude/memory/` itself — the git-tracked corpus — is untouched and stays committed in git,
-   inert, until someone runs `/hippo:init` again (in this repo or a fresh clone of it). Removal
+   inert, until someone runs `/hippo:setup` again (in this repo or a fresh clone of it). Removal
    never edits, deletes, or archives a single memory file.
 
 ## Hard rules
@@ -121,6 +121,6 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 No hook still fires for this project in a way that matters — `SessionStart` and
 `UserPromptSubmit` still run (they're global to the plugin, not per-project), but with the
 symlink gone, Claude Code's native memory has nothing to read for this repo, so there is no more
-floor injection and no more recall output tied to this corpus. Re-running `/hippo:init` here
+floor injection and no more recall output tied to this corpus. Re-running `/hippo:setup` here
 later picks the existing `.claude/memory/` corpus back up exactly where it was left (ONB-5's
 existing-corpus path) — nothing was lost.

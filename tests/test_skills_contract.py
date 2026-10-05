@@ -25,6 +25,13 @@ import pytest
 _PLUGIN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "plugin"))
 _SKILLS_DIR = os.path.join(_PLUGIN_DIR, "skills")
 _ALL_SKILLS = sorted(glob.glob(os.path.join(_SKILLS_DIR, "*", "SKILL.md")))
+# SRF-3: a skill's supporting flow files (doctor's content audit). Claude Code fills plugin
+# paths into SKILL.md only, so these blocks ask `hippo env` instead (tested below); the
+# content checks — python snippets, bash syntax, module and path references — cover them too.
+_SUPPORTING_DOCS = sorted(
+    p for p in glob.glob(os.path.join(_SKILLS_DIR, "*", "*.md")) if os.path.basename(p) != "SKILL.md"
+)
+_ALL_SKILL_DOCS = _ALL_SKILLS + _SUPPORTING_DOCS
 _RESOLVE_PY_SH = os.path.join(_PLUGIN_DIR, "hooks", "_resolve_py.sh")
 
 # The shared preflight (ONB-7, reshaped by INT-20). The Bash tool inherits neither plugin path on
@@ -41,7 +48,7 @@ def test_shipped_skills_are_exactly_these():
     assert names == [
         "audit", "bootstrap", "consolidate", "doctor", "dream", "export-agents", "import",
         "init", "new", "pack", "promote", "promote-rule", "publish", "recall", "remove",
-        "resolve", "review", "tend", "why",
+        "resolve", "review", "setup", "share", "tend", "why",
     ]
 
 
@@ -195,7 +202,7 @@ def test_every_skill_routes_through_the_canonical_resolver():
 # is what makes a CORPUS_FORMAT_VERSION bump a one-constant change: bump the
 # constant and this test names the exact init surface that must follow.
 # --------------------------------------------------------------------------- #
-_INIT_SKILL = os.path.join(_SKILLS_DIR, "init", "SKILL.md")
+_INIT_SKILL = os.path.join(_SKILLS_DIR, "setup", "SKILL.md")  # SRF-3: init is setup's Init flow
 
 
 def test_init_skill_seeds_the_canonical_corpus_format():
@@ -277,7 +284,7 @@ def test_new_skill_routes_the_duplicate_decision():
 # the both-directions rule, the archive guard as the structural no-dangling
 # enforcer, and the reworded-duplicate-is-not-a-contradiction mislabel guard.
 # --------------------------------------------------------------------------- #
-_AUDIT_SKILL = os.path.join(_SKILLS_DIR, "audit", "SKILL.md")
+_AUDIT_SKILL = os.path.join(_SKILLS_DIR, "doctor", "audit.md")  # SRF-3: doctor's content audit
 
 
 def test_audit_skill_merge_tier_uses_the_calibrated_dup_scale():
@@ -320,7 +327,7 @@ def test_audit_skill_contradiction_fork_carries_the_mislabel_guard():
     assert '"contradicts"' in text, (
         "the (b) arm proposes links.add_typed_relation(..., 'contradicts', ...) per item"
     )
-    assert "GOV-1" in text and "/hippo:resolve" in text, (
+    assert "GOV-1" in text and "/hippo:tend" in text, (
         "accepted contradicts edges drain through the GOV-1 inbox"
     )
     assert "refresh_index" in text, (
@@ -399,7 +406,7 @@ def _python_snippets(skill_path: str):
     return out
 
 
-_ALL_PY_SNIPPETS = [s for _path in _ALL_SKILLS for s in _python_snippets(_path)]
+_ALL_PY_SNIPPETS = [s for _path in _ALL_SKILL_DOCS for s in _python_snippets(_path)]
 
 
 def _resolve_dotted_chain(node: ast.AST):
@@ -624,7 +631,7 @@ def test_bash_blocks_pass_shellcheck_syntax():
     only, never a shellcheck lint (see plugin/hooks/*.sh for the real shellcheck pass, which
     runs where the binary IS available)."""
     failures = []
-    for path in _ALL_SKILLS:
+    for path in _ALL_SKILL_DOCS:
         label = os.path.relpath(path, _PLUGIN_DIR)
         for i, code in enumerate(_bash_blocks(path), start=1):
             result = subprocess.run(
@@ -644,7 +651,7 @@ _DASH_M_RE = re.compile(r"-m\s+memory\.([A-Za-z_][A-Za-z0-9_.]*)")
 def test_dash_m_module_references_resolve():
     """(B): every `python -m memory.<mod>` target names a real, importable memory submodule."""
     failures = []
-    for path in _ALL_SKILLS:
+    for path in _ALL_SKILL_DOCS:
         label = os.path.relpath(path, _PLUGIN_DIR)
         for _lang, code in _fenced_blocks(path):
             for mod_suffix in sorted(set(_DASH_M_RE.findall(code))):
@@ -661,7 +668,7 @@ _PLUGIN_ROOT_PATH_RE = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}/([A-Za-z0-9_./-]+)"
 
 def test_claude_plugin_root_paths_exist_under_plugin():
     failures = []
-    for path in _ALL_SKILLS:
+    for path in _ALL_SKILL_DOCS:
         label = os.path.relpath(path, _PLUGIN_DIR)
         for _lang, code in _fenced_blocks(path):
             for rel in sorted(set(_PLUGIN_ROOT_PATH_RE.findall(code))):
@@ -690,7 +697,7 @@ def test_project_local_claude_paths_use_the_canonical_trio(monkeypatch):
     canonical_telemetry = os.path.relpath(default_telemetry_dir(f"{anchor}/.claude/memory"), anchor)
 
     failures = []
-    for path in _ALL_SKILLS:
+    for path in _ALL_SKILL_DOCS:
         label = os.path.relpath(path, _PLUGIN_DIR)
         for _lang, code in _fenced_blocks(path):
             for pre, token in _CLAUDE_PATH_RE.findall(code):
@@ -920,4 +927,37 @@ def test_every_bash_block_sets_what_it_reads():
             })
             if unset:
                 failures.append(f"{name} bash block #{i}: reads {', '.join(unset)} without setting it")
+    assert not failures, "\n".join(failures)
+
+
+# --------------------------------------------------------------------------- #
+# SRF-3: supporting flow files are read, not loaded — no substituted paths reach them.
+# --------------------------------------------------------------------------- #
+_ENV_LINE = 'eval "$(hippo env)"'
+_NEEDS_PATHS_RE = re.compile(r'"\$PY"|\$\{?CLAUDE_PLUGIN_(?:DATA|ROOT)|\bhippo_(?:resolve_py|note_usage)\b')
+
+
+def test_supporting_docs_exist_and_carry_no_pin_line():
+    assert _SUPPORTING_DOCS, "doctor's content audit moved to doctor/audit.md"
+    for path in _SUPPORTING_DOCS:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        assert _PIN not in text, (
+            f"{os.path.relpath(path, _PLUGIN_DIR)} pins the bare plugin paths, which Claude Code "
+            "never fills into a supporting file — open the block with eval \"$(hippo env)\""
+        )
+
+
+def test_supporting_doc_blocks_ask_hippo_for_the_paths_first():
+    failures = []
+    for path in _SUPPORTING_DOCS:
+        label = os.path.relpath(path, _PLUGIN_DIR)
+        for i, code in enumerate(_bash_blocks(path), start=1):
+            body = _shell_code_only(code)
+            m = _NEEDS_PATHS_RE.search(body)
+            if m is None:
+                continue
+            env_at = code.find(_ENV_LINE)
+            if env_at == -1 or env_at > code.find(m.group(0)):
+                failures.append(f"{label} bash block #{i}: reads {m.group(0)!r} before {_ENV_LINE}")
     assert not failures, "\n".join(failures)

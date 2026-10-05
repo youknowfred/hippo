@@ -156,3 +156,17 @@ def test_an_exported_data_dir_wins(tmp_path):
         env=_env(tmp_path, CLAUDE_PLUGIN_DATA=str(other)), cwd=str(tmp_path),
     )
     assert r.stdout.strip() == f"OTHER={other}"
+
+
+def test_env_prints_shell_exports_a_flow_file_can_eval(tmp_path):
+    """SRF-3: `eval "$(hippo env)"` gives a supporting flow file the plugin root, data dir and
+    interpreter that Claude Code only fills into SKILL.md."""
+    env = _env(tmp_path, PYTHONPATH=_PLUGIN, CLAUDE_PLUGIN_DATA=str(tmp_path / "data"))
+    r = subprocess.run(
+        ["/bin/bash", "-c",
+         f'eval "$("{sys.executable}" -m memory.cli env)"; '
+         'printf "%s|%s|%s\\n" "$CLAUDE_PLUGIN_ROOT" "$CLAUDE_PLUGIN_DATA" "$PY"'],
+        capture_output=True, text=True, timeout=30, env=env, cwd=str(tmp_path),
+    )
+    root, data, py = r.stdout.strip().split("|")
+    assert root == _PLUGIN and data == str(tmp_path / "data") and py == sys.executable

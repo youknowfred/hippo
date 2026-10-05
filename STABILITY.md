@@ -20,7 +20,10 @@ release). New *additions* alongside them are minor, non-breaking changes.
 - **The `/hippo:*` skill namespace** — the command names users type: `bootstrap`, `init`, `new`,
   `recall`, `why`, `doctor`, `audit`, `consolidate`, `resolve`, `promote`, `promote-rule`, `pack`,
   `export-agents`, `import`, `remove`. (New skills may be added; existing ones won't be renamed or
-  removed silently.)
+  removed silently.) v1.42.0 opened this list's deprecation window: the nine v2 verbs (`setup`,
+  `new`, `recall`, `tend`, `doctor`, `share`, `review`, `dream`, `remove`) absorbed the other
+  names, each of which now routes into its verb, keeps working through v1.43, and is removed in
+  v2.0.
 - **The `bin/hippo` CLI subcommands** — `recall`, `new`, `build-index`, `staleness`, `mcp`,
   `sleep` (added in T15 SLP as a minor, non-breaking addition), `review` (added in T12 CLB —
   the corpus review packet; its `--ci` mode is the single memory-diff CI gate).

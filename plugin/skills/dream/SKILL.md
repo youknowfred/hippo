@@ -86,7 +86,7 @@ stamped `pass=`/`edge=` and recorded in the committed append-only
 `.claude/memory/dream-ledger.jsonl`. Edges are live in recall immediately (index rebuilt)
 but **never committed** — git history stays the owner's. Present the digest verbatim,
 including the undo handles. Supersedes candidates are digest-gated (never auto);
-contradicts route to `/hippo:resolve`.
+contradicts route to `/hippo:tend`.
 
 Undo is one command, byte-exact, drift-refusing; applied edges age into /dream's own
 source set only after 5 un-undone sessions (`DREAM_AGE_SESSIONS`):
@@ -145,7 +145,7 @@ hippo dream --dedup-merge <survivor> <loser>
 **Protected hubs — floor-linked, co-recalled (≥3 shared sessions), or cited by other
 memories — are never proposed for depression**; dream-created edges confer no protection
 (the counterweight cannot be disarmed by the pass it counterweighs). A pair already
-carrying `contradicts` is a disagreement, not a duplicate: it routes to `/hippo:resolve`
+carrying `contradicts` is a disagreement, not a duplicate: it routes to `/hippo:tend`
 and is never auto-resolved or merged. Present proposals as proposals — apply nothing
 without the owner's per-item yes.
 

@@ -145,8 +145,8 @@ def test_report_names_drain_verbs_per_surface_from_the_registry(tmp_path, monkey
     _mem(md, "alpha")
     _seed_pending(md, _root)
     out = _run(capsys=capsys)
-    assert "/hippo:consolidate" in out  # the terminal drain for the capture queue
-    assert "capture" in out and "new_memory" in out  # the Desktop tool route (registry row)
+    assert "/hippo:tend" in out  # the terminal drain for the capture queue
+    assert "the tend, new_memory tools" in out  # the Desktop tool route (registry row)
 
 
 def test_capture_snooze_is_honored(tmp_path, monkeypatch, capsys):

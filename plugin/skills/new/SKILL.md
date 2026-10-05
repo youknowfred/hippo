@@ -109,7 +109,7 @@ link (it pollutes 1-hop graph expansion at recall time for everyone downstream).
 
 Only `user`/`feedback`/`project`/`reference` memories written via THIS tool ever gain a
 Related line — it is never retrofitted onto an existing memory by any automated process (see
-`/hippo:audit`'s link-densification pass for the agent-gated equivalent on the existing corpus).
+`/hippo:doctor`'s link-densification pass for the agent-gated equivalent on the existing corpus).
 
 ## Near-duplicate / conflict check (LIF-2) — the tool reports, YOU decide
 
@@ -150,7 +150,7 @@ reviewable, per-item git diff — never a bulk sweep). **Read the flagged neighb
   This appends `supersedes: ["<old-name>"]` to the NEW memory's frontmatter (the GRA-4
   edge) and logs the verdict; recall then demotes the loser automatically (halved rank,
   `[superseded by <new-name>]` annotation) — the old file stays in the corpus as history
-  and can be archived later via `/hippo:audit` once it ages out.
+  and can be archived later via `/hippo:doctor` once it ages out.
 - **skip** — the flagged memory already covers it and needs no update (the new file should
   not exist). Delete the just-created file (+ its floor pointer, as in update-existing)
   and re-run `hippo build-index`.
@@ -208,8 +208,8 @@ outcome silently — report it to the user and act on it:**
   flags any leftovers).
 - `skipped — MEMORY.md missing …` — the floor file itself does not exist, so the pointer was
   **not recorded anywhere** (the memory file + index are fine). The tool never fabricates
-  `MEMORY.md` — floor creation is `/hippo:init`'s job (skeleton + starter packs). Run
-  `/hippo:init`, then add the pointer line to the canonical section by hand
+  `MEMORY.md` — floor creation is `/hippo:setup`'s job (skeleton + starter packs). Run
+  `/hippo:setup`, then add the pointer line to the canonical section by hand
   (`- [Title](name.md) — hook`, the skeleton's pointer style). Do NOT re-run this tool for
   that — it refuses to overwrite the already-created memory file.
 - `skipped — pointer already present` — idempotence: the floor already links `<name>.md`;
@@ -231,4 +231,4 @@ outcome silently — report it to the user and act on it:**
 
 The tool refreshes the index automatically — the new memory is recallable in the SAME session,
 not just future ones. It does NOT commit anything; that's the user's call, same as
-`/hippo:init`'s nudge-not-commit policy.
+`/hippo:setup`'s nudge-not-commit policy.

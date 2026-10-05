@@ -511,18 +511,19 @@ def test_doctor_footer_maps_consolidate_to_the_flow_tools(corpus, tmp_path, monk
 
 
 def test_consolidate_skill_preflight_maps_every_flow_tool():
-    """The skill's guard must route Desktop to the tools (not claim no path exists), and
-    every tool it names must be one the server actually serves."""
-    path = os.path.join(
-        os.path.dirname(__file__), "..", "plugin", "skills", "consolidate", "SKILL.md"
-    )
+    """The consolidate flow now lives in /hippo:tend (SRF-3). Its Desktop routing must map every
+    step onto a v2 tool route the server serves (not claim no path exists)."""
+    path = os.path.join(os.path.dirname(__file__), "..", "plugin", "skills", "tend", "SKILL.md")
     with open(path, encoding="utf-8") as fh:
         text = fh.read()
-    assert "no Desktop-safe MCP-tool equivalent" not in text  # the pre-INT-13 claim is gone
-    for tool in _FLOW_TOOLS:
-        assert tool in text, f"consolidate SKILL.md no longer names the {tool} tool"
-        assert tool in M._DISPATCH, f"SKILL.md names {tool} but the server does not serve it"
-    assert "check:true" in text or "check: true" in text  # the CAP-3 dry-run flag
+    assert "no Desktop-safe MCP-tool equivalent" not in text
+    for tool in ("tend", "new_memory", "doctor", "setup"):
+        assert f"`{tool}`" in text, f"tend SKILL.md no longer names the {tool} tool"
+        assert tool in M._DISPATCH
+    for route in ("action='secrets_scan'", "action='build_index'", "action='link_proposals'",
+                  "action='fixtures'", "action='interview'", "action='add_decision'"):
+        assert route in text, f"tend SKILL.md no longer maps a consolidate step to {route}"
+    assert "check:true" in text or "check: true" in text  # the dry-run flag
 
 
 def test_capture_list_names_corrupt_seed_files(corpus, tmp_path):

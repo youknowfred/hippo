@@ -70,6 +70,7 @@ CLI_VERBS: Tuple[CliVerb, ...] = (
     CliVerb("eval", "eval_recall", "recall quality against the pinned fixtures"),
     CliVerb("census", "machine_census", "every hippo corpus on this machine"),
     CliVerb("soak", "soak", "record usage for the soak report"),
+    CliVerb("env", "cli_env", "the plugin paths and interpreter as shell exports (for eval)"),
     # Hook entries: the hooks call these through the door like everything else.
     CliVerb("session-start", "session_start", "the SessionStart report", internal=True),
     CliVerb("outcome", "outcome", "log a file touch (PostToolUse)", internal=True),

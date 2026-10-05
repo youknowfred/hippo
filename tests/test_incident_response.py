@@ -174,7 +174,7 @@ def test_incident_tools_registered_on_both_surfaces():
 
     for tool in ("untrust", "blast_radius"):
         assert tool in M._DISPATCH
-        assert tool in S.VERBLESS_TOOLS
+        assert tool in S.DEPRECATED_TOOLS  # served through the window, routed by inspect/trust
     # the registry parity lint's own invariant: every dispatched tool is claimed
     assert S.claimed_tools() == set(M._DISPATCH)
 

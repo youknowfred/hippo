@@ -1,11 +1,11 @@
 ---
-description: Fast health check for the memory plugin's own install/environment — is it bootstrapped, is the venv healthy, is the corpus symlinked and indexed correctly. Use for "is memory working", "check memory setup", "/hippo:doctor", or when recall seems to be silently returning nothing. This is a QUICK sanity check, not a deep corpus audit — for the latter use /hippo:audit.
+description: Health check for hippo's install and corpus — bootstrapped, venv healthy, corpus wired, indexed and trusted, recall working — plus the consent step, and on request a deep, judgment-based audit of the corpus content. Triggers include "is memory working", "check memory setup", "audit memory", "how healthy is my memory", "/hippo:doctor".
 ---
 
 # /hippo:doctor — fast environment sanity check
 
 A few-second diagnostic over the PLUGIN'S OWN install health — venv, bootstrap, symlink,
-corpus resolution, trust, index freshness/corruption. This is deliberately NOT `/hippo:audit`:
+corpus resolution, trust, index freshness/corruption. This is deliberately not the content audit (the last section):
 doctor answers "is the plumbing working," audit answers "is the corpus content still
 trustworthy" (a much heavier, judgment-based pass). Don't reach for audit when doctor's quick
 checks are what's actually being asked.
@@ -17,7 +17,7 @@ untrusted-corpus consent prompt.
 
 ## Surface routing — decide first, then act silently
 
-- **On Claude Desktop** (your context says you are in the Claude desktop app, `CLAUDE_CODE_ENTRYPOINT` is `claude-desktop`, or the preflight below stops on an unset `CLAUDE_PLUGIN_DATA`): the Desktop path for this verb IS the `doctor` MCP tool — call it directly and present its lines, then run the SEC-1 trust/re-consent step through the `trust_corpus` tool if the trust line asks for it. Skip the bash preflight and the shell blocks below; those run only in a terminal. Call the tool with no preamble — don't explain that the shell flow doesn't run on this surface, or why you're reaching for a tool instead of bash. That surface-plumbing narration is exactly the repeated noise this routing removes.
+- **On Claude Desktop** (your context says you are in the Claude desktop app, `CLAUDE_CODE_ENTRYPOINT` is `claude-desktop`, or the preflight below stops on an unset `CLAUDE_PLUGIN_DATA`): the Desktop path for this verb IS the `doctor` MCP tool — call it directly and present its lines, then run the consent step through the `trust` tool (action='review', then 'grant' with its digest once the user agrees) if the trust line asks for it. A content audit uses the `doctor` tool with action='audit' for its gathered material; the judgment is yours. Skip the bash preflight and the shell blocks below; those run only in a terminal. Call the tool with no preamble — don't explain that the shell flow doesn't run on this surface, or why you're reaching for a tool instead of bash. That surface-plumbing narration is exactly the repeated noise this routing removes.
 - **In a terminal Claude Code session**: run the bash flow below, guard first.
 
 ## Preflight (shared across all hippo skills)
@@ -120,12 +120,24 @@ active — that is the designed posture, not a failure state.
 ## End with ONE next action
 
 After presenting the engine's lines (and handling consent if it applied), end with the single
-most useful thing to run next if anything failed (e.g. `/hippo:bootstrap`, `/hippo:init`, or the
+most useful thing to run next if anything failed (e.g. `/hippo:setup`, or the
 rebuild command a line named) — not a list of every possible remediation. If every line is a
 `✔`, say so plainly.
 
 ## When NOT to use
 
-- A deep "is my corpus content still accurate" pass — that's `/hippo:audit`.
+- A deep "is my corpus content still accurate" pass — that's the content audit below.
 - Routine curiosity when nothing seems wrong — SessionStart's own staleness/link-health
   producers already surface real problems for free every session; don't re-run this reflexively.
+
+## Content audit — on request
+
+Doctor checks the plumbing; a content audit judges what the corpus says: staleness, drift,
+orphans, archive candidates, duplicates and blind spots, ranked into one report. It is heavy
+and judgment-based, so run it only when the user asks for an audit. Read the full procedure
+from this skill's directory and follow it:
+
+`${CLAUDE_PLUGIN_ROOT}/skills/doctor/audit.md`
+
+That file is read, not loaded, so Claude Code does not fill in its plugin paths: its blocks
+open with `eval "$(hippo env)"`, which asks `hippo` for them.

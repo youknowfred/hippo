@@ -1,112 +1,18 @@
 ---
-description: Drain the contradiction inbox — walk every unresolved `contradicts` pair in the memory corpus and render a per-item human verdict (keep one side and supersede the other, scope both, merge, or mark not-conflicting). Nothing auto-picks a winner. Triggers include "resolve contradictions", "contradiction inbox", "resolve memory conflicts", "which memories conflict", "/hippo:resolve". An empty inbox is fine — it just says so.
+description: Moved into /hippo:tend — its "Contradictions" flow, unchanged. This name keeps working until v2.0. /hippo:resolve
 ---
 
-# /hippo:resolve — drain the contradiction inbox
+# /hippo:resolve → /hippo:tend
 
-A `contradicts` edge deliberately demotes neither side — it means "one of these is wrong,
-VERIFY", and the verify step is a human call. Until someone renders it, recall keeps
-injecting both sides of the dispute. This skill walks each unresolved pair, one verdict per
-item. Every verdict that changes the corpus is an ordinary reviewable git commit; the ONLY
-verdict that doesn't touch the corpus (mark-not-conflicting) lands in a per-clone ledger.
-
-## Surface routing — decide first, then act silently
-
-- **On Claude Desktop** (your context says you are in the Claude desktop app, `CLAUDE_CODE_ENTRYPOINT` is `claude-desktop`, or the preflight below stops on an unset `CLAUDE_PLUGIN_DATA`): drive this SAME flow through the `resolve` MCP tool instead of the bash blocks — the steps map 1:1. Step 1's listing → the `resolve` tool (action='inbox'). Step 2's per-pair verdicts → ONE `resolve` tool call each (action='verdict'): keep-A-supersede-B → verdict='keep_one' (winner=…, loser=… — it also drops the settled contradicts declaration, so skip the hand edit); keep-both-as-scoped → edit both bodies to name their scopes FIRST, then verdict='scope_both' (a=…, b=… — it drops the declaration); merge → fold the loser's unique content into the survivor FIRST, then verdict='merge' (winner=<survivor>, loser=…); mark-not-conflicting → verdict='not_conflicting' (a=…, b=…). Same per-item discipline throughout — read both files before every verdict, never bulk-apply, commit each corpus-mutating verdict as its own reviewable diff. Just start driving the tool — don't preface it by explaining that the shell flow doesn't run on this surface. That surface-plumbing narration is exactly the repeated noise this routing removes.
-- **In a terminal Claude Code session**: run the bash flow below, guard first.
+`/hippo:resolve` is now the "Contradictions" flow of `/hippo:tend`. Load the `hippo:tend` skill and
+follow that flow: it does exactly what this command did. This name is removed in v2.0.
 
 ## Preflight (shared across all hippo skills)
 
 ```bash
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
-[ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:resolve skill, not from a copy of its SKILL.md. If the loaded skill stops here too, take the MCP-tool route in 'Surface routing' above."; exit 1; }
-. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell; load /hippo:tend instead."; exit 1; }
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # the shared interpreter resolver
 hippo_resolve_py
-hippo_note_usage skill resolve  # OBS-2: count this skill's use (one spool line, no Python)
+hippo_note_usage skill resolve  # count the old name's use: it decides when the name goes
 ```
-
-Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
-opens by pinning what it needs; an inline `hippo …` command runs
-as written (`hippo` is on the Bash tool's PATH and finds its own venv).
-
-## Step 1 — List the inbox
-
-```bash
-export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
-. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
-hippo resolve --list
-```
-
-Every unresolved `contradicts` pair in the corpus, whether or not the two memories ever
-co-surfaced in a recall. `(declared by: …)` names which file carries the `contradicts:`
-frontmatter — that is the file a corpus-mutating verdict edits.
-
-Each pair carries a deterministic **evidence card** (TMB-1): conflict age in
-commits-since-declaration (git-mined; "unknown" for uncommitted/rewritten history), the
-git-newer side, cached cited-code drift per side, usage asymmetry (withheld below 5
-recorded sessions), and a `suggested:` prefill expressed strictly in the four verdict
-names below (or `abstain`). The suggestion is adjudication EVIDENCE, never a decision —
-read both files regardless, and it is never auto-applied. When you render a verdict,
-pass the suggestion you saw so agreement is auditable: `--prefill <name>` on `--dismiss`,
-or `prefill=` on the resolve MCP tool's verdict calls (it lands beside the dismiss
-records in the per-clone ledger).
-
-The inbox may also list `(PROPOSED by dream --contradictions …)` pairs — DRM-C candidates
-an LLM flagged as substantive conflicts among dream's high-cofire pairs, shown with the
-model's one-line rationale. No edge is declared yet, so there is no frontmatter to drop;
-the same verdicts below apply, with the proposal clearing itself on any corpus outcome
-(the listing repeats this inline): keep-one-supersede-other's `supersedes` edge clears it;
-declaring the edge (`contradicts: [<other>]` on one side) turns it into an ordinary
-declared pair if you want the dispute to stay visible instead; merging/retiring a side
-clears it; and scope-both ends in `--dismiss` (after scoping, "both stand as written" —
-exactly what dismiss records). A proposal is an LLM's opinion with a cofire receipt —
-read both files before believing it.
-
-## Step 2 — For EACH pair, read both files and render ONE verdict
-
-Read both memories under `.claude/memory/` first — the descriptions in the listing are
-hooks, not the full claims. Then pick exactly one, per item:
-
-- **keep-A-supersede-B** — one side won (the other is outdated/wrong). Demote the loser and
-  record the succession edge:
-  ```
-  hippo reconsolidate --reverify <loser-name> --outcome demote --superseded-by <winner-name>
-  ```
-  Then edit the declaring memory's frontmatter to drop the now-settled `contradicts:` entry
-  (the supersedes edge carries the story from here). Commit both — an ordinary reviewable diff.
-
-- **keep-both-as-scoped** — both are right in different scopes ("we use X *on the backend*",
-  "we use Y *on the frontend*"). Edit each memory's description/body to name its scope, drop
-  the `contradicts:` entry from the declaring file, and commit.
-
-- **merge** — the two are one fact split awkwardly. Fold the surviving claim into ONE memory
-  (update its body/description), then retire the other via the `/hippo:remove` flow so links
-  and the floor stay consistent. Commit.
-
-- **mark-not-conflicting** — the edge itself was wrong; both stand as written:
-  ```
-  hippo resolve --dismiss <name-a> <name-b>
-  ```
-  This is the ONLY verdict that does not edit the corpus — it lands in this clone's
-  gitignored ledger (under `${CLAUDE_PLUGIN_DATA}`), so the pair stops appearing here while
-  the files and the edge stay untouched for other readers to judge.
-
-Never bulk-apply a verdict across pairs — each pair gets its own reading and its own commit.
-
-## Step 3 — Confirm the inbox drained
-
-```bash
-export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
-. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
-hippo resolve --list
-```
-
-Pairs you dismissed stay gone on this clone; pairs you resolved in the corpus are gone
-everywhere once the commit lands.
-
-## When NOT to use
-
-- "Is my corpus content still accurate" — that judgment-based sweep is `/hippo:audit`.
-- Draining captured session drafts / the stale-memory worklist — `/hippo:consolidate`.
-- A conflict between a memory and CLAUDE.md/.claude/rules (the governance plane) — the
-  SessionStart radar routes those to `/hippo:consolidate`; this inbox is memory ⇄ memory.

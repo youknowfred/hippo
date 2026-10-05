@@ -271,17 +271,15 @@ def test_pack_tools_honor_the_trust_gate(corpus, monkeypatch, tmp_path):
 
 
 def test_pack_skill_preflight_maps_every_pack_tool():
-    """INT-16 mirrors INT-13's contract: the skill's guard must route Desktop to the
-    tools (not claim no path exists), and every tool it names must be served."""
-    path = os.path.join(
-        os.path.dirname(__file__), "..", "plugin", "skills", "pack", "SKILL.md"
-    )
+    """The pack flow now lives in /hippo:share (SRF-3): its Desktop routing names the share
+    tool and every pack action it routes, and the server serves them."""
+    path = os.path.join(os.path.dirname(__file__), "..", "plugin", "skills", "share", "SKILL.md")
     with open(path, encoding="utf-8") as fh:
         text = fh.read()
-    assert "no Desktop-safe MCP-tool equivalent" not in text  # the pre-INT-16 claim is gone
+    assert "`share` MCP tool" in text and "share" in M._DISPATCH
     for tool in _PACK_TOOLS:
-        assert tool in text, f"pack SKILL.md no longer names the {tool} tool"
-        assert tool in M._DISPATCH, f"SKILL.md names {tool} but the server does not serve it"
+        assert f"'{tool}'" in text, f"share SKILL.md no longer routes the {tool} action"
+        assert tool in M._DISPATCH
 
 
 def test_traverse_tool_walks_the_graph(corpus):

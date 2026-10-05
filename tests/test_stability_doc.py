@@ -228,8 +228,11 @@ def _read(rel: str) -> str:
 
 
 def _skill_count() -> int:
+    """SRF-3: the v2 verbs; the retired names are one-line routes, not skills to count."""
     skills = os.path.join(_REPO_ROOT, "plugin", "skills")
-    return sum(1 for d in os.listdir(skills) if os.path.isfile(os.path.join(skills, d, "SKILL.md")))
+    shipped = {d for d in os.listdir(skills) if os.path.isfile(os.path.join(skills, d, "SKILL.md"))}
+    assert set(surfaces.V2_VERBS) <= shipped
+    return len(surfaces.V2_VERBS)
 
 
 def test_upgrading_states_the_current_versions():

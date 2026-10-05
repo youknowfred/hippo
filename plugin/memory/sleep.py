@@ -132,6 +132,8 @@ def _drain_line(verb: str) -> str:
     from .surfaces import verb_map
 
     row = verb_map().get(verb)
+    if row is not None and row.desktop == "route":  # SRF-3: a retired name opens its v2 verb
+        verb, row = row.routes_to, verb_map().get(row.routes_to)
     if row is None:
         return f"drain: /hippo:{verb} (terminal)"
     if row.desktop == "tool":
@@ -215,11 +217,11 @@ def _section_promote_scan(memory_dir: str, repo_root: str) -> Optional[str]:
 # monkeypatch a section producer on the module and the runner sees it)
 _SECTIONS = (
     ("doctor", "Plumbing (doctor)", "doctor", "_section_doctor"),
-    ("pending_captures", "Pending captures (CAP-2 triage)", "consolidate", "_section_pending"),
-    ("reconsolidation", "Reconsolidation worklist (LIF-1)", "consolidate", "_section_reconsolidation"),
+    ("pending_captures", "Pending captures (CAP-2 triage)", "tend", "_section_pending"),
+    ("reconsolidation", "Reconsolidation worklist (LIF-1)", "tend", "_section_reconsolidation"),
     ("dream", "Dream discovery (DRM-1)", "dream", "_section_dream"),
-    ("link_health", "Link health (GRA)", "consolidate", "_section_links"),
-    ("promotion_mining", "Cross-project promotion candidates (EXT-2)", "promote", "_section_promote_scan"),
+    ("link_health", "Link health (GRA)", "tend", "_section_links"),
+    ("promotion_mining", "Cross-project promotion candidates (EXT-2)", "share", "_section_promote_scan"),
 )
 
 

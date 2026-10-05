@@ -332,7 +332,7 @@ def test_no_minutes_per_verdict_claim_ships():
 
     skill = os.path.join(
         os.path.dirname(os.path.dirname(inspect.getsourcefile(RB))), "skills",
-        "consolidate", "SKILL.md",
+        "tend", "SKILL.md",
     )
     with open(skill, "r", encoding="utf-8") as fh:
         skill_text = fh.read()
@@ -344,11 +344,11 @@ def test_no_minutes_per_verdict_claim_ships():
 def test_skill_step2_names_the_brief_cli():
     skill = os.path.join(
         os.path.dirname(os.path.dirname(inspect.getsourcefile(RB))), "skills",
-        "consolidate", "SKILL.md",
+        "tend", "SKILL.md",
     )
     with open(skill, "r", encoding="utf-8") as fh:
         text = fh.read()
-    assert "hippo brief" in text and "action='brief'" in text
+    assert "hippo brief" in text and "action='show' with id='reverify:<name>'" in text
 
 
 # --------------------------------------------------------------------------- #

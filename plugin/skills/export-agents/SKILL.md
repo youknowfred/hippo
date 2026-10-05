@@ -1,126 +1,18 @@
 ---
-description: Render this project's memory floor as a PROPOSED AGENTS.md diff — one ranked, drift-checked source for the cross-tool rule plane (Codex/Cursor/Copilot all read AGENTS.md). Glob scoping is derived from each memory's cited_paths; propose-only, never an authoritative overwrite; once applied, the exported file is drift-checked by doctor/SessionStart. Use for "export to AGENTS.md", "sync my agent rules", "fan out the floor", "/hippo:export-agents".
+description: Moved into /hippo:share — its "Export" flow, unchanged. This name keeps working until v2.0. /hippo:export-agents
 ---
 
-# /hippo:export-agents — the floor as a proposed AGENTS.md diff
+# /hippo:export-agents → /hippo:share
 
-Every agent tool reads its own hand-maintained rules file; they all drift. hippo's floor
-(the memories pinned in the corpus `MEMORY.md`) is the ranked, staleness-tracked version
-of the same content. This skill renders that floor as ONE proposed `AGENTS.md` — the
-Linux-Foundation cross-tool standard — as a **reviewable diff, never a write**. The
-corpus stays the authority: to change `AGENTS.md`, edit the memories and re-export.
-
-Scope is deliberately narrow (reach, not core): `AGENTS.md` only, one shot per run, no
-auto-sync cadence. Only the PROJECT tier exports — user/private memories never enter a
-repo-committed file (the no-git-leak invariant).
+`/hippo:export-agents` is now the "Export" flow of `/hippo:share`. Load the `hippo:share` skill and
+follow that flow: it does exactly what this command did. This name is removed in v2.0.
 
 ## Preflight (shared across all hippo skills)
 
 ```bash
 export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # Claude Code fills both in when it loads this skill
-[ "${CLAUDE_CODE_ENTRYPOINT:-}" != "claude-desktop" ] || { echo "✘ /hippo:export-agents has no Desktop-safe MCP-tool equivalent yet. Run it from a terminal Claude Code session in this repo (claude, then /hippo:export-agents)."; exit 1; }
-[ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell. Claude Code fills them into this skill's text when it loads the skill (the Bash tool does not inherit them), so run these blocks from the loaded /hippo:export-agents skill, not from a copy of its SKILL.md. If the loaded skill stops here too, this Claude Code does not fill them in: update it and run /hippo:export-agents again."; exit 1; }
-. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # canonical PY resolver, OSP-6
+[ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || { echo "✘ hippo's plugin paths are empty in this shell; load /hippo:share instead."; exit 1; }
+. "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"  # the shared interpreter resolver
 hippo_resolve_py
-hippo_note_usage skill export-agents  # OBS-2: count this skill's use (one spool line, no Python)
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-MEMORY_DIR="$REPO_ROOT/.claude/memory"
+hippo_note_usage skill export-agents  # count the old name's use: it decides when the name goes
 ```
-
-Each Bash call is a fresh shell, so nothing set here reaches the next call. Every block below
-opens by pinning what it needs; an inline `hippo …` command runs
-as written (`hippo` is on the Bash tool's PATH and finds its own venv).
-
-## What this does, in order
-
-1. **Render the proposal (read-only).** Nothing is written — the output IS the decision
-   surface:
-
-   ```bash
-   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
-   . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
-   REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
-   "$PY" -c \
-     "import sys; from memory.export_agents import export_agents, describe; \
-      print(describe(export_agents(memory_dir=sys.argv[1], repo_root=sys.argv[2])))" \
-     "$MEMORY_DIR" "$REPO_ROOT"
-   ```
-
-   Read the report to the user, concretely:
-   - each section's scope (`Applies to:` globs derived from the memory's `cited_paths`;
-     a single citation stays a literal path — exact drift detection — and a collapsed
-     glob is capped so it can never balloon into a near-unscoped always-load);
-   - every `⚑` flag (over-scoped globs kept as literals, cited paths missing from the
-     tree, a preserved foreign frontmatter) and every skipped memory (retired ones do
-     not fan out);
-   - the unified diff. Hand-maintained content outside the managed markers is preserved
-     byte-verbatim — the export proposes a diff, it never regenerates the file.
-
-2. **Show the curation receipt (read-only) — WHY each floor line earned export.** The
-   counter-story to "LLM-generated AGENTS.md hurts": this export is curated, and the
-   receipt is the evidence, per floor line — recall strength under the soak-maturity
-   gate (a thin corpus honestly reads *insufficient evidence*, never a false-clean
-   0.0), staleness from the last scan (an absent cache reads *unknown*, never
-   *fresh*), graduation stamps (type / confidence / last_verified), conflict-radar
-   hits (authority gaps, superseded/contradicted floor lines), what was excluded and
-   why, and rot already present in the prior AGENTS.md block:
-
-   ```bash
-   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
-   . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
-   REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
-   "$PY" -c \
-     "import sys; from memory.export_receipts import curation_receipt, describe_receipt; \
-      print(describe_receipt(curation_receipt(memory_dir=sys.argv[1], repo_root=sys.argv[2])))" \
-     "$MEMORY_DIR" "$REPO_ROOT"
-   ```
-
-   Evidence is DISPLAY-ONLY: it never selects, filters, or ranks what exports (the
-   proposed AGENTS.md is byte-identical with or without this step). A `⚑` here is a
-   reason to go fix the memory (reverify, resolve, retire) and re-run step 1 — not a
-   knob this skill turns for you.
-
-3. **Review with the user.** This is the inv4 gate: the user (or the agent with the
-   user's explicit go-ahead) approves the diff as a whole, or edits memories / floor
-   pins and re-runs step 1. A refusal (`✘ export-agents refused: …`) means nothing to
-   decide — relay the reason (empty floor, corrupt managed block) and stop.
-
-4. **Apply only on explicit approval.** This re-renders from the current floor and
-   writes the proposed file — run it ONLY after step 3's yes:
-
-   ```bash
-   export CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"  # a fresh shell: pin again
-   . "${CLAUDE_PLUGIN_ROOT}/hooks/_resolve_py.sh"; hippo_resolve_py
-   REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; MEMORY_DIR="$REPO_ROOT/.claude/memory"
-   "$PY" -c \
-     "import sys; from memory.export_agents import export_agents; \
-      r = export_agents(memory_dir=sys.argv[1], repo_root=sys.argv[2]); \
-      r['proposed'] or sys.exit('✘ refused: ' + str(r.get('reason'))); \
-      f = open(sys.argv[3], 'w', encoding='utf-8'); f.write(r['proposed']); f.close(); \
-      print('wrote', sys.argv[3], '-', r['bytes'], 'bytes')" \
-     "$MEMORY_DIR" "$REPO_ROOT" "$REPO_ROOT/AGENTS.md"
-   ```
-
-   Committing the file is the user's call, like any other working-tree change.
-
-5. **Tell the user what stays true afterwards.**
-   - The exported file is now DRIFT-CHECKED: a cited path that later moves flags loud in
-     `/hippo:doctor` and the SessionStart rules-rot card (dead `paths:` globs in the
-     frontmatter; rotten backtick refs in `Applies to:` lines).
-   - Exported memories are governance-cited (backtick stems in the section headings), so
-     they are archive-protected and visible to the conflict radar.
-   - Re-running the skill later refreshes ONLY the managed block; anything the team
-     hand-wrote around it survives.
-
-## Hard rules
-
-- **Propose, never overwrite.** The render step writes nothing; the apply step runs only
-  after an explicit yes on the shown diff. No flag skips the review.
-- **The corpus is the one authority (inv1).** Never hand-edit inside the managed block —
-  edit the memory and re-export. Hand edits there are replaced by the next export.
-- **AGENTS.md only.** No other tool's rules file, no auto-sync cadence, no watcher —
-  re-export is always a deliberate, per-run decision.
-- **Project tier only.** User/private-tier memories never render into a committed file;
-  promote/demote between tiers is `/hippo:promote` territory.
-- **A refusal means nothing changed.** Corrupt markers are repaired by hand, never
-  guessed around.
