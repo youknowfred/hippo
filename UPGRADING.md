@@ -63,7 +63,11 @@ sees with its new spelling. Move them before v2.0, when the old names stop being
 
 Which value wins: an environment variable, then hippo's plugin option, then `hippo.json`, then the
 old location. The plugin options reach hippo's hooks and its MCP server but not commands run in a
-shell, so the dream contradiction check runs through hippo's MCP `dream` tool.
+shell, so the dream contradiction check runs through hippo's MCP `dream` tool. A scheduled
+`hippo sleep` (cron or launchd) never sees them either: if your schedule relies on
+`hippo-llm.json` for the check, put `HIPPO_DREAM_CONTRADICTIONS=1` and `HIPPO_LLM_API_KEY` in the
+scheduled command's environment before v2.0 (`hippo sleep --print-schedule` shows where). A run
+that has the check on but sees no key says so in its report.
 
 ## 2. Rebuild a derived cache (automatic)
 

@@ -40,7 +40,9 @@ _GIT_ENV = {
 
 @pytest.fixture(autouse=True)
 def _hermetic(monkeypatch):
-    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    # The current spelling, so doctor's legacy-name list stays clean in the settings tests.
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE", raising=False)
+    monkeypatch.setenv("HIPPO_DISABLE", "dense")
     monkeypatch.setenv("HIPPO_DREAM_CONTRA_MIN_COFIRE", "0.05")
 
     def _bomb(*a, **kw):  # pragma: no cover - only fires on a contract breach
@@ -317,3 +319,66 @@ def test_hook_capture_keeps_its_one_stderr_line_and_empty_stdout(repo, monkeypat
     res = _capture(md, repo, capsys, "--from-hook")
     assert res.out == ""
     assert len(res.err.strip().splitlines()) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Said where people look: the schedule recipes and doctor's legacy-file line
+# --------------------------------------------------------------------------- #
+_ID = r"\b[A-Z]{2,5}-\d+\b"
+
+
+def _ids(text):
+    """Roadmap-id-shaped tokens, minus the ones the jargon lint allows (the plist's UTF-8)."""
+    import re
+
+    return sorted(set(re.findall(_ID, text)) - {"UTF-8", "ISO-8601", "SHA-256"})
+
+
+def test_print_schedule_says_config_options_never_reach_the_schedule(
+    tmp_path, monkeypatch, capsys
+):
+    _sleep_repo(tmp_path, monkeypatch)
+    _legacy_file(tmp_path, monkeypatch, {"api_key": _FAKE_KEY, "dream_contradictions": True})
+    assert SL.main(["--print-schedule"]) == 0
+    out = capsys.readouterr().out
+    section = out[out.index("## LLM passes on a schedule"):]
+    assert "/config" in section and "never reach" in section
+    assert "HIPPO_DREAM_CONTRADICTIONS=1" in section and "HIPPO_LLM_API_KEY" in section
+    assert "hippo-llm.json" in section and "v2.0" in section
+    assert "skipped" in out  # the failure-mode list names where a missing key surfaces
+    assert _FAKE_KEY not in out
+    assert not _ids(out)
+
+
+def _settings_msg(tmp_path):
+    from memory.doctor_checks_env import DoctorContext
+    from memory.doctor_checks_settings import check_settings
+
+    md = tmp_path / "corpus" / ".claude" / "memory"
+    md.mkdir(parents=True, exist_ok=True)
+    return check_settings(DoctorContext(str(md), str(tmp_path / "corpus")))
+
+
+@pytest.mark.parametrize("doc", [
+    {"api_key": _FAKE_KEY},
+    {"api_key": _FAKE_KEY, "dream_contradictions": True},
+    {"dream_contradictions": True},
+    {"capture_triage": True},
+])
+def test_doctor_legacy_file_line_says_a_schedule_needs_the_env_pair(doc, tmp_path, monkeypatch):
+    _legacy_file(tmp_path, monkeypatch, doc)
+    r = _settings_msg(tmp_path)
+    msg = r["message"]
+    assert r["status"] == "warn"
+    assert "/config" in msg and "scheduled" in msg
+    assert "HIPPO_LLM_API_KEY" in msg and "HIPPO_DREAM_CONTRADICTIONS=1" in msg
+    assert "v2.0" in msg
+    assert _FAKE_KEY not in msg
+    assert not _ids(msg)
+
+
+def test_doctor_says_nothing_about_schedules_without_a_legacy_llm_file(tmp_path, monkeypatch):
+    r = _settings_msg(tmp_path)
+    assert r["status"] == "ok" and "scheduled" not in r["message"]
+    _legacy_file(tmp_path, monkeypatch, {"model": "claude-haiku-4-5"})
+    assert "scheduled" not in _settings_msg(tmp_path)["message"]

@@ -380,10 +380,20 @@ copy the one you want and install it yourself — the explicit-install posture i
 ## Claude scheduled task (paste into your scheduler of choice)
 {task}
 
+## LLM passes on a schedule
+The plugin options you save in /config (the LLM switches and the LLM API key) never reach
+a scheduled run: cron and launchd start hippo outside Claude Code. To run the LLM
+contradiction check on this schedule, set HIPPO_DREAM_CONTRADICTIONS=1 and
+HIPPO_LLM_API_KEY in the scheduled command's own environment (the crontab line, or the
+plist's EnvironmentVariables). A schedule that relies on ~/.claude/hippo-llm.json for them
+needs that pair before v2.0, which stops reading the file.
+
 Failure modes — where each one surfaces (nothing vanishes silently):
 - machine asleep / run skipped: the NEXT report's "last sleep run" line shows the gap.
 - venv moved or repo moved: the command above fails before hippo starts (cron mails
   stderr; launchd writes {log}) — re-run --print-schedule and reinstall the new line.
+- LLM check turned on but no key in the run's environment: the report's dream section
+  says it was skipped and names the fix.
 - report going stale (nobody reads it): it is one markdown file at
   {os.path.join(telemetry_dir, _REPORT_NAME)} — snooze it honestly
   (`hippo sleep --snooze 7d`) instead of letting it rot; it says so once when it resumes.

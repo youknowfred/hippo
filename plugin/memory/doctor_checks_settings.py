@@ -6,7 +6,11 @@ twelve names. Every old spelling keeps working through v1.43; this check is wher
 sees which ones are still in use and what each one is called now. It also names a
 plaintext API key in the legacy ``hippo-llm.json`` — the key's new home is a ``sensitive``
 plugin option Claude Code keeps in the system keychain — and any ``HIPPO_DISABLE`` entry
-that names no feature. Read-only and deterministic (fixed order, no timestamps).
+that names no feature. When that file holds the key or turns an LLM pass on, the line also
+says what moving it costs a schedule: the plugin options never reach a cron or launchd
+``hippo sleep`` (or a shell run), so a schedule that relies on the file needs the env pair
+before v2.0 (owner ruling 2026-10-05). Never a key value. Read-only and deterministic (fixed
+order, no timestamps).
 """
 
 from __future__ import annotations
@@ -26,13 +30,16 @@ def check_settings(ctx: DoctorContext) -> Dict[str, str]:
     """``ok`` when nothing legacy is in use; ``warn`` naming each old spelling and its new
     one, a plaintext key file, and unknown ``HIPPO_DISABLE`` entries."""
     try:
+        from .llm_client import as_bool
         from .provenance_format import read_policy_file
         from .settings import DISABLE_FEATURES, disable_list, legacy_llm_file, legacy_names_in_use
 
         seen = legacy_names_in_use(memory_dir=ctx.memory_dir)
         _known, unknown = disable_list()
-        key = legacy_llm_file().get("api_key")
+        llm_doc = legacy_llm_file()
+        key = llm_doc.get("api_key")
         plaintext_key = isinstance(key, str) and bool(key.strip())
+        llm_pass_on = any(as_bool(llm_doc.get(k)) for k in ("dream_contradictions", "capture_triage"))
         parts = []
         if seen:
             parts.append(
@@ -44,6 +51,13 @@ def check_settings(ctx: DoctorContext) -> Dict[str, str]:
                 f"{_key_file_label()} holds an LLM API key in plain text — move it to the "
                 "hippo plugin's LLM API key option (set it from /plugin; Claude Code keeps it "
                 "in your system keychain), then delete the key from that file"
+            )
+        if plaintext_key or llm_pass_on:
+            parts.append(
+                "hippo's plugin options (in /config) never reach a scheduled or shell run "
+                "(`hippo sleep` from cron or launchd, a terminal `hippo dream`): a schedule "
+                f"that relies on {_key_file_label()} needs HIPPO_DREAM_CONTRADICTIONS=1 and "
+                "HIPPO_LLM_API_KEY in its own environment before v2.0 stops reading the file"
             )
         if unknown:
             parts.append(

@@ -652,7 +652,12 @@ shipped default**. The legacy file, **`~/.claude/hippo-llm.json`** (`HIPPO_LLM_C
 relocates it), is still read through v1.43 — keys `provider`, `model`, `base_url`,
 `api_key`, `capture_triage`, `capture_timeout_s`, `dream_contradictions`,
 `dream_timeout_s`, `contra_max_pairs`, `contra_min_cofire` — and doctor warns while it holds
-a plaintext key.
+a plaintext key or turns a pass on. Scheduled and shell runs (a cron or launchd `hippo sleep`,
+a terminal `hippo dream` or `hippo capture`) never receive the plugin options, so their route
+is the environment: `HIPPO_LLM_API_KEY` / `ANTHROPIC_API_KEY` plus the flag's own variable
+(owner ruling 2026-10-05). A run whose pass is turned on but which sees no key on any route
+(`key_visible()`) skips the pass and prints one line naming the fix (`no_key_line()`): the
+dream report, the apply digest, the sleep report's dream section, and a shell capture.
 
 ### `capture_triage.py` — CAP-LLM, capture-time triage
 
