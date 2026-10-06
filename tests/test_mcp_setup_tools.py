@@ -868,6 +868,25 @@ def test_rederive_in_a_repo_with_no_corpus_says_so_instead_of_a_tool_error(tmp_p
     assert not os.path.exists(os.path.join(repo, ".claude"))
 
 
+def test_snapshot_in_a_repo_with_no_corpus_refuses_and_creates_nothing(tmp_path, monkeypatch):
+    """MIG-5: rederive and tend action='snapshot' created ``.claude/memory.pre-cite2-<stamp>/``
+    in a git repo with no corpus, then answered "snapshot FAILED". Both now answer in the
+    CLI's one line, and nothing is created."""
+    import subprocess
+
+    repo = str(tmp_path / "bare")
+    os.makedirs(repo)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    for tool in ("rederive", "tend"):
+        resp = _call(tool, {"action": "snapshot", "stamp": "t1"})
+        assert not resp["result"].get("isError"), _text(resp)
+        text = _text(resp)
+        assert "no corpus" in text and "nothing to snapshot" in text and "/hippo:setup" in text, text
+        assert "FAILED" not in text and "refused" not in text, text
+    assert not os.path.exists(os.path.join(repo, ".claude"))
+
+
 def test_rederive_snapshot_is_self_ignoring(rederive_repo):
     repo, md = rederive_repo
     text = _text(_call("rederive", {"action": "snapshot", "stamp": "t1"}))

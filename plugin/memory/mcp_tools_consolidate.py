@@ -361,8 +361,9 @@ def _tool_rederive(args: Dict[str, Any]) -> str:
 
     action = str(args.get("action") or "worklist").strip().lower()
 
-    if action in ("worklist", "stamp"):
-        no_corpus = rederive_no_corpus_line(memory_dir)  # MIG-3: the CLI's line
+    if action in ("worklist", "stamp", "snapshot"):  # MIG-3/MIG-5: the CLI's line
+        what = "snapshot" if action == "snapshot" else "re-derive or stamp"
+        no_corpus = rederive_no_corpus_line(memory_dir, what)
         if no_corpus:
             return no_corpus
 

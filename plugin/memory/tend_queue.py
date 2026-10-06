@@ -116,6 +116,8 @@ def _src_baseline(memory_dir: str, repo_root: str) -> List[dict]:
     from .staleness import unresolvable_baseline_names
     from .fm_access import fm_get
 
+    if not os.path.isdir(memory_dir):
+        return []  # TND-8: no corpus, so no baselines; an unreadable one still fails the source
     out = []
     for path in _iter_memory_files(memory_dir):
         try:
