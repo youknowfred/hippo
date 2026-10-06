@@ -98,3 +98,30 @@ def test_an_untrusted_corpus_that_exists_is_still_withheld(untrusted, memory_dir
         assert "untrusted" in text.lower() and "no corpus at" not in text, f"{name}: {text[:300]}"
     for uri, text in _resources().items():
         assert "untrusted" in text.lower() and "no corpus at" not in text, f"{uri}: {text[:300]}"
+
+
+def test_doctor_does_not_call_a_missing_corpus_untrusted(untrusted):
+    """SEC-22: doctor said "✘ no corpus at … run /hippo:setup" and then "⚠ corpus UNTRUSTED
+    (0 memories) — Next step: `hippo trust review`", two contradictory next steps. With no
+    corpus, trust and trust drift are N/A, and the corpus line is the one next step."""
+    from memory.doctor_checks_corpus import check_trust, check_trust_drift
+    from memory.doctor_checks_env import DoctorContext
+
+    repo = untrusted
+    ctx = DoctorContext(memory_dir=os.path.join(repo, ".claude", "memory"), repo_root=repo)
+    for check in (check_trust, check_trust_drift):
+        r = check(ctx)
+        assert r["status"] == "ok", r
+        assert "N/A" in r["message"] and "no corpus" in r["message"], r
+        assert "untrusted" not in r["message"].lower(), r
+    report = _tool("doctor", {})
+    assert "no corpus at" in report
+    assert "untrusted" not in report.lower(), [ln for ln in report.splitlines() if "ntrusted" in ln]
+
+
+def test_doctor_still_reports_an_untrusted_corpus_that_exists(untrusted, memory_dir):
+    from memory.doctor_checks_corpus import check_trust
+    from memory.doctor_checks_env import DoctorContext
+
+    r = check_trust(DoctorContext(memory_dir=memory_dir, repo_root=untrusted))
+    assert r["status"] == "warn" and "UNTRUSTED" in r["message"], r
