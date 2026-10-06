@@ -116,6 +116,8 @@ def _src_baseline(memory_dir: str, repo_root: str) -> List[dict]:
     from .staleness import unresolvable_baseline_names
     from .fm_access import fm_get
 
+    if not os.path.isdir(memory_dir):
+        return []  # TND-8: no corpus, so no baselines; an unreadable one still fails the source
     out = []
     for path in _iter_memory_files(memory_dir):
         try:
@@ -257,6 +259,8 @@ def _src_derivation(memory_dir: str, repo_root: str) -> List[dict]:
     from .provenance import rederive_worklist
     from .provenance_format import CITATION_DERIVATION_VERSION, read_cite_derivation
 
+    if not os.path.isdir(memory_dir):
+        return []  # MIG-3: no corpus, so nothing to re-derive and no marker to stamp
     have = read_cite_derivation(memory_dir)
     work = rederive_worklist(memory_dir, repo_root)
     out = []

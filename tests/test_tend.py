@@ -188,3 +188,20 @@ def test_doctor_reports_the_queue(corpus):
     repo, md = corpus
     r = check_tend_queue(DoctorContext(memory_dir=md, repo_root=repo))
     assert r["status"] == "warn" and "2 capture" in r["message"] and "tend memory" in r["message"]
+
+
+def test_list_in_a_repo_with_no_corpus_is_empty_on_both_surfaces(repo, monkeypatch, capsys):
+    """TND-8: `hippo tend list` and the MCP tool printed "⚠ the baseline source failed:
+    FileNotFoundError" in a git repo with no corpus. Both now just say the queue is empty."""
+    from memory.mcp_server import handle_request
+
+    md = os.path.join(repo, ".claude", "memory")
+    assert T.main(["list", "--memory-dir", md, "--repo-root", repo]) == 0
+    out = capsys.readouterr().out
+    assert "queue: empty" in out and "failed" not in out, out
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    resp = handle_request({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                           "params": {"name": "tend", "arguments": {"action": "list"}}})
+    text = resp["result"]["content"][0]["text"]
+    assert "queue: empty" in text and "failed" not in text, text
+    assert not os.path.exists(os.path.join(repo, ".claude"))

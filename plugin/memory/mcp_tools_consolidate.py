@@ -339,6 +339,7 @@ def _tool_rederive(args: Dict[str, Any]) -> str:
         build_repo_file_index,
         read_cite_derivation,
         rederive_file,
+        rederive_no_corpus_line,
         rederive_one_lines,
         rederive_worklist,
         rederive_worklist_lines,
@@ -359,6 +360,12 @@ def _tool_rederive(args: Dict[str, Any]) -> str:
         )
 
     action = str(args.get("action") or "worklist").strip().lower()
+
+    if action in ("worklist", "stamp", "snapshot"):  # MIG-3/MIG-5: the CLI's line
+        what = "snapshot" if action == "snapshot" else "re-derive or stamp"
+        no_corpus = rederive_no_corpus_line(memory_dir, what)
+        if no_corpus:
+            return no_corpus
 
     if action == "snapshot":
         stamp = str(args.get("stamp") or "").strip()

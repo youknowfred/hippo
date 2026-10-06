@@ -163,3 +163,36 @@ def test_a_corpus_behind_the_extractor_with_nothing_to_change_asks_for_a_stamp(c
         json.dump({"corpus_format": 5, "cite_derivation": 4}, fh)
     r = Q.build_queue(md, repo, kinds=("derivation",))
     assert [e["target"] for e in r["pending"]] == ["corpus"]
+
+
+def test_a_repo_with_no_corpus_has_no_derivation_item_and_no_failed_source(repo):
+    """MIG-3: the derivation source raised FileNotFoundError in a repo with no corpus (so
+    every list printed "the derivation source failed"), and an empty worklist alone would
+    then ask to stamp a corpus that does not exist."""
+    md = os.path.join(repo, ".claude", "memory")
+    r = Q.build_queue(md, repo, kinds=("derivation",), write_cache=False)
+    assert r["errors"] == {}
+    assert r["pending"] == []
+    assert not os.path.exists(os.path.join(repo, ".claude"))
+
+
+def test_a_repo_with_no_corpus_has_no_baseline_item_and_no_source_fails(repo):
+    """TND-8: the baseline source iterated the missing dir, so in a repo with no corpus every
+    list said "the baseline source failed". No corpus means no baseline items, and with
+    MIG-3's derivation half no source fails at all."""
+    md = os.path.join(repo, ".claude", "memory")
+    r = Q.build_queue(md, repo, write_cache=False)
+    assert r["errors"] == {}
+    assert r["pending"] == []
+    assert not os.path.exists(os.path.join(repo, ".claude"))
+
+
+def test_an_unreadable_corpus_still_fails_the_baseline_source(repo, memory_dir):
+    """TND-8 covers an ABSENT corpus only: one that exists but cannot be read is still a
+    failed source, named in the list, not an empty one."""
+    try:
+        os.chmod(memory_dir, 0o000)
+        r = Q.build_queue(memory_dir, repo, kinds=("baseline",), write_cache=False)
+    finally:
+        os.chmod(memory_dir, 0o755)
+    assert "PermissionError" in r["errors"].get("baseline", ""), r["errors"]
