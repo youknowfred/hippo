@@ -40,6 +40,7 @@ _MEMS = {
     "llama_billing_cutover": "Llama billing cutover checklist — ledger freeze, invoice replay, rollback.",
 }
 _PROMPT = "how do we deploy the zebra service canary lane"
+_SHIPPED_CLAIM_WAIT_S = W.CLAIM_WAIT_S
 
 
 @pytest.fixture(autouse=True)
@@ -168,7 +169,11 @@ def _injected(out: str) -> bool:
 
 
 def _prime(w, sid):
-    """One S-first prompt so the session has a healthy heartbeat from this live process."""
+    """One S-first prompt so the session has a healthy heartbeat from this live process.
+
+    The decider answers here, so it runs under the shipped claim window. A bash start can
+    take tens of ms on a loaded runner; a test that shortens the window primes first."""
+    assert W.CLAIM_WAIT_S == _SHIPPED_CLAIM_WAIT_S, "prime before shortening CLAIM_WAIT_S"
     t, box = _serve_in_thread(sid, "prime")
     _wait_waiting(w, sid)
     assert _decide(w, sid, "prime") == "warm"
@@ -235,16 +240,16 @@ def test_many_prompts_in_random_order_always_have_exactly_one_injector(warm):
 
 
 def test_server_that_gave_up_waiting_leaves_spawn_for_a_late_hook(warm, monkeypatch):
-    monkeypatch.setattr(W, "CLAIM_WAIT_S", 0.05)
     _prime(warm, "s1")
+    monkeypatch.setattr(W, "CLAIM_WAIT_S", 0.05)
     assert _serve("s1", "p2") == "{}"  # the hook never answered in time
     assert open(W.claim_path(warm["warm"], "s1", "p2")).read() == "spawn"
     assert _decide(warm, "s1", "p2") == "spawn"  # the late hook obeys it: no gap
 
 
 def test_a_hook_that_keeps_not_answering_trips_the_breaker(warm, monkeypatch):
-    monkeypatch.setattr(W, "CLAIM_WAIT_S", 0.02)
     _prime(warm, "s1")
+    monkeypatch.setattr(W, "CLAIM_WAIT_S", 0.02)
     for i in range(W.GIVEUP_TRIP):
         _serve("s1", f"g{i}")
     hb = _heartbeat(warm, "s1")
@@ -258,9 +263,9 @@ def test_a_hook_that_keeps_not_answering_trips_the_breaker(warm, monkeypatch):
 # Session routing
 # --------------------------------------------------------------------------- #
 def test_two_sessions_never_cross(warm, monkeypatch):
-    monkeypatch.setattr(W, "CLAIM_WAIT_S", 0.05)
     _prime(warm, "sessA")
     _prime(warm, "sessB")
+    monkeypatch.setattr(W, "CLAIM_WAIT_S", 0.05)
     assert _decide(warm, "sessA", "same") == "warm"
     # Session B's server call for the same prompt id must not see A's claim.
     assert _serve("sessB", "same") == "{}"
