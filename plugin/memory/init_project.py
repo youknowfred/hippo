@@ -159,15 +159,14 @@ def init_project(
     interpreter (the MCP server passes its freshly-resolved venv python so a rebuild
     right after a mid-session bootstrap embeds dense vectors); None builds in-process.
 
-    CLM-4 — two cases init used to get wrong:
-      - a repo NESTED inside another repo's corpus resolved that ancestor's corpus, so
-        init "re-wired" the ancestor's. Init here means this repo's own corpus, so the
-        target becomes ``<repo_root>/.claude/memory`` (``nested_owner`` names the other);
-      - a native memory directory in the link slot. ``adopt_digest`` None returns the
-        adoption preview (``mode: "adopt_preview"``) and writes NOTHING; the preview's
-        digest adopts it (``native_adopt.execute_adoption``) and continues on the
-        existing-corpus path, which never auto-trusts; ``"skip"`` runs init as before
-        (the link step then reports the conflict).
+    A repo nested inside another repo's corpus gets its own: SHP-8 stops resolution at the
+    session's git toplevel, so init never targets the ancestor's corpus.
+
+    CLM-4 — a native memory directory in the link slot. ``adopt_digest`` None returns the
+    adoption preview (``mode: "adopt_preview"``) and writes NOTHING; the preview's digest
+    adopts it (``native_adopt.execute_adoption``) and continues on the existing-corpus path,
+    which never auto-trusts; ``"skip"`` runs init as before (the link step then reports the
+    conflict).
     """
     from . import trust
     from .build_index import build_index, default_index_dir
@@ -183,13 +182,9 @@ def init_project(
 
     from .machine_census import claude_projects_root
     from .native_adopt import adoption_applies, execute_adoption, plan_adoption
-    from .provenance_env import foreign_corpus_owner
 
     plugin_root = _plugin_root()
     memory_dir, repo_root = resolve_dirs()
-    nested_owner = foreign_corpus_owner(memory_dir, repo_root)
-    if nested_owner:
-        memory_dir = os.path.join(repo_root, ".claude", "memory")
     is_git = git_root(repo_root) is not None
     result: Dict[str, object] = {
         "memory_dir": memory_dir,
@@ -197,7 +192,6 @@ def init_project(
         "git": is_git,
         "seeded": [],
         "warnings": [],
-        "nested_owner": nested_owner,
     }
     projects_dir = claude_projects_dir or claude_projects_root()
 

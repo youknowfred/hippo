@@ -416,6 +416,10 @@ carries **no** corpus leaves a worktree's branch-only corpus alone. `/hippo:doct
 tree it resolved in one line (`tree: MAIN working tree … (redirected from linked worktree …)`)
 and names any dead `.claude/.memory-*` copies a worktree still carries from before this behavior.
 
+A repo nested inside another, or a git submodule, resolves only its own corpus: resolution stops
+at the session's git toplevel. When it has none and a parent does, SessionStart and doctor say
+so; point `HIPPO_CORPUS_ROOT` at the parent to share the parent's corpus.
+
 ## Repo layout
 
 This repo is both a **plugin marketplace** and the **plugin itself**:
@@ -461,8 +465,9 @@ an implicit SessionStart auto-provision. Reasoning:
 - It keeps the hard hook contract (`exit 0`, never downloads, never blocks) simple and
   auditable: hooks only ever *read* an already-warmed cache; they never *provision* one.
 
-Until bootstrap runs, the SessionStart hook nudges the next step (once every few
-sessions, permanently dismissable) instead of staying silent.
+Until bootstrap runs, the SessionStart hook names the next step instead of staying
+silent: in the first session of each day, in any repo, with a one-line command that
+dismisses it on this machine.
 
 ## Troubleshooting
 
