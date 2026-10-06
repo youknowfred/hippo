@@ -801,6 +801,8 @@ def heal_empty_baselines(memory_dir: str, repo_root: str) -> Tuple[List[str], Di
 def backfill_corpus(
     memory_dir: str, repo_root: str, dry_run: bool = False, refresh: bool = False
 ) -> List[dict]:
+    if not os.path.isdir(memory_dir):
+        return []  # MIG-4: no corpus is nothing to backfill; an unreadable one still raises
     repo_files, basename_index = build_repo_file_index(repo_root)
     return [
         backfill_file(p, repo_root, repo_files, basename_index, dry_run=dry_run, refresh=refresh)
@@ -1269,8 +1271,11 @@ def rederive_worklist(memory_dir: str, repo_root: str) -> List[dict]:
     """Every memory whose citations would change under this plugin's extractor (MIG-1).
 
     Read-only. The operator reviews these, then approves them ONE AT A TIME via
-    ``rederive_file`` — there is deliberately no "approve all".
+    ``rederive_file`` — there is deliberately no "approve all". MIG-3: an ABSENT corpus
+    is an empty worklist; one that exists but cannot be read still raises.
     """
+    if not os.path.isdir(memory_dir):
+        return []
     repo_files, basename_index = build_repo_file_index(repo_root)
     out = []
     for path in _iter_memory_files(memory_dir):
@@ -1359,6 +1364,16 @@ def rederive_file(
     except Exception as exc:
         result["error"] = str(exc)
         return result
+
+
+def rederive_no_corpus_line(memory_dir: str, what: str = "re-derive or stamp") -> Optional[str]:
+    """MIG-3: a corpus-wide verb's answer in a repo with no corpus (CLI and MCP share it; ``what``
+    names the verb); None when the corpus dir exists. Without it an empty worklist reads as
+    "already match" and the stamp tries to write ``.format`` into a dir that is not there."""
+    if os.path.isdir(memory_dir):
+        return None
+    return (f"no corpus at {memory_dir}, so there is nothing to {what} — "
+            "run /hippo:setup to create one.")
 
 
 def rederive_worklist_lines(work: List[dict]) -> List[str]:
@@ -1464,8 +1479,9 @@ def snapshot_corpus(memory_dir: str, stamp: str) -> str:
     dest = os.path.join(os.path.dirname(memory_dir), f"memory.pre-cite2-{stamp}")
     if os.path.exists(dest):
         raise FileExistsError(f"{dest} already exists — refusing to overwrite a snapshot")
+    entries = os.listdir(memory_dir)  # MIG-5: read before dest exists — no debris on failure
     ensure_self_ignoring_dir(dest)  # the `*` marker lands first — no unignored window
-    for entry in os.listdir(memory_dir):
+    for entry in entries:
         src = os.path.join(memory_dir, entry)
         dst = os.path.join(dest, entry)
         if os.path.isdir(src):
@@ -1560,8 +1576,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             dest = snapshot_corpus(memory_dir, args.snapshot)
             print(f"snapshot: {dest}")
             return 0
-        except Exception as exc:
-            print(f"snapshot FAILED: {exc} — do not migrate without one")
+        except Exception as exc:  # MIG-5: an absent corpus is named as that, not as a failed copy
+            print(rederive_no_corpus_line(memory_dir, "snapshot")
+                  or f"snapshot FAILED: {exc} — do not migrate without one")
             return 1
 
     if args.heal_baselines:
@@ -1573,6 +1590,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"  - {n}: {reason}")
             return 1
         return 0
+
+    rederive = args.stamp_derivation or args.rederive_worklist
+    if rederive or not (args.rederive_one or args.reverify or args.refresh_one):  # MIG-4: + backfill
+        no_corpus = rederive_no_corpus_line(memory_dir, "re-derive or stamp" if rederive else "backfill")
+        if no_corpus:
+            print(no_corpus)
+            return 0
 
     if args.stamp_derivation:
         work = rederive_worklist(memory_dir, repo_root)
