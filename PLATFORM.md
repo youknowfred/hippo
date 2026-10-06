@@ -92,10 +92,69 @@ Desktop receipt before its `surfaces.py` row flips.
 
 | Question | Answer | Receipt | Consequence |
 |---|---|---|---|
-| Does an option reach the plugin's MCP server? | **Yes, plain and sensitive.** | A probe plugin's MCP server received both options' values through `${user_config.KEY}` in its `env`. | SRF-4 can move the LLM key to a sensitive option for anything the MCP server runs. |
+| Does an option reach the plugin's MCP server? | **Yes, plain and sensitive, saved values included.** | 2026-10-03: a probe plugin's MCP server received both options' values through `${user_config.KEY}` in its `env`. 2026-10-05 (2.1.286 and 2.1.289): with a value saved, the key-probe below received the 21-character dummy key and the switch, substituted, in terminal, headless and Desktop Code-tab sessions. | SRF-4 can move the LLM key to a sensitive option for anything the MCP server runs. |
 | Does it reach the Bash tool? | **No.** | `env` in a Bash tool call showed no `CLAUDE_PLUGIN_OPTION_*` variable. The docs agree. | hippo's LLM paths that run through Bash today (`memory.dream --generate`, capture triage) cannot read a sensitive key. They have to move into the MCP server or a hook before SRF-4 removes the plaintext config file. |
-| Does it reach a command hook? | **Not with defaults alone.** | With only `default` values (no answers saved through the configuration dialog), a command hook saw no `CLAUDE_PLUGIN_OPTION_*` variable. The docs say every option is exported to hooks. Saved values were not probed, since sensitive values need the interactive dialog. | Treat hook reach as unverified. |
+| Does it reach a command hook? | **Yes, once saved: plain and sensitive, on SessionStart, UserPromptSubmit and SessionEnd.** Not with defaults alone. Options are read when the process starts. | 2026-10-03, 2.1.286: with only `default` values, a command hook saw no `CLAUDE_PLUGIN_OPTION_*` variable. 2026-10-05, 2.1.286 and 2.1.289: the key-probe below, with a 21-character dummy key and the switch saved. The SessionStart, UserPromptSubmit and SessionEnd hooks of a fresh headless session on each version saw the key at length 21 and the switch as `true`; so did a terminal session's SessionStart and UserPromptSubmit on 2.1.289. Desktop Code-tab sessions on 2.1.286 started after the save saw both in UserPromptSubmit (8 lines). Desktop processes started before the save never did (36 lines without either); the CLI says "Restart Claude Code to apply it". One Desktop process at 22:58 UTC saw neither, even in its MCP `env`, where the switch read its default `false`. That process is not attributed. | Capture triage, which runs in the SessionEnd hook, reads the key saved in /config. The environment route (`HIPPO_LLM_API_KEY`) is needed only for runs outside Claude Code: a scheduled `hippo sleep` and shell commands. A session started before the key was saved sees it only after a restart. |
+| Can a sensitive value be saved without the dialog? | **Yes, from the CLI.** | 2026-10-05, 2.1.289: `claude plugin configure <plugin> --values-stdin` saved the dummy key. Its help text says it stores values the same way as the interactive `/plugin configure` flow, and `claude plugin install --config KEY=VALUE` does the same. The in-session `/plugin configure` dialog did not list the probe's fields. | A probe of saved values no longer needs a person at the dialog. |
 | Version floors | `/config` rows need 2.1.269; `options` pickers need 2.1.271 (docs). | This machine runs 2.1.286. | A string `options` picker stops the plugin loading on older versions, so CLM-2 stays a boolean (as planned). PLT-2 declares the floor. |
+
+**Re-running the hook row with saved values (owner ruling 2026-10-05).** The probe is a
+throwaway plugin, `key-probe`, added from a local marketplace directory. Its wiring copies
+hippo's:
+
+- a `sensitive` string option `llm_api_key` and a boolean `probe_flag`;
+- command hooks on SessionStart, UserPromptSubmit and SessionEnd;
+- an MCP server whose `env` maps both options through `${user_config.*}`, as hippo's
+  `plugin.json` does.
+
+All of them run the script below. It appends one line per call and never records a value.
+A separate plugin keeps any real key out of the probe and leaves hippo's install alone.
+Options are exported per plugin, so the answer applies to hippo.
+
+```sh
+#!/bin/sh
+k=${CLAUDE_PLUGIN_OPTION_LLM_API_KEY-}
+f=${CLAUDE_PLUGIN_OPTION_PROBE_FLAG-}
+case $k in *'${'*) kp=true ;; *) kp=false ;; esac
+if [ -n "$k" ]; then ks=true; else ks=false; fi
+if [ -n "$f" ]; then fs=true; else fs=false; fi
+printf '{"at":"%s","surface":"%s","agent":"%s","entrypoint":"%s","key_set":%s,"key_len":%s,"key_placeholder":%s,"flag_set":%s,"flag_len":%s}\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "${AI_AGENT-}" "${CLAUDE_CODE_ENTRYPOINT-}" \
+  "$ks" "${#k}" "$kp" "$fs" "${#f}" >> "$HOME/.claude/key-probe-records.jsonl"
+[ "$1" = mcp ] && exit 1   # as an MCP server it records its env, then stops
+exit 0
+```
+
+1. Add the marketplace and install `key-probe@key-probe`.
+2. Save a dummy string such as `probe-dummy-not-a-key` (21 characters) as the key and turn
+   the switch on: pipe `{"llm_api_key": "probe-dummy-not-a-key", "probe_flag": "true"}` to
+   `claude plugin configure key-probe@key-probe --values-stdin`. The `--json` form of the same
+   command then lists both options under `configured`. Delete the records written before the
+   save.
+3. From a scratch directory, with a clean environment (`env -i` keeping only `HOME`, `PATH`,
+   `USER`, `LOGNAME`, `TMPDIR` and `LANG`), run one headless prompt with each Claude Code
+   build: `claude -p "reply with ok" --max-turns 1`, and the same with the binary the Desktop
+   app bundles. Each run fires SessionStart, UserPromptSubmit and SessionEnd in a process
+   started after the save.
+4. As a cross-check, quit and reopen the Desktop app, start a fresh Code-tab session and send
+   one prompt.
+5. Read `~/.claude/key-probe-records.jsonl`. Then uninstall the plugin, remove the
+   marketplace and delete the records file.
+
+The plugin is installed at user scope, so every open session on the machine also fires it.
+Only lines from processes started after the save answer the question. A session that was
+already running keeps the values it read at start.
+
+How to read the records:
+
+- On a `hook:*` line, `key_len` 21 means a saved sensitive value reaches command hooks on that
+  surface, and `key_set: false` means it does not. `agent` names the version and `entrypoint`
+  the surface.
+- `flag_len` 4 (`true`) gives the same answer for a plain option.
+- An `mcp` line gives the answer for the MCP server with a saved value. `key_placeholder: true`
+  means the `${user_config.…}` reference reached the server unsubstituted.
+
+Date the row with the result.
 
 ## 5. `PostToolBatch` and `async` hooks
 

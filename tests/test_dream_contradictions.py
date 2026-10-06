@@ -109,7 +109,11 @@ def _conflicting_corpus(md, declare_contradicts=False, declare_supersedes=False)
 
 
 def _mock_llm(monkeypatch, responses=None, default='{"conflict": true, "reason": "opposite claims about the gateway"}'):
-    """Install a complete() double; returns the call log. ``responses`` pops in order."""
+    """Install a complete() double; returns the call log. ``responses`` pops in order.
+
+    The double stands for a provider this run can reach, so the run also sees a key: a run
+    with no key skips the check outright (tests/test_llm_key_reach.py)."""
+    monkeypatch.setenv("HIPPO_LLM_API_KEY", "test-key-not-real")
     calls = []
     queue = list(responses) if responses is not None else None
 

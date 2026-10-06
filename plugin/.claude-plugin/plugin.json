@@ -43,7 +43,7 @@
     "llm_api_key": {
       "type": "string",
       "title": "LLM API key",
-      "description": "Anthropic API key for the opt-in LLM passes, kept in your system keychain. It reaches hippo's hooks and MCP server only, never a shell command. HIPPO_LLM_API_KEY or ANTHROPIC_API_KEY override it.",
+      "description": "Anthropic API key for the opt-in LLM passes, kept in your system keychain. It reaches hippo's hooks and MCP server only, never a shell command or a scheduled hippo sleep; those need HIPPO_LLM_API_KEY in their own environment. HIPPO_LLM_API_KEY or ANTHROPIC_API_KEY override it.",
       "sensitive": true
     }
   },

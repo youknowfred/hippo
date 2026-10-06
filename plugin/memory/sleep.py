@@ -183,13 +183,17 @@ def _section_dream(memory_dir: str, repo_root: str) -> Optional[str]:
     """Dream discovery — report-only by default; the SLP-3 apply lane lives in
     ``_run_report`` (it must lead the report, not sit inside a section). Dream's own
     empty norms (no candidates / below-soak / empty corpus) read as nothing-to-report
-    here — an empty discovery must not stop the report being one line."""
+    here — an empty discovery must not stop the report being one line. The one thing
+    an empty pass still says is the LLM check's skip line: a scheduled run never sees the
+    key saved in /config, and a skip folded into "nothing to do" would stay silent on
+    every run."""
     from . import dream
 
     _code, text = dream.run_report_pass(memory_dir)
     first = (text or "").split("\n", 1)[0]
     if "— no candidates:" in first or re.search(r"\b0 candidate", first):
-        return None
+        skip = dream.contradictions_skip_line()
+        return f"⚠ {skip}" if skip else None
     return text
 
 
@@ -376,10 +380,20 @@ copy the one you want and install it yourself — the explicit-install posture i
 ## Claude scheduled task (paste into your scheduler of choice)
 {task}
 
+## LLM passes on a schedule
+The plugin options you save in /config (the LLM switches and the LLM API key) never reach
+a scheduled run: cron and launchd start hippo outside Claude Code. To run the LLM
+contradiction check on this schedule, set HIPPO_DREAM_CONTRADICTIONS=1 and
+HIPPO_LLM_API_KEY in the scheduled command's own environment (the crontab line, or the
+plist's EnvironmentVariables). A schedule that relies on ~/.claude/hippo-llm.json for them
+needs that pair before v2.0, which stops reading the file.
+
 Failure modes — where each one surfaces (nothing vanishes silently):
 - machine asleep / run skipped: the NEXT report's "last sleep run" line shows the gap.
 - venv moved or repo moved: the command above fails before hippo starts (cron mails
   stderr; launchd writes {log}) — re-run --print-schedule and reinstall the new line.
+- LLM check turned on but no key in the run's environment: the report's dream section
+  says it was skipped and names the fix.
 - report going stale (nobody reads it): it is one markdown file at
   {os.path.join(telemetry_dir, _REPORT_NAME)} — snooze it honestly
   (`hippo sleep --snooze 7d`) instead of letting it rot; it says so once when it resumes.

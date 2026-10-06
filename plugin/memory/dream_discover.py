@@ -22,6 +22,7 @@ from .dream_config import (
     apply_eligible,
     cofire_theta,
     contradictions_enabled,
+    contradictions_skip_line,
     max_apply_per_pass,
     reward_weight,
 )
@@ -712,8 +713,10 @@ def discover(
     # pairs serialized above. Appended AFTER the Tier-A sort + stats so the organic
     # surface is byte-identical flag-off vs flag-on-but-empty; its own try/except because
     # an LLM-layer failure must never break the organic pass (fail open — inv3 still
-    # holds: the stats block says what was judged/skipped when the flag is on).
-    if contradictions_enabled():
+    # holds: the stats block says what was judged/skipped when the flag is on). A run
+    # that can see no API key skips it outright — no call could succeed — and the report
+    # names the skip (``contradictions_skip_line``) instead of counting failures.
+    if contradictions_enabled() and contradictions_skip_line() is None:
         try:
             contra = discover_contradictions(
                 pairs_out, texts, memory_dir, td, pass_id=pass_id, graph=graph

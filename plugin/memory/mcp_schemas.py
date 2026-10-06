@@ -307,8 +307,8 @@ _TOOLS = [
                 "contradictions": {
                     "type": "boolean",
                     "description": "with action='pass': run the LLM contradiction check "
-                    "for this pass (needs the plugin's LLM API key; silently skipped "
-                    "without one). Omit to follow the dream_contradictions option.",
+                    "for this pass (needs the plugin's LLM API key; without one the pass "
+                    "says it was skipped). Omit to follow the dream_contradictions option.",
                 },
                 "edge_id": {
                     "type": "string",

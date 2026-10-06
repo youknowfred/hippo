@@ -110,6 +110,7 @@ from .dream_config import (
     contra_max_pairs,
     contra_min_cofire,
     contradictions_enabled,
+    contradictions_skip_line,
     max_apply_per_pass,
     reward_weight,
 )
@@ -172,9 +173,12 @@ def render_report(result: dict, *, ledger_path: Optional[str]) -> str:
     lines: List[str] = []
     status = result.get("status")
     pass_id = result.get("pass_id", "?")
+    skip = contradictions_skip_line()
     if status != "ok":
         lines.append(f"🌙 dream pass {pass_id} — no candidates: {result.get('reason')}")
         lines.append("   (an empty pass is the norm; this one never reached replay)")
+        if skip:
+            lines.append(f"   ⚠ {skip}")
         return "\n".join(lines)
 
     stats = result.get("stats") or {}
@@ -186,6 +190,8 @@ def render_report(result: dict, *, ledger_path: Optional[str]) -> str:
     )
     if ledger_path:
         lines.append(f"   candidate ledger: {ledger_path}")
+    if skip:
+        lines.append(f"   ⚠ {skip}")
     kc = stats.get("kind_counts") or {}
     lines.append(
         "   count-by-kind: "
@@ -564,6 +570,9 @@ def run_apply_pass(
         lines.append(
             f"  ↪ {len(routed)} contradicts candidate(s) routed to /hippo:tend — never auto."
         )
+    contra_skip = contradictions_skip_line()
+    if contra_skip:
+        lines.append(f"  ⚠ {contra_skip}")
     contra_stats = (result.get("stats") or {}).get("contradictions")
     if contra_stats:
         lines.append(

@@ -160,6 +160,28 @@ def contradictions_enabled() -> bool:
         return False
 
 
+def contradictions_skip_line() -> Optional[str]:
+    """The loud skip: the check is turned on but this process sees no API key, or ``None``.
+
+    A scheduled ``hippo sleep`` and a shell ``hippo dream`` never receive the key saved in
+    /config — only hippo's MCP server does — so a flag set through the environment or the
+    legacy file used to skip the check without a word. The pass skips it (no call can
+    succeed) and the report prints this line instead. Never raises."""
+    try:
+        if not contradictions_enabled():
+            return None
+        from . import llm_client
+
+        if llm_client.key_visible():
+            return None
+        return llm_client.no_key_line(
+            "LLM contradiction check",
+            "run dream through hippo's MCP dream tool with the LLM API key saved in /config",
+        )
+    except Exception:
+        return None
+
+
 def _contra_env(name: str) -> str:
     """SRF-4: ``HIPPO_DREAM_CONTRA_*`` is the spelling; the unprefixed ``DREAM_CONTRA_*``
     still reads (deprecated, through v1.43). The new name wins when both are set."""

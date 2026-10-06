@@ -124,10 +124,13 @@ contradiction check in dream**. Set the **LLM API key** option too (from hippo's
 `/plugin`): it is masked and kept in your system keychain, never in a file. The key reaches
 hippo's hooks and its MCP server and never a shell command, so the contradiction check runs
 through hippo's MCP `dream` tool. An `ANTHROPIC_API_KEY` in your environment overrides the
-option. Defaults to the `claude-haiku-4-5` alias (a heavy month of captures costs on the order
+option. A scheduled `hippo sleep` (cron or launchd) and a shell command never see the options:
+give them `HIPPO_LLM_API_KEY` and the switch's variable (`HIPPO_DREAM_CONTRADICTIONS=1`,
+`HIPPO_CAPTURE_LLM=1`) in their own environment; `hippo sleep --print-schedule` shows where. Defaults to the `claude-haiku-4-5` alias (a heavy month of captures costs on the order
 of a dollar); set the **LLM model** option to `claude-sonnet-5` to upgrade the judgment at ~3×
 the (still tiny) per-call cost. Any failure — no key, no network, a malformed reply — falls back
-to exactly the un-enriched behavior. Full knob reference:
+to exactly the un-enriched behavior, and a run with a switch on but no key says so in one line.
+Full knob reference:
 [`plugin/memory/README.md`](plugin/memory/README.md#standalone-llm-enrichment-opt-in-default-off).
 
 ## Compared to other memory tools
