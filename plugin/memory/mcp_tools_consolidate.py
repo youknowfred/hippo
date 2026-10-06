@@ -185,7 +185,7 @@ def _tool_reconsolidate(args: Dict[str, Any]) -> str:
     # and like new_memory (a reverify verdict WRITES corpus frontmatter).
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
-        return (
+        return trust.no_corpus_refusal(memory_dir, "reconsolidate: ") or (  # SEC-21
             "reconsolidate: withheld — this project's memory corpus is untrusted ("
             "the worklist exposes memory names and a verdict writes corpus files, gated "
             "just as recall and new_memory are). " + _UNTRUSTED_REMEDY
@@ -353,7 +353,7 @@ def _tool_rederive(args: Dict[str, Any]) -> str:
     # corpus frontmatter.
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
-        return (
+        return trust.no_corpus_refusal(memory_dir, "rederive: ") or (  # SEC-21
             "rederive: withheld — this project's memory corpus is untrusted (the "
             "worklist exposes memory names and 'one' writes corpus files, gated just as "
             "recall and reconsolidate are). " + _UNTRUSTED_REMEDY
@@ -477,7 +477,7 @@ def _tool_heal_baselines(args: Dict[str, Any]) -> str:
     memory_dir, repo_root = resolve_dirs()
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
-        return (
+        return trust.no_corpus_refusal(memory_dir, "heal_baselines: ") or (  # SEC-21
             "heal_baselines: withheld — this project's memory corpus is untrusted ("
             "this writes corpus files). " + _UNTRUSTED_REMEDY
         )
@@ -555,7 +555,7 @@ def _tool_co_recall_proposals(args: Dict[str, Any]) -> str:
     # SEC-1: proposals render memory names — gate exactly as traverse does.
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
-        return (
+        return trust.no_corpus_refusal(memory_dir, "co_recall_proposals: ") or (  # SEC-21
             "co_recall_proposals: withheld — this project's memory corpus is untrusted "
             "(proposals expose memory names, gated just as recall is). "
             + _UNTRUSTED_REMEDY
@@ -632,7 +632,7 @@ def _tool_abstention_fixtures(args: Dict[str, Any]) -> str:
     memory_dir, repo_root = resolve_dirs()
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
-        return (
+        return trust.no_corpus_refusal(memory_dir, "abstention_fixtures: ") or (  # SEC-21
             "abstention_fixtures: withheld — this project's memory corpus is untrusted "
             "(fixture rows name corpus memories and the confirm step writes into "
             ".claude/memory/, gated just as recall and new_memory are). " + _UNTRUSTED_REMEDY

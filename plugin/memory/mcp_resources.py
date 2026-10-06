@@ -68,11 +68,11 @@ def _resource_floor() -> str:
     )
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
-        return (
-            header + "\n\nFloor WITHHELD — this project's memory corpus is untrusted "
+        return header + "\n\n" + (trust.no_corpus_refusal(memory_dir) or (  # SEC-21
+            "Floor WITHHELD — this project's memory corpus is untrusted "
             "(a cloned corpus is an unreviewed prompt-injection channel). "
             + _UNTRUSTED_REMEDY
-        )
+        ))
     parts = []
     try:
         with open(os.path.join(memory_dir, "MEMORY.md"), encoding="utf-8") as fh:
@@ -104,10 +104,10 @@ def _resource_scorecard() -> str:
     header = "# hippo trust scorecard — corpus-health rollup"
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
-        return (
-            header + "\n\nScorecard WITHHELD — this project's corpus is untrusted. "
+        return header + "\n\n" + (trust.no_corpus_refusal(memory_dir) or (  # SEC-21
+            "Scorecard WITHHELD — this project's corpus is untrusted. "
             + _UNTRUSTED_REMEDY
-        )
+        ))
     status, message = _scorecard_message(memory_dir, repo_root)
     glyph = "⚠" if status == "warn" else "✔"
     return (
@@ -127,10 +127,10 @@ def _resource_rules_view() -> str:
     header = "# hippo rules-view — governance plane ↔ memory corpus reconciliation"
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
-        return (
-            header + "\n\nView WITHHELD — this project's corpus is untrusted. "
+        return header + "\n\n" + (trust.no_corpus_refusal(memory_dir) or (  # SEC-21
+            "View WITHHELD — this project's corpus is untrusted. "
             + _UNTRUSTED_REMEDY
-        )
+        ))
     radar = conflict_radar(memory_dir, repo_root)
     rot = rules_rot(repo_root)
     lines = [header, ""]

@@ -345,6 +345,11 @@ def check_trust(ctx: DoctorContext) -> Dict[str, str]:
             }
         if trust.is_trusted(gate_root):
             return {"status": "ok", "message": "corpus trusted — recall active."}
+        if trust.no_corpus_refusal(ctx.memory_dir):  # SEC-22: the corpus line owns the next step
+            return {
+                "status": "ok",
+                "message": "corpus trust: N/A (no corpus here — see the corpus line).",
+            }
         count = trust.corpus_count(ctx.memory_dir)
         return {
             "status": "warn",
@@ -379,7 +384,9 @@ def check_trust_drift(ctx: DoctorContext) -> Dict[str, str]:
         if not trust.is_trusted(gate_root):
             return {
                 "status": "ok",
-                "message": "trust drift: N/A (corpus untrusted — see the trust line).",
+                "message": "trust drift: N/A (no corpus here)."  # SEC-22
+                if trust.no_corpus_refusal(ctx.memory_dir)
+                else "trust drift: N/A (corpus untrusted — see the trust line).",
             }
         drift = trust.untrusted_changes(gate_root, ctx.memory_dir)
         if not drift.get("baseline"):

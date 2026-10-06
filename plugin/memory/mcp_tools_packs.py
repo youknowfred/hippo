@@ -28,7 +28,8 @@ def _corpus_gate(tool: str, why: str):
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
         return (
-            f"{tool}: withheld — this project's memory corpus is untrusted ("
+            trust.no_corpus_refusal(memory_dir, f"{tool}: ")  # SEC-21: no corpus is not "untrusted"
+            or f"{tool}: withheld — this project's memory corpus is untrusted ("
             f"{why}). " + _UNTRUSTED_REMEDY,
             memory_dir,
             repo_root,

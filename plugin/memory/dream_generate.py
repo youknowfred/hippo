@@ -1255,7 +1255,7 @@ def run_generative_pass(
 
         gate_root = trust.gate_repo_root(memory_dir, repo_root)
         if gate_root is not None and not trust.is_trusted(gate_root):
-            return 1, (
+            return 1, trust.no_corpus_refusal(memory_dir, "🌱 dream --generate: ") or (  # SEC-21
                 "🌱 dream --generate: STAGING REFUSED — this corpus is untrusted. "
                 "The report-only form (no --stage) remains available."
             )
