@@ -7,6 +7,67 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.42.1 — 2026-10-06 — "Name what's missing"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**, link cache still
+**6**; `stale.json` schema still **1**. Follow-ups to the three owner calls v1.42.0 left open,
+ruled 2026-10-05, plus two no-corpus fixes and a test race. The common thread is a thing that
+is missing: a repo with no corpus of its own, a corpus that does not exist, a run that cannot
+see the LLM key. Each now says so in one line, instead of borrowing a parent's corpus,
+printing a traceback, calling an absent corpus "untrusted", or skipping its LLM pass silently.
+
+**Operator action: only if you relied on one of these.**
+- **A nested repo or a submodule** no longer reads its parent's `.claude/memory/`. Run
+  `/hippo:setup` in it for a corpus of its own, or point `HIPPO_CORPUS_ROOT` at the parent to
+  share the parent's on purpose. The hooks now honor that pin too. See
+  [UPGRADING.md](UPGRADING.md).
+- **A scheduled `hippo sleep`** never sees the options saved in /config. If your schedule runs
+  the LLM contradiction check, give it `HIPPO_DREAM_CONTRADICTIONS=1` and `HIPPO_LLM_API_KEY`
+  in its own environment. `hippo sleep --print-schedule` shows where, and a schedule that
+  relies on `~/.claude/hippo-llm.json` needs that pair before v2.0.
+
+- **Nested repos resolve their own corpus (#144).**
+  - **Where the walk stops.** Corpus resolution now stops at the session's own git toplevel.
+    Before, a session started at the top of a nested repo or a submodule with no corpus
+    climbed into the parent's. There, the MCP tools and the CLI read and wrote the parent's
+    corpus against the child's files, while the hooks did nothing.
+  - **The line.** SessionStart and doctor say "this repo has no corpus of its own; <parent>
+    has one — init here, or pin HIPPO_CORPUS_ROOT to share it". A repo pinned to its parent's
+    corpus now recalls in the six command hooks as well as in the MCP tools.
+  - **Symlinks.** A launch through a symlink resolves the same way.
+- **The not-bootstrapped line is the machine's (#143).** It shows in the first session of
+  each day, in any repo, and its hint dismisses it on this machine. Before, it showed in every
+  session, and dismissing it in one repo also hid that repo's nested and no-corpus lines,
+  which still show every session and are dismissed per repo.
+- **A missing LLM key is named (#145).**
+  - **The line.** A cron or launchd `hippo sleep`, a shell `hippo dream` or a shell `hippo
+    capture` with an LLM switch on and no key in sight prints one line naming the skip and the
+    fix. Before, the pass skipped silently. Dream skips the check outright rather than making
+    calls that cannot succeed. The sleep report keeps that line even when it would otherwise
+    be the one-line "nothing to do".
+  - **Where it is said.** `--print-schedule` and doctor's legacy-file line name the pair a
+    schedule needs.
+  - **Receipt.** A key saved in /config reaches the SessionStart, UserPromptSubmit and
+    SessionEnd hooks and the MCP server on Claude Code 2.1.286 and 2.1.289, in every process
+    started after the save, so capture triage in the SessionEnd hook uses it. The dated rows
+    and the probe procedure are in [PLATFORM.md](PLATFORM.md) §4.
+- **No corpus is an answer, not a traceback (#146).** In a repo with no `.claude/memory/`,
+  the rederive worklist, `--stamp-derivation` and a bare `python -m memory.provenance` answer
+  in one line instead of printing a `FileNotFoundError` traceback, and `tend` no longer
+  reports "the baseline source failed". `--snapshot` no longer creates an empty
+  `.claude/memory.pre-cite2-*` directory first. A corpus that exists but cannot be read still
+  fails loudly.
+- **No corpus is not "untrusted" (#150).** The 19 trust-gated MCP tools and the three
+  resources answer "no corpus at <dir> — run /hippo:setup to create one" when there is no
+  corpus. Before, they asked you to review and trust a corpus that did not exist. doctor's
+  two trust lines read N/A there instead of UNTRUSTED. The gate itself is unchanged, and a
+  corpus that exists, even an empty one, still refuses as untrusted until you trust it.
+- **A warm-recall test race (#149).** Three tests lowered the claim wait before priming, so a
+  slow `/bin/bash` spawn on a loaded macOS runner read "spawn" where it expected "warm". The
+  prime now asserts the shipped wait, and the breaker test times a tripped server against
+  it. Test-only.
+
 ## v1.42.0 — 2026-10-05 — "One door, one queue"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format

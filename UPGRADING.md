@@ -11,7 +11,7 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
-### Next release: nested repos and submodules stop seeing the parent's corpus
+### v1.42.1: nested repos and submodules stop seeing the parent's corpus
 
 A session started at the top of a git repo that sits inside another one (a nested checkout or a
 git submodule) used to climb into the parent's `.claude/memory/` when it had none of its own. The
