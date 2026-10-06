@@ -550,6 +550,20 @@ def _root_of_memory_dir(memory_dir: Optional[str]) -> Optional[str]:
     return norm
 
 
+def no_corpus_refusal(memory_dir: Optional[str], who: str = "") -> Optional[str]:
+    """SEC-21: what a gated surface says, ahead of "untrusted", when there is NO corpus.
+
+    ``gate_repo_root`` keys a git corpus on its git root whether or not the corpus exists, so
+    in a git repo nobody ran setup in, every gated surface answered "untrusted … review and
+    trust it" with nothing there to review. The gate still refuses; this only names the real
+    state, in doctor's words. None when the corpus dir exists, so an existing corpus (even an
+    empty one) still reads as untrusted. ``who`` prefixes the line (``"rederive: "``).
+    """
+    if not memory_dir or os.path.isdir(memory_dir):
+        return None
+    return f"{who}no corpus at {memory_dir} — run /hippo:setup to create one."
+
+
 def gate_repo_root(memory_dir: Optional[str], repo_root: Optional[str] = None) -> Optional[str]:
     """Resolve the ``repo_root`` the trust gate keys on, or None if the gate is inapplicable.
 

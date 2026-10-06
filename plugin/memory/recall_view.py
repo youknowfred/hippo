@@ -119,6 +119,9 @@ def _abstention_receipt(
     try:
         gate_root = trust.gate_repo_root(memory_dir, repo_root)
         if gate_root is not None and not trust.is_trusted(gate_root):
+            no_corpus = trust.no_corpus_refusal(memory_dir)  # SEC-21: no corpus is not "untrusted"
+            if no_corpus:
+                return base + f"\nReason: {no_corpus}"
             return (
                 base + "\nReason: this corpus is UNTRUSTED — recall is withheld "
                 "entirely, nothing was scored at all. Run /hippo:doctor to review and "

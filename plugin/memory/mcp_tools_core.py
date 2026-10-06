@@ -55,7 +55,7 @@ def _tool_new_memory(args: Dict[str, Any]) -> str:
     memory_dir, repo_root = resolve_dirs()
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
-        return (
+        return trust.no_corpus_refusal(memory_dir, "new_memory: ") or (  # SEC-21
             "new_memory REFUSED — this project's memory corpus is untrusted (writing "
             "to an unreviewed corpus is gated just as reading it is — and the check dry-run "
             "reads its descriptions). " + _UNTRUSTED_REMEDY
@@ -165,7 +165,7 @@ def _tool_traverse(args: Dict[str, Any]) -> str:
     # them until the corpus is reviewed — the read-without-trust gap traverse used to leave.
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
-        return (
+        return trust.no_corpus_refusal(memory_dir, "traverse: ") or (  # SEC-21
             "traverse: withheld — this project's memory corpus is untrusted (the link "
             "graph exposes memory names and typed edges, gated just as recall is). "
             + _UNTRUSTED_REMEDY
@@ -207,7 +207,7 @@ def _tool_decision_history(args: Dict[str, Any]) -> str:
     # read-without-trust gap traverse had).
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
-        return (
+        return trust.no_corpus_refusal(memory_dir, "decision_history: ") or (  # SEC-21
             "decision_history: withheld — this project's memory corpus is untrusted ("
             "the lineage narrative exposes memory names, dates, and typed edges, gated just as "
             "recall is). " + _UNTRUSTED_REMEDY

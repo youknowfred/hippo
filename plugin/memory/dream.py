@@ -397,7 +397,7 @@ def run_apply_pass(
     # like doctor, it is a pre-consent-safe analysis).
     gate_root = trust.gate_repo_root(memory_dir, repo_root)
     if gate_root is not None and not trust.is_trusted(gate_root):
-        return 1, (
+        return 1, trust.no_corpus_refusal(memory_dir, "🌙 dream: ") or (  # SEC-21
             "🌙 dream: APPLY REFUSED — this corpus is untrusted. Review and trust "
             "it first (/hippo:doctor → trust flow); the report-only pass (--dry-run) "
             "remains available."
