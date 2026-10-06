@@ -47,6 +47,10 @@ releases:
     re_bootstrap: "no"
   - version: v1.42.0
     theme: "One door, one queue"
+    status: released
+    re_bootstrap: "no"
+  - version: v1.42.1
+    theme: "Name what's missing (follow-ups to v1.42.0's owner calls: #143 CLM-4, #144 nested repos, #145 the LLM key, #146 and #150 no corpus; #149 a HOT-6 test race)"
     status: in review
     re_bootstrap: "no"
   - version: v1.43.0
@@ -168,8 +172,8 @@ items:
     title: "Warm recall served by the session's own MCP server"
     size: L
     release: "v1.42.0"
-    status: built
-    note: "v1.42.0 release PR"
+    status: done
+    note: "v1.42.0; v1.42.1 (#149) fixed a test race that primed below the shipped claim wait"
     deps: [RWY-1, OBS-4, PLT-1]
   - id: CLM-1
     title: "Budgeted SessionStart digest"
@@ -195,20 +199,20 @@ items:
     title: "Onboarding nudge scoped per repo"
     size: S
     release: "v1.42.0"
-    status: built
-    note: "v1.42.0 release PR"
+    status: done
+    note: "v1.42.0; v1.42.1 (#143): the not-bootstrapped line shows once a day and is dismissed machine-wide; (#144) the nested-repo line names the parent and HIPPO_CORPUS_ROOT"
   - id: CLM-5
     title: "Jargon lint"
     size: S
     release: "v1.42.0"
-    status: built
-    note: "v1.42.0 release PR"
+    status: done
+    note: "v1.42.0"
   - id: CLM-6
     title: "One remediation spelling"
     size: M
     release: "v1.42.0"
-    status: built
-    note: "v1.42.0 release PR"
+    status: done
+    note: "v1.42.0"
     deps: [SRF-1]
   - id: CLM-7
     title: "A floor with hard edges"
@@ -228,14 +232,14 @@ items:
     title: "One derived, ranked maintenance queue"
     size: M
     release: "v1.42.0"
-    status: built
-    note: "v1.42.0 release PR"
+    status: done
+    note: "v1.42.0"
   - id: TND-2
     title: "The `tend` verb"
     size: L
     release: "v1.42.0"
-    status: built
-    note: "v1.42.0 release PR"
+    status: done
+    note: "v1.42.0"
     deps: [TND-1, SRF-1]
   - id: TND-3
     title: "Derived evidence anchors and quiet arming"
@@ -253,14 +257,14 @@ items:
     title: "Capture-queue hygiene"
     size: S
     release: "v1.42.0"
-    status: built
-    note: "v1.42.0 release PR"
+    status: done
+    note: "v1.42.0"
   - id: TND-6
     title: "`hippo trust` and per-session batched re-consent"
     size: S
     release: "v1.42.0"
-    status: built
-    note: "v1.42.0 release PR"
+    status: done
+    note: "v1.42.0"
     deps: [OBS-6]
   - id: TND-7
     title: "Scheduled sleep for every opted-in corpus"
@@ -271,8 +275,8 @@ items:
     title: "`hippo migrate --check`"
     size: S
     release: "v1.42.0"
-    status: built
-    note: "v1.42.0 release PR"
+    status: done
+    note: "v1.42.0"
     deps: [RWY-2, SRF-1]
   - id: FMT-2
     title: "Derived citation binding moves into the index (dual mode)"
@@ -306,29 +310,29 @@ items:
     title: "`hippo <verb>` is the one engine entry"
     size: M
     release: "v1.42.0"
-    status: built
-    note: "v1.42.0 release PR"
+    status: done
+    note: "v1.42.0"
     deps: [RWY-1]
   - id: SRF-2
     title: "MCP v2 toolset"
     size: L
     release: "v1.42.0"
-    status: built
-    note: "v1.42.0 release PR"
+    status: done
+    note: "v1.42.0"
     deps: [SRF-1, TND-2, OBS-2]
   - id: SRF-3
     title: "The v2 skill set: 9 verbs"
     size: L
     release: "v1.42.0"
-    status: built
-    note: "v1.42.0 release PR"
+    status: done
+    note: "v1.42.0"
     deps: [SRF-1, OBS-2, TND-2]
   - id: SRF-4
     title: "Config consolidation"
     size: M
     release: "v1.42.0"
-    status: built
-    note: "v1.42.0 release PR"
+    status: done
+    note: "v1.42.0; v1.42.1 (#145): a run with an LLM switch on and no key says so; saved options reach hooks (PLATFORM.md §4)"
   - id: SRF-5
     title: "One machine-wide venv and model cache"
     size: M
