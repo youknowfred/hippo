@@ -11,6 +11,23 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### Next release: nested repos and submodules stop seeing the parent's corpus
+
+A session started at the top of a git repo that sits inside another one (a nested checkout or a
+git submodule) used to climb into the parent's `.claude/memory/` when it had none of its own. The
+MCP tools and the CLI then read and wrote the parent's corpus against the nested repo's files,
+while the hooks did nothing. Corpus resolution now stops at the session's own git toplevel, so a
+nested repo has no corpus until it gets one. Subdirectory launches inside one repo, and linked
+worktrees, resolve as before.
+
+SessionStart and `/hippo:doctor` name the parent in one line: *this repo has no corpus of its own;
+\<parent\> has one — init here, or pin HIPPO_CORPUS_ROOT to share it*. Pick one:
+
+- **Its own corpus:** run `/hippo:setup` in the nested repo.
+- **The parent's, on purpose:** set `HIPPO_CORPUS_ROOT` to the parent's directory for sessions
+  in the nested repo. The hooks, the MCP tools and the CLI then all use the parent's corpus, and
+  citations and trust are checked against the parent's repo.
+
 ### v1.42.0: new MCP tool names (the old ones work until v2.0)
 
 v1.42.0 adds the v2 MCP toolset: `recall`, `new_memory`, `inspect`, `tend`, `doctor`, `setup`,

@@ -220,11 +220,6 @@ def _tool_init(args: Dict[str, Any]) -> str:
     if r.get("mode") == "adopt_refused":
         return "init: " + render_result(r.get("adoption") or {})
     lines = [f"init ({r.get('mode')} corpus) — {r.get('memory_dir')}"]
-    if r.get("nested_owner"):
-        lines.append(
-            f"✔ this repo is nested inside {r['nested_owner']}, whose corpus it used to "
-            "resolve; init set up this repo's own corpus instead."
-        )
     if isinstance(r.get("adoption"), dict) and r["adoption"].get("ok"):
         lines.append(render_result(
             r["adoption"], next_step="Nothing adopted is trusted yet (see the trust line below)."

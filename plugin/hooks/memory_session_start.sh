@@ -33,17 +33,25 @@ cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" 
 # --- First-run nudge (ONB-1; scoped per repo by CLM-4) — pre-Python, pure bash -------
 # After install the plugin is otherwise silently inert: hooks fall back to bare
 # python3 and every error is swallowed. Tell the user the ONE next step, in one line:
-#   - not bootstrapped: machine-level, so it shows in any repo;
-#   - a repo nested inside another corpus: hippo's resolver climbs past this repo's own
-#     toplevel into the ancestor's corpus, so its tools read and write THAT corpus;
+#   - not bootstrapped: about the machine, so the machine sets its cadence and
+#     dismissal (owner ruling 2026-10-05). It shows in any repo, but only in the first
+#     session of each local day: PLUGIN_DATA/.bootstrap-nudge-day holds the date it
+#     last showed, written only when it shows. Its own hint names a bootstrap-only
+#     machine-wide marker, PLUGIN_DATA/.bootstrap-nudge-dismissed, so dismissing it
+#     never hides a repo's later nested or no-corpus line;
+#   - a repo nested inside another corpus (or a submodule) with none of its own: hippo
+#     stops at this repo's toplevel (SHP-8), so the line names the ancestor's corpus and
+#     the two choices — init here, or pin HIPPO_CORPUS_ROOT to share it;
 #   - no corpus here: only in a repo that opted in — hippo enabled in its own
 #     .claude/settings*.json (a project or local install), or init recorded in the
 #     machine's projects registry. Not on a native memory dir alone: native auto memory
 #     is on by default, so that dir exists in most repos a user opens and keying on it
 #     would bring back the machine-wide nag. When one exists, the line mentions adoption.
-# Dismissal is per repo: a line per repo root in PLUGIN_DATA/nudge-dismissed-repos. The
-# old machine-wide .nudge-dismissed marker is still honored (an explicit "permanently"
-# from before), but nothing tells anyone to create it any more.
+# The nested and no-corpus lines show every session and are dismissed per repo: a line
+# per repo root in PLUGIN_DATA/nudge-dismissed-repos. That list still silences every
+# line in its repos (it was the bootstrap line's hint before the ruling). The old
+# machine-wide .nudge-dismissed marker is still honored for every line (an explicit
+# "permanently" from before), but nothing tells anyone to create it any more.
 hippo_repo_key() {  # the repo this session works in: git toplevel (main tree of a linked worktree)
   local d main
   d="$(pwd -P)"
@@ -83,10 +91,18 @@ hippo_repo_opted_in() {  # <repo key>
   case "$c" in *"\"$1\":"*) return 0 ;; esac
   return 1
 }
-hippo_nested_owner() {  # prints the ancestor whose corpus a repo toplevel without one resolves
-  local d home="${HOME:-}"
+hippo_today() {  # the local date, YYYY-MM-DD: bash's own clock (4.2+), else date(1); empty if neither
+  local d=""
+  printf -v d '%(%F)T' -1 2>/dev/null || d="$(date +%F 2>/dev/null)" || d=""
+  case "$d" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) printf '%s' "$d" ;; esac
+}
+hippo_ancestor_corpus() {  # prints the dir above a corpus-less repo toplevel that carries one
+  local d home="${HOME:-}"  # mirrors provenance_env.ancestor_corpus_owner
+  if [ -n "${HIPPO_CORPUS_ROOT:-}" ] || [ -n "${HIPPO_MEMORY_DIR:-}" ]; then
+    return 1  # the corpus is already pinned
+  fi
   [ -d ".claude/memory" ] && return 1
-  [ -e ".git" ] || return 1  # only a toplevel launch climbs past itself (walk_up_for_memory_dir)
+  [ -e ".git" ] || return 1  # a toplevel launch only, as in Python
   if [ -f ".git" ] && hippo_main_tree >/dev/null; then
     return 1  # a linked worktree resolves its main tree's corpus, by design
   fi
@@ -128,13 +144,24 @@ if [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ ! -f "${CLAUDE_PLUGIN_DATA}/.nudge-dism
       INIT_STEP="run /hippo:setup"
     fi
     if [ ! -x "${CLAUDE_PLUGIN_DATA}/venv/bin/python" ] || [ ! -f "${CLAUDE_PLUGIN_DATA}/.bootstrap-sentinel" ]; then
-      if [ "${CLAUDE_CODE_ENTRYPOINT:-}" = "claude-desktop" ]; then
-        NUDGE="hippo memory is installed but not bootstrapped — recall is inert. Set it up with the hippo setup MCP tool: bootstrap once per machine, then init once per project (just ask for it). ${SILENCE}"
-      else
-        NUDGE="hippo memory is installed but not bootstrapped — recall is inert. Run /hippo:setup once per machine, then once in each project. ${SILENCE}"
+      DAY_FILE="${CLAUDE_PLUGIN_DATA}/.bootstrap-nudge-day"
+      TODAY="$(hippo_today)"
+      SHOWN_ON=""
+      [ -f "$DAY_FILE" ] && SHOWN_ON="$(<"$DAY_FILE")"
+      # No readable clock: show it every session rather than never, and say no cadence.
+      if [ ! -f "${CLAUDE_PLUGIN_DATA}/.bootstrap-nudge-dismissed" ] && { [ -z "$TODAY" ] || [ "$SHOWN_ON" != "$TODAY" ]; }; then
+        BOOT_SILENCE="(${TODAY:+Shown once a day. }To stop it on this machine: touch '${CLAUDE_PLUGIN_DATA}/.bootstrap-nudge-dismissed')"
+        if [ "${CLAUDE_CODE_ENTRYPOINT:-}" = "claude-desktop" ]; then
+          NUDGE="hippo memory is installed but not bootstrapped — recall is inert. Set it up with the hippo setup MCP tool: bootstrap once per machine, then init once per project (just ask for it). ${BOOT_SILENCE}"
+        else
+          NUDGE="hippo memory is installed but not bootstrapped — recall is inert. Run /hippo:setup once per machine, then once in each project. ${BOOT_SILENCE}"
+        fi
+        if [ -n "$TODAY" ]; then
+          { printf '%s\n' "$TODAY" > "$DAY_FILE"; } 2>/dev/null || true
+        fi
       fi
-    elif OWNER="$(hippo_nested_owner)"; then
-      NUDGE="This repo is nested inside ${OWNER}, so hippo resolves ${OWNER}'s memory corpus here, not one of this repo's own. To give this repo its own corpus, ${INIT_STEP} here. ${SILENCE}"
+    elif OWNER="$(hippo_ancestor_corpus)"; then
+      NUDGE="This repo has no corpus of its own; ${OWNER} has one — ${INIT_STEP} here, or pin HIPPO_CORPUS_ROOT to share it. ${SILENCE}"
     elif ! hippo_floor_present && hippo_repo_opted_in "$REPO_KEY"; then
       NUDGE="hippo memory is enabled for this repo but it has no memory corpus yet — ${INIT_STEP} to seed .claude/memory/."
       if ND="$(hippo_native_memory_dir "$REPO_KEY")"; then
