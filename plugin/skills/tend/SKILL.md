@@ -67,8 +67,8 @@ What each kind needs before its verdict:
 - **merge** — a merged-in memory looks like a duplicate. `supersede --winner <name>`,
   `updated` after you folded it into the existing memory, or `distinct`.
 - **baseline** — confirm the memory still holds, then `rebaseline`.
-- **link**, **floor** — edit the file, then `done`; tend re-checks and refuses while the
-  problem is still there.
+- **link**, **floor** — edit the file, then `done`; tend re-checks, refuses while the
+  problem is still there, and answers fixed once it is gone.
 - **derivation** — read the citation diff, then `apply` for that memory; when every memory
   is applied, the `corpus` item takes `stamp`. On a corpus that is not committed to git,
   take a snapshot first (`hippo provenance --snapshot <label>`).

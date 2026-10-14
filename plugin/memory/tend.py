@@ -14,7 +14,8 @@ Every per-item gate is preserved, because ``apply`` only routes:
   - contradiction  keep_one | merge | scope_both | not_conflicting (``resolve_view``)
   - merge          supersede (demote the loser under the winner) | updated | distinct
   - baseline       rebaseline (the graduate re-baseline: confirm, then move the baseline)
-  - link, floor    done (re-checked: refused while the problem is still there)
+  - link, floor    done (re-checked: refused while the problem is still there, fixed once
+                   the source no longer reports it)
   - derivation     apply (re-derive ONE memory) | stamp (earned: refused while any
                    memory still derives differently)
   - trust          routed to the consent review (re-consent is its own gate)
@@ -292,6 +293,10 @@ def apply(
     memory_dir, repo_root = _dirs(memory_dir, repo_root)
     try:
         entry, state = find_entry(memory_dir, repo_root, entry_id)
+        kind = entry_id.split(":", 1)[0]
+        if entry is None and kind in ("link", "floor"):
+            # A hand edit drops the item from the queue: re-check it, and answer fixed if gone.
+            entry = {"kind": kind, "id": entry_id, "target": entry_id.split(":", 1)[-1]}
         if entry is None:
             return _refused(f"{entry_id} is not in the maintenance queue now (already resolved?).")
         kind, target = entry["kind"], entry["target"]
