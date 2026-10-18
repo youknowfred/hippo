@@ -51,6 +51,10 @@ releases:
     re_bootstrap: "no"
   - version: v1.42.1
     theme: "Name what's missing (follow-ups to v1.42.0's owner calls: #143 CLM-4, #144 nested repos, #145 the LLM key, #146 and #150 no corpus; #149 a HOT-6 test race)"
+    status: released
+    re_bootstrap: "no"
+  - version: v1.42.2
+    theme: "Room for the undecided (#154 TND-9: decided merge pairs no longer crowd undecided ones past the five-pair cap; no roadmap item)"
     status: in review
     re_bootstrap: "no"
   - version: v1.43.0
@@ -233,7 +237,7 @@ items:
     size: M
     release: "v1.42.0"
     status: done
-    note: "v1.42.0"
+    note: "v1.42.0; v1.42.2 (#154): the merge items' five-pair cap counts only undecided pairs, in tend, the SessionStart digest and doctor alike"
   - id: TND-2
     title: "The `tend` verb"
     size: L
