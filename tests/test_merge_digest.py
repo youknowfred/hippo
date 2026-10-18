@@ -141,6 +141,82 @@ def test_pairs_capped_at_five(repo, memory_dir, tmp_path, monkeypatch):
     assert len(pairs) == 5  # the spec's cap — bounded, never a full sweep
 
 
+_TOPICS = {
+    "a": "zebra migration patterns in the savanna during seasonal drought cycles",
+    "b": "postgres connection pooling exhaustion under bursty webhook retries",
+    "c": "terraform state locking conflicts between parallel deploy pipelines",
+}
+
+
+def test_decided_pairs_do_not_use_up_the_cap(repo, memory_dir, tmp_path, monkeypatch):
+    """The 2026-10-18 Skyline repro: seven incoming pairs, the five that sort first carry a
+    `distinct` verdict, and the two after them must still reach tend and the digest.
+
+    a-in has three local duplicates and b-in two (the five that sort first); c-in's two
+    sort last. Before the fix the five-pair cap was spent on a-in and b-in before the
+    queue hid them, so c-in's pairs were never listed and `tend apply` refused them.
+    """
+    import re
+
+    from memory import tend as T
+    from memory import tend_queue as Q
+    from memory.doctor_checks_env import DoctorContext
+    from memory.doctor_checks_lifecycle import check_merge_digest
+    from memory.telemetry import log_episode
+
+    td = str(tmp_path / "telemetry")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    locals_by_topic = {"a": 3, "b": 2, "c": 2}
+    for topic, n in locals_by_topic.items():
+        for i in range(n):
+            write_file(repo, f".claude/memory/{topic}-local-{i}.md",
+                       _mem(f"{topic}-local-{i}", _TOPICS[topic]))
+    for i in range(5):
+        write_file(repo, f".claude/memory/filler-{i}.md",
+                   _mem(f"filler-{i}", f"distinct topic {i} about build tooling caches and release step {i}"))
+    git_commit(repo, "seed corpus", 1_700_000_000)
+    assert log_episode(["a-local-0"], query="zebra", repo_root=repo, telemetry_dir=td)
+    for topic in locals_by_topic:
+        write_file(repo, f".claude/memory/{topic}-in.md", _mem(f"{topic}-in", _TOPICS[topic]))
+    git_commit(repo, "merge teammate memories (#11)", 1_700_000_100)
+    _build(memory_dir)
+
+    def merge_ids():
+        return [e["id"] for e in Q.build_queue(memory_dir, repo, kinds=("merge",))["pending"]]
+
+    first = merge_ids()
+    assert first == [f"merge:a-in|a-local-{i}" for i in range(3)] + [
+        f"merge:b-in|b-local-{i}" for i in range(2)
+    ]
+    # The entry format is what an existing tend_state.json skip hash was taken over;
+    # changing it would silently un-hide every verdict already recorded.
+    entry = Q.build_queue(memory_dir, repo, kinds=("merge",))["pending"][0]
+    assert re.fullmatch(r"merged-in memory looks like a duplicate \(similarity \d\.\d\d\)",
+                        entry["evidence"])
+    for entry_id in first:
+        r = T.apply(entry_id, "distinct", memory_dir=memory_dir, repo_root=repo)
+        assert r["ok"], r
+
+    undecided = ["merge:c-in|c-local-0", "merge:c-in|c-local-1"]
+    assert merge_ids() == undecided
+    built = Q.build_queue(memory_dir, repo, kinds=("merge",))
+    assert sorted(e["id"] for e in built["skipped"]) == sorted(first)
+    assert built["counts"]["merge"] == 2
+
+    out = merge_digest_producer(memory_dir, repo)
+    assert out is not None
+    assert "2 pair(s)" in out
+    assert "c-in ⇄ c-local-0" in out and "c-in ⇄ c-local-1" in out
+    assert "a-in" not in out and "b-in" not in out  # decided pairs are not re-surfaced
+    doc = check_merge_digest(DoctorContext(memory_dir, repo))
+    assert "c-in ⇄ c-local-0" in doc["message"] and "a-in" not in doc["message"]
+
+    r = T.apply(undecided[0], "distinct", memory_dir=memory_dir, repo_root=repo)
+    assert r["ok"], r
+    assert merge_ids() == undecided[1:]
+
+
 def test_incoming_archive_arrivals_are_skipped(repo, memory_dir, tmp_path, monkeypatch):
     _seed_with_watermark(repo, memory_dir, tmp_path, monkeypatch)
     _merge_in(repo, ".claude/memory/archive/m-old.md", _mem("m-old", _DESC))
@@ -234,7 +310,7 @@ def test_doctor_merge_digest_ok_when_clean(repo, memory_dir, tmp_path, monkeypat
     _seed_with_watermark(repo, memory_dir, tmp_path, monkeypatch)
     r = check_merge_digest(DoctorContext(memory_dir, repo))
     assert r["status"] == "ok"
-    assert "no duplicate pairs" in r["message"]
+    assert "no undecided duplicate pairs" in r["message"]
     assert "\n" not in r["message"]
     labels = [label for label, _fn in CHECKS]
     assert labels.count("merge_digest") == 1

@@ -159,25 +159,30 @@ def _src_contradiction(memory_dir: str, repo_root: str) -> List[dict]:
     return out
 
 
+def merge_entry(pair: dict) -> dict:
+    """The queue entry for one incoming-duplicate pair. A recorded verdict's skip hash
+    covers this id and evidence, so the digest's cap builds entries here too (TND-9)."""
+    if pair.get("route") == "resolve":
+        proposed = "they also contradict: give the pair a verdict"
+    else:
+        proposed = "update the existing memory, supersede it, or skip"
+    return _entry(
+        "merge", f"{pair['incoming']}|{pair['neighbor']}",
+        f"merged-in memory looks like a duplicate (similarity {float(pair.get('score', 0)):.2f})",
+        proposed,
+    )
+
+
 def _src_merge(memory_dir: str, repo_root: str) -> List[dict]:
     from .merge_digest import incoming_duplicate_pairs
     from .telemetry import default_telemetry_dir
 
+    # Hidden pairs ride along so build_queue can still bucket them (a snoozed pair can
+    # still take a verdict); the cap inside counts only the pairs still pending.
     pairs, _degradation, _n = incoming_duplicate_pairs(
-        memory_dir, repo_root, default_telemetry_dir(memory_dir)
+        memory_dir, repo_root, default_telemetry_dir(memory_dir), include_hidden=True
     )
-    out = []
-    for p in pairs:
-        if p.get("route") == "resolve":
-            proposed = "they also contradict: give the pair a verdict"
-        else:
-            proposed = "update the existing memory, supersede it, or skip"
-        out.append(_entry(
-            "merge", f"{p['incoming']}|{p['neighbor']}",
-            f"merged-in memory looks like a duplicate (similarity {float(p.get('score', 0)):.2f})",
-            proposed,
-        ))
-    return out
+    return [merge_entry(p) for p in pairs]
 
 
 def _src_capture(memory_dir: str, repo_root: str) -> List[dict]:
@@ -335,6 +340,14 @@ def _hidden(entry: dict, state: dict, now: float) -> Optional[str]:
     if (state.get("skip") or {}).get(entry["id"]) == evidence_hash(entry):
         return "skipped"
     return None
+
+
+def hidden_check(memory_dir: str, now: Optional[float] = None) -> Callable[[dict], Optional[str]]:
+    """``entry -> "held"/"snoozed"/"skipped"/None`` over this clone's tend state, read once.
+    The same test build_queue applies, for a source that caps on what will be pending."""
+    state = read_state(memory_dir)
+    now = time.time() if now is None else now
+    return lambda entry: _hidden(entry, state, now)
 
 
 # --------------------------------------------------------------------------- #

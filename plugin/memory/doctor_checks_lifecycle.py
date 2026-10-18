@@ -206,7 +206,7 @@ def check_merge_digest(ctx: DoctorContext) -> Dict[str, str]:
         if not pairs:
             return {
                 "status": "ok",
-                "message": "incoming-merge dedup: no duplicate pairs among memories "
+                "message": "incoming-merge dedup: no undecided duplicate pairs among memories "
                 "merged in since the last session.",
             }
         shown = "; ".join(

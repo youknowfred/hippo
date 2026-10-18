@@ -17,7 +17,9 @@ existing machinery end to end (inv5 — nothing new is invented):
     ONE calibrated near-duplicate check; no second detector, no new thresholds.
   - **Seen-state** is the advancing watermark itself (the GOV-4 ledger pattern,
     reused rather than re-implemented: each session's episodes move the watermark,
-    so a surfaced pair never re-nags — and no parallel per-clone ledger exists).
+    so a surfaced pair never re-nags — and no parallel per-clone ledger exists). Within
+    one range, a pair already decided in ``tend`` is read from the tend state (TND-9)
+    and neither shown nor counted against the cap.
   - **Routing** is entirely human: a pair with a declared ``contradicts`` edge goes
     to ``/hippo:resolve``; everything else to ``/hippo:consolidate`` (the GRW-3
     merge tier: update-existing / supersede / skip). No contradicts/supersedes
@@ -140,22 +142,35 @@ def _contradicts_declared(a: str, b: str, memory_dir: str) -> bool:
 
 
 def incoming_duplicate_pairs(
-    memory_dir: str, repo_root: str, telemetry_dir: Optional[str] = None
+    memory_dir: str,
+    repo_root: str,
+    telemetry_dir: Optional[str] = None,
+    *,
+    include_hidden: bool = False,
 ) -> Tuple[List[dict], Optional[str], int]:
     """``(pairs, degradation, incoming_count)`` — the digest's whole derivation.
 
     Each pair is ``{"incoming", "neighbor", "score", "route"}`` (``route`` is
-    ``"resolve"`` for declared contradictions, else ``"consolidate"``), capped at
-    ``_MAX_PAIRS``, incoming-stem-sorted for a deterministic render. Read-only;
-    never raises; ``([], None, 0)`` on any failure.
+    ``"resolve"`` for declared contradictions, else ``"consolidate"``),
+    incoming-stem-sorted for a deterministic render. Read-only; never raises;
+    ``([], None, 0)`` on any failure.
+
+    TND-9: ``_MAX_PAIRS`` caps only the pairs still undecided — those the tend queue
+    would list as pending. A pair the tend state hides (a ``distinct``/``updated``
+    verdict, a skip, a snooze or an owner hold) is left out and does not count, so
+    decided pairs can never crowd an undecided one past the cap. ``include_hidden``
+    keeps the hidden pairs in the list (still uncounted) for the queue to bucket.
     """
     try:
         stems, degradation = _incoming_memory_stems(memory_dir, repo_root, telemetry_dir)
         if not stems:
             return [], degradation, 0
         from .new_memory import committed_duplicate_neighbors
+        from .tend_queue import hidden_check, merge_entry
 
+        hidden = hidden_check(memory_dir)
         pairs: List[dict] = []
+        pending = 0
         seen: set = set()
         for stem in sorted(stems):
             neighbors, _note = committed_duplicate_neighbors(stem, memory_dir)
@@ -167,17 +182,21 @@ def incoming_duplicate_pairs(
                 if key in seen:
                     continue
                 seen.add(key)
-                pairs.append(
-                    {
-                        "incoming": stem,
-                        "neighbor": other,
-                        "score": float(n.get("score") or 0.0),
-                        "route": "resolve"
-                        if _contradicts_declared(stem, other, memory_dir)
-                        else "consolidate",
-                    }
-                )
-                if len(pairs) >= _MAX_PAIRS:
+                pair = {
+                    "incoming": stem,
+                    "neighbor": other,
+                    "score": float(n.get("score") or 0.0),
+                    "route": "resolve"
+                    if _contradicts_declared(stem, other, memory_dir)
+                    else "consolidate",
+                }
+                if hidden(merge_entry(pair)):
+                    if include_hidden:
+                        pairs.append(pair)
+                    continue
+                pairs.append(pair)
+                pending += 1
+                if pending >= _MAX_PAIRS:
                     return pairs, degradation, len(stems)
         return pairs, degradation, len(stems)
     except Exception:
