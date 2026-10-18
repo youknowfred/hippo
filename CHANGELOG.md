@@ -7,6 +7,34 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.42.2 — 2026-10-18 — "Room for the undecided"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**, link cache still
+**6**; `stale.json` schema still **1**. One fix to the merge items in the `tend` queue. It was
+found on 2026-10-18 while working through Skyline's queue, where two pairs that had a verdict
+could not take it.
+
+**Operator action: none.** Verdicts already recorded stay hidden: the entry they were hashed
+over is unchanged byte for byte.
+
+- **Decided merge pairs no longer crowd out undecided ones (#154, TND-9).**
+  - **What broke.** The incoming-merge duplicate check stopped at five pairs, and `tend` hid
+    the pairs that already had a verdict only after that. When the first five pairs, sorted by
+    incoming memory name, were decided, `tend list` showed no merge items, and `tend apply`
+    refused the undecided pairs past them as "not in the maintenance queue now". The
+    SessionStart digest used the same list, so it listed decided pairs and left out undecided
+    ones.
+  - **Now.** The five-pair cap counts only undecided pairs: those with no verdict, skip,
+    snooze or owner hold. `tend`, the SessionStart digest and doctor see the same pairs. The
+    digest and doctor leave decided, snoozed and held pairs out. `tend` still lists them as
+    skipped, snoozed or held, and a snoozed pair can still take a verdict. doctor's clean
+    line reads "no undecided duplicate pairs".
+  - **Receipt.** On Skyline the digest no longer lists three decided pairs. A third pair for
+    `skyline-gro811-named-partial-round` (similarity 0.81), which the old cap hid, now reaches
+    the queue. A regression test decides the first five of seven pairs with `tend apply` and
+    requires the last two to reach `tend list`, the digest and doctor, and to take a verdict.
+
 ## v1.42.1 — 2026-10-06 — "Name what's missing"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
