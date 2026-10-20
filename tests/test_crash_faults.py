@@ -109,6 +109,7 @@ CRASH_CONTRACT = {
     ("trust", "_write_registry_doc"): ("detected",),  # mark_trusted returns False
     ("tend", "_write_state"): ("detected",),  # TND-2: hold/snooze/skip report the failure; prior state kept
     ("tend_queue", "_write_cache"): ("intact",),  # TND-1: the cache is derived; the build still returns
+    ("derived_dirs", "_write_stub"): ("intact",),  # MIG-10: the move stands and the stub dir exists; only its note is missing
     ("trust_review", "keep_consented_baselines"): ("intact",),  # TND-6: best-effort store copy; consent itself already landed
     ("recall_warm", "_publish"): ("intact",),  # HOT-6 heartbeat: bookkeeping; a missing one makes the hook spawn
     ("setup_cli", "_apply"): ("detected",),  # HOT-6 settings write: exit 1, "Nothing was changed"
@@ -1043,6 +1044,24 @@ def scn_related_merge_detected(tmp_path, monkeypatch):
     assert res["fixed"] is False and "file unchanged" in res["error"]
 
 
+def scn_derived_stub_intact(tmp_path, monkeypatch):
+    """MIG-10: a torn stub note costs only the note — the telemetry dir is moved, and the old
+    dir a sleep schedule appends into still exists, self-ignoring."""
+    from memory import derived_dirs as D
+
+    for var in ("HIPPO_INDEX_DIR", "HIPPO_TELEMETRY_DIR", "HIPPO_PENDING_DIR"):
+        monkeypatch.delenv(var, raising=False)
+    md = tmp_path / ".claude" / "memory"
+    md.mkdir(parents=True)
+    old = tmp_path / ".claude" / ".memory-telemetry"
+    old.mkdir()
+    (old / "sleep.log").write_text("night 1\n")
+    _arm(monkeypatch, "derived_dirs", "_write_stub")
+    assert D.migrate(str(md)) == {"telemetry": "moved"}
+    assert (tmp_path / ".hippo" / "telemetry" / "sleep.log").read_text() == "night 1\n"
+    assert sorted(os.listdir(old)) == [".gitignore"]
+
+
 _SCENARIOS = [
     *_warm_scenarios(_arm, _snap, _assert_unchanged),  # HOT-6 sites (tests/crash_scenarios_warm.py)
     (("dream", "_apply_one"), "detected", scn_dream_apply_bridge_detected),
@@ -1096,6 +1115,7 @@ _SCENARIOS = [
     (("telemetry_rollup", "_drain_spool"), "detected", scn_rollup_drain_spool_detected),
     (("tend", "_write_state"), "detected", scn_tend_state_detected),
     (("tend_queue", "_write_cache"), "intact", scn_tend_cache_intact),
+    (("derived_dirs", "_write_stub"), "intact", scn_derived_stub_intact),
 ]
 
 

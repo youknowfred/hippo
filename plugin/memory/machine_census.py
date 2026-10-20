@@ -225,6 +225,11 @@ def _classify_schedule(cmd: str) -> dict:
     py = parsed["python"]
     if py and "/" in py and not os.path.exists(py):
         missing.append(py)
+    # MIG-10: the shell's `>> <log>` fails before hippo starts when the log's dir is gone —
+    # the old .claude/.memory-telemetry once that stub is deleted without a reinstall.
+    log_dir = os.path.dirname(parsed["log"] or "")
+    if log_dir.startswith("/") and not os.path.isdir(log_dir):
+        missing.append(log_dir)
     return {"status": "stale-path" if missing else "ok", "missing": missing, **parsed}
 
 

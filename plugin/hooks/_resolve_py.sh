@@ -66,12 +66,14 @@ hippo_floor_present() {
 }
 
 # MIG-9: a project's derived dirs live in <root>/.hippo/<kind> (index, telemetry, pending);
-# one an older hippo left at <root>/.claude/.memory-<kind> is read in place.
+# one an older hippo left at <root>/.claude/.memory-<kind> is read in place until SessionStart
+# moves it, and an empty telemetry stub kept for a sleep schedule (a MOVED note inside) is not.
 # memory/derived_dirs.py's derived_dir, in builtins: sets HIPPO_DERIVED_DIR, never forks.
 hippo_derived_dir() {  # <root> <kind>
   HIPPO_DERIVED_DIR="$1/.hippo/$2"
   [ -d "$HIPPO_DERIVED_DIR" ] && return 0
-  [ -d "$1/.claude/.memory-$2" ] && HIPPO_DERIVED_DIR="$1/.claude/.memory-$2"
+  [ -d "$1/.claude/.memory-$2" ] && [ ! -f "$1/.claude/.memory-$2/MOVED" ] \
+    && HIPPO_DERIVED_DIR="$1/.claude/.memory-$2"
   return 0
 }
 

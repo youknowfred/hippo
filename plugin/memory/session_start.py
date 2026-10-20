@@ -444,6 +444,12 @@ def main(
         # itself. The heal is still available and still correct — it moved to the
         # provenance CLI (--heal-baselines), which doctor's empty-baseline check names, so
         # the write happens where a human can consent to it.
+        # MIG-10: move any old .claude/.memory-* dir into <project>/.hippo/ first, so the
+        # refresh below writes the live index. One rename each the first time; after that a
+        # fold of whatever a session still on an older hippo wrote there. Never raises.
+        from .derived_dirs import migrate
+
+        migrate(memory_dir)
         # Bring the recall index up to date so a memory written during the LAST session is
         # indexed (recallable) this one. Incremental, OFFLINE, bounded, never-downgrade,
         # never-raises — a fast no-op when nothing changed. (Side effect, not a producer.)
