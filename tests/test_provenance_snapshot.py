@@ -380,3 +380,21 @@ def test_doctor_names_both_old_locations_on_one_line(repo, memory_dir):
     m = r["message"]
     assert "1 pre-migration backup(s) in" in m and "kept: still the undo" in m, m
     assert "1 backup(s) in " + os.path.join(repo, ".hippo-snapshots") in m, m
+
+
+# --------------------------------------------------------------------------- #
+# MIG-14: /hippo:remove deletes the derived dirs by name, never the backups beside them
+# --------------------------------------------------------------------------- #
+def test_remove_deletes_the_derived_dirs_by_name_and_reports_the_backups():
+    """v1.42.4's /hippo:remove said to remove `.hippo/` at the project root. With the backups
+    in .hippo/snapshots/ that would delete a gitignored corpus's only undo."""
+    skill = os.path.join(os.path.dirname(__file__), "..", "plugin", "skills", "remove", "SKILL.md")
+    with open(skill, encoding="utf-8") as fh:
+        text = fh.read()
+    assert "remove `.hippo/` at the project root" not in text
+    assert "never `.hippo/` as a whole" in text and "never `rm -rf .hippo/`" in text
+    for kind in ("index", "telemetry", "pending"):
+        assert f"`.hippo/{kind}/`" in text
+    for backup in (".hippo/snapshots/", ".hippo-snapshots/", ".claude/memory.pre-cite*/"):
+        assert backup in text, backup
+    assert "report them, never delete them here" in text
