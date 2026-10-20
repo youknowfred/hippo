@@ -70,7 +70,7 @@ from .doctor_checks_env import (
     check_plugin_version,
     check_plugin_source_skew,
 )
-from .doctor_checks_worktree import check_worktree_copies  # SHP-7
+from .doctor_checks_worktree import check_snapshots, check_worktree_copies  # MIG-8, SHP-7
 from .doctor_checks_corpus import (
     check_steering,
     check_format_version,
@@ -349,6 +349,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("native_auto_memory", check_native_auto_memory),  # NAT-1: auto-memory settings + its footprint in the corpus
     ("resolution", check_corpus_resolution),
     ("worktree_copies", check_worktree_copies),  # SHP-7: a linked worktree's dead .memory-* copies, named
+    ("snapshots", check_snapshots),  # MIG-8: pre-migration backups still in .claude/, with size; spent once stamped
     ("git_mode", check_git_mode),
     ("trust", check_trust),
     ("trust_scorecard", check_trust_scorecard),  # GOV-6: the one-line rollup a lead scans first; the point-checks below are the drill-down

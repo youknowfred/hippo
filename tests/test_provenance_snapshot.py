@@ -1,8 +1,9 @@
-"""The pre-migration backup (MIG-6, MIG-7).
+"""The pre-migration backup (MIG-6, MIG-7) and doctor's line for the old ones (MIG-8).
 
 MIG-6: the copy lives in ``<project>/.hippo-snapshots/``, not in ``.claude/``, which the
 Claude desktop app copies into every worktree it creates. MIG-7: a corpus git can restore
-gets its commit, not a copy.
+gets its commit, not a copy. MIG-8: doctor names the backups older plugins left in
+``.claude/``, with their size, and calls them spent once the migration is done.
 
 The MIG-1 snapshot tests moved here from test_provenance.py (its size ratchet).
 """
@@ -15,6 +16,8 @@ import subprocess
 import pytest
 
 from memory import provenance as P
+from memory.doctor_checks_env import DoctorContext
+from memory.doctor_checks_worktree import check_snapshots
 
 from .conftest import git_commit, write_file
 
@@ -185,3 +188,59 @@ def test_ignored_files_a_migration_never_writes_do_not_force_a_copy(repo, memory
     write_file(repo, ".claude/memory/.DS_Store", "x")
     write_file(repo, ".claude/memory/.audit-reports/audit.md", "report\n")
     assert P.take_snapshot(memory_dir, "t1") == {"commit": _head(repo)}
+
+
+# --------------------------------------------------------------------------- #
+# MIG-8: doctor names the backups older plugins left in .claude/
+# --------------------------------------------------------------------------- #
+def _legacy(memory_dir, stamp):
+    d = os.path.join(os.path.dirname(memory_dir), f"memory.pre-cite2-{stamp}")
+    write_file(d, "m.md", "x" * 2000)
+    return d
+
+
+def test_doctor_reports_no_backups_in_claude(repo, memory_dir):
+    _corpus(repo, ignored=True)
+    r = check_snapshots(DoctorContext(memory_dir, repo))
+    assert r == {"status": "ok", "message": "snapshots: none in .claude/."}
+    P.take_snapshot(memory_dir, "t1")
+    m = check_snapshots(DoctorContext(memory_dir, repo))["message"]
+    assert "none in .claude/; 1 in" in m and ".hippo-snapshots" in m, m
+
+
+def test_doctor_keeps_backups_while_the_derivation_is_unstamped(repo, memory_dir):
+    _corpus(repo, ignored=True)
+    _legacy(memory_dir, "a")
+    _legacy(memory_dir, "b")
+    r = check_snapshots(DoctorContext(memory_dir, repo))
+    assert r["status"] == "ok", r
+    m = r["message"]
+    assert "2 pre-migration backup(s)" in m and "(4 KB, 2 files)" in m, m
+    assert "memory.pre-cite2-a, memory.pre-cite2-b" in m and "kept" in m and "not stamped" in m
+    assert os.path.join(repo, ".hippo-snapshots") in m
+
+
+def test_doctor_keeps_backups_while_a_stamped_corpus_still_has_worklist_items(repo, memory_dir):
+    _corpus(repo, ignored=True)
+    assert P.write_cite_derivation(memory_dir)  # stamped, yet m.md still derives differently
+    _legacy(memory_dir, "a")
+    r = check_snapshots(DoctorContext(memory_dir, repo))
+    assert r["status"] == "ok" and "worklist still lists 1 memory" in r["message"], r
+
+
+def test_doctor_calls_backups_spent_once_stamped_with_an_empty_worklist(repo, memory_dir):
+    write_file(repo, "src/keep.py", "k = 1\n")
+    c1 = git_commit(repo, "code", 1_700_000_000)
+    write_file(repo, ".claude/memory/m.md",
+               f'---\nname: M\ncited_paths: ["src/keep.py"]\nsource_commit: "{c1}"\n'
+               "---\nbody cites src/keep.py\n")
+    git_commit(repo, "memory", 1_700_000_001)
+    assert P.rederive_worklist(memory_dir, repo) == []
+    assert P.write_cite_derivation(memory_dir)
+    for stamp in "abcde":
+        _legacy(memory_dir, stamp)
+    r = check_snapshots(DoctorContext(memory_dir, repo))
+    assert r["status"] == "warn", r
+    m = r["message"]
+    assert "5 pre-migration backup(s)" in m and "(10 KB, 5 files)" in m and "(+1 more)" in m, m
+    assert "spent" in m and "every worktree" in m and "Delete them" in m

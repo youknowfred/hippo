@@ -26,12 +26,13 @@ import re
 import shlex
 import shutil
 import subprocess
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .provenance_env import ensure_self_ignoring_dir
 
 SNAPSHOT_DIRNAME = ".hippo-snapshots"
 SNAPSHOT_PREFIX = "memory.pre-cite2-"
+LEGACY_PREFIX = "memory.pre-cite"  # every pre-MIG-6 backup beside the corpus, any cite round
 
 # A stamp names a directory, so it is a plain label: a `/` or `..` would put the copy
 # somewhere else — back inside `.claude/`, say.
@@ -57,6 +58,32 @@ def snapshot_root(memory_dir: str) -> str:
     if os.path.basename(parent) == ".claude":
         parent = os.path.dirname(parent)
     return os.path.join(parent, SNAPSHOT_DIRNAME)
+
+
+def legacy_snapshot_dirs(memory_dir: str) -> List[str]:
+    """Pre-MIG-6 backups still beside the corpus (``.claude/memory.pre-cite*/``), sorted."""
+    parent = os.path.dirname(os.path.abspath(memory_dir))
+    try:
+        names = sorted(
+            e.name for e in os.scandir(parent)
+            if e.name.startswith(LEGACY_PREFIX) and e.is_dir(follow_symlinks=False)
+        )
+    except OSError:
+        return []
+    return [os.path.join(parent, n) for n in names]
+
+
+def dir_size(path: str) -> Tuple[int, int]:
+    """``(bytes, files)`` under ``path``, symlinks not followed; unreadable entries count 0."""
+    total = files = 0
+    for dirpath, _dirs, names in os.walk(path):
+        for name in names:
+            try:
+                total += os.lstat(os.path.join(dirpath, name)).st_size
+                files += 1
+            except OSError:
+                pass
+    return total, files
 
 
 def _git(args: List[str], cwd: str) -> Optional[str]:
