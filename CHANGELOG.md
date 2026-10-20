@@ -7,6 +7,54 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.42.3 — 2026-10-20 — "Out of .claude/"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**, link cache still
+**6**; `stale.json` schema still **1**. The pre-migration corpus backup moves out of
+`.claude/`. The problem was found on 2026-10-19, when a 1.8 TB disk filled. The Claude
+desktop app lays down every worktree it creates with a copy of the checkout's whole
+`.claude/` directory, ignored files included, and in one repo 53 worktrees each carried six
+spent backups: about 44 MB and 3,915 files per tree.
+
+**Operator action: only if you have old backups in `.claude/`.** `/hippo:doctor`'s new
+`snapshots` line names any `.claude/memory.pre-cite*` dirs with their size, and says whether
+they are spent. Delete spent ones, or move them into `.hippo-snapshots/` at the project root.
+See [UPGRADING.md](UPGRADING.md).
+
+- **Backups land in `.hippo-snapshots/`, not `.claude/` (#160, MIG-6).**
+  - **What broke.** `hippo provenance --snapshot <label>` and the `tend` / `rederive`
+    snapshot action copied the corpus to `.claude/memory.pre-cite2-<label>/`, so each backup
+    rode into every worktree made after it.
+  - **Now.** The copy goes to `<project>/.hippo-snapshots/memory.pre-cite2-<label>/`, beside
+    `.claude/`. The path comes from the corpus path alone, so every surface writes and prints
+    the same one. The plugin data dir was not used: a terminal and the Bash tool cannot see
+    it, and Claude Code deletes it when the plugin is uninstalled. The result prints the
+    `cp -Rp` that restores the copy.
+  - **Still self-ignoring.** `.hippo-snapshots/` gets its `*` .gitignore before the copy,
+    and a marker there that no longer ignores everything refuses the copy. The copy holds no
+    marker of its own, so it is byte-identical to the corpus. Before, the marker sat inside
+    the copy, and a corpus with its own `.gitignore` overwrote it, so the backup showed in
+    `git status`.
+  - **Stamps.** A stamp is a plain label (letters, digits, `.`, `_`, `-`); one with a `/`
+    could have put the copy anywhere, `.claude/` included.
+- **A committed, clean corpus is not copied (#160, MIG-7).** Git already undoes a migration
+  there. When every memory file and `.format` is tracked and `git status` shows nothing
+  under the corpus, the snapshot names HEAD and prints `git -C <corpus> checkout <sha> -- .`
+  instead of copying. A gitignored corpus, an uncommitted edit, or a new or ignored memory
+  still gets the copy.
+- **doctor names the old backups (#160, MIG-8).** The `snapshots` line lists the
+  `memory.pre-cite*` dirs beside the corpus with their total size and file count. Once the
+  citation derivation is stamped and the re-derivation worklist is empty it warns that they
+  are spent. Before that it lists them as kept, since they are still the undo, and says
+  where to move them so new worktrees stop carrying them.
+- **Receipt.** On this machine's hippo checkout, doctor lists four backups in `.claude/`
+  (1.6 MB, 259 files) as kept: that corpus is stamped v4 on purpose. In the repo that filled
+  the disk, the corpus currently has uncommitted edits, so a snapshot there copies, now
+  into `.hippo-snapshots/`; once committed, it records the commit instead. The two restore
+  tests (copy and git) run the undo command the snapshot prints after a real re-derivation,
+  and require the corpus back byte for byte.
+
 ## v1.42.2 — 2026-10-18 — "Room for the undecided"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
