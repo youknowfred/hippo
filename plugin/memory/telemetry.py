@@ -15,8 +15,8 @@ Robustness contract (the UserPromptSubmit hook depends on it):
 
 Markdown-in-git stays the single source of authority; this ledger is DERIVED, local,
 gitignored, and append-only HISTORY (NOT rebuildable like the index — deleting it loses only
-the history, nothing the corpus needs). It lives in its OWN sibling of the index
-(``.claude/.memory-telemetry/``) precisely BECAUSE it is history, not a rebuildable cache.
+the history, nothing the corpus needs). It lives in its OWN dir beside the index
+(``.hippo/telemetry/``) precisely BECAUSE it is history, not a rebuildable cache.
 
 ``read_events`` is the read surface the Tier-2 soak/curation analyzer consumes.
 

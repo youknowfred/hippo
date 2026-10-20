@@ -34,7 +34,7 @@ instead.
 
 ### `build_index.py` — offline hybrid index builder
 
-Builds a gitignored, rebuildable index at `.claude/.memory-index/` over each memory's
+Builds a gitignored, rebuildable index at `.hippo/index/` over each memory's
 `name` + `description`:
 - **dense** — `bge-small-en-v1.5` via `fastembed` (ONNX, no torch), and
 - **sparse** — BM25 (`rank-bm25`, or the vendored scorer pre-bootstrap).
@@ -45,7 +45,7 @@ error). The index dir is self-ignoring (it drops a `.gitignore` containing `*` o
 creation) so it stays invisible to git even in projects that never patched `.gitignore`.
 
 ```bash
-"$PY" -m memory.build_index --memory-dir .claude/memory --index-dir .claude/.memory-index
+"$PY" -m memory.build_index --memory-dir .claude/memory --index-dir .hippo/index
 ```
 
 **Auto-refresh at SessionStart:** you rarely run `build_index` by hand. The SessionStart
@@ -401,12 +401,12 @@ floor link rot (read-only); its summary is the `floor` producer.
 ## Telemetry (three ledgers)
 
 `telemetry.py` writes append-only, size-bounded (rotating), gitignored JSONL ledgers under
-`.claude/.memory-telemetry/` — derived local history, never authority:
+`.hippo/telemetry/` — derived local history, never authority:
 
 | Ledger | Written by | Content |
 |---|---|---|
 | `recall_events.jsonl` | `recall.main()` after results | `{ts, session_id, names, backend, latency_ms, k, query_preview}` |
-| `episode_buffer.jsonl` | `recall.main()`, same block | adds the repo HEAD watermark — replayed by the CAP-2 SessionEnd capture pass (`memory.capture`) into the gitignored `.memory-pending/` queue |
+| `episode_buffer.jsonl` | `recall.main()`, same block | adds the repo HEAD watermark — replayed by the CAP-2 SessionEnd capture pass (`memory.capture`) into the gitignored `.hippo/pending/` queue |
 | `reconsolidation_events.jsonl` | `record_reconsolidation_outcome()` | `{ts, name, outcome[, invalidated]}` verdicts + LIF-1 snooze acks |
 
 Contract: never raises, never delays a recall (fires after results, fully wrapped), no
@@ -545,7 +545,7 @@ write-time/doctor warning points here), or must be forgotten for privacy. It is 
 
 There is no bulk/automated purge command by design (the per-item agent-gate is permanent). Follow
 these steps for the one memory `<name>` in corpus `<memory_dir>` (its index dir is
-`<index_dir>` — the gitignored `.claude/.memory-index` sibling, or a tier's own index):
+`<index_dir>` — the gitignored `.hippo/index`, or a tier's own index):
 
 1. **Remove the memory file** and drop its floor pointer.
    ```bash
@@ -574,8 +574,8 @@ these steps for the one memory `<name>` in corpus `<memory_dir>` (its index dir 
    re-embeds every memory from scratch.)
 
 4. **Clear the ledgers.** The telemetry ledgers store recalled memory **names** and truncated
-   query previews (never bodies) in `.claude/.memory-telemetry/`. To erase a purged name, delete
-   or rotate that dir (all derived, rebuildable): `rm -rf .claude/.memory-telemetry`. If the name
+   query previews (never bodies) in `.hippo/telemetry/`. To erase a purged name, delete
+   or rotate that dir (all derived, rebuildable): `rm -rf .hippo/telemetry`. If the name
    was published in a committed per-user usage summary (TEA-5), also edit or `git rm`
    `.claude/memory/.usage/<user>.json` and scrub it from history via step 2.
 
@@ -721,14 +721,15 @@ re-billed.
 - `CLAUDE_PROJECT_DIR` — the launch dir (set by the harness); else cwd. Resolution starts
   there — except that a launch inside a **linked git worktree** starts from the MAIN working
   tree when it carries a corpus (SHP-7, `provenance_env.resolve_corpus_start`): the corpus,
-  `repo_root`, and every derived sibling dir (`.memory-pending`, `.memory-index`,
-  `.memory-telemetry`) move together, while `provenance.launch_root()` keeps naming the
+  `repo_root`, and every derived dir (`.hippo/pending`, `.hippo/index`,
+  `.hippo/telemetry`) move together, while `provenance.launch_root()` keeps naming the
   worktree for session-local git facts (capture's diff, the presence doc's branch/head).
 - `HIPPO_CORPUS_ROOT` — pin the resolution start dir explicitly; disables the worktree
   redirect (an explicit root is honored as-is, whichever tree it names). It is also how a
   nested repo or submodule shares its parent's corpus: resolution stops at the session's own
   git toplevel (SHP-8), and the hooks' corpus guard honors the pin (SHP-10).
-- `HIPPO_INDEX_DIR` — override the index location (default `.claude/.memory-index/`).
+- `HIPPO_INDEX_DIR` — override the index location (default `.hippo/index/`; an older
+  hippo's `.claude/.memory-index/` is read in place until SessionStart moves it).
 - `HIPPO_EMBED_MODEL` — dense model name (default `BAAI/bge-small-en-v1.5`).
 - `HIPPO_DISABLE=<list>` — turn features off: `dense` (force BM25-only — hermetic tests,
   CI), `jit`, `presence`, `floor-nag`, `abstain-gate`, `touch-fastpath`. The older
@@ -740,7 +741,7 @@ re-billed.
 - `HIPPO_EMBED_CHUNK_SIZE` — docs per offline embed slice, so a large corpus persists
   partial dense progress across sessions instead of an all-or-nothing attempt (default 64).
 - `HIPPO_RECENT_DAYS` — window for the git-recent producer (default 14).
-- `HIPPO_TELEMETRY_DIR` — override the ledger location (default `.claude/.memory-telemetry/`).
+- `HIPPO_TELEMETRY_DIR` — override the ledger location (default `.hippo/telemetry/`).
 - `HIPPO_TELEMETRY_MAX_BYTES` — ledger byte ceiling before rotation (default 2 MB).
 - `HIPPO_TRUST_ALL=1` — bypass the SEC-1 foreign-corpus trust gate entirely (CI/automation);
   recall injects from any corpus without requiring a trust marker.

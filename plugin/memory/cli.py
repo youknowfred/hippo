@@ -44,11 +44,13 @@ def usage(all_verbs: bool = False) -> str:
 def _telemetry_dir() -> Optional[str]:
     """Where bash's ``hippo_note_usage`` would write: the override, this tree's ledger
     dir, or a linked worktree's main tree. Only an existing dir counts."""
+    from .derived_dirs import derived_dir
+
     override = os.environ.get("HIPPO_TELEMETRY_DIR")
     if override:
         return override if os.path.isdir(override) else None
     if os.path.isdir(os.path.join(".claude", "memory")):
-        td = os.path.join(".claude", ".memory-telemetry")
+        td = derived_dir(os.path.join(".claude", "memory"), "telemetry")
         return td if os.path.isdir(td) else None
     if os.path.isfile(".git"):
         try:
@@ -61,7 +63,7 @@ def _telemetry_dir() -> Optional[str]:
         if common and os.path.basename(common) == ".git":
             main = os.path.dirname(common)
             if os.path.isdir(os.path.join(main, ".claude", "memory")):
-                td = os.path.join(main, ".claude", ".memory-telemetry")
+                td = derived_dir(os.path.join(main, ".claude", "memory"), "telemetry")
                 return td if os.path.isdir(td) else None
     return None
 

@@ -35,7 +35,7 @@ def test_purge_doc_section_exists_and_covers_every_step():
     assert "git rm" in section
     assert "git filter-repo" in section  # history scrub recipe
     assert "memory.build_index" in section  # clear index rows via rebuild
-    assert ".memory-telemetry" in section  # clear ledgers
+    assert ".hippo/telemetry" in section  # clear ledgers (MIG-9: no longer in .claude/)
     assert "memory.recall" in section  # verify it no longer surfaces
     # It contrasts with the reversible/whole-project neighbours so a reader doesn't conflate them.
     assert "/hippo:archive" in section and "/hippo:remove" in section

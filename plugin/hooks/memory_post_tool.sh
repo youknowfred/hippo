@@ -22,7 +22,7 @@
 # CRITICAL CONTRACT (identical to the other memory hooks):
 #   - ALWAYS exits 0 — a read-signal failure must never disturb the tool loop.
 #   - stdout is EMPTY or exactly one hookSpecificOutput JSON object (QUA-2).
-#   - Writes ONLY to gitignored derived dirs (.claude/.memory-telemetry/). Never the corpus.
+#   - Writes ONLY to gitignored derived dirs (.hippo/telemetry/). Never the corpus.
 #   - No network, no model download. Fire-and-forget; a single cheap Python spawn.
 #
 # Wired as a PostToolUse hook (matcher-scoped to file tools) via plugin/hooks/hooks.json.

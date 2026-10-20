@@ -5,7 +5,7 @@
 # written to the corpus. This hook runs the sleep-time capture pass: it snapshots the ending
 # session's episode-buffer entries (query previews + recalled names + the HEAD watermark) plus
 # `git diff` since that watermark into ONE seed in the GITIGNORED pending queue
-# (.claude/.memory-pending/), for the agent to review and approve into memory NEXT session.
+# (.hippo/pending/), for the agent to review and approve into memory NEXT session.
 #
 # CRITICAL CONTRACT:
 #   - ALWAYS exits 0 — never interferes with session teardown.

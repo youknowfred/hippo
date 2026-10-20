@@ -738,7 +738,7 @@ def _session_start_env(tmp_path, monkeypatch):
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / ".claude" / "memory")
     os.makedirs(md)
-    td = str(tmp_path / ".claude" / ".memory-telemetry")
+    td = str(tmp_path / ".hippo" / "telemetry")
     monkeypatch.delenv("HIPPO_TELEMETRY_DIR", raising=False)
     monkeypatch.setattr(S, "resolve_dirs", lambda: (md, str(tmp_path)))
     monkeypatch.setattr(S, "build_context", lambda *a, **k: "")

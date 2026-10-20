@@ -20,11 +20,12 @@ from .provenance import resolve_corpus_start
 from .provenance_snapshot import dir_size, legacy_snapshot_dirs, snapshot_root
 
 
-# The derived, gitignored siblings of ``.claude/memory`` that move WITH the corpus (SHP-7).
+# The derived, gitignored dirs that move WITH the corpus (SHP-7), by their pre-MIG-9 names:
+# the ones a worktree's copied ``.claude/`` can still hold.
 _DERIVED_SIBLINGS = (
-    (".memory-pending", "pending queue"),
-    (".memory-index", "index"),
-    (".memory-telemetry", "telemetry"),
+    (".memory-pending", "pending queue", "pending"),
+    (".memory-index", "index", "index"),
+    (".memory-telemetry", "telemetry", "telemetry"),
 )
 
 
@@ -56,13 +57,14 @@ def check_worktree_copies(ctx: DoctorContext) -> Dict[str, str]:
                 "status": "ok",
                 "message": "worktree copies: n/a — resolution did not redirect from a linked worktree.",
             }
+        from .derived_dirs import derived_dir
+
         wt = info.get("linked_worktree") or ""
-        live_claude = os.path.dirname(os.path.abspath(ctx.memory_dir))
         dead: List[str] = []
         stranded = 0
-        for dirname, label in _DERIVED_SIBLINGS:
+        for dirname, label, kind in _DERIVED_SIBLINGS:
             cand = os.path.join(wt, ".claude", dirname)
-            live = os.path.join(live_claude, dirname)
+            live = derived_dir(ctx.memory_dir, kind)
             if not os.path.isdir(cand) or os.path.realpath(cand) == os.path.realpath(live):
                 continue
             if dirname == ".memory-pending":

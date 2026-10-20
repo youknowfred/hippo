@@ -488,7 +488,7 @@ def test_force_reembeds_everything(tmp_path, monkeypatch):
 def test_default_index_dir_is_gitignored_sibling(tmp_path):
     md = str(tmp_path / ".claude" / "memory")
     got = B.default_index_dir(md)
-    assert got.endswith(os.path.join(".claude", ".memory-index"))
+    assert got == str(tmp_path / ".hippo" / "index")  # MIG-9: beside .claude/, not in it
 
 
 def test_switching_to_bm25_removes_stale_dense_file(tmp_path, monkeypatch):
@@ -1109,12 +1109,12 @@ def test_derived_dirs_invisible_to_git_without_init(tmp_path, monkeypatch):
     monkeypatch.chdir(repo)
     R.main(["zebra", "canary", "deploys"])  # builds the index + writes telemetry
 
-    assert os.path.isdir(os.path.join(repo, ".claude", ".memory-index"))
-    assert os.path.isdir(os.path.join(repo, ".claude", ".memory-telemetry"))
+    assert os.path.isdir(os.path.join(repo, ".hippo", "index"))
+    assert os.path.isdir(os.path.join(repo, ".hippo", "telemetry"))
     porcelain = subprocess.run(
         ["git", "status", "--porcelain", "-uall"], cwd=repo, capture_output=True, text=True
     ).stdout
-    assert ".memory-index" not in porcelain and ".memory-telemetry" not in porcelain
+    assert ".hippo" not in porcelain
     assert ".claude/memory/m.md" in porcelain  # the CORPUS stays visible/committable
 
 

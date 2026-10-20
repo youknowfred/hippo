@@ -161,7 +161,7 @@ def _extra_recall_tiers(memory_dir: str) -> List[Tuple[str, str, str]]:
     dirs: List[Tuple[str, str, str]] = []
     # TEA-3: the in-repo private tier — precedes the user tier (a repo-local override of a
     # portable preference wins). Its index NESTS inside memory.local because its plain sibling
-    # would be the project's own ``.claude/.memory-index``; nesting keeps it distinct AND sweeps
+    # would be the project's pre-MIG-9 ``.claude/.memory-index``; nesting keeps it distinct AND sweeps
     # it into memory.local's own self-ignoring .gitignore, so private text never reaches git.
     local = local_memory_dir(memory_dir)
     if local:
