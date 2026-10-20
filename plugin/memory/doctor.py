@@ -353,7 +353,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("native_auto_memory", check_native_auto_memory),  # NAT-1: auto-memory settings + its footprint in the corpus
     ("resolution", check_corpus_resolution),
     ("worktree_copies", check_worktree_copies),  # SHP-7: a linked worktree's dead .memory-* copies, named
-    ("snapshots", check_snapshots),  # MIG-8/13: backups still in .claude/ (spent once stamped) or .hippo-snapshots/
+    ("snapshots", check_snapshots),  # MIG-8/13/16: every backup — .claude/ (spent once stamped), .hippo/, worktrees
     ("derived_dirs", check_derived_dirs),  # MIG-9: index/telemetry/pending in <project>/.hippo/; names what is left in .claude/
     ("git_mode", check_git_mode),
     ("trust", check_trust),

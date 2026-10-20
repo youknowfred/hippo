@@ -255,7 +255,9 @@ dir. It ignores itself: its `*` .gitignore lands before the copy, and a marker t
 longer ignores everything refuses the copy. The copy holds no marker of its own, so it is
 byte-identical to the corpus. Backups taken before v1.42.3 sit in `.claude/memory.pre-cite*/`;
 doctor's `snapshots` line names them with their size, and calls them spent once the citation
-derivation is stamped and the re-derivation worklist is empty (MIG-8).
+derivation is stamped and the re-derivation worklist is empty (MIG-8). The same line counts
+the backups in `.hippo/snapshots/` and v1.42.3's `.hippo-snapshots/`, and the copies the
+desktop app's worktrees carry in `.claude/worktrees/*/.claude/` (MIG-16).
 
 ### Verify-at-use banner + reinforcement (RET-6)
 
@@ -592,8 +594,9 @@ these steps for the one memory `<name>` in corpus `<memory_dir>` (its index dir 
      worktree it creates, so each worktree made after one was taken holds its own copy in
      `.claude/worktrees/*/.claude/`.
 
-   `/hippo:doctor`'s `snapshots` line is hippo's report on them. For a purge, this `find`, run
-   from the project root, is the complete list, because it also reaches the worktree copies:
+   `/hippo:doctor`'s `snapshots` line counts them in all three places, worktree copies
+   included, with their size. To list the ones that hold `<name>.md`, run this `find` from the
+   project root:
    ```bash
    find .hippo/snapshots .hippo-snapshots .claude -path '*/memory.pre-cite*/*' -name "<name>.md" 2>/dev/null
    ```
