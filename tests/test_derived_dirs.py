@@ -1,10 +1,10 @@
-"""MIG-9/MIG-10: the index, telemetry and pending queue live in ``<project>/.hippo/``.
+"""MIG-9/MIG-10/MIG-11: the index, telemetry and pending queue live in ``<project>/.hippo/``.
 
 The Claude desktop app copies the checkout's whole ``.claude/`` (ignored files included) into
 every worktree it creates, so the three dirs that used to sit beside the corpus rode into each
 one. These pin where they resolve now, that an older layout is still read where it is, how
 SessionStart moves it (one rename, then a fold of whatever a session still on an older hippo
-writes), and the telemetry stub a sleep schedule's log needs.
+writes), the telemetry stub a sleep schedule's log needs, and doctor's line.
 """
 
 from __future__ import annotations
@@ -293,7 +293,7 @@ def test_the_census_flags_a_schedule_whose_log_dir_is_gone(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# SessionStart
+# SessionStart and doctor
 # --------------------------------------------------------------------------- #
 def test_session_start_moves_the_old_dirs_before_refreshing_the_index(tmp_path, monkeypatch):
     from memory import session_start as S
@@ -310,3 +310,65 @@ def test_session_start_moves_the_old_dirs_before_refreshing_the_index(tmp_path, 
     assert [e["name"] for e in manifest["entries"]] == ["note"]  # the refresh wrote the live index
     assert (tmp_path / ".hippo" / "pending" / "capture-a.json").exists()
     assert ".hippo" not in _git(tmp_path, "status", "--porcelain", "--untracked-files=all")
+
+
+def _doctor(md, tmp_path):
+    from memory.doctor_checks_env import DoctorContext
+    from memory.doctor_checks_worktree import check_derived_dirs
+
+    return check_derived_dirs(DoctorContext(memory_dir=str(md), repo_root=str(tmp_path)))
+
+
+def test_doctor_names_an_unmoved_dir_with_the_move_by_hand(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    md = _old_layout(tmp_path)
+    r = _doctor(md, tmp_path)
+    assert r["status"] == "warn"
+    assert "index, telemetry, pending queue still in" in r["message"]
+    assert f"mv {_legacy(tmp_path, 'index')} {tmp_path / '.hippo' / 'index'}" in r["message"]
+
+
+def test_doctor_is_quiet_once_moved_and_names_a_stub_and_leftovers(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    md = _old_layout(tmp_path)
+    (_legacy(tmp_path, "telemetry") / "sleep.log").write_text("x\n")
+    D.migrate(md)
+    r = _doctor(md, tmp_path)
+    assert r["status"] == "ok"
+    assert "stays as an empty stub" in r["message"] and "--print-schedule" in r["message"]
+    pend = _legacy(tmp_path, "pending")
+    pend.mkdir()
+    (pend / "capture-a.json").write_text("{}")  # the live queue has one by this name
+    D.migrate(md)
+    r = _doctor(md, tmp_path)
+    assert r["status"] == "warn"
+    assert f"{pend} holds 1 entry" in r["message"] and "never overwrites" in r["message"]
+    os.unlink(pend / "capture-a.json")
+    import shutil
+
+    shutil.rmtree(_legacy(tmp_path, "telemetry"))
+    D.migrate(md)
+    r = _doctor(md, tmp_path)
+    assert r == {"status": "ok", "message": f"derived dirs: in {tmp_path / '.hippo'}, outside "
+                 ".claude/, so worktrees do not carry them."}
+
+
+def test_doctor_totals_the_copies_old_worktrees_carry_and_its_command_deletes_only_them(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    md = _corpus(tmp_path)
+    for name in ("wt-a", "wt-b"):
+        claude = tmp_path / ".claude" / "worktrees" / name / ".claude"
+        for kind in _KINDS:
+            (claude / f".memory-{kind}").mkdir(parents=True)
+            (claude / f".memory-{kind}" / "blob").write_bytes(b"x" * 200_000)
+        (claude / "memory").mkdir()
+        (claude / "settings.json").write_text("{}")
+    (tmp_path / ".claude" / "worktrees" / "wt-c" / ".claude").mkdir(parents=True)
+    r = _doctor(md, tmp_path)
+    assert "2 worktree(s) under" in r["message"] and "(1.2 MB)" in r["message"]
+    cmd = r["message"].split("Delete them: ", 1)[1].rstrip(".")
+    subprocess.run(["/bin/sh", "-c", cmd], check=True)
+    for name in ("wt-a", "wt-b"):
+        claude = tmp_path / ".claude" / "worktrees" / name / ".claude"
+        assert sorted(os.listdir(claude)) == ["memory", "settings.json"]
+    assert "worktree(s)" not in _doctor(md, tmp_path)["message"]

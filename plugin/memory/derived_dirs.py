@@ -1,4 +1,4 @@
-"""Where hippo's derived per-clone dirs live: ``<project>/.hippo/`` (MIG-9, MIG-10).
+"""Where hippo's derived per-clone dirs live: ``<project>/.hippo/`` (MIG-9, MIG-10, MIG-11).
 
 The recall index, the telemetry ledgers and the capture pending queue used to sit beside the
 corpus, in ``.claude/.memory-index``, ``.claude/.memory-telemetry`` and
@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import os
 import shutil
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from .provenance_env import DERIVED_HOME_DIRNAME, ensure_self_ignoring_dir
 
@@ -270,3 +270,30 @@ def migrate(memory_dir: str) -> Dict[str, str]:
     except Exception:
         pass
     return out
+
+
+def leftovers(memory_dir: str) -> Tuple[Optional[str], Dict[str, Tuple[str, int]]]:
+    """For doctor: ``(home, {kind: (state, entries)})`` for each old dir still in ``.claude/``.
+
+    ``state`` is ``unmoved`` (no live dir yet), ``stub`` (kept for a sleep schedule) or
+    ``leftover`` (entries the fold would not overwrite). Read-only. Never raises.
+    """
+    found: Dict[str, Tuple[str, int]] = {}
+    home = derived_home(memory_dir)
+    if home is None:
+        return None, found
+    for kind in KINDS:
+        legacy = legacy_dir(memory_dir, kind)
+        try:
+            if not os.path.isdir(legacy) or os.path.islink(legacy):
+                continue
+            names = [n for n in os.listdir(legacy) if n not in (".gitignore", STUB_NOTE)]
+            if not os.path.isdir(os.path.join(home, kind)):
+                found[kind] = ("unmoved", len(names))
+            elif kind == "telemetry" and is_stub(legacy):
+                found[kind] = ("stub", 0)
+            else:
+                found[kind] = ("leftover", len(names))
+        except OSError:
+            continue
+    return home, found

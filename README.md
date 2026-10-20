@@ -317,7 +317,7 @@ To stop hippo from acting on a project, run inside Claude Code:
 This removes the cross-machine symlink under `~/.claude/projects/<encoded>/memory` — the one
 thing that actually stops Claude Code's native memory from injecting the floor for this project.
 It then offers (a confirmed step, never automatic) to delete the derived, gitignored
-`.claude/.memory-index/` and `.claude/.memory-telemetry/` dirs, and **reports** — never
+`.hippo/` dir (the index, telemetry and pending queue), and **reports** — never
 deletes — the shared per-machine venv (`CLAUDE_PLUGIN_DATA/venv`) and fastembed model cache
 paths, since those are shared across every project using the plugin on this machine.
 
@@ -415,6 +415,14 @@ other checkout), and `HIPPO_MEMORY_DIR` still names a corpus dir outright. A mai
 carries **no** corpus leaves a worktree's branch-only corpus alone. `/hippo:doctor` prints which
 tree it resolved in one line (`tree: MAIN working tree … (redirected from linked worktree …)`)
 and names any dead `.claude/.memory-*` copies a worktree still carries from before this behavior.
+
+Since v1.42.4 the index, the telemetry ledgers and the capture pending queue live in
+`<project>/.hippo/`, beside `.claude/` rather than inside it. The Claude desktop app copies a
+checkout's whole `.claude/` dir, ignored files included, into every worktree it creates, and these
+dirs used to ride along (about 39 MB per worktree on a large corpus). The first session after the
+update moves them with one rename each. `/hippo:doctor`'s `derived dirs:` line names anything still
+in `.claude/`, and in the main checkout it totals the old copies existing worktrees carry, with a
+`find … -exec rm -rf` that deletes only those.
 
 A repo nested inside another, or a git submodule, resolves only its own corpus: resolution stops
 at the session's git toplevel. When it has none and a parent does, SessionStart and doctor say
