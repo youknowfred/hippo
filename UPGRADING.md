@@ -11,6 +11,21 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### v1.42.6: purged memories in the backups, and the worktree copies
+
+**If you purged a memory while backups existed.** A pre-migration backup is a full copy of the
+corpus. Before v1.42.6 the purge procedure (*Purging a memory* in `plugin/memory/README.md`)
+did not cover the backups, so a memory purged by it, a leaked secret included, is still in every
+backup taken before the purge. Run the procedure's step 5 for that memory: a `find` lists every
+copy, then delete `<name>.md` and its `MEMORY.md` pointer line from each backup, or delete a
+spent backup outright.
+
+**doctor's `snapshots` line is longer.** It counts the backups in `.hippo/snapshots/` even when
+some are still in `.claude/`, and it counts the copies of old `.claude/` backups that
+desktop-app worktrees carry, with a `find` that lists them. It does not delete them or warn about
+them. When it names a backup that exists only in worktrees, move that copy into
+`.hippo/snapshots/` before you retire those worktrees, or it goes with them.
+
 ### v1.42.5: backups move into `.hippo/snapshots/`
 
 v1.42.3 put pre-migration backups in `.hippo-snapshots/` at the project root, and v1.42.4 put

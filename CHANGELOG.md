@@ -7,6 +7,45 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.42.6 — 2026-10-20 — "Every copy counted"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**, link cache still
+**6**; `stale.json` schema still **1**. A pre-migration backup is a full copy of the corpus.
+The purge procedure now reaches the backups, and doctor's `snapshots` line counts all of them,
+the copies the Claude desktop app laid into each worktree included.
+
+**Operator action: only if you purged a memory while backups existed.** The purge procedure
+predates the backups, so a memory purged by it, a leaked secret included, is still in every
+backup taken before the purge. Run the procedure's new step 5 for that memory. See
+[UPGRADING.md](UPGRADING.md).
+
+- **The purge procedure clears the backups (#163, SEC-23).** Step 5 of *Purging a memory* in
+  `plugin/memory/README.md` names the three places backups have lived:
+  `.hippo/snapshots/memory.pre-cite2-*/` (v1.42.5 and later), `.hippo-snapshots/` (v1.42.3 and
+  v1.42.4) and `.claude/memory.pre-cite*/` (older, and copied into every desktop-app worktree
+  under `.claude/worktrees/*/.claude/`). One `find` lists every copy of the memory. For each,
+  delete `<name>.md` and its pointer line in that backup's `MEMORY.md`, or delete a spent
+  backup outright. The backups are gitignored, so the history scrub never reaches them, and
+  hippo never deletes one by itself. The verify step (now step 6) greps the backups for the
+  phrase too. The test builds the paths from the snapshot module's own constants, so the next
+  move of the backups fails it until the doc follows.
+- **doctor's `snapshots` line counts every backup (#164, MIG-16).**
+  - With backups still in `.claude/`, the line named those and `.hippo-snapshots/` but did not
+    count `.hippo/snapshots/`. It counts them in both cases now.
+  - The desktop app copies `.claude/` into each worktree it makes, so
+    `.claude/worktrees/*/.claude/` holds copies of the old backups, which doctor never named.
+    The line counts them with their size and prints a `find` that lists them; removal stays
+    per item. A copy whose name no backup outside the worktrees has is named, since retiring
+    the worktrees that hold it deletes that backup. It never warns.
+  - The count is on this line, not on `worktree copies` (SHP-7), which is n/a from the main
+    checkout. It runs from whichever tree doctor runs in, since a worktree session resolves to
+    the main checkout's corpus. A worktree whose `.claude` is a symlink is skipped.
+  - The purge doc's step 5, the README's backup section and the doctor skill say so too.
+- **Receipt.** On hippo's own checkout (read-only), the line still lists the four `.claude/`
+  backups (1.6 MB, 259 files) as kept, and now adds 30 copies in 8 of its 11 worktrees
+  (11.9 MB), none of them a backup that exists only in a worktree, in 47 ms.
+
 ## v1.42.5 — 2026-10-20 — "Under one roof"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
