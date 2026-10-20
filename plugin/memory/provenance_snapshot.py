@@ -1,4 +1,4 @@
-"""The pre-migration backup: where it goes, and when it is a copy at all (MIG-6, MIG-7).
+"""The pre-migration backup: where it goes, and when it is a copy at all (MIG-6, MIG-7, MIG-12).
 
 Split out of ``provenance.py``, which sat at its size-ratchet ceiling; the façade re-imports
 every public name here, so ``provenance.snapshot_corpus`` keeps resolving. Imports only
@@ -8,11 +8,17 @@ MIG-6. The copy used to land beside the corpus, in ``.claude/memory.pre-cite2-<s
 The Claude desktop app lays down every worktree it creates with a copy of the checkout's whole
 ``.claude/`` directory, ignored files included, so each backup rode into every worktree made
 after it. On 2026-10-19 that was 53 worktrees each carrying six spent backups (44 MB, 3,915
-files apiece) on a disk that filled. The copy now goes to ``<project>/.hippo-snapshots/``:
-beside ``.claude/``, not inside it, so no worktree carries it, and on the same path from every
-surface (it is derived from the corpus path alone — the plugin data dir is not: the Bash tool
-and a terminal never see ``CLAUDE_PLUGIN_DATA``, and Claude Code removes that dir when the
-plugin is uninstalled, which would take a gitignored corpus's only undo with it).
+files apiece) on a disk that filled. The copy now goes outside ``.claude/``, so no worktree
+carries it, and on the same path from every surface (it is derived from the corpus path alone —
+the plugin data dir is not: the Bash tool and a terminal never see ``CLAUDE_PLUGIN_DATA``, and
+Claude Code removes that dir when the plugin is uninstalled, which would take a gitignored
+corpus's only undo with it).
+
+MIG-12. v1.42.3 put that copy in ``<project>/.hippo-snapshots/``; v1.42.4 then gave the
+derived dirs their own ``<project>/.hippo/`` (MIG-9), so the copy moved into it, as
+``<project>/.hippo/snapshots/``, and a project carries one hippo dir instead of two. Backups
+already in ``.hippo-snapshots/`` are never moved by a hook — they are the only undo a
+gitignored corpus has — so doctor names them with the ``mv`` that moves them.
 
 MIG-7. A copy is only needed when git cannot undo the migration. A corpus whose memory files
 are all committed and unchanged is restored by ``git checkout``, so the snapshot names that
@@ -28,9 +34,10 @@ import shutil
 import subprocess
 from typing import Dict, List, Optional, Tuple
 
-from .provenance_env import ensure_self_ignoring_dir
+from .provenance_env import DERIVED_HOME_DIRNAME, ensure_self_ignoring_dir
 
-SNAPSHOT_DIRNAME = ".hippo-snapshots"
+SNAPSHOT_SUBDIR = "snapshots"  # inside the .hippo/ container (MIG-12)
+V1423_DIRNAME = ".hippo-snapshots"  # where v1.42.3 put them (MIG-6)
 SNAPSHOT_PREFIX = "memory.pre-cite2-"
 LEGACY_PREFIX = "memory.pre-cite"  # every pre-MIG-6 backup beside the corpus, any cite round
 
@@ -48,16 +55,28 @@ def _check_stamp(stamp: str) -> None:
         )
 
 
-def snapshot_root(memory_dir: str) -> str:
-    """``<project>/.hippo-snapshots`` for the usual ``<project>/.claude/memory`` corpus.
-
-    Beside ``.claude/``, never inside it. A corpus that does not sit in a ``.claude/`` dir
-    (a ``HIPPO_MEMORY_DIR`` elsewhere) keeps the same-named dir beside itself.
-    """
+def _snapshot_home(memory_dir: str) -> str:
+    """The dir the snapshot container sits in: the project, beside ``.claude/``, for a corpus
+    in a ``.claude/`` dir; else the corpus's own parent (a ``HIPPO_MEMORY_DIR`` elsewhere)."""
     parent = os.path.dirname(os.path.abspath(memory_dir))
     if os.path.basename(parent) == ".claude":
         parent = os.path.dirname(parent)
-    return os.path.join(parent, SNAPSHOT_DIRNAME)
+    return parent
+
+
+def snapshot_root(memory_dir: str) -> str:
+    """``<project>/.hippo/snapshots`` for the usual ``<project>/.claude/memory`` corpus.
+
+    Beside ``.claude/``, never inside it, in the same ``.hippo/`` container as the derived
+    dirs (MIG-12). A corpus that does not sit in a ``.claude/`` dir keeps a
+    ``.hippo/snapshots`` beside itself.
+    """
+    return os.path.join(_snapshot_home(memory_dir), DERIVED_HOME_DIRNAME, SNAPSHOT_SUBDIR)
+
+
+def v1423_snapshot_root(memory_dir: str) -> str:
+    """Where v1.42.3 put the copies: ``<project>/.hippo-snapshots``. Doctor names it."""
+    return os.path.join(_snapshot_home(memory_dir), V1423_DIRNAME)
 
 
 def legacy_snapshot_dirs(memory_dir: str) -> List[str]:
@@ -136,7 +155,7 @@ def git_restore_point(memory_dir: str) -> Optional[str]:
 
 
 def snapshot_corpus(memory_dir: str, stamp: str) -> str:
-    """Copy the corpus to ``<project>/.hippo-snapshots/memory.pre-cite2-<stamp>/``.
+    """Copy the corpus to ``<project>/.hippo/snapshots/memory.pre-cite2-<stamp>/``.
 
     The copy is the undo for a corpus git cannot restore (MIG-7 decides that — see
     ``take_snapshot``). hippo SHIPS expecting a committed corpus (``.claude/memory/`` is
@@ -150,8 +169,9 @@ def snapshot_corpus(memory_dir: str, stamp: str) -> str:
     ``.claude/memory/`` does not thereby ignore a backup of it, so without a marker the
     copy lands as a fresh untracked directory holding every private memory — one
     ``git add -A`` from being committed, in a repo that may well be public. The ``*``
-    marker sits in ``.hippo-snapshots/`` itself and lands BEFORE the payload, so the window
-    never exists; a marker that no longer ignores everything refuses the copy. The copy
+    marker sits in ``.hippo/snapshots/`` itself (and ``.hippo/`` gets its own) and lands
+    BEFORE the payload, so the window never exists; a marker that no longer ignores
+    everything refuses the copy. The copy
     itself carries no marker, so it is byte-identical to the corpus and copying it back is
     the whole restore. (The pre-MIG-6 marker sat inside the copy: a corpus with its own
     ``.gitignore`` overwrote it, which left the copy visible to git, and a restore would

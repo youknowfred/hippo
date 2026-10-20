@@ -1519,7 +1519,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--snapshot",
         metavar="STAMP",
         default=None,
-        help="back up the corpus before migrating: a copy in <project>/.hippo-snapshots/"
+        help="back up the corpus before migrating: a copy in <project>/.hippo/snapshots/"
         "memory.pre-cite2-<STAMP>/ when git cannot undo it (gitignored or uncommitted), "
         "else the commit to `git checkout`. Take this first.",
     )

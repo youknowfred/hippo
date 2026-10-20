@@ -1,7 +1,8 @@
-"""The pre-migration backup (MIG-6, MIG-7) and doctor's line for the old ones (MIG-8).
+"""The pre-migration backup (MIG-6, MIG-7, MIG-12) and doctor's line for the old ones (MIG-8).
 
-MIG-6: the copy lives in ``<project>/.hippo-snapshots/``, not in ``.claude/``, which the
-Claude desktop app copies into every worktree it creates. MIG-7: a corpus git can restore
+MIG-6: the copy lives outside ``.claude/``, which the Claude desktop app copies into every
+worktree it creates; MIG-12: in ``<project>/.hippo/snapshots/``, the container the derived
+dirs use, not v1.42.3's ``<project>/.hippo-snapshots/``. MIG-7: a corpus git can restore
 gets its commit, not a copy. MIG-8: doctor names the backups older plugins left in
 ``.claude/``, with their size, and calls them spent once the migration is done.
 
@@ -16,8 +17,10 @@ import subprocess
 import pytest
 
 from memory import provenance as P
+from memory.derived_dirs import derived_home
 from memory.doctor_checks_env import DoctorContext
 from memory.doctor_checks_worktree import check_snapshots
+from memory.provenance_snapshot import snapshot_root
 
 from .conftest import git_commit, write_file
 
@@ -75,7 +78,7 @@ def test_a_gitignored_corpus_is_copied_outside_claude_and_restores_byte_for_byte
     target = _corpus(repo, ignored=True)
     before = _tree(memory_dir)
     r = P.take_snapshot(memory_dir, "20260714")
-    assert r == {"path": os.path.join(repo, ".hippo-snapshots", "memory.pre-cite2-20260714")}
+    assert r == {"path": os.path.join(repo, ".hippo", "snapshots", "memory.pre-cite2-20260714")}
     assert not [n for n in os.listdir(os.path.dirname(memory_dir)) if n.startswith("memory.pre-cite")]
     assert _tree(r["path"]) == before
     lines = P.snapshot_lines(r, memory_dir)
@@ -88,27 +91,28 @@ def test_a_gitignored_corpus_is_copied_outside_claude_and_restores_byte_for_byte
 
 def test_the_copy_is_invisible_to_git_even_when_the_corpus_has_its_own_gitignore(repo, memory_dir):
     """SEC-3 at the new location: the backup must not publish a corpus its project keeps
-    private. The `*` marker sits in .hippo-snapshots/ itself, so a corpus .gitignore copied
+    private. The `*` marker sits in .hippo/snapshots/ itself, so a corpus .gitignore copied
     with the payload cannot replace it — before MIG-6 the marker sat inside the copy, where the
     corpus's own .gitignore overwrote it and the copy showed up in `git status`."""
     _corpus(repo, ignored=True)
     write_file(repo, ".claude/memory/.gitignore", "scratch/\n")
     dest = P.take_snapshot(memory_dir, "t1")["path"]
-    with open(os.path.join(repo, ".hippo-snapshots", ".gitignore"), encoding="utf-8") as fh:
-        assert fh.read().strip() == "*"
+    for marker in (".hippo/.gitignore", ".hippo/snapshots/.gitignore"):
+        with open(os.path.join(repo, marker), encoding="utf-8") as fh:
+            assert fh.read().strip() == "*", marker
     porcelain = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"],
                                cwd=repo, capture_output=True, text=True, check=True).stdout
-    assert "hippo-snapshots" not in porcelain and "pre-cite" not in porcelain, porcelain
+    assert ".hippo" not in porcelain and "pre-cite" not in porcelain, porcelain
     assert subprocess.run(["git", "check-ignore", "-q", os.path.join(dest, "m.md")],
                           cwd=repo).returncode == 0
 
 
 def test_a_snapshot_dir_whose_marker_stopped_ignoring_everything_refuses_the_copy(repo, memory_dir):
     _corpus(repo, ignored=True)
-    write_file(repo, ".hippo-snapshots/.gitignore", "*.tmp\n")
+    write_file(repo, ".hippo/snapshots/.gitignore", "*.tmp\n")
     with pytest.raises(PermissionError):
         P.take_snapshot(memory_dir, "t1")
-    assert os.listdir(os.path.join(repo, ".hippo-snapshots")) == [".gitignore"]
+    assert os.listdir(os.path.join(repo, ".hippo", "snapshots")) == [".gitignore"]
 
 
 def test_a_corpus_outside_git_and_outside_claude_is_copied_beside_itself(tmp_path):
@@ -116,7 +120,32 @@ def test_a_corpus_outside_git_and_outside_claude_is_copied_beside_itself(tmp_pat
     md.mkdir()
     (md / "m.md").write_text("---\nname: m\n---\nb\n", encoding="utf-8")
     r = P.take_snapshot(str(md), "t1")
-    assert r == {"path": str(tmp_path / ".hippo-snapshots" / "memory.pre-cite2-t1")}
+    assert r == {"path": str(tmp_path / ".hippo" / "snapshots" / "memory.pre-cite2-t1")}
+
+
+def test_snapshots_share_the_hippo_dir_the_derived_dirs_use(repo, memory_dir):
+    """MIG-12: one hippo dir per project. v1.42.4 put the index, telemetry and pending queue
+    in <project>/.hippo/; the backups join them there instead of a second .hippo-snapshots/."""
+    _corpus(repo, ignored=True)
+    root = snapshot_root(memory_dir)
+    assert root == os.path.join(repo, ".hippo", "snapshots")
+    assert os.path.dirname(root) == derived_home(memory_dir)
+    P.take_snapshot(memory_dir, "t1")
+    assert not os.path.exists(os.path.join(repo, ".hippo-snapshots"))
+    assert sorted(os.listdir(os.path.join(repo, ".hippo"))) == [".gitignore", "snapshots"]
+
+
+def test_a_new_snapshot_leaves_v1423_backups_where_they_are(repo, memory_dir):
+    """Backups in .hippo-snapshots/ are a gitignored corpus's only undo: taking a new one never
+    moves, merges or deletes them. Doctor names them with the mv (MIG-13)."""
+    _corpus(repo, ignored=True)
+    old = os.path.join(repo, ".hippo-snapshots")
+    write_file(old, ".gitignore", "*\n")
+    write_file(old, "memory.pre-cite2-t1/m.md", "old\n")
+    before = _tree(old)
+    dest = P.take_snapshot(memory_dir, "t1")["path"]  # the same stamp is free at the new root
+    assert dest == os.path.join(repo, ".hippo", "snapshots", "memory.pre-cite2-t1")
+    assert _tree(old) == before
 
 
 def test_snapshot_refuses_to_overwrite_an_existing_one(repo, memory_dir):
@@ -133,7 +162,7 @@ def test_a_stamp_is_a_plain_label_so_the_copy_cannot_land_anywhere_else(repo, me
     _corpus(repo, ignored=True)
     with pytest.raises(ValueError):
         P.take_snapshot(memory_dir, stamp)
-    assert not os.path.exists(os.path.join(repo, ".hippo-snapshots"))
+    assert not os.path.exists(os.path.join(repo, ".hippo"))
     assert not os.path.exists(os.path.join(repo, ".claude", "x"))
 
 
@@ -142,7 +171,7 @@ def test_the_cli_prints_where_the_undo_is(repo, memory_dir, capsys):
     argv = ["--snapshot", "t1", "--memory-dir", memory_dir, "--repo-root", repo]
     assert P.main(argv) == 0
     out = capsys.readouterr().out
-    dest = os.path.join(repo, ".hippo-snapshots", "memory.pre-cite2-t1")
+    dest = os.path.join(repo, ".hippo", "snapshots", "memory.pre-cite2-t1")
     assert out.startswith(f"snapshot: {dest}\n") and "To undo the migration: cp -Rp" in out, out
     assert P.main(argv) == 1  # a second take of the same stamp is refused
     assert "already exists" in capsys.readouterr().out
@@ -156,7 +185,7 @@ def test_a_committed_clean_corpus_gets_its_commit_not_a_copy_and_git_restores_it
     before = _tree(memory_dir)
     r = P.take_snapshot(memory_dir, "t1")
     assert r == {"commit": _head(repo)}
-    assert not os.path.exists(os.path.join(repo, ".hippo-snapshots"))
+    assert not os.path.exists(os.path.join(repo, ".hippo"))
     lines = P.snapshot_lines(r, memory_dir)
     assert lines[0].startswith("snapshot: not copied") and _head(repo)[:12] in lines[0]
     _migrate(repo, target)
@@ -205,7 +234,7 @@ def test_doctor_reports_no_backups_in_claude(repo, memory_dir):
     assert r == {"status": "ok", "message": "snapshots: none in .claude/."}
     P.take_snapshot(memory_dir, "t1")
     m = check_snapshots(DoctorContext(memory_dir, repo))["message"]
-    assert "none in .claude/; 1 in" in m and ".hippo-snapshots" in m, m
+    assert "none in .claude/; 1 in" in m and os.path.join(repo, ".hippo", "snapshots") in m, m
 
 
 def test_doctor_keeps_backups_while_the_derivation_is_unstamped(repo, memory_dir):
@@ -217,7 +246,7 @@ def test_doctor_keeps_backups_while_the_derivation_is_unstamped(repo, memory_dir
     m = r["message"]
     assert "2 pre-migration backup(s)" in m and "(4 KB, 2 files)" in m, m
     assert "memory.pre-cite2-a, memory.pre-cite2-b" in m and "kept" in m and "not stamped" in m
-    assert os.path.join(repo, ".hippo-snapshots") in m
+    assert os.path.join(repo, ".hippo", "snapshots") in m
 
 
 def test_doctor_keeps_backups_while_a_stamped_corpus_still_has_worklist_items(repo, memory_dir):

@@ -885,17 +885,17 @@ def test_snapshot_in_a_repo_with_no_corpus_refuses_and_creates_nothing(tmp_path,
         assert "no corpus" in text and "nothing to snapshot" in text and "/hippo:setup" in text, text
         assert "FAILED" not in text and "refused" not in text, text
     assert not os.path.exists(os.path.join(repo, ".claude"))
-    assert not os.path.exists(os.path.join(repo, ".hippo-snapshots"))
+    assert not os.path.exists(os.path.join(repo, ".hippo", "snapshots"))
 
 
 def test_rederive_snapshot_is_self_ignoring_outside_claude(rederive_repo):
-    """MIG-6: the copy lands in <project>/.hippo-snapshots/, which ignores itself — not in
-    .claude/, which the desktop app copies into every worktree it creates."""
+    """MIG-6/MIG-12: the copy lands in <project>/.hippo/snapshots/, which ignores itself —
+    not in .claude/, which the desktop app copies into every worktree it creates."""
     repo, md = rederive_repo
     text = _text(_call("rederive", {"action": "snapshot", "stamp": "t1"}))
-    snap = os.path.join(repo, ".hippo-snapshots", "memory.pre-cite2-t1")
+    snap = os.path.join(repo, ".hippo", "snapshots", "memory.pre-cite2-t1")
     assert f"snapshot: {snap}" in text and "ignores itself" in text and "cp -Rp" in text, text
-    assert open(os.path.join(repo, ".hippo-snapshots", ".gitignore")).read().strip() == "*"
+    assert open(os.path.join(repo, ".hippo", "snapshots", ".gitignore")).read().strip() == "*"
     assert os.path.isfile(os.path.join(snap, "m.md"))
     assert not [n for n in os.listdir(os.path.dirname(md)) if n.startswith("memory.pre-cite")]
     text = _text(_call("rederive", {"action": "snapshot", "stamp": "a/../../.claude/x"}))
@@ -911,7 +911,7 @@ def test_tend_snapshot_of_a_committed_clean_corpus_names_the_commit(rederive_rep
     subprocess.run(["git", "commit", "-qm", "memory"], cwd=repo, check=True)
     text = _text(_call("tend", {"action": "snapshot", "stamp": "t1"}))
     assert "snapshot: not copied" in text and f"git -C {md} checkout" in text, text
-    assert not os.path.exists(os.path.join(repo, ".hippo-snapshots"))
+    assert not os.path.exists(os.path.join(repo, ".hippo", "snapshots"))
 
 
 def test_rederive_and_heal_are_trust_gated_like_every_other_corpus_write(corpus, monkeypatch):
