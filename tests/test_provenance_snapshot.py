@@ -305,8 +305,10 @@ def _v1423(repo, *stamps):
 
 
 def _run_printed(message, marker, shell):
-    cmd = message.split(marker, 1)[1]
-    subprocess.run([shell, "-c", cmd], check=True, capture_output=True)
+    """Run the command doctor printed after ``marker``, exactly as printed (in backticks)."""
+    after = message.split(marker, 1)[1]
+    assert after.startswith("`"), message
+    subprocess.run([shell, "-c", after[1:].split("`", 1)[0]], check=True, capture_output=True)
 
 
 def _porcelain(repo):
@@ -323,7 +325,7 @@ def test_doctor_names_v1423_backups_and_its_mv_folds_them_into_one_dir(spaced_re
     assert r["status"] == "ok", r  # they do not ride into worktrees: named, never a warning
     m = r["message"]
     assert m.startswith("snapshots: none in .claude/. 2 backup(s) in " + old), m
-    assert "where v1.42.3 put them — kept" in m and "one hippo dir: " in m, m
+    assert "where v1.42.3 and v1.42.4 put them — kept" in m and "one hippo dir: " in m, m
     _run_printed(m, "one hippo dir: ", shell)
     root = os.path.join(repo, ".hippo", "snapshots")
     assert not os.path.exists(old)
@@ -360,8 +362,8 @@ def test_an_empty_v1423_dir_is_named_and_its_command_removes_only_that(spaced_re
     repo, md = spaced_repo
     old = _v1423(repo)
     m = check_snapshots(DoctorContext(md, repo))["message"]
-    assert m == f"snapshots: none in .claude/. {old}, where v1.42.3 put them, holds no backups; delete it: " \
-        + f"[ -z \"$(ls -A {shlex.quote(old)} | grep -vxF .gitignore)\" ] && rm -r {shlex.quote(old)}", m
+    assert m == f"snapshots: none in .claude/. {old}, where v1.42.3 and v1.42.4 put them, holds no backups; delete it: " \
+        + f"`[ -z \"$(ls -A {shlex.quote(old)} | grep -vxF .gitignore)\" ] && rm -r {shlex.quote(old)}`.", m
     write_file(old, "notes.txt", "mine\n")  # anything but the marker blocks the rm
     with pytest.raises(subprocess.CalledProcessError):
         _run_printed(m, "delete it: ", shell)
@@ -371,15 +373,68 @@ def test_an_empty_v1423_dir_is_named_and_its_command_removes_only_that(spaced_re
     assert not os.path.exists(old)
 
 
-def test_doctor_names_both_old_locations_on_one_line(repo, memory_dir):
-    _corpus(repo, ignored=True)
-    _legacy(memory_dir, "a")
-    _v1423(repo, "b")
-    r = check_snapshots(DoctorContext(memory_dir, repo))
+@pytest.mark.parametrize("shell", _SHELLS)
+def test_the_v1423_move_also_works_in_the_other_order(spaced_repo, shell):
+    """The .hippo-snapshots/ move first, while no root exists: one rename, then the .claude/
+    move fills the root it made."""
+    repo, md = spaced_repo
+    _legacy(md, "a")
+    old = _v1423(repo, "c")
+    m = check_snapshots(DoctorContext(md, repo))["message"]
+    _run_printed(m, "one hippo dir: ", shell)
+    _run_printed(m, "to keep them there instead: ", shell)
+    root = os.path.join(repo, ".hippo", "snapshots")
+    assert not os.path.exists(old)
+    assert sorted(os.listdir(root)) == [".gitignore", "memory.pre-cite2-a", "memory.pre-cite2-c"]
+    assert _porcelain(repo) == "", _porcelain(repo)
+
+
+@pytest.mark.parametrize("shell", _SHELLS)
+def test_doctor_names_both_old_locations_and_each_command_runs(spaced_repo, shell):
+    """MIG-15: the .claude/ hint said "move them into <root>/", but <root> rarely exists yet,
+    so a plain mv failed. It now prints the command, which makes <root> with its `*` marker
+    first. Two commands share the line, each in backticks."""
+    repo, md = spaced_repo
+    for stamp in ("a", "b"):
+        _legacy(md, stamp)
+    old = _v1423(repo, "c")
+    r = check_snapshots(DoctorContext(md, repo))
     assert r["status"] == "ok", r
     m = r["message"]
-    assert "1 pre-migration backup(s) in" in m and "kept: still the undo" in m, m
-    assert "1 backup(s) in " + os.path.join(repo, ".hippo-snapshots") in m, m
+    assert "2 pre-migration backup(s) in" in m and "kept: still the undo" in m, m
+    assert "1 backup(s) in " + old in m, m
+    assert m.count("`") == 4, m
+    # Both commands from the one line, in the order printed: the first makes the root, so
+    # the second must take its other branch.
+    _run_printed(m, "to keep them there instead: ", shell)
+    root = os.path.join(repo, ".hippo", "snapshots")
+    assert not [n for n in os.listdir(os.path.dirname(md)) if n.startswith("memory.pre-cite")]
+    assert sorted(os.listdir(root)) == [".gitignore", "memory.pre-cite2-a", "memory.pre-cite2-b"]
+    with open(os.path.join(root, ".gitignore"), encoding="utf-8") as fh:
+        assert fh.read() == "*\n"
+    assert _porcelain(repo) == "", _porcelain(repo)
+    _run_printed(m, "one hippo dir: ", shell)
+    assert not os.path.exists(old)
+    assert sorted(os.listdir(root)) == [".gitignore"] + [f"memory.pre-cite2-{s}" for s in "abc"]
+    assert check_snapshots(DoctorContext(md, repo))["message"] == (
+        f"snapshots: none in .claude/; 3 in {root} (4 KB), outside .claude/, so worktrees do "
+        "not carry them.")
+    assert _porcelain(repo) == "", _porcelain(repo)
+
+
+def test_a_spent_backup_line_prints_the_move_too(repo, memory_dir):
+    write_file(repo, "src/keep.py", "k = 1\n")
+    c1 = git_commit(repo, "code", 1_700_000_000)
+    write_file(repo, ".claude/memory/m.md",
+               f'---\nname: M\ncited_paths: ["src/keep.py"]\nsource_commit: "{c1}"\n'
+               "---\nbody cites src/keep.py\n")
+    git_commit(repo, "memory", 1_700_000_001)
+    assert P.write_cite_derivation(memory_dir)
+    _legacy(memory_dir, "a")
+    r = check_snapshots(DoctorContext(memory_dir, repo))
+    assert r["status"] == "warn" and "Delete them, or move them into" in r["message"], r
+    _run_printed(r["message"], "to keep them: ", "sh")
+    assert os.path.isdir(os.path.join(repo, ".hippo", "snapshots", "memory.pre-cite2-a"))
 
 
 # --------------------------------------------------------------------------- #

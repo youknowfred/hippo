@@ -20,7 +20,13 @@ from typing import Dict, List, Tuple
 
 from .doctor_checks_env import DoctorContext
 from .provenance import resolve_corpus_start
-from .provenance_snapshot import dir_size, legacy_snapshot_dirs, snapshot_root, v1423_snapshot_root
+from .provenance_snapshot import (
+    LEGACY_PREFIX,
+    dir_size,
+    legacy_snapshot_dirs,
+    snapshot_root,
+    v1423_snapshot_root,
+)
 
 
 # The derived, gitignored dirs that move WITH the corpus (SHP-7), by their pre-MIG-9 names:
@@ -123,13 +129,15 @@ def _migration_unfinished(ctx: DoctorContext) -> str:
 
 
 def _v1423_backups(memory_dir: str, root: str) -> str:
-    """MIG-13: '' or the sentence naming backups in v1.42.3's ``.hippo-snapshots/``.
+    """MIG-13: '' or the sentence naming backups in ``.hippo-snapshots/`` (v1.42.3, v1.42.4).
 
     They do not ride into worktrees, so this never warns; it only names the second hippo dir
-    and the ``mv`` that folds it into ``root``. The command is guarded, so it is safe to run
-    later: with no ``root`` yet, one rename (the old dir's own ``*`` .gitignore comes along);
-    else each backup ``root`` lacks is moved, and the old dir is removed only once nothing
-    but its ``.gitignore`` is left. A backup ``root`` already has by name stays put.
+    and the ``mv`` that folds it into ``root``. The command picks its branch when it runs, so
+    it works whether or not ``root`` exists by then (MIG-15's ``.claude/`` move, printed on
+    the same line, makes it): with no ``root``, one rename (the old dir's own ``*``
+    .gitignore comes along); else each backup ``root`` lacks is moved, and the old dir is
+    removed only once nothing but its ``.gitignore`` is left. A backup ``root`` already has
+    by name stays put.
     """
     old = v1423_snapshot_root(memory_dir)
     try:
@@ -138,23 +146,35 @@ def _v1423_backups(memory_dir: str, root: str) -> str:
         return ""
     q_old, q_root = shlex.quote(old), shlex.quote(root)
     drop_old = f'[ -z "$(ls -A {q_old} | grep -vxF .gitignore)" ] && rm -r {q_old}'
+    where = "where v1.42.3 and v1.42.4 put them"
     if not names:
-        return f" {old}, where v1.42.3 put them, holds no backups; delete it: {drop_old}"
+        return f" {old}, {where}, holds no backups; delete it: `{drop_old}`."
     size = sum(dir_size(os.path.join(old, n))[0] for n in names)
-    head = f" {len(names)} backup(s) in {old} ({_mb(size)}), where v1.42.3 put them — kept."
-    if not os.path.lexists(root):
-        return head + (f" Move them into {root} so the project has one hippo dir: [ ! -e {q_root} ] "
-                       f"&& mkdir -p {shlex.quote(os.path.dirname(root))} && mv {q_old} {q_root}")
+    head = f" {len(names)} backup(s) in {old} ({_mb(size)}), {where} — kept."
     clash = [n for n in names if os.path.lexists(os.path.join(root, n))]
     if clash:
         head += (f" {', '.join(clash)} {'is' if len(clash) == 1 else 'are'} also in {root} under "
                  f"the same name, so {'it stays' if len(clash) == 1 else 'they stay'}: compare, "
                  "then delete the old one.")
-    move = f'for d in {q_old}/*/; do d="${{d%/}}"; [ -e {q_root}/"${{d##*/}}" ] || mv "$d" {q_root}/; done'
     if len(clash) == len(names):
         return head
+    each = _move_each(q_old + "/*/", q_root) + ("" if clash else f"; {drop_old}")
     return head + (f" Move {'the rest' if clash else 'them'} into {root} so the project has one "
-                   f"hippo dir: {move}" + ("" if clash else f"; {drop_old}"))
+                   f"hippo dir: `if [ -e {q_root} ]; then {each}; else mkdir -p "
+                   f"{shlex.quote(os.path.dirname(root))} && mv {q_old} {q_root}; fi`.")
+
+
+def _move_each(glob: str, q_root: str) -> str:
+    """Shell: move each dir ``glob`` matches into ``q_root`` unless one by that name is there."""
+    return f'for d in {glob}; do d="${{d%/}}"; [ -e {q_root}/"${{d##*/}}" ] || mv "$d" {q_root}/; done'
+
+
+def _claude_move(parent: str, root: str) -> str:
+    """MIG-15: the command that moves ``.claude/memory.pre-cite*/`` into ``root``. ``root``
+    usually does not exist yet, so it is made with its ``*`` .gitignore first (SEC-3)."""
+    q_root = shlex.quote(root)
+    return (f"mkdir -p {q_root} && {{ [ -e {q_root}/.gitignore ] || echo '*' > {q_root}/.gitignore; }} "
+            f"&& {_move_each(shlex.quote(parent) + '/' + LEGACY_PREFIX + '*/', q_root)}")
 
 
 def check_snapshots(ctx: DoctorContext) -> Dict[str, str]:
@@ -165,8 +185,9 @@ def check_snapshots(ctx: DoctorContext) -> Dict[str, str]:
     files included) into every worktree it creates — 53 worktrees x 44 MB of spent backups on
     the disk that filled on 2026-10-19. Once the citation derivation is stamped and the
     worklist is empty they are spent: warn, so they get moved or deleted. Before that they are
-    still the undo: named, ok, with where to move them so they stop riding along. Backups in
-    v1.42.3's ``.hippo-snapshots/`` are named on the same line (MIG-13). Read-only.
+    still the undo: named, ok, with the command that moves them so they stop riding along
+    (MIG-15). Backups in v1.42.3's ``.hippo-snapshots/`` are named on the same line (MIG-13).
+    Every printed command sits in backticks, so two can share the line. Read-only.
     """
     try:
         legacy = legacy_snapshot_dirs(ctx.memory_dir)
@@ -190,18 +211,19 @@ def check_snapshots(ctx: DoctorContext) -> Dict[str, str]:
             "The Claude desktop app copies .claude/ into every worktree it creates, so each new "
             "worktree carries them. " if os.path.basename(parent) == ".claude" else ""
         )
+        move = f"`{_claude_move(parent, root)}`"
         unfinished = _migration_unfinished(ctx)
         if unfinished:
             return {
                 "status": "ok",
                 "message": f"{head} — kept: still the undo, as {unfinished}. {rides}Move them "
-                f"into {root}/ to keep them there instead.{v1423}",
+                f"into {root}/ to keep them there instead: {move}.{v1423}",
             }
         return {
             "status": "warn",
             "message": f"{head} — spent: the citation derivation is stamped and the "
             f"re-derivation worklist is empty. {rides}Delete them, or move them into {root}/ "
-            f"to keep them.{v1423}",
+            f"to keep them: {move}.{v1423}",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"snapshots check failed: {exc}."}
