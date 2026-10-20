@@ -12,6 +12,8 @@ The MIG-1 snapshot tests moved here from test_provenance.py (its size ratchet).
 from __future__ import annotations
 
 import os
+import shlex
+import shutil
 import subprocess
 
 import pytest
@@ -273,3 +275,108 @@ def test_doctor_calls_backups_spent_once_stamped_with_an_empty_worklist(repo, me
     m = r["message"]
     assert "5 pre-migration backup(s)" in m and "(10 KB, 5 files)" in m and "(+1 more)" in m, m
     assert "spent" in m and "every worktree" in m and "Delete them" in m
+
+
+# --------------------------------------------------------------------------- #
+# MIG-13: doctor names v1.42.3's .hippo-snapshots/ with the mv into .hippo/snapshots/
+# --------------------------------------------------------------------------- #
+_SHELLS = [s for s in ("sh", "zsh", "bash") if shutil.which(s)]
+
+
+@pytest.fixture
+def spaced_repo(tmp_path):
+    """A repo whose path has a space, so the printed command's quoting is exercised."""
+    r = str(tmp_path / "my repo")
+    os.makedirs(os.path.join(r, ".claude", "memory"))
+    subprocess.run(["git", "init", "-q"], cwd=r, check=True)
+    write_file(r, ".gitignore", ".claude/memory/\n")
+    write_file(r, ".claude/memory/m.md", "---\nname: m\n---\nbody\n")
+    git_commit(r, "ignore the corpus", 1_700_000_000)
+    return r, os.path.join(r, ".claude", "memory")
+
+
+def _v1423(repo, *stamps):
+    """Backups where v1.42.3 put them: .hippo-snapshots/ with its `*` marker."""
+    old = os.path.join(repo, ".hippo-snapshots")
+    write_file(old, ".gitignore", "*\n")
+    for stamp in stamps:
+        write_file(old, f"memory.pre-cite2-{stamp}/m.md", f"backup {stamp}\n")
+    return old
+
+
+def _run_printed(message, marker, shell):
+    cmd = message.split(marker, 1)[1]
+    subprocess.run([shell, "-c", cmd], check=True, capture_output=True)
+
+
+def _porcelain(repo):
+    return subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=repo,
+                          capture_output=True, text=True, check=True).stdout
+
+
+@pytest.mark.parametrize("shell", _SHELLS)
+def test_doctor_names_v1423_backups_and_its_mv_folds_them_into_one_dir(spaced_repo, shell):
+    repo, md = spaced_repo
+    old = _v1423(repo, "a", "b")
+    before = _tree(old)
+    r = check_snapshots(DoctorContext(md, repo))
+    assert r["status"] == "ok", r  # they do not ride into worktrees: named, never a warning
+    m = r["message"]
+    assert m.startswith("snapshots: none in .claude/. 2 backup(s) in " + old), m
+    assert "where v1.42.3 put them — kept" in m and "one hippo dir: " in m, m
+    _run_printed(m, "one hippo dir: ", shell)
+    root = os.path.join(repo, ".hippo", "snapshots")
+    assert not os.path.exists(old)
+    assert _tree(root) == before  # one rename: every byte, the `*` marker included
+    assert _porcelain(repo) == "", _porcelain(repo)
+    m = check_snapshots(DoctorContext(md, repo))["message"]
+    assert m == f"snapshots: none in .claude/; 2 in {root} (1 KB), outside .claude/, so worktrees do not carry them.", m
+
+
+@pytest.mark.parametrize("shell", _SHELLS)
+def test_a_backup_already_in_the_new_dir_by_name_stays_where_it_is(spaced_repo, shell):
+    """After the update a new snapshot can take a stamp a v1.42.3 one already has. The printed
+    command moves only what the new dir lacks, and keeps the old dir (and its marker) while a
+    backup is left in it."""
+    repo, md = spaced_repo
+    old = _v1423(repo, "a", "b")
+    P.take_snapshot(md, "b")
+    root = os.path.join(repo, ".hippo", "snapshots")
+    new_b = _tree(os.path.join(root, "memory.pre-cite2-b"))
+    m = check_snapshots(DoctorContext(md, repo))["message"]
+    assert f"memory.pre-cite2-b is also in {root} under the same name, so it stays" in m, m
+    _run_printed(m, "one hippo dir: ", shell)
+    assert _tree(os.path.join(root, "memory.pre-cite2-a")) == {"m.md": b"backup a\n"}
+    assert _tree(os.path.join(root, "memory.pre-cite2-b")) == new_b
+    assert sorted(os.listdir(old)) == [".gitignore", "memory.pre-cite2-b"]
+    assert _porcelain(repo) == "", _porcelain(repo)
+    m = check_snapshots(DoctorContext(md, repo))["message"]
+    assert "1 backup(s) in" in m and "memory.pre-cite2-b is also in" in m, m
+    assert "Move" not in m and "rm -r" not in m, m  # nothing left that the command could move
+
+
+@pytest.mark.parametrize("shell", _SHELLS)
+def test_an_empty_v1423_dir_is_named_and_its_command_removes_only_that(spaced_repo, shell):
+    repo, md = spaced_repo
+    old = _v1423(repo)
+    m = check_snapshots(DoctorContext(md, repo))["message"]
+    assert m == f"snapshots: none in .claude/. {old}, where v1.42.3 put them, holds no backups; delete it: " \
+        + f"[ -z \"$(ls -A {shlex.quote(old)} | grep -vxF .gitignore)\" ] && rm -r {shlex.quote(old)}", m
+    write_file(old, "notes.txt", "mine\n")  # anything but the marker blocks the rm
+    with pytest.raises(subprocess.CalledProcessError):
+        _run_printed(m, "delete it: ", shell)
+    assert os.path.isfile(os.path.join(old, "notes.txt"))
+    os.unlink(os.path.join(old, "notes.txt"))
+    _run_printed(m, "delete it: ", shell)
+    assert not os.path.exists(old)
+
+
+def test_doctor_names_both_old_locations_on_one_line(repo, memory_dir):
+    _corpus(repo, ignored=True)
+    _legacy(memory_dir, "a")
+    _v1423(repo, "b")
+    r = check_snapshots(DoctorContext(memory_dir, repo))
+    assert r["status"] == "ok", r
+    m = r["message"]
+    assert "1 pre-migration backup(s) in" in m and "kept: still the undo" in m, m
+    assert "1 backup(s) in " + os.path.join(repo, ".hippo-snapshots") in m, m

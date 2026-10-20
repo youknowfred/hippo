@@ -2,7 +2,8 @@
 
 SHP-7: a linked git worktree's dead ``.claude/.memory-*`` copies, named. MIG-8: pre-MIG-6
 corpus backups still in ``.claude/``, which the Claude desktop app copies into every worktree
-it creates, named with their size. MIG-9: the derived dirs moved to ``<project>/.hippo/``;
+it creates, named with their size; MIG-13: v1.42.3's ``.hippo-snapshots/``, named with the
+``mv`` into ``.hippo/snapshots/``. MIG-9: the derived dirs moved to ``<project>/.hippo/``;
 what is still in ``.claude/``, and the old copies existing worktrees carry, named.
 
 Sibling of ``doctor_checks_env`` (CONTRIBUTING.md "Code layout": the env module sat at the
@@ -19,7 +20,7 @@ from typing import Dict, List, Tuple
 
 from .doctor_checks_env import DoctorContext
 from .provenance import resolve_corpus_start
-from .provenance_snapshot import dir_size, legacy_snapshot_dirs, snapshot_root
+from .provenance_snapshot import dir_size, legacy_snapshot_dirs, snapshot_root, v1423_snapshot_root
 
 
 # The derived, gitignored dirs that move WITH the corpus (SHP-7), by their pre-MIG-9 names:
@@ -121,6 +122,41 @@ def _migration_unfinished(ctx: DoctorContext) -> str:
     return f"the re-derivation worklist still lists {left} memory(ies)" if left else ""
 
 
+def _v1423_backups(memory_dir: str, root: str) -> str:
+    """MIG-13: '' or the sentence naming backups in v1.42.3's ``.hippo-snapshots/``.
+
+    They do not ride into worktrees, so this never warns; it only names the second hippo dir
+    and the ``mv`` that folds it into ``root``. The command is guarded, so it is safe to run
+    later: with no ``root`` yet, one rename (the old dir's own ``*`` .gitignore comes along);
+    else each backup ``root`` lacks is moved, and the old dir is removed only once nothing
+    but its ``.gitignore`` is left. A backup ``root`` already has by name stays put.
+    """
+    old = v1423_snapshot_root(memory_dir)
+    try:
+        names = sorted(e.name for e in os.scandir(old) if e.is_dir(follow_symlinks=False))
+    except OSError:
+        return ""
+    q_old, q_root = shlex.quote(old), shlex.quote(root)
+    drop_old = f'[ -z "$(ls -A {q_old} | grep -vxF .gitignore)" ] && rm -r {q_old}'
+    if not names:
+        return f" {old}, where v1.42.3 put them, holds no backups; delete it: {drop_old}"
+    size = sum(dir_size(os.path.join(old, n))[0] for n in names)
+    head = f" {len(names)} backup(s) in {old} ({_mb(size)}), where v1.42.3 put them — kept."
+    if not os.path.lexists(root):
+        return head + (f" Move them into {root} so the project has one hippo dir: [ ! -e {q_root} ] "
+                       f"&& mkdir -p {shlex.quote(os.path.dirname(root))} && mv {q_old} {q_root}")
+    clash = [n for n in names if os.path.lexists(os.path.join(root, n))]
+    if clash:
+        head += (f" {', '.join(clash)} {'is' if len(clash) == 1 else 'are'} also in {root} under "
+                 f"the same name, so {'it stays' if len(clash) == 1 else 'they stay'}: compare, "
+                 "then delete the old one.")
+    move = f'for d in {q_old}/*/; do d="${{d%/}}"; [ -e {q_root}/"${{d##*/}}" ] || mv "$d" {q_root}/; done'
+    if len(clash) == len(names):
+        return head
+    return head + (f" Move {'the rest' if clash else 'them'} into {root} so the project has one "
+                   f"hippo dir: {move}" + ("" if clash else f"; {drop_old}"))
+
+
 def check_snapshots(ctx: DoctorContext) -> Dict[str, str]:
     """MIG-8: pre-MIG-6 backups still in ``.claude/`` (``memory.pre-cite*/``), with their size.
 
@@ -129,18 +165,20 @@ def check_snapshots(ctx: DoctorContext) -> Dict[str, str]:
     files included) into every worktree it creates — 53 worktrees x 44 MB of spent backups on
     the disk that filled on 2026-10-19. Once the citation derivation is stamped and the
     worklist is empty they are spent: warn, so they get moved or deleted. Before that they are
-    still the undo: named, ok, with where to move them so they stop riding along. Read-only.
+    still the undo: named, ok, with where to move them so they stop riding along. Backups in
+    v1.42.3's ``.hippo-snapshots/`` are named on the same line (MIG-13). Read-only.
     """
     try:
         legacy = legacy_snapshot_dirs(ctx.memory_dir)
         root = snapshot_root(ctx.memory_dir)
+        v1423 = _v1423_backups(ctx.memory_dir, root)
         if not legacy:
             kept = [e.path for e in os.scandir(root) if e.is_dir()] if os.path.isdir(root) else []
             where = (
                 f"; {len(kept)} in {root} ({_mb(sum(dir_size(p)[0] for p in kept))}), outside "
                 ".claude/, so worktrees do not carry them" if kept else ""
             )
-            return {"status": "ok", "message": f"snapshots: none in .claude/{where}."}
+            return {"status": "ok", "message": f"snapshots: none in .claude/{where}.{v1423}"}
         sizes = [dir_size(p) for p in legacy]
         nbytes, nfiles = sum(b for b, _ in sizes), sum(f for _, f in sizes)
         names = [os.path.basename(p) for p in legacy]
@@ -157,13 +195,13 @@ def check_snapshots(ctx: DoctorContext) -> Dict[str, str]:
             return {
                 "status": "ok",
                 "message": f"{head} — kept: still the undo, as {unfinished}. {rides}Move them "
-                f"into {root}/ to keep them there instead.",
+                f"into {root}/ to keep them there instead.{v1423}",
             }
         return {
             "status": "warn",
             "message": f"{head} — spent: the citation derivation is stamped and the "
             f"re-derivation worklist is empty. {rides}Delete them, or move them into {root}/ "
-            "to keep them.",
+            f"to keep them.{v1423}",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"snapshots check failed: {exc}."}
