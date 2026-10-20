@@ -10,13 +10,14 @@ of them (15 MB index, 13 MB telemetry, 8 MB pending queue apiece).
 
 MIG-9. The dirs now live in ``<project>/.hippo/index``, ``.hippo/telemetry`` and
 ``.hippo/pending``: beside ``.claude/``, not inside it, on a path derived from the corpus path
-alone (the same rule as MIG-6's ``.hippo-snapshots/``, for the same reasons: every surface,
+alone (the same rule as MIG-6's pre-migration backups, for the same reasons: every surface,
 the bash fast paths included, computes it without the plugin data dir, and it lives and dies
 with the clone, so the pending queue survives a plugin uninstall). The ``.hippo/`` container
 self-ignores (SEC-3). A corpus that is not ``<project>/.claude/memory`` (a ``HIPPO_MEMORY_DIR``
 elsewhere, the user tier's ``~/.claude/hippo-memory``) keeps the old sibling dirs: there is no
 ``.claude/`` for them to ride in. Until SessionStart moves an old dir, ``derived_dir`` reads it
-where it is.
+where it is. The pre-migration backups share the container, in ``.hippo/snapshots`` (MIG-12,
+``provenance_snapshot``), but they are not derived: nothing here moves or deletes them.
 
 MIG-10. SessionStart moves each old dir with one ``rename``. Hooks are pinned to the version
 a session launched with, so a session that was open across the update keeps writing the old

@@ -58,7 +58,9 @@ dirs from before the redirect — a dead queue WITH seeds warns; nothing drains 
 derived dirs (the index, telemetry and pending queue live in `<project>/.hippo/`; an old
 `.claude/.memory-*` dir not moved yet, entries left over from an older hippo, a telemetry stub
 kept for a sleep schedule, and the old copies existing worktrees still carry, with the command
-that deletes them),
+that deletes them), snapshots (pre-migration backups: old ones in `.claude/` with their size,
+spent once the derivation is stamped; v1.42.3's `.hippo-snapshots/`, with the `mv` into
+`.hippo/snapshots/`),
 git degraded-mode, corpus trust,
 frontmatter integrity, index corruption, index count vs corpus, hot-path p95 latency
 , index format version, pack drift, `<FILL-ME` templates, and the corpus-wide secret

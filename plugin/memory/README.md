@@ -237,7 +237,7 @@ baseline sentence distinguishes *preserved* from *assigned* (a memory that had n
 against the stored frontmatter so an index that moved since the worklist read is loud, and
 a file with no `---` block is reported as **no frontmatter**, not as a YAML error.
 
-### The pre-migration backup: `--snapshot` (MIG-6, MIG-7)
+### The pre-migration backup: `--snapshot` (MIG-6, MIG-7, MIG-12)
 
 ```bash
 "$PY" -m memory.provenance --snapshot <label>   # before the first re-derivation write
@@ -247,10 +247,11 @@ The backup is whatever git cannot already undo (`provenance_snapshot.take_snapsh
 every memory file and `.format` is tracked and `git status` shows nothing under the corpus,
 nothing is copied: the result names HEAD and the `git -C <corpus> checkout <sha> -- .` that
 restores it. Otherwise (a gitignored corpus, an uncommitted edit, a new or ignored memory) the
-corpus is copied to `<project>/.hippo-snapshots/memory.pre-cite2-<label>/`, and the result
+corpus is copied to `<project>/.hippo/snapshots/memory.pre-cite2-<label>/`, and the result
 prints the `cp -Rp` that copies it back. That dir sits beside `.claude/`, not inside it,
 because the Claude desktop app copies `.claude/` (ignored files included) into every worktree it
-creates. It ignores itself: its `*` .gitignore lands before the copy, and a marker that no
+creates, and it shares the `.hippo/` container with the derived dirs, so a project has one hippo
+dir. It ignores itself: its `*` .gitignore lands before the copy, and a marker that no
 longer ignores everything refuses the copy. The copy holds no marker of its own, so it is
 byte-identical to the corpus. Backups taken before v1.42.3 sit in `.claude/memory.pre-cite*/`;
 doctor's `snapshots` line names them with their size, and calls them spent once the citation

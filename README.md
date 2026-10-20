@@ -316,10 +316,11 @@ To stop hippo from acting on a project, run inside Claude Code:
 
 This removes the cross-machine symlink under `~/.claude/projects/<encoded>/memory` — the one
 thing that actually stops Claude Code's native memory from injecting the floor for this project.
-It then offers (a confirmed step, never automatic) to delete the derived, gitignored
-`.hippo/` dir (the index, telemetry and pending queue), and **reports** — never
-deletes — the shared per-machine venv (`CLAUDE_PLUGIN_DATA/venv`) and fastembed model cache
-paths, since those are shared across every project using the plugin on this machine.
+It then offers (a confirmed step, never automatic) to delete the derived, gitignored dirs in
+`.hippo/` (the index, telemetry and pending queue), and **reports** — never
+deletes — the pre-migration corpus backups in `.hippo/snapshots/`, which are a gitignored
+corpus's only undo, and the shared per-machine venv (`CLAUDE_PLUGIN_DATA/venv`) and fastembed
+model cache paths, since those are shared across every project using the plugin on this machine.
 
 `.claude/memory/` itself — the git-tracked corpus — is always left alone: it stays committed in
 git, inert, until someone runs `/hippo:init` again (in this repo, a fresh clone, or a new

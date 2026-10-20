@@ -74,10 +74,11 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 2. **Offer to delete the derived, gitignored dirs — agent-gated, never unconditional.** Ask the
    user (in this skill's own conversational turn) before deleting anything here; a "yes" to step
-   1 is not consent for step 2. If confirmed, remove `.hippo/` at the project root, which
-   holds all three (v1.42.4 moved them out of `.claude/`; an older hippo left them at
+   1 is not consent for step 2. If confirmed, remove these three dirs in `.hippo/` at the
+   project root (v1.42.4 moved them out of `.claude/`; an older hippo left them at
    `.claude/.memory-index/`, `.claude/.memory-telemetry/` and `.claude/.memory-pending/` —
-   remove those too if they exist):
+   remove those too if they exist). Remove them by name, never `.hippo/` as a whole: it also
+   holds `.hippo/snapshots/` (see below):
    - `.hippo/index/` (the recall index — rebuildable any time via
      `/hippo:setup` or `memory.build_index`)
    - `.hippo/telemetry/` (recall/episode/reconsolidation ledgers —
@@ -89,7 +90,15 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
    All three are already gitignored derived state — deleting them loses no git history and
    nothing committed. If the user declines, leave them exactly as they are and say so plainly
    (they're inert without the symlink from step 1 anyway — nothing reads them once native memory
-   has nothing pointing at this corpus).
+   has nothing pointing at this corpus). Once they are gone, `.hippo/` may be removed only if
+   nothing but its `.gitignore` and `.migrate.lock` is left in it.
+
+   **Pre-migration backups are not derived — report them, never delete them here.**
+   `.hippo/snapshots/memory.pre-cite2-*/` (v1.42.5 and later), `.hippo-snapshots/` (v1.42.3
+   and v1.42.4) and `.claude/memory.pre-cite*/` (older) are copies of the corpus taken before
+   a citation migration. For a gitignored corpus they are its only undo. Name each one that
+   exists with its size (`du -sh <dir>`), say it was left in place, and let the user delete it
+   themself.
 
 3. **Report (never delete) the shared, per-machine paths.** These are NOT per-project — removing
    them affects every other project on this machine still using the plugin, so this skill only
@@ -108,7 +117,8 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 4. **Explain what was left alone.** End every run with this, regardless of what steps 2-3 did:
    `.claude/memory/` itself — the git-tracked corpus — is untouched and stays committed in git,
    inert, until someone runs `/hippo:setup` again (in this repo or a fresh clone of it). Removal
-   never edits, deletes, or archives a single memory file.
+   never edits, deletes, or archives a single memory file, and it leaves every pre-migration
+   backup where it is.
 
 ## Hard rules
 
@@ -117,6 +127,9 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
   ever candidates for removal here.
 - **Step 2 is agent-gated, not automatic.** No `--all`, no silent sweep — a confirmed step in
   this skill's own conversation, every time.
+- **Never delete a pre-migration backup** (`.hippo/snapshots/`, `.hippo-snapshots/`,
+  `.claude/memory.pre-cite*/`), and never `rm -rf .hippo/`, which would take
+  `.hippo/snapshots/` with it. Report them; the user decides.
 - **Never delete the venv or model cache.** Report their paths only; a human decides whether
   removing hippo everywhere on this machine is actually what they want.
 - **A `conflict` status on the symlink removal is a hard stop, not a force-through.** A symlink

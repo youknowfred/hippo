@@ -7,6 +7,47 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.42.5 — 2026-10-20 — "Under one roof"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**, link cache still
+**6**; `stale.json` schema still **1**. The pre-migration backups join the derived dirs in
+`.hippo/`. v1.42.3 put them in `<project>/.hippo-snapshots/`, and v1.42.4 then gave the index,
+telemetry and pending queue `<project>/.hippo/`, which left two hippo dirs at the project root.
+
+**Operator action: only if you took a snapshot on v1.42.3 or v1.42.4.** hippo does not move
+an existing `.hippo-snapshots/`. `/hippo:doctor`'s `snapshots` line names it and prints the
+command that moves it. See [UPGRADING.md](UPGRADING.md).
+
+- **Backups land in `.hippo/snapshots/` (#162, MIG-12).** `hippo provenance --snapshot
+  <label>` and the `tend` / `rederive` snapshot action copy the corpus to
+  `<project>/.hippo/snapshots/memory.pre-cite2-<label>/`. Both `.hippo/` and `snapshots/` get a
+  `*` .gitignore before the copy, and a `snapshots/` marker that no longer ignores everything
+  still refuses it. The copy holds no marker, so it stays byte-identical to the corpus. A
+  corpus outside `.claude/` gets a `.hippo/snapshots/` beside itself.
+- **doctor names the v1.42.3 dir (#162, MIG-13).** No hook moves it: a backup is the only undo
+  a gitignored corpus has, and the dir sits outside `.claude/`, so no worktree carries it. The
+  line stays ok and prints a command that picks its branch when it runs. With no
+  `.hippo/snapshots/` yet it is one rename, which takes the old dir's `*` .gitignore along.
+  Otherwise it moves each backup the new dir lacks, and removes the old dir only when nothing
+  but its `.gitignore` is left. A backup the new dir already has by name stays where it is,
+  and the line says so.
+- **`/hippo:remove` keeps the backups (#162, MIG-14).** Its cleanup step said to remove
+  `.hippo/` at the project root, which would now delete `.hippo/snapshots/`. It removes
+  `.hippo/index`, `.hippo/telemetry` and `.hippo/pending` by name, removes `.hippo/` only when
+  nothing else is in it, and lists every backup (`.hippo/snapshots/`, `.hippo-snapshots/`,
+  `.claude/memory.pre-cite*/`) with its size for the user to delete.
+- **A runnable move for backups in `.claude/` (#162, MIG-15).** The `snapshots` line said to
+  move them into the snapshot dir, which usually did not exist yet, so a plain `mv` failed. It
+  now prints the command: make `.hippo/snapshots/` with its `*` .gitignore, then move each
+  `memory.pre-cite*` dir it lacks. Every command on the line sits in backticks, so the two
+  moves can share it, and they work run in either order.
+- **Receipt.** No `.hippo-snapshots/` exists anywhere on this machine, so no live backup needed
+  moving. On hippo's own checkout (read-only), doctor still lists its four `.claude/` backups
+  (1.6 MB, 259 files) as kept, now with the move, in 5 ms cold. Tests run every printed command
+  under `sh`, `zsh` and `bash` in a path with a space, and require the backups to arrive byte
+  for byte with `git status` still empty.
+
 ## v1.42.4 — 2026-10-20 — "Nothing left to copy"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format

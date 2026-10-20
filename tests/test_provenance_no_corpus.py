@@ -85,7 +85,7 @@ def test_snapshot_of_a_repo_with_no_corpus_refuses_and_creates_nothing(repo, mon
     """MIG-5: the snapshot wrote its self-ignoring ``.gitignore`` BEFORE reading the corpus,
     so in a repo with no corpus it left ``.claude/memory.pre-cite2-<stamp>/`` behind and then
     reported "snapshot FAILED". It now refuses in MIG-3's one line and creates nothing — not
-    ``.claude/`` and not MIG-6's ``.hippo-snapshots/``."""
+    ``.claude/`` and not MIG-12's ``.hippo/snapshots/``."""
     md = os.path.join(repo, ".claude", "memory")
     with pytest.raises(FileNotFoundError):
         P.snapshot_corpus(md, "t1")
@@ -97,7 +97,7 @@ def test_snapshot_of_a_repo_with_no_corpus_refuses_and_creates_nothing(repo, mon
     assert "no corpus" in out and "nothing to snapshot" in out and "/hippo:setup" in out, out
     assert "FAILED" not in out
     assert not os.path.exists(os.path.join(repo, ".claude"))
-    assert not os.path.exists(os.path.join(repo, ".hippo-snapshots"))
+    assert not os.path.exists(os.path.join(repo, ".hippo"))
 
 
 def test_snapshot_of_an_unreadable_corpus_still_fails_and_leaves_no_debris(repo, memory_dir):
@@ -110,4 +110,4 @@ def test_snapshot_of_an_unreadable_corpus_still_fails_and_leaves_no_debris(repo,
     finally:
         os.chmod(memory_dir, 0o755)
     assert not os.path.exists(os.path.join(os.path.dirname(memory_dir), "memory.pre-cite2-t1"))
-    assert not os.path.exists(os.path.join(repo, ".hippo-snapshots"))
+    assert not os.path.exists(os.path.join(repo, ".hippo", "snapshots"))
