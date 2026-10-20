@@ -127,6 +127,8 @@ from .provenance_citations import (  # noqa: E402,F401
     resolve_citations,
     unresolved_citations,
 )
+# MIG-6: the pre-migration backup, outside .claude/.
+from .provenance_snapshot import snapshot_corpus, snapshot_lines, take_snapshot  # noqa: E402,F401
 
 
 def split_frontmatter(text: str) -> Tuple[Optional[List[str]], str]:
@@ -1456,41 +1458,6 @@ def rederive_one_lines(base: str, r: dict, *, dry_run: bool = False) -> List[str
     return lines
 
 
-def snapshot_corpus(memory_dir: str, stamp: str) -> str:
-    """Copy the corpus to a sibling ``memory.pre-cite2-<stamp>/`` before the first write.
-
-    MANDATORY before MIG-1's first non-dry write, and not merely belt-and-braces: hippo
-    SHIPS expecting a committed corpus (``.claude/memory/`` is deliberately absent from
-    init's GITIGNORE_ENTRIES, and the README says the corpus "stays committed in git"), so
-    upstream a re-derivation is undoable with ``git checkout``. A corpus the user chose to
-    gitignore has NO undo — and that is the first corpus this migration will ever touch.
-    Returns the snapshot path. Raises on failure: no snapshot, no migration.
-
-    SELF-IGNORING (SEC-3), and this is load-bearing rather than tidy. The snapshot is a
-    verbatim copy of the corpus, but it is NOT the corpus: a project that gitignores
-    ``.claude/memory/`` does not thereby ignore ``.claude/memory.pre-cite2-*``, so the
-    snapshot lands as a fresh untracked directory holding every private memory — one
-    ``git add -A`` from being committed, in a repo that may well be public. Whatever
-    exposure rule the corpus lives under, its backup must inherit; the copy must not be the
-    thing that publishes it. Written BEFORE the payload so the window never exists.
-    """
-    import shutil
-
-    dest = os.path.join(os.path.dirname(memory_dir), f"memory.pre-cite2-{stamp}")
-    if os.path.exists(dest):
-        raise FileExistsError(f"{dest} already exists — refusing to overwrite a snapshot")
-    entries = os.listdir(memory_dir)  # MIG-5: read before dest exists — no debris on failure
-    ensure_self_ignoring_dir(dest)  # the `*` marker lands first — no unignored window
-    for entry in entries:
-        src = os.path.join(memory_dir, entry)
-        dst = os.path.join(dest, entry)
-        if os.path.isdir(src):
-            shutil.copytree(src, dst)
-        else:
-            shutil.copy2(src, dst)
-    return dest
-
-
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
@@ -1552,8 +1519,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--snapshot",
         metavar="STAMP",
         default=None,
-        help="copy the corpus to memory.pre-cite<N>-<STAMP>/ before migrating. A "
-        "gitignored corpus has no `git checkout` undo — take this first.",
+        help="copy the corpus to <project>/.hippo-snapshots/memory.pre-cite2-<STAMP>/ "
+        "before migrating. A gitignored corpus has no `git checkout` undo — take this first.",
     )
     parser.add_argument(
         "--stamp-derivation",
@@ -1573,8 +1540,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.snapshot:
         try:
-            dest = snapshot_corpus(memory_dir, args.snapshot)
-            print(f"snapshot: {dest}")
+            print("\n".join(snapshot_lines(take_snapshot(memory_dir, args.snapshot), memory_dir)))
             return 0
         except Exception as exc:  # MIG-5: an absent corpus is named as that, not as a failed copy
             print(rederive_no_corpus_line(memory_dir, "snapshot")

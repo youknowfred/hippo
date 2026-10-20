@@ -344,7 +344,8 @@ def _tool_rederive(args: Dict[str, Any]) -> str:
         rederive_worklist,
         rederive_worklist_lines,
         resolve_dirs,
-        snapshot_corpus,
+        snapshot_lines,
+        take_snapshot,
         write_cite_derivation,
     )
 
@@ -371,13 +372,9 @@ def _tool_rederive(args: Dict[str, Any]) -> str:
         stamp = str(args.get("stamp") or "").strip()
         if not stamp:
             return "rederive: action='snapshot' needs stamp=<label> (e.g. '20260715-cite3')."
-        try:
-            return (
-                f"snapshot: {snapshot_corpus(memory_dir, stamp)}\n"
-                "Self-ignoring (a `*` .gitignore lands before the payload), so the backup "
-                "cannot publish a corpus its project keeps private."
-            )
-        except FileExistsError as exc:
+        try:  # MIG-6: the CLI's own rendering — where the copy is, and how to restore it
+            return "\n".join(snapshot_lines(take_snapshot(memory_dir, stamp), memory_dir))
+        except (FileExistsError, ValueError) as exc:
             return f"rederive: refused — {exc}"
         except Exception as exc:
             return f"rederive: snapshot FAILED — {exc}. Do not migrate without one."

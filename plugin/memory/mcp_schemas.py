@@ -608,7 +608,7 @@ _TOOLS = [
                     "enum": ["worklist", "one", "snapshot", "stamp"],
                     "description": "worklist = the read-only attributed diff (default); "
                     "one = apply to ONE reviewed memory (requires name); "
-                    "snapshot = copy the corpus to memory.pre-cite<N>-<stamp>/ first; "
+                    "snapshot = copy the corpus to <project>/.hippo-snapshots/ first; "
                     "stamp = record the corpus as derived by this extractor, the LAST step "
                     "(refused while any memory still differs — the stamp is earned, not "
                     "claimed)",
