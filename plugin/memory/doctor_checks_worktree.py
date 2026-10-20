@@ -3,8 +3,10 @@
 SHP-7: a linked git worktree's dead ``.claude/.memory-*`` copies, named. MIG-8: pre-MIG-6
 corpus backups still in ``.claude/``, which the Claude desktop app copies into every worktree
 it creates, named with their size; MIG-13: v1.42.3's ``.hippo-snapshots/``, named with the
-``mv`` into ``.hippo/snapshots/``. MIG-9: the derived dirs moved to ``<project>/.hippo/``;
-what is still in ``.claude/``, and the old copies existing worktrees carry, named.
+``mv`` into ``.hippo/snapshots/``; MIG-16: the backups in ``.hippo/snapshots/`` and the copies
+desktop-app worktrees carry, counted on the same line. MIG-9: the derived dirs moved to
+``<project>/.hippo/``; what is still in ``.claude/``, and the old copies existing worktrees
+carry, named.
 
 Sibling of ``doctor_checks_env`` (CONTRIBUTING.md "Code layout": the env module sat at the
 900-line cap, so the worktree check lands in its own prefix-named module; ``doctor`` imports
@@ -16,7 +18,7 @@ from __future__ import annotations
 
 import os
 import shlex
-from typing import Dict, List, Tuple
+from typing import Dict, List, Set, Tuple
 
 from .doctor_checks_env import DoctorContext
 from .provenance import resolve_corpus_start
@@ -177,6 +179,53 @@ def _claude_move(parent: str, root: str) -> str:
             f"&& {_move_each(shlex.quote(parent) + '/' + LEGACY_PREFIX + '*/', q_root)}")
 
 
+def _dirs_in(path: str) -> List[str]:
+    """The dirs directly in ``path``, symlinks not followed, sorted; [] when it is unreadable."""
+    try:
+        return sorted(e.path for e in os.scandir(path) if e.is_dir(follow_symlinks=False))
+    except OSError:
+        return []
+
+
+def _worktree_copies(memory_dir: str, named: Set[str]) -> str:
+    """MIG-16: '' or the sentence counting the backup copies desktop-app worktrees carry.
+
+    The app copies ``.claude/`` into each worktree it makes under ``.claude/worktrees/``, so
+    every ``.claude/`` backup there at the time rode along. Counted from whichever tree doctor
+    runs in: a session in one of those worktrees resolves to the main tree's corpus, so its own
+    worktree is among them. A worktree whose ``.claude`` is a symlink holds no copy of its own.
+    A copy whose name no backup outside the worktrees has is named: retiring the worktrees that
+    hold it deletes that backup. Never warns; the ``find`` only lists them (removal is per item).
+    """
+    claude = os.path.dirname(os.path.abspath(memory_dir))
+    if os.path.basename(claude) != ".claude":
+        return ""
+    base = os.path.join(claude, "worktrees")
+    copies: List[str] = []
+    trees = 0
+    for tree in _dirs_in(base):
+        wt_claude = os.path.join(tree, ".claude")
+        if os.path.islink(wt_claude):
+            continue
+        found = [p for p in _dirs_in(wt_claude) if os.path.basename(p).startswith(LEGACY_PREFIX)]
+        trees += bool(found)
+        copies += found
+    if not copies:
+        return ""
+    n = len(copies)
+    find = (f"find {shlex.quote(base)} -mindepth 3 -maxdepth 3 -type d "
+            f"-path '*/.claude/{LEGACY_PREFIX}*'")
+    out = (f" {n} cop{'y' if n == 1 else 'ies'} of pre-migration backups in {trees} worktree(s) "
+           f"under {base} ({_mb(sum(dir_size(p)[0] for p in copies))}): the Claude desktop app "
+           f"copied .claude/ into each worktree it made, and nothing reads them. List them: `{find}`.")
+    only = sorted({os.path.basename(p) for p in copies} - named)
+    if only:
+        one = len(only) == 1
+        out += (f" {', '.join(only)} exist{'s' if one else ''} only in worktrees: no backup elsewhere "
+                f"has {'that name' if one else 'those names'}.")
+    return out
+
+
 def check_snapshots(ctx: DoctorContext) -> Dict[str, str]:
     """MIG-8: pre-MIG-6 backups still in ``.claude/`` (``memory.pre-cite*/``), with their size.
 
@@ -186,20 +235,25 @@ def check_snapshots(ctx: DoctorContext) -> Dict[str, str]:
     the disk that filled on 2026-10-19. Once the citation derivation is stamped and the
     worklist is empty they are spent: warn, so they get moved or deleted. Before that they are
     still the undo: named, ok, with the command that moves them so they stop riding along
-    (MIG-15). Backups in v1.42.3's ``.hippo-snapshots/`` are named on the same line (MIG-13).
-    Every printed command sits in backticks, so two can share the line. Read-only.
+    (MIG-15). The same line counts the backups in ``.hippo/snapshots/`` and v1.42.3's
+    ``.hippo-snapshots/`` (MIG-13), and the copies worktrees carry (MIG-16), so it accounts for
+    every backup. Every printed command sits in backticks, so several can share the line.
+    Read-only.
     """
     try:
         legacy = legacy_snapshot_dirs(ctx.memory_dir)
         root = snapshot_root(ctx.memory_dir)
+        kept = _dirs_in(root)
+        in_root = (f"in {root} ({_mb(sum(dir_size(p)[0] for p in kept))}), outside .claude/, so "
+                   "worktrees do not carry them" if kept else "")
         v1423 = _v1423_backups(ctx.memory_dir, root)
+        elsewhere = legacy + kept + _dirs_in(v1423_snapshot_root(ctx.memory_dir))
+        tail = v1423 + _worktree_copies(ctx.memory_dir, {os.path.basename(p) for p in elsewhere})
         if not legacy:
-            kept = [e.path for e in os.scandir(root) if e.is_dir()] if os.path.isdir(root) else []
-            where = (
-                f"; {len(kept)} in {root} ({_mb(sum(dir_size(p)[0] for p in kept))}), outside "
-                ".claude/, so worktrees do not carry them" if kept else ""
-            )
-            return {"status": "ok", "message": f"snapshots: none in .claude/{where}.{v1423}"}
+            where = f"; {len(kept)} {in_root}" if kept else ""
+            return {"status": "ok", "message": f"snapshots: none in .claude/{where}.{tail}"}
+        if kept:
+            tail = f" {len(kept)} backup(s) {in_root}.{tail}"
         sizes = [dir_size(p) for p in legacy]
         nbytes, nfiles = sum(b for b, _ in sizes), sum(f for _, f in sizes)
         names = [os.path.basename(p) for p in legacy]
@@ -217,13 +271,13 @@ def check_snapshots(ctx: DoctorContext) -> Dict[str, str]:
             return {
                 "status": "ok",
                 "message": f"{head} — kept: still the undo, as {unfinished}. {rides}Move them "
-                f"into {root}/ to keep them there instead: {move}.{v1423}",
+                f"into {root}/ to keep them there instead: {move}.{tail}",
             }
         return {
             "status": "warn",
             "message": f"{head} — spent: the citation derivation is stamped and the "
             f"re-derivation worklist is empty. {rides}Delete them, or move them into {root}/ "
-            f"to keep them: {move}.{v1423}",
+            f"to keep them: {move}.{tail}",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"snapshots check failed: {exc}."}

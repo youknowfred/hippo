@@ -4,7 +4,8 @@ no longer surfaces. The single-sourced pointer lives in ``secrets.REMEDIATION`` 
 write-time warning and doctor's secret check name it.
 
 SEC-23 — the procedure also clears the pre-migration backups, each a full copy of the corpus
-that git never sees, in all three places they have lived.
+that git never sees, in all three places they have lived. MIG-16 — doctor's ``snapshots`` line,
+which the step points to, counts them in every one of those places.
 """
 
 from __future__ import annotations
@@ -65,7 +66,8 @@ def test_purge_doc_clears_the_pre_migration_backups():
     assert f"{V1423_DIRNAME}/" in section  # v1.42.3, v1.42.4
     assert f".claude/{LEGACY_PREFIX}" in section  # older
     assert ".claude/worktrees/" in section  # the desktop app copied .claude/ into worktrees
-    assert "`snapshots` line" in section  # doctor's report on them
+    # Doctor's line counts them all (MIG-16, pinned below); the find picks out <name>.md.
+    assert "`snapshots` line counts them in all three places, worktree copies" in section
     # One find covers all three places and the worktree copies, by the shared dir prefix.
     roots = f"{DERIVED_HOME_DIRNAME}/{SNAPSHOT_SUBDIR} {V1423_DIRNAME} .claude"
     find = f"find {roots} -path '*/{LEGACY_PREFIX}*/*'"
@@ -73,6 +75,28 @@ def test_purge_doc_clears_the_pre_migration_backups():
     assert SNAPSHOT_PREFIX.startswith(LEGACY_PREFIX)  # so the find's prefix matches every era
     assert "rm -r" in section  # deleting a spent backup outright
     assert section.index("pre-migration backups") < section.index("Verify nothing surfaces")
+
+
+def test_doctor_snapshots_line_counts_every_place_the_doc_names(tmp_path):
+    """MIG-16: step 5 says doctor's line counts the backups in all three places, worktree copies
+    included. Before, a machine with backups in .claude/ never saw .hippo/snapshots/ counted,
+    and no tree saw the worktree copies."""
+    repo = str(tmp_path)
+    md = os.path.join(repo, ".claude", "memory")
+    write_file(md, "m.md", _mem("m", "note"))
+    places = {
+        f".claude/{SNAPSHOT_PREFIX}a": "1 pre-migration backup(s) in {}/.claude (",
+        f"{DERIVED_HOME_DIRNAME}/{SNAPSHOT_SUBDIR}/{SNAPSHOT_PREFIX}b":
+            f"1 backup(s) in {{}}/{DERIVED_HOME_DIRNAME}/{SNAPSHOT_SUBDIR} (",
+        f"{V1423_DIRNAME}/{SNAPSHOT_PREFIX}c": f"1 backup(s) in {{}}/{V1423_DIRNAME} (",
+        f".claude/worktrees/wt/.claude/{SNAPSHOT_PREFIX}a":
+            "1 copy of pre-migration backups in 1 worktree(s) under {}/.claude/worktrees (",
+    }
+    for rel in places:
+        write_file(os.path.join(repo, rel), "m.md", "copy\n")
+    m = D.check_snapshots(D.DoctorContext(md, repo))["message"]
+    for said in places.values():
+        assert said.format(repo) in m, (said, m)
 
 
 def test_scan_with_remediation_carries_the_purge_pointer():

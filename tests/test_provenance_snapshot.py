@@ -4,7 +4,8 @@ MIG-6: the copy lives outside ``.claude/``, which the Claude desktop app copies 
 worktree it creates; MIG-12: in ``<project>/.hippo/snapshots/``, the container the derived
 dirs use, not v1.42.3's ``<project>/.hippo-snapshots/``. MIG-7: a corpus git can restore
 gets its commit, not a copy. MIG-8: doctor names the backups older plugins left in
-``.claude/``, with their size, and calls them spent once the migration is done.
+``.claude/``, with their size, and calls them spent once the migration is done. MIG-16: the same
+line counts every other backup, the copies desktop-app worktrees carry included.
 
 The MIG-1 snapshot tests moved here from test_provenance.py (its size ratchet).
 """
@@ -435,6 +436,75 @@ def test_a_spent_backup_line_prints_the_move_too(repo, memory_dir):
     assert r["status"] == "warn" and "Delete them, or move them into" in r["message"], r
     _run_printed(r["message"], "to keep them: ", "sh")
     assert os.path.isdir(os.path.join(repo, ".hippo", "snapshots", "memory.pre-cite2-a"))
+
+
+# --------------------------------------------------------------------------- #
+# MIG-16: the line accounts for every backup, the copies desktop-app worktrees carry included
+# --------------------------------------------------------------------------- #
+def _worktree_copy(repo, tree, stamp):
+    """A copy of a .claude/ backup in a desktop-app worktree, as the app's copy of .claude/ left it."""
+    return write_file(os.path.join(repo, ".claude", "worktrees", tree, ".claude"),
+                      f"memory.pre-cite2-{stamp}/m.md", "x" * 2000)
+
+
+def test_with_backups_in_claude_the_line_still_counts_the_new_dir(spaced_repo):
+    """Only the no-.claude/-backups branch counted <root>, so a machine with both saw none of
+    the new ones."""
+    repo, md = spaced_repo
+    _legacy(md, "a")
+    P.take_snapshot(md, "t1")
+    old = _v1423(repo, "c")
+    m = check_snapshots(DoctorContext(md, repo))["message"]
+    root = snapshot_root(md)
+    assert "1 pre-migration backup(s) in" in m, m
+    assert f" 1 backup(s) in {root} (1 KB), outside .claude/, so worktrees do not carry them." in m, m
+    assert f"1 backup(s) in {old}" in m, m
+    assert m.count("`") == 4, m  # the count adds no command
+
+
+@pytest.mark.parametrize("shell", _SHELLS)
+def test_the_line_counts_the_backup_copies_desktop_worktrees_carry(spaced_repo, shell):
+    """The app copies .claude/ into each worktree it makes, backups included. Doctor run from the
+    main tree never named those copies; the purge doc had to send readers to a find instead."""
+    repo, md = spaced_repo
+    for stamp in ("a", "b"):
+        _legacy(md, stamp)
+    copies = [_worktree_copy(repo, "wt-1", "a"), _worktree_copy(repo, "wt-1", "b"),
+              _worktree_copy(repo, "wt-2", "a")]
+    write_file(os.path.join(repo, ".claude", "worktrees", "wt-3", ".claude"), "settings.json", "{}")
+    os.symlink(os.path.join(repo, ".claude"), os.path.join(repo, ".claude", "worktrees", "wt-4"))
+    base = os.path.join(repo, ".claude", "worktrees")
+    r = check_snapshots(DoctorContext(md, repo))
+    assert r["status"] == "ok", r  # still the undo; the copies never warn by themselves
+    m = r["message"]
+    assert f" 3 copies of pre-migration backups in 2 worktree(s) under {base} (6 KB): " in m, m
+    assert "nothing reads them" in m and "only in worktrees" not in m, m
+    out = subprocess.run([shell, "-c", m.split("List them: `", 1)[1].split("`", 1)[0]],
+                         check=True, capture_output=True, text=True).stdout
+    assert sorted(out.split("\n")[:-1]) == sorted(os.path.dirname(c) for c in copies), out
+    assert sorted(_tree(base)) == sorted(  # listing them changed nothing
+        os.path.relpath(c, base) for c in copies) + ["wt-3/.claude/settings.json"]
+
+
+def test_a_worktree_copy_whose_backup_is_gone_is_named_as_the_last_copy(spaced_repo):
+    repo, md = spaced_repo
+    _worktree_copy(repo, "wt-1", "z")
+    _worktree_copy(repo, "wt-2", "z")
+    m = check_snapshots(DoctorContext(md, repo))["message"]
+    assert m.startswith("snapshots: none in .claude/. 2 copies of pre-migration backups in 2 "
+                        "worktree(s)"), m
+    assert m.endswith(" memory.pre-cite2-z exists only in worktrees: no backup elsewhere has that name."), m
+    write_file(snapshot_root(md), "memory.pre-cite2-z/m.md", "moved\n")  # its backup, by name
+    m = check_snapshots(DoctorContext(md, repo))["message"]
+    assert "; 1 in " in m and "only in worktrees" not in m, m
+
+
+def test_a_corpus_outside_claude_has_no_worktree_copies_to_count(tmp_path):
+    md = str(tmp_path / "notes" / "memory")
+    write_file(md, "m.md", "---\nname: m\n---\nbody\n")
+    write_file(str(tmp_path / "notes" / "worktrees" / "wt-1" / ".claude"), "memory.pre-cite2-a/m.md", "x")
+    m = check_snapshots(DoctorContext(md, str(tmp_path)))["message"]
+    assert "worktree" not in m.replace("so worktrees do not carry them", ""), m
 
 
 # --------------------------------------------------------------------------- #
