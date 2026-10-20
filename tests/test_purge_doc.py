@@ -2,6 +2,9 @@
 memory, scrubbing git history, clearing index rows + ledgers, and verifying via recall that it
 no longer surfaces. The single-sourced pointer lives in ``secrets.REMEDIATION`` so BOTH the
 write-time warning and doctor's secret check name it.
+
+SEC-23 — the procedure also clears the pre-migration backups, each a full copy of the corpus
+that git never sees, in all three places they have lived.
 """
 
 from __future__ import annotations
@@ -10,6 +13,13 @@ import os
 
 from memory import doctor as D
 from memory import secrets as S
+from memory.provenance_env import DERIVED_HOME_DIRNAME
+from memory.provenance_snapshot import (
+    LEGACY_PREFIX,
+    SNAPSHOT_PREFIX,
+    SNAPSHOT_SUBDIR,
+    V1423_DIRNAME,
+)
 
 from .conftest import write_file
 
@@ -21,17 +31,22 @@ def _mem(name, description, body="body"):
     return f'---\nname: {name}\ndescription: "{description}"\nmetadata:\n  type: project\n---\n{body}\n'
 
 
+def _purge_section():
+    with open(_PURGE_DOC, encoding="utf-8") as fh:
+        text = fh.read()
+    assert "## Purging a memory" in text
+    return text.split("## Purging a memory", 1)[1].split("\n## ", 1)[0]
+
+
 def test_remediation_names_the_purge_doc():
     assert "Purging a memory" in S.REMEDIATION
     assert "plugin/memory/README.md" in S.REMEDIATION
 
 
 def test_purge_doc_section_exists_and_covers_every_step():
-    with open(_PURGE_DOC, encoding="utf-8") as fh:
-        text = fh.read()
-    assert "## Purging a memory" in text
-    section = text.split("## Purging a memory", 1)[1].split("\n## ", 1)[0]
-    # The five acceptance steps: remove file, scrub history, clear index, clear ledgers, verify.
+    section = _purge_section()
+    # SEC-4's five acceptance steps: remove file, scrub history, clear index, clear ledgers,
+    # verify. SEC-23's backup step is pinned below.
     assert "git rm" in section
     assert "git filter-repo" in section  # history scrub recipe
     assert "memory.build_index" in section  # clear index rows via rebuild
@@ -39,6 +54,25 @@ def test_purge_doc_section_exists_and_covers_every_step():
     assert "memory.recall" in section  # verify it no longer surfaces
     # It contrasts with the reversible/whole-project neighbours so a reader doesn't conflate them.
     assert "/hippo:archive" in section and "/hippo:remove" in section
+
+
+def test_purge_doc_clears_the_pre_migration_backups():
+    """SEC-23: a backup holds the purged memory, a leaked secret included, and git never sees
+    it. The doc names each place one has lived, built from the snapshot module's own names, so
+    the next move of the backups breaks this test until the doc follows."""
+    section = _purge_section()
+    assert f"{DERIVED_HOME_DIRNAME}/{SNAPSHOT_SUBDIR}/{SNAPSHOT_PREFIX}" in section  # v1.42.5+
+    assert f"{V1423_DIRNAME}/" in section  # v1.42.3, v1.42.4
+    assert f".claude/{LEGACY_PREFIX}" in section  # older
+    assert ".claude/worktrees/" in section  # the desktop app copied .claude/ into worktrees
+    assert "`snapshots` line" in section  # doctor's report on them
+    # One find covers all three places and the worktree copies, by the shared dir prefix.
+    roots = f"{DERIVED_HOME_DIRNAME}/{SNAPSHOT_SUBDIR} {V1423_DIRNAME} .claude"
+    find = f"find {roots} -path '*/{LEGACY_PREFIX}*/*'"
+    assert section.count(find) == 2  # once to list the copies, once in the verify step
+    assert SNAPSHOT_PREFIX.startswith(LEGACY_PREFIX)  # so the find's prefix matches every era
+    assert "rm -r" in section  # deleting a spent backup outright
+    assert section.index("pre-migration backups") < section.index("Verify nothing surfaces")
 
 
 def test_scan_with_remediation_carries_the_purge_pointer():

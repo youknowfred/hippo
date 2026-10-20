@@ -580,12 +580,39 @@ these steps for the one memory `<name>` in corpus `<memory_dir>` (its index dir 
    was published in a committed per-user usage summary (TEA-5), also edit or `git rm`
    `.claude/memory/.usage/<user>.json` and scrub it from history via step 2.
 
-5. **Verify nothing surfaces.** Confirm the memory is gone from the corpus, the index, and recall:
+5. **Clear the pre-migration backups.** Before a citation re-derivation rewrites frontmatter,
+   the snapshot copies the whole corpus (before v1.42.3 every time; since then only when git
+   cannot restore it, as *The pre-migration backup* above describes). Each copy carries its own
+   `<name>.md`, a leaked secret included, and its own `MEMORY.md` with the memory's floor
+   pointer, if it had one. The copies are gitignored, so step 2 never reaches them, and hippo
+   never deletes one by itself. They live in three places:
+   - `<project>/.hippo/snapshots/memory.pre-cite2-*/`: v1.42.5 and later.
+   - `<project>/.hippo-snapshots/`: v1.42.3 and v1.42.4.
+   - `.claude/memory.pre-cite*/`: older. The Claude desktop app copies `.claude/` into every
+     worktree it creates, so each worktree made after one was taken holds its own copy in
+     `.claude/worktrees/*/.claude/`.
+
+   `/hippo:doctor`'s `snapshots` line is hippo's report on them. For a purge, this `find`, run
+   from the project root, is the complete list, because it also reaches the worktree copies:
+   ```bash
+   find .hippo/snapshots .hippo-snapshots .claude -path '*/memory.pre-cite*/*' -name "<name>.md" 2>/dev/null
+   ```
+   For each backup it names, delete `<name>.md` and any pointer line in that backup's
+   `MEMORY.md`, or, once the backup is spent, delete the backup outright:
+   `rm -r "<backup dir>"`. A backup is spent once the citation derivation is stamped and the
+   re-derivation worklist is empty, which doctor reports for the ones in `.claude/`. Until then
+   it is the migration's undo, so edit it instead. Since v1.42.3 a committed, clean corpus gets
+   a git restore point instead of a copy (MIG-7), and step 2 already scrubs that.
+
+6. **Verify nothing surfaces.** Confirm the memory is gone from the corpus, the backups, the
+   index, and recall:
    ```bash
    grep -ri "<distinctive phrase from the memory>" .claude/memory        # -> no hits
+   find .hippo/snapshots .hippo-snapshots .claude -path '*/memory.pre-cite*/*' -name '*.md' \
+     -exec grep -li "<distinctive phrase from the memory>" {} + 2>/dev/null   # -> no hits
    "$PY" -m memory.recall "<the memory's own topic>"                      # -> does not list <name>
    ```
-   Following these steps leaves no trace in the corpus, index, ledgers, or recall output.
+   Following these steps leaves no trace in the corpus, backups, index, ledgers, or recall output.
    `/hippo:doctor`'s secret check references this procedure in its remediation line.
 
 ## Degraded modes (all legible, none fatal)
