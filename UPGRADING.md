@@ -11,6 +11,28 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### v1.42.5: backups move into `.hippo/snapshots/`
+
+v1.42.3 put pre-migration backups in `.hippo-snapshots/` at the project root, and v1.42.4 put
+the index, telemetry and pending queue in `.hippo/`. New backups now go to `.hippo/snapshots/`,
+so a project has one hippo dir. Where the v1.42.3 notes below say `.hippo-snapshots/`, read
+`.hippo/snapshots/`.
+
+**Nothing to do in most projects.** Only a project where you took a snapshot on v1.42.3 or
+v1.42.4 has a `.hippo-snapshots/`. hippo leaves it where it is: a backup is the only undo a
+gitignored corpus has, and that dir is outside `.claude/`, so worktrees do not carry it.
+`/hippo:doctor`'s `snapshots` line names it and prints a command that moves it. When
+`.hippo/snapshots/` does not exist yet, that is one rename. Otherwise it moves each backup the
+new dir lacks, then deletes the old dir once only its `.gitignore` is left. A backup with the
+same name in both stays in the old dir: compare the two, then delete one.
+
+**Backups still in `.claude/`.** The same line now prints the command that moves
+`.claude/memory.pre-cite*/` into `.hippo/snapshots/`. It creates the dir with its `*`
+`.gitignore` first. Before, the line said to move them into a dir that usually did not exist.
+
+**`/hippo:remove` keeps the backups.** It deletes `.hippo/index`, `.hippo/telemetry` and
+`.hippo/pending` by name and lists each backup with its size, for you to delete yourself.
+
 ### v1.42.4: the index, telemetry and pending queue move out of `.claude/`
 
 hippo kept three derived, gitignored dirs beside the corpus: `.claude/.memory-index`,
