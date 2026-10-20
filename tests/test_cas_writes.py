@@ -114,6 +114,7 @@ CORPUS_RMW_SITES = {
 
 # Plain atomic writers that are NOT corpus read-modify-writes, each with why.
 NON_CORPUS_SITES = {
+    ("derived_dirs", "_write_stub"): "the MOVED note in an old telemetry dir (MIG-10)",
     ("eval_fixtures", "_append_draft_rows"): "gitignored drafts queue",
     ("eval_recall", "draft_abstention_fixtures"): "gitignored drafts queue",
     ("eval_recall", "confirm_hard_set_row"): "its drafts-queue drop (the fixture write is CAS)",

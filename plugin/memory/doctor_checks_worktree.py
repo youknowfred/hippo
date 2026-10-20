@@ -2,7 +2,8 @@
 
 SHP-7: a linked git worktree's dead ``.claude/.memory-*`` copies, named. MIG-8: pre-MIG-6
 corpus backups still in ``.claude/``, which the Claude desktop app copies into every worktree
-it creates, named with their size.
+it creates, named with their size. MIG-9: the derived dirs moved to ``<project>/.hippo/``;
+what is still in ``.claude/``, and the old copies existing worktrees carry, named.
 
 Sibling of ``doctor_checks_env`` (CONTRIBUTING.md "Code layout": the env module sat at the
 900-line cap, so the worktree check lands in its own prefix-named module; ``doctor`` imports
@@ -13,18 +14,20 @@ WHICH tree resolution started from — this check names what the redirect left b
 from __future__ import annotations
 
 import os
-from typing import Dict, List
+import shlex
+from typing import Dict, List, Tuple
 
 from .doctor_checks_env import DoctorContext
 from .provenance import resolve_corpus_start
 from .provenance_snapshot import dir_size, legacy_snapshot_dirs, snapshot_root
 
 
-# The derived, gitignored siblings of ``.claude/memory`` that move WITH the corpus (SHP-7).
+# The derived, gitignored dirs that move WITH the corpus (SHP-7), by their pre-MIG-9 names:
+# the ones a worktree's copied ``.claude/`` can still hold.
 _DERIVED_SIBLINGS = (
-    (".memory-pending", "pending queue"),
-    (".memory-index", "index"),
-    (".memory-telemetry", "telemetry"),
+    (".memory-pending", "pending queue", "pending"),
+    (".memory-index", "index", "index"),
+    (".memory-telemetry", "telemetry", "telemetry"),
 )
 
 
@@ -56,13 +59,14 @@ def check_worktree_copies(ctx: DoctorContext) -> Dict[str, str]:
                 "status": "ok",
                 "message": "worktree copies: n/a — resolution did not redirect from a linked worktree.",
             }
+        from .derived_dirs import derived_dir
+
         wt = info.get("linked_worktree") or ""
-        live_claude = os.path.dirname(os.path.abspath(ctx.memory_dir))
         dead: List[str] = []
         stranded = 0
-        for dirname, label in _DERIVED_SIBLINGS:
+        for dirname, label, kind in _DERIVED_SIBLINGS:
             cand = os.path.join(wt, ".claude", dirname)
-            live = os.path.join(live_claude, dirname)
+            live = derived_dir(ctx.memory_dir, kind)
             if not os.path.isdir(cand) or os.path.realpath(cand) == os.path.realpath(live):
                 continue
             if dirname == ".memory-pending":
@@ -163,3 +167,97 @@ def check_snapshots(ctx: DoctorContext) -> Dict[str, str]:
         }
     except Exception as exc:
         return {"status": "warn", "message": f"snapshots check failed: {exc}."}
+
+
+_KIND_LABELS = {"index": "index", "telemetry": "telemetry", "pending": "pending queue"}
+
+
+def _worktree_copies_total(main_root: str) -> Tuple[int, int]:
+    """``(worktrees, bytes)``: old ``.claude/.memory-*`` copies the desktop app put in the
+    worktrees under ``<main>/.claude/worktrees/``. Nothing reads them (SHP-7)."""
+    from .derived_dirs import LEGACY_DIRNAMES
+
+    trees = total = 0
+    base = os.path.join(main_root, ".claude", "worktrees")
+    try:
+        entries = sorted(os.scandir(base), key=lambda e: e.name)
+    except OSError:
+        return 0, 0
+    for entry in entries:
+        if not entry.is_dir(follow_symlinks=False):
+            continue
+        sizes = [
+            dir_size(p)[0]
+            for p in (os.path.join(entry.path, ".claude", n) for n in LEGACY_DIRNAMES.values())
+            if os.path.isdir(p) and not os.path.islink(p)
+        ]
+        if sizes:
+            trees += 1
+            total += sum(sizes)
+    return trees, total
+
+
+def check_derived_dirs(ctx: DoctorContext) -> Dict[str, str]:
+    """MIG-9/MIG-10: the index, telemetry and pending queue live in ``<project>/.hippo/``.
+
+    Names what is still in ``.claude/``, where the Claude desktop app copies it into every
+    worktree it creates: an old dir SessionStart has not moved yet (warn), entries an older
+    hippo wrote after the move that the fold would not overwrite (warn), or a telemetry stub
+    kept for a sleep schedule's log (ok, with the reinstall step). In the main tree it also
+    totals the old copies existing worktrees carry, with the command that deletes them.
+    Read-only.
+    """
+    try:
+        from .derived_dirs import legacy_dir, leftovers
+
+        home, found = leftovers(ctx.memory_dir)
+        if home is None:
+            return {
+                "status": "ok",
+                "message": f"derived dirs: beside {ctx.memory_dir} (not a <project>/.claude/memory "
+                "corpus, so nothing rides in .claude/).",
+            }
+        claude = os.path.dirname(os.path.abspath(ctx.memory_dir))
+        parts: List[str] = []
+        warn = False
+        unmoved = [k for k, (state, _n) in found.items() if state == "unmoved"]
+        if unmoved:
+            warn = True
+            paths = [legacy_dir(ctx.memory_dir, k) for k in unmoved]
+            size = sum(dir_size(p)[0] for p in paths)
+            parts.append(
+                f"{', '.join(_KIND_LABELS[k] for k in unmoved)} still in {claude} ({_mb(size)}) — "
+                f"the next session start moves {'it' if len(unmoved) == 1 else 'them'} into {home}; "
+                "until then the Claude desktop app copies them into every worktree it creates. "
+                "If this line stays after a new session, move by hand: "
+                + "; ".join(f"mv {p} {os.path.join(home, k)}" for p, k in zip(paths, unmoved))
+            )
+        for kind, (state, n) in found.items():
+            legacy = legacy_dir(ctx.memory_dir, kind)
+            if state == "leftover":
+                warn = True
+                parts.append(
+                    f"{legacy} holds {n} entr{'y' if n == 1 else 'ies'} that {home}/{kind} also "
+                    "has — an older hippo wrote them after the move, and hippo never overwrites "
+                    f"the live copy. Compare, then delete {legacy}"
+                )
+            elif state == "stub":
+                parts.append(
+                    f"{legacy} stays as an empty stub because a scheduled `hippo sleep` logs into "
+                    "it. Reinstall the schedule from `hippo sleep --print-schedule`, then delete "
+                    "the stub"
+                )
+        if not parts:
+            parts.append(f"in {home}, outside .claude/, so worktrees do not carry them")
+        if resolve_corpus_start().get("tree") != "main-tree":
+            trees, nbytes = _worktree_copies_total(os.path.dirname(claude))
+            if trees:
+                parts.append(
+                    f"{trees} worktree(s) under {claude}/worktrees still carry old copies "
+                    f"({_mb(nbytes)}) that nothing reads. Delete them: find "
+                    f"{shlex.quote(os.path.join(claude, 'worktrees'))} -mindepth 3 -maxdepth 3 "
+                    "-type d -path '*/.claude/.memory-*' -exec rm -rf {} +"
+                )
+        return {"status": "warn" if warn else "ok", "message": "derived dirs: " + ". ".join(parts) + "."}
+    except Exception as exc:
+        return {"status": "warn", "message": f"derived-dirs check failed: {exc}."}

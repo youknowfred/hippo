@@ -259,7 +259,7 @@ symlink Claude Code's native memory system reads from.
 
 - **Fresh project, no corpus yet.** Runs all steps 1-6 below.
 - **Teammate clones the repo.** `.claude/memory/MEMORY.md` already exists (it's in git), but
-  this machine's `~/.claude/projects/<encoded>/memory` symlink and `.claude/.memory-index/`
+  this machine's `~/.claude/projects/<encoded>/memory` symlink and `.hippo/index/`
   don't exist yet (both are gitignored, so cloning never brings them along). Preflight detects
   the existing corpus and runs steps 2c-5 only.
 - **New worktree of an existing repo.** Needs NOTHING (v1.34.0): a session launched in
@@ -373,8 +373,8 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    stop and report the conflict rather than silently overwriting it; a pre-existing symlink to
    a different target is a sign of a prior manual setup that shouldn't be clobbered. A real
    directory there is Claude Code's own memory: that is the adoption case in the preflight.
-4. **Build the index**: `hippo build-index --memory-dir .claude/memory --index-dir
-   .claude/.memory-index` — run it in the same Bash call as step 3's pin line, so `hippo`
+4. **Build the index**: `hippo build-index --memory-dir .claude/memory` (it lands in
+   `.hippo/index/`) — run it in the same Bash call as step 3's pin line, so `hippo`
    uses the plugin's venv (it falls back to bare `python3` if bootstrap hasn't run yet — a
    BM25-only index still builds and works).
 4b. **Mark this corpus TRUSTED + register it for cross-project recall.**
@@ -407,10 +407,9 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    otherwise.
 5. **Patch `.gitignore`** — SKIP entirely when not a git repo (there's nothing for git to
    ignore yet; a future `git init` + this same nudge in step 6, once repeated after init, is
-   how it gets patched). In a git repo, append `.claude/.memory-index/`,
-   `.claude/.memory-telemetry/`, and `.claude/memory.local/` if not already present (the first
-   two are derived, rebuildable caches; `memory.local/` is the private tier from step 5b — never
-   commit any of them). Do NOT create `.gitignore` from scratch if the project doesn't have one
+   how it gets patched). In a git repo, append `.hippo/` and `.claude/memory.local/` if not
+   already present (`.hippo/` holds the derived index, telemetry and pending queue;
+   `memory.local/` is the private tier from step 5b — never commit either). Do NOT create `.gitignore` from scratch if the project doesn't have one
    without asking first — a repo with zero `.gitignore` may be intentional (e.g. a throwaway test repo).
 5b. **Create the private memory tier** — git repo only. `.claude/memory.local/` is a
    gitignored sibling of `.claude/memory/` for memories you want recall over on THIS clone but
@@ -469,8 +468,8 @@ months the way a hand-authored corpus without this feature would.
 
 ### Hard rules
 
-- **Never write outside `.claude/memory/`, `.claude/memory.local/`, `.claude/.memory-index/`,
-  `.claude/.memory-telemetry/`, `.gitignore`, and the one symlink.** No other files, no other
+- **Never write outside `.claude/memory/`, `.claude/memory.local/`, `.hippo/`, `.gitignore`,
+  and the one symlink.** No other files, no other
   directories.
 - **Never overwrite an existing memory file.** If a name collision occurs (unlikely for a fresh
   project, but check), skip that one file and report it rather than silently clobbering.

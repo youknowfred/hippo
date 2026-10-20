@@ -638,7 +638,7 @@ def test_init_drift_line_is_the_same_rendering_sessionstart_uses(corpus, monkeyp
 # WRONG: `.git/info/exclude` and `core.excludesFile` are machine-local and never travel to a
 # clone, so honouring them would let one developer's private exclude silently deprive every
 # teammate of coverage — in exactly the scenario the patch exists for. GITIGNORE_ENTRIES
-# holds only DERIVED paths (.memory-index/, .memory-telemetry/, memory.local/); the corpus
+# holds only DERIVED paths (.hippo/, memory.local/); the corpus
 # itself is deliberately absent because hippo ships expecting it COMMITTED. The tracked
 # .gitignore is the only file that clones, so it is the right thing to write.
 #
@@ -736,17 +736,17 @@ def test_patch_gitignore_does_not_consult_machine_local_excludes(repo):
     import subprocess
 
     with open(os.path.join(repo, ".git", "info", "exclude"), "a") as fh:
-        fh.write("\n.claude/.memory-index/\n.claude/.memory-telemetry/\n.claude/memory.local/\n")
+        fh.write("\n.hippo/\n.claude/memory.local/\n")
     with open(os.path.join(repo, ".gitignore"), "w") as fh:
         fh.write("node_modules/\n")
     # The entries are directory-scoped (trailing slash), so git needs the dir to exist
     # before it will match — create it, then confirm git DOES consider it ignored here.
-    os.makedirs(os.path.join(repo, ".claude", ".memory-index"), exist_ok=True)
-    r = subprocess.run(["git", "check-ignore", "-q", ".claude/.memory-index"], cwd=repo)
+    os.makedirs(os.path.join(repo, ".hippo"), exist_ok=True)
+    r = subprocess.run(["git", "check-ignore", "-q", ".hippo"], cwd=repo)
     assert r.returncode == 0, "fixture: the exclude should make git report this as ignored"
     # ...and _patch_gitignore patches anyway, on purpose.
     assert _pg(repo) == "patched"
-    assert ".claude/.memory-index/" in open(os.path.join(repo, ".gitignore")).read()
+    assert ".hippo/" in open(os.path.join(repo, ".gitignore")).read()
 
 
 # --------------------------------------------------------------------------- #

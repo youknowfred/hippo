@@ -56,7 +56,7 @@ Landing zone (re-verified against the live tree): generated drafts are staged IN
 CORPUS via ``new_memory.write_memory`` — the one canonical create primitive (refuses
 overwrite, folds SEC-6 trust, refreshes the index) — because every quarantine mechanic
 above (down-weight, abstention guard, decay, outcome join, prospective flips) operates on
-RECALLABLE memories. The gitignored ``.claude/.memory-pending/`` queue the roadmap
+RECALLABLE memories. The gitignored ``.hippo/pending/`` queue the roadmap
 snapshot named is the home for *unreviewed session text awaiting a human* (capture seeds,
 SIG-6 fixture drafts); parking claims there would leave the tier inert — no recall
 influence, no evidence, no decay, and the prospective-recall metric unsatisfiable. The

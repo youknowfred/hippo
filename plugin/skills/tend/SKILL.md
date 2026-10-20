@@ -124,7 +124,7 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 The SessionEnd/SubagentStop capture pass leaves gitignored `session-capture` seeds — a
 prior session's episode replay (queries, recalled names) + `git diff`, including bounded
-VERBATIM diff hunks — in `.claude/.memory-pending/`. Nothing in there is in the
+VERBATIM diff hunks — in `.hippo/pending/`. Nothing in there is in the
 corpus; you approve it here, per item.
 
 List what's queued (highest-value first — each seed carries a `value:` score and trivial
@@ -401,7 +401,7 @@ refreshes the FOURTH lane in the same step: `draft_livedin_fixtures` queues
 per-item confirm below (`category='single-hop'` for these).
 
 Each recurring abstention cluster becomes an UNCONFIRMED row (`expected: []`) in the
-gitignored drafts queue the summary's `path` names (`.claude/.memory-pending/` — queue
+gitignored drafts queue the summary's `path` names (`.hippo/pending/` — queue
 state, the same trust domain as the capture seeds; existing rows are preserved verbatim).
 For each unconfirmed row: if a memory you JUST captured — or an existing one — genuinely
 answers the query, propose the pair and, on explicit approval, admit it per item:

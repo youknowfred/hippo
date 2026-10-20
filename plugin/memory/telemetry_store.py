@@ -15,9 +15,10 @@ import os
 import uuid
 from typing import Iterator, Optional
 
+from .derived_dirs import derived_dir
 from .provenance import ensure_self_ignoring_dir
 
-_TELEMETRY_DIRNAME = ".memory-telemetry"
+_TELEMETRY_DIRNAME = ".memory-telemetry"  # the pre-MIG-9 name, still read until moved
 _LEDGER_NAME = "recall_events.jsonl"
 _EPISODE_LEDGER_NAME = "episode_buffer.jsonl"
 _RECONSOLIDATION_LEDGER_NAME = "reconsolidation_events.jsonl"
@@ -41,16 +42,17 @@ def _max_bytes() -> int:
 # Dir resolution (mirrors build_index.default_index_dir)
 # --------------------------------------------------------------------------- #
 def default_telemetry_dir(memory_dir: str) -> str:
-    """``.claude/.memory-telemetry`` — a sibling of ``.claude/memory`` (its own gitignored dir).
+    """``<project>/.hippo/telemetry`` (MIG-9; see ``derived_dirs``) — its own gitignored dir.
 
     Mirrors ``build_index.default_index_dir`` so the ledger lands beside the index. It is a
     SEPARATE dir from the index because it is append-only history, not a rebuildable cache.
+    An old ``.claude/.memory-telemetry`` is read in place until SessionStart moves it.
     ``HIPPO_TELEMETRY_DIR`` overrides (hermetic tests use this).
     """
     override = os.environ.get("HIPPO_TELEMETRY_DIR")
     if override:
         return override
-    return os.path.join(os.path.dirname(os.path.abspath(memory_dir)), _TELEMETRY_DIRNAME)
+    return derived_dir(memory_dir, "telemetry")
 
 
 def _resolve_dir(telemetry_dir: Optional[str]) -> str:

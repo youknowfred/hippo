@@ -7,6 +7,65 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.42.4 — 2026-10-20 — "Nothing left to copy"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**, link cache still
+**6**; `stale.json` schema still **1**. hippo's three derived dirs move out of `.claude/`, the
+follow-up v1.42.3 named. The Claude desktop app lays down every worktree it creates with a copy
+of the checkout's whole `.claude/` directory, ignored files included. In the repo that filled
+the disk on 2026-10-19, `.claude/.memory-index` (15 MB), `.memory-telemetry` (13 MB) and
+`.memory-pending` (8 MB) rode into each worktree: 50 worktrees carried 1.66 GB of copies that
+nothing read, since v1.34.0 (SHP-7) points a worktree session at the main checkout's dirs.
+
+**Operator action: only if you scheduled `hippo sleep`, or want the space back.** The first
+session on v1.42.4 moves the dirs. A schedule installed from an older `--print-schedule` logs
+into `.claude/.memory-telemetry/`, which stays as an empty stub until you reinstall the
+schedule. `/hippo:doctor` in the main checkout totals the copies existing worktrees carry and
+prints the command that deletes them. See [UPGRADING.md](UPGRADING.md).
+
+- **The derived dirs live in `<project>/.hippo/` (#161, MIG-9).**
+  - **Where.** `.hippo/index`, `.hippo/telemetry` and `.hippo/pending`, beside `.claude/`. The
+    path comes from the corpus path alone, by the same rule as v1.42.3's `.hippo-snapshots/`,
+    so the engine, the CLI and the bash fast paths (the PostToolUse touch path and the usage
+    spool) all compute the same one. A machine-local cache was ruled out: the bash fast path
+    would have to hash the repo path, the pending queue and telemetry are not caches, and a
+    moved repo would orphan them.
+  - **Old dirs are read in place.** Until a dir is moved, every resolver returns the old one,
+    so an update never loses the index or the queue between sessions. On the recall hot path
+    that is at most two stats (5 µs measured).
+  - **Self-ignoring.** A dir created inside `.hippo/` gives the container its own `*`
+    `.gitignore` first (SEC-3). `/hippo:setup` writes `.hippo/` into `.gitignore` instead of
+    the two `.claude/.memory-*` lines.
+  - **Unchanged.** `HIPPO_INDEX_DIR`, `HIPPO_TELEMETRY_DIR` and `HIPPO_PENDING_DIR` still win.
+    A corpus that is not `<project>/.claude/memory` keeps its sibling dirs, so the user tier's
+    index stays at `~/.claude/.memory-index` and no `~/.hippo` appears.
+- **SessionStart moves them, and keeps moving what older sessions write (#161, MIG-10).**
+  - **The move.** One `rename` per dir, under a non-blocking lock in `.hippo/`; a second
+    session that finds it held moves nothing and leaves it for the next start.
+  - **The fold.** Hooks keep the hippo version a session launched with, so a session open
+    across the update writes the old paths again. Each SessionStart folds that in: ledger lines
+    (`*.jsonl`, `*.log`) are appended on a line boundary, entries the live dir lacks are moved,
+    locks, the session token and `*.tmp.*` leftovers are dropped, and a second index is
+    deleted (it is a cache). A seed or state file the live dir also has is never overwritten:
+    it stays, with the old dir's own `.gitignore`, for doctor to name.
+  - **The sleep stub.** An installed `hippo sleep` schedule appends to
+    `.claude/.memory-telemetry/sleep.log` from the shell, before hippo runs, and that fails if
+    the dir is gone. A telemetry dir that held a `sleep.log` stays behind as an empty stub
+    with a `MOVED` note; no resolver reads it, and its log is folded in at each start.
+    `hippo census` now reports a schedule whose log dir is missing as `stale-path`.
+- **doctor's `derived dirs:` line (#161, MIG-11).** It names a dir still in `.claude/` with
+  its size and the `mv` that moves it by hand (warn), entries the fold left (warn), or the
+  sleep stub with the reinstall step (ok). In the main checkout it totals the old copies under
+  `.claude/worktrees/*/.claude/` and prints a `find … -exec rm -rf {} +` that deletes those dirs
+  and nothing else.
+- **Receipt.** Run on copies of two of this machine's corpora (nothing was changed in either
+  repo). em-growth-labs: 36 MB moved in 0.55 ms, leaving nothing in `.claude/` but the corpus;
+  the next start's check costs 0.02 ms. hippo's own checkout, whose telemetry holds a
+  scheduled `sleep.log`: moved, with the stub left and named. Doctor's worktree total, read-only
+  on em-growth-labs: 50 worktrees, 1.66 GB, in 0.73 s. A test runs the printed `find` and
+  requires each worktree's `.claude/` to keep everything else.
+
 ## v1.42.3 — 2026-10-20 — "Out of .claude/"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format

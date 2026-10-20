@@ -180,7 +180,7 @@ def pending_capture_producer(
     """Surface the CAP-2 pending-capture queue so it never soaks silently.
 
     The SessionEnd draft-capture pass (``memory.capture``) snapshots a prior session's episode
-    buffer + ``git diff`` into the gitignored ``.claude/.memory-pending/`` queue. This nudge
+    buffer + ``git diff`` into the gitignored ``.hippo/pending/`` queue. This nudge
     makes that queue LEGIBLE (guiding invariant: every silent-fallback/soak path gains a
     user-visible signal) and routes to the deliberate, per-item drain — NOTHING in the queue is
     in the corpus until the agent explicitly approves each candidate. Self-clearing: it goes

@@ -131,15 +131,16 @@ def test_claude_project_dir_inside_linked_worktree_redirects(linked, monkeypatch
 
 def test_every_derived_dir_moves_with_the_corpus(linked, monkeypatch):
     """A corpus in one tree with an index/queue/ledger in another is the class of lie SHP-7
-    closes — the three siblings derive from memory_dir, so they land beside the LIVE corpus."""
+    closes — the three derive from memory_dir, so they land in the LIVE corpus's tree (MIG-9:
+    its ``.hippo/``, outside ``.claude/``)."""
     monkeypatch.chdir(linked["wt"])
     for var in ("HIPPO_PENDING_DIR", "HIPPO_INDEX_DIR", "HIPPO_TELEMETRY_DIR"):
         monkeypatch.delenv(var, raising=False)
     memory_dir, _ = P.resolve_dirs()
-    live_claude = os.path.realpath(os.path.join(linked["main"], ".claude"))
+    live_home = os.path.realpath(os.path.join(linked["main"], ".hippo"))
     for derived in (default_pending_dir(memory_dir), default_index_dir(memory_dir), default_telemetry_dir(memory_dir)):
-        assert os.path.realpath(os.path.dirname(derived)) == live_claude
-        assert ".claude/worktrees" not in os.path.realpath(derived)
+        assert os.path.realpath(os.path.dirname(derived)) == live_home
+        assert ".claude" not in os.path.realpath(derived)
 
 
 def test_launch_root_stays_the_worktree_while_repo_root_is_main(linked, monkeypatch):
@@ -364,7 +365,7 @@ def test_doctor_worktree_copies_warns_on_a_dead_pending_queue_with_seeds(linked,
     assert r["status"] == "warn"
     assert "3 capture seed(s) sit in a DEAD pending queue" in r["message"]
     assert dead in r["message"]
-    assert os.path.join(linked["main"], ".claude", ".memory-pending") in r["message"]  # the live queue, named
+    assert os.path.join(linked["main"], ".hippo", "pending") in r["message"]  # the live queue, named (MIG-9)
     assert "index " + os.path.join(linked["wt"], ".claude", ".memory-index") in r["message"]
     assert "2 dead derived dir(s)" in r["message"]
 
@@ -402,7 +403,7 @@ def test_presence_docs_carry_their_tree_and_other_trees_are_not_this_tree(linked
     monkeypatch.chdir(linked["wt"])
     md, _rr = P.resolve_dirs()
     td = default_telemetry_dir(md)
-    assert os.path.realpath(os.path.dirname(td)) == os.path.realpath(os.path.join(linked["main"], ".claude"))
+    assert os.path.realpath(os.path.dirname(td)) == os.path.realpath(os.path.join(linked["main"], ".hippo"))
     PR.write_presence(md, linked["wt"], session_id="wt-session")
     own = PR._read_doc(PR._presence_path(td, "wt-session"))
     assert own["tree"] == os.path.realpath(linked["wt"])

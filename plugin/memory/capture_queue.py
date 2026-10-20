@@ -24,13 +24,15 @@ import os
 import time
 from typing import Dict, List, Optional
 
+from .derived_dirs import LEGACY_DIRNAMES, derived_dir
 from .provenance import ensure_self_ignoring_dir, resolve_dirs
+from .provenance_env import DERIVED_HOME_DIRNAME
 from .telemetry import default_telemetry_dir
 
-# The gitignored pending queue — a sibling of ``.claude/memory`` and of the index/telemetry
-# dirs, following the same self-ignoring-cache convention (SEC-3). It is NOT the corpus and is
+# The gitignored pending queue — in ``<project>/.hippo/`` beside the index/telemetry dirs
+# (MIG-9), following the same self-ignoring-cache convention (SEC-3). It is NOT the corpus and is
 # NOT git-tracked: a draft here is a proposal awaiting explicit per-item approval, never memory.
-_PENDING_DIRNAME = ".memory-pending"
+_PENDING_DIRNAME = LEGACY_DIRNAMES["pending"]  # the pre-MIG-9 name, still read until moved
 # CAP-6: hard bound on the pending queue. One seed lands per session that recalls anything, so
 # an un-drained queue would grow WITHOUT LIMIT — the exact "soaks forever" footgun the LIF
 # workstream goal ("nothing nags forever") already closed for reconsolidation. When a fresh
@@ -70,15 +72,16 @@ _SUBAGENT_STOP = "subagent-stop"
 
 
 def default_pending_dir(memory_dir: str) -> str:
-    """``.claude/.memory-pending`` — a sibling of ``.claude/memory`` (its own gitignored dir).
+    """``<project>/.hippo/pending`` (MIG-9; see ``derived_dirs``) — its own gitignored dir.
 
     Mirrors ``build_index.default_index_dir`` / ``telemetry.default_telemetry_dir`` so the
-    queue lands beside the index and ledgers. ``HIPPO_PENDING_DIR`` overrides (hermetic tests).
+    queue lands beside the index and ledgers. An old ``.claude/.memory-pending`` is read in
+    place until SessionStart moves it. ``HIPPO_PENDING_DIR`` overrides (hermetic tests).
     """
     override = os.environ.get("HIPPO_PENDING_DIR")
     if override:
         return override
-    return os.path.join(os.path.dirname(os.path.abspath(memory_dir)), _PENDING_DIRNAME)
+    return derived_dir(memory_dir, "pending")
 
 
 def _resolve_pending_dir(pending_dir: Optional[str], memory_dir: Optional[str]) -> str:
@@ -185,9 +188,16 @@ def _queue_telemetry_dir(
         override = os.environ.get("HIPPO_TELEMETRY_DIR")
         if override:
             return override
-        if pending_dir and os.path.basename(os.path.normpath(pending_dir)) == _PENDING_DIRNAME:
-            sibling = os.path.join(os.path.dirname(os.path.normpath(pending_dir)), ".memory-telemetry")
-            return sibling if os.path.isdir(sibling) else None
+        if pending_dir:
+            pd = os.path.normpath(pending_dir)
+            name, parent = os.path.basename(pd), os.path.dirname(pd)
+            sibling = None
+            if name == _PENDING_DIRNAME:
+                sibling = os.path.join(parent, LEGACY_DIRNAMES["telemetry"])
+            elif name == "pending" and os.path.basename(parent) == DERIVED_HOME_DIRNAME:
+                sibling = os.path.join(parent, "telemetry")
+            if sibling:
+                return sibling if os.path.isdir(sibling) else None
     except Exception:
         return None
     return None

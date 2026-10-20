@@ -48,13 +48,11 @@ def _fmt(value, digits: int = 3) -> str:
 
 
 def _latest_run(memory_dir: str, telemetry_dir: Optional[str] = None) -> Optional[dict]:
-    # Each corpus's OWN sibling telemetry dir: a HIPPO_TELEMETRY_DIR override names one
+    # Each corpus's OWN telemetry dir: a HIPPO_TELEMETRY_DIR override names one
     # dir, and reading it for every corpus would print one corpus's run on every row.
-    from .telemetry_store import _TELEMETRY_DIRNAME
+    from .derived_dirs import derived_dir
 
-    td = telemetry_dir or os.path.join(
-        os.path.dirname(os.path.abspath(memory_dir)), _TELEMETRY_DIRNAME
-    )
+    td = telemetry_dir or derived_dir(memory_dir, "telemetry")
     latest = None
     for row in read_run_ledger(memory_dir, td):
         if isinstance(row.get("report"), dict):

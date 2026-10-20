@@ -383,7 +383,7 @@ def scan_corpus(memory_dir: str) -> List[dict]:
 # AKIA…/ghp_… tokens exist so the detector itself can be tested), and caches/venvs are not
 # shipped content. A real secret belongs in none of these — a leaked credential in a fixture
 # is not recalled or re-injected the way a shipped memory is.
-_REPO_SCAN_SKIP_DIRS = ("tests/", ".git/", ".venv/", "plugin/.venv/", ".claude/.memory-index/")
+_REPO_SCAN_SKIP_DIRS = ("tests/", ".git/", ".venv/", "plugin/.venv/", ".claude/.memory-index/", ".hippo/")
 
 # Extensions whose bytes are not scannable text (a UnicodeDecodeError also skips these, but
 # checking the extension first avoids reading a large binary just to discard it).

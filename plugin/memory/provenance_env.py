@@ -362,7 +362,7 @@ def walk_up_for_memory_dir(start: str) -> Tuple[str, str]:
 # STARTS from the main working tree (the parent of `--git-common-dir`; a subdir launch is
 # mirrored so SHP-2's nested-wins still applies), provided that tree carries a corpus.
 # `repo_root` moves with it — the trust registry, the projects-dir symlink check, and
-# every derived sibling dir (`.memory-pending`, `.memory-index`, `.memory-telemetry`)
+# every derived dir (`.hippo/pending`, `.hippo/index`, `.hippo/telemetry`)
 # all key on the SAME tree, which is the whole point: a corpus in one tree with an index
 # in another is exactly the class of lie this closes. Session-LOCAL git facts (the
 # session-end capture's diff, the presence doc's branch/head) keep reading the launch
@@ -655,15 +655,19 @@ def current_user_slug(repo_root: str) -> str:
 def tier_index_dir(tier_dir: str) -> str:
     """Index-cache location for a NON-project tier — nested at ``<tier_dir>/.memory-index``.
 
-    The project tier keeps its historical SIBLING cache (``.claude/.memory-index`` via
+    The project tier keeps its cache in ``<project>/.hippo/index`` (MIG-9, via
     ``build_index.default_index_dir``); the user tier (and TEA-3's private tier) NEST their
-    index inside the tier dir instead. Two reasons: (1) the private tier's sibling would be
-    ``.claude/.memory-index`` — colliding with the project's — so nesting keeps them distinct;
+    index inside the tier dir instead. Two reasons: (1) the private tier's plain sibling would
+    be ``.claude/.memory-index`` — the project's own index before MIG-9 — so nesting keeps them distinct;
     (2) a nested user-tier index lives under ``~/.claude/hippo-memory`` (outside every repo)
     and a nested private-tier index is swept up by ``memory.local``'s own self-ignoring
     ``.gitignore``, so neither can ever reach a project's git.
     """
     return os.path.join(tier_dir, ".memory-index")
+
+
+# MIG-9: the container for a project's derived dirs, ``<project>/.hippo/`` (see derived_dirs).
+DERIVED_HOME_DIRNAME = ".hippo"
 
 
 def ensure_self_ignoring_dir(path: str) -> None:
@@ -672,14 +676,18 @@ def ensure_self_ignoring_dir(path: str) -> None:
     The standard self-ignoring cache pattern (SEC-3): the index and telemetry dirs
     stay invisible to ``git status`` even in projects that never ran init's
     .gitignore patch — a habitual ``git add .`` can never commit prompt previews or
-    index blobs. Idempotent (an existing .gitignore, even user-edited, is left
-    alone); never raises.
+    index blobs. A dir inside the ``.hippo/`` container (MIG-9) marks the container
+    first, so nothing later dropped beside it reaches git either. Idempotent (an
+    existing .gitignore, even user-edited, is left alone); never raises.
     """
     try:
-        os.makedirs(path, exist_ok=True)
-        gi = os.path.join(path, ".gitignore")
-        if not os.path.exists(gi):
-            with open(gi, "w", encoding="utf-8") as fh:
-                fh.write("*\n")
+        parent = os.path.dirname(os.path.abspath(path))
+        targets = [parent, path] if os.path.basename(parent) == DERIVED_HOME_DIRNAME else [path]
+        for target in targets:
+            os.makedirs(target, exist_ok=True)
+            gi = os.path.join(target, ".gitignore")
+            if not os.path.exists(gi):
+                with open(gi, "w", encoding="utf-8") as fh:
+                    fh.write("*\n")
     except Exception:
         pass

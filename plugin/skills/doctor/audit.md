@@ -177,7 +177,7 @@ Phase 0.5 samples what someone thought to test; this phase grows the same fixtur
 users actually ASK. The blind-spot backlog (recurring queries recall abstained on) is
 turned into CANDIDATE fixture rows — so the yardstick self-populates from real
 un-answered traffic. Runs on every audit, no flag: the drafter only APPENDS to a gitignored
-drafts QUEUE (`.claude/.memory-pending/recall_hard_set.drafts.yaml` — raw ledger query text
+drafts QUEUE (`.hippo/pending/recall_hard_set.drafts.yaml` — raw ledger query text
 stays in the self-ignoring pending dir, the capture-seed precedent), which is
 bookkeeping like the Phase 1 history-file write, not a corpus mutation. ADMISSION into the
 tracked fixture is the gated act, and it is always per-item + human-approved.

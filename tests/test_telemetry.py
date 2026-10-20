@@ -584,7 +584,7 @@ def test_three_ledgers_are_distinct_files(tmp_path):
 def test_default_telemetry_dir_is_index_sibling(tmp_path, monkeypatch):
     monkeypatch.delenv("HIPPO_TELEMETRY_DIR", raising=False)
     md = str(tmp_path / ".claude" / "memory")
-    assert T.default_telemetry_dir(md) == str(tmp_path / ".claude" / ".memory-telemetry")
+    assert T.default_telemetry_dir(md) == str(tmp_path / ".hippo" / "telemetry")  # MIG-9
 
 
 def test_default_telemetry_dir_env_override(tmp_path, monkeypatch):
@@ -678,7 +678,7 @@ def test_session_start_main_marks_a_session(tmp_path, monkeypatch):
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = str(tmp_path / ".claude" / "memory")
     os.makedirs(md)
-    td = str(tmp_path / ".claude" / ".memory-telemetry")
+    td = str(tmp_path / ".hippo" / "telemetry")
     monkeypatch.delenv("HIPPO_TELEMETRY_DIR", raising=False)
 
     monkeypatch.setattr(S, "resolve_dirs", lambda: (md, str(tmp_path)))

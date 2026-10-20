@@ -11,6 +11,42 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### v1.42.4: the index, telemetry and pending queue move out of `.claude/`
+
+hippo kept three derived, gitignored dirs beside the corpus: `.claude/.memory-index`,
+`.claude/.memory-telemetry` and `.claude/.memory-pending`. The Claude desktop app copies a
+checkout's whole `.claude/` directory, ignored files included, into every worktree it creates,
+so each worktree carried all three, about 39 MB on a large corpus. Since v1.34.0 a worktree
+session reads the main checkout's dirs, so nothing ever read those copies. The dirs now live in
+`.hippo/` at the project root: `.hippo/index`, `.hippo/telemetry`, `.hippo/pending`. `.hippo/`
+ignores itself, and `/hippo:setup` adds `.hippo/` to `.gitignore`.
+
+**Nothing to do in most projects.** The first session on v1.42.4 moves the three dirs with one
+rename each; until then hippo reads them where they are. Sessions that were already open keep
+running the hippo they started with and keep writing the old paths. Each new session moves
+whatever they wrote: ledger lines are appended, new seeds and files are moved, and the old index
+is dropped (it is rebuilt from the corpus). An entry the new dir already has is never
+overwritten; `/hippo:doctor`'s `derived dirs:` line names it, and you compare and delete.
+
+**If you installed a scheduled `hippo sleep`:** its command ends in
+`>> <repo>/.claude/.memory-telemetry/sleep.log`, and the shell needs that dir to exist. When the
+moved dir held a `sleep.log`, hippo leaves `.claude/.memory-telemetry/` behind as an empty stub
+with a `MOVED` note, and folds the log into `.hippo/telemetry/sleep.log` at each session start.
+Reinstall the schedule from `hippo sleep --print-schedule` (it now logs to `.hippo/telemetry/`),
+then delete the stub. If you delete the stub first, `hippo census` and doctor's machine-state
+line report the schedule as `stale-path`.
+
+**Reclaiming the copies existing worktrees carry.** Worktrees made before the move still hold
+their own `.claude/.memory-*` copies. Run `/hippo:doctor` in the main checkout: its `derived dirs:`
+line totals them and prints a `find <repo>/.claude/worktrees -mindepth 3 -maxdepth 3 -type d
+-path '*/.claude/.memory-*' -exec rm -rf {} +` that deletes those dirs and nothing else. On the
+repo that filled the disk, that was 50 worktrees and 1.66 GB.
+
+`HIPPO_INDEX_DIR`, `HIPPO_TELEMETRY_DIR` and `HIPPO_PENDING_DIR` still override each location,
+and hippo leaves an overridden dir where it is. A corpus that is not `<project>/.claude/memory`
+(a `HIPPO_MEMORY_DIR` elsewhere, the user tier in `~/.claude/hippo-memory`) keeps its dirs beside
+itself, as before.
+
 ### v1.42.3: pre-migration backups move out of `.claude/`
 
 `hippo provenance --snapshot <label>` and the `tend` / `rederive` snapshot action used to copy the

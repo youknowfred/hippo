@@ -55,6 +55,10 @@ worktree resolves the MAIN checkout's corpus, and the line says `tree: MAIN work
 the main tree has no corpus, or `tree: OVERRIDE via HIPPO_CORPUS_ROOT=…`), worktree copies
 (a worktree's own dead `.claude/.memory-pending` / `.memory-index` / `.memory-telemetry`
 dirs from before the redirect — a dead queue WITH seeds warns; nothing drains it from there),
+derived dirs (the index, telemetry and pending queue live in `<project>/.hippo/`; an old
+`.claude/.memory-*` dir not moved yet, entries left over from an older hippo, a telemetry stub
+kept for a sleep schedule, and the old copies existing worktrees still carry, with the command
+that deletes them),
 git degraded-mode, corpus trust,
 frontmatter integrity, index corruption, index count vs corpus, hot-path p95 latency
 , index format version, pack drift, `<FILL-ME` templates, and the corpus-wide secret

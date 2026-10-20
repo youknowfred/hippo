@@ -32,10 +32,10 @@ import json
 import os
 from typing import Dict, List, Optional
 
-# The three derived/private paths init keeps out of git (the skill's step 5 list).
+# The derived/private paths init keeps out of git (the skill's step 5 list): the ``.hippo/``
+# container of the index, telemetry and pending queue (MIG-9), and the private tier.
 GITIGNORE_ENTRIES = (
-    ".claude/.memory-index/",
-    ".claude/.memory-telemetry/",
+    ".hippo/",
     ".claude/memory.local/",
 )
 

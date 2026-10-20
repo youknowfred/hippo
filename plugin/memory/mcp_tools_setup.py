@@ -253,7 +253,7 @@ def _tool_init(args: Dict[str, Any]) -> str:
     elif gi == "absent_not_created":
         lines.append(
             "⚠ no .gitignore here — not creating one unasked; add the entries "
-            "(.claude/.memory-index/, .claude/.memory-telemetry/, .claude/memory.local/) "
+            "(.hippo/, .claude/memory.local/) "
             "if this repo should have one."
         )
     if not r.get("git"):

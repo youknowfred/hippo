@@ -654,6 +654,7 @@ def test_render_names_the_age_and_the_log_path(tmp_path):
     stamp = _iso_ago(10)
     _sleep_state(repo, stamp)
     log = str(tmp_path / "logs" / "hippo-sleep.log")
+    os.makedirs(os.path.dirname(log))
     path = _plist(la, "dying", str(repo), str(plugin), str(python), log=log)
     text = "\n".join(
         MC._render_scheduler(MC.scheduler_census(launch_agents_dir=la, crontab_text=""))

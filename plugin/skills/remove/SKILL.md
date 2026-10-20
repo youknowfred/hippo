@@ -74,13 +74,16 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
 
 2. **Offer to delete the derived, gitignored dirs — agent-gated, never unconditional.** Ask the
    user (in this skill's own conversational turn) before deleting anything here; a "yes" to step
-   1 is not consent for step 2. If confirmed, remove:
-   - `.claude/.memory-index/` (the recall index — rebuildable any time via
+   1 is not consent for step 2. If confirmed, remove `.hippo/` at the project root, which
+   holds all three (v1.42.4 moved them out of `.claude/`; an older hippo left them at
+   `.claude/.memory-index/`, `.claude/.memory-telemetry/` and `.claude/.memory-pending/` —
+   remove those too if they exist):
+   - `.hippo/index/` (the recall index — rebuildable any time via
      `/hippo:setup` or `memory.build_index`)
-   - `.claude/.memory-telemetry/` (recall/episode/reconsolidation ledgers —
+   - `.hippo/telemetry/` (recall/episode/reconsolidation ledgers —
      `recall_events.jsonl`, `episode_buffer.jsonl`, `reconsolidation_events.jsonl` all live here;
      deleting the directory takes all three with it)
-   - `.claude/.memory-pending/` (draft-capture queue — un-approved session-capture seeds
+   - `.hippo/pending/` (draft-capture queue — un-approved session-capture seeds
      awaiting review; deleting it discards those drafts, which never entered the corpus anyway)
 
    All three are already gitignored derived state — deleting them loses no git history and

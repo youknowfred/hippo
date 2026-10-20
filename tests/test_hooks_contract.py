@@ -5,7 +5,7 @@ The plugin's most safety-critical contract lives in plugin/hooks/*.sh:
   - ALWAYS exit 0. On UserPromptSubmit, a non-zero exit BLOCKS *and ERASES* the
     user's prompt — a recall failure must degrade silently, never eat input.
   - stdout is either EMPTY or a single valid ``hookSpecificOutput`` JSON object.
-  - Nothing is written outside the project's ``.claude/`` derived dirs and the
+  - Nothing is written outside the project's ``.hippo/`` derived dirs and the
     plugin's own ``CLAUDE_PLUGIN_DATA`` dir.
 
 Every test here invokes the real script in a fresh subprocess under a controlled
@@ -290,7 +290,7 @@ class TestUserPromptHook:
         _assert_contract(proc, "UserPromptSubmit")
         for rel in _tree(project):
             assert rel.startswith(
-                (".claude/memory/", ".claude/.memory-index/", ".claude/.memory-telemetry/")
+                (".claude/memory/", ".hippo/index/", ".hippo/telemetry/", ".hippo/.gitignore")
             ), f"hook wrote outside the expected dirs: {rel}"
 
 
@@ -335,7 +335,7 @@ class TestSessionStartHook:
         _assert_contract(proc, "SessionStart")
         for rel in _tree(project):
             assert rel.startswith(
-                (".claude/memory/", ".claude/.memory-index/", ".claude/.memory-telemetry/")
+                (".claude/memory/", ".hippo/index/", ".hippo/telemetry/", ".hippo/.gitignore")
             ), f"hook wrote outside the expected dirs: {rel}"
 
 
@@ -457,7 +457,7 @@ class TestSessionEndHook:
         stdin = json.dumps({"session_id": "sess-cap", "reason": "clear"})
         # Build the project first (idempotent) so we can drop an episode buffer beside it.
         proc0, project, _ = _run_hook(_SESSION_END_HOOK, "", tmp_path)  # warm the dirs
-        tele = os.path.join(project, ".claude", ".memory-telemetry")
+        tele = os.path.join(project, ".hippo", "telemetry")
         os.makedirs(tele, exist_ok=True)
         with open(os.path.join(tele, "episode_buffer.jsonl"), "w", encoding="utf-8") as fh:
             fh.write(json.dumps({
@@ -470,7 +470,7 @@ class TestSessionEndHook:
         _assert_contract(proc, "SessionEnd")
 
         # A seed landed in the gitignored pending queue …
-        pending = os.path.join(project, ".claude", ".memory-pending")
+        pending = os.path.join(project, ".hippo", "pending")
         seeds = [f for f in os.listdir(pending) if f.endswith(".json")] if os.path.isdir(pending) else []
         assert seeds, "SessionEnd captured no pending seed from the episode buffer"
         assert os.path.exists(os.path.join(pending, ".gitignore"))  # self-ignoring (SEC-3)
@@ -500,7 +500,7 @@ class TestSubagentStopHook:
 
     def test_captures_to_pending_labeled_subagent_stop(self, tmp_path):
         proc0, project, _ = _run_hook(_SUBAGENT_STOP_HOOK, "", tmp_path)  # warm dirs
-        tele = os.path.join(project, ".claude", ".memory-telemetry")
+        tele = os.path.join(project, ".hippo", "telemetry")
         os.makedirs(tele, exist_ok=True)
         with open(os.path.join(tele, "episode_buffer.jsonl"), "w", encoding="utf-8") as fh:
             fh.write(json.dumps({
@@ -512,7 +512,7 @@ class TestSubagentStopHook:
         proc, _, _ = _run_hook(_SUBAGENT_STOP_HOOK, json.dumps({"session_id": "sub-1"}), tmp_path)
         _assert_contract(proc, "SubagentStop")
 
-        pending = os.path.join(project, ".claude", ".memory-pending")
+        pending = os.path.join(project, ".hippo", "pending")
         seeds = [f for f in os.listdir(pending) if f.endswith(".json")] if os.path.isdir(pending) else []
         assert seeds, "SubagentStop captured no seed"
         with open(os.path.join(pending, seeds[0])) as fh:
@@ -792,8 +792,7 @@ class TestBashLevelCorpusGuard:
         assert not canary.exists(), "the hook spawned python despite no .claude/memory"
         assert _tree(project) == set()
         assert not os.path.isdir(os.path.join(project, ".claude"))
-        assert not os.path.isdir(os.path.join(project, ".claude", ".memory-index"))
-        assert not os.path.isdir(os.path.join(project, ".claude", ".memory-telemetry"))
+        assert not os.path.isdir(os.path.join(project, ".hippo"))
 
     def test_session_start_nudge_still_fires_before_guard_when_not_dismissed(self, tmp_path):
         # The bash guard must NOT silence the ONB-1 nudge — it sits AFTER it. The repo
@@ -821,7 +820,7 @@ class TestBashLevelCorpusGuard:
 # through the REAL bash hook script (not just memory.session_start directly).
 # --------------------------------------------------------------------------- #
 def _session_token(project: str) -> str:
-    path = os.path.join(project, ".claude", ".memory-telemetry", "session")
+    path = os.path.join(project, ".hippo", "telemetry", "session")
     with open(path, "r", encoding="utf-8") as fh:
         return fh.read().strip()
 
@@ -882,7 +881,7 @@ class TestSessionStartSourceAwareness:
         )
         _assert_contract(proc, "SessionStart")
         assert not os.path.exists(
-            os.path.join(project, ".claude", ".memory-telemetry", "session")
+            os.path.join(project, ".hippo", "telemetry", "session")
         )
 
 
@@ -918,14 +917,14 @@ class TestConcurrentSessionAttribution:
         )
         _assert_contract(proc_b, "UserPromptSubmit")
 
-        ledger = os.path.join(project, ".claude", ".memory-telemetry", "recall_events.jsonl")
+        ledger = os.path.join(project, ".hippo", "telemetry", "recall_events.jsonl")
         with open(ledger, "r", encoding="utf-8") as fh:
             events = [json.loads(line) for line in fh if line.strip()]
         session_ids = [e.get("session_id") for e in events]
         assert "session-A" in session_ids
         assert "session-B" in session_ids
         assert not os.path.exists(
-            os.path.join(project, ".claude", ".memory-telemetry", "session")
+            os.path.join(project, ".hippo", "telemetry", "session")
         )
 
 
@@ -966,7 +965,7 @@ class TestPostToolUseHook:
         )
         proc, project, _ = _run_hook(_POST_TOOL_HOOK, stdin, tmp_path, venv_python=True)
         _assert_contract(proc, "PostToolUse")
-        ledger = os.path.join(project, ".claude", ".memory-telemetry", "outcome_events.jsonl")
+        ledger = os.path.join(project, ".hippo", "telemetry", "outcome_events.jsonl")
         assert os.path.exists(ledger), "PostToolUse hook logged no outcome event"
         with open(ledger, "r", encoding="utf-8") as fh:
             events = [json.loads(line) for line in fh if line.strip()]
@@ -983,7 +982,7 @@ class TestPostToolUseHook:
         _assert_contract(proc, "PostToolUse")
         for rel in _tree(project):
             assert rel.startswith(
-                (".claude/memory/", ".claude/.memory-index/", ".claude/.memory-telemetry/")
+                (".claude/memory/", ".hippo/index/", ".hippo/telemetry/", ".hippo/.gitignore")
             ), f"PostToolUse hook wrote outside the expected dirs: {rel}"
 
 
@@ -1070,7 +1069,7 @@ class TestPostToolUseFirstTouchReminder:
         _assert_contract(proc, "PostToolUse")
         assert proc.stdout.strip() == ""
         # ... and the measurement lane (the outcome ledger) still records the touch.
-        ledger = os.path.join(project, ".claude", ".memory-telemetry", "outcome_events.jsonl")
+        ledger = os.path.join(project, ".hippo", "telemetry", "outcome_events.jsonl")
         assert os.path.exists(ledger)
 
     def test_writes_stay_inside_derived_dirs(self, tmp_path):
@@ -1079,5 +1078,5 @@ class TestPostToolUseFirstTouchReminder:
         _assert_contract(proc, "PostToolUse")
         for rel in _tree(project):
             assert rel.startswith(
-                (".claude/memory/", ".claude/.memory-index/", ".claude/.memory-telemetry/")
+                (".claude/memory/", ".hippo/index/", ".hippo/telemetry/", ".hippo/.gitignore")
             ), f"JIT lane wrote outside the expected dirs: {rel}"

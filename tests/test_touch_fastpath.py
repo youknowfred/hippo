@@ -39,17 +39,25 @@ def _bin(tmp_path):
     return str(b)
 
 
-def _project(root, *, cited="src/cited.py", mtype="feedback"):
+def _derived(root, kind):
+    """The dir the engine reads for ``kind``: ``.hippo/<kind>`` (MIG-9), or the old
+    ``.claude/.memory-<kind>`` a project made with ``legacy=True`` still has."""
+    new = root / ".hippo" / kind
+    return new if new.is_dir() else root / ".claude" / f".memory-{kind}"
+
+
+def _project(root, *, cited="src/cited.py", mtype="feedback", legacy=False):
     md = root / ".claude" / "memory"
     md.mkdir(parents=True)
     (md / "MEMORY.md").write_text("# Memory\n\n## User\n", encoding="utf-8")
     (md / "note.md").write_text(
         f'---\nname: note\ndescription: "about cited"\ntype: {mtype}\ncited_paths: ["{cited}"]\n'
         '---\nbody\n', encoding="utf-8")
-    idx = root / ".claude" / ".memory-index"
+    base, prefix = (root / ".claude", ".memory-") if legacy else (root / ".hippo", "")
+    idx = base / f"{prefix}index"
     idx.mkdir(parents=True)
     assert refresh_touch_cache(str(md), str(idx))  # the real touchmap for this corpus
-    td = root / ".claude" / ".memory-telemetry"
+    td = base / f"{prefix}telemetry"
     (td / "presence").mkdir(parents=True)
     (td / "presence" / f"{_SID}.json").write_text(
         json.dumps({"session_id": _SID, "branch": "main", "head": "abc", "ts": time.time(),
@@ -79,7 +87,7 @@ def _touch(tmp_path, tag, tool, rel, *, fast=True, extra=None):
     proc = subprocess.run(["/bin/bash", _HOOK], input=json.dumps(payload), capture_output=True,
                           text=True, timeout=60, env=env)
     assert proc.returncode == 0
-    td = root / ".claude" / ".memory-telemetry"
+    td = _derived(root, "telemetry")
     rows = [json.loads(ln) for ln in (td / "outcome_events.jsonl").read_text().splitlines() if ln]
     spool = (td / "usage_spool.jsonl").read_text().splitlines() if (td / "usage_spool.jsonl").exists() else []
     return rows[-1], json.loads(spool[-1])["action"] if spool else None, proc.stdout
@@ -98,6 +106,18 @@ def test_the_fast_row_equals_the_python_row(tmp_path, tool, rel):
     strip = lambda r: {k: v for k, v in r.items() if k != "ts"}  # noqa: E731
     assert strip(fast_row) == strip(py_row)
     assert isinstance(fast_row["ts"], float)
+
+
+def test_the_fast_path_reads_the_dirs_an_older_hippo_left_in_claude(tmp_path):
+    """MIG-9: until SessionStart moves them, .claude/.memory-index and .memory-telemetry are
+    where the touchmap and the ledgers are, so the fast path reads them there."""
+    _project(tmp_path / "old", legacy=True)
+    fast_row, fast_how, _ = _touch(tmp_path, "old", "Read", "src/plain.py")
+    assert fast_how == "fast"
+    assert not (tmp_path / "old" / ".hippo").exists()
+    py_row, py_how, _ = _touch(tmp_path, "new", "Read", "src/plain.py", fast=False)
+    strip = lambda r: {k: v for k, v in r.items() if k != "ts"}  # noqa: E731
+    assert py_how == "spawn" and strip(fast_row) == strip(py_row)
 
 
 @pytest.mark.parametrize("tool,rel,why", [

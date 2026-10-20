@@ -8,7 +8,7 @@ a capture pass would have something to replay. THIS is that consumer.
 At SessionEnd this module snapshots the ending session's EPHEMERAL episode-buffer entries (the
 buffer rotates under a byte cap; the snapshot is durable) together with ``git diff`` since the
 session's HEAD watermark, into ONE ``session-capture`` seed in a GITIGNORED pending queue
-(``.claude/.memory-pending/``). The agent reviews that seed NEXT session and — per item,
+(``.hippo/pending/``). The agent reviews that seed NEXT session and — per item,
 explicitly — approves any durable fact into the corpus via ``/hippo:new`` (or the
 ``/hippo:consolidate`` drain skill). Sleep-time-compute: the only work here is cheap I/O + one
 ``git diff``; the LLM work of drafting an actual memory from a seed happens off the hot path,

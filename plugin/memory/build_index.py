@@ -9,7 +9,7 @@ What gets indexed per memory = its ``name`` + ``description:`` (the recall hook 
 already carry). Body-summary embedding is deferred (see the roadmap) until the
 description-only index is measured.
 
-Persistence: a gitignored, rebuildable cache at ``.claude/.memory-index/``
+Persistence: a gitignored, rebuildable cache at ``.hippo/index/``
   - ``manifest.json`` — schema version, model, per-entry {name, file, hash, tokens, doc_text},
     and a "bm25" block (PRF-1: precomputed postings/doc_len/avgdl/idf/k1/b — see
     ``compute_bm25_stats`` — so query time never reconstructs BM25Okapi over the whole corpus)
@@ -37,6 +37,7 @@ import time
 from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple
 
+from .derived_dirs import derived_dir
 from .fm_access import fm_get
 from .provenance import (
     _iter_memory_files,
@@ -50,7 +51,6 @@ from .staleness import read_source_commit_time
 # --------------------------------------------------------------------------- #
 # Config (all overridable via env so the hook/tests never hard-depend on one model)
 # --------------------------------------------------------------------------- #
-_INDEX_DIRNAME = ".memory-index"
 # v2 (Tier 3, memory-organism-instrument-immunize): entries gained "invalid_after".
 # v3 (RET-5, salience fusion): entries gained "source_commit_time" (the frontmatter-persisted
 # committer epoch — see ``staleness.read_source_commit_time`` — copied into the manifest at
@@ -135,11 +135,14 @@ _DENSE_NAME = "dense.npy"
 
 
 def default_index_dir(memory_dir: str) -> str:
-    """``.claude/.memory-index`` — a sibling of ``.claude/memory`` (the gitignored cache)."""
+    """``<project>/.hippo/index`` (MIG-9; see ``derived_dirs``) — the gitignored cache.
+
+    An old ``.claude/.memory-index`` is read in place until SessionStart moves it.
+    ``HIPPO_INDEX_DIR`` overrides."""
     override = os.environ.get("HIPPO_INDEX_DIR")
     if override:
         return override
-    return os.path.join(os.path.dirname(os.path.abspath(memory_dir)), _INDEX_DIRNAME)
+    return derived_dir(memory_dir, "index")
 
 
 def dense_disabled() -> bool:

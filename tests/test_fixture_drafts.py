@@ -76,7 +76,7 @@ def test_drafts_queue_lands_in_selfignoring_pending_dir(memory_dir):
     E.draft_abstention_fixtures(memory_dir, probe=False)
     dp = E.default_drafts_path(memory_dir)
     pending = os.path.dirname(dp)
-    assert os.path.basename(pending) == ".memory-pending"
+    assert os.path.basename(pending) == "pending"  # <project>/.hippo/pending (MIG-9)
     with open(os.path.join(pending, ".gitignore"), "r", encoding="utf-8") as fh:
         assert fh.read().strip() == "*"
 

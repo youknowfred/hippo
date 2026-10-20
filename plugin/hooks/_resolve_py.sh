@@ -65,6 +65,18 @@ hippo_floor_present() {
   main="$(hippo_main_tree)" && [ -f "$main/.claude/memory/MEMORY.md" ]
 }
 
+# MIG-9: a project's derived dirs live in <root>/.hippo/<kind> (index, telemetry, pending);
+# one an older hippo left at <root>/.claude/.memory-<kind> is read in place until SessionStart
+# moves it, and an empty telemetry stub kept for a sleep schedule (a MOVED note inside) is not.
+# memory/derived_dirs.py's derived_dir, in builtins: sets HIPPO_DERIVED_DIR, never forks.
+hippo_derived_dir() {  # <root> <kind>
+  HIPPO_DERIVED_DIR="$1/.hippo/$2"
+  [ -d "$HIPPO_DERIVED_DIR" ] && return 0
+  [ -d "$1/.claude/.memory-$2" ] && [ ! -f "$1/.claude/.memory-$2/MOVED" ] \
+    && HIPPO_DERIVED_DIR="$1/.claude/.memory-$2"
+  return 0
+}
+
 # OBS-2: count one use of a bash-only hippo surface (`hippo <verb>`, a skill preflight, a
 # hook whose Python failed) without spawning Python: append one line to the corpus's
 # usage spool, which the next Python fold drains into the day's rollup. Resolves the
@@ -76,9 +88,9 @@ hippo_note_usage() {  # <surface> <verb> [action]
   if [ -n "${HIPPO_TELEMETRY_DIR:-}" ]; then
     td="$HIPPO_TELEMETRY_DIR"
   elif [ -d ".claude/memory" ]; then
-    td=".claude/.memory-telemetry"
+    hippo_derived_dir "." telemetry && td="$HIPPO_DERIVED_DIR"
   elif main="$(hippo_main_tree)" && [ -d "$main/.claude/memory" ]; then
-    td="$main/.claude/.memory-telemetry"
+    hippo_derived_dir "$main" telemetry && td="$HIPPO_DERIVED_DIR"
   fi
   [ -n "$td" ] && [ -d "$td" ] || return 0
   printf '{"surface":"%s","verb":"%s","action":"%s","client":"%s"}\n' \
@@ -260,9 +272,11 @@ hippo_touch_fastpath() {  # <payload json>; 0 = logged here, 1 = spawn Python
   # Printable ASCII only: the touchmap may store anything else \u-escaped, and a key this
   # grep cannot see must never be read as "not cited".
   [[ $tree_rel =~ ^[\ -~]+$ ]] || return 1
-  idx="$corpus/.claude/.memory-index/touchmap.json"
+  hippo_derived_dir "$corpus" index
+  idx="$HIPPO_DERIVED_DIR/touchmap.json"
   [ -f "$idx" ] || return 1
-  td="${HIPPO_TELEMETRY_DIR:-$corpus/.claude/.memory-telemetry}"
+  td="${HIPPO_TELEMETRY_DIR:-}"
+  [ -n "$td" ] || { hippo_derived_dir "$corpus" telemetry; td="$HIPPO_DERIVED_DIR"; }
   [ -d "$td" ] || return 1
   # jit.observe_touch looks the in-tree path up as an exact key; so does this. A grep error
   # (or no grep) spawns.
