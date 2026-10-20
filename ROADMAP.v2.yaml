@@ -65,6 +65,10 @@ releases:
     theme: "Nothing left to copy (MIG-9 the index, telemetry and pending queue live in .hippo/, MIG-10 SessionStart moves them and folds what older sessions write, MIG-11 doctor names what is left and the copies old worktrees carry; no roadmap item)"
     status: in review
     re_bootstrap: "no"
+  - version: v1.42.5
+    theme: "Under one roof (MIG-12 pre-migration backups land in .hippo/snapshots/, MIG-13 doctor names v1.42.3's .hippo-snapshots/ with the mv that folds it in, MIG-14 /hippo:remove deletes the derived dirs by name and leaves the backups, MIG-15 doctor prints a runnable move for .claude/ backups too; no roadmap item)"
+    status: in review
+    re_bootstrap: "no"
   - version: v1.43.0
     theme: "Last 1.x: derived self-tending"
     status: planned
