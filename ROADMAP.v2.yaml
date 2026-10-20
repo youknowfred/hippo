@@ -59,6 +59,10 @@ releases:
     re_bootstrap: "no"
   - version: v1.42.3
     theme: "Out of .claude/ (MIG-6 pre-migration backups land in .hippo-snapshots/, MIG-7 a committed clean corpus gets a git restore point, MIG-8 doctor names the old ones; no roadmap item)"
+    status: released
+    re_bootstrap: "no"
+  - version: v1.42.4
+    theme: "Nothing left to copy (MIG-9 the index, telemetry and pending queue live in .hippo/, MIG-10 SessionStart moves them and folds what older sessions write, MIG-11 doctor names what is left and the copies old worktrees carry; no roadmap item)"
     status: in review
     re_bootstrap: "no"
   - version: v1.43.0
