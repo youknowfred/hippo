@@ -1,7 +1,8 @@
-"""The pre-migration backup (MIG-6).
+"""The pre-migration backup (MIG-6, MIG-7).
 
 MIG-6: the copy lives in ``<project>/.hippo-snapshots/``, not in ``.claude/``, which the
-Claude desktop app copies into every worktree it creates.
+Claude desktop app copies into every worktree it creates. MIG-7: a corpus git can restore
+gets its commit, not a copy.
 
 The MIG-1 snapshot tests moved here from test_provenance.py (its size ratchet).
 """
@@ -54,6 +55,11 @@ def _run_undo(lines):
     """Run the undo command the snapshot printed, exactly as printed."""
     cmd = next(l for l in lines if l.startswith("To undo the migration: ")).split(": ", 1)[1]
     subprocess.run(cmd, shell=True, check=True, capture_output=True)
+
+
+def _head(repo):
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True,
+                          text=True, check=True).stdout.strip()
 
 
 # --------------------------------------------------------------------------- #
@@ -137,3 +143,45 @@ def test_the_cli_prints_where_the_undo_is(repo, memory_dir, capsys):
     assert out.startswith(f"snapshot: {dest}\n") and "To undo the migration: cp -Rp" in out, out
     assert P.main(argv) == 1  # a second take of the same stamp is refused
     assert "already exists" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# MIG-7: git is the undo for a committed, clean corpus
+# --------------------------------------------------------------------------- #
+def test_a_committed_clean_corpus_gets_its_commit_not_a_copy_and_git_restores_it(repo, memory_dir):
+    target = _corpus(repo, ignored=False)
+    before = _tree(memory_dir)
+    r = P.take_snapshot(memory_dir, "t1")
+    assert r == {"commit": _head(repo)}
+    assert not os.path.exists(os.path.join(repo, ".hippo-snapshots"))
+    lines = P.snapshot_lines(r, memory_dir)
+    assert lines[0].startswith("snapshot: not copied") and _head(repo)[:12] in lines[0]
+    _migrate(repo, target)
+    assert _tree(memory_dir) != before
+    _run_undo(lines)
+    assert _tree(memory_dir) == before
+
+
+@pytest.mark.parametrize("state", ["edited", "staged", "untracked", "ignored"])
+def test_a_corpus_git_cannot_fully_restore_is_still_copied(repo, memory_dir, state):
+    """An uncommitted edit, a new memory, or a memory git ignores has no git undo."""
+    target = _corpus(repo, ignored=False)
+    if state in ("edited", "staged"):
+        with open(target, "a", encoding="utf-8") as fh:
+            fh.write("more\n")
+        if state == "staged":
+            subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    elif state == "untracked":
+        write_file(repo, ".claude/memory/new.md", "---\nname: new\n---\nb\n")
+    else:
+        write_file(repo, ".git/info/exclude", "secret.md\n")
+        write_file(repo, ".claude/memory/secret.md", "---\nname: s\n---\nb\n")
+    assert "path" in P.take_snapshot(memory_dir, "t1")
+
+
+def test_ignored_files_a_migration_never_writes_do_not_force_a_copy(repo, memory_dir):
+    _corpus(repo, ignored=False)
+    write_file(repo, ".git/info/exclude", ".DS_Store\n.audit-reports/\n")
+    write_file(repo, ".claude/memory/.DS_Store", "x")
+    write_file(repo, ".claude/memory/.audit-reports/audit.md", "report\n")
+    assert P.take_snapshot(memory_dir, "t1") == {"commit": _head(repo)}

@@ -127,7 +127,7 @@ from .provenance_citations import (  # noqa: E402,F401
     resolve_citations,
     unresolved_citations,
 )
-# MIG-6: the pre-migration backup, outside .claude/.
+# MIG-6/MIG-7: the pre-migration backup (where it goes, and whether git already is one).
 from .provenance_snapshot import snapshot_corpus, snapshot_lines, take_snapshot  # noqa: E402,F401
 
 
@@ -1519,8 +1519,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--snapshot",
         metavar="STAMP",
         default=None,
-        help="copy the corpus to <project>/.hippo-snapshots/memory.pre-cite2-<STAMP>/ "
-        "before migrating. A gitignored corpus has no `git checkout` undo — take this first.",
+        help="back up the corpus before migrating: a copy in <project>/.hippo-snapshots/"
+        "memory.pre-cite2-<STAMP>/ when git cannot undo it (gitignored or uncommitted), "
+        "else the commit to `git checkout`. Take this first.",
     )
     parser.add_argument(
         "--stamp-derivation",

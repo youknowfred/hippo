@@ -372,7 +372,7 @@ def _tool_rederive(args: Dict[str, Any]) -> str:
         stamp = str(args.get("stamp") or "").strip()
         if not stamp:
             return "rederive: action='snapshot' needs stamp=<label> (e.g. '20260715-cite3')."
-        try:  # MIG-6: the CLI's own rendering — where the copy is, and how to restore it
+        try:  # MIG-6/MIG-7: the CLI's own rendering — where the undo is, and its command
             return "\n".join(snapshot_lines(take_snapshot(memory_dir, stamp), memory_dir))
         except (FileExistsError, ValueError) as exc:
             return f"rederive: refused — {exc}"

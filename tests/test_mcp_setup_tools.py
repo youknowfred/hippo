@@ -902,6 +902,18 @@ def test_rederive_snapshot_is_self_ignoring_outside_claude(rederive_repo):
     assert text.startswith("rederive: refused") and "plain label" in text, text
 
 
+def test_tend_snapshot_of_a_committed_clean_corpus_names_the_commit(rederive_repo):
+    """MIG-7: git already is the undo for a committed, clean corpus — nothing is copied."""
+    import subprocess
+
+    repo, md = rederive_repo
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "memory"], cwd=repo, check=True)
+    text = _text(_call("tend", {"action": "snapshot", "stamp": "t1"}))
+    assert "snapshot: not copied" in text and f"git -C {md} checkout" in text, text
+    assert not os.path.exists(os.path.join(repo, ".hippo-snapshots"))
+
+
 def test_rederive_and_heal_are_trust_gated_like_every_other_corpus_write(corpus, monkeypatch):
     monkeypatch.delenv("HIPPO_TRUST_ALL", raising=False)
     for tool in ("rederive", "heal_baselines"):
