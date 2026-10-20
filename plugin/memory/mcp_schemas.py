@@ -608,7 +608,8 @@ _TOOLS = [
                     "enum": ["worklist", "one", "snapshot", "stamp"],
                     "description": "worklist = the read-only attributed diff (default); "
                     "one = apply to ONE reviewed memory (requires name); "
-                    "snapshot = copy the corpus to memory.pre-cite<N>-<stamp>/ first; "
+                    "snapshot = back up the corpus first: a copy in <project>/.hippo-snapshots/ "
+                    "when git cannot undo it, else the commit to restore; "
                     "stamp = record the corpus as derived by this extractor, the LAST step "
                     "(refused while any memory still differs — the stamp is earned, not "
                     "claimed)",

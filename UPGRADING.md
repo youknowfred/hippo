@@ -11,6 +11,28 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### v1.42.3: pre-migration backups move out of `.claude/`
+
+`hippo provenance --snapshot <label>` and the `tend` / `rederive` snapshot action used to copy the
+corpus to `.claude/memory.pre-cite2-<label>/`. The Claude desktop app copies a checkout's whole
+`.claude/` directory, ignored files included, into every worktree it creates, so each backup
+rode into every later worktree. A new copy now goes to `.hippo-snapshots/` at the project root,
+which ignores itself. A corpus that is committed and clean gets no copy: the result names the
+commit that `git checkout` restores.
+
+Backups already in `.claude/` stay where they are. `/hippo:doctor` names them on its
+`snapshots` line, with their size:
+
+- **spent** (a warning): the citation derivation is stamped and the re-derivation worklist is
+  empty. Delete them, or move them into `.hippo-snapshots/` if you want to keep them.
+- **kept**: the migration is unfinished, so they are still your undo. Move them into
+  `.hippo-snapshots/` to keep them without new worktrees carrying them.
+
+If you restore from one of the old backups, leave out the `.gitignore` inside it. It holds `*`,
+and in the corpus it would hide every memory from git. (New copies carry no marker of their own.)
+Worktrees made before you move them still hold their own copies. Those go away with the
+worktree.
+
 ### v1.42.1: nested repos and submodules stop seeing the parent's corpus
 
 A session started at the top of a git repo that sits inside another one (a nested checkout or a

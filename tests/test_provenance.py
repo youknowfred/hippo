@@ -2140,45 +2140,7 @@ def test_rederive_dry_run_writes_nothing(repo, memory_dir):
     assert open(target, encoding="utf-8").read() == before  # ...but nothing was written
 
 
-def test_snapshot_copies_the_corpus_before_a_migration(repo, memory_dir):
-    _mig_repo(repo)
-    dest = P.snapshot_corpus(memory_dir, "20260714")
-    assert dest.endswith("memory.pre-cite2-20260714")
-    assert os.path.isfile(os.path.join(dest, "m.md"))
-    assert open(os.path.join(dest, "m.md"), encoding="utf-8").read() == open(
-        os.path.join(memory_dir, "m.md"), encoding="utf-8"
-    ).read()
-
-
-def test_snapshot_is_self_ignoring_so_the_backup_cannot_publish_the_corpus(repo, memory_dir):
-    """AC: the snapshot inherits the corpus's exposure, it does not widen it.
-
-    A project that gitignores `.claude/memory/` does NOT thereby ignore
-    `.claude/memory.pre-cite2-*` — so without the SEC-3 marker the safety copy lands as a
-    fresh untracked directory holding every private memory, one `git add -A` from being
-    committed in a repo that may be public. Caught live: the first real snapshot taken on
-    this repo showed up as `?? .claude/memory.pre-cite2-...`."""
-    import subprocess
-
-    _mig_repo(repo)
-    dest = P.snapshot_corpus(memory_dir, "20260714")
-    assert os.path.isfile(os.path.join(dest, ".gitignore"))
-    assert open(os.path.join(dest, ".gitignore"), encoding="utf-8").read().strip() == "*"
-    porcelain = subprocess.run(
-        ["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True
-    ).stdout
-    assert "pre-cite2" not in porcelain, "the snapshot is visible to git"
-
-
-def test_snapshot_refuses_to_overwrite_an_existing_one(repo, memory_dir):
-    """The snapshot is the only undo a gitignored corpus has — never clobber one."""
-    _mig_repo(repo)
-    P.snapshot_corpus(memory_dir, "20260714")
-    try:
-        P.snapshot_corpus(memory_dir, "20260714")
-        raise AssertionError("expected a refusal")
-    except FileExistsError:
-        pass
+# The MIG-1 snapshot tests live in test_provenance_snapshot.py (MIG-6/MIG-7 moved the copy).
 
 
 # --------------------------------------------------------------------------- #

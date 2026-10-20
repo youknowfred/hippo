@@ -55,6 +55,10 @@ releases:
     re_bootstrap: "no"
   - version: v1.42.2
     theme: "Room for the undecided (#154 TND-9: decided merge pairs no longer crowd undecided ones past the five-pair cap; no roadmap item)"
+    status: released
+    re_bootstrap: "no"
+  - version: v1.42.3
+    theme: "Out of .claude/ (MIG-6 pre-migration backups land in .hippo-snapshots/, MIG-7 a committed clean corpus gets a git restore point, MIG-8 doctor names the old ones; no roadmap item)"
     status: in review
     re_bootstrap: "no"
   - version: v1.43.0

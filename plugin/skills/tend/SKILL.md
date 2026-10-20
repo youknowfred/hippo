@@ -71,7 +71,8 @@ What each kind needs before its verdict:
   problem is still there.
 - **derivation** — read the citation diff, then `apply` for that memory; when every memory
   is applied, the `corpus` item takes `stamp`. On a corpus that is not committed to git,
-  take a snapshot first (`hippo provenance --snapshot <label>`).
+  take a snapshot first (`hippo provenance --snapshot <label>`). It copies the corpus to
+  `.hippo-snapshots/` at the project root, or names the commit when git can already undo it.
 - **trust** — re-consent is its own gate: `hippo trust review` shows each change against
   the version consented to, and `hippo trust grant` takes the digest it prints (all of it,
   or `--files` for part). On Desktop the `trust` MCP tool does the same (action='review',

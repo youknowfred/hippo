@@ -128,7 +128,8 @@ V2_TOOLS: List[dict] = [
             "(id, verdict: ONE item, after the user agrees) | snooze | skip | hold (kind or id, "
             "reason) | release. Also: add_decision (text) records a decision the user made for "
             "the capture drain; restore (seed, or all) brings back an expired capture; "
-            "snapshot (stamp) backs up the corpus; fixtures (step draft or "
+            "snapshot (stamp) backs up the corpus (a copy in .hippo-snapshots/, or the "
+            "commit git restores); fixtures (step draft or "
             "confirm) and interview (step questions or respond) run the blind-spot steps; "
             "link_proposals lists co-recall link suggestions."
         ),
