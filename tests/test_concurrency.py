@@ -303,7 +303,8 @@ def test_index_reader_never_observes_torn_manifest_dense_pair_during_rebuild(tmp
                 if not manifest:
                     continue
                 time.sleep(0.01)
-                dense = B._load_dense(idx) if manifest.get("dense_ready") else None
+                # IDX-1: the matrix THIS manifest names, as load_index reads it.
+                dense = B._load_dense(idx, manifest) if manifest.get("dense_ready") else None
                 loaded = B.LoadedIndex(manifest, dense)
                 checks[0] += 1
                 _assert_manifest_dense_consistent(loaded)

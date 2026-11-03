@@ -569,12 +569,16 @@ these steps for the one memory `<name>` in corpus `<memory_dir>` (its index dir 
    secret, rotate the credential regardless** — assume any pushed history was already cloned.
 
 3. **Clear the index rows.** The dense/BM25 index embeds the memory's description *and body
-   chunks*, so its text survives in `manifest.json` / `dense.npy` until a rebuild. Rebuild it:
+   chunks*, so its text survives in `manifest.json` and its vectors in the `dense.<id>.npy`
+   matrices until a rebuild. Rebuild it:
    ```bash
    "$PY" -m memory.build_index --memory-dir "<memory_dir>" --index-dir "<index_dir>"
    ```
    (SessionStart rebuilds automatically too, but run it now to verify immediately. `--force`
-   re-embeds every memory from scratch.)
+   re-embeds every memory from scratch.) A build keeps the matrices it supersedes for five
+   minutes, for readers still holding the previous manifest, and the first build after that
+   deletes them. To drop them now, delete every `dense.*.npy` in the index dir except the one
+   `manifest.json` names as `dense_file`.
 
 4. **Clear the ledgers.** The telemetry ledgers store recalled memory **names** and truncated
    query previews (never bodies) in `.hippo/telemetry/`. To erase a purged name, delete

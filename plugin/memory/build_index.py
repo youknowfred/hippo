@@ -13,7 +13,9 @@ Persistence: a gitignored, rebuildable cache at ``.hippo/index/``
   - ``manifest.json`` — schema version, model, per-entry {name, file, hash, tokens, doc_text},
     and a "bm25" block (PRF-1: precomputed postings/doc_len/avgdl/idf/k1/b — see
     ``compute_bm25_stats`` — so query time never reconstructs BM25Okapi over the whole corpus)
-  - ``dense.npy``    — float32 [N, dim] L2-normalized embeddings (row i ↔ entries[i])
+  - ``dense.<id>.npy`` — float32 [N, dim] L2-normalized embeddings (row i ↔ entries[i]);
+    each build writes its own and the manifest names it (``dense_file``, IDX-1 — see
+    ``build_index_dense``). A manifest with no ``dense_file`` reads the legacy ``dense.npy``.
 
 Markdown-in-git stays the single source of authority; this cache is derived and
 deleting it loses nothing (``build_index`` regenerates it). The build is INCREMENTAL:
@@ -33,6 +35,7 @@ import math
 import os
 import re
 import sys
+import threading
 import time
 from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple
@@ -1134,16 +1137,17 @@ def _load_manifest(index_dir: str) -> Optional[dict]:
     return manifest
 
 
-def _load_dense(index_dir: str):
-    p = os.path.join(index_dir, _DENSE_NAME)
-    if not os.path.exists(p):
-        return None
-    try:
-        import numpy as np
+def _load_dense(index_dir: str, manifest: Optional[dict] = None):
+    """The matrix ``manifest`` is bound to (IDX-1); the current manifest's when omitted."""
+    from .build_index_dense import load_dense
 
-        return np.load(p)
-    except Exception:
-        return None
+    return load_dense(index_dir, manifest if manifest is not None else _read_manifest_json(index_dir))
+
+
+def _embed_bounded(texts: List[str], allow_download: bool):
+    if allow_download:
+        return embed_documents(texts, allow_download=True)
+    return run_bounded(lambda: embed_documents(texts, allow_download=False), DENSE_REFRESH_TIMEOUT_SECS)
 
 
 # --------------------------------------------------------------------------- #
@@ -1222,7 +1226,17 @@ def build_index(
         pass
 
     old_manifest = None if force else _load_manifest(index_dir)
-    old_dense = None if force else _load_dense(index_dir)
+    old_dense = _load_dense(index_dir, old_manifest) if old_manifest else None
+    # IDX-1: an unbound (legacy) prior may be a torn pair. Reuse its rows only once a sample
+    # of them proves aligned; a torn one is re-embedded, never copied forward, and never
+    # "preserved" below (wrong vectors are worse than BM25).
+    prior_torn = False
+    if old_dense is not None and "dense_file" not in old_manifest and not dense_disabled():
+        from .build_index_dense import prior_rows_aligned
+
+        aligned = prior_rows_aligned(old_manifest, old_dense, lambda t: _embed_bounded(t, allow_download))
+        if aligned is not True:
+            old_dense, prior_torn = None, aligned is False
 
     # RET-2: flatten body_chunks_by_entry into one deterministic list, in (entry_index,
     # chunk_index) order — this is also the manifest's persisted "body_chunks" ORDER, and
@@ -1334,6 +1348,7 @@ def build_index(
         and not dense_ready
         and old_manifest is not None
         and old_manifest.get("dense_ready")
+        and not prior_torn
     ):
         return old_manifest
 
@@ -1391,34 +1406,19 @@ def build_index(
         "head_commit": head_commit,
     }
 
-    # COR-12: dense.npy (or its removal) is durably in place BEFORE the manifest that
-    # references it is made visible — a recall racing this rebuild must never observe a
-    # manifest ahead of its data (e.g. dense_ready=true with a stale/missing dense.npy).
-    dense_path = os.path.join(index_dir, _DENSE_NAME)
-    if dense_rows is not None:
-        # Persisted even when dense_ready=False (partial progress) so the next build's
-        # old_row_by_hash can resume from here instead of re-embedding from scratch.
-        import numpy as np
+    # COR-12: the matrix is durably in place BEFORE the manifest that references it is
+    # made visible — a recall racing this rebuild must never observe a manifest ahead of
+    # its data (e.g. dense_ready=true with a stale/missing matrix).
+    # IDX-1: under a name no other build uses, so the manifest below can only ever name
+    # the matrix THIS build wrote. Persisted even when dense_ready=False (partial
+    # progress) so the next build's old_row_by_hash can resume from it.
+    from .build_index_dense import retire_dense, write_dense
 
-        tmp_dense_path = dense_path + f".tmp.{os.getpid()}.npy"  # COR-17: unique per writer
-        try:
-            np.save(tmp_dense_path, dense_rows)
-            os.replace(tmp_dense_path, dense_path)
-        finally:
-            if os.path.exists(tmp_dense_path):
-                try:
-                    os.remove(tmp_dense_path)
-                except Exception:
-                    pass
-    elif os.path.exists(dense_path):
-        # Stale dense file from a prior dense build — remove so recall doesn't misread it.
-        try:
-            os.remove(dense_path)
-        except Exception:
-            pass
+    if dense_rows is not None:
+        manifest["dense_file"] = write_dense(index_dir, dense_rows)
 
     manifest_path = os.path.join(index_dir, _MANIFEST_NAME)
-    tmp_manifest_path = manifest_path + f".tmp.{os.getpid()}"  # COR-17: unique per writer
+    tmp_manifest_path = manifest_path + f".tmp.{os.getpid()}.{threading.get_ident()}"  # COR-17
     try:
         with open(tmp_manifest_path, "w", encoding="utf-8") as fh:
             json.dump(manifest, fh)
@@ -1429,6 +1429,7 @@ def build_index(
                 os.remove(tmp_manifest_path)
             except Exception:
                 pass
+    retire_dense(index_dir, manifest.get("dense_file"))
     return manifest
 
 
@@ -1507,7 +1508,10 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
                 and old_steer == now_steer
                 and old_conf == now_conf
             )
-            if corpus_unchanged and (old.get("dense_ready") or dense_disabled()):
+            # IDX-1: a legacy (unbound) dense index falls through ONCE, to be verified and
+            # rewritten bound — a torn one would otherwise be served until the next write.
+            legacy = old.get("dense_ready") and "dense_file" not in old and not dense_disabled()
+            if corpus_unchanged and (old.get("dense_ready") or dense_disabled()) and not legacy:
                 # GRA-6: "corpus unchanged" above compares doc_text hashes, which BODY
                 # edits do not perturb — but wikilinks live in bodies. Before skipping
                 # the rebuild, independently verify the edge cache against the stat sigs
@@ -1611,7 +1615,7 @@ def load_index(index_dir: str) -> Optional[LoadedIndex]:
     if not manifest:
         return None
     dense = (
-        _load_dense(index_dir)
+        _load_dense(index_dir, manifest)
         if (manifest.get("dense_ready") and not dense_disabled())
         else None
     )
@@ -1666,14 +1670,16 @@ def check_index_integrity(index_dir: str) -> Optional[str]:
             # check_format_version owns reporting it; diagnosing the dense/model state of
             # a manifest no reader will ever serve would only mislead.
             return None
-        dense_path = os.path.join(index_dir, _DENSE_NAME)
+        from .build_index_dense import dense_path as _bound_path
+
+        dense_path = _bound_path(index_dir, manifest)
         if manifest.get("dense_ready"):
-            if not os.path.exists(dense_path):
+            if dense_path is None or not os.path.exists(dense_path):
                 return (
                     "index manifest claims dense embeddings exist but the data file is "
                     "missing — recall will degrade to BM25 until the next rebuild"
                 )
-            dense = _load_dense(index_dir)
+            dense = _load_dense(index_dir, manifest)
             entries = manifest.get("entries", [])
             body_chunks = manifest.get("body_chunks", []) or []
             dim = manifest.get("dim")
@@ -1697,6 +1703,25 @@ def check_index_integrity(index_dir: str) -> Optional[str]:
                 "rebuilt (run `/hippo:doctor` or re-run bootstrap to rebuild the index)"
             )
         return None
+    except Exception:
+        return None
+
+
+def check_index_alignment(index_dir: str) -> Optional[str]:
+    """IDX-1: one line when sampled entries do not hold their own vector, else None.
+
+    ``check_index_integrity`` sees shape; a torn pair of the same size passes it. This
+    re-embeds a small sample offline and bounded (no model: None, nothing claimed)."""
+    try:
+        manifest = _load_manifest(index_dir)
+        if not manifest or not manifest.get("dense_ready") or dense_disabled():
+            return None
+        dense = _load_dense(index_dir, manifest)
+        if dense is None:
+            return None
+        from .build_index_dense import alignment_line
+
+        return alignment_line(manifest, dense, lambda t: _embed_bounded(t, False))
     except Exception:
         return None
 

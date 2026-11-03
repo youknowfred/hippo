@@ -45,6 +45,17 @@ def _fake_embedder(dim: int = 16):
     return embed_documents
 
 
+
+def _dense_file(idx: str) -> str:
+    """IDX-1: the matrix the current manifest is bound to (``dense.<id>.npy``)."""
+    from memory.build_index_dense import dense_path
+
+    return dense_path(idx, B._read_manifest_json(idx))
+
+
+def _dense_files(idx: str) -> list:
+    return [n for n in os.listdir(idx) if n.startswith("dense.")] if os.path.isdir(idx) else []
+
 # --------------------------------------------------------------------------- #
 # BM25-only build (no dense)
 # --------------------------------------------------------------------------- #
@@ -60,7 +71,7 @@ def test_build_bm25_only_when_dense_disabled(tmp_path, monkeypatch):
     assert manifest["model"] is None
     # BM25 inputs persisted (tokens per entry), no dense file written.
     assert all(e["tokens"] for e in manifest["entries"])
-    assert not os.path.exists(os.path.join(idx, "dense.npy"))
+    assert "dense_file" not in manifest and not _dense_files(idx)
     assert os.path.exists(os.path.join(idx, "manifest.json"))
 
 
@@ -221,7 +232,7 @@ def test_dense_build_writes_matrix_and_rows(tmp_path, monkeypatch):
     manifest = B.build_index(md, idx)
     assert manifest["dense_ready"] is True
     assert manifest["dim"] == 16 and manifest["count"] == 3
-    dense = np.load(os.path.join(idx, "dense.npy"))
+    dense = np.load(_dense_file(idx))
     assert dense.shape == (3, 16)
     # rows are L2-normalized
     norms = np.linalg.norm(dense, axis=1)
@@ -267,7 +278,7 @@ def test_dense_replace_happens_before_manifest_replace(tmp_path, monkeypatch):
     monkeypatch.setattr(B.os, "replace", spy_replace)
     B.build_index(md, idx)
 
-    dense_path = os.path.join(idx, "dense.npy")
+    dense_path = _dense_file(idx)
     manifest_path = os.path.join(idx, "manifest.json")
     assert dense_path in replaced and manifest_path in replaced
     assert replaced.index(dense_path) < replaced.index(manifest_path)
@@ -285,7 +296,7 @@ def test_manifest_never_visible_with_missing_or_stale_dense(tmp_path, monkeypatc
 
     manifest = B.build_index(md, idx)
     assert manifest["dense_ready"] is True
-    dense_path = os.path.join(idx, "dense.npy")
+    dense_path = _dense_file(idx)
     assert os.path.exists(dense_path)
     dense = np.load(dense_path)
     assert dense.shape == (manifest["count"], manifest["dim"])
@@ -500,12 +511,14 @@ def test_switching_to_bm25_removes_stale_dense_file(tmp_path, monkeypatch):
     _write_corpus(md, {"a.md": "alpha", "b.md": "beta"})
     monkeypatch.setattr(B, "embed_documents", _fake_embedder(16))
     B.build_index(md, idx)
-    assert os.path.exists(os.path.join(idx, "dense.npy"))
-    # Rebuild with dense disabled -> the stale dense.npy must be removed.
+    assert os.path.exists(_dense_file(idx))
+    # Rebuild with dense disabled -> the stale matrix is unbound (IDX-1: retired after
+    # the grace), so recall can never misread it.
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     m2 = B.build_index(md, idx)
-    assert m2["dense_ready"] is False
-    assert not os.path.exists(os.path.join(idx, "dense.npy"))
+    assert m2["dense_ready"] is False and "dense_file" not in m2
+    monkeypatch.delenv("HIPPO_DISABLE_DENSE")
+    assert B.load_index(idx).dense is None
 
 
 def test_allow_download_false_threads_to_embedder(tmp_path, monkeypatch):
@@ -575,7 +588,7 @@ def test_refresh_preserves_dense_when_offline_embed_fails(tmp_path, monkeypatch)
     idx = str(tmp_path / ".memory-index")
     _write_corpus(md, {"a.md": "alpha", "b.md": "beta"})
     B.build_index(md, idx)
-    dense_before = np.load(os.path.join(idx, "dense.npy")).copy()
+    dense_before = np.load(_dense_file(idx)).copy()
 
     with open(os.path.join(md, "c.md"), "w", encoding="utf-8") as fh:
         fh.write(_mem("c", "gamma needs embedding but cache is cold"))
@@ -589,7 +602,7 @@ def test_refresh_preserves_dense_when_offline_embed_fails(tmp_path, monkeypatch)
     assert m["dense_ready"] is True and m["count"] == 2
     loaded = B.load_index(idx)
     assert loaded.dense_ready is True and len(loaded) == 2
-    assert np.array_equal(np.load(os.path.join(idx, "dense.npy")), dense_before)
+    assert np.array_equal(np.load(_dense_file(idx)), dense_before)
 
 
 def test_refresh_index_missing_dir_is_none(tmp_path):
@@ -915,7 +928,7 @@ def test_large_corpus_offline_embed_persists_partial_progress_across_sessions(tm
     assert m1["dense_ready"] is False  # not everything embedded yet
     embedded_so_far = sum(1 for e in m1["entries"] if e["row"] is not None)
     assert 0 < embedded_so_far < 50  # partial progress, not all-or-nothing
-    assert os.path.exists(os.path.join(idx, "dense.npy"))  # partial rows persisted to disk
+    assert os.path.exists(_dense_file(idx))  # partial rows persisted to disk
     first_pass_submitted = sum(len(batch) for batch in submitted_texts)
     assert first_pass_submitted == embedded_so_far
 
@@ -962,7 +975,7 @@ def test_offline_embed_chunk_timeout_keeps_partial_progress(tmp_path, monkeypatc
     assert m["dense_ready"] is False
     embedded_rows = [e for e in m["entries"] if e["row"] is not None]
     assert len(embedded_rows) == 5  # only the first slice (5 docs) landed
-    assert os.path.exists(os.path.join(idx, "dense.npy"))
+    assert os.path.exists(_dense_file(idx))
 
 
 def test_load_index_roundtrip(tmp_path, monkeypatch):
@@ -1073,7 +1086,7 @@ def test_real_fastembed_dense_build(tmp_path, monkeypatch, tmp_path_factory):
     manifest = B.build_index(md, idx)
     assert manifest["dense_ready"] is True
     assert manifest["dim"] and manifest["dim"] > 0
-    assert os.path.exists(os.path.join(idx, "dense.npy"))
+    assert os.path.exists(_dense_file(idx))
 
 
 # --------------------------------------------------------------------------- #
@@ -1522,7 +1535,7 @@ def test_build_index_dense_matrix_widened_with_body_chunk_rows(tmp_path, monkeyp
     n_chunks = len(manifest["body_chunks"])
     assert n_chunks >= 2  # a.md's two headed sections both clear the min-chars floor
 
-    dense = np.load(os.path.join(idx, "dense.npy"))
+    dense = np.load(_dense_file(idx))
     assert dense.shape[0] == n_entries + n_chunks  # widened: descriptions THEN chunks
     # Every entry row is in 0..n_entries-1, every chunk row is in n_entries..n_total-1.
     for e in manifest["entries"]:
