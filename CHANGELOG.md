@@ -7,6 +7,61 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.42.7 — 2026-11-03 — "One matrix per manifest"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7** (the manifest gains an additive `dense_file` key),
+citation derivation still **6**, link cache still **6**; `stale.json` schema still **1**. Two
+concurrent index builds could leave one build's manifest over the other's embeddings, and
+recall then scored memories against each other's vectors. Each build now writes its own
+matrix and the manifest names it, and an index torn before this release heals by itself.
+
+**Operator action: only on a corpus that many sessions share.** The first session on v1.42.7
+checks the existing index. If it is torn, recall uses BM25 while each SessionStart re-embeds
+what its time budget allows. `hippo build-index` in a terminal finishes it in one pass.
+`/hippo:doctor` names a torn index. See [UPGRADING.md](UPGRADING.md).
+
+- **A manifest names its own matrix (#166, IDX-1).**
+  - **What broke.** `build_index` wrote `dense.npy` and then `manifest.json`, each atomically
+    (COR-12), but nothing ordered two builds. A writes its matrix, B writes its matrix and its
+    manifest, A writes its manifest last, and A's entries now index B's rows. The load check
+    (QUA-4) compares shape and row bounds, and a pair of the same size passes it. Every later
+    incremental build copied the wrong rows forward by hash, so only `--force` cleared it.
+    On em-growth-labs (1,315 memories), 1,016 entries (77%) carried another memory's vector,
+    and the tend queue raised unrelated memories as duplicates at similarity 1.00.
+  - **Now.** Each build writes `dense.<id>.npy` and the manifest records it as
+    `dense_file`. Whichever manifest lands last names the matrix its own build wrote. A
+    `dense_file` that is not that shape is never opened. A build deletes the matrices it
+    supersedes once they are five minutes old, so a reader that holds the previous manifest
+    can still open its file.
+  - **Older sessions.** A session still running an older plugin writes the old shape, a
+    manifest with no `dense_file` and a `dense.npy`, and that is still served. A v1.42.7
+    build deletes the old `dense.npy`, so such a session's reader falls back to BM25 instead
+    of pairing it with the new manifest.
+  - **The heal.** Before a build reuses rows from an old-shape index, it re-embeds 8 of
+    them and compares. A torn index is re-embedded, never copied forward, and never kept by
+    the never-worse guard: wrong vectors are worse than BM25. The SessionStart refresh
+    rebuilds an old-shape index once even when nothing changed, so a torn one heals at the
+    next session start, not the next memory write.
+  - **doctor.** The `index_corruption` check samples alignment once the shape passes, and
+    fails with the rebuild command.
+  - **Purge.** Step 3 of *Purging a memory* says superseded matrices stay up to five minutes
+    and how to delete them sooner.
+- **`tend show` prints a derivation item's citation diff (#166, TND-10).** It printed
+  `(evidence unavailable: 'cited')`: it passed a preview to the renderer for a re-derivation
+  result. The diff was only readable through the deprecated `rederive action=worklist`. It
+  now prints the gains, losses and kept paths, with the `cited_paths_exclude` hint.
+- **A tend verdict says when its consent fold failed (#166, TND-11).** A graduate, fix or
+  re-derivation whose write did not join the consent baseline returns a note: recall will
+  withhold that memory. `tend apply` printed only "recorded", so the memory came back as a
+  trust item with nothing said at the verdict. The note now rides the message on both
+  surfaces.
+- **Receipt.** On a scratch copy of em-growth-labs' live index (that repo untouched), doctor
+  flags it in 0.17 s. Three offline refreshes serve BM25 while they re-embed, with entry rows
+  going 704 → 1,280 → 1,316. One `hippo build-index` (110 s) leaves 0 of 1,316 entries
+  misaligned. hippo's own index passes the check. A new test runs two builds interleaved the
+  way the field race did; on v1.42.6 it leaves every entry misaligned.
+
 ## v1.42.6 — 2026-10-20 — "Every copy counted"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
