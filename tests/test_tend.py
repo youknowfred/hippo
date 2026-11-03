@@ -221,3 +221,20 @@ def test_show_on_a_derivation_item_prints_the_citation_diff(corpus, capsys):
     assert "evidence unavailable" not in out, out
     assert "+ gains  : src/engine.py" in out, out
 
+
+def test_a_verdict_whose_consent_fold_failed_says_so(corpus, monkeypatch):
+    """TND-11: a graduate/fix/rederive whose write did not join the consent baseline returns
+    BND-3's disclosure line; tend printed only "recorded", so the memory came back as a
+    trust item with nothing said at the moment of the verdict."""
+    from memory.trust import _CONSENT_FOLD_FAILURE_LINE as LINE
+
+    repo, md = corpus
+    monkeypatch.setattr("memory.reconsolidate.semantic_reverify",
+                        lambda *a, **kw: {"error": None, "consent_note": LINE})
+    monkeypatch.setitem(Q.SOURCES, "reverify", lambda md_, rr: [Q._entry("reverify", "beta", "moved", "graduate")])
+    r = T.apply("reverify:beta", "graduate", memory_dir=md, repo_root=repo)
+    assert r["ok"] and LINE in r["message"], r
+    monkeypatch.setattr("memory.provenance.rederive_file", lambda *a, **kw: {"error": None, "consent_note": LINE})
+    monkeypatch.setitem(Q.SOURCES, "derivation", lambda md_, rr: [Q._entry("derivation", "alpha", "differs", "apply")])
+    r = T.apply("derivation:alpha", "apply", memory_dir=md, repo_root=repo)
+    assert r["ok"] and LINE in r["message"], r
