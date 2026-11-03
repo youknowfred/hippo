@@ -462,11 +462,14 @@ def check_index_corruption(ctx: DoctorContext) -> Dict[str, str]:
     ``build_index.check_index_integrity`` is the ONE detector for the truncated-manifest /
     missing-dense / wrong-shape states that otherwise degrade recall to nothing silently. Its
     returned string is reported verbatim; ``None`` means healthy or nothing built yet.
+    IDX-1: a same-size torn manifest/dense pair passes every shape test, so an intact shape
+    is then sampled for alignment (``check_index_alignment``, offline and bounded).
     """
     try:
-        from .build_index import check_index_integrity, default_index_dir
+        from .build_index import check_index_alignment, check_index_integrity, default_index_dir
 
-        finding = check_index_integrity(default_index_dir(ctx.memory_dir))
+        index_dir = default_index_dir(ctx.memory_dir)
+        finding = check_index_integrity(index_dir) or check_index_alignment(index_dir)
         if not finding:
             return {"status": "ok", "message": "recall index is intact."}
         return {"status": "fail", "message": f"{finding}."}

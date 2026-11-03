@@ -130,11 +130,15 @@ def _detail_lines(entry: dict, memory_dir: str, repo_root: str) -> List[str]:
             a, b = target.split("|", 1)
             return [f"{side}: {_description_of(memory_dir, side)}" for side in (a, b)]
         if kind == "derivation" and target != "corpus":
-            from .provenance import build_repo_file_index, rederive_one_lines, rederive_preview
+            from .provenance import (
+                REDERIVE_EXCLUDE_HINT, build_repo_file_index, rederive_preview, rederive_worklist_lines,
+            )
 
+            # TND-10: a preview, so the worklist's renderer — rederive_one_lines renders a
+            # rederive_file RESULT and raised KeyError 'cited' on this dict.
             repo_files, index = build_repo_file_index(repo_root)
             preview = rederive_preview(os.path.join(memory_dir, f"{target}.md"), repo_root, repo_files, index)
-            return rederive_one_lines(f"{target}.md", preview, dry_run=True)
+            return [ln[2:] for ln in rederive_worklist_lines([preview])] + [REDERIVE_EXCLUDE_HINT]
     except Exception as exc:
         return [f"(evidence unavailable: {exc})"]
     return []
@@ -180,8 +184,11 @@ def render_next(entry: Optional[dict], memory_dir: str, repo_root: str, remainin
 # --------------------------------------------------------------------------- #
 # Apply — one verdict, routed to the engine call that owns the write
 # --------------------------------------------------------------------------- #
-def _ok(msg: str) -> dict:
-    return {"ok": True, "message": msg}
+def _ok(msg: str, r: Optional[dict] = None) -> dict:
+    """``r`` is the engine result: its BND-3 ``consent_note`` (the write did not join the
+    consent baseline, so recall will withhold it) rides the message (TND-11)."""
+    note = (r or {}).get("consent_note")
+    return {"ok": True, "message": f"{msg} ⚠ {note}" if note else msg}
 
 
 def _refused(msg: str) -> dict:
@@ -206,7 +213,7 @@ def _apply_reverify(name, verdict, memory_dir, repo_root, superseded_by):
     r = semantic_reverify(name, verdict, memory_dir, repo_root, superseded_by=superseded_by)
     if r.get("error"):
         return _refused(f"{name}: {r['error']}")
-    return _ok(f"{verdict} {name}: recorded.")
+    return _ok(f"{verdict} {name}: recorded.", r)
 
 
 def _apply_capture(target, verdict, memory_dir):
@@ -275,7 +282,7 @@ def _apply_derivation(target, verdict, memory_dir, repo_root):
     r = rederive_file(os.path.join(memory_dir, f"{target}.md"), repo_root, repo_files, index)
     if r.get("error"):
         return _refused(f"{target}: {r['error']}")
-    return _ok(f"re-derived {target}'s citations.")
+    return _ok(f"re-derived {target}'s citations.", r)
 
 
 def apply(

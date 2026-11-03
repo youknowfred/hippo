@@ -105,12 +105,19 @@ def test_truncated_manifest_self_heals_on_rebuild(tmp_path, monkeypatch):
     assert B.check_index_integrity(idx) is None
 
 
+
+def _dense_file(idx: str) -> str:
+    """IDX-1: the matrix the current manifest is bound to (``dense.<id>.npy``)."""
+    from memory.build_index_dense import dense_path
+
+    return dense_path(idx, B._read_manifest_json(idx))
+
 # --------------------------------------------------------------------------- #
 # (b) dense_ready=True but dense.npy missing
 # --------------------------------------------------------------------------- #
 def test_dense_ready_without_dense_file_never_raises_recall_and_is_named(tmp_path, monkeypatch):
     md, idx = _build_dense_index(tmp_path, monkeypatch)
-    os.remove(os.path.join(idx, "dense.npy"))
+    os.remove(_dense_file(idx))
 
     finding = B.check_index_integrity(idx)
     assert finding is not None
@@ -122,7 +129,7 @@ def test_dense_ready_without_dense_file_never_raises_recall_and_is_named(tmp_pat
 
 def test_loaded_index_degrades_when_dense_file_missing(tmp_path, monkeypatch):
     md, idx = _build_dense_index(tmp_path, monkeypatch)
-    os.remove(os.path.join(idx, "dense.npy"))
+    os.remove(_dense_file(idx))
 
     loaded = B.load_index(idx)
     assert loaded is not None
@@ -136,7 +143,7 @@ def test_loaded_index_degrades_when_dense_file_missing(tmp_path, monkeypatch):
 def test_wrong_row_count_never_raises_recall_and_is_named(tmp_path, monkeypatch):
     md, idx = _build_dense_index(tmp_path, monkeypatch)
     bad = np.zeros((1, 16), dtype="float32")  # manifest has 3 entries
-    np.save(os.path.join(idx, "dense.npy"), bad)
+    np.save(_dense_file(idx), bad)
 
     finding = B.check_index_integrity(idx)
     assert finding is not None
@@ -149,7 +156,7 @@ def test_wrong_row_count_never_raises_recall_and_is_named(tmp_path, monkeypatch)
 def test_wrong_column_count_never_raises_recall_and_is_named(tmp_path, monkeypatch):
     md, idx = _build_dense_index(tmp_path, monkeypatch)
     bad = np.zeros((3, 4), dtype="float32")  # manifest declares dim=16
-    np.save(os.path.join(idx, "dense.npy"), bad)
+    np.save(_dense_file(idx), bad)
 
     finding = B.check_index_integrity(idx)
     assert finding is not None
@@ -163,7 +170,7 @@ def test_wrong_shape_dense_rank_never_raises(tmp_path, monkeypatch):
     """Direct unit check that _dense_rank's index.dense @ qvec degrades, not just recall()."""
     md, idx = _build_dense_index(tmp_path, monkeypatch)
     bad = np.zeros((1, 3), dtype="float32")
-    np.save(os.path.join(idx, "dense.npy"), bad)
+    np.save(_dense_file(idx), bad)
 
     loaded = B.load_index(idx)
     assert loaded is not None
