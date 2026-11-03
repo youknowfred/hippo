@@ -205,3 +205,19 @@ def test_list_in_a_repo_with_no_corpus_is_empty_on_both_surfaces(repo, monkeypat
     text = resp["result"]["content"][0]["text"]
     assert "queue: empty" in text and "failed" not in text, text
     assert not os.path.exists(os.path.join(repo, ".claude"))
+
+
+def test_show_on_a_derivation_item_prints_the_citation_diff(corpus, capsys):
+    """TND-10: `tend show` on a derivation item printed "(evidence unavailable: 'cited')" —
+    it fed a read-only preview into the renderer of a rederive_file result. The diff was
+    only readable through the deprecated `rederive action=worklist`."""
+    repo, md = corpus
+    write_file(repo, "src/engine.py", "x = 1\n")
+    write_file(md, "gamma.md", _MEM.format(name="gamma", body="the fix lives in `src/engine.py`"))
+    git_commit(repo, "gamma", 1_700_000_100)
+    assert "derivation:gamma" in _ids(md, repo, "derivation")
+    assert T.main(["show", "derivation:gamma", "--memory-dir", md, "--repo-root", repo]) == 0
+    out = capsys.readouterr().out
+    assert "evidence unavailable" not in out, out
+    assert "+ gains  : src/engine.py" in out, out
+

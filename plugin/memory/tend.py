@@ -130,11 +130,15 @@ def _detail_lines(entry: dict, memory_dir: str, repo_root: str) -> List[str]:
             a, b = target.split("|", 1)
             return [f"{side}: {_description_of(memory_dir, side)}" for side in (a, b)]
         if kind == "derivation" and target != "corpus":
-            from .provenance import build_repo_file_index, rederive_one_lines, rederive_preview
+            from .provenance import (
+                REDERIVE_EXCLUDE_HINT, build_repo_file_index, rederive_preview, rederive_worklist_lines,
+            )
 
+            # TND-10: a preview, so the worklist's renderer — rederive_one_lines renders a
+            # rederive_file RESULT and raised KeyError 'cited' on this dict.
             repo_files, index = build_repo_file_index(repo_root)
             preview = rederive_preview(os.path.join(memory_dir, f"{target}.md"), repo_root, repo_files, index)
-            return rederive_one_lines(f"{target}.md", preview, dry_run=True)
+            return [ln[2:] for ln in rederive_worklist_lines([preview])] + [REDERIVE_EXCLUDE_HINT]
     except Exception as exc:
         return [f"(evidence unavailable: {exc})"]
     return []
