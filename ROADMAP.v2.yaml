@@ -71,6 +71,10 @@ releases:
     re_bootstrap: "no"
   - version: v1.42.6
     theme: "Every copy counted (SEC-23 the purge procedure clears the pre-migration backups, MIG-16 doctor's snapshots line counts every backup, the worktree copies included; no roadmap item)"
+    status: released
+    re_bootstrap: "no"
+  - version: v1.42.7
+    theme: "One matrix per manifest (IDX-1 each index build writes its own dense matrix and the manifest names it, a torn index heals itself; TND-10 tend show prints a derivation item's citation diff; TND-11 a tend verdict says when its consent fold failed; no roadmap item)"
     status: in review
     re_bootstrap: "no"
   - version: v1.43.0

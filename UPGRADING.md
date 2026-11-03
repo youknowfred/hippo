@@ -11,6 +11,22 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### v1.42.7: a torn index heals itself
+
+Two index builds running at once, for example SessionStart refreshes in several sessions on one
+corpus, could leave the manifest of one build over the embeddings of the other. Recall then
+scored memories against each other's vectors, and the tend queue could pair unrelated memories as
+duplicates at similarity 1.00. v1.42.7 writes each build's embeddings to their own file and
+records that file in the manifest, so it cannot happen again.
+
+**An index torn before this release.** The first session on v1.42.7 checks it. If it is torn,
+recall uses BM25 while each SessionStart re-embeds what its time budget allows; a large corpus
+takes a few sessions. `hippo build-index` in a terminal re-embeds it in one pass.
+`/hippo:doctor`'s `index_corruption` line fails while an index is torn.
+
+**Sessions still on an older plugin** fall back to BM25 for dense recall once a v1.42.7 build has
+run. Restart them to pick up the update.
+
 ### v1.42.6: purged memories in the backups, and the worktree copies
 
 **If you purged a memory while backups existed.** A pre-migration backup is a full copy of the
