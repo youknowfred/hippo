@@ -7,6 +7,35 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.42.8 — 2026-11-06 — "Haiku 5.5, thinking off"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**, link cache still **6**;
+`stale.json` schema still **1**. The opt-in LLM passes (capture triage, the dream contradiction
+and generative passes) move from Claude Haiku 4.5 to Claude Haiku 5.5, and every request now
+turns thinking off on the models that allow it.
+
+**Operator action: none, unless you pinned a model.** A machine with the **LLM model** option,
+`HIPPO_LLM_MODEL` or a config-file `model` set keeps that model. Clear it to follow the new
+default. `/hippo:doctor` is unchanged.
+
+- **The default model is `claude-haiku-5-5` (owner word, 2026-11-06).**
+  - **What broke.** The default was the `claude-haiku-4-5` alias, on the 2026-07-13 reasoning
+    that an alias tracks the tier. It does not: an alias follows snapshots within one model
+    version, so hippo kept calling Haiku 4.5 (`claude-haiku-4-5-20251001`) after Haiku 5.5
+    shipped. A cost monitor that treats Haiku 4.5 as retired raised a critical model-drift
+    alert on hippo's key every day.
+  - **The fix.** `DEFAULT_MODEL = "claude-haiku-5-5"`, still the alias, never a dated snapshot.
+- **Thinking off per model family (`thinking_param`).** On the 5.5 generation, a request with
+  no `thinking` field runs adaptive thinking, and thinking tokens count against `max_tokens`.
+  The dream pass asks for 256 tokens, so a thinking model could spend all of them and return
+  no text, which `complete()` reads as a failure and skips silently. The body now carries
+  `{"type": "disabled"}` for Haiku 5.5 and `{"type": "between_tools"}` for Sonnet 5.5 (where
+  `disabled` is a 400). Older models, and those that cannot turn thinking off (Opus 5.5,
+  Fable), get no field, as before.
+- **Tests.** `tests/test_llm_client.py` pins the default, the per-family table, the default
+  request's thinking field at 256 tokens, and an unlisted override sending no field.
+
 ## v1.42.7 — 2026-11-03 — "One matrix per manifest"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format

@@ -698,8 +698,10 @@ untouched), and both routed through one auditable seam:
 `None` on ANY failure (no key, timeout, junk response, unknown provider), never raises.
 Every consumer treats `None` as "skip the enrichment entirely", so a dead network can never
 break a hook or a dream pass. Provider/model/endpoint/key are config points (defaults:
-Anthropic, the `claude-haiku-4-5` alias — deliberately not a dated snapshot, so tier
-refreshes arrive without a release). Since v1.42 the machine settings are the plugin's
+Anthropic, the `claude-haiku-5-5` alias — deliberately not a dated snapshot, so snapshot
+refreshes within Haiku 5.5 arrive without a release; a new model version still needs one).
+The request turns thinking off for the families that allow it (`thinking_param`): the 5.5
+generation thinks by default, and those tokens come out of the callers' small `max_tokens`. Since v1.42 the machine settings are the plugin's
 options (`plugin.json` `userConfig`): `capture_llm`, `dream_contradictions`,
 `dream_generative`, `llm_model`, and `llm_api_key` (`sensitive` — Claude Code keeps it in the
 system keychain). Hooks receive them as `CLAUDE_PLUGIN_OPTION_<KEY>`; the MCP server gets the
@@ -787,7 +789,7 @@ re-billed.
   `~/.claude/hippo-llm.json`); hermetic tests point it at a tmp path. Every knob below ALSO
   has a config-file key (see "Standalone LLM enrichment") — env wins per key.
 - `HIPPO_LLM_PROVIDER` / `HIPPO_LLM_MODEL` / `HIPPO_LLM_BASE_URL` / `HIPPO_LLM_API_KEY` —
-  standalone-call provider (default `anthropic`), model (default the `claude-haiku-4-5`
+  standalone-call provider (default `anthropic`), model (default the `claude-haiku-5-5`
   alias), endpoint root, and hippo-scoped key (falls back to `ANTHROPIC_API_KEY`).
 - `HIPPO_CAPTURE_LLM=1` — opt the SessionEnd/SubagentStop capture pass into CAP-LLM triage;
   `HIPPO_CAPTURE_LLM_TIMEOUT` caps the call (default 6s, clamped ≤20s).
