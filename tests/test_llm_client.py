@@ -182,12 +182,52 @@ def _write_config(tmp_path, monkeypatch, obj) -> str:
 
 
 def test_default_model_is_the_alias_not_a_dated_snapshot():
-    """Owner decision 2026-07-13 (max flexibility): the default tracks the tier's current
-    snapshot via the alias, so a model refresh needs no hippo release."""
+    """Owner decision 2026-07-13 (max flexibility): the default is the tier's alias, never a
+    dated snapshot. Haiku 5.5 since v1.42.8 (owner word 2026-11-06)."""
     import re
 
-    assert L.DEFAULT_MODEL == "claude-haiku-4-5"
+    assert L.DEFAULT_MODEL == "claude-haiku-5-5"
     assert not re.search(r"\d{8}$", L.DEFAULT_MODEL), "default must not pin a dated snapshot"
+
+
+@pytest.mark.parametrize(
+    "model, expected",
+    [
+        ("claude-haiku-5-5", {"type": "disabled"}),
+        ("claude-sonnet-5-5", {"type": "between_tools"}),
+        ("claude-haiku-4-5", None),
+        ("claude-opus-5-5", None),
+        ("claude-sonnet-5", None),
+    ],
+)
+def test_thinking_param_per_family(model, expected):
+    """5.5-generation models think by default and the thinking tokens come out of
+    max_tokens, so each family that can turn thinking off gets its own off switch. The others
+    get no field."""
+    assert L.thinking_param(model) == expected
+
+
+def test_default_request_turns_thinking_off(monkeypatch):
+    """The shipped default must answer inside the dream pass's 256-token budget: the body
+    carries Haiku 5.5's thinking-off switch."""
+    calls = []
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    _install_fake(monkeypatch, payload=_anthropic_payload(), calls=calls)
+    assert L.complete("p", timeout_s=1.0, max_tokens=256) == "hello"
+    body = json.loads(calls[0]["req"].data.decode("utf-8"))
+    assert body["model"] == "claude-haiku-5-5"
+    assert body["max_tokens"] == 256
+    assert body["thinking"] == {"type": "disabled"}
+
+
+def test_override_to_an_unlisted_model_sends_no_thinking_field(monkeypatch):
+    calls = []
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setenv("HIPPO_LLM_MODEL", "claude-opus-5-5")
+    _install_fake(monkeypatch, payload=_anthropic_payload(), calls=calls)
+    assert L.complete("p", timeout_s=1.0) == "hello"
+    body = json.loads(calls[0]["req"].data.decode("utf-8"))
+    assert "thinking" not in body
 
 
 def test_config_file_supplies_model_base_url_and_key(tmp_path, monkeypatch):

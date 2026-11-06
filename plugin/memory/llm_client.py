@@ -30,7 +30,7 @@ Design contract (every caller depends on it):
 
         {
           "provider": "anthropic",            // HIPPO_LLM_PROVIDER
-          "model": "claude-haiku-4-5",        // HIPPO_LLM_MODEL
+          "model": "claude-haiku-5-5",        // HIPPO_LLM_MODEL
           "base_url": "https://…",            // HIPPO_LLM_BASE_URL
           "api_key": "sk-ant-…",              // HIPPO_LLM_API_KEY / ANTHROPIC_API_KEY
           "capture_triage": true,              // HIPPO_CAPTURE_LLM (CAP-LLM opt-in)
@@ -65,10 +65,34 @@ from typing import Any, Optional
 DEFAULT_PROVIDER = "anthropic"
 # Small/fast tier by design: both shipped callers run inside bounded budgets (a hook's
 # hard timeout; an offline dream pass a human is watching). Deliberately the ALIAS, not a
-# dated snapshot (owner decision 2026-07-13, max flexibility): Anthropic aliases track the
-# current snapshot of the tier, so hippo picks up model refreshes without a code change.
-# Override: HIPPO_LLM_MODEL / config "model".
-DEFAULT_MODEL = "claude-haiku-4-5"
+# dated snapshot (owner decision 2026-07-13, max flexibility). An alias tracks snapshots
+# WITHIN one model version only, never across versions: `claude-haiku-4-5` stayed on
+# Haiku 4.5 after Haiku 5.5 shipped, so a new generation still needs this line moved.
+# Haiku 5.5 since v1.42.8 (owner word 2026-11-06). Override: HIPPO_LLM_MODEL / config "model".
+DEFAULT_MODEL = "claude-haiku-5-5"
+
+# Thinking per model family (prefix-matched, first match wins). Every caller wants a short
+# answer inside a small max_tokens (the dream pass asks for 256), and thinking tokens count
+# against max_tokens. On the 5.5 generation, OMITTING `thinking` runs adaptive thinking,
+# which can spend the whole budget and leave no text, and complete() would then return
+# None as if the flag were off. So each family names its thinking-off setting:
+#   - Haiku 5.5: {"type": "disabled"} (accepted at effort high or below; hippo sends no
+#     effort, and Haiku 5.5 defaults to medium).
+#   - Sonnet 5.5: {"type": "disabled"} is a 400; {"type": "between_tools"} is its off switch.
+# A model not listed here (Haiku 4.5 and older run without thinking unless asked; Opus 5.5
+# and Fable cannot turn it off) is sent no `thinking` field at all, as before.
+_THINKING_OFF = (
+    ("claude-haiku-5", {"type": "disabled"}),
+    ("claude-sonnet-5-5", {"type": "between_tools"}),
+)
+
+
+def thinking_param(model: str) -> Optional[dict]:
+    """The `thinking` value to send for ``model``, or ``None`` to send none."""
+    for prefix, value in _THINKING_OFF:
+        if model.startswith(prefix):
+            return dict(value)
+    return None
 DEFAULT_BASE_URL = "https://api.anthropic.com"
 _ANTHROPIC_VERSION = "2023-06-01"
 # Response-body read cap — a misbehaving endpoint must not balloon a hook's memory.
@@ -224,11 +248,15 @@ def _complete_anthropic(
         return None
     import urllib.request
 
+    model = model_name()
     body = {
-        "model": model_name(),
+        "model": model,
         "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": prompt}],
     }
+    thinking = thinking_param(model)
+    if thinking is not None:
+        body["thinking"] = thinking
     if system:
         body["system"] = system
     req = urllib.request.Request(
