@@ -21,6 +21,9 @@
 #   scale     — PRF-3's generated ~500-memory BM25 corpus, asserting recall latency, bounded
 #               output, and build/refresh time. NIGHTLY only (schedule trigger). `scale`-marked
 #               so it never runs on the hermetic or dense lanes.
+#   linear-history — CON-5: after a push to `main`, fails if the pushed range holds a merge
+#               commit. The ruleset below already requires linear history; this catches the one
+#               way around it (`--admin`), which nothing else looks at afterwards.
 #
 # Branch protection for `main` (QUA-12 — the ruleset of record, versioned here). APPLIED to
 # `main` 2026-07-19 via the API, the repo now being public — Q2(r5), dated owner entry on
@@ -130,7 +133,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: shellcheck hook scripts and bin/hippo
-        run: shellcheck plugin/hooks/*.sh plugin/bin/hippo
+        run: shellcheck plugin/hooks/*.sh plugin/bin/hippo .github/scripts/*.sh
 
   secret-scan:
     name: secret-scan (SEC-8 — shipped packs + repo)
@@ -208,6 +211,22 @@ jobs:
           PYTHONPATH=plugin python -m memory.build_index --memory-dir .claude/memory --index-dir .hippo/index
       - name: Hermetic suite on this interpreter (dense disabled)
         run: python -m pytest
+
+  linear-history:
+    name: linear-history (no merge commits on main)
+    # After the fact, and on main only: a pull request cannot show what a bypassed merge will
+    # look like. Not a required check (there is no PR for it to gate).
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Fail if the pushed range holds a merge commit
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: bash .github/scripts/check_linear_history.sh "$BEFORE" "$AFTER"
 
   scale:
     name: scale (500-memory BM25 lane, nightly)

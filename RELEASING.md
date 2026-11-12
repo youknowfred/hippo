@@ -48,7 +48,9 @@ Gates:
 8. **Tag only after the main-push run is green**: the squash-merge triggers a fresh CI run
    on `main` — watch it (`gh run list --branch main`, then `gh run watch <run-id>`) and
    push the `vX.Y.Z` tag only after that run concludes green (the remedy the v1.27.0
-   release used). `release.yml` verifies the four-way match on the tag push.
+   release used). `release.yml` verifies the four-way match on the tag push. The same
+   main-push run carries the `linear-history` lane, which fails if the push brought a merge
+   commit onto `main` (the one thing `--admin` can let through unseen).
 
 ## The re-bootstrap flag
 
