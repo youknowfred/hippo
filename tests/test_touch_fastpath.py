@@ -130,6 +130,16 @@ def test_python_still_runs_when_it_has_work(tmp_path, tool, rel, why):
     assert how == "spawn", why
 
 
+def test_a_memory_files_own_read_goes_to_python(tmp_path):
+    """Python stamps the open on the row and folds it into today's rollup; the fast path
+    would write the bare row. (The rollup write also drains the usage spool.)"""
+    row, _how, _ = _touch(tmp_path, "m", "Read", ".claude/memory/note.md")
+    assert row["opened"] == "note"
+    today = json.loads((_derived(tmp_path / "m", "telemetry") / "rollup_today.json").read_text())
+    assert today["opened"] == {"opens": 1}
+    assert today["surface"]["hook:post_tool:spawn"] == 1
+
+
 def test_a_due_fleet_check_spawns(tmp_path):
     root = tmp_path / "d"
     td = _project(root)

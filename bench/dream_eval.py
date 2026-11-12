@@ -39,6 +39,11 @@ Flag surface: written to the ``eval --ab <flag>`` whitelist shape (owner decisio
 rewrite. ``net-token`` from the proposal's GEM list is SKIPPED, not gated: edges ADD
 injection cost by design (EXPLORATIONS §6 "no token-saving claim" — the token win belongs
 to DRM-6's schema tier), and the two binding texts reconcile only that way.
+
+Lives in ``bench/`` (a repo-checkout dev/CI tool, not shipped with the plugin): it needs the
+committed fixture under ``tests/fixtures/dream_ab``. Run it from the repository root::
+
+    PYTHONPATH=plugin python -m bench.dream_eval [--live] [--rebuilds N] [--pin]
 """
 
 from __future__ import annotations
@@ -49,12 +54,6 @@ import shutil
 import tempfile
 from math import comb
 from typing import Dict, List, Optional, Tuple
-
-AB_FLAGS = (
-    "HIPPO_DREAM",
-    "HIPPO_SALIENCE",  # MSR-5 — memory.salience_eval
-    "HIPPO_OUTCOME_PRIOR",  # MEA-5 — memory.outcome_prior_eval (the EVD-4 Arm B un-sever)
-)  # the --ab whitelist: each flag owns a self-contained harness module (DRM-3)
 
 # Harness-local dream knobs: DRM-3 proves "admitted edges raise multi-hop recall because
 # of the edges"; discovery-θ calibration on real data is DRM-1's job. The fixture's
@@ -74,7 +73,7 @@ _GATE_P95_MS = 300.0
 
 def default_fixture_dir() -> Optional[str]:
     """The committed frozen fixture (repo dev tree), or None on an installed plugin."""
-    from .provenance import resolve_dirs
+    from memory.provenance import resolve_dirs
 
     _md, repo = resolve_dirs()
     cand = os.path.join(repo, "tests", "fixtures", "dream_ab")
@@ -126,8 +125,8 @@ def sign_test_p(n_pos: int, n_neg: int) -> Optional[float]:
 
 def _per_probe_hits(rows: List[dict], index_dir: str, k: int) -> List[dict]:
     """Per-row ``{query, category, expected, hit, rank, via}`` under the CURRENT env arm."""
-    from .build_index import load_index
-    from .recall import recall
+    from memory.build_index import load_index
+    from memory.recall import recall
 
     idx = load_index(index_dir)
     out: List[dict] = []
@@ -210,8 +209,8 @@ def _run_arm(
 ) -> Tuple[dict, List[dict], List[dict]]:
     """One arm: N index rebuilds + evaluate() each time. Returns
     ``(first_report, first_probes, [projection per rebuild])``."""
-    from .build_index import build_index
-    from .eval_recall import evaluate
+    from memory.build_index import build_index
+    from memory.eval_recall import evaluate
 
     projections: List[dict] = []
     first_report: Optional[dict] = None
@@ -277,7 +276,7 @@ def run_ab(
         return 1, f"eval --ab HIPPO_DREAM: fixture hard set missing: {hard_set_path}"
     abstention_arg = abstention_path if os.path.exists(abstention_path) else None
 
-    from .eval_recall import load_hard_set
+    from memory.eval_recall import load_hard_set
 
     hard_rows = load_hard_set(hard_set_path)
     mh_rows = [r for r in hard_rows if r["category"] == "multi-hop"]
@@ -319,12 +318,12 @@ def run_ab(
 
         # ---- baseline-absence: the latent edges must NOT pre-exist (GRA-3/GRW-2 never
         # made them), and every multi-hop probe must MISS while its control HITS. -------
-        from .links import LinkGraph
+        from memory.links import LinkGraph
 
         g0 = LinkGraph(mem)
 
         # ---- ONE dream pass on the COPY (never the fixture, never the live corpus). ---
-        from .dream import read_apply_ledger, run_apply_pass
+        from memory.dream import read_apply_ledger, run_apply_pass
 
         with _arm_env(off=False):
             code, digest = run_apply_pass(mem, os.path.join(work, "idx-dream"), tele)
@@ -379,8 +378,8 @@ def run_ab(
         # Attribution: every converted probe entered via a dream edge — the expected
         # memory adjacent through a LEDGER edge to a memory the OFF arm ALREADY surfaced
         # for that query (the seed), and graph-provenance ("via") in the ON run.
-        from .build_index import load_index
-        from .recall import recall as _recall
+        from memory.build_index import load_index
+        from memory.recall import recall as _recall
 
         idx_off_dir = os.path.join(work, "idx-off")
         attribution: List[dict] = []
@@ -511,9 +510,9 @@ def _run_live(memory_dir: str, *, rebuilds: int, k: int) -> Tuple[int, str]:
     and the report is the per-arm self_recall + the probes whose hit set changed. The live
     corpus itself is never written (inv6 / measure-only).
     """
-    from .build_index import build_index, load_index
-    from .eval_recall import derive_self_query
-    from .recall import recall as _recall
+    from memory.build_index import build_index, load_index
+    from memory.eval_recall import derive_self_query
+    from memory.recall import recall as _recall
 
     work = tempfile.mkdtemp(prefix="hippo-dream-ab-live-")
     try:
@@ -558,7 +557,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
     ap = argparse.ArgumentParser(
-        prog="memory.dream_eval",
+        prog="bench.dream_eval",
         description="the /dream HIPPO_DREAM snapshot-diff A/B (measure-only).",
     )
     ap.add_argument("--fixture-dir", default=None, help="dir holding S0/ + hard_set.yaml + pinned_off.json")
@@ -573,7 +572,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.live:
         live_dir = args.memory_dir
         if live_dir is None:
-            from .provenance import resolve_dirs
+            from memory.provenance import resolve_dirs
 
             live_dir, _ = resolve_dirs()
     code, text = run_ab(
