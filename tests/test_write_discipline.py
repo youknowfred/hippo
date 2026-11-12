@@ -102,6 +102,7 @@ WRITE_OPEN_ALLOWLIST = {
     ("capture_queue", "snooze_queue"): "queue-state marker; worst case the nudge re-fires",
     ("capture_queue", "_write_seed_json"): "gitignored pending seed moved to/from expired/ (TND-5): own unique-tmp + os.replace, and the source is removed only after the destination landed",
     ("provenance_env", "ensure_self_ignoring_dir"): "derived-dir self-ignore marker; create-once, single '*' line",
+    ("gate_cli", "policy_of"): "GAT-2: one side's hippo.json/.format copied into a private mkdtemp dir so the engine's own policy readers parse it; the dir is rmtree'd in the same call and nothing else reads it",
     ("eval_adversarial", "_sec6_withheld_via_real_recall"): "SEN-4 acceptance-probe: throwaway temp-repo fixture writes (whole dir rmtree'd); a torn write just fails the probe, fail-open + honest",
     # -- machine-local provisioning state under CLAUDE_PLUGIN_DATA: a failure means
     #    re-bootstrap, never corpus/registry loss --

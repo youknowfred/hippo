@@ -124,7 +124,8 @@ itself — so the crash behavior of every write is a stated, tested contract, no
 implementation detail. Every irreplaceable file (corpus `.md` files and the committed
 markers/fixtures beside them, the machine-wide trust and projects registries, the packs
 lockfile, `MEMORY.md` floors, promoted rule files, the user tier's `.gitignore` list of
-machine-local memories) is written through one atomic
+machine-local memories, the git pre-commit hook `hippo gate --install` writes) is written
+through one atomic
 primitive family (`memory/atomic.py`: a per-call-unique tmp in the target's directory +
 `os.replace`, symlink-aware). A reader sees the old document or the new one — **never a
 torn one** — and a crash mid-write strands at worst an orphaned tmp file, never partial

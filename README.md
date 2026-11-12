@@ -366,7 +366,8 @@ hippo's settings now live in three places, and the first one that answers wins:
 3. **`.claude/memory/hippo.json`** — the corpus's committed policy, shared with your team:
    `volatile_paths`, `floor_lint`, `floor_sections`, `fold_digests`, `attention` (`"calm"` or
    `"full"`), `mute` (SessionStart signals to hide), `acknowledged_findings` (see below),
-   `write_path` (`"outbox"` or `"direct"`, below) and `gate` (the write gate, below).
+   `write_path` (`"outbox"` or `"direct"`, below), `gate` (the write gate, below), `budgets`
+   and `journals` (the commit gate's budgets, below).
 
 **Acknowledging a cleared lint finding.** When a memory file carries a secret or threat finding
 you have reviewed and cleared, add an entry to `acknowledged_findings` in `hippo.json` —
@@ -445,6 +446,34 @@ budget, its before and after numbers, and the way out. A corpus can ask for more
 silences the check for the corpus; any other value only warns. `/hippo:doctor` states which of
 these applies. The hook always exits 0, and a write outside a corpus is rejected in bash
 before any Python starts.
+
+### At commit time: `hippo gate` and declared budgets
+
+`hippo gate --staged` runs the floor checks on what the next commit records (HEAD against the
+index, read with git plumbing, so untracked files never count), with the same rule: it fails
+(exit 1) only when the change leaves a budget over and makes it worse. The banned pattern over
+memory bodies is not checked at commit time: a status word in a body is the write gate's
+warning, never a failed commit. `hippo gate --commit
+<rev>` judges one commit against its first parent, for CI or a replay of history. A corpus can
+declare hard numbers of its own in `hippo.json`:
+
+```json
+{"budgets": {"files": 1200, "floor_bytes": 20000, "floor_lines": 150, "journals": 300}}
+```
+
+`files` counts memory files directly in the corpus dir, `journals` counts files matching
+`fold_digests` or a `journals` glob list, and `floor_bytes`/`floor_lines` are the floor's own
+budget. They sit beside the harness read window rather than replacing it: at commit time the
+floor is also held to the read limit (25,000 bytes or 200 lines, or a lower declared
+`floor_lint` cap), while the write-time warn line stays advice. Each key is optional; a corpus
+with no `budgets` and no `floor_lint` is not checked. The budgets are read from the side being
+committed, so raising one deliberately in the same change is judged by the new number.
+
+`hippo gate --install` shows the pre-commit hook it would write and where (it follows
+`core.hooksPath` and linked worktrees); `--install --yes` writes it. It never overwrites a
+pre-commit hook it did not write (it prints the two lines to add by hand instead), it exits 0
+when hippo is not installed, so it cannot stop commits on a machine without the plugin, and
+`git commit --no-verify` skips it for one commit.
 
 ## Support matrix
 
