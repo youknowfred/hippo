@@ -90,7 +90,7 @@ subtraction release (ruling V2Q-13).
 | Native-stamped files, emgl | 260 carry `modified`, 281 `originSessionId`; 134 of 1,066 carry `last_verified` | ✓ frontmatter keys |
 | SessionStart, emgl, 30 days | 857 runs; 305 at ≥98% of the 9,000 cap; `git_recent`, `rules_rot`, `staleness` dropped in all 857; user-tier floor median 2,997 chars | ✓ rollups; ✓ `injection_producers.jsonl` |
 | Explicit recall | `mcp:recall` 195 calls against 16,118 prompts | ✓ rollups |
-| Dream linker | completion edges are exempt from the cofire threshold, so an edge can apply at cofire 0.00 (56 of 103 applied edges *(handed over)*) | ✓ mechanism, `dream_config.py:243-265` |
+| Dream linker | completion edges are exempt from the cofire threshold, so an edge can apply at cofire 0.00. All 103 applied edges on emgl are completions: 56 at 0.00, 11 in 0.29–0.50, 20 in 0.50–0.75, 8 in 0.75–0.90, 8 at 0.90 or above | ✓ `dream:links` stamps at the default branch; `dream_config.py:243-265` |
 | User tier | about 27 memories, not a git repository | *(handed over; outside this session's read boundary)*; #158 |
 | Stray native directory | a real `memory` directory under the harness's projects dir, holding native memories no corpus received; census skips anything that is not a symlink | *(handed over)*; ✓ mechanism, `machine_census.py:104` |
 
@@ -452,7 +452,12 @@ identities.*
   cofire floor (today they are exempt, `dream_config.py:243-265`), and the pass that ships this
   lists the edges already applied below it for one reviewed undo. *Gate, added:* on emgl, 0
   applied edges below the floor after the undo; on hippo and Skyline the linker's applied set is
-  unchanged.
+  unchanged. *Replay (V2Q-27), 2026-11-12:* the applied edges split in two. 56 of 103 sit at
+  exactly 0.00 (the body names the target, and recall has never returned the pair together);
+  the other 47 spread from 0.29 to 1.00 with no second break. The floor is therefore **any
+  nonzero cofire**: a completion needs the text mention and at least one observed co-recall.
+  That puts 56 edges in the reviewed undo. The replay shows where the edges sit, not which
+  are right, so the undo is reviewed and not automatic.
 - **LDG-1 External-ledger read-time join** *(thread, v2.x → v1.44.0)* — Direction A as
   ratified. This amendment answers its other three questions in V2Q-21. *Why now:* the boundary
   "memory cites the tracker by id; status lives in the tracker" is failing in 661 of 1,066 bodies
