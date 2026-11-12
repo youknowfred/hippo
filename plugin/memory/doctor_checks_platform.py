@@ -139,6 +139,48 @@ def check_attention(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"attention check failed: {exc}."}
 
 
+# CLM-9: when full attention is costing context. The warn line needs enough SessionStarts to
+# be a pattern (a fresh corpus's first few sessions are not one) and a share at the cap that
+# means real loss: one session in ten opening truncated. The field corpus that motivated this
+# sat at 36% (305 of 857).
+_CAP_MIN_RUNS = 10
+_CAP_MIN_SHARE = 0.10
+
+
+def check_attention_cost(ctx: DoctorContext) -> Dict[str, str]:
+    """CLM-9: joins attention ``full`` with the 30-day share of SessionStarts at the cap."""
+    try:
+        from .attention import CALM, attention_source
+        from .telemetry import default_telemetry_dir
+        from .telemetry_rollup import read_rollups, summarize
+
+        mode, source = attention_source(memory_dir=ctx.memory_dir)
+        if mode == CALM:
+            return {"status": "ok", "message": "attention cost: calm, nothing to add."}
+        k = summarize(read_rollups(default_telemetry_dir(ctx.memory_dir), days=30))
+        runs, at_cap = k.get("ss_runs") or 0, k.get("ss_at_cap") or 0
+        if runs < _CAP_MIN_RUNS or at_cap < _CAP_MIN_SHARE * runs:
+            return {
+                "status": "ok",
+                "message": f"attention cost: full, {at_cap}/{runs} SessionStart(s) at the cap "
+                "in 30 days (under the warn line).",
+            }
+        msg = (
+            f"full attention is costing context: {at_cap} of {runs} SessionStarts in the "
+            "last 30 days hit the cap"
+        )
+        top = sorted((k.get("ss_dropped") or {}).items(), key=lambda kv: (-kv[1], kv[0]))[:3]
+        if top:
+            msg += ", dropping " + ", ".join(f"{name} ({n})" for name, n in top)
+        if source == "HIPPO_ATTENTION":
+            msg += " — turn calm on: set HIPPO_ATTENTION=calm (it is set to full here)."
+        else:
+            msg += " — turn calm on: the plugin's calm_session_start option (from /plugin)."
+        return {"status": "warn", "message": msg}
+    except Exception as exc:
+        return {"status": "warn", "message": f"attention cost check failed: {exc}."}
+
+
 _WIRE = "mcp__plugin_hippo_hippo__"
 
 

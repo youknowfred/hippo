@@ -247,6 +247,7 @@ def record_prompt(
     wall_ms: Optional[float] = None,
     now: Optional[float] = None,
     path: str = "spawn",
+    injected_memories: Optional[int] = None,
 ) -> bool:
     """Fold one UserPromptSubmit hook run into today's row. Machine turns count by trigger
     and nothing else (they never recall). Fire-and-forget: never raises.
@@ -274,11 +275,28 @@ def record_prompt(
             hook["injected_prompts"] += 1
             hook["injected_chars"] += int(injected_chars)
             _bump(hook["injected_by_trigger"], trigger or "human", int(injected_chars))
+            if injected_memories:  # OBS-10: the denominator of the daily opened rate
+                _bump(hook, "injected_memories", int(injected_memories))
         if session_id:
             _bump(hook["session_chars"], str(session_id), int(injected_chars or 0))
         if wall_ms is not None:
             key = "warm_wall_ms_hist" if path == "warm" else "wall_ms_hist"
             _bump(hook.setdefault(key, {}), _bucket(float(wall_ms), _MS_BUCKETS))
+
+    return _update(telemetry_dir, now, fold)
+
+
+def record_open(telemetry_dir: str, *, after_recall: bool, now: Optional[float] = None) -> bool:
+    """OBS-10: fold one Read of a memory file into today's row: ``opened.opens`` counts every
+    open, ``opened.after_recall`` the ones whose memory the hook had injected earlier in the
+    same session. With ``hook.injected_memories`` that is a daily opened-after-recall rate
+    that outlives the outcome ledger's rotation. Fire-and-forget: never raises."""
+
+    def fold(acc: dict) -> None:
+        opened = acc.setdefault("opened", {})
+        _bump(opened, "opens")
+        if after_recall:
+            _bump(opened, "after_recall")
 
     return _update(telemetry_dir, now, fold)
 
@@ -485,6 +503,9 @@ def summarize(rows: List[dict]) -> dict:
         "skipped": hook_total("skipped"),
         "injected_prompts": injected_prompts,
         "injected_chars": hook_total("injected_chars"),
+        "injected_memories": hook_total("injected_memories"),
+        "opens": sum(int((r.get("opened") or {}).get("opens") or 0) for r in rows),
+        "opens_after_recall": sum(int((r.get("opened") or {}).get("after_recall") or 0) for r in rows),
         "chars_per_injected_prompt": (hook_total("injected_chars") / injected_prompts) if injected_prompts else None,
         "sessions": hook_total("sessions"),
         "session_chars_p50": _hist_percentile(_merge(rows, "hook", "session_chars_hist"), 50),

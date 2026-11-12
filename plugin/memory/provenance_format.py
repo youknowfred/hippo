@@ -446,6 +446,62 @@ def read_floor_lint(memory_dir: str) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# GAT-3: the floor's declared sections — which ``## `` headings are floor, and which
+# memory types new_memory files a pointer under each. ONE accessor, read by the pointer
+# writer, the tier skeleton and lint_floor alike, so the three can never disagree.
+# --------------------------------------------------------------------------- #
+DEFAULT_FLOOR_SECTIONS = (
+    ("## User", ("user",)),
+    ("## Working Style & Process Feedback", ("feedback",)),
+)
+_FLOOR_SECTION_TYPES = ("user", "feedback", "project", "reference")
+
+
+def read_floor_sections(memory_dir: str) -> tuple:
+    """The corpus's floor sections as ``((heading, (type, ...)), ...)``, in declared order.
+    Never raises.
+
+    ``floor_sections`` in ``hippo.json`` is a list of ``{"heading": "## Name", "types":
+    [...]}``. A section with ``types: []`` is floor (its pointers are legitimately placed)
+    but new_memory never files into it — it is hand-maintained. Same posture as
+    ``floor_lint``: corpus-owned, committed, no writer, garbled degrades to absent. An
+    entry whose heading is not a ``## `` line, whose ``types`` is not a list of known
+    types, or which repeats a heading or a type an earlier entry already claimed is
+    dropped; a non-list key, or one with no valid entry left, is the default — today's two
+    sections, ``user`` and ``feedback``.
+    """
+    raw = read_policy_key(memory_dir, "floor_sections")
+    if not isinstance(raw, list):
+        return DEFAULT_FLOOR_SECTIONS
+    out: list = []
+    seen_types: set = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        heading, types = entry.get("heading"), entry.get("types")
+        if not isinstance(heading, str) or "\n" in heading or not isinstance(types, list):
+            continue
+        heading = heading.strip()
+        if not heading.startswith("## ") or not heading[3:].strip():
+            continue
+        if any(heading == h for h, _ in out):
+            continue
+        if not all(isinstance(t, str) and t in _FLOOR_SECTION_TYPES for t in types):
+            continue
+        tset = tuple(dict.fromkeys(types))
+        if seen_types.intersection(tset):
+            continue
+        seen_types.update(tset)
+        out.append((heading, tset))
+    return tuple(out) if out else DEFAULT_FLOOR_SECTIONS
+
+
+def floor_section_for_type(memory_dir: str, mtype: str) -> Optional[str]:
+    """The declared heading a ``mtype`` memory's floor pointer files under, or ``None``."""
+    return next((h for h, types in read_floor_sections(memory_dir) if mtype in types), None)
+
+
+# --------------------------------------------------------------------------- #
 # GRF-7: the fold-digest POLICY key — the marker's third policy key after FLR-1
 # --------------------------------------------------------------------------- #
 def read_fold_digests(memory_dir: str) -> list:

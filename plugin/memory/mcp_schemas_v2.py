@@ -98,6 +98,8 @@ V2_TOOLS: List[dict] = [
             "description": dict(_S, description="the one line recall matches"),
             "type": {"type": "string", "enum": ["user", "feedback", "project", "reference"]},
             "body": dict(_S, description="the memory body: the fact and why"),
+            "hook": dict(_S, description="the short line shown in the always-loaded index; "
+                         "defaults to the description when that fits"),
             "links": {"type": "array", "items": _S, "description": "related memory names"},
             "confidence": {"type": "string", "enum": ["draft", "verified", "authoritative"]},
             "check": dict(_B, description="dry run: neighbors only, writes nothing"),

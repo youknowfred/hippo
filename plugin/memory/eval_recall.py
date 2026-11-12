@@ -95,31 +95,49 @@ from .recall import format_results, recall
 # as ``memory.eval_recall.<name>`` and stays patchable HERE for the façade's own
 # call sites (evaluate/main/_handle_run_outputs look these up in this module's
 # globals). Siblings never import this façade.
+#
+# The eval-only siblings (condition arms + latency probes, the dense-floor sweep, the
+# adversarial probe) are re-exported LAZILY: importing this façade for a runtime path
+# (the abstention-fixture drafts, doctor's abstention check) never imports them. A
+# ``from memory.eval_recall import X`` or ``eval_recall.X`` resolves them on first use
+# (PEP 562 ``__getattr__``, cached into the module namespace); the façade's own call
+# sites go through ``_lazy`` so a monkeypatch of ``memory.eval_recall.X`` still lands.
 # --------------------------------------------------------------------------- #
-from .eval_arms import (
-    _COLD_PROBE,
-    _REACHABILITY_MIN_ROWS,
-    _REACHABILITY_SEEDS,
-    _dense_disabled_env,
-    _grep_baseline_docs,
-    _grep_rank,
-    cold_latency,
-    latency,
-    miss_autopsy,
-    null_hypothesis_arms,
-    reachability_audit,
-    token_reduction,
-)
-from .eval_floor import (  # GRF-3 dense-floor calibration sweep (façade re-exports)
-    _FLOOR_SWEEP_NAME,
-    _FLOOR_SWEEP_SCHEMA,
-    _raw_max_cosines,
-    default_floor_sweep_path,
-    floor_sweep,
-    read_floor_sweep,
-    recommend_floor,
-    write_floor_sweep,
-)
+_LAZY_SIBLINGS = {
+    "eval_arms": "_COLD_PROBE _REACHABILITY_MIN_ROWS _REACHABILITY_SEEDS _dense_disabled_env "
+    "_grep_baseline_docs _grep_rank cold_latency latency miss_autopsy null_hypothesis_arms "
+    "reachability_audit token_reduction",
+    "eval_floor": "_FLOOR_SWEEP_NAME _FLOOR_SWEEP_SCHEMA _raw_max_cosines "  # GRF-3 sweep
+    "default_floor_sweep_path floor_sweep read_floor_sweep recommend_floor write_floor_sweep",
+    "eval_adversarial": "_ADVERSARIAL_DIRNAME _ADVERSARIAL_MANIFEST _adversarial_fixture_dir "
+    "_render_clean_fixture _sec6_withheld_via_real_recall adversarial_report",  # SEN-4
+}
+_LAZY_REEXPORTS = {n: mod for mod, names in _LAZY_SIBLINGS.items() for n in names.split()}
+
+
+def __getattr__(name: str):
+    sibling = _LAZY_REEXPORTS.get(name)
+    if sibling is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    import importlib
+
+    value = getattr(importlib.import_module(f".{sibling}", __package__), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_LAZY_REEXPORTS))
+
+
+def _lazy(name: str):
+    """A lazily re-exported name, honouring a patch already set on this module."""
+    try:
+        return globals()[name]
+    except KeyError:
+        return __getattr__(name)
+
+
 from .eval_ledger import (
     _BASELINE_FILENAME,
     _BASELINE_N_FLOOR,
@@ -244,7 +262,7 @@ def session_token_cost(
         # chars/4 — _estimate_tokens' exact heuristic, applied to the measured mean.
         per_query_tokens = max(0, round((sum(measured_chars) / len(measured_chars)) / 4))
     else:
-        tok = token_reduction(memory_dir, index, hard_set, k=k, index_dir=index_dir)
+        tok = _lazy("token_reduction")(memory_dir, index, hard_set, k=k, index_dir=index_dir)
         per_query_tokens = tok["recall_avg"]
     return {
         "avg_events_per_session": round(avg_events, 2),
@@ -302,14 +320,6 @@ from .eval_fixtures import (  # drafts-queue plumbing + the T11 synthesizers (fa
     run_draft_livedin_cli,
     run_draft_update_cli,
     validate_confirm_row_kind,
-)
-from .eval_adversarial import (  # SEN-4 adversarial probe (façade re-exports; ED5R-3 split)
-    _ADVERSARIAL_DIRNAME,
-    _ADVERSARIAL_MANIFEST,
-    _adversarial_fixture_dir,
-    _render_clean_fixture,
-    _sec6_withheld_via_real_recall,
-    adversarial_report,
 )
 from .eval_ledger import read_run_ledger
 from .eval_metrics import (
@@ -736,12 +746,12 @@ def evaluate(
     )
     if not update_knowledge["n"]:
         update_knowledge = {}
-    tok = token_reduction(memory_dir, index, hard_set, k=k, index_dir=index_dir)
+    tok = _lazy("token_reduction")(memory_dir, index, hard_set, k=k, index_dir=index_dir)
     lat_queries = [item["query"] for item in hard_set] or [
         derive_self_query(e) for e in index.entries[:30]
     ]
-    lat = latency(index, lat_queries, k=k, index_dir=index_dir, memory_dir=memory_dir)
-    cold = cold_latency(memory_dir, index_dir, lat_queries, k=k)
+    lat = _lazy("latency")(index, lat_queries, k=k, index_dir=index_dir, memory_dir=memory_dir)
+    cold = _lazy("cold_latency")(memory_dir, index_dir, lat_queries, k=k)
 
     # Report-only scorecard additions (Tier 1 + Tier 2) — never feed a gate threshold above.
     # Resolve telemetry_dir ONCE here (sibling of memory_dir) and pass the SAME resolved value
@@ -836,7 +846,7 @@ def evaluate(
     # hard set under other conditions; nothing above depends on them) and emitted only
     # when requested, so a flag-off report stays byte-identical.
     null_arms = (
-        null_hypothesis_arms(
+        _lazy("null_hypothesis_arms")(
             memory_dir, index, index_dir, hard_set, k=k, full_by_category=by_category
         )
         if arms and hard_set
@@ -846,7 +856,7 @@ def evaluate(
     # cut it, per category. Only missed rows are re-run (with a watched drop-log), so
     # a healthy fixture pays ~nothing; deterministic, so it rides the pass^k view.
     autopsy = (
-        miss_autopsy(index, hard_set, k=k, index_dir=index_dir, memory_dir=memory_dir)
+        _lazy("miss_autopsy")(index, hard_set, k=k, index_dir=index_dir, memory_dir=memory_dir)
         if hard_set
         else {}
     )
@@ -1037,6 +1047,23 @@ def run_repeat_probe(args, repeat: int) -> int:
     return 1
 
 
+# The --ab whitelist: each flag owns a self-contained harness module (DRM-3).
+AB_FLAGS = (
+    "HIPPO_DREAM",  # bench.dream_eval — repo checkout only
+    "HIPPO_SALIENCE",  # MSR-5 — memory.salience_eval
+    "HIPPO_OUTCOME_PRIOR",  # MEA-5 — memory.outcome_prior_eval (the EVD-4 Arm B un-sever)
+)
+
+
+def _bench_only(what: str, module: str) -> str:
+    """The plain-language redirect for a measurement that ships with bench/, not the plugin."""
+    return (
+        f"eval: {what} is a development tool that ships with the hippo repository, not "
+        f"with the installed plugin. From a hippo repository checkout, run:\n"
+        f"  PYTHONPATH=plugin python -m {module} --help"
+    )
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
@@ -1125,19 +1152,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--ab",
         default=None,
         metavar="FLAG",
-        help="run a paired A/B toggling ONLY the named flag. Whitelist: HIPPO_DREAM "
-        "(the /dream snapshot-diff harness, memory.dream_eval; extra args pass "
-        "through, e.g. --ab HIPPO_DREAM --live) and HIPPO_SALIENCE (the "
-        "salience-revisit rig, memory.salience_eval: OFF/ON/OFF over the live corpus, "
+        help="run a paired A/B toggling ONLY the named flag. Whitelist: HIPPO_SALIENCE "
+        "(the salience-revisit rig, memory.salience_eval: OFF/ON/OFF over the live corpus, "
         "per-category deltas to the gitignored dir; MEASURES ONLY, the default stays "
-        "owner-decided-OFF).",
+        "owner-decided-OFF), HIPPO_OUTCOME_PRIOR (memory.outcome_prior_eval) and "
+        "HIPPO_DREAM (the /dream snapshot-diff harness — a repo-checkout tool: "
+        "PYTHONPATH=plugin python -m bench.dream_eval).",
     )
     parser.add_argument(
         "--calibrate",
         action="store_true",
-        help="grid-search HIPPO_KNEE_RATIO/HIPPO_DENSE_FLOOR against this same "
-        "--memory-dir/--hard-set/--abstention-set (memory.calibrate_thresholds) instead of "
-        "running the normal gate report. Report-only — never mutates recall.py's default.",
+        help="grid-search HIPPO_KNEE_RATIO/HIPPO_DENSE_FLOOR — a repo-checkout tool now: "
+        "PYTHONPATH=plugin python -m bench.calibrate_thresholds (same --memory-dir/"
+        "--hard-set/--abstention-set). Report-only — never mutates recall.py's default.",
     )
     parser.add_argument(
         "--reachability",
@@ -1211,9 +1238,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     # DRM-3 (owner decision 3, 2026-07-12): the --ab whitelist dispatch. Each flag owns a
     # self-contained harness module; eval_recall stays the one CLI front door.
     if args.ab is not None:
-        from .dream_eval import AB_FLAGS
-        from .dream_eval import main as _dream_ab_main
-
         if args.ab not in AB_FLAGS:
             print(f"eval --ab: unknown flag {args.ab!r} (whitelist: {', '.join(AB_FLAGS)}).")
             return 2
@@ -1248,7 +1272,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             from .outcome_prior_eval import main as _outcome_ab_main
 
             return _outcome_ab_main(_ab_forward())
-        return _dream_ab_main((ab_extra or []) + (["-k", str(args.k)] if args.k != 10 else []))
+        # HIPPO_DREAM: the /dream harness needs the repo's committed fixture, so it ships
+        # with the benchmark tools in bench/, not with the plugin (the plugin never
+        # imports bench/).
+        print(_bench_only("the /dream A/B (--ab HIPPO_DREAM)", "bench.dream_eval"))
+        return 2
 
     # MSR-1: the pass^k probe is its own mode (like --calibrate) — it spawns fresh
     # processes that each run the plain eval with --json; output flags never forward.
@@ -1256,20 +1284,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_repeat_probe(args, args.repeat)
 
     if args.calibrate:
-        from .calibrate_thresholds import format_report as _calibrate_report
-
-        ambient = args.memory_dir is None
-        print(
-            _calibrate_report(
-                memory_dir=args.memory_dir,
-                index_dir=args.index_dir,
-                hard_set_path=args.hard_set or (_default_hard_set_path() if ambient else None),
-                abstention_set_path=args.abstention_set
-                or (_default_abstention_set_path() if ambient else None),
-                k=args.k,
-            )
-        )
-        return 0
+        print(_bench_only("threshold calibration (--calibrate)", "bench.calibrate_thresholds"))
+        return 2
 
     if args.reachability:
         ambient = args.memory_dir is None
@@ -1284,7 +1300,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print("reachability: no index / empty corpus")
             return 1
         hard_set = load_hard_set(hs_path) if hs_path else []
-        audit = reachability_audit(index, hard_set, _idx, k=args.k, memory_dir=_md)
+        audit = _lazy("reachability_audit")(index, hard_set, _idx, k=args.k, memory_dir=_md)
         if audit.get("skipped"):
             print(f"reachability: SKIPPED — {audit['skipped']}")
             return 0
@@ -1307,7 +1323,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.floor_sweep:
         ambient = args.memory_dir is None
-        doc = floor_sweep(
+        doc = _lazy("floor_sweep")(
             memory_dir=args.memory_dir,
             index_dir=args.index_dir,
             hard_set_path=args.hard_set or (_default_hard_set_path() if ambient else None),
@@ -1347,7 +1363,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_draft_livedin_cli(args.memory_dir)
 
     if args.adversarial:
-        rep = adversarial_report(_adversarial_fixture_dir(args.memory_dir))
+        rep = _lazy("adversarial_report")(_lazy("_adversarial_fixture_dir")(args.memory_dir))
         if rep.get("skipped"):
             print(f"adversarial: SKIPPED — {rep['skipped']}")
             return 0
