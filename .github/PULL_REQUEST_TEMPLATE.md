@@ -14,7 +14,7 @@ the test markers, and the commit conventions.
 - [ ] Secret-scan is clean: `PYTHONPATH=plugin python -m memory.secrets --repo .`
 - [ ] New wall-clock/timing assertions are marked `slow`; model-download tests are marked `network`
 - [ ] Preserves the guiding invariants (markdown-in-git is the only authority; hooks exit 0 / never
-      download / never block; the UserPromptSubmit hot path stays pure retrieval; writes are per-item
+      download / no hook blocks unless the corpus's own committed policy asks it to; the UserPromptSubmit hot path stays pure retrieval; writes are per-item
       and agent-gated)
 - [ ] Docs/skills updated if user-facing behavior changed; no new broken relative links
 - [ ] If this touches the frozen surface (see STABILITY.md), it's a major bump or ships a deprecation

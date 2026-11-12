@@ -402,6 +402,20 @@ floor link rot (read-only); its summary is the `floor` producer.
 "$PY" -m memory.lint_floor
 ```
 
+### `gate.py` / `gate_hook.py` — the write gate
+
+Wired at **PreToolUse** (matcher `Write|Edit|MultiEdit`) via
+[`../hooks/memory_pre_tool.sh`](../hooks/memory_pre_tool.sh). The bash fast path rejects any
+write whose `file_path` is not a `.md` file directly in a `memory` directory before an
+interpreter starts. For a corpus write, `gate_hook` simulates the tool (Write content; Edit
+`old_string` -> `new_string`, `replace_all`; MultiEdit in order) and `gate.judge_file` compares
+before and after with `lint_floor.measure_floor`'s definitions: floor bytes and lines against
+the warn lines, `max_line`, `banned_re`, `section_budgets`, and `banned_re` over memory bodies.
+A finding needs the after side over budget **and** worse than before. The default is a warning
+in `additionalContext`; `permissionDecision: "deny"` only when the committed `hippo.json` at
+HEAD and this machine's accepted value (`policy_consent.honoured`) both say
+`"gate": {"write": "deny"}`. `"off"` silences it. Always exits 0.
+
 ## Telemetry (three ledgers)
 
 `telemetry.py` writes append-only, size-bounded (rotating), gitignored JSONL ledgers under

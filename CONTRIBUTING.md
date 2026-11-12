@@ -90,7 +90,8 @@ item ([`ROADMAP.yaml`](ROADMAP.yaml) / [`ROADMAP.v1.md`](ROADMAP.v1.md)):
 - **Keep the full suite green after each commit.** `HIPPO_DISABLE=dense pytest` from the root.
 - **Preserve the guiding invariants.** They're listed in `ROADMAP.yaml` (`guiding_invariants`) —
   the load-bearing ones: markdown-in-git is the only source of authority (index/telemetry/graph are
-  derived, rebuildable, gitignored caches); hooks always `exit 0`, never download, never block; the
+  derived, rebuildable, gitignored caches); hooks always `exit 0` and never download, and no hook blocks unless the corpus's own committed
+  policy asks it to; the
   `UserPromptSubmit` hot path stays pure retrieval (no LLM, no network, no per-prompt writes);
   destructive/corrective writes are per-item and agent-gated (no bulk autonomous sweeps).
 - **PRs are squash-merged.** Write a PR body that says what shipped and why.

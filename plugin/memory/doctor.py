@@ -137,6 +137,7 @@ from .doctor_checks_recall import (
     check_update_eval,
 )
 from .doctor_checks_native import check_native_auto_memory  # NAT-1
+from .doctor_checks_gate import check_write_gate  # GAT-1
 from .doctor_checks_outbox import check_outbox  # OUT-1
 from .doctor_checks_settings import check_settings  # SRF-4
 from .doctor_checks_kpi import check_capture_queue, check_hook_wall, check_kpi_rollups, check_opened_after_recall, check_surface_usage  # TND-5, OBS-4, OBS-1, OBS-10, OBS-2
@@ -392,6 +393,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Optional[Dict[str, str]]]]] = 
     ("format_migration", check_format_migration),  # FMT-1: what format 6 will touch, read-only
     ("volatile_paths", check_volatile_paths),  # VOL-1: arming-policy state, ok-glyph always
     ("floor_governance", check_floor_governance),  # FLR-1: floor vs the harness read window + declared floor_lint policy
+    ("write_gate", check_write_gate),  # GAT-1: off / warns / may refuse, and a refusal not yet accepted here
     ("empty_baselines", check_empty_baselines),  # COR-10: the heal moved off the hook
     ("pack_drift", check_pack_drift),
     ("fill_me", check_fill_me),

@@ -350,6 +350,18 @@ def floor_governance(memory_dir: str) -> dict:
     from .provenance import read_floor_lint
 
     policy = read_floor_lint(memory_dir)
+    try:
+        with open(_floor_path(memory_dir), "rb") as fh:
+            raw = fh.read()
+    except Exception:
+        raw = None
+    return measure_floor(raw, policy)
+
+
+def measure_floor(raw: Optional[bytes], policy: dict) -> dict:
+    """``floor_governance``'s measurement of floor bytes ``raw`` (None: no floor) under an
+    already-read ``policy`` — the one definition the write gate (``gate.py``) judges a
+    before/after pair with, so the gate and the lint can never measure differently."""
     out = {
         "bytes": 0,
         "warn_bytes": policy["warn_bytes"],
@@ -366,10 +378,7 @@ def floor_governance(memory_dir: str) -> dict:
         "longlines": [],
         "policy_declared": bool(policy["banned_re"] or policy["max_line"]),
     }
-    try:
-        with open(_floor_path(memory_dir), "rb") as fh:
-            raw = fh.read()
-    except Exception:
+    if raw is None:
         return out
     out["bytes"] = len(raw)
     out["over_warn"] = len(raw) > policy["warn_bytes"]
@@ -383,25 +392,32 @@ def floor_governance(memory_dir: str) -> dict:
     )
     if not out["policy_declared"]:
         return out
-    banned_re = None
-    if policy["banned_re"]:
-        try:
-            banned_re = re.compile(policy["banned_re"])
-        except Exception:
-            banned_re = None
     try:
         text = raw.decode("utf-8", "replace")
     except Exception:
         return out
+    out["banned"] = banned_lines(text, policy["banned_re"])
     for i, line in enumerate(text.split("\n"), start=1):
-        if banned_re is not None:
-            m = banned_re.search(line)
-            if m:
-                token = (m.group(0) or "").strip()[:40]
-                out["banned"].append({"line": i, "token": token})
         if policy["max_line"] and len(line) > policy["max_line"]:
             out["longlines"].append({"line": i, "chars": len(line)})
     return out
+
+
+def banned_lines(text: str, pattern: Optional[str]) -> List[dict]:
+    """``[{line, token}]`` — each line of ``text`` the declared ``banned_re`` matches (first
+    match per line, 1-based). ``[]`` when no pattern is declared or it does not compile."""
+    if not pattern:
+        return []
+    try:
+        banned_re = re.compile(pattern)
+    except Exception:
+        return []
+    rows: List[dict] = []
+    for i, line in enumerate(text.split("\n"), start=1):
+        m = banned_re.search(line)
+        if m:
+            rows.append({"line": i, "token": (m.group(0) or "").strip()[:40]})
+    return rows
 
 
 def section_bytes(text: str) -> Dict[str, int]:

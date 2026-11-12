@@ -365,8 +365,8 @@ hippo's settings now live in three places, and the first one that answers wins:
    LLM opt-ins, the LLM model, and the LLM API key (kept in your system keychain).
 3. **`.claude/memory/hippo.json`** — the corpus's committed policy, shared with your team:
    `volatile_paths`, `floor_lint`, `floor_sections`, `fold_digests`, `attention` (`"calm"` or
-   `"full"`), `mute` (SessionStart signals to hide), `acknowledged_findings` (see below) and
-   `write_path` (`"outbox"` or `"direct"`, below).
+   `"full"`), `mute` (SessionStart signals to hide), `acknowledged_findings` (see below),
+   `write_path` (`"outbox"` or `"direct"`, below) and `gate` (the write gate, below).
 
 **Acknowledging a cleared lint finding.** When a memory file carries a secret or threat finding
 you have reviewed and cleared, add an entry to `acknowledged_findings` in `hippo.json` —
@@ -420,6 +420,31 @@ five siblings (now `HIPPO_DISABLE=dense`, …), `DREAM_CONTRA_MAX_PAIRS` and
 `.claude/memory/.format` (move them to `hippo.json`; the format number stays in `.format`), and
 `~/.claude/hippo-llm.json` (move its settings to the plugin options, and its key out of the
 plain-text file). `/hippo:doctor` lists every old name it sees with its new spelling.
+
+## The write gate
+
+Before a file tool writes into the corpus, a `PreToolUse` hook simulates the write and asks
+one question: does it leave a budget over **and** make it worse? It checks the floor
+(`MEMORY.md` bytes and lines against the harness read window, lines over `floor_lint.max_line`,
+lines matching `floor_lint.banned_re`, each `floor_lint.section_budgets` entry) and runs the
+same `banned_re` over memory bodies (frontmatter excluded). Standing debt never objects: an
+edit that holds or shrinks a measure always passes, so a corpus that is over budget today can
+still be edited.
+
+By default a worsening write goes ahead with one line in the model's context naming each
+budget, its before and after numbers, and the way out. A corpus can ask for more, or less, in
+`hippo.json`:
+
+```json
+{"gate": {"write": "deny"}}
+```
+
+`"deny"` refuses a worsening write, but only where that value is in the **committed**
+`hippo.json` and this machine accepted it (`hippo trust policy`, then `hippo trust policy
+--accept`): a pulled or uncommitted change can never turn refusal on by itself. `"off"`
+silences the check for the corpus; any other value only warns. `/hippo:doctor` states which of
+these applies. The hook always exits 0, and a write outside a corpus is rejected in bash
+before any Python starts.
 
 ## Support matrix
 
@@ -514,7 +539,7 @@ plugin/
 ├── .claude-plugin/plugin.json    # plugin manifest
 ├── memory/                       # the engine (Python package, imported as `memory`)
 │   └── _vendor/                  # pre-bootstrap fallbacks (BM25 + frontmatter parser)
-├── hooks/                        # UserPromptSubmit recall + SessionStart dispatcher + PreCompact nudge + SessionEnd/SubagentStop capture
+├── hooks/                        # UserPromptSubmit recall + SessionStart dispatcher + PreToolUse write gate + PreCompact nudge + SessionEnd/SubagentStop capture
 ├── assets/packs/                 # starter packs (core seeded by default; rest opt-in)
 ├── bin/hippo                     # `hippo <verb>`: the one entry into the engine
 ├── requirements.txt              # fastembed, numpy, PyYAML, rank-bm25 (the venv path)
@@ -546,7 +571,8 @@ an implicit SessionStart auto-provision. Reasoning:
   whose whole value proposition is instant, silent recall.
   Explicit bootstrap means degraded-to-BM25 only ever happens because bootstrap
   genuinely hasn't run yet, not because it raced a hook timeout.
-- It keeps the hard hook contract (`exit 0`, never downloads, never blocks) simple and
+- It keeps the hard hook contract (`exit 0`, never downloads, and no hook blocks unless the
+  corpus's own committed policy asks it to) simple and
   auditable: hooks only ever *read* an already-warmed cache; they never *provision* one.
 
 Until bootstrap runs, the SessionStart hook names the next step instead of staying

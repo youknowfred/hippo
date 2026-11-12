@@ -77,6 +77,7 @@ CLI_VERBS: Tuple[CliVerb, ...] = (
     # Hook entries: the hooks call these through the door like everything else.
     CliVerb("session-start", "session_start", "the SessionStart report", internal=True),
     CliVerb("outcome", "outcome", "log a file touch (PostToolUse)", internal=True),
+    CliVerb("pre-tool", "gate_hook", "judge a corpus write before it lands (PreToolUse)", internal=True),
 )
 
 
