@@ -1,4 +1,4 @@
-"""Tests for memory/calibrate_thresholds.py (RET-15) — the knee-ratio/dense-floor sweep.
+"""Tests for bench/calibrate_thresholds.py (RET-15) — the knee-ratio/dense-floor sweep.
 
 Hermetic: a tmp corpus + tmp hard-set fixture, BM25-only (no fastembed needed) — mirrors
 test_eval_recall.py's conventions.
@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import os
 
+from bench import calibrate_thresholds as C
 from memory import build_index as B
-from memory import calibrate_thresholds as C
 from memory import eval_recall as E
 
 _CORPUS = {
@@ -136,15 +136,25 @@ def test_format_report_end_to_end_recommends_keeping_current(tmp_path, monkeypat
     assert "dense floor sweep: SKIPPED" in out
 
 
-def test_cli_calibrate_flag_dispatches_without_running_normal_gates(tmp_path, monkeypatch, capsys):
+def test_cli_runs_the_sweep_without_the_normal_gates(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
     md = _build_corpus(tmp_path)
     idx = str(tmp_path / ".memory-index")
     B.build_index(md, idx)
     hs = _write_hard_set(tmp_path)
 
-    code = E.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs, "--calibrate"])
+    code = C.main(["--memory-dir", md, "--index-dir", idx, "--hard-set", hs])
     assert code == 0
     out = capsys.readouterr().out
     assert "knee ratio sweep" in out
     assert "RESULT:" not in out  # the normal gate-report footer must NOT also print
+
+
+def test_eval_calibrate_flag_points_at_the_bench_tool(capsys):
+    """The shipped eval keeps --calibrate only as a plain-language pointer: the sweep
+    lives in bench/, which the plugin never imports."""
+    code = E.main(["--calibrate"])
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "python -m bench.calibrate_thresholds" in out
+    assert "knee ratio sweep" not in out

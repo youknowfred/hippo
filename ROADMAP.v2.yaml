@@ -75,10 +75,18 @@ releases:
     re_bootstrap: "no"
   - version: v1.42.7
     theme: "One matrix per manifest (IDX-1 each index build writes its own dense matrix and the manifest names it, a torn index heals itself; TND-10 tend show prints a derivation item's citation diff; TND-11 a tend verdict says when its consent fold failed; no roadmap item)"
-    status: in review
+    status: released
+    re_bootstrap: "no"
+  - version: v1.42.8
+    theme: "Haiku 5.5, thinking off (the two opt-in LLM calls move to the current small model with thinking off; no roadmap item)"
+    status: released
     re_bootstrap: "no"
   - version: v1.43.0
     theme: "Last 1.x: derived self-tending"
+    status: planned
+    re_bootstrap: "no"
+  - version: v1.44.0
+    theme: "Selective, and shippable (added by amendment 1, ruling V2Q-13)"
     status: planned
     re_bootstrap: "no"
   - version: v2.0.0
@@ -438,13 +446,18 @@ threads:
   - id: LDG-1
     title: "External-ledger read-time join (LDG-1.spec.md)"
     status: planned
+    release: v1.44.0
+    note: "V2Q-10 answered its Q1: direction A, a derived cache. V2Q-21 (2026-11-12) pulled it forward to v1.44.0 and answered the rest: the line-window contract over the committed snapshot, a cap of 2 ids per row with recall rows first, and LDG-2 chartered for v2.x."
+  - id: LDG-2
+    title: "Arming on a terminal ledger status (LDG-1.spec.md section 4)"
+    status: planned
     release: v2.x
-    note: "V2Q-10 answers its Q1: direction A, a derived cache; build in v2.x on the frozen core. Its other three owner questions stay open until then."
+    note: "chartered by V2Q-21: the trigger for retiring a memory about finished work."
   - id: GP-S4
     title: "recall --for-issue: an issue-id join beside recall --for-diff"
     status: planned
-    release: v2.x
-    note: "growing-pains slate (2026-08-27) S4; reach work per V2Q-12."
+    release: v1.44.0
+    note: "growing-pains slate (2026-08-27) S4. V2Q-21 (2026-11-12) pulled it forward to v1.44.0 with LDG-1, as one of HOT-7's three admissions for journals."
   - id: GP-S5
     title: "Trim-safety report for the MEMORY.md floor"
     status: done
@@ -511,3 +524,288 @@ owner_rulings:
     question: "Reach inside v2.0"
     ruling: "marketplace submission only"
     status: ratified
+
+# ----------------------------------------------------------------------------
+# Amendment 1: the estate evaluation (ROADMAP.v2.amendment-1.md).
+# RATIFIED 2026-11-12: the owner accepted every recommendation in its section A6.
+# Its items keep their own block because their design record is the amendment,
+# not ROADMAP.v2.md section 5; status vocabulary and release rows are the
+# ledger's. tests/test_roadmap_v2_ledger.py keeps these ids in step with the
+# amendment's section A4 and apart from the ids ratified on 2026-10-03.
+amendment_1:
+  design_record: ROADMAP.v2.amendment-1.md
+  status: ratified
+  proposed: 2026-11-12  # at v1.42.8
+  ratified: 2026-11-12
+  items:
+    - id: HOT-7
+      title: "Recall lanes by kind"
+      size: L
+      release: "v1.44.0"
+      status: planned
+      deps: [OBS-5, OBS-10]
+      ruling: V2Q-14
+      issue: "#155"
+    - id: HOT-8
+      title: "An injection count that scales with signal"
+      size: M
+      release: "v1.44.0"
+      status: planned
+      deps: [HOT-7]
+      issue: "#155"
+    - id: HOT-9
+      title: "Hub damping in neighbor expansion"
+      size: S
+      release: "v1.44.0"
+      status: planned
+      issue: "#155"
+    - id: HOT-10
+      title: "A soft band at the dense floor, and a sweep that stays current"
+      size: M
+      release: "v1.44.0"
+      status: planned
+      issue: "#156"
+    - id: HOT-11
+      title: "Digest headings as recall units"
+      size: M
+      release: "v1.44.0"
+      status: planned
+      deps: [HOT-7]
+      issue: "#157"
+    - id: HOT-12
+      title: "Recall for subagents"
+      size: M
+      release: "v2.x"
+      status: planned
+      deps: [PLT-3]
+      ruling: V2Q-24
+    - id: OBS-10
+      title: "Opened-after-recall"
+      size: S
+      release: "v1.43.0"
+      status: built
+      ruling: V2Q-15
+      issue: "#155"
+      note: "built ahead of ratification as the measurement instrument the new gates read; report-only. Measured 2026-11-12: em-growth-labs 11/10,986, Skyline 4/7,708, hippo 125/6,563"
+    - id: OBS-11
+      title: "Say why a recall ran BM25-only"
+      size: S
+      release: "v1.43.0"
+      status: planned
+      issue: "#156"
+    - id: OUT-1
+      title: "An outbox that recall already sees"
+      size: L
+      release: "v1.44.0"
+      status: planned
+      deps: [RWY-3]
+      ruling: V2Q-16
+    - id: OUT-2
+      title: "`hippo ship`"
+      size: M
+      release: "v1.44.0"
+      status: planned
+      deps: [OUT-1]
+    - id: OUT-3
+      title: "An index that reads the default branch"
+      size: L
+      release: "v2.x"
+      status: planned
+      deps: [OUT-1, OUT-2]
+      ruling: V2Q-16
+    - id: OUT-4
+      title: "Consent that travels with the bytes"
+      size: M
+      release: "v1.44.0"
+      status: planned
+      deps: [OBS-6]
+      ruling: V2Q-17
+    - id: OWN-1
+      title: "A git home for the user tier"
+      size: M
+      release: "v1.44.0"
+      status: planned
+      ruling: V2Q-18
+      issue: "#158"
+    - id: OWN-2
+      title: "Promotion as a tend kind"
+      size: M
+      release: "v1.44.0"
+      status: planned
+      deps: [TND-2]
+      ruling: V2Q-18
+    - id: OWN-3
+      title: "Read-only recall across declared siblings"
+      size: M
+      release: "v2.x"
+      status: planned
+      deps: [OWN-2, HOT-7]
+      ruling: V2Q-19
+    - id: JRN-1
+      title: "`hippo fold`"
+      size: L
+      release: "v2.x"
+      status: planned
+      deps: [HOT-11]
+      ruling: V2Q-20
+    - id: JRN-2
+      title: "A time-to-live that proposes"
+      size: S
+      release: "v2.x"
+      status: planned
+      deps: [JRN-1]
+    - id: GAT-1
+      title: "A write-time gate"
+      size: M
+      release: "v1.44.0"
+      status: planned
+      ruling: V2Q-22
+    - id: GAT-2
+      title: "A commit-time gate and declared budgets"
+      size: M
+      release: "v1.44.0"
+      status: planned
+      deps: [GAT-1]
+    - id: GAT-3
+      title: "Declared floor sections and a pointer line of its own"
+      size: S
+      release: "v1.44.0"
+      status: planned
+    - id: GAT-4
+      title: "One versioned `CONVENTIONS.md`"
+      size: S
+      release: "v1.44.0"
+      status: planned
+    - id: NAT-3
+      title: "A floor diet before a floor channel"
+      size: M
+      release: "v1.44.0"
+      status: planned
+      deps: [GAT-3, HOT-7]
+      ruling: V2Q-23
+    - id: NAT-4
+      title: "Census flags native memory that belongs to no corpus"
+      size: S
+      release: "v1.43.0"
+      status: planned
+    - id: RUL-8
+      title: "Conflicts between what a memory says and what a rule says"
+      size: M
+      release: "v1.44.0"
+      status: planned
+      ruling: V2Q-26
+    - id: RUL-9
+      title: "Promote-to-rule as a tend proposal"
+      size: S
+      release: "v1.44.0"
+      status: planned
+      deps: [TND-2]
+    - id: RUL-10
+      title: "A floor line that restates a rule"
+      size: S
+      release: "v1.44.0"
+      status: planned
+    - id: PLT-3
+      title: "Two platform receipts"
+      size: S
+      release: "v1.43.0"
+      status: planned
+    - id: RWY-6
+      title: "Writers clean up after themselves"
+      size: S
+      release: "v1.43.0"
+      status: planned
+    - id: CLM-9
+      title: "Doctor says when full attention is costing context"
+      size: S
+      release: "v1.43.0"
+      status: planned
+    - id: TND-12
+      title: "Claims a memory makes about the machine"
+      size: S
+      release: "v2.x"
+      status: planned
+    - id: TND-13
+      title: "Acknowledging a cleared lint finding"
+      size: S
+      release: "v1.44.0"
+      status: planned
+      ruling: V2Q-25
+  # Chartered items and threads whose design or timing the evidence changes.
+  changed:
+    - id: SRF-7
+      change: "completion edges get a cofire floor (they are exempt today); edges already applied below it are offered as one reviewed undo"
+      ruling: V2Q-27
+    - id: NAT-2
+      change: "order and gate: floor diet (NAT-3) first, then the platform re-probe (PLT-3), then the channel; gate adds a per-spawn floor cost and 14 days with no native-stamped file landing in a corpus"
+      ruling: V2Q-23
+    - id: LDG-1
+      change: "pulled forward from v2.x to v1.44.0; its spec questions 2-4 answered in V2Q-21"
+      ruling: V2Q-21
+    - id: GP-S4
+      change: "pulled forward from v2.x to v1.44.0, as one of HOT-7's three admissions for journals"
+      ruling: V2Q-21
+    - id: LDG-2
+      change: "chartered as a v2.x thread: arming on a terminal ledger status, the trigger for retiring a memory about finished work"
+      ruling: V2Q-21
+  owner_rulings:
+    - id: V2Q-13
+      question: "Train shape"
+      ruling: "(a) add v1.44.0 for the additive items; keep v2.0.0 as chartered"
+      status: ratified
+    - id: V2Q-14
+      question: "Journals out of the prompt hook by default"
+      ruling: "(a) yes, for corpora that declare journals; admitted by id, issue join or explicit recall"
+      status: ratified
+    - id: V2Q-15
+      question: "What doctor gates precision on"
+      ruling: "(b) opened-after-recall for the fact lane, lane share for the behavior lane; report-only for 14 days first"
+      status: ratified
+    - id: V2Q-16
+      question: "The outbox: opt-in or default"
+      ruling: "(a) opt-in per corpus in 1.x; default decided in v2.x on field data"
+      status: ratified
+    - id: V2Q-17
+      question: "Consent for bytes hippo wrote"
+      ruling: "(b) content-hash consent across registered corpora on this machine; never git identity"
+      status: ratified
+    - id: V2Q-18
+      question: "What 'no team features' rules out"
+      ruling: "one owner, one machine, registered and trusted corpora are in scope; identities, permissions, servers and network calls stay out"
+      status: ratified
+    - id: V2Q-19
+      question: "Sibling recall in the prompt hook"
+      ruling: "(a) v2.x, after promotion, capped at two labelled fact rows"
+      status: ratified
+    - id: V2Q-20
+      question: "A fold as one reviewed changeset"
+      ruling: "(a) add conserved-text folds to the V2Q-1 (b) class, with a byte-conservation check"
+      status: ratified
+    - id: V2Q-21
+      question: "LDG-1 and recall --for-issue before v2.0.0"
+      ruling: "yes, in v1.44.0; line-window contract, cap of 2 ids per row, LDG-2 chartered for v2.x"
+      status: ratified
+    - id: V2Q-22
+      question: "A hook that can refuse a write"
+      ruling: "(b) warn by default; deny only where the corpus's committed policy asks"
+      status: ratified
+    - id: V2Q-23
+      question: "NAT-2's order and the floor budget"
+      ruling: "diet, re-probe, then channel; 8,192 B default for an imported floor"
+      status: ratified
+    - id: V2Q-24
+      question: "Subagent recall"
+      ruling: "spike now (PLT-3); build in v2.x only if the hook pairing works"
+      status: ratified
+    - id: V2Q-25
+      question: "An acknowledgement list for cleared lint findings"
+      ruling: "yes, committed, keyed on the reviewed content hash, re-armed by any change"
+      status: ratified
+    - id: V2Q-26
+      question: "Text-level rule conflicts without an LLM"
+      ruling: "yes, deterministic candidates into tend; the opt-in LLM check may confirm, never decide"
+      status: ratified
+    - id: V2Q-27
+      question: "SRF-7's cofire floor for completion edges"
+      ruling: "set from a replay of the applied-edge ledger; one reviewed undo for edges below it"
+      status: ratified
