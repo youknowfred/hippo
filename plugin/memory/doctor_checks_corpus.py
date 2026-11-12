@@ -424,16 +424,20 @@ def check_secrets(ctx: DoctorContext) -> Dict[str, str]:
     files in sorted order.
     """
     try:
+        from .lint_ack import apply_corpus, render_parts, render_tail
         from .secrets import REMEDIATION, scan_corpus
 
-        findings = scan_corpus(ctx.memory_dir)
+        # TND-13: findings the corpus acknowledged (file + rule + reviewed bytes, consented
+        # here) are counted, not warned; an undeclared list renders byte-identically.
+        ack = apply_corpus(scan_corpus(ctx.memory_dir), ctx.memory_dir, ctx.repo_root)
+        findings, tail = ack["findings"], render_tail(ack)
         if not findings:
-            return {"status": "ok", "message": "no secret-looking content in the corpus."}
-        parts = [f"{f['file']}: {'; '.join(f['warnings'])}" for f in findings]
+            return {"status": "ok", "message": f"no secret-looking content in the corpus.{tail}"}
+        parts = render_parts(ack)
         return {
             "status": "warn",
             "message": f"{len(findings)} file(s) contain secret-looking content — "
-            f"{' | '.join(parts)}. {REMEDIATION}.",
+            f"{' | '.join(parts)}. {REMEDIATION}.{tail}",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"secret scan failed: {exc}."}
@@ -450,23 +454,25 @@ def check_threat_lint(ctx: DoctorContext) -> Dict[str, str]:
     doctor line-count pin is relative — one check, one line). Never raises.
     """
     try:
+        from .lint_ack import apply_corpus, render_parts, render_tail
         from .telemetry import threat_ledger_aggregate
         from .threat_lint import scan_corpus
 
-        findings = scan_corpus(ctx.memory_dir)
+        ack = apply_corpus(scan_corpus(ctx.memory_dir), ctx.memory_dir, ctx.repo_root)
+        findings, tail = ack["findings"], render_tail(ack)
         agg = threat_ledger_aggregate()
         tier_b = f" Tier-B (ledger, measured-only): {agg['rows']} imperative-grammar finding(s)." if agg.get("rows") else ""
         if not findings:
             return {
                 "status": "ok",
-                "message": f"no Tier-A threat payloads in the corpus.{tier_b}",
+                "message": f"no Tier-A threat payloads in the corpus.{tail}{tier_b}",
             }
-        parts = [f"{f['file']}: {'; '.join(f['warnings'])}" for f in findings]
+        parts = render_parts(ack)
         return {
             "status": "warn",
             "message": f"{len(findings)} file(s) carry Tier-A threat payloads — {' | '.join(parts)}. "
             f"Inspect before they re-inject on recall (HTML comments are lint-only by the "
-            f"dated spike decision, 2026-07-16).{tier_b}",
+            f"dated spike decision, 2026-07-16).{tail}{tier_b}",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"threat scan failed: {exc}."}

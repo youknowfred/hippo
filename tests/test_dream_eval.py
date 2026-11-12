@@ -1,4 +1,4 @@
-"""Tests for memory/dream_eval.py — DRM-3: the HIPPO_DREAM snapshot-diff proof harness.
+"""Tests for bench/dream_eval.py — DRM-3: the HIPPO_DREAM snapshot-diff proof harness.
 
 Pinned acceptance criteria (ROADMAP.dream.yaml DRM-3):
   - eval --ab HIPPO_DREAM runs evaluate() twice over one frozen snapshot; the OFF arm is
@@ -22,7 +22,7 @@ import json
 import os
 import shutil
 
-import memory.dream_eval as DE
+import bench.dream_eval as DE
 from memory.links import LinkGraph
 
 _FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "dream_ab")
@@ -152,10 +152,19 @@ def test_eval_cli_ab_whitelist_refuses_unknown_flags(capsys):
     assert "whitelist" in out and "HIPPO_DREAM" in out and "HIPPO_SALIENCE" in out
 
 
-def test_eval_cli_ab_dispatches_to_dream_harness(capsys):
+def test_eval_cli_ab_dream_points_at_the_bench_tool(capsys):
+    """The /dream harness needs the repo's committed fixture, so it lives in bench/; the
+    shipped eval answers --ab HIPPO_DREAM with a plain pointer (never an import of bench)."""
     from memory.eval_recall import main as eval_main
 
     rc = eval_main(["--ab", "HIPPO_DREAM", "--fixture-dir", _FIXTURE, "--rebuilds", "1"])
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert "python -m bench.dream_eval" in out and "RESULT:" not in out
+
+
+def test_bench_cli_runs_the_dream_harness(capsys):
+    rc = DE.main(["--fixture-dir", _FIXTURE, "--rebuilds", "1"])
     out = capsys.readouterr().out
     assert rc == 0
     assert "eval --ab HIPPO_DREAM" in out and "RESULT: PASS" in out

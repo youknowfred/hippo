@@ -198,6 +198,18 @@ recall already works in BM25-only mode — the plugin vendors a dependency-free 
 frontmatter parser (`memory/_vendor/`) so a bare `python3` with none of the pinned deps still
 serves real lexical recall. Bootstrap unlocks the dense half (and the full pinned deps).
 
+### The user tier's git home (optional, once per machine)
+
+When this machine has a user tier (`~/.claude/hippo-memory`, written by `hippo new --tier user`)
+and the user asks to keep it in git, offer `hippo setup --user-tier`. Run it bare first and show the
+user its preview (the `.gitignore` block and the `git init`); run it with `--yes` only after
+they agree. It makes no commit and adds no remote, and hippo never pushes, pulls or fetches, so
+tell the user the next steps are theirs: review `git status`, make the first commit, and add a
+private remote if they want the tier on another machine. A memory about this machine only
+(a local path, a device) should be marked machine-local first (`machine_local: true` in its
+frontmatter, then `hippo setup --user-tier --yes` again), so the first commit leaves it out.
+A tier inside another repository (a dotfiles repo) is reported and left alone.
+
 ## Init — once per project
 
 Builds the two seams a copy-isolated plugin cannot reach on its own: the consuming project's

@@ -91,7 +91,8 @@ These may change at any release without a major bump — do not build on them:
   (A `schema_version` bump is a re-index, not a corpus migration — the CHANGELOG's `re-bootstrap`
   flag tells you when deps or the index change.)
 - **Internal ranking-tuning knobs** — the undocumented `HIPPO_*` variables that tune the ranker
-  (e.g. `HIPPO_KNEE_RATIO`, `HIPPO_MMR_LAMBDA`, `HIPPO_BODY_RRF_WEIGHT`, `HIPPO_PIN_BOOST`, the
+  (e.g. `HIPPO_KNEE_RATIO`, `HIPPO_MMR_LAMBDA`, `HIPPO_BODY_RRF_WEIGHT`, `HIPPO_PIN_BOOST`,
+  `HIPPO_DENSE_FLOOR_BAND` (the soft band under the dense floor; 0 turns it off), the
   `HIPPO_INTENT_*` and `HIPPO_RESCUE_*` families). They exist for experimentation and move with
   retrieval work; the `HIPPO_*` prefix is reserved, but these specific knobs are not a contract.
 - **The Python API** — importing `memory.*` internals directly. hippo is consumed as a Claude Code
@@ -122,11 +123,14 @@ hippo's pitch is that your memory is ordinary markdown in git and it will not co
 itself — so the crash behavior of every write is a stated, tested contract, not an
 implementation detail. Every irreplaceable file (corpus `.md` files and the committed
 markers/fixtures beside them, the machine-wide trust and projects registries, the packs
-lockfile, `MEMORY.md` floors, promoted rule files) is written through one atomic
+lockfile, `MEMORY.md` floors, promoted rule files, the user tier's `.gitignore` list of
+machine-local memories) is written through one atomic
 primitive family (`memory/atomic.py`: a per-call-unique tmp in the target's directory +
 `os.replace`, symlink-aware). A reader sees the old document or the new one — **never a
 torn one** — and a crash mid-write strands at worst an orphaned tmp file, never partial
-bytes at the real path.
+bytes at the real path. The usage-aggregate, usage-summary and ledger-rotation writers, which name their tmp `<file>.tmp.<pid>`, remove
+such orphans on their next successful write, once the pid is dead and the file is more than
+five minutes old.
 
 On top of that primitive, every registered write site declares one of three crash
 classes, and a fault-injection lane tears each site once to prove it:

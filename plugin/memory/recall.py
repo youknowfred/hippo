@@ -107,6 +107,10 @@ from .recall_query import (
 )
 from .outbox import RECALL_NOTE as OUTBOX_NOTE
 from .provenance_format import injection_refusal
+# SEC-5's one description flatten/truncate lives in ``trust`` (the consent sample is its
+# other caller, and a foundation module may not import this orchestrator — RWY-5); it is
+# re-imported here so ``memory.recall.inject_description`` keeps resolving.
+from .trust import _INJECT_DESC_CHARS, inject_description
 from .recall_abstain import corroboration
 from .recall_budget import _PROMPT_BUDGET_CHARS, below_knee, fit
 from .recall_rank import (
@@ -117,6 +121,7 @@ from .recall_rank import (
     _MMR_POOL_MULT,
     _RERANK_TIMEOUT_SECS,
     _RRF_K,
+    _band_corroborators,
     _bm25_rank,
     _bm25_rank_body,
     _bm25_score_via_postings,
@@ -130,6 +135,7 @@ from .recall_rank import (
     _rerank_enabled,
     _rerank_timeout_secs,
     _rrf_fuse,
+    _subfloor_reason,
 )
 from .recall_salience import (
     _OUTCOME_PRIOR_CAP,
@@ -511,6 +517,7 @@ def recall(
                         ``_DROP_CAP_PER_MECHANISM`` per reason code; a ``watch``ed stem
                         (the eval autopsy's expected names) is always recorded. Reason
                         codes: ``dense_floor`` (sub-floor cosine — RET-1's cut),
+                        ``dense_floor_band`` (HOT-10: inside the soft band, uncorroborated),
                         ``old_state`` (soft-invalidated 'old' display skip),
                         ``dangling_file`` (deleted/renamed since indexing),
                         ``knee_cliff`` (RET-1's score-gap cutoff, tripping entry and
@@ -658,21 +665,25 @@ def recall(
         # twice (once per ranking) would double the per-query embed+matmul cost for no benefit,
         # which is exactly what an earlier draft of this item did and blew the p95 gate.
         sims_out: List = []
+        band_corr = _band_corroborators(bm25)  # HOT-10: None when the soft band is off
         raw_dense_rows = _dense_rank_rows(
-            query, idx, subfloor_out=subfloor, watch_rows=watch_rows, sims_out=sims_out
+            query, idx, subfloor_out=subfloor, watch_rows=watch_rows, sims_out=sims_out,
+            corroborated=band_corr,
         )
         # MSR-4: the floor cut's near-misses — recorded IMMEDIATELY so the hard-skip
         # abstention return below still carries them (that is the whole point: the
         # abstention arm finally gets its "how close was the miss" evidence).
         if drop_log is not None and subfloor:
-            floor_val = round(_dense_floor(idx.model or DEFAULT_MODEL), 6)
+            floor_raw = _dense_floor(idx.model or DEFAULT_MODEL)
+            floor_val = round(floor_raw, 6)
             drop_log["dense_floor"] = floor_val
             for row, sim in subfloor:
-                _record_drop(entries[row].get("name"), "dense_floor", sim, threshold=floor_val)
+                reason = _subfloor_reason(sim, floor_raw, band_corr)  # HOT-10
+                _record_drop(entries[row].get("name"), reason, sim, threshold=floor_val)
             drop_log["near_miss"] = [
                 {"name": d["name"], "score": d["score"]}
                 for d in drop_log["drops"]
-                if d["reason"] == "dense_floor"
+                if d["reason"] in ("dense_floor", "dense_floor_band")
             ]
         dense = _dense_rank(query, idx, raw_rows=raw_dense_rows)
 
@@ -1154,23 +1165,6 @@ def recall(
         return results
     except Exception:
         return []
-
-
-# SEC-5: the ONE flatten/truncate every injected description goes through — shared with
-# ``trust.corpus_consent_sample`` so the consent review shows EXACTLY the strings that
-# will enter prompts once a corpus is trusted (ROADMAP.v1 §4: consent sampled NAMES while
-# injection used DESCRIPTIONS — the review must sample the real injectable surface).
-_INJECT_DESC_CHARS = 220
-
-
-def inject_description(text: str) -> str:
-    """A ``description`` exactly as the injection layer renders it: newlines flattened,
-    trimmed, truncated to the calibrated per-line budget with an ellipsis (SEC-5 — the
-    consent surface must be byte-equal to the injection surface)."""
-    desc = (text or "").replace("\n", " ").strip()
-    if len(desc) > _INJECT_DESC_CHARS:
-        desc = desc[: _INJECT_DESC_CHARS - 3].rstrip() + "…"
-    return desc
 
 
 def format_results(

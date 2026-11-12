@@ -71,6 +71,69 @@ def _dense_floor(model: Optional[str]) -> float:
     return _DENSE_FLOOR_BY_MODEL.get(model or "", _DENSE_FLOOR_DEFAULT)
 
 
+# HOT-10: a soft band under the floor. The floor is one number, and on a large corpus the
+# closest sub-floor rows sit a hair under it on almost every prompt: on emgl's raw recall
+# window 1,281 of 1,563 recorded ``dense_floor`` drops lay within 0.005 of the floor, and one
+# memory was dropped there 148 times in 41 hours. A description row whose cosine is under the
+# floor by no more than the band is ADMITTED to the dense lane only when the lexical lane
+# corroborates it: it ranks in the top ``_BAND_CORROBORATION_DEPTH`` of the BM25 description
+# ranking (the same depth HOT-2's gate calls agreement). An uncorroborated band row is dropped
+# with its own reason, ``dense_floor_band``, so the autopsy tells a near miss from a clear
+# miss. What the band never does:
+#   - admit on dense evidence alone (corroboration is lexical, never a cosine);
+#   - create a dense lane: a row is admitted only when some description row cleared the
+#     floor itself, so the backend label and the intent weights cannot change;
+#   - touch abstention: HOT-2's gate reads the raw cosines and the BM25 lists, and the hard
+#     skip needs every lane empty, which a corroborated row (a BM25 hit) never is;
+#   - move a row at or above the floor: admitted band rows sit after every above-floor row,
+#     exactly where a lower floor would have put them, so above-floor ranks are unchanged;
+#   - admit body-chunk rows (a sub-floor chunk is not "this memory nearly surfaced").
+# Graph expansion is not counted as corroboration: GRA-1 already admits a linked neighbour
+# regardless of its cosine, so counting it here would only double-count the same edge.
+# Default 0.002, measured (2026-11-12, bge-small, each corpus's pinned hard set): the widest
+# band tried (0.001 / 0.002 / 0.0025 / 0.005 / 0.01) that loses no hard-set row anywhere.
+# hippo 16 rows and emgl 105 rows were unchanged at 0.002 and Skyline gained one of 25; from
+# 0.0025 up a corroborated near-duplicate (0.0023 under) displaced a hippo hit at the MMR
+# re-cut, and emgl's MRR dipped. Admitting on ANY BM25 match instead of the top 10 cost an
+# emgl hit at 0.005. Off-topic abstention was identical at every band on all three.
+# ``HIPPO_DENSE_FLOOR_BAND`` overrides it; 0 turns the band off (byte-identical to the floor).
+_DENSE_FLOOR_BAND_DEFAULT = 0.002
+_BAND_CORROBORATION_DEPTH = 10  # = recall_abstain._AGREE_DEPTH, HOT-2's agreement depth
+
+
+def _dense_floor_band() -> float:
+    """The band under the floor, ``HIPPO_DENSE_FLOOR_BAND`` first. A malformed, negative or
+    non-finite value degrades to the default rather than raising (recall never breaks over
+    a typo'd env var); 0 disables the band."""
+    raw = os.environ.get("HIPPO_DENSE_FLOOR_BAND")
+    if raw is not None and raw.strip():
+        try:
+            val = float(raw)
+            if val >= 0.0 and val != float("inf"):
+                return val
+        except ValueError:
+            pass
+    return _DENSE_FLOOR_BAND_DEFAULT
+
+
+def _band_corroborators(bm25_desc: List[int]) -> Optional[set]:
+    """Entry indices that may be admitted from the band: the BM25 description lane's top
+    ``_BAND_CORROBORATION_DEPTH`` (empty when nothing matched lexically: the band is on but
+    can admit nothing). ``None`` when the band is off, which ``_dense_rank_rows`` and
+    ``_subfloor_reason`` read as "no band at all"."""
+    if _dense_floor_band() <= 0.0:
+        return None
+    return set(bm25_desc[:_BAND_CORROBORATION_DEPTH])
+
+
+def _subfloor_reason(sim: float, floor: float, corroborators: Optional[set]) -> str:
+    """The drop code for a recorded sub-floor row: ``dense_floor_band`` inside an active
+    band, ``dense_floor`` otherwise (and always when the band is off)."""
+    if corroborators is not None and sim >= floor - _dense_floor_band():
+        return "dense_floor_band"
+    return "dense_floor"
+
+
 # --------------------------------------------------------------------------- #
 # Rankers
 # --------------------------------------------------------------------------- #
@@ -249,9 +312,14 @@ def _dense_rank_rows(
     subfloor_out: Optional[List] = None,
     watch_rows: Optional[set] = None,
     sims_out: Optional[List] = None,
+    corroborated: Optional[set] = None,
 ) -> List[int]:
     """RAW dense-matrix row indices ordered by descending cosine similarity, ABOVE the
     calibrated floor for ``index.model``, or [].
+
+    HOT-10: ``corroborated`` (from ``_band_corroborators``; ``None`` = band off) also admits
+    description rows inside the soft band under the floor when they are in that set and at
+    least one description row cleared the floor itself; they follow every above-floor row.
 
     RET-2: the matrix is WIDENED (description rows ``0..N-1`` then body-chunk rows ``N..``),
     so this returns ROW indices over that whole matrix — callers split the result into a
@@ -308,17 +376,37 @@ def _dense_rank_rows(
         above: List[int] = []
         n_desc = len(index.entries)
         below_kept = 0
+        # HOT-10: ``corroborated`` (None = band off, today's walk exactly) opens the band
+        # [floor - band, floor). Inside it the walk keeps going so a corroborated
+        # description row can join ``above``; an uncorroborated one is recorded with its
+        # own cap (the caller names it ``dense_floor_band``). Arithmetic on ``sims`` only.
+        band_lo = floor - _dense_floor_band() if corroborated is not None else floor
+        desc_above = False
+        band_kept = 0
         for i in order:
             sim = float(sims[i])
+            row = int(i)
             if sim >= floor:
-                above.append(int(i))
+                above.append(row)
+                desc_above = desc_above or row < n_desc
+                continue
+            in_band = sim >= band_lo
+            if in_band and desc_above and row < n_desc and row in corroborated:
+                above.append(row)  # admitted: corroborated, and a dense lane exists
                 continue
             if subfloor_out is None:
+                if in_band:
+                    continue  # still inside the band: a corroborated row may follow
                 break  # order is descending: every remaining row is sub-floor too
-            row = int(i)
             if row >= n_desc:
                 continue  # body-chunk rows aren't per-memory near-misses
-            if below_kept < _DROP_CAP_PER_MECHANISM or (watch_rows and row in watch_rows):
+            watched = bool(watch_rows) and row in watch_rows
+            if in_band:
+                if band_kept < _DROP_CAP_PER_MECHANISM or watched:
+                    subfloor_out.append((row, sim))
+                    band_kept += 1
+                continue
+            if below_kept < _DROP_CAP_PER_MECHANISM or watched:
                 subfloor_out.append((row, sim))
                 below_kept += 1
             elif not watch_rows:

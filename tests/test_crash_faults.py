@@ -42,6 +42,7 @@ import pytest
 from memory import atomic as A
 
 from .crash_scenarios_outbox import scenarios as _outbox_scenarios
+from .crash_scenarios_user_tier import scenarios as _user_tier_scenarios
 from .crash_scenarios_warm import scenarios as _warm_scenarios
 
 _MEMORY_PKG = os.path.dirname(os.path.abspath(A.__file__))
@@ -117,6 +118,7 @@ CRASH_CONTRACT = {
     ("setup_cli", "_backup"): ("detected",),  # the backup tears first: the settings write never starts
     ("outbox", "_update_manifest"): ("detected",),  # OUT-1: prior manifest kept; the save names the miss
     ("outbox", "copy_up"): ("detected",),  # OUT-1: raises; no partial copy; the floor edit reports it
+    ("user_tier_git", "sync_ignore_block"): ("detected",),  # OWN-1: error named, .gitignore intact; a machine-local save refuses
 }
 
 
@@ -1068,6 +1070,7 @@ def scn_derived_stub_intact(tmp_path, monkeypatch):
 _SCENARIOS = [
     *_warm_scenarios(_arm, _snap, _assert_unchanged),  # HOT-6 sites (tests/crash_scenarios_warm.py)
     *_outbox_scenarios(_arm, _snap, _assert_unchanged),  # OUT-1 sites (tests/crash_scenarios_outbox.py)
+    *_user_tier_scenarios(_arm, _snap, _assert_unchanged),  # OWN-1 (tests/crash_scenarios_user_tier.py)
     (("dream", "_apply_one"), "detected", scn_dream_apply_bridge_detected),
     (("dream_apply", "_undo_one_edge"), "detected", scn_dream_undo_detected),
     (("dream", "_apply_one"), "rolled_back", scn_dream_apply_refines_rolled_back),

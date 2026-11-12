@@ -43,6 +43,7 @@ from .provenance import resolve_dirs
 # import and monkeypatch target (mcp_server, sleep, tests) resolving unchanged.
 from .doctor_checks_platform import (
     check_attention,
+    check_attention_cost,
     check_claude_code_version,
     check_installed_version,
     check_mcp_allowlist,
@@ -138,8 +139,9 @@ from .doctor_checks_recall import (
 from .doctor_checks_native import check_native_auto_memory  # NAT-1
 from .doctor_checks_outbox import check_outbox  # OUT-1
 from .doctor_checks_settings import check_settings  # SRF-4
-from .doctor_checks_kpi import check_capture_queue, check_hook_wall, check_kpi_rollups, check_surface_usage  # TND-5, OBS-4, OBS-1, OBS-2
+from .doctor_checks_kpi import check_capture_queue, check_hook_wall, check_kpi_rollups, check_opened_after_recall, check_surface_usage  # TND-5, OBS-4, OBS-1, OBS-10, OBS-2
 from .doctor_checks_kpi import check_warm_recall  # HOT-6
+from .doctor_checks_user_tier import check_user_tier  # OWN-1
 
 # One glyph per status — the deterministic line prefix. Ordered dict-free lookup.
 _GLYPH = {"ok": "✔", "warn": "⚠", "fail": "✘"}
@@ -339,13 +341,14 @@ def check_trust_scorecard(ctx: DoctorContext) -> Dict[str, str]:
 
 # (label, check_fn) in a FIXED order — the source of the deterministic output. New checks append
 # here; the order is never sorted-by-name or set-derived, so the printed sequence is stable.
-CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
+CHECKS: List[Tuple[str, Callable[[DoctorContext], Optional[Dict[str, str]]]]] = [
     ("bootstrap", check_bootstrap),
     ("plugin_version", check_plugin_version),
     ("plugin_source_skew", check_plugin_source_skew),  # OPS-1: running hooks vs this tree's plugin source (dogfood shape only; empty-norm elsewhere)
     ("installed_version", check_installed_version),  # FMT-3: installed_plugins.json vs the version this process runs
     ("claude_code_version", check_claude_code_version),  # PLT-2: the running Claude Code vs hippo's declared floor
     ("attention", check_attention),  # CLM-2: calm/full SessionStart and the mute list
+    ("attention_cost", check_attention_cost),  # CLM-9: full attention with SessionStarts at the cap
     ("settings", check_settings),  # SRF-4: legacy env/config names in use + their new spelling; a plaintext key file
     ("venv", check_venv),
     ("corpus", check_corpus_exists),
@@ -381,6 +384,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("floor_calibration", check_floor_calibration),  # GRF-3: configured floor vs the sweep's number
     ("salience_evidence", check_salience_evidence),  # MSR-5: the ED-2 lived-in nudge (measures only)
     ("injection_precision", check_injection_precision),
+    ("opened_after_recall", check_opened_after_recall),  # OBS-10: was the injected memory's own file opened afterwards
     ("rules_conflicts", check_rules_conflicts),
     ("rules_plane_rot", check_rules_plane_rot),
     ("rules_source", check_rules_source),
@@ -403,6 +407,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("mcp_launch", check_mcp_launch),  # INT-8: the stdio MCP server (bin/hippo mcp) actually starts
     ("committed_usage_privacy", check_committed_usage_privacy),  # SEC-14: TEA-5 usage on a shared remote
     ("projects_registry", check_projects_registry),  # RCH-11: dead-row hygiene, machine-level
+    ("user_tier", check_user_tier),  # OWN-1: the user tier's git posture; no line on a machine without one
     ("invalid_after_terminal", check_invalid_after_terminal),  # TMB-2: non-drift retirements, corpus-wide
     ("succession_replay", check_succession_replay),  # TMB-5: supersedes with failing/unrun replay
     ("archive_shadowing", check_archive_shadowing),  # TMB-3: archive/ stem colliding with a live one
@@ -423,7 +428,9 @@ def run_checks(ctx: DoctorContext) -> List[Tuple[str, Dict[str, str]]]:
     """Run every check in ``CHECKS`` order; return ``[(label, result)]``. Never raises.
 
     A check that raises despite its own try/except is caught here too and reported as a ``warn``
-    line — a single misbehaving check can never abort the whole diagnostic run.
+    line — a single misbehaving check can never abort the whole diagnostic run. A check that
+    returns None does not apply on this machine and prints no line (OWN-1's user tier), so a
+    machine without the thing it reports on renders exactly as before the check existed.
     """
     out: List[Tuple[str, Dict[str, str]]] = []
     for label, fn in CHECKS:
@@ -431,6 +438,8 @@ def run_checks(ctx: DoctorContext) -> List[Tuple[str, Dict[str, str]]]:
             result = fn(ctx)
         except Exception as exc:  # defense in depth — checks already guard themselves
             result = {"status": "warn", "message": f"{label} check crashed: {exc}."}
+        if result is None:
+            continue
         status = result.get("status", "warn")
         if status not in _GLYPH:
             status = "warn"

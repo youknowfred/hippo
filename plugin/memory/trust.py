@@ -643,6 +643,26 @@ def corpus_sample(memory_dir: str, limit: int = 8) -> List[str]:
         return []
 
 
+# SEC-5: the ONE flatten/truncate every injected description goes through — recall's
+# ``format_results`` renders hits with it and ``corpus_consent_sample`` below samples with
+# it, so the consent review shows EXACTLY the strings that will enter prompts once a corpus
+# is trusted (ROADMAP.v1 §4: consent sampled NAMES while injection used DESCRIPTIONS — the
+# review must sample the real injectable surface). It lives here, not in recall, because
+# this foundation module may not import the recall orchestrator (RWY-5); recall re-imports
+# it, so ``memory.recall.inject_description`` still resolves.
+_INJECT_DESC_CHARS = 220
+
+
+def inject_description(text: str) -> str:
+    """A ``description`` exactly as the injection layer renders it: newlines flattened,
+    trimmed, truncated to the calibrated per-line budget with an ellipsis (SEC-5 — the
+    consent surface must be byte-equal to the injection surface)."""
+    desc = (text or "").replace("\n", " ").strip()
+    if len(desc) > _INJECT_DESC_CHARS:
+        desc = desc[: _INJECT_DESC_CHARS - 3].rstrip() + "…"
+    return desc
+
+
 def corpus_consent_sample(
     memory_dir: str, limit: int = 8, stems: Optional[List[str]] = None
 ) -> List[dict]:
@@ -650,7 +670,7 @@ def corpus_consent_sample(
 
     These are THE strings that enter every prompt once this corpus is trusted: the
     ``description`` frontmatter is what recall injects per hit, rendered through the SAME
-    flatten/truncate the injection layer applies (``recall.inject_description``) — the
+    flatten/truncate the injection layer applies (``inject_description`` below) — the
     user consents to exactly what they will get, closing SEC-1's consent/injection gap
     (consent sampled NAMES; injection used DESCRIPTIONS). Descriptions only, never
     bodies: bodies stay unreviewed-and-uninjected behind the gate; the description is
@@ -669,7 +689,6 @@ def corpus_consent_sample(
     """
     try:
         from .provenance import _iter_memory_files, parse_frontmatter
-        from .recall import inject_description  # lazy: recall top-imports this module
 
         wanted = set(stems) if stems is not None else None
         out: List[dict] = []

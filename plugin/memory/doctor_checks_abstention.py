@@ -187,11 +187,13 @@ def check_floor_calibration(ctx: DoctorContext) -> Dict[str, str]:
     seconds, not a health-check budget). Advisory-only by design (inv4): the line
     NAMES both numbers and the remedy; a human edits ``recall._DENSE_FLOOR_BY_MODEL``
     or sets ``HIPPO_DENSE_FLOOR`` — nothing here (or anywhere) auto-writes the table.
-    A sweep keyed to a different corpus fingerprint is reported stale, not compared —
-    a floor recommendation from last month's corpus says nothing about today's.
+    A sweep keyed to a different corpus fingerprint, or measured with a different embedding
+    model than the configured one, is a WARN naming the re-run, not a comparison — a floor
+    recommendation from last month's corpus says nothing about today's (HOT-10; it was an
+    ok line before, so a months-old sweep read as healthy). No sweep at all stays ok.
     """
     try:
-        from .build_index import _load_manifest, default_index_dir, load_index
+        from .build_index import DEFAULT_MODEL, _load_manifest, default_index_dir, load_index
         from .eval_floor import read_floor_sweep
         from .eval_ledger import corpus_fingerprint
         from .recall import _dense_floor
@@ -203,6 +205,14 @@ def check_floor_calibration(ctx: DoctorContext) -> Dict[str, str]:
                 "message": "floor calibration: no sweep recorded — "
                 "`hippo eval --floor-sweep` writes one.",
             }
+        # HOT-10: a sweep measured in another embedding space says nothing about this one.
+        if sweep.get("model") and sweep.get("model") != DEFAULT_MODEL:
+            return {
+                "status": "warn",
+                "message": f"floor calibration: recorded sweep is STALE (measured with "
+                f"{sweep.get('model')}, configured model is {DEFAULT_MODEL}) — re-run "
+                "`hippo eval --floor-sweep`.",
+            }
         # Staleness leg: only when an index is actually loadable — the sweep report is
         # self-contained (model + recommendation), so a deleted/rebuildable index cache
         # must not silence the comparison; it just can't prove freshness.
@@ -211,10 +221,13 @@ def check_floor_calibration(ctx: DoctorContext) -> Dict[str, str]:
             index = load_index(index_dir)
             if index is not None and len(index):
                 if sweep.get("corpus_fingerprint") != corpus_fingerprint(index):
+                    # HOT-10: a WARN, not ok — the recommendation was measured on a corpus
+                    # that no longer exists, and the line used to read as healthy.
                     return {
-                        "status": "ok",
+                        "status": "warn",
                         "message": "floor calibration: recorded sweep is STALE (corpus changed "
-                        "since) — re-run `hippo eval --floor-sweep`.",
+                        f"since it ran on {sweep.get('generated_at') or 'an unknown date'}) — "
+                        "re-run `hippo eval --floor-sweep`.",
                     }
         configured = _dense_floor(sweep.get("model"))
         recommended = sweep.get("recommended")

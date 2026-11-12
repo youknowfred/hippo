@@ -29,6 +29,7 @@ import json
 import os
 from typing import List, Optional
 
+from .atomic import sweep_dead_pid_tmps
 from .telemetry_store import _resolve_dir, _usage_aggregates_path
 
 
@@ -151,6 +152,7 @@ def _update_usage_aggregates(
             with open(tmp, "w", encoding="utf-8") as fh:
                 fh.write(json.dumps(agg, ensure_ascii=False, separators=(",", ":")))
             os.replace(tmp, path)
+            sweep_dead_pid_tmps(path)  # RWY-6: a killed writer's tmp goes on the next write
         except Exception:
             try:
                 os.unlink(tmp)
@@ -306,6 +308,7 @@ def write_user_usage_summary(
             with open(tmp, "w", encoding="utf-8") as fh:
                 fh.write(json.dumps(out, ensure_ascii=False, separators=(",", ":")))
             os.replace(tmp, path)
+            sweep_dead_pid_tmps(path)  # RWY-6
         except Exception:
             try:
                 os.unlink(tmp)
