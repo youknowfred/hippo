@@ -399,7 +399,8 @@ def _merge_loaded_indexes(
 
     # PRF-6: each tier contributes its persisted stats; a tier that lost entries to a
     # higher tier's slug (a promoted memory lives in both) recounts only its own kept docs —
-    # first-wins means that is never the project tier. A tier without usable persisted stats
+    # first-wins means that is never the project tier, except under an outbox copy that
+    # shadows a committed memory (OUT-1), which costs one recount. A tier without usable persisted stats
     # sends the whole merge back to one recompute over the merged tokens, as before.
     parts: List[Tuple[dict, int, int]] = []
     for li, dropped, tier_entries, tier_chunks in kept_per_tier:
@@ -447,9 +448,16 @@ def _fuse_recall_tiers(
     corpora."""
     try:
         tiers = _recall_tier_dirs(memory_dir, index_dir)
-        if len(tiers) == 1:
+        # OUT-1: the outbox fuses FIRST, so an (accepted) outbox copy shadows the committed
+        # memory of the same name; one isdir when there is none. Never in _recall_tier_dirs:
+        # the floor exclusion must keep reading the COMMITTED floor (the one the harness loads).
+        from .outbox import recall_tier
+
+        outbox = recall_tier(memory_dir, repo_root)
+        if len(tiers) == 1 and outbox is None:
             return project_idx
-        loadeds: List[Tuple[LoadedIndex, str, str]] = [(project_idx, memory_dir, _PROJECT_TIER)]
+        loadeds: List[Tuple[LoadedIndex, str, str]] = [outbox] if outbox else []
+        loadeds.append((project_idx, memory_dir, _PROJECT_TIER))
         for tdir, tidx, label in tiers:
             if label == _PROJECT_TIER:
                 continue

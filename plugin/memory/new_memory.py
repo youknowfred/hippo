@@ -964,6 +964,11 @@ def write_memory(
         if tier == "user":
             # Machine-local, outside any repo: no git provenance to backfill against.
             repo_root = memory_dir
+    # OUT-1: a corpus whose accepted hippo.json says "write_path": "outbox" takes the save in
+    # its outbox, not the corpus dir; (None, None) for one that declares nothing.
+    from . import outbox as OB
+
+    ob_dir, ob_held = OB.write_redirect(memory_dir, repo_root, tier)
 
     # --- GRA-3: link discovery, BEFORE rendering (so it lands in the body at birth). ---
     # This runs against the EXISTING corpus index only — the new file does not exist on disk
@@ -987,7 +992,7 @@ def write_memory(
     body = _append_rationale(body, rationale)
     body = _append_related_line(body, related)
 
-    path = os.path.join(memory_dir, f"{name}.md")
+    path = os.path.join(ob_dir or memory_dir, f"{name}.md")
     rendered = _render_frontmatter(name, description, type, body, confidence, origin)
 
     # --- LIF-2: duplicate/conflict detection, BEFORE the write + index refresh. ---
@@ -999,6 +1004,11 @@ def write_memory(
     result["neighbors"], result["note"] = _duplicate_neighbors(
         name, rendered, memory_dir, index_dir=tier_index
     )
+    if tier == "project" and OB.present(memory_dir):  # the committed index cannot see the outbox
+        result["neighbors"] = sorted(
+            result["neighbors"] + OB.duplicate_neighbors(name, rendered, memory_dir, _DUP_NEIGHBORS_K),
+            key=lambda n: -n["score"],
+        )[:_DUP_NEIGHBORS_K]
 
     # --- RUL-3: rules-plane dedup, the PREVENTIVE leg of LIF-2. A draft that restates a
     # rule already in CLAUDE.md/.claude/rules/AGENTS.md starts two-plane drift the moment it
@@ -1015,13 +1025,13 @@ def write_memory(
     # reader treats it as a memory), its citation provenance is backfilled THERE, and only then
     # is it linked to <name>.md. os.link is atomic and never overwrites, so it keeps the old
     # exclusive-create guarantee; a crash at any point leaves no provenance-less memory.
-    if os.path.exists(path):
+    if os.path.exists(path) or (tier == "project" and OB.name_taken(memory_dir, name)):
         result["error"] = f"{name}.md already exists — refusing to overwrite"
         return result
-    staging = os.path.join(memory_dir, f".{name}.md.staging-{os.getpid()}")
+    staging = os.path.join(os.path.dirname(path), f".{name}.md.staging-{os.getpid()}")
     bf: dict = {}
     try:
-        os.makedirs(memory_dir, exist_ok=True)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(staging, "x", encoding="utf-8") as fh:
             fh.write(rendered)
         try:
@@ -1140,7 +1150,11 @@ def write_memory(
     # itself. Project tier only: the user/private tiers are the user's own machine
     # state and are never trust-gated. Best-effort (a legacy fingerprint-less record
     # is a no-op by design); never fatal.
-    if tier == "project":
+    if ob_dir:  # OUT-1: the outbox's own per-file record, never the corpus baseline
+        note = OB.record_write(memory_dir, path, repo_root)
+        if note:
+            result["warnings"] = (result.get("warnings") or []) + [note]
+    elif tier == "project":
         try:
             from .trust import record_authored_write_disclosing
 
@@ -1160,7 +1174,7 @@ def write_memory(
         # tier_index is None for project/user (their index is the plain sibling); for the
         # private tier it is the NESTED index, so a private write's index never lands in the
         # project's ``.claude/.memory-index`` cache (no leakage).
-        refresh_index(memory_dir, tier_index)
+        refresh_index(ob_dir or memory_dir, tier_index_dir(ob_dir) if ob_dir else tier_index)
         result["indexed"] = True
     except Exception:
         pass
@@ -1176,8 +1190,13 @@ def write_memory(
         }
     else:
         result["floor"] = _append_floor_pointer(
-            memory_dir, section, name, title or _title_from_slug(name), hook or description
+            memory_dir, section, name, title or _title_from_slug(name), hook or description,
+            floor_dir=OB.floor_target(memory_dir, repo_root) if ob_dir else None,
         )
+    if ob_dir:
+        result["write_path"] = "outbox"
+    if ob_held:  # asked for, not accepted on this machine: the save went to the working tree
+        result["warnings"] = (result.get("warnings") or []) + [ob_held]
     return result
 
 
@@ -1571,6 +1590,10 @@ def main(argv=None) -> int:
         print(f"error: {res['error']}")
         return 1
     print(f"created : {res['path']}")
+    if res.get("write_path") == "outbox":
+        from .outbox import SAVE_LINE
+
+        print(f"lands   : {SAVE_LINE}")
     if res.get("tier") and res["tier"] != "project":
         print(f"tier    : {res['tier']} (recalled across every project; not in this repo's git)")
     print(f"indexed : {res['indexed']}")

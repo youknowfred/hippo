@@ -93,7 +93,9 @@ gives hippo its four defining properties:
   writes itself, gated by a human.
 - **It travels with the repo.** Clone the repo and you get its memory; a teammate opening the
   project shares the same reviewed corpus, instead of each person keeping private, opaque
-  notes. (There's also a gitignored local tier for notes you *don't* want to publish.)
+  notes. (There's also a gitignored local tier for notes you *don't* want to publish, and an
+  opt-in outbox, `"write_path": "outbox"`, for a corpus that wants saves kept out of the working
+  tree until someone lands them.)
 - **It has real history.** `git blame`, revert, and PR review all work on your memory, because
   it's just text in your tree.
 - **It notices when the code moves.** A memory can cite the code it describes (`cited_paths`),

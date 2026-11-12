@@ -105,6 +105,7 @@ from .recall_query import (
     _rescue_turns,
     clean_query,
 )
+from .outbox import RECALL_NOTE as OUTBOX_NOTE
 from .provenance_format import injection_refusal
 from .recall_abstain import corroboration
 from .recall_budget import _PROMPT_BUDGET_CHARS, below_knee, fit
@@ -931,6 +932,7 @@ def recall(
                 consented_hashes is not None
                 and e_path
                 and e.get("corpus") in (None, _PROJECT_TIER)
+                and not e.get("outbox")  # OUT-1: the outbox gate already checked its own record
             ):
                 live_hash = trust.file_sha256(e_path)
                 if live_hash is None or live_hash != consented_hashes.get(e["name"]):
@@ -1057,7 +1059,8 @@ def recall(
                     # names why the line ranks below its successor; "contradicts <name> —
                     # verify" flags a live conflict without demoting either side. Absent
                     # links cache -> _typed_relation_maps returned empty maps -> "".
-                    "note": _typed_note(i, superseded_by, contradicted_by),
+                    "note": _typed_note(i, superseded_by, contradicted_by)
+                    or (OUTBOX_NOTE if e.get("outbox") else ""),  # OUT-1: an unshipped copy
                     # RET-6: the verify-at-use banner — ALWAYS present ("" when the memory is
                     # not in LIF-6's stale.json, same no-key-branching convention as "note").
                     # format_results renders it appended to the pointer line; a memory that

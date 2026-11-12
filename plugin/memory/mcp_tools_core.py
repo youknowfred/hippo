@@ -115,6 +115,10 @@ def _tool_new_memory(args: Dict[str, Any]) -> str:
     if result.get("error"):
         return f"new_memory failed: {result['error']}"
     out = [f"created: {result.get('path')}", f"indexed: {bool(result.get('indexed'))}"]
+    if result.get("write_path") == "outbox":
+        from .outbox import SAVE_LINE
+
+        out.append(f"lands: {SAVE_LINE}")
     floor = result.get("floor")
     if isinstance(floor, dict) and floor.get("status"):
         out.append(f"floor: {floor.get('status')}" + (f" ({floor['reason']})" if floor.get("reason") else ""))

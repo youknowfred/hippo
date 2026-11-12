@@ -63,7 +63,8 @@ def _pointer_name(line: str) -> Optional[str]:
 
 
 def _append_floor_pointer(
-    memory_dir: str, section_header: str, name: str, title: str, hook: str
+    memory_dir: str, section_header: str, name: str, title: str, hook: str,
+    floor_dir: Optional[str] = None,
 ) -> dict:
     """Insert ``- [title](name.md) — hook`` at its SORTED position within ``section_header``.
 
@@ -93,7 +94,9 @@ def _append_floor_pointer(
     from .lint_floor import over_hard_edge
     from .provenance import read_floor_lint
 
-    path = os.path.join(memory_dir, "MEMORY.md")
+    # OUT-1: ``floor_dir`` is the outbox in outbox mode (its copy of the committed floor); the
+    # floor policy is always the corpus's own, read from ``memory_dir``.
+    path = os.path.join(floor_dir or memory_dir, "MEMORY.md")
     outcome: dict = {}
     policy = read_floor_lint(memory_dir)
     # CLM-7: a hard edge for hippo's own writes — the global read limits, and the budget of

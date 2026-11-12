@@ -322,6 +322,9 @@ deletes — the pre-migration corpus backups in `.hippo/snapshots/`, which are a
 corpus's only undo, and the shared per-machine venv (`CLAUDE_PLUGIN_DATA/venv`) and fastembed
 model cache paths, since those are shared across every project using the plugin on this machine.
 
+It also reports, and never deletes, `.claude/memory.outbox/` when a corpus saves there: those
+memories are not in git yet.
+
 `.claude/memory/` itself — the git-tracked corpus — is always left alone: it stays committed in
 git, inert, until someone runs `/hippo:init` again (in this repo, a fresh clone, or a new
 worktree).
@@ -334,8 +337,39 @@ hippo's settings now live in three places, and the first one that answers wins:
 2. **hippo's plugin options** — your machine's settings: the calm SessionStart switch, the
    LLM opt-ins, the LLM model, and the LLM API key (kept in your system keychain).
 3. **`.claude/memory/hippo.json`** — the corpus's committed policy, shared with your team:
-   `volatile_paths`, `floor_lint`, `fold_digests`, `attention` (`"calm"` or `"full"`) and
-   `mute` (SessionStart signals to hide).
+   `volatile_paths`, `floor_lint`, `fold_digests`, `attention` (`"calm"` or `"full"`),
+   `mute` (SessionStart signals to hide) and `write_path` (`"outbox"` or `"direct"`, below).
+
+### Saving without touching the working tree (opt-in)
+
+When several checkouts write one corpus, every saved memory is a change someone has to commit.
+A corpus can opt out of that: `"write_path": "outbox"` in `hippo.json` sends each new memory,
+and the floor pointer it adds, to `.claude/memory.outbox/`, a gitignored folder beside the
+corpus (it also ignores itself). The corpus folder is not touched, so `git status` stays clean.
+Recall reads the outbox like a tier, so a saved memory is recalled from the next prompt; an
+outbox copy of a memory takes precedence over the committed one.
+
+- **Where.** Always `.claude/memory.outbox/` beside the corpus; the setting cannot name a path.
+  A linked git worktree uses its main tree's corpus, so one clone has one outbox for all its
+  worktrees.
+- **When a save goes there.** Only when this machine accepted the setting: because
+  `hippo.json` arrives by pull, a setting that changes where writes land takes one
+  `hippo trust policy --accept` per machine (and a trusted corpus). Until then saves land in the
+  working tree as before, and the save and `/hippo:doctor` say what is waiting. Any value other
+  than `"outbox"` or `"direct"` behaves as `"direct"`, and doctor names it. The user and private
+  tiers are never redirected.
+- **Trust.** hippo records the hash of every file it writes into the outbox in this machine's
+  trust registry, and recall injects an outbox file only while its bytes match. A file that
+  arrived another way (dropped in, pulled, edited by hand) is withheld and counted by doctor;
+  if it shadows a committed memory, recall uses the committed one.
+- **Reads do not depend on the setting.** Turning it off never hides memories still in the
+  outbox: recall and doctor keep seeing them.
+- **The floor.** The floor pointer goes into the outbox's copy of `MEMORY.md`. Claude Code
+  still loads the committed floor, so a memory whose pointer is only in the outbox copy stays
+  recallable on demand.
+- **Landing them.** There is no ship command yet. To land a memory, copy its file into
+  `.claude/memory/`, commit it, delete the outbox copy, and consent the new file with
+  `hippo trust review`. `/hippo:remove` reports the outbox and never deletes it.
 
 The environment variables you might still set are the directory overrides,
 `HIPPO_DISABLE=<list>` (any of `dense`, `jit`, `presence`, `floor-nag`, `abstain-gate`,

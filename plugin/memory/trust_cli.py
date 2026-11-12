@@ -1,4 +1,4 @@
-"""TND-6: ``hippo trust status | review | grant | revoke`` — the consent loop as one verb.
+"""TND-6: ``hippo trust status | review | grant | revoke | policy`` — the consent loop as one verb.
 
 Thin presentation over ``trust_review`` (the engine an MCP tool can call too). The
 renderers live here so every surface prints the same words. Exit codes: 0 when the
@@ -156,6 +156,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_grant.add_argument("--all-reviewed", action="store_true", help="consent to everything the review showed")
     p_grant.add_argument("--digest", default="", help="the digest the review printed")
     sub.add_parser("revoke", help="stop trusting this corpus (recall injects nothing from it)")
+    p_pol = sub.add_parser(
+        "policy", help="the hippo.json settings that change what hippo does, and whether this machine accepted them"
+    )
+    p_pol.add_argument("--accept", action="store_true", help="accept the settings shown, for this machine")
     for p in sub.choices.values():  # on the subcommands: a parent default would be overwritten
         p.add_argument("--memory-dir", default=None, help=argparse.SUPPRESS)
         p.add_argument("--repo-root", default=None, help=argparse.SUPPRESS)
@@ -170,6 +174,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.cmd == "status":
         print(render_status(TR.status(memory_dir, repo_root)))
+        from . import policy_consent as PC
+
+        held = PC.pending_line(memory_dir, repo_root)
+        if held:
+            print(f"policy: {held}")
         return 0
     if args.cmd == "review":
         print(render_review(TR.build_review(memory_dir, repo_root, files=_split_files(args.files))))
@@ -181,6 +190,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         print(render_grant(res))
         return 0 if res.get("ok") else 1
+    if args.cmd == "policy":
+        from . import policy_consent as PC
+
+        print(PC.render_policy(memory_dir, repo_root))
+        if not args.accept:
+            return 0
+        res = PC.acknowledge(memory_dir, repo_root)
+        if not res.get("ok"):
+            print(f"trust policy: NOT accepted ({res.get('error')}); nothing changed.")
+            return 1
+        names = ", ".join(sorted(res["accepted"])) or "nothing declared"
+        print(f"trust policy: accepted for this machine: {names}.")
+        return 0
     res = TR.revoke(memory_dir, repo_root)
     if not res.get("ok"):
         print(f"trust revoke: FAILED ({res.get('error')}); nothing changed.")
