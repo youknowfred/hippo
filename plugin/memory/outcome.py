@@ -40,6 +40,7 @@ import sys
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
+from .outcome_opened import format_opened_report, note_open, opened_memory, tier_path
 from .provenance import launch_root, resolve_dirs
 from .telemetry import default_telemetry_dir, log_outcome, read_episodes, read_outcomes
 
@@ -117,6 +118,26 @@ def record_from_payload(
                     break
         except Exception:
             rel = None
+        td = telemetry_dir or default_telemetry_dir(memory_dir)
+        # OBS-10: a Read of a memory file is the "opened after recall" signal, however the
+        # path was spelled. The harness's native-memory symlink resolves into the corpus
+        # from outside the repository, so this row used to be dropped; the user tier has
+        # no repository at all.
+        opened = opened_memory(raw, None, memory_dir) if tool == "Read" else None
+        if not rel and opened:
+            stem, tier = opened
+            try:
+                real, root = os.path.realpath(raw), os.path.realpath(repo_root)
+                rel = os.path.relpath(real, root) if real.startswith(root + os.sep) else None
+            except Exception:
+                rel = None
+            if not rel:  # outside every tree (the user tier): the row, and nothing else
+                ok = log_outcome(
+                    tool, tier_path(stem, tier), session_id=session_id, telemetry_dir=td,
+                    opened=stem, tier=tier,
+                )
+                note_open(td, session_id, stem)
+                return ok
         if not rel:
             return False
         # MEA-6: derive the in-tree path ONCE via the module's _WORKTREE_PREFIX (the same
@@ -133,7 +154,8 @@ def record_from_payload(
             tail = rel[len(_WORKTREE_PREFIX):].split("/", 1)
             if len(tail) == 2 and tail[1]:
                 tree_rel = tail[1]
-        td = telemetry_dir or default_telemetry_dir(memory_dir)
+        if tool == "Read" and not opened:  # a linked worktree's own copy of the corpus
+            opened = opened_memory(raw, tree_rel, memory_dir)
         cited_by = None
         try:
             from .jit import observe_touch
@@ -191,10 +213,15 @@ def record_from_payload(
                     context_out.append(nag)
             except Exception:
                 pass
-        return log_outcome(
+        ok = log_outcome(
             tool, rel, session_id=session_id, telemetry_dir=td, cited_by=cited_by,
             tree_path=tree_rel if tree_rel != rel else None,
+            opened=opened[0] if opened else None,
+            tier=opened[1] if opened and opened[1] != "project" else None,
         )
+        if opened:
+            note_open(td, session_id, opened[0])
+        return ok
     except Exception:
         return False
 
@@ -589,6 +616,12 @@ def main(argv: Optional[list] = None) -> int:
         help="print the touch-grain lane health/diagnosis + the touch-vs-session grain "
         "comparison (; report-only — explains the lane's zeros, changes nothing)",
     )
+    parser.add_argument(
+        "--opened",
+        action="store_true",
+        help="print how many injected memories had their own file opened later in the same "
+        "session, by memory type (report-only)",
+    )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--repo-root", default=None)
     args = parser.parse_args(argv)
@@ -627,6 +660,9 @@ def main(argv: Optional[list] = None) -> int:
             memory_dir, _ = resolve_dirs()
         if args.touch_grain:
             print(format_lane_health(memory_dir))
+            return 0
+        if args.opened:
+            print(format_opened_report(memory_dir))
             return 0
         print(format_report(memory_dir))
         return 0

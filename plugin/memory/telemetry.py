@@ -624,8 +624,14 @@ def log_outcome(
     telemetry_dir: Optional[str] = None,
     cited_by: Optional[List[str]] = None,
     tree_path: Optional[str] = None,
+    opened: Optional[str] = None,
+    tier: Optional[str] = None,
 ) -> bool:
     """Append ONE file-touch outcome to ``outcome_events.jsonl``. Fire-and-forget; never raises.
+
+    ``opened`` (OBS-10) is the memory stem when the touch was a Read of a memory file, and
+    ``tier`` its tier when that is not the project corpus. Both sparse and additive, like
+    the two fields below.
 
     ``cited_by`` (JIT-2, T16) is OPTIONAL touch-grain provenance: the memory names whose
     cited_paths matched this touch AT TOUCH TIME (the jit lane's derived-map lookup — the
@@ -654,6 +660,10 @@ def log_outcome(
             event["cited_by"] = [str(n) for n in cited_by if n]
         if tree_path and tree_path != path:
             event["tree_path"] = tree_path
+        if opened:
+            event["opened"] = str(opened)
+            if tier:
+                event["tier"] = str(tier)
         v = _producer_version()  # MEA-4: provenance stamp, cached; omitted when unreadable
         if v:
             event["v"] = v
