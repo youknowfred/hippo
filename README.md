@@ -422,8 +422,10 @@ Since v1.42.4 the index, the telemetry ledgers and the capture pending queue liv
 checkout's whole `.claude/` dir, ignored files included, into every worktree it creates, and these
 dirs used to ride along (about 39 MB per worktree on a large corpus). The first session after the
 update moves them with one rename each. `/hippo:doctor`'s `derived dirs:` line names anything still
-in `.claude/`, and in the main checkout it totals the old copies existing worktrees carry, with a
-`find … -exec rm -rf` that deletes only those.
+in `.claude/`, and in the main checkout it totals the old copies existing worktrees carry.
+`hippo setup --worktree-copies` lists them, and `--remove <dir> --yes` removes one directory per
+yes (it refuses anything that is not one of those copies, and any symlink); the doctor line also
+prints a `find … -exec rm -rf` that deletes only those, all at once.
 
 A repo nested inside another, or a git submodule, resolves only its own corpus: resolution stops
 at the session's git toplevel. When it has none and a parent does, SessionStart and doctor say

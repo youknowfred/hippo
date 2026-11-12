@@ -93,7 +93,9 @@ line report the schedule as `stale-path`.
 their own `.claude/.memory-*` copies. Run `/hippo:doctor` in the main checkout: its `derived dirs:`
 line totals them and prints a `find <repo>/.claude/worktrees -mindepth 3 -maxdepth 3 -type d
 -path '*/.claude/.memory-*' -exec rm -rf {} +` that deletes those dirs and nothing else. On the
-repo that filled the disk, that was 50 worktrees and 1.66 GB.
+repo that filled the disk, that was 50 worktrees and 1.66 GB. To go one directory at a time
+instead, `hippo setup --worktree-copies` lists them and `hippo setup --worktree-copies --remove
+<dir> --yes` removes the one you name.
 
 `HIPPO_INDEX_DIR`, `HIPPO_TELEMETRY_DIR` and `HIPPO_PENDING_DIR` still override each location,
 and hippo leaves an overridden dir where it is. A corpus that is not `<project>/.claude/memory`
