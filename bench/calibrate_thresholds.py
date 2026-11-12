@@ -16,6 +16,14 @@ Dense-floor sweeping needs a bootstrapped embedding model (the floor's real job 
 separating on-topic hits from off-topic admission, which recall@10 alone can't see, so an
 ``--abstention-set`` fixture materially improves the recommendation) — both requirements
 degrade to a clearly-labeled skip, never a silent no-op or a fabricated recommendation.
+
+Lives in ``bench/`` (a repo-checkout dev/CI tool, not shipped with the plugin). Run it from the
+repository root::
+
+    PYTHONPATH=plugin python -m bench.calibrate_thresholds [--memory-dir DIR --hard-set PATH]
+
+With no ``--memory-dir`` it calibrates the resolved corpus against its default fixtures (the
+same defaults ``memory.eval_recall`` uses on an ambient run).
 """
 
 from __future__ import annotations
@@ -23,8 +31,8 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Optional, Tuple
 
-from .build_index import DEFAULT_MODEL, default_index_dir, load_index
-from .eval_recall import evaluate
+from memory.build_index import DEFAULT_MODEL, default_index_dir, load_index
+from memory.eval_recall import evaluate
 
 _KNEE_RATIO_CANDIDATES: Tuple[float, ...] = (0.3, 0.4, 0.5, 0.6, 0.7)
 _DENSE_FLOOR_CANDIDATES: Tuple[float, ...] = (0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75)
@@ -164,7 +172,7 @@ def format_report(
     """
     lines: List[str] = []
     try:
-        from .recall import _KNEE_RATIO
+        from memory.recall import _KNEE_RATIO
 
         knee_rows = sweep_knee_ratio(
             memory_dir=memory_dir, index_dir=index_dir, hard_set_path=hard_set_path, k=k
@@ -202,7 +210,7 @@ def format_report(
         if "skipped" in dense:
             lines.append(f"dense floor sweep: SKIPPED — {dense['skipped']}")
         else:
-            from .recall import _DENSE_FLOOR_BY_MODEL, _DENSE_FLOOR_DEFAULT
+            from memory.recall import _DENSE_FLOOR_BY_MODEL, _DENSE_FLOOR_DEFAULT
 
             current_floor = _DENSE_FLOOR_BY_MODEL.get(dense["model"] or "", _DENSE_FLOOR_DEFAULT)
             lines.append(f"dense floor sweep (model={dense['model']}, current default: {current_floor}):")
@@ -228,7 +236,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     import argparse
 
     ap = argparse.ArgumentParser(
-        prog="memory.calibrate_thresholds",
+        prog="bench.calibrate_thresholds",
         description="grid-search the knee-ratio/dense-floor constants against the "
         "eval harness (report-only — never mutates recall.py's shipped default).",
     )
@@ -238,12 +246,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--abstention-set", default=None)
     ap.add_argument("-k", type=int, default=10)
     args = ap.parse_args(argv)
+    from memory.eval_fixtures import _default_abstention_set_path, _default_hard_set_path
+
+    ambient = args.memory_dir is None
     print(
         format_report(
             memory_dir=args.memory_dir,
             index_dir=args.index_dir,
-            hard_set_path=args.hard_set,
-            abstention_set_path=args.abstention_set,
+            hard_set_path=args.hard_set or (_default_hard_set_path() if ambient else None),
+            abstention_set_path=args.abstention_set
+            or (_default_abstention_set_path() if ambient else None),
             k=args.k,
         )
     )
