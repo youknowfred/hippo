@@ -190,6 +190,10 @@ def mark_trusted(
             # losing it would silently disable quarantine (fail-open), the exact
             # degradation SEC-6 exists to prevent.
             entry["fingerprint"] = prior["fingerprint"]
+        if isinstance(prior.get("policy"), dict):
+            # A re-consent keeps the policy settings this machine already accepted
+            # (policy_consent); it never accepts a new one, which needs its own yes.
+            entry["policy"] = prior["policy"]
         trusted[key] = entry
         doc["trusted"] = trusted
         ok = _write_registry_doc(doc)

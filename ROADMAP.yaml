@@ -48,7 +48,8 @@ north_star: >-
 guiding_invariants:
   - markdown-in-git is the single source of authority; index, telemetry, and
     graph caches are derived, rebuildable, and gitignored
-  - hooks always exit 0, never download, never block; recall failures degrade
+  - hooks always exit 0 and never download; no hook blocks unless the corpus's own
+    committed policy asks it to; recall failures degrade
     silently at the hook boundary but must become LOUD at doctor/SessionStart
   - degradation must be legible — every silent-fallback path gains a
     user-visible signal somewhere (nudge, doctor line, producer)
