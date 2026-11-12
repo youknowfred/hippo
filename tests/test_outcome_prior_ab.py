@@ -55,7 +55,7 @@ def _corpus(md, cited=False):
 
 
 def test_ab_flags_whitelist_carries_the_flag():
-    from memory.dream_eval import AB_FLAGS
+    from memory.eval_recall import AB_FLAGS
 
     assert "HIPPO_OUTCOME_PRIOR" in AB_FLAGS
     from memory import eval_recall as E
