@@ -9,7 +9,9 @@ them into three homes:
     pre-bootstrap ``python3`` reads it): ``volatile_paths``, ``floor_lint``,
     ``fold_digests``, ``attention``, ``mute``. ``provenance_format.read_policy_key``
     reads it first and falls back to ``.format`` (both read through v1.43; the format
-    axes ``corpus_format``/``cite_derivation`` stay in ``.format``).
+    axes ``corpus_format``/``cite_derivation`` stay in ``.format``). TND-13 adds
+    ``acknowledged_findings`` (``lint_ack``), read from ``hippo.json`` only — it never
+    had a ``.format`` home, so it is not in ``POLICY_KEYS``.
   - **machine settings** — the plugin's ``userConfig`` options (``plugin.json``):
     ``calm_session_start``, ``capture_llm``, ``dream_contradictions``,
     ``dream_generative``, ``llm_model`` and the ``sensitive`` ``llm_api_key``, which
