@@ -114,13 +114,17 @@ def _tool_new_memory(args: Dict[str, Any]) -> str:
     links = [str(x) for x in links] if isinstance(links, list) else None
     confidence = args.get("confidence")
     confidence = str(confidence) if isinstance(confidence, str) and confidence else None
+    machine_local = args.get("machine_local") is True  # OWN-1: implies the user tier
     result = write_memory(
         name, description, mtype, str(args.get("body") or ""), links=links,
         confidence=confidence, hook=hook,
+        **({"tier": "user", "machine_local": True} if machine_local else {}),
     )
     if result.get("error"):
         return f"new_memory failed: {result['error']}"
     out = [f"created: {result.get('path')}", f"indexed: {bool(result.get('indexed'))}"]
+    if result.get("machine_local"):
+        out.append("machine-local: in the user tier, listed in its .gitignore, never committed")
     floor = result.get("floor")
     if isinstance(floor, dict) and floor.get("status"):
         out.append(f"floor: {floor.get('status')}" + (f" ({floor['reason']})" if floor.get("reason") else ""))

@@ -47,7 +47,7 @@ not literal shell; fill in the placeholders before running):
 hippo new \
   <name> "<one-line description — this is the recall hook, be specific>" \
   --type {user|feedback|project|reference} \
-  [--tier {project|user}] \
+  [--tier {project|user}] [--machine-local] \
   --body "<full memory body — the WHY, not just the WHAT>" \
   [--title "<floor link text>"] [--hook "<short floor line>"] \
   [--links name-a,name-b | --no-links] \
@@ -71,10 +71,16 @@ hippo new \
   - `user` — the **machine-local user tier** (`~/.claude/hippo-memory`, or
     `HIPPO_USER_MEMORY_DIR`). It is recalled ALONGSIDE every project's corpus, so a
     person-scoped lesson learned here propagates to all your projects — but it is NEVER
-    committed to any repo, and its floor pointer lands in the user tier's OWN `MEMORY.md`,
+    committed to any project repo (the tier can have its own, see `hippo setup --user-tier`),
+    and its floor pointer lands in the user tier's OWN `MEMORY.md`,
     never the shared project one. Use it for `user`/`feedback` memories that are about YOU,
     not this codebase (e.g. a personal workflow, a cross-project preference). A fused hit is
     labelled `(user memory)` in the injected block and `user tier` in `/hippo:recall`.
+- `--machine-local` — a user-tier memory that stays on THIS machine (it implies
+  `--tier user`): the file carries `machine_local: true` and is listed in the user tier's
+  `.gitignore` before it exists, so a user tier you keep in git (`hippo setup --user-tier`)
+  never commits it, while recall here still reads it. Use it for a fact about this machine
+  (a local path, a device, a network quirk). The MCP tool takes `machine_local: true`.
 - `--title` / `--hook` shape the floor pointer, for the types the floor files (`user`/
   `feedback`, unless the corpus's `hippo.json` `floor_sections` says otherwise) — omit them
   for a type recalled on demand. `--hook` (`hook` on the `new_memory` tool) is the short line

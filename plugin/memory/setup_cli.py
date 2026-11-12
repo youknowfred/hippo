@@ -18,6 +18,10 @@ Writes go through ``atomic.update_text_cas`` (Claude Code writes this file too),
 other key, and never touch a file that does not parse. ``HIPPO_CLAUDE_SETTINGS`` points the
 user settings file elsewhere (``native_memory.user_settings_path``), which is how the tests
 stay off the real one. A later setting is one more ``_SETTINGS`` row and its flag.
+
+OWN-1 adds the second, ``--user-tier``: a local git home for the user tier (``git init`` plus
+a hippo-kept ``.gitignore`` block for machine-local memories; no commit, no remote). Its
+handler and wording live in ``setup_user_tier``, the mechanics in ``user_tier_git``.
 """
 
 from __future__ import annotations
@@ -415,6 +419,12 @@ def _indent(text: str) -> str:
     return "\n".join("  " + line for line in text.splitlines())
 
 
+def _user_tier(args) -> int:
+    from .setup_user_tier import run  # OWN-1
+
+    return run(args)
+
+
 def _mb(n: int) -> str:
     return f"{n / 1_048_576:.1f} MB" if n >= 104_858 else f"{max(n, 0) // 1024} KB"
 
@@ -463,6 +473,7 @@ def _worktree_copies(args) -> int:
 # setting -> (its handler, one line for the bare `hippo setup` listing)
 _SETTINGS = {
     "warm": (_warm, "warm recall: the session's MCP server answers each prompt's recall"),
+    "user_tier": (_user_tier, "a local git home for the user tier (git init; never pushes or pulls)"),
     "worktree_copies": (_worktree_copies, "old index/telemetry copies in worktrees: list them, remove one at a time"),
 }
 
@@ -474,6 +485,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "writes only with --yes.",
     )
     parser.add_argument("--warm", action="store_true", help=_SETTINGS["warm"][1])
+    parser.add_argument("--user-tier", action="store_true", help=_SETTINGS["user_tier"][1])
     parser.add_argument("--worktree-copies", action="store_true", help=_SETTINGS["worktree_copies"][1])
     parser.add_argument("--remove", metavar="DIR", default=None,
                         help="with --worktree-copies: the one directory to remove")

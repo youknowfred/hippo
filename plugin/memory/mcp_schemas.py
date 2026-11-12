@@ -69,6 +69,11 @@ _TOOLS = [
                     "draining captures, so a duplicate routes to update/supersede instead of "
                     "becoming a new file",
                 },
+                "machine_local": {
+                    "type": "boolean",
+                    "description": "save to the user tier as a machine-local memory: recalled "
+                    "here, kept out of the user tier's git repository",
+                },
             },
             "required": ["name", "description", "type"],
         },
