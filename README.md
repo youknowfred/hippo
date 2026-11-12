@@ -306,6 +306,33 @@ handshake files in the plugin's data directory.
 memory once it has served a prompt. `/hippo:doctor` shows whether warm recall is on and how many
 prompts in the last 30 days were served warm, by the usual path, or failed.
 
+## A git home for the user tier (opt-in)
+
+The user tier (`~/.claude/hippo-memory`) holds what you taught hippo about yourself, recalled in
+every project. It is not a repository until you ask for one:
+
+```
+hippo setup --user-tier          # preview: the .gitignore it writes and the `git init`; writes nothing
+hippo setup --user-tier --yes    # make it a local repository (no commit, no remote)
+hippo setup --user-tier --status # its posture: not a repository, uncommitted changes, behind its upstream
+```
+
+hippo makes no commit (you choose what the first one holds) and adds no remote. It never pushes,
+pulls or fetches; add a private remote yourself if you want the tier on a second machine. A user
+tier that already sits inside a repository (a dotfiles repo) is left alone.
+
+**Machine-local memories** stay out of that repository: save one with
+`hippo new <name> "<description>" --type user --machine-local` (or add `machine_local: true` to
+an existing memory's frontmatter and re-run `hippo setup --user-tier --yes`). hippo lists such
+files in a block of the tier's `.gitignore`; recall on this machine still reads them. Ignoring does
+not untrack: `/hippo:doctor` names a machine-local memory that is already committed, with the
+`git rm --cached` that stops tracking it. On another machine's clone, a project memory's link to a
+machine-local memory reads "machine-local on another machine" in `hippo lint-links`, not
+"dangling".
+
+`/hippo:doctor` prints the tier's posture in one line, from local state only: "as of your last
+fetch" means exactly that.
+
 ## Removal / Uninstall
 
 To stop hippo from acting on a project, run inside Claude Code:

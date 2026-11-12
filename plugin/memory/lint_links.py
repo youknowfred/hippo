@@ -80,6 +80,10 @@ def _classify_cross_tier(memory_dir: str, report: dict) -> dict:
         from .links import extra_tier_stems, resolve_cross_tier
 
         tier_stems = extra_tier_stems(memory_dir)
+        # OWN-1: a machine-local user-tier memory exists only on the machine that wrote it,
+        # but its name rides the tier's committed ignore list, so a clone elsewhere can say
+        # where the link points instead of calling it dangling. Present-here stems win above.
+        tier_stems = {**machine_local_elsewhere(), **tier_stems}
     except Exception:
         tier_stems = {}
     cross: List[dict] = []
@@ -98,6 +102,30 @@ def _classify_cross_tier(memory_dir: str, report: dict) -> dict:
     report["cross_tier"] = cross
     report["cross_tier_typed"] = cross_typed
     return report
+
+
+MACHINE_LOCAL_TIER = "user:machine-local"  # OWN-1's tier label for a memory kept on another machine
+
+
+def machine_local_elsewhere() -> Dict[str, str]:
+    """Stem -> ``MACHINE_LOCAL_TIER`` for each memory the user tier's committed ignore list
+    names as machine-local (OWN-1). One small read of the tier's ``.gitignore``; ``{}`` when
+    there is no tier or no list, so a machine without one classifies exactly as before."""
+    try:
+        from .provenance_env import user_memory_dir
+        from .user_tier_git import ignored_machine_local
+
+        return {n[:-3]: MACHINE_LOCAL_TIER for n in ignored_machine_local(user_memory_dir())}
+    except Exception:
+        return {}
+
+
+def tier_phrase(tier: str) -> str:
+    """How a cross-tier link's tier reads: ``user tier``, ``private tier``, or, for a
+    machine-local memory, ``user tier, machine-local on another machine``."""
+    if tier == MACHINE_LOCAL_TIER:
+        return "user tier, machine-local on another machine"
+    return f"{tier} tier"
 
 
 def _classify_planned(memory_dir: str, report: dict, g: LinkGraph) -> dict:
@@ -473,9 +501,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     if n_cross:
         print(f"cross-tier links : {n_cross} (resolve in another recall tier — not rot)")
         for d in report.get("cross_tier", []):
-            print(f"  = {d['file']} -> [[{d['target']}]] ({d['tier']} tier)")
+            print(f"  = {d['file']} -> [[{d['target']}]] ({tier_phrase(d['tier'])})")
         for d in report.get("cross_tier_typed", []):
-            print(f"  = {d['file']} -> {d['relation']}: {d['target']} ({d['tier']} tier)")
+            print(f"  = {d['file']} -> {d['relation']}: {d['target']} ({tier_phrase(d['tier'])})")
     planned = report.get("planned") or []
     if planned:
         print(f"planned forward refs: {len(planned)} (declared deliberate — not rot)")

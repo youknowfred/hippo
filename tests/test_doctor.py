@@ -31,6 +31,10 @@ def _mem(name: str, description: str, body: str = "body text") -> str:
     return f'---\nname: {name}\ndescription: "{description}"\ntype: project\n---\n{body}\n'
 
 
+# Every registered label but OWN-1's, which prints nothing on a machine with no user tier.
+_CHECKS_WITHOUT_USER_TIER = [label for label, _ in D.CHECKS if label != "user_tier"]
+
+
 def _seed(memory_dir: str, *, floor: bool = True) -> None:
     if floor:
         write_file(memory_dir, "MEMORY.md", "# floor\n")
@@ -70,15 +74,17 @@ def test_render_is_deterministic_across_runs(repo, memory_dir):
     first = D.render(ctx)
     second = D.render(ctx)
     assert first == second
-    # One line per registered check, in the fixed CHECKS order.
-    assert first.count("\n") + 1 == len(D.CHECKS)
+    # One line per registered check, in the fixed CHECKS order — except OWN-1's user-tier
+    # line, which a machine without a user tier does not get (conftest points it at an
+    # absent dir).
+    assert first.count("\n") + 1 == len(_CHECKS_WITHOUT_USER_TIER)
 
 
 def test_run_checks_order_is_fixed(repo, memory_dir):
     _seed(memory_dir)
     ctx = _ctx(memory_dir, repo)
     labels = [label for label, _ in D.run_checks(ctx)]
-    assert labels == [label for label, _ in D.CHECKS]
+    assert labels == _CHECKS_WITHOUT_USER_TIER
     # Sanity: the order is a real ordered list, not derived from a set/dict view.
     # DOC-8 appended "stale_memobot_env" as the new last check (an environment-hygiene check,
     # deliberately last so it never shifts the corpus-content checks' relative order).
@@ -808,7 +814,8 @@ def test_main_prints_and_returns_zero(repo, memory_dir, monkeypatch, capsys):
     rc = D.main([])  # explicit empty argv — never pytest's own sys.argv
     assert rc == 0
     out = capsys.readouterr().out
-    assert out.count("\n") == len(D.CHECKS)  # one line per check + trailing newline from print
+    # one line per check (no user-tier line: none here) + trailing newline from print
+    assert out.count("\n") == len(_CHECKS_WITHOUT_USER_TIER)
 
 
 def test_main_output_is_deterministic(repo, memory_dir, monkeypatch, capsys):

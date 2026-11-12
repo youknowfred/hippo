@@ -797,8 +797,12 @@ def _render_frontmatter(
     body: str,
     confidence: Optional[str] = None,
     origin: Optional[str] = None,
+    machine_local: bool = False,
 ) -> str:
     """Recall-ready frontmatter: top-level name + description (indexed), metadata.type.
+
+    ``machine_local`` (OWN-1) adds ``metadata.machine_local: true``: a user-tier memory the
+    tier's git home keeps out of the repository. Absence emits nothing.
 
     ``description`` is JSON-quoted so any colon/character is valid YAML (the recall index
     reads ``description`` via yaml.safe_load). ``confidence`` (GOV-7, optional) nests under
@@ -817,6 +821,7 @@ def _render_frontmatter(
         f"  type: {mtype}",
         *([f"  confidence: {confidence}"] if confidence else []),
         *([f"  origin: {json.dumps(origin)}"] if origin else []),
+        *(["  machine_local: true"] if machine_local else []),
         "---",
         "",
         body.rstrip("\n") + "\n" if body else "",
@@ -854,8 +859,13 @@ def write_memory(
     rationale: Optional[str] = None,
     confidence: Optional[str] = None,
     origin: Optional[str] = None,
+    machine_local: bool = False,
 ) -> dict:
     """Create a recall-ready memory file. Returns a small result dict.
+
+    - ``machine_local`` (OWN-1, user tier only): stamps ``machine_local: true`` and lists the
+      file in the tier's ``.gitignore`` block BEFORE the file exists, so it is never visible
+      to git; a failed list update refuses the write (``user_tier_git``).
 
     - ``origin`` (RCH-1): the promote-time provenance stamp (``"<repo>@<sha>"``), rendered
       as ``metadata.origin``. Display-only; absence emits nothing (byte-identical default).
@@ -913,6 +923,12 @@ def write_memory(
         result["error"] = f"invalid tier {tier!r} (expected one of {_VALID_TIERS})"
         return result
     result["tier"] = tier
+    if machine_local and tier != "user":
+        result["error"] = (
+            "machine-local applies to the user tier only (the private tier is never "
+            "committed anyway); save it with tier 'user'"
+        )
+        return result
     if confidence is not None and confidence not in _VALID_CONFIDENCE:
         result["error"] = (
             f"invalid confidence {confidence!r} (expected one of {_VALID_CONFIDENCE})"
@@ -988,7 +1004,7 @@ def write_memory(
     body = _append_related_line(body, related)
 
     path = os.path.join(memory_dir, f"{name}.md")
-    rendered = _render_frontmatter(name, description, type, body, confidence, origin)
+    rendered = _render_frontmatter(name, description, type, body, confidence, origin, machine_local)
 
     # --- LIF-2: duplicate/conflict detection, BEFORE the write + index refresh. ---
     # Ordering is load-bearing twice over: (a) it must score against the PRE-refresh
@@ -1018,6 +1034,14 @@ def write_memory(
     if os.path.exists(path):
         result["error"] = f"{name}.md already exists — refusing to overwrite"
         return result
+    if machine_local:  # OWN-1: ignored before it exists, so git never sees it
+        from .user_tier_git import sync_ignore_block
+
+        listed = sync_ignore_block(memory_dir, also=[f"{name}.md"])
+        if listed["error"]:
+            result["error"] = f"not written: {listed['error']}"
+            return result
+        result["machine_local"] = True
     staging = os.path.join(memory_dir, f".{name}.md.staging-{os.getpid()}")
     bf: dict = {}
     try:
@@ -1455,7 +1479,7 @@ def main(argv=None) -> int:
     parser.add_argument("--type", required=True, choices=VALID_TYPES)
     parser.add_argument(
         "--tier",
-        default="project",
+        default=None,
         choices=_VALID_TIERS,
         help="'project' (default, git-native in-repo) or 'user' (machine-local user "
         "tier, recalled across every project; its floor pointer lands in the user tier's own "
@@ -1495,7 +1519,15 @@ def main(argv=None) -> int:
         help="the author's trust dial (draft | verified | authoritative) — rendered "
         "at inject and in /hippo:recall, never a ranking input; omit for today's default",
     )
+    parser.add_argument(
+        "--machine-local",
+        action="store_true",
+        help="user tier only: keep this memory on this machine (frontmatter machine_local: "
+        "true, listed in the user tier's .gitignore); recall still reads it",
+    )
     args = parser.parse_args(argv)
+    if args.tier is None:  # OWN-1: --machine-local alone means the user tier
+        args.tier = "user" if args.machine_local else "project"
 
     # CAP-3: dry-run decisioning — check a captured candidate BEFORE it can become a file, so a
     # duplicate routes to update/supersede instead of re-bloating the corpus. Writes nothing.
@@ -1566,6 +1598,7 @@ def main(argv=None) -> int:
         tier=args.tier,
         rationale=args.rationale,
         confidence=args.confidence,
+        machine_local=args.machine_local,
     )
     if res["error"]:
         print(f"error: {res['error']}")
@@ -1573,6 +1606,8 @@ def main(argv=None) -> int:
     print(f"created : {res['path']}")
     if res.get("tier") and res["tier"] != "project":
         print(f"tier    : {res['tier']} (recalled across every project; not in this repo's git)")
+    if res.get("machine_local"):
+        print("machine : machine-local — listed in the user tier's .gitignore, never committed")
     print(f"indexed : {res['indexed']}")
     # LIF-5: the floor outcome is always printed; anything but a plain append carries its
     # machine-readable reason (never silence — /hippo:new tells the agent to surface it).

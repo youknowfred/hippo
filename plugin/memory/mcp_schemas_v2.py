@@ -101,6 +101,7 @@ V2_TOOLS: List[dict] = [
             "links": {"type": "array", "items": _S, "description": "related memory names"},
             "confidence": {"type": "string", "enum": ["draft", "verified", "authoritative"]},
             "check": dict(_B, description="dry run: neighbors only, writes nothing"),
+            "machine_local": dict(_B, description="save to the user tier, kept on this machine only"),
         }, ["name", "description", "type"]),
     },
     {

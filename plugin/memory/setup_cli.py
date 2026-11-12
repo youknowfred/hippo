@@ -16,6 +16,10 @@ Writes go through ``atomic.update_text_cas`` (Claude Code writes this file too),
 other key, and never touch a file that does not parse. ``HIPPO_CLAUDE_SETTINGS`` points the
 user settings file elsewhere (``native_memory.user_settings_path``), which is how the tests
 stay off the real one. A later setting is one more ``_SETTINGS`` row and its flag.
+
+OWN-1 adds the second, ``--user-tier``: a local git home for the user tier (``git init`` plus
+a hippo-kept ``.gitignore`` block for machine-local memories; no commit, no remote). Its
+handler and wording live in ``setup_user_tier``, the mechanics in ``user_tier_git``.
 """
 
 from __future__ import annotations
@@ -413,9 +417,16 @@ def _indent(text: str) -> str:
     return "\n".join("  " + line for line in text.splitlines())
 
 
+def _user_tier(args) -> int:
+    from .setup_user_tier import run  # OWN-1
+
+    return run(args)
+
+
 # setting -> (its handler, one line for the bare `hippo setup` listing)
 _SETTINGS = {
     "warm": (_warm, "warm recall: the session's MCP server answers each prompt's recall"),
+    "user_tier": (_user_tier, "a local git home for the user tier (git init; never pushes or pulls)"),
 }
 
 
@@ -426,6 +437,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "writes only with --yes.",
     )
     parser.add_argument("--warm", action="store_true", help=_SETTINGS["warm"][1])
+    parser.add_argument("--user-tier", action="store_true", help=_SETTINGS["user_tier"][1])
     parser.add_argument("--yes", action="store_true", help="apply the change (default: preview only)")
     parser.add_argument("--off", action="store_true", help="remove the setting instead")
     parser.add_argument("--status", action="store_true", help="show the setting's state; writes nothing")
@@ -434,7 +446,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not chosen:
         print("hippo setup: choose a setting.")
         for name, (_fn, summary) in _SETTINGS.items():
-            print(f"  --{name}  {summary}")
+            print(f"  --{name.replace('_', '-')}  {summary}")
         print("Each previews first; add --yes to apply, --off to remove, --status to inspect.")
         return 2
     if args.status and (args.yes or args.off):
