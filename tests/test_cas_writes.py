@@ -145,6 +145,7 @@ NON_CORPUS_SITES = {
     ("trust", "_write_registry_doc"): "machine trust registry, outside the corpus",
     ("trust_review", "keep_consented_baselines"): "content-addressed baseline store beside the trust registry, outside the corpus",
     ("recall_warm", "_publish"): "warm-recall heartbeat in the plugin data dir; one writer (the session's server)",
+    ("gate_cli", "install"): "the git pre-commit hook, a whole document hippo owns (marker line), written only on --yes",
     ("setup_cli", "_backup"): "a fresh timestamped backup copy (the settings write itself is CAS)",
 }
 

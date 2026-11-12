@@ -41,6 +41,7 @@ import pytest
 
 from memory import atomic as A
 
+from .crash_scenarios_gate import scenarios as _gate_scenarios
 from .crash_scenarios_warm import scenarios as _warm_scenarios
 
 _MEMORY_PKG = os.path.dirname(os.path.abspath(A.__file__))
@@ -114,6 +115,7 @@ CRASH_CONTRACT = {
     ("recall_warm", "_publish"): ("intact",),  # HOT-6 heartbeat: bookkeeping; a missing one makes the hook spawn
     ("setup_cli", "_apply"): ("detected",),  # HOT-6 settings write: exit 1, "Nothing was changed"
     ("setup_cli", "_backup"): ("detected",),  # the backup tears first: the settings write never starts
+    ("gate_cli", "install"): ("detected",),  # GAT-2 pre-commit hook: exit 1, "nothing was changed", prior hook intact
 }
 
 
@@ -1064,6 +1066,7 @@ def scn_derived_stub_intact(tmp_path, monkeypatch):
 
 _SCENARIOS = [
     *_warm_scenarios(_arm, _snap, _assert_unchanged),  # HOT-6 sites (tests/crash_scenarios_warm.py)
+    *_gate_scenarios(_arm, _snap, _assert_unchanged),  # GAT-2 site (tests/crash_scenarios_gate.py)
     (("dream", "_apply_one"), "detected", scn_dream_apply_bridge_detected),
     (("dream_apply", "_undo_one_edge"), "detected", scn_dream_undo_detected),
     (("dream", "_apply_one"), "rolled_back", scn_dream_apply_refines_rolled_back),

@@ -57,6 +57,7 @@ CLI_VERBS: Tuple[CliVerb, ...] = (
     CliVerb("links", "links", "the link graph: audit and repair"),
     CliVerb("lint-links", "lint_links", "dangling links, orphans, boundary candidates"),
     CliVerb("lint-floor", "lint_floor", "check MEMORY.md against its budgets"),
+    CliVerb("gate", "gate_cli", "fail a change that makes a corpus budget worse; install it as a pre-commit hook"),
     CliVerb("publish", "publish", "preflight one memory for the committed subset"),
     CliVerb("promote-rule", "promote_rule", "propose one memory as a scoped rule"),
     CliVerb("promote-scan", "promote_scan", "list memories ready for the user tier"),

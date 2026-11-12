@@ -104,6 +104,7 @@ WRITE_OPEN_ALLOWLIST = {
     ("provenance_env", "ensure_self_ignoring_dir"): "derived-dir self-ignore marker; create-once, single '*' line",
     ("dream_eval", "_seed_soak"): "eval-harness fixture generation (bench substrate)",
     ("dream_eval", "_body"): "eval-harness fixture generation (bench substrate)",
+    ("gate_cli", "policy_of"): "GAT-2: one side's hippo.json/.format copied into a private mkdtemp dir so the engine's own policy readers parse it; the dir is rmtree'd in the same call and nothing else reads it",
     ("eval_adversarial", "_sec6_withheld_via_real_recall"): "SEN-4 acceptance-probe: throwaway temp-repo fixture writes (whole dir rmtree'd); a torn write just fails the probe, fail-open + honest",
     # -- machine-local provisioning state under CLAUDE_PLUGIN_DATA: a failure means
     #    re-bootstrap, never corpus/registry loss --
