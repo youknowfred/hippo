@@ -334,8 +334,19 @@ hippo's settings now live in three places, and the first one that answers wins:
 2. **hippo's plugin options** — your machine's settings: the calm SessionStart switch, the
    LLM opt-ins, the LLM model, and the LLM API key (kept in your system keychain).
 3. **`.claude/memory/hippo.json`** — the corpus's committed policy, shared with your team:
-   `volatile_paths`, `floor_lint`, `fold_digests`, `attention` (`"calm"` or `"full"`) and
-   `mute` (SessionStart signals to hide).
+   `volatile_paths`, `floor_lint`, `floor_sections`, `fold_digests`, `attention` (`"calm"` or
+   `"full"`), `mute` (SessionStart signals to hide) and `acknowledged_findings` (see below).
+
+**Acknowledging a cleared lint finding.** When a memory file carries a secret or threat finding
+you have reviewed and cleared, add an entry to `acknowledged_findings` in `hippo.json` —
+`{"file": "notes.md", "rule": "html-comment", "sha256": "<the file's sha256>", "reason": "…",
+"date": "YYYY-MM-DD"}` — and commit it. `/hippo:doctor` then counts the finding instead of
+warning it; its warn line names each finding's rule and the file's sha256 once the key exists
+(or run `shasum -a 256 .claude/memory/notes.md`). Any change to the file re-arms the finding,
+and doctor says the acknowledgement no longer matches. Locally an acknowledgement counts only
+on a corpus you trust, for the exact bytes you consented to; the review packet and
+`hippo review --ci` count only acknowledgements already present at the base of the range, so a
+change can never acknowledge its own finding. The release secret scan ignores the list.
 
 The environment variables you might still set are the directory overrides,
 `HIPPO_DISABLE=<list>` (any of `dense`, `jit`, `presence`, `floor-nag`, `abstain-gate`,

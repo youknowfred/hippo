@@ -393,7 +393,8 @@ what-not-to-save judgment.
 ### `lint_floor.py` — the floor invariant
 
 The `MEMORY.md` floor is the only always-loaded memory context, so it stays lean: memory
-pointers belong ONLY under `## User` and `## Working Style & Process Feedback`;
+pointers belong ONLY under `## User` and `## Working Style & Process Feedback` (or the
+sections the corpus declares in `hippo.json` `floor_sections` — see CONVENTIONS.md);
 `project`/`reference` memories are recalled on demand. `lint_floor` flags re-bloat and
 floor link rot (read-only); its summary is the `floor` producer.
 

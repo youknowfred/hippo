@@ -24,6 +24,10 @@ def _ensure_tier_floor(tier_dir: str, label: str) -> None:
             return
         os.makedirs(tier_dir, exist_ok=True)
         from .atomic import write_text_cas
+        from .provenance import read_floor_sections
+
+        # GAT-3: the tier's declared sections (today's two when undeclared — byte-identical).
+        headings = "\n\n".join(h for h, _ in read_floor_sections(tier_dir))
 
         # INV-2: a torn skeleton would pass the exists() guard above forever and block
         # every future floor append — the floor is corpus-class truth, write it whole.
@@ -35,8 +39,7 @@ def _ensure_tier_floor(tier_dir: str, label: str) -> None:
             f"> {label.capitalize()}-tier user/feedback memories — recalled alongside the "
             "project corpus and delivered each session by the SessionStart portable-floor "
             "producer, NOT the native symlink.\n\n"
-            "## User\n\n"
-            "## Working Style & Process Feedback\n",
+            f"{headings}\n",
             None,
         )
     except Exception:
@@ -132,6 +135,46 @@ def _append_floor_pointer(
     return dict(outcome)
 
 
+def _pointer_line(name: str, title: str, hook: str) -> str:
+    """The one floor pointer line ``- [title](name.md) — hook`` (the writer and its check)."""
+    return f"- [{title}]({name}.md) — {hook}".rstrip()
+
+
+def floor_line_refusal(
+    memory_dir: str, section: Optional[str], name: str, title: str, hook: Optional[str],
+    description: str,
+) -> Optional[str]:
+    """GAT-3: why this save's floor line must be refused, or ``None`` — checked BEFORE any
+    file is written, so a refused save leaves nothing behind.
+
+    The line's text is ``hook`` when given, else the description. The limit is the
+    corpus's declared ``floor_lint.max_line``; undeclared means no limit (today's
+    behaviour), and a type that files no pointer (``section`` None) is never refused.
+    """
+    from .provenance import read_floor_lint
+
+    limit = read_floor_lint(memory_dir).get("max_line") if section else None
+    if not limit:
+        return None
+    text = hook if hook else description
+    n = len(_pointer_line(name, title, text))
+    if n <= limit:
+        return None
+    room = limit - (n - len(text.rstrip()))
+    what = "the hook you gave makes" if hook else "with no hook, the description would make"
+    fix = (
+        f"pass a {'shorter ' if hook else ''}hook of at most {room} characters"
+        if room > 0
+        else "pass a shorter title and a short hook"
+    )
+    return (
+        f"refused: {what} this memory's line in MEMORY.md {n} characters, over this "
+        f"corpus's {limit}-character floor line limit (floor_lint.max_line in hippo.json). "
+        f"Nothing was written. To save it, {fix} — the short line shown in the "
+        "always-loaded index (--hook on hippo new, hook on the new_memory tool)."
+    )
+
+
 def _with_pointer(
     text: str, section_header: str, name: str, title: str, hook: str
 ) -> Tuple[Optional[str], dict]:
@@ -141,7 +184,7 @@ def _with_pointer(
     if any(link in ln for ln in lines):
         return None, {"status": "skipped", "reason": "pointer already present"}
 
-    pointer = f"- [{title}]({name}.md) — {hook}".rstrip()
+    pointer = _pointer_line(name, title, hook)
 
     # Find the section header, then the end of its block (next "## " or EOF).
     start = next((i for i, ln in enumerate(lines) if ln.strip() == section_header), None)
