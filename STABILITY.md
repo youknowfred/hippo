@@ -91,7 +91,8 @@ These may change at any release without a major bump — do not build on them:
   (A `schema_version` bump is a re-index, not a corpus migration — the CHANGELOG's `re-bootstrap`
   flag tells you when deps or the index change.)
 - **Internal ranking-tuning knobs** — the undocumented `HIPPO_*` variables that tune the ranker
-  (e.g. `HIPPO_KNEE_RATIO`, `HIPPO_MMR_LAMBDA`, `HIPPO_BODY_RRF_WEIGHT`, `HIPPO_PIN_BOOST`, the
+  (e.g. `HIPPO_KNEE_RATIO`, `HIPPO_MMR_LAMBDA`, `HIPPO_BODY_RRF_WEIGHT`, `HIPPO_PIN_BOOST`,
+  `HIPPO_DENSE_FLOOR_BAND` (the soft band under the dense floor; 0 turns it off), the
   `HIPPO_INTENT_*` and `HIPPO_RESCUE_*` families). They exist for experimentation and move with
   retrieval work; the `HIPPO_*` prefix is reserved, but these specific knobs are not a contract.
 - **The Python API** — importing `memory.*` internals directly. hippo is consumed as a Claude Code
@@ -108,6 +109,11 @@ These may change at any release without a major bump — do not build on them:
 - **The `recall_hook` MCP tool** — internal: the opt-in warm-recall hook (`hippo setup --warm`)
   calls it, never a model or a skill. Its inputs, its reply and the handshake files it shares with
   the recall hook may change in any release; the `hippo setup` verb is unfrozen too.
+- **The outbox** — the `write_path` key in `hippo.json`, `.claude/memory.outbox/` and its
+  `.outbox.json` manifest, the `HIPPO_OUTBOX_DIR` test override, the `write_path` field on a
+  save's result, and the doctor line. An opt-in addition; STABILITY v2 classifies it. The
+  rule that a setting moving where writes land needs one acceptance per machine
+  (`hippo trust policy --accept`) is part of the trust contract and will not loosen.
 - **Exact recall output text and ordering** — recall is a ranker; its wording, formatting, and the
   precise order of results are tuned continuously.
 
@@ -117,12 +123,15 @@ hippo's pitch is that your memory is ordinary markdown in git and it will not co
 itself — so the crash behavior of every write is a stated, tested contract, not an
 implementation detail. Every irreplaceable file (corpus `.md` files and the committed
 markers/fixtures beside them, the machine-wide trust and projects registries, the packs
-lockfile, `MEMORY.md` floors, promoted rule files, the git pre-commit hook `hippo gate
---install` writes) is written through one atomic
+lockfile, `MEMORY.md` floors, promoted rule files, the user tier's `.gitignore` list of
+machine-local memories, the git pre-commit hook `hippo gate --install` writes) is written
+through one atomic
 primitive family (`memory/atomic.py`: a per-call-unique tmp in the target's directory +
 `os.replace`, symlink-aware). A reader sees the old document or the new one — **never a
 torn one** — and a crash mid-write strands at worst an orphaned tmp file, never partial
-bytes at the real path.
+bytes at the real path. The usage-aggregate, usage-summary and ledger-rotation writers, which name their tmp `<file>.tmp.<pid>`, remove
+such orphans on their next successful write, once the pid is dead and the file is more than
+five minutes old.
 
 On top of that primitive, every registered write site declares one of three crash
 classes, and a fault-injection lane tears each site once to prove it:
@@ -139,6 +148,16 @@ classes, and a fault-injection lane tears each site once to prove it:
   a clean tree. The registered chains: **demote+supersede** (reconsolidation),
   **dedup-merge** (de-parasite), **dream refines** (frontmatter edge + body stamp),
   and the **pack-update lockfile** advance.
+
+The opt-in outbox (`.claude/memory.outbox/`, for a corpus whose `hippo.json` sets
+`"write_path": "outbox"`) is a second write path, and each of its sites is registered like
+the corpus's: a new memory is still born whole (staged, then linked), the floor copy is made
+create-only-while-absent and edited by compare-and-swap like `MEMORY.md`, and its manifest
+(`.outbox.json`, the base each copy was made from) is a compare-and-swap update. Both new
+sites are **detected**: a torn copy raises and leaves no partial copy (a floor edit through
+it reports the missing floor instead of writing the working tree), and a torn manifest write
+keeps the prior manifest and the save names what did not land. Deletions never go through
+the outbox.
 
 Two recovery stories are additionally pinned for hard kills (`kill -9` mid-verb):
 `pack_extract` re-runs refuse a partially-written dest **by name** (delete it and

@@ -110,6 +110,8 @@ CORPUS_RMW_SITES = {
     ("dream_generate", "_set_cited_paths"),
     ("packs", "pack_update_item"),  # three-way pack merge over local edits
     ("eval_recall", "confirm_hard_set_row"),  # the tracked hard-set fixture append
+    ("outbox", "_update_manifest"),  # the outbox manifest: two sessions saving at once
+    ("outbox", "copy_up"),  # create-only-while-absent (expected=None)
 }
 
 # Plain atomic writers that are NOT corpus read-modify-writes, each with why.

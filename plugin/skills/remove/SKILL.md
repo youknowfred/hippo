@@ -93,6 +93,14 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
    has nothing pointing at this corpus). Once they are gone, `.hippo/` may be removed only if
    nothing but its `.gitignore` and `.migrate.lock` is left in it.
 
+   **The outbox is not derived either — report it, never delete it here.** A corpus that sets
+   `"write_path": "outbox"` keeps saves it has not moved into the corpus yet in
+   `.claude/memory.outbox/`. Those memories exist nowhere else: they are not in git. If the
+   folder exists, name it with the number of memory files in it
+   (`ls .claude/memory.outbox/*.md 2>/dev/null | wc -l`), say it was left in place, and tell the
+   user to move any memory they want to keep into `.claude/memory/` (and commit it) before they
+   delete the folder themself.
+
    **Pre-migration backups are not derived — report them, never delete them here.**
    `.hippo/snapshots/memory.pre-cite2-*/` (v1.42.5 and later), `.hippo-snapshots/` (v1.42.3
    and v1.42.4) and `.claude/memory.pre-cite*/` (older) are copies of the corpus taken before
@@ -127,6 +135,8 @@ as written (`hippo` is on the Bash tool's PATH and finds its own venv).
   ever candidates for removal here.
 - **Step 2 is agent-gated, not automatic.** No `--all`, no silent sweep — a confirmed step in
   this skill's own conversation, every time.
+- **Never delete the outbox** (`.claude/memory.outbox/`): it holds memories that are not in
+  git yet. Report it; the user decides.
 - **Never delete a pre-migration backup** (`.hippo/snapshots/`, `.hippo-snapshots/`,
   `.claude/memory.pre-cite*/`), and never `rm -rf .hippo/`, which would take
   `.hippo/snapshots/` with it. Report them; the user decides.

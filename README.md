@@ -306,6 +306,33 @@ handshake files in the plugin's data directory.
 memory once it has served a prompt. `/hippo:doctor` shows whether warm recall is on and how many
 prompts in the last 30 days were served warm, by the usual path, or failed.
 
+## A git home for the user tier (opt-in)
+
+The user tier (`~/.claude/hippo-memory`) holds what you taught hippo about yourself, recalled in
+every project. It is not a repository until you ask for one:
+
+```
+hippo setup --user-tier          # preview: the .gitignore it writes and the `git init`; writes nothing
+hippo setup --user-tier --yes    # make it a local repository (no commit, no remote)
+hippo setup --user-tier --status # its posture: not a repository, uncommitted changes, behind its upstream
+```
+
+hippo makes no commit (you choose what the first one holds) and adds no remote. It never pushes,
+pulls or fetches; add a private remote yourself if you want the tier on a second machine. A user
+tier that already sits inside a repository (a dotfiles repo) is left alone.
+
+**Machine-local memories** stay out of that repository: save one with
+`hippo new <name> "<description>" --type user --machine-local` (or add `machine_local: true` to
+an existing memory's frontmatter and re-run `hippo setup --user-tier --yes`). hippo lists such
+files in a block of the tier's `.gitignore`; recall on this machine still reads them. Ignoring does
+not untrack: `/hippo:doctor` names a machine-local memory that is already committed, with the
+`git rm --cached` that stops tracking it. On another machine's clone, a project memory's link to a
+machine-local memory reads "machine-local on another machine" in `hippo lint-links`, not
+"dangling".
+
+`/hippo:doctor` prints the tier's posture in one line, from local state only: "as of your last
+fetch" means exactly that.
+
 ## Removal / Uninstall
 
 To stop hippo from acting on a project, run inside Claude Code:
@@ -322,6 +349,9 @@ deletes — the pre-migration corpus backups in `.hippo/snapshots/`, which are a
 corpus's only undo, and the shared per-machine venv (`CLAUDE_PLUGIN_DATA/venv`) and fastembed
 model cache paths, since those are shared across every project using the plugin on this machine.
 
+It also reports, and never deletes, `.claude/memory.outbox/` when a corpus saves there: those
+memories are not in git yet.
+
 `.claude/memory/` itself — the git-tracked corpus — is always left alone: it stays committed in
 git, inert, until someone runs `/hippo:init` again (in this repo, a fresh clone, or a new
 worktree).
@@ -334,9 +364,52 @@ hippo's settings now live in three places, and the first one that answers wins:
 2. **hippo's plugin options** — your machine's settings: the calm SessionStart switch, the
    LLM opt-ins, the LLM model, and the LLM API key (kept in your system keychain).
 3. **`.claude/memory/hippo.json`** — the corpus's committed policy, shared with your team:
-   `volatile_paths`, `floor_lint`, `fold_digests`, `attention` (`"calm"` or `"full"`),
-   `mute` (SessionStart signals to hide), `gate` (the write gate, below), `budgets` and
-   `journals` (the commit gate's budgets, below).
+   `volatile_paths`, `floor_lint`, `floor_sections`, `fold_digests`, `attention` (`"calm"` or
+   `"full"`), `mute` (SessionStart signals to hide), `acknowledged_findings` (see below),
+   `write_path` (`"outbox"` or `"direct"`, below), `gate` (the write gate, below), `budgets`
+   and `journals` (the commit gate's budgets, below).
+
+**Acknowledging a cleared lint finding.** When a memory file carries a secret or threat finding
+you have reviewed and cleared, add an entry to `acknowledged_findings` in `hippo.json` —
+`{"file": "notes.md", "rule": "html-comment", "sha256": "<the file's sha256>", "reason": "…",
+"date": "YYYY-MM-DD"}` — and commit it. `/hippo:doctor` then counts the finding instead of
+warning it; its warn line names each finding's rule and the file's sha256 once the key exists
+(or run `shasum -a 256 .claude/memory/notes.md`). Any change to the file re-arms the finding,
+and doctor says the acknowledgement no longer matches. Locally an acknowledgement counts only
+on a corpus you trust, for the exact bytes you consented to; the review packet and
+`hippo review --ci` count only acknowledgements already present at the base of the range, so a
+change can never acknowledge its own finding. The release secret scan ignores the list.
+
+### Saving without touching the working tree (opt-in)
+
+When several checkouts write one corpus, every saved memory is a change someone has to commit.
+A corpus can opt out of that: `"write_path": "outbox"` in `hippo.json` sends each new memory,
+and the floor pointer it adds, to `.claude/memory.outbox/`, a gitignored folder beside the
+corpus (it also ignores itself). The corpus folder is not touched, so `git status` stays clean.
+Recall reads the outbox like a tier, so a saved memory is recalled from the next prompt; an
+outbox copy of a memory takes precedence over the committed one.
+
+- **Where.** Always `.claude/memory.outbox/` beside the corpus; the setting cannot name a path.
+  A linked git worktree uses its main tree's corpus, so one clone has one outbox for all its
+  worktrees.
+- **When a save goes there.** Only when this machine accepted the setting: because
+  `hippo.json` arrives by pull, a setting that changes where writes land takes one
+  `hippo trust policy --accept` per machine (and a trusted corpus). Until then saves land in the
+  working tree as before, and the save and `/hippo:doctor` say what is waiting. Any value other
+  than `"outbox"` or `"direct"` behaves as `"direct"`, and doctor names it. The user and private
+  tiers are never redirected.
+- **Trust.** hippo records the hash of every file it writes into the outbox in this machine's
+  trust registry, and recall injects an outbox file only while its bytes match. A file that
+  arrived another way (dropped in, pulled, edited by hand) is withheld and counted by doctor;
+  if it shadows a committed memory, recall uses the committed one.
+- **Reads do not depend on the setting.** Turning it off never hides memories still in the
+  outbox: recall and doctor keep seeing them.
+- **The floor.** The floor pointer goes into the outbox's copy of `MEMORY.md`. Claude Code
+  still loads the committed floor, so a memory whose pointer is only in the outbox copy stays
+  recallable on demand.
+- **Landing them.** There is no ship command yet. To land a memory, copy its file into
+  `.claude/memory/`, commit it, delete the outbox copy, and consent the new file with
+  `hippo trust review`. `/hippo:remove` reports the outbox and never deletes it.
 
 The environment variables you might still set are the directory overrides,
 `HIPPO_DISABLE=<list>` (any of `dense`, `jit`, `presence`, `floor-nag`, `abstain-gate`,
@@ -476,8 +549,10 @@ Since v1.42.4 the index, the telemetry ledgers and the capture pending queue liv
 checkout's whole `.claude/` dir, ignored files included, into every worktree it creates, and these
 dirs used to ride along (about 39 MB per worktree on a large corpus). The first session after the
 update moves them with one rename each. `/hippo:doctor`'s `derived dirs:` line names anything still
-in `.claude/`, and in the main checkout it totals the old copies existing worktrees carry, with a
-`find … -exec rm -rf` that deletes only those.
+in `.claude/`, and in the main checkout it totals the old copies existing worktrees carry.
+`hippo setup --worktree-copies` lists them, and `--remove <dir> --yes` removes one directory per
+yes (it refuses anything that is not one of those copies, and any symlink); the doctor line also
+prints a `find … -exec rm -rf` that deletes only those, all at once.
 
 A repo nested inside another, or a git submodule, resolves only its own corpus: resolution stops
 at the session's git toplevel. When it has none and a parent does, SessionStart and doctor say

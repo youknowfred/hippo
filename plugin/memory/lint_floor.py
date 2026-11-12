@@ -42,7 +42,9 @@ from typing import Dict, List, Optional
 
 from .staleness import RunContext
 
-# Sections under which memory pointers ARE allowed (the always-loaded floor).
+# Sections under which memory pointers ARE allowed (the always-loaded floor) when the corpus
+# declares none. GAT-3: a declared hippo.json ``floor_sections`` replaces them, read through
+# the one accessor the pointer writer uses too (``_floor_sections``).
 _FLOOR_SECTIONS = ("User", "Working Style & Process Feedback")
 
 # Restore/snapshot pointers — not memory entries; allowed in any section.
@@ -57,6 +59,22 @@ _MAX_CHARS = 1500
 
 def _floor_path(memory_dir: str) -> str:
     return os.path.join(memory_dir, "MEMORY.md")
+
+
+def _floor_sections(memory_dir: str) -> tuple:
+    """The floor's section names (no ``## ``) — declared, or today's two. Never raises."""
+    from .provenance import read_floor_sections
+
+    try:
+        return tuple(h[3:].strip() for h, _ in read_floor_sections(memory_dir))
+    except Exception:
+        return _FLOOR_SECTIONS
+
+
+def _sections_label(memory_dir: str) -> str:
+    """How the floor's sections are named in a message: today's wording when undeclared."""
+    sections = _floor_sections(memory_dir)
+    return "User + Working-Style" if sections == _FLOOR_SECTIONS else " + ".join(sections)
 
 
 def floor_violations(memory_dir: str) -> Dict[str, List[dict]]:
@@ -75,6 +93,7 @@ def floor_violations(memory_dir: str) -> Dict[str, List[dict]]:
     except Exception:
         return result
 
+    sections = _floor_sections(memory_dir)
     current = "(preamble)"
     for raw in text.split("\n"):
         line = raw.rstrip("\n")
@@ -89,7 +108,7 @@ def floor_violations(memory_dir: str) -> Dict[str, List[dict]]:
             base = target.rsplit("/", 1)[-1]
             if base in _ALLOWLIST:
                 continue
-            if current in _FLOOR_SECTIONS:
+            if current in sections:
                 # A genuine floor pointer — check the target file exists (link rot).
                 if not os.path.exists(os.path.join(memory_dir, target)):
                     result["missing_targets"].append({"file": base, "section": current})
@@ -116,6 +135,7 @@ def floor_memory_names(memory_dir: str) -> set:
             text = fh.read()
     except Exception:
         return names
+    sections = _floor_sections(memory_dir)
     current = "(preamble)"
     for raw in text.split("\n"):
         stripped = raw.strip()
@@ -124,7 +144,7 @@ def floor_memory_names(memory_dir: str) -> set:
             continue
         if stripped.startswith("# "):  # the H1 title — not a section
             continue
-        if current not in _FLOOR_SECTIONS:
+        if current not in sections:
             continue
         for m in _MD_LINK_RE.finditer(raw):
             base = m.group(1).rsplit("/", 1)[-1]
@@ -159,7 +179,7 @@ def floor_producer(
         if rebloat:
             lines.append(
                 f"⚠ Memory floor re-bloat — {len(rebloat)} project/reference link(s) found "
-                "OUTSIDE the User + Working-Style sections of MEMORY.md (the always-loaded floor "
+                f"OUTSIDE the {_sections_label(memory_dir)} sections of MEMORY.md (the always-loaded floor "
                 "must stay lean; these belong in on-demand recall, not the floor):"
             )
             for item in rebloat[:_MAX_ITEMS]:
@@ -284,7 +304,7 @@ def main(argv=None) -> int:
     rebloat, missing = v["rebloat"], v["missing_targets"]
     gov_line = format_governance_summary(floor_governance(memory_dir))
     if not rebloat and not missing and not gov_line:
-        print("MEMORY.md floor invariant holds ✅ (memory links only under User + Working-Style)")
+        print(f"MEMORY.md floor invariant holds ✅ (memory links only under {_sections_label(memory_dir)})")
         return 0
     if gov_line:
         print(gov_line)
