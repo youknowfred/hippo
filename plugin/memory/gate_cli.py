@@ -4,9 +4,15 @@
   hippo gate --commit <rev>       judge one commit: its first parent -> it (read-only replay, CI)
   hippo gate --install [--yes]    preview, then write, a git pre-commit hook that runs --staged
 
-The checks are GAT-1's (``gate.judge_floor`` / ``gate.judge_body``) with the same delta
-posture: a finding needs the AFTER side over its budget AND worse than the BEFORE side, so
-standing debt never fails a commit. Added here:
+The floor checks are GAT-1's (``gate.judge_floor``) with the same delta posture: a finding
+needs the AFTER side over its budget AND worse than the BEFORE side, so standing debt never
+fails a commit. The banned pattern over memory BODIES is deliberately not run here: it stays
+a write-time warning (the PreToolUse hook), never a failed commit. Replayed over 30 days of
+two production corpora it would have failed about half of all corpus commits (187 of 359 and
+11 of 22), each for a status word a session typed into a body, while on the floor and the
+caps this verb agreed with the larger corpus's own hand-built checker on every commit. A
+gate that fails half the commits gets skipped, and the floor is what rides every session.
+So ``judge_sides`` never calls ``judge_body`` and never reads a memory body. Added here:
 
 - ``hippo.json: "budgets"`` — ``files`` (memory files directly in the corpus dir),
   ``floor_bytes``, ``floor_lines`` and ``journals`` (files matching ``fold_digests`` or a
@@ -177,13 +183,13 @@ def _counts(names, globs) -> Tuple[int, int]:
 def judge_sides(top: str, rel: str, before: str, after: str, budgets_override: Optional[dict] = None) -> dict:
     """``{"declared", "findings", "changed"}`` for BEFORE -> AFTER of the corpus at ``rel``.
     ``budgets_override`` replaces the declared budgets (a replay measuring other caps)."""
-    from .gate import FLOOR_NAME, judge_body, judge_floor
-    from .provenance import _is_memory_filename
+    from .gate import FLOOR_NAME, judge_floor
 
     b, a = _list(top, rel, before), _list(top, rel, after)
     changed = sorted(n for n in set(b) | set(a) if b.get(n) != a.get(n))
+    # The policy and the floor, both sides. Memory bodies are never read at commit time:
+    # their banned-pattern check is the write-time hook's warning, not a commit failure.
     want = [a.get(n) for n in ("hippo.json", ".format")] + [b.get(FLOOR_NAME), a.get(FLOOR_NAME)]
-    want += [x for n in changed if _is_memory_filename(n) for x in (b.get(n), a.get(n))]
     text = _blobs(top, [w for w in want if w])
     pol = policy_of({n: text[a[n]] for n in ("hippo.json", ".format") if a.get(n) in text})
     budgets = read_budgets(budgets_override) if budgets_override is not None else pol["budgets"]
@@ -199,9 +205,6 @@ def judge_sides(top: str, rel: str, before: str, after: str, budgets_override: O
     f: List[dict] = []
     if a.get(FLOOR_NAME):
         f += judge_floor(get(b, FLOOR_NAME), get(a, FLOOR_NAME), fl, budgets)
-    for n in changed:
-        if n != FLOOR_NAME and _is_memory_filename(n) and a.get(n):
-            f += judge_body(get(b, n), get(a, n), fl, n)
     (bf, bj), (af, aj) = _counts(b, pol["journals"]), _counts(a, pol["journals"])
     for key, what, bv, av in (("files", "memory files", bf, af), ("journals", "journal files", bj, aj)):
         cap = budgets.get(key)

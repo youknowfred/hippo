@@ -415,7 +415,8 @@ in `additionalContext`; `permissionDecision: "deny"` only when the committed `hi
 HEAD and this machine's accepted value (`policy_consent.honoured`) both say
 `"gate": {"write": "deny"}`. `"off"` silences it. Always exits 0.
 
-`gate_cli.py` is `hippo gate`: the same `judge_floor`/`judge_body` over HEAD -> index
+`gate_cli.py` is `hippo gate`: the same `judge_floor` (never `judge_body`: bodies are a
+write-time warning only, and the commit path reads no memory body) over HEAD -> index
 (`--staged`) or first parent -> commit (`--commit <rev>`), trees read by `ls-tree` /
 `ls-files -s` / `cat-file --batch`, plus the declared `budgets` (`files`, `floor_bytes`,
 `floor_lines`, `journals`). Exit 0 / 1 (a budget got worse) / 2 (usage). `--install [--yes]`

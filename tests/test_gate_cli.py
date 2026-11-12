@@ -131,17 +131,60 @@ def test_the_first_commit_is_judged_against_nothing(repo, memory_dir, capsys):
     assert rc == 1 and "memory files 0 -> 2" in out
 
 
-# --- the same checks as the write gate ----------------------------------------------------
-def test_floor_lint_and_body_checks_run_at_commit(repo, memory_dir, capsys):
-    _seed(repo, memory_dir, {"floor_lint": {"banned_re": r"DONE-NOW|#\d{3,}"}})
+# --- the floor is judged at commit; a status word in a body is a write-time warning only -----
+BAN = {"floor_lint": {"banned_re": r"DONE-NOW|#\d{3,}"}}
+
+
+def test_a_body_gaining_a_banned_token_passes_the_commit_gate_and_still_warns_at_write_time(repo, memory_dir, capsys):
+    from memory import gate_hook as H
+
+    _seed(repo, memory_dir, BAN)
+    path = os.path.join(memory_dir, "n0.md")
+    after = note("n0", "Closed in #4521.")
+    # The write itself, judged by the PreToolUse path: one warning naming the file.
+    out = H.evaluate(
+        {"tool_name": "Write", "tool_input": {"file_path": path, "content": after}},
+        memory_dir=memory_dir, repo_root=repo,
+    )
+    hso = out["hookSpecificOutput"]
+    assert "permissionDecision" not in hso and "n0.md" in hso["additionalContext"]
+    assert "banned pattern" in hso["additionalContext"]
+    # The same bytes, staged: the commit gate passes and says nothing about the body.
+    write_file(memory_dir, "n0.md", after)
+    write_file(memory_dir, "fresh.md", note("fresh", "DONE-NOW, shipped in #9001."))  # a new file too
+    _stage(repo)
+    rc, text = _staged(memory_dir, capsys)
+    assert rc == 0 and "n0.md" not in text and "fresh.md" not in text and "banned pattern" not in text
+    sha = git_commit(repo, "status words in bodies", 1_700_000_200)
+    assert C.main(["--commit", sha, "--memory-dir", memory_dir]) == 0
+    assert "banned pattern" not in capsys.readouterr().out
+
+
+def test_the_commit_gate_never_reads_or_judges_a_memory_body(repo, memory_dir, monkeypatch):
+    from memory import gate as G
+
+    def boom(*_a, **_k):
+        raise AssertionError("the commit gate ran the body check")
+
+    monkeypatch.setattr(G, "judge_body", boom)
+    read = []
+    real = C._blobs
+    monkeypatch.setattr(C, "_blobs", lambda top, shas: read.append(len(shas)) or real(top, shas))
+    _seed(repo, memory_dir, BAN, n_notes=6)
+    for i in range(6):
+        write_file(memory_dir, f"n{i}.md", note(f"n{i}", "Closed in #4521."))
+    _stage(repo)
+    assert C.main(["--staged", "--memory-dir", memory_dir]) == 0
+    assert read and max(read) <= 3  # hippo.json and the floor's two sides, never the six bodies
+
+
+def test_the_banned_pattern_on_the_floor_still_fails_the_commit(repo, memory_dir, capsys):
+    _seed(repo, memory_dir, BAN)
+    write_file(memory_dir, "MEMORY.md", FLOOR + "- [N](n0.md) — closed in #4521\n")
     write_file(memory_dir, "n0.md", note("n0", "Closed in #4521."))
     _stage(repo)
-    rc, out = _staged(memory_dir, capsys)
-    assert rc == 1 and "n0.md: body lines matching the banned pattern 0 -> 1" in out
-    git_commit(repo, "debt", 1_700_000_200)
-    write_file(memory_dir, "n0.md", note("n0", "Closed in #4521, see the tracker."))
-    _stage(repo)
-    assert _staged(memory_dir, capsys)[0] == 0  # standing debt, reworded
+    rc, text = _staged(memory_dir, capsys)
+    assert rc == 1 and "MEMORY.md" in text and "n0.md: body" not in text
 
 
 def test_commit_time_size_edge_is_the_read_limit_not_the_warn_line(repo, memory_dir, capsys):

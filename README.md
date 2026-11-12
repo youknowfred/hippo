@@ -376,9 +376,11 @@ before any Python starts.
 
 ### At commit time: `hippo gate` and declared budgets
 
-`hippo gate --staged` runs the same checks on what the next commit records (HEAD against the
+`hippo gate --staged` runs the floor checks on what the next commit records (HEAD against the
 index, read with git plumbing, so untracked files never count), with the same rule: it fails
-(exit 1) only when the change leaves a budget over and makes it worse. `hippo gate --commit
+(exit 1) only when the change leaves a budget over and makes it worse. The banned pattern over
+memory bodies is not checked at commit time: a status word in a body is the write gate's
+warning, never a failed commit. `hippo gate --commit
 <rev>` judges one commit against its first parent, for CI or a replay of history. A corpus can
 declare hard numbers of its own in `hippo.json`:
 
