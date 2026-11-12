@@ -11,6 +11,8 @@ stays installed as the fallback, and the two settle every prompt so exactly one 
   hippo setup --warm --yes            write it (a timestamped backup first; idempotent)
   hippo setup --warm --off [--yes]    remove it (preview without --yes)
   hippo setup --warm --status         read-only: configured where, the servers, the paths
+  hippo setup --worktree-copies       list the old derived-dir copies worktrees carry
+  hippo setup --worktree-copies --remove DIR --yes   remove that one directory
 
 Writes go through ``atomic.update_text_cas`` (Claude Code writes this file too), keep every
 other key, and never touch a file that does not parse. ``HIPPO_CLAUDE_SETTINGS`` points the
@@ -413,9 +415,55 @@ def _indent(text: str) -> str:
     return "\n".join("  " + line for line in text.splitlines())
 
 
+def _mb(n: int) -> str:
+    return f"{n / 1_048_576:.1f} MB" if n >= 104_858 else f"{max(n, 0) // 1024} KB"
+
+
+def _worktree_copies(args) -> int:
+    """RWY-6: list the old derived-dir copies worktrees carry; remove ONE per --remove --yes."""
+    from . import derived_cleanup as DC
+    from .provenance import resolve_dirs
+    from .provenance_env import main_worktree_root
+
+    _md, repo_root = resolve_dirs()
+    main = main_worktree_root(repo_root) or repo_root
+    flag = "hippo setup --worktree-copies"
+    if args.remove:
+        why = DC.check_candidate(main, args.remove)
+        if why:
+            print(f"{flag}: refused. {args.remove}: {why}. Nothing was removed.")
+            return 1
+        if not args.yes:
+            print(f"`{flag} --remove {args.remove} --yes` would delete this one directory and "
+                  "everything in it. Nothing reads it: a session in that worktree uses the main "
+                  "checkout's index, telemetry and queue.\n\nNothing was removed.")
+            return 0
+        res = DC.remove_copy(main, args.remove)
+        if not res["removed"]:
+            print(f"{flag}: NOT removed ({res['error']}).")
+            return 1
+        left = len(DC.list_copies(main))
+        print(f"{flag}: removed {res['path']} ({_mb(int(res['bytes']))}). {left} left.")
+        return 0
+    copies = DC.list_copies(main)
+    if not copies:
+        print(f"{flag}: no old copies under {os.path.join(main, '.claude', 'worktrees')}.")
+        return 0
+    print(f"{flag}: {len(copies)} old cop{'y' if len(copies) == 1 else 'ies'} of the index, "
+          f"telemetry or queue ({_mb(sum(n for _p, n in copies))}) that nothing reads. The "
+          "Claude desktop app copied them into these worktrees before hippo moved its derived "
+          "dirs out of .claude/.")
+    for path, n in copies:
+        print(f"  {path}  ({_mb(n)})")
+    print(f"Remove them one at a time: `{flag} --remove <one of the paths above> --yes`. "
+          "Nothing was removed.")
+    return 0
+
+
 # setting -> (its handler, one line for the bare `hippo setup` listing)
 _SETTINGS = {
     "warm": (_warm, "warm recall: the session's MCP server answers each prompt's recall"),
+    "worktree_copies": (_worktree_copies, "old index/telemetry copies in worktrees: list them, remove one at a time"),
 }
 
 
@@ -426,6 +474,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         "writes only with --yes.",
     )
     parser.add_argument("--warm", action="store_true", help=_SETTINGS["warm"][1])
+    parser.add_argument("--worktree-copies", action="store_true", help=_SETTINGS["worktree_copies"][1])
+    parser.add_argument("--remove", metavar="DIR", default=None,
+                        help="with --worktree-copies: the one directory to remove")
     parser.add_argument("--yes", action="store_true", help="apply the change (default: preview only)")
     parser.add_argument("--off", action="store_true", help="remove the setting instead")
     parser.add_argument("--status", action="store_true", help="show the setting's state; writes nothing")
@@ -434,11 +485,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not chosen:
         print("hippo setup: choose a setting.")
         for name, (_fn, summary) in _SETTINGS.items():
-            print(f"  --{name}  {summary}")
+            print(f"  --{name.replace('_', '-')}  {summary}")
         print("Each previews first; add --yes to apply, --off to remove, --status to inspect.")
         return 2
     if args.status and (args.yes or args.off):
         parser.error("--status is read-only; drop --yes/--off")
+    if args.remove and chosen[0] != "worktree_copies":
+        parser.error("--remove goes with --worktree-copies")
     return _SETTINGS[chosen[0]][0](args)
 
 

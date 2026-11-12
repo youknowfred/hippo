@@ -366,7 +366,8 @@ def test_doctor_totals_the_copies_old_worktrees_carry_and_its_command_deletes_on
     (tmp_path / ".claude" / "worktrees" / "wt-c" / ".claude").mkdir(parents=True)
     r = _doctor(md, tmp_path)
     assert "2 worktree(s) under" in r["message"] and "(1.2 MB)" in r["message"]
-    cmd = r["message"].split("Delete them: ", 1)[1].rstrip(".")
+    assert "`hippo setup --worktree-copies` lists them and removes one per yes" in r["message"]
+    cmd = r["message"].split("Or delete them all: ", 1)[1].rstrip(".")
     subprocess.run(["/bin/sh", "-c", cmd], check=True)
     for name in ("wt-a", "wt-b"):
         claude = tmp_path / ".claude" / "worktrees" / name / ".claude"
