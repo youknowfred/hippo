@@ -477,6 +477,7 @@ def run_recall(
                     latency_ms=latency_ms if is_human else None,
                     wall_ms=wall,
                     path=path,
+                    injected_memories=len(results) if out else None,
                 )
             except Exception:
                 pass
