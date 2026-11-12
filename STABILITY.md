@@ -91,7 +91,8 @@ These may change at any release without a major bump — do not build on them:
   (A `schema_version` bump is a re-index, not a corpus migration — the CHANGELOG's `re-bootstrap`
   flag tells you when deps or the index change.)
 - **Internal ranking-tuning knobs** — the undocumented `HIPPO_*` variables that tune the ranker
-  (e.g. `HIPPO_KNEE_RATIO`, `HIPPO_MMR_LAMBDA`, `HIPPO_BODY_RRF_WEIGHT`, `HIPPO_PIN_BOOST`, the
+  (e.g. `HIPPO_KNEE_RATIO`, `HIPPO_MMR_LAMBDA`, `HIPPO_BODY_RRF_WEIGHT`, `HIPPO_PIN_BOOST`,
+  `HIPPO_DENSE_FLOOR_BAND` (the soft band under the dense floor; 0 turns it off), the
   `HIPPO_INTENT_*` and `HIPPO_RESCUE_*` families). They exist for experimentation and move with
   retrieval work; the `HIPPO_*` prefix is reserved, but these specific knobs are not a contract.
 - **The Python API** — importing `memory.*` internals directly. hippo is consumed as a Claude Code

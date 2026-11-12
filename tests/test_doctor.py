@@ -1426,8 +1426,11 @@ def test_floor_calibration_stale_fingerprint_reports_stale(
     B.build_index(memory_dir, B.default_index_dir(memory_dir))
     _write_sweep(memory_dir, monkeypatch, tmp_path, corpus_fingerprint="fp-stale")
     r = D.check_floor_calibration(_ctx(memory_dir, repo))
-    assert r["status"] == "ok"
-    assert "STALE" in r["message"] and "--floor-sweep" in r["message"]
+    # HOT-10: a stale sweep is a WARN naming the remedy (it read as healthy before)
+    assert r["status"] == "warn"
+    assert "STALE" in r["message"] and "hippo eval --floor-sweep" in r["message"]
+    assert "2026-07-16" in r["message"]  # when the stale sweep ran
+    assert "\n" not in r["message"]
 
 
 # --------------------------------------------------------------------------- #
