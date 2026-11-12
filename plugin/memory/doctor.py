@@ -137,7 +137,7 @@ from .doctor_checks_recall import (
 )
 from .doctor_checks_native import check_native_auto_memory  # NAT-1
 from .doctor_checks_settings import check_settings  # SRF-4
-from .doctor_checks_kpi import check_capture_queue, check_hook_wall, check_kpi_rollups, check_surface_usage  # TND-5, OBS-4, OBS-1, OBS-2
+from .doctor_checks_kpi import check_capture_queue, check_hook_wall, check_kpi_rollups, check_opened_after_recall, check_surface_usage  # TND-5, OBS-4, OBS-1, OBS-10, OBS-2
 from .doctor_checks_kpi import check_warm_recall  # HOT-6
 
 # One glyph per status — the deterministic line prefix. Ordered dict-free lookup.
@@ -379,6 +379,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("floor_calibration", check_floor_calibration),  # GRF-3: configured floor vs the sweep's number
     ("salience_evidence", check_salience_evidence),  # MSR-5: the ED-2 lived-in nudge (measures only)
     ("injection_precision", check_injection_precision),
+    ("opened_after_recall", check_opened_after_recall),  # OBS-10: was the injected memory's own file opened afterwards
     ("rules_conflicts", check_rules_conflicts),
     ("rules_plane_rot", check_rules_plane_rot),
     ("rules_source", check_rules_source),
