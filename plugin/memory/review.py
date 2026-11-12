@@ -553,8 +553,45 @@ def _render_ops(items: List[dict]) -> List[str]:
     return lines
 
 
-def _render_lints(lints: Dict[str, List[dict]]) -> List[str]:
+def _apply_base_acknowledgements(
+    lints: Dict[str, List[dict]], items: List[dict], texts: Dict[str, str],
+    base_ref: str, head_ref: Optional[str], top: str, prefix: str,
+) -> Tuple[int, List[dict]]:
+    """TND-13: drop gate findings acknowledged in ``hippo.json`` at the BASE of the range.
+
+    Only the base's list counts — it is already merged, so already reviewed. A list entry
+    the range itself adds is returned (to be named in the packet), never applied: a diff
+    must not be able to silence its own finding. Returns ``(acknowledged, added)``.
+    """
+    from .lint_ack import declared_in, filter_review, introduced
+
+    policy = f"{prefix}/hippo.json"
+    _bd, base_acks = declared_in(_text_at(base_ref, policy, top))
+    _hd, head_acks = declared_in(_text_at(head_ref, policy, top))
+    files = {
+        item["stem"]: (item["path"][len(prefix) + 1:], texts[item["stem"]])
+        for item in items
+        if item["stem"] in texts and item["path"].startswith(prefix + "/")
+    }
+    lints["gate"], acked = filter_review(lints["gate"], base_acks, files)
+    return acked, introduced(base_acks, head_acks)
+
+
+def _render_lints(
+    lints: Dict[str, List[dict]], *, acked: int = 0, added: Optional[List[dict]] = None
+) -> List[str]:
     lines = ["### lints (touched files only)"]
+    if acked:
+        lines.append(
+            f"{acked} gate finding(s) acknowledged in hippo.json at the base of this range "
+            "(file unchanged since it was reviewed) — counted here, not gated."
+        )
+    if added:
+        names = ", ".join(f"{e['file']} ({e['rule']})" for e in added)
+        lines.append(
+            f"this range adds {len(added)} acknowledgement(s) to hippo.json — {names}. They "
+            "take effect only once merged; review them like any other change."
+        )
     if lints["gate"]:
         lines.append("GATE findings — these fail `--ci` (secret / threat Tier-A):")
         for f in lints["gate"]:
@@ -630,8 +667,11 @@ def run(
     }
     texts = {stem: text for stem, text in texts.items() if text}
     lints = lint_touched(texts, md, repo)
+    acked, added = _apply_base_acknowledgements(lints, items, texts, base_ref, head_ref, top, prefix)
 
-    sections: List[str] = header + [""] + _render_ops(items) + [""] + _render_lints(lints)
+    sections: List[str] = (
+        header + [""] + _render_ops(items) + [""] + _render_lints(lints, acked=acked, added=added)
+    )
     if not args.ci:
         sections.append("")
         if _dense_disabled():
