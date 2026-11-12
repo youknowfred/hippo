@@ -243,3 +243,13 @@ outcome silently — report it to the user and act on it:**
 The tool refreshes the index automatically — the new memory is recallable in the SAME session,
 not just future ones. It does NOT commit anything; that's the user's call, same as
 `/hippo:setup`'s nudge-not-commit policy.
+
+**Where a project save lands.** By default, in `.claude/memory/` (a change in the working
+tree). A corpus whose `hippo.json` sets `"write_path": "outbox"` — and only once this machine
+accepted that with `hippo trust policy --accept` — sends the save (and its floor pointer) to
+`.claude/memory.outbox/` instead: a gitignored folder beside the corpus, so `git status` stays
+clean. The output then says so on a `lands` line. Recall sees an outbox memory from the next
+prompt, marked `unshipped: in memory.outbox`; read it there, not in `.claude/memory/`. If the
+corpus asks for the outbox but this machine has not accepted it, the save goes to the working
+tree as usual and a warning says which command turns it on — surface that line to the user. The
+`user` and `private` tiers are never redirected.

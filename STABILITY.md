@@ -109,6 +109,11 @@ These may change at any release without a major bump — do not build on them:
 - **The `recall_hook` MCP tool** — internal: the opt-in warm-recall hook (`hippo setup --warm`)
   calls it, never a model or a skill. Its inputs, its reply and the handshake files it shares with
   the recall hook may change in any release; the `hippo setup` verb is unfrozen too.
+- **The outbox** — the `write_path` key in `hippo.json`, `.claude/memory.outbox/` and its
+  `.outbox.json` manifest, the `HIPPO_OUTBOX_DIR` test override, the `write_path` field on a
+  save's result, and the doctor line. An opt-in addition; STABILITY v2 classifies it. The
+  rule that a setting moving where writes land needs one acceptance per machine
+  (`hippo trust policy --accept`) is part of the trust contract and will not loosen.
 - **Exact recall output text and ordering** — recall is a ranker; its wording, formatting, and the
   precise order of results are tuned continuously.
 
@@ -142,6 +147,16 @@ classes, and a fault-injection lane tears each site once to prove it:
   a clean tree. The registered chains: **demote+supersede** (reconsolidation),
   **dedup-merge** (de-parasite), **dream refines** (frontmatter edge + body stamp),
   and the **pack-update lockfile** advance.
+
+The opt-in outbox (`.claude/memory.outbox/`, for a corpus whose `hippo.json` sets
+`"write_path": "outbox"`) is a second write path, and each of its sites is registered like
+the corpus's: a new memory is still born whole (staged, then linked), the floor copy is made
+create-only-while-absent and edited by compare-and-swap like `MEMORY.md`, and its manifest
+(`.outbox.json`, the base each copy was made from) is a compare-and-swap update. Both new
+sites are **detected**: a torn copy raises and leaves no partial copy (a floor edit through
+it reports the missing floor instead of writing the working tree), and a torn manifest write
+keeps the prior manifest and the save names what did not land. Deletions never go through
+the outbox.
 
 Two recovery stories are additionally pinned for hard kills (`kill -9` mid-verb):
 `pack_extract` re-runs refuse a partially-written dest **by name** (delete it and

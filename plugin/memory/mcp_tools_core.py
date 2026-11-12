@@ -123,6 +123,10 @@ def _tool_new_memory(args: Dict[str, Any]) -> str:
     if result.get("error"):
         return f"new_memory failed: {result['error']}"
     out = [f"created: {result.get('path')}", f"indexed: {bool(result.get('indexed'))}"]
+    if result.get("write_path") == "outbox":
+        from .outbox import SAVE_LINE
+
+        out.append(f"lands: {SAVE_LINE}")
     if result.get("machine_local"):
         out.append("machine-local: in the user tier, listed in its .gitignore, never committed")
     floor = result.get("floor")

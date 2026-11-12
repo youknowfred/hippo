@@ -419,9 +419,11 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    otherwise.
 5. **Patch `.gitignore`** — SKIP entirely when not a git repo (there's nothing for git to
    ignore yet; a future `git init` + this same nudge in step 6, once repeated after init, is
-   how it gets patched). In a git repo, append `.hippo/` and `.claude/memory.local/` if not
-   already present (`.hippo/` holds the derived index, telemetry and pending queue;
-   `memory.local/` is the private tier from step 5b — never commit either). Do NOT create `.gitignore` from scratch if the project doesn't have one
+   how it gets patched). In a git repo, append `.hippo/`, `.claude/memory.local/` and
+   `.claude/memory.outbox/` if not already present (`.hippo/` holds the derived index, telemetry
+   and pending queue; `memory.local/` is the private tier from step 5b; `memory.outbox/` holds
+   saves a corpus set to `"write_path": "outbox"` has not moved into the corpus yet — never
+   commit any of them). Do NOT create `.gitignore` from scratch if the project doesn't have one
    without asking first — a repo with zero `.gitignore` may be intentional (e.g. a throwaway test repo).
 5b. **Create the private memory tier** — git repo only. `.claude/memory.local/` is a
    gitignored sibling of `.claude/memory/` for memories you want recall over on THIS clone but

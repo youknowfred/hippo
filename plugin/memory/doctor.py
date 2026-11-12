@@ -137,6 +137,7 @@ from .doctor_checks_recall import (
     check_update_eval,
 )
 from .doctor_checks_native import check_native_auto_memory  # NAT-1
+from .doctor_checks_outbox import check_outbox  # OUT-1
 from .doctor_checks_settings import check_settings  # SRF-4
 from .doctor_checks_kpi import check_capture_queue, check_hook_wall, check_kpi_rollups, check_opened_after_recall, check_surface_usage  # TND-5, OBS-4, OBS-1, OBS-10, OBS-2
 from .doctor_checks_kpi import check_warm_recall  # HOT-6
@@ -362,6 +363,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Optional[Dict[str, str]]]]] = 
     ("trust", check_trust),
     ("trust_scorecard", check_trust_scorecard),  # GOV-6: the one-line rollup a lead scans first; the point-checks below are the drill-down
     ("trust_drift", check_trust_drift),  # SEC-6: content drift since consent — quarantine state + the re-consent path
+    ("outbox", check_outbox),  # OUT-1: where saves land, what waits in the outbox, its trust state
     ("integrity", check_integrity),
     ("index_corruption", check_index_corruption),
     ("index_count", check_index_count),

@@ -33,10 +33,12 @@ import os
 from typing import Dict, List, Optional
 
 # The derived/private paths init keeps out of git (the skill's step 5 list): the ``.hippo/``
-# container of the index, telemetry and pending queue (MIG-9), and the private tier.
+# container of the index, telemetry and pending queue (MIG-9), the private tier, and the
+# outbox a corpus can send its saves to (OUT-1; it also ignores itself).
 GITIGNORE_ENTRIES = (
     ".hippo/",
     ".claude/memory.local/",
+    ".claude/memory.outbox/",
 )
 
 
