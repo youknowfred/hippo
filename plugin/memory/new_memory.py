@@ -40,10 +40,12 @@ import os
 from typing import Dict, List, Optional
 
 from .fm_access import fm_get, fm_metadata
+from .provenance_format import DEFAULT_FLOOR_SECTIONS
 
 from .new_memory_floor import (  # RWY-3 split: re-exported, every old path resolves
     _append_floor_pointer,
     _ensure_tier_floor,
+    floor_line_refusal,
     _pointer_name,  # noqa: F401  (tests and lint callers read it here)
     _remove_floor_pointer,
 )
@@ -80,11 +82,9 @@ _DUP_COSINE_THRESHOLD = 0.80
 # warn-only asymmetry as the cosine threshold.
 _DUP_BM25_THRESHOLD = 0.45
 
-# Which floor section a pointer goes under, by type. project/reference => no floor pointer.
-_FLOOR_SECTION_BY_TYPE = {
-    "user": "## User",
-    "feedback": "## Working Style & Process Feedback",
-}
+# Which floor section a pointer goes under, by type, when the corpus declares none. GAT-3: a
+# corpus's hippo.json ``floor_sections`` overrides it (provenance.floor_section_for_type).
+_FLOOR_SECTION_BY_TYPE = {t: h for h, types in DEFAULT_FLOOR_SECTIONS for t in types}
 
 # TEA-1/TEA-3: which corpus a memory is written to. "project" (default) = the git-native in-repo
 # corpus teammates share; "user" = the machine-local user tier that follows the person across
@@ -687,8 +687,13 @@ def check_candidate(
     *,
     memory_dir: Optional[str] = None,
     repo_root: Optional[str] = None,
+    title: Optional[str] = None,
+    hook: Optional[str] = None,
 ) -> dict:
     """CAP-3: DRY-RUN write-time decisioning for a captured candidate — writes NOTHING.
+
+    ``refused`` (GAT-3) carries the refusal the real write would give for an over-long
+    floor line (``floor_line_refusal``), else ``None``.
 
     Renders the candidate (name + description + type) and scores it against the EXISTING
     corpus with LIF-2's exact near-duplicate machinery (``_duplicate_neighbors``), so an agent
@@ -771,6 +776,12 @@ def check_candidate(
         # the route above was already decided by the dup check alone, and no ticket
         # finding ever flips it (no autonomous rejection; the approving human routes).
         ticket = build_write_ticket(name, rendered, body, memory_dir, repo_root)
+        from .provenance import floor_section_for_type
+
+        refused = floor_line_refusal(
+            memory_dir, floor_section_for_type(memory_dir, type), name,
+            title or _title_from_slug(name), hook, description,
+        )
         return {
             "route": "review" if neighbors else "add",
             "neighbors": neighbors,
@@ -778,6 +789,7 @@ def check_candidate(
             "baseline": baseline,
             "note": note,
             "ticket": ticket,
+            "refused": refused,
         }
     except Exception as exc:
         return {
@@ -787,6 +799,7 @@ def check_candidate(
             "baseline": None,
             "note": f"candidate check skipped: {exc}",
             "ticket": build_write_ticket(name, "", body, memory_dir, repo_root),
+            "refused": None,
         }
 
 
@@ -797,8 +810,12 @@ def _render_frontmatter(
     body: str,
     confidence: Optional[str] = None,
     origin: Optional[str] = None,
+    machine_local: bool = False,
 ) -> str:
     """Recall-ready frontmatter: top-level name + description (indexed), metadata.type.
+
+    ``machine_local`` (OWN-1) adds ``metadata.machine_local: true``: a user-tier memory the
+    tier's git home keeps out of the repository. Absence emits nothing.
 
     ``description`` is JSON-quoted so any colon/character is valid YAML (the recall index
     reads ``description`` via yaml.safe_load). ``confidence`` (GOV-7, optional) nests under
@@ -817,6 +834,7 @@ def _render_frontmatter(
         f"  type: {mtype}",
         *([f"  confidence: {confidence}"] if confidence else []),
         *([f"  origin: {json.dumps(origin)}"] if origin else []),
+        *(["  machine_local: true"] if machine_local else []),
         "---",
         "",
         body.rstrip("\n") + "\n" if body else "",
@@ -854,8 +872,13 @@ def write_memory(
     rationale: Optional[str] = None,
     confidence: Optional[str] = None,
     origin: Optional[str] = None,
+    machine_local: bool = False,
 ) -> dict:
     """Create a recall-ready memory file. Returns a small result dict.
+
+    - ``machine_local`` (OWN-1, user tier only): stamps ``machine_local: true`` and lists the
+      file in the tier's ``.gitignore`` block BEFORE the file exists, so it is never visible
+      to git; a failed list update refuses the write (``user_tier_git``).
 
     - ``origin`` (RCH-1): the promote-time provenance stamp (``"<repo>@<sha>"``), rendered
       as ``metadata.origin``. Display-only; absence emits nothing (byte-identical default).
@@ -913,6 +936,12 @@ def write_memory(
         result["error"] = f"invalid tier {tier!r} (expected one of {_VALID_TIERS})"
         return result
     result["tier"] = tier
+    if machine_local and tier != "user":
+        result["error"] = (
+            "machine-local applies to the user tier only (the private tier is never "
+            "committed anyway); save it with tier 'user'"
+        )
+        return result
     if confidence is not None and confidence not in _VALID_CONFIDENCE:
         result["error"] = (
             f"invalid confidence {confidence!r} (expected one of {_VALID_CONFIDENCE})"
@@ -954,6 +983,16 @@ def write_memory(
             memory_dir = md
     if tier == "private":
         tier_index = tier_index_dir(memory_dir)
+    # GAT-3: the floor line is judged BEFORE anything is written (tier skeleton included),
+    # so a save refused for an over-long line leaves nothing behind.
+    from .provenance import floor_section_for_type
+
+    section = floor_section_for_type(memory_dir, type)
+    title = title or _title_from_slug(name)
+    refusal = floor_line_refusal(memory_dir, section, name, title, hook, description)
+    if refusal:
+        result["error"] = refusal
+        return result
     if tier != "project":
         if tier == "private":
             # SEC-3: drop a self-ignoring ``.gitignore`` (``*``) so the whole private tier —
@@ -988,7 +1027,7 @@ def write_memory(
     body = _append_related_line(body, related)
 
     path = os.path.join(memory_dir, f"{name}.md")
-    rendered = _render_frontmatter(name, description, type, body, confidence, origin)
+    rendered = _render_frontmatter(name, description, type, body, confidence, origin, machine_local)
 
     # --- LIF-2: duplicate/conflict detection, BEFORE the write + index refresh. ---
     # Ordering is load-bearing twice over: (a) it must score against the PRE-refresh
@@ -1018,6 +1057,14 @@ def write_memory(
     if os.path.exists(path):
         result["error"] = f"{name}.md already exists — refusing to overwrite"
         return result
+    if machine_local:  # OWN-1: ignored before it exists, so git never sees it
+        from .user_tier_git import sync_ignore_block
+
+        listed = sync_ignore_block(memory_dir, also=[f"{name}.md"])
+        if listed["error"]:
+            result["error"] = f"not written: {listed['error']}"
+            return result
+        result["machine_local"] = True
     staging = os.path.join(memory_dir, f".{name}.md.staging-{os.getpid()}")
     bf: dict = {}
     try:
@@ -1165,19 +1212,17 @@ def write_memory(
     except Exception:
         pass
 
-    # 3. Floor pointer ONLY for user / feedback (project / reference are recalled on demand).
+    # 3. Floor pointer only for a type a floor section files (user / feedback unless the
+    # corpus declares otherwise — GAT-3); the rest are recalled on demand.
     # LIF-5: the outcome is ALWAYS explicit on the result — appended / created-section /
     # skipped-with-reason — never a silent no-op the agent can't see.
-    section = _FLOOR_SECTION_BY_TYPE.get(type)
     if section is None:
         result["floor"] = {
             "status": "skipped",
             "reason": f"type '{type}' is never floor-linked — recalled on demand",
         }
     else:
-        result["floor"] = _append_floor_pointer(
-            memory_dir, section, name, title or _title_from_slug(name), hook or description
-        )
+        result["floor"] = _append_floor_pointer(memory_dir, section, name, title, hook or description)
     return result
 
 
@@ -1455,7 +1500,7 @@ def main(argv=None) -> int:
     parser.add_argument("--type", required=True, choices=VALID_TYPES)
     parser.add_argument(
         "--tier",
-        default="project",
+        default=None,
         choices=_VALID_TIERS,
         help="'project' (default, git-native in-repo) or 'user' (machine-local user "
         "tier, recalled across every project; its floor pointer lands in the user tier's own "
@@ -1463,7 +1508,12 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--body", default="", help="memory body text")
     parser.add_argument("--title", default=None, help="floor-pointer link text (user/feedback only)")
-    parser.add_argument("--hook", default=None, help="floor-pointer trailing note (user/feedback only)")
+    parser.add_argument(
+        "--hook",
+        default=None,
+        help="the short line shown in the always-loaded index (MEMORY.md); defaults to the "
+        "description when that fits the corpus's floor line limit",
+    )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument(
         "--links",
@@ -1495,7 +1545,15 @@ def main(argv=None) -> int:
         help="the author's trust dial (draft | verified | authoritative) — rendered "
         "at inject and in /hippo:recall, never a ranking input; omit for today's default",
     )
+    parser.add_argument(
+        "--machine-local",
+        action="store_true",
+        help="user tier only: keep this memory on this machine (frontmatter machine_local: "
+        "true, listed in the user tier's .gitignore); recall still reads it",
+    )
     args = parser.parse_args(argv)
+    if args.tier is None:  # OWN-1: --machine-local alone means the user tier
+        args.tier = "user" if args.machine_local else "project"
 
     # CAP-3: dry-run decisioning — check a captured candidate BEFORE it can become a file, so a
     # duplicate routes to update/supersede instead of re-bloating the corpus. Writes nothing.
@@ -1518,8 +1576,12 @@ def main(argv=None) -> int:
             body=args.body,
             memory_dir=args.memory_dir,
             repo_root=check_repo_root,
+            title=args.title,
+            hook=args.hook,
         )
         print(f"route   : {decision['route']}")
+        if decision.get("refused"):
+            print(f"error   : {decision['refused']}")
         # GOV-3: the proposal-time git baseline — the honest anchor a reviewer can check
         # out ("as of HEAD <sha>"). source_commit exists only after the real write.
         if decision.get("baseline"):
@@ -1547,7 +1609,7 @@ def main(argv=None) -> int:
             print(ticket_block)
         if decision["note"]:
             print(f"note    : {decision['note']}")
-        return 0
+        return 1 if decision.get("refused") else 0
 
     links_arg = None
     if args.links is not None:
@@ -1566,6 +1628,7 @@ def main(argv=None) -> int:
         tier=args.tier,
         rationale=args.rationale,
         confidence=args.confidence,
+        machine_local=args.machine_local,
     )
     if res["error"]:
         print(f"error: {res['error']}")
@@ -1573,6 +1636,8 @@ def main(argv=None) -> int:
     print(f"created : {res['path']}")
     if res.get("tier") and res["tier"] != "project":
         print(f"tier    : {res['tier']} (recalled across every project; not in this repo's git)")
+    if res.get("machine_local"):
+        print("machine : machine-local — listed in the user tier's .gitignore, never committed")
     print(f"indexed : {res['indexed']}")
     # LIF-5: the floor outcome is always printed; anything but a plain append carries its
     # machine-readable reason (never silence — /hippo:new tells the agent to surface it).

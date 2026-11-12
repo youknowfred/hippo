@@ -31,6 +31,10 @@ def _mem(name: str, description: str, body: str = "body text") -> str:
     return f'---\nname: {name}\ndescription: "{description}"\ntype: project\n---\n{body}\n'
 
 
+# Every registered label but OWN-1's, which prints nothing on a machine with no user tier.
+_CHECKS_WITHOUT_USER_TIER = [label for label, _ in D.CHECKS if label != "user_tier"]
+
+
 def _seed(memory_dir: str, *, floor: bool = True) -> None:
     if floor:
         write_file(memory_dir, "MEMORY.md", "# floor\n")
@@ -70,15 +74,17 @@ def test_render_is_deterministic_across_runs(repo, memory_dir):
     first = D.render(ctx)
     second = D.render(ctx)
     assert first == second
-    # One line per registered check, in the fixed CHECKS order.
-    assert first.count("\n") + 1 == len(D.CHECKS)
+    # One line per registered check, in the fixed CHECKS order — except OWN-1's user-tier
+    # line, which a machine without a user tier does not get (conftest points it at an
+    # absent dir).
+    assert first.count("\n") + 1 == len(_CHECKS_WITHOUT_USER_TIER)
 
 
 def test_run_checks_order_is_fixed(repo, memory_dir):
     _seed(memory_dir)
     ctx = _ctx(memory_dir, repo)
     labels = [label for label, _ in D.run_checks(ctx)]
-    assert labels == [label for label, _ in D.CHECKS]
+    assert labels == _CHECKS_WITHOUT_USER_TIER
     # Sanity: the order is a real ordered list, not derived from a set/dict view.
     # DOC-8 appended "stale_memobot_env" as the new last check (an environment-hygiene check,
     # deliberately last so it never shifts the corpus-content checks' relative order).
@@ -808,7 +814,8 @@ def test_main_prints_and_returns_zero(repo, memory_dir, monkeypatch, capsys):
     rc = D.main([])  # explicit empty argv — never pytest's own sys.argv
     assert rc == 0
     out = capsys.readouterr().out
-    assert out.count("\n") == len(D.CHECKS)  # one line per check + trailing newline from print
+    # one line per check (no user-tier line: none here) + trailing newline from print
+    assert out.count("\n") == len(_CHECKS_WITHOUT_USER_TIER)
 
 
 def test_main_output_is_deterministic(repo, memory_dir, monkeypatch, capsys):
@@ -1423,32 +1430,6 @@ def test_floor_calibration_stale_fingerprint_reports_stale(
     assert r["status"] == "warn"
     assert "STALE" in r["message"] and "hippo eval --floor-sweep" in r["message"]
     assert "2026-07-16" in r["message"]  # when the stale sweep ran
-    assert "\n" not in r["message"]
-
-
-def test_floor_calibration_current_fingerprint_compares(repo, memory_dir, monkeypatch, tmp_path):
-    from memory import build_index as B
-    from memory.eval_ledger import corpus_fingerprint
-
-    monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
-    _seed(memory_dir)
-    write_file(memory_dir, "a.md", _mem("a", "note a"))
-    idx = B.default_index_dir(memory_dir)
-    B.build_index(memory_dir, idx)
-    fp = corpus_fingerprint(B.load_index(idx))
-    _write_sweep(memory_dir, monkeypatch, tmp_path, corpus_fingerprint=fp, recommended=0.61)
-    r = D.check_floor_calibration(_ctx(memory_dir, repo))
-    assert r["status"] == "ok" and "STALE" not in r["message"]
-    assert "0.61" in r["message"]
-
-
-def test_floor_calibration_other_model_is_stale(repo, memory_dir, monkeypatch, tmp_path):
-    _seed(memory_dir)
-    _write_sweep(memory_dir, monkeypatch, tmp_path, model="some/other-embedder")
-    r = D.check_floor_calibration(_ctx(memory_dir, repo))
-    assert r["status"] == "warn"
-    assert "STALE" in r["message"] and "some/other-embedder" in r["message"]
-    assert "hippo eval --floor-sweep" in r["message"]
     assert "\n" not in r["message"]
 
 

@@ -390,7 +390,8 @@ def test_doctor_render_from_a_worktree_is_deterministic_and_complete(linked, mon
     ctx = _ctx(md, rr)
     first, second = D.render(ctx), D.render(ctx)
     assert first == second
-    assert first.count("\n") + 1 == len(D.CHECKS)
+    # every check but OWN-1's user-tier line, which an absent user tier does not get
+    assert first.count("\n") + 1 == len(D.CHECKS) - 1
     assert "tree: MAIN working tree" in first
 
 

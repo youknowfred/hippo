@@ -60,14 +60,20 @@ def _tool_new_memory(args: Dict[str, Any]) -> str:
             "to an unreviewed corpus is gated just as reading it is — and the check dry-run "
             "reads its descriptions). " + _UNTRUSTED_REMEDY
         )
+    hook = args.get("hook")
+    hook = str(hook).strip() if isinstance(hook, str) and hook.strip() else None
     if args.get("check"):
         # CAP-3: the check-FIRST dry-run — the same check_candidate the CLI --check runs,
         # rendered the same way, so the drain can route add/update/supersede/skip BEFORE
         # any file exists. Writes nothing (no file, no index refresh, no floor edit).
         from .new_memory import check_candidate
 
-        decision = check_candidate(name, description, mtype, body=str(args.get("body") or ""))
+        decision = check_candidate(
+            name, description, mtype, body=str(args.get("body") or ""), hook=hook
+        )
         out = [f"check (dry-run — nothing was written): route = {decision['route']}"]
+        if decision.get("refused"):
+            out.append(f"new_memory would fail: {decision['refused']}")
         # GOV-3: the proposal-time git baseline — the honest anchor a reviewer can check
         # out ("as of HEAD <sha>"). source_commit exists only after the real write.
         if decision.get("baseline"):
@@ -108,13 +114,17 @@ def _tool_new_memory(args: Dict[str, Any]) -> str:
     links = [str(x) for x in links] if isinstance(links, list) else None
     confidence = args.get("confidence")
     confidence = str(confidence) if isinstance(confidence, str) and confidence else None
+    machine_local = args.get("machine_local") is True  # OWN-1: implies the user tier
     result = write_memory(
         name, description, mtype, str(args.get("body") or ""), links=links,
-        confidence=confidence,
+        confidence=confidence, hook=hook,
+        **({"tier": "user", "machine_local": True} if machine_local else {}),
     )
     if result.get("error"):
         return f"new_memory failed: {result['error']}"
     out = [f"created: {result.get('path')}", f"indexed: {bool(result.get('indexed'))}"]
+    if result.get("machine_local"):
+        out.append("machine-local: in the user tier, listed in its .gitignore, never committed")
     floor = result.get("floor")
     if isinstance(floor, dict) and floor.get("status"):
         out.append(f"floor: {floor.get('status')}" + (f" ({floor['reason']})" if floor.get("reason") else ""))

@@ -306,6 +306,33 @@ handshake files in the plugin's data directory.
 memory once it has served a prompt. `/hippo:doctor` shows whether warm recall is on and how many
 prompts in the last 30 days were served warm, by the usual path, or failed.
 
+## A git home for the user tier (opt-in)
+
+The user tier (`~/.claude/hippo-memory`) holds what you taught hippo about yourself, recalled in
+every project. It is not a repository until you ask for one:
+
+```
+hippo setup --user-tier          # preview: the .gitignore it writes and the `git init`; writes nothing
+hippo setup --user-tier --yes    # make it a local repository (no commit, no remote)
+hippo setup --user-tier --status # its posture: not a repository, uncommitted changes, behind its upstream
+```
+
+hippo makes no commit (you choose what the first one holds) and adds no remote. It never pushes,
+pulls or fetches; add a private remote yourself if you want the tier on a second machine. A user
+tier that already sits inside a repository (a dotfiles repo) is left alone.
+
+**Machine-local memories** stay out of that repository: save one with
+`hippo new <name> "<description>" --type user --machine-local` (or add `machine_local: true` to
+an existing memory's frontmatter and re-run `hippo setup --user-tier --yes`). hippo lists such
+files in a block of the tier's `.gitignore`; recall on this machine still reads them. Ignoring does
+not untrack: `/hippo:doctor` names a machine-local memory that is already committed, with the
+`git rm --cached` that stops tracking it. On another machine's clone, a project memory's link to a
+machine-local memory reads "machine-local on another machine" in `hippo lint-links`, not
+"dangling".
+
+`/hippo:doctor` prints the tier's posture in one line, from local state only: "as of your last
+fetch" means exactly that.
+
 ## Removal / Uninstall
 
 To stop hippo from acting on a project, run inside Claude Code:
@@ -334,8 +361,19 @@ hippo's settings now live in three places, and the first one that answers wins:
 2. **hippo's plugin options** — your machine's settings: the calm SessionStart switch, the
    LLM opt-ins, the LLM model, and the LLM API key (kept in your system keychain).
 3. **`.claude/memory/hippo.json`** — the corpus's committed policy, shared with your team:
-   `volatile_paths`, `floor_lint`, `fold_digests`, `attention` (`"calm"` or `"full"`) and
-   `mute` (SessionStart signals to hide).
+   `volatile_paths`, `floor_lint`, `floor_sections`, `fold_digests`, `attention` (`"calm"` or
+   `"full"`), `mute` (SessionStart signals to hide) and `acknowledged_findings` (see below).
+
+**Acknowledging a cleared lint finding.** When a memory file carries a secret or threat finding
+you have reviewed and cleared, add an entry to `acknowledged_findings` in `hippo.json` —
+`{"file": "notes.md", "rule": "html-comment", "sha256": "<the file's sha256>", "reason": "…",
+"date": "YYYY-MM-DD"}` — and commit it. `/hippo:doctor` then counts the finding instead of
+warning it; its warn line names each finding's rule and the file's sha256 once the key exists
+(or run `shasum -a 256 .claude/memory/notes.md`). Any change to the file re-arms the finding,
+and doctor says the acknowledgement no longer matches. Locally an acknowledgement counts only
+on a corpus you trust, for the exact bytes you consented to; the review packet and
+`hippo review --ci` count only acknowledgements already present at the base of the range, so a
+change can never acknowledge its own finding. The release secret scan ignores the list.
 
 The environment variables you might still set are the directory overrides,
 `HIPPO_DISABLE=<list>` (any of `dense`, `jit`, `presence`, `floor-nag`, `abstain-gate`,
@@ -422,8 +460,10 @@ Since v1.42.4 the index, the telemetry ledgers and the capture pending queue liv
 checkout's whole `.claude/` dir, ignored files included, into every worktree it creates, and these
 dirs used to ride along (about 39 MB per worktree on a large corpus). The first session after the
 update moves them with one rename each. `/hippo:doctor`'s `derived dirs:` line names anything still
-in `.claude/`, and in the main checkout it totals the old copies existing worktrees carry, with a
-`find … -exec rm -rf` that deletes only those.
+in `.claude/`, and in the main checkout it totals the old copies existing worktrees carry.
+`hippo setup --worktree-copies` lists them, and `--remove <dir> --yes` removes one directory per
+yes (it refuses anything that is not one of those copies, and any symlink); the doctor line also
+prints a `find … -exec rm -rf` that deletes only those, all at once.
 
 A repo nested inside another, or a git submodule, resolves only its own corpus: resolution stops
 at the session's git toplevel. When it has none and a parent does, SessionStart and doctor say

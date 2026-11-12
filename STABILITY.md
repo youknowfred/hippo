@@ -118,11 +118,14 @@ hippo's pitch is that your memory is ordinary markdown in git and it will not co
 itself — so the crash behavior of every write is a stated, tested contract, not an
 implementation detail. Every irreplaceable file (corpus `.md` files and the committed
 markers/fixtures beside them, the machine-wide trust and projects registries, the packs
-lockfile, `MEMORY.md` floors, promoted rule files) is written through one atomic
+lockfile, `MEMORY.md` floors, promoted rule files, the user tier's `.gitignore` list of
+machine-local memories) is written through one atomic
 primitive family (`memory/atomic.py`: a per-call-unique tmp in the target's directory +
 `os.replace`, symlink-aware). A reader sees the old document or the new one — **never a
 torn one** — and a crash mid-write strands at worst an orphaned tmp file, never partial
-bytes at the real path.
+bytes at the real path. The usage-aggregate, usage-summary and ledger-rotation writers, which name their tmp `<file>.tmp.<pid>`, remove
+such orphans on their next successful write, once the pid is dead and the file is more than
+five minutes old.
 
 On top of that primitive, every registered write site declares one of three crash
 classes, and a fault-injection lane tears each site once to prove it:
