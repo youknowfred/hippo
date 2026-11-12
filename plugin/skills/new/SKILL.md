@@ -47,9 +47,9 @@ not literal shell; fill in the placeholders before running):
 hippo new \
   <name> "<one-line description — this is the recall hook, be specific>" \
   --type {user|feedback|project|reference} \
-  [--tier {project|user}] \
+  [--tier {project|user}] [--machine-local] \
   --body "<full memory body — the WHY, not just the WHAT>" \
-  [--title "<floor link text>"] [--hook "<floor trailing note>"] \
+  [--title "<floor link text>"] [--hook "<short floor line>"] \
   [--links name-a,name-b | --no-links] \
   [--memory-dir <path, defaults to resolve_dirs()>]
 ```
@@ -71,12 +71,23 @@ hippo new \
   - `user` — the **machine-local user tier** (`~/.claude/hippo-memory`, or
     `HIPPO_USER_MEMORY_DIR`). It is recalled ALONGSIDE every project's corpus, so a
     person-scoped lesson learned here propagates to all your projects — but it is NEVER
-    committed to any repo, and its floor pointer lands in the user tier's OWN `MEMORY.md`,
+    committed to any project repo (the tier can have its own, see `hippo setup --user-tier`),
+    and its floor pointer lands in the user tier's OWN `MEMORY.md`,
     never the shared project one. Use it for `user`/`feedback` memories that are about YOU,
     not this codebase (e.g. a personal workflow, a cross-project preference). A fused hit is
     labelled `(user memory)` in the injected block and `user tier` in `/hippo:recall`.
-- `--title` / `--hook` are floor-pointer cosmetics for `user`/`feedback` only — omit for
-  `project`/`reference` (they're recalled on demand, never floor-linked).
+- `--machine-local` — a user-tier memory that stays on THIS machine (it implies
+  `--tier user`): the file carries `machine_local: true` and is listed in the user tier's
+  `.gitignore` before it exists, so a user tier you keep in git (`hippo setup --user-tier`)
+  never commits it, while recall here still reads it. Use it for a fact about this machine
+  (a local path, a device, a network quirk). The MCP tool takes `machine_local: true`.
+- `--title` / `--hook` shape the floor pointer, for the types the floor files (`user`/
+  `feedback`, unless the corpus's `hippo.json` `floor_sections` says otherwise) — omit them
+  for a type recalled on demand. `--hook` (`hook` on the `new_memory` tool) is the short line
+  shown in the always-loaded index; with none, the description is used when it fits. When
+  the corpus declares `floor_lint.max_line` and the pointer line would run past it, the save
+  is **refused before anything is written**, naming the limit — pass a short `--hook` and
+  save again. Never paste the whole description in as the hook.
 - `--links a,b,c` — explicit related-memory names, comma-separated. OVERRIDES the automatic
   discovery below entirely (no `recall()` call happens at all — your list wins verbatim).
 - `--no-links` — suppress the Related line entirely (no discovery, no `--links`).
@@ -232,3 +243,13 @@ outcome silently — report it to the user and act on it:**
 The tool refreshes the index automatically — the new memory is recallable in the SAME session,
 not just future ones. It does NOT commit anything; that's the user's call, same as
 `/hippo:setup`'s nudge-not-commit policy.
+
+**Where a project save lands.** By default, in `.claude/memory/` (a change in the working
+tree). A corpus whose `hippo.json` sets `"write_path": "outbox"` — and only once this machine
+accepted that with `hippo trust policy --accept` — sends the save (and its floor pointer) to
+`.claude/memory.outbox/` instead: a gitignored folder beside the corpus, so `git status` stays
+clean. The output then says so on a `lands` line. Recall sees an outbox memory from the next
+prompt, marked `unshipped: in memory.outbox`; read it there, not in `.claude/memory/`. If the
+corpus asks for the outbox but this machine has not accepted it, the save goes to the working
+tree as usual and a warning says which command turns it on — surface that line to the user. The
+`user` and `private` tiers are never redirected.

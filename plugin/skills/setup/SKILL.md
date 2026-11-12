@@ -198,6 +198,18 @@ recall already works in BM25-only mode — the plugin vendors a dependency-free 
 frontmatter parser (`memory/_vendor/`) so a bare `python3` with none of the pinned deps still
 serves real lexical recall. Bootstrap unlocks the dense half (and the full pinned deps).
 
+### The user tier's git home (optional, once per machine)
+
+When this machine has a user tier (`~/.claude/hippo-memory`, written by `hippo new --tier user`)
+and the user asks to keep it in git, offer `hippo setup --user-tier`. Run it bare first and show the
+user its preview (the `.gitignore` block and the `git init`); run it with `--yes` only after
+they agree. It makes no commit and adds no remote, and hippo never pushes, pulls or fetches, so
+tell the user the next steps are theirs: review `git status`, make the first commit, and add a
+private remote if they want the tier on another machine. A memory about this machine only
+(a local path, a device) should be marked machine-local first (`machine_local: true` in its
+frontmatter, then `hippo setup --user-tier --yes` again), so the first commit leaves it out.
+A tier inside another repository (a dotfiles repo) is reported and left alone.
+
 ## Init — once per project
 
 Builds the two seams a copy-isolated plugin cannot reach on its own: the consuming project's
@@ -407,9 +419,11 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    otherwise.
 5. **Patch `.gitignore`** — SKIP entirely when not a git repo (there's nothing for git to
    ignore yet; a future `git init` + this same nudge in step 6, once repeated after init, is
-   how it gets patched). In a git repo, append `.hippo/` and `.claude/memory.local/` if not
-   already present (`.hippo/` holds the derived index, telemetry and pending queue;
-   `memory.local/` is the private tier from step 5b — never commit either). Do NOT create `.gitignore` from scratch if the project doesn't have one
+   how it gets patched). In a git repo, append `.hippo/`, `.claude/memory.local/` and
+   `.claude/memory.outbox/` if not already present (`.hippo/` holds the derived index, telemetry
+   and pending queue; `memory.local/` is the private tier from step 5b; `memory.outbox/` holds
+   saves a corpus set to `"write_path": "outbox"` has not moved into the corpus yet — never
+   commit any of them). Do NOT create `.gitignore` from scratch if the project doesn't have one
    without asking first — a repo with zero `.gitignore` may be intentional (e.g. a throwaway test repo).
 5b. **Create the private memory tier** — git repo only. `.claude/memory.local/` is a
    gitignored sibling of `.claude/memory/` for memories you want recall over on THIS clone but

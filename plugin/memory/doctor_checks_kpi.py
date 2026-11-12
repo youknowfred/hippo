@@ -109,6 +109,30 @@ def check_kpi_rollups(ctx: DoctorContext) -> Dict[str, str]:
         return {"status": "warn", "message": f"30-day KPI check failed: {exc}."}
 
 
+def check_opened_after_recall(ctx: DoctorContext) -> Dict[str, str]:
+    """OBS-10: of the memories the recall hook injected, how many had their own file opened
+    later in the same session — the direct form of the hook's "read the file before
+    relying on it". The raw-ledger join gives the split by memory type; the daily rollups
+    give the same rate over 30 days, past the ledgers' rotation. Read-only and
+    display-only: ``ok`` unless the read itself fails."""
+    try:
+        from .outcome_opened import format_opened_report
+        from .telemetry import default_telemetry_dir
+        from .telemetry_rollup import read_rollups, summarize
+
+        td = default_telemetry_dir(ctx.memory_dir)
+        msg = format_opened_report(ctx.memory_dir, td)
+        k = summarize(read_rollups(td, days=30))
+        if k["injected_memories"]:
+            msg += (
+                f" 30 days of rollups: {k['opens_after_recall']} of {k['injected_memories']} "
+                f"injected memories opened afterwards ({k['opens']} memory open(s) in all)."
+            )
+        return {"status": "ok", "message": msg}
+    except Exception as exc:
+        return {"status": "warn", "message": f"opened-after-recall check failed: {exc}."}
+
+
 _USAGE_LINE_MAX = 14
 
 

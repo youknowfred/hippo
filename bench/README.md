@@ -56,3 +56,23 @@ What hippo actually does on the hot path is **retrieval over a curated, human-ap
 so the honest metric is retrieval precision (recall@k / MRR@k) on that corpus, which is exactly what
 `bench/run.sh` reports. If and when hippo grows an autonomous-extraction mode, a LongMemEval-style
 number becomes meaningful; until then it would be measuring the wrong thing.
+
+## Other measurement tools in `bench/`
+
+`bench/` is a repository-checkout tool, not part of the plugin: the installed plugin is the
+`plugin/` directory alone, and nothing under `plugin/` imports `bench/` (a test enforces it).
+Run these from the repository root, with the engine on the path:
+
+```bash
+# grid-search the knee-ratio / dense-floor constants against a labeled hard set (report-only)
+PYTHONPATH=plugin python -m bench.calibrate_thresholds --memory-dir DIR --hard-set PATH \
+  [--abstention-set PATH] [--index-dir DIR]
+
+# the /dream snapshot-diff A/B over the committed fixture (tests/fixtures/dream_ab), or over a
+# copy of a live corpus with --live (measure-only)
+PYTHONPATH=plugin python -m bench.dream_eval [--live [--memory-dir DIR]] [--rebuilds N] [--pin]
+```
+
+These used to run as `python -m memory.eval_recall --calibrate` and `--ab HIPPO_DREAM`; those
+flags now print where the tool lives. The other `--ab` arms (`HIPPO_SALIENCE`,
+`HIPPO_OUTCOME_PRIOR`) still ship with the plugin, because `hippo doctor` reads their reports.

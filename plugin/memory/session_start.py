@@ -471,6 +471,9 @@ def main(
             for tdir, tidx, label in _recall_tier_dirs(memory_dir, None):
                 if label != "project" and os.path.isdir(tdir):
                     refresh_index(tdir, tidx)
+            from .outbox import refresh_index as refresh_outbox  # OUT-1: a no-op without one
+
+            refresh_outbox(memory_dir)
         except Exception:
             pass
         # Open a NEW telemetry session so the recall ledger can count distinct sessions

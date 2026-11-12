@@ -368,7 +368,8 @@ def check_derived_dirs(ctx: DoctorContext) -> Dict[str, str]:
             if trees:
                 parts.append(
                     f"{trees} worktree(s) under {claude}/worktrees still carry old copies "
-                    f"({_mb(nbytes)}) that nothing reads. Delete them: find "
+                    f"({_mb(nbytes)}) that nothing reads. `hippo setup --worktree-copies` "
+                    "lists them and removes one per yes. Or delete them all: find "
                     f"{shlex.quote(os.path.join(claude, 'worktrees'))} -mindepth 3 -maxdepth 3 "
                     "-type d -path '*/.claude/.memory-*' -exec rm -rf {} +"
                 )

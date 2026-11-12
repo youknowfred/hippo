@@ -15,6 +15,7 @@ import os
 import uuid
 from typing import Iterator, Optional
 
+from .atomic import sweep_dead_pid_tmps
 from .derived_dirs import derived_dir
 from .provenance import ensure_self_ignoring_dir
 
@@ -178,6 +179,7 @@ def _rotate_if_needed(path: str) -> None:
         with open(tmp, "wb") as fh:
             fh.write(tail)
         os.replace(tmp, path)
+        sweep_dead_pid_tmps(path)  # RWY-6: a killed rotation's tmp goes on the next one
     except Exception:
         pass
 

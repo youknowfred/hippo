@@ -45,6 +45,11 @@ _TOOLS = [
                 "description": {"type": "string", "description": "one-line recall hook — the field recall matches"},
                 "type": {"type": "string", "enum": list(("user", "feedback", "project", "reference"))},
                 "body": {"type": "string", "description": "the full memory body (the WHY)"},
+                "hook": {
+                    "type": "string",
+                    "description": "the short line shown in the always-loaded index; "
+                    "defaults to the description when that fits",
+                },
                 "links": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -63,6 +68,11 @@ _TOOLS = [
                     "git baseline) and write NOTHING — run it before the real write when "
                     "draining captures, so a duplicate routes to update/supersede instead of "
                     "becoming a new file",
+                },
+                "machine_local": {
+                    "type": "boolean",
+                    "description": "save to the user tier as a machine-local memory: recalled "
+                    "here, kept out of the user tier's git repository",
                 },
             },
             "required": ["name", "description", "type"],
