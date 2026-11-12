@@ -43,6 +43,7 @@ from .provenance import resolve_dirs
 # import and monkeypatch target (mcp_server, sleep, tests) resolving unchanged.
 from .doctor_checks_platform import (
     check_attention,
+    check_attention_cost,
     check_claude_code_version,
     check_installed_version,
     check_mcp_allowlist,
@@ -345,6 +346,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Dict[str, str]]]] = [
     ("installed_version", check_installed_version),  # FMT-3: installed_plugins.json vs the version this process runs
     ("claude_code_version", check_claude_code_version),  # PLT-2: the running Claude Code vs hippo's declared floor
     ("attention", check_attention),  # CLM-2: calm/full SessionStart and the mute list
+    ("attention_cost", check_attention_cost),  # CLM-9: full attention with SessionStarts at the cap
     ("settings", check_settings),  # SRF-4: legacy env/config names in use + their new spelling; a plaintext key file
     ("venv", check_venv),
     ("corpus", check_corpus_exists),
