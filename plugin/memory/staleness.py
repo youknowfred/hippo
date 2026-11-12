@@ -588,6 +588,41 @@ def set_invalid_after(path: str, ts: Optional[str] = None, *, dry_run: bool = Fa
     return result
 
 
+# Soft-invalidation horizon (Tier 3, graceful decay): recall halves a "recent"
+# invalidated memory's fused score before the top-k cut and display-filters an "old" one
+# after it; ``nondrift_old_invalidated`` below counts the "old" population. Defined here,
+# not in recall_graph, so this foundation module never imports the recall engine (RWY-5);
+# recall_graph and the recall façade re-import both names.
+_INVALIDATION_RECENT_DAYS = 30.0
+
+
+def _invalidation_state(entry: dict, *, now: Optional[float] = None) -> Optional[str]:
+    """Classify one entry's ``invalid_after`` as ``"recent"``, ``"old"``, or ``None``.
+
+    ``None`` covers both "not invalidated" (no ``invalid_after``) and "unparseable
+    ``invalid_after``" — both fail OPEN to "treat as valid/not-invalidated", never to "treat
+    as invalidated". Pure; never raises.
+    """
+    raw = entry.get("invalid_after")
+    if not raw:
+        return None
+    try:
+        from datetime import datetime, timezone
+
+        ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        ref = (
+            datetime.fromtimestamp(now, tz=timezone.utc)
+            if now is not None
+            else datetime.now(timezone.utc)
+        )
+        age_days = (ref - ts).total_seconds() / 86400.0
+    except Exception:
+        return None
+    return "recent" if age_days < _INVALIDATION_RECENT_DAYS else "old"
+
+
 def read_invalid_after(text: str) -> Optional[str]:
     """The memory's ``invalid_after`` (top-level or under ``metadata:``), or ``None``.
 
@@ -596,7 +631,7 @@ def read_invalid_after(text: str) -> Optional[str]:
     extractor for this key (same ``metadata:`` fallback + YAML-date coercion the index
     itself applies), so what LIF-1's producers see can never drift from what recall's
     penalty actually acts on. Never raises; ``None`` on any failure (fails OPEN to
-    "not invalidated", the same direction as ``recall._invalidation_state``).
+    "not invalidated", the same direction as ``_invalidation_state`` above).
     """
     try:
         from .build_index import _extract_invalid_after
@@ -671,17 +706,14 @@ def nondrift_old_invalidated(
     These are the supersede/merge/manual retirements ``find_stale`` can never see (no
     cited-code drift): recall's emission loop already display-filters them ("old" state),
     so without this count they are invisible everywhere while still sitting in the corpus.
-    Classification delegates to ``recall._invalidation_state`` (one horizon, one
-    implementation — the same 30-day boundary the display filter and the staleness
-    producer's existing in-stale line use); the lazy import keeps this module light for
-    callers that never need it. Reinstatement stays the existing per-item
+    Classification is ``_invalidation_state`` above (one horizon, one implementation —
+    the same 30-day boundary recall's display filter and the staleness producer's
+    existing in-stale line use). Reinstatement stays the existing per-item
     ``semantic_reverify(name, outcome='graduate'|'fix')`` — ``reverify_file`` already
     strips ``invalid_after``; no new verb exists here. Read-only; never raises; ``{}`` on
     any failure (fails toward silence on a broken corpus — the other checks own that).
     """
     try:
-        from .recall import _invalidation_state
-
         exclude = set(stale_names or ())
         return {
             name: ia

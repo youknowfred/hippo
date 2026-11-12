@@ -106,6 +106,10 @@ from .recall_query import (
     clean_query,
 )
 from .provenance_format import injection_refusal
+# SEC-5's one description flatten/truncate lives in ``trust`` (the consent sample is its
+# other caller, and a foundation module may not import this orchestrator — RWY-5); it is
+# re-imported here so ``memory.recall.inject_description`` keeps resolving.
+from .trust import _INJECT_DESC_CHARS, inject_description
 from .recall_abstain import corroboration
 from .recall_budget import _PROMPT_BUDGET_CHARS, below_knee, fit
 from .recall_rank import (
@@ -1151,23 +1155,6 @@ def recall(
         return results
     except Exception:
         return []
-
-
-# SEC-5: the ONE flatten/truncate every injected description goes through — shared with
-# ``trust.corpus_consent_sample`` so the consent review shows EXACTLY the strings that
-# will enter prompts once a corpus is trusted (ROADMAP.v1 §4: consent sampled NAMES while
-# injection used DESCRIPTIONS — the review must sample the real injectable surface).
-_INJECT_DESC_CHARS = 220
-
-
-def inject_description(text: str) -> str:
-    """A ``description`` exactly as the injection layer renders it: newlines flattened,
-    trimmed, truncated to the calibrated per-line budget with an ellipsis (SEC-5 — the
-    consent surface must be byte-equal to the injection surface)."""
-    desc = (text or "").replace("\n", " ").strip()
-    if len(desc) > _INJECT_DESC_CHARS:
-        desc = desc[: _INJECT_DESC_CHARS - 3].rstrip() + "…"
-    return desc
 
 
 def format_results(

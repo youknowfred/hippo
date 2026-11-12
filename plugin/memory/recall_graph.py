@@ -11,11 +11,15 @@ from typing import Dict, List, Optional, Tuple
 
 from .build_index import _hash, bm25_terms, memory_doc_text, tokenize
 
+# The soft-invalidation horizon and its classifier live in ``staleness`` (its terminal-state
+# count needs them, and a foundation module may not import recall — RWY-5); re-imported here
+# so ``memory.recall_graph.<name>`` and the façade's ``memory.recall.<name>`` keep resolving.
+from .staleness import _INVALIDATION_RECENT_DAYS, _invalidation_state  # noqa: F401
+
 # Soft-invalidation (Tier 3, graceful decay) — "recent" halves the fused score BEFORE the
 # top-k cut (real demotion, can fall out of top-k); "old" is filtered from DISPLAY only,
 # after the cut (the memory stays fully in the corpus/index, never excluded from ranking).
 _INVALIDATION_PENALTY = 0.5
-_INVALIDATION_RECENT_DAYS = 30.0
 
 # Typed-edge demotion (GRA-4) — a memory that is the TARGET of a live supersedes edge
 # (some OTHER memory in the index declares `supersedes: [it]`) has its fused score halved
@@ -42,33 +46,6 @@ _SUPERSEDED_PENALTY = 0.5
 # discounted score actually beats an organic candidate, never by displacing one for free.
 _GRAPH_SEEDS = 3  # override: HIPPO_GRAPH_SEEDS (0 disables expansion entirely)
 _NEIGHBOR_DISCOUNT = 0.5
-
-
-def _invalidation_state(entry: dict, *, now: Optional[float] = None) -> Optional[str]:
-    """Classify one entry's ``invalid_after`` as ``"recent"``, ``"old"``, or ``None``.
-
-    ``None`` covers both "not invalidated" (no ``invalid_after``) and "unparseable
-    ``invalid_after``" — both fail OPEN to "treat as valid/not-invalidated", never to "treat
-    as invalidated". Pure; never raises.
-    """
-    raw = entry.get("invalid_after")
-    if not raw:
-        return None
-    try:
-        from datetime import datetime, timezone
-
-        ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        ref = (
-            datetime.fromtimestamp(now, tz=timezone.utc)
-            if now is not None
-            else datetime.now(timezone.utc)
-        )
-        age_days = (ref - ts).total_seconds() / 86400.0
-    except Exception:
-        return None
-    return "recent" if age_days < _INVALIDATION_RECENT_DAYS else "old"
 
 
 def _drift_patch(entry: dict, memory_dir: str) -> dict:
