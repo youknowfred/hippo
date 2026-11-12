@@ -84,9 +84,12 @@ def symlink_farm_census(claude_projects_dir: Optional[str] = None) -> dict:
     """Classify every ``<projects>/<encoded>/memory`` symlink: ok / dangling /
     dangling-temp-rooted.
 
-    Symlinks ONLY — a real ``memory`` dir or file is a native-memory shape
-    (``check_native_coexistence``'s class) and is not hippo's to report here, let alone
-    touch. A dangling target under a system temp root can never be an unmounted volume
+    ``entries`` holds symlinks ONLY — a real ``memory`` dir or file is a native-memory
+    shape and is never hippo's to touch. NAT-4: a real ``memory`` DIRECTORY holding at
+    least one ``.md`` file is native memory that belongs to no corpus (a session launched
+    from a folder with no hippo corpus); it is listed separately under ``native_dirs``
+    (the dir and its top-level ``.md`` count — names and counts only, never contents) so
+    the remover and every symlink count stay exactly as they were. A dangling target under a system temp root can never be an unmounted volume
     (the ``registry.prune_dead`` honesty argument), which is what makes that class —
     and only that class — mechanically safe for HYG-2's batch remover. ``pytest_leaked``
     counts dangling targets under a pytest tmp tree (``pytest-of-``): the self-inflicted
@@ -98,10 +101,14 @@ def symlink_farm_census(claude_projects_dir: Optional[str] = None) -> dict:
         names = sorted(os.listdir(root))
     except Exception:
         names = []
+    native_dirs: List[dict] = []
     for name in names:
         link = os.path.join(root, name, "memory")
         try:
             if not os.path.islink(link):
+                n_md = _native_md_count(link)
+                if n_md:
+                    native_dirs.append({"dir": link, "files": n_md})
                 continue
             target = os.readlink(link)
             if not os.path.isabs(target):
@@ -134,7 +141,25 @@ def symlink_farm_census(claude_projects_dir: Optional[str] = None) -> dict:
         "pytest_leaked": sum(
             1 for e in entries if e["status"] != "ok" and "pytest-of-" in e["target"]
         ),
+        "native_dirs": native_dirs,
     }
+
+
+def _native_md_count(path: str) -> int:
+    """Top-level ``.md`` files in a REAL directory at ``path`` (0 for a symlink, a file,
+    an absent path, or any read failure). Lists names only; never opens a file."""
+    try:
+        if os.path.islink(path) or not os.path.isdir(path):
+            return 0
+        return sum(
+            1
+            for n in os.listdir(path)
+            if n.endswith(".md")
+            and not os.path.islink(os.path.join(path, n))
+            and os.path.isfile(os.path.join(path, n))
+        )
+    except Exception:
+        return 0
 
 
 # --------------------------------------------------------------------------- #
@@ -363,8 +388,8 @@ def prune_dangling(claude_projects_dir: Optional[str] = None) -> dict:
     honesty grain, mirrored exactly): islink AND target gone AND target under a system
     temp root — a dangling target anywhere else could be an unmounted volume and stays
     per-item (``kept_dead``, named for a deliberate hand removal). Never touches
-    non-symlink shapes (a real ``memory`` dir/file is native-memory state and never
-    even enumerates); only ever removes the ``memory`` symlink hippo itself creates,
+    non-symlink shapes (a real ``memory`` dir/file is native-memory state: the census
+    may name it under ``native_dirs``, the remover never reads that list); only ever removes the ``memory`` symlink hippo itself creates,
     never its harness-owned parent dir. The removal is a bare unlink and claims no
     more — no registry document is rewritten, so SEC-19's atomic-whole-document
     discipline is not implicated. Never raises.
@@ -407,10 +432,30 @@ def _n(count: int, singular: str, plural: str) -> str:
     return f"{count} {singular if count == 1 else plural}"
 
 
+def _render_native_dirs(farm: dict) -> List[str]:
+    """NAT-4: one line per real native ``memory`` directory no corpus receives, then the
+    adopt route in the words doctor's broken-link check already uses."""
+    dirs = farm.get("native_dirs") or []
+    if not dirs:
+        return []
+    lines = [
+        "native memory in no corpus (Claude Code wrote it; no hippo corpus receives it): "
+        + _n(len(dirs), "directory", "directories")
+    ]
+    for d in dirs:
+        lines.append(f"  {d['dir']} ({_n(d['files'], 'memory file', 'memory files')})")
+    lines.append(
+        "  to keep them, run /hippo:setup in that project — it previews adopting them "
+        "first and writes nothing until you confirm (`hippo adopt` shows the same preview)."
+    )
+    return lines
+
+
 def _render_symlinks(farm: dict) -> List[str]:
     entries = farm["entries"]
+    native = _render_native_dirs(farm)
     if not entries:
-        return [f"memory symlinks: none under {farm['path']}."]
+        return [f"memory symlinks: none under {farm['path']}."] + native
     lines = [
         f"memory symlinks: {farm['path']} "
         f"({_n(len(entries), 'entry', 'entries')}: {farm['ok']} ok, "
@@ -440,7 +485,7 @@ def _render_symlinks(farm: dict) -> List[str]:
             + _n(n_batch, "batch-safe entry", "batch-safe entries")
             + ": hippo census --prune-dangling"
         )
-    return lines
+    return lines + native
 
 
 def _render_trust(census: dict) -> List[str]:
@@ -533,6 +578,7 @@ def render_report(census: dict) -> str:
     empty = (
         not census["projects"]["entries"]
         and not census["symlinks"]["entries"]
+        and not census["symlinks"].get("native_dirs")
         and not census["trust"]["entries"]
         and not census["scheduler"]["entries"]
     )
