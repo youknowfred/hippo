@@ -45,6 +45,11 @@ _TOOLS = [
                 "description": {"type": "string", "description": "one-line recall hook — the field recall matches"},
                 "type": {"type": "string", "enum": list(("user", "feedback", "project", "reference"))},
                 "body": {"type": "string", "description": "the full memory body (the WHY)"},
+                "hook": {
+                    "type": "string",
+                    "description": "the short line shown in the always-loaded index; "
+                    "defaults to the description when that fits",
+                },
                 "links": {
                     "type": "array",
                     "items": {"type": "string"},

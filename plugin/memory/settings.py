@@ -7,7 +7,7 @@ them into three homes:
 
   - **corpus policy** — the committed ``.claude/memory/hippo.json`` (JSON, so a bare
     pre-bootstrap ``python3`` reads it): ``volatile_paths``, ``floor_lint``,
-    ``fold_digests``, ``attention``, ``mute``. ``provenance_format.read_policy_key``
+    ``floor_sections``, ``fold_digests``, ``attention``, ``mute``. ``provenance_format.read_policy_key``
     reads it first and falls back to ``.format`` (both read through v1.43; the format
     axes ``corpus_format``/``cite_derivation`` stay in ``.format``). TND-13 adds
     ``acknowledged_findings`` (``lint_ack``), read from ``hippo.json`` only — it never
@@ -186,7 +186,9 @@ LEGACY_ENV: Dict[str, str] = {
 }
 
 # ``.format`` policy keys -> hippo.json (same key name).
-POLICY_KEYS = ("volatile_paths", "floor_lint", "fold_digests", "attention", "mute")
+POLICY_KEYS = (
+    "volatile_paths", "floor_lint", "floor_sections", "fold_digests", "attention", "mute",
+)
 FORMAT_AXES = ("corpus_format", "cite_derivation")
 
 # ``~/.claude/hippo-llm.json`` key -> its new home.
