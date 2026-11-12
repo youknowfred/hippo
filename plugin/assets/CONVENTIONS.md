@@ -168,6 +168,28 @@ by hand, so it's re-created at the end of the file in skeleton format), or `skip
 machine-readable reason (`MEMORY.md missing`, `pointer already present`, or a write failure).
 A `project`/`reference` write is `skipped` by design — recalled on demand, never floor-linked.
 
+**Declared sections.** A corpus may name its own floor sections in the committed
+`.claude/memory/hippo.json`:
+
+```json
+"floor_sections": [
+  {"heading": "## User", "types": ["user"]},
+  {"heading": "## Working Style & Process Feedback", "types": ["feedback"]},
+  {"heading": "## In flight", "types": []}
+]
+```
+
+Each declared section is floor (`lint_floor` accepts pointers there), and `new_memory` files
+a new memory's pointer under the section that lists its type. A section with `types: []` is
+hand-maintained: never auto-filed into, still legitimately floor. An entry whose heading is
+not a `## ` line, or that lists a type an earlier entry already claimed, is ignored; with no
+valid entry (or no key) the floor is the two sections above.
+
+**The pointer's line.** The pointer's trailing text is the `hook` (`--hook` on `hippo new`)
+when given, else the description. When the corpus declares `floor_lint.max_line` and the
+pointer line would run past it, the save is refused before any file is written, naming the
+limit — a description is never copied whole into the floor past its line limit.
+
 New pointers are inserted at their deterministic SORTED position within the section — before
 the first existing pointer line whose memory name sorts lexicographically greater — rather
 than always at the tail. Two teammates each adding a DIFFERENT name to the same section touch

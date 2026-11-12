@@ -334,7 +334,7 @@ hippo's settings now live in three places, and the first one that answers wins:
 2. **hippo's plugin options** — your machine's settings: the calm SessionStart switch, the
    LLM opt-ins, the LLM model, and the LLM API key (kept in your system keychain).
 3. **`.claude/memory/hippo.json`** — the corpus's committed policy, shared with your team:
-   `volatile_paths`, `floor_lint`, `fold_digests`, `attention` (`"calm"` or `"full"`) and
+   `volatile_paths`, `floor_lint`, `floor_sections`, `fold_digests`, `attention` (`"calm"` or `"full"`) and
    `mute` (SessionStart signals to hide).
 
 The environment variables you might still set are the directory overrides,

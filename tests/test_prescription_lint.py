@@ -185,7 +185,8 @@ def test_check_candidate_never_carries_a_prescription_field(tmp_path):
     # route stays add (dup-only), and no prescription lint result leaks into the decision
     assert decision["route"] == "add"
     assert "prescription" not in " ".join(decision).lower()
-    assert set(decision) == {"route", "neighbors", "rule_neighbors", "baseline", "note", "ticket"}
+    assert set(decision) == {
+        "route", "neighbors", "rule_neighbors", "baseline", "note", "ticket", "refused"}
 
 
 def test_prescription_lint_never_imported_by_hot_path():
