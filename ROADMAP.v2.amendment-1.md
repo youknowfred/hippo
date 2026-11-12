@@ -361,6 +361,12 @@ identities.*
   writes a git pre-commit hook that calls it. *Gate:* on the three corpora, the hook passes every
   commit in the last 30 days that the estate's checker passed and fails the ones it failed; a
   corpus with no `budgets` behaves as today.
+  *Ruled 2026-11-12, after the replay:* the banned-pattern check over memory **bodies** stays
+  at write time, as GAT-1's warning, and is not part of the commit gate. Replayed over 30 days of
+  default-branch commits it would have failed 187 of 359 on emgl and 11 of 22 on Skyline, each
+  one a real status line added to a body. The commit gate keeps the floor checks and the declared
+  budgets, where it agrees with the estate's own checker on every replayed commit (both fail 3,
+  both pass 356). LDG-1 removes the reason those lines get typed.
 - **GAT-3 Declared floor sections and a pointer line of its own** `S` — `hippo.json` declares
   the floor's sections and which types file under which; the two hardcoded names
   (`new_memory.py:84-87`) become the default. The floor pointer takes a short line of its own
@@ -514,7 +520,8 @@ Batched, with a recommendation each, as §8 did. Item ids in §A4 that depend on
 work the ruling itself asks for before anything builds: V2Q-15 (14 days of OBS-10 before a
 threshold is set), V2Q-17 (the classification table before the consent change) and V2Q-27 (the
 replay that sets the number). V2Q-22's change to the invariant's wording lands with GAT-1, in the
-change that first lets a hook deny.
+change that first lets a hook deny. One follow-on answer was given the same day under V2Q-22 and is recorded
+at GAT-2: status words in memory bodies are warned at write time only, never failed at commit.
 
 - **V2Q-13 — Train shape.** *Options:* (a) add v1.44.0 for the additive items and keep v2.0.0
   as chartered; (b) fold them into v1.43.0; (c) fold them into v2.0.0. **Rec: (a).** It keeps the
