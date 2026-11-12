@@ -39,3 +39,55 @@ def test_rows_use_the_ledger_vocabulary():
 def test_the_closed_trains_say_so():
     for n in ("", "2", "3", "4", "5"):
         assert _read(f"ROADMAP.enhancements{n}.yaml").startswith("# HISTORY"), n
+
+
+# ---- amendment 1: proposed rows stay in step with their design record, apart from the ratified ones
+def _amendment():
+    return yaml.safe_load(_read("ROADMAP.v2.yaml"))["amendment_1"]
+
+
+def _amendment_section(start, end):
+    md = _read("ROADMAP.v2.amendment-1.md")
+    return md[md.index(start):md.index(end)]
+
+
+def test_every_amendment_item_has_exactly_one_row():
+    am = _amendment()
+    design = re.findall(r"^- \*\*([A-Z]{3}-\d+) ", _amendment_section("## A4. Items", "## A5. The train"), re.M)
+    new = [row["id"] for row in am["items"]]
+    changed = [row["id"] for row in am["changed"]]
+    assert len(new) == len(set(new))
+    assert sorted(design) == sorted(new + [c for c in changed if re.fullmatch(r"[A-Z]{3}-\d+", c)])
+
+
+def test_amendment_rows_never_reuse_a_ratified_id():
+    ledger = yaml.safe_load(_read("ROADMAP.v2.yaml"))
+    am = ledger["amendment_1"]
+    ratified = {row["id"] for row in ledger["items"]}
+    assert not ratified & {row["id"] for row in am["items"]}
+    chartered = ratified | {row["id"] for row in ledger["threads"]} | {"LDG-2"}  # named in LDG-1.spec.md
+    assert {row["id"] for row in am["changed"]} <= chartered
+    assert not {r["id"] for r in ledger["owner_rulings"]} & {r["id"] for r in am["owner_rulings"]}
+
+
+def test_amendment_rows_use_the_ledger_vocabulary():
+    ledger = yaml.safe_load(_read("ROADMAP.v2.yaml"))
+    am = ledger["amendment_1"]
+    versions = {r["version"] for r in ledger["releases"]} | {r["version"] for r in am["releases"]} | {"v2.x"}
+    new = {row["id"] for row in am["items"]}
+    known = new | {row["id"] for row in ledger["items"]} | {row["id"] for row in ledger["threads"]}
+    rulings = {r["id"] for r in am["owner_rulings"]}
+    for row in am["items"]:
+        assert row["status"] in {"proposed", "built", "planned", "partial", "done"}, row
+        assert row["size"] in {"S", "M", "L"}, row
+        assert row["release"] in versions, row
+        assert set(row.get("deps", [])) <= known, row
+        assert row.get("ruling", next(iter(rulings))) in rulings, row
+    for row in am["changed"]:
+        assert row["ruling"] in rulings, row
+
+
+def test_every_amendment_ruling_is_asked_in_the_design_record():
+    asked = re.findall(r"^- \*\*(V2Q-\d+) ", _amendment_section("## A6. Owner rulings needed", "## A7. KPIs added"), re.M)
+    assert asked == [r["id"] for r in _amendment()["owner_rulings"]]
+    assert all(r["status"] == "open" for r in _amendment()["owner_rulings"])
