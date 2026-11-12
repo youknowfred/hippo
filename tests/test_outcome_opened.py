@@ -153,10 +153,13 @@ def test_only_the_window_both_ledgers_cover_is_judged(repo, memory_dir, monkeypa
     _mem(memory_dir, "new-note")
     td = default_telemetry_dir(memory_dir)
     now = time.time()
-    monkeypatch.setenv("HIPPO_TELEMETRY_MAX_BYTES", "400")  # the two rows below pass 45% of it
+    # The floor of the byte ceiling is 256, so "may have rotated" starts at 115 bytes. The
+    # outcome rows below total well over that whatever length the timestamps print at.
+    monkeypatch.setenv("HIPPO_TELEMETRY_MAX_BYTES", "256")
     _append(td, "episode_buffer.jsonl", {"ts": now - 5000, "session_id": "s", "recalled_names": ["old-note"]})
     _append(td, "episode_buffer.jsonl", {"ts": now - 50, "session_id": "s", "recalled_names": ["new-note"]})
     _append(td, "outcome_events.jsonl", {"ts": now - 100, "session_id": "s", "tool": "Read", "path": "src/a.py"})
+    _append(td, "outcome_events.jsonl", {"ts": now - 90, "session_id": "s", "tool": "Edit", "path": "src/a.py"})
     _append(td, "outcome_events.jsonl",
             {"ts": now - 10, "session_id": "s", "tool": "Read", "path": ".claude/memory/new-note.md"})
     r = OO.opened_after_recall(memory_dir)
