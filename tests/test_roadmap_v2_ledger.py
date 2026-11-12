@@ -41,7 +41,7 @@ def test_the_closed_trains_say_so():
         assert _read(f"ROADMAP.enhancements{n}.yaml").startswith("# HISTORY"), n
 
 
-# ---- amendment 1: proposed rows stay in step with their design record, apart from the ratified ones
+# ---- amendment 1: its rows stay in step with their design record, apart from the 2026-10-03 ids
 def _amendment():
     return yaml.safe_load(_read("ROADMAP.v2.yaml"))["amendment_1"]
 
@@ -65,7 +65,7 @@ def test_amendment_rows_never_reuse_a_ratified_id():
     am = ledger["amendment_1"]
     ratified = {row["id"] for row in ledger["items"]}
     assert not ratified & {row["id"] for row in am["items"]}
-    chartered = ratified | {row["id"] for row in ledger["threads"]} | {"LDG-2"}  # named in LDG-1.spec.md
+    chartered = ratified | {row["id"] for row in ledger["threads"]}
     assert {row["id"] for row in am["changed"]} <= chartered
     assert not {r["id"] for r in ledger["owner_rulings"]} & {r["id"] for r in am["owner_rulings"]}
 
@@ -73,12 +73,12 @@ def test_amendment_rows_never_reuse_a_ratified_id():
 def test_amendment_rows_use_the_ledger_vocabulary():
     ledger = yaml.safe_load(_read("ROADMAP.v2.yaml"))
     am = ledger["amendment_1"]
-    versions = {r["version"] for r in ledger["releases"]} | {r["version"] for r in am["releases"]} | {"v2.x"}
+    versions = {r["version"] for r in ledger["releases"]} | {"v2.x"}
     new = {row["id"] for row in am["items"]}
     known = new | {row["id"] for row in ledger["items"]} | {row["id"] for row in ledger["threads"]}
     rulings = {r["id"] for r in am["owner_rulings"]}
     for row in am["items"]:
-        assert row["status"] in {"proposed", "built", "planned", "partial", "done"}, row
+        assert row["status"] in {"built", "planned", "partial", "done"}, row
         assert row["size"] in {"S", "M", "L"}, row
         assert row["release"] in versions, row
         assert set(row.get("deps", [])) <= known, row
@@ -87,7 +87,7 @@ def test_amendment_rows_use_the_ledger_vocabulary():
         assert row["ruling"] in rulings, row
 
 
-def test_every_amendment_ruling_is_asked_in_the_design_record():
-    asked = re.findall(r"^- \*\*(V2Q-\d+) ", _amendment_section("## A6. Owner rulings needed", "## A7. KPIs added"), re.M)
+def test_every_amendment_ruling_is_recorded_in_the_design_record():
+    asked = re.findall(r"^- \*\*(V2Q-\d+) ", _amendment_section("## A6. Owner rulings", "## A7. KPIs added"), re.M)
     assert asked == [r["id"] for r in _amendment()["owner_rulings"]]
-    assert all(r["status"] == "open" for r in _amendment()["owner_rulings"])
+    assert all(r["status"] == "ratified" and r["ruling"] for r in _amendment()["owner_rulings"])

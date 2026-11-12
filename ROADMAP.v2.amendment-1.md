@@ -1,10 +1,11 @@
 # hippo — Road to v2.0.0, amendment 1: the estate evaluation
 
-**Status: PROPOSED 2026-11-12. Nothing here is ratified.** This is a companion to
+**Status: RATIFIED 2026-11-12.** The owner accepted every §A6 ruling as recommended ("Accept
+all"), the same day it was proposed. This is a companion to
 [`ROADMAP.v2.md`](ROADMAP.v2.md) (ratified 2026-10-03), in the same shape: ground truth →
-corrections → items → train → rulings → KPIs. It does not edit the ratified document.
-[`ROADMAP.v2.yaml`](ROADMAP.v2.yaml) carries its rows under `amendment_1`, with status
-`proposed` until the owner rules (§A6). Authored at **v1.42.8** (`b85a907`).
+corrections → items → train → rulings → KPIs. It does not edit that document.
+[`ROADMAP.v2.yaml`](ROADMAP.v2.yaml) carries its rows under `amendment_1`, and that is where
+their status lives. Authored at **v1.42.8** (`b85a907`).
 
 **Why an amendment.** Six weeks after ratification the first three releases of the train have
 run on a production estate: five corpora owned by one person, the largest ("emgl") at 1,068
@@ -49,10 +50,10 @@ is opened afterwards.
   two.
 
 **What this amendment proposes.** Thirty-one new items: 14 S, 13 M, 4 L. Twenty-five ship on
-the road to v2.0.0 (six small ones in v1.43.0, nineteen in a proposed v1.44.0) and six in v2.x.
+the road to v2.0.0 (six small ones in v1.43.0, nineteen in a new v1.44.0) and six in v2.x.
 The ratified thesis stands (earned context, derived maintenance, a smaller contract), and
 so do the invariants. Two chartered items change design (SRF-7, NAT-2), two v2.x threads are
-proposed for pull-forward (LDG-1, GP-S4), and the train gains one minor so that v2.0.0 stays the
+pulled forward (LDG-1, GP-S4), and the train gains one minor so that v2.0.0 stays the
 subtraction release (ruling V2Q-13).
 
 ---
@@ -452,14 +453,14 @@ identities.*
   lists the edges already applied below it for one reviewed undo. *Gate, added:* on emgl, 0
   applied edges below the floor after the undo; on hippo and Skyline the linker's applied set is
   unchanged.
-- **LDG-1 External-ledger read-time join** *(thread, v2.x → proposed v1.44.0)* — Direction A as
+- **LDG-1 External-ledger read-time join** *(thread, v2.x → v1.44.0)* — Direction A as
   ratified. This amendment answers its other three questions in V2Q-21. *Why now:* the boundary
   "memory cites the tracker by id; status lives in the tracker" is failing in 661 of 1,066 bodies
   ✓, and GAT-1's body lint only polices that. The join removes the reason to retype a status.
   hippo reads the committed snapshot and never the network. *Gate:* on emgl, a recall row citing
   a tracker id renders its status with the snapshot date; on hippo and Skyline (no ledger
   declared) recall output is byte-identical.
-- **GP-S4 `recall --for-issue`** *(thread, v2.x → proposed v1.44.0)* · deps LDG-1, HOT-7 — The
+- **GP-S4 `recall --for-issue`** *(thread, v2.x → v1.44.0)* · deps LDG-1, HOT-7 — The
   issue join is one of HOT-7's three admissions for journals, which is why it moves with it.
   *Gate:* on emgl, 20 sampled ids each return the memories that cite them; on the other two
   corpora the verb reports that no ledger is declared.
@@ -501,9 +502,14 @@ estate code and should not slip.
 
 ---
 
-## A6. Owner rulings needed
+## A6. Owner rulings (RECORDED 2026-11-12)
 
 Batched, with a recommendation each, as §8 did. Item ids in §A4 that depend on a ruling name it.
+**On 2026-11-12 the owner ratified every recommendation below as written.** Three of them carry
+work the ruling itself asks for before anything builds: V2Q-15 (14 days of OBS-10 before a
+threshold is set), V2Q-17 (the classification table before the consent change) and V2Q-27 (the
+replay that sets the number). V2Q-22's change to the invariant's wording lands with GAT-1, in the
+change that first lets a hook deny.
 
 - **V2Q-13 — Train shape.** *Options:* (a) add v1.44.0 for the additive items and keep v2.0.0
   as chartered; (b) fold them into v1.43.0; (c) fold them into v2.0.0. **Rec: (a).** It keeps the
