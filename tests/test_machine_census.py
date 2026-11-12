@@ -130,6 +130,71 @@ def test_symlink_farm_skips_non_symlink_shapes(tmp_path):
 
     out = MC.symlink_farm_census(farm)
     assert out["entries"] == []
+    # NAT-4: an EMPTY real dir (and a plain file) is still not reported.
+    assert out["native_dirs"] == []
+
+
+def _add_native_dir(farm: str, name: str, files):
+    d = os.path.join(farm, name, "memory")
+    os.makedirs(d, exist_ok=True)
+    for f in files:
+        with open(os.path.join(d, f), "w", encoding="utf-8") as fh:
+            fh.write("---\nname: x\n---\nbody\n")
+    return d
+
+
+def test_nat4_census_names_a_native_dir_with_md_files(tmp_path):
+    """NAT-4: a real native ``memory`` dir with .md files is named with its count and
+    the adopt route; no-.md and empty dirs are not; the symlink counts are untouched."""
+    farm = _farm(tmp_path)
+    stray = _add_native_dir(farm, "-stray-project", ["MEMORY.md", "a.md", "b.md", "notes.txt"])
+    _add_native_dir(farm, "-no-md-project", ["notes.txt"])
+    _add_native_dir(farm, "-empty-project", [])
+    live = tmp_path / "live" / ".claude" / "memory"
+    live.mkdir(parents=True)
+    _add_symlink(farm, "-live", str(live))
+
+    out = MC.symlink_farm_census(farm)
+    assert out["native_dirs"] == [{"dir": stray, "files": 3}]
+    assert (out["ok"], len(out["entries"])) == (1, 1)
+
+    text = "\n".join(MC._render_symlinks(out))
+    assert f"  {stray} (3 memory files)" in text
+    assert "/hippo:setup" in text and "`hippo adopt`" in text
+    assert "-no-md-project" not in text and "-empty-project" not in text
+    # the remover never reaches the native dir
+    assert MC.prune_dangling(farm)["removed"] == []
+    assert os.path.isdir(stray) and not os.path.islink(stray)
+
+
+def test_nat4_native_dir_alone_breaks_the_empty_norm_and_rides_json(tmp_path, monkeypatch, capsys):
+    _hermetic_env(tmp_path, monkeypatch)
+    farm = str(tmp_path / "claude-projects")
+    stray = _add_native_dir(farm, "-stray", ["one.md"])
+    assert MC.main([]) == 0
+    out = capsys.readouterr().out
+    assert "nothing to report" not in out
+    assert "memory symlinks: none under" in out
+    assert f"  {stray} (1 memory file)" in out
+    assert MC.main(["--json"]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["symlinks"]["native_dirs"] == [{"dir": stray, "files": 1}]
+
+
+def test_nat4_census_reads_no_native_file_contents(tmp_path, monkeypatch):
+    """Names and counts only: the census never opens a file inside a native dir."""
+    import builtins
+
+    farm = _farm(tmp_path)
+    stray = _add_native_dir(farm, "-stray", ["a.md"])
+    real_open = builtins.open
+
+    def guarded(path, *a, **kw):
+        assert not str(path).startswith(stray), f"census opened {path}"
+        return real_open(path, *a, **kw)
+
+    monkeypatch.setattr(builtins, "open", guarded)
+    MC.render_report(_hermetic_census(tmp_path, claude_projects_dir=farm))
 
 
 def test_symlink_farm_counts_the_pytest_leak_and_report_labels_it(tmp_path):
@@ -291,6 +356,7 @@ def test_census_is_read_only(tmp_path):
     """Zero writes: the farm's shape and targets are byte-identical after a census."""
     farm = _farm(tmp_path)
     _add_symlink(farm, "-x-gone", str(tmp_path / "gone" / ".claude" / "memory"))
+    _add_native_dir(farm, "-x-native", ["a.md"])  # NAT-4: the native class reads only
 
     def snapshot():
         out = []

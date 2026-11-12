@@ -269,6 +269,9 @@ hippo_touch_fastpath() {  # <payload json>; 0 = logged here, 1 = spawn Python
     .claude/worktrees/*/?*) tree_rel="${rel#.claude/worktrees/}"; tree_rel="${tree_rel#*/}" ;;
   esac
   [ "${tree_rel##*/}" = "MEMORY.md" ] && return 1
+  # A memory file's own touch goes to Python: it stamps the open on the row and folds it
+  # into today's rollup. These touches are rare beside ordinary file reads.
+  case "$tree_rel" in .claude/memory/*|.claude/memory.local/*) return 1 ;; esac
   # Printable ASCII only: the touchmap may store anything else \u-escaped, and a key this
   # grep cannot see must never be read as "not cited".
   [[ $tree_rel =~ ^[\ -~]+$ ]] || return 1
