@@ -31,7 +31,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import tempfile
+import time
 from typing import Callable, Optional, Tuple
 
 
@@ -189,3 +191,73 @@ def update_text_cas(
         except CasConflict:
             continue
     raise CasConflict(f"{os.path.basename(path)} kept changing; gave up after {retries} tries")
+
+
+# --------------------------------------------------------------------------- #
+# RWY-6: the pid-suffixed writers clean up after a killed process.
+#
+# A writer that names its tmp ``<target>.tmp.<pid>`` and is killed between writing it and
+# the ``os.replace`` strands that file forever: nothing else ever writes that exact name
+# again. Its NEXT successful write sweeps them: a sibling ``<target>.tmp.<digits>`` goes
+# when it is a regular file, older than the grace period, not this process's own, and its
+# pid is not alive. ``write_text_atomic``'s mkstemp names carry no pid, so they are not
+# attributable from the name and are not swept here.
+#
+# The grace period covers what the pid alone cannot prove: a writer in another pid
+# namespace (a container sharing the dir) whose pid means nothing here. Each such write is
+# a few hundred KB at most and lands well under a second, so a tmp older than five minutes
+# is not in flight; the orphans this exists for are days or weeks old.
+# --------------------------------------------------------------------------- #
+TMP_SWEEP_GRACE_S = 300.0
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except PermissionError:
+        return True  # it exists, owned by someone else
+    except Exception:
+        return False
+
+
+def sweep_dead_pid_tmps(path: str, *, grace_s: float = TMP_SWEEP_GRACE_S) -> int:
+    """Remove ``<path>.tmp.<pid>`` siblings left by dead processes; returns how many.
+
+    One ``os.listdir`` of the target's directory. Never raises, never follows a symlink
+    (``lstat``; only regular files go), never touches another name. A no-op on Windows,
+    where ``os.kill(pid, 0)`` would terminate the process instead of probing it.
+    """
+    if os.name == "nt":
+        return 0
+    removed = 0
+    try:
+        d = os.path.dirname(os.path.abspath(path)) or "."
+        prefix = os.path.basename(path) + ".tmp."
+        me, now = os.getpid(), time.time()
+        for name in os.listdir(d):
+            if not name.startswith(prefix):
+                continue
+            tail = name[len(prefix):]
+            if not (tail.isascii() and tail.isdigit()):
+                continue
+            pid = int(tail)
+            if pid <= 0 or pid == me:
+                continue
+            full = os.path.join(d, name)
+            try:
+                st = os.lstat(full)
+            except OSError:
+                continue
+            if not stat.S_ISREG(st.st_mode) or now - st.st_mtime < grace_s:
+                continue
+            if _pid_alive(pid):
+                continue
+            try:
+                os.unlink(full)
+                removed += 1
+            except OSError:
+                pass
+    except Exception:
+        pass
+    return removed
