@@ -82,11 +82,11 @@ releases:
     status: released
     re_bootstrap: "no"
   - version: v1.43.0
-    theme: "Last 1.x: derived self-tending"
-    status: planned
+    theme: "Gates, receipts, an outbox (cut from main on the owner's word, 2026-11-12, so OBS-10's 14-day soak starts on an installed release: OBS-10, RWY-4, RWY-5, RWY-6, NAT-4, CLM-9, TND-13, GAT-1, GAT-2, GAT-3, OWN-1, HOT-10, OUT-1's first slice, CON-5's CI check)"
+    status: in review
     re_bootstrap: "no"
   - version: v1.44.0
-    theme: "Selective, and shippable (added by amendment 1, ruling V2Q-13)"
+    theme: "Selective, and shippable (added by amendment 1, ruling V2Q-13); it also takes the chartered 'last 1.x: derived self-tending' items and their gate, which v1.43.0 was cut without (TND-3, TND-4, TND-7, FMT-2, OBS-8, SRF-7, CON-3's draft)"
     status: planned
     re_bootstrap: "no"
   - version: v2.0.0
@@ -115,12 +115,12 @@ items:
     title: "Ship only the runtime (reshaped)"
     size: S
     release: "v1.43.0"
-    status: planned
+    status: built
   - id: RWY-5
     title: "Foundation→engine edge lint"
     size: S
     release: "v1.43.0"
-    status: planned
+    status: built
   - id: OBS-1
     title: "Rotation-proof daily rollups"
     size: M
@@ -161,8 +161,9 @@ items:
   - id: OBS-8
     title: "1,000-memory dense-under-load nightly lane"
     size: S
-    release: "v1.43.0"
+    release: "v1.44.0"
     status: planned
+    note: "moved from v1.43.0 on 2026-11-12: v1.43.0 was cut from main without it so the OBS-10 soak could start"
   - id: OBS-9
     title: "Tests never write the live ledgers (repro-first)"
     size: S
@@ -276,14 +277,16 @@ items:
   - id: TND-3
     title: "Derived evidence anchors and quiet arming"
     size: L
-    release: "v1.43.0"
+    release: "v1.44.0"
     status: planned
+    note: "moved from v1.43.0 on 2026-11-12: v1.43.0 was cut from main without it so the OBS-10 soak could start"
     deps: [TND-1, OBS-5]
   - id: TND-4
     title: "Batched acknowledgement for owner-ruled classes"
     size: M
-    release: "v1.43.0"
+    release: "v1.44.0"
     status: planned
+    note: "moved from v1.43.0 on 2026-11-12: v1.43.0 was cut from main without it so the OBS-10 soak could start"
     deps: [TND-2, TND-3, V2Q-1]
   - id: TND-5
     title: "Capture-queue hygiene"
@@ -301,8 +304,9 @@ items:
   - id: TND-7
     title: "Scheduled sleep for every opted-in corpus"
     size: S
-    release: "v1.43.0"
+    release: "v1.44.0"
     status: planned
+    note: "moved from v1.43.0 on 2026-11-12: v1.43.0 was cut from main without it so the OBS-10 soak could start"
   - id: FMT-1
     title: "`hippo migrate --check`"
     size: S
@@ -313,8 +317,9 @@ items:
   - id: FMT-2
     title: "Derived citation binding moves into the index (dual mode)"
     size: L
-    release: "v1.43.0"
+    release: "v1.44.0"
     status: planned
+    note: "moved from v1.43.0 on 2026-11-12: v1.43.0 was cut from main without it so the OBS-10 soak could start"
     deps: [RWY-1, RWY-2]
   - id: FMT-3
     title: "N-1 compat guard"
@@ -378,8 +383,9 @@ items:
   - id: SRF-7
     title: "Dream: reduce to the linker unless it earns more"
     size: M
-    release: "v1.43.0"
+    release: "v1.44.0"
     status: planned
+    note: "moved from v1.43.0 on 2026-11-12: v1.43.0 was cut from main without it so the OBS-10 soak could start"
   - id: SRF-8
     title: "The v2 removal cut"
     size: M
@@ -422,8 +428,9 @@ items:
   - id: CON-3
     title: "STABILITY v2"
     size: M
-    release: "v1.43.0"
+    release: "v1.44.0"
     status: planned
+    note: "moved from v1.43.0 on 2026-11-12: v1.43.0 was cut from main without it so the OBS-10 soak could start"
   - id: CON-4
     title: "`ROADMAP.v2.yaml` as the one live ledger"
     size: S
@@ -434,7 +441,8 @@ items:
     title: "Release-gate hardening"
     size: S
     release: "v2.0.0"
-    status: planned
+    status: partial
+    note: "the CI half (a push to main that carries a merge commit fails the linear-history lane) ships in v1.43.0; enforce_admins is for the v2.0.0 cut (V2Q-11)"
   - id: CON-6
     title: "Official marketplace submission"
     size: S
@@ -562,8 +570,9 @@ amendment_1:
     - id: HOT-10
       title: "A soft band at the dense floor, and a sweep that stays current"
       size: M
-      release: "v1.44.0"
-      status: planned
+      release: "v1.43.0"
+      status: partial
+      note: "pulled into v1.43.0: the band (default 0.002) and the stale-sweep WARN ship. Not done: the sweep does not run in the scheduled sleep (it loads the embedding model; TND-7 is unbuilt). Two gates read short on 2026-11-12: off-topic abstention 7/11, 7/11, 6/11 on hippo, Skyline, em-growth-labs against 8/11, the same before and after; and near-floor repeat drops on em-growth-labs"
       issue: "#156"
     - id: HOT-11
       title: "Digest headings as recall units"
@@ -590,14 +599,16 @@ amendment_1:
     - id: OBS-11
       title: "Say why a recall ran BM25-only"
       size: S
-      release: "v1.43.0"
+      release: "v1.44.0"
       status: planned
+      note: "moved from v1.43.0 on 2026-11-12: v1.43.0 was cut from main before it was built"
       issue: "#156"
     - id: OUT-1
       title: "An outbox that recall already sees"
       size: L
       release: "v1.44.0"
-      status: planned
+      status: partial
+      note: "the first slice ships in v1.43.0: new_memory and its floor pointer land in the outbox, recall fuses it, doctor counts it. The tend verdicts and the ship verb (OUT-2) follow; a corpus should not set write_path: outbox before they do"
       deps: [RWY-3]
       ruling: V2Q-16
     - id: OUT-2
@@ -623,8 +634,9 @@ amendment_1:
     - id: OWN-1
       title: "A git home for the user tier"
       size: M
-      release: "v1.44.0"
-      status: planned
+      release: "v1.43.0"
+      status: built
+      note: "pulled into v1.43.0, which was cut from main on 2026-11-12 with everything merged"
       ruling: V2Q-18
       issue: "#158"
     - id: OWN-2
@@ -657,20 +669,23 @@ amendment_1:
     - id: GAT-1
       title: "A write-time gate"
       size: M
-      release: "v1.44.0"
-      status: planned
+      release: "v1.43.0"
+      status: built
+      note: "pulled into v1.43.0, which was cut from main on 2026-11-12 with everything merged"
       ruling: V2Q-22
     - id: GAT-2
       title: "A commit-time gate and declared budgets"
       size: M
-      release: "v1.44.0"
-      status: planned
+      release: "v1.43.0"
+      status: built
+      note: "pulled into v1.43.0. Ruled 2026-11-12 after the 30-day replay: status words in memory bodies are a write-time warning only, never a failed commit"
       deps: [GAT-1]
     - id: GAT-3
       title: "Declared floor sections and a pointer line of its own"
       size: S
-      release: "v1.44.0"
-      status: planned
+      release: "v1.43.0"
+      status: built
+      note: "pulled into v1.43.0, which was cut from main on 2026-11-12 with everything merged"
     - id: GAT-4
       title: "One versioned `CONVENTIONS.md`"
       size: S
@@ -687,7 +702,7 @@ amendment_1:
       title: "Census flags native memory that belongs to no corpus"
       size: S
       release: "v1.43.0"
-      status: planned
+      status: built
     - id: RUL-8
       title: "Conflicts between what a memory says and what a rule says"
       size: M
@@ -708,18 +723,20 @@ amendment_1:
     - id: PLT-3
       title: "Two platform receipts"
       size: S
-      release: "v1.43.0"
+      release: "v1.44.0"
       status: planned
+      note: "moved from v1.43.0 on 2026-11-12: v1.43.0 was cut from main before it was built"
     - id: RWY-6
       title: "Writers clean up after themselves"
       size: S
       release: "v1.43.0"
-      status: planned
+      status: built
+      note: "both halves: writers remove the tmp files a killed process left, and setup offers the old worktree copies one directory per yes"
     - id: CLM-9
       title: "Doctor says when full attention is costing context"
       size: S
       release: "v1.43.0"
-      status: planned
+      status: built
     - id: TND-12
       title: "Claims a memory makes about the machine"
       size: S
@@ -728,8 +745,9 @@ amendment_1:
     - id: TND-13
       title: "Acknowledging a cleared lint finding"
       size: S
-      release: "v1.44.0"
-      status: planned
+      release: "v1.43.0"
+      status: built
+      note: "pulled into v1.43.0, which was cut from main on 2026-11-12 with everything merged"
       ruling: V2Q-25
   # Chartered items and threads whose design or timing the evidence changes.
   changed:
