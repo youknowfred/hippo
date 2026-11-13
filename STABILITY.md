@@ -111,6 +111,9 @@ These may change at any release without a major bump — do not build on them:
   `HIPPO_COUNT_BAND` and `HIPPO_COUNT_WIDE` (its two cosine margins),
   `HIPPO_JOURNAL_SIGNAL` (a journal that leads the fused candidates is served beside the
   prompt's rows on a corpus that declares `journals`; 0 turns it off),
+  `HIPPO_HOOK_COMPACT` (the prompt hook's shorter block: later rows' descriptions cut at a
+  word boundary, fewer names on the collapse lines, a shorter repeat header; 0 restores the
+  longer block),
   `HIPPO_SECTION_ROWS` (how many folded-section rows explicit recall lists after the memories;
   0 turns them off),
   `HIPPO_INDEX_BINDING` (readers prefer the citation binding the index derives; 0 means

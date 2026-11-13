@@ -156,9 +156,12 @@ def test_no_production_recall_or_render_change():
 
     # format_results still has its shipped signature (trust_note kw-only) — no SEN-4 param crept in
     sig = inspect.signature(R.format_results)
-    # (HOT-7's kw-only lane_share is the prompt hook's lane render, None = the shipped render.)
-    assert list(sig.parameters) == ["results", "max_chars", "trust_note", "lane_share"]
+    # (HOT-7's kw-only lane_share is the prompt hook's lane render, None = the shipped render.
+    # HOT-14's kw-only compact is the prompt hook's shorter block, None = the shipped render.)
+    assert list(sig.parameters) == ["results", "max_chars", "trust_note", "lane_share", "compact"]
     assert sig.parameters["lane_share"].default is None
+    assert sig.parameters["compact"].default is None
+    assert sig.parameters["compact"].kind is inspect.Parameter.KEYWORD_ONLY
     # adversarial_report is report-only: it never imports/mutates a production writer at module
     # scope (it builds a throwaway index in a fixture dir only).
     src = inspect.getsource(E.adversarial_report)

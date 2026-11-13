@@ -51,6 +51,7 @@ RECALL_LEAF_HELPERS = frozenset(
     {
         "recall_abstain",
         "recall_budget",
+        "recall_compact",
         "recall_count",
         "recall_diff",
         "recall_fallback",
