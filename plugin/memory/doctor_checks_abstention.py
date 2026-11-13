@@ -179,6 +179,29 @@ def check_abstention_floor_sanity(ctx: DoctorContext) -> Dict[str, str]:
 _FLOOR_CAL_TOLERANCE = 0.02
 
 
+# HOT-8: how much tighter than the sweep's own recommendation the count band may be.
+_COUNT_BAND_TOLERANCE = 0.01
+
+
+def _count_band_note(sweep: dict):
+    """``(clause, warn)`` for the count rule's band against the sweep: the gap under the best
+    cosine that holds the expected memory in 3 of 4 of this corpus's hard-set queries. A
+    band tighter than that drops rows that were the answer. Empty for an older sweep."""
+    count = sweep.get("count")
+    if not isinstance(count, dict):
+        return "", False
+    band, rec = count.get("band"), count.get("band_recommended")
+    if not isinstance(band, (int, float)) or not isinstance(rec, (int, float)):
+        return "", False
+    if float(band) + _COUNT_BAND_TOLERANCE >= float(rec):
+        return f" Row-count band {band} covers this corpus's hard set (it asks for {rec}).", False
+    return (
+        f" Row-count band {band} is tighter than this corpus's hard set asks for ({rec}): "
+        f"set HIPPO_COUNT_BAND={rec} to serve the rows it is cutting.",
+        True,
+    )
+
+
 def check_floor_calibration(ctx: DoctorContext) -> Dict[str, str]:
     """GRF-3 (RET-9's calibration half): configured dense floor vs the persisted sweep.
 
@@ -235,11 +258,12 @@ def check_floor_calibration(ctx: DoctorContext) -> Dict[str, str]:
             return {"status": "ok", "message": "floor calibration: recorded sweep is unreadable."}
         delta = round(float(recommended) - float(configured), 4)
         overlap = " (no clean on/off-topic separation on this corpus)" if sweep.get("overlap") else ""
+        count_note, count_warn = _count_band_note(sweep)
         if abs(delta) <= _FLOOR_CAL_TOLERANCE:
             return {
-                "status": "ok",
+                "status": "warn" if count_warn else "ok",
                 "message": f"floor calibration: configured {configured} ≈ recommended "
-                f"{recommended} (Δ{delta:+}){overlap}.",
+                f"{recommended} (Δ{delta:+}){overlap}.{count_note}",
             }
         # ABS-4: on an OVERLAPPING corpus the recommendation is a trade, not a fix — name
         # its measured cost instead of pointing at the table, or this repeats the powerless
@@ -259,7 +283,7 @@ def check_floor_calibration(ctx: DoctorContext) -> Dict[str, str]:
             "status": "warn",
             "message": f"floor calibration: configured {configured} vs sweep-recommended "
             f"{recommended} (Δ{delta:+}, off-topic max {sweep.get('off_max')}){overlap} — "
-            f"{remedy}.",
+            f"{remedy}.{count_note}",
         }
     except Exception as exc:
         return {"status": "warn", "message": f"floor-calibration check failed: {exc}."}

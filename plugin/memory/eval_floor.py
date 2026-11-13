@@ -122,6 +122,56 @@ def _raw_max_cosines(index: LoadedIndex, queries: List[str]) -> List[float]:
     return out
 
 
+def quantiles(scores: List[float], points=(0.10, 0.50, 0.75, 0.90)) -> dict:
+    """``{"p10": .., "p50": .., "p75": .., "p90": .., "n": ..}`` over ``scores`` (nearest
+    rank, no interpolation); ``{"n": 0}`` when empty. Pure."""
+    xs = sorted(float(s) for s in scores)
+    out: dict = {"n": len(xs)}
+    for p in points:
+        if xs:
+            out[f"p{int(round(p * 100))}"] = round(xs[min(len(xs) - 1, int(p * len(xs)))], 4)
+    return out
+
+
+def _top_and_gap(index: LoadedIndex, rows: List[dict]):
+    """Per on-topic hard-set row: ``(tops, gaps)``. ``tops`` is what ``_raw_max_cosines``
+    returns for the row's query. ``gaps`` is how far under that best cosine the EXPECTED
+    memory's own best cosine (description row or any of its body chunks) sits: HOT-8's
+    calibration target, the margin inside one query, which holds across corpora where the
+    absolute level of a good cosine does not. One embed per query serves both. A query that
+    fails to embed is skipped; a row whose expected memory has no dense row adds no gap."""
+    from . import recall as _recall_mod
+
+    entries = index.entries
+    n = len(entries)
+    rows_of: dict = {}
+    for i, e in enumerate(entries):
+        r = e.get("row", i)
+        if isinstance(r, int):
+            rows_of.setdefault(e.get("name"), []).append(r)
+    for j, c in enumerate(index.body_chunks or []):
+        p, r = c.get("entry"), c.get("row", n + j)
+        if isinstance(p, int) and 0 <= p < n and isinstance(r, int):
+            rows_of.setdefault(entries[p].get("name"), []).append(r)
+    tops: List[float] = []
+    gaps: List[float] = []
+    for row in rows:
+        q = row.get("query")
+        if not q:
+            continue
+        try:
+            sims = index.dense @ _recall_mod.embed_query(q, allow_download=False)
+            top = float(sims.max())
+        except Exception:
+            continue
+        tops.append(round(top, 6))
+        own = [float(sims[r]) for name in (row.get("expected") or []) for r in rows_of.get(name, [])
+               if 0 <= r < len(sims)]
+        if own:
+            gaps.append(round(top - max(own), 6))
+    return tops, gaps
+
+
 def floor_sweep(
     memory_dir: Optional[str] = None,
     index_dir: Optional[str] = None,
@@ -160,12 +210,13 @@ def floor_sweep(
     hard_set = load_hard_set(hs_path) if hs_path else []
     probes = load_abstention_set(ab_path) if ab_path else []
     names = {e.get("name") for e in index.entries}
-    on_queries = [
-        row["query"]
+    on_rows = [
+        row
         for row in hard_set
         if (row.get("category") or _DEFAULT_CATEGORY) != "abstention"
         and resolvable_row(names, row)  # MEA-1: the ONE shared predicate (inv5)
     ]
+    on_queries = [row["query"] for row in on_rows]
     if not on_queries or not probes:
         return {
             "ok": False,
@@ -177,7 +228,7 @@ def floor_sweep(
 
     from .recall import _dense_floor
 
-    on_scores = _raw_max_cosines(index, on_queries)
+    on_scores, gaps = _top_and_gap(index, on_rows)
     off_scores = _raw_max_cosines(index, probes)
     rec = recommend_floor(on_scores, off_scores)
     if rec is None:
@@ -191,12 +242,34 @@ def floor_sweep(
         "corpus_fingerprint": corpus_fingerprint(index),
         "generated_at": time.strftime("%Y-%m-%d"),
         **rec,
+        # HOT-8 (additive; schema stays 1): the distributions behind the two extremes above,
+        # and the count rule's calibration target with what the rule is configured to.
+        "on_top": quantiles(on_scores),
+        "off_top": quantiles(off_scores),
+        "expected_gap": quantiles(gaps),
+        "count": _count_calibration(index.model, gaps),
     }
     if write:
         path = default_floor_sweep_path(memory_dir, telemetry_dir)
         written = write_floor_sweep(doc, path)
         doc["path"] = written.get("path") if written.get("ok") else None
     return doc
+
+
+def _count_calibration(model: Optional[str], gaps: List[float]) -> Optional[dict]:
+    """The count rule's configured numbers beside the band this corpus's own hard set asks
+    for: the gap under the best cosine that holds the expected memory in 3 of 4 queries (the
+    rest are held by lane agreement, not nearness). None for an uncalibrated model."""
+    from .recall_count import thresholds
+
+    th = thresholds(model)
+    if th is None:
+        return None
+    out = {"band": th["band"], "wide": th["wide"]}
+    q = quantiles(gaps)
+    if "p75" in q:
+        out["band_recommended"] = q["p75"]
+    return out
 
 
 def write_floor_sweep(doc: dict, path: str) -> dict:

@@ -252,6 +252,7 @@ def record_prompt(
     injected_by_lane: Optional[Dict[str, int]] = None,
     rendered_by_lane: Optional[Dict[str, int]] = None,
     journal_admitted: Optional[Dict[str, int]] = None,
+    served_rows: Optional[int] = None,
 ) -> bool:
     """Fold one UserPromptSubmit hook run into today's row. Machine turns count by trigger
     and nothing else (they never recall). Fire-and-forget: never raises.
@@ -271,7 +272,11 @@ def record_prompt(
 
     GP-S4 ``journal_admitted``: the served journals counted by the admission that let them
     past the lane — ``named`` (the prompt names the journal) or ``issue`` (it cites an issue
-    id the prompt names) — so K14's journal share can be read by cause. Additive."""
+    id the prompt names) — so K14's journal share can be read by cause. Additive.
+
+    HOT-8 ``served_rows``: the memory rows an injecting prompt served (collapsed rows and
+    rule pointers left out), counted in ``hook.served_rows_hist`` under ``"0"``..``"9"`` and
+    ``"10+"`` so the median per injecting prompt can be read after the raw events rotate."""
 
     def fold(acc: dict) -> None:
         _bump(acc.setdefault("surface", {}), _usage_key("hook", "user_prompt", path or "spawn"))
@@ -300,6 +305,9 @@ def record_prompt(
                                 ("journal_admitted", journal_admitted)):
                 for lane, n in (counts or {}).items():
                     _bump(hook.setdefault(key, {}), str(lane), int(n))
+            if served_rows is not None:
+                n_rows = max(0, int(served_rows))
+                _bump(hook.setdefault("served_rows_hist", {}), "10+" if n_rows >= 10 else str(n_rows))
         if session_id:
             _bump(hook["session_chars"], str(session_id), int(injected_chars or 0))
         if wall_ms is not None:
@@ -530,6 +538,7 @@ def summarize(rows: List[dict]) -> dict:
         "injected_by_lane": _merge(rows, "hook", "injected_by_lane"),  # HOT-7
         "rendered_by_lane": _merge(rows, "hook", "rendered_by_lane"),
         "journal_admitted": _merge(rows, "hook", "journal_admitted"),  # GP-S4
+        "served_rows_hist": _merge(rows, "hook", "served_rows_hist"),  # HOT-8
         "opens": sum(int((r.get("opened") or {}).get("opens") or 0) for r in rows),
         "opens_after_recall": sum(int((r.get("opened") or {}).get("after_recall") or 0) for r in rows),
         "chars_per_injected_prompt": (hook_total("injected_chars") / injected_prompts) if injected_prompts else None,
