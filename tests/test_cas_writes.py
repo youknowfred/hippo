@@ -138,7 +138,7 @@ NON_CORPUS_SITES = {
     ("lint_floor", "observe_floor_edit"): "session sentinel",
     ("packs", "_write_lockfile"): "pack lockfile, rebuilt whole by the pack verbs",
     ("presence", "_write_doc"): "per-session presence doc",
-    ("promote_rule", "main"): "writes a new rule file",
+    ("promote_rule", "write_rule"): "writes a new rule file",
     ("provenance", "restore_file_bytes"): "restores snapshot bytes (a rollback, not an edit)",
     ("registry", "register_project"): "machine registry, outside the corpus",
     ("registry", "deregister_project"): "machine registry, outside the corpus",

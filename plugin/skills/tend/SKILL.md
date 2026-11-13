@@ -1,5 +1,5 @@
 ---
-description: Work hippo's maintenance queue one item at a time — captures to draft or discard, memories whose cited code moved, contradictions, merged-in duplicates, broken baselines and links, floor overflow, citation re-derivation, and changes waiting for re-consent — each with its evidence and your yes. Triggers include "tend memory", "consolidate memory", "drain the capture queue", "resolve contradictions", "/hippo:tend".
+description: Work hippo's maintenance queue one item at a time — captures to draft or discard, memories whose cited code moved, contradictions, merged-in duplicates, broken baselines and links, floor overflow, citation re-derivation, path-scoped rule proposals, and changes waiting for re-consent — each with its evidence and your yes. Triggers include "tend memory", "consolidate memory", "drain the capture queue", "resolve contradictions", "/hippo:tend".
 ---
 
 # /hippo:tend — the one maintenance queue
@@ -75,6 +75,10 @@ What each kind needs before its verdict:
   always-loaded rule (`CLAUDE.md`, or a `.claude/rules` file with no `paths:`) already says:
   remove the line from `MEMORY.md` (the memory stays and recall still finds it), or, when the
   user wants it kept, `skip` it or acknowledge it (`hippo lint-floor` prints the entry to add).
+- **rule** — a feedback memory whose recorded file touches concentrate under one path glob
+  (the evidence gives the share). `hippo tend show` prints the `.claude/rules/<name>.md` it
+  would write, scoped to that glob; on the user's yes, `write` creates that one file and
+  nothing else (commit it yourself). Otherwise `skip` it.
 - **derivation** — read the citation diff, then `apply` for that memory; when every memory
   is applied, the `corpus` item takes `stamp`. On a corpus that is not committed to git,
   take a snapshot first (`hippo provenance --snapshot <label>`). It copies the corpus to
