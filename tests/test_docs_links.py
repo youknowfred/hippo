@@ -20,7 +20,7 @@ _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _DOC_FILES = sorted(
     p
     for p in glob.glob(os.path.join(_REPO, "plugin", "**", "*.md"), recursive=True)
-    + [os.path.join(_REPO, "README.md"), os.path.join(_REPO, "CONCEPTS.md")]
+    + [os.path.join(_REPO, n) for n in ("README.md", "CONCEPTS.md", "SETTINGS.md")]
     if os.sep + os.path.join("plugin", "assets") + os.sep not in p
 )
 

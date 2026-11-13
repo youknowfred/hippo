@@ -13,22 +13,29 @@
 
 Give Claude Code a memory that lives in your repo: a corpus of small markdown files it recalls
 the right pieces of, on demand, every session. **New here? Start with
-[How hippo thinks](CONCEPTS.md)** — the five-minute mental model (what a memory is, the
+[How hippo thinks](CONCEPTS.md)**, the five-minute mental model (what a memory is, the
 always-on floor vs. on-demand recall, the four types, why markdown-in-git).
 
 **Local, git-native memory for Claude Code: your repo is the store, recall runs offline with no LLM
 and no network per prompt (what it injects into context is counted, per prompt and per session, in
-`/hippo:doctor`), staleness is git-drift verified before injection (the cited code moved — not
+`/hippo:doctor`), staleness is git-drift verified before injection (the cited code moved, not
 calendar age), and every team memory lands through code review.** Distributed as a Claude Code
 plugin.
 
-By mid-2026 "a markdown corpus with hybrid recall" is a crowded shelf. hippo's line is narrower
-and sharper: **git *is* the store** (diff it, review it, revert it — not an opaque local DB),
+"A markdown corpus with hybrid recall" is a crowded shelf. hippo's line is narrower
+and sharper: **git *is* the store** (diff it, review it, revert it; not an opaque local DB),
 **staleness is semantic** (did the code a memory cites actually move?), the **hot path runs no
 LLM** ($0 and nothing leaves your machine per prompt), and **team memory ships through review**,
 never an autonomous write. See how it stacks up in [Compared to other memory tools](#compared-to-other-memory-tools).
 
-Battle-tested in daily use since 2026-06 across a 180+ memory production corpus.
+In daily use since 2026-06 across three production corpora, the largest over 1,000 memories.
+
+**On this page:** [Quickstart](#quickstart) · [What you get](#what-you-get) ·
+[Automatic capture](#automatic-capture--memory-that-writes-itself-gated-by-your-review) ·
+[Compared to other tools](#compared-to-other-memory-tools) · [Commands](#commands) ·
+[Issue trackers (Linear)](#issue-trackers-linear-and-others) ·
+[Opt-in settings](#warm-recall-opt-in) · [Native memory and worktrees](#hippo-and-claude-codes-native-memory) ·
+[Troubleshooting](#troubleshooting) · [All the docs](#all-the-docs)
 
 ## Quickstart
 
@@ -36,10 +43,10 @@ Battle-tested in daily use since 2026-06 across a 180+ memory production corpus.
 > _or_ the Claude Desktop app's Code tab.** The desktop app's **local sessions run the same
 > plugin**: the auto-recall hook, the skills and the MCP tools. Typed `/hippo:*` commands run
 > there too, and the skills route themselves to hippo's MCP tools. You can also just ask
-> (*"set up hippo memory for this project"*). Seven verbs still need a terminal
-> (`export-agents`, `import`, `promote`, `promote-rule`, `publish`, `remove`, `review`), and
-> each says so if you run it on the desktop app. Claude Code's docs say plugins also install
-> from the desktop app; hippo has verified only the terminal install below (see
+> (*"set up hippo memory for this project"*). Two things still need a terminal, and each says
+> so if you run it on the desktop app: `/hippo:remove`, and every `/hippo:share` flow except
+> packs (promote, promote a rule, publish, export, import). Claude Code's docs say plugins
+> also install from the desktop app; hippo has verified only the terminal install below (see
 > [`PLATFORM.md`](PLATFORM.md)). **Cloud / remote sessions** can't run hippo at all (it needs
 > local access to your files and git).
 
@@ -50,87 +57,124 @@ Battle-tested in daily use since 2026-06 across a 180+ memory production corpus.
    /plugin install hippo@hippo
    ```
 
-2. **Bootstrap — once per machine.** Builds the plugin's own venv and downloads the ~130MB
-   embedding model (the ONE online step in the plugin's whole lifecycle):
+2. **Set up.** One command, two halves, each safe to re-run:
 
    ```
-   /hippo:bootstrap
+   /hippo:setup
    ```
 
-3. **Init — once per project.** Seeds `.claude/memory/` from the starter packs (core by
-   default — a `user_role.md` template and the memory-master policy; themed packs are
-   opt-in), builds the recall index, and wires the always-loaded floor. Fill in
-   `user_role.md` when it asks:
+   - **Once per machine** it builds the plugin's own venv and downloads the ~130MB embedding
+     model (the ONE online step in the plugin's whole lifecycle).
+   - **Once per project** it seeds `.claude/memory/` from the starter packs (core by
+     default: a `user_role.md` template and the memory-master policy; themed packs are
+     opt-in), builds the recall index, and wires the always-loaded floor. Fill in
+     `user_role.md` when it asks. On a teammate's clone or a second machine it wires the
+     existing corpus and overwrites nothing.
 
-   ```
-   /hippo:init
-   ```
-
-4. **Use it.** Say *"remember this: …"* (the `/hippo:new` skill writes a recall-ready
-   memory), then just work — every prompt is matched against the corpus by the
+3. **Use it.** Say *"remember this: …"* (the `/hippo:new` skill writes a recall-ready
+   memory), then just work: every prompt is matched against the corpus by the
    UserPromptSubmit hook and the relevant memories are injected automatically. Session
    starts surface staleness, recent captures, and link health. If anything seems off, run
    `/hippo:doctor` (or see [Troubleshooting](#troubleshooting)).
 
-5. **See it work.** Ask Claude *"what do you remember about my role?"* (or run
+4. **See it work.** Ask Claude *"what do you remember about my role?"* (or run
    `/hippo:recall "my role"` directly). hippo matches your prompt against the corpus and
-   surfaces the relevant memory inline — that returned memory is the whole point: the right
+   surfaces the relevant memory inline. That returned memory is the whole point: the right
    context on demand, retrieved with no model call and never leaving your machine. (Fill in
-   `user_role.md` first, from step 3, so there's something real to recall.)
+   `user_role.md` first, from step 2, so there's something real to recall.)
 
-Before bootstrap has run, recall works immediately in BM25-only mode: the plugin vendors a
-dependency-free BM25 scorer and frontmatter parser (`plugin/memory/_vendor/`) precisely
-for that pre-bootstrap window, so a bare `python3` with none of the pinned deps still
-serves real lexical recall. Bootstrap unlocks the dense half — dense recall degrades
-gracefully rather than blocking or erroring.
+Before the machine half of setup has run, recall works immediately in BM25-only mode: the
+plugin vendors a dependency-free BM25 scorer and frontmatter parser (`plugin/memory/_vendor/`)
+for that window, so a bare `python3` with none of the pinned deps still serves real lexical
+recall. Setup unlocks the dense half; until then dense recall degrades gracefully rather
+than blocking or erroring.
+
+## What you get
+
+- **Recall on every prompt.** A hook ranks the corpus against your prompt (dense + BM25,
+  fused) and injects the memories that earn it: up to ten rows when the match is strong,
+  fewer when it is not, none when nothing matches. No model call, no network.
+- **A reminder at the file.** The first time a session touches a file that a pinned or
+  feedback memory cites, that memory's one-line description is shown once, at the moment it
+  applies (`HIPPO_DISABLE=jit` turns it off).
+- **An always-loaded floor.** `MEMORY.md` holds pointers to the few memories worth knowing in
+  every session. It reaches Claude through Claude Code's own memory, so hippo adds no second
+  always-on channel ([below](#hippo-and-claude-codes-native-memory)).
+- **Staleness by git drift.** A memory records the files it cites and the commit it was
+  verified at. When those files move, the memory is flagged on the recalled row and queued
+  for a re-check, whatever its age.
+- **Capture behind a review.** A session's end leaves a seed of what happened in a queue;
+  nothing is written to the corpus until you approve it
+  ([below](#automatic-capture--memory-that-writes-itself-gated-by-your-review)).
+- **One maintenance queue.** `/hippo:tend` lists every kind of upkeep and works it one
+  verdict at a time.
+- **Consent before injection.** Memory files you have not reviewed on this machine (a clone,
+  a pull, a merge) are withheld from recall until you do (`hippo trust review`). Saved memories are scanned for credential shapes and
+  prompt-injection shapes, and recalled text is labelled as quoted data.
+- **Three tiers.** The project corpus (committed, reviewed), a user tier in
+  `~/.claude/hippo-memory` recalled in every project, and a private per-repo tier
+  (`.claude/memory.local/`) that is never committed.
+- **Team memory through review.** The corpus is plain files in git, so a memory lands the way
+  code does. `/hippo:review` renders a memory diff as a review packet, `/hippo:share` moves
+  packs between repos, and a CI recipe posts the memories a pull request's files touch.
+- **Your tracker's statuses, not a copy of them.** A memory cites an issue id; recall shows
+  the id's current status from a mirror the repo commits
+  ([Linear and others](#issue-trackers-linear-and-others)).
+- **Mid-turn and subagent memory.** The plugin's MCP server gives the model the same recall
+  as a tool, for the moments the per-prompt hook cannot cover.
+- **A terminal door.** `hippo <verb>` runs the same engine without Claude (`hippo help`),
+  which is what CI and scheduled maintenance use.
 
 ## Automatic capture — memory that writes itself, gated by your review
 
 hippo remembers more than what you explicitly save. When a session ends, a background hook
-quietly drafts candidate memories from what actually happened — the queries you ran, the files
-that changed, the decisions you confirmed — and parks them, unwritten, in a gitignored pending
-queue. **Nothing enters your corpus automatically.**
+saves a seed of what actually happened (the queries you ran, the memories recalled, the files
+that changed since the session began) in a gitignored pending queue, `.hippo/pending/`.
+The hook drafts nothing and writes nothing to the corpus. **Nothing enters your corpus
+automatically.**
 
 The next session's SessionStart nudge tells you when that queue is worth draining. You run:
 
 ```
-/hippo:consolidate
+/hippo:tend
 ```
 
-and hippo walks you through each captured draft one at a time — showing its evidence (which
-files changed, the session's queries, any near-duplicate already in the corpus) and its
-rationale — then writes only the ones you approve, as an ordinary reviewable markdown diff.
+and hippo walks you through each seed one at a time, showing its evidence (which files
+changed, the session's queries, any near-duplicate already in the corpus), drafts a memory
+from it, and writes only the ones you approve, as an ordinary reviewable markdown diff.
 This is the part native memory doesn't have: **capture is automatic, but every write waits for
 a human.** You get the recall benefit of always-on capture without ever ceding control of what
 your corpus says.
 
 ### Optional: a small model as second opinion (off by default)
 
-If you give hippo an API key, two opt-in surfaces add one bounded small-model call each —
+If you give hippo an API key, two opt-in surfaces add one bounded small-model call each,
 both **propose-only**, so the review gate above is untouched:
 
-- **Capture triage** — each captured draft arrives pre-annotated with a suggested type, a
-  drafted description, and likely near-duplicates (judged semantically, alongside — never
-  instead of — hippo's calibrated similarity check). You still ratify per item at
-  `/hippo:consolidate`.
-- **Contradiction discovery** — the `/hippo:dream` sleep pass asks, for its strongest
-  co-firing memory pairs, "do these actually *disagree*, or merely relate?" — the one
-  judgment similarity math can't make. Confirmed candidates feed the `/hippo:resolve`
-  inbox, where you render the verdict as usual. Nothing auto-applies.
+- **Capture triage.** Each captured seed arrives pre-annotated with a suggested type, a
+  drafted description, and likely near-duplicates (judged semantically, alongside, never
+  instead of, hippo's calibrated similarity check). You still ratify per item in
+  `/hippo:tend`.
+- **Contradiction discovery.** The `/hippo:dream` pass asks, for its strongest co-firing
+  memory pairs, "do these actually *disagree*, or merely relate?", the one judgment
+  similarity math can't make. Confirmed candidates join the `/hippo:tend` queue as
+  contradictions, where you render the verdict as usual. Nothing auto-applies.
 
 Turn either on in hippo's plugin options: Claude Code asks for them when you enable the
-plugin, and lists the switches in `/config` — **LLM triage of captured sessions** and **LLM
-contradiction check in dream**. Set the **LLM API key** option too (from hippo's entry in
+plugin, and lists the switches in `/config` (**LLM triage of captured sessions** and **LLM
+contradiction check in dream**). Set the **LLM API key** option too (from hippo's entry in
 `/plugin`): it is masked and kept in your system keychain, never in a file. The key reaches
 hippo's hooks and its MCP server and never a shell command, so the contradiction check runs
 through hippo's MCP `dream` tool. An `ANTHROPIC_API_KEY` in your environment overrides the
 option. A scheduled `hippo sleep` (cron or launchd) and a shell command never see the options:
 give them `HIPPO_LLM_API_KEY` and the switch's variable (`HIPPO_DREAM_CONTRADICTIONS=1`,
-`HIPPO_CAPTURE_LLM=1`) in their own environment; `hippo sleep --print-schedule` shows where. Defaults to the `claude-haiku-5-5` alias, with thinking off (a heavy month of captures costs
-well under a dollar); set the **LLM model** option to `claude-sonnet-5-5` to upgrade the judgment
-at ~20× the (still small) per-call cost. Any failure — no key, no network, a malformed reply — falls back
-to exactly the un-enriched behavior, and a run with a switch on but no key says so in one line.
-Full knob reference:
+`HIPPO_CAPTURE_LLM=1`) in their own environment; `hippo sleep --print-schedule` shows where.
+
+The default model is the `claude-haiku-5-5` alias, with thinking off (a heavy month of
+captures costs well under a dollar); set the **LLM model** option to `claude-sonnet-5-5` to
+upgrade the judgment at ~20× the (still small) per-call cost. Any failure (no key, no
+network, a malformed reply) falls back to exactly the un-enriched behavior, and a run with a
+switch on but no key says so in one line. Full knob reference:
 [`plugin/memory/README.md`](plugin/memory/README.md#standalone-llm-enrichment-opt-in-default-off).
 
 ## Compared to other memory tools
@@ -141,12 +185,12 @@ excellent. hippo makes a specific set of trades the others don't:
 
 | | **hippo** | claude-mem | memsearch / memweave | Anthropic native memory | supermemory |
 |---|---|---|---|---|---|
-| **Store** | your **git repo** (plain markdown, diffable) | local store of AI-compressed logs | markdown + a derived index (Milvus / SQLite-FTS) | client-managed files / an auto `MEMORY.md` | hosted service |
-| **Recall** | hybrid dense+BM25, on-demand, ranked | AI-compressed context, auto-injected | hybrid semantic + keyword | the file(s), always loaded | hosted semantic search |
+| **Store** | your **git repo** (plain markdown, diffable) | local SQLite + vector store of AI-compressed session observations | markdown + a derived index (Milvus / SQLite-FTS) | client-managed files / an auto `MEMORY.md` | hosted service |
+| **Recall** | hybrid dense+BM25, on-demand, ranked | AI-compressed context injected at session start, plus search | hybrid semantic + keyword | the file(s), always loaded | hosted semantic search |
 | **Hot-path cost** | **$0 inference** — no LLM or network per prompt; injected context is counted | AI compression in the loop | local embeddings; write path may summarize | injected file = tokens | API calls to the service |
 | **Staleness** | semantic **git-drift** (did the *cited code* move) | recency-based | recency / content-hash | — | — |
 | **Team memory** | ships through **code review**; a foreign corpus is quarantined until you trust it | auto-captured, no review gate | shared index, no review gate | per-project / per-machine | shared via account |
-| **Runs** | local, offline | local | local (memsearch needs Milvus) | in-model + local files | cloud (self-host on paid tiers) |
+| **Runs** | local, offline | local | local (memsearch embeds Milvus Lite by default) | in-model + local files | cloud; self-hosting on paid tiers |
 
 Where hippo stands apart is two rows: **staleness is semantic and checked before injection** —
 offline and deterministically, hippo asks whether the *code a memory cites* has moved since the
@@ -160,8 +204,8 @@ audit/review/revert trail — not a byproduct of, or a sidecar to, a separate da
 throwaway repo, writes a memory that cites a function, edits that function, and shows hippo flag the
 memory stale — because the code it points at moved, not because a timer expired. No download needed.
 
-*(Reflects each tool's documented behavior as of mid-2026; these projects move fast — corrections
-welcome via an issue.)*
+*(Reflects each tool's documented behavior, last checked 2026-11; these projects move fast, and
+corrections are welcome via an issue.)*
 
 **One reproducible number.** On the shipped 50-memory golden dev corpus, over 18 hand-written
 cross-vocabulary paraphrase queries, hippo scores **recall@10 = 1.0** and **MRR@10 ≈ 0.91** — at
@@ -174,32 +218,36 @@ extraction — a thing hippo deliberately gates behind human approval) are in
 **Why the hot path is $0 and private.** Every prompt's recall is local lexical + cached-dense
 ranking — hippo calls no model API to retrieve, so retrieval spends **no inference**, and **nothing
 leaves your machine**. What recall injects does take context; doctor counts it per prompt and per
-session. The one online step in hippo's entire lifecycle is `/hippo:bootstrap`
+session. The one online step in hippo's entire lifecycle is `/hippo:setup`
 downloading the embedding model once; after that, recall is fully offline. For a privacy- or
 cost-sensitive team, "memory that calls no model per prompt and never phones home" is a hard
 requirement a hosted-by-default or LLM-in-the-loop memory can't meet without extra self-hosting work.
 
 ## Why it's called hippo
 
-Named for the **hippocampus** — the brain's memory-indexing structure — not just the animal at the
+Named for the **hippocampus**, the brain's memory-indexing structure, not just the animal at the
 waterline. The analogy is loose and deliberately cheap: hippo is git + embeddings + staleness
-scoring, not a model of neural tissue. What it *does* borrow is the *shape* — six of its verbs are
-distinct passes over one shared store (the markdown corpus plus its derived index, link graph, and
+scoring, not a model of neural tissue. What it *does* borrow is the *shape*: five operations
+over one shared store (the markdown corpus plus its derived index, link graph, and
 ledgers), the way memory is encoded, consolidated, and replayed:
 
-- **recall** — hybrid BM25 + dense retrieval, per prompt, `$0` and offline. No LLM, no network.
-- **consolidate** — *sleep-time compute*: a deliberate off-hot-path turn that drains pending
-  captures and re-verifies stale memories. One agent turn, per-item, approval-gated — nothing
-  autonomous or bulk.
-- **reconsolidate** — re-verify a memory when recall resurfaces it *and* its cited code has drifted.
-- **forget** — not calendar decay: a memory goes stale when a file it cites moved after its recorded
-  commit. Semantic, and always graceful demotion, never deletion.
-- **dream** — offline replay that re-runs recall over each memory's own self-query to surface latent
-  graph edges. Report-first, capped, soak-gated. **The empty pass is the norm.**
+- **recall**: hybrid BM25 + dense retrieval, per prompt, `$0` and offline. No LLM, no network.
+- **consolidate**: *sleep-time compute*, a deliberate off-hot-path turn that drains pending
+  captures and re-verifies stale memories. One agent turn, per-item, approval-gated; nothing
+  autonomous or bulk. The command is `/hippo:tend`.
+- **reconsolidate**: re-verify a memory when recall resurfaces it *and* its cited code has
+  drifted. These items sit in the same `/hippo:tend` queue.
+- **forget**: not calendar decay. A memory goes stale when a file it cites moved after its
+  recorded commit. Semantic, and always graceful demotion, never deletion.
+- **dream**: offline replay that re-runs recall over each memory's own self-query to surface
+  latent graph edges. It proposes nothing on a young corpus, and on a soaked one it applies
+  only the few links that clear a calibrated bar (five per pass at most), each stamped,
+  reversible with one command, and left uncommitted in your working tree; `--dry-run`
+  previews. **The empty pass is the norm.**
 
 The loose analogy earns the name; every claim above resolves to a file you can `git diff`. The
-sharpest ideas are the ones that *break* from biology — staleness is git-drift, not time — and the
-full map (with where each analogy ends) is in
+sharpest ideas are the ones that *break* from biology (staleness is git-drift, not time), and the
+full map, with where each analogy ends, is in
 [How hippo thinks](CONCEPTS.md#one-more-idea-the-sleep-model).
 
 ## Commands
@@ -213,7 +261,8 @@ terminal the same engine is one command, `hippo <verb>` (`hippo help` lists the 
   model (the one online step in hippo's whole lifecycle); once per project, seeds
   `.claude/memory/`, wires the native-memory symlink and builds the recall index. Safe on a
   teammate's clone or a second machine: an existing corpus is wired, never overwritten. A linked
-  `git worktree` needs nothing: it resolves the main checkout's corpus (see below).
+  `git worktree` needs nothing: it resolves the main checkout's corpus
+  ([Git worktrees](#git-worktrees)).
 
 **Everyday:**
 - `/hippo:new` — save one memory the right way (correct frontmatter, provenance backfill, index
@@ -236,7 +285,8 @@ terminal the same engine is one command, `hippo <verb>` (`hippo help` lists the 
   audit of the *content* (staleness, drift, orphans, archive candidates).
 - `/hippo:dream` — the offline link pass: it replays recall over each memory's own self-query,
   watches which memories co-fire, and diffs that against the link graph to surface latent edges.
-  Report-first, gated, capped per pass; the empty pass is the designed norm.
+  Gated on a soak bar and capped at five edges per pass; what it applies is reversible and
+  never committed, and `--dry-run` previews. The empty pass is the designed norm.
 - `/hippo:review` — review a memory diff like a pull request: what each touched memory's change
   *is* (added, updated, superseded, archived, relinked), the lints on the touched files, and how
   recall would shift.
@@ -269,8 +319,8 @@ now a one-line route into the verb above that absorbed it.
   only by default (fork PRs get no write token).
 - `hippo recall --for-issue <ID> [--json] [--cap N]` — the issue's recall: the memories whose
   description or body cites a tracker id as a whole token, each with where it cites it, under
-  the id's status and snapshot date from a declared ledger (see "Tracker statuses at read
-  time" below). Read-only like `--for-diff`. Without a `ledgers` declaration it says so and
+  the id's status and snapshot date from a declared ledger
+  ([Issue trackers](#issue-trackers-linear-and-others)). Read-only like `--for-diff`. Without a `ledgers` declaration it says so and
   exits 0; an id that matches no declared `id_re` is refused (exit 2) with the pattern named.
 
 **Which one do I want?**
@@ -283,6 +333,28 @@ now a one-line route into the verb above that absorbed it.
   verdicts, contradictions → decisions); the audit *diagnoses* content health but drains nothing.
 - **tend vs. dream** — both run *off* the hot path, but `tend` works what is already queued;
   `dream` *discovers* what wasn't captured — latent links between existing memories.
+
+## Issue trackers: Linear and others
+
+Task state belongs in the tracker; a memory holds what the tracker does not. hippo keeps the
+two apart and joins them at read time:
+
+- **Cite the id, never the status.** A memory that says "ENG-901 is in progress" is wrong the
+  day the issue moves. A memory that cites `ENG-901` stays right.
+- **Recall shows the status for you.** If the repo commits a mirror of its tracker (a Linear
+  snapshot file is the worked example), declare it under `ledgers` in `hippo.json` and a
+  recalled row whose name or description cites an id ends with that id's status and the
+  mirror's date:
+  `· ENG-901 In Progress (snapshot 2026-08-26)`.
+- **Ask by issue.** `hippo recall --for-issue ENG-901` lists the memories that cite one issue.
+  A prompt that names an issue id also lets a journal citing it through the recall lanes.
+- **Keep status words out of memory.** A corpus can ban them from the floor and warn on them
+  in memory bodies (`floor_lint.banned_re`, in [the write gate](SETTINGS.md#the-write-gate)).
+
+hippo reads only the committed file. It never calls Linear's API or any other tracker's,
+holds no tracker credential, and writes nothing back, so Jira, GitHub Issues or a hand-kept
+file work the same way. The declaration and its limits are in
+[SETTINGS.md](SETTINGS.md#tracker-statuses-at-read-time).
 
 ## Warm recall (opt-in)
 
@@ -356,6 +428,33 @@ Keep a corpus's own rules in `CONVENTIONS.local.md` beside it. hippo never requi
 never overwrites it, and adds to it only on that `--yes` (the lines of an edited copy that are
 in no version hippo shipped). Neither file is a memory: neither is indexed or recalled.
 
+## Settings and gates
+
+Settings live in three places, and the first one that answers wins: an environment variable,
+hippo's plugin options (your machine: the calm SessionStart switch, the LLM opt-ins and key),
+and `.claude/memory/hippo.json` (the corpus's committed policy, shared with your team).
+[SETTINGS.md](SETTINGS.md) is the full reference. What a corpus can ask for there:
+
+- **Recall lanes and journals**: keep long work journals out of the prompt hook's rows unless
+  the prompt names them ([recall lanes](SETTINGS.md#recall-lanes),
+  [folded sections](SETTINGS.md#folded-sections)).
+- **Tracker statuses**: a committed tracker mirror whose statuses recall renders
+  ([above](#issue-trackers-linear-and-others)).
+- **An outbox**: saved memories go to a gitignored folder beside the corpus, so `git status`
+  stays clean, and `hippo ship` lands them as one commit on one new branch, never pushed
+  ([the outbox](SETTINGS.md#saving-without-touching-the-working-tree-opt-in)).
+- **A write gate**: a `PreToolUse` hook warns (or, by committed policy, refuses) when a write
+  leaves a floor budget over and makes it worse ([the write gate](SETTINGS.md#the-write-gate)).
+- **Consent for a session's own writes**: skip the review for bytes this machine's own session
+  wrote and that pass the lints
+  ([session writes](SETTINGS.md#consent-for-a-sessions-own-memory-writes-opt-in)).
+- **A commit gate and budgets**: `hippo gate --staged` as a pre-commit hook, with declared
+  limits on files, floor size and journals, and a floor diet in `/hippo:tend`
+  ([the commit gate](SETTINGS.md#at-commit-time-hippo-gate-and-declared-budgets)).
+
+A setting that changes what a machine does with pulled bytes (the outbox, a refusing gate,
+session-write consent) takes one `hippo trust policy --accept` on each machine before it acts.
+
 ## Removal / Uninstall
 
 To stop hippo from acting on a project, run inside Claude Code:
@@ -376,286 +475,8 @@ It also reports, and never deletes, `.claude/memory.outbox/` when a corpus saves
 memories are not in git yet.
 
 `.claude/memory/` itself — the git-tracked corpus — is always left alone: it stays committed in
-git, inert, until someone runs `/hippo:init` again (in this repo, a fresh clone, or a new
+git, inert, until someone runs `/hippo:setup` again (in this repo, a fresh clone, or a new
 worktree).
-
-## Settings (moved in v1.42)
-
-hippo's settings now live in three places, and the first one that answers wins:
-
-1. **An environment variable** — a per-shell or CI override.
-2. **hippo's plugin options** — your machine's settings: the calm SessionStart switch, the
-   LLM opt-ins, the LLM model, and the LLM API key (kept in your system keychain).
-3. **`.claude/memory/hippo.json`** — the corpus's committed policy, shared with your team:
-   `volatile_paths`, `floor_lint`, `floor_sections`, `fold_digests`, `attention` (`"calm"` or
-   `"full"`), `mute` (SessionStart signals to hide), `acknowledged_findings` (see below),
-   `write_path` (`"outbox"` or `"direct"`, below), `gate` (the write gate, below), `consent`
-   (`{"session_writes": true}`: consent for a session's own memory writes, below), `budgets`
-   (the commit gate's budgets, below), `journals` (journal filename globs: the commit
-   gate's journal budget counts them, and the prompt hook's recall lanes, below, act once it
-   is declared) and `ledgers` (committed tracker mirrors whose statuses recall renders,
-   below).
-
-**Recall lanes.** Each memory sits in one lane: **behavior** (`type: user` or `feedback`),
-**fact** (`project`, `reference`, anything else) or **journal** (a file matching
-`fold_digests` or a `journals` glob). A corpus whose `hippo.json` declares `journals` as a
-list (`[]` counts) changes what the prompt hook injects, and only that: a journal is injected
-only when the prompt names it (`round-12`, `[[round-12]]` or `round-12.md`), when, with a
-ledger declared, the prompt names an issue id it cites (below), or when it earns its place
-by its own signal: it leads every candidate the ranker fused for the prompt and has evidence
-of its own under the count rule. At most one journal per prompt enters that last way, and it
-is an extra row beside the others, never in place of one (`HIPPO_JOURNAL_SIGNAL=0` turns it
-off; it needs the dense model). The hook
-picks behavior memories first, up to 4 of its 10 slots and 40% of the prompt's character
-budget, then facts, with any lane's unused room going to the others. `hippo recall` and the
-`recall` tool are unchanged and still return journals. Nothing is withheld from a corpus that
-declares no `journals`. Doctor's recall-lanes line reports each lane's share of what the hook
-injected beside its share of the corpus. `journals` only names files; like `mute`, it needs no
-`hippo trust policy --accept`.
-
-**Tracker statuses at read time.** A memory should cite a tracker issue by its id and leave
-the status to the tracker. If the repo commits a mirror of its tracker, declare it and recall
-shows each cited id's status beside the row, dated, so nobody has to type it into a memory:
-
-```json
-{"ledgers": [{"name": "linear", "path": "LINEAR-SNAPSHOT.yaml", "id_re": "\\bGRO-\\d+\\b",
-              "entry_key": "id", "status_key": "state"}]}
-```
-
-A row whose name or description cites `GRO-901` then ends `· GRO-901 In Progress (snapshot
-2026-08-26)`, at most two ids per row, in the prompt hook's rows, `hippo recall` and
-`hippo inspect`. The date is the mirror's last commit. hippo reads the file line by line: an
-entry starts at an `id: <an id_re match>` line (`- id:` in a list too) and its status is the
-first `state:` line at that key's indent before the next entry; nothing else in the file is
-read. The `path` must stay inside the repo, `id_re` must be a plain pattern (no nested
-repeats, alternation under a repeat, backreferences or lookarounds; 120 characters at most),
-and a status is cut to 40 characters on one line. The join is a derived cache,
-`.hippo/index/ledger.json`, built at SessionStart and by `hippo build-index` for a trusted
-corpus only, and never a network call or a write to the tracker or the corpus. A ledger that
-cannot be used is dropped and `/hippo:doctor` says why. `ledgers` only declares data, so it
-needs no `hippo trust policy --accept`; a corpus without it is unchanged. When the corpus also
-declares `journals`, a journal the recall lanes would withhold is let through when it cites an
-issue id the prompt names (`what's left on GRO-901?`); it still has to rank, and the journal
-cap still applies. The cache holds the map from each id to the journals citing it (8 at most
-per id), so the hook never reads the corpus for it.
-
-**Folded sections.** In a file matching `fold_digests`, each `### <slug>` section (a heading
-that is one slug, nothing after it) is a recall unit of its own, found by its name, its first
-line and its opening text, and shown as `slug (digest.md:LINE)` so you open the right place.
-A section whose slug is also a live memory's file name is skipped (the file wins). Sections
-never take a memory's place: `hippo recall` and the `recall` tool list up to 5 matching
-sections after the memories (`HIPPO_SECTION_ROWS` changes the number; a query no memory
-matches stays unanswered), and the prompt hook shows a section only when the prompt names its
-slug. A `[[slug]]` link to a folded section is not a broken link and never resolves to the
-whole digest. Sections live in a sub-index beside the main one
-(`.hippo/index/sections.json`); a corpus with no sections gets none.
-
-**Acknowledging a cleared lint finding.** When a memory file carries a secret or threat finding
-you have reviewed and cleared, add an entry to `acknowledged_findings` in `hippo.json` —
-`{"file": "notes.md", "rule": "html-comment", "sha256": "<the file's sha256>", "reason": "…",
-"date": "YYYY-MM-DD"}` — and commit it. `/hippo:doctor` then counts the finding instead of
-warning it; its warn line names each finding's rule and the file's sha256 once the key exists
-(or run `shasum -a 256 .claude/memory/notes.md`). Any change to the file re-arms the finding,
-and doctor says the acknowledgement no longer matches. Locally an acknowledgement counts only
-on a corpus you trust, for the exact bytes you consented to; the review packet and
-`hippo review --ci` count only acknowledgements already present at the base of the range, so a
-change can never acknowledge its own finding. The release secret scan ignores the list.
-A floor line that an always-loaded rule already says (`hippo lint-floor` lists these, and they
-never fail anything) is acknowledged the same way with `"file": "MEMORY.md"` and
-`"rule": "restates-rule"`; `MEMORY.md` is outside the consent baseline, so that one entry needs
-only a matching hash.
-
-### Saving without touching the working tree (opt-in)
-
-When several checkouts write one corpus, every saved memory is a change someone has to commit.
-A corpus can opt out of that: `"write_path": "outbox"` in `hippo.json` sends each new memory,
-and the floor pointer it adds, to `.claude/memory.outbox/`, a gitignored folder beside the
-corpus (it also ignores itself). The corpus folder is not touched, so `git status` stays clean.
-Recall reads the outbox like a tier, so a saved memory is recalled from the next prompt; an
-outbox copy of a memory takes precedence over the committed one.
-
-- **Where.** Always `.claude/memory.outbox/` beside the corpus; the setting cannot name a path.
-  A linked git worktree uses its main tree's corpus, so one clone has one outbox for all its
-  worktrees.
-- **When a save goes there.** Only when this machine accepted the setting: because
-  `hippo.json` arrives by pull, a setting that changes where writes land takes one
-  `hippo trust policy --accept` per machine (and a trusted corpus). Until then saves land in the
-  working tree as before, and the save and `/hippo:doctor` say what is waiting. Any value other
-  than `"outbox"` or `"direct"` behaves as `"direct"`, and doctor names it. The user and private
-  tiers are never redirected.
-- **Trust.** hippo records the hash of every file it writes into the outbox in this machine's
-  trust registry, and recall injects an outbox file only while its bytes match. A file that
-  arrived another way (dropped in, pulled, edited by hand) is withheld and counted by doctor;
-  if it shadows a committed memory, recall uses the committed one. `hippo trust review` shows
-  such a file (as `outbox:<name>`) and `hippo trust grant` consents it.
-- **Edits go there too.** Every `/hippo:tend` verdict that changes an existing memory (graduate,
-  demote, keep one of a contradiction, re-derive citations, heal a baseline), and the other
-  hippo edits (typed edges, dream edges, the related-line fix), copy the memory into the outbox
-  on first edit and change the copy, so `git status` stays clean and the item does not come
-  back: tend reads what it wrote. A committed file this machine withholds is refused with the
-  reason, never copied. Removals are not edits: archive and promote still change the corpus
-  folder (commit those yourself) and remove the memory's outbox copy with it. Packs keep
-  writing the corpus folder and refuse a memory that has an outbox copy.
-- **Reads do not depend on the setting.** Turning it off never hides memories still in the
-  outbox: recall and doctor keep seeing them.
-- **The floor.** The floor pointer goes into the outbox's copy of `MEMORY.md`. Claude Code
-  still loads the committed floor, so a memory whose pointer is only in the outbox copy stays
-  recallable on demand.
-- **Landing them.** `hippo ship` lands the outbox as one reviewed batch; see below.
-  `/hippo:remove` reports the outbox and never deletes it.
-
-#### `hippo ship`: one branch, one commit, nothing pushed
-
-`hippo ship` previews; `hippo ship --yes` acts. It makes ONE commit holding the outbox's new
-and edited memories on ONE new branch (`hippo/ship-<UTC time>`, or `--branch <name>`) off the
-local default-branch ref (`origin/HEAD`, else `origin/main`, `origin/master`, else your local
-`main`/`master`; `--base <ref>` picks another), and stops. It never fetches, so the base is as
-fresh as your last `git fetch`; it never pushes, never touches your checkout, your staged
-changes or `HEAD`, never overwrites a branch, and never carries a deletion. Push the branch
-and open the pull request yourself. Because no `git commit` runs in your working tree, the
-repository's git hooks do not run for that commit; hippo runs its own gate judgment (the
-corpus's committed `budgets` and `floor_lint`) and refuses while a finding stands, and the
-pull request's checks run the rest.
-
-Each outbox file is one of: **new** (ships), **waiting** (already on a ship branch that still
-exists, unchanged since: not shipped again), **stale** (the committed copy changed since the
-outbox copy was made, appeared under the same name, or was deleted: shown as a diff and never
-shipped; `hippo ship --mine <name>` keeps the copy as an edit of the current version,
-`hippo ship --drop <name>` removes the copy), **held** (a credential shape, a threat-lint
-class, or bytes hippo did not write on this machine: the file and the class are named, never
-the matching text), or **landed** (the default branch already has these bytes). The floor is
-never committed whole: the pointer adds and removes hippo made in the outbox copy of
-`MEMORY.md` are replayed onto the floor at the base, so both sides' pointers survive. Files
-stay in the outbox, and recallable, until they land; once the default branch and this checkout
-both hold them, the next `hippo ship --yes` clears them (and folds the bytes this machine wrote
-into the corpus's consent, so the landed file is not withheld). `--json` prints the plan.
-
-The environment variables you might still set are the directory overrides,
-`HIPPO_DISABLE=<list>` (any of `dense`, `jit`, `presence`, `floor-nag`, `abstain-gate`,
-`touch-fastpath`), `HIPPO_TRUST_ALL` and `HIPPO_TRUST_NONGIT`.
-
-The old spellings keep working through v1.43 and stop at v2.0: `HIPPO_DISABLE_DENSE` and its
-five siblings (now `HIPPO_DISABLE=dense`, …), `DREAM_CONTRA_MAX_PAIRS` and
-`DREAM_CONTRA_MIN_COFIRE` (now with a `HIPPO_` prefix), the policy keys in
-`.claude/memory/.format` (move them to `hippo.json`; the format number stays in `.format`), and
-`~/.claude/hippo-llm.json` (move its settings to the plugin options, and its key out of the
-plain-text file). `/hippo:doctor` lists every old name it sees with its new spelling.
-
-## The write gate
-
-Before a file tool writes into the corpus, a `PreToolUse` hook simulates the write and asks
-one question: does it leave a budget over **and** make it worse? It checks the floor
-(`MEMORY.md` bytes and lines against the harness read window, lines over `floor_lint.max_line`,
-lines matching `floor_lint.banned_re`, each `floor_lint.section_budgets` entry) and runs the
-same `banned_re` over memory bodies (frontmatter excluded). Standing debt never objects: an
-edit that holds or shrinks a measure always passes, so a corpus that is over budget today can
-still be edited.
-
-By default a worsening write goes ahead with one line in the model's context naming each
-budget, its before and after numbers, and the way out. A corpus can ask for more, or less, in
-`hippo.json`:
-
-```json
-{"gate": {"write": "deny"}}
-```
-
-`"deny"` refuses a worsening write, but only where that value is in the **committed**
-`hippo.json` and this machine accepted it (`hippo trust policy`, then `hippo trust policy
---accept`): a pulled or uncommitted change can never turn refusal on by itself. `"off"`
-silences the check for the corpus; any other value only warns. `/hippo:doctor` states which of
-these applies. The hook always exits 0, and a write outside a corpus is rejected in bash
-before any Python starts.
-
-### Consent for a session's own memory writes (opt-in)
-
-Once setup links Claude Code's native memory dir to `.claude/memory/`, a memory that a session
-writes with its own file tool lands in the corpus with no consent recorded, so hippo's recall
-withholds it until `hippo trust review` and a grant. A corpus can skip that review for exactly
-those bytes:
-
-```json
-{"consent": {"session_writes": true}}
-```
-
-This setting needs `hippo trust policy --accept` on each machine before it does anything. Once
-accepted, the `PreToolUse` hook notes the file's state before a Write, Edit or MultiEdit
-(absent, consented, or not) and the bytes the tool will leave, in a small note in the
-gitignored telemetry dir. The `PostToolUse` hook then consents to the bytes on disk only when
-the corpus is already trusted with a per-file record, the file sat directly in a corpus this
-session works in (symlinks resolved; the main checkout's when the session runs in a linked
-worktree), it was absent or consented before, the bytes on disk are exactly the ones
-predicted, the note belongs to this same tool call (its `tool_use_id`), the call was not made
-inside a subagent (the payload names no `agent_id`; a harness that does not send `agent_id`
-cannot be told apart from the main session), and the bytes pass the lints a review gates on
-(secrets; hidden characters, homographs, HTML comments, exfiltration shapes, tool mimicry).
-A write that fails a lint is held for review and counted. Anything else grants nothing and
-says nothing.
-
-The prediction is exact for a Write (it leaves exactly `content`) and for an Edit or
-`replace_all` Edit of an LF file or a file with a UTF-8 BOM. An Edit of a CRLF file with a
-multi-line `new_string` is not predicted (the tool writes the inserted newline as CRLF), so
-such an edit grants nothing: it waits for review.
-
-What this does and does not change:
-
-- Claude Code's native loader already reads these files (`MEMORY.md` and whatever the model
-  opens through it) with no gate at all. hippo's gate only governs what hippo's own recall
-  injects.
-- The gate never defended against this machine's own session when it has a shell (it can run
-  `hippo trust grant` or `hippo trust policy --accept` itself) or file-tool access to the trust
-  registry under your home directory. This setting changes what a session limited to file tools
-  inside the project can get into hippo's recall without you: its own new, or
-  already-consented-then-edited, memory files that pass the lints above.
-- With the setting on, those bytes join hippo's recall without a human review. With it off (or
-  not accepted), nothing changes.
-- Bytes that arrive by pull, merge, checkout or a shell redirect are still withheld, and so are
-  an edit to a file whose bytes were not consented, a subagent's write and a write a lint
-  flags. An untrusted corpus stays untrusted, and the recall block still labels memory text as
-  quoted data.
-
-`hippo trust status` counts and names the memories consented this way, the daily rollup counts
-the grants and the held writes, and `/hippo:doctor` sorts withheld memories by how they arrived (the native path,
-written by hippo elsewhere, other), naming this setting when the native-path count is not zero.
-
-### At commit time: `hippo gate` and declared budgets
-
-`hippo gate --staged` runs the floor checks on what the next commit records (HEAD against the
-index, read with git plumbing, so untracked files never count), with the same rule: it fails
-(exit 1) only when the change leaves a budget over and makes it worse. The banned pattern over
-memory bodies is not checked at commit time: a status word in a body is the write gate's
-warning, never a failed commit. `hippo gate --commit
-<rev>` judges one commit against its first parent, for CI or a replay of history. A corpus can
-declare hard numbers of its own in `hippo.json`:
-
-```json
-{"budgets": {"files": 1200, "floor_bytes": 20000, "floor_lines": 150, "journals": 300}}
-```
-
-`files` counts memory files directly in the corpus dir, `journals` counts files matching
-`fold_digests` or a `journals` glob list, and `floor_bytes`/`floor_lines` are the floor's own
-budget. They sit beside the harness read window rather than replacing it: at commit time the
-floor is also held to the read limit (25,000 bytes or 200 lines, or a lower declared
-`floor_lint` cap), while the write-time warn line stays advice. Each key is optional; a corpus
-with no `budgets` and no `floor_lint` is not checked. The budgets are read from the side being
-committed, so raising one deliberately in the same change is judged by the new number.
-
-A declared `floor_bytes` also puts the floor on a diet: `hippo tend` lists one demotion per
-floor line until the floor would fit, lines whose memory is not a user or feedback memory
-first, the least used first (injected or opened in the last 30 days, as far back as the local
-ledgers reach). Each item says whether a replay of recent prompts shows the memory reaching a
-prompt only through its floor line; such a line is listed last and never proposed as safe.
-The replay ranks at most 50 prompts per `hippo tend` call and keeps each ranking in a
-gitignored cache, so later calls read it back; a line whose prompts are not all replayed yet
-says "wait". `hippo doctor` never runs the replay.
-`--verdict demote` removes that one line and nothing else: the memory file stays, and recall
-still finds it. `hippo doctor` shows the floor against the budget and how to start, and
-suggests 8,192 bytes when a floor without a budget is over the warn line.
-
-`hippo gate --install` shows the pre-commit hook it would write and where (it follows
-`core.hooksPath` and linked worktrees); `--install --yes` writes it. It never overwrites a
-pre-commit hook it did not write (it prints the two lines to add by hand instead), it exits 0
-when hippo is not installed, so it cannot stop commits on a machine without the plugin, and
-`git commit --no-verify` skips it for one commit.
 
 ## Support matrix
 
@@ -667,15 +488,16 @@ when hippo is not installed, so it cannot stop commits on a machine without the 
 
 **Claude Code 2.1.269 or newer.** That is the first version that sets plugin options from
 `/config` (the attention setting); `/hippo:doctor` prints the running version against this
-floor, and SessionStart names an older one. Python 3.10 and 3.12 are exercised in CI.
-Bootstrap runs once per machine; init runs once per project.
+floor, and SessionStart names an older one. CI runs the full suite on Python 3.10 and 3.12 and
+a dependency-install lane on 3.11, 3.13 and 3.14. Setup's machine half runs once per machine;
+its project half runs once per project.
 
 ## hippo and Claude Code's native memory
 
 Anthropic now ships memory of its own: the GA `memory_20250818` tool (a client-managed
 file-memory API, view/create/edit/delete) and Claude Code's **Auto Memory**, which quietly
 maintains a project `MEMORY.md` — build commands, code style, architecture decisions, bugs it
-solved with you. So the fair question at launch is *"why not just use Anthropic's memory?"*
+solved with you. So the fair question is *"why not just use Anthropic's memory?"*
 
 Because hippo is the **ranking + hygiene + review layer on top of it**, not a competitor to it.
 hippo **composes** with native memory — it does not replace or fork it.
@@ -694,10 +516,13 @@ hippo **composes** with native memory — it does not replace or fork it.
   **automatic-capture-behind-an-approval-gate** path, and an offline **generative-replay** pass
   (`/hippo:dream`) that surfaces latent edges between memories. It is exactly the ranking, staleness
   hygiene, and human review that Auto Memory's always-loaded, auto-written note lacks.
-- **How they compose.** `/hippo:init` points the native memory location at this repo's
+- **How they compose.** `/hippo:setup` points the native memory location at this repo's
   `.claude/memory/` via a symlink, so hippo's always-load **floor** (the `user`/`feedback`
   pointers) reaches context *through* native memory's own always-load — hippo adds no second
   always-load channel. Everything else is served on demand by the recall hook and the MCP tools.
+  If native auto memory already wrote notes for the repo, setup previews adopting them into the
+  corpus (`hippo adopt`) and asks first; adopted notes wait for `hippo trust review` like any
+  bytes hippo did not write.
 
 That symlink is the **only** native behavior hippo depends on. The full contract — every
 assumption, how it can drift, and how `/hippo:doctor` detects a break — is documented in
@@ -747,28 +572,33 @@ This repo is both a **plugin marketplace** and the **plugin itself**:
 ```
 .claude-plugin/marketplace.json   # marketplace manifest (lists the `hippo` plugin)
 plugin/
-├── .claude-plugin/plugin.json    # plugin manifest
+├── .claude-plugin/plugin.json    # plugin manifest (version, options, the MCP server)
 ├── memory/                       # the engine (Python package, imported as `memory`)
 │   └── _vendor/                  # pre-bootstrap fallbacks (BM25 + frontmatter parser)
-├── hooks/                        # UserPromptSubmit recall + SessionStart dispatcher + PreToolUse write gate + PreCompact nudge + SessionEnd/SubagentStop capture
+├── hooks/                        # UserPromptSubmit recall · SessionStart report · PreToolUse write gate ·
+│                                 # PostToolUse first-touch reminder · PreCompact nudge · SessionEnd/SubagentStop capture
 ├── assets/packs/                 # starter packs (core seeded by default; rest opt-in)
 ├── bin/hippo                     # `hippo <verb>`: the one entry into the engine
 ├── requirements.txt              # fastembed, numpy, PyYAML, rank-bm25 (the venv path)
-└── skills/                       # 9 /hippo:* verbs (+ 12 v1 names routing to them) (see the Commands section above)
+└── skills/                       # the nine verbs, plus 12 v1 names routing to them (see Commands above)
 tests/                            # hermetic test suite (no network/model download by default)
+bench/                            # the reproducible recall benchmark (bench/run.sh)
+demo/                             # git_drift.sh: staleness in five seconds
 .github/workflows/ci.yml          # hermetic matrix + dense/secret-scan/resolution lanes + shellcheck
+.github/workflows/memory-on-diff.yml  # the CI recipe: memories a pull request's files touch
+.github/workflows/release.yml     # on a version tag: manifests and CHANGELOG must agree, then the release is published
 ```
 
 New to the ideas here? Start with [How hippo thinks](CONCEPTS.md). For the deep internals
 (recall, staleness, reconsolidation, archive), see the engine reference at
-[`plugin/memory/README.md`](plugin/memory/README.md); for the skills, see
+[`plugin/memory/README.md`](plugin/memory/README.md); for the skills and the MCP server, see
 [`plugin/README.md`](plugin/README.md).
 
 ## Bootstrap vs. auto-provision (design decision)
 
 The plugin's Python dependencies (fastembed, numpy, PyYAML, rank-bm25) and the ~130MB
 fastembed model cache are **not** installed automatically on enable. Bootstrapping is
-**explicit** via the `/hippo:bootstrap` skill, run once per machine, rather than
+**explicit** via `/hippo:setup`'s machine half, run once per machine, rather than
 an implicit SessionStart auto-provision. Reasoning:
 
 - The one-time venv build + model warm is an **online** step (the only one in this
@@ -792,45 +622,44 @@ dismisses it on this machine.
 
 ## Troubleshooting
 
-- **`/hippo:init` (or any `/hippo:*` command) "isn't a recognized command" / "only works in the
+- **`/hippo:setup` (or any `/hippo:*` command) "isn't a recognized command" / "only works in the
   Claude Code terminal."** Desktop app versions before 2026-10 rejected typed plugin commands;
   current ones run them (see [`PLATFORM.md`](PLATFORM.md)). Either way the **desktop app**'s
   local sessions run hippo's hook, skills, and MCP tools, so where typed commands are still
-  rejected, just ask in plain words (*"set up hippo memory here"*, *"run hippo doctor"*):
-  the agent invokes the same flows via the `init` / `bootstrap` / `doctor` / `trust_corpus` MCP
-  tools — and *"consolidate memory"* likewise drives the full `/hippo:consolidate` drain
-  through the consolidate-flow tools (`capture`, `secrets_scan`, `reconsolidate`,
-  `build_index`, `co_recall_proposals`, `abstention_fixtures`), per item, same approval
-  gates. **Cloud / remote** sessions are the real limit — no local filesystem, no hippo.
-  (Nothing's wrong with your install.)
-- **Recall is BM25-only in the desktop app even though I already bootstrapped.** Bootstrap is
-  once per plugin-data dir, and some Claude Code versions gave the terminal CLI and the desktop
-  app **different plugin-data dirs** (`…/data/hippo-<marketplace>` vs `…/data/hippo-inline`, seen
-  in 2026-07; on 2.1.286 both use the first), so the terminal's venv and model cache weren't
-  where a desktop session looked. Ask the desktop session
-  to run hippo bootstrap once — its `status` output names the sibling install so you can see
-  exactly this situation, and `/hippo:doctor` (or the `doctor` tool) flags it too.
+  rejected, just ask in plain words (*"set up hippo memory here"*, *"run hippo doctor"*,
+  *"tend memory"*): the agent drives the same flows through the `setup`, `doctor`, `trust`
+  and `tend` MCP tools, per item, with the same approval gates. **Cloud / remote** sessions
+  are the real limit: no local filesystem, no hippo. (Nothing's wrong with your install.)
+- **Recall is BM25-only in the desktop app even though I already ran setup.** The machine half
+  of setup is once per plugin-data dir, and some Claude Code versions gave the terminal CLI and
+  the desktop app **different plugin-data dirs** (`…/data/hippo-<marketplace>` vs
+  `…/data/hippo-inline`, seen in 2026-07; on 2.1.286 both use the first), so the terminal's
+  venv and model cache weren't where a desktop session looked. Ask the desktop session to run
+  hippo setup once: its status output names the sibling install so you can see exactly this
+  situation, and `/hippo:doctor` (or the `doctor` tool) flags it too.
 - **Some recalls run BM25-only and I don't know why.** The prompt hook records a
   reason beside every BM25-only recall (the model not warmed, an index without vectors, another
   model, the dense timeout, an error, dense turned off, a tier without vectors, or simply no
   memory clearing the dense floor), and `/hippo:doctor`'s BM25-only line names the most common
   one over 30 days with what to do about it.
-- **Recall comes back empty.** Almost always one of three things: **(a) bootstrap never ran**
-  on this machine — dense recall is silently BM25-only until `/hippo:bootstrap` finishes;
-  **(b) the corpus isn't trusted yet** — a freshly cloned or downloaded corpus injects
-  *nothing* until you review it, and running `/hippo:init` (or `/hippo:doctor`) here is what
-  marks it trusted; **(c) `user_role.md` is still the `<FILL-ME>` template**, so the only
-  thing to recall is placeholder text — edit it with your real role and context.
+- **Recall comes back empty.** Almost always one of three things: **(a) setup's machine half
+  never ran** on this machine, so recall is BM25-only until `/hippo:setup` finishes;
+  **(b) the corpus isn't trusted yet**: a freshly cloned or pulled corpus injects *nothing*
+  until you review it. `/hippo:doctor` walks the consent step (`hippo trust review`, then
+  `hippo trust grant`), and its withheld line counts memories by how they arrived. A file
+  that changed outside hippo after you consented is withheld the same way until you review it;
+  **(c) `user_role.md` is still the `<FILL-ME>` template**, so the only thing to recall is
+  placeholder text. Edit it with your real role and context.
 - **A memory I wrote never resurfaces.** Recall is on-demand and ranked, not always-on: only
-  the always-load *floor* (the `user`/`feedback` pointers) is injected every prompt;
+  the always-load *floor* (the `user`/`feedback` pointers) is loaded in every session;
   everything else surfaces when a prompt actually matches it. Phrase your question closer to
   the memory's own wording, or confirm it's indexed with `/hippo:doctor`.
 - **Recall surfaces something off-topic.** Since v1.41.0, recall injects only when the dense
   and lexical lanes agree on a memory, or when one of them is strong on its own (a very close
   meaning, or a description sharing several of the prompt's terms). A prompt that shares one
   coincidental word with a memory abstains. The gate needs the dense model, so on a BM25-only
-  install (`/hippo:bootstrap` not run, or the model cache cold) any shared token still admits.
-  Ask `/hippo:why` about the prompt to see which memory matched and why;
+  install (setup's machine half not run, or the model cache cold) any shared token still admits.
+  Ask `/hippo:recall` why a memory surfaced for the prompt to see which lane matched it;
   `HIPPO_DISABLE=abstain-gate` turns the gate off. `/hippo:doctor` reports the measured
   per-corpus rate when you supply an off-topic fixture.
 - **Recall shows fewer memories per prompt than it used to.** The prompt hook used to serve
@@ -867,6 +696,22 @@ dismisses it on this machine.
 - **When in doubt, run `/hippo:doctor`.** It is the one-stop diagnostic — it checks the native
   symlink, the recall index, corpus trust and drift, the corpus format version, link density,
   and unfilled templates, and prints the exact repair command for whatever it finds.
+
+## All the docs
+
+| Read | For |
+|---|---|
+| [CONCEPTS.md](CONCEPTS.md) | The five-minute mental model: memories, the floor, the four types |
+| [SETTINGS.md](SETTINGS.md) | `hippo.json`, the outbox and `hippo ship`, the write and commit gates |
+| [plugin/README.md](plugin/README.md) | The skills and the MCP server |
+| [plugin/memory/README.md](plugin/memory/README.md) | The engine: recall, staleness, reconsolidation, archive, purge |
+| [plugin/memory/NATIVE_MEMORY.md](plugin/memory/NATIVE_MEMORY.md) | The contract with Claude Code's native memory |
+| [UPGRADING.md](UPGRADING.md) | What each release asks of an existing install |
+| [STABILITY.md](STABILITY.md) | What is frozen, and the deprecation window (the v2 draft: [STABILITY.v2.md](STABILITY.v2.md)) |
+| [PLATFORM.md](PLATFORM.md) | Dated observations of the Claude Code behavior hippo depends on |
+| [bench/README.md](bench/README.md) | The benchmark and its method |
+| [CHANGELOG.md](CHANGELOG.md) | Every release |
+| [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) | Working on hippo; reporting a vulnerability |
 
 ## Security
 
