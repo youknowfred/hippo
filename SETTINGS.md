@@ -97,7 +97,9 @@ The example is a Linear mirror, the setup this feature was built for: a `LINEAR-
 that the repo's own script refreshes from Linear and commits. Any tracker works the same way
 (Jira, GitHub Issues, a hand-kept file), because hippo reads only the committed file. It
 never calls Linear's API or any other tracker's, holds no tracker credential, and writes
-nothing back. Up to four ledgers can be declared.
+nothing back. Up to four ledgers can be declared. The README's
+[hippo and Linear](README.md#hippo-and-linear-or-any-issue-tracker) section has the whole
+picture (who holds what, the mirror's shape, real output); this section is the contract.
 
 ```
 hippo recall --for-issue ENG-901    # the memories that cite one issue, under its status

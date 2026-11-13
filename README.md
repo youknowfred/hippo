@@ -33,7 +33,7 @@ In daily use since 2026-06 across three production corpora, the largest over 1,0
 **On this page:** [Quickstart](#quickstart) · [What you get](#what-you-get) ·
 [Automatic capture](#automatic-capture--memory-that-writes-itself-gated-by-your-review) ·
 [Compared to other tools](#compared-to-other-memory-tools) · [Commands](#commands) ·
-[Issue trackers (Linear)](#issue-trackers-linear-and-others) ·
+[Linear and other trackers](#hippo-and-linear-or-any-issue-tracker) ·
 [Opt-in settings](#warm-recall-opt-in) · [Native memory and worktrees](#hippo-and-claude-codes-native-memory) ·
 [Troubleshooting](#troubleshooting) · [All the docs](#all-the-docs)
 
@@ -119,7 +119,7 @@ than blocking or erroring.
   packs between repos, and a CI recipe posts the memories a pull request's files touch.
 - **Your tracker's statuses, not a copy of them.** A memory cites an issue id; recall shows
   the id's current status from a mirror the repo commits
-  ([Linear and others](#issue-trackers-linear-and-others)).
+  ([Linear and others](#hippo-and-linear-or-any-issue-tracker)).
 - **Mid-turn and subagent memory.** The plugin's MCP server gives the model the same recall
   as a tool, for the moments the per-prompt hook cannot cover.
 - **A terminal door.** `hippo <verb>` runs the same engine without Claude (`hippo help`),
@@ -320,8 +320,8 @@ now a one-line route into the verb above that absorbed it.
 - `hippo recall --for-issue <ID> [--json] [--cap N]` — the issue's recall: the memories whose
   description or body cites a tracker id as a whole token, each with where it cites it, under
   the id's status and snapshot date from a declared ledger
-  ([Issue trackers](#issue-trackers-linear-and-others)). Read-only like `--for-diff`. Without a `ledgers` declaration it says so and
-  exits 0; an id that matches no declared `id_re` is refused (exit 2) with the pattern named.
+  ([hippo and Linear](#hippo-and-linear-or-any-issue-tracker)). Read-only like `--for-diff`.
+  Without a `ledgers` declaration it says so and exits 0; an id that matches no declared `id_re` is refused (exit 2) with the pattern named.
 
 **Which one do I want?**
 - **recall vs. doctor** — `recall` asks the *corpus* a question; `doctor` asks whether the *plugin*
@@ -334,27 +334,96 @@ now a one-line route into the verb above that absorbed it.
 - **tend vs. dream** — both run *off* the hot path, but `tend` works what is already queued;
   `dream` *discovers* what wasn't captured — latent links between existing memories.
 
-## Issue trackers: Linear and others
+## hippo and Linear (or any issue tracker)
 
-Task state belongs in the tracker; a memory holds what the tracker does not. hippo keeps the
-two apart and joins them at read time:
+hippo does not connect to Linear. There is no integration to install and no API key to hold,
+and hippo never reads or writes an issue. The two work together through the repo: **Linear
+keeps the state of the work, hippo keeps what was learned doing it, and a file the repo
+commits carries the one to the other.**
 
-- **Cite the id, never the status.** A memory that says "ENG-901 is in progress" is wrong the
-  day the issue moves. A memory that cites `ENG-901` stays right.
-- **Recall shows the status for you.** If the repo commits a mirror of its tracker (a Linear
-  snapshot file is the worked example), declare it under `ledgers` in `hippo.json` and a
-  recalled row whose name or description cites an id ends with that id's status and the
-  mirror's date:
-  `· ENG-901 In Progress (snapshot 2026-08-26)`.
-- **Ask by issue.** `hippo recall --for-issue ENG-901` lists the memories that cite one issue.
-  A prompt that names an issue id also lets a journal citing it through the recall lanes.
-- **Keep status words out of memory.** A corpus can ban them from the floor and warn on them
-  in memory bodies (`floor_lint.banned_re`, in [the write gate](SETTINGS.md#the-write-gate)).
+```
+ Linear ──(your export script, on your schedule)──▶ LINEAR-SNAPSHOT.yaml, committed
+                                                            │
+                                    read at SessionStart and `hippo build-index`
+                                                            ▼
+ a memory cites ENG-901 ───────▶ recalled as  "… · ENG-901 In Progress (snapshot 2026-08-26)"
+```
 
-hippo reads only the committed file. It never calls Linear's API or any other tracker's,
-holds no tracker credential, and writes nothing back, so Jira, GitHub Issues or a hand-kept
-file work the same way. The declaration and its limits are in
-[SETTINGS.md](SETTINGS.md#tracker-statuses-at-read-time).
+**Who holds what.** The split is the whole design:
+
+| In Linear | In hippo |
+|---|---|
+| Status, assignee, priority, the linked pull request | Why the approach was chosen, what broke, what you corrected |
+| Changes many times a day | Changes when the lesson changes |
+| One issue per piece of work | One memory per durable fact, citing the issues it came from |
+
+So a memory about tracked work carries the issue id and the lesson, and nothing a tracker
+already records: no status word, no PR number, no commit SHA. A status typed into a memory is
+wrong the day the issue moves, and nothing in the repo changes to say so.
+
+**How a status reaches the session.** Three steps, the first one yours:
+
+1. **Commit a mirror of the tracker.** hippo ships no exporter. A script of your own (Linear's
+   GraphQL API in a scheduled job is the usual shape) writes a text file with one entry per
+   issue and commits it:
+
+   ```yaml
+   issues:
+     - id: ENG-901
+       title: Rotate the signing key
+       state: In Progress
+   ```
+
+   hippo reads two lines of each entry, the id and the state, and nothing else in the file.
+2. **Declare it** in `.claude/memory/hippo.json`:
+
+   ```json
+   {"ledgers": [{"name": "linear", "path": "LINEAR-SNAPSHOT.yaml", "id_re": "\\bENG-\\d+\\b",
+                 "entry_key": "id", "status_key": "state"}]}
+   ```
+
+3. **Recall does the rest.** From the next session, a recalled memory whose name or
+   description cites an id ends with that id's status and the mirror's date, in the prompt
+   hook's rows, `hippo recall` and `hippo inspect`:
+
+   ```
+   • signing-key-rotation — ENG-901 signing key rotation: the mobile client caches the old
+     key for 24h · ENG-901 In Progress (snapshot 2026-08-26)
+   ```
+
+   And you can ask by issue, from a terminal or in CI:
+
+   ```
+   $ hippo recall --for-issue ENG-901
+   ENG-901 In Progress (snapshot 2026-08-26) — 1 memory(ies) cite it:
+   - signing-key-rotation [project] — ENG-901 signing key rotation: …  (cites it in: description, line 8)
+   ```
+
+The date is the mirror's last commit, so a status is as fresh as your last refresh and says
+so. For live state a session still asks Linear (its MCP server, or your own script); what
+hippo adds is that the session knows which issues bear on the prompt, and what was learned
+on them, before it asks.
+
+**How status stays out of memory.** A corpus can make the split a rule rather than a habit.
+`floor_lint.banned_re` in `hippo.json` names the words the floor may not carry:
+
+```json
+{"floor_lint": {"banned_re": "MERGED|SHIPPED|In Progress|#\\d{3,}"}}
+```
+
+The write gate then warns when a write adds a matching line to the floor or a matching word
+to a memory body, `hippo lint-floor` lists what is already there, and the commit gate fails
+a commit that makes the floor worse ([the gates](SETTINGS.md#the-write-gate)).
+
+**What hippo does not do.** It makes no network call to a tracker, holds no tracker
+credential, and writes nothing back: no comment, no status change, no issue. It does not yet
+re-queue a memory for review when an issue it cites is closed; that is planned. And
+`--for-issue` is a terminal command, with no MCP tool input yet.
+
+**Other trackers.** Nothing above is specific to Linear except the example. Jira, GitHub
+Issues or a hand-kept file work the same way once a mirror with an id line and a status line
+per entry is committed; up to four ledgers can be declared. The declaration's limits, the
+cache and the journal rule are in [SETTINGS.md](SETTINGS.md#tracker-statuses-at-read-time).
 
 ## Warm recall (opt-in)
 
@@ -445,7 +514,7 @@ and `.claude/memory/hippo.json` (the corpus's committed policy, shared with your
   the prompt names them ([recall lanes](SETTINGS.md#recall-lanes),
   [folded sections](SETTINGS.md#folded-sections)).
 - **Tracker statuses**: a committed tracker mirror whose statuses recall renders
-  ([above](#issue-trackers-linear-and-others)).
+  ([above](#hippo-and-linear-or-any-issue-tracker)).
 - **An outbox**: saved memories go to a gitignored folder beside the corpus, so `git status`
   stays clean, and `hippo ship` lands them as one commit on one new branch, never pushed
   ([the outbox](SETTINGS.md#saving-without-touching-the-working-tree-opt-in)).
