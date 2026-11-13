@@ -54,6 +54,7 @@ RECALL_LEAF_HELPERS = frozenset(
         "recall_diff",
         "recall_fallback",
         "recall_graph",
+        "recall_issue",
         "recall_query",
         "recall_rank",
         "recall_salience",

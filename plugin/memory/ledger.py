@@ -395,7 +395,7 @@ def build_cache(memory_dir: str, top: str, ledgers: List[dict], dropped: List[di
     by_state = [[] for _ in states]
     for ident, si in ids.items():
         by_state[si].append(ident)
-    return {
+    doc = {
         "schema_version": SCHEMA_VERSION,
         "ledgers": meta,
         "dropped": dropped,
@@ -403,6 +403,59 @@ def build_cache(memory_dir: str, top: str, ledgers: List[dict], dropped: List[di
         "by_state": [" " + " ".join(sorted(v)) + " " for v in by_state],
         "prev": prev,
     }
+    if meta:
+        cites = journal_cites(memory_dir, LedgerCache(doc))
+        if cites:
+            doc["cites"] = cites
+    return doc
+
+
+# --------------------------------------------------------------------------- #
+# GP-S4: the issue join's reverse map, built with the cache (the corpus is read then)
+# --------------------------------------------------------------------------- #
+JOURNALS_PER_ID = 8
+JOURNAL_SCAN_CHARS = 256 * 1024
+
+
+def journal_files(memory_dir: str) -> List[str]:
+    """The corpus's journal files (lane ``journal``), only when it declares ``journals``
+    (the lanes act only then, so nothing else needs the map). Never raises."""
+    try:
+        from .lanes import JOURNAL, journal_globs, journals_declared, lane_of
+        from .provenance import _iter_memory_files
+
+        if not journals_declared(memory_dir):
+            return []
+        globs = journal_globs(memory_dir)
+        return [p for p in _iter_memory_files(memory_dir) if lane_of(os.path.basename(p), None, globs) == JOURNAL]
+    except Exception:
+        return []
+
+
+def journal_cites(memory_dir: str, cache: "LedgerCache") -> str:
+    """``"\\n<ID> <journal> <journal>…\\n"`` for every id a journal cites (any match of a
+    declared ``id_re``, in the ledger or not), at most ``JOURNALS_PER_ID`` journals per id,
+    the ones citing it most first (then the later name). One line per id, so the hook finds
+    an id with one substring search instead of parsing a map."""
+    found: Dict[str, Dict[str, int]] = {}
+    for path in journal_files(memory_dir):
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                text = fh.read(JOURNAL_SCAN_CHARS)
+        except Exception:
+            continue
+        name = os.path.splitext(os.path.basename(path))[0]
+        if any(ch.isspace() for ch in name):
+            continue
+        for ident in cache.find_ids(text, cap=JOURNAL_SCAN_CHARS, unique=False):
+            per = found.setdefault(ident, {})
+            per[name] = per.get(name, 0) + 1
+    lines = []
+    for ident in sorted(found):
+        by_name = sorted(found[ident].items(), reverse=True)  # later (newer-dated) names first
+        top = sorted(by_name, key=lambda kv: -kv[1])[:JOURNALS_PER_ID]  # stable: count wins
+        lines.append(ident + " " + " ".join(n for n, _ in top))
+    return ("\n" + "\n".join(lines) + "\n") if lines else ""
 
 
 def write_cache(index_dir: str, doc: dict) -> bool:
@@ -438,7 +491,14 @@ def refresh_ledger_cache(memory_dir: str, index_dir: str, repo_root: Optional[st
             return None
         top = gate or corpus_top(memory_dir, repo_root)
         ledgers, dropped = read_declaration(memory_dir, top)
-        sig = _signature(memory_dir, ledgers, [json.dumps(dropped, sort_keys=True)])
+        from .lanes import lane_state
+
+        journals = [json.dumps(lane_state(memory_dir), sort_keys=True)]  # GP-S4: the issue join's
+        # map changes when the journals declaration or a journal file does
+        for p in journal_files(memory_dir):
+            st = os.stat(p)
+            journals.append(f"{os.path.basename(p)}:{st.st_size}:{st.st_mtime_ns}")
+        sig = _signature(memory_dir, ledgers, [json.dumps(dropped, sort_keys=True), *journals])
         previous = _read_json(path)
         if previous is not None and previous.get("signature") == sig:
             return True
@@ -513,21 +573,40 @@ class LedgerCache:
             self._rxs = rxs
         return self._rxs
 
-    def find_ids(self, text: str, cap: int = ROW_SCAN_CHARS) -> List[str]:
-        """Every id ``text`` cites, in order of appearance, deduped: the declared patterns
-        run per whitespace token over the first ``cap`` chars (see the module docstring)."""
+    def find_ids(self, text: str, cap: int = ROW_SCAN_CHARS, unique: bool = True) -> List[str]:
+        """Every id ``text`` cites, in order of appearance (deduped unless ``unique`` is
+        False): the declared patterns run per whitespace token over the first ``cap`` chars
+        (see the module docstring)."""
         rxs = self.patterns()
         if not rxs or not text:
             return []
         out: List[str] = []
+        seen = set()
         for tok in _TOKEN.finditer(text[:cap]):
             t = tok.group(0)
             if len(t) > TOKEN_CHARS:
                 continue
             hits = sorted((m.start(), m.group(0)) for rx in rxs for m in rx.finditer(t))
             for _pos, ident in hits:
-                if ident and ident not in out:
+                if ident and not (unique and ident in seen):
+                    seen.add(ident)
                     out.append(ident)
+        return out
+
+    def journals_for(self, prompt: str) -> Dict[str, str]:
+        """GP-S4: ``{lowercased journal name: id}`` for the journals that cite an id the
+        prompt names (the first id wins when several admit one journal)."""
+        cites = self.doc.get("cites")
+        if not isinstance(cites, str) or not cites:
+            return {}
+        out: Dict[str, str] = {}
+        for ident in self.find_ids(prompt, cap=PROMPT_SCAN_CHARS):
+            at = cites.find("\n" + ident + " ")
+            if at < 0:
+                continue
+            end = cites.find("\n", at + 1)
+            for name in cites[at + 1 + len(ident): end if end >= 0 else None].split():
+                out.setdefault(name.lower(), ident)
         return out
 
     def status(self, ident: str) -> Optional[Tuple[str, str, str]]:

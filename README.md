@@ -264,6 +264,11 @@ now a one-line route into the verb above that absorbed it.
   the comment renders only names + descriptions already committed to the repo's own
   `.claude/memory/` corpus — nothing a reader of the repo couldn't already see. Same-repo PRs
   only by default (fork PRs get no write token).
+- `hippo recall --for-issue <ID> [--json] [--cap N]` — the issue's recall: the memories whose
+  description or body cites a tracker id as a whole token, each with where it cites it, under
+  the id's status and snapshot date from a declared ledger (see "Tracker statuses at read
+  time" below). Read-only like `--for-diff`. Without a `ledgers` declaration it says so and
+  exits 0; an id that matches no declared `id_re` is refused (exit 2) with the pattern named.
 
 **Which one do I want?**
 - **recall vs. doctor** — `recall` asks the *corpus* a question; `doctor` asks whether the *plugin*
@@ -391,7 +396,8 @@ hippo's settings now live in three places, and the first one that answers wins:
 **fact** (`project`, `reference`, anything else) or **journal** (a file matching
 `fold_digests` or a `journals` glob). A corpus whose `hippo.json` declares `journals` as a
 list (`[]` counts) changes what the prompt hook injects, and only that: a journal is injected
-only when the prompt names it (`round-12`, `[[round-12]]` or `round-12.md`), and the hook
+only when the prompt names it (`round-12`, `[[round-12]]` or `round-12.md`) or, with a ledger
+declared, an issue id it cites (below), and the hook
 picks behavior memories first, up to 4 of its 10 slots and 40% of the prompt's character
 budget, then facts, with any lane's unused room going to the others. `hippo recall` and the
 `recall` tool are unchanged and still return journals. Nothing is withheld from a corpus that
@@ -419,7 +425,11 @@ and a status is cut to 40 characters on one line. The join is a derived cache,
 `.hippo/index/ledger.json`, built at SessionStart and by `hippo build-index` for a trusted
 corpus only, and never a network call or a write to the tracker or the corpus. A ledger that
 cannot be used is dropped and `/hippo:doctor` says why. `ledgers` only declares data, so it
-needs no `hippo trust policy --accept`; a corpus without it is unchanged.
+needs no `hippo trust policy --accept`; a corpus without it is unchanged. When the corpus also
+declares `journals`, a journal the recall lanes would withhold is let through when it cites an
+issue id the prompt names (`what's left on GRO-901?`); it still has to rank, and the journal
+cap still applies. The cache holds the map from each id to the journals citing it (8 at most
+per id), so the hook never reads the corpus for it.
 
 **Acknowledging a cleared lint finding.** When a memory file carries a secret or threat finding
 you have reviewed and cleared, add an entry to `acknowledged_findings` in `hippo.json` —

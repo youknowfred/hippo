@@ -12,7 +12,8 @@ the manifest top level what it was computed from (``lanes: {declared, globs}``).
 ACT only in the prompt hook, and only for a corpus whose ``hippo.json`` declares
 ``journals`` as a list (``[]`` included):
 
-  - a journal is admitted only when the prompt names its id (``LaneRequest``); a withheld
+  - a journal is admitted only when the prompt names its id, or (GP-S4) when it cites a
+    tracker id the prompt names and the corpus declares a ledger (``LaneRequest``); a withheld
     journal takes no pool slot, seeds no expansion and cannot enter by one;
   - the admitted rows are then picked by lane, behavior first (``select``), and the
     prompt's char budget follows the same shares (``fit_lanes``).
@@ -156,11 +157,23 @@ def named_ids(text: str) -> Set[str]:
     return out
 
 
-def issue_join_admissions(prompt: str) -> Set[str]:
-    """Journal ids an issue join admits for this prompt. Always empty today: this is the
-    seam GP-S4's ``recall --for-issue`` join will fill (the second of V2Q-14's three
-    admissions; the prompt naming the id and explicit recall are the other two)."""
-    return set()
+def issue_join_admissions(prompt: str, join=None) -> Dict[str, str]:
+    """GP-S4: the journals an issue join admits for this prompt, as ``{lowercased journal
+    name: the issue id that admitted it}`` — the journals that cite a tracker id the prompt
+    names (the second of V2Q-14's three admissions; the prompt naming the journal and
+    explicit recall are the other two).
+
+    ``join`` is the loaded ledger cache (``ledger.load``), whose reverse map ``id ->
+    journal names`` was built off the hot path with the cache; None (no ledger declared)
+    admits nothing at no cost. Otherwise O(ids the prompt names): the declared id patterns
+    scan the prompt's first chars and each id is one lookup. The hook never scans the
+    corpus. Keyed on names, so a digest section slug can be admitted the same way."""
+    if join is None or not prompt:
+        return {}
+    try:
+        return join.journals_for(prompt)
+    except Exception:
+        return {}
 
 
 class LaneRequest:
@@ -172,7 +185,8 @@ class LaneRequest:
     a file: the declaration comes off the manifest recall already loaded."""
 
     def __init__(
-        self, prompt: str, k: int, share: Optional[float] = None, floor: Iterable[str] = ()
+        self, prompt: str, k: int, share: Optional[float] = None, floor: Iterable[str] = (),
+        join=None,
     ) -> None:
         self.prompt = prompt or ""
         self.k = int(k)
@@ -183,7 +197,13 @@ class LaneRequest:
         self.active = False
         self.withheld: Set[str] = set()
         self.admitted: Set[str] = set()
+        # GP-S4: why each admitted journal passed — "named" (the prompt names it) or
+        # "issue" (it cites an issue id the prompt names). The hook copies it onto the row,
+        # so the recall event and the rollup count each admission by cause.
+        self.admitted_by: Dict[str, str] = {}
+        self.join = join  # the ledger cache (ledger.load) or None
         self._named: Optional[Set[str]] = None
+        self._issue: Optional[Dict[str, str]] = None
 
     def start(self, manifest: Optional[dict]) -> int:
         self.active = active(manifest)
@@ -191,8 +211,21 @@ class LaneRequest:
 
     def named(self) -> Set[str]:
         if self._named is None:
-            self._named = named_ids(self.prompt) | issue_join_admissions(self.prompt)
+            self._named = named_ids(self.prompt)
         return self._named
+
+    def issue(self) -> Dict[str, str]:
+        if self._issue is None:
+            self._issue = issue_join_admissions(self.prompt, self.join)
+        return self._issue
+
+    def _admit(self, name: str) -> Optional[str]:
+        low = name.lower()
+        if low in self.named():
+            return "named"
+        if low in self.issue():
+            return "issue"
+        return None
 
     def withhold(self, rows: List[tuple], entries: List[dict], record=None) -> List[tuple]:
         """``rows`` (tuples whose first item is an entry index) minus every journal the
@@ -209,8 +242,10 @@ class LaneRequest:
             if name in self.floor:
                 kept.append(row)
                 continue
-            if name.lower() in self.named():
+            why = self._admit(name)
+            if why:
                 self.admitted.add(name)
+                self.admitted_by[name] = why
                 kept.append(row)
                 continue
             if name not in self.withheld:
