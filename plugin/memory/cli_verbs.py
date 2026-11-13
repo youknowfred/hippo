@@ -24,7 +24,7 @@ prints).
 
 from __future__ import annotations
 
-from typing import NamedTuple, Tuple
+from typing import Dict, NamedTuple, Tuple
 
 
 class CliVerb(NamedTuple):
@@ -84,8 +84,13 @@ CLI_VERBS: Tuple[CliVerb, ...] = (
 
 
 # Multi-step flows that live in a skill, not behind a verb: ``hippo <name>`` names the
-# skill to run instead (exit 1), the v1.0 redirect behavior.
-SKILL_REDIRECTS: Tuple[str, ...] = ("init", "bootstrap", "audit")
+# skill to run instead (exit 1), the v1.0 redirect behavior. Each name maps to the LIVE
+# skill directory and the flow inside it (the old skill of the same name only routes on).
+SKILL_REDIRECTS: Dict[str, Tuple[str, str]] = {
+    "init": ("setup", "Init"),
+    "bootstrap": ("setup", "Bootstrap"),
+    "audit": ("doctor", "Content audit"),
+}
 
 
 def verb_table() -> dict:

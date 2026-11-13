@@ -179,15 +179,17 @@ class TestSkillRedirects:
     def test_each_skill_command_redirects(self, tmp_path):
         cwd = tmp_path / "scratch_cwd"
         os.makedirs(cwd, exist_ok=True)
-        for name in ("init", "bootstrap", "audit"):
+        # Each name points at the LIVE skill (the old skill of the same name only routes on).
+        for name, skill in (("init", "setup"), ("bootstrap", "setup"), ("audit", "doctor")):
             proc = _run_hippo([name], tmp_path, cwd=cwd)
             assert proc.returncode == 1, (
                 f"'{name}': expected exit 1, got {proc.returncode}; stderr: {proc.stderr!r}"
             )
-            assert f"/hippo:{name}" in proc.stderr, (
-                f"'{name}': expected a pointer to /hippo:{name} in stderr; "
+            assert f"/hippo:{skill}" in proc.stderr, (
+                f"'{name}': expected a pointer to /hippo:{skill} in stderr; "
                 f"got: {proc.stderr!r}"
             )
+            assert f"/hippo:{name}" not in proc.stderr
             assert proc.stdout == ""
 
     def test_skill_redirect_ignores_trailing_args(self, tmp_path):
@@ -197,7 +199,7 @@ class TestSkillRedirects:
         os.makedirs(cwd, exist_ok=True)
         proc = _run_hippo(["audit", "--verbose", "extra"], tmp_path, cwd=cwd)
         assert proc.returncode == 1
-        assert "/hippo:audit" in proc.stderr
+        assert "/hippo:doctor" in proc.stderr
 
 
 # --------------------------------------------------------------------------- #

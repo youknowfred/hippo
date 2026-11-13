@@ -35,7 +35,8 @@ def usage(all_verbs: bool = False) -> str:
     lines += [f"  {v.verb.ljust(width)}  {v.summary}" for v in rows]
     lines += [
         "",
-        f"  {', '.join(SKILL_REDIRECTS)}: multi-step skills, run as /hippo:<name>",
+        "  " + "; ".join(f"{n}: /hippo:{s}" for n, (s, _flow) in SKILL_REDIRECTS.items())
+        + " (multi-step skills, run in Claude Code)",
         "  hippo <verb> --help shows a verb's own options.",
     ]
     return "\n".join(lines) + "\n"
@@ -98,9 +99,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         sys.stdout.write(usage(all_verbs="--all" in rest))
         return 0
     if verb in SKILL_REDIRECTS:
+        skill, flow = SKILL_REDIRECTS[verb]
+        _note_cli_use(verb)  # counted like any typed verb, so a removal window has a number
         sys.stderr.write(
             f"hippo: '{verb}' is a multi-step skill, not a bare CLI command — "
-            f"use /hippo:{verb} instead.\n"
+            f"use /hippo:{skill} instead (its \"{flow}\" flow).\n"
         )
         return 1
     row = verb_table().get(verb)
