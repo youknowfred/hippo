@@ -143,6 +143,7 @@ from .doctor_checks_outbox import check_outbox  # OUT-1
 from .doctor_checks_settings import check_settings  # SRF-4
 from .recall_fallback import check_bm25_reasons  # OBS-11
 from .doctor_checks_lanes import check_recall_lanes  # HOT-7
+from .staleness_anchors import check_evidence_anchors  # TND-3
 from .doctor_checks_kpi import check_capture_queue, check_hook_wall, check_kpi_rollups, check_opened_after_recall, check_surface_usage  # TND-5, OBS-4, OBS-1, OBS-10, OBS-2
 from .doctor_checks_kpi import check_warm_recall  # HOT-6
 from .doctor_checks_user_tier import check_user_tier  # OWN-1
@@ -397,6 +398,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Optional[Dict[str, str]]]]] = 
     ("format_version", check_format_version),
     ("format_migration", check_format_migration),  # FMT-1: what format 6 will touch, read-only
     ("volatile_paths", check_volatile_paths),  # VOL-1: arming-policy state, ok-glyph always
+    ("evidence_anchors", check_evidence_anchors),  # TND-3: would-be-quiet count, report-only
     ("floor_governance", check_floor_governance),  # FLR-1: floor vs the harness read window + declared floor_lint policy
     ("write_gate", check_write_gate),  # GAT-1: off / warns / may refuse, and a refusal not yet accepted here
     ("conventions", check_conventions),  # GAT-4: the corpus's CONVENTIONS.md: current / behind / edited / missing
