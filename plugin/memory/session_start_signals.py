@@ -58,9 +58,12 @@ def staleness_producer(
         worklist_names = set()
     # SHP-6: a scoped git-log scan can still time out on a pathologically large cited-path
     # set; surface that instead of silently reporting "nothing stale" (legible degradation).
-    timeout_note = (
-        "⚠ staleness scan timed out — signal may be incomplete"
-        if diagnostics.get("timed_out")
+    timeout_note = (  # HOT-15: also an output-capped walk, and how much of the corpus it missed
+        f"⚠ staleness scan {'timed out' if diagnostics.get('timed_out') else 'stopped at its output cap'}"
+        " — signal may be incomplete"
+        + (f" ({diagnostics['unchecked']} memor{'y' if diagnostics['unchecked'] == 1 else 'ies'} not checked)"
+           if diagnostics.get("unchecked") else "")
+        if diagnostics.get("timed_out") or diagnostics.get("partial")
         else None
     )
     # TMB-2: the CORPUS-WIDE terminal-state count — retirements the drift signal cannot

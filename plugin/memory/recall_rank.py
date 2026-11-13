@@ -7,7 +7,9 @@ cross-encoder rerank, and the RCL-4 MMR diversity re-cut. Decomposed out of
 from __future__ import annotations
 
 import os
-from typing import Dict, List, Optional, Tuple
+import threading
+from contextlib import contextmanager
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from .build_index import (
     DEFAULT_MODEL,
@@ -305,6 +307,41 @@ def _bm25_rank_body(
 _DROP_CAP_PER_MECHANISM = 3
 
 
+# HOT-15: explicit recall's section pass (``recall_sections.extra``) ranks the SAME query a
+# second time, over the section sub-index, by calling ``recall`` again — which embedded the
+# query again (one model call, about a fifth of an explicit recall on the field corpus).
+# Each successful embed here records ``(query, embedder, vector)`` for the calling thread;
+# only inside ``reuse_query_vector(query)`` — the section pass's own window — is a recorded
+# vector for that exact query and embedder handed back instead of embedding again. Outside
+# the window nothing is ever read from the record, so every other recall embeds as before.
+_QVEC = threading.local()
+
+
+@contextmanager
+def reuse_query_vector(query: str) -> Iterator[None]:
+    """Inside this block, a dense ranking of ``query`` reuses the vector the last successful
+    embed on this thread produced for it (same embedder), instead of embedding again."""
+    prev = getattr(_QVEC, "window", None)
+    _QVEC.window = query
+    try:
+        yield
+    finally:
+        _QVEC.window = prev
+
+
+def _query_vector(query: str):
+    """``query``'s embedding, wall-clock-bounded (a cold/wiped model cache aborts to BM25
+    instead of blocking; offline-guarded in build_index). Raises like ``embed_query``."""
+    last = getattr(_QVEC, "last", None)
+    if (last is not None and getattr(_QVEC, "window", None) == query and last[0] == query
+            and last[1] is embed_query):
+        return last[2]
+    _QVEC.last = None  # a failed embed must never leave an older vector to be reused
+    qvec = run_bounded(lambda: embed_query(query, allow_download=False), DENSE_QUERY_TIMEOUT_SECS)
+    _QVEC.last = (query, embed_query, qvec)
+    return qvec
+
+
 def _dense_rank_rows(
     query: str,
     index: LoadedIndex,
@@ -367,11 +404,7 @@ def _dense_rank_rows(
     try:
         import numpy as np
 
-        # Wall-clock-bounded: a cold/wiped model cache aborts to BM25 instead of blocking.
-        qvec = run_bounded(
-            lambda: embed_query(query, allow_download=False),  # offline-guarded in build_index
-            DENSE_QUERY_TIMEOUT_SECS,
-        )
+        qvec = _query_vector(query)
         sims = index.dense @ qvec  # rows are L2-normalized -> dot == cosine
         if sims_out is not None:
             sims_out.append(sims)  # HOT-2: the abstention gate reads every row's cosine

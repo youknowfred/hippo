@@ -22,14 +22,16 @@ whole digest. When a named section is fused, it carries its own links, and its d
 only the out-links written outside its sections (``section_edges``). Explicit recall does
 not expand into sections: a section appears there only as an appended row.
 
-Leaf helper: imports ``recall_tiers`` and ``index_sections``, never the recall façade (the
-section pass is handed the ``recall`` function it runs).
+Leaf helper: imports ``recall_tiers``, ``index_sections`` and ``recall_rank``'s query-vector
+window (HOT-15: the section pass reuses the memory pass's query embedding), never the recall
+façade (the section pass is handed the ``recall`` function it runs).
 """
 
 from __future__ import annotations
 
 from typing import Iterable, Optional
 
+from .recall_rank import reuse_query_vector as _reuse_query_vector
 from .recall_tiers import _PROJECT_TIER, _merge_loaded_indexes
 
 
@@ -82,6 +84,38 @@ def for_eval(idx):
     return idx
 
 
+# HOT-15: explicit recall in a long-lived process (the MCP recall tool, eval) re-read the
+# section sub-index — a 4.7 MB manifest and its matrix on the field corpus — on every call.
+# It is kept per index dir under the sub-manifest's stat signature (the matrix is named by,
+# and written before, the manifest that points at it, so a new matrix always comes with a
+# new manifest) and the dense switch. The section pass only reads it.
+_SEC_MEMO: dict = {}
+
+
+def _loaded_sections(index_dir: Optional[str]):
+    import os
+
+    from .build_index import dense_disabled
+    from .index_sections import SECTIONS_MANIFEST, load_sections
+
+    if not index_dir:
+        return None
+    try:
+        st = os.stat(os.path.join(index_dir, SECTIONS_MANIFEST))
+    except OSError:
+        _SEC_MEMO.pop(index_dir, None)
+        return None
+    sig = (st.st_mtime_ns, st.st_ctime_ns, st.st_size, st.st_ino, dense_disabled())
+    hit = _SEC_MEMO.get(index_dir)
+    if hit is not None and hit[0] == sig:
+        return hit[1]
+    sec = load_sections(index_dir)
+    _SEC_MEMO.clear()  # one corpus per process in practice; never grows
+    if sec is not None:
+        _SEC_MEMO[index_dir] = (sig, sec)
+    return sec
+
+
 def extra(rows: list, query: str, idx, memory_dir, index_dir, *, explicit: bool,
           consented=None, recall_fn=None) -> list:
     """``rows`` with the best ``extra_k()`` section rows appended after the memory rows
@@ -103,16 +137,16 @@ def extra(rows: list, query: str, idx, memory_dir, index_dir, *, explicit: bool,
         if n <= 0 or not mem:
             return rows  # extra rows ride an answer; they never turn an abstention into one
         from .build_index import default_index_dir
-        from .index_sections import load_sections
 
         if not index_dir and memory_dir:
             index_dir = default_index_dir(memory_dir)
-        sec = load_sections(index_dir)
+        sec = _loaded_sections(index_dir)
         if sec is None or not len(sec):
             return rows
         if idx.dense_ready and (not sec.dense_ready or sec.model != idx.model):
             return rows  # still catching up: never rank sections BM25-only beside dense rows
-        hits = recall_fn(query, k=n, index=sec)
+        with _reuse_query_vector(query):  # HOT-15: the memory pass already embedded it
+            hits = recall_fn(query, k=n, index=sec)
         if consented is not None and memory_dir:
             import os
 
