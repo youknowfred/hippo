@@ -288,6 +288,9 @@ def run_recall(
         # only), so the ledger event below can finally say WHY a candidate didn't
         # surface. Values are read off the walk recall() already ran (inv6).
         drop_log: dict = {}
+        # HOT-9: a memory enters by expansion at most once per session (the episode buffer
+        # this hook already read keeps each turn's expansion entries).
+        expanded_before = {n for ep in session_episodes for n in (ep.get("expanded") or ())}
         results = recall(
             query,
             k=pool_k,
@@ -295,6 +298,7 @@ def run_recall(
             index_dir=index_dir,
             repo_root=repo_root,
             drop_log=drop_log,
+            expanded_before=expanded_before or None,
         )
         # RUL-4: rules-plane pointers are EXTRA lines, not top-k competitors — split them out
         # so the floor-dedup slice below can never cut them (nor let them displace a corpus
@@ -456,6 +460,7 @@ def run_recall(
                     telemetry_dir=td,
                     session_id=session_id or None,
                     injected_chars=len(out) if out else None,
+                    expanded=[r.get("name") for r in results if r.get("via") == "graph"],
                 )
             except Exception:
                 pass

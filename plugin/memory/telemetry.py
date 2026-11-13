@@ -270,6 +270,9 @@ def log_recall_event(
         }
         if collapsed:
             event["collapsed"] = collapsed
+        expanded = [r.get("name") for r in named if r.get("via") == "graph"]
+        if expanded:  # HOT-9: served by graph expansion alone, so the field window can count it
+            event["expanded"] = expanded
         if drops:
             event["drops"] = drops
         if near_miss:
@@ -488,8 +491,13 @@ def log_episode(
     telemetry_dir: Optional[str] = None,
     session_id: Optional[str] = None,
     injected_chars: Optional[int] = None,
+    expanded: Optional[List[str]] = None,
 ) -> bool:
     """Append ONE episode to the gitignored ``episode_buffer.jsonl``. Fire-and-forget.
+
+    HOT-9 ``expanded``: the names that entered this prompt's results by graph expansion, so
+    the next prompt of the session can refuse them a second expansion entry. Additive; absent
+    when none did.
 
     HOT-3 ``injected_chars``: what this prompt's hook emitted, so the next prompt can read
     the session's spend off the buffer it already scans. Additive; absent on an abstention.
@@ -522,6 +530,8 @@ def log_episode(
         }
         if injected_chars:
             event["injected_chars"] = int(injected_chars)
+        if expanded:
+            event["expanded"] = [n for n in expanded if n]
         path = _episode_ledger_path(td)
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, ensure_ascii=False) + "\n")

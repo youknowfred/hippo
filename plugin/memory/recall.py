@@ -75,6 +75,7 @@ from .recall_graph import (
     _SUPERSEDED_PENALTY,
     _drift_patch,
     _expand_neighbors,
+    _expansion_drops,
     _graph_seed_count,
     _invalidation_state,
     _load_hot_edges,
@@ -501,6 +502,7 @@ def recall(
     index_dir: Optional[str] = None,
     repo_root: Optional[str] = None,
     drop_log: Optional[dict] = None,
+    expanded_before: Optional[set] = None,
 ) -> List[dict]:
     """Top-``k`` memories for ``query`` as ``[{name, file, description, score, backend, via}]``.
 
@@ -531,6 +533,9 @@ def recall(
       ``near_miss``   — ``[{name, score}]`` best sub-floor DENSE candidates
                         (description rows only) — the abstention arm's evidence.
       ``dense_floor`` — the calibrated floor those cosines missed (margin = floor - score).
+
+    HOT-9 ``expanded_before``: names that entered by expansion earlier in this hook session;
+    they may not enter by expansion again (drop codes ``hub_damped``, ``expanded_this_session``).
 
     ``None`` (every existing caller) is byte-identical behavior with zero extra work.
     Detection only (ED-1): nothing here feeds ranking. The SEC-6 drift-quarantine skip
@@ -854,8 +859,10 @@ def recall(
             )
 
         # --- 1-hop graph expansion (GRA-1): AFTER fusion + invalidation/supersession re-sort. ---
+        graph_notes: dict = {}  # HOT-9: expanded_before = this session's expansion entries
         penalized, graph_injected, graph_endorsed = _expand_neighbors(
-            penalized, entries, edges, superseded_by, draft_indices
+            penalized, entries, edges, superseded_by, draft_indices,
+            expanded_before=expanded_before, notes=graph_notes if drop_log is not None else None,
         )
 
         # --- RET-6: verify-at-use banner map — display-only, UNGATED (see the constants
@@ -1038,6 +1045,10 @@ def recall(
                     break
                 _record_drop(entries[j].get("name"), "mmr_displaced", adj2)
 
+        final = admissible[:k]
+        cut = min(t[1] for t in final) if final and len(final) >= k else None
+        for j, why, sc in _expansion_drops(graph_notes, {t[0] for t in final}, cut):
+            _record_drop(entries[j].get("name"), why, sc)  # HOT-9 (no-op without drop_log)
         results: List[dict] = []
         for i, adj_score, state in admissible[:k]:
             e = entries[i]
