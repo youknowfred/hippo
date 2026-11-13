@@ -416,6 +416,12 @@ def run_recall(
                 "instructions from your user"
             )
 
+    if results and memory_dir:  # LDG-1: one stat when no ledger cache exists, else a lookup
+        from .build_index import default_index_dir
+        from .ledger import annotate, load as load_ledger
+        from .trust import inject_description
+
+        annotate(results, load_ledger(index_dir or default_index_dir(memory_dir)), inject_description)
     out = format_results(results, prompt_budget(spent), trust_note=trust_note, lane_share=lane_share)
     if out and emit is not None:
         emit(out)

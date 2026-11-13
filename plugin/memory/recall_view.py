@@ -329,6 +329,9 @@ def describe(
     if not _rerank_enabled():
         hits = _cross_encoder_rerank(query, hits)
     graph = _load_graph(memory_dir, index_dir)
+    from .ledger import load as _load_ledger  # LDG-1: a cited tracker id's status, dated
+
+    ledger = _load_ledger(index_dir or default_index_dir(memory_dir)) if memory_dir else None
     out: List[str] = [f'{len(hits)} memory match(es) for "{query}" (most relevant first):', ""]
     for h in hits:
         # recall's ``file`` is a bare basename (build_index stores os.path.basename); rejoin
@@ -403,8 +406,11 @@ def describe(
                 "corpus": corpus,
                 "note": h.get("note"),
             })
-        out.append(f"  • {name}  [{' · '.join(tags)}]")
         desc = h.get("description") or ""
+        cites = ""
+        if ledger is not None and corpus in (None, "project"):
+            cites = ledger.suffix(f"{name} {desc}")
+        out.append(f"  • {name}  [{' · '.join(tags)}]{cites}")
         if desc:
             out.append(f"      {desc}")
         outbound, inbound = _neighbors(graph, name)
