@@ -407,9 +407,34 @@ outbox copy of a memory takes precedence over the committed one.
 - **The floor.** The floor pointer goes into the outbox's copy of `MEMORY.md`. Claude Code
   still loads the committed floor, so a memory whose pointer is only in the outbox copy stays
   recallable on demand.
-- **Landing them.** There is no ship command yet. To land a memory, copy its file into
-  `.claude/memory/`, commit it, delete the outbox copy, and consent the new file with
-  `hippo trust review`. `/hippo:remove` reports the outbox and never deletes it.
+- **Landing them.** `hippo ship` lands the outbox as one reviewed batch; see below.
+  `/hippo:remove` reports the outbox and never deletes it.
+
+#### `hippo ship`: one branch, one commit, nothing pushed
+
+`hippo ship` previews; `hippo ship --yes` acts. It makes ONE commit holding the outbox's new
+and edited memories on ONE new branch (`hippo/ship-<UTC time>`, or `--branch <name>`) off the
+local default-branch ref (`origin/HEAD`, else `origin/main`, `origin/master`, else your local
+`main`/`master`; `--base <ref>` picks another), and stops. It never fetches, so the base is as
+fresh as your last `git fetch`; it never pushes, never touches your checkout, your staged
+changes or `HEAD`, never overwrites a branch, and never carries a deletion. Push the branch
+and open the pull request yourself. Because no `git commit` runs in your working tree, the
+repository's git hooks do not run for that commit; hippo runs its own gate judgment (the
+corpus's committed `budgets` and `floor_lint`) and refuses while a finding stands, and the
+pull request's checks run the rest.
+
+Each outbox file is one of: **new** (ships), **waiting** (already on a ship branch that still
+exists, unchanged since: not shipped again), **stale** (the committed copy changed since the
+outbox copy was made, appeared under the same name, or was deleted: shown as a diff and never
+shipped; `hippo ship --mine <name>` keeps the copy as an edit of the current version,
+`hippo ship --drop <name>` removes the copy), **held** (a credential shape, a threat-lint
+class, or bytes hippo did not write on this machine: the file and the class are named, never
+the matching text), or **landed** (the default branch already has these bytes). The floor is
+never committed whole: the pointer adds and removes hippo made in the outbox copy of
+`MEMORY.md` are replayed onto the floor at the base, so both sides' pointers survive. Files
+stay in the outbox, and recallable, until they land; once the default branch and this checkout
+both hold them, the next `hippo ship --yes` clears them (and folds the bytes this machine wrote
+into the corpus's consent, so the landed file is not withheld). `--json` prints the plan.
 
 The environment variables you might still set are the directory overrides,
 `HIPPO_DISABLE=<list>` (any of `dense`, `jit`, `presence`, `floor-nag`, `abstain-gate`,
