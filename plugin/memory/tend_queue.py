@@ -49,6 +49,7 @@ KINDS: Tuple[str, ...] = (
     "link",
     "floor",
     "derivation",
+    "rule",
 )
 
 GATES: Dict[str, str] = {
@@ -61,6 +62,7 @@ GATES: Dict[str, str] = {
     "link": "one link at a time: fix or remove it in the memory body",
     "floor": "one floor line at a time: trim it, or move it out of the floor",
     "derivation": "one memory at a time: read the citation diff, then apply it; stamp last",
+    "rule": "one memory at a time: read the rule file it would write, then write it or skip",
 }
 
 _QUEUE_FILE = "tend_queue.json"
@@ -209,6 +211,14 @@ def _src_capture(memory_dir: str, repo_root: str) -> List[dict]:
     return out
 
 
+def _src_rule(memory_dir: str, repo_root: str) -> List[dict]:
+    """RUL-9: a feedback memory whose recorded touches concentrate on one glob, proposed
+    as the path-scoped rule file ``promote_rule`` drafts (``rule_proposals``)."""
+    from .rule_proposals import tend_entries
+
+    return tend_entries(memory_dir, repo_root)
+
+
 def _src_reverify(memory_dir: str, repo_root: str) -> List[dict]:
     from .reconsolidate import recalled_stale_worklist
 
@@ -306,6 +316,7 @@ SOURCES: Dict[str, Callable[[str, str], List[dict]]] = {
     "link": _src_link,
     "floor": _src_floor,
     "derivation": _src_derivation,
+    "rule": _src_rule,
 }
 
 

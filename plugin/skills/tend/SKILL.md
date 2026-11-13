@@ -1,5 +1,5 @@
 ---
-description: Work hippo's maintenance queue one item at a time — captures to draft or discard, memories whose cited code moved, contradictions, merged-in duplicates, broken baselines and links, floor overflow, citation re-derivation, and changes waiting for re-consent — each with its evidence and your yes. Triggers include "tend memory", "consolidate memory", "drain the capture queue", "resolve contradictions", "/hippo:tend".
+description: Work hippo's maintenance queue one item at a time — captures to draft or discard, memories whose cited code moved, contradictions, merged-in duplicates, broken baselines and links, floor overflow, citation re-derivation, path-scoped rule proposals, and changes waiting for re-consent — each with its evidence and your yes. Triggers include "tend memory", "consolidate memory", "drain the capture queue", "resolve contradictions", "/hippo:tend".
 ---
 
 # /hippo:tend — the one maintenance queue
@@ -69,6 +69,10 @@ What each kind needs before its verdict:
 - **baseline** — confirm the memory still holds, then `rebaseline`.
 - **link**, **floor** — edit the file, then `done`; tend re-checks and refuses while the
   problem is still there.
+- **rule** — a feedback memory whose recorded file touches concentrate under one path glob
+  (the evidence gives the share). `hippo tend show` prints the `.claude/rules/<name>.md` it
+  would write, scoped to that glob; on the user's yes, `write` creates that one file and
+  nothing else (commit it yourself). Otherwise `skip` it.
 - **derivation** — read the citation diff, then `apply` for that memory; when every memory
   is applied, the `corpus` item takes `stamp`. On a corpus that is not committed to git,
   take a snapshot first (`hippo provenance --snapshot <label>`). It copies the corpus to

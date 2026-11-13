@@ -18,6 +18,8 @@ Every per-item gate is preserved, because ``apply`` only routes:
   - derivation     apply (re-derive ONE memory) | stamp (earned: refused while any
                    memory still derives differently)
   - trust          routed to the consent review (re-consent is its own gate)
+  - rule           write (the path-scoped rule file ``promote_rule`` drafts, through its
+                   writer; ``rule_proposals``)
 
 There is no apply-all. ``hold`` is an owner decision with a reason (for example, keeping
 an old citation derivation on purpose); held items count as resolved.
@@ -42,6 +44,7 @@ VERDICTS: Dict[str, Tuple[str, ...]] = {
     "link": ("done",),
     "floor": ("done",),
     "derivation": ("apply", "stamp"),
+    "rule": ("write",),
 }
 
 _DEFAULT_SNOOZE_DAYS = 7
@@ -141,6 +144,10 @@ def _detail_lines(entry: dict, memory_dir: str, repo_root: str) -> List[str]:
 
             preview = rederive_preview(effective_path(memory_dir, target), repo_root, repo_files, index)
             return [ln[2:] for ln in rederive_worklist_lines([preview])] + [REDERIVE_EXCLUDE_HINT]
+        if kind == "rule":
+            from .rule_proposals import detail_lines
+
+            return detail_lines(entry, memory_dir, repo_root)
     except Exception as exc:
         return [f"(evidence unavailable: {exc})"]
     return []
@@ -163,6 +170,8 @@ def _verdict_help(kind: str, entry_id: str) -> List[str]:
         lines.append("  done means you already wrote what was durable with `hippo new` (check first).")
     if kind in ("link", "floor"):
         lines.append("  done means you already edited the file; tend re-checks before clearing it.")
+    if kind == "rule":
+        lines.append("  write creates the rule file shown above and nothing else; commit it yourself.")
     lines.append(f"Or: hippo tend snooze {entry_id} | hippo tend skip {entry_id}")
     return lines
 
@@ -327,6 +336,10 @@ def apply(
             r = _apply_merge(entry, verdict, memory_dir, repo_root, winner)
         elif kind in ("link", "floor"):
             r = _apply_recheck(entry, memory_dir, repo_root)
+        elif kind == "rule":
+            from .rule_proposals import apply_write
+
+            r = apply_write(entry, memory_dir, repo_root)
         else:
             r = _apply_derivation(target, verdict, memory_dir, repo_root)
         if r["ok"]:

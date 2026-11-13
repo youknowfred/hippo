@@ -845,8 +845,8 @@ _TOOLS = [
         "description": (
             "The maintenance queue: every kind of memory upkeep in one ranked list — "
             "changes waiting for re-consent, broken baselines, contradictions, merged-in "
-            "duplicates, pending captures, memories whose cited code moved, broken links, "
-            "floor overflow, and citation re-derivation. action='list' (default) counts and "
+            "duplicates, pending captures, memories whose cited code moved, broken links, floor "
+            "overflow, citation re-derivation and rule proposals. action='list' (default) counts and "
             "lists them; 'next' shows the top item with its evidence, the likely verdict and "
             "the verdicts it accepts; 'show' does the same for one id; 'apply' executes ONE "
             "verdict on ONE item (there is no apply-all — confirm each with the user first); "

@@ -226,8 +226,9 @@ terminal the same engine is one command, `hippo <verb>` (`hippo help` lists the 
 **Curation & health:**
 - `/hippo:tend` — the one maintenance queue: every kind of upkeep (captures, memories whose cited
   code moved, contradictions, merged-in duplicates, broken baselines and links, floor overflow,
-  citation re-derivation, changes waiting for re-consent) in one ranked list, worked one verdict
-  at a time with your yes. `hippo tend` in a terminal; the `tend` MCP tool on Desktop.
+  citation re-derivation, path-scoped rule proposals, changes waiting for re-consent) in one
+  ranked list, worked one verdict at a time with your yes. `hippo tend` in a terminal; the
+  `tend` MCP tool on Desktop.
 - `/hippo:doctor` — fast check of the *plumbing* (bootstrapped, venv healthy, corpus symlinked,
   indexed and trusted, format current) plus the consent step; on request, a deep, judgment-based
   audit of the *content* (staleness, drift, orphans, archive candidates).

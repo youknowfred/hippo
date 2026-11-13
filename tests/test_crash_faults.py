@@ -94,7 +94,7 @@ CRASH_CONTRACT = {
     ("packs", "_write_lockfile"): ("detected", "rolled_back"),  # install: re-run adopts; update: file restored
     ("packs", "pack_update_item"): ("detected",),  # ours-replacement write
     ("presence", "_write_doc"): ("intact",),  # T18 fleet bookkeeping: silent by design (the jit._write_state posture) — a lost write costs one stale fleet line, never a torn doc
-    ("promote_rule", "main"): ("detected",),
+    ("promote_rule", "write_rule"): ("detected",),  # RUL-9: main --apply and tend write share it
     ("provenance_format", "_write_marker_keys"): ("detected",),  # returns False
     ("provenance", "restore_file_bytes"): ("detected",),  # returns the error string
     ("provenance", "backfill_file"): ("detected",),
@@ -683,7 +683,7 @@ def scn_promote_rule_detected(tmp_path, monkeypatch, capsys):
     root, md = _git_repo(tmp_path)
     _mem(md, "lint", extra_meta='  cited_paths: ["app.py"]\n')
     rule = os.path.join(root, ".claude", "rules", "lint.md")
-    _arm(monkeypatch, "promote_rule", "main")
+    _arm(monkeypatch, "promote_rule", "write_rule")
     with pytest.raises(_Tear):
         PR.main(["--name", "lint", "--memory-dir", md, "--repo-root", root, "--apply"])
     assert not os.path.exists(rule)  # the rule file is whole-or-absent
@@ -1109,7 +1109,7 @@ _SCENARIOS = [
     (("packs", "_write_lockfile"), "detected", scn_pack_lockfile_install_detected),
     (("packs", "_write_lockfile"), "rolled_back", scn_pack_lockfile_update_rolled_back),
     (("packs", "pack_update_item"), "detected", scn_pack_update_write_detected),
-    (("promote_rule", "main"), "detected", scn_promote_rule_detected),
+    (("promote_rule", "write_rule"), "detected", scn_promote_rule_detected),
     (("provenance_format", "_write_marker_keys"), "detected", scn_marker_keys_detected),
     (("provenance", "restore_file_bytes"), "detected", scn_restore_bytes_detected),
     (("provenance", "backfill_file"), "detected", scn_backfill_detected),
