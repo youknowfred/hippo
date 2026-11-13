@@ -71,3 +71,19 @@ def test_lanes_line_without_an_index(repo, memory_dir, monkeypatch, tmp_path):
     _seed(memory_dir)
     r = D.check_recall_lanes(_ctx(memory_dir, repo))
     assert r["status"] == "ok" and "no current index yet" in r["message"]
+
+
+def test_lanes_line_reports_the_median_rows_per_injecting_prompt(repo, memory_dir, monkeypatch, tmp_path):
+    td = str(tmp_path / "tel")
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", td)
+    _corpus(memory_dir, monkeypatch)
+    assert "Rows per injecting prompt" not in D.check_recall_lanes(_ctx(memory_dir, repo))["message"]
+    for n in (1, 3, 3, 5, 12):
+        record_prompt(td, trigger="human", ran_recall=True, backend="dense+bm25",
+                      injected_chars=400, served_rows=n)
+    msg = D.check_recall_lanes(_ctx(memory_dir, repo))["message"]
+    assert "Rows per injecting prompt (5 prompts): median 3." in msg
+    for _ in range(9):
+        record_prompt(td, trigger="human", ran_recall=True, backend="dense+bm25",
+                      injected_chars=400, served_rows=10)
+    assert "(14 prompts): median 10 or more." in D.check_recall_lanes(_ctx(memory_dir, repo))["message"]

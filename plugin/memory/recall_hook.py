@@ -221,6 +221,7 @@ def run_recall(
     # Read at call time from the recall façade, so a monkeypatched memory.recall.<name>
     # steers this entry exactly as it did before the split.
     from .lanes import LaneRequest, count_by_lane, rendered_names, select as select_lanes
+    from .recall_count import REASON as LOW_SIGNAL, REASON_CAP, cut as low_signal_rows, row_budget
     from .recall_budget import over_session_budget, prompt_budget, session_spent
     from .recall_query import HUMAN_TURN, human_text, turn_class
     from .recall import (
@@ -390,6 +391,16 @@ def run_recall(
 
         lane_share = lane_req.share if lane_req is not None and lane_req.active else None
         pending: List[dict] = []  # HOT-7: the non-collapsed rows the lane shares pick from
+        # HOT-8: the count scales with signal. A servable row with no evidence of its own
+        # (recall_count) is not served and not named; the slot it held goes to the next row
+        # that has some. Judged before the lane shares pick, so a share is filled by earned rows.
+        low = low_signal_rows(
+            r for r in results if r["name"] not in floor and r["name"] not in already_injected
+        )
+        if low and lane_req is not None:  # a memory the prompt names is served, evidence or not
+            low -= lane_req.admitted | {n for n in low if n.lower() in lane_req.named()}
+        k_rows = row_budget(results, k)  # k when the best cosine clears the floor widely
+        past_k = "display_overflow" if k_rows >= k else REASON_CAP
         for r in results:
             if r["name"] in floor:
                 r["floor_collapsed"] = True
@@ -399,17 +410,19 @@ def run_recall(
                 r["cooldown_collapsed"] = True
                 _record_main_drop(r, "cooldown_collapsed")
                 walked.append(r)
+            elif r["name"] in low:
+                _record_main_drop(r, LOW_SIGNAL)
             elif lane_share is not None:
                 pending.append(r)
-            elif kept < k:
+            elif kept < k_rows:
                 walked.append(r)
                 kept += 1
             else:
-                _record_main_drop(r, "display_overflow")
+                _record_main_drop(r, past_k)
         if lane_share is not None:
-            picked, cut = select_lanes(pending, k, lane_share)
+            picked, cut = select_lanes(pending, k_rows, lane_share)
             for r in cut:
-                _record_main_drop(r, "lane_share")
+                _record_main_drop(r, "lane_share" if k_rows >= k else REASON_CAP)
             walked = picked + walked
         results = walked
         # RUL-4/T2 guard: rule pointers are EXEMPT from floor-dedup (a rule is not a floor
@@ -568,6 +581,16 @@ def run_recall(
                         count_by_lane(r for r in results if r.get("name") in shown) if out else None
                     ),
                     journal_admitted=_admitted_counts(results) if out else None,  # GP-S4
+                    # HOT-8: how many memory rows this prompt served (collapsed rows and
+                    # rule pointers left out), so the field median is readable from rollups.
+                    served_rows=(
+                        sum(
+                            1 for r in results
+                            if r.get("name") and r.get("corpus") != _RULES_SOURCE
+                            and not (r.get("floor_collapsed") or r.get("cooldown_collapsed"))
+                        )
+                        if out else None
+                    ),
                 )
             except Exception:
                 pass
