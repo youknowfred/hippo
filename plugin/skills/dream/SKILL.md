@@ -145,6 +145,12 @@ the corpus root and `archive/`. It refuses while the stamp is on disk anywhere (
 `--undo`'s job), is strictly per-edge, touches no memory file, and never commits. Never
 hand-edit stamped lines or `dream-ledger.jsonl`.
 
+A ghost whose **source memory is deleted** (in neither the corpus, `archive/` nor the
+outbox, its stamp nowhere) no longer needs the verb: the promote move retires the edges of
+the file it removes, and every link pass (`hippo dream`, a sleep run) retires the rest with
+the same proof and cause `source-deleted`, saying how many in its digest. A ghost whose
+source file is still here but lost its stamp is left for `--retire-ghost`.
+
 Prefer per-item hand-application when the user wants to review each edge: a
 **completion/bridge** is one `[[wikilink]]` added to the source body; a **refines** is
 additive frontmatter. Never bulk-apply the whole ledger by hand — the cap is the point.

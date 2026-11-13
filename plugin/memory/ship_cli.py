@@ -49,7 +49,7 @@ def render(plan: dict, *, gate: Optional[dict] = None, done: Optional[dict] = No
     for it in plan["held"]:
         lines.append(f"held: {it['name']}: {'; '.join(it['classes'])}. Not shipped; fix or remove it.")
     for it in plan["ignored"]:
-        lines.append(f"ignored: {it['name']} ({it['why']}); only memory files directly in the outbox ship.")
+        lines.append(f"ignored: {it['name']} ({it['why']}); only memory files and the conventions files directly in the outbox ship.")
     fl = plan.get("floor")
     if fl:
         if fl["state"] == "new":

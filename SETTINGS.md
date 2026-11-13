@@ -199,7 +199,7 @@ outbox copy of a memory takes precedence over the committed one.
 ### `hippo ship`: one branch, one commit, nothing pushed
 
 `hippo ship` previews; `hippo ship --yes` acts. It makes ONE commit holding the outbox's new
-and edited memories on ONE new branch (`hippo/ship-<UTC time>`, or `--branch <name>`) off the
+and edited memories (and a refreshed `CONVENTIONS.md`, when one is there) on ONE new branch (`hippo/ship-<UTC time>`, or `--branch <name>`) off the
 local default-branch ref (`origin/HEAD`, else `origin/main`, `origin/master`, else your local
 `main`/`master`; `--base <ref>` picks another), and stops. It never fetches, so the base is as
 fresh as your last `git fetch`; it never pushes, never touches your checkout, your staged

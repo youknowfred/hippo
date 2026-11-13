@@ -366,7 +366,10 @@ Steps 1-2b are SKIPPED entirely on an existing corpus (see preflight) — jump s
    edited (setup's output and `/hippo:doctor` name which), offer `hippo setup --conventions`:
    it previews the diff and the copy's own lines; on the user's yes, `--yes` moves those
    lines into `CONVENTIONS.local.md` (append-only, never overwritten) and then refreshes
-   the copy.
+   the copy. The write lands where the corpus's saves land: the outbox when `write_path`
+   is `outbox` and accepted here (`hippo ship` then carries both files; say so, and do not
+   move them by hand), else the corpus dir, which from a linked worktree is that
+   worktree's own. The command's last line names where it wrote.
 3. **Create the cross-machine symlink**. The encoding is the harness's actual rule (
    every non-alphanumeric character becomes a literal `-`, one-for-one, no collapsing, no
    stripping), and the create-or-confirm logic itself is ONE tested Python helper

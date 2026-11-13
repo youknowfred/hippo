@@ -428,6 +428,12 @@ Keep a corpus's own rules in `CONVENTIONS.local.md` beside it. hippo never requi
 never overwrites it, and adds to it only on that `--yes` (the lines of an edited copy that are
 in no version hippo shipped). Neither file is a memory: neither is indexed or recalled.
 
+The refresh lands where the corpus's saves land. On a corpus whose `write_path` is `outbox`
+(and this machine has accepted it) both files are written to the outbox and `hippo ship`
+carries them into its branch; the working tree is not touched. Otherwise the corpus dir is
+written, and from a linked git worktree that is the worktree's own `.claude/memory/`, never
+the main checkout's tracked copy.
+
 ## Settings and gates
 
 Settings live in three places, and the first one that answers wins: an environment variable,

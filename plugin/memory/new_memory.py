@@ -1471,6 +1471,10 @@ def promote_memory(
                 os.remove(src)
             result["warnings"] += [ln for ln in [OE.removal_line(memory_dir, repo_root)] if ln]
         result["warnings"] += [ln for ln in [OE.drop_copy(memory_dir, name, repo_root)] if ln]
+        from .dream_apply import retire_deleted_sources  # its dream edges leave with the file
+
+        result["dream_edges_retired"] = retire_deleted_sources(
+            memory_dir, only_file=os.path.basename(src), reason=f"promoted to the {dest_tier} tier")
         result["floor_removed"] = _remove_floor_pointer(
             memory_dir, name, floor_dir=OE.floor_dir_for_edit(memory_dir, repo_root)
         )

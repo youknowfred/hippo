@@ -502,6 +502,78 @@ def retire_ghost_edge(
     return 0, "\n".join(lines)
 
 
+def _stamped_edge_ids(dirs: List[str]) -> Tuple[set, List[str]]:
+    """``(edge ids stamped in any *.md of dirs, unreadable paths)`` in one pass."""
+    stamped: set = set()
+    unreadable: List[str] = []
+    for d in dirs:
+        try:
+            names = sorted(n for n in os.listdir(d) if n.endswith(".md"))
+        except FileNotFoundError:
+            continue
+        except Exception:
+            unreadable.append(d)
+            continue
+        for name in names:
+            try:
+                with open(os.path.join(d, name), "r", encoding="utf-8") as fh:
+                    for line in fh:
+                        if "<!-- dream:" in line:
+                            stamped.update(_EDGE_STAMP_RE.findall(line))
+            except Exception:
+                unreadable.append(os.path.join(d, name))
+    return stamped, unreadable
+
+
+def retire_deleted_sources(
+    memory_dir: str, *, only_file: Optional[str] = None, reason: Optional[str] = None
+) -> List[str]:
+    """Retire every ACTIVE ledger row whose source memory was deleted: its file is in neither
+    the corpus root, ``archive/`` nor the outbox, and no readable memory file there carries
+    its ``edge=`` stamp — the proof ``retire_ghost_edge`` asks for, cause ``source-deleted``.
+    ``only_file`` limits it to one source file (the write that just deleted it).
+
+    Called by the one hippo write that deletes a memory (the promote move) and by the link
+    pass, for a delete hippo did not make (a fold or ``git rm`` committed by hand). A row whose
+    source file is still here but lost its stamp is never retired here: that one may be a hand
+    edit worth chasing, and stays a per-edge ``--retire-ghost``. Fails closed: an unreadable
+    file anywhere retires nothing. Writes only superseding ledger lines (append-only), never
+    a memory file. Returns the retired edge ids; never raises."""
+    try:
+        from .outbox import present
+
+        box = present(memory_dir)
+        gone = []
+        for e in read_apply_ledger(memory_dir):
+            if e.get("state") != "active":
+                continue
+            fname, where = edge_source_location(memory_dir, e)
+            if where != "gone" or not fname or (only_file is not None and fname != only_file):
+                continue
+            if box and os.path.isfile(os.path.join(box, fname)):
+                continue  # an unshipped outbox copy is the source
+            gone.append(e)
+        if not gone:
+            return []
+        dirs = [memory_dir, os.path.join(memory_dir, "archive")] + ([box] if box else [])
+        stamped, unreadable = _stamped_edge_ids(dirs)
+        if unreadable:
+            return []
+        ghosts = [e for e in gone if e.get("edge_id") not in stamped]
+        if not ghosts:
+            return []
+        from .archive import _mark_dream_rows
+
+        err = _mark_dream_rows(
+            memory_dir, ghosts, "undone", undone_at_ts=None, retired_ghost=True,
+            retire_cause="source-deleted",
+            retire_reason=reason or "its source memory was deleted outside the archive",
+        )
+        return [] if err else [e.get("edge_id") for e in ghosts]
+    except Exception:
+        return []
+
+
 def render_log(memory_dir: str) -> str:
     """``dream --log``: every edge's current state (active / aged-in / undone), oldest first."""
     ledger = read_apply_ledger(memory_dir)
