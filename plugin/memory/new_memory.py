@@ -876,8 +876,11 @@ def write_memory(
     confidence: Optional[str] = None,
     origin: Optional[str] = None,
     machine_local: bool = False,
+    floor: bool = True,
 ) -> dict:
     """Create a recall-ready memory file. Returns a small result dict.
+
+    - ``floor=False`` (OWN-4, the promote move): no floor pointer, reported as a skip.
 
     - ``machine_local`` (OWN-1, user tier only): stamps ``machine_local: true`` and lists the
       file in the tier's ``.gitignore`` block BEFORE the file exists, so it is never visible
@@ -992,7 +995,7 @@ def write_memory(
 
     section = floor_section_for_type(memory_dir, type)
     title = title or _title_from_slug(name)
-    refusal = floor_line_refusal(memory_dir, section, name, title, hook, description)
+    refusal = floor_line_refusal(memory_dir, section, name, title, hook, description) if floor else None
     if refusal:
         result["error"] = refusal
         return result
@@ -1238,6 +1241,8 @@ def write_memory(
             "status": "skipped",
             "reason": f"type '{type}' is never floor-linked — recalled on demand",
         }
+    elif not floor:
+        result["floor"] = {"status": "skipped", "reason": "recalled on demand where it came from"}
     else:
         result["floor"] = _append_floor_pointer(
             memory_dir, section, name, title, hook or description,
@@ -1417,6 +1422,12 @@ def promote_memory(
         body = body.lstrip("\n")
 
         dest_dir = user_memory_dir() if dest_tier == "user" else local_memory_dir(memory_dir)
+        from .lint_floor import floor_memory_names
+        from .outbox_edit import floor_dir_for_edit
+
+        # OWN-4: floor membership travels as it was. A lesson recalled on demand here must not
+        # become a floor member there, where the hook collapses it to a one-line mention.
+        was_floor = name in floor_memory_names(floor_dir_for_edit(memory_dir, repo_root) or memory_dir)
         write = write_memory(
             new_name or name,
             description,
@@ -1428,6 +1439,7 @@ def promote_memory(
             tier=dest_tier,
             confidence=confidence,
             origin=origin,
+            floor=was_floor,
         )
         result["warnings"] = write.get("warnings") or []
         if write.get("error"):
