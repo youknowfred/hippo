@@ -367,6 +367,9 @@ def run_recall(
         results = []  # hygiene skipped recall — no model load, no junk injection
         drop_log = {}  # nothing ran, nothing to autopsy — the ledger event stays bare
     latency_ms = (time.perf_counter() - t0) * 1000.0
+    from .recall_fallback import result_reason  # OBS-11: None unless the label is bm25
+
+    backend_reason = result_reason(results, drop_log.get("dense_why") or [])
 
     # SEC-1/SEC-7: resolve the trust gate ONCE here (reusing the already-resolved
     # repo_root — no extra git call) and share it between the provenance banner below and
@@ -448,6 +451,7 @@ def run_recall(
                     # OBS-4: the shell-measured wall, spawned hook path only (the served
                     # path's wall has its own rollup histogram, so this line stays comparable).
                     wall_ms=wall if path == "spawn" else None,
+                    backend_reason=backend_reason,
                 )
                 log_episode(
                     [r.get("name") for r in results if r.get("name")],
@@ -473,6 +477,7 @@ def run_recall(
                     session_id=session_id or None,
                     ran_recall=bool(query),
                     backend=(results[0].get("backend") if results else None) or "none",
+                    backend_reason=backend_reason,
                     injected_chars=len(out) if out else None,
                     latency_ms=latency_ms if is_human else None,
                     wall_ms=wall,

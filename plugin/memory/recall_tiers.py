@@ -431,6 +431,8 @@ def _merge_loaded_indexes(
         "body_chunks": merged_chunks,
         "bm25": bm25,
     }
+    if merged_dense is None and any(li.dense_ready for li, _r, _l in loadeds):
+        manifest["fused_without_dense"] = True  # OBS-11: a tier, not the project, cost dense
     return LoadedIndex(manifest, merged_dense)
 
 
