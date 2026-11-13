@@ -42,6 +42,9 @@ OUTPUT_SCHEMAS: Dict[str, dict] = {
             "score": {"type": ["number", "null"]},
             "corpus": {"type": ["string", "null"]},
             "note": {"type": ["string", "null"]},
+            "file": {"type": "string", "description": "a folded section's digest file"},
+            "line": {"type": ["integer", "null"], "description": "its heading's line in that file"},
+            "section": {"type": "boolean", "description": "true on a folded-section row, listed after the memories"},
         }, "required": ["name"]}},
     }, ["query", "abstained", "hits"]),
     "doctor": _out({

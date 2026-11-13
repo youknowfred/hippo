@@ -383,6 +383,17 @@ declares no `journals`. Doctor's recall-lanes line reports each lane's share of 
 injected beside its share of the corpus. `journals` only names files; like `mute`, it needs no
 `hippo trust policy --accept`.
 
+**Folded sections.** In a file matching `fold_digests`, each `### <slug>` section (a heading
+that is one slug, nothing after it) is a recall unit of its own, found by its name, its first
+line and its opening text, and shown as `slug (digest.md:LINE)` so you open the right place.
+A section whose slug is also a live memory's file name is skipped (the file wins). Sections
+never take a memory's place: `hippo recall` and the `recall` tool list up to 5 matching
+sections after the memories (`HIPPO_SECTION_ROWS` changes the number; a query no memory
+matches stays unanswered), and the prompt hook shows a section only when the prompt names its
+slug. A `[[slug]]` link to a folded section is not a broken link and never resolves to the
+whole digest. Sections live in a sub-index beside the main one
+(`.hippo/index/sections.json`); a corpus with no sections gets none.
+
 **Acknowledging a cleared lint finding.** When a memory file carries a secret or threat finding
 you have reviewed and cleared, add an entry to `acknowledged_findings` in `hippo.json` —
 `{"file": "notes.md", "rule": "html-comment", "sha256": "<the file's sha256>", "reason": "…",

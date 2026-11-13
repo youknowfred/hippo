@@ -21,6 +21,25 @@ def _pct(n: int, d: int) -> str:
     return f"{100.0 * n / d:.1f}%" if d else "n/a"
 
 
+def _sections_line(memory_dir: str) -> str:
+    """The folded-sections sentence: how many digest sections recall can find by name."""
+    from .build_index import default_index_dir
+    from .index_sections import read_manifest
+
+    sm = read_manifest(default_index_dir(memory_dir))
+    if not sm:
+        return "Folded sections: not indexed yet (the next SessionStart builds them)."
+    state = "dense ready" if sm.get("dense_ready") else ("BM25 only" if not sm.get("model") else "still embedding")
+    skipped = sm.get("skipped") or {}
+    n_dig = int(sm.get("digests") or 0)
+    return (
+        f"Folded sections: {sm.get('count', 0)} indexed from {n_dig} digest{'s' if n_dig != 1 else ''} "
+        f"({state}); {skipped.get('live_memory', 0)} not indexed because a live memory has the name, "
+        f"{skipped.get('duplicate', 0)} duplicate name{'s' if skipped.get('duplicate', 0) != 1 else ''}. "
+        "They reach the prompt hook only when a prompt names one."
+    )
+
+
 def check_recall_lanes(ctx: DoctorContext) -> Dict[str, str]:
     try:
         from .build_index import _load_manifest, default_index_dir
@@ -60,6 +79,8 @@ def check_recall_lanes(ctx: DoctorContext) -> Dict[str, str]:
             )
         else:
             parts.append("Hook-injected by lane: nothing counted yet (recorded from this release on).")
+        if manifest.get("sections"):  # HOT-11: only a corpus whose digests hold sections
+            parts.append(_sections_line(ctx.memory_dir))
         return {"status": "ok", "message": " ".join(parts)}
     except Exception as exc:
         return {"status": "warn", "message": f"recall-lanes check failed: {exc}."}

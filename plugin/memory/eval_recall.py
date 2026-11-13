@@ -694,6 +694,9 @@ def evaluate(
     if index is None:
         build_index(memory_dir, index_dir)
         index = load_index(index_dir)
+    from .recall_sections import for_eval  # HOT-11: section rows appended, as explicit recall does
+
+    index = for_eval(index)
     if index is None or not len(index):
         return {"ok": False, "error": "no index / empty corpus"}
 
@@ -1295,7 +1298,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         else:
             _md = args.memory_dir
         _idx = args.index_dir or default_index_dir(_md)
-        index = load_index(_idx)
+        from .recall_sections import for_eval  # HOT-11: a folded gold stem is reachable
+
+        index = for_eval(load_index(_idx))
         if index is None or not len(index):
             print("reachability: no index / empty corpus")
             return 1
