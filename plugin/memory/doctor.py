@@ -145,6 +145,7 @@ from .doctor_checks_lanes import check_recall_lanes  # HOT-7
 from .doctor_checks_kpi import check_capture_queue, check_hook_wall, check_kpi_rollups, check_opened_after_recall, check_surface_usage  # TND-5, OBS-4, OBS-1, OBS-10, OBS-2
 from .doctor_checks_kpi import check_warm_recall  # HOT-6
 from .doctor_checks_user_tier import check_user_tier  # OWN-1
+from .dream_deprecated import check_dream_tiers  # SRF-7
 
 # One glyph per status — the deterministic line prefix. Ordered dict-free lookup.
 _GLYPH = {"ok": "✔", "warn": "⚠", "fail": "✘"}
@@ -408,6 +409,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Optional[Dict[str, str]]]]] = 
     ("link_density", check_link_density),
     ("edge_rot", check_edge_rot),  # GRF-1: edges into archived/superseded/dangling targets
     ("dream_ledger", check_dream_ledger),  # DRM-2: on-disk dream stamps ↔ dream-ledger.jsonl reconcile
+    ("dream_tiers", check_dream_tiers),  # SRF-7: which dream tiers are deprecated, and any turned on here
     ("non_english_corpus", check_non_english_corpus),
     ("mcp_allowlist", check_mcp_allowlist),  # SRF-2: permission rules naming deprecated tools (read-only)
     ("mcp_launch", check_mcp_launch),  # INT-8: the stdio MCP server (bin/hippo mcp) actually starts

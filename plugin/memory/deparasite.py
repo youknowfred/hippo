@@ -723,11 +723,13 @@ def run_deparasite_pass(
     Exit 0 on ok/below-soak/empty-corpus (legible refusals are correct outcomes);
     a retraction refusal (drift) propagates undo's exit 1.
     """
+    from .dream_deprecated import with_notice  # SRF-7: deprecated; one line says so
+
     td = telemetry_dir or default_telemetry_dir(memory_dir)
     report = deparasite_report(memory_dir, index_dir, td)
     rf = write_report(td, report) if report["status"] == "ok" else None
     text = render_report(report, report_file=rf)
     if not retract or report["status"] != "ok":
-        return 0, text
+        return 0, with_notice(text, "deparasite")
     code, retract_text = retract_flagged_unaged(memory_dir, index_dir, report)
-    return code, text + "\n" + retract_text
+    return code, with_notice(text + "\n" + retract_text, "deparasite")

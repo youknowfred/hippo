@@ -247,40 +247,16 @@ _TOOLS = [
     {
         "name": "dream",
         "description": (
-            "The generative sleep pass: replay the memory corpus against itself offline "
-            "and surface the latent graph edges consolidate can't reach (transitive "
-            "bridges, body-names-target-but-unlinked, undeclared refines), with co-fire "
-            "strength + provenance. A bare pass AUTO-APPLIES Tier-A edges reversibly "
-            "(the owner-ratified default, 2026-07-12): additive stamped edges only, "
-            "capped single-digit, θ/mutuality-gated, secret-linted, never committed, live "
-            "in recall immediately — present the returned digest verbatim, it carries the "
-            "undo handles. apply=false runs report-only (zero writes). "
-            "contradictions=true adds the opt-in LLM contradiction check over the pass's "
-            "strongest pairs (propose-only, into the resolve inbox; it uses the plugin's "
-            "LLM API key, which reaches this server and never a shell). action='undo' "
-            "reverts the latest pass (or edge_id for one edge), byte-exact, refusing on "
-            "manual drift. action='retire_ghost' (edge_id=…, optional reason=…) retires ONE "
-            "ACTIVE ledger edge whose stamp is provably gone — its source memory was "
-            "deleted outside archive/, or the stamped line never survived a rewrite — by "
-            "appending the superseding undone line; it refuses while the stamp is on disk "
-            "anywhere (use undo) and has no bulk form. action='log' lists every dream edge "
-            "(active / aged-in / undone). action='deparasite' runs the counterweight: reports "
-            "per-memory out-degree, flags hubs over DREAM_MAX_OUT_DEGREE, and PROPOSES "
-            "retractions (dream's own un-aged edges — executed only with retract=true) "
-            "vs per-item GATED demotions and non-lossy dedup-merges (never auto; "
-            "protected floor/co-recalled/cited hubs are never proposed for depression). "
-            "action='dedup_merge' executes ONE ratified merge proposal (survivor gains "
-            "supersedes, loser gets invalid_after — additive frontmatter, nothing "
-            "deleted). action='generate' runs the generative tier: clusters "
-            "co-firing sets into schema/gist + hypothesis PROPOSALS (report-only unless "
-            "stage=true or HIPPO_DREAM_GENERATIVE=1) — staged memories are QUARANTINED: "
-            "created only at confidence:draft, down-weighted in recall, never answering "
-            "alone, firewalled from /dream's own sources, self-decaying past "
-            "DREAM_DRAFT_HORIZON, graduating draft→verified ONLY on recorded outcome "
-            "evidence. action='sweep_drafts' runs that decay sweep now; "
-            "action='archive_draft' executes ONE proposed draft archive (name=...); "
-            "action='prospective' reports abstain→hit flips over the frozen abstention "
-            "backlog. Offline deliberate turn — never needed for ordinary recall."
+            "The offline link pass: replay the memory corpus against itself and add the "
+            "links it finds (unlinked mentions, transitive bridges, undeclared refines): "
+            "reversible, capped, stamped, never committed. Returns a digest with undo "
+            "handles; show it as is. apply=false reports only (zero writes); "
+            "contradictions=true adds the opt-in LLM contradiction check (propose-only). "
+            "action='undo' reverts the latest pass (edge_id: one edge; undo_since: a range); "
+            "'retire_ghost' retires ONE active ledger edge whose stamp is provably gone "
+            "(edge_id, reason); 'log' lists every dream edge. Deprecated, removed in "
+            "v2.0.0: deparasite (retract), dedup_merge (survivor, loser), generate (stage), "
+            "sweep_drafts, archive_draft (name), prospective."
         ),
         "inputSchema": {
             "type": "object",
@@ -299,69 +275,29 @@ _TOOLS = [
                         "archive_draft",
                         "prospective",
                     ],
-                    "description": "pass = run a dream pass (default); undo = revert; "
-                    "retire_ghost = close one active ledger edge whose stamp is provably "
-                    "gone; log = list edges; deparasite = counterweight report; "
-                    "dedup_merge = execute one ratified merge; generate = "
-                    "schema/hypothesis proposals (stage=true stages drafts); "
-                    "sweep_drafts = decay sweep; archive_draft = execute one "
-                    "proposed draft archive; prospective = the abstain→hit flip metric",
+                    "description": "pass (default) | undo | retire_ghost | log; the rest "
+                    "are deprecated",
                 },
                 "apply": {
                     "type": "boolean",
-                    "description": "with action='pass': override the shipped default for "
-                    "this pass — false = report-only (zero writes), true = force apply. "
-                    "Omit to follow the default (auto-apply ON, owner-ratified "
-                    "2026-07-12).",
+                    "description": "with a pass: false = report-only, true = apply; omit "
+                    "for the default",
                 },
                 "contradictions": {
                     "type": "boolean",
-                    "description": "with action='pass': run the LLM contradiction check "
-                    "for this pass (needs the plugin's LLM API key; without one the pass "
-                    "says it was skipped). Omit to follow the dream_contradictions option.",
+                    "description": "with a pass: also run the LLM contradiction check",
                 },
-                "edge_id": {
-                    "type": "string",
-                    "description": "with action='undo': revert exactly this edge (e.g. "
-                    "p7-e2); with action='retire_ghost': the ONE ghost edge to retire",
-                },
-                "reason": {
-                    "type": "string",
-                    "description": "with action='retire_ghost': why the stamp is gone — "
-                    "recorded on the ledger line as retire_reason",
-                },
+                "edge_id": {"type": "string", "description": "with undo or retire_ghost"},
+                "reason": {"type": "string", "description": "with retire_ghost: why"},
                 "undo_since": {
                     "type": "string",
-                    "description": "with action='undo': revert edges applied since an ISO "
-                    "date or within the last N distinct sessions",
+                    "description": "with undo: an ISO date or the last N sessions",
                 },
-                "retract": {
-                    "type": "boolean",
-                    "description": "with action='deparasite': additionally EXECUTE the "
-                    "Tier-A lane (retract flagged un-aged dream edges via the undo "
-                    "machinery). Default false = report/propose only.",
-                },
-                "survivor": {
-                    "type": "string",
-                    "description": "with action='dedup_merge': the memory that stays "
-                    "current (gains supersedes:[loser])",
-                },
-                "loser": {
-                    "type": "string",
-                    "description": "with action='dedup_merge': the memory being "
-                    "superseded (gets invalid_after; file stays on disk)",
-                },
-                "stage": {
-                    "type": "boolean",
-                    "description": "with action='generate': stage the proposals into "
-                    "the corpus as confidence:draft memories (explicit opt-in; trusted "
-                    "corpus required). Default false = report-only proposals.",
-                },
-                "name": {
-                    "type": "string",
-                    "description": "with action='archive_draft': the dream-generated "
-                    "memory to archive (per-item)",
-                },
+                "retract": {"type": "boolean", "description": "deprecated (deparasite)"},
+                "survivor": {"type": "string", "description": "deprecated (dedup_merge)"},
+                "loser": {"type": "string", "description": "deprecated (dedup_merge)"},
+                "stage": {"type": "boolean", "description": "deprecated (generate)"},
+                "name": {"type": "string", "description": "deprecated (archive_draft)"},
             },
         },
     },

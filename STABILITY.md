@@ -123,6 +123,14 @@ These may change at any release without a major bump — do not build on them:
   (`hippo trust policy --accept`) is part of the trust contract and will not loosen.
 - **Exact recall output text and ordering** — recall is a ranker; its wording, formatting, and the
   precise order of results are tuned continuously.
+- **dream's deprecated tiers (from v1.45)** — reverse replay, the generative tier (`--generate`,
+  `--sweep-drafts`, `--archive-draft`, `--prospective`, the MCP actions of those names and
+  `HIPPO_DREAM_GENERATIVE`) and de-parasite (`--deparasite`, `--retract`, `--dedup-merge`; MCP
+  `deparasite`, `dedup_merge`) measured no recall@10 gain on three real corpora. They are off by
+  default, still run when named (reverse replay with `HIPPO_DREAM_REVERSE_REPLAY=1`), print one
+  line saying they are deprecated, and are removed at v2.0. Every MCP input name stays in the
+  `dream` schema until then. The link pass, the `dream:links` grammar, `dream-ledger.jsonl` and
+  `HIPPO_SLEEP_TIER_A` are unchanged.
 
 ## Crash safety
 
