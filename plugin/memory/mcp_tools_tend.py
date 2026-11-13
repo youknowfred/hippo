@@ -77,7 +77,7 @@ def _tool_tend(args: Dict[str, Any]):
     if action in ("list", "next"):
         result = Q.build_queue(memory_dir, repo_root, kinds=kinds)
         if action == "list":
-            text = tend.render_list(result)
+            text = tend.with_schedule_offer(tend.render_list(result), memory_dir, result, kinds)
             return text, _structured(action, text, result, result["pending"])
         top = result["pending"][0] if result["pending"] else None
         text = tend.render_next(top, memory_dir, repo_root, Q.total_pending(result))
