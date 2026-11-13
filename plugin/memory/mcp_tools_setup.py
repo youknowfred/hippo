@@ -423,6 +423,7 @@ def _tool_dream(args: Dict[str, Any]) -> str:
     every applied edge returns with its undo handle in the digest.
     """
     from .dream import apply_mode_default, render_log, run_apply_pass, run_report_pass, undo_edges
+    from .dream_deprecated import reverse_replay_enabled, with_notice
     from .provenance import resolve_dirs
 
     memory_dir, repo_root = resolve_dirs()
@@ -446,12 +447,13 @@ def _tool_dream(args: Dict[str, Any]) -> str:
                 return "dream dedup_merge: both 'survivor' and 'loser' are required."
             res = apply_dedup_merge(memory_dir, survivor, loser)
             if res.get("error"):
-                return f"dedup-merge REFUSED: {res['error']}"
-            return (
+                return with_notice(f"dedup-merge REFUSED: {res['error']}", "deparasite")
+            return with_notice(
                 f"dedup-merge applied (non-lossy, reversible): {survivor} now supersedes "
                 f"{loser}; {loser} invalid_after "
                 f"{(res.get('invalid_after') or {}).get('ts')}. Both files remain on "
-                "disk; the commit stays the owner's."
+                "disk; the commit stays the owner's.",
+                "deparasite",
             )
         if action == "undo":
             edge_id = str(args.get("edge_id") or "").strip() or None
@@ -479,7 +481,7 @@ def _tool_dream(args: Dict[str, Any]) -> str:
             from .dream_generate import sweep_drafts
 
             _code, text = sweep_drafts(memory_dir, repo_root=repo_root)
-            return text
+            return with_notice(text, "generative")
         if action == "archive_draft":
             from .dream_generate import archive_draft
 
@@ -488,15 +490,16 @@ def _tool_dream(args: Dict[str, Any]) -> str:
                 return "dream archive_draft: 'name' is required."
             res = archive_draft(memory_dir, name, repo_root=repo_root)
             if res.get("error"):
-                return f"archive-draft REFUSED: {res['error']}"
-            return (
+                return with_notice(f"archive-draft REFUSED: {res['error']}", "generative")
+            return with_notice(
                 f"archived dream draft {name} (git-reversible move into archive/; "
-                "ledger updated; the commit stays the owner's)."
+                "ledger updated; the commit stays the owner's).",
+                "generative",
             )
         if action == "prospective":
             from .dream_generate import prospective_recall, render_prospective
 
-            return render_prospective(prospective_recall(memory_dir))
+            return with_notice(render_prospective(prospective_recall(memory_dir)), "generative")
         apply_arg = args.get("apply")
         do_apply = bool(apply_arg) if apply_arg is not None else apply_mode_default()
         # SRF-4: the contradiction check needs the LLM key, and a sensitive plugin option
@@ -518,6 +521,6 @@ def _tool_dream(args: Dict[str, Any]) -> str:
                     os.environ.pop("HIPPO_DREAM_CONTRADICTIONS", None)
                 else:
                     os.environ["HIPPO_DREAM_CONTRADICTIONS"] = prior
-        return text
+        return with_notice(text, "reverse_replay") if reverse_replay_enabled() else text
     except Exception as exc:
         return f"dream: pass failed ({exc}) — nothing was changed."

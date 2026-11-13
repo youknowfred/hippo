@@ -26,7 +26,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         write_boost_ledger,
         write_candidate_ledger,
     )
+    from .dream_deprecated import notice, reverse_replay_enabled
     from .provenance import resolve_dirs
+
+    def _note(tier: str) -> None:
+        # SRF-7: a deprecated tier, asked for by name, still runs and says so in one line.
+        line = notice(tier)
+        if line:
+            print(line)
 
     parser = argparse.ArgumentParser(
         prog="memory.dream",
@@ -90,14 +97,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--deparasite",
         action="store_true",
-        help="the de-parasiting counterweight — report per-memory out-degree, flag "
+        help="DEPRECATED (removed in v2.0.0) — the de-parasiting counterweight — report per-memory out-degree, flag "
         "hubs over DREAM_MAX_OUT_DEGREE, and PROPOSE retractions (dream's own un-aged "
         "edges) vs gated demotions/dedup-merges. Report/propose only; zero memory writes.",
     )
     parser.add_argument(
         "--retract",
         action="store_true",
-        help="with --deparasite: additionally EXECUTE the Tier-A lane — retract the "
+        help="DEPRECATED (removed in v2.0.0) — with --deparasite: additionally EXECUTE the Tier-A lane — retract the "
         "flagged, un-aged dream edges via the byte-exact undo machinery. Human "
         "structures and aged-in edges stay gated regardless.",
     )
@@ -106,14 +113,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         nargs=2,
         metavar=("SURVIVOR", "LOSER"),
         default=None,
-        help="execute ONE ratified dedup-merge proposal (per-item, no batch): SURVIVOR "
+        help="DEPRECATED (removed in v2.0.0) — execute ONE ratified dedup-merge proposal (per-item, no batch): SURVIVOR "
         "gains supersedes:[LOSER], LOSER's validity window closes (set_invalid_after). "
         "Non-lossy — additive frontmatter only, no body byte touched, nothing deleted.",
     )
     parser.add_argument(
         "--generate",
         action="store_true",
-        help="the generative tier — cluster co-firing sets into schema/gist + "
+        help="DEPRECATED (removed in v2.0.0) — the generative tier — cluster co-firing sets into schema/gist + "
         "hypothesis PROPOSALS (report-only by default; proposals land under the derived "
         "dream dir). With --stage (or HIPPO_DREAM_GENERATIVE=1 on apply passes), stages "
         "them into the corpus at confidence:draft — quarantined, capped, ledgered, "
@@ -122,14 +129,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--stage",
         action="store_true",
-        help="with --generate: actually stage the proposals as confidence:draft memories "
+        help="DEPRECATED (removed in v2.0.0) — with --generate: actually stage the proposals as confidence:draft memories "
         "(explicit opt-in, like --apply; the corpus must be trusted). Never verified — "
         "graduation needs recorded outcome evidence (DREAM-).",
     )
     parser.add_argument(
         "--sweep-drafts",
         action="store_true",
-        help="decay: graduate evidence-confirmed drafts (draft→verified on a "
+        help="DEPRECATED (removed in v2.0.0) — decay: graduate evidence-confirmed drafts (draft→verified on a "
         "recorded outcome, never a glance), expire drafts past DREAM_DRAFT_HORIZON "
         "(auto-close validity + propose archive). Also runs inside every apply pass.",
     )
@@ -137,13 +144,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--archive-draft",
         default=None,
         metavar="NAME",
-        help="execute ONE proposed draft archive (per-item; only dream-generated "
+        help="DEPRECATED (removed in v2.0.0) — execute ONE proposed draft archive (per-item; only dream-generated "
         "memories — human memories use the audit archive flow)",
     )
     parser.add_argument(
         "--prospective",
         action="store_true",
-        help="metric: abstain→hit flips over the FROZEN abstention backlog, with "
+        help="DEPRECATED (removed in v2.0.0) — metric: abstain→hit flips over the FROZEN abstention backlog, with "
         "dream-attribution (measure-only, off the hot path)",
     )
     parser.add_argument(
@@ -209,12 +216,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         if res.get("error"):
             print(f"🧹 dedup-merge REFUSED: {res['error']}")
+            _note("deparasite")
             return 1
         print(
             f"🧹 dedup-merge applied (non-lossy, reversible): {survivor} now supersedes "
             f"{loser}; {loser} invalid_after {res['invalid_after']['ts']}. Both files "
             "remain on disk; commit stays yours."
         )
+        _note("deparasite")
         return 0
     if args.retire_ghost:
         code, text = retire_ghost_edge(memory_dir, args.retire_ghost, reason=args.reason)
@@ -250,6 +259,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         code, text = sweep_drafts(memory_dir, args.telemetry_dir, args.index_dir)
         print(text)
+        _note("generative")
         return code
     if args.archive_draft:
         from .dream_generate import archive_draft
@@ -262,16 +272,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         if res.get("error"):
             print(f"🌱 archive-draft REFUSED: {res['error']}")
+            _note("generative")
             return 1
         print(
             f"🌱 archived dream draft {args.archive_draft} (git-reversible move into "
             "archive/; ledger updated; commit stays yours)."
         )
+        _note("generative")
         return 0
     if args.prospective:
         from .dream_generate import prospective_recall, render_prospective
 
         print(render_prospective(prospective_recall(memory_dir, args.telemetry_dir, args.index_dir)))
+        _note("generative")
         return 0
     # --json is a READ surface (raw discovery dump) — it never applies unless --apply is
     # explicit, regardless of the shipped default.
@@ -284,6 +297,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             max_seeds=args.max_seeds,
         )
         print(text)
+        if reverse_replay_enabled():
+            _note("reverse_replay")
         return code
 
     if args.json:
@@ -307,6 +322,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         max_seeds=args.max_seeds,
     )
     print(text)
+    if reverse_replay_enabled():
+        _note("reverse_replay")
     return code
 
 

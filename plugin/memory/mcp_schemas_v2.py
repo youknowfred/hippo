@@ -230,8 +230,8 @@ V2_TOOLS: List[dict] = [
             "The offline link pass: replay the corpus against itself and add the links it "
             "finds (reversible, capped, stamped); returns a digest with undo handles — show it "
             "as is. apply=false reports only. action undo (edge_id or undo_since) | log | "
-            "retire_ghost (edge_id, reason) | deparasite (retract) | dedup_merge (survivor, "
-            "loser) | generate (stage) | sweep_drafts | archive_draft (name) | prospective."
+            "retire_ghost (edge_id, reason). Deprecated, removed in v2.0.0: deparasite, "
+            "dedup_merge, generate, sweep_drafts, archive_draft, prospective."
         ),
         "inputSchema": _schema({
             "action": {"type": "string", "enum": [

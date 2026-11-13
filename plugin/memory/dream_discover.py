@@ -416,9 +416,15 @@ def discover(
     # replay priority + candidate-rank promotion. Same endpoint exclusions as generation
     # (floor + drafts); the backward walk never crosses an un-aged dream pair. With no
     # recorded outcome this is empty and every downstream consumer is provably inert.
-    reward = reward_boosts(
-        memory_dir, index_dir, td, exclude_stems=floor | drafts | unaged_gen, unaged_pairs=unaged
-    )
+    # SRF-7: deprecated and OFF unless asked for (dream_deprecated holds the switch); off,
+    # the reward stays the empty shape above, exactly the no-outcome pass.
+    from .dream_deprecated import reverse_replay_enabled
+
+    reward = result["reward"]
+    if reverse_replay_enabled():
+        reward = reward_boosts(
+            memory_dir, index_dir, td, exclude_stems=floor | drafts | unaged_gen, unaged_pairs=unaged
+        )
     boost_of = reward["memories"]
 
     # Replay worklist — outcome-anchored traces FIRST (DRM-5 replay priority), then

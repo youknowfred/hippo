@@ -32,6 +32,9 @@ from .test_dream import _seed_sessions, _snapshot_md, _write_memory
 @pytest.fixture(autouse=True)
 def _bm25_only(monkeypatch):
     monkeypatch.setenv("HIPPO_DISABLE_DENSE", "1")
+    # SRF-7: reverse replay is deprecated and off by default; these tests pin the tier's
+    # own behaviour, so they ask for it the way a user still can.
+    monkeypatch.setenv("HIPPO_DREAM_REVERSE_REPLAY", "1")
 
 
 @pytest.fixture
