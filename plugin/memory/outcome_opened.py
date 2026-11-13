@@ -36,7 +36,7 @@ import os
 from typing import Dict, Optional, Tuple
 
 # Files that live in a memory dir without being memories.
-_NOT_MEMORIES = frozenset({"MEMORY", "CONVENTIONS", "README"})
+_NOT_MEMORIES = frozenset({"MEMORY", "CONVENTIONS", "CONVENTIONS.local", "README"})
 
 # The kinds a report row can carry besides a frontmatter ``type``.
 KIND_DIGEST = "digest"  # a declared fold digest (``fold_digests`` globs)

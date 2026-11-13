@@ -83,7 +83,7 @@ def _untracked(repo_root: str, memory_dir: str) -> List[str]:
         return sorted(
             os.path.splitext(os.path.basename(p))[0]
             for p in out.stdout.splitlines()
-            if p.endswith(".md") and os.path.basename(p) not in ("MEMORY.md", "CONVENTIONS.md")
+            if p.endswith(".md") and os.path.basename(p) not in ("MEMORY.md", "CONVENTIONS.md", "CONVENTIONS.local.md")
         )
     except Exception:
         return []
