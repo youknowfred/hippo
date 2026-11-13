@@ -267,7 +267,13 @@ def _src_floor(memory_dir: str, repo_root: str) -> List[dict]:
         edge = None
     if edge:
         out.append(_entry("floor", "MEMORY.md", edge, "trim the floor below the limit"))
-    return out
+    from .floor_diet import queue_entries  # NAT-3: demotions under a declared floor budget
+
+    diet = queue_entries(memory_dir, _entry)
+    if diet:  # a pointer the diet weighs is one item, not also an out-of-section one
+        weighed = {e["target"].split(":", 1)[1] + ".md" for e in diet}
+        out = [e for e in out if not (e["evidence"].startswith("floor pointer outside") and e["target"] in weighed)]
+    return out + diet
 
 
 def _src_derivation(memory_dir: str, repo_root: str) -> List[dict]:
