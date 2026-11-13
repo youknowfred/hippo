@@ -97,6 +97,7 @@ from .doctor_checks_corpus import (
     check_non_english_corpus,
     check_producer_versions,
 )
+from .floor_diet import check_floor_budget
 from .doctor_checks_lifecycle import (
     check_format_migration,
     check_tend_queue,
@@ -405,6 +406,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Optional[Dict[str, str]]]]] = 
     ("volatile_paths", check_volatile_paths),  # VOL-1: arming-policy state, ok-glyph always
     ("evidence_anchors", check_evidence_anchors),  # TND-3: would-be-quiet count, report-only
     ("floor_governance", check_floor_governance),  # FLR-1: floor vs the harness read window + declared floor_lint policy
+    ("floor_budget", check_floor_budget),  # NAT-3 (K17): floor vs a declared budgets.floor_bytes; no line when undeclared and lean
     ("write_gate", check_write_gate),  # GAT-1: off / warns / may refuse, and a refusal not yet accepted here
     ("conventions", check_conventions),  # GAT-4: the corpus's CONVENTIONS.md: current / behind / edited / missing
     ("empty_baselines", check_empty_baselines),  # COR-10: the heal moved off the hook

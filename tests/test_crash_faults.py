@@ -42,6 +42,7 @@ import pytest
 from memory import atomic as A
 
 from .crash_scenarios_conventions import scenarios as _conventions_scenarios
+from .crash_scenarios_floor_diet import scenarios as _floor_diet_scenarios
 from .crash_scenarios_gate import scenarios as _gate_scenarios
 from .crash_scenarios_outbox import scenarios as _outbox_scenarios
 from .crash_scenarios_ship import scenarios as _ship_scenarios
@@ -115,6 +116,7 @@ CRASH_CONTRACT = {
     ("trust", "_write_registry_doc"): ("detected",),  # mark_trusted returns False
     ("tend", "_write_state"): ("detected",),  # TND-2: hold/snooze/skip report the failure; prior state kept
     ("tend_queue", "_write_cache"): ("intact",),  # TND-1: the cache is derived; the build still returns
+    ("floor_diet", "_write_replay_cache"): ("intact",),  # NAT-3: derived replay cache; the diet still proposes
     ("derived_dirs", "_write_stub"): ("intact",),  # MIG-10: the move stands and the stub dir exists; only its note is missing
     ("trust_review", "keep_consented_baselines"): ("intact",),  # TND-6: best-effort store copy; consent itself already landed
     ("recall_warm", "_publish"): ("intact",),  # HOT-6 heartbeat: bookkeeping; a missing one makes the hook spawn
@@ -1086,6 +1088,7 @@ _SCENARIOS = [
     *_ship_scenarios(_arm, _snap, _assert_unchanged),  # OUT-2 sites (tests/crash_scenarios_ship.py)
     *_conventions_scenarios(_arm, _snap, _assert_unchanged),  # GAT-4 (tests/crash_scenarios_conventions.py)
     *_ledger_scenarios(_arm, _snap, _assert_unchanged),  # LDG-1 (tests/crash_scenarios_ledger.py)
+    *_floor_diet_scenarios(_arm, _snap, _assert_unchanged),  # NAT-3 (tests/crash_scenarios_floor_diet.py)
     (("dream", "_apply_one"), "detected", scn_dream_apply_bridge_detected),
     (("dream_apply", "_undo_one_edge"), "detected", scn_dream_undo_detected),
     (("dream", "_apply_one"), "rolled_back", scn_dream_apply_refines_rolled_back),

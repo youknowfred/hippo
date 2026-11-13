@@ -32,7 +32,7 @@ def _mem(name: str, description: str, body: str = "body text") -> str:
 
 
 # Every registered label but OWN-1's, which prints nothing on a machine with no user tier.
-_CHECKS_WITHOUT_USER_TIER = [label for label, _ in D.CHECKS if label not in ("user_tier", "ledger_join")]
+_CHECKS_WITHOUT_USER_TIER = [label for label, _ in D.CHECKS if label not in ("user_tier", "ledger_join", "floor_budget")]  # LDG-1, NAT-3: optional lines
 
 
 def _seed(memory_dir: str, *, floor: bool = True) -> None:

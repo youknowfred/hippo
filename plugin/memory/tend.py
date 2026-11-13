@@ -15,6 +15,7 @@ Every per-item gate is preserved, because ``apply`` only routes:
   - merge          supersede (demote the loser under the winner) | updated | distinct
   - baseline       rebaseline (the graduate re-baseline: confirm, then move the baseline)
   - link, floor    done (re-checked: refused while the problem is still there)
+  - floor (diet)   demote (NAT-3: remove that one pointer line from the floor; the memory stays)
   - derivation     apply (re-derive ONE memory) | stamp (earned: refused while any
                    memory still derives differently)
   - trust          routed to the consent review (re-consent is its own gate)
@@ -42,7 +43,7 @@ VERDICTS: Dict[str, Tuple[str, ...]] = {
     "capture": ("discard", "done"),
     "reverify": ("graduate", "fix", "demote", "snooze", "archive"),
     "link": ("done",),
-    "floor": ("done",),
+    "floor": ("done", "demote"),
     "derivation": ("apply", "stamp"),
     "rule": ("write",),
 }
@@ -159,6 +160,9 @@ def _detail_lines(entry: dict, memory_dir: str, repo_root: str) -> List[str]:
 
 def _verdict_help(kind: str, entry_id: str) -> List[str]:
     v = VERDICTS[kind]
+    diet = kind == "floor" and entry_id.startswith("floor:diet:")
+    if kind == "floor":  # NAT-3: demote belongs to a floor-diet item only
+        v = ("demote", "done") if diet else ("done",)
     if kind == "trust":
         return ["Re-consent is its own gate: `hippo trust review` shows each change against the "
                 "consented version, then `hippo trust grant` with the digest it prints (the trust "
@@ -172,6 +176,8 @@ def _verdict_help(kind: str, entry_id: str) -> List[str]:
         lines.append("  demote may take --superseded-by <name>; fix means you already edited the body.")
     if kind == "capture":
         lines.append("  done means you already wrote what was durable with `hippo new` (check first).")
+    if diet:
+        lines.append("  demote removes this one line from MEMORY.md; the memory file stays and recall reaches it.")
     if kind in ("link", "floor"):
         lines.append("  done means you already edited the file; tend re-checks before clearing it.")
     if kind == "rule":
@@ -292,6 +298,15 @@ def _apply_recheck(entry, memory_dir, repo_root):
     return _ok(f"{entry['id']}: fixed.")
 
 
+def _apply_demote(target, memory_dir, repo_root):
+    """NAT-3: a floor-diet item's demotion — that one pointer line, nothing else."""
+    from .floor_diet import TARGET_PREFIX, demote
+
+    if not target.startswith(TARGET_PREFIX):
+        return _refused("demote takes a floor-diet item (floor:diet:<name>); edit the file, then done.")
+    return demote(target[len(TARGET_PREFIX):], memory_dir, repo_root)
+
+
 def _apply_derivation(target, verdict, memory_dir, repo_root):
     from .provenance import build_repo_file_index, rederive_file, rederive_worklist
     from .provenance_format import CITATION_DERIVATION_VERSION, read_cite_derivation, write_cite_derivation
@@ -353,6 +368,8 @@ def apply(
             r = _apply_contradiction(target, verdict, memory_dir, repo_root, winner, loser)
         elif kind == "merge":
             r = _apply_merge(entry, verdict, memory_dir, repo_root, winner)
+        elif kind == "floor" and verdict == "demote":
+            r = _apply_demote(target, memory_dir, repo_root)
         elif kind in ("link", "floor"):
             r = _apply_recheck(entry, memory_dir, repo_root)
         elif kind == "rule":
