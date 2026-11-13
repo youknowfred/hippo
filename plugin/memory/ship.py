@@ -197,9 +197,11 @@ def _section_of(lines: List[str], i: int) -> Optional[str]:
     return None
 
 
-def floor_changes(base_text: str, copy_text: str) -> Optional[Tuple[List[dict], List[str]]]:
+def floor_changes(base_text: str, copy_text: str, is_memory=None) -> Optional[Tuple[List[dict], List[str]]]:
     """``(adds, removes)`` hippo made in the floor copy against the text it was copied
-    from, or None when anything else changed (a hand edit, a moved line)."""
+    from, or None when anything else changed (a hand edit, a moved line). With ``is_memory``
+    a removed bare pointer line (FLR-1: a floor diet's demote on a bare floor) is a remove."""
+    from .lint_floor import bare_pointer
     from .new_memory_floor import _pointer_name
 
     a, b = base_text.split("\n"), copy_text.split("\n")
@@ -212,7 +214,9 @@ def floor_changes(base_text: str, copy_text: str) -> Optional[Tuple[List[dict], 
         for ln in a[i1:i2]:
             name = _pointer_name(ln)
             if name is None or not _POINTER_RE.match(ln):
-                return None
+                name = bare_pointer(ln)
+                if name is None or is_memory is None or not is_memory(name):
+                    return None
             removes.append(name)
         for j in range(j1, j2):
             ln = b[j]
@@ -232,12 +236,12 @@ def replay_floor(target: str, adds: List[dict], removes: List[str]) -> Tuple[str
     """Apply the adds and removes to ``target`` (the floor at the base ref) with a direct
     save's placement rules. ``(text, applied adds, applied removes)``; an add whose pointer is
     already there and a remove whose pointer is already gone are skipped."""
-    from .new_memory_floor import _pointer_name, _with_pointer
+    from .new_memory_floor import _pointer_name, _points_at, _with_pointer
 
     text, n_add, n_rm = target, 0, 0
     for name in removes:
         lines = text.split("\n")
-        kept = [ln for ln in lines if _pointer_name(ln) != name]
+        kept = [ln for ln in lines if not _points_at(ln, name)]
         if len(kept) != len(lines):
             text, n_rm = "\n".join(kept), n_rm + 1
     for add in adds:
@@ -366,7 +370,10 @@ def _floor_plan(memory_dir, top, rel, b, at_base, manifest, d) -> Optional[dict]
     fp = {"path": copy, "sha256": _sha256(copy_bytes), "state": None, "adds": 0, "removes": 0}
     base_path = os.path.join(d, OB.FLOOR_BASE_NAME)
     base_text = open(base_path, encoding="utf-8").read() if os.path.isfile(base_path) else None
-    changes = floor_changes(base_text, copy_bytes.decode("utf-8")) if base_text is not None else None
+    from .lint_floor import memory_exists
+
+    changes = (floor_changes(base_text, copy_bytes.decode("utf-8"), memory_exists(memory_dir))
+               if base_text is not None else None)
     if target_bytes is None or changes is None:
         fp["state"] = "stale"
         fp["why"] = ("the default branch has no MEMORY.md" if target_bytes is None
