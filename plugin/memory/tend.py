@@ -117,6 +117,10 @@ def _detail_lines(entry: dict, memory_dir: str, repo_root: str) -> List[str]:
 
             brief = brief_for_name(target, memory_dir, repo_root)
             return render_brief(brief) if brief else []
+        if kind == "contradiction" and "|rule:" in target:  # RUL-8: memory vs rule section
+            from .rules_conflict import detail_lines
+
+            return detail_lines(entry, memory_dir, repo_root)
         if kind == "contradiction":
             from .resolve_evidence import render_pair_evidence
             from .resolve_view import _description_of, pair_evidence
@@ -321,6 +325,10 @@ def apply(
             r = _apply_reverify(target, "graduate", memory_dir, repo_root, None)
         elif kind == "capture":
             r = _apply_capture(target, verdict, memory_dir)
+        elif kind == "contradiction" and "|rule:" in target:  # RUL-8: never edits the rule
+            from .rules_conflict import apply_verdict
+
+            r = apply_verdict(entry, verdict, memory_dir, repo_root, winner, loser)
         elif kind == "contradiction":
             r = _apply_contradiction(target, verdict, memory_dir, repo_root, winner, loser)
         elif kind == "merge":
