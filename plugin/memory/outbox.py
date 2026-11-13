@@ -47,13 +47,16 @@ from typing import Dict, Iterator, List, Optional, Tuple
 OUTBOX_DIRNAME = "memory.outbox"
 MANIFEST_NAME = ".outbox.json"
 FLOOR_NAME = "MEMORY.md"
+# OUT-2: the committed floor text a floor copy was made from, kept beside it so a ship can
+# replay hippo's pointer adds and removes onto the floor at the base ref. Not a memory file.
+FLOOR_BASE_NAME = ".floor-base"
 WRITE_PATH_VALUES = ("outbox", "direct")
 # The note a recalled outbox memory carries where the renderers show one.
 RECALL_NOTE = "unshipped: in memory.outbox"
 # What a save that landed here says (CLI and MCP).
 SAVE_LINE = (
     "saved to the outbox beside the corpus, not the corpus dir: recall sees it from the next "
-    "prompt; it is not in git until it is moved into the corpus dir"
+    "prompt; it is not in git until `hippo ship` batches the outbox into a branch"
 )
 
 
@@ -297,6 +300,8 @@ def copy_up(memory_dir: str, name: str, repo_root: Optional[str] = None) -> Opti
     from .atomic import CasConflict, write_text_cas
 
     ensure(memory_dir)
+    if fname == FLOOR_NAME:
+        _record_floor_base(memory_dir, data)  # OUT-2: before the copy, so a copy never lacks it
     try:
         write_text_cas(dest, data.decode("utf-8"), None)  # never replaces a copy made a moment ago
     except CasConflict:
@@ -310,6 +315,23 @@ def copy_up(memory_dir: str, name: str, repo_root: Optional[str] = None) -> Opti
         if consented is not None and consented.get(os.path.splitext(fname)[0]) == base:
             _record_hash(memory_dir, dest, repo_root)
     return dest
+
+
+def _record_floor_base(memory_dir: str, data: bytes) -> None:
+    """OUT-2: keep the committed floor text a floor copy is made from (create-only while
+    absent). A torn write raises before the copy exists, so no copy is ever left without
+    its base; a copy whose base is missing is reported stale by ship, never replayed."""
+    from .atomic import CasConflict, write_text_cas
+
+    from .atomic import content_token
+
+    path = os.path.join(outbox_dir(memory_dir), FLOOR_BASE_NAME)
+    try:
+        write_text_cas(path, data.decode("utf-8"), None)
+    except CasConflict:
+        if not os.path.isfile(os.path.join(outbox_dir(memory_dir), FLOOR_NAME)):
+            # A base no copy belongs to (a copy-up torn after it): this copy's base replaces it.
+            write_text_cas(path, data.decode("utf-8"), content_token(path))
 
 
 def floor_target(memory_dir: str, repo_root: Optional[str] = None) -> str:

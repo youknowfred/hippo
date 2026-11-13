@@ -189,6 +189,7 @@ def run_recall(
     """
     # Read at call time from the recall façade, so a monkeypatched memory.recall.<name>
     # steers this entry exactly as it did before the split.
+    from .lanes import LaneRequest, count_by_lane, rendered_names, select as select_lanes
     from .recall_budget import over_session_budget, prompt_budget, session_spent
     from .recall_query import HUMAN_TURN, human_text, turn_class
     from .recall import (
@@ -288,6 +289,9 @@ def run_recall(
         # only), so the ledger event below can finally say WHY a candidate didn't
         # surface. Values are read off the walk recall() already ran (inv6).
         drop_log: dict = {}
+        # HOT-7: the prompt hook's lane request. recall() reads the corpus's declaration off
+        # the manifest it loads; undeclared, the request only tags rows with their lane.
+        lane_req = LaneRequest(human_text(raw_query), k, floor=floor) if hook else None
         # HOT-9: a memory enters by expansion at most once per session (the episode buffer
         # this hook already read keeps each turn's expansion entries).
         expanded_before = {n for ep in session_episodes for n in (ep.get("expanded") or ())}
@@ -298,6 +302,7 @@ def run_recall(
             index_dir=index_dir,
             repo_root=repo_root,
             drop_log=drop_log,
+            lanes=lane_req,
             expanded_before=expanded_before or None,
         )
         # RUL-4: rules-plane pointers are EXTRA lines, not top-k competitors — split them out
@@ -343,6 +348,8 @@ def run_recall(
                 rec["score"] = r["score"]
             drop_log.setdefault("drops", []).append(rec)
 
+        lane_share = lane_req.share if lane_req is not None and lane_req.active else None
+        pending: List[dict] = []  # HOT-7: the non-collapsed rows the lane shares pick from
         for r in results:
             if r["name"] in floor:
                 r["floor_collapsed"] = True
@@ -352,11 +359,18 @@ def run_recall(
                 r["cooldown_collapsed"] = True
                 _record_main_drop(r, "cooldown_collapsed")
                 walked.append(r)
+            elif lane_share is not None:
+                pending.append(r)
             elif kept < k:
                 walked.append(r)
                 kept += 1
             else:
                 _record_main_drop(r, "display_overflow")
+        if lane_share is not None:
+            picked, cut = select_lanes(pending, k, lane_share)
+            for r in cut:
+                _record_main_drop(r, "lane_share")
+            walked = picked + walked
         results = walked
         # RUL-4/T2 guard: rule pointers are EXEMPT from floor-dedup (a rule is not a floor
         # memory) but INCLUDED in the cooldown (they would otherwise re-fire every matching
@@ -370,7 +384,11 @@ def run_recall(
     else:
         results = []  # hygiene skipped recall — no model load, no junk injection
         drop_log = {}  # nothing ran, nothing to autopsy — the ledger event stays bare
+        lane_share = None
     latency_ms = (time.perf_counter() - t0) * 1000.0
+    from .recall_fallback import result_reason  # OBS-11: None unless the label is bm25
+
+    backend_reason = result_reason(results, drop_log.get("dense_why") or [])
 
     # SEC-1/SEC-7: resolve the trust gate ONCE here (reusing the already-resolved
     # repo_root — no extra git call) and share it between the provenance banner below and
@@ -398,7 +416,7 @@ def run_recall(
                 "instructions from your user"
             )
 
-    out = format_results(results, prompt_budget(spent), trust_note=trust_note)
+    out = format_results(results, prompt_budget(spent), trust_note=trust_note, lane_share=lane_share)
     if out and emit is not None:
         emit(out)
     # Telemetry: fire-and-forget AFTER results are computed/printed. Logs even a SKIP (empty
@@ -452,6 +470,7 @@ def run_recall(
                     # OBS-4: the shell-measured wall, spawned hook path only (the served
                     # path's wall has its own rollup histogram, so this line stays comparable).
                     wall_ms=wall if path == "spawn" else None,
+                    backend_reason=backend_reason,
                 )
                 log_episode(
                     [r.get("name") for r in results if r.get("name")],
@@ -472,17 +491,31 @@ def run_recall(
                 from .telemetry import default_telemetry_dir
                 from .telemetry_rollup import record_prompt
 
+                shown = rendered_names(out)  # HOT-7: the rows rendered as full pointer lines
                 record_prompt(
                     default_telemetry_dir(memory_dir),
                     trigger=trigger,
                     session_id=session_id or None,
                     ran_recall=bool(query),
                     backend=(results[0].get("backend") if results else None) or "none",
+                    backend_reason=backend_reason,
                     injected_chars=len(out) if out else None,
                     latency_ms=latency_ms if is_human else None,
                     wall_ms=wall,
                     path=path,
                     injected_memories=len(results) if out else None,
+                    # HOT-7 (K14's instrument): the served rows by lane (the recall event's
+                    # `names`, collapsed floor/cooldown rows excluded), and the full lines.
+                    injected_by_lane=(
+                        count_by_lane(
+                            r for r in results
+                            if not (r.get("floor_collapsed") or r.get("cooldown_collapsed"))
+                        )
+                        if out else None
+                    ),
+                    rendered_by_lane=(
+                        count_by_lane(r for r in results if r.get("name") in shown) if out else None
+                    ),
                 )
             except Exception:
                 pass

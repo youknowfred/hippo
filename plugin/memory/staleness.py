@@ -27,8 +27,12 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from .fm_access import fm_get
+
+# OUT-1: staleness reads what this machine sees (committed files overlaid by outbox copies),
+# so a verdict that edited an outbox copy is not re-queued off the committed one.
+from .outbox import effective_path
+from .outbox_edit import iter_files as _iter_memory_files
 from .provenance import (
-    _iter_memory_files,
     build_repo_file_index,
     parse_frontmatter,
     run_git,
@@ -532,7 +536,9 @@ def set_invalid_after(path: str, ts: Optional[str] = None, *, dry_run: bool = Fa
         if ts is None:
             ts = datetime.now(timezone.utc).isoformat()
         from .atomic import read_text_cas
+        from .outbox_edit import edit_path, resolve
 
+        path = resolve(path)  # OUT-1: the outbox copy, when there is one
         text, _cas_token = read_text_cas(path)  # RWY-3: the CAS token of what we read
         fm_lines, _ = split_frontmatter(text)
         if fm_lines is None:
@@ -569,6 +575,10 @@ def set_invalid_after(path: str, ts: Optional[str] = None, *, dry_run: bool = Fa
         if changed and not dry_run:
             from .atomic import write_text_cas
 
+            path, why = edit_path(path)
+            if why:
+                result["error"] = why
+                return result
             write_text_cas(path, new_text, _cas_token)  # COR-18: never a torn corpus file
             # SEC-6: this per-item, agent-gated frontmatter write is a reviewed edit —
             # fold the file's new bytes into the trusted-corpus consent baseline so a
@@ -658,7 +668,7 @@ def invalid_after_map(names: List[str], memory_dir: str) -> Dict[str, str]:
     try:
         for name in names:
             try:
-                with open(os.path.join(memory_dir, f"{name}.md"), "r", encoding="utf-8") as fh:
+                with open(effective_path(memory_dir, name), "r", encoding="utf-8") as fh:
                     ia = read_invalid_after(fh.read())
             except Exception:
                 continue

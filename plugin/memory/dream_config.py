@@ -14,8 +14,8 @@ from typing import Optional
 # Tunables (env-overridable; defaults are the ratified/roadmap values)
 # --------------------------------------------------------------------------- #
 
-# Co-fire threshold for DRM-2 auto-apply (bridges/refines; completions are text-evidence
-# based and exempt per DRM-2.spec.md §1). CALIBRATED 2026-07-12 from the live-corpus DRM-1
+# Co-fire threshold for DRM-2 auto-apply (bridges/refines; completions have their own
+# floor, ``COMPLETION_MIN_COFIRE`` below). CALIBRATED 2026-07-12 from the live-corpus DRM-1
 # pass p20260712210214 (29 memories, 28 probes, 190 co-fire pairs): RRF fused-score ratios
 # are rank-compressed (rank-10/rank-1 ≈ 0.87 by construction), so raw ratio under-
 # discriminates at the top — the distribution's real separator is MUTUALITY (the pair
@@ -25,6 +25,23 @@ from typing import Optional
 # holds); refines require cofire ≥ θ (the slug-prefix signal is already strong);
 # completions are θ-exempt. Report-only passes record every candidate regardless of θ.
 _DEFAULT_THETA = 0.90
+
+# SRF-7 (ruling V2Q-27): the floor a COMPLETION must clear, exclusive. A completion was
+# exempt from every co-fire bar: the body names the target, and that text evidence was
+# taken as enough. Replayed on the largest corpus on 2026-11-12, the applied completions
+# split in two: more than half sat at exactly 0.00 (the body names the target, and recall
+# has never returned the pair together) and the rest spread from 0.29 to 1.00 with no
+# second break. So the floor is "any nonzero cofire": the text mention AND at least one
+# observed co-recall. Not env-tunable: the only meaningful values are "none" and "any".
+COMPLETION_MIN_COFIRE = 0.0
+
+
+def completion_clears_floor(cofire) -> bool:
+    """True when a completion's co-fire strength is above ``COMPLETION_MIN_COFIRE``."""
+    try:
+        return float(cofire or 0.0) > COMPLETION_MIN_COFIRE
+    except (TypeError, ValueError):
+        return False
 
 # Per-pass auto-apply cap (DRM-2). Single-digit by design (inv-DRM-empty-norm / DREAM-KILL-4:
 # no bulk sweeps); the hard max is not overridable.
@@ -244,8 +261,9 @@ def apply_eligible(candidate: dict, *, theta: Optional[float] = None) -> bool:
     """The Tier-A auto-apply bar ONE candidate must clear (DRM-2's gate; DRM-1's sweep).
 
     Calibrated 2026-07-12 on the live corpus (see ``_DEFAULT_THETA``'s note):
-      - **completion** — θ-exempt: the body already names the target (text evidence, the
-        highest-precision kind per DRM-2.spec.md §1).
+      - **completion** — θ-exempt, but not evidence-exempt (SRF-7): the body already
+        names the target AND recall has returned the pair together at least once
+        (``completion_clears_floor``: any nonzero cofire).
       - **refines**    — ``cofire ≥ θ`` (the slug-prefix signal carries the typing).
       - **bridge**     — ``cofire ≥ θ`` AND **mutual** (co-fired from BOTH endpoints'
         probes): RRF score ratios are rank-compressed, and mutuality is the separator the
@@ -256,7 +274,7 @@ def apply_eligible(candidate: dict, *, theta: Optional[float] = None) -> bool:
     th = cofire_theta() if theta is None else theta
     kind = candidate.get("kind")
     if kind == "completion":
-        return True
+        return completion_clears_floor(candidate.get("cofire"))
     if kind == "refines":
         return (candidate.get("cofire") or 0.0) >= th
     if kind == "bridge":

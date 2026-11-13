@@ -367,7 +367,21 @@ hippo's settings now live in three places, and the first one that answers wins:
    `volatile_paths`, `floor_lint`, `floor_sections`, `fold_digests`, `attention` (`"calm"` or
    `"full"`), `mute` (SessionStart signals to hide), `acknowledged_findings` (see below),
    `write_path` (`"outbox"` or `"direct"`, below), `gate` (the write gate, below), `budgets`
-   and `journals` (the commit gate's budgets, below).
+   (the commit gate's budgets, below) and `journals` (journal filename globs: the commit
+   gate's journal budget counts them, and the prompt hook's recall lanes, below, act once it
+   is declared).
+
+**Recall lanes.** Each memory sits in one lane: **behavior** (`type: user` or `feedback`),
+**fact** (`project`, `reference`, anything else) or **journal** (a file matching
+`fold_digests` or a `journals` glob). A corpus whose `hippo.json` declares `journals` as a
+list (`[]` counts) changes what the prompt hook injects, and only that: a journal is injected
+only when the prompt names it (`round-12`, `[[round-12]]` or `round-12.md`), and the hook
+picks behavior memories first, up to 4 of its 10 slots and 40% of the prompt's character
+budget, then facts, with any lane's unused room going to the others. `hippo recall` and the
+`recall` tool are unchanged and still return journals. Nothing is withheld from a corpus that
+declares no `journals`. Doctor's recall-lanes line reports each lane's share of what the hook
+injected beside its share of the corpus. `journals` only names files; like `mute`, it needs no
+`hippo trust policy --accept`.
 
 **Acknowledging a cleared lint finding.** When a memory file carries a secret or threat finding
 you have reviewed and cleared, add an entry to `acknowledged_findings` in `hippo.json` —
@@ -401,15 +415,49 @@ outbox copy of a memory takes precedence over the committed one.
 - **Trust.** hippo records the hash of every file it writes into the outbox in this machine's
   trust registry, and recall injects an outbox file only while its bytes match. A file that
   arrived another way (dropped in, pulled, edited by hand) is withheld and counted by doctor;
-  if it shadows a committed memory, recall uses the committed one.
+  if it shadows a committed memory, recall uses the committed one. `hippo trust review` shows
+  such a file (as `outbox:<name>`) and `hippo trust grant` consents it.
+- **Edits go there too.** Every `/hippo:tend` verdict that changes an existing memory (graduate,
+  demote, keep one of a contradiction, re-derive citations, heal a baseline), and the other
+  hippo edits (typed edges, dream edges, the related-line fix), copy the memory into the outbox
+  on first edit and change the copy, so `git status` stays clean and the item does not come
+  back: tend reads what it wrote. A committed file this machine withholds is refused with the
+  reason, never copied. Removals are not edits: archive and promote still change the corpus
+  folder (commit those yourself) and remove the memory's outbox copy with it. Packs keep
+  writing the corpus folder and refuse a memory that has an outbox copy.
 - **Reads do not depend on the setting.** Turning it off never hides memories still in the
   outbox: recall and doctor keep seeing them.
 - **The floor.** The floor pointer goes into the outbox's copy of `MEMORY.md`. Claude Code
   still loads the committed floor, so a memory whose pointer is only in the outbox copy stays
   recallable on demand.
-- **Landing them.** There is no ship command yet. To land a memory, copy its file into
-  `.claude/memory/`, commit it, delete the outbox copy, and consent the new file with
-  `hippo trust review`. `/hippo:remove` reports the outbox and never deletes it.
+- **Landing them.** `hippo ship` lands the outbox as one reviewed batch; see below.
+  `/hippo:remove` reports the outbox and never deletes it.
+
+#### `hippo ship`: one branch, one commit, nothing pushed
+
+`hippo ship` previews; `hippo ship --yes` acts. It makes ONE commit holding the outbox's new
+and edited memories on ONE new branch (`hippo/ship-<UTC time>`, or `--branch <name>`) off the
+local default-branch ref (`origin/HEAD`, else `origin/main`, `origin/master`, else your local
+`main`/`master`; `--base <ref>` picks another), and stops. It never fetches, so the base is as
+fresh as your last `git fetch`; it never pushes, never touches your checkout, your staged
+changes or `HEAD`, never overwrites a branch, and never carries a deletion. Push the branch
+and open the pull request yourself. Because no `git commit` runs in your working tree, the
+repository's git hooks do not run for that commit; hippo runs its own gate judgment (the
+corpus's committed `budgets` and `floor_lint`) and refuses while a finding stands, and the
+pull request's checks run the rest.
+
+Each outbox file is one of: **new** (ships), **waiting** (already on a ship branch that still
+exists, unchanged since: not shipped again), **stale** (the committed copy changed since the
+outbox copy was made, appeared under the same name, or was deleted: shown as a diff and never
+shipped; `hippo ship --mine <name>` keeps the copy as an edit of the current version,
+`hippo ship --drop <name>` removes the copy), **held** (a credential shape, a threat-lint
+class, or bytes hippo did not write on this machine: the file and the class are named, never
+the matching text), or **landed** (the default branch already has these bytes). The floor is
+never committed whole: the pointer adds and removes hippo made in the outbox copy of
+`MEMORY.md` are replayed onto the floor at the base, so both sides' pointers survive. Files
+stay in the outbox, and recallable, until they land; once the default branch and this checkout
+both hold them, the next `hippo ship --yes` clears them (and folds the bytes this machine wrote
+into the corpus's consent, so the landed file is not withheld). `--json` prints the plan.
 
 The environment variables you might still set are the directory overrides,
 `HIPPO_DISABLE=<list>` (any of `dense`, `jit`, `presence`, `floor-nag`, `abstain-gate`,
@@ -628,6 +676,11 @@ dismisses it on this machine.
   where a desktop session looked. Ask the desktop session
   to run hippo bootstrap once — its `status` output names the sibling install so you can see
   exactly this situation, and `/hippo:doctor` (or the `doctor` tool) flags it too.
+- **Some recalls run BM25-only and I don't know why.** The prompt hook records a
+  reason beside every BM25-only recall (the model not warmed, an index without vectors, another
+  model, the dense timeout, an error, dense turned off, a tier without vectors, or simply no
+  memory clearing the dense floor), and `/hippo:doctor`'s BM25-only line names the most common
+  one over 30 days with what to do about it.
 - **Recall comes back empty.** Almost always one of three things: **(a) bootstrap never ran**
   on this machine — dense recall is silently BM25-only until `/hippo:bootstrap` finishes;
   **(b) the corpus isn't trusted yet** — a freshly cloned or downloaded corpus injects

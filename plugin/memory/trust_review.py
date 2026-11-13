@@ -43,7 +43,26 @@ _STORE_DIRNAME = "hippo-trust-baselines"
 _STORE_MAX_BLOB = 2 * 1024 * 1024  # a memory file is a few KB; anything this big is not one
 _STORE_MAX_TOTAL = 64 * 1024 * 1024
 _GIT_HISTORY_CAP = 200  # commits searched per file for the consented blob
-_KIND_ORDER = {"changed": 0, "added": 1, "removed": 2}
+_KIND_ORDER = {"changed": 0, "added": 1, "removed": 2, "outbox": 3}
+# OUT-1: an outbox copy recall withholds (hippo did not write its bytes on this machine) is
+# reviewed and granted here too, under this prefix so it never collides with a corpus stem.
+# Its grant records the outbox hash (``entry["outbox"]``), never the corpus baseline.
+OUTBOX_PREFIX = "outbox:"
+
+
+def _outbox_rows(memory_dir: str, repo_root: Optional[str]) -> List[dict]:
+    from . import outbox as OB
+
+    d = OB.present(memory_dir)
+    if not d:
+        return []
+    recorded = OB.outbox_hashes(memory_dir, repo_root) or {}
+    rows = []
+    for stem in OB.withheld(memory_dir, repo_root):
+        path = os.path.join(d, f"{stem}.md")
+        rows.append({"stem": OUTBOX_PREFIX + stem, "kind": "outbox", "baseline": recorded.get(stem),
+                     "live": trust.file_sha256(path), "path": path})
+    return rows
 
 
 # --------------------------------------------------------------------------- #
@@ -318,6 +337,7 @@ def corpus_state(memory_dir: str, repo_root: Optional[str]) -> dict:
             for stem in sorted(set(base) - set(live)):
                 rows.append({"stem": stem, "kind": "removed", "baseline": base[stem],
                              "live": None, "path": None})
+            rows += _outbox_rows(memory_dir, repo_root)
             out["withheld"] = sum(1 for r in rows if r["kind"] != "removed")
         rows.sort(key=lambda r: (_KIND_ORDER[r["kind"]], r["stem"]))
         out["rows"] = rows
@@ -376,6 +396,18 @@ def build_review(memory_dir: str, repo_root: Optional[str], files: Optional[List
             except OSError:
                 cur = []
             old = None
+            if r["kind"] == "outbox":  # shown against the committed file it may shadow
+                committed = os.path.join(memory_dir, f"{stem[len(OUTBOX_PREFIX):]}.md")
+                try:
+                    with open(committed, "rb") as fh:
+                        old = _decode(fh.read())
+                    item["source"] = "committed"
+                except OSError:
+                    item["source"] = None
+                item["body"] = _diff(old or [], cur, f"committed/{stem[len(OUTBOX_PREFIX):]}.md"
+                                     if old is not None else "/dev/null", f"outbox/{stem[len(OUTBOX_PREFIX):]}.md")
+                items.append(item)
+                continue
             if r["kind"] == "changed" and r.get("baseline"):
                 data = _git_bytes_for_hash(r["path"], r["baseline"])
                 if data is not None:
@@ -465,9 +497,12 @@ def grant(
         now = datetime.now(timezone.utc).isoformat()
         fp = entry.get("fingerprint") if isinstance(entry.get("fingerprint"), dict) else {}
         base = dict(fp.get("files")) if isinstance(fp.get("files"), dict) else {}
+        outbox = dict(entry.get("outbox")) if isinstance(entry.get("outbox"), dict) else {}
         for r in selected:
             if r["kind"] == "removed":
                 base.pop(r["stem"], None)
+            elif r["kind"] == "outbox":
+                outbox[r["stem"][len(OUTBOX_PREFIX):]] = r["live"]
             else:
                 base[r["stem"]] = r["live"]
         if not entry:  # first consent: a reviewed corpus, like the MCP consent flow's
@@ -480,10 +515,14 @@ def grant(
                 "\n".join(f"{k}:{v}" for k, v in sorted(base.items())).encode("utf-8")
             ).hexdigest(),
         }
+        if outbox:
+            entry["outbox"] = outbox
         trusted[key] = entry
         doc["trusted"] = trusted
         trust._write_registry_doc(doc)
-        keep_consented_baselines(memory_dir, [r["path"] for r in selected if r.get("path")])
+        keep_consented_baselines(
+            memory_dir, [r["path"] for r in selected if r.get("path") and r["kind"] != "outbox"]
+        )
         res["ok"] = True
         res["granted"] = [r["stem"] for r in selected]
         res["remaining"] = corpus_state(memory_dir, repo_root)["withheld"]
@@ -518,6 +557,7 @@ def status(memory_dir: str, repo_root: Optional[str]) -> dict:
         "changed": kinds.count("changed") if st["state"] == "trusted" else 0,
         "added": kinds.count("added") if st["state"] == "trusted" else 0,
         "removed": kinds.count("removed"),
+        "outbox": kinds.count("outbox"),
         "withheld": st["withheld"],
         "total": st["total"],
     }

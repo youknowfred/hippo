@@ -42,17 +42,15 @@ def check_outbox(ctx: DoctorContext) -> Dict[str, str]:
                 pieces.append("floor change pending")
             parts.append(
                 f"{n} memor{'y' if n == 1 else 'ies'} waiting in the outbox ({st['dir']}): "
-                f"{', '.join(pieces)}; recall sees them; they are not in git until they are moved "
-                "into the corpus dir (copy each file into it, commit, delete the outbox copy, then "
-                "consent the new files with `hippo trust review`)"
+                f"{', '.join(pieces)}; recall sees them; they are not in git until `hippo ship` "
+                "batches them into one commit on a new branch (it previews first and never pushes)"
             )
             if st["withheld"]:
                 warn = True
                 parts.append(
                     f"{st['withheld']} outbox file(s) withheld from recall: hippo did not write "
                     "their current bytes on this machine (pulled, or edited outside hippo); read "
-                    "them, then move them into the corpus dir, where `hippo trust review` can "
-                    "consent them, or delete them"
+                    "them with `hippo trust review`, then grant them there or delete them"
                 )
             if st["tracked_by_git"]:
                 warn = True

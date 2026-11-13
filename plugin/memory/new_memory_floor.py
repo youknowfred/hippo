@@ -238,7 +238,7 @@ def _with_pointer(
     return "\n".join(lines), {"status": "appended", "reason": None}
 
 
-def _remove_floor_pointer(memory_dir: str, name: str) -> dict:
+def _remove_floor_pointer(memory_dir: str, name: str, floor_dir: Optional[str] = None) -> dict:
     """Drop ``name``'s floor pointer line from MEMORY.md — ``_append_floor_pointer``'s inverse.
 
     RCH-1: when /hippo:promote lifts a user/feedback memory OUT of the project corpus, the
@@ -255,7 +255,8 @@ def _remove_floor_pointer(memory_dir: str, name: str) -> dict:
     """
     from .atomic import update_text_cas
 
-    path = os.path.join(memory_dir, "MEMORY.md")
+    # OUT-1: ``floor_dir`` is the outbox when the removal belongs in its floor copy.
+    path = os.path.join(floor_dir or memory_dir, "MEMORY.md")
     removed = {"any": False}
 
     def transform(text: str) -> Optional[str]:

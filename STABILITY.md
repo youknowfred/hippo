@@ -84,7 +84,7 @@ release). New *additions* alongside them are minor, non-breaking changes.
 
 These may change at any release without a major bump — do not build on them:
 
-- **Derived caches and their schemas** — the recall index (`schema_version`, currently 7), the link
+- **Derived caches and their schemas** — the recall index (`schema_version`, currently 8), the link
   cache (`links.json`, currently 6), the staleness cache, and the telemetry ledgers under
   `.hippo/` (`.claude/.memory-*` before v1.42.4). They are
   gitignored, rebuildable-from-source artifacts; hippo may bump their schema and rebuild them freely.
@@ -93,6 +93,7 @@ These may change at any release without a major bump — do not build on them:
 - **Internal ranking-tuning knobs** — the undocumented `HIPPO_*` variables that tune the ranker
   (e.g. `HIPPO_KNEE_RATIO`, `HIPPO_MMR_LAMBDA`, `HIPPO_BODY_RRF_WEIGHT`, `HIPPO_PIN_BOOST`,
   `HIPPO_DENSE_FLOOR_BAND` (the soft band under the dense floor; 0 turns it off),
+  `HIPPO_LANE_BEHAVIOR_SHARE` (the behavior lane's share of the prompt hook's slots),
   `HIPPO_HUB_DAMPING` (hub damping in graph expansion; 0 turns it off), the
   `HIPPO_INTENT_*` and `HIPPO_RESCUE_*` families). They exist for experimentation and move with
   retrieval work; the `HIPPO_*` prefix is reserved, but these specific knobs are not a contract.
@@ -107,6 +108,11 @@ These may change at any release without a major bump — do not build on them:
   `review` (added in v1.42.0), the internal `recall_hook`, every tool's `annotations` and
   `outputSchema`, and the order `tools/list` returns. STABILITY v2 freezes the v2 names at v2.0;
   until then they are additions, not promises.
+- **`hippo ship`** — the verb, its flags (`--yes`, `--json`, `--base`, `--branch`, `--drop`,
+  `--mine`), its output and exit codes, the `hippo/ship-<time>` branch name, the commit message,
+  the manifest's `shipped` stamp and the outbox's `.floor-base` file. A CLI-only addition (no MCP
+  tool); STABILITY v2 classifies it. That it never fetches, never pushes, never touches HEAD,
+  the index or the working tree, and never carries a deletion will not loosen.
 - **The `recall_hook` MCP tool** — internal: the opt-in warm-recall hook (`hippo setup --warm`)
   calls it, never a model or a skill. Its inputs, its reply and the handshake files it shares with
   the recall hook may change in any release; the `hippo setup` verb is unfrozen too.
@@ -160,6 +166,14 @@ it reports the missing floor instead of writing the working tree), and a torn ma
 keeps the prior manifest and the save names what did not land. Deletions never go through
 the outbox.
 
+In outbox mode the verdicts that edit an existing memory (tend's graduate, demote, keep-one,
+re-derive and baseline heal, typed edges, dream edges, the related-line fix) make no new write
+site: each site above is the same compare-and-swap, only aimed at the memory's outbox copy
+(made by the copy-up above on first edit), and a COR-16 rollback restores bytes into that
+copy. One site is new: a removal (archive, promote) drops the removed memory's outbox
+manifest row by compare-and-swap. It is **detected**: a torn drop keeps the prior manifest
+and the removal names what stayed.
+
 Two recovery stories are additionally pinned for hard kills (`kill -9` mid-verb):
 `pack_extract` re-runs refuse a partially-written dest **by name** (delete it and
 re-run clean), and `build_index` re-runs heal the index outright. A crash between a
@@ -171,6 +185,14 @@ call site by AST, fails if one is unregistered, tears each registered site once
 in-process, and runs the kill lane against the two long-running verbs. This section is
 asserted against that registration — the published classes and chain names above cannot
 drift from what the tests enforce.
+
+`hippo ship` adds two sites, both **detected**: the floor copy's recorded base text (written
+create-only, before the copy, so a torn write leaves no copy without its base) and the
+ship's one compare-and-swap on the outbox manifest (the shipped stamp, `--drop`'s row
+removal, `--mine`'s new base), which keeps the prior manifest when torn. The commit itself is
+git plumbing against a temporary index, and the branch is created create-only; a crash
+between the branch and the stamp is read on the next run from the branch itself (its tree
+holds the bytes), so the files count as in flight, not as new.
 
 ## Support policy
 

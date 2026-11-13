@@ -520,7 +520,9 @@ def restore_file_bytes(
     """
     try:
         from .atomic import write_text_atomic
+        from .outbox_edit import resolve  # OUT-1: put the bytes back where the edit landed
 
+        path = resolve(path)
         write_text_atomic(path, original)
     except Exception as exc:
         return str(exc)
@@ -624,12 +626,15 @@ def backfill_file(
     try:
         from .atomic import read_text_cas
 
+        from .outbox_edit import edit_path, resolve
+
+        rel = os.path.relpath(path, repo_root)  # the committed path: its git history is the file's
+        path = resolve(path)  # OUT-1: an outbox copy, when there is one, is what this edits
         text, _cas_token = read_text_cas(path)  # RWY-3: the CAS token of what we read
         original = text  # COR-9: `text` is re-assigned by the strip below; the guard needs this
         _, body = split_frontmatter(text)
         # DRV-1: the derivation's OTHER half — what the body offered that the oracle refused.
         result["extracted_but_unresolved"] = unresolved_citations(body, repo_files, basename_index)
-        rel = os.path.relpath(path, repo_root)
         gone: List[str] = []
         not_derived: List[str] = []
         fm = parse_frontmatter(text)
@@ -712,6 +717,10 @@ def backfill_file(
             from .atomic import write_text_cas
             from .trust import carry_consent_forward
 
+            path, why = edit_path(path, repo_root)
+            if why:
+                result["error"] = why
+                return result
             write_text_cas(path, new_text, _cas_token)  # COR-18: never a torn corpus file
             # TND-6: not a review, so no new consent — but consented bytes stay consented.
             carry_consent_forward(os.path.dirname(path), path, _cas_token, repo_root)
@@ -762,7 +771,9 @@ def heal_empty_baselines(memory_dir: str, repo_root: str) -> Tuple[List[str], Di
         head = git_head(repo_root)
         if not head or not os.path.isdir(memory_dir):
             return [], {}
-        for path in _iter_memory_files(memory_dir):
+        from .outbox_edit import iter_files  # OUT-1: heal what tend's baseline kind reads
+
+        for path in iter_files(memory_dir):
             stem = os.path.splitext(os.path.basename(path))[0]
             try:
                 from .atomic import read_text_cas
@@ -787,8 +798,12 @@ def heal_empty_baselines(memory_dir: str, repo_root: str) -> Tuple[List[str], Di
                         lines[i] = f'{m.group(1)}"{head}"'
                         try:
                             from .atomic import write_text_cas
+                            from .outbox_edit import edit_path
                             from .trust import carry_consent_forward
 
+                            path, why = edit_path(path, repo_root, memory_dir)
+                            if why:
+                                raise RuntimeError(why)
                             write_text_cas(path, "\n".join(lines), _cas_token)  # COR-18
                             carry_consent_forward(memory_dir, path, _cas_token, repo_root)  # TND-6
                         except Exception as exc:
@@ -950,7 +965,9 @@ def reverify_file(
     }
     try:
         from .atomic import read_text_cas
+        from .outbox_edit import edit_path, resolve
 
+        path = resolve(path)  # OUT-1: the outbox copy, when there is one
         text, _cas_token = read_text_cas(path)  # RWY-3: the CAS token of what we read
         fm_lines, body = split_frontmatter(text)
         if fm_lines is None:
@@ -1032,6 +1049,10 @@ def reverify_file(
         if changed and not dry_run:
             from .atomic import write_text_cas
 
+            path, why = edit_path(path, repo_root)
+            if why:
+                result["error"] = why
+                return result
             write_text_cas(path, new_text, _cas_token)  # COR-18: never a torn corpus file
         if not dry_run:
             # SEC-6: a re-verify IS a per-item human review of this exact file — fold its
@@ -1283,7 +1304,9 @@ def rederive_worklist(memory_dir: str, repo_root: str) -> List[dict]:
         return []
     repo_files, basename_index = build_repo_file_index(repo_root)
     out = []
-    for path in _iter_memory_files(memory_dir):
+    from .outbox_edit import iter_files  # OUT-1: the outbox copies the verdict edits
+
+    for path in iter_files(memory_dir):
         pv = rederive_preview(path, repo_root, repo_files, basename_index)
         if pv["changed"] or pv["error"]:
             out.append(pv)
@@ -1358,8 +1381,10 @@ def rederive_file(
             # backfill_file (whose --refresh path has no reviewer).
             # BND-3: an anomalous fold failure rides the result additively.
             try:
+                from .outbox_edit import resolve
                 from .trust import record_authored_write_disclosing
 
+                path = resolve(path)  # OUT-1: the outbox copy backfill_file wrote
                 note = record_authored_write_disclosing(os.path.dirname(path), path, repo_root)
                 if note:
                     result["consent_note"] = note
