@@ -214,6 +214,17 @@ def test_demote_removes_that_one_line_and_nothing_else(tmp_path, monkeypatch):
     assert name in [h["name"] for h in recall(desc, k=5, memory_dir=md)]  # still reachable
 
 
+def test_demote_on_a_diet_id_the_queue_no_longer_proposes_writes_nothing(tmp_path, monkeypatch):
+    """`done` re-checks a floor id that left the queue; `demote` writes, so it needs a live item."""
+    md, repo = _corpus(tmp_path, monkeypatch, budget=100_000)  # under budget: no diet items
+    assert _diet_ids(md, repo) == []
+    before = open(os.path.join(md, "MEMORY.md"), "rb").read()
+    r = TD.apply("floor:diet:vendor_api", "demote", memory_dir=md, repo_root=repo)
+    assert not r["ok"] and "not in the maintenance queue now" in r["message"]
+    assert open(os.path.join(md, "MEMORY.md"), "rb").read() == before
+    assert TD.apply("floor:diet:vendor_api", "done", memory_dir=md, repo_root=repo)["ok"]  # gone: fixed
+
+
 def test_demote_is_refused_on_a_floor_item_that_is_not_a_diet_item(tmp_path, monkeypatch):
     md, repo = _corpus(tmp_path, monkeypatch)
     with open(os.path.join(md, "MEMORY.md"), "a", encoding="utf-8") as fh:

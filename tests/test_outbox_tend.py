@@ -266,8 +266,8 @@ def test_link_source_resolves_outbox_memories_and_reads_copies(repo, memory_dir,
     r = remove_typed_relation(os.path.join(memory_dir, "pointer.md"), "refines", "nowhere_at_all")
     assert r["changed"] and not r["error"]
     _assert_landed(repo, memory_dir, "pointer", before)
-    assert TD.apply("link:pointer-refines->nowhere_at_all", "done",
-                    memory_dir=memory_dir, repo_root=repo)["ok"] is False  # already gone: not queued
+    r = TD.apply("link:pointer-refines->nowhere_at_all", "done", memory_dir=memory_dir, repo_root=repo)
+    assert r["ok"] and r["message"].endswith("fixed.")  # already gone from the queue: re-checked
     assert _ids(memory_dir, repo, "link") == []
 
 
