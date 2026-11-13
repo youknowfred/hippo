@@ -112,8 +112,11 @@ hippo_warm_route() {  # <payload json>
   dir="$CLAUDE_PLUGIN_DATA/warm"
   [ -d "$dir" ] || return 1
   # Each key exactly once, so a key-like string inside the prompt can never be read as one.
-  [ "${p//\"session_id\"/}" = "${p/\"session_id\"/}" ] || return 1
-  [ "${p//\"prompt_id\"/}" = "${p/\"prompt_id\"/}" ] || return 1
+  # A glob, not a pattern substitution: bash 3.2 substitutes in time quadratic in the
+  # payload (a 180 KB pasted prompt took about 90 s here), and matches this in linear time.
+  case "$p" in
+    *\"session_id\"*\"session_id\"*|*\"prompt_id\"*\"prompt_id\"*) return 1 ;;
+  esac
   [[ $p =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9_-]+)\" ]] || return 1
   sid="${BASH_REMATCH[1]}"
   [[ $p =~ \"prompt_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9_-]+)\" ]] || return 1
