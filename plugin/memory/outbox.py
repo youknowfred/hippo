@@ -51,6 +51,10 @@ FLOOR_NAME = "MEMORY.md"
 # replay hippo's pointer adds and removes onto the floor at the base ref. Not a memory file.
 FLOOR_BASE_NAME = ".floor-base"
 WRITE_PATH_VALUES = ("outbox", "direct")
+# GAT-4: the two conventions files. Not memories (never indexed or recalled), but hippo writes
+# them here in outbox mode and ``hippo ship`` carries them, under the same manifest row and
+# hash record a memory copy gets.
+DOC_NAMES = ("CONVENTIONS.md", "CONVENTIONS.local.md")
 # The note a recalled outbox memory carries where the renderers show one.
 RECALL_NOTE = "unshipped: in memory.outbox"
 # What a save that landed here says (CLI and MCP).
@@ -270,9 +274,11 @@ def record_write(memory_dir: str, path: str, repo_root: Optional[str] = None, ba
     problems = []
     if not _update_manifest(memory_dir, os.path.basename(path), base_sha):
         problems.append("its row in the outbox manifest")
-    if _is_memory_filename(os.path.basename(path)):
+    fname = os.path.basename(path)
+    if _is_memory_filename(fname) or fname in DOC_NAMES:
         if _record_hash(memory_dir, path, repo_root) is False:
-            problems.append("its trust record (recall will withhold it on this machine)")
+            problems.append("its hash record (`hippo ship` will hold it)" if fname in DOC_NAMES
+                            else "its trust record (recall will withhold it on this machine)")
     if not problems:
         return None
     return "the outbox copy was written but " + " and ".join(problems) + " could not be recorded"

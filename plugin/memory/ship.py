@@ -261,6 +261,18 @@ def replay_floor(target: str, adds: List[dict], removes: List[str]) -> Tuple[str
 # --------------------------------------------------------------------------- #
 # the plan
 # --------------------------------------------------------------------------- #
+def _shipped_conventions(name: str, sha: Optional[str]) -> bool:
+    """True when ``CONVENTIONS.md``'s bytes are a text the plugin shipped (now or earlier)."""
+    try:
+        from . import conventions as C
+
+        if name != C.NAME or not sha:
+            return False
+        return sha == _sha256(C.asset_bytes()) or sha in set(C.history()["versions"].values())
+    except Exception:
+        return False
+
+
 def _hippo_own(name: str) -> bool:
     return name in (OB.MANIFEST_NAME, ".gitignore", OB.FLOOR_BASE_NAME, ".memory-index")
 
@@ -309,7 +321,8 @@ def build_plan(memory_dir: str, repo_root: Optional[str] = None, base: Optional[
                 continue
             if name == OB.FLOOR_NAME:
                 continue  # the floor is a replay, below
-            if not OB._is_memory_filename(name):
+            doc = name in OB.DOC_NAMES  # GAT-4: the conventions files ship like a memory does
+            if not doc and not OB._is_memory_filename(name):
                 plan["ignored"].append({"name": name, "why": "not a memory file"})
                 continue
             with open(path, "rb") as fh:
@@ -318,12 +331,13 @@ def build_plan(memory_dir: str, repo_root: Optional[str] = None, base: Optional[
             stem = name[:-3]
             committed = _blob_bytes(top, at_base.get(name))
             item = {"name": name, "stem": stem, "path": path, "sha256": sha,
-                    "committed_sha256": _sha256(committed), "edit": committed is not None}
+                    "committed_sha256": _sha256(committed), "edit": committed is not None, "doc": doc}
             row = manifest.get(name) or {}
             if committed is not None and committed == data:
                 live = os.path.join(memory_dir, name)
                 pulled = os.path.isfile(live) and open(live, "rb").read() == data
-                item["recorded"] = allowed is None or allowed.get(stem) == sha
+                # a conventions file is not a memory: it never joins the consent baseline
+                item["recorded"] = not doc and (allowed is None or allowed.get(stem) == sha)
                 plan["landed" if pulled else "landed_unpulled"].append(item)
                 continue
             shipped = row.get("shipped") if isinstance(row.get("shipped"), dict) else None
@@ -349,7 +363,13 @@ def build_plan(memory_dir: str, repo_root: Optional[str] = None, base: Optional[
             classes = []
             if allowed is not None and allowed.get(stem) != sha:
                 classes.append("bytes hippo did not write on this machine")
-            classes += scan_classes(data.decode("utf-8", "replace"))
+            if not (doc and _shipped_conventions(name, sha)):  # hippo's own text needs no lint
+                text = data.decode("utf-8", "replace")
+                if doc:  # the local file: hippo's own "moved from" header is not the corpus's line
+                    from .conventions import without_own_markers
+
+                    text = without_own_markers(text)
+                classes += scan_classes(text)
             if classes:
                 plan["held"].append(dict(item, classes=classes))
                 continue
@@ -532,8 +552,13 @@ def message(plan: dict) -> str:
     fl = plan.get("floor")
     if fl and fl["state"] == "new":
         files.append(f"- {rel}/MEMORY.md (floor: {fl['adds']} pointer(s) added, {fl['removes']} removed)")
-    n = len(plan["new"])
-    subject = f"Land {n} memor{'y' if n == 1 else 'ies'} from the outbox"
+    n = sum(1 for i in plan["new"] if not i.get("doc"))
+    docs = any(i.get("doc") for i in plan["new"])
+    if n or not docs:
+        subject = (f"Land {n} memor{'y' if n == 1 else 'ies'}"
+                   + (" and the CONVENTIONS.md refresh" if docs else "") + " from the outbox")
+    else:
+        subject = "Land the CONVENTIONS.md refresh from the outbox"
     return subject + "\n\n" + "\n".join(files) + "\n"
 
 
