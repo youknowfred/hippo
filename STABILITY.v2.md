@@ -106,7 +106,7 @@ Any other key in `.format` is a legacy policy key (see the legacy table).
 ### The `hippo.json` schema
 
 The committed corpus policy file, `.claude/memory/hippo.json` (path from `policy_file_path` in
-`plugin/memory/provenance_format.py`). These twelve keys are every key the tree reads. A key
+`plugin/memory/provenance_format.py`). These thirteen keys are every key the tree reads. A key
 name and the value shapes listed here are frozen. An unknown key is ignored, and a value of
 the wrong shape reads as if the key were absent. A new key, or a new accepted value, is an
 addition. What hippo does with a key's value (ranking effects, output text, doctor lines) is
@@ -126,6 +126,7 @@ not frozen.
 | `ledgers` | list of at most four `{name, path, id_re, entry_key, status_key}` | `ledger.py` | declares data |
 | `write_path` | `"direct"` or `"outbox"` | `outbox.py` | `hippo trust policy --accept` on each machine |
 | `gate` | `{"write": "warn" \| "deny" \| "off"}` | `gate_hook.py`, `doctor_checks_gate.py` | `deny` needs `hippo trust policy --accept`, and the committed file at HEAD must say `deny` too |
+| `consent` | `{"session_writes": true \| false}` | `session_consent.py` | `hippo trust policy --accept` on each machine |
 
 All paths in the table are under `plugin/memory/`. The consent rule is part of the trust
 contract and will not loosen: a key that changes what hippo does on a machine

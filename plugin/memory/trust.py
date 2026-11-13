@@ -291,8 +291,6 @@ def corpus_fingerprint(memory_dir: str) -> dict:
     input). ``digest`` is a single roll-up over the sorted (stem, sha) pairs for cheap
     equality. Deterministic; never raises; empty maps on any problem.
     """
-    import hashlib
-
     files: dict = {}
     try:
         from .provenance import _iter_memory_files
@@ -304,10 +302,17 @@ def corpus_fingerprint(memory_dir: str) -> dict:
                 files[stem] = h
     except Exception:
         files = {}
-    digest = hashlib.sha256(
+    return {"files": files, "digest": files_digest(files)}
+
+
+def files_digest(files: dict) -> str:
+    """The record's roll-up over its ``{stem: sha256}`` map: the one formula every
+    writer of a consent record uses (``corpus_fingerprint``, a fold, a grant)."""
+    import hashlib
+
+    return hashlib.sha256(
         "\n".join(f"{k}:{v}" for k, v in sorted(files.items())).encode("utf-8")
     ).hexdigest()
-    return {"files": files, "digest": digest}
 
 
 def _trusted_entry(repo_root: Optional[str]) -> Optional[dict]:
@@ -388,15 +393,48 @@ def carry_consent_forward(
     return _fold_file(memory_dir, path, repo_root, before_sha=before_sha)
 
 
+def record_session_write(
+    memory_dir: str, path: str, repo_root: Optional[str], *,
+    expect_sha: str, before_sha: Optional[str],
+) -> bool:
+    """OUT-5: fold the bytes a session's OWN file tool just wrote, opt-in, from a hook.
+
+    The one hook-callable fold, and only ``session_consent.grant_after_write`` calls it,
+    after it has checked every condition: the corpus's ``hippo.json`` sets
+    ``"consent": {"session_writes": true}`` and this machine accepted it (``hippo trust
+    policy --accept``); ``path`` is a top-level memory file of a corpus this session works
+    in, symlinks resolved; the PreToolUse note for this session and path says the bytes
+    before the write were ABSENT or CONSENTED (``before_sha``, the consented hash) and
+    predicted the bytes the tool would leave (``expect_sha``); the note and the payload
+    carry the same ``tool_use_id``; the call was not a subagent's (no ``agent_id``); the
+    bytes pass the review gate's lints (secrets, tier-A threats). Here, as everywhere: the
+    record must already exist with a fingerprint baseline (this extends a consent, never
+    creates one); the bytes on disk must hash to ``expect_sha`` (anything that wrote in
+    between voids the grant); a CONSENTED prior must still be the recorded hash. Only the
+    record of the corpus the real path is in is extended (no OBS-6 fan-out to a main
+    tree: bytes that reach it by merge stay withheld there). The grant is marked
+    (``session_granted``, ``last_session_grant_at``) so ``hippo trust status`` can count
+    it apart from a human grant. Never raises; False when nothing was folded.
+    """
+    from .outbox_edit import owner_of
+
+    if not expect_sha or owner_of(path):
+        return False
+    return _fold_file(memory_dir, path, repo_root, before_sha, expect_sha=expect_sha)
+
+
 def _fold_file(
-    memory_dir: str, path: str, repo_root: Optional[str], before_sha: Optional[str]
+    memory_dir: str, path: str, repo_root: Optional[str], before_sha: Optional[str],
+    expect_sha: Optional[str] = None,
 ) -> bool:
     """The one baseline fold. ``before_sha`` None: fold unconditionally (authorship);
-    set: fold only into a record whose consented hash for this file equals it."""
+    set: fold only into a record whose consented hash for this file equals it.
+    ``expect_sha`` set (OUT-5's session fold): the bytes must hash to it, only the real
+    path's own record is extended, and the grant is marked as a session's."""
     try:
         from .outbox_edit import owner_of, record_edit  # OUT-1: an outbox copy keeps its own record
 
-        if owner_of(path):
+        if owner_of(path) and expect_sha is None:
             return record_edit(path, repo_root, before_sha)
         gate_root = gate_repo_root(memory_dir, repo_root)
         if gate_root is None:
@@ -410,7 +448,7 @@ def _fold_file(
         try:
             from .provenance_env import main_worktree_root
 
-            main = main_worktree_root(gate_root)
+            main = main_worktree_root(gate_root) if expect_sha is None else None  # OUT-5: own record only
             if main and _corpus_key(main) not in keys:
                 keys.append(_corpus_key(main))
         except Exception:
@@ -420,10 +458,8 @@ def _fold_file(
         if not isinstance(trusted, dict):
             return False
         h = file_sha256(path)
-        if h is None:
+        if h is None or (expect_sha is not None and h != expect_sha):
             return False
-        import hashlib
-
         stem = os.path.splitext(os.path.basename(path))[0]
         folded = False
         for key in keys:
@@ -434,9 +470,9 @@ def _fold_file(
             if before_sha is not None and fp["files"].get(stem) != before_sha:
                 continue  # the bytes hippo rewrote were not the consented ones — stays drift
             fp["files"][stem] = h
-            fp["digest"] = hashlib.sha256(
-                "\n".join(f"{k}:{v}" for k, v in sorted(fp["files"].items())).encode("utf-8")
-            ).hexdigest()
+            fp["digest"] = files_digest(fp["files"])
+            if expect_sha is not None:
+                _mark_session_grant(entry, fp["files"], stem, h)
             folded = True
         ok = _write_registry_doc(doc) if folded else False
         if ok:
@@ -444,6 +480,30 @@ def _fold_file(
         return ok
     except Exception:
         return False
+
+
+def _mark_session_grant(entry: dict, files: dict, stem: str, sha: str) -> None:
+    """OUT-5's origin mark: ``session_granted`` maps a stem to the hash a session's own
+    write was consented at. A mark whose hash is no longer the consented one (a human
+    grant, a removal) is dropped here, so the map stays as small as what it describes."""
+    from datetime import datetime, timezone
+
+    marks = entry.get("session_granted")
+    marks = {k: v for k, v in marks.items() if files.get(k) == v} if isinstance(marks, dict) else {}
+    marks[stem] = sha
+    entry["session_granted"] = marks
+    entry["last_session_grant_at"] = datetime.now(timezone.utc).isoformat()
+
+
+def session_granted_stems(entry: Optional[dict]) -> List[str]:
+    """The files of a consent record consented at the bytes a session's own write left
+    (OUT-5), sorted, for ``hippo trust status`` and doctor. Never raises."""
+    try:
+        files = entry["fingerprint"]["files"]
+        marks = entry.get("session_granted") or {}
+        return sorted(k for k, v in marks.items() if files.get(k) == v)
+    except Exception:
+        return []
 
 
 _CONSENT_FOLD_FAILURE_LINE = (

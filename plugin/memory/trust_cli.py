@@ -54,6 +54,15 @@ def render_status(s: dict) -> str:
         f"since consent: {s['changed']} changed, {s['added']} new, {s['removed']} removed — "
         f"{s['withheld']} of {s['total']} memories withheld from recall right now."
     )
+    if s.get("session_granted"):  # OUT-5: named, so a person can read what got in unreviewed
+        names = list(s["session_granted"])
+        n = len(names)
+        shown = ", ".join(names[:10]) + (f" (+{n - 10} more)" if n > 10 else "")
+        lines.append(
+            f"{n} memor{'y' if n == 1 else 'ies'} consented at bytes this machine's own session "
+            f"wrote, without a review (hippo.json's consent.session_writes), last "
+            f"{_date(s.get('last_session_grant_at'))}: {shown}."
+        )
     if s["changed"] or s["added"] or s["removed"]:
         lines.append("next: hippo trust review")
     return "\n".join(lines)

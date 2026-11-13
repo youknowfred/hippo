@@ -203,6 +203,9 @@ def main(argv: Optional[list] = None) -> int:
             payload = json.load(sys.stdin)
         except Exception:
             payload = None
+        from .session_consent import note_before_write  # OUT-5: opt-in; writes nothing otherwise
+
+        note_before_write(payload)
         out = evaluate(payload)
         if out:
             print(json.dumps(out, ensure_ascii=False))

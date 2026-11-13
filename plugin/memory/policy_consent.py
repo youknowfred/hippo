@@ -5,9 +5,11 @@ fingerprint, which covers memory files only. Most of its keys tune a warning, so
 edit can at worst make hippo noisier. A few do more than that:
 
 - ``write_path`` moves where a save lands (out of the working tree, into an outbox);
-- ``gate`` lets a hook refuse a write.
+- ``gate`` lets a hook refuse a write;
+- ``consent`` (``{"session_writes": true}``) lets a hook record consent for the bytes a
+  session's own file tool wrote into an already-trusted corpus.
 
-A pulled edit must not switch either on by itself. So a consent-sensitive key is HONOURED
+A pulled edit must not switch any of them on by itself. So a consent-sensitive key is HONOURED
 on a machine only while its declared value equals the value the user acknowledged there
 (``hippo trust policy --accept``). Anything else reads as "not declared", which is the
 safe behaviour for every key listed here: a direct write, and a gate that only warns.
@@ -30,6 +32,10 @@ from typing import List, Optional
 SENSITIVE_KEYS = {
     "write_path": "where a saved memory lands (the working tree, or an outbox beside the corpus)",
     "gate": "whether a hook may refuse a write into the corpus (it only warns otherwise)",
+    "consent": (  # OUT-5
+        "whether a memory this machine's own Claude Code session writes with a file tool "
+        "joins recall without a review (it waits for `hippo trust review` otherwise)"
+    ),
 }
 
 _ENTRY_KEY = "policy"  # trusted[<corpus>]["policy"] = {key: acknowledged value}
@@ -135,7 +141,7 @@ def pending_line(memory_dir: str, repo_root: Optional[str] = None) -> Optional[s
     return (
         f"this corpus's hippo.json sets {names}, which this machine has not accepted yet, "
         "so hippo is ignoring it here (saves land in the working tree; the write gate only "
-        "warns). Next step: `hippo trust policy` shows each setting; `hippo trust policy "
+        "warns; a session's own memory writes wait for review). Next step: `hippo trust policy` shows each setting; `hippo trust policy "
         "--accept` turns them on for this machine."
     )
 

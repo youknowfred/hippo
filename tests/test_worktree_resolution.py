@@ -391,9 +391,9 @@ def test_doctor_render_from_a_worktree_is_deterministic_and_complete(linked, mon
     first, second = D.render(ctx), D.render(ctx)
     assert first == second
     # every check but OWN-1's user-tier line, LDG-1's ledger line, NAT-3's floor-budget
-    # line and OBS-5's hard-set pins line: no user tier, no `ledgers`, a lean floor with no
-    # declared budget, and no hard set here
-    assert first.count("\n") + 1 == len(D.CHECKS) - 4
+    # line, OBS-5's hard-set pins line and OUT-5's withheld line: no user tier, no `ledgers`,
+    # a lean floor with no declared budget, no hard set, and nothing withheld here
+    assert first.count("\n") + 1 == len(D.CHECKS) - 5
     assert "tree: MAIN working tree" in first
 
 

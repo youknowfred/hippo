@@ -47,6 +47,22 @@ narrower than a networked service, and centers on **untrusted memory content**:
   text from an unconsented or changed corpus without the banner/quarantine — that
   is a vulnerability. See `plugin/memory/README.md` (the trust model) for the
   design.
+- **Consent for a session's own writes (opt-in).** A corpus whose `hippo.json` sets
+  `"consent": {"session_writes": true}`, accepted on a machine with `hippo trust
+  policy --accept`, lets hippo's file-tool hooks consent to the exact bytes a session's
+  own Write/Edit/MultiEdit left in an already-trusted corpus, when the file was absent
+  or consented before, the grant is bound to the same tool call, the call was not made
+  in a subagent (a harness that sends no `agent_id` cannot be told apart), and the bytes
+  pass the secret and tier-A threat lints. Claude Code's native loader already reads
+  those files with no gate; hippo's gate governs only what hippo's recall injects. The
+  gate never defended against this machine's own session with a shell (it can run
+  `hippo trust grant` itself) or with file-tool access to the trust registry in the home
+  directory; this setting changes what a session limited to file tools inside the
+  project can get into recall without a person. Pulled, merged or checked-out bytes, a
+  shell redirect, an edit over unconsented bytes, subagent writes and lint-flagged
+  writes are still withheld, and an untrusted corpus stays untrusted. Getting a grant
+  for bytes the session's file tool did not write, or for a file outside the session's
+  own corpus, is a vulnerability.
 - **Credentials committed into memory.** Memories are committed to git and recalled
   forever, so a secret pasted into a memory body is a real exposure. hippo lints for
   known credential shapes at write time and in `/hippo:doctor`, and a CI gate scans

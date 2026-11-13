@@ -53,6 +53,7 @@ from .crash_scenarios_ledger import scenarios as _ledger_scenarios
 from .crash_scenarios_user_tier import scenarios as _user_tier_scenarios
 from .crash_scenarios_warm import scenarios as _warm_scenarios
 from .crash_scenarios_promote import scenarios as _promote_scenarios  # OWN-2
+from .crash_scenarios_session_consent import scenarios as _session_consent_scenarios  # OUT-5
 
 _MEMORY_PKG = os.path.dirname(os.path.abspath(A.__file__))
 _PLUGIN_ROOT = os.path.dirname(_MEMORY_PKG)
@@ -141,6 +142,7 @@ CRASH_CONTRACT = {
     ("index_sections", "_write_matrix"): ("intact",),  # HOT-11: derived sub-index; prior kept, the build returns
     ("index_sections", "_write_manifest"): ("intact",),  # HOT-11: same; the prior manifest names its own matrix
     ("citation_binding", "_write_doc"): ("intact",),  # FMT-2: derived sidecar; the build returns, the prior sidecar stays
+    ("session_consent", "_write_note"): ("intact",),  # OUT-5: a lost pre-note costs one grant; the file waits for review
 }
 
 
@@ -1118,6 +1120,7 @@ _SCENARIOS = [
     (("tend_queue", "_write_cache"), "intact", scn_tend_cache_intact),
     (("derived_dirs", "_write_stub"), "intact", scn_derived_stub_intact),
     *_promote_scenarios(_arm, _snap, _assert_unchanged, _git_repo, _mem),  # OWN-2 (tests/crash_scenarios_promote.py)
+    *_session_consent_scenarios(_arm, _snap, _assert_unchanged),  # OUT-5 (tests/crash_scenarios_session_consent.py)
 ]
 
 

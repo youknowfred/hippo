@@ -509,12 +509,7 @@ def grant(
             entry = {"trusted_at": now, "origin": "review"}
         entry = dict(entry)
         entry["last_grant_at"] = now
-        entry["fingerprint"] = {
-            "files": base,
-            "digest": hashlib.sha256(
-                "\n".join(f"{k}:{v}" for k, v in sorted(base.items())).encode("utf-8")
-            ).hexdigest(),
-        }
+        entry["fingerprint"] = {"files": base, "digest": trust.files_digest(base)}
         if outbox:
             entry["outbox"] = outbox
         trusted[key] = entry
@@ -554,6 +549,8 @@ def status(memory_dir: str, repo_root: Optional[str]) -> dict:
         "trusted_at": entry.get("trusted_at"),
         "age_days": _age_days(entry.get("trusted_at")),
         "last_grant_at": entry.get("last_grant_at"),
+        "session_granted": trust.session_granted_stems(entry),  # OUT-5: names, for audit
+        "last_session_grant_at": entry.get("last_session_grant_at"),
         "changed": kinds.count("changed") if st["state"] == "trusted" else 0,
         "added": kinds.count("added") if st["state"] == "trusted" else 0,
         "removed": kinds.count("removed"),
