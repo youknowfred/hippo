@@ -152,6 +152,18 @@ These may change at any release without a major bump — do not build on them:
   save's result, and the doctor line. An opt-in addition; STABILITY v2 classifies it. The
   rule that a setting moving where writes land needs one acceptance per machine
   (`hippo trust policy --accept`) is part of the trust contract and will not loosen.
+- **Consent for a session's own writes** — the `consent` key in `hippo.json`
+  (`{"session_writes": true}`), the PreToolUse note store (`.hippo/telemetry/session-writes/`,
+  one small JSON per session and real path, consumed by the PostToolUse hook), the
+  `session_granted` and `last_session_grant_at` fields on a consent record, the
+  `consent.session_grants` and `consent.session_held` daily-rollup counters, the `hippo trust
+  status` line (it names the memories consented this way) and the doctor line
+  (`withheld_origin`). An opt-in addition; STABILITY v2 classifies it. That the key needs one
+  acceptance per machine, that it can only extend an existing consent record with a per-file
+  baseline, never create one, that a grant is bound to the tool call's `tool_use_id`, and that
+  bytes the hooks did not see written (a pull, a merge, a checkout, a shell redirect), edits
+  over unconsented bytes, subagent writes (`agent_id`) and writes a review lint flags stay
+  withheld, will not loosen.
 - **Exact recall output text and ordering** — recall is a ranker; its wording, formatting, and the
   precise order of results are tuned continuously.
 - **dream's deprecated tiers (from v1.45)** — reverse replay, the generative tier (`--generate`,
@@ -218,6 +230,12 @@ Two recovery stories are additionally pinned for hard kills (`kill -9` mid-verb)
 re-run clean), and `build_index` re-runs heal the index outright. A crash between a
 pack install's file write and its lockfile record heals on re-run via the
 byte-identical adopt path.
+
+The opt-in consent for a session's own writes (`"consent": {"session_writes": true}`) adds
+one site, **intact**: the PreToolUse note in the gitignored telemetry dir. A torn note leaves
+no partial note, the hook says nothing either way, and the PostToolUse hook then grants
+nothing, so the file waits for review exactly as it would without the opt-in. The grant
+itself is a fold through the trust registry's existing atomic writer (**detected**, above).
 
 The folded-sections sub-index adds two sites, both **intact**: its matrix is written under a
 fresh name before the manifest that names it, so a torn matrix or manifest write keeps the

@@ -389,7 +389,8 @@ hippo's settings now live in three places, and the first one that answers wins:
 3. **`.claude/memory/hippo.json`** — the corpus's committed policy, shared with your team:
    `volatile_paths`, `floor_lint`, `floor_sections`, `fold_digests`, `attention` (`"calm"` or
    `"full"`), `mute` (SessionStart signals to hide), `acknowledged_findings` (see below),
-   `write_path` (`"outbox"` or `"direct"`, below), `gate` (the write gate, below), `budgets`
+   `write_path` (`"outbox"` or `"direct"`, below), `gate` (the write gate, below), `consent`
+   (`{"session_writes": true}`: consent for a session's own memory writes, below), `budgets`
    (the commit gate's budgets, below), `journals` (journal filename globs: the commit
    gate's journal budget counts them, and the prompt hook's recall lanes, below, act once it
    is declared) and `ledgers` (committed tracker mirrors whose statuses recall renders,
@@ -564,6 +565,57 @@ budget, its before and after numbers, and the way out. A corpus can ask for more
 silences the check for the corpus; any other value only warns. `/hippo:doctor` states which of
 these applies. The hook always exits 0, and a write outside a corpus is rejected in bash
 before any Python starts.
+
+### Consent for a session's own memory writes (opt-in)
+
+Once setup links Claude Code's native memory dir to `.claude/memory/`, a memory that a session
+writes with its own file tool lands in the corpus with no consent recorded, so hippo's recall
+withholds it until `hippo trust review` and a grant. A corpus can skip that review for exactly
+those bytes:
+
+```json
+{"consent": {"session_writes": true}}
+```
+
+This setting needs `hippo trust policy --accept` on each machine before it does anything. Once
+accepted, the `PreToolUse` hook notes the file's state before a Write, Edit or MultiEdit
+(absent, consented, or not) and the bytes the tool will leave, in a small note in the
+gitignored telemetry dir. The `PostToolUse` hook then consents to the bytes on disk only when
+the corpus is already trusted with a per-file record, the file sat directly in a corpus this
+session works in (symlinks resolved; the main checkout's when the session runs in a linked
+worktree), it was absent or consented before, the bytes on disk are exactly the ones
+predicted, the note belongs to this same tool call (its `tool_use_id`), the call was not made
+inside a subagent (the payload names no `agent_id`; a harness that does not send `agent_id`
+cannot be told apart from the main session), and the bytes pass the lints a review gates on
+(secrets; hidden characters, homographs, HTML comments, exfiltration shapes, tool mimicry).
+A write that fails a lint is held for review and counted. Anything else grants nothing and
+says nothing.
+
+The prediction is exact for a Write (it leaves exactly `content`) and for an Edit or
+`replace_all` Edit of an LF file or a file with a UTF-8 BOM. An Edit of a CRLF file with a
+multi-line `new_string` is not predicted (the tool writes the inserted newline as CRLF), so
+such an edit grants nothing: it waits for review.
+
+What this does and does not change:
+
+- Claude Code's native loader already reads these files (`MEMORY.md` and whatever the model
+  opens through it) with no gate at all. hippo's gate only governs what hippo's own recall
+  injects.
+- The gate never defended against this machine's own session when it has a shell (it can run
+  `hippo trust grant` or `hippo trust policy --accept` itself) or file-tool access to the trust
+  registry under your home directory. This setting changes what a session limited to file tools
+  inside the project can get into hippo's recall without you: its own new, or
+  already-consented-then-edited, memory files that pass the lints above.
+- With the setting on, those bytes join hippo's recall without a human review. With it off (or
+  not accepted), nothing changes.
+- Bytes that arrive by pull, merge, checkout or a shell redirect are still withheld, and so are
+  an edit to a file whose bytes were not consented, a subagent's write and a write a lint
+  flags. An untrusted corpus stays untrusted, and the recall block still labels memory text as
+  quoted data.
+
+`hippo trust status` counts and names the memories consented this way, the daily rollup counts
+the grants and the held writes, and `/hippo:doctor` sorts withheld memories by how they arrived (the native path,
+written by hippo elsewhere, other), naming this setting when the native-path count is not zero.
 
 ### At commit time: `hippo gate` and declared budgets
 

@@ -639,6 +639,9 @@ def main(argv: Optional[list] = None) -> int:
             except Exception:
                 payload = None
             if isinstance(payload, dict):
+                from .session_consent import grant_after_write  # OUT-5: opt-in; one stat otherwise
+
+                grant_after_write(payload, memory_dir=args.memory_dir, repo_root=args.repo_root)
                 context: list = []
                 record_from_payload(
                     payload,

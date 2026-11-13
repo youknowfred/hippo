@@ -18,7 +18,10 @@ A day row holds:
     ``hippo <verb>``, every skill preflight, every hook spawn (and a failed one) — plus
     tallies of the client and the plugin version that served them. The bash-only surfaces
     append a line to ``usage_spool.jsonl`` (``hippo_note_usage`` in ``_resolve_py.sh``,
-    no Python spawn) and the next fold drains it into the open day.
+    no Python spawn) and the next fold drains it into the open day;
+  - consent (OUT-5, absent until the first one): ``session_grants``, how many consents the
+    PostToolUse hook recorded for bytes a session's own file tool wrote (opt-in), and
+    ``session_held``, how many such writes it held for review because a gate lint fired.
 
 Latency and char values are kept as fixed-bucket histograms so 30-day percentiles merge
 across days; a percentile reads as the bucket's upper bound ("≤ X"). Per-corpus (it lives in
@@ -332,6 +335,20 @@ def record_open(telemetry_dir: str, *, after_recall: bool, now: Optional[float] 
     return _update(telemetry_dir, now, fold)
 
 
+def record_session_grant(telemetry_dir: str, *, held: bool = False, now: Optional[float] = None) -> bool:
+    """OUT-5: count one consent recorded for the bytes a session's own file tool wrote
+    (``consent.session_grants``), or, with ``held``, one such write held for review because
+    it failed a gate lint (``consent.session_held``). The section is absent until the first
+    one, so older rows and every corpus that has not opted in read unchanged. Never raises."""
+    if not telemetry_dir:
+        return False
+
+    def fold(acc: dict) -> None:
+        _bump(acc.setdefault("consent", {}), "session_held" if held else "session_grants")
+
+    return _update(telemetry_dir, now, fold)
+
+
 def dropped_producers(producer_chars: Dict[str, int], ctx: str) -> Dict[str, List[str]]:
     """Which SessionStart producers the char budget dropped whole (``dropped``) or cut
     mid-block (``cut``). Producers merge in order, joined by a blank line; the bounded
@@ -558,6 +575,8 @@ def summarize(rows: List[dict]) -> dict:
         "ss_cut": _merge(rows, "session_start", "cut"),
         "surface": _merge_top(rows, "surface"),
         "queue": _merge_top(rows, "queue"),
+        "session_grants": sum(int((r.get("consent") or {}).get("session_grants") or 0) for r in rows),  # OUT-5
+        "session_held": sum(int((r.get("consent") or {}).get("session_held") or 0) for r in rows),
         "client": _merge_top(rows, "client"),
         "version": _merge_top(rows, "version"),
     }

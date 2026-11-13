@@ -161,6 +161,7 @@ NON_CORPUS_SITES = {
     ("index_sections", "_write_matrix"): "gitignored derived index matrix under a fresh name no other build uses (IDX-1)",
     ("index_sections", "_write_manifest"): "gitignored derived sub-index manifest, rebuilt whole by every index build",
     ("citation_binding", "_write_doc"): "gitignored derived citation-binding sidecar, rebuilt by every index build",
+    ("session_consent", "_write_note"): "per-session PreToolUse note in the gitignored telemetry dir (OUT-5)",
 }
 
 
