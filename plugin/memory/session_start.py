@@ -280,6 +280,16 @@ def _build_run_context(memory_dir: str, repo_root: str) -> RunContext:
                 refresh_touch_cache(memory_dir, default_index_dir(memory_dir))
     except Exception:
         pass
+    # LDG-1: the ledger join's cache (ledger.json) at the same offline, trust-gated moment;
+    # nothing happens unless hippo.json declares `ledgers`.
+    try:
+        if os.path.isdir(memory_dir):
+            from .build_index import default_index_dir
+            from .ledger import refresh_ledger_cache
+
+            refresh_ledger_cache(memory_dir, default_index_dir(memory_dir), repo_root)
+    except Exception:
+        pass
     # RET-14: same offline moment — refresh recall's outcome-prior cache from the KPI-2
     # join (SIG-4's episode x outcome ledger reconciliation), so the hot path (gated by its
     # OWN HIPPO_OUTCOME_PRIOR flag, independent of HIPPO_SALIENCE) only ever reads a small

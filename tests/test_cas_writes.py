@@ -133,6 +133,7 @@ NON_CORPUS_SITES = {
     ("init_project", "init_project"): "fresh .format stamp at init",
     ("interview", "_write_state"): "telemetry bookkeeping",
     ("jit", "write_touch_cache"): "derived cache",
+    ("ledger", "write_cache"): "derived cache",  # LDG-1: ledger.json
     ("jit", "_write_state"): "telemetry bookkeeping",
     ("lint_floor", "observe_floor_edit"): "session sentinel",
     ("packs", "_write_lockfile"): "pack lockfile, rebuilt whole by the pack verbs",

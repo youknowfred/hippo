@@ -382,9 +382,10 @@ hippo's settings now live in three places, and the first one that answers wins:
    `volatile_paths`, `floor_lint`, `floor_sections`, `fold_digests`, `attention` (`"calm"` or
    `"full"`), `mute` (SessionStart signals to hide), `acknowledged_findings` (see below),
    `write_path` (`"outbox"` or `"direct"`, below), `gate` (the write gate, below), `budgets`
-   (the commit gate's budgets, below) and `journals` (journal filename globs: the commit
+   (the commit gate's budgets, below), `journals` (journal filename globs: the commit
    gate's journal budget counts them, and the prompt hook's recall lanes, below, act once it
-   is declared).
+   is declared) and `ledgers` (committed tracker mirrors whose statuses recall renders,
+   below).
 
 **Recall lanes.** Each memory sits in one lane: **behavior** (`type: user` or `feedback`),
 **fact** (`project`, `reference`, anything else) or **journal** (a file matching
@@ -397,6 +398,28 @@ budget, then facts, with any lane's unused room going to the others. `hippo reca
 declares no `journals`. Doctor's recall-lanes line reports each lane's share of what the hook
 injected beside its share of the corpus. `journals` only names files; like `mute`, it needs no
 `hippo trust policy --accept`.
+
+**Tracker statuses at read time.** A memory should cite a tracker issue by its id and leave
+the status to the tracker. If the repo commits a mirror of its tracker, declare it and recall
+shows each cited id's status beside the row, dated, so nobody has to type it into a memory:
+
+```json
+{"ledgers": [{"name": "linear", "path": "LINEAR-SNAPSHOT.yaml", "id_re": "\\bGRO-\\d+\\b",
+              "entry_key": "id", "status_key": "state"}]}
+```
+
+A row whose name or description cites `GRO-901` then ends `· GRO-901 In Progress (snapshot
+2026-08-26)`, at most two ids per row, in the prompt hook's rows, `hippo recall` and
+`hippo inspect`. The date is the mirror's last commit. hippo reads the file line by line: an
+entry starts at an `id: <an id_re match>` line (`- id:` in a list too) and its status is the
+first `state:` line at that key's indent before the next entry; nothing else in the file is
+read. The `path` must stay inside the repo, `id_re` must be a plain pattern (no nested
+repeats, alternation under a repeat, backreferences or lookarounds; 120 characters at most),
+and a status is cut to 40 characters on one line. The join is a derived cache,
+`.hippo/index/ledger.json`, built at SessionStart and by `hippo build-index` for a trusted
+corpus only, and never a network call or a write to the tracker or the corpus. A ledger that
+cannot be used is dropped and `/hippo:doctor` says why. `ledgers` only declares data, so it
+needs no `hippo trust policy --accept`; a corpus without it is unchanged.
 
 **Acknowledging a cleared lint finding.** When a memory file carries a secret or threat finding
 you have reviewed and cleared, add an entry to `acknowledged_findings` in `hippo.json` —

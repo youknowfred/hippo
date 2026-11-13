@@ -82,6 +82,13 @@ rule, not just the rule — that's what makes it worth always-loading. (The full
 reference lives in [CONVENTIONS.md](plugin/assets/CONVENTIONS.md), which hippo also seeds into
 every corpus so the rules travel with the memories.)
 
+A memory about tracked work cites the issue by its id (`GRO-901`) and leaves the status to the
+tracker: a status word typed into a memory is out of date the day the issue moves. When the
+repo commits a mirror of its tracker, the corpus can declare it under `ledgers` in
+`hippo.json`, and recall renders each cited id's status beside the row at read time, dated by
+the mirror's last commit (`· GRO-901 In Progress (snapshot 2026-08-26)`). The status lives in
+the mirror, never in the memory.
+
 ## Why markdown, in git
 
 Storing memory as reviewable files in git — instead of an opaque per-machine blob — is what
