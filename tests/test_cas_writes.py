@@ -115,6 +115,7 @@ CORPUS_RMW_SITES = {
     ("outbox", "copy_up"),  # create-only-while-absent (expected=None)
     ("outbox", "_record_floor_base"),  # OUT-2: the floor copy's base text, create-only
     ("ship", "_edit_manifest"),  # OUT-2: the shipped stamp, --drop, --mine
+    ("promote_tend", "_adopt"),  # OWN-2: a drifted rule takes the other corpus's text
 }
 
 # Plain atomic writers that are NOT corpus read-modify-writes, each with why.
@@ -152,6 +153,7 @@ NON_CORPUS_SITES = {
     ("recall_warm", "_publish"): "warm-recall heartbeat in the plugin data dir; one writer (the session's server)",
     ("gate_cli", "install"): "the git pre-commit hook, a whole document hippo owns (marker line), written only on --yes",
     ("setup_cli", "_backup"): "a fresh timestamped backup copy (the settings write itself is CAS)",
+    ("promote_tend", "_write_cache"): "gitignored derived cross-corpus scan, keyed by a stat fingerprint (OWN-2)",
 }
 
 

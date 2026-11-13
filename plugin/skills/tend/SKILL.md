@@ -61,6 +61,13 @@ What each kind needs before its verdict:
 - **reverify** — re-read the memory against the code that moved. `graduate` if it still
   holds; edit the body and `fix` if it was wrong; `demote` (optionally
   `--superseded-by <name>`) if it is wrong and not worth fixing; `archive` to retire it.
+- **promote** — a lesson another registered, trusted project on this machine also keeps.
+  `promote:<name>` has the same text there: `promote` moves it to the user tier, where every
+  project recalls it, the way the Promote flow of `/hippo:share` does (the project copy
+  leaves this corpus; commit that). `promote:drift:<name>|<project>/<other>` is the same
+  rule written differently there; read the diff, then `adopt` (this memory takes the other
+  text; the other project is never written, tend it there), `distinct`, or `promote`. A
+  refusal that needs a per-finding yes or a new name goes through `/hippo:share`.
 - **contradiction** — read both. `keep_one` or `merge` take `--winner` and `--loser` (merge
   after you folded the loser's unique content into the winner); `scope_both` after you
   edited both to name their scopes; `not_conflicting` when they are both right.

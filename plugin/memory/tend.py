@@ -14,6 +14,8 @@ Every per-item gate is preserved, because ``apply`` only routes:
   - contradiction  keep_one | merge | scope_both | not_conflicting (``resolve_view``)
   - merge          supersede (demote the loser under the winner) | updated | distinct
   - baseline       rebaseline (the graduate re-baseline: confirm, then move the baseline)
+  - promote        promote (``promote_memory`` into the user tier) | adopt (a drifted
+                   rule takes the other corpus's text, here only) | distinct (OWN-2)
   - link, floor    done (re-checked: refused while the problem is still there)
   - derivation     apply (re-derive ONE memory) | stamp (earned: refused while any
                    memory still derives differently)
@@ -38,6 +40,7 @@ VERDICTS: Dict[str, Tuple[str, ...]] = {
     "contradiction": ("keep_one", "merge", "scope_both", "not_conflicting"),
     "merge": ("supersede", "updated", "distinct"),
     "capture": ("discard", "done"),
+    "promote": ("promote", "adopt", "distinct"),
     "reverify": ("graduate", "fix", "demote", "snooze", "archive"),
     "link": ("done",),
     "floor": ("done",),
@@ -129,6 +132,10 @@ def _detail_lines(entry: dict, memory_dir: str, repo_root: str) -> List[str]:
 
             a, b = target.split("|", 1)
             return [f"{side}: {_description_of(memory_dir, side)}" for side in (a, b)]
+        if kind == "promote":
+            from .promote_tend import detail_lines
+
+            return detail_lines(target, memory_dir)
         if kind == "derivation" and target != "corpus":
             from .provenance import (
                 REDERIVE_EXCLUDE_HINT, build_repo_file_index, rederive_preview, rederive_worklist_lines,
@@ -161,6 +168,9 @@ def _verdict_help(kind: str, entry_id: str) -> List[str]:
         lines.append("  demote may take --superseded-by <name>; fix means you already edited the body.")
     if kind == "capture":
         lines.append("  done means you already wrote what was durable with `hippo new` (check first).")
+    if kind == "promote":
+        lines.append("  promote moves this memory to the user tier; adopt (a drifted rule only) takes "
+                     "the other corpus's text here; distinct keeps both as they are.")
     if kind in ("link", "floor"):
         lines.append("  done means you already edited the file; tend re-checks before clearing it.")
     lines.append(f"Or: hippo tend snooze {entry_id} | hippo tend skip {entry_id}")
@@ -268,6 +278,19 @@ def _apply_recheck(entry, memory_dir, repo_root):
     return _ok(f"{entry['id']}: fixed.")
 
 
+def _apply_promote(entry, verdict, memory_dir, repo_root):
+    """OWN-2: promote | adopt | distinct (``promote_tend``); distinct is a skip that lapses
+    when either text changes, the way merge's distinct is."""
+    from .promote_tend import apply_verdict
+
+    r = apply_verdict(entry["target"], verdict, memory_dir, repo_root)
+    if not r.get("ok"):
+        return _refused(r["message"])
+    if verdict == "distinct":
+        _mark_done(memory_dir, entry)
+    return _ok(r["message"], r)
+
+
 def _apply_derivation(target, verdict, memory_dir, repo_root):
     from .provenance import build_repo_file_index, rederive_file, rederive_worklist
     from .provenance_format import CITATION_DERIVATION_VERSION, read_cite_derivation, write_cite_derivation
@@ -319,6 +342,8 @@ def apply(
             r = _apply_reverify(target, verdict, memory_dir, repo_root, superseded_by)
         elif kind == "baseline":
             r = _apply_reverify(target, "graduate", memory_dir, repo_root, None)
+        elif kind == "promote":
+            r = _apply_promote(entry, verdict, memory_dir, repo_root)
         elif kind == "capture":
             r = _apply_capture(target, verdict, memory_dir)
         elif kind == "contradiction":

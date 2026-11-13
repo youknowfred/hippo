@@ -46,6 +46,7 @@ KINDS: Tuple[str, ...] = (
     "merge",
     "capture",
     "reverify",
+    "promote",
     "link",
     "floor",
     "derivation",
@@ -57,6 +58,7 @@ GATES: Dict[str, str] = {
     "contradiction": "one pair at a time: a human verdict, never an automatic winner",
     "merge": "one pair at a time: update the existing memory, supersede, or skip",
     "capture": "one seed at a time: check for duplicates first, then write or discard",
+    "promote": "one lesson at a time: read both texts; nothing is written in the other corpus",
     "reverify": "one memory at a time: graduate, fix, demote or snooze",
     "link": "one link at a time: fix or remove it in the memory body",
     "floor": "one floor line at a time: trim it, or move it out of the floor",
@@ -223,6 +225,12 @@ def _src_reverify(memory_dir: str, repo_root: str) -> List[dict]:
     return out
 
 
+def _src_promote(memory_dir: str, repo_root: str) -> List[dict]:
+    from .promote_tend import entries  # OWN-2: a lesson another trusted corpus also keeps
+
+    return [_entry("promote", t, ev, pr) for t, ev, pr in entries(memory_dir)]
+
+
 def _src_link(memory_dir: str, repo_root: str) -> List[dict]:
     from .lint_links import lint
 
@@ -302,6 +310,7 @@ SOURCES: Dict[str, Callable[[str, str], List[dict]]] = {
     "contradiction": _src_contradiction,
     "merge": _src_merge,
     "capture": _src_capture,
+    "promote": _src_promote,
     "reverify": _src_reverify,
     "link": _src_link,
     "floor": _src_floor,
