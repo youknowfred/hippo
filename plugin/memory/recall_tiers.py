@@ -427,7 +427,8 @@ def _merge_loaded_indexes(
 
     merged_entries: List[dict] = []
     merged_chunks: List[dict] = []
-    dense_vectors: List = []
+    dense_vectors: List = []  # description rows, merged entry order
+    chunk_vectors: List = []  # then body-chunk rows, merged chunk order
     seen_names: set = set()
     kept_per_tier: List[Tuple[LoadedIndex, bool, List[dict], List[dict]]] = []
     model: Optional[str] = None
@@ -450,8 +451,14 @@ def _merge_loaded_indexes(
             # entry that already carries one (a merged index fused again) keeps it.
             ne.setdefault("head_commit", li.manifest.get("head_commit"))
             remap[old_i] = len(merged_entries)
+            # OWN-4: an entry's dense row IS its merged entry index. The rankers read the
+            # matrix as every description row first, then every body-chunk row
+            # (``recall_rank._dense_rank``: row < len(entries)), the same doc space BM25 uses;
+            # appending each tier's chunks before the next tier's entries shifted every
+            # later tier's rows, so a user-tier lesson's description vector was scored as
+            # a project body chunk and a project chunk stood in for it.
             if build_dense:
-                ne["row"] = len(dense_vectors)
+                ne["row"] = len(merged_entries)
                 dense_vectors.append(li.dense[e.get("row")])
             else:
                 ne["row"] = None
@@ -464,8 +471,8 @@ def _merge_loaded_indexes(
             nc = dict(c)
             nc["entry"] = remap[parent]
             if build_dense:
-                nc["row"] = len(dense_vectors)
-                dense_vectors.append(li.dense[c.get("row")])
+                nc["row"] = len(merged_chunks)  # offset by the entry count below
+                chunk_vectors.append(li.dense[c.get("row")])
             else:
                 nc["row"] = None
             merged_chunks.append(nc)
@@ -477,7 +484,9 @@ def _merge_loaded_indexes(
     if build_dense and dense_vectors:
         import numpy as np
 
-        merged_dense = np.vstack(dense_vectors)
+        for nc in merged_chunks:
+            nc["row"] += len(merged_entries)
+        merged_dense = np.vstack(dense_vectors + chunk_vectors)
 
     # PRF-6: each tier contributes its persisted stats; a tier that lost entries to a
     # higher tier's slug (a promoted memory lives in both, or OUT-1's outbox copy shadows a
