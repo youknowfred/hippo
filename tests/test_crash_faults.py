@@ -46,6 +46,7 @@ from .crash_scenarios_floor_diet import scenarios as _floor_diet_scenarios
 from .crash_scenarios_gate import scenarios as _gate_scenarios
 from .crash_scenarios_outbox import scenarios as _outbox_scenarios
 from .crash_scenarios_rollup import scenarios as _rollup_scenarios
+from .crash_scenarios_sections import scenarios as _sections_scenarios
 from .crash_scenarios_ship import scenarios as _ship_scenarios
 from .crash_scenarios_ledger import scenarios as _ledger_scenarios
 from .crash_scenarios_user_tier import scenarios as _user_tier_scenarios
@@ -136,6 +137,8 @@ CRASH_CONTRACT = {
     ("ledger", "write_cache"): ("detected",),  # LDG-1: prior ledger.json kept; the SessionStart caller sees False
     ("promote_tend", "_write_cache"): ("intact",),  # OWN-2: the scan cache is derived; the scan still returns
     ("promote_tend", "_adopt"): ("detected",),  # OWN-2: adopt names the miss; the memory keeps its bytes
+    ("index_sections", "_write_matrix"): ("intact",),  # HOT-11: derived sub-index; prior kept, the build returns
+    ("index_sections", "_write_manifest"): ("intact",),  # HOT-11: same; the prior manifest names its own matrix
 }
 
 
@@ -1059,6 +1062,7 @@ _SCENARIOS = [
     *_conventions_scenarios(_arm, _snap, _assert_unchanged),  # GAT-4 (tests/crash_scenarios_conventions.py)
     *_ledger_scenarios(_arm, _snap, _assert_unchanged),  # LDG-1 (tests/crash_scenarios_ledger.py)
     *_floor_diet_scenarios(_arm, _snap, _assert_unchanged),  # NAT-3 (tests/crash_scenarios_floor_diet.py)
+    *_sections_scenarios(_arm, _snap, _assert_unchanged),  # HOT-11 (tests/crash_scenarios_sections.py)
     (("dream", "_apply_one"), "detected", scn_dream_apply_bridge_detected),
     (("dream_apply", "_undo_one_edge"), "detected", scn_dream_undo_detected),
     (("dream", "_apply_one"), "rolled_back", scn_dream_apply_refines_rolled_back),

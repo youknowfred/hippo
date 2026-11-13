@@ -46,6 +46,7 @@ from .build_index import (
 from . import archive, trust
 from . import lanes as _lanes  # HOT-7 (the recall() keyword below is the hook's request)
 from . import recall_count as _count  # HOT-8 (rows gain ``signal`` under the same keyword)
+from . import recall_sections as _sections  # HOT-11: folded digest sections (a fused tier)
 from .build_index import extract_description
 from .lint_floor import floor_memory_names
 from .provenance import (
@@ -601,8 +602,13 @@ def recall(
             # so an untrusted project can never pull the user's own memories into its context,
             # and the extra tiers (the user's own) never need a gate of their own.
             idx = _fuse_recall_tiers(idx, memory_dir, index_dir, repo_root)
+            idx = _sections.fuse(idx, memory_dir, index_dir, lanes)  # HOT-11: named-only in the hook
         if not len(idx):
             return []
+
+        def _extra_sections(rows):  # HOT-11: explicit recall appends section rows, never ranks them
+            return _sections.extra(rows, query, idx, memory_dir, index_dir, explicit=index is None and lanes is None,
+                                   consented=consented_hashes, recall_fn=recall)
 
         entries = idx.entries
 
@@ -778,7 +784,7 @@ def recall(
             rules_index_dir = index_dir
             if rules_index_dir is None and memory_dir:
                 rules_index_dir = default_index_dir(memory_dir)
-            return _rules_source_hits(q_tokens, rules_index_dir, repo_root)
+            return _extra_sections(_rules_source_hits(q_tokens, rules_index_dir, repo_root))
         fused = _rrf_fuse(rankings, weights=weights)  # [(idx, score), ...] desc by fused score
         sig = None
         if lanes is not None:  # HOT-7: an unnamed journal takes no pool slot and seeds nothing
@@ -816,7 +822,7 @@ def recall(
         graph_index_dir = index_dir
         if graph_index_dir is None and memory_dir:
             graph_index_dir = default_index_dir(memory_dir)
-        edges = _load_hot_edges(graph_index_dir)
+        edges = _sections.section_edges(_load_hot_edges(graph_index_dir), idx)  # HOT-11
         superseded_by, contradicted_by = _typed_relation_maps(entries, edges)
 
         # --- Soft-invalidation + supersession: applied to the SCORE, BEFORE the top-k cut. ---
@@ -974,7 +980,7 @@ def recall(
                 and not e.get("outbox")  # OUT-1: the outbox gate already checked its own record
             ):
                 live_hash = trust.file_sha256(e_path)
-                if live_hash is None or live_hash != consented_hashes.get(e["name"]):
+                if live_hash is None or live_hash != consented_hashes.get(e.get("digest") or e["name"]):
                     continue  # drifted, new-since-consent, or unhashable — withheld
             # RET-1: the knee compares PRIMARY-SIGNAL-ONLY relevance (`primary_relevance`,
             # see its construction above), never the display/sort score -- an entry with NO
@@ -1166,6 +1172,7 @@ def recall(
                     "head_commit": idx.manifest.get("head_commit"),
                     **({"lane": e.get("lane") or "fact"} if lanes is not None else {}),  # HOT-7
                     **({"signal": sig.row(i)} if sig is not None else {}),  # HOT-8
+                    **_sections.result_keys(e),  # HOT-11: a section row's digest and line
                 }
             )
         # DRM-6 quarantine, leg 2 — excluded from ABSTENTION-SENSITIVE answering: a
@@ -1196,7 +1203,7 @@ def recall(
         if results and _rerank_enabled():
             results = _cross_encoder_rerank(query, results)
 
-        return results
+        return _extra_sections(results)
     except Exception:
         return []
 
@@ -1305,7 +1312,7 @@ def format_results(
             collapse = " (already surfaced this thread)"
         else:
             collapse = ""
-        shown_file = "" if r.get("file") == f"{r['name']}.md" else f" ({r['file']})"
+        shown_file = "" if r.get("file") == f"{r['name']}.md" else f" ({_sections.where(r)})"
         lines.append(
             f"  • {r['name']}{shown_file} — {desc}{marker}{origin}{conf}{note}{banner}{collapse}"
             f"{r.get('ledger') or ''}"  # LDG-1: a cited tracker id's status, dated (ledger.py)

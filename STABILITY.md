@@ -89,7 +89,14 @@ These may change at any release without a major bump — do not build on them:
   `.hippo/` (`.claude/.memory-*` before v1.42.4). They are
   gitignored, rebuildable-from-source artifacts; hippo may bump their schema and rebuild them freely.
   (A `schema_version` bump is a re-index, not a corpus migration — the CHANGELOG's `re-bootstrap`
-  flag tells you when deps or the index change.)
+  flag tells you when deps or the index change.) The folded-sections sub-index (`sections.json`
+  and its `sections.<id>.npy` matrix, beside the main index, from v1.45) is in this class, as is
+  the `sections` key it adds to the main manifest; a corpus with no digest section has neither.
+- **The folded-section fields on a recall result** — a row for a `### <slug>` section of a
+  fold digest carries `digest` (the digest's stem), `line` (its heading's 1-based line) and
+  `section: true` on the result dict, and `file`/`line`/`section` on the recall tool's
+  structured hits; explicit recall lists such rows after the memory rows, which are unchanged.
+  Additions, unfrozen until STABILITY v2 classifies them.
 - **Internal ranking-tuning knobs** — the undocumented `HIPPO_*` variables that tune the ranker
   (e.g. `HIPPO_KNEE_RATIO`, `HIPPO_MMR_LAMBDA`, `HIPPO_BODY_RRF_WEIGHT`, `HIPPO_PIN_BOOST`,
   `HIPPO_DENSE_FLOOR_BAND` (the soft band under the dense floor; 0 turns it off),
@@ -98,7 +105,9 @@ These may change at any release without a major bump — do not build on them:
   `HIPPO_QUIET_ARMING` (evidence anchors; 0 turns them off — they are report-only, so
   arming is unchanged either way until a replay of past verdicts clears their gate),
   `HIPPO_SIGNAL_COUNT` (the prompt hook's count-by-evidence rule; 0 turns it off) with
-  `HIPPO_COUNT_BAND` and `HIPPO_COUNT_WIDE` (its two cosine margins), the
+  `HIPPO_COUNT_BAND` and `HIPPO_COUNT_WIDE` (its two cosine margins),
+  `HIPPO_SECTION_ROWS` (how many folded-section rows explicit recall lists after the memories;
+  0 turns them off), the
   `HIPPO_INTENT_*` and `HIPPO_RESCUE_*` families). They exist for experimentation and move with
   retrieval work; the `HIPPO_*` prefix is reserved, but these specific knobs are not a contract.
 - **The Python API** — importing `memory.*` internals directly. hippo is consumed as a Claude Code
@@ -190,6 +199,11 @@ Two recovery stories are additionally pinned for hard kills (`kill -9` mid-verb)
 re-run clean), and `build_index` re-runs heal the index outright. A crash between a
 pack install's file write and its lockfile record heals on re-run via the
 byte-identical adopt path.
+
+The folded-sections sub-index adds two sites, both **intact**: its matrix is written under a
+fresh name before the manifest that names it, so a torn matrix or manifest write keeps the
+prior sub-index whole and loadable, the index build still returns, and the next build heals
+it.
 
 The enforcing lane is `tests/test_crash_faults.py`: it discovers every atomic-write
 call site by AST, fails if one is unregistered, tears each registered site once
