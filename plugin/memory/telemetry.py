@@ -286,6 +286,9 @@ def log_recall_event(
                     r.get("lane") for r in results
                     if r.get("name") and (r.get("floor_collapsed") or r.get("cooldown_collapsed"))
                 ]
+        admitted = {r["name"]: r["admitted"] for r in named if r.get("admitted")}
+        if admitted:  # GP-S4: why each served journal got past the lane (named / issue)
+            event["admitted"] = admitted
         expanded = [r.get("name") for r in named if r.get("via") == "graph"]
         if expanded:  # HOT-9: served by graph expansion alone, so the field window can count it
             event["expanded"] = expanded
