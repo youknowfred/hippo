@@ -80,8 +80,13 @@ def _diff(existing: Optional[str], proposed: str, basename: str) -> str:
     )
 
 
-def promote_to_rule(memory_dir: str, name: str, repo_root: str) -> dict:
+def promote_to_rule(
+    memory_dir: str, name: str, repo_root: str, globs: Optional[List[str]] = None
+) -> dict:
     """Propose ``.claude/rules/<name>.md`` from the memory ``<name>.md``. NEVER writes.
+
+    ``globs`` (RUL-9) scopes the draft to globs the caller already derived (tend's proposal
+    from where the memory's touches land) instead of deriving them from cited_paths.
 
     Returns ``{proposed, diff, changed, exists, path, globs, flags, cited_paths, reason}``.
     ``proposed`` is None + ``reason`` set when refused: unreadable/retired memory, no cited_paths,
@@ -112,9 +117,12 @@ def promote_to_rule(memory_dir: str, name: str, repo_root: str) -> dict:
             out["reason"] = f"memory {name!r} cites no paths — a scoped rule needs cited_paths"
             return out
 
-        repo_files, _bn = build_repo_file_index(repo_root)
-        universe = _repo_paths_for_globs(repo_root, repo_files) if repo_files else set()
-        globs, flags = derive_paths_globs(cited, universe)
+        if globs is not None:
+            globs, flags = [g for g in globs if g], []
+        else:
+            repo_files, _bn = build_repo_file_index(repo_root)
+            universe = _repo_paths_for_globs(repo_root, repo_files) if repo_files else set()
+            globs, flags = derive_paths_globs(cited, universe)
         out["globs"], out["flags"] = globs, flags
         if not globs:
             miss = [f.get("path") for f in flags if f.get("kind") == "missing"]
@@ -206,15 +214,21 @@ def main(argv=None) -> int:
         print(res["diff"], end="")
         return 0
 
-    # Approved apply step: this is the one and only write. INV-2: the rule file is
-    # committed, always-loaded governance — a torn write would ship half a rule.
+    write_rule(repo_root, res)
+    print(f"wrote {res['path']} — commit it as a reviewable per-item rule.")
+    return 0
+
+
+def write_rule(repo_root: str, res: dict) -> None:
+    """The one write this module makes: ``promote_to_rule``'s ``proposed`` file, after a
+    human said yes (``--apply`` here, a tend ``write`` verdict for RUL-9). INV-2: the rule
+    file is committed, always-loaded governance — a torn write would ship half a rule.
+    Raises on failure; both callers report it."""
     from .atomic import write_text_atomic
 
     abs_rule = os.path.join(repo_root, res["path"])
     os.makedirs(os.path.dirname(abs_rule), exist_ok=True)
     write_text_atomic(abs_rule, res["proposed"])
-    print(f"wrote {res['path']} — commit it as a reviewable per-item rule.")
-    return 0
 
 
 if __name__ == "__main__":
