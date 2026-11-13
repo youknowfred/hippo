@@ -693,7 +693,9 @@ def _set_confidence(path: str, value: str, *, dry_run: bool = False) -> dict:
     result = {"path": path, "changed": False, "confidence": value, "error": None}
     try:
         from .atomic import read_text_cas
+        from .outbox_edit import edit_or_raise, resolve
 
+        path = resolve(path)  # OUT-1: the outbox copy, when there is one
         text, _cas_token = read_text_cas(path)  # RWY-3: the CAS token of what we read
         if not text.startswith("---"):
             result["error"] = "no frontmatter"
@@ -744,6 +746,7 @@ def _set_confidence(path: str, value: str, *, dry_run: bool = False) -> dict:
         if result["changed"] and not dry_run:
             from .atomic import write_text_cas
 
+            path = edit_or_raise(path)  # OUT-1: the outbox copy in outbox mode
             write_text_cas(path, new_text, _cas_token)  # COR-18: never a torn corpus file
             # BND-3: an anomalous fold failure rides the result additively.
             try:
@@ -771,7 +774,9 @@ def _set_cited_paths(path: str, paths: List[str], *, dry_run: bool = False) -> d
     result = {"path": path, "changed": False, "error": None}
     try:
         from .atomic import read_text_cas
+        from .outbox_edit import edit_or_raise, resolve
 
+        path = resolve(path)  # OUT-1: the outbox copy, when there is one
         text, _cas_token = read_text_cas(path)  # RWY-3: the CAS token of what we read
         if not text.startswith("---"):
             result["error"] = "no frontmatter"
@@ -822,7 +827,12 @@ def _set_cited_paths(path: str, paths: List[str], *, dry_run: bool = False) -> d
         if result["changed"] and not dry_run:
             from .atomic import write_text_cas
 
+            path = edit_or_raise(path)  # OUT-1: the outbox copy in outbox mode
             write_text_cas(path, new_text, _cas_token)  # COR-18: never a torn corpus file
+            from .outbox_edit import owner_of, record_edit
+
+            if owner_of(path):  # no consent fold here; the outbox copy still needs its record
+                record_edit(path)
     except Exception as exc:
         result["error"] = str(exc)
     return result
@@ -832,7 +842,9 @@ def _live_confidence(memory_dir: str, stem: str) -> Optional[str]:
     try:
         from .build_index import _extract_confidence
 
-        with open(os.path.join(memory_dir, f"{stem}.md"), "r", encoding="utf-8") as fh:
+        from .outbox import effective_path  # OUT-1: a graduated copy reads as graduated
+
+        with open(effective_path(memory_dir, stem), "r", encoding="utf-8") as fh:
             return _extract_confidence(parse_frontmatter(fh.read()))
     except Exception:
         return None

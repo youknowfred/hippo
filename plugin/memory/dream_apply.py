@@ -178,7 +178,9 @@ def _undo_one_edge(memory_dir: str, edge: dict) -> Tuple[bool, str]:
     inserted = block.get("inserted")
     if not fname or not inserted:
         return False, "ledger row carries no undo record"
-    path = os.path.join(memory_dir, fname)
+    from .outbox_edit import edit_or_raise, resolve
+
+    path = resolve(os.path.join(memory_dir, fname))  # OUT-1: the outbox copy, when there is one
     if not os.path.isfile(path):
         # The stamped source may have been moved into ``archive/`` with the edge left
         # ACTIVE — the legacy trap (pre-fix archives never retired their edges) or a hand
@@ -226,6 +228,7 @@ def _undo_one_edge(memory_dir: str, edge: dict) -> Tuple[bool, str]:
         from .atomic import write_text_cas
 
         # RWY-3: whole (it used to truncate in place) and only over the bytes we verified.
+        path = edit_or_raise(path, memory_dir=memory_dir)  # OUT-1: an existing copy stays the target
         write_text_cas(path, new_text, cas_token)
     except Exception as exc:
         return False, f"write failed: {exc}"
@@ -303,8 +306,10 @@ def undo_edges(
                 try:
                     from .trust import record_authored_write_disclosing
 
-                    note = record_authored_write_disclosing(
-                        memory_dir, os.path.join(memory_dir, fname)
+                    from .outbox_edit import resolve
+
+                    note = record_authored_write_disclosing(  # OUT-1: where the undo landed
+                        memory_dir, resolve(os.path.join(memory_dir, fname))
                     )
                     if note:
                         fold_failures += 1

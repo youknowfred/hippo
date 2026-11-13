@@ -30,7 +30,7 @@ from .dream_contra import discover_contradictions
 from .dream_ledgers import _new_pass_id, unaged_dream_pairs, unaged_generated_stems
 from .links import LinkGraph, build_graph, normalize_slug
 from .lint_floor import floor_memory_names
-from .provenance import _iter_memory_files, parse_frontmatter
+from .provenance import parse_frontmatter
 from .soak import soak_status
 from .telemetry import default_telemetry_dir, read_usage_aggregates
 
@@ -41,7 +41,9 @@ def _corpus_texts(memory_dir: str) -> Dict[str, str]:
     """``{stem: full text}`` for every memory file; unreadable files skipped. Never raises."""
     texts: Dict[str, str] = {}
     try:
-        for path in _iter_memory_files(memory_dir):
+        from .outbox_edit import iter_files  # OUT-1: an edge applied into a copy is seen
+
+        for path in iter_files(memory_dir):
             stem = os.path.splitext(os.path.basename(path))[0]
             try:
                 with open(path, "r", encoding="utf-8") as fh:
@@ -389,7 +391,9 @@ def discover(
 
     # The graph, two views: RAW (novelty — does ANY edge already connect this pair, aged or
     # not?) and FIREWALLED (generation — un-aged dream edges subtracted; inv-DRM-firewall).
-    graph = build_graph(memory_dir, index_dir)
+    from .outbox_edit import effective_graph  # OUT-1: same view as the texts above
+
+    graph = effective_graph(memory_dir, index_dir)
     if graph is None:
         graph = LinkGraph(memory_dir, texts=texts)
     raw_view = _undirected_view(graph, set())

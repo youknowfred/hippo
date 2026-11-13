@@ -137,7 +137,9 @@ def _detail_lines(entry: dict, memory_dir: str, repo_root: str) -> List[str]:
             # TND-10: a preview, so the worklist's renderer — rederive_one_lines renders a
             # rederive_file RESULT and raised KeyError 'cited' on this dict.
             repo_files, index = build_repo_file_index(repo_root)
-            preview = rederive_preview(os.path.join(memory_dir, f"{target}.md"), repo_root, repo_files, index)
+            from .outbox import effective_path  # OUT-1: the copy the verdict would edit
+
+            preview = rederive_preview(effective_path(memory_dir, target), repo_root, repo_files, index)
             return [ln[2:] for ln in rederive_worklist_lines([preview])] + [REDERIVE_EXCLUDE_HINT]
     except Exception as exc:
         return [f"(evidence unavailable: {exc})"]
@@ -207,7 +209,11 @@ def _apply_reverify(name, verdict, memory_dir, repo_root, superseded_by):
         r = archive_memory(name, memory_dir, repo_root)
         if not r.get("moved"):
             return _refused(r.get("error") or "not archived")
-        return _ok(f"archived {name} (restore with `hippo archive --restore {name}`).")
+        from .outbox_edit import removal_line  # OUT-1: a removal never goes through the outbox
+
+        tail = removal_line(memory_dir, repo_root)
+        return _ok(f"archived {name} (restore with `hippo archive --restore {name}`)."
+                   + (f" {tail[0].upper()}{tail[1:]}." if tail else ""))
     from .reconsolidate import semantic_reverify
 
     r = semantic_reverify(name, verdict, memory_dir, repo_root, superseded_by=superseded_by)
@@ -278,8 +284,10 @@ def _apply_derivation(target, verdict, memory_dir, repo_root):
         return _ok(f"stamped citation derivation {was} → {CITATION_DERIVATION_VERSION}.")
     if target == "corpus":
         return _refused("the corpus entry takes --verdict stamp.")
+    from .outbox import effective_path  # OUT-1: an outbox copy is what gets re-derived
+
     repo_files, index = build_repo_file_index(repo_root)
-    r = rederive_file(os.path.join(memory_dir, f"{target}.md"), repo_root, repo_files, index)
+    r = rederive_file(effective_path(memory_dir, target), repo_root, repo_files, index)
     if r.get("error"):
         return _refused(f"{target}: {r['error']}")
     return _ok(f"re-derived {target}'s citations.", r)

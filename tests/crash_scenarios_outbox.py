@@ -2,7 +2,7 @@
 
 Kept beside the lane, which sits near its module-size cap, the way the warm-recall scenarios
 are. The lane passes in its tear machinery and lists what ``scenarios`` returns in
-``_SCENARIOS``; ``CRASH_CONTRACT`` there declares the same two sites.
+``_SCENARIOS``; ``CRASH_CONTRACT`` there declares the same sites.
 """
 
 from __future__ import annotations
@@ -70,7 +70,27 @@ def scenarios(arm, snap, assert_unchanged):
         assert out["status"] == "skipped" and "MEMORY.md missing" in out["reason"]
         assert_unchanged(before)
 
+    def drop_row_detected(tmp_path, monkeypatch):
+        """OUT-1 (the tend half): a removal takes its outbox copy along; a torn manifest-row
+        drop keeps the prior manifest bytes and the removal names what stayed."""
+        from memory import outbox as OB
+        from memory import outbox_edit as OE
+
+        root, md = _corpus(tmp_path, monkeypatch)
+        d = OB.ensure(md)
+        copy = os.path.join(d, "alpha.md")
+        with open(copy, "w", encoding="utf-8") as fh:
+            fh.write('---\nname: alpha\ndescription: "a"\nmetadata:\n  type: project\n---\nA\n')
+        assert OB.record_write(md, copy, root) is None
+        before = snap(OB.manifest_path(md))
+        arm(monkeypatch, "outbox_edit", "_drop_manifest_row")
+        note = OE.drop_copy(md, "alpha", root)
+        assert_unchanged(before)
+        assert note and "manifest row" in note
+        assert "alpha.md" in OB.read_manifest(md)
+
     return [
         (("outbox", "_update_manifest"), "detected", manifest_detected),
         (("outbox", "copy_up"), "detected", copy_up_detected),
+        (("outbox_edit", "_drop_manifest_row"), "detected", drop_row_detected),
     ]

@@ -65,6 +65,8 @@ def _source_note(item: dict) -> str:
         return "diff from the consented version (found in git history)"
     if src == "store":
         return "diff from the consented version (kept in the local baseline store)"
+    if src == "committed":
+        return "diff from the committed file this outbox copy shadows"
     if src == "none":
         return "no recorded baseline — the consented version is not in git history or the local store; full current content"
     return "full content"
@@ -87,14 +89,15 @@ def render_review(rv: dict) -> str:
             "trust review: nothing to review — every memory matches what you consented to."
         )
         return "\n".join(lines)
-    counts = {k: sum(1 for i in items if i["kind"] == k) for k in ("changed", "added", "removed")}
+    counts = {k: sum(1 for i in items if i["kind"] == k) for k in ("changed", "added", "removed", "outbox")}
     head = {
         "untrusted": f"this corpus ({root}) is not trusted yet: all {len(items)} shown memories are new to you.",
         "legacy": f"this corpus ({root}) is trusted without a per-file baseline: all {len(items)} shown memories count as new.",
-    }.get(state, f"{counts['changed']} changed, {counts['added']} new, {counts['removed']} removed since you consented to this corpus ({root}).")
+    }.get(state, f"{counts['changed']} changed, {counts['added']} new, {counts['removed']} removed since you consented to this corpus ({root})"
+          + (f"; {counts['outbox']} outbox cop{'y' if counts['outbox'] == 1 else 'ies'} hippo did not write here" if counts["outbox"] else "") + ".")
     digest = rv.get("digest")
     lines += [f"trust review — digest {digest} (grant only after reading what follows)", head, "", _UNTRUSTED_DATA_NOTE, ""]
-    label = {"changed": "changed", "added": "new", "removed": "removed"}
+    label = {"changed": "changed", "added": "new", "removed": "removed", "outbox": "outbox copy"}
     for it in items:
         if it["kind"] == "removed":
             lines.append(f"=== removed: {it['stem']} (no longer on disk; a grant drops it from the consent record)")
