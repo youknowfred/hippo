@@ -380,7 +380,28 @@ def _apply_one(
     return False, f"kind {cand.get('kind')!r} is not Tier-A", None
 
 
-def run_apply_pass(
+def run_apply_pass(memory_dir: str, index_dir: Optional[str] = None,
+                   telemetry_dir: Optional[str] = None, **kw) -> Tuple[int, str]:
+    """The link pass (``_run_apply_pass``), then, on a trusted corpus, the retirement of every
+    active edge whose source memory was deleted outside ``archive_memory`` (a fold or a hand
+    ``git rm``): ``dream_apply.retire_deleted_sources``, with the same proof the per-edge
+    ``--retire-ghost`` verb asks for. The digest names how many it retired."""
+    from . import trust
+    from .dream_apply import retire_deleted_sources
+
+    code, text = _run_apply_pass(memory_dir, index_dir, telemetry_dir, **kw)
+    gate_root = trust.gate_repo_root(memory_dir, kw.get("repo_root"))
+    if gate_root is not None and not trust.is_trusted(gate_root):
+        return code, text
+    retired = retire_deleted_sources(memory_dir, reason="its source memory was deleted outside "
+                                     "the archive; retired by the link pass")
+    if retired:
+        text += (f"\n🌙 {len(retired)} ledger edge(s) whose source memory was deleted are retired "
+                 f"(no stamp is left anywhere): {', '.join(retired[:5])}.")
+    return code, text
+
+
+def _run_apply_pass(
     memory_dir: str,
     index_dir: Optional[str] = None,
     telemetry_dir: Optional[str] = None,
