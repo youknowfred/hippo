@@ -48,7 +48,7 @@ on the memory's type.
 that holds pointer links to your most universally-relevant memories. It is small *on purpose*:
 it's injected into every prompt, so it only carries the handful of facts that are always worth
 knowing — who you are, how you like to work. (It reaches Claude through Claude Code's own
-always-on memory, which hippo points at your repo with a symlink during `/hippo:init` — hippo
+always-on memory, which hippo points at your repo with a symlink during `/hippo:setup` — hippo
 adds no second always-load channel of its own.)
 
 **On-demand recall — matched per prompt.** Everything else is recalled *only when it fits*. On
@@ -96,7 +96,7 @@ gives hippo its four defining properties:
 
 - **You can review it.** A new memory is an ordinary diff. hippo's *automatic capture* drafts
   candidate memories from what happened in a session, but parks them unwritten in a pending
-  queue — nothing enters your corpus until you approve it (`/hippo:consolidate`). Memory that
+  queue — nothing enters your corpus until you approve it (`/hippo:tend`). Memory that
   writes itself, gated by a human.
 - **It travels with the repo.** Clone the repo and you get its memory; a teammate opening the
   project shares the same reviewed corpus, instead of each person keeping private, opaque
@@ -127,9 +127,9 @@ ideas are the ones where it *departs* from the brain.
 |---|---|---|
 | **encode / retrieve** — `recall` | hybrid BM25 + dense retrieval, every prompt, `$0` and offline | plain information retrieval; no LLM in the loop |
 | **consolidate** — systems consolidation | a deliberate off-hot-path turn drains captures and re-verifies stale memories | one agent turn, per-item, approval-gated — not a gradual, autonomous hand-off |
-| **reconsolidate** | a recently-recalled memory whose cited code drifted goes on a re-verify worklist — unless its *only* drift is a file the corpus declared churn-by-design (`volatile_paths` in `.claude/memory/.format`: still cited, still recalled, just not re-flagged every session) | recall destabilizes nothing; it's an intersection heuristic plus a human verdict |
+| **reconsolidate** | a recently-recalled memory whose cited code drifted goes on a re-verify worklist — unless its *only* drift is a file the corpus declared churn-by-design (`volatile_paths` in `.claude/memory/hippo.json`: still cited, still recalled, just not re-flagged every session) | recall destabilizes nothing; it's an intersection heuristic plus a human verdict |
 | **forget** — decay | a memory goes stale when a cited file moved after its recorded commit | *not biological at all* — it's git-drift, not time or disuse. The departure is the feature |
-| **replay** — `/dream` | offline, recall is re-run over each memory's self-query; memories that co-fire become candidate links | "co-fire" = co-rank for one probe, not temporal sequence re-firing; report-first, capped, empty-pass-is-the-norm |
+| **replay** — `/dream` | offline, recall is re-run over each memory's self-query; memories that co-fire become candidate links | "co-fire" = co-rank for one probe, not temporal sequence re-firing; gated, capped at five reversible edges per pass, empty-pass-is-the-norm |
 | **reward-gated replay** | an outcome-anchored memory boosts the ranking of the lineage that earned it | ranking-only; never changes what's eligible to be written |
 
 The one mechanism with **no** brain analog at all is the *aging firewall*: `/dream` won't trust its
@@ -139,10 +139,10 @@ exactly what makes leaning on the loose analogy safe.
 
 ## Where to go next
 
-- **[Quickstart](README.md#quickstart)** — install, bootstrap, init, and see your first recall.
+- **[Quickstart](README.md#quickstart)** — install, set up, and see your first recall.
 - **[CONVENTIONS.md](plugin/assets/CONVENTIONS.md)** — the field-by-field reference for writing
   memories (frontmatter schema, typed relations, the evidence-block convention).
 - **[The engine reference](plugin/memory/README.md)** — how recall, staleness, and
   reconsolidation work under the hood (deep internals; you don't need it to *use* hippo).
 - **[The skills](plugin/README.md)** — the `/hippo:*` commands (`new`, `recall`, `doctor`,
-  `consolidate`, `dream`, `audit`, …) you drive hippo with day to day.
+  `tend`, `dream`, …) you drive hippo with day to day.

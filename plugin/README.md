@@ -1,39 +1,37 @@
 # memory (plugin)
 
 Local, git-native agent memory: a markdown-in-git corpus with offline dense+BM25 hybrid recall,
-git-drift staleness/provenance tracking, and a self-audit skill. See
+git-drift staleness/provenance tracking, a review-gated capture path and one maintenance queue. See
 [`memory/README.md`](memory/README.md) for the full engine documentation (recall, staleness,
 reconsolidation, archive internals).
 
 ## Skills
 
-All 15 `/hippo:*` commands (the root [README's Commands section](../README.md#commands) has the
-one-line "which one do I want?" guide for recall-vs-doctor, doctor-vs-audit, consolidate-vs-audit):
+The nine `/hippo:*` verbs (the root [README's Commands section](../README.md#commands) has the
+one-line "which one do I want?" guide for recall-vs-doctor, tend-vs-dream and the rest):
 
 | Skill | Run when |
 |---|---|
-| `/hippo:bootstrap` | Once per machine — builds the shared venv + warms the offline model cache |
-| `/hippo:init` | Once per new project (or a fresh clone) — seeds `.claude/memory/` + the cross-machine symlink + index; a linked git worktree needs nothing (it resolves the main checkout's corpus) |
+| `/hippo:setup` | Once per machine: builds the shared venv and warms the offline model cache. Once per project (or a fresh clone): seeds `.claude/memory/`, the cross-machine symlink and the index; a linked git worktree needs nothing (it resolves the main checkout's corpus) |
 | `/hippo:new` | Whenever the agent decides to save something to memory |
-| `/hippo:recall` | Deliberately recall the corpus — "what do you remember about X", or list it by type |
-| `/hippo:why` | The glass-box recall receipt — why a memory surfaced (or didn't) for a query |
-| `/hippo:doctor` | Fast health check — is the plugin's own install/environment working |
-| `/hippo:audit` | Deep, judgment-based self-audit of the corpus's content — staleness, drift, archive candidates |
-| `/hippo:consolidate` | Sleep-time drain — approve pending captures, work the reconsolidation worklist, refresh the graph |
-| `/hippo:resolve` | Drain the contradiction inbox — a per-item verdict on each unresolved `contradicts` pair |
-| `/hippo:promote` | Lift one proven-portable memory into the machine-local user (or repo private) tier with an origin stamp |
-| `/hippo:promote-rule` | Promote one reinforced procedural memory into a glob-scoped `.claude/rules/` file |
-| `/hippo:pack` | Share or adopt memory packs — extract a portable pack, or install one per-item on the trust spine |
-| `/hippo:export-agents` | Render the memory floor as a proposed `AGENTS.md` diff for the cross-tool rule plane |
-| `/hippo:import` | Migration on-ramp — import other tools' rules/notes (Cursor `.mdc` first) into deduped hippo memories |
-| `/hippo:remove` | Uninstall/offboard THIS project — removes the symlink, offers to delete index/telemetry, reports (never deletes) shared venv/cache paths |
+| `/hippo:recall` | Deliberately recall the corpus ("what do you remember about X"), list it by type, or get the receipt for why a memory surfaced (or didn't) for a query |
+| `/hippo:tend` | The one maintenance queue: pending captures, memories whose cited code moved, contradictions, duplicates, broken baselines and links, floor overflow, rule proposals, changes waiting for re-consent; one verdict at a time |
+| `/hippo:doctor` | Fast health check of the plugin's install and the corpus's wiring, plus the consent step; on request, the deep judgment-based audit of the corpus's content |
+| `/hippo:dream` | The offline link pass: replay recall over each memory's self-query and surface the latent edges |
+| `/hippo:review` | Review a memory diff like a pull request: what each change is, the lints on the touched files, how recall would shift |
+| `/hippo:share` | Memory beyond this project: packs, promotion to the user tier, a memory as a glob-scoped `.claude/rules/` file, publishing one memory, an `AGENTS.md` export, imports from other tools (Cursor `.mdc` first) |
+| `/hippo:remove` | Uninstall/offboard THIS project: removes the symlink, offers to delete index/telemetry, reports (never deletes) shared venv/cache paths |
+
+The twelve v1 skill names (`bootstrap`, `init`, `why`, `consolidate`, `resolve`, `audit`, `pack`,
+`promote`, `promote-rule`, `publish`, `export-agents`, `import`) still load until v2.0: each is a
+one-line route into the verb above that absorbed it.
 
 ## MCP server — mid-turn & subagent memory (INT-2)
 
 The plugin declares a stdio MCP server (`plugin.json` → `bin/hippo mcp` → the PLUGIN_DATA venv
 python, falling back to `python3` pre-bootstrap). It closes the two gaps the once-per-prompt
 recall hook can't: mid-turn retrieval (after the agent discovers what it's working on) and
-subagent memory (Task turns get no `UserPromptSubmit`). Sixteen tools + three resources, offline
+subagent memory (Task turns get no `UserPromptSubmit`). Ten tools (plus the 24 v1 tool names, which still answer until v2.0) + three resources, offline
 (bootstrap's model download excepted) and corpus-local, reusing the exact hook ranking (no fork).
 
 **The v2 toolset (v1.42.0).** Ten tools carry the whole surface: `recall`, `new_memory`,
@@ -42,7 +40,7 @@ consolidate steps), `doctor` (checks, audit material, secrets scan), `setup` (bo
 index), `trust` (consent status, review, grant, revoke), `share` (packs), `dream` and `review`.
 Each is annotated (read-only or not, destructive or not), and `recall`, `doctor` and `tend`
 return structured content to clients that negotiate protocol 2025-06-18 or later. The v1 names
-below keep working through v1.43 and are removed in v2.0; each says so in its description and
+below still work and are removed in v2.0; each says so in its description and
 in every answer. [UPGRADING.md](../UPGRADING.md) maps each old permission id to its new one.
 
 The five core v1 tools (the frozen v1.0 surface):
@@ -55,7 +53,7 @@ The five core v1 tools (the frozen v1.0 surface):
 | `why(query, k)` | The recall receipt (GOV-5): re-runs the ranking and explains each hit — or, on abstention, the near-miss and the floor it missed |
 | `decision_history(name)` | Replays the supersedes/refines lineage around a memory into a dated "chose X → refined to Y → Z superseded it" narrative |
 
-And the four setup tools (INT-9..12) — the `/hippo:*` setup flows re-served as tools, so a
+And the four v1 setup tools (INT-9..12, now behind `setup`, `doctor` and `trust`) — the `/hippo:*` setup flows re-served as tools, so a
 surface with **no typed-command input can still set hippo up end to end**. The one that
 matters: the **Claude Desktop app**'s local sessions run installed plugins' hooks, skills,
 and MCP servers through the same engine as the terminal CLI. They rejected *typed*
@@ -68,10 +66,10 @@ daily recall) works from either surface:
 |---|---|
 | `doctor()` | The `/hippo:doctor` engine verbatim (deterministic, read-only), plus a mapping from each named fix to the tool that runs it on this surface |
 | `bootstrap(action, multilingual)` | Per-machine-surface provisioning, kick-off-and-poll: `start` detaches the venv-build + ~130MB model-warm worker, `status` polls it (sentinel-last; log tail included). Bootstrap is once per plugin-data dir. In 2026-07 the terminal and the desktop app got **different** ones from the harness, so each surface bootstrapped once (on Claude Code 2.1.286 they share one). `status` names a sibling install when it detects one |
-| `init()` | The mechanical `/hippo:init` flow: seed a fresh corpus (core pack + floor + format marker) or wire an existing one (symlink, index, CONVENTIONS backfill, `.gitignore`, private tier). Idempotent, never overwrites, never commits |
+| `init()` | The mechanical project half of `/hippo:setup`: seed a fresh corpus (core pack + floor + format marker) or wire an existing one (symlink, index, CONVENTIONS backfill, `.gitignore`, private tier). Idempotent, never overwrites, never commits |
 | `trust_corpus(confirm_digest)` | The SEC-1 consent flow, two-step: a review call **never trusts** — it returns the memory count, the exact description strings recall would inject (quoted as untrusted data), and a consent digest; the confirm call requires that digest, binding consent to the reviewed bytes (a corpus that changed in between refuses). Also the SEC-6 drift re-consent path |
 
-One consent rule differs from the terminal skill, deliberately (SEC-1): typing `/hippo:init`
+One consent rule differs from the terminal skill, deliberately (SEC-1): typing `/hippo:setup`
 is the user's own explicit review of an existing corpus, so the *skill* may trust it on
 re-run. A *model-invoked* `init` must not — it auto-trusts only a corpus it just **created**
 (whose entire content is the plugin's own starter files) and otherwise routes consent through
@@ -82,7 +80,7 @@ The `/hippo:dream` generative sleep pass is likewise a verb tool — `dream(acti
 (pass / undo / log / deparasite / dedup_merge / generate / sweep_drafts / archive_draft /
 prospective; see the dream skill for the doctrine).
 
-And the six **consolidate-flow tools (INT-13)** — `/hippo:consolidate`'s five steps as thin,
+And the six **consolidate-flow tools (INT-13)**, now behind `tend` — the five steps of `/hippo:tend`'s capture drain as thin,
 per-item primitives, so the sleep-time drain runs from either surface too (they were built
 because the desktop app's Bash tool never inherits `CLAUDE_PLUGIN_DATA`, and they stay the
 desktop route).
@@ -148,7 +146,7 @@ agent's judgment, never a human pre-approval checkpoint, and there is deliberate
 "reverify everything at once" primitive anywhere in this engine — every resolution is a single,
 deliberate, individually-justified action (a blind bulk re-baseline would anchor to the
 mechanical backfill touch and silence real drift; that rationale carried forward into
-`/hippo:audit`'s no-bulk hard rule).
+`/hippo:doctor`'s content audit and its no-bulk hard rule).
 
 This is a **default assumption seeded by the core starter pack** (`assets/packs/core/claude_is_memory_master.md`),
 not a hardcoded behavior — if an operator prefers to review corpus maintenance themselves before

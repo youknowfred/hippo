@@ -100,6 +100,14 @@ item ([`ROADMAP.yaml`](ROADMAP.yaml) / [`ROADMAP.v1.md`](ROADMAP.v1.md)):
 Post-1.0, changes to the frozen compatibility surface follow [`STABILITY.md`](STABILITY.md) — a
 rename or removal there is a major-version bump or a deprecation window, not a silent break.
 
+## Where user-facing docs go
+
+The root [`README.md`](README.md) is the front door: what hippo is, setup, the commands, and
+one short paragraph per feature with a link. The reference for a setting, a `hippo.json` key or
+a gate goes in [`SETTINGS.md`](SETTINGS.md); engine internals go in
+[`plugin/memory/README.md`](plugin/memory/README.md). A change that renames or retires a command
+updates every doc that names it in the same change (`grep -rn "hippo:<name>" --include="*.md" .`).
+
 ## Code layout
 
 `plugin/memory/` is a flat package of focused modules. When a concern outgrows its module, it is
