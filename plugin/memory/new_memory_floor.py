@@ -46,23 +46,26 @@ def _ensure_tier_floor(tier_dir: str, label: str) -> None:
         pass
 
 
-def _pointer_name(line: str) -> Optional[str]:
+def _pointer_name(line: str, is_memory=None) -> Optional[str]:
     """The memory name a floor-section ``line`` points at, or ``None`` if it isn't a pointer.
 
     TEA-4: reuses lint_floor's own link regex + restore-pointer allow-list so "what counts as
     a pointer to sort by" is the exact same notion the lint guard already parses — a hand-
     authored ``[MEMORY.full.md](MEMORY.full.md)`` restore link inside a floor section (rare,
     but the allow-list tolerates it) is never treated as a memory entry to sort against.
+    FLR-1: ``lint_floor.pointer_name``, so with ``is_memory`` a bare pointer reads too.
     """
-    from .lint_floor import _ALLOWLIST, _MD_LINK_RE
+    from .lint_floor import pointer_name
 
-    m = _MD_LINK_RE.search(line)
-    if not m:
-        return None
-    base = m.group(1).rsplit("/", 1)[-1]
-    if base in _ALLOWLIST:
-        return None
-    return base[:-3] if base.endswith(".md") else base
+    return pointer_name(line, is_memory)
+
+
+def _points_at(line: str, name: str) -> bool:
+    """``line`` is ``name``'s pointer, link or bare. The name is given, so a bare line needs no
+    file: promote removes the pointer after the memory has left the corpus."""
+    from .lint_floor import bare_pointer
+
+    return _pointer_name(line) == name or bare_pointer(line) == name
 
 
 def _append_floor_pointer(
@@ -99,7 +102,10 @@ def _append_floor_pointer(
 
     # OUT-1: ``floor_dir`` is the outbox in outbox mode (its copy of the committed floor); the
     # floor policy is always the corpus's own, read from ``memory_dir``.
+    from .lint_floor import memory_exists
+
     path = os.path.join(floor_dir or memory_dir, "MEMORY.md")
+    exists = memory_exists(memory_dir)
     outcome: dict = {}
     policy = read_floor_lint(memory_dir)
     # CLM-7: a hard edge for hippo's own writes — the global read limits, and the budget of
@@ -113,7 +119,7 @@ def _append_floor_pointer(
 
     def transform(text: str) -> Optional[str]:
         # RWY-3: re-run on fresh bytes after a CAS conflict, so it must be pure.
-        new_text, out = _with_pointer(text, section_header, name, title, hook)
+        new_text, out = _with_pointer(text, section_header, name, title, hook, exists)
         edge = over_hard_edge(new_text, edge_policy) if new_text is not None else None
         if edge:
             new_text, out = None, {
@@ -179,12 +185,15 @@ def floor_line_refusal(
 
 
 def _with_pointer(
-    text: str, section_header: str, name: str, title: str, hook: str
+    text: str, section_header: str, name: str, title: str, hook: str, is_memory=None
 ) -> Tuple[Optional[str], dict]:
-    """``_append_floor_pointer``'s edit as a pure function: ``(new_text or None, outcome)``."""
+    """``_append_floor_pointer``'s edit as a pure function: ``(new_text or None, outcome)``.
+    ``is_memory`` lets bare pointers take part in the sorted insert (FLR-1)."""
+    from .lint_floor import bare_pointer
+
     lines = text.split("\n")
     link = f"]({name}.md)"
-    if any(link in ln for ln in lines):
+    if any(link in ln or bare_pointer(ln) == name for ln in lines):
         return None, {"status": "skipped", "reason": "pointer already present"}
 
     pointer = _pointer_line(name, title, hook)
@@ -219,7 +228,7 @@ def _with_pointer(
     # (blank lines, hand-written prose) are skipped when searching but never moved.
     insert = None
     for j in range(start + 1, end):
-        other = _pointer_name(lines[j])
+        other = _pointer_name(lines[j], is_memory)
         if other is not None and other > name:
             insert = j
             break
@@ -243,7 +252,7 @@ def _remove_floor_pointer(memory_dir: str, name: str, floor_dir: Optional[str] =
 
     RCH-1: when /hippo:promote lifts a user/feedback memory OUT of the project corpus, the
     project floor's pointer to it would dangle (the .md is gone); this removes exactly that
-    line. What counts as "the pointer" is ``_pointer_name`` — the same notion the TEA-4
+    line, link or bare (``_points_at``). What counts as "the pointer" is ``_pointer_name`` — the same notion the TEA-4
     sorted insert and lint_floor parse — so a prose line that merely mentions ``name.md``
     is never touched. Returns the same explicit outcome-dict contract as append, never
     raises, and MEMORY.md stays the only file this module edits:
@@ -261,7 +270,7 @@ def _remove_floor_pointer(memory_dir: str, name: str, floor_dir: Optional[str] =
 
     def transform(text: str) -> Optional[str]:
         lines = text.split("\n")
-        kept = [ln for ln in lines if _pointer_name(ln) != name]
+        kept = [ln for ln in lines if not _points_at(ln, name)]
         removed["any"] = len(kept) != len(lines)
         return "\n".join(kept) if removed["any"] else None
 
