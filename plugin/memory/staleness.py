@@ -5,13 +5,15 @@ a memory is stale when any file it cites (``cited_paths``) changed AFTER the mem
 ``source_commit``. This is correlated with the thing it warns about — code drift —
 unlike calendar age.
 
-Fast path (for the SessionStart hook): a BOUNDED number of git calls, proportional to the
-cited-path set (not repo history):
-  1. ``git log --since=<window> --name-only -- <cited paths, chunked>`` → newest change
-     time per path. SHP-6: scoped to the union of cited_paths across the corpus (chunked
-     to stay well under ARG_MAX) instead of scanning every path in the repo's history —
-     on a large monorepo, an unscoped scan can emit hundreds of MB and blow the subprocess
-     timeout, which used to silently degrade to "no stale memories" with no notice.
+Fast path (for the SessionStart hook): TWO git calls, memoized per HEAD (HOT-15,
+``staleness_scan``):
+  1. ONE ``git log --since=<window> --name-only`` → newest change time per cited path.
+     SHP-6's scoped call (``-- :/<cited paths>``) when the cited set fits one pathspec
+     chunk — a small corpus in a huge repo makes git print only its own paths — and an
+     unscoped walk filtered in memory when it needs more (SHP-6's chunks each re-walked the
+     whole window: minutes on the largest field corpus, dropped chunks at the timeout). The
+     unscoped walk's output is streamed and capped. A walk cut short by its budget or the
+     cap keeps what it read and says so (``diagnostics``).
   2. ``git show -s`` over the distinct source_commits → their commit times.
 Then it's pure in-memory comparison. Never raises.
 """
@@ -21,11 +23,12 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
+import subprocess  # noqa: F401  (kept: tests stub ``staleness.subprocess.run``)
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
+from . import staleness_scan as _scan  # HOT-15: one window walk, memoized per HEAD
 from .fm_access import fm_get
 
 # OUT-1: staleness reads what this machine sees (committed files overlaid by outbox copies),
@@ -48,8 +51,7 @@ _CHANGE_MARKER = "__C__"
 # OS's real ARG_MAX (~1MB on macOS/Linux). This is a defensive, conservative constant —
 # not tuned to any OS's exact limit — chosen so even a monorepo with thousands of cited
 # paths issues a handful of git calls instead of one call that risks blowing the timeout.
-_MAX_PATHSPEC_BYTES = 8_000
-_GIT_LOG_TIMEOUT = 20
+_MAX_PATHSPEC_BYTES = 8_000  # HOT-15: also picks the walk shape (one chunk: scoped); the watermark scan chunks by it
 
 
 def read_provenance(text: str) -> tuple[List[str], Optional[str]]:
@@ -153,93 +155,30 @@ def _chunk_paths(paths: List[str], max_bytes: int = _MAX_PATHSPEC_BYTES) -> List
     return chunks
 
 
-def _run_git_log_scoped(repo_root: str, since: str, paths: List[str]) -> Tuple[str, bool]:
-    """Run ONE ``git log --since=<since> --name-only -- <paths>`` call; return ``(stdout, timed_out)``.
-
-    Distinct from ``provenance.run_git`` on purpose (SHP-6): that helper's broad
-    ``except Exception`` swallows ``subprocess.TimeoutExpired`` indistinguishably from any
-    other failure, which is exactly the silent-degradation bug this fix closes. Scoped to
-    this module's own git-log invocation — ``run_git``'s general contract for OTHER callers
-    (archive.py, provenance.py) is untouched.
-
-    ``cited_paths`` are always TOPLEVEL-relative (SHP-1), but a bare pathspec after ``--``
-    is interpreted relative to ``-C repo_root`` — so for a monorepo-subdir-rooted corpus
-    (``repo_root`` below the git toplevel), an unanchored pathspec would silently match
-    nothing. The ``:/`` magic prefix anchors each pathspec to the repo top regardless of
-    ``-C``, matching the toplevel-relative convention every other caller in this module
-    already relies on.
-    """
-    pathspecs = [f":/{p}" for p in paths]
-    try:
-        out = subprocess.run(
-            ["git", "-C", repo_root, "log", f"--since={since}", "--name-only",
-             f"--format={_CHANGE_MARKER}%ct", "--", *pathspecs],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=_GIT_LOG_TIMEOUT,
-        )
-        return out.stdout or "", False
-    except subprocess.TimeoutExpired:
-        return "", True
-    except Exception:
-        return "", False
-
-
 def _path_change_times(
     repo_root: str, since: str, paths: List[str]
 ) -> Tuple[Dict[str, int], bool]:
-    """Map repo-relative path -> newest commit unix-time within the window.
+    """Map repo-relative path -> newest commit unix-time within the window, for ``paths``.
 
-    SHP-6: scoped to ``paths`` (the union of cited_paths across the corpus being checked)
-    instead of the whole repo history, and chunked so no single git invocation risks
-    blowing ``_GIT_LOG_TIMEOUT`` on a large monorepo. Returns ``(times, timed_out)`` —
-    ``timed_out`` is True if ANY chunk hit the timeout, so the caller can surface a visible
-    diagnostic instead of silently treating a partial result as "nothing is stale".
+    HOT-15: ONE ``git log`` per scan (``staleness_scan.scan``): SHP-6's scoped call when
+    ``paths`` fits one ``_chunk_paths`` chunk, else an unscoped, output-capped walk filtered
+    in memory. Returns ``(times, cut_short)``: the walk hit its budget or its output cap, and
+    ``times`` holds what it read before then (each a true newest change).
     """
-    out: Dict[str, int] = {}
-    if not paths:
-        return out, False
-    timed_out = False
-    for chunk in _chunk_paths(paths):
-        log, chunk_timed_out = _run_git_log_scoped(repo_root, since, chunk)
-        if chunk_timed_out:
-            timed_out = True
-        cur: Optional[int] = None
-        for line in log.split("\n"):
-            if line.startswith(_CHANGE_MARKER):
-                try:
-                    cur = int(line[len(_CHANGE_MARKER):] or 0)
-                except ValueError:
-                    cur = None
-            elif line.strip() and cur is not None:
-                # git log is newest-first, so the first time we see a path is its newest change.
-                if line not in out:
-                    out[line] = cur
-    return out, timed_out
+    times, reason = _scan.scan(repo_root, since, paths, run_git, _MAX_PATHSPEC_BYTES)
+    return times, reason is not None
 
 
 def _commit_times(shas: List[str], repo_root: str) -> Dict[str, int]:
-    """Map commit sha -> commit unix-time, in one ``git show`` call.
+    """Map commit sha -> commit unix-time, in one ``git show`` call (memoized per sha,
+    ``staleness_scan.commit_times``).
 
     ``--ignore-missing`` (SHP-3): without it, a SINGLE unresolvable sha in the batch
     (squash-merge / shallow clone — exactly the mixed batch this signal must survive)
     makes ``git show`` exit nonzero and print NOTHING, silently poisoning the lookup for
     every OTHER, perfectly resolvable sha in the same call too.
     """
-    shas = [s for s in dict.fromkeys(shas) if s]
-    if not shas:
-        return {}
-    out: Dict[str, int] = {}
-    res = run_git(["show", "-s", "--format=%H %ct", "--ignore-missing", *shas], repo_root)
-    for line in res.split("\n"):
-        parts = line.split()
-        if len(parts) == 2:
-            try:
-                out[parts[0]] = int(parts[1])
-            except ValueError:
-                pass
-    return out
+    return _scan.commit_times(shas, repo_root, run_git)
 
 
 def find_stale(
@@ -256,13 +195,15 @@ def find_stale(
     — an unresolvable sha must not make a memory permanently exempt from drift detection.
     Memories with neither a resolvable sha NOR a stored time are still skipped (unjudgeable).
 
-    SHP-6: the git-log path-change scan is scoped to the union of ``cited_paths`` across
-    every memory being checked (chunked to stay under a conservative pathspec-byte bound),
-    not the whole repo history — bounding scan cost to the cited-path set instead of repo
-    size. If ``diagnostics`` (a caller-owned dict) is passed, this sets
-    ``diagnostics["timed_out"] = True`` when any chunk of that scan hit the git timeout, so
-    a caller (e.g. ``session_start.staleness_producer``) can emit a visible
-    "scan timed out" note instead of treating a partial/empty result as "nothing stale".
+    HOT-15: the path-change scan is ONE ``git log`` per scan (``staleness_scan``): SHP-6's
+    scoped call when the union of ``cited_paths`` fits one pathspec chunk, else an unscoped,
+    output-capped walk filtered in memory; memoized per HEAD. If ``diagnostics`` (a
+    caller-owned dict) is passed, this sets ``diagnostics["timed_out"]`` when the walk hit
+    the git timeout, ``"output_capped"`` when the unscoped walk stopped at its output cap,
+    ``"partial"`` when either happened, and ``"unchecked"`` to the number of memories it
+    could not decide: not flagged from what was read, and citing a path the walk never
+    reached. A caller (e.g. ``session_start.staleness_producer``) then says so instead of
+    treating a partial result as "nothing stale".
 
     Never raises; returns ``[]`` on any failure.
     """
@@ -286,12 +227,18 @@ def find_stale(
             return []
 
         cited_union = sorted({p for m in memories for p in m[1]})
-        path_times, timed_out = _path_change_times(repo_root, since, cited_union)
+        path_times, cut = _scan.scan(repo_root, since, cited_union, run_git, _MAX_PATHSPEC_BYTES)
+        timed_out = cut is not None  # HOT-15: the walk was cut short (budget or output cap)
         if diagnostics is not None:
-            diagnostics["timed_out"] = timed_out
+            diagnostics["timed_out"] = cut == _scan.TIMEOUT
+            diagnostics["partial"] = timed_out  # the verdicts cover part of the corpus
+            if cut == _scan.OUTPUT_CAP:
+                diagnostics["output_capped"] = True
+            diagnostics["unchecked"] = 0
         commit_times = _commit_times([m[2] for m in memories], repo_root)
 
         stale: List[dict] = []
+        unchecked = 0
         for name, cited, sc, text in memories:
             base = commit_times.get(sc)
             if base is None:
@@ -313,6 +260,10 @@ def find_stale(
                     {"name": name, "changed_paths": changed, "recency": recency,
                      "source_commit": sc, "type": read_memory_type(text)}
                 )
+            elif timed_out and any(p not in path_times for p in cited):
+                unchecked += 1  # HOT-15: a cited path the short walk never reached
+        if diagnostics is not None:
+            diagnostics["unchecked"] = unchecked
         # Most-recently-drifted first (then name) so the SessionStart note surfaces what matters.
         stale.sort(key=lambda d: (-d["recency"], d["name"]))
         return stale
@@ -806,8 +757,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"  ! {item['name']}: {missing}{more}{total}")
     diagnostics: dict = {}
     stale = find_stale(memory_dir, repo_root, diagnostics=diagnostics)
-    if diagnostics.get("timed_out"):
-        print("⚠ staleness scan timed out — signal may be incomplete")
+    if diagnostics.get("partial") or diagnostics.get("timed_out"):
+        n = diagnostics.get("unchecked") or 0
+        why = "timed out" if diagnostics.get("timed_out") else "stopped at its output cap"
+        print(f"⚠ staleness scan {why} — signal may be incomplete"
+              + (f" ({n} memor{'y' if n == 1 else 'ies'} not checked)" if n else ""))
     if not stale:
         print("No code-stale memories detected.")
         return 0

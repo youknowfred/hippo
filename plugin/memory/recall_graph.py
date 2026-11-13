@@ -110,6 +110,32 @@ def _expansion_drops(notes: dict, final: set, cut: Optional[float]) -> List[Tupl
     return out
 
 
+# HOT-15: the drift check's per-process memo. A long-lived process (the warm recall server,
+# the MCP server) re-ran the check's frontmatter parse for up to 200 unchanged files on every
+# prompt: about a quarter of a warm served call on the field corpus. The parse result is kept
+# per file under the open file's own stat signature; any write to the file changes its ctime
+# (which no tool can set back) and so misses the memo. A one-shot hook process pays one fstat
+# per file on top of the read it already did.
+_DRIFT_MEMO: Dict[Tuple[str, str], tuple] = {}
+_DRIFT_MEMO_MAX = 8192
+
+
+def _file_sig(fh) -> Optional[tuple]:
+    try:
+        st = os.fstat(fh.fileno())
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_ctime_ns, st.st_size, st.st_ino, st.st_dev)
+
+
+def _remember_drift(key: Tuple[str, str], value: tuple) -> None:
+    if value[0] is None:
+        return
+    if len(_DRIFT_MEMO) >= _DRIFT_MEMO_MAX:
+        _DRIFT_MEMO.clear()
+    _DRIFT_MEMO[key] = value
+
+
 def _drift_patch(entry: dict, memory_dir: str) -> dict:
     """Detect mid-session edits (COR-4) and return a display/BM25-fresh COPY of ``entry``.
 
@@ -141,9 +167,14 @@ def _drift_patch(entry: dict, memory_dir: str) -> dict:
     try:
         path = os.path.join(memory_dir, entry["file"])
         with open(path, "r", encoding="utf-8") as fh:
-            text = fh.read()
-        doc_text = memory_doc_text(entry["name"], text)
-        fresh_hash = _hash(doc_text)
+            sig = _file_sig(fh)
+            hit = _DRIFT_MEMO.get((path, entry["name"]))
+            if hit is not None and hit[0] == sig:
+                doc_text, fresh_hash = hit[1], hit[2]
+            else:
+                doc_text = memory_doc_text(entry["name"], fh.read())
+                fresh_hash = _hash(doc_text)
+                _remember_drift((path, entry["name"]), (sig, doc_text, fresh_hash))
         if fresh_hash == entry.get("hash"):
             return entry
         patched = dict(entry)
@@ -180,9 +211,29 @@ def _load_hot_edges(index_dir: Optional[str]) -> Optional[dict]:
             return None
         from .links import load_edges
 
-        return load_edges(index_dir)
+        # HOT-15: a long-lived process re-parsed links.json and rebuilt every edge set on
+        # each prompt. Kept per index dir under the file's stat signature and the dream
+        # admission view (``links_cache``'s own cache key); the hot path only reads it.
+        from .links_cache import _LINKS_CACHE_NAME, dream_edges_admitted
+
+        try:
+            st = os.stat(os.path.join(index_dir, _LINKS_CACHE_NAME))
+            sig = (st.st_mtime_ns, st.st_ctime_ns, st.st_size, st.st_ino, dream_edges_admitted())
+        except OSError:
+            sig = None
+        hit = _EDGES_MEMO.get(index_dir)
+        if sig is not None and hit is not None and hit[0] == sig:
+            return hit[1]
+        edges = load_edges(index_dir)
+        _EDGES_MEMO.clear()  # one corpus per process in practice; never grows
+        if sig is not None and edges is not None:
+            _EDGES_MEMO[index_dir] = (sig, edges)
+        return edges
     except Exception:
         return None
+
+
+_EDGES_MEMO: Dict[str, tuple] = {}
 
 
 def _typed_relation_maps(
