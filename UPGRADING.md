@@ -11,6 +11,21 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### v1.46.1: two fixes; the conventions refresh follows your write path
+
+**Nothing rebuilds.** The index schema is unchanged.
+
+**If doctor reports a dream edge whose source memory is deleted**, run `hippo dream` once. The
+pass retires that edge in `dream-ledger.jsonl` (one added line in a tracked file; commit it
+the way you commit the corpus). Run from a linked worktree, the pass writes the main
+checkout's ledger: a linked worktree's corpus is the main tree's.
+
+**`hippo setup --conventions --yes` now lands where your saves land.** On a corpus whose
+`write_path` is `outbox`, the refreshed `CONVENTIONS.md` goes to the outbox and the next
+`hippo ship` carries it; nothing is moved by hand. From a linked worktree with a direct write
+path, the worktree's own `.claude/memory/` is written. The command's last line names the
+place.
+
 ### v1.46.0: a shorter hook block, and an opt-in for your own sessions' memory writes
 
 **Nothing rebuilds.** The index schema is unchanged.
