@@ -88,10 +88,12 @@ def line_text(raw: str) -> str:
     return " ".join(text.split())
 
 
-def pointer_lines(text: str, sections) -> List[dict]:
+def pointer_lines(text: str, sections, is_memory=None) -> List[dict]:
     """``[{line, name, text}]`` — each memory pointer line under a floor section (the same
-    walk ``lint_floor.floor_memory_names`` makes; restore links excluded)."""
-    from .lint_floor import _ALLOWLIST, _MD_LINK_RE
+    walk ``lint_floor.floor_memory_names`` makes; restore links excluded). With ``is_memory``
+    (``lint_floor.memory_exists``) a line with no link counts when it is a bare pointer,
+    ``- name — text``, to a memory that exists: ``lint_floor.pointer_name``'s reading."""
+    from .lint_floor import _ALLOWLIST, _MD_LINK_RE, pointer_name
 
     rows: List[dict] = []
     current = "(preamble)"
@@ -102,12 +104,18 @@ def pointer_lines(text: str, sections) -> List[dict]:
             continue
         if stripped.startswith("# ") or current not in sections:
             continue
+        linked = False
         for m in _MD_LINK_RE.finditer(raw):
+            linked = True
             base = m.group(1).rsplit("/", 1)[-1]
             if base in _ALLOWLIST:
                 continue
             rows.append({"line": i, "name": base[:-3], "text": line_text(raw)})
             break
+        if not linked and is_memory is not None:
+            name = pointer_name(raw, is_memory)
+            if name:
+                rows.append({"line": i, "name": name, "text": line_text(raw)})
     return rows
 
 
@@ -139,14 +147,15 @@ def floor_restatements(memory_dir: str, repo_root: str) -> dict:
         out["files"] = len(files)
         if not files:
             return out
-        from .lint_floor import _floor_sections
+        from .lint_floor import _floor_sections, memory_exists
         from .rules_plane import rule_dup_candidates
 
         with open(_floor_file(memory_dir), "rb") as fh:
             raw = fh.read()
         out["sha256"] = hashlib.sha256(raw).hexdigest()
         rows: List[dict] = []
-        for p in pointer_lines(raw.decode("utf-8", "replace"), _floor_sections(memory_dir)):
+        for p in pointer_lines(raw.decode("utf-8", "replace"), _floor_sections(memory_dir),
+                               memory_exists(memory_dir)):
             cands = rule_dup_candidates(p["text"], "", repo_root, files=files, items=True)
             if cands:
                 c = cands[0]

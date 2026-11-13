@@ -186,3 +186,49 @@ def test_never_raises_on_a_missing_floor(repo, memory_dir):
     write_file(repo, "CLAUDE.md", CLAUDE_MD)
     assert FR.floor_restatements(memory_dir, repo)["rows"] == []
     assert FR.tend_entries(memory_dir, repo) == []
+
+
+# --------------------------------------------------------------------------- #
+# bare-name pointers (`- name — text`, no markdown link)
+# --------------------------------------------------------------------------- #
+BARE_RESTATING = ("- friday-deploys — never deploy the billing service on a Friday afternoon "
+                  "without a rollback plan")
+BARE_FLOOR = f"""# Memory
+
+## User
+- tabs — the formatter uses four spaces for indentation in every Python module
+
+## Working Style & Process Feedback
+{BARE_RESTATING}
+- not-a-memory — never deploy the billing service on a Friday afternoon without a rollback plan
+"""
+
+
+def test_a_bare_floor_pointer_that_restates_a_rule_is_reported(repo, memory_dir):
+    _setup(repo, memory_dir, floor=BARE_FLOOR)
+    rep = FR.floor_restatements(memory_dir, repo)
+    # The line whose name is a memory is a pointer; the one naming no memory is prose.
+    assert [(r["name"], r["file"]) for r in rep["rows"]] == [("friday-deploys", "CLAUDE.md")]
+    assert rep["rows"][0]["line"] == BARE_FLOOR.split("\n").index(BARE_RESTATING) + 1
+
+
+def test_bare_pointer_lines_are_read_only_when_the_name_is_a_memory(memory_dir):
+    for n in ("friday-deploys", "tabs"):
+        write_file(memory_dir, f"{n}.md", f"---\nname: {n}\ndescription: about {n}\n---\n\nbody\n")
+    from memory.lint_floor import memory_exists
+
+    sections = ("User", "Working Style & Process Feedback")
+    names = [p["name"] for p in FR.pointer_lines(BARE_FLOOR, sections, memory_exists(memory_dir))]
+    assert names == ["tabs", "friday-deploys"]
+    assert FR.pointer_lines(BARE_FLOOR, sections) == []      # no resolver: links only, as before
+    mixed = FLOOR + BARE_RESTATING + "\n"
+    names = [p["name"] for p in FR.pointer_lines(mixed, sections, memory_exists(memory_dir))]
+    assert names == ["tabs", "friday-deploys", "short", "friday-deploys"]
+
+
+def test_a_bare_restating_line_reaches_doctor_and_tend(repo, memory_dir):
+    _setup(repo, memory_dir, floor=BARE_FLOOR)
+    r = check_floor_governance(DoctorContext(memory_dir, repo))
+    assert "1 floor line(s) restate an always-loaded rule" in r["message"]
+    res = Q.build_queue(memory_dir, repo, kinds=("floor",), write_cache=False)
+    assert "floor:rule:friday-deploys.md" in [e["id"] for e in res["pending"]]
