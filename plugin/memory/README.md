@@ -192,6 +192,23 @@ Absent/empty key ⇒ byte-identical behavior (ED-4); every verdict stays human, 
 this routes detection only (ED-1). Tier-2 co-drift arming (volatile drift counting when a
 non-volatile sibling also drifted) is a deliberate non-feature for now.
 
+### Evidence anchors (TND-3) — report-only
+
+A derived anchor is a token the memory writes as code (inside backticks) that also occurs
+in a drifted cited file at the memory's `source_commit`. The path is *intact* when it has
+an anchor, no line the `source_commit..HEAD` change added or removed contains one (a line
+that only moved does not count), and every anchor still occurs at HEAD; a deleted,
+renamed, binary, oversized, baseline-absent or anchorless path is never intact. A memory
+is *quiet* when every drifted cited path is intact (`staleness_anchors.py`, derivation
+version `ANCHOR_DERIVATION_VERSION`). Nothing is written anywhere: blobs come from one
+`git cat-file --batch` call per batch.
+
+Quiet does **not** change arming in this release: a replay over the real historical
+verdicts did not reach the gate (at least half of graduates quiet with at most 5% of
+fix/demote verdicts suppressed), so doctor counts how many armed stale memories *would*
+be quiet and `hippo staleness --anchors` lists each with its anchors and the change
+lines that touched them. `HIPPO_QUIET_ARMING=0` turns the anchor report off.
+
 ### Citation rot (LIF-3) — a vanished cited path is loud, never a silent shrink
 
 A renamed/deleted cited file used to vanish from `cited_paths` on the next re-derivation

@@ -751,11 +751,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument("--memory-dir", default=None)
     parser.add_argument("--repo-root", default=None)
+    parser.add_argument(
+        "--anchors", action="store_true",
+        help="list the armed stale memories with their evidence-anchor verdict (which would be "
+        "quiet: cited code moved, the identifiers they name did not) and the evidence lines",
+    )
     args = parser.parse_args(argv)
 
     md, repo = resolve_dirs()
     memory_dir = args.memory_dir or md
     repo_root = args.repo_root or repo
+    if args.anchors:  # TND-3: report-only listing (staleness_anchors.render_report)
+        from .staleness_anchors import render_report
+
+        print("\n".join(render_report(memory_dir, repo_root)))
+        return 0
 
     if args.invalidate:
         name = args.invalidate if args.invalidate.endswith(".md") else f"{args.invalidate}.md"

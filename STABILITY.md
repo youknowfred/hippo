@@ -94,7 +94,9 @@ These may change at any release without a major bump — do not build on them:
   (e.g. `HIPPO_KNEE_RATIO`, `HIPPO_MMR_LAMBDA`, `HIPPO_BODY_RRF_WEIGHT`, `HIPPO_PIN_BOOST`,
   `HIPPO_DENSE_FLOOR_BAND` (the soft band under the dense floor; 0 turns it off),
   `HIPPO_LANE_BEHAVIOR_SHARE` (the behavior lane's share of the prompt hook's slots),
-  `HIPPO_HUB_DAMPING` (hub damping in graph expansion; 0 turns it off), the
+  `HIPPO_HUB_DAMPING` (hub damping in graph expansion; 0 turns it off),
+  `HIPPO_QUIET_ARMING` (evidence anchors; 0 turns them off — they are report-only, so
+  arming is unchanged either way until a replay of past verdicts clears their gate), the
   `HIPPO_INTENT_*` and `HIPPO_RESCUE_*` families). They exist for experimentation and move with
   retrieval work; the `HIPPO_*` prefix is reserved, but these specific knobs are not a contract.
 - **The Python API** — importing `memory.*` internals directly. hippo is consumed as a Claude Code
