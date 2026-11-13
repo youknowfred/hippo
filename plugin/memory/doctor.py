@@ -144,6 +144,7 @@ from .doctor_checks_settings import check_settings  # SRF-4
 from .recall_fallback import check_bm25_reasons  # OBS-11
 from .doctor_checks_lanes import check_recall_lanes  # HOT-7
 from .staleness_anchors import check_evidence_anchors  # TND-3
+from .doctor_checks_ledger import check_ledger  # LDG-1
 from .doctor_checks_kpi import check_capture_queue, check_hook_wall, check_kpi_rollups, check_opened_after_recall, check_surface_usage  # TND-5, OBS-4, OBS-1, OBS-10, OBS-2
 from .doctor_checks_kpi import check_warm_recall  # HOT-6
 from .doctor_checks_user_tier import check_user_tier  # OWN-1
@@ -392,6 +393,7 @@ CHECKS: List[Tuple[str, Callable[[DoctorContext], Optional[Dict[str, str]]]]] = 
     ("opened_after_recall", check_opened_after_recall),  # OBS-10: was the injected memory's own file opened afterwards
     ("bm25_reasons", check_bm25_reasons),  # OBS-11: why recalls ran BM25-only, top reason + remedy
     ("recall_lanes", check_recall_lanes),  # HOT-7: hook-injected share by lane vs the corpus (K14), report-only
+    ("ledger_join", check_ledger),  # LDG-1: declared ledgers, ids cached + snapshot date, or why one was dropped
     ("rules_conflicts", check_rules_conflicts),
     ("rules_plane_rot", check_rules_plane_rot),
     ("rules_source", check_rules_source),

@@ -45,6 +45,7 @@ from .crash_scenarios_conventions import scenarios as _conventions_scenarios
 from .crash_scenarios_gate import scenarios as _gate_scenarios
 from .crash_scenarios_outbox import scenarios as _outbox_scenarios
 from .crash_scenarios_ship import scenarios as _ship_scenarios
+from .crash_scenarios_ledger import scenarios as _ledger_scenarios
 from .crash_scenarios_user_tier import scenarios as _user_tier_scenarios
 from .crash_scenarios_warm import scenarios as _warm_scenarios
 
@@ -128,6 +129,7 @@ CRASH_CONTRACT = {
     ("ship", "_edit_manifest"): ("detected",),  # OUT-2: prior manifest kept; False named; the branch still reads as in flight
     ("conventions", "_append_local"): ("detected",),  # GAT-4: local file's prior bytes kept; the copy is not replaced
     ("conventions", "_write_copy"): ("detected",),  # GAT-4: the copy's prior bytes kept; "NOT finished" named
+    ("ledger", "write_cache"): ("detected",),  # LDG-1: prior ledger.json kept; the SessionStart caller sees False
 }
 
 
@@ -1083,6 +1085,7 @@ _SCENARIOS = [
     *_user_tier_scenarios(_arm, _snap, _assert_unchanged),  # OWN-1 (tests/crash_scenarios_user_tier.py)
     *_ship_scenarios(_arm, _snap, _assert_unchanged),  # OUT-2 sites (tests/crash_scenarios_ship.py)
     *_conventions_scenarios(_arm, _snap, _assert_unchanged),  # GAT-4 (tests/crash_scenarios_conventions.py)
+    *_ledger_scenarios(_arm, _snap, _assert_unchanged),  # LDG-1 (tests/crash_scenarios_ledger.py)
     (("dream", "_apply_one"), "detected", scn_dream_apply_bridge_detected),
     (("dream_apply", "_undo_one_edge"), "detected", scn_dream_undo_detected),
     (("dream", "_apply_one"), "rolled_back", scn_dream_apply_refines_rolled_back),

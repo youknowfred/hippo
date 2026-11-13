@@ -1299,6 +1299,7 @@ def format_results(
         shown_file = "" if r.get("file") == f"{r['name']}.md" else f" ({r['file']})"
         lines.append(
             f"  • {r['name']}{shown_file} — {desc}{marker}{origin}{conf}{note}{banner}{collapse}"
+            f"{r.get('ledger') or ''}"  # LDG-1: a cited tracker id's status, dated (ledger.py)
         )
         # RCL-6: rank-1 body-signal-win evidence snippet — progressive disclosure so a memory
         # whose key fact is buried in the body behind a generic description doesn't force a

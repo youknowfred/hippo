@@ -1757,7 +1757,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--force", action="store_true", help="re-embed every memory")
     args = parser.parse_args(argv)
 
-    memory_dir, _ = resolve_dirs()
+    memory_dir, root = resolve_dirs()
     memory_dir = args.memory_dir or memory_dir
     index_dir = args.index_dir or default_index_dir(memory_dir)
 
@@ -1767,6 +1767,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"dense backend : {'ready (' + str(manifest['model']) + ')' if manifest['dense_ready'] else 'BM25-only (fastembed unavailable/disabled)'}")
     if manifest["dense_ready"]:
         print(f"embedding dim : {manifest['dim']}")
+    from .ledger import refresh_ledger_cache, summary  # LDG-1: only when `ledgers` is declared
+
+    if refresh_ledger_cache(memory_dir, index_dir, None if args.memory_dir else root) is not None:
+        print(f"ledger join   : {summary(index_dir)}")
     return 0
 
 
