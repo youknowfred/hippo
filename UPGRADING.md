@@ -11,6 +11,24 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### v1.46.0: a shorter hook block, and an opt-in for your own sessions' memory writes
+
+**Nothing rebuilds.** The index schema is unchanged.
+
+**The prompt hook's block is shorter.** Later rows' descriptions are cut at a word boundary
+and the collapse lines name fewer memories; the rows served are the same. `hippo recall` and
+the recall tool are unchanged. `HIPPO_HOOK_COMPACT=0` restores the longer block.
+
+**A journal may appear without being named** on a corpus that declares `journals`, when it is
+the best answer to the prompt. `HIPPO_JOURNAL_SIGNAL=0` turns that off.
+
+**To stop withholding what your own sessions write**, add to `.claude/memory/hippo.json`:
+`"consent": {"session_writes": true}`, then run `hippo trust policy --accept` on each machine.
+From then on a memory file a session writes or edits with a file tool joins recall without a
+review, when its bytes are exactly what the tool wrote and pass the secret and threat lints.
+It does not grant what is already withheld: `hippo trust review` and `hippo trust grant` do
+that, once. Doctor's new line says how many memories are withheld and by which route.
+
 ### v1.45.0: fewer rows per prompt, and nothing to re-index
 
 **Nothing rebuilds.** The index schema is unchanged. Three derived files may appear beside the

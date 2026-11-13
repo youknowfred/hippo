@@ -7,6 +7,95 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.46.0 — 2026-11-13 — "Recall that reaches its memories"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, citation derivation still **6**, link cache still **6**, index schema still **8**,
+so nothing re-indexes. Five items of the road to v2.0.0 (amendment 2, added under the owner's
+delegation of 2026-11-13) and six fixes. **OWN-5 is not in it:** it was built and measured,
+and its gate missed. Every gate this release measured and missed is stated below with its
+number.
+
+**Operator action: none required.** One opt-in is new (below). Things you may notice:
+- **The prompt hook's block is shorter.** The first row keeps its description; later rows'
+  descriptions are cut at a word boundary, the "already in floor" line names three memories,
+  the "already surfaced this thread" line gives its count, and a session's later blocks carry
+  a shorter header. Which rows are served does not change. `HIPPO_HOOK_COMPACT=0` restores it.
+- **A journal can be served without being named**, on a corpus that declares `journals`, when
+  it leads every candidate for the prompt and has evidence of its own. At most one per
+  prompt, as an extra row. `HIPPO_JOURNAL_SIGNAL=0` turns it off.
+- **Doctor says more:** how many memories are withheld from recall and by which route, and
+  how many hard-set rows pin a memory that no longer exists.
+- **`hippo init`, `bootstrap` and `audit`** in a terminal now name `/hippo:setup` and
+  `/hippo:doctor`, the skills that carry those flows.
+
+**Consent**
+- **OUT-5 — consent for the bytes a session wrote on this machine (opt-in).** hippo's setup
+  links Claude Code's native memory directory into the corpus, so a session's own memory
+  writes land in a trusted corpus with no consent recorded and wait for `hippo trust review`.
+  On two estate corpora that was 67 withheld memories, none of them written by a hippo verb.
+  With `"consent": {"session_writes": true}` in `hippo.json`, accepted on the machine with
+  `hippo trust policy --accept`, the file-tool hooks record a per-file consent for the bytes a
+  session's own Write, Edit or MultiEdit left in a memory file, by content hash, when: the
+  corpus is already trusted; the file was absent or consented before the write; the bytes on
+  disk are exactly the ones the tool call produced; the call was not made in a subagent; and
+  the bytes pass the secret and threat lints a review gates on. Bytes from a pull, merge,
+  checkout or shell redirect, an edit over unconsented bytes, and a subagent's write still
+  wait for review. `hippo trust status` names every memory consented this way, and the daily
+  rollup counts grants and holds. A corpus without the key, or with it not accepted, is
+  byte-identical. Claude Code's native loader already reads these files with no gate; this
+  changes only what hippo's own recall injects. Measured on scratch copies of emgl: 0 of 4
+  withheld after native-path and repo-path writes and edits with the key on; the trust file
+  byte-identical with the key off; pulled bytes still withheld. **Short of its gate as
+  measured:** the hook-cost bound (p95 under 20 ms added outside a memory dir) read +72 and
+  +101 ms under a load average of 60 to 150, where the base hook's own p95 is over 1.2 s; the
+  bash fast path is unchanged.
+
+**Recall**
+- **HOT-13 — a journal admitted by its own signal.** Of emgl's 31 hard-set rows that expect a
+  journal, the journal leads the fused candidates in 3; the rest rank past the fifteenth
+  candidate, which no admission reaches. Such a leading journal is now served beside the
+  prompt's rows. emgl hook-mode hard-set recall@10 0.495 → 0.524 (gate 0.52), Skyline 0.60 →
+  0.68, hippo unchanged; journals are 1.2% and 3.1% of served rows; median rows unchanged.
+  **On a second, later copy of emgl's corpus it reads 0.467 → 0.495, under the gate.**
+- **HOT-14 — characters per prompt.** emgl 1,455 → 982 per injecting prompt (gate 1,000),
+  Skyline 1,296 → 888, hippo 1,456 → 989, with the hard sets unchanged and no visible row name
+  lost. More rows fit in full: 3.5 → 4.1 per prompt on emgl.
+- **OWN-4 — a promoted lesson keeps its place at home.** The fused index (project, user and
+  private tiers, an accepted outbox copy, a named digest section) laid out its dense rows so
+  that every tier after the first was misread: a promoted lesson's description was scored as
+  a body chunk. And a promote put a lesson recalled on demand onto the user tier's floor. Both
+  are fixed; ten promoted lessons on emgl keep their explicit rank and fused score (10 of 10,
+  3 of 10 before).
+- **HOT-15 — speed on the largest corpus.** Explicit recall embeds the query once (the section
+  pass reused nothing), one staleness scan walks history once instead of once per chunk of
+  paths (emgl: 67 to 210 s → 1 to 12 s cold, the same verdicts, and a scan cut short by its
+  timeout or output cap now says how many memories it did not check), and a long-lived process
+  stops re-parsing unchanged memory files and the link cache on every prompt (warm hook p50
+  278 → 150 ms). Results are byte-identical on three corpora. Explicit recall p50 on emgl,
+  interleaved on a quiet machine: 249 ms in v1.44.0, 447 ms in v1.45.0, 261 ms now (the gate
+  is within 20 ms of v1.44.0's). Under heavy load the same comparison read 105 to 157 ms apart,
+  so on a busy machine expect it to stay slower than v1.44.0.
+
+**Not shipped**
+- **OWN-5 — promotion proposals for a lesson with no twin.** Built and measured: sibling
+  corpora gained 0 of the ten probe answers against a bar of 5. 66 lessons qualify on emgl
+  and 6 of the ten probes are among them, but the telemetry window spans three days, so every
+  qualifier ties and none of the probes was in the first twelve proposals. It stays out until
+  a longer window can be measured.
+
+**Fixes**
+- The episode record keeps the rows a prompt served apart from the names it collapsed
+  (`served_names`); injection precision, co-recall pairs and the capture seed read it. On
+  emgl a record named 24.7 memories of which 8.1 were served.
+- The floor lint that reports a floor line an always-loaded rule already says reads bare
+  pointers (on emgl's floor: 0 → 141 lines read).
+- A fused recall keeps each row's "indexed @sha" mark.
+- Promoting a memory with a bare floor pointer in outbox mode leaves `hippo ship`'s floor plan
+  shippable.
+- `hippo init`, `bootstrap` and `audit` name the live skills, and their use is counted.
+- Doctor counts hard-set pins that no longer resolve (emgl: 2 of 105 rows, 1 with no pin left).
+
 ## v1.45.0 — 2026-11-13 — "Fewer rows, each earned"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
