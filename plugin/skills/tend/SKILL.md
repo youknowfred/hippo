@@ -71,7 +71,10 @@ What each kind needs before its verdict:
   `updated` after you folded it into the existing memory, or `distinct`.
 - **baseline** — confirm the memory still holds, then `rebaseline`.
 - **link**, **floor** — edit the file, then `done`; tend re-checks and refuses while the
-  problem is still there.
+  problem is still there. A `floor:rule:<name>.md` item is a floor line that an
+  always-loaded rule (`CLAUDE.md`, or a `.claude/rules` file with no `paths:`) already says:
+  remove the line from `MEMORY.md` (the memory stays and recall still finds it), or, when the
+  user wants it kept, `skip` it or acknowledge it (`hippo lint-floor` prints the entry to add).
 - **derivation** — read the citation diff, then `apply` for that memory; when every memory
   is applied, the `corpus` item takes `stamp`. On a corpus that is not committed to git,
   take a snapshot first (`hippo provenance --snapshot <label>`). It copies the corpus to
