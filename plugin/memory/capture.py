@@ -37,6 +37,7 @@ import re
 import time
 from typing import Dict, List, Optional
 
+from .episode_names import served
 from .harness_envelopes import is_envelope_preview
 from .provenance import ensure_self_ignoring_dir, launch_root, resolve_dirs, run_git
 from .secrets import scan_text
@@ -400,7 +401,7 @@ def _gather_session_context_raw(
     previews: List[str] = []
     seen_previews = set()
     for e in episodes:
-        for n in e.get("recalled_names") or []:
+        for n in served(e):  # served rows: the collapsed floor pool would fill the cap
             if n and n not in seen_names:
                 seen_names.add(n)
                 names.append(n)

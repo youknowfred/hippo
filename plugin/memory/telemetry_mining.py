@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Optional
 
+from .episode_names import served
 from .harness_envelopes import is_envelope_preview
 from .telemetry_store import _resolve_dir, read_episodes, read_events
 
@@ -181,7 +182,7 @@ def co_recall_pairs(
         by_session: Dict[str, set] = {}
         for e in read_episodes(telemetry_dir):
             sid = e.get("session_id") or ""
-            names = {n for n in (e.get("recalled_names") or []) if n and n not in excluded}
+            names = {n for n in served(e) if n and n not in excluded}  # co-served, not co-collapsed
             if not names:
                 continue
             by_session.setdefault(str(sid), set()).update(names)

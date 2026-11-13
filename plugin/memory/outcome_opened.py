@@ -118,10 +118,11 @@ def row_opened(row: dict, rel_dir: str) -> Optional[str]:
 
 def _hook_served(telemetry_dir: str):
     """Yield ``(session_id, ts, names)`` for every recall the prompt hook injected."""
+    from .episode_names import served
     from .telemetry import read_episodes
 
     for e in read_episodes(telemetry_dir):
-        names = [n for n in (e.get("recalled_names") or []) if isinstance(n, str) and n]
+        names = [n for n in served(e) if isinstance(n, str) and n]  # not the collapsed pool
         ts = e.get("ts")
         if names and isinstance(ts, (int, float)):
             yield e.get("session_id"), float(ts), names
