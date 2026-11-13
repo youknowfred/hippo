@@ -240,10 +240,15 @@ hippo_touch_fastpath() {  # <payload json>; 0 = logged here, 1 = spawn Python
   local LC_ALL=C
   hippo_disabled touch-fastpath && return 1
   [ -z "${HIPPO_INDEX_DIR:-}" ] || return 1
-  # Each key exactly once, so a key-like string inside a value can never be read as one.
-  [ "${p//\"tool_name\"/}" = "${p/\"tool_name\"/}" ] || return 1
-  [ "${p//\"file_path\"/}" = "${p/\"file_path\"/}" ] || return 1
-  [ "${p//\"session_id\"/}" = "${p/\"session_id\"/}" ] || return 1
+  # Each key at most once, so a key-like string inside a value can never be read as one.
+  # Inside a JSON string every quote is escaped, so a value can hold the quoted key only
+  # where an escaped quote meets the string's own closing quote; that, or a response that
+  # echoes the key, makes two, and two decline. A glob, not ${p//key/}: bash 3.2 does
+  # pattern substitution in time quadratic in the payload (RWY-7), and this in linear time.
+  case "$p" in
+    *\"tool_name\"*\"tool_name\"*|*\"file_path\"*\"file_path\"*|*\"session_id\"*\"session_id\"*)
+      return 1 ;;
+  esac
   [[ $p =~ \"tool_name\"[[:space:]]*:[[:space:]]*\"(Read|Edit|Write|MultiEdit)\" ]] || return 1
   tool="${BASH_REMATCH[1]}"
   [[ $p =~ \"file_path\"[[:space:]]*:[[:space:]]*\"([^\"\\]+)\" ]] || return 1

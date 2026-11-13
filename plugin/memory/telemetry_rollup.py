@@ -248,6 +248,7 @@ def record_prompt(
     now: Optional[float] = None,
     path: str = "spawn",
     injected_memories: Optional[int] = None,
+    backend_reason: Optional[str] = None,
     injected_by_lane: Optional[Dict[str, int]] = None,
     rendered_by_lane: Optional[Dict[str, int]] = None,
 ) -> bool:
@@ -257,6 +258,9 @@ def record_prompt(
     HOT-6 ``path``: which hook path ran the recall — ``spawn`` (a fresh Python per prompt)
     or ``warm`` (served by the session's own MCP server). It keys the surface count, and a
     warm run's wall lands in its own histogram so the spawn wall stays comparable.
+
+    OBS-11 ``backend_reason``: a ``bm25`` recall's reason token, counted in
+    ``hook.backend_reason`` beside ``hook.backend`` (a missing token counts as ``unknown``).
 
     HOT-7 ``injected_by_lane`` / ``rendered_by_lane``: the rows the block served (the
     recall event's ``names``: floor- and cooldown-collapsed rows, which ``injected_memories``
@@ -275,6 +279,8 @@ def record_prompt(
                 hook["skipped"] += 1
             else:
                 _bump(hook["backend"], backend or "none")
+                if backend == "bm25":
+                    _bump(hook.setdefault("backend_reason", {}), backend_reason or "unknown")
                 if (backend or "none") == "none":
                     hook["abstained"] += 1
             if latency_ms is not None:

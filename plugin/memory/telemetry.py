@@ -180,8 +180,12 @@ def log_recall_event(
     channel: Optional[str] = None,
     injected_chars: Optional[int] = None,
     wall_ms: Optional[float] = None,
+    backend_reason: Optional[str] = None,
 ) -> bool:
     """Append ONE recall event to the ledger. Fire-and-forget: NEVER raises.
+
+    OBS-11 ``backend_reason``: on a ``bm25`` row, why the dense lane did not serve (a
+    ``recall_fallback`` token). Additive; the hook passes it, other rows carry no key.
 
     Records the surfaced memory names, the serving backend, latency, ``k``, a TRUNCATED
     query preview (never the full prompt), and — COR-8 — each result's TRUE penalized fused
@@ -271,6 +275,8 @@ def log_recall_event(
             "k": int(k),
             "query_preview": (query or "")[:_QUERY_PREVIEW_CHARS],
         }
+        if backend_reason and backend == "bm25":
+            event["backend_reason"] = backend_reason
         if collapsed:
             event["collapsed"] = collapsed
         if any(r.get("lane") for r in results):  # HOT-7: hook rows carry their lane

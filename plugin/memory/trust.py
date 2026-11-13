@@ -394,6 +394,10 @@ def _fold_file(
     """The one baseline fold. ``before_sha`` None: fold unconditionally (authorship);
     set: fold only into a record whose consented hash for this file equals it."""
     try:
+        from .outbox_edit import owner_of, record_edit  # OUT-1: an outbox copy keeps its own record
+
+        if owner_of(path):
+            return record_edit(path, repo_root, before_sha)
         gate_root = gate_repo_root(memory_dir, repo_root)
         if gate_root is None:
             return False

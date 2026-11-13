@@ -136,6 +136,7 @@ from .dream_discover import (
     discover,
     reward_boosts,
 )
+from .dream_floor import RETRACTED_BY as FLOOR_RETRACTED_BY, below_floor_line
 from .dream_ledgers import (
     _GENERATED_KINDS,
     _new_pass_id,
@@ -262,7 +263,7 @@ def render_report(result: dict, *, ledger_path: Optional[str]) -> str:
     sweep = stats.get("theta_sweep") or []
     lines.append(
         "   θ sweep (apply-eligible candidates at each θ — bridges need MUTUAL co-fire, "
-        "refines need cofire≥θ, completions are text-evidence based and θ-exempt):"
+        "refines need cofire≥θ, completions need the text mention and any co-recall):"
     )
     lines.append("     " + " ".join(f"θ≥{row['theta']:.2f}:{row['apply_eligible']}" for row in sweep))
     lines.append(
@@ -294,7 +295,9 @@ def _apply_one(
     """
     from .links import add_typed_relation, parse_typed_relations
 
-    src_path = os.path.join(memory_dir, cand["source"] + ".md")
+    from .outbox_edit import edit_or_raise, resolve
+
+    src_path = resolve(os.path.join(memory_dir, cand["source"] + ".md"))  # OUT-1: a copy wins
     try:
         from .atomic import read_text_cas
 
@@ -312,6 +315,7 @@ def _apply_one(
         try:
             from .atomic import write_text_cas
 
+            src_path = edit_or_raise(src_path, memory_dir=memory_dir)  # OUT-1: outbox mode
             write_text_cas(src_path, new_text, _cas_token)  # COR-18: never a torn corpus file
         except Exception as exc:
             return False, f"write failed: {exc}", None
@@ -437,10 +441,14 @@ def run_apply_pass(
     # autonomy must not override the audit record (DREAM-KILL-2's spirit; also the
     # retract→re-apply ping-pong guard the de-parasiting pass depends on). The candidate
     # still appears in report passes — re-applying it is a per-item human/agent action.
+    # SRF-7: an edge undone by the cofire floor's reviewed undo was undone for lacking
+    # evidence, not for being wrong, so that verdict stands only while the evidence is
+    # still missing: the floor itself keeps the pair out until recall returns it together.
     prior_undone = {
         frozenset((e["source"], e["target"]))
         for e in read_apply_ledger(memory_dir)
         if e.get("state") == "undone"
+        and e.get("retracted_by") != FLOOR_RETRACTED_BY
         and isinstance(e.get("source"), str)
         and isinstance(e.get("target"), str)
     }
@@ -506,8 +514,10 @@ def run_apply_pass(
         # add_typed_relation's own internal fold.
         # BND-3: an anomalous fold failure is counted into the digest's one line.
         try:
-            note = trust.record_authored_write_disclosing(
-                memory_dir, os.path.join(memory_dir, cand["source"] + ".md"), repo_root
+            from .outbox_edit import resolve
+
+            note = trust.record_authored_write_disclosing(  # OUT-1: where the edge landed
+                memory_dir, resolve(os.path.join(memory_dir, cand["source"] + ".md")), repo_root
             )
             if note:
                 fold_failures += 1
@@ -590,6 +600,9 @@ def run_apply_pass(
             f"  reply `undo` to revert all · `undo <edge-id>` for one · they age into "
             f"/dream's trusted source set after {age_sessions()} sessions"
         )
+    below_floor = below_floor_line(memory_dir)  # SRF-7: named every pass, undone by none
+    if below_floor:
+        lines.append(below_floor)
 
     # DRM-6: the generative tier rides the apply pass. NEW generation is flag-gated
     # (HIPPO_DREAM_GENERATIVE, default OFF — DREAM-KILL-1: P3 ships behind a flag) and

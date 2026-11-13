@@ -44,7 +44,7 @@ RECALL_ORCHESTRATOR = frozenset({"recall", "recall_hook", "recall_view", "recall
 
 # Leaf helpers: ``recall_*`` siblings the façade imports that never import the façade or
 # any orchestrator member themselves (rankers, budget, query hygiene, the graph plane,
-# salience, tiers, abstention, the diff preview). They are not forbidden by this lint;
+# salience, tiers, abstention, the diff preview, the BM25-only reasons). They are not forbidden by this lint;
 # they are listed so a NEW ``recall_*`` module must be classified on purpose, and
 # ``test_orchestrator_classification_matches_the_import_graph`` re-derives the split.
 RECALL_LEAF_HELPERS = frozenset(
@@ -52,6 +52,7 @@ RECALL_LEAF_HELPERS = frozenset(
         "recall_abstain",
         "recall_budget",
         "recall_diff",
+        "recall_fallback",
         "recall_graph",
         "recall_query",
         "recall_rank",

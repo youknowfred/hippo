@@ -44,6 +44,8 @@ import json
 import os
 from typing import Dict, List, Optional, Set, Tuple
 
+from .outbox import effective_path  # OUT-1: a verdict reads and edits the outbox copy
+
 _LEDGER_PREFIX = ".resolve-ledger-"
 
 
@@ -209,7 +211,7 @@ def proposed_contradictions(
     try:
         from .build_index import default_index_dir
         from .dream import read_contradiction_verdicts
-        from .links import build_graph
+        from .outbox_edit import effective_graph
         from .telemetry import default_telemetry_dir
 
         td = telemetry_dir or default_telemetry_dir(memory_dir)
@@ -218,7 +220,7 @@ def proposed_contradictions(
         if not live:
             return []
         settled: Set[Tuple[str, str]] = set()
-        graph = build_graph(memory_dir, index_dir or default_index_dir(memory_dir))
+        graph = effective_graph(memory_dir, index_dir or default_index_dir(memory_dir))  # OUT-1
         if graph is not None:
             for rel in ("contradicts", "supersedes"):
                 for src, tgt in graph.all_typed_edges(rel):
@@ -230,8 +232,8 @@ def proposed_contradictions(
             if pair in settled or pair in resolved:
                 continue
             if not (
-                os.path.isfile(os.path.join(memory_dir, f"{a}.md"))
-                and os.path.isfile(os.path.join(memory_dir, f"{b}.md"))
+                os.path.isfile(effective_path(memory_dir, a))
+                and os.path.isfile(effective_path(memory_dir, b))
             ):
                 continue
             rec = live[pair]
@@ -269,9 +271,9 @@ def unresolved_contradictions(
     """
     try:
         from .build_index import default_index_dir
-        from .links import build_graph
+        from .outbox_edit import effective_graph  # OUT-1: a verdict edits the outbox copy
 
-        graph = build_graph(memory_dir, index_dir or default_index_dir(memory_dir))
+        graph = effective_graph(memory_dir, index_dir or default_index_dir(memory_dir))
         if graph is None:
             return []
         declared: Dict[Tuple[str, str], Set[str]] = {}
@@ -307,7 +309,7 @@ def pair_edge_state(memory_dir: str, a: str, b: str, *, repo_root: Optional[str]
 
         for side, other in ((a, b), (b, a)):
             try:
-                with open(os.path.join(memory_dir, f"{side}.md"), "r", encoding="utf-8") as fh:
+                with open(effective_path(memory_dir, side), "r", encoding="utf-8") as fh:
                     rels = parse_typed_relations(parse_frontmatter(fh.read()))
                 if normalize_slug(other) in {normalize_slug(t) for t in rels.get("contradicts", [])}:
                     declared_by.append(side)
@@ -365,7 +367,7 @@ def _drop_declarations(
     captured: Dict[str, str] = {}
     changed: List[str] = []
     for side in declared_by:
-        path = os.path.join(memory_dir, f"{side}.md")
+        path = effective_path(memory_dir, side)
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 captured[path] = fh.read()
@@ -463,7 +465,7 @@ def apply_resolve_verdict(
             return result
 
         for side in (first, second):
-            if not os.path.isfile(os.path.join(memory_dir, f"{side}.md")):
+            if not os.path.isfile(effective_path(memory_dir, side)):
                 result["error"] = f"memory not found: {side}.md"
                 return result
         state = pair_edge_state(memory_dir, first, second, repo_root=repo_root)
@@ -567,7 +569,7 @@ def _description_of(memory_dir: str, name: str) -> str:
     try:
         from .build_index import extract_description
 
-        path = os.path.join(memory_dir, f"{name}.md")
+        path = effective_path(memory_dir, name)
         with open(path, "r", encoding="utf-8") as fh:
             return extract_description(fh.read()).strip()
     except Exception:

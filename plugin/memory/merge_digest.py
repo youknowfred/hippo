@@ -130,7 +130,9 @@ def _contradicts_declared(a: str, b: str, memory_dir: str) -> bool:
 
         for src, tgt in ((a, b), (b, a)):
             try:
-                with open(os.path.join(memory_dir, f"{src}.md"), "r", encoding="utf-8") as fh:
+                from .outbox import effective_path  # OUT-1: a copy's edges are the live ones
+
+                with open(effective_path(memory_dir, src), "r", encoding="utf-8") as fh:
                     rels = parse_typed_relations(parse_frontmatter(fh.read()))
             except Exception:
                 continue

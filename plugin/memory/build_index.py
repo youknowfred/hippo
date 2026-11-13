@@ -171,6 +171,14 @@ class DenseTimeout(Exception):
     pass
 
 
+class DenseUnavailable(RuntimeError):
+    """OBS-11: the offline model cannot serve; ``reason`` is a recall_fallback token."""
+
+    def __init__(self, message: str, reason: str):
+        super().__init__(message)
+        self.reason = reason
+
+
 def _parse_timeout_env(name: str, default: float) -> float:
     """Parse a float timeout env var; a malformed value must NEVER crash module import."""
     try:
@@ -1003,7 +1011,7 @@ def _get_model(allow_download: bool):
     timeout to bound an import+load that was never going to succeed.
     """
     if dense_disabled():
-        raise RuntimeError("dense disabled via HIPPO_DISABLE_DENSE")
+        raise DenseUnavailable("dense disabled via HIPPO_DISABLE_DENSE", "dense_disabled")
     key = (DEFAULT_MODEL, bool(allow_download))
     if key in _MODEL_CACHE:
         return _MODEL_CACHE[key]
@@ -1017,7 +1025,7 @@ def _get_model(allow_download: bool):
     # so it must warm into the durable dir too — not just the offline read paths.
     cache_dir = ensure_fastembed_cache_path()
     if not allow_download and not _fastembed_model_cached(cache_dir):
-        raise RuntimeError(f"fastembed model not cached offline at {cache_dir}")
+        raise DenseUnavailable(f"fastembed model not cached offline at {cache_dir}", "model_not_warmed")
     from fastembed import TextEmbedding  # lazy: never imported at module load
 
     model = TextEmbedding(model_name=DEFAULT_MODEL)

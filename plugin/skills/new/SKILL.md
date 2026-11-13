@@ -252,4 +252,6 @@ clean. The output then says so on a `lands` line. Recall sees an outbox memory f
 prompt, marked `unshipped: in memory.outbox`; read it there, not in `.claude/memory/`. If the
 corpus asks for the outbox but this machine has not accepted it, the save goes to the working
 tree as usual and a warning says which command turns it on — surface that line to the user. The
-`user` and `private` tiers are never redirected.
+`user` and `private` tiers are never redirected. Outbox memories land with `hippo ship`: it
+previews by default, and only the user's `hippo ship --yes` creates the branch (one commit, never
+pushed). Suggest it when the user asks how to land them; never run `--yes` on your own.

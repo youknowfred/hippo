@@ -11,6 +11,39 @@ Update via the marketplace (`/plugin`). Most releases need nothing more. When a 
 Python dependencies, the CHANGELOG entry says **re-bootstrap: yes** — run `/hippo:bootstrap` again to
 rebuild the venv. `/hippo:doctor`'s `plugin_version` / `bootstrap` checks flag a stale bootstrap.
 
+### v1.43.0: a write gate, policy keys that ask once, and two commands that moved
+
+**Restart open sessions.** The update adds a `PreToolUse` hook on file writes into the corpus. A
+session started before the update keeps its old hook list until it restarts. The hook warns by
+default and the write goes ahead.
+
+**`write_path` and `gate` in `hippo.json` need one yes per machine.** These two keys change what
+hippo does (where a save lands, whether a write can be refused), and `hippo.json` arrives by pull.
+Declaring one does nothing on a machine until you run `hippo trust policy --accept` there; doctor
+names a declared key that is waiting. Changing the value asks again. `budgets`, `floor_sections`,
+`floor_lint` and `acknowledged_findings` are read directly.
+
+**The outbox is a first slice.** With `write_path: outbox` accepted, saves stay out of the working
+tree and recall still sees them. Tend verdicts still write to the working tree, and nothing ships
+the outbox yet: until the release that adds `hippo ship`, landing a memory means moving its file
+into the corpus dir, committing, and consenting it with `hippo trust review`. On a corpus several
+checkouts write to, wait for that release.
+
+**Doctor may warn about a stale floor sweep.** The floor-calibration line now warns when the
+recorded sweep was taken at another corpus fingerprint or with another model.
+`hippo eval --floor-sweep` refreshes it (it loads the embedding model: a few seconds).
+
+**Two eval commands run from a checkout now.** They were evaluation tooling, not runtime:
+
+| Before | Now |
+|---|---|
+| `hippo eval --calibrate` | from a checkout: `PYTHONPATH=plugin python -m bench.calibrate_thresholds --memory-dir DIR --hard-set PATH` |
+| `hippo eval --ab HIPPO_DREAM` | from a checkout: `PYTHONPATH=plugin python -m bench.dream_eval` |
+
+**A save refused for its floor line.** If your corpus declares `floor_lint.max_line`, a `user` or
+`feedback` save with no `hook` is refused when its description would not fit that line. Pass
+`--hook` (`hook` on the `new_memory` tool) with the short line you want in `MEMORY.md`.
+
 ### v1.42.7: a torn index heals itself
 
 Two index builds running at once, for example SessionStart refreshes in several sessions on one

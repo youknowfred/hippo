@@ -671,10 +671,13 @@ def recall(
         # which is exactly what an earlier draft of this item did and blew the p95 gate.
         sims_out: List = []
         band_corr = _band_corroborators(bm25)  # HOT-10: None when the soft band is off
+        why: List[str] = []  # OBS-11: why the dense lane could not run (recall_fallback)
         raw_dense_rows = _dense_rank_rows(
             query, idx, subfloor_out=subfloor, watch_rows=watch_rows, sims_out=sims_out,
-            corroborated=band_corr,
+            corroborated=band_corr, why_out=why if drop_log is not None else None,
         )
+        if drop_log is not None:
+            drop_log["dense_why"] = why
         # MSR-4: the floor cut's near-misses — recorded IMMEDIATELY so the hard-skip
         # abstention return below still carries them (that is the whole point: the
         # abstention arm finally gets its "how close was the miss" evidence).

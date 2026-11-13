@@ -87,7 +87,7 @@ def test_token_first_seen_in_a_lower_tier_entry_orders_before_upper_tier_chunks(
     _assert_identical_to_recompute(_merge(proj, user))
 
 
-def test_slug_collision_recounts_only_the_losing_tier(monkeypatch):
+def test_slug_collision_recounts_nothing_and_masks_the_losing_tier(monkeypatch):
     proj = _tier([("shared", ["deploy", "pipeline"]), ("other", ["widget"])], [(0, ["deploy"])])
     user = _tier(
         [("shared", ["deploy", "user", "copy"]), ("solo", ["tabs"])],
@@ -103,8 +103,10 @@ def test_slug_collision_recounts_only_the_losing_tier(monkeypatch):
     monkeypatch.setattr(RT, "compute_bm25_stats", spy)
     merged = _merge(proj, user)
     assert [e["name"] for e in merged.entries] == ["shared", "other", "solo"]
-    # Only the user tier's 2 kept docs (solo + its chunk) were recounted, not all 5.
-    assert calls == [2]
+    # OUT-1: the losing tier keeps its persisted stats with the hidden docs masked out
+    # (it used to recount its 2 kept docs); nothing is recounted, and the numbers still
+    # equal a full recompute below.
+    assert calls == []
     monkeypatch.setattr(RT, "compute_bm25_stats", real)
     _assert_identical_to_recompute(merged)
 

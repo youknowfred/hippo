@@ -43,6 +43,7 @@ from memory import atomic as A
 
 from .crash_scenarios_gate import scenarios as _gate_scenarios
 from .crash_scenarios_outbox import scenarios as _outbox_scenarios
+from .crash_scenarios_ship import scenarios as _ship_scenarios
 from .crash_scenarios_user_tier import scenarios as _user_tier_scenarios
 from .crash_scenarios_warm import scenarios as _warm_scenarios
 
@@ -120,7 +121,10 @@ CRASH_CONTRACT = {
     ("gate_cli", "install"): ("detected",),  # GAT-2 pre-commit hook: exit 1, "nothing was changed", prior hook intact
     ("outbox", "_update_manifest"): ("detected",),  # OUT-1: prior manifest kept; the save names the miss
     ("outbox", "copy_up"): ("detected",),  # OUT-1: raises; no partial copy; the floor edit reports it
+    ("outbox_edit", "_drop_manifest_row"): ("detected",),  # OUT-1 tend half: prior manifest kept; the removal names the row
     ("user_tier_git", "sync_ignore_block"): ("detected",),  # OWN-1: error named, .gitignore intact; a machine-local save refuses
+    ("outbox", "_record_floor_base"): ("detected",),  # OUT-2: raises before the floor copy exists; no copy without its base
+    ("ship", "_edit_manifest"): ("detected",),  # OUT-2: prior manifest kept; False named; the branch still reads as in flight
 }
 
 
@@ -1074,6 +1078,7 @@ _SCENARIOS = [
     *_gate_scenarios(_arm, _snap, _assert_unchanged),  # GAT-2 site (tests/crash_scenarios_gate.py)
     *_outbox_scenarios(_arm, _snap, _assert_unchanged),  # OUT-1 sites (tests/crash_scenarios_outbox.py)
     *_user_tier_scenarios(_arm, _snap, _assert_unchanged),  # OWN-1 (tests/crash_scenarios_user_tier.py)
+    *_ship_scenarios(_arm, _snap, _assert_unchanged),  # OUT-2 sites (tests/crash_scenarios_ship.py)
     (("dream", "_apply_one"), "detected", scn_dream_apply_bridge_detected),
     (("dream_apply", "_undo_one_edge"), "detected", scn_dream_undo_detected),
     (("dream", "_apply_one"), "rolled_back", scn_dream_apply_refines_rolled_back),

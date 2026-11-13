@@ -313,9 +313,14 @@ def _dense_rank_rows(
     watch_rows: Optional[set] = None,
     sims_out: Optional[List] = None,
     corroborated: Optional[set] = None,
+    why_out: Optional[List] = None,
 ) -> List[int]:
     """RAW dense-matrix row indices ordered by descending cosine similarity, ABOVE the
     calibrated floor for ``index.model``, or [].
+
+    OBS-11: ``why_out`` (a caller-owned list) receives one ``recall_fallback`` token when the
+    dense lane could not run at all — no matrix, another model, the timeout, an exception.
+    A lane that ran and found nothing above the floor appends nothing.
 
     HOT-10: ``corroborated`` (from ``_band_corroborators``; ``None`` = band off) also admits
     description rows inside the soft band under the floor when they are in that set and at
@@ -350,8 +355,14 @@ def _dense_rank_rows(
     names) so "recall silently got worse after a model change" has a diagnosis surface.
     """
     if not index.dense_ready or index.dense is None:
+        if why_out is not None:
+            from .recall_fallback import unavailable_reason
+
+            why_out.append(unavailable_reason(index))
         return []
     if index.model and index.model != DEFAULT_MODEL:
+        if why_out is not None:
+            why_out.append("model_mismatch")
         return []
     try:
         import numpy as np
@@ -412,7 +423,11 @@ def _dense_rank_rows(
             elif not watch_rows:
                 break  # cap reached and nothing watched: nearer misses are all recorded
         return above
-    except Exception:  # incl. DenseTimeout -> degrade to BM25, never block/crash
+    except Exception as exc:  # incl. DenseTimeout -> degrade to BM25, never block/crash
+        if why_out is not None:
+            from .recall_fallback import exception_reason
+
+            why_out.append(exception_reason(exc))
         return []
 
 

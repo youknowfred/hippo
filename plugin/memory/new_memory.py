@@ -119,11 +119,12 @@ def _unresolvable_link_warnings(related: List[str], memory_dir: str) -> List[str
     """
     try:
         from .links import normalize_slug
-        from .provenance import _iter_memory_files
+        from .outbox_edit import iter_files  # OUT-1: an outbox memory resolves a link too
+        from .provenance import _iter_memory_files  # the other tiers' own walk
 
         corpus = {
             normalize_slug(os.path.splitext(os.path.basename(p))[0])
-            for p in _iter_memory_files(memory_dir)
+            for p in iter_files(memory_dir)
         }
         unresolved = [ln for ln in related if normalize_slug(ln) not in corpus]
         if not unresolved:
@@ -729,7 +730,9 @@ def check_candidate(
         # overwrite ``write_memory`` would then refuse. An on-disk collision always
         # routes to review, surfaced as a score-1.0 neighbor carrying the LIVE file's
         # description so the agent can choose update-existing / supersede / skip.
-        existing_path = os.path.join(memory_dir, f"{name}.md")
+        from .outbox import effective_path  # OUT-1: an outbox name collides like a corpus one
+
+        existing_path = effective_path(memory_dir, name)
         if os.path.isfile(existing_path):
             live_desc = ""
             try:
@@ -1331,12 +1334,14 @@ def promote_memory(
         md, repo = resolve_dirs()
         memory_dir = memory_dir or md
         repo_root = repo_root or repo
+        from .outbox import effective_path  # OUT-1: an outbox copy is the memory's live text
+
         src = os.path.join(memory_dir, f"{name}.md")
         result["from"] = src
-        if not os.path.isfile(src):
+        if not os.path.isfile(effective_path(memory_dir, name)):
             result["error"] = f"not found: {name}.md"
             return result
-        with open(src, "r", encoding="utf-8") as fh:
+        with open(effective_path(memory_dir, name), "r", encoding="utf-8") as fh:
             text = fh.read()
 
         fm = parse_frontmatter(text)
@@ -1439,17 +1444,24 @@ def promote_memory(
         # Destination write is durable — now (and only now) the project side moves out.
         import subprocess
 
-        proc = subprocess.run(
-            ["git", "-C", repo_root, "rm", "-q", "--", src],
-            capture_output=True,
-            text=True,
-            timeout=20,
+        from . import outbox_edit as OE  # OUT-1: removals stay direct; the copy goes too
+
+        if os.path.isfile(src):
+            proc = subprocess.run(
+                ["git", "-C", repo_root, "rm", "-q", "--", src],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            if proc.returncode != 0:
+                # git rm refuses untracked/ignored paths — the content already lives in the
+                # destination tier, so a plain remove loses nothing.
+                os.remove(src)
+            result["warnings"] += [ln for ln in [OE.removal_line(memory_dir, repo_root)] if ln]
+        result["warnings"] += [ln for ln in [OE.drop_copy(memory_dir, name, repo_root)] if ln]
+        result["floor_removed"] = _remove_floor_pointer(
+            memory_dir, name, floor_dir=OE.floor_dir_for_edit(memory_dir, repo_root)
         )
-        if proc.returncode != 0:
-            # git rm refuses untracked/ignored paths — the content already lives in the
-            # destination tier, so a plain remove loses nothing.
-            os.remove(src)
-        result["floor_removed"] = _remove_floor_pointer(memory_dir, name)
         try:
             from .build_index import refresh_index
 
