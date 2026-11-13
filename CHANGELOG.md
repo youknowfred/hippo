@@ -7,6 +7,61 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.46.1 — 2026-11-13 — "Follow-ups from the estate install"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, citation derivation still **6**, link cache still **6**, index schema still **8**,
+so nothing re-indexes. Two fixes for defects found while v1.45.0 was installed across an
+estate of four repos, and one measurement that changed no code.
+
+**Operator action: none required.** Things you may notice:
+- **A doctor error about a dream edge whose source memory is deleted goes away** after the
+  next `hippo dream` pass, which adds one line to the tracked `dream-ledger.jsonl`. Commit
+  that file the way you commit the corpus.
+- **`hippo setup --conventions --yes` says where it wrote.** On a corpus that saves to the
+  outbox it writes the outbox, and `hippo ship` carries the file.
+
+**Fixes**
+- **DRM-7 — a memory deleted outside the archive retires its dream edges.** A memory file
+  removed by a plain delete (a fold commit, a hand `git rm`) left its applied dream edges
+  active in the ledger with no stamp on disk, which doctor reports as an error naming each
+  edge. Now the promote move and every link pass on a trusted corpus retire an active edge,
+  with the cause `source-deleted`, when its source memory is in neither the corpus,
+  `archive/` nor the outbox and no readable memory file carries its stamp. A source that is
+  still there but lost its stamp is left to `hippo dream --retire-ghost`, as before. On a
+  copy of emgl's corpus the one such edge is retired by the first pass and doctor's line
+  reads clean (102 stamps reconcile).
+- **GAT-4 — the conventions refresh lands where the corpus's write path says.**
+  `hippo setup --conventions --yes` wrote the resolved corpus dir whatever the corpus asked
+  for: with `write_path: "outbox"` it changed the tracked `CONVENTIONS.md` in the working
+  tree, from a linked worktree it changed the main checkout's tracked file, and `hippo ship`
+  ignored a `CONVENTIONS.md` in the outbox. All four estate repos hit it on v1.45.0. Now:
+  - with the outbox honoured, `CONVENTIONS.md` (and `CONVENTIONS.local.md`, when lines move)
+    are written to the outbox and `hippo ship` carries them, classified like a memory (new,
+    waiting, stale, held, landed). The working tree is not touched. A conventions file in
+    the outbox that hippo did not record writing is held and never written over;
+  - from a linked worktree with a direct write path, the worktree's own corpus dir is
+    written, never the main checkout's;
+  - a plain checkout with a direct write path is unchanged.
+  Doctor's conventions line reads the outbox copy when hippo wrote one and says it is there
+  until `hippo ship`.
+
+**Measured, not changed**
+- **The floor diet at emgl's size.** On a copy of emgl's corpus with
+  `"budgets": {"floor_bytes": 8192}` declared, `hippo tend` proposes 95 demotions, one floor
+  line each, and applying all 95 takes the floor from 22,140 to 8,120 bytes. Each
+  `hippo tend next --kind floor` and each apply takes about 0.15 s once the trim-safety
+  replay is cached; with 200 prompts to replay, the first four calls take 5 to 7 s each. The
+  machine time is under a minute; the cost is 95 separate yeses. In outbox mode the 95
+  removals ship as one commit. The copy had no real prompt history (the replay ran on 200
+  synthetic prompts and flagged none), so which lines are safe to demote on the live corpus
+  is not measured here. Two things to know before declaring the budget: `budgets` is not a
+  consent-sensitive key, so it takes effect on merge with no `hippo trust policy --accept`;
+  and while the floor is over the budget, `hippo ship --yes` refuses any ship that makes the
+  floor bigger (a ship that removes at least as many bytes as it adds passes). A reviewed
+  batch for the diet is not built: one yes per write is a standing rule, and changing it is
+  the owner's call.
+
 ## v1.46.0 — 2026-11-13 — "Recall that reaches its memories"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
