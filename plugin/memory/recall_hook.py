@@ -292,6 +292,9 @@ def run_recall(
         # HOT-7: the prompt hook's lane request. recall() reads the corpus's declaration off
         # the manifest it loads; undeclared, the request only tags rows with their lane.
         lane_req = LaneRequest(human_text(raw_query), k, floor=floor) if hook else None
+        # HOT-9: a memory enters by expansion at most once per session (the episode buffer
+        # this hook already read keeps each turn's expansion entries).
+        expanded_before = {n for ep in session_episodes for n in (ep.get("expanded") or ())}
         results = recall(
             query,
             k=pool_k,
@@ -300,6 +303,7 @@ def run_recall(
             repo_root=repo_root,
             drop_log=drop_log,
             lanes=lane_req,
+            expanded_before=expanded_before or None,
         )
         # RUL-4: rules-plane pointers are EXTRA lines, not top-k competitors — split them out
         # so the floor-dedup slice below can never cut them (nor let them displace a corpus
@@ -475,6 +479,7 @@ def run_recall(
                     telemetry_dir=td,
                     session_id=session_id or None,
                     injected_chars=len(out) if out else None,
+                    expanded=[r.get("name") for r in results if r.get("via") == "graph"],
                 )
             except Exception:
                 pass

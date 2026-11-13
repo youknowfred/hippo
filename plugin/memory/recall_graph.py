@@ -6,6 +6,7 @@ re-exports."""
 
 from __future__ import annotations
 
+import math
 import os
 from typing import Dict, List, Optional, Tuple
 
@@ -46,6 +47,67 @@ _SUPERSEDED_PENALTY = 0.5
 # discounted score actually beats an organic candidate, never by displacing one for free.
 _GRAPH_SEEDS = 3  # override: HIPPO_GRAPH_SEEDS (0 disables expansion entirely)
 _NEIGHBOR_DISCOUNT = 0.5
+
+# HOT-9: hub damping. A neighbor's injected score is divided by f(in_degree / median), where
+# in-degree counts the edges expansion itself traverses INTO a node (wikilinks, plus typed
+# refines / derives-from), and the median is the corpus's, taken once per edge-list load. f is 1
+# at or below the median (no boost for a sparse node, no change for a typical one) and grows
+# sub-linearly above it, so a memory half the corpus links to stops riding every expansion.
+# A corpus whose median in-degree is 0 divides by 1. HIPPO_HUB_DAMPING=0 turns it off, and off
+# is byte-identical to before (no division happens at all).
+_HUB_DAMPING_FN = "sqrt"  # "sqrt" or "log" (1 + ln x); chosen from the three-corpus replay
+# Drop reasons the recall autopsy counts (MSR-4 drop_log): damped out of the final cut, and
+# suppressed because it already entered by expansion earlier in this session.
+HUB_DAMPED = "hub_damped"
+EXPANDED_THIS_SESSION = "expanded_this_session"
+
+
+def _hub_damping_on() -> bool:
+    raw = os.environ.get("HIPPO_HUB_DAMPING")
+    if raw is None or not raw.strip():
+        return True
+    return raw.strip().lower() not in ("0", "false", "off", "no")
+
+
+def _in_degree(rec: dict) -> int:
+    typed_in = rec.get("typed_in") or {}
+    return (
+        len(rec.get("in") or ())
+        + len(typed_in.get("refines") or ())
+        + len(typed_in.get("derives-from") or ())
+    )
+
+
+def _median_in_degree(edges: dict) -> float:
+    """The corpus median in-degree, at least 1 (the denominator for a median of 0)."""
+    degs = sorted(_in_degree(rec) for rec in edges.values())
+    if not degs:
+        return 1.0
+    mid = len(degs) // 2
+    median = degs[mid] if len(degs) % 2 else (degs[mid - 1] + degs[mid]) / 2.0
+    return float(median) if median > 0 else 1.0
+
+
+def _hub_divisor(in_degree: int, median: float) -> float:
+    x = in_degree / median
+    if x <= 1.0:
+        return 1.0
+    return math.sqrt(x) if _HUB_DAMPING_FN == "sqrt" else 1.0 + math.log(x)
+
+
+def _expansion_drops(notes: dict, final: set, cut: Optional[float]) -> List[Tuple[int, str, float]]:
+    """``(entry index, reason, score)`` for the two HOT-9 drops, off ``_expand_neighbors``'
+    ``notes``: a damped neighbor absent from the final results whose UNDAMPED score would have
+    cleared the final cut (``cut`` is the lowest final score, None when results were short of
+    k), and a suppressed already-expanded neighbor absent from the final results."""
+    out: List[Tuple[int, str, float]] = []
+    for j, (undamped, damped) in sorted((notes.get("damped") or {}).items()):
+        if j not in final and (cut is None or undamped >= cut):
+            out.append((j, HUB_DAMPED, damped))
+    for j, score in sorted((notes.get("expanded_before") or {}).items()):
+        if j not in final:
+            out.append((j, EXPANDED_THIS_SESSION, score))
+    return out
 
 
 def _drift_patch(entry: dict, memory_dir: str) -> dict:
@@ -180,8 +242,18 @@ def _expand_neighbors(
     edges: Optional[dict],
     superseded: Optional[Dict[int, List[str]]] = None,
     draft_seeds: Optional[set] = None,
+    *,
+    expanded_before: Optional[set] = None,
+    notes: Optional[dict] = None,
 ) -> Tuple[List[Tuple[int, float, Optional[str]]], set]:
     """1-hop neighbor expansion (GRA-1): inject linked memories at a discounted score.
+
+    HOT-9: each neighbor's injected score is hub-damped (see ``_hub_divisor``), and a
+    non-seed neighbor whose NAME is in ``expanded_before`` (the names that already entered
+    by expansion earlier in this session; None outside a hook session) is neither injected
+    nor endorsed — it keeps only its organic standing. ``notes`` (an optional out-param)
+    collects ``damped`` ``{j: (undamped, damped)}`` and ``expanded_before`` ``{j: score}`` for
+    the drop autopsy (``_expansion_drops``).
 
     Takes the ALREADY-penalized candidate list (post-fusion, post-invalidation re-sort),
     seeds on its top-N entries, and unions their outbound+inbound 1-hop neighbor stems from
@@ -237,6 +309,7 @@ def _expand_neighbors(
         name_to_idx = {e.get("name"): j for j, e in enumerate(entries)}
         organic_score = {i: score for i, score, _state in penalized}
         injected: dict = {}  # entry idx -> best discounted seed score
+        median = _median_in_degree(edges) if _hub_damping_on() else None  # HOT-9: once per load
         endorsed_seeds: set = set()  # seeds that are other seeds' 1-hop neighbors (GRF-2)
         for si, sscore, _sstate in seeds:
             rec = edges.get(entries[si].get("name"))
@@ -304,6 +377,19 @@ def _expand_neighbors(
                         endorsed_seeds.add(j)
                     continue
                 cand = sscore * _NEIGHBOR_DISCOUNT
+                if expanded_before and stem in expanded_before:
+                    if notes is not None:  # HOT-9: once per session by expansion
+                        prior = notes.setdefault("expanded_before", {})
+                        prior[j] = max(prior.get(j, float("-inf")), cand)
+                    continue
+                if median is not None:
+                    div = _hub_divisor(_in_degree(edges.get(stem) or {}), median)
+                    if div > 1.0:
+                        if notes is not None:
+                            was = notes.setdefault("damped", {}).get(j)
+                            if was is None or cand > was[0]:
+                                notes["damped"][j] = (cand, cand / div)
+                        cand = cand / div
                 if cand > injected.get(j, float("-inf")):
                     injected[j] = cand
         if not injected and not endorsed_seeds:
