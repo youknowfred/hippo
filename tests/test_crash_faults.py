@@ -43,6 +43,7 @@ from memory import atomic as A
 
 from .crash_scenarios_gate import scenarios as _gate_scenarios
 from .crash_scenarios_outbox import scenarios as _outbox_scenarios
+from .crash_scenarios_rollup import scenarios as _rollup_scenarios
 from .crash_scenarios_ship import scenarios as _ship_scenarios
 from .crash_scenarios_user_tier import scenarios as _user_tier_scenarios
 from .crash_scenarios_warm import scenarios as _warm_scenarios
@@ -921,40 +922,6 @@ def scn_jit_state_intact(tmp_path, monkeypatch):
     assert not [f for f in leftovers if f.endswith(".json")], "state absent, never partial"
 
 
-def scn_rollup_update_detected(tmp_path, monkeypatch):
-    """OBS-1: a torn accumulator write is reported (the fold returns False) and the open
-    day's row keeps its prior bytes."""
-    from memory import telemetry_rollup as TR
-
-    td = str(tmp_path / "tele")
-    os.makedirs(td)
-    assert TR.record_prompt(td, trigger="human")
-    path = os.path.join(td, TR._TODAY_NAME)
-    before = _snap(path)
-    _arm(monkeypatch, "telemetry_rollup", "_update")
-    assert TR.record_prompt(td, trigger="human") is False
-    _assert_unchanged(before)
-
-
-def scn_rollup_trim_intact(tmp_path, monkeypatch):
-    """OBS-1: a torn 365-day trim is silent and costs nothing: the finished day stays
-    appended and the new day still folds."""
-    from memory import telemetry_rollup as TR
-
-    td = str(tmp_path / "tele")
-    os.makedirs(td)
-    monkeypatch.setattr(TR, "MAX_DAYS", 1)
-    t0 = 1_790_000_000.0
-    assert TR.record_prompt(td, trigger="human", now=t0)
-    assert TR.record_prompt(td, trigger="human", now=t0 + 86400)  # roll 1: no trim needed
-    _arm(monkeypatch, "telemetry_rollup", "_append_finalized")
-    assert TR.record_prompt(td, trigger="human", now=t0 + 2 * 86400)  # roll 2: the trim tears
-    with open(os.path.join(td, TR._ROLLUP_NAME), encoding="utf-8") as fh:
-        rows = [json.loads(line) for line in fh if line.strip()]
-    assert [r["date"] for r in rows] == [TR._today(t0), TR._today(t0 + 86400)]
-    assert TR.read_rollups(td, now=t0 + 2 * 86400)[-1]["hook"]["prompts"] == 1
-
-
 def scn_rollup_drain_spool_detected(tmp_path, monkeypatch):
     """OBS-2: a torn spool truncation fails the fold loudly and keeps both files, so the
     next fold counts each spooled use exactly once."""
@@ -1125,8 +1092,7 @@ _SCENARIOS = [
     (("staleness", "set_invalid_after"), "rolled_back", scn_invalid_after_rolled_back),
     (("trust", "_write_registry_doc"), "detected", scn_trust_registry_detected),
     (("trust_review", "keep_consented_baselines"), "intact", scn_trust_baseline_store_intact),
-    (("telemetry_rollup", "_update"), "detected", scn_rollup_update_detected),
-    (("telemetry_rollup", "_append_finalized"), "intact", scn_rollup_trim_intact),
+    *_rollup_scenarios(_arm, _snap, _assert_unchanged),  # OBS-1 (tests/crash_scenarios_rollup.py)
     (("telemetry_rollup", "_drain_spool"), "detected", scn_rollup_drain_spool_detected),
     (("tend", "_write_state"), "detected", scn_tend_state_detected),
     (("tend_queue", "_write_cache"), "intact", scn_tend_cache_intact),
