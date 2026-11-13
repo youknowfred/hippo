@@ -106,6 +106,11 @@ These may change at any release without a major bump — do not build on them:
   `review` (added in v1.42.0), the internal `recall_hook`, every tool's `annotations` and
   `outputSchema`, and the order `tools/list` returns. STABILITY v2 freezes the v2 names at v2.0;
   until then they are additions, not promises.
+- **`hippo ship`** — the verb, its flags (`--yes`, `--json`, `--base`, `--branch`, `--drop`,
+  `--mine`), its output and exit codes, the `hippo/ship-<time>` branch name, the commit message,
+  the manifest's `shipped` stamp and the outbox's `.floor-base` file. A CLI-only addition (no MCP
+  tool); STABILITY v2 classifies it. That it never fetches, never pushes, never touches HEAD,
+  the index or the working tree, and never carries a deletion will not loosen.
 - **The `recall_hook` MCP tool** — internal: the opt-in warm-recall hook (`hippo setup --warm`)
   calls it, never a model or a skill. Its inputs, its reply and the handshake files it shares with
   the recall hook may change in any release; the `hippo setup` verb is unfrozen too.
@@ -178,6 +183,14 @@ call site by AST, fails if one is unregistered, tears each registered site once
 in-process, and runs the kill lane against the two long-running verbs. This section is
 asserted against that registration — the published classes and chain names above cannot
 drift from what the tests enforce.
+
+`hippo ship` adds two sites, both **detected**: the floor copy's recorded base text (written
+create-only, before the copy, so a torn write leaves no copy without its base) and the
+ship's one compare-and-swap on the outbox manifest (the shipped stamp, `--drop`'s row
+removal, `--mine`'s new base), which keeps the prior manifest when torn. The commit itself is
+git plumbing against a temporary index, and the branch is created create-only; a crash
+between the branch and the stamp is read on the next run from the branch itself (its tree
+holds the bytes), so the files count as in flight, not as new.
 
 ## Support policy
 

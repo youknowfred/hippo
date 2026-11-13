@@ -42,9 +42,8 @@ def check_outbox(ctx: DoctorContext) -> Dict[str, str]:
                 pieces.append("floor change pending")
             parts.append(
                 f"{n} memor{'y' if n == 1 else 'ies'} waiting in the outbox ({st['dir']}): "
-                f"{', '.join(pieces)}; recall sees them; they are not in git until they are moved "
-                "into the corpus dir (copy each file into it, commit, delete the outbox copy, then "
-                "consent the new files with `hippo trust review`)"
+                f"{', '.join(pieces)}; recall sees them; they are not in git until `hippo ship` "
+                "batches them into one commit on a new branch (it previews first and never pushes)"
             )
             if st["withheld"]:
                 warn = True

@@ -113,6 +113,8 @@ CORPUS_RMW_SITES = {
     ("outbox_edit", "_drop_manifest_row"),  # a removal's outbox manifest row
     ("outbox", "_update_manifest"),  # the outbox manifest: two sessions saving at once
     ("outbox", "copy_up"),  # create-only-while-absent (expected=None)
+    ("outbox", "_record_floor_base"),  # OUT-2: the floor copy's base text, create-only
+    ("ship", "_edit_manifest"),  # OUT-2: the shipped stamp, --drop, --mine
 }
 
 # Plain atomic writers that are NOT corpus read-modify-writes, each with why.
