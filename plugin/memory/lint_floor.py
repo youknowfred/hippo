@@ -300,7 +300,7 @@ def main(argv=None) -> int:
     )
     args = parser.parse_args(argv)
 
-    memory_dir, _ = resolve_dirs()
+    memory_dir, repo_root = resolve_dirs()
     memory_dir = args.memory_dir or memory_dir
     if args.trim_report:
         print(render_trim_report(trim_safety_report(memory_dir)))
@@ -309,8 +309,11 @@ def main(argv=None) -> int:
     v = floor_violations(memory_dir)
     rebloat, missing = v["rebloat"], v["missing_targets"]
     gov_line = format_governance_summary(floor_governance(memory_dir))
+    from .floor_rules import print_report  # RUL-10: informational; never moves the exit code
+
     if not rebloat and not missing and not gov_line:
         print(f"MEMORY.md floor invariant holds ✅ (memory links only under {_sections_label(memory_dir)})")
+        print_report(memory_dir, None if args.memory_dir else repo_root)
         return 0
     if gov_line:
         print(gov_line)
@@ -322,6 +325,7 @@ def main(argv=None) -> int:
         print(f"floor link rot ({len(missing)}): floor pointers to missing files")
         for item in missing:
             print(f"  • {item['file']} (under '{item['section']}')")
+    print_report(memory_dir, None if args.memory_dir else repo_root)
     return 1
 
 

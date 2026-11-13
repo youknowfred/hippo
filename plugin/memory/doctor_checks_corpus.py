@@ -208,16 +208,27 @@ def check_floor_governance(ctx: DoctorContext) -> Dict[str, str]:
 
         gov = floor_governance(ctx.memory_dir)
         line = format_governance_summary(gov)
+        restates = _floor_restates_sentence(ctx)  # RUL-10: informational, never the status
         if line is None:
             declared = " (floor_lint policy declared)" if gov.get("policy_declared") else ""
             return {
                 "status": "ok",
                 "message": f"floor governance: MEMORY.md {gov['bytes']:,}B — under the "
-                f"{gov['warn_bytes']:,}B warn line{declared}.",
+                f"{gov['warn_bytes']:,}B warn line{declared}.{restates}",
             }
-        return {"status": "warn", "message": f"floor governance: {line}"}
+        return {"status": "warn", "message": f"floor governance: {line}{restates}"}
     except Exception as exc:
         return {"status": "ok", "message": f"floor governance: check skipped ({exc})."}
+
+
+def _floor_restates_sentence(ctx: DoctorContext) -> str:
+    """RUL-10: '' or one sentence on floor lines an always-loaded rule already carries."""
+    try:
+        from .floor_rules import doctor_sentence, floor_restatements
+
+        return doctor_sentence(floor_restatements(ctx.memory_dir, ctx.repo_root)) if ctx.repo_root else ""
+    except Exception:
+        return ""
 
 
 def check_pack_drift(ctx: DoctorContext) -> Dict[str, str]:
