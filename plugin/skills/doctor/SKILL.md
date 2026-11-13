@@ -63,6 +63,8 @@ size, spent once the derivation is stamped; the ones in `.hippo/snapshots/`; v1.
 `.hippo-snapshots/`, with the `mv` into `.hippo/snapshots/`; and the copies worktrees carry
 in `.claude/worktrees/*/.claude/`, with a `find` that lists them),
 git degraded-mode, corpus trust,
+the corpus's `CONVENTIONS.md` (the plugin's current version, an earlier one, edited, or absent,
+with `hippo setup --conventions` to preview the refresh),
 frontmatter integrity, index corruption, index count vs corpus, hot-path p95 latency
 , index format version, pack drift, `<FILL-ME` templates, and the corpus-wide secret
 scan. Each line already

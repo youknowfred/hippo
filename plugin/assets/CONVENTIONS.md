@@ -1,3 +1,4 @@
+<!-- hippo-conventions: 7 -->
 # Memory corpus conventions
 
 This file documents the conventions the hippo memory engine actually implements — how a
@@ -5,6 +6,12 @@ memory file is shaped, what its typed fields mean, and how recall/reconsolidatio
 — so the rules live in the corpus where memories get written, not only in the plugin bundle a
 teammate may never open. `/hippo:init` seeds this file into `.claude/memory/` (idempotent —
 it never overwrites an existing copy).
+
+The comment on the first line is this text's version. Keep the copy verbatim: `/hippo:doctor`
+names a copy that is behind the plugin's or edited, and `hippo setup --conventions` previews
+refreshing it (on `--yes` it replaces the copy, first moving any lines of your own into
+`CONVENTIONS.local.md`). Put this corpus's own rules in `CONVENTIONS.local.md` beside this
+file: hippo never requires it, never overwrites it, and adds to it only on that `--yes`.
 
 This is reference material, not a memory: it is deliberately excluded from indexing,
 recall, and floor scanning by the same corpus-membership filter

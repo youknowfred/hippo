@@ -738,7 +738,7 @@ def _is_memory_filename(name: str) -> bool:
     ``MEMORY.full.md`` — it is a reference doc seeded into the corpus by ``/hippo:init``, not
     a memory, and must never be indexed, recalled, floor-scanned, or counted in corpus stats.
     """
-    return name.endswith(".md") and name not in ("MEMORY.md", "MEMORY.full.md", "CONVENTIONS.md")
+    return name.endswith(".md") and name not in ("MEMORY.md", "MEMORY.full.md", "CONVENTIONS.md", "CONVENTIONS.local.md")
 
 
 def _iter_memory_files(memory_dir: str):

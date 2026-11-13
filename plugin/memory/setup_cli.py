@@ -13,6 +13,7 @@ stays installed as the fallback, and the two settle every prompt so exactly one 
   hippo setup --warm --status         read-only: configured where, the servers, the paths
   hippo setup --worktree-copies       list the old derived-dir copies worktrees carry
   hippo setup --worktree-copies --remove DIR --yes   remove that one directory
+  hippo setup --conventions [--yes]   the corpus's CONVENTIONS.md vs the plugin's (``conventions``)
 
 Writes go through ``atomic.update_text_cas`` (Claude Code writes this file too), keep every
 other key, and never touch a file that does not parse. ``HIPPO_CLAUDE_SETTINGS`` points the
@@ -425,6 +426,12 @@ def _user_tier(args) -> int:
     return run(args)
 
 
+def _conventions(args) -> int:
+    from .conventions import run  # GAT-4
+
+    return run(args)
+
+
 def _mb(n: int) -> str:
     return f"{n / 1_048_576:.1f} MB" if n >= 104_858 else f"{max(n, 0) // 1024} KB"
 
@@ -475,6 +482,7 @@ _SETTINGS = {
     "warm": (_warm, "warm recall: the session's MCP server answers each prompt's recall"),
     "user_tier": (_user_tier, "a local git home for the user tier (git init; never pushes or pulls)"),
     "worktree_copies": (_worktree_copies, "old index/telemetry copies in worktrees: list them, remove one at a time"),
+    "conventions": (_conventions, "refresh the corpus's CONVENTIONS.md to the plugin's version, keeping local lines"),
 }
 
 
@@ -487,6 +495,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--warm", action="store_true", help=_SETTINGS["warm"][1])
     parser.add_argument("--user-tier", action="store_true", help=_SETTINGS["user_tier"][1])
     parser.add_argument("--worktree-copies", action="store_true", help=_SETTINGS["worktree_copies"][1])
+    parser.add_argument("--conventions", action="store_true", help=_SETTINGS["conventions"][1])
     parser.add_argument("--remove", metavar="DIR", default=None,
                         help="with --worktree-copies: the one directory to remove")
     parser.add_argument("--yes", action="store_true", help="apply the change (default: preview only)")

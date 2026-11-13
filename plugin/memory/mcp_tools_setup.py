@@ -230,6 +230,12 @@ def _tool_init(args: Dict[str, Any]) -> str:
         lines.append("✔ format marker stamped (.claude/memory/.format)")
     if r.get("conventions") == "seeded":
         lines.append("✔ CONVENTIONS.md seeded")
+    elif r.get("conventions") == "already_present" and r.get("memory_dir"):
+        from .conventions import doctor_line  # GAT-4: behind or edited is named, not refreshed
+
+        conv = doctor_line(r["memory_dir"])
+        if conv["status"] != "ok":
+            lines.append("⚠ " + conv["message"])
     link = r.get("symlink")
     if isinstance(link, dict):
         if link.get("status") in ("created", "already_correct"):
