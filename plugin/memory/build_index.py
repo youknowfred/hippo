@@ -42,6 +42,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .derived_dirs import derived_dir
 from .fm_access import fm_get
+from .index_sections import plan_sections, write_sections  # HOT-11: the digest sections' sub-index
 from .lanes import journal_globs, lane_of, lane_state
 from .provenance import (
     _iter_memory_files,
@@ -1218,6 +1219,7 @@ def build_index(
     if index_dir is None:
         index_dir = default_index_dir(memory_dir)
     ensure_self_ignoring_dir(index_dir)  # derived dir: mkdir + self-ignoring .gitignore (SEC-3)
+    started = time.monotonic()  # HOT-11: folded sections embed inside what the budget leaves
 
     texts: Dict[str, str] = {}
     sigs: Dict[str, List[int]] = {}
@@ -1225,6 +1227,7 @@ def build_index(
     entries = compute_corpus(
         memory_dir, texts_out=texts, sigs_out=sigs, body_chunks_out=body_chunks_by_entry
     )
+    sections = plan_sections(memory_dir, texts)  # HOT-11: None without a digest section
 
     # GRA-6: persist the resolved wikilink graph (links.json) from the texts this build
     # already read — zero extra file reads. Done BEFORE the dense work (and before the
@@ -1419,6 +1422,7 @@ def build_index(
         "bm25": bm25_stats,
         "head_commit": head_commit,
         "lanes": lane_state(memory_dir),  # HOT-7: what the entries' lanes were computed from
+        **({"sections": sections.record} if sections else {}),  # HOT-11: slug -> digest file
     }
 
     # COR-12: the matrix is durably in place BEFORE the manifest that references it is
@@ -1445,6 +1449,7 @@ def build_index(
             except Exception:
                 pass
     retire_dense(index_dir, manifest.get("dense_file"))
+    write_sections(index_dir, sections, allow_download=allow_download, deadline=started + DENSE_REFRESH_TIMEOUT_SECS, force=force)
     return manifest
 
 
@@ -1475,12 +1480,14 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
             memory_dir, _ = resolve_dirs()
         if index_dir is None:
             index_dir = default_index_dir(memory_dir)
+        started = time.monotonic()
         texts: Dict[str, str] = {}
         sigs: Dict[str, List[int]] = {}
         body_chunks_now: Dict[int, List[dict]] = {}
         entries_now = compute_corpus(
             memory_dir, texts_out=texts, sigs_out=sigs, body_chunks_out=body_chunks_now
         )
+        sections = plan_sections(memory_dir, texts)  # HOT-11
         old = _load_manifest(index_dir)
         if old is not None:
             old_hashes = [e.get("hash") for e in old.get("entries", [])]
@@ -1526,6 +1533,7 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
                 # relabels through build_index below, every embedding row reused by hash.
                 and [e.get("lane") for e in old.get("entries", [])] == [e.get("lane") for e in entries_now]
                 and old.get("lanes") == lane_state(memory_dir)
+                and old.get("sections") == (sections.record if sections else None)  # HOT-11
             )
             # IDX-1: a legacy (unbound) dense index falls through ONCE, to be verified and
             # rewritten bound — a torn one would otherwise be served until the next write.
@@ -1545,6 +1553,8 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
                         write_links_cache(index_dir, LinkGraph(memory_dir, texts=texts), sigs)
                 except Exception:
                     pass
+                # HOT-11: a section edit changes no main row; the sub-index catches up alone.
+                write_sections(index_dir, sections, allow_download=False, deadline=started + DENSE_REFRESH_TIMEOUT_SECS)
                 return old  # corpus unchanged + already as good as it can be -> no-op
         return build_index(
             memory_dir, index_dir, allow_download=False, preserve_on_dense_fail=True

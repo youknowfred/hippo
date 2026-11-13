@@ -371,6 +371,8 @@ def describe(
             hit_origin = _memory_origin(hit_text)
             if hit_origin:
                 tags.append(f"learned in {hit_origin}")
+            if h.get("digest"):  # HOT-11: a folded section — open the digest at its heading
+                tags.insert(0, f"folded section, {fname} line {h.get('line')}")
         if isinstance(score, (int, float)) and not (why and corpus == "rule"):
             tags.append(f"relevance {score:.3f}")
         if via == "graph":
@@ -405,6 +407,7 @@ def describe(
                 "score": float(score) if isinstance(score, (int, float)) else None,
                 "corpus": corpus,
                 "note": h.get("note"),
+                **({"file": fname, "line": h.get("line"), "section": True} if h.get("digest") else {}),  # HOT-11
             })
         desc = h.get("description") or ""
         cites = ""

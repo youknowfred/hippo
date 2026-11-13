@@ -695,6 +695,7 @@ def hard_set_resolvability(index: LoadedIndex, hard_set: List[dict]) -> Dict[str
     if not hard_set:
         return out
     names = {e.get("name") for e in index.entries}
+    names |= set(((index.manifest or {}).get("sections") or {}).get("slugs") or ())  # HOT-11
     for row in hard_set:
         cat = row.get("category") or _DEFAULT_CATEGORY
         rec = out.setdefault(cat, {"resolvable_n": 0, "n": 0})

@@ -136,6 +136,8 @@ def _drift_patch(entry: dict, memory_dir: str) -> dict:
     hashes, not just entry hashes, to notice a body-only edit -- see ``refresh_index``'s
     docstring). Mid-session, a query for a just-edited body fact may miss until then.
     """
+    if entry.get("digest"):
+        return entry  # HOT-11: a folded section is not its file's description; it heals at refresh
     try:
         path = os.path.join(memory_dir, entry["file"])
         with open(path, "r", encoding="utf-8") as fh:

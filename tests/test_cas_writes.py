@@ -158,6 +158,8 @@ NON_CORPUS_SITES = {
     ("gate_cli", "install"): "the git pre-commit hook, a whole document hippo owns (marker line), written only on --yes",
     ("setup_cli", "_backup"): "a fresh timestamped backup copy (the settings write itself is CAS)",
     ("promote_tend", "_write_cache"): "gitignored derived cross-corpus scan, keyed by a stat fingerprint (OWN-2)",
+    ("index_sections", "_write_matrix"): "gitignored derived index matrix under a fresh name no other build uses (IDX-1)",
+    ("index_sections", "_write_manifest"): "gitignored derived sub-index manifest, rebuilt whole by every index build",
 }
 
 
