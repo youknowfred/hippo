@@ -21,6 +21,11 @@ stay authored in frontmatter, and nothing CUR-1 preserved by hand is in it (a pa
 does not name is not derivable). A missing, torn, schema- or version-mismatched sidecar
 reads as absent, so every reader falls back to frontmatter, which is exactly today.
 
+Readers PREFER it (dual mode): ``Bound.cited`` returns a memory's sidecar paths when the
+sidecar is current AND its row was derived from this exact text, else the frontmatter's.
+Writers still write frontmatter (``new_memory``, reverify, rederive). ``HIPPO_INDEX_BINDING=0``
+is the kill switch: frontmatter only and no sidecar write, exactly the previous release.
+
 The main manifest and the dense file are untouched: the prompt hook loads the manifest on
 every prompt and must not pay for this. One ``git ls-files`` per build or refresh, never one
 per memory. Never raises from a public entry point.
@@ -42,6 +47,14 @@ from .provenance_citations import (
 
 BINDING_SCHEMA = 1
 BINDING_NAME = "citation_binding.json"
+
+# Kill switch (HOT-9's shape, outside the frozen HIPPO_DISABLE set): "0" means frontmatter
+# only and no sidecar write. Unset or any other value: readers prefer the index binding.
+INDEX_BINDING_ENV = "HIPPO_INDEX_BINDING"
+
+
+def binding_enabled() -> bool:
+    return os.environ.get(INDEX_BINDING_ENV, "").strip() != "0"
 
 
 def _versions() -> Tuple[int, int]:
@@ -202,6 +215,8 @@ def write_binding(
     when there is no git work tree to resolve against or anything failed (the sidecar then
     stays as it was; a reader treats a stale one row by row via ``row_for``). Never raises."""
     try:
+        if not binding_enabled():
+            return None
         if file_index is None:
             if repo_root is None:
                 from .provenance_env import git_root
@@ -227,6 +242,141 @@ def _write_doc(index_dir: str, doc: dict) -> None:
 
     os.makedirs(index_dir, exist_ok=True)
     write_json_atomic(binding_path(index_dir), doc, indent=None, sort_keys=True)
+
+
+# --------------------------------------------------------------------------- #
+# The reader accessor: the sidecar's paths when current for this text, else frontmatter's
+# --------------------------------------------------------------------------- #
+def index_dir_for(memory_dir: str) -> str:
+    """``build_index.default_index_dir`` without importing the index builder."""
+    override = os.environ.get("HIPPO_INDEX_DIR")
+    if override:
+        return override
+    from .derived_dirs import derived_dir
+
+    return derived_dir(memory_dir, "index")
+
+
+class Bound:
+    """One sidecar read for a corpus pass. ``cited(name, text, fallback)`` is THE accessor
+    every ``cited_paths`` reader goes through."""
+
+    def __init__(self, memory_dir: Optional[str] = None, index_dir: Optional[str] = None):
+        self.doc = None
+        try:
+            if binding_enabled() and (index_dir or memory_dir):
+                self.doc = read_binding(index_dir or index_dir_for(memory_dir))
+        except Exception:
+            self.doc = None
+
+    def row(self, name: str, text: str) -> Optional[dict]:
+        try:
+            return row_for(self.doc, name, text)
+        except Exception:
+            return None
+
+    def cited(self, name: str, text: str, fallback: Optional[List[str]] = None) -> List[str]:
+        """The sidecar's ``cited_paths`` when its row was derived from exactly ``text`` at
+        the current derivation versions; else ``fallback`` (the frontmatter's, read here
+        when not given)."""
+        row = self.row(name, text)
+        if row is not None:
+            return list(row.get("cited_paths") or [])
+        if fallback is None:
+            fallback = frontmatter_cited(text)
+        return list(fallback)
+
+
+def bound(memory_dir: Optional[str], index_dir: Optional[str] = None) -> Bound:
+    return Bound(memory_dir, index_dir)
+
+
+def drop_index_bound(memory_dir: str, work: List[dict]) -> Tuple[List[dict], int]:
+    """``(still_listed, dropped)``: the re-derivation worklist without the memories whose
+    index binding is current (readers already use the current extractor's binding for
+    them, so the per-memory rederive buys nothing). What stays is what the index cannot
+    derive: an error, no row, or a row derived from other text (an outbox copy, an edit
+    since the last refresh). Never raises; the input unchanged on any failure."""
+    try:
+        b = bound(memory_dir)
+        if b.doc is None:
+            return list(work), 0
+        from .outbox import effective_path
+
+        keep: List[dict] = []
+        for w in work:
+            name = w.get("name") or ""
+            ok = False
+            if not w.get("error"):
+                try:
+                    with open(effective_path(memory_dir, name), "r", encoding="utf-8") as fh:
+                        ok = b.row(name, fh.read()) is not None
+                except Exception:
+                    ok = False
+            if not ok:
+                keep.append(w)
+        return keep, len(work) - len(keep)
+    except Exception:
+        return list(work), 0
+
+
+def all_index_bound(memory_dir: str) -> bool:
+    """True when the binding is on and EVERY memory file has a current row (text read and
+    hashed, no YAML parse): the citation-derivation nudge has nothing left to ask for."""
+    try:
+        b = bound(memory_dir)
+        if b.doc is None:
+            return False
+        from .outbox_edit import iter_files
+
+        seen = False
+        for path in iter_files(memory_dir):
+            seen = True
+            with open(path, "r", encoding="utf-8") as fh:
+                if b.row(os.path.basename(path)[:-3], fh.read()) is None:
+                    return False
+        return seen
+    except Exception:
+        return False
+
+
+def review_lines(texts: Dict[str, str], repo_root: str, ref: Optional[str] = None) -> List[str]:
+    """The review packet's section: what each touched memory binds to, derived from its
+    body at ``ref`` (the working tree when None) with the current extractor, beside what its
+    frontmatter lists. Never raises."""
+    try:
+        if not texts:
+            return []
+        from .provenance_env import run_git
+
+        if ref:
+            raw = run_git(["ls-tree", "-r", "--name-only", "--full-tree", ref], repo_root)
+            files = [f for f in raw.split("\n") if f]
+            fi = file_index_from_list(files) if files else None
+        else:
+            fi = repo_file_index(repo_root)
+        if fi is None:
+            return []
+        lines = ["derived citations (what each touched memory binds to, from its body):"]
+        for stem in sorted(texts):
+            text = texts[stem]
+            row = derive_row(text, fi[0], fi[1])
+            cited, fm = row["cited_paths"], frontmatter_cited(text)
+            shown = ", ".join(cited) if cited else "(none)"
+            extra = []
+            lacks = [p for p in cited if p not in fm]
+            only = [p for p in fm if p not in cited]
+            if lacks:
+                extra.append(f"frontmatter lacks {', '.join(lacks)}")
+            if only:
+                extra.append(f"frontmatter also lists {', '.join(only)}")
+            if row["excluded"]:
+                extra.append(f"excluded by the memory: {', '.join(row['excluded'])}")
+            tail = f" ({'; '.join(extra)})" if extra else ""
+            lines.append(f"- `{stem}`: {shown}{tail}")
+        return lines
+    except Exception:
+        return []
 
 
 # --------------------------------------------------------------------------- #
@@ -299,6 +449,9 @@ def classify_path(path: str, text: str, row: dict) -> str:
 # Doctor (one line) and migrate --check's count
 # --------------------------------------------------------------------------- #
 def summary(memory_dir: str, index_dir: Optional[str] = None) -> str:
+    if not binding_enabled():
+        return (f"citation binding in the index: off ({INDEX_BINDING_ENV}=0); readers use "
+                "frontmatter cited_paths.")
     c = compare(memory_dir, index_dir)
     if c["state"] == "absent":
         return ("citation binding in the index: not built yet (the next index refresh "
@@ -309,12 +462,12 @@ def summary(memory_dir: str, index_dir: Optional[str] = None) -> str:
     tail = (f"; frontmatter cited_paths differ on {c['disagree']}" if c["disagree"]
             else "; frontmatter agrees on every one")
     return (f"citation binding in the index: current for {c['derived']} of {c['memories']} "
-            f"memories{tail}.")
+            f"memories, and staleness reads it for those{tail}.")
 
 
 def check_citation_binding(ctx) -> Dict[str, str]:
-    """Doctor's CHECKS entry: the sidecar's state, always ``ok`` (derived data; frontmatter
-    remains the binding readers use in this release)."""
+    """Doctor's CHECKS entry: the sidecar's state, always ``ok`` (derived data; a memory
+    without a current row falls back to its frontmatter)."""
     try:
         return {"status": "ok", "message": summary(ctx.memory_dir)}
     except Exception as exc:

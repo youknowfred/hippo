@@ -221,9 +221,19 @@ a fingerprint of the repo file list (one `git ls-files` per build). A memory re-
 when its text or the file list changed; a missing, torn or older-version sidecar reads as
 absent. `source_commit`, `cited_paths_exclude` and relations stay authored in frontmatter.
 
-In this release nothing reads it for staleness: doctor reports its state and how many
-memories' frontmatter `cited_paths` differ from it, and `hippo migrate --check` reports
-how many bindings the index already derives.
+Readers prefer it (dual mode): staleness, the SessionStart relevant-to-work line, the
+re-verify watermark, the JIT touch map, `recall --for-diff` and the outcome join use a
+memory's derived `cited_paths` when the sidecar is current and its row was derived from
+the memory's exact text, else its frontmatter `cited_paths`. Writers are unchanged:
+`new_memory`, reverify and rederive still write frontmatter. The tend `derivation` kind and
+the SessionStart citation-derivation note stop listing a memory whose index binding is
+current (doctor says so instead of asking for a re-derivation); the explicit rederive verb
+and its stamp still compare frontmatter. The review packet renders each touched memory's
+derived citations beside its frontmatter. Doctor reports the sidecar's state and how many
+memories' frontmatter differs from it; `hippo migrate --check` reports how many bindings the
+index already derives. `HIPPO_INDEX_BINDING=0` is frontmatter only, exactly as before.
+Citation rot, packs, exports and promoted rules deliberately keep reading frontmatter: they
+report on, or copy out, the committed field itself.
 
 ### Citation rot (LIF-3) — a vanished cited path is loud, never a silent shrink
 

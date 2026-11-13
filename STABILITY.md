@@ -108,7 +108,9 @@ These may change at any release without a major bump — do not build on them:
   `HIPPO_SIGNAL_COUNT` (the prompt hook's count-by-evidence rule; 0 turns it off) with
   `HIPPO_COUNT_BAND` and `HIPPO_COUNT_WIDE` (its two cosine margins),
   `HIPPO_SECTION_ROWS` (how many folded-section rows explicit recall lists after the memories;
-  0 turns them off), the
+  0 turns them off),
+  `HIPPO_INDEX_BINDING` (readers prefer the citation binding the index derives; 0 means
+  frontmatter `cited_paths` only and no sidecar write), the
   `HIPPO_INTENT_*` and `HIPPO_RESCUE_*` families). They exist for experimentation and move with
   retrieval work; the `HIPPO_*` prefix is reserved, but these specific knobs are not a contract.
 - **The Python API** — importing `memory.*` internals directly. hippo is consumed as a Claude Code

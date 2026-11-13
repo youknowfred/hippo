@@ -672,6 +672,10 @@ def run(
     sections: List[str] = (
         header + [""] + _render_ops(items) + [""] + _render_lints(lints, acked=acked, added=added)
     )
+    from .citation_binding import review_lines  # FMT-2: what each memory binds to, derived
+
+    cites = review_lines(texts, top, head_ref)
+    sections += [""] + cites if cites else []
     if not args.ci:
         sections.append("")
         if _dense_disabled():
