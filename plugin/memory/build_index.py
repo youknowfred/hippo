@@ -357,7 +357,7 @@ def tokenize(text: str) -> List[str]:
     lowered = text.lower()
     for m in _TOKEN_RE.finditer(lowered):
         tok = m.group(0)
-        if any(_is_cjk_char(ch) for ch in tok):
+        if not tok.isascii() and any(_is_cjk_char(ch) for ch in tok):  # ASCII is never CJK
             out.extend(_split_cjk_and_word_runs(tok))
             continue
         if len(tok) < 2 or tok in _STOPWORDS:
