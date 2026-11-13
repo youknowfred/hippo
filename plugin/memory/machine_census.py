@@ -205,8 +205,13 @@ def trust_census() -> dict:
             drift = untrusted_changes(root, os.path.join(root, ".claude", "memory"))
             n_changed = len(drift.get("changed") or [])
             n_added = len(drift.get("added") or [])
-            if drift.get("baseline") and (n_changed or n_added):
+            from .outbox import withheld as _outbox_withheld  # OUT-1: outbox copies count too
+
+            n_outbox = len(_outbox_withheld(os.path.join(root, ".claude", "memory"), root))
+            if drift.get("baseline") and (n_changed or n_added or n_outbox):
                 row["withholding"] = {"changed": n_changed, "added": n_added}
+                if n_outbox:
+                    row["withholding"]["outbox"] = n_outbox
         entries.append(row)
     return {
         "path": path,
@@ -510,8 +515,9 @@ def _render_trust(census: dict) -> List[str]:
         w = e.get("withholding")
         if w:
             lines.append(
-                f"    WITHHOLDING {w['changed']} changed / {w['added']} added — "
-                "re-consent in that project (`hippo trust review` there)"
+                f"    WITHHOLDING {w['changed']} changed / {w['added']} added"
+                + (f" / {w['outbox']} outbox" if w.get("outbox") else "")
+                + " — re-consent in that project (`hippo trust review` there)"
             )
     lines.append(
         "  rows are REPORT-ONLY pending owner decision Q2 — the per-row route is "

@@ -65,6 +65,7 @@ from .provenance import (
     reverify_file,
     run_git,  # unused here since the watermark-lane move; kept importable (tests reach it as R.run_git)
 )
+from .outbox import effective_path
 from .staleness import RunContext, find_stale, invalid_after_map, read_provenance, set_invalid_after
 from .staleness_policy import (
     DIAG_TYPE_KEY,
@@ -467,16 +468,16 @@ def semantic_reverify(
                 )
                 return result
             sfname = superseded_by if superseded_by.endswith(".md") else f"{superseded_by}.md"
-            successor_path = os.path.join(memory_dir, sfname)
+            successor_path = effective_path(memory_dir, sfname)  # OUT-1: copies count
             if not os.path.isfile(successor_path):
                 result["error"] = f"successor memory not found: {sfname}"
                 return result
-            if not os.path.isfile(os.path.join(memory_dir, fname)):
+            if not os.path.isfile(effective_path(memory_dir, fname)):
                 result["error"] = f"memory not found: {fname}"
                 return result
         if outcome in _OUTCOMES_THAT_CLEAR_STALENESS:
             repo_files, basename_index = build_repo_file_index(repo_root)
-            path = os.path.join(memory_dir, fname)
+            path = effective_path(memory_dir, fname)
             rv = reverify_file(path, repo_root, repo_files, basename_index, dry_run=dry_run)
             if rv["error"]:
                 result["error"] = rv["error"]
@@ -497,7 +498,7 @@ def semantic_reverify(
             # demotion mechanism) engages with no second manual command. A refusal here
             # (missing file, unparseable frontmatter) aborts before anything is logged,
             # mirroring every other refused write above.
-            path = os.path.join(memory_dir, fname)
+            path = effective_path(memory_dir, fname)  # OUT-1: an outbox copy is what demote edits
             if not os.path.isfile(path):
                 result["error"] = f"memory not found: {fname}"
                 return result
@@ -506,7 +507,9 @@ def semantic_reverify(
             # rendering the verdict. One write: the same set_invalid_after call receives
             # the timestamp (None → its own now-UTC default for an uncommitted successor).
             successor_ts = (
-                _successor_commit_iso(successor_path, repo_root)
+                _successor_commit_iso(  # OUT-1: the committed file's history, not its copy's
+                    os.path.join(memory_dir, os.path.basename(successor_path)), repo_root
+                )
                 if successor_path is not None
                 else None
             )
@@ -624,7 +627,7 @@ def snooze(
     try:
         telemetry_dir = telemetry_dir or default_telemetry_dir(memory_dir)  # OBS-9
         fname = name if name.endswith(".md") else f"{name}.md"
-        if not os.path.isfile(os.path.join(memory_dir, fname)):
+        if not os.path.isfile(effective_path(memory_dir, fname)):
             result["error"] = f"memory not found: {fname}"
             return result
         if dry_run:

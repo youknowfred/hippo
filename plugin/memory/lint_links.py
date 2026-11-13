@@ -34,15 +34,21 @@ from .links import TYPED_RELATIONS, LinkGraph, build_graph
 from .staleness import RunContext
 
 
-def lint(memory_dir: str, index_dir: Optional[str] = None) -> dict:
+def lint(memory_dir: str, index_dir: Optional[str] = None, *, effective: bool = False) -> dict:
     """Return a report dict. Pure / never raises / never writes.
 
     ``index_dir`` (GRA-6) opts into ``build_graph``'s persisted-cache fast path — the
     SessionStart producer passes it so the dispatcher's ONE corpus read stays the index
     refresh's own; a fresh cache makes this a stat sweep with zero file reads. The CLI
     keeps the full re-read (a diagnostic should read the source of authority directly).
+    ``effective`` (OUT-1, tend's link source) reads the outbox copies over the committed files.
     """
-    g = build_graph(memory_dir, index_dir=index_dir)
+    if effective:
+        from .outbox_edit import effective_graph
+
+        g = effective_graph(memory_dir, index_dir)
+    else:
+        g = build_graph(memory_dir, index_dir=index_dir)
     if g is None:
         return {
             "ok": False,

@@ -552,8 +552,10 @@ def apply_dedup_merge(
         "invalid_after": None,
     }
     try:
-        s_path = os.path.join(memory_dir, f"{survivor}.md")
-        l_path = os.path.join(memory_dir, f"{loser}.md")
+        from .outbox import effective_path  # OUT-1: the outbox copies are the live text
+
+        s_path = effective_path(memory_dir, survivor)
+        l_path = effective_path(memory_dir, loser)
         if survivor == loser:
             result["error"] = "survivor and loser are the same memory"
             return result

@@ -76,7 +76,18 @@ What each kind needs before its verdict:
 - **trust** — re-consent is its own gate: `hippo trust review` shows each change against
   the version consented to, and `hippo trust grant` takes the digest it prints (all of it,
   or `--files` for part). On Desktop the `trust` MCP tool does the same (action='review',
-  then 'grant'). Consent is never inferred.
+  then 'grant'). Consent is never inferred. An `outbox:<name>` item is a file in
+  `.claude/memory.outbox/` that hippo did not write on this machine: the same review shows
+  it, and a grant consents those bytes for the outbox only.
+
+**When the corpus saves to the outbox** (`"write_path": "outbox"` in `hippo.json`, accepted
+here): a verdict that edits a memory changes its copy in `.claude/memory.outbox/`, not the
+corpus folder, so there is nothing to commit and the item does not come back. If the memory
+is withheld on this machine the verdict is refused with the reason; review it with
+`hippo trust review` first. `archive` is a removal, not an edit: it still moves the file in the
+corpus folder (commit that yourself) and removes the outbox copy. For a `link` or `floor`
+fix by hand, edit the outbox copy when there is one; hippo did not write that edit, so
+consent it with `hippo trust review` before recall uses it.
 
 ## 3. Deferring
 

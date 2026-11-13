@@ -225,7 +225,9 @@ class _MergedPostings(Mapping):
     """
 
     def __init__(self, sources: Dict[str, list], order: List[str]):
-        self._sources = sources  # token -> [(plist, split, entry_off, chunk_shift), ...]
+        # token -> [(plist, split, entry_off, chunk_shift, drop), ...]; ``drop`` (OUT-1) is
+        # the sorted old doc ids a shadowed tier hides, else None.
+        self._sources = sources
         self._order = order
         self._built: Dict[str, List[List[int]]] = {}
 
@@ -235,11 +237,15 @@ class _MergedPostings(Mapping):
             return got
         slot = self._sources[tok]  # KeyError for an unknown token, like a dict
         merged: List[List[int]] = []
-        for plist, k, entry_off, _ in slot:  # all tiers' entry postings first...
-            if k:
+        for plist, k, entry_off, _, drop in slot:  # all tiers' entry postings first...
+            if drop is not None:
+                merged.extend(_unmasked(plist[:k], drop, entry_off))
+            elif k:
                 merged.extend(plist[:k] if not entry_off else [[d + entry_off, tf] for d, tf in plist[:k]])
-        for plist, k, _, chunk_shift in slot:  # ...then all tiers' body-chunk postings
-            if k < len(plist):
+        for plist, k, _, chunk_shift, drop in slot:  # ...then all tiers' body-chunk postings
+            if drop is not None:
+                merged.extend(_unmasked(plist[k:], drop, chunk_shift))
+            elif k < len(plist):
                 merged.extend([[d + chunk_shift, tf] for d, tf in plist[k:]])
         self._built[tok] = merged
         return merged
@@ -254,6 +260,70 @@ class _MergedPostings(Mapping):
         return len(self._order)
 
 
+def _unmasked(plist: List[List[int]], drop: List[int], shift: int) -> List[List[int]]:
+    """OUT-1: ``plist`` without the hidden docs, renumbered past them, then shifted."""
+    return [[d - bisect_left(drop, d) + shift, tf] for d, tf in plist if not _hidden(drop, d)]
+
+
+def _hidden(drop: List[int], d: int) -> bool:
+    i = bisect_left(drop, d)
+    return i < len(drop) and drop[i] == d
+
+
+def _shadow_mask(li: LoadedIndex, kept_entries: set) -> Tuple[List[int], Dict[str, int], List[int]]:
+    """OUT-1: what a tier that lost entries to a shadowing tier hides from its persisted
+    stats: ``(hidden old doc ids, sorted; {token: hidden docs holding it}; kept doc_len)``.
+    Work is over the HIDDEN docs only (a handful), never the tier's whole token stream."""
+    n_old = len(li.entries)
+    drop: List[int] = [i for i in range(n_old) if i not in kept_entries]
+    drop += [n_old + j for j, c in enumerate(li.body_chunks) if c.get("entry") not in kept_entries]
+    docs = li.entries + li.body_chunks
+    dtok: Dict[str, int] = {}
+    for i in drop:
+        for tok in set(docs[i].get("tokens") or []):
+            dtok[tok] = dtok.get(tok, 0) + 1
+    hidden = set(drop)
+    doc_len = [n for i, n in enumerate(li.manifest["bm25"]["doc_len"]) if i not in hidden]
+    return drop, dtok, doc_len
+
+
+def _masked_part_keys(stats: dict, li: LoadedIndex, mask, n_e: int, entry_off: int,
+                      chunk_shift: int, sources: dict, df: dict, keys: dict) -> None:
+    """OUT-1: ``_merge_bm25_stats``'s per-tier pass for a tier with hidden docs, equal to
+    recounting that tier's kept docs: df drops each hidden holder, a token whose first doc
+    was hidden moves to its next doc, and the tokens first seen in such a doc are re-ordered
+    by first occurrence there (what a recount's insertion order gives)."""
+    drop, dtok, _ = mask
+    old_e = len(li.entries)
+    docs = li.entries + li.body_chunks
+    firsts: Dict[str, int] = {}
+    moved_to: set = set()
+    for pos, (tok, plist) in enumerate(stats["postings"].items()):
+        if not plist:
+            continue
+        held = dtok.get(tok, 0)
+        if held >= len(plist):
+            continue  # only hidden docs held it: a recount never sees it
+        first_old = plist[0][0]
+        if held and _hidden(drop, first_old):
+            first_old = next(d for d, _ in plist if not _hidden(drop, d))
+            moved_to.add(first_old)
+        k = bisect_left(plist, [old_e])
+        sources.setdefault(tok, []).append((plist, k, entry_off, chunk_shift, drop))
+        df[tok] = df.get(tok, 0) + len(plist) - held
+        new = first_old - bisect_left(drop, first_old)
+        first = new + (entry_off if new < n_e else chunk_shift)
+        firsts[tok] = first_old
+        if tok not in keys or first < keys[tok][0]:
+            keys[tok] = (first, pos)
+    for doc in moved_to:
+        new = doc - bisect_left(drop, doc)
+        first = new + (entry_off if new < n_e else chunk_shift)
+        for rank, tok in enumerate(dict.fromkeys(docs[doc].get("tokens") or [])):
+            if firsts.get(tok) == doc and keys.get(tok, (None,))[0] == first:
+                keys[tok] = (first, rank)
+
+
 def _merge_bm25_stats(parts: List[Tuple[dict, int, int]]) -> dict:
     """PRF-6: ``compute_bm25_stats`` over the merged doc space, assembled from each tier's
     PERSISTED stats instead of re-counting every token on every prompt.
@@ -266,27 +336,36 @@ def _merge_bm25_stats(parts: List[Tuple[dict, int, int]]) -> dict:
     float bits included: tokens are ordered by their first merged doc (ties keep the owning
     tier's order, which is within-doc order) and IDF runs the same loop in that order (a
     test pins equality). ``parts`` is one ``(stats, n_entries, n_chunks)`` per tier, each
-    ``stats`` describing exactly that tier's KEPT docs (see ``_merge_loaded_indexes``).
+    ``stats`` describing exactly that tier's KEPT docs (see ``_merge_loaded_indexes``), or
+    (OUT-1) ``(persisted stats, n_entries, n_chunks, (li, mask))`` for a tier whose
+    persisted stats still describe docs a shadowing tier hid (``_shadow_mask``).
     """
-    n_entries_total = sum(n_e for _, n_e, _ in parts)
+    parts = [p if len(p) == 4 else (*p, None) for p in parts]
+    n_entries_total = sum(n_e for _, n_e, _, _ in parts)
     doc_len: List[int] = []
-    for stats, n_e, _ in parts:
-        doc_len.extend(stats["doc_len"][:n_e])
-    for stats, n_e, _ in parts:
-        doc_len.extend(stats["doc_len"][n_e:])
+    lens = [m[1][2] if m else stats["doc_len"] for stats, _, _, m in parts]
+    for dl, (_, n_e, _, _) in zip(lens, parts):
+        doc_len.extend(dl[:n_e])
+    for dl, (_, n_e, _, _) in zip(lens, parts):
+        doc_len.extend(dl[n_e:])
 
     sources: Dict[str, list] = {}
     df: Dict[str, int] = {}
     keys: Dict[str, Tuple[int, int]] = {}
     entry_off = 0
     chunk_off = n_entries_total
-    for stats, n_e, n_c in parts:
+    for stats, n_e, n_c, masked in parts:
         chunk_shift = chunk_off - n_e
+        if masked is not None:
+            _masked_part_keys(stats, masked[0], masked[1], n_e, entry_off, chunk_shift, sources, df, keys)
+            entry_off += n_e
+            chunk_off += n_c
+            continue
         for pos, (tok, plist) in enumerate(stats["postings"].items()):
             if not plist:
                 continue
             k = bisect_left(plist, [n_e])
-            sources.setdefault(tok, []).append((plist, k, entry_off, chunk_shift))
+            sources.setdefault(tok, []).append((plist, k, entry_off, chunk_shift, None))
             df[tok] = df.get(tok, 0) + len(plist)
             first = plist[0][0] + (entry_off if k else chunk_shift)
             if tok not in keys or first < keys[tok][0]:
@@ -389,7 +468,7 @@ def _merge_loaded_indexes(
             merged_chunks.append(nc)
             tier_chunks.append(nc)
         dropped = len(tier_entries) < len(li.entries)
-        kept_per_tier.append((li, dropped, tier_entries, tier_chunks))
+        kept_per_tier.append((li, dropped, tier_entries, tier_chunks, set(remap)))
 
     merged_dense = None
     if build_dense and dense_vectors:
@@ -398,19 +477,26 @@ def _merge_loaded_indexes(
         merged_dense = np.vstack(dense_vectors)
 
     # PRF-6: each tier contributes its persisted stats; a tier that lost entries to a
-    # higher tier's slug (a promoted memory lives in both) recounts only its own kept docs —
-    # first-wins means that is never the project tier, except under an outbox copy that
-    # shadows a committed memory (OUT-1), which costs one recount. A tier without usable persisted stats
+    # higher tier's slug (a promoted memory lives in both, or OUT-1's outbox copy shadows a
+    # committed memory) keeps its persisted stats too, with the hidden docs masked out
+    # (``_shadow_mask``: the same numbers a recount of its kept docs gives, at the cost of
+    # the hidden docs only, so a shadow never recounts the project tier per prompt). A tier
+    # without usable persisted stats recounts only its own kept docs; one with none at all
     # sends the whole merge back to one recompute over the merged tokens, as before.
-    parts: List[Tuple[dict, int, int]] = []
-    for li, dropped, tier_entries, tier_chunks in kept_per_tier:
+    parts: list = []
+    for li, dropped, tier_entries, tier_chunks, kept in kept_per_tier:
+        persisted = _persisted_bm25(li)
+        if dropped and persisted is not None:
+            mask = _shadow_mask(li, kept)
+            parts.append((persisted, len(tier_entries), len(tier_chunks), (li, mask)))
+            continue
         stats = (
             compute_bm25_stats(
                 [e.get("tokens") or [] for e in tier_entries]
                 + [c.get("tokens") or [] for c in tier_chunks]
             )
             if dropped
-            else _persisted_bm25(li)
+            else persisted
         )
         if stats is None:
             break
@@ -431,6 +517,8 @@ def _merge_loaded_indexes(
         "body_chunks": merged_chunks,
         "bm25": bm25,
     }
+    if merged_dense is None and any(li.dense_ready for li, _r, _l in loadeds):
+        manifest["fused_without_dense"] = True  # OBS-11: a tier, not the project, cost dense
     return LoadedIndex(manifest, merged_dense)
 
 

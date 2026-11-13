@@ -527,7 +527,12 @@ def archive_memory(
         fname = name if name.endswith(".md") else f"{name}.md"
         src = os.path.join(memory_dir, fname)
         if not os.path.isfile(src):
-            result["error"] = f"not found: {fname}"
+            from .outbox import effective_path  # OUT-1: an unshipped memory is not in git yet
+
+            result["error"] = f"not found: {fname}" + (
+                " (it exists only in the outbox, unshipped: demote it instead, or delete the "
+                "outbox copy)" if effective_path(memory_dir, fname) != src else ""
+            )
             return result
         referrers = _inbound_referrers(fname[:-3], memory_dir)
         if referrers is None:
@@ -583,12 +588,15 @@ def archive_memory(
                 return result
             _journal_move(memory_dir, fname, src, dest, "os.rename")
         result["moved"] = True
+        from .outbox_edit import drop_copy  # OUT-1: an archived memory's outbox copy goes too
+
+        drop_note = drop_copy(memory_dir, fname, repo_root)
         retire_err = _mark_dream_rows(
             memory_dir, dream_rows, "archived", archived_at_ts=None, archived_by="archive"
         )
         result["dream_edges_retired"] = [r.get("edge_id") for r in dream_rows]
-        if retire_err:
-            result["error"] = retire_err
+        if retire_err or drop_note:
+            result["error"] = retire_err or drop_note
         try:
             from . import build_index
 

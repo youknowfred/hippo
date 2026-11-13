@@ -164,6 +164,14 @@ it reports the missing floor instead of writing the working tree), and a torn ma
 keeps the prior manifest and the save names what did not land. Deletions never go through
 the outbox.
 
+In outbox mode the verdicts that edit an existing memory (tend's graduate, demote, keep-one,
+re-derive and baseline heal, typed edges, dream edges, the related-line fix) make no new write
+site: each site above is the same compare-and-swap, only aimed at the memory's outbox copy
+(made by the copy-up above on first edit), and a COR-16 rollback restores bytes into that
+copy. One site is new: a removal (archive, promote) drops the removed memory's outbox
+manifest row by compare-and-swap. It is **detected**: a torn drop keeps the prior manifest
+and the removal names what stayed.
+
 Two recovery stories are additionally pinned for hard kills (`kill -9` mid-verb):
 `pack_extract` re-runs refuse a partially-written dest **by name** (delete it and
 re-run clean), and `build_index` re-runs heal the index outright. A crash between a

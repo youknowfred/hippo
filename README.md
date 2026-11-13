@@ -401,7 +401,16 @@ outbox copy of a memory takes precedence over the committed one.
 - **Trust.** hippo records the hash of every file it writes into the outbox in this machine's
   trust registry, and recall injects an outbox file only while its bytes match. A file that
   arrived another way (dropped in, pulled, edited by hand) is withheld and counted by doctor;
-  if it shadows a committed memory, recall uses the committed one.
+  if it shadows a committed memory, recall uses the committed one. `hippo trust review` shows
+  such a file (as `outbox:<name>`) and `hippo trust grant` consents it.
+- **Edits go there too.** Every `/hippo:tend` verdict that changes an existing memory (graduate,
+  demote, keep one of a contradiction, re-derive citations, heal a baseline), and the other
+  hippo edits (typed edges, dream edges, the related-line fix), copy the memory into the outbox
+  on first edit and change the copy, so `git status` stays clean and the item does not come
+  back: tend reads what it wrote. A committed file this machine withholds is refused with the
+  reason, never copied. Removals are not edits: archive and promote still change the corpus
+  folder (commit those yourself) and remove the memory's outbox copy with it. Packs keep
+  writing the corpus folder and refuse a memory that has an outbox copy.
 - **Reads do not depend on the setting.** Turning it off never hides memories still in the
   outbox: recall and doctor keep seeing them.
 - **The floor.** The floor pointer goes into the outbox's copy of `MEMORY.md`. Claude Code
@@ -653,6 +662,11 @@ dismisses it on this machine.
   where a desktop session looked. Ask the desktop session
   to run hippo bootstrap once — its `status` output names the sibling install so you can see
   exactly this situation, and `/hippo:doctor` (or the `doctor` tool) flags it too.
+- **Some recalls run BM25-only and I don't know why.** The prompt hook records a
+  reason beside every BM25-only recall (the model not warmed, an index without vectors, another
+  model, the dense timeout, an error, dense turned off, a tier without vectors, or simply no
+  memory clearing the dense floor), and `/hippo:doctor`'s BM25-only line names the most common
+  one over 30 days with what to do about it.
 - **Recall comes back empty.** Almost always one of three things: **(a) bootstrap never ran**
   on this machine — dense recall is silently BM25-only until `/hippo:bootstrap` finishes;
   **(b) the corpus isn't trusted yet** — a freshly cloned or downloaded corpus injects

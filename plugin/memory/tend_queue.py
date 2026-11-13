@@ -108,13 +108,21 @@ def _src_trust(memory_dir: str, repo_root: str) -> List[dict]:
                "read it, then consent")
         for name in drift.get("added") or []
     ]
+    from .outbox import withheld  # OUT-1: an outbox copy hippo did not write here
+
+    out += [
+        _entry("trust", f"outbox:{name}", "an outbox copy whose bytes hippo did not write on "
+               "this machine; recall is withholding it", "read it, then consent or delete it")
+        for name in withheld(memory_dir, repo_root)
+    ]
     return out
 
 
 def _src_baseline(memory_dir: str, repo_root: str) -> List[dict]:
-    from .provenance import _iter_memory_files, parse_frontmatter
-    from .staleness import unresolvable_baseline_names
     from .fm_access import fm_get
+    from .outbox_edit import iter_files as _iter_memory_files  # OUT-1: the effective view
+    from .provenance import parse_frontmatter
+    from .staleness import unresolvable_baseline_names
 
     if not os.path.isdir(memory_dir):
         return []  # TND-8: no corpus, so no baselines; an unreadable one still fails the source
@@ -218,7 +226,7 @@ def _src_reverify(memory_dir: str, repo_root: str) -> List[dict]:
 def _src_link(memory_dir: str, repo_root: str) -> List[dict]:
     from .lint_links import lint
 
-    report = lint(memory_dir)
+    report = lint(memory_dir, effective=True)  # OUT-1: an outbox copy's links are the live ones
     out = []
     for d in report.get("dangling") or []:
         src = d["file"][:-3] if d["file"].endswith(".md") else d["file"]
@@ -251,7 +259,9 @@ def _src_floor(memory_dir: str, repo_root: str) -> List[dict]:
         out.append(_entry("floor", item["file"], "floor pointer names a memory that does not exist",
                           "remove the pointer or restore the memory"))
     try:
-        with open(os.path.join(memory_dir, "MEMORY.md"), "r", encoding="utf-8") as fh:
+        from .outbox import effective_path  # OUT-1: the floor copy a floor edit lands in
+
+        with open(effective_path(memory_dir, "MEMORY"), "r", encoding="utf-8") as fh:
             edge = over_hard_edge(fh.read(), read_floor_lint(memory_dir))
     except Exception:
         edge = None

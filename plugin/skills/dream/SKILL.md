@@ -11,7 +11,9 @@ derived self-query, watches what **co-fires**, and diffs that against the link g
 surface the latent edges the corpus is structurally missing —
 
 - **completion** — a body already *names* another memory (plain prose, or a dangling
-  `[[wikilink]]` that nearly resolves) but no edge exists. Highest precision.
+  `[[wikilink]]` that nearly resolves) but no edge exists. Applied only when recall has
+  also returned the pair together at least once (any nonzero co-fire): a name in the text
+  with no co-recall behind it is reported, never applied.
 - **bridge** — a transitive A–B–C pair (A–B and B–C linked, A–C absent) that co-fires:
   exactly the 2-hop miss the recall hook's 1-hop graph expansion turns into a hit once the
   edge exists.
@@ -24,7 +26,8 @@ and says so. **The empty pass is the norm** — a non-empty report is signal wor
 
 **Auto-apply is the shipped default (owner-ratified 2026-07-12), and it is REVERSIBLE
 AUTONOMY:** a bare pass applies only the Tier-A class above the calibrated bar (θ=0.90,
-cap 5/pass, bridges must co-fire mutually), every edge stamped and one-command undoable,
+cap 5/pass, bridges must co-fire mutually, completions need any co-fire), every edge
+stamped and one-command undoable,
 never committed. `--dry-run` previews without writing. Floor memories are never an edge
 endpoint; `confidence: draft` memories are quarantined from both ends; un-aged dream
 edges are firewalled out of the pass's own source set (a dream never cites an unreviewed
@@ -103,6 +106,19 @@ hippo dream --undo-since <N|date>
 hippo dream --log               # every edge: active / aged-in / undone
 hippo dream --retire-ghost <edge-id> [--reason "…"]   # see below
 ```
+
+**Completions applied before they needed a co-fire.** Earlier versions applied a
+completion on the text mention alone, so a corpus can hold completion edges whose pair
+recall has never returned together. Every apply pass names their count; nothing reverts
+them for you. Show the user the list, and revert only on their yes:
+
+```
+hippo dream --below-floor        # the list (read-only)
+hippo dream --undo-below-floor   # revert exactly those, in one step
+```
+
+A pair reverted this way may be linked again once it does co-fire; a pair reverted with
+`--undo` never is.
 
 **A ghost edge** (doctor: "active ledger edge(s) with no on-disk stamp") is an ACTIVE
 ledger row whose stamp no longer exists anywhere — its source memory was deleted or folded

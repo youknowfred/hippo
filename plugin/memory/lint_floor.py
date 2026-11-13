@@ -87,8 +87,12 @@ def floor_violations(memory_dir: str) -> Dict[str, List[dict]]:
     READ-ONLY; never raises (returns empty sets on any failure).
     """
     result: Dict[str, List[dict]] = {"rebloat": [], "missing_targets": []}
+    from .outbox import effective_path, present  # OUT-1: the floor as this machine sees it
+
+    ob = present(memory_dir)
+    floor = effective_path(memory_dir, "MEMORY") if ob else _floor_path(memory_dir)
     try:
-        with open(_floor_path(memory_dir), "r", encoding="utf-8") as fh:
+        with open(floor, "r", encoding="utf-8") as fh:
             text = fh.read()
     except Exception:
         return result
@@ -110,7 +114,9 @@ def floor_violations(memory_dir: str) -> Dict[str, List[dict]]:
                 continue
             if current in sections:
                 # A genuine floor pointer — check the target file exists (link rot).
-                if not os.path.exists(os.path.join(memory_dir, target)):
+                if not os.path.exists(os.path.join(memory_dir, target)) and not (
+                    ob and os.path.exists(os.path.join(ob, target))
+                ):
                     result["missing_targets"].append({"file": base, "section": current})
             else:
                 # A memory link outside the floor sections — re-bloat.

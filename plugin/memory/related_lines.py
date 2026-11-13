@@ -169,9 +169,9 @@ def scan_duplicate_related(memory_dir: str) -> List[Dict]:
     """
     out: List[Dict] = []
     try:
-        from .provenance import _iter_memory_files
+        from .outbox_edit import iter_files  # OUT-1: the outbox copies the fix edits
 
-        paths = list(_iter_memory_files(memory_dir))
+        paths = list(iter_files(memory_dir))
     except Exception:
         return out
     for path in sorted(paths):
@@ -208,7 +208,10 @@ def fix_duplicate_related(path: str, *, memory_dir: Optional[str] = None) -> Dic
     res: Dict = {"path": path, "fixed": False, "error": None, "note": None}
     try:
         from .atomic import read_text_cas, write_text_cas
+        from .outbox_edit import edit_or_raise, resolve
 
+        path = resolve(path)  # OUT-1: the outbox copy, when there is one
+        res["path"] = path
         text, token = read_text_cas(path)
         new, refusal = merged_text(text)
         if refusal:
@@ -216,6 +219,8 @@ def fix_duplicate_related(path: str, *, memory_dir: Optional[str] = None) -> Dic
             return res
         if new is None or new == text:
             return res
+        path = edit_or_raise(path, memory_dir=memory_dir)  # OUT-1: the outbox copy in outbox mode
+        res["path"] = path
         write_text_cas(path, new, token)
         res["fixed"] = True
     except Exception as exc:
