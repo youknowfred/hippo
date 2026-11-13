@@ -248,13 +248,17 @@ def record_prompt(
     now: Optional[float] = None,
     path: str = "spawn",
     injected_memories: Optional[int] = None,
+    backend_reason: Optional[str] = None,
 ) -> bool:
     """Fold one UserPromptSubmit hook run into today's row. Machine turns count by trigger
     and nothing else (they never recall). Fire-and-forget: never raises.
 
     HOT-6 ``path``: which hook path ran the recall — ``spawn`` (a fresh Python per prompt)
     or ``warm`` (served by the session's own MCP server). It keys the surface count, and a
-    warm run's wall lands in its own histogram so the spawn wall stays comparable."""
+    warm run's wall lands in its own histogram so the spawn wall stays comparable.
+
+    OBS-11 ``backend_reason``: a ``bm25`` recall's reason token, counted in
+    ``hook.backend_reason`` beside ``hook.backend`` (a missing token counts as ``unknown``)."""
 
     def fold(acc: dict) -> None:
         _bump(acc.setdefault("surface", {}), _usage_key("hook", "user_prompt", path or "spawn"))
@@ -267,6 +271,8 @@ def record_prompt(
                 hook["skipped"] += 1
             else:
                 _bump(hook["backend"], backend or "none")
+                if backend == "bm25":
+                    _bump(hook.setdefault("backend_reason", {}), backend_reason or "unknown")
                 if (backend or "none") == "none":
                     hook["abstained"] += 1
             if latency_ms is not None:

@@ -7,6 +7,120 @@ are written by hand as the final commit of each release PR, `plugin.json` and
 `marketplace.json` versions are kept in lockstep by `tests/test_version_sync.py`
 and the tag-time `release.yml`, and every entry states a **re-bootstrap** flag.
 
+## v1.43.0 — 2026-11-12 — "Gates, receipts, an outbox"
+
+**re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format
+still **5**, index schema still **7**, citation derivation still **6**, link cache still **6**;
+`stale.json` schema still **1**. Fourteen items of the road to v2.0.0, most of them from
+[amendment 1](ROADMAP.v2.amendment-1.md), which the owner ratified on 2026-11-12. The release
+is cut from `main` as it stands, on the owner's word, so that the opened-after-recall
+instrument starts its 14 days on an installed release: the recall-lane work in v1.44.0 is
+gated on that data. The chartered "derived self-tending" items that are not built (TND-3,
+TND-4, TND-7, FMT-2, OBS-8, the rest of SRF-7, CON-3's draft) move to v1.44.0 with their gate.
+
+**Operator action: none required.** Nothing changes for a corpus that declares nothing new.
+Things you may notice:
+- **A new hook.** The plugin adds a `PreToolUse` hook on file writes. It warns when a write
+  into the corpus pushes a floor or body budget further over; it never refuses unless the
+  corpus's committed `hippo.json` asks and this machine accepted that. Sessions started before
+  the update pick it up on restart.
+- **Policy keys that need one yes per machine.** `write_path` and `gate` in `hippo.json` change
+  what hippo does, and `hippo.json` arrives by pull, outside the consent fingerprint. Each is
+  honoured on a machine only after `hippo trust policy --accept` there. Until then saves are
+  direct and the gate only warns; doctor names what is pending.
+- **Doctor says more.** New lines: opened-after-recall (always `ok`), the write gate, the
+  outbox, the user tier's git posture, full attention costing context. The floor-calibration
+  line is now a WARN when the recorded sweep is stale; `hippo eval --floor-sweep` refreshes it.
+- **Two eval commands moved out of the plugin.** `hippo eval --calibrate` and
+  `hippo eval --ab HIPPO_DREAM` print a pointer and exit 2; they run from a checkout
+  (`bench/`). See [UPGRADING.md](UPGRADING.md).
+- **A save can be refused for its floor line.** On a corpus that declares
+  `floor_lint.max_line`, saving a `user` or `feedback` memory with no `hook` whose description
+  would make an over-long `MEMORY.md` line is refused before anything is written. Pass a
+  `hook`.
+
+**Receipts**
+- **OBS-10 — opened after recall.** The recall block ends with "read the file before relying
+  on it", and PostToolUse already logs Reads. This joins the two: was an injected memory's own
+  file opened later in the same session? Split by memory type; rolled up daily
+  (`hook.injected_memories`, `opened.{opens, after_recall}`) so the rate outlives the ledger's
+  rotation; a doctor line and `hippo outcome --opened`. Reads through the native memory path, a
+  worktree copy, the private tier and the user tier are now recorded (they were dropped).
+  Measured on three corpora's ledgers: 11 of 10,986, 4 of 7,708 and 125 of 6,563. Feedback
+  memories are almost never opened (0 of 3,650; 0 of 911; 2 of 455), so this is a gauge for
+  fact memories. Report-only: no threshold is set until it has 14 days (ruling V2Q-15).
+- **CLM-9 — doctor says when full attention is costing context.** One line joins two facts
+  doctor printed apart: attention is `full`, and N of M SessionStarts hit the cap with these
+  producers dropped. It names the one setting that turns calm on.
+- **NAT-4 — census names native memory that belongs to no corpus.** A session launched from a
+  folder with no hippo corpus leaves a real `memory` directory under Claude Code's projects
+  dir. The census skipped anything that was not a symlink. It now lists each such directory
+  with its file count and the adopt route. Read-only; no file is opened.
+
+**Gates the plugin owns**
+- **GAT-1 — a write-time gate.** The `PreToolUse` hook simulates a file-tool write into the
+  corpus and asks whether it leaves a budget over *and* makes it worse: `MEMORY.md` bytes,
+  lines, line length, the corpus's banned pattern, section budgets, and, new, the same banned
+  pattern over memory bodies. Standing debt never objects. By default it adds one warning line
+  to context and the write goes ahead. It denies only when the committed `hippo.json` says
+  `"gate": {"write": "deny"}` and this machine accepted it. The invariant's wording moves with
+  it: no hook blocks unless the corpus's own committed policy asks it to (ruling V2Q-22).
+- **GAT-2 — `hippo gate`, and declared budgets.** `hippo gate --staged` runs the floor checks
+  on what the next commit records; `--commit <rev>` on one commit (read-only). `hippo.json`
+  gains `budgets` (`files`, `floor_bytes`, `floor_lines`, `journals`). `hippo gate --install`
+  previews a git pre-commit hook and `--yes` writes it; it never overwrites a hook that is not
+  its own, and it passes on a machine without the plugin. Ruled after a 30-day replay: status
+  words in memory bodies are a write-time warning only, never a failed commit.
+- **GAT-3 — declared floor sections, and a pointer line of its own.** `hippo.json` gains
+  `floor_sections` (headings and which types file under each; a section with no types is
+  hand-maintained). The save path, the tier skeleton and `lint_floor` read one accessor. A
+  description is never copied into the floor when it would not fit the corpus's line limit:
+  the save is refused with the limit named, and the MCP `new_memory` tool gains `hook`.
+- **TND-13 — acknowledging a cleared lint finding.** `hippo.json` gains
+  `acknowledged_findings` (file, rule, the reviewed content hash, a reason, a date). An
+  acknowledged finding is counted, not warned; a one-byte change re-arms it. The release
+  secret scan never reads the list, a review range cannot silence its own finding, and local
+  doctor honours an entry only for bytes this machine consented to.
+
+**The write path and the owner's own memory**
+- **OUT-1, first slice — an outbox that recall already sees.** Opt-in per corpus
+  (`hippo.json: "write_path": "outbox"`, accepted per machine). A save and its floor pointer
+  land in `.claude/memory.outbox/`, a self-ignoring sibling of the corpus, and the working tree
+  is not touched. Recall fuses the outbox like a tier, so the memory is recalled on the next
+  prompt; each outbox file is injected only while its bytes are the ones hippo recorded
+  writing. **Not in this release:** tend verdicts still write to the working tree, and there
+  is no ship verb yet, so the only landing route is moving files into the corpus dir by hand.
+  A corpus with several writers should wait for v1.44.0 before turning it on.
+- **OWN-1 — a git home for the user tier.** `hippo setup --user-tier` previews; `--yes` runs
+  `git init` (no commit, no remote). A memory marked `machine_local: true`
+  (`hippo new --machine-local`) is listed in the tier's `.gitignore` before the file exists.
+  Doctor reports the tier's posture from local state. A link to a machine-local memory reads
+  as "lives in the user tier on another machine", not as dangling. hippo never pushes, pulls
+  or fetches.
+
+**Recall**
+- **HOT-10 — a soft band at the dense floor.** A description row within 0.002 under the floor
+  (`HIPPO_DENSE_FLOOR_BAND`; `0` turns it off) is admitted only when the lexical lane ranks it
+  in its top 10, and is otherwise dropped with its own reason, `dense_floor_band`. Nothing at
+  or above the floor moves, and abstention is unchanged. Hard-set recall@10 held on two
+  corpora and rose on the third (0.36 to 0.40). **Short of its gate, stated plainly:**
+  off-topic abstention reads 7, 7 and 6 of 11 on the three corpora against a gate of 8, the
+  same before and after; and the sweep does not yet run on a schedule, because it loads the
+  embedding model.
+
+**Runway**
+- **RWY-4 — the plugin ships only the runtime.** 845 lines of evaluation tooling move to
+  `bench/`, and a test fails if `plugin/` ever imports it.
+- **RWY-5 — foundation modules no longer import the recall orchestrator.** Two upward imports
+  are gone, and a test walks each foundation module's AST to keep it so.
+- **RWY-6 — writers clean up after themselves.** A writer killed mid-write strands
+  `<target>.tmp.<pid>`; the next successful write now removes siblings whose process is gone.
+  `hippo setup --worktree-copies` lists the old derived-dir copies worktrees carry and removes
+  one directory per yes.
+- **CON-5, the CI half — a merge commit on `main` fails a lane.** `main` requires linear
+  history, and an admin merge can go around that. The `linear-history` lane now fails a push
+  that carried one.
+
 ## v1.42.8 — 2026-11-06 — "Haiku 5.5, thinking off"
 
 **re-bootstrap: no** — `plugin/requirements.txt` byte-identical since v1.28.0; corpus format

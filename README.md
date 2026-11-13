@@ -637,6 +637,11 @@ dismisses it on this machine.
   where a desktop session looked. Ask the desktop session
   to run hippo bootstrap once — its `status` output names the sibling install so you can see
   exactly this situation, and `/hippo:doctor` (or the `doctor` tool) flags it too.
+- **Some recalls run BM25-only and I don't know why.** The prompt hook records a
+  reason beside every BM25-only recall (the model not warmed, an index without vectors, another
+  model, the dense timeout, an error, dense turned off, a tier without vectors, or simply no
+  memory clearing the dense floor), and `/hippo:doctor`'s BM25-only line names the most common
+  one over 30 days with what to do about it.
 - **Recall comes back empty.** Almost always one of three things: **(a) bootstrap never ran**
   on this machine — dense recall is silently BM25-only until `/hippo:bootstrap` finishes;
   **(b) the corpus isn't trusted yet** — a freshly cloned or downloaded corpus injects
