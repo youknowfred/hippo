@@ -80,7 +80,7 @@ WRITE_OPEN_ALLOWLIST = {
     ("archive", "_journal_move"): "append-only gitignored journal (archive + TMB-3 restore); torn tail skipped",
     ("archive", "_mark_dream_rows"): "append-only committed dream ledger (archive retires / restore reactivates edges); junk tail skipped by read_apply_ledger",
     ("dream_contra", "_append_contradiction_rows"): "append-only gitignored ledger; torn tail skipped",
-    ("dream", "run_apply_pass"): "append-only gitignored dream ledger; corpus edge stamps stay the truth",
+    ("dream", "_run_apply_pass"): "append-only gitignored dream ledger; corpus edge stamps stay the truth",
     ("dream_apply", "undo_edges"): "append-only gitignored dream ledger; torn tail skipped",
     ("dream_generate", "stage_generated"): "append-only gitignored ledger; torn tail skipped",
     ("dream_generate", "sweep_drafts"): "append-only gitignored ledger; torn tail skipped",
