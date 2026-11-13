@@ -167,6 +167,14 @@ def _verdict_help(kind: str, entry_id: str) -> List[str]:
     return lines
 
 
+def with_schedule_offer(text: str, memory_dir: str, result: dict, kinds) -> str:
+    """TND-7: the summary's one scheduled-sleep line (whole queue only; once a day)."""
+    from .sleep_offer import offer_line
+
+    line = offer_line(memory_dir, Q.total_pending(result)) if kinds is None else None
+    return f"{text}\n{line}" if line else text
+
+
 def render_next(entry: Optional[dict], memory_dir: str, repo_root: str, remaining: int) -> str:
     if entry is None:
         return "Maintenance queue: empty — nothing needs a decision."
@@ -441,7 +449,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.action in ("list", "next"):
         result = Q.build_queue(memory_dir, repo_root, kinds=kinds)
         if args.action == "list":
-            print(render_list(result, args.limit))
+            print(with_schedule_offer(render_list(result, args.limit), memory_dir, result, kinds))
         else:
             top = result["pending"][0] if result["pending"] else None
             print(render_next(top, memory_dir, repo_root, Q.total_pending(result)))
