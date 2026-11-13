@@ -443,14 +443,16 @@ its keys.
 ### CLI names that redirect to a skill
 
 Read in `SKILL_REDIRECTS` in `plugin/memory/cli_verbs.py`: `hippo <name>` exits 1 and names the
-skill to run instead. Doctor does not report their use and nothing counts it, so the removal
-rule has no count to read (open question 5).
+skill to run instead. Until v1.46 each named the old skill of the same name, and nothing counted
+its use. From v1.46 each names the live skill and its flow, and a typed redirect counts as one
+`cli` use like any verb, so doctor's per-verb counts give the removal rule a number to read
+(open question 5 was asked before that).
 
 | Name | Says to run |
 |---|---|
-| `init` | `/hippo:init`, itself an old skill name that routes to `/hippo:setup` |
-| `bootstrap` | `/hippo:bootstrap`, which routes to `/hippo:setup` |
-| `audit` | `/hippo:audit`, which routes to `/hippo:doctor` |
+| `init` | `/hippo:setup`, its "Init" flow |
+| `bootstrap` | `/hippo:setup`, its "Bootstrap" flow |
+| `audit` | `/hippo:doctor`, its "Content audit" flow |
 
 ### Old locations
 

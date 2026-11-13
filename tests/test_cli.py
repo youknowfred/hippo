@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import glob
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -100,10 +101,38 @@ def test_unknown_verb_prints_usage_and_exits_2(capsys):
     assert "unknown verb 'nope'" in err and "usage: hippo <verb>" in err
 
 
-def test_skill_redirects_name_the_skill(capsys):
-    for name in SKILL_REDIRECTS:
+def test_skill_redirects_name_the_live_skill_and_its_flow(capsys):
+    want = {"init": ("/hippo:setup", "Init"), "bootstrap": ("/hippo:setup", "Bootstrap"),
+            "audit": ("/hippo:doctor", "Content audit")}
+    assert set(SKILL_REDIRECTS) == set(want)
+    for name, (skill, flow) in want.items():
         assert cli.main([name, "--anything"]) == 1
-        assert f"/hippo:{name}" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert skill in err and f'"{flow}"' in err
+        assert f"/hippo:{name}" not in err          # never the retired skill name
+    usage = cli.usage()
+    assert "/hippo:setup" in usage and "/hippo:doctor" in usage and "/hippo:<name>" not in usage
+
+
+def test_every_redirect_points_at_a_skill_that_ships_and_a_flow_it_has():
+    skills = os.path.join(_PLUGIN, "skills")
+    for name, (skill, flow) in SKILL_REDIRECTS.items():
+        with open(os.path.join(skills, skill, "SKILL.md"), encoding="utf-8") as fh:
+            text = fh.read()
+        assert "Moved into" not in text.split("---")[1], f"{skill} is itself a retired name"
+        assert flow in text, f"/hippo:{skill} has no {flow!r} flow"
+
+
+def test_a_typed_redirect_counts_one_cli_use(tmp_path, monkeypatch):
+    td = tmp_path / "tel"
+    td.mkdir()
+    monkeypatch.setenv("HIPPO_TELEMETRY_DIR", str(td))
+    monkeypatch.delenv("HIPPO_SURFACE", raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
+    assert cli.main(["audit"]) == 1
+    with open(td / "usage_spool.jsonl", encoding="utf-8") as fh:
+        lines = [json.loads(ln) for ln in fh if ln.strip()]
+    assert lines == [{"surface": "cli", "verb": "audit", "action": "", "client": "cli"}]
 
 
 def _fake_cache_install(tmp_path, *, sentinel: bool):
