@@ -1,5 +1,5 @@
 ---
-description: The generative sleep pass — offline replay surfaces the latent graph edges consolidate can't reach (bridges, unlinked mentions, undeclared refines). Tier-A edges auto-apply reversibly; --dry-run previews; --deparasite runs the counterweight; reverse replay boosts ranking; --generate runs the quarantined schema/hypothesis draft tier (flagged, self-decaying, evidence-graduated). Triggers "dream", "find latent links", "de-parasite my graph", "generate schemas", "/hippo:dream".
+description: The generative sleep pass — offline replay surfaces the latent graph edges consolidate can't reach (bridges, unlinked mentions, undeclared refines). Tier-A edges auto-apply reversibly; --dry-run previews. Deprecated, off by default and removed in v2.0.0: --deparasite, reverse replay, and the --generate draft tier. Triggers "dream", "find latent links", "de-parasite my graph", "generate schemas", "/hippo:dream".
 ---
 
 # /hippo:dream — the generative sleep pass
@@ -32,6 +32,20 @@ never committed. `--dry-run` previews without writing. Floor memories are never 
 endpoint; `confidence: draft` memories are quarantined from both ends; un-aged dream
 edges are firewalled out of the pass's own source set (a dream never cites an unreviewed
 dream).
+
+## Deprecated tiers (removed in v2.0.0)
+
+Measured on three real corpora, three tiers moved recall@10 by 0.000, so they are off by
+default and deprecated. Each still runs when asked for by name and prints one line saying
+it is going; the link pass above is unchanged. Do not reach for one unless the user names it.
+
+- **reverse replay** — no longer runs inside every pass; `HIPPO_DREAM_REVERSE_REPLAY=1`
+  turns it back on.
+- **the generative tier** — `--generate`, `--sweep-drafts`, `--archive-draft`,
+  `--prospective` (MCP actions of the same names); `HIPPO_DREAM_GENERATIVE=1` still lets
+  apply passes stage drafts.
+- **de-parasite** — `--deparasite` (and `--retract`) and `--dedup-merge` (MCP:
+  `deparasite`, `dedup_merge`).
 
 ## Surface routing — decide first, then act silently
 
@@ -135,7 +149,7 @@ Prefer per-item hand-application when the user wants to review each edge: a
 **completion/bridge** is one `[[wikilink]]` added to the source body; a **refines** is
 additive frontmatter. Never bulk-apply the whole ledger by hand — the cap is the point.
 
-## De-parasiting counterweight — the forgetting function
+## De-parasiting counterweight (deprecated) — the forgetting function
 
 An edge-only pass has no restoring force; this is sleep's downscaling half. Report/propose
 posture — the pass itself writes **nothing**:
@@ -170,9 +184,10 @@ carrying `contradicts` is a disagreement, not a duplicate: it routes to `/hippo:
 and is never auto-resolved or merged. Present proposals as proposals — apply nothing
 without the owner's per-item yes.
 
-## Reward-gated reverse replay — outcome-anchored boosts
+## Reward-gated reverse replay (deprecated) — outcome-anchored boosts
 
-Runs inside every pass, silently when there is no signal. Memories with a RECORDED
+Off by default; with `HIPPO_DREAM_REVERSE_REPLAY=1` it runs inside every pass, silently
+when there is no signal. Memories with a RECORDED
 outcome (injected, then a cited file touched in-session — the join) anchor a
 backward walk along their `supersedes`/`refines` decision chain; the upstream chain earns
 **replay priority** (probed first) and its candidates earn **ordering priority** under the
@@ -181,7 +196,7 @@ always reads the raw cofire; no memory byte ever changes. Boosted edges are logg
 `boosts-<pass>.jsonl` in the derived dream dir, each row carrying the justifying
 decision chain; un-aged dream edges conduct no reward (the aging firewall extends here).
 
-## Generative payload — schema/gist + hypotheses, quarantined
+## Generative payload (deprecated) — schema/gist + hypotheses, quarantined
 
 The boldest tier: net-new memories, not just edges. **OFF by default**
 (`HIPPO_DREAM_GENERATIVE=1` opts apply passes in; DREAM- — never auto-applied as

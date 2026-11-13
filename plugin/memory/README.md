@@ -862,6 +862,10 @@ re-billed.
   `HIPPO_DREAM_LLM_TIMEOUT` per-call cap (default 10s), `HIPPO_DREAM_CONTRA_MAX_PAIRS`
   attempts per pass (default 6, hard-max 12), `HIPPO_DREAM_CONTRA_MIN_COFIRE` the pool bar
   (default θ); the unprefixed `DREAM_CONTRA_*` spellings still read through v1.43.
+- `HIPPO_DREAM_REVERSE_REPLAY=1` — run dream's reverse replay inside discovery passes. It is
+  deprecated and off by default since v1.45 (with the generative tier and de-parasite: no
+  recall@10 gain on three corpora); `dream_deprecated.py` holds one switch per tier, and
+  v2.0.0 removes all three.
 
 ## Tests (dev checkout)
 

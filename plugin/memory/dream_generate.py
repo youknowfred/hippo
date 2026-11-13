@@ -1258,6 +1258,7 @@ def run_generative_pass(
     the corpus is probed once per pass, not twice.
     """
     from .dream import discover
+    from .dream_deprecated import with_notice
 
     td = telemetry_dir or default_telemetry_dir(memory_dir)
     lines: List[str] = []
@@ -1281,7 +1282,8 @@ def run_generative_pass(
         lines.append(
             f"🌱 dream --generate {result.get('pass_id', '?')} — no proposals: {result.get('reason')}"
         )
-        return (1 if result.get("status") == "no-index" else 0), "\n".join(lines)
+        code = 1 if result.get("status") == "no-index" else 0
+        return code, with_notice("\n".join(lines), "generative")
 
     texts: Dict[str, str] = {}
     try:
@@ -1349,4 +1351,4 @@ def run_generative_pass(
             "   report-only: stage with `dream --generate --stage` (explicit) or set "
             "HIPPO_DREAM_GENERATIVE=1 to let apply passes stage up to the cap."
         )
-    return 0, "\n".join(lines)
+    return 0, with_notice("\n".join(lines), "generative")  # SRF-7: deprecated, one line
