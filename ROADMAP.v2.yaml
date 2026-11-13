@@ -91,7 +91,7 @@ releases:
     re_bootstrap: "no"
   - version: v1.45.0
     theme: "Fewer rows, each earned (cut from main on the owner's word, 2026-11-13: HOT-8, HOT-11, LDG-1, GP-S4, TND-3's anchors report-only, TND-7, FMT-2, OBS-8, the rest of SRF-7, CON-3's draft, OWN-2, GAT-4, NAT-3, RUL-8, RUL-9, RUL-10; and seven fixes with no roadmap item). TND-4, OUT-4 and PLT-3 are not built and move to v2.0.0"
-    status: in review
+    status: released
     re_bootstrap: "no"
     open_gates:
       - "TND-3's replay gate: missed (7.3% of graduates quiet against 50%), so quiet arming is not on"
@@ -100,6 +100,15 @@ releases:
       - "0 corpora withholding hippo-written files after a pull (OUT-4, not built)"
       - "14 days of contended warm-recall data on emgl (field time)"
       - "emgl chars per injecting prompt at or under 1,000 (1,399 on the replay)"
+  - version: v1.46.0
+    theme: "Recall that reaches its memories (added by amendment 2 under the owner's delegation of 2026-11-13: OUT-5, HOT-13, HOT-14, OWN-4, HOT-15; and six fixes with no roadmap item). OWN-5 is not shipped: its gate missed"
+    status: in review
+    re_bootstrap: "no"
+    open_gates:
+      - "HOT-13 on a second, later copy of emgl's corpus: hard-set recall@10 0.495 against 0.52 (0.524 on the copy the gates are measured on)"
+      - "HOT-15's cold-hook comparison: within noise both ways under load; not re-measured quiet"
+      - "OUT-5's hook-cost bound measured only under load (p95 +72 and +101 ms against 20 ms, base p95 over 1.2 s); not re-measured quiet"
+      - "OWN-5: siblings gained 0 of the ten probe answers against 5 (6 of the ten qualify under the rule; none was among the first twelve proposed)"
   - version: v2.0.0
     theme: "Smaller, calmer, honest"
     status: planned
@@ -173,7 +182,7 @@ items:
     title: "1,000-memory dense-under-load nightly lane"
     size: S
     release: "v1.45.0"
-    status: built
+    status: done
     note: "built in v1.45.0: a nightly lane with 1,000 memories and 8 concurrent recalls. It fails on a p95 more than 25% over the trailing 7 nights' median (the first 7 nights only record) and on an absolute 30 s ceiling. Its first real run is on CI after the release"
   - id: OBS-9
     title: "Tests never write the live ledgers (repro-first)"
@@ -316,7 +325,7 @@ items:
     title: "Scheduled sleep for every opted-in corpus"
     size: S
     release: "v1.45.0"
-    status: built
+    status: done
     note: "built in v1.45.0: `hippo tend` offers the report-only schedule, once a day, when 10 or more items wait and no sleep pass ran in 7 days; a scheduled pass refreshes a stale floor sweep offline. hippo still installs no scheduler"
   - id: FMT-1
     title: "`hippo migrate --check`"
@@ -329,7 +338,7 @@ items:
     title: "Derived citation binding moves into the index (dual mode)"
     size: L
     release: "v1.45.0"
-    status: built
+    status: done
     note: "built in v1.45.0 in two slices: the index derives each memory's citation binding into a sidecar, and readers prefer it while writers still write frontmatter. Parity on emgl: 6 of 1,073 staleness verdicts differ (0.56%, gate 1%). `HIPPO_INDEX_BINDING=0` restores frontmatter-only"
     deps: [RWY-1, RWY-2]
   - id: FMT-3
@@ -395,7 +404,7 @@ items:
     title: "Dream: reduce to the linker unless it earns more"
     size: M
     release: "v1.45.0"
-    status: built
+    status: done
     note: "v1.44.0 shipped the cofire floor and the reviewed undo (ruling V2Q-27). v1.45.0 ships the rest as ruled on 2026-11-13: reverse replay, the generative tier and de-parasite each measured +0.000 recall@10 on three corpora, so they are off by default and deprecated, and their code is deleted at v2.0.0 (SRF-8). The Tier-A linker stays"
   - id: SRF-8
     title: "The v2 removal cut"
@@ -570,7 +579,7 @@ amendment_1:
       title: "An injection count that scales with signal"
       size: M
       release: "v1.45.0"
-      status: built
+      status: done
       deps: [HOT-7]
       issue: "#155"
       note: "built in v1.45.0 as ruled on 2026-11-13: the count is decided per row (a weak-signal prompt serves at most five rows, each with evidence of its own), not by one margin per query, which cost emgl's hook-mode hard set 0.057 or more in simulation. Median rows per injecting prompt 10/10/8 -> 5/5/3 on three corpora with the hard sets within 0.02. Missed: emgl chars per injecting prompt, 1,399 against 1,000"
@@ -592,7 +601,7 @@ amendment_1:
       title: "Digest headings as recall units"
       size: M
       release: "v1.45.0"
-      status: built
+      status: done
       deps: [HOT-7]
       issue: "#157"
       note: "built in v1.45.0: folded sections live in a sub-index beside the main one and are extra rows in explicit recall; the prompt hook shows one only when the prompt names it. Probe recall@10 0.00 -> 0.80 (gate 0.8). Missed: cold build CPU on emgl, +27% against 25%"
@@ -647,7 +656,7 @@ amendment_1:
       status: planned
       deps: [OBS-6]
       ruling: V2Q-17
-      note: "not built in v1.45.0: the classification table ruling V2Q-17 asks for first was commissioned on 2026-11-13 and is not in yet"
+      note: "not built as chartered: the classification V2Q-17 asked for came in on 2026-11-13 and found 0 of 67 withheld memories written by a hippo verb (56 native path, 10 file tool, 1 unknown). Its route is taken by OUT-5 (amendment 2, ruling V2Q-29); the row stays for v2.0.0"
     - id: OWN-1
       title: "A git home for the user tier"
       size: M
@@ -660,7 +669,7 @@ amendment_1:
       title: "Promotion as a tend kind"
       size: M
       release: "v1.45.0"
-      status: built
+      status: done
       deps: [TND-2]
       ruling: V2Q-18
       note: "built in v1.45.0: a `promote` tend kind with a promote shape and a drifted shape. The scan finds 5 drifted pairs on the estate, 4 of them true. Missed: the 10-probe gate, because a lesson that lives in one corpus only has no twin and is never proposed"
@@ -708,13 +717,13 @@ amendment_1:
       title: "One versioned `CONVENTIONS.md`"
       size: S
       release: "v1.45.0"
-      status: built
+      status: done
       note: "built in v1.45.0: the asset carries a version stamp, doctor classifies a corpus's copy, `hippo setup --conventions` refreshes it, and local rules go in `CONVENTIONS.local.md`"
     - id: NAT-3
       title: "A floor diet before a floor channel"
       size: M
       release: "v1.45.0"
-      status: built
+      status: done
       deps: [GAT-3, HOT-7]
       ruling: V2Q-23
       note: "built in v1.45.0: with `budgets.floor_bytes` declared, tend's floor kind proposes one demotion at a time, ranked by lane and use, each with the trim-safety replay. Skyline 8,780 -> 8,050 B and a smaller sibling 17,418 -> 8,136 B with 0 lost hits. On emgl the proposals reach 8,137 B once bare-name floor pointers are read, which the same release adds"
@@ -727,21 +736,21 @@ amendment_1:
       title: "Conflicts between what a memory says and what a rule says"
       size: M
       release: "v1.45.0"
-      status: built
+      status: done
       ruling: V2Q-26
       note: "built in v1.45.0: a deterministic text leg into the tend contradiction kind. The handed-over conflict is listed on emgl. Missed: its copy in a second corpus, which carries no rule to compare against"
     - id: RUL-9
       title: "Promote-to-rule as a tend proposal"
       size: S
       release: "v1.45.0"
-      status: built
+      status: done
       deps: [TND-2]
       note: "built in v1.45.0: a `rule` tend kind; 1 proposal on emgl at 100% coverage, none on hippo or Skyline"
     - id: RUL-10
       title: "A floor line that restates a rule"
       size: S
       release: "v1.45.0"
-      status: built
+      status: done
       note: "built in v1.45.0, informational: 0 / 2 / 4 floor lines reported on hippo / emgl / Skyline, all true on hand review"
     - id: PLT-3
       title: "Two platform receipts"
@@ -849,4 +858,94 @@ amendment_1:
     - id: V2Q-27
       question: "SRF-7's cofire floor for completion edges"
       ruling: "set from a replay of the applied-edge ledger; one reviewed undo for edges below it"
+      status: ratified
+
+
+# ----------------------------------------------------------------------------
+# Amendment 2: recall performance on the estate (ROADMAP.v2.amendment-2.md).
+# RATIFIED 2026-11-13 under the owner's delegation ("prioritize directions that drive
+# memory performance for our group of repos, then ratify as you recommend"). Its items
+# keep their own block, like amendment 1's.
+amendment_2:
+  design_record: ROADMAP.v2.amendment-2.md
+  status: ratified
+  proposed: 2026-11-13  # at v1.45.0
+  ratified: 2026-11-13
+  items:
+    - id: OUT-5
+      title: "Consent for bytes a session wrote on this machine"
+      size: L
+      release: "v1.46.0"
+      status: built
+      deps: [OUT-1, GAT-1]
+      ruling: V2Q-29
+      note: "built in v1.46.0 as an opt-in (consent.session_writes, honoured after hippo trust policy --accept). Gate on scratch copies of emgl: 0 of 4 withheld after native-path and repo-path Writes and Edits of consented files; the trust file byte-identical with the key off; pulled bytes and an Edit of an unconsented file still withheld. The hook-cost bound was measured only under load (missed as measured). An adversarial pass bound the note to its tool call, excluded subagent writes and held lint-flagged bytes"
+    - id: HOT-13
+      title: "Journals admitted by their own signal"
+      size: M
+      release: "v1.46.0"
+      status: built
+      deps: [HOT-7, HOT-8]
+      ruling: V2Q-28
+      note: "built in v1.46.0: the first fused candidate, when it is a journal with evidence of its own, is served beside the prompt's rows (at most one). emgl 52/105 -> 55/105 (gate 0.52; 0.495 on a later copy), Skyline 15/25 -> 17/25, hippo unchanged; journals 1.2% / 3.1% of served rows. HIPPO_JOURNAL_SIGNAL=0 turns it off"
+    - id: HOT-14
+      title: "Characters per prompt"
+      size: M
+      release: "v1.46.0"
+      status: built
+      deps: [HOT-8]
+      ruling: V2Q-32
+      note: "built in v1.46.0, hook only: emgl 1,455 -> 982 characters per injecting prompt (gate 1,000), Skyline 1,296 -> 888, hippo 1,456 -> 989; hard sets unchanged; no visible name lost. HIPPO_HOOK_COMPACT=0 restores the block"
+    - id: OWN-4
+      title: "A promoted lesson keeps its place at home"
+      size: S
+      release: "v1.46.0"
+      status: built
+      deps: [OWN-2]
+      ruling: V2Q-28
+      note: "built in v1.46.0: the fused index laid its dense rows out wrong for every tier after the first (a promoted lesson's description vector was scored as a body chunk), and a promote put an on-demand lesson on the user tier's floor. After the fix, ten promoted probe lessons keep their explicit rank and fused score at home (10/10, was 3/10)"
+    - id: OWN-5
+      title: "Promotion proposals for a lesson with no twin"
+      size: M
+      release: "v1.46.0"
+      status: planned
+      deps: [OWN-2, OWN-4]
+      ruling: V2Q-30
+      note: "built and measured, not shipped: siblings gained 0 of the ten probe answers against a bar of 5. 66 lessons qualify on emgl, 6 of the ten probes among them; the telemetry window spans three days, so every qualifier ties at three and the first twelve proposed held none of the probes. Re-measure when the window is longer"
+    - id: HOT-15
+      title: "Speed on the largest corpus"
+      size: M
+      release: "v1.46.0"
+      status: built
+      deps: [HOT-11]
+      ruling: V2Q-28
+      note: "built in v1.46.0: one query embedding per explicit recall, one bounded history walk per staleness scan (emgl 67-210 s -> 1-12 s cold, the same 659-660 verdicts) and per-process memos for the hook. Explicit recall p50 on emgl, interleaved, quiet machine: v1.44.0 249 ms, v1.45.0 447 ms, v1.46.0 261 ms (gate: within 20 ms of v1.44.0; under heavy load the same pair read 105-157 ms apart). Warm hook p50 278 -> 150 ms. Results byte-identical on three corpora"
+  owner_rulings:
+    - id: V2Q-28
+      question: "Which directions, in what order"
+      ruling: "withheld memories, journals, characters per prompt, lessons between repos, speed, then the signals the gates are read through"
+      status: ratified
+    - id: V2Q-29
+      question: "What replaces OUT-4"
+      ruling: "(b) consent for bytes a session's own file tool wrote into a trusted corpus, opt-in by a consented key"
+      status: ratified
+    - id: V2Q-30
+      question: "Promote a lesson that has no twin"
+      ruling: "yes, when it cites no repo path and was served or used on three or more distinct days; at most three per listing"
+      status: ratified
+    - id: V2Q-31
+      question: "The dense floor default"
+      ruling: "stays 0.60; no swept floor applied automatically"
+      status: ratified
+    - id: V2Q-32
+      question: "May the prompt hook shorten a description"
+      ruling: "yes, at a word boundary, in hook mode only"
+      status: ratified
+    - id: V2Q-33
+      question: "What is not in this release"
+      ruling: "TND-4, PLT-3, NAT-2's channel, the v2.0.0 format and removal items, the seven STABILITY.v2.md questions"
+      status: ratified
+    - id: V2Q-34
+      question: "The release"
+      ruling: "v1.46.0 prepared ahead on the rehearsed tree; an item that misses its gate is not shipped; merges and tags wait for the owner"
       status: ratified
