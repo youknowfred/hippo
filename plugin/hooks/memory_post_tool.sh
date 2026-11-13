@@ -38,7 +38,8 @@ hippo_corpus_present || exit 0  # SHP-7: a linked worktree whose MAIN tree has t
 
 # PostToolUse delivers the event as JSON on stdin ({tool_name, tool_input, session_id, ...});
 # parse it INSIDE the outcome module (one Python spawn) rather than with a separate launch.
-PAYLOAD="$(cat 2>/dev/null || true)"
+# Read by the shell itself ($(<file) execs no `cat`), as memory_pre_tool.sh does.
+PAYLOAD="$(</dev/stdin)" 2>/dev/null || PAYLOAD=""
 
 # HOT-5: most touches need nothing but their outcome row — append it here, no interpreter.
 if hippo_touch_fastpath "$PAYLOAD"; then

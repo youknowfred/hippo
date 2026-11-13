@@ -260,3 +260,128 @@ def test_the_fast_path_works_with_gnu_stat(tmp_path):
     os.chmod(os.path.join(bindir, "stat"), 0o755)
     _row, how, _ = _touch(tmp_path, "gnu", "Read", "src/plain.py")
     assert how == "fast"
+
+
+# RWY-7: the duplicate-key check ran ${p//key/} and ${p/key/}, which bash 3.2 does in time
+# quadratic in the payload (a 60 KB Write took seconds). The check is now a glob with the same
+# meaning (two occurrences of the quoted key: decline), which bash matches in linear time.
+
+def _raw(tmp_path, tag, payload, *, fast=True):
+    """Run the hook on a payload string; return (all rows, last usage action)."""
+    root = tmp_path / tag
+    if not root.exists():
+        _project(root)
+    data = tmp_path / f"data-{tag}"
+    (data / "venv" / "bin").mkdir(parents=True, exist_ok=True)
+    if not (data / "venv" / "bin" / "python").exists():
+        os.symlink(sys.executable, data / "venv" / "bin" / "python")
+    env = {
+        "PATH": _bin(tmp_path), "HOME": str(tmp_path / "home"),
+        "CLAUDE_PROJECT_DIR": str(root), "CLAUDE_PLUGIN_ROOT": _PLUGIN_ROOT,
+        "CLAUDE_PLUGIN_DATA": str(data), "HIPPO_DISABLE_DENSE": "1", "HIPPO_TRUST_NONGIT": "1",
+    }
+    if not fast:
+        env["HIPPO_DISABLE_TOUCH_FASTPATH"] = "1"
+    proc = subprocess.run(["/bin/bash", _HOOK], input=payload, capture_output=True, text=True,
+                          timeout=60, env=env)
+    assert proc.returncode == 0
+    td = _derived(root, "telemetry")
+    ledger = td / "outcome_events.jsonl"
+    rows = [json.loads(ln) for ln in ledger.read_text().splitlines() if ln] if ledger.exists() else []
+    spool = (td / "usage_spool.jsonl").read_text().splitlines() if (td / "usage_spool.jsonl").exists() else []
+    return rows, (json.loads(spool[-1])["action"] if spool else None)
+
+
+_DECOY = 'see "file_path": "/x" and "tool_name": "Read" and "session_id": "evil"'
+
+
+def _orderings(root, tool, *, response=None):
+    """The same event as JSON text in each key order the harness could plausibly send."""
+    real = str(root / "src" / "real.py")
+    ti = {"file_path": real} if tool == "Read" else {"file_path": real, "content": _DECOY}
+    ti_rev = dict(reversed(list(ti.items())))
+    tr = response if response is not None else {"type": "text", "filePath": real, "content": _DECOY}
+    head = {"session_id": _SID, "hook_event_name": "PostToolUse", "tool_name": tool}
+    return {
+        "input-after-name": json.dumps({**head, "tool_input": ti, "tool_response": tr}),
+        "input-before-name": json.dumps({"tool_input": ti, **head, "tool_response": tr}),
+        "content-before-path": json.dumps({**head, "tool_input": ti_rev, "tool_response": tr}),
+        "response-first": json.dumps({"tool_response": tr, "tool_input": ti_rev, **head}),
+    }
+
+
+@pytest.mark.parametrize("tool", ["Write", "Read"])
+def test_a_key_like_string_in_a_value_is_never_read_as_the_path(tmp_path, tool):
+    """Inside a JSON string every quote arrives escaped, so the content's literal
+    `"file_path": "/x"` (and decoy tool_name / session_id) is never the touched path, in any
+    key order: the fast path writes the real path, exactly as Python does."""
+    _project(tmp_path / "r")
+    _project(tmp_path / "rp")
+    for name, payload in _orderings(tmp_path / "r", tool).items():
+        assert '\\"file_path\\": \\"/x\\"' in payload, name
+        rows, how = _raw(tmp_path, "r", payload)
+        assert how == "fast", name
+        assert rows[-1]["path"] == "src/real.py" and rows[-1]["tool"] == tool, name
+        assert rows[-1]["session_id"] == _SID, name
+        py_payload = payload.replace(str(tmp_path / "r"), str(tmp_path / "rp"))
+        py_rows, py_how = _raw(tmp_path, "rp", py_payload, fast=False)
+        assert py_how == "spawn" and py_rows[-1]["path"] == "src/real.py", name
+
+
+@pytest.mark.parametrize("response", [
+    {"filePath": "ECHO", "file_path": "ECHO"},             # a response that echoes the key
+    {"note": 'ends with a quote "file_path'},               # an escaped quote, then the key text
+])
+def test_a_second_unescaped_key_declines_to_python(tmp_path, response):
+    """Where the leftmost `"file_path"` might not be tool_input's, the fast path declines:
+    Python parses the JSON properly. Every ordering, including the response coming first."""
+    root = tmp_path / "s"
+    _project(root)
+    other = str(root / "src" / "other.py")
+    response = {k: (other if v == "ECHO" else v) for k, v in response.items()}
+    for name, payload in _orderings(root, "Edit", response=response).items():
+        assert payload.count('"file_path"') == 2, name
+        rows, how = _raw(tmp_path, "s", payload)
+        assert how == "spawn", name
+        assert rows[-1]["path"] == "src/real.py", name  # Python's reading: tool_input's
+
+
+@pytest.mark.parametrize("key", ["tool_name", "session_id"])
+def test_a_duplicated_tool_name_or_session_id_declines(tmp_path, key):
+    root = tmp_path / "k"
+    _project(root)
+    payload = json.dumps({"session_id": _SID, "tool_name": "Read",
+                          "tool_input": {"file_path": str(root / "src" / "a.py")},
+                          "tool_response": {key: "Write" if key == "tool_name" else "other-1"}})
+    _rows, how = _raw(tmp_path, "k", payload)
+    assert how == "spawn"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("tool", ["Write", "Read"])
+def test_a_large_payload_stays_far_under_the_hook_timeout(tmp_path, tool):
+    """180 KB of payload. Before RWY-7 the duplicate-key check alone took about 30 s here
+    under /bin/bash 3.2 (the hook's timeout is 10 s); the fast path now costs what a 1 KB
+    payload costs plus a linear read."""
+    root = tmp_path / "big"
+    _project(root)
+    real = str(root / "src" / "big.py")
+    content = "x = 1\n" * 30000  # 180,000 bytes
+    if tool == "Write":
+        ev = {"tool_input": {"file_path": real, "content": content},
+              "tool_response": {"type": "create", "filePath": real}}
+    else:
+        ev = {"tool_input": {"file_path": real},
+              "tool_response": {"type": "text", "file": {"filePath": real, "content": content}}}
+    payload = json.dumps({"session_id": _SID, "hook_event_name": "PostToolUse", "tool_name": tool, **ev})
+    assert len(payload) > 180_000
+    _raw(tmp_path, "big", json.dumps({"session_id": _SID, "tool_name": "Read",
+                                      "tool_input": {"file_path": real}}))  # warm the fs caches
+    t0 = time.perf_counter()
+    try:
+        rows, how = _raw(tmp_path, "big", payload)
+    except subprocess.TimeoutExpired:
+        pytest.fail("the hook ran past 60 s on a 180 KB payload")
+    took = time.perf_counter() - t0
+    assert how == "fast" and rows[-1]["path"] == "src/big.py"
+    assert took < 2.5, f"{took:.2f}s for a 180 KB {tool} payload"
