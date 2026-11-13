@@ -82,11 +82,12 @@ What each kind needs before its verdict:
 - **merge** — a merged-in memory looks like a duplicate. `supersede --winner <name>`,
   `updated` after you folded it into the existing memory, or `distinct`.
 - **baseline** — confirm the memory still holds, then `rebaseline`.
-- **link**, **floor** — edit the file, then `done`; tend re-checks and refuses while the
-  problem is still there. A `floor:rule:<name>.md` item is a floor line that an
-  always-loaded rule (`CLAUDE.md`, or a `.claude/rules` file with no `paths:`) already says:
-  remove the line from `MEMORY.md` (the memory stays and recall still finds it), or, when the
-  user wants it kept, `skip` it or acknowledge it (`hippo lint-floor` prints the entry to add).
+- **link**, **floor** — edit the file, then `done`; tend re-checks, refuses while the
+  problem is still there, and answers fixed once it is gone. A `floor:rule:<name>.md` item
+  is a floor line that an always-loaded rule (`CLAUDE.md`, or a `.claude/rules` file with no
+  `paths:`) already says: remove the line from `MEMORY.md` (the memory stays and recall still
+  finds it), or, when the user wants it kept, `skip` it or acknowledge it (`hippo lint-floor`
+  prints the entry to add).
 - **floor**, a `floor:diet:<name>` item (a corpus that declares `budgets.floor_bytes`) — the
   floor is over its budget and this line is the next one to move out. Read the evidence (its
   type, how often it was used, and the trim-safety replay), then `demote`: tend removes that
