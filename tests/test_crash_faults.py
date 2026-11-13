@@ -120,6 +120,7 @@ CRASH_CONTRACT = {
     ("gate_cli", "install"): ("detected",),  # GAT-2 pre-commit hook: exit 1, "nothing was changed", prior hook intact
     ("outbox", "_update_manifest"): ("detected",),  # OUT-1: prior manifest kept; the save names the miss
     ("outbox", "copy_up"): ("detected",),  # OUT-1: raises; no partial copy; the floor edit reports it
+    ("outbox_edit", "_drop_manifest_row"): ("detected",),  # OUT-1 tend half: prior manifest kept; the removal names the row
     ("user_tier_git", "sync_ignore_block"): ("detected",),  # OWN-1: error named, .gitignore intact; a machine-local save refuses
 }
 

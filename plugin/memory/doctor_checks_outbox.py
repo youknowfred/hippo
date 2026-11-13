@@ -51,8 +51,7 @@ def check_outbox(ctx: DoctorContext) -> Dict[str, str]:
                 parts.append(
                     f"{st['withheld']} outbox file(s) withheld from recall: hippo did not write "
                     "their current bytes on this machine (pulled, or edited outside hippo); read "
-                    "them, then move them into the corpus dir, where `hippo trust review` can "
-                    "consent them, or delete them"
+                    "them with `hippo trust review`, then grant them there or delete them"
                 )
             if st["tracked_by_git"]:
                 warn = True

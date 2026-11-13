@@ -295,7 +295,9 @@ def _apply_one(
     """
     from .links import add_typed_relation, parse_typed_relations
 
-    src_path = os.path.join(memory_dir, cand["source"] + ".md")
+    from .outbox_edit import edit_or_raise, resolve
+
+    src_path = resolve(os.path.join(memory_dir, cand["source"] + ".md"))  # OUT-1: a copy wins
     try:
         from .atomic import read_text_cas
 
@@ -313,6 +315,7 @@ def _apply_one(
         try:
             from .atomic import write_text_cas
 
+            src_path = edit_or_raise(src_path, memory_dir=memory_dir)  # OUT-1: outbox mode
             write_text_cas(src_path, new_text, _cas_token)  # COR-18: never a torn corpus file
         except Exception as exc:
             return False, f"write failed: {exc}", None
@@ -511,8 +514,10 @@ def run_apply_pass(
         # add_typed_relation's own internal fold.
         # BND-3: an anomalous fold failure is counted into the digest's one line.
         try:
-            note = trust.record_authored_write_disclosing(
-                memory_dir, os.path.join(memory_dir, cand["source"] + ".md"), repo_root
+            from .outbox_edit import resolve
+
+            note = trust.record_authored_write_disclosing(  # OUT-1: where the edge landed
+                memory_dir, resolve(os.path.join(memory_dir, cand["source"] + ".md")), repo_root
             )
             if note:
                 fold_failures += 1

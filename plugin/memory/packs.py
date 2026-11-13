@@ -688,6 +688,11 @@ def pack_install_item(
         if not any(r["file"] == fname for r in manifest["memories"]):
             result["error"] = f"{fname} is not in this pack's manifest"
             return result
+        from .outbox_edit import pack_refusal  # OUT-1: packs write the corpus dir directly
+
+        if pack_refusal(memory_dir, name):
+            result["error"] = pack_refusal(memory_dir, name)
+            return result
         with open(os.path.join(source_dir, fname), "r", encoding="utf-8") as fh:
             raw = fh.read()
         if not parse_frontmatter(raw):
@@ -954,7 +959,11 @@ def pack_update_item(
             )
             return result
         from .atomic import write_text_cas
+        from .outbox_edit import pack_refusal  # OUT-1: never under an outbox copy
 
+        if pack_refusal(memory_dir, name):
+            result["error"] = pack_refusal(memory_dir, name)
+            return result
         # COR-18: atomic — this write REPLACES a file holding the user's local edits;
         # a torn in-place write was the one way to lose them (they exist nowhere else).
         # RWY-3: and only over the bytes the three-way merge was computed from.
