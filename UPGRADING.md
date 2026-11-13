@@ -201,11 +201,18 @@ that has the check on but sees no key says so in its report.
 
 ## 2. Rebuild a derived cache (automatic)
 
-The recall index carries its own `schema_version` (currently 7), separate from your corpus format.
+The recall index carries its own `schema_version` (currently 8), separate from your corpus format.
 When the plugin's schema is newer than the persisted index, **every load path treats the stale index
 as absent** and the next SessionStart refresh does one full rebuild — no action needed. The same is
 true of the link cache, staleness cache, and telemetry ledgers: they are gitignored, rebuildable
 artifacts. A `schema_version` bump is a re-index, never a corpus migration.
+
+What a bump costs: the rebuild re-embeds every memory and body chunk, offline and in slices of
+about 15 seconds per SessionStart, so a corpus of about a thousand memories takes a dozen or so
+SessionStarts to come back to dense recall (a hundred-memory corpus, two to six). Until then the
+prompt hook recalls with BM25 only, and a prompt that arrives before the first SessionStart
+refresh builds that BM25 index inline once (one to three seconds). Nothing is lost and nothing
+needs doing; `hippo build-index` rebuilds it in one go if you would rather wait once.
 
 ## 3. Migrate the corpus format (agent-gated, per-item)
 

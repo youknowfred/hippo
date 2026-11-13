@@ -137,20 +137,10 @@ def read_budgets(raw) -> Dict[str, int]:
     }
 
 
-def _journal_globs(policy_dir: str) -> List[str]:
-    from .provenance_format import read_fold_digests, read_policy_key
-
-    globs = list(read_fold_digests(policy_dir))
-    raw = read_policy_key(policy_dir, "journals")
-    for g in raw if isinstance(raw, list) else []:
-        if isinstance(g, str) and g.strip() and "/" not in g and g.strip() not in globs:
-            globs.append(g.strip())
-    return globs
-
-
 def policy_of(files: Dict[str, str]) -> dict:
     """The corpus policy from one side's ``hippo.json`` / ``.format`` texts, read by the
     same readers the engine uses (materialized into a scratch dir, never the corpus)."""
+    from .lanes import journal_globs  # HOT-7: the one reader, shared with recall's lanes
     from .provenance_format import read_floor_lint, read_policy_key
 
     tmp = tempfile.mkdtemp(prefix="hippo-gate-")
@@ -163,7 +153,7 @@ def policy_of(files: Dict[str, str]) -> dict:
             "floor_lint": read_floor_lint(tmp),
             "floor_lint_declared": isinstance(read_policy_key(tmp, "floor_lint"), dict),
             "budgets": read_budgets(read_policy_key(tmp, "budgets")),
-            "journals": _journal_globs(tmp),
+            "journals": journal_globs(tmp),
         }
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

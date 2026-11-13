@@ -44,6 +44,7 @@ from .build_index import (
     tokenize,
 )
 from . import archive, trust
+from . import lanes as _lanes  # HOT-7 (the recall() keyword below is the hook's request)
 from .build_index import extract_description
 from .lint_floor import floor_memory_names
 from .provenance import (
@@ -501,6 +502,7 @@ def recall(
     index_dir: Optional[str] = None,
     repo_root: Optional[str] = None,
     drop_log: Optional[dict] = None,
+    lanes=None,
 ) -> List[dict]:
     """Top-``k`` memories for ``query`` as ``[{name, file, description, score, backend, via}]``.
 
@@ -533,6 +535,9 @@ def recall(
       ``dense_floor`` — the calibrated floor those cosines missed (margin = floor - score).
 
     ``None`` (every existing caller) is byte-identical behavior with zero extra work.
+    HOT-7 ``lanes``: the prompt hook's ``lanes.LaneRequest`` (None everywhere else — explicit
+    recall never withholds). On a corpus declaring ``journals`` it withholds unnamed journals
+    before expansion (reason ``journal_lane``) and over-fetches the behavior slots; rows gain ``lane``.
     Detection only (ED-1): nothing here feeds ranking. The SEC-6 drift-quarantine skip
     is deliberately NOT recorded — a withheld file already has its own loud surfaces
     (the SessionStart trust-drift producer + doctor), and a per-query ledger row naming
@@ -764,6 +769,9 @@ def recall(
                 rules_index_dir = default_index_dir(memory_dir)
             return _rules_source_hits(q_tokens, rules_index_dir, repo_root)
         fused = _rrf_fuse(rankings, weights=weights)  # [(idx, score), ...] desc by fused score
+        if lanes is not None:  # HOT-7: an unnamed journal takes no pool slot and seeds nothing
+            k += lanes.start(idx.manifest)
+            fused = lanes.withhold(fused, entries, _record_drop)
         # backend label reflects the PRIMARY (description) signals only -- body rankings are
         # a backstop, not a third backend a user needs to reason about at the display layer.
         backend = "dense+bm25" if (dense and bm25) else ("dense" if dense else "bm25")
@@ -857,6 +865,8 @@ def recall(
         penalized, graph_injected, graph_endorsed = _expand_neighbors(
             penalized, entries, edges, superseded_by, draft_indices
         )
+        if lanes is not None:  # HOT-7: ...and cannot enter by expansion either
+            penalized = lanes.withhold(penalized, entries, _record_drop)
 
         # --- RET-6: verify-at-use banner map — display-only, UNGATED (see the constants
         # block above), computed once here from the SAME graph_index_dir the salience/graph
@@ -1132,6 +1142,7 @@ def recall(
                     # or a pre-RCL-6 manifest without the key yet). Source of the snippet's
                     # "indexed @sha" mark; identical across every hit in one recall() call.
                     "head_commit": idx.manifest.get("head_commit"),
+                    **({"lane": e.get("lane") or "fact"} if lanes is not None else {}),  # HOT-7
                 }
             )
         # DRM-6 quarantine, leg 2 — excluded from ABSTENTION-SENSITIVE answering: a
@@ -1168,7 +1179,8 @@ def recall(
 
 
 def format_results(
-    results: List[dict], max_chars: int = _PROMPT_BUDGET_CHARS, *, trust_note: str = ""
+    results: List[dict], max_chars: int = _PROMPT_BUDGET_CHARS, *, trust_note: str = "",
+    lane_share: Optional[float] = None,
 ) -> str:
     """Render recall results as a bounded one-pointer-per-line additionalContext block.
 
@@ -1188,6 +1200,9 @@ def format_results(
         so foreign content is never indistinguishable from the user's own authored
         memory. Empty (the default, incl. init-origin and legacy records) renders
         byte-identically to the pre-SEC-7 block modulo the header clause.
+
+    HOT-7 ``lane_share`` (the hook, lanes active only): the render knee is judged per lane
+    and the budget follows the lane shares (``lanes.fit_lanes``); None renders as before.
     """
     if not results:
         return ""
@@ -1220,6 +1235,7 @@ def format_results(
     if trust_note:
         head.append(f"  ⚠ {trust_note}")
     blocks: List[Tuple[str, List[str], bool]] = []
+    refs = _lanes.lane_refs(full) if lane_share is not None else None
     top_score = next(
         (r.get("score") for r in full if r.get("corpus") != _RULES_SOURCE), None
     )
@@ -1293,9 +1309,8 @@ def format_results(
             sha = (r.get("head_commit") or "")[:7]
             sha_mark = f" — indexed @{sha}" if sha else ""
             lines.append(f'      ↳ "{snippet}"{sha_mark}')
-        knee = r.get("corpus") != _RULES_SOURCE and r is not full[0] and below_knee(
-            r.get("score"), top_score
-        )
+        first, top = refs[id(r)] if refs else (full[0], top_score)
+        knee = r.get("corpus") != _RULES_SOURCE and r is not first and below_knee(r.get("score"), top)
         blocks.append((r["name"], lines, knee))
     tail: List[str] = []
     # The two collapse summary lines (floor first — the more fundamental, every-session
@@ -1309,7 +1324,11 @@ def format_results(
             more = len(names) - _COLLAPSE_SUMMARY_NAMES
             more_tail = f" (+{more} more)" if more > 0 else ""
             tail.append(f"  ⤷ {len(names)} {why}: {shown}{more_tail}")
-    out, rendered = fit(head, blocks, tail, max_chars)
+    if refs is None:
+        out, rendered = fit(head, blocks, tail, max_chars)
+    else:
+        behavior = [_lanes.row_lane(r) == _lanes.BEHAVIOR for r in full]
+        out, rendered = _lanes.fit_lanes(head, blocks, behavior, tail, max_chars, lane_share)
     return out.replace("{n}", str(rendered), 1)
 
 

@@ -242,6 +242,9 @@ def log_recall_event(
     ``load1 / cpus`` so a tail caused by a busy machine is not reported as a hippo
     regression. Additive; rows from before this field, or from a platform without
     ``getloadavg``, carry neither key and doctor counts them as unclassified.
+
+    HOT-7 ``lanes`` / ``collapsed_lanes``: each served (and collapsed) row's recall lane,
+    aligned to ``names`` (``collapsed``). Hook rows only; absent when no row carries one.
     """
     try:
         td = _resolve_dir(telemetry_dir)
@@ -270,6 +273,13 @@ def log_recall_event(
         }
         if collapsed:
             event["collapsed"] = collapsed
+        if any(r.get("lane") for r in results):  # HOT-7: hook rows carry their lane
+            event["lanes"] = [r.get("lane") for r in named]
+            if collapsed:
+                event["collapsed_lanes"] = [
+                    r.get("lane") for r in results
+                    if r.get("name") and (r.get("floor_collapsed") or r.get("cooldown_collapsed"))
+                ]
         if drops:
             event["drops"] = drops
         if near_miss:

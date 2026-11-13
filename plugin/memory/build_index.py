@@ -42,6 +42,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .derived_dirs import derived_dir
 from .fm_access import fm_get
+from .lanes import journal_globs, lane_of, lane_state
 from .provenance import (
     _iter_memory_files,
     ensure_self_ignoring_dir,
@@ -82,7 +83,10 @@ from .staleness import read_source_commit_time
 # chunks) are now ``bm25_terms(tokenize(...))`` instead of raw ``tokenize(...)`` -- a
 # manifest built under v6 has un-stemmed postings that would silently under-match a stemmed
 # query token, so this MUST bump to force one full reindex rather than degrade quietly.
-SCHEMA_VERSION = 7
+# v8 (HOT-7, recall lanes): entries gained "lane" (behavior/fact/journal, ``lanes.lane_of``)
+# and the manifest a top-level "lanes" record ({declared, globs}) of the declaration they were
+# computed from; refresh relabels on a changed declaration with every embedding row reused.
+SCHEMA_VERSION = 8
 # Public (not underscore-prefixed): doctor's non-English-corpus check (RET-3) compares a
 # manifest's recorded model against this constant to decide whether the CURRENTLY configured
 # model is the English default vs. an already-switched multilingual/other model.
@@ -718,6 +722,7 @@ def compute_corpus(
     out-of-band instead of growing the entry dict.
     """
     entries: List[dict] = []
+    globs = journal_globs(memory_dir)  # HOT-7: read once per scan, not per file
     for path in _iter_memory_files(memory_dir):
         try:
             st = os.stat(path) if sigs_out is not None else None
@@ -750,6 +755,7 @@ def compute_corpus(
                 "steer": _extract_steer(fm),
                 # GOV-7: carried so the inject-time marker never re-reads a file per hit.
                 "confidence": _extract_confidence(fm),
+                "lane": lane_of(os.path.basename(path), fm_get(fm, "type", falsy=True, nested_first=True), globs),
             }
         )
     return entries
@@ -1404,6 +1410,7 @@ def build_index(
         "body_chunks": body_chunks_manifest,
         "bm25": bm25_stats,
         "head_commit": head_commit,
+        "lanes": lane_state(memory_dir),  # HOT-7: what the entries' lanes were computed from
     }
 
     # COR-12: the matrix is durably in place BEFORE the manifest that references it is
@@ -1507,6 +1514,10 @@ def refresh_index(memory_dir: Optional[str] = None, index_dir: Optional[str] = N
                 and old_sct == now_sct
                 and old_steer == now_steer
                 and old_conf == now_conf
+                # HOT-7: lanes follow hippo.json, not a memory file — a changed declaration
+                # relabels through build_index below, every embedding row reused by hash.
+                and [e.get("lane") for e in old.get("entries", [])] == [e.get("lane") for e in entries_now]
+                and old.get("lanes") == lane_state(memory_dir)
             )
             # IDX-1: a legacy (unbound) dense index falls through ONCE, to be verified and
             # rewritten bound — a torn one would otherwise be served until the next write.

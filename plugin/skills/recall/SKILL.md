@@ -10,7 +10,9 @@ matches. This skill is the DELIBERATE read entry point for the questions the hoo
 
 It reuses the exact same engine the hook does (`memory.recall` → the same fusion, relevance
 floor, knee cutoff, 1-hop graph expansion, and salience) — it never forks the ranking, so what
-you see here is what the hook would inject. On top of that it shows each match's **type**, a
+you see here is what the hook would inject — except on a corpus whose `hippo.json` declares
+`journals`, where the hook leaves out journals the prompt did not name and lists behavior
+memories (`user`, `feedback`) first; this skill still shows every match. On top of that it shows each match's **type**, a
 **staleness flag**, and its **inbound/outbound graph neighbors**, so the answer is browsable,
 not just a raw injection block.
 

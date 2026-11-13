@@ -367,7 +367,21 @@ hippo's settings now live in three places, and the first one that answers wins:
    `volatile_paths`, `floor_lint`, `floor_sections`, `fold_digests`, `attention` (`"calm"` or
    `"full"`), `mute` (SessionStart signals to hide), `acknowledged_findings` (see below),
    `write_path` (`"outbox"` or `"direct"`, below), `gate` (the write gate, below), `budgets`
-   and `journals` (the commit gate's budgets, below).
+   (the commit gate's budgets, below) and `journals` (journal filename globs: the commit
+   gate's journal budget counts them, and the prompt hook's recall lanes, below, act once it
+   is declared).
+
+**Recall lanes.** Each memory sits in one lane: **behavior** (`type: user` or `feedback`),
+**fact** (`project`, `reference`, anything else) or **journal** (a file matching
+`fold_digests` or a `journals` glob). A corpus whose `hippo.json` declares `journals` as a
+list (`[]` counts) changes what the prompt hook injects, and only that: a journal is injected
+only when the prompt names it (`round-12`, `[[round-12]]` or `round-12.md`), and the hook
+picks behavior memories first, up to 4 of its 10 slots and 40% of the prompt's character
+budget, then facts, with any lane's unused room going to the others. `hippo recall` and the
+`recall` tool are unchanged and still return journals. Nothing is withheld from a corpus that
+declares no `journals`. Doctor's recall-lanes line reports each lane's share of what the hook
+injected beside its share of the corpus. `journals` only names files; like `mute`, it needs no
+`hippo trust policy --accept`.
 
 **Acknowledging a cleared lint finding.** When a memory file carries a secret or threat finding
 you have reviewed and cleared, add an entry to `acknowledged_findings` in `hippo.json` —
