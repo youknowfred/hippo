@@ -1169,7 +1169,7 @@ def recall(
                     # The index-wide build commit — ALWAYS present (None on a non-git corpus
                     # or a pre-RCL-6 manifest without the key yet). Source of the snippet's
                     # "indexed @sha" mark; identical across every hit in one recall() call.
-                    "head_commit": idx.manifest.get("head_commit"),
+                    "head_commit": e.get("head_commit", idx.manifest.get("head_commit")),  # per tier when fused
                     **({"lane": e.get("lane") or "fact"} if lanes is not None else {}),  # HOT-7
                     **({"signal": sig.row(i)} if sig is not None else {}),  # HOT-8
                     **_sections.result_keys(e),  # HOT-11: a section row's digest and line

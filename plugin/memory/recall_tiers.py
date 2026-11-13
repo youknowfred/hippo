@@ -446,6 +446,9 @@ def _merge_loaded_indexes(
             ne = dict(e)
             ne["root"] = root
             ne["corpus"] = label
+            # RCL-6: the commit THIS tier was indexed at, for the "indexed @sha" mark. An
+            # entry that already carries one (a merged index fused again) keeps it.
+            ne.setdefault("head_commit", li.manifest.get("head_commit"))
             remap[old_i] = len(merged_entries)
             if build_dense:
                 ne["row"] = len(dense_vectors)
@@ -516,6 +519,7 @@ def _merge_loaded_indexes(
         "entries": merged_entries,
         "body_chunks": merged_chunks,
         "bm25": bm25,
+        "head_commit": loadeds[0][0].manifest.get("head_commit"),  # the first (project) tier's
     }
     if merged_dense is None and any(li.dense_ready for li, _r, _l in loadeds):
         manifest["fused_without_dense"] = True  # OBS-11: a tier, not the project, cost dense
